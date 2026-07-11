@@ -20,6 +20,7 @@ import {
   type VariantCallOptions,
 } from "./instantiate.ts";
 import { CODEX_PROVIDER_ID, createCodexFetch } from "./oauth/openai-codex.ts";
+import { ANTHROPIC_PROVIDER_ID, createAnthropicFetch } from "./oauth/anthropic.ts";
 import { mergedCatalog, resolveRole, type ModelRole } from "./resolve.ts";
 import { effortVariantsFor, variantById, type ModelVariant } from "./variants.ts";
 
@@ -131,7 +132,16 @@ export async function resolveConfiguredLanguageModel(
           ...(credential === undefined ? {} : { credential: credential as ProviderCredential }),
           ...(baseURL === undefined ? {} : { baseURL }),
           env,
-          ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+          ...(resolved.providerId === ANTHROPIC_PROVIDER_ID && credential?.type === "oauth"
+            ? {
+                fetchImpl: createAnthropicFetch({
+                  store,
+                  ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+                }),
+              }
+            : options.fetchImpl === undefined
+              ? {}
+              : { fetchImpl: options.fetchImpl }),
           ...(variant === undefined ? {} : { variant }),
         });
   const context = resolved.model.limit.context;
