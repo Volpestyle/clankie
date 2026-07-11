@@ -35,7 +35,7 @@ Local development may send OTLP to the stack in `infra/observability/`. Producti
 
 ## Event replay
 
-`@sapling/event-store` stores hash-chained JSONL records for local audit and deterministic projection. Debugging starts from the event timeline:
+`@sapling/event-store` stores hash-chained event records for local audit and deterministic projection — durable SQLite (`SqliteEventStore`, the control plane's mission log) and JSONL (`JsonlEventStore`, eval artifacts) backends share one chain format. Debugging starts from the event timeline:
 
 1. verify hash chain;
 2. replay mission projection;

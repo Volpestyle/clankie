@@ -83,7 +83,7 @@ worker-claude        Claude Agent SDK adapter
 worker-pi            Pi JSONL RPC adapter
 worker-sim           deterministic test harness workers
 jsonl-rpc            strict subprocess protocol transport
-event-store          append-only hash-chained local audit/replay store
+event-store          append-only hash-chained audit/replay store (durable SQLite + JSONL backends)
 credential-broker    short-lived capability grants; no provider secrets in workers
 terminal-protocol    snapshots, deltas, sequence replay, and control leases
 garden-model         operational events → stable spatial presentation state

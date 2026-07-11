@@ -1,8 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { compileDoctrine, decideAction, loadDoctrineFile, type CompiledDoctrine } from "@sapling/doctrine";
+import type { EventStore } from "@sapling/event-store";
 import { createLogger } from "@sapling/observability";
-import { ActionRequestSchema, MissionPlanSchema, type MissionPlan } from "@sapling/protocol";
+import {
+  ActionRequestSchema,
+  MissionPlanSchema,
+  type DomainEvent,
+  type MissionPlan,
+} from "@sapling/protocol";
 import { Hono } from "hono";
 import { z } from "zod";
 
@@ -19,10 +25,37 @@ interface MissionRecord {
 
 export interface ControlPlaneDependencies {
   doctrine: CompiledDoctrine;
+  /** Durable mission event log; when provided, mission records are rebuilt from it on startup. */
+  eventStore?: EventStore;
 }
 
-export function createControlPlane(dependencies: ControlPlaneDependencies): Hono {
+export async function createControlPlane(dependencies: ControlPlaneDependencies): Promise<Hono> {
   const missions = new Map<string, MissionRecord>();
+  if (dependencies.eventStore) {
+    for (const stored of await dependencies.eventStore.readAll()) {
+      applyMissionEvent(missions, stored.event);
+    }
+    logger.info({ missionCount: missions.size }, "mission records rebuilt from event store");
+  }
+
+  const recordEvent = async (
+    type: string,
+    missionId: string,
+    occurredAt: string,
+    data: Record<string, unknown>,
+  ): Promise<void> => {
+    if (!dependencies.eventStore) return;
+    await dependencies.eventStore.append({
+      id: randomUUID(),
+      occurredAt,
+      missionId,
+      correlationId: missionId,
+      profileHash: dependencies.doctrine.profileHash,
+      type,
+      data,
+    });
+  };
+
   const app = new Hono();
 
   app.get("/health", (context) =>
@@ -39,13 +72,9 @@ export function createControlPlane(dependencies: ControlPlaneDependencies): Hono
       .object({ goal: z.string().min(1), context: z.record(z.string(), z.unknown()).default({}) })
       .parse(await context.req.json());
     const id = `mission-${randomUUID().slice(0, 12)}`;
-    missions.set(id, {
-      id,
-      goal: input.goal,
-      context: input.context,
-      state: "draft",
-      createdAt: new Date().toISOString(),
-    });
+    const createdAt = new Date().toISOString();
+    await recordEvent("mission.drafted", id, createdAt, { goal: input.goal, context: input.context });
+    missions.set(id, { id, goal: input.goal, context: input.context, state: "draft", createdAt });
     logger.info({ missionId: id }, "mission created");
     return context.json({ missionId: id }, 201);
   });
@@ -62,6 +91,7 @@ export function createControlPlane(dependencies: ControlPlaneDependencies): Hono
         409,
       );
     }
+    await recordEvent("mission.planned", id, new Date().toISOString(), { plan });
     mission.plan = plan;
     mission.state = "planned";
     logger.info({ missionId: id, taskCount: plan.tasks.length }, "mission planned");
@@ -102,6 +132,31 @@ export function createControlPlane(dependencies: ControlPlaneDependencies): Hono
   });
 
   return app;
+}
+
+function applyMissionEvent(missions: Map<string, MissionRecord>, event: DomainEvent): void {
+  if (event.type === "mission.drafted") {
+    const data = z
+      .object({ goal: z.string().min(1), context: z.record(z.string(), z.unknown()).default({}) })
+      .parse(event.data);
+    missions.set(event.missionId, {
+      id: event.missionId,
+      goal: data.goal,
+      context: data.context,
+      state: "draft",
+      createdAt: event.occurredAt,
+    });
+    return;
+  }
+  if (event.type === "mission.planned") {
+    const mission = missions.get(event.missionId);
+    if (!mission) {
+      logger.warn({ missionId: event.missionId }, "mission.planned event without a drafted mission");
+      return;
+    }
+    mission.plan = MissionPlanSchema.parse(event.data.plan);
+    mission.state = "planned";
+  }
 }
 
 export async function loadDefaultDoctrine(): Promise<CompiledDoctrine> {

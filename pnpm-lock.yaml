@@ -110,6 +110,9 @@ importers:
       '@sapling/doctrine':
         specifier: workspace:*
         version: link:../../packages/doctrine
+      '@sapling/event-store':
+        specifier: workspace:*
+        version: link:../../packages/event-store
       '@sapling/observability':
         specifier: workspace:*
         version: link:../../packages/observability

@@ -1,16 +1,20 @@
-import { resolve } from "node:path";
-import { compileDoctrine, loadDoctrineFile } from "@sapling/doctrine";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { compileDoctrine, loadDoctrineFile, type CompiledDoctrine } from "@sapling/doctrine";
+import { SqliteEventStore } from "@sapling/event-store";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createControlPlane } from "../src/app.ts";
 
-let app: ReturnType<typeof createControlPlane>;
+let app: Awaited<ReturnType<typeof createControlPlane>>;
+let doctrine: CompiledDoctrine;
 let profileHash: string;
 
 beforeAll(async () => {
   const profilePath = resolve(import.meta.dirname, "../../../doctrine/profiles/self-build-lab.yaml");
-  const doctrine = compileDoctrine([await loadDoctrineFile(profilePath)]);
+  doctrine = compileDoctrine([await loadDoctrineFile(profilePath)]);
   profileHash = doctrine.profileHash;
-  app = createControlPlane({ doctrine });
+  app = await createControlPlane({ doctrine });
 });
 
 describe("control plane", () => {
@@ -77,5 +81,53 @@ describe("control plane", () => {
       effect: "deny",
       matchedPolicyIds: ["stale-doctrine"],
     });
+  });
+
+  it("rebuilds mission records from the SQLite event store after a restart", async () => {
+    const storePath = join(await mkdtemp(join(tmpdir(), "sapling-control-plane-")), "events.db");
+    const store = new SqliteEventStore(storePath);
+    const durable = await createControlPlane({ doctrine, eventStore: store });
+
+    const created = await durable.request("/v1/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ goal: "Survive a restart", context: { source: "test" } }),
+    });
+    expect(created.status).toBe(201);
+    const { missionId } = (await created.json()) as { missionId: string };
+
+    const plan = {
+      missionId,
+      goal: "Survive a restart",
+      rationale: "Restart-recovery coverage for the durable event store.",
+      tasks: [
+        {
+          id: "t-1",
+          title: "Prove durability",
+          objective: "Confirm the mission record survives a control-plane restart.",
+          kind: "verification",
+          successCriteria: ["The mission and its plan are rebuilt from the event log."],
+        },
+      ],
+      successCriteria: ["Mission state is identical after restart."],
+      profileHash,
+    };
+    const planned = await durable.request(`/v1/missions/${missionId}/plan`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(plan),
+    });
+    expect(planned.status).toBe(200);
+    store.close();
+
+    const reopenedStore = new SqliteEventStore(storePath);
+    const restarted = await createControlPlane({ doctrine, eventStore: reopenedStore });
+    const fetched = await restarted.request(`/v1/missions/${missionId}`);
+    expect(fetched.status).toBe(200);
+    const record = (await fetched.json()) as Record<string, unknown>;
+    expect(record).toMatchObject({ id: missionId, goal: "Survive a restart", state: "planned" });
+    expect((record.plan as { tasks: unknown[] }).tasks).toHaveLength(1);
+    expect(await reopenedStore.verify()).toMatchObject({ valid: true, count: 2 });
+    reopenedStore.close();
   });
 });
