@@ -1,7 +1,7 @@
 # Plan review checklist
 
 - Goal and success criteria are observable.
-- Every task has at least one success criterion.
+- Every task has one operational role, at least one success criterion, and non-empty evidence requirements.
 - Dependencies exist and form no cycle.
 - Writer scopes do not overlap in parallel.
 - Risky paths trigger stricter verification.
@@ -9,4 +9,4 @@
 - Integration and rollback are represented.
 - Source-of-truth conflicts are surfaced.
 - Time/cost/concurrency fit doctrine.
-- Privileged actions are named and gated.
+- Anticipated privileged actions are named in `plannedActions` and remain subject to policy.

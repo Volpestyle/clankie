@@ -12,4 +12,4 @@ Evaluate observed state and artifacts, not persuasive prose.
 - Compare against the single-worker baseline and relevant ablations under the same scenario constraints.
 - Identify causal evidence and uncertainty.
 - For self-improvement, compare old and candidate on both development and holdout suites.
-- Recommend promote, canary, revise, or reject. Promotion of policy/runtime/evaluator changes requires human approval.
+- Return scored dimensions, critical failures, causal evidence, uncertainty, and one recommendation: promote, canary, revise, or reject. Promotion of policy/runtime/evaluator changes requires human approval.

@@ -15,16 +15,20 @@ describe("renderPiPrompt", () => {
         title: "Debug",
         objective: "Fix failure",
         kind: "debugging",
+        role: "debugger",
         dependsOn: [],
         executionClass: "runner_visible",
         risk: "low",
         writeScope: ["src/**"],
         successCriteria: ["test passes"],
+        evidenceRequirements: ["Record the unchanged test command and exit code."],
         maxAttempts: 1,
         metadata: {},
       },
     });
     expect(prompt).toContain("Do not modify tests");
+    expect(prompt).toContain("Role: debugger");
+    expect(prompt).toContain("Record the unchanged test command and exit code.");
     expect(prompt).toContain("Do not merge");
   });
 });

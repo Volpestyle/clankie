@@ -26,10 +26,9 @@ Prefer captured evidence (screenshots, frame diffs, logs, process samples) over 
 
 ## Android emulator (fully headless)
 
-- Env is not in the shell profile; export per run:
-  `ANDROID_HOME=$HOME/Library/Android/sdk`, `JAVA_HOME=$(brew --prefix openjdk@21)/libexec/openjdk.jdk/Contents/Home`, `PATH=$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH`.
-- AVD `clankie` (Pixel 7, API 36) exists. Headless boot:
-  `emulator -avd clankie -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect`.
+- Discover the environment instead of assuming shell-profile state: default `ANDROID_HOME` to `$HOME/Library/Android/sdk`, resolve `JAVA_HOME` from `brew --prefix openjdk@21` when absent, and prepend the SDK's `platform-tools` and `emulator` directories to `PATH`.
+- List available devices with `emulator -list-avds`; use the repo convention `clankie` only when it is present. Headless boot:
+  `emulator -avd <avd> -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect`.
 - Wait for boot: `adb wait-for-device` then poll `adb shell getprop sys.boot_completed` until `1`.
 - Evidence: `adb exec-out screencap -p > f.png`; interact with `adb shell input tap <x> <y>` (scale coordinates from any downscaled screenshot back to device pixels).
 

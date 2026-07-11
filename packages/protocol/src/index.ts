@@ -22,6 +22,16 @@ export const TaskKindSchema = z.enum([
 ]);
 export type TaskKind = z.infer<typeof TaskKindSchema>;
 
+export const TaskRoleSchema = z.enum([
+  "planner",
+  "implementer",
+  "verifier",
+  "reviewer",
+  "debugger",
+  "evaluator",
+]);
+export type TaskRole = z.infer<typeof TaskRoleSchema>;
+
 export const ExecutionClassSchema = z.enum([
   "eve_subagent",
   "runner_visible",
@@ -74,26 +84,73 @@ export const TaskSpecSchema = z.object({
   title: z.string().min(1),
   objective: z.string().min(1),
   kind: TaskKindSchema,
+  role: TaskRoleSchema,
   dependsOn: z.array(TaskIdSchema).default([]),
   preferredHarness: HarnessSchema.optional(),
   executionClass: ExecutionClassSchema.default("automatic"),
   risk: RiskSchema.default("low"),
   writeScope: z.array(z.string()).default([]),
   successCriteria: z.array(z.string().min(1)).min(1),
+  evidenceRequirements: z.array(z.string().min(1)).min(1),
   estimatedChangedLines: z.number().int().nonnegative().optional(),
+  estimatedDurationMinutes: z.number().int().positive().optional(),
+  estimatedCostUsd: z.number().nonnegative().optional(),
   maxAttempts: z.number().int().positive().default(1),
   metadata: z.record(z.string(), z.unknown()).default({}),
 });
 export type TaskSpec = z.infer<typeof TaskSpecSchema>;
 
-export const MissionPlanSchema = z.object({
-  missionId: MissionIdSchema,
-  goal: z.string().min(1),
-  rationale: z.string().min(1),
-  tasks: z.array(TaskSpecSchema).min(1),
-  successCriteria: z.array(z.string().min(1)).min(1),
-  profileHash: z.string().min(1),
+export const ActionResourceSchema = z.object({
+  type: z.string().min(1),
+  id: z.string().min(1),
+  repository: z.string().optional(),
+  environment: z.string().optional(),
 });
+export type ActionResource = z.infer<typeof ActionResourceSchema>;
+
+export const PlannedActionSchema = z.object({
+  id: z.string().min(1),
+  taskId: TaskIdSchema.optional(),
+  action: z.string().min(1),
+  resource: ActionResourceSchema,
+  rationale: z.string().min(1),
+});
+export type PlannedAction = z.infer<typeof PlannedActionSchema>;
+
+export const MissionPlanSchema = z
+  .object({
+    missionId: MissionIdSchema,
+    goal: z.string().min(1),
+    rationale: z.string().min(1),
+    tasks: z.array(TaskSpecSchema).min(1),
+    successCriteria: z.array(z.string().min(1)).min(1),
+    assumptions: z.array(z.string().min(1)).default([]),
+    risks: z.array(z.string().min(1)).default([]),
+    humanDecisionsRequired: z.array(z.string().min(1)).default([]),
+    plannedActions: z.array(PlannedActionSchema).default([]),
+    profileHash: z.string().min(1),
+  })
+  .superRefine((plan, context) => {
+    const taskIds = new Set(plan.tasks.map((task) => task.id));
+    const actionIds = new Set<string>();
+    for (const action of plan.plannedActions) {
+      if (actionIds.has(action.id)) {
+        context.addIssue({
+          code: "custom",
+          message: `Planned action id ${action.id} is duplicated`,
+          path: ["plannedActions"],
+        });
+      }
+      actionIds.add(action.id);
+      if (action.taskId && !taskIds.has(action.taskId)) {
+        context.addIssue({
+          code: "custom",
+          message: `Planned action ${action.id} references unknown task ${action.taskId}`,
+          path: ["plannedActions"],
+        });
+      }
+    }
+  });
 export type MissionPlan = z.infer<typeof MissionPlanSchema>;
 
 export const WorkerResultSchema = z.object({
@@ -116,12 +173,7 @@ export const ActionRequestSchema = z.object({
     role: z.string().optional(),
   }),
   action: z.string().min(1),
-  resource: z.object({
-    type: z.string().min(1),
-    id: z.string().min(1),
-    repository: z.string().optional(),
-    environment: z.string().optional(),
-  }),
+  resource: ActionResourceSchema,
   context: z.object({
     missionId: MissionIdSchema,
     taskId: TaskIdSchema.optional(),

@@ -123,8 +123,10 @@ export class PiWorkerAdapter implements WorkerAdapter {
 export function renderPiPrompt(context: WorkerRunContext): string {
   return [
     `Mission ${context.missionId}; task ${context.task.id}: ${context.task.title}`,
+    `Role: ${context.task.role}`,
     context.task.objective,
     `Success criteria:\n${context.task.successCriteria.map((value) => `- ${value}`).join("\n")}`,
+    `Required evidence:\n${context.task.evidenceRequirements.map((value) => `- ${value}`).join("\n")}`,
     `Write scope:\n${context.task.writeScope.length ? context.task.writeScope.map((value) => `- ${value}`).join("\n") : "- read-only"}`,
     "Do not modify tests merely to make them pass. Do not merge, deploy, or update external systems.",
     "Return evidence: files changed, commands run, exact results, and remaining uncertainty.",

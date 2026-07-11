@@ -38,6 +38,12 @@ The included evaluator scores:
 
 Extend it with cost, latency, plan churn, conflict/rework, escalation quality, and human ratings once real providers run.
 
+## Captain skill routing
+
+The captain keeps live skill-routing evals under `apps/captain-eve/evals/skills/`. They assert that lead, recovery, and evaluation prompts load the corresponding mission skill, while an unrelated conversational turn does not invoke `load_skill`.
+
+Credential-free CI runs the captain discovery test and lists the eval definitions. The strict behavior run uses the configured captain model because routing quality is a model behavior rather than a deterministic compiler property.
+
 ## Frozen and holdout suites
 
 - `evals/scenarios/`: visible development scenarios.

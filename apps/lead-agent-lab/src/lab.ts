@@ -116,18 +116,22 @@ export async function runSelfBuildLab(options: RunSelfBuildOptions = {}): Promis
         title: "Inspect the self-build fixture",
         objective: "Read the fixture and produce a bounded implementation contract.",
         kind: "context",
+        role: "planner",
         executionClass: "eve_subagent",
         successCriteria: ["Test expectations are summarized before implementation."],
+        evidenceRequirements: ["The fixture contract is attached to the task result."],
       },
       {
         id: "implement-retry",
         title: "Implement retry utility",
         objective: "Create src/retry.mjs against the fixture contract.",
         kind: "implementation",
+        role: "implementer",
         dependsOn: ["inspect-context"],
         executionClass: "runner_visible",
         writeScope: ["src/retry.mjs"],
         successCriteria: ["The retry module exists and exports retry()."],
+        evidenceRequirements: ["The implementation diff is attached."],
         estimatedChangedLines: 20,
       },
       {
@@ -135,9 +139,11 @@ export async function runSelfBuildLab(options: RunSelfBuildOptions = {}): Promis
         title: "Independently verify retry utility",
         objective: "Run the fixture tests without modifying the implementation.",
         kind: "verification",
+        role: "verifier",
         dependsOn: ["implement-retry"],
         executionClass: "runner_visible",
         successCriteria: ["The test command is run and its complete result is reported."],
+        evidenceRequirements: ["The unchanged command, exit code, and output are attached."],
       },
     ],
   });
@@ -261,10 +267,12 @@ export async function runSelfBuildLab(options: RunSelfBuildOptions = {}): Promis
       title: "Diagnose and repair retry utility",
       objective: "Use the verifier diagnosis to fix only src/retry.mjs.",
       kind: "debugging",
+      role: "debugger",
       dependsOn: ["implement-retry"],
       executionClass: "runner_visible",
       writeScope: ["src/retry.mjs"],
       successCriteria: ["The attempt-count defect is fixed without weakening the tests."],
+      evidenceRequirements: ["The repair diff and unchanged failing check are attached."],
     });
     engine.addTask(debugTask, firstVerification.result?.diagnosis);
     const reverifyTask = TaskSpecSchema.parse({
@@ -272,9 +280,11 @@ export async function runSelfBuildLab(options: RunSelfBuildOptions = {}): Promis
       title: "Re-verify repaired retry utility",
       objective: "Rerun the unchanged fixture tests after the debugger repair.",
       kind: "verification",
+      role: "verifier",
       dependsOn: ["debug-retry"],
       executionClass: "runner_visible",
       successCriteria: ["The original unchanged fixture tests pass."],
+      evidenceRequirements: ["The unchanged command, exit code, and output are attached."],
     });
     engine.addTask(reverifyTask, "debug-retry");
     await engine.runUntilIdle(router);

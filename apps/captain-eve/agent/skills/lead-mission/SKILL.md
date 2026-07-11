@@ -1,16 +1,21 @@
 ---
-description: Lead a multi-agent engineering mission from authoritative context through independent verification and governed integration.
+description: Use when starting, replanning, or finalizing a governed multi-agent engineering mission that needs a typed DAG, independent verification, and controlled integration.
 ---
 
-1. Create the mission before doing work.
-2. Load the effective doctrine and quote the few constraints that materially affect the plan.
-3. Gather context from the declared authority for each field; surface conflicts instead of silently choosing.
-4. Ask the planner for a typed DAG. Ask the critic to attack it. Revise before submission.
-5. Prefer bounded parallelism. Give every worker a non-overlapping write scope and an evidence contract.
-6. Watch semantic events and budgets. Do not infer completion from quiet terminals.
-7. When a worker fails, preserve its branch and evidence, add a diagnosis/recovery task, and re-run the original verifier.
-8. Route merge, deployment, memory writes, external messages, and destructive shell actions through policy.
-9. Run the mission evaluation. A failed critical criterion blocks completion.
-10. Produce a concise final synthesis with artifacts, decisions, costs, remaining risk, and any doctrine recommendation.
+# Lead a mission
 
-Read `references/mission-checklist.md` before finalizing a high-risk mission.
+## Before submission
+
+1. Create the mission, load effective doctrine, and gather each field from its declared authority.
+2. Ask the planner for a `MissionPlanSchema` plan, then ask the critic to attack acceptance ambiguity, write conflicts, missing evidence, policy exposure, and budget risk.
+3. Revise and submit only a valid DAG whose tasks have explicit roles, disjoint parallel write scopes, observable success criteria, and non-empty evidence requirements.
+
+## During execution
+
+1. Follow semantic events and budgets. Quiet terminal output is not completion evidence.
+2. Preserve failed branches and artifacts. Load `debug-mission` before adding recovery work.
+3. Send every privileged action through policy; a planned action is never permission.
+
+## Before completion
+
+Read `references/mission-checklist.md`, run the mission evaluation, reconcile authoritative state, and report artifacts, decisions, cost, remaining risk, and any measured doctrine recommendation.

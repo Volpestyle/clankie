@@ -4,8 +4,8 @@ description: Use when a worker, skill, connector, terminal, relay, memory bounda
 
 # Security incident
 
-1. Stop affected mission/runner and prevent further side effects.
-2. Revoke device, provider, connector, and capability credentials as applicable.
+1. Request the affected mission/runner emergency stop through the authorized control plane and prevent further side effects.
+2. Request device, provider, connector, and capability revocation through their trusted brokers; never improvise credential handling in a worker shell.
 3. Preserve hash-chained events, worktrees, process metadata, and bounded diagnostic artifacts.
 4. Identify the first compromised boundary and affected workspaces/channels/users.
 5. Do not paste secrets or private content into a model prompt or public issue.

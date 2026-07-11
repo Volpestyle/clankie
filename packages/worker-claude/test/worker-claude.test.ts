@@ -15,16 +15,20 @@ describe("renderClaudePrompt", () => {
         title: "Review change",
         objective: "Find defects",
         kind: "review",
+        role: "reviewer",
         dependsOn: [],
         executionClass: "runner_headless",
         risk: "medium",
         writeScope: [],
         successCriteria: ["find regressions"],
+        evidenceRequirements: ["Report findings with file locations."],
         maxAttempts: 1,
         metadata: {},
       },
     });
     expect(prompt).toContain("lead owns intent");
+    expect(prompt).toContain("Role: reviewer");
+    expect(prompt).toContain("Report findings with file locations.");
     expect(prompt).toContain("read-only");
   });
 });

@@ -20,5 +20,5 @@ DerivedData/
 .env.*
 !.env.example
 
-# eve framework runtime cache
-**/.eve/cache/
+# eve framework generated runtime and discovery artifacts
+**/.eve/
