@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -116,6 +116,7 @@ describe("createModelRegistry", () => {
     };
     expect(envelope.fetchedAt).toBeTypeOf("number");
     expect(Object.keys(envelope.catalog)).toEqual(["testprov"]);
+    expect((await readdir(cacheDir)).filter((entry) => entry.endsWith(".tmp"))).toEqual([]);
 
     const catalog = await registry.catalog();
     expect(must(catalog["testprov"]).name).toBe("Test Provider");
@@ -183,6 +184,33 @@ describe("createModelRegistry", () => {
     expect(Object.keys(catalog)).toEqual(["testprov"]);
     expect(await registry.refresh(true)).toEqual({ updated: false, source: "cache" });
     expect(calls).toEqual([]);
+  });
+
+  it("CLANKIE_MODELS_URL overrides the configured URL", async () => {
+    const cacheDir = await makeTempDir();
+    const { impl, calls } = stubFetch(remoteCatalog);
+    const registry = createModelRegistry({
+      cacheDir,
+      env: { CLANKIE_MODELS_URL: "https://override.example.test/" },
+      fetchImpl: impl,
+      url: "https://ignored.example.test",
+    });
+
+    await registry.refresh(true);
+    expect(calls).toEqual(["https://override.example.test/api.json"]);
+  });
+
+  it("falls back to the stale cache when an explicit refresh fails", async () => {
+    const cacheDir = await makeTempDir();
+    const initial = stubFetch(remoteCatalog);
+    const writer = createModelRegistry({ cacheDir, env: {}, fetchImpl: initial.impl });
+    await writer.refresh(true);
+
+    const failed = forbiddenFetch();
+    const registry = createModelRegistry({ cacheDir, env: {}, fetchImpl: failed.impl });
+    expect(await registry.refresh(true)).toEqual({ updated: false, source: "cache" });
+    expect(failed.calls).toHaveLength(1);
+    expect((await registry.catalog())["testprov"]).toBeDefined();
   });
 });
 
@@ -276,5 +304,33 @@ describe("lenient parsing", () => {
     expect(bare.attachment).toBe(false);
     expect(bare.limit).toEqual({ context: 0, output: 0 });
     expect(bare["surprise"]).toBe("yes");
+  });
+
+  it("recovers from malformed known fields and entries without rejecting the catalog", () => {
+    const catalog = CatalogSchema.parse({
+      malformed: {
+        id: 42,
+        name: null,
+        env: "not-an-array",
+        models: {
+          broken: { id: 99, name: false, cost: "unknown", limit: "unknown" },
+          notAnObject: "unknown",
+        },
+      },
+      providerNotAnObject: "unknown",
+    });
+
+    const malformed = must(catalog["malformed"]);
+    expect(malformed.id).toBe("");
+    expect(malformed.name).toBe("");
+    expect(malformed.env).toEqual([]);
+    expect(must(malformed.models["broken"]).cost).toEqual({
+      input: 0,
+      output: 0,
+      cache_read: 0,
+      cache_write: 0,
+    });
+    expect(must(malformed.models["notAnObject"]).id).toBe("");
+    expect(must(catalog["providerNotAnObject"]).models).toEqual({});
   });
 });

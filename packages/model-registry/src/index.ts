@@ -12,10 +12,10 @@ import bundledSnapshot from "../data/models-dev-snapshot.json" with { type: "jso
 // ---------------------------------------------------------------------------
 
 export const ModelCostSchema = z.looseObject({
-  input: z.number().optional(),
-  output: z.number().optional(),
-  cache_read: z.number().optional(),
-  cache_write: z.number().optional(),
+  input: z.number().catch(0).default(0),
+  output: z.number().catch(0).default(0),
+  cache_read: z.number().catch(0).default(0),
+  cache_write: z.number().catch(0).default(0),
 });
 export type ModelCost = z.infer<typeof ModelCostSchema>;
 
@@ -33,15 +33,15 @@ export const ModelModalitiesSchema = z.looseObject({
 export type ModelModalities = z.infer<typeof ModelModalitiesSchema>;
 
 export const ModelEntrySchema = z.looseObject({
-  id: z.string(),
-  name: z.string(),
+  id: z.string().catch("").default(""),
+  name: z.string().catch("").default(""),
   family: z.string().optional(),
   release_date: z.string().optional(),
   reasoning: z.boolean().catch(false).default(false),
   tool_call: z.boolean().catch(false).default(false),
   temperature: z.boolean().catch(true).default(true),
   attachment: z.boolean().catch(false).default(false),
-  cost: ModelCostSchema.optional(),
+  cost: ModelCostSchema.catch({ input: 0, output: 0, cache_read: 0, cache_write: 0 }).optional(),
   limit: ModelLimitSchema.catch({ context: 0, output: 0 }).default({ context: 0, output: 0 }),
   modalities: ModelModalitiesSchema.optional(),
   /** models.dev uses "alpha" | "beta" | "deprecated" today; kept open for new values. */
@@ -50,17 +50,34 @@ export const ModelEntrySchema = z.looseObject({
 export type ModelEntry = z.infer<typeof ModelEntrySchema>;
 
 export const ProviderEntrySchema = z.looseObject({
-  id: z.string(),
-  name: z.string(),
+  id: z.string().catch("").default(""),
+  name: z.string().catch("").default(""),
   env: z.array(z.string()).catch([]).default([]),
   npm: z.string().optional(),
   api: z.string().optional(),
   doc: z.string().optional(),
-  models: z.record(z.string(), ModelEntrySchema).catch({}).default({}),
+  models: z
+    .record(
+      z.string(),
+      ModelEntrySchema.catch({
+        id: "",
+        name: "",
+        reasoning: false,
+        tool_call: false,
+        temperature: true,
+        attachment: false,
+        limit: { context: 0, output: 0 },
+      }),
+    )
+    .catch({})
+    .default({}),
 });
 export type ProviderEntry = z.infer<typeof ProviderEntrySchema>;
 
-export const CatalogSchema = z.record(z.string(), ProviderEntrySchema);
+export const CatalogSchema = z.record(
+  z.string(),
+  ProviderEntrySchema.catch({ id: "", name: "", env: [], models: {} }),
+).catch({});
 export type Catalog = z.infer<typeof CatalogSchema>;
 
 const CacheEnvelopeSchema = z.object({
@@ -131,7 +148,7 @@ export function createModelRegistry(options: ModelRegistryOptions = {}): ModelRe
   const ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
   const cacheDir = options.cacheDir ?? join(env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "clankie");
   const cachePath = join(cacheDir, "models.json");
-  const baseUrl = env.CLANKIE_MODELS_URL ?? options.url ?? DEFAULT_URL;
+  const baseUrl = (env.CLANKIE_MODELS_URL ?? options.url ?? DEFAULT_URL).replace(/\/+$/, "");
   const fetchImpl = options.fetchImpl ?? fetch;
 
   interface CacheState {
