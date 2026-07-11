@@ -1,88 +1,109 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "issue": "VUH-693",
   "outcome": "pass",
   "invocation": "pnpm exec tsx scripts/m1-exit-gate.ts",
   "crash": {
     "controlPlaneSignal": "SIGKILL",
+    "runnerSignal": "SIGKILL",
     "consoleSignal": "SIGKILL",
+    "runnerClient": "@sapling/runner --recovery-probe",
     "consoleClient": "@sapling/tui --recovery-probe",
     "consoleConsumedTerminalReplay": true,
     "workersAliveDuringCrash": 3
   },
+  "runner": {
+    "previousPid": 61720,
+    "recoveredPid": 61807,
+    "previousStartOrdinal": 1,
+    "recoveredStartOrdinal": 2,
+    "readoptedWorkers": 3,
+    "lostWorkers": 0,
+    "duplicateWorkers": 0
+  },
   "mission": {
-    "missionId": "mission-ee733384-4cb",
+    "missionId": "mission-3280ef37-add",
     "profileHash": "1a7fbc876f4556b5",
     "state": "running",
     "recordExact": true,
-    "projectionExact": true,
-    "eventLogExact": true,
-    "eventCount": 12,
+    "operationalProjectionExact": true,
+    "eventLogPrefixExact": true,
+    "recoveryEventCount": 3,
+    "eventCount": 15,
     "hashChainValid": true
   },
   "leases": [
     {
-      "leaseId": "62bbf4e2-8d29-4e4b-9653-797678e23a78",
+      "leaseId": "f1dad8dd-ca9c-4221-8a47-f1effb557556",
       "workerRunId": "run-1",
       "taskId": "worker-a",
-      "pid": 39867,
-      "processStartedAt": "Sat Jul 11 02:33:44 2026",
+      "pid": 61721,
+      "processStartedAt": "Sat Jul 11 03:07:06 2026",
+      "previousRunnerPid": 61720,
+      "recoveredRunnerPid": 61807,
       "state": "live",
-      "exactAfterRecovery": true
+      "identityExact": true,
+      "readopted": true
     },
     {
-      "leaseId": "80b749a6-d224-4e22-8cea-911a90c5c52f",
+      "leaseId": "11338a84-cd12-46c1-89d4-b361dc70d5fa",
       "workerRunId": "run-2",
       "taskId": "worker-b",
-      "pid": 39883,
-      "processStartedAt": "Sat Jul 11 02:33:44 2026",
+      "pid": 61737,
+      "processStartedAt": "Sat Jul 11 03:07:06 2026",
+      "previousRunnerPid": 61720,
+      "recoveredRunnerPid": 61807,
       "state": "live",
-      "exactAfterRecovery": true
+      "identityExact": true,
+      "readopted": true
     },
     {
-      "leaseId": "772538ac-8787-4f07-84e5-1fe372cf7d22",
+      "leaseId": "4ab1ff13-487c-4475-9a93-356bb4785c4d",
       "workerRunId": "run-3",
       "taskId": "worker-c",
-      "pid": 39899,
-      "processStartedAt": "Sat Jul 11 02:33:44 2026",
+      "pid": 61753,
+      "processStartedAt": "Sat Jul 11 03:07:07 2026",
+      "previousRunnerPid": 61720,
+      "recoveredRunnerPid": 61807,
       "state": "live",
-      "exactAfterRecovery": true
+      "identityExact": true,
+      "readopted": true
     }
   ],
   "terminals": [
     {
-      "terminalId": "term-2a61d8a1-a67",
+      "terminalId": "terminal-run-1",
       "workerRunId": "run-1",
-      "preCrashSequence": 6,
-      "recoveredSequence": 17,
-      "resumedFirstSequence": 7,
-      "replayedBytes": 289,
+      "preCrashSequence": 8,
+      "recoveredSequence": 21,
+      "resumedFirstSequence": 9,
+      "replayedBytes": 357,
       "gapFree": true,
       "byteExact": true
     },
     {
-      "terminalId": "term-ad192818-f49",
+      "terminalId": "terminal-run-2",
       "workerRunId": "run-2",
-      "preCrashSequence": 6,
-      "recoveredSequence": 17,
-      "resumedFirstSequence": 7,
-      "replayedBytes": 289,
+      "preCrashSequence": 7,
+      "recoveredSequence": 21,
+      "resumedFirstSequence": 8,
+      "replayedBytes": 357,
       "gapFree": true,
       "byteExact": true
     },
     {
-      "terminalId": "term-5e996259-456",
+      "terminalId": "terminal-run-3",
       "workerRunId": "run-3",
       "preCrashSequence": 6,
-      "recoveredSequence": 17,
+      "recoveredSequence": 20,
       "resumedFirstSequence": 7,
-      "replayedBytes": 289,
+      "replayedBytes": 340,
       "gapFree": true,
       "byteExact": true
     }
   ],
   "sideEffects": {
-    "operationId": "mission-ee733384-4cb:side-effect:1",
+    "operationId": "mission-3280ef37-add:side-effect:1",
     "attempts": 2,
     "executions": 1,
     "eventOccurrences": 1,

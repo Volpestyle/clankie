@@ -26,6 +26,8 @@ export interface TerminalTransport {
 }
 
 export interface SpawnTerminalOptions {
+  /** Stable session identity when restoring a durable terminal after runner restart. */
+  id?: string;
   workerRunId: string;
   title: string;
   command: string;
@@ -102,7 +104,9 @@ export class TerminalManager implements TerminalProvider {
   }
 
   public spawnTerminal(options: SpawnTerminalOptions): TerminalSession {
-    const id = `term-${randomUUID().slice(0, 12)}`;
+    const id = options.id ?? `term-${randomUUID().slice(0, 12)}`;
+    if (id.length === 0) throw new Error("Terminal id must not be empty");
+    if (this.terminals.has(id)) throw new Error(`Terminal ${id} already exists`);
     const transport =
       options.transport ??
       spawnPipeTransport(options.command, options.args ?? [], options.cwd ?? process.cwd());

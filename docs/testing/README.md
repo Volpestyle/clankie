@@ -4,4 +4,4 @@ This directory preserves dated verification campaigns whose methodology and fail
 
 ## Entries
 
-- [2026-07-11 · M1 control-plane and TUI crash recovery](2026-07-11-m1-crash-recovery/)
+- [2026-07-11 · M1 control-plane, runner, and TUI crash recovery](2026-07-11-m1-crash-recovery/)

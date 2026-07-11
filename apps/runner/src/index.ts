@@ -5,6 +5,11 @@ import { createLogger } from "@sapling/observability";
 import { ProcessLeaseManager } from "./process-leases.ts";
 import { defaultWorktreeRoot, WorktreeManager } from "./worktrees.ts";
 
+if (process.argv.includes("--recovery-probe")) {
+  const { runRecoveryProbeFromCli } = await import("./recovery-probe.ts");
+  await runRecoveryProbeFromCli();
+}
+
 const logger = createLogger({
   service: "sapling-runner",
   version: "0.1.0",

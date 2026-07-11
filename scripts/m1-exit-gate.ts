@@ -1,20 +1,18 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import type { RunnerRecoveryStatus } from "../apps/runner/src/recovery-probe.ts";
+import { ProcessLeaseManager, type ProcessLease } from "../apps/runner/src/process-leases.ts";
+import type { ConsoleRecoverySnapshot, ConsoleTerminalSnapshot } from "../apps/tui/src/recovery-probe.ts";
 import { SaplingApiClient } from "../packages/api-client/src/index.ts";
 import { SqliteEventStore, projectMission } from "../packages/event-store/src/index.ts";
 import { MissionPlanSchema, type DomainEvent } from "../packages/protocol/src/index.ts";
-import type { TerminalFrame, TerminalSession } from "../packages/terminal-protocol/src/index.ts";
-import { ProcessLeaseManager, type ProcessLease } from "../apps/runner/src/process-leases.ts";
-import { TerminalManager, type TerminalTransport } from "../apps/runner/src/terminals.ts";
-import type { ConsoleRecoverySnapshot, ConsoleTerminalSnapshot } from "../apps/tui/src/recovery-probe.ts";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = resolve(dirname(scriptPath), "..");
@@ -23,13 +21,6 @@ interface CapturedProcess {
   child: ChildProcessWithoutNullStreams;
   stdout: string[];
   stderr: string[];
-}
-
-interface WorkerProcess {
-  child: ChildProcessWithoutNullStreams;
-  transport: ChildTransport;
-  workerRunId: string;
-  taskId: string;
 }
 
 interface TerminalProof {
@@ -43,71 +34,22 @@ interface TerminalProof {
   byteExact: true;
 }
 
-interface ReplayServer {
-  url: string;
-  close(): Promise<void>;
-}
-
-class ChildTransport implements TerminalTransport {
-  private readonly child: ChildProcessWithoutNullStreams;
-  private readonly dataListeners: Array<(chunk: Buffer) => void> = [];
-  private readonly exitListeners: Array<(exitCode: number | null) => void> = [];
-  private exited = false;
-  private exitCode: number | null = null;
-
-  public constructor(child: ChildProcessWithoutNullStreams) {
-    this.child = child;
-    child.stdout.on("data", (chunk: Buffer) => this.emitData(chunk));
-    child.stderr.on("data", (chunk: Buffer) => this.emitData(chunk));
-    child.on("exit", (code) => {
-      if (this.exited) return;
-      this.exited = true;
-      this.exitCode = code;
-      for (const listener of this.exitListeners) listener(code);
-    });
-  }
-
-  public write(bytes: Uint8Array): void {
-    this.child.stdin.write(bytes);
-  }
-
-  public resize(): void {
-    // The drill uses pipe transports; resize is intentionally a no-op.
-  }
-
-  public kill(): void {
-    this.child.kill("SIGKILL");
-  }
-
-  public onData(listener: (chunk: Buffer) => void): void {
-    this.dataListeners.push(listener);
-  }
-
-  public onExit(listener: (exitCode: number | null) => void): void {
-    this.exitListeners.push(listener);
-    if (this.exited) queueMicrotask(() => listener(this.exitCode));
-  }
-
-  private emitData(chunk: Buffer): void {
-    for (const listener of this.dataListeners) listener(chunk);
-  }
+interface LeaseProof {
+  leaseId: string;
+  workerRunId: string;
+  taskId: string;
+  pid: number;
+  processStartedAt: string;
+  previousRunnerPid: number;
+  recoveredRunnerPid: number;
+  state: "live";
+  identityExact: true;
+  readopted: true;
 }
 
 function argument(name: string): string | undefined {
   const index = process.argv.indexOf(name);
   return index >= 0 ? process.argv[index + 1] : undefined;
-}
-
-async function runWorker(): Promise<never> {
-  const workerRunId = argument("--worker-run-id");
-  assert(workerRunId, "worker role requires --worker-run-id");
-  let sequence = 0;
-  await delay(250);
-  setInterval(() => {
-    sequence += 1;
-    process.stdout.write(`${workerRunId}:frame:${String(sequence).padStart(4, "0")}\n`);
-  }, 75);
-  return new Promise<never>(() => undefined);
 }
 
 function captureProcess(
@@ -128,19 +70,31 @@ function captureProcess(
   return { child, stdout, stderr };
 }
 
-async function freePort(): Promise<number> {
-  const server = createNetServer();
-  await new Promise<void>((resolvePromise, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolvePromise);
-  });
-  const address = server.address();
-  assert(address && typeof address === "object");
-  const port = address.port;
-  await new Promise<void>((resolvePromise, reject) =>
-    server.close((error) => (error ? reject(error) : resolvePromise())),
+async function freePorts(count: number): Promise<number[]> {
+  const servers = Array.from({ length: count }, () => createNetServer());
+  await Promise.all(
+    servers.map(
+      (server) =>
+        new Promise<void>((resolvePromise, reject) => {
+          server.once("error", reject);
+          server.listen(0, "127.0.0.1", resolvePromise);
+        }),
+    ),
   );
-  return port;
+  const ports = servers.map((server) => {
+    const address = server.address();
+    assert(address && typeof address === "object");
+    return address.port;
+  });
+  await Promise.all(
+    servers.map(
+      (server) =>
+        new Promise<void>((resolvePromise, reject) =>
+          server.close((error) => (error ? reject(error) : resolvePromise())),
+        ),
+    ),
+  );
+  return ports;
 }
 
 function startControlPlane(port: number, eventStorePath: string): CapturedProcess {
@@ -153,6 +107,38 @@ function startControlPlane(port: number, eventStorePath: string): CapturedProces
       SAPLING_DOCTRINE: join(repoRoot, "doctrine/profiles/rawdog.yaml"),
     },
   });
+}
+
+function startRunner(options: {
+  stateRoot: string;
+  eventStorePath: string;
+  missionId: string;
+  profileHash: string;
+  port: number;
+  output: string;
+}): CapturedProcess {
+  return captureProcess(
+    process.execPath,
+    [
+      "--import",
+      "tsx",
+      join(repoRoot, "apps/runner/src/index.ts"),
+      "--recovery-probe",
+      "--state-root",
+      options.stateRoot,
+      "--event-store",
+      options.eventStorePath,
+      "--mission-id",
+      options.missionId,
+      "--profile-hash",
+      options.profileHash,
+      "--port",
+      options.port.toString(),
+      "--output",
+      options.output,
+    ],
+    { detached: true },
+  );
 }
 
 function startConsole(options: {
@@ -177,24 +163,6 @@ function startConsole(options: {
     options.output,
     ...(options.resumeFrom === undefined ? [] : ["--resume-from", options.resumeFrom]),
   ]);
-}
-
-function startWorker(workerRunId: string, taskId: string): WorkerProcess {
-  const captured = captureProcess(process.execPath, [
-    "--import",
-    "tsx",
-    scriptPath,
-    "--role",
-    "worker",
-    "--worker-run-id",
-    workerRunId,
-  ]);
-  return {
-    child: captured.child,
-    transport: new ChildTransport(captured.child),
-    workerRunId,
-    taskId,
-  };
 }
 
 async function waitForHealth(
@@ -233,102 +201,6 @@ async function waitForFile<T>(path: string, timeoutMs = 10_000, processInfo?: Ca
   throw new Error(`Timed out waiting for ${path}${logs}`);
 }
 
-async function waitForTerminalSequence(
-  manager: TerminalManager,
-  terminalId: string,
-  minimum: number,
-  timeoutMs = 10_000,
-): Promise<TerminalSession> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const session = (await manager.listSessions()).find((candidate) => candidate.id === terminalId);
-    if (session && session.lastSequence >= minimum) return session;
-    await delay(25);
-  }
-  throw new Error(`Terminal ${terminalId} did not reach sequence ${String(minimum)}`);
-}
-
-async function collectThrough(
-  manager: TerminalManager,
-  terminalId: string,
-  throughSequence: number,
-  fromSequence?: number,
-): Promise<TerminalFrame[]> {
-  const frames: TerminalFrame[] = [];
-  for await (const frame of manager.observe(terminalId, fromSequence)) {
-    frames.push(frame);
-    if (frame.sequence >= throughSequence) break;
-  }
-  return frames;
-}
-
-async function readRequestBody(request: AsyncIterable<Uint8Array>): Promise<unknown> {
-  const chunks: Buffer[] = [];
-  let length = 0;
-  for await (const chunk of request) {
-    const bytes = Buffer.from(chunk);
-    length += bytes.byteLength;
-    assert(length <= 16_384, "terminal replay request is too large");
-    chunks.push(bytes);
-  }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
-}
-
-async function startReplayServer(manager: TerminalManager): Promise<ReplayServer> {
-  const server: HttpServer = createHttpServer(async (request, response) => {
-    try {
-      if (request.method !== "POST" || request.url !== "/replay") {
-        response.writeHead(404).end();
-        return;
-      }
-      const body = (await readRequestBody(request)) as { cursors?: Record<string, unknown> };
-      const cursors = body.cursors ?? {};
-      const sessions = [...(await manager.listSessions())].sort((left, right) =>
-        left.workerRunId.localeCompare(right.workerRunId),
-      );
-      const terminals = await Promise.all(
-        sessions.map(async (session) => {
-          const rawCursor = cursors[session.id];
-          assert(
-            rawCursor === undefined || (Number.isInteger(rawCursor) && Number(rawCursor) >= 0),
-            `invalid replay cursor for ${session.id}`,
-          );
-          const frames = await collectThrough(
-            manager,
-            session.id,
-            session.lastSequence,
-            rawCursor === undefined ? undefined : Number(rawCursor),
-          );
-          return {
-            terminalId: session.id,
-            workerRunId: session.workerRunId,
-            throughSequence: session.lastSequence,
-            frames,
-          };
-        }),
-      );
-      response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ terminals }));
-    } catch (error) {
-      response
-        .writeHead(400, { "content-type": "application/json" })
-        .end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
-    }
-  });
-  await new Promise<void>((resolvePromise, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolvePromise);
-  });
-  const address = server.address();
-  assert(address && typeof address === "object");
-  return {
-    url: `http://127.0.0.1:${address.port.toString()}/replay`,
-    close: () =>
-      new Promise<void>((resolvePromise, reject) =>
-        server.close((error) => (error ? reject(error) : resolvePromise())),
-      ),
-  };
-}
-
 function terminalSnapshot(snapshot: ConsoleRecoverySnapshot, terminalId: string): ConsoleTerminalSnapshot {
   const terminal = snapshot.terminals.find((candidate) => candidate.terminalId === terminalId);
   assert(terminal, `TUI checkpoint omitted terminal ${terminalId}`);
@@ -342,6 +214,17 @@ function assertWorkerStream(terminal: ConsoleTerminalSnapshot): void {
     lines,
     lines.map((_, index) => `${terminal.workerRunId}:frame:${String(index + 1).padStart(4, "0")}`),
   );
+}
+
+async function waitForWorkerLogSequence(path: string, minimum: number): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const content = await readFile(path, "utf8");
+    const sequence = content.match(/\n/g)?.length ?? 0;
+    if (sequence >= minimum) return;
+    await delay(25);
+  }
+  throw new Error(`Worker log ${path} did not reach sequence ${minimum.toString()}`);
 }
 
 function event(
@@ -370,6 +253,28 @@ function stableLeases(leases: readonly ProcessLease[]): ProcessLease[] {
   return [...leases].sort((left, right) => left.workerRunId.localeCompare(right.workerRunId));
 }
 
+function leaseIdentity(lease: ProcessLease): Omit<ProcessLease, "runnerPid"> {
+  const { runnerPid: _runnerPid, ...identity } = lease;
+  return identity;
+}
+
+function projectionIdentity(
+  projection: ReturnType<typeof projectMission>,
+): Omit<ReturnType<typeof projectMission>, "eventCount"> {
+  const { eventCount: _eventCount, ...identity } = projection;
+  return identity;
+}
+
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    throw error;
+  }
+}
+
 async function killGroup(processInfo: CapturedProcess): Promise<void> {
   const pid = processInfo.child.pid;
   if (!pid || processInfo.child.signalCode || processInfo.child.exitCode !== null) return;
@@ -387,9 +292,28 @@ async function killChild(processInfo: CapturedProcess | undefined): Promise<void
   await once(processInfo.child, "exit").catch(() => undefined);
 }
 
-async function waitForChildExit(child: ChildProcessWithoutNullStreams): Promise<void> {
-  if (child.signalCode || child.exitCode !== null) return;
-  await once(child, "exit");
+async function killWorker(pid: number): Promise<void> {
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+  }
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline && isAlive(pid)) await delay(25);
+  assert(!isAlive(pid), `Worker pid ${pid.toString()} survived cleanup`);
+}
+
+async function discoverWorkerPids(stateRoot: string): Promise<number[]> {
+  const workerRoot = join(stateRoot, "workers");
+  const files = await readdir(workerRoot).catch(() => []);
+  const pids: number[] = [];
+  for (const file of files.filter((candidate) => candidate.endsWith(".pid"))) {
+    const value = await readFile(join(workerRoot, file), "utf8");
+    const pid = Number.parseInt(value, 10);
+    assert(Number.isInteger(pid) && pid > 0, `Invalid worker pid marker ${file}`);
+    pids.push(pid);
+  }
+  return pids;
 }
 
 async function performSideEffect(path: string, operationId: string): Promise<"executed" | "replayed"> {
@@ -404,6 +328,10 @@ async function performSideEffect(path: string, operationId: string): Promise<"ex
   }
 }
 
+function scrub(value: unknown, stateRoot: string): string {
+  return `${JSON.stringify(value, null, 2).replaceAll(stateRoot, "<state-root>")}\n`;
+}
+
 async function runDrill(): Promise<void> {
   const outputDir = resolve(argument("--output") ?? join(repoRoot, "artifacts/evals/m1-exit-gate"));
   await mkdir(outputDir, { recursive: true });
@@ -412,19 +340,19 @@ async function runDrill(): Promise<void> {
   const sideEffectPath = join(stateRoot, "side-effect.json");
   const consoleBeforePath = join(stateRoot, "console-before.json");
   const consoleAfterPath = join(stateRoot, "console-after.json");
-  const port = await freePort();
-  const baseUrl = `http://127.0.0.1:${String(port)}`;
-  const terminalManager = new TerminalManager();
+  const runnerBeforePath = join(stateRoot, "runner-before.json");
+  const runnerAfterPath = join(stateRoot, "runner-after.json");
+  const [controlPort, runnerPort] = await freePorts(2);
+  const baseUrl = `http://127.0.0.1:${controlPort.toString()}`;
+  const replayUrl = `http://127.0.0.1:${runnerPort.toString()}/replay`;
   const eventStore = new SqliteEventStore(eventStorePath);
-  const leaseManager = new ProcessLeaseManager({ rootDir: stateRoot, events: eventStore });
-  let replayServer: ReplayServer | undefined;
   const controls: CapturedProcess[] = [];
+  const runners: CapturedProcess[] = [];
   const consoles: CapturedProcess[] = [];
-  const workers: WorkerProcess[] = [];
-  const leases: ProcessLease[] = [];
+  let runnerStatus: RunnerRecoveryStatus | undefined;
 
   try {
-    const controlBefore = startControlPlane(port, eventStorePath);
+    const controlBefore = startControlPlane(controlPort, eventStorePath);
     controls.push(controlBefore);
     const { profileHash } = await waitForHealth(baseUrl, 10_000, controlBefore);
     const client = new SaplingApiClient({ baseUrl });
@@ -436,78 +364,72 @@ async function runDrill(): Promise<void> {
     const plan = MissionPlanSchema.parse({
       missionId,
       goal: "M1 crash recovery drill",
-      rationale: "Prove the trusted runner survives control-plane and console crashes.",
+      rationale: "Prove exact recovery after control-plane, runner, and TUI crashes.",
       profileHash,
       successCriteria: ["All three workers remain live and state recovers exactly."],
       tasks: taskIds.map((taskId) => ({
         id: taskId,
         title: `Run ${taskId}`,
-        objective: "Continue producing terminal output across client-process crashes.",
+        objective: "Continue producing terminal output while trusted client processes restart.",
         kind: "implementation" as const,
         role: "implementer" as const,
         executionClass: "runner_visible" as const,
-        successCriteria: ["Worker stays live through reconnect."],
-        evidenceRequirements: ["Lease and terminal replay evidence are attached."],
+        successCriteria: ["Worker stays live through runner re-adoption."],
+        evidenceRequirements: ["Lease identity and terminal replay evidence are attached."],
       })),
     });
     await client.proposePlan(missionId, plan);
 
-    const sessions: TerminalSession[] = [];
-    for (const [index, taskId] of taskIds.entries()) {
-      const workerRunId = `run-${String(index + 1)}`;
-      const worker = startWorker(workerRunId, taskId);
-      workers.push(worker);
-      assert(worker.child.pid);
-      sessions.push(
-        terminalManager.spawnTerminal({
-          workerRunId,
-          title: taskId,
-          command: process.execPath,
-          transport: worker.transport,
-        }),
-      );
-      leases.push(
-        await leaseManager.register({
-          missionId,
-          taskId,
-          workerRunId,
-          profileHash,
-          pid: worker.child.pid,
-        }),
-      );
+    const runnerBefore = startRunner({
+      stateRoot,
+      eventStorePath,
+      missionId,
+      profileHash,
+      port: runnerPort,
+      output: runnerBeforePath,
+    });
+    runners.push(runnerBefore);
+    const runnerSnapshotBefore = await waitForFile<RunnerRecoveryStatus>(
+      runnerBeforePath,
+      10_000,
+      runnerBefore,
+    );
+    runnerStatus = runnerSnapshotBefore;
+    assert.equal(runnerSnapshotBefore.client, "@sapling/runner recovery probe");
+    assert.equal(runnerSnapshotBefore.startOrdinal, 1);
+    assert.equal(runnerSnapshotBefore.manifest.workers.length, 3);
+    assert.equal(runnerSnapshotBefore.reconciliation.readopted.length, 0);
+
+    for (const worker of runnerSnapshotBefore.manifest.workers) {
+      assert(isAlive(worker.pid), `Worker ${worker.workerRunId} did not remain live`);
       await eventStore.append(
         event(
-          `${missionId}:${taskId}:leased`,
+          `${missionId}:${worker.taskId}:leased`,
           "task.leased",
           missionId,
           profileHash,
           {},
-          taskId,
-          workerRunId,
+          worker.taskId,
+          worker.workerRunId,
         ),
       );
       await eventStore.append(
         event(
-          `${missionId}:${taskId}:running`,
+          `${missionId}:${worker.taskId}:running`,
           "task.running",
           missionId,
           profileHash,
           {},
-          taskId,
-          workerRunId,
+          worker.taskId,
+          worker.workerRunId,
         ),
       );
     }
 
-    const readySessions: TerminalSession[] = [];
-    for (const session of sessions) {
-      readySessions.push(await waitForTerminalSequence(terminalManager, session.id, 3));
-    }
-    replayServer = await startReplayServer(terminalManager);
     const consoleBefore = startConsole({
       baseUrl,
       missionId,
-      replayUrl: replayServer.url,
+      replayUrl,
       output: consoleBeforePath,
     });
     consoles.push(consoleBefore);
@@ -518,8 +440,9 @@ async function runDrill(): Promise<void> {
     );
     assert.equal(consoleSnapshotBefore.client, "@sapling/tui recovery probe");
     const missionBefore = consoleSnapshotBefore.mission;
-    for (const session of readySessions)
+    for (const session of runnerSnapshotBefore.terminals) {
       assertWorkerStream(terminalSnapshot(consoleSnapshotBefore, session.id));
+    }
 
     const operationId = `${missionId}:side-effect:1`;
     assert.equal(await performSideEffect(sideEffectPath, operationId), "executed");
@@ -527,7 +450,7 @@ async function runDrill(): Promise<void> {
       operationId,
     });
     const firstSideEffectAppend = await eventStore.append(sideEffectEvent);
-    const leasesBefore = stableLeases(await leaseManager.list());
+    const leasesBefore = stableLeases(runnerSnapshotBefore.leases);
     const eventsBefore = await eventStore.readAll();
     const projectionBefore = projectMission(
       eventsBefore.map((entry) => entry.event),
@@ -535,36 +458,69 @@ async function runDrill(): Promise<void> {
     );
     assert.equal(projectionBefore.state, "running");
 
-    await Promise.all([killGroup(controlBefore), killChild(consoleBefore)]);
+    await Promise.all([killGroup(controlBefore), killGroup(runnerBefore), killChild(consoleBefore)]);
     assert.equal(controlBefore.child.signalCode, "SIGKILL");
+    assert.equal(runnerBefore.child.signalCode, "SIGKILL");
     assert.equal(consoleBefore.child.signalCode, "SIGKILL");
-    for (const worker of workers) {
-      assert.equal(worker.child.exitCode, null);
-      assert.equal(worker.child.signalCode, null);
-      assert(worker.child.pid);
-      process.kill(worker.child.pid, 0);
+    for (const worker of runnerSnapshotBefore.manifest.workers) {
+      assert(isAlive(worker.pid), `Worker ${worker.workerRunId} died with the runner`);
+      const before = terminalSnapshot(consoleSnapshotBefore, worker.terminalId);
+      await waitForWorkerLogSequence(worker.logPath, before.lastSequence + 2);
     }
 
-    for (const session of readySessions) {
-      const before = terminalSnapshot(consoleSnapshotBefore, session.id);
-      assert(before.lastSequence >= session.lastSequence);
-    }
-
-    const postCrashSessions: TerminalSession[] = [];
-    for (const session of readySessions) {
-      const before = terminalSnapshot(consoleSnapshotBefore, session.id);
-      postCrashSessions.push(
-        await waitForTerminalSequence(terminalManager, session.id, before.lastSequence + 2),
-      );
-    }
-
-    const controlAfter = startControlPlane(port, eventStorePath);
+    const controlAfter = startControlPlane(controlPort, eventStorePath);
     controls.push(controlAfter);
     await waitForHealth(baseUrl, 10_000, controlAfter);
+    const runnerAfter = startRunner({
+      stateRoot,
+      eventStorePath,
+      missionId,
+      profileHash,
+      port: runnerPort,
+      output: runnerAfterPath,
+    });
+    runners.push(runnerAfter);
+    const runnerSnapshotAfter = await waitForFile<RunnerRecoveryStatus>(runnerAfterPath, 10_000, runnerAfter);
+    runnerStatus = runnerSnapshotAfter;
+    assert.equal(runnerSnapshotAfter.startOrdinal, 2);
+    assert.notEqual(runnerSnapshotAfter.runnerPid, runnerSnapshotBefore.runnerPid);
+    assert.deepEqual(runnerSnapshotAfter.manifest, runnerSnapshotBefore.manifest);
+    assert.equal(runnerSnapshotAfter.reconciliation.readopted.length, 3);
+    assert.equal(runnerSnapshotAfter.reconciliation.failed.length, 0);
+    assert.equal(runnerSnapshotAfter.reconciliation.retained.length, 0);
+
+    const leasesAfter = stableLeases(runnerSnapshotAfter.leases);
+    assert.equal(leasesAfter.length, leasesBefore.length);
+    const leaseProofs: LeaseProof[] = leasesBefore.map((before, index) => {
+      const after = leasesAfter[index];
+      assert(after);
+      assert.deepEqual(leaseIdentity(after), leaseIdentity(before));
+      assert.equal(before.runnerPid, runnerSnapshotBefore.runnerPid);
+      assert.equal(after.runnerPid, runnerSnapshotAfter.runnerPid);
+      assert(
+        runnerSnapshotAfter.reconciliation.readopted.some(
+          (lease) => lease.id === before.id && lease.workerRunId === before.workerRunId,
+        ),
+      );
+      assert.equal(after.state, "live");
+      return {
+        leaseId: after.id,
+        workerRunId: after.workerRunId,
+        taskId: after.taskId,
+        pid: after.pid,
+        processStartedAt: after.processStartedAt,
+        previousRunnerPid: before.runnerPid,
+        recoveredRunnerPid: after.runnerPid,
+        state: "live",
+        identityExact: true,
+        readopted: true,
+      };
+    });
+
     const consoleAfter = startConsole({
       baseUrl,
       missionId,
-      replayUrl: replayServer.url,
+      replayUrl,
       output: consoleAfterPath,
       resumeFrom: consoleBeforePath,
     });
@@ -576,15 +532,11 @@ async function runDrill(): Promise<void> {
     );
     const missionAfter = consoleSnapshotAfter.mission;
     assert.deepEqual(missionAfter, missionBefore);
-
-    const recoveredMission = await new SaplingApiClient({ baseUrl }).getMission(missionId);
-    assert.deepEqual(recoveredMission, missionBefore);
-    const leasesAfter = stableLeases(await leaseManager.list());
-    assert.deepEqual(leasesAfter, leasesBefore);
+    assert.deepEqual(await new SaplingApiClient({ baseUrl }).getMission(missionId), missionBefore);
 
     const terminalProofs: TerminalProof[] = [];
-    for (const session of readySessions) {
-      const recovered = postCrashSessions.find((candidate) => candidate.id === session.id);
+    for (const session of runnerSnapshotBefore.terminals) {
+      const recovered = runnerSnapshotAfter.terminals.find((candidate) => candidate.id === session.id);
       assert(recovered);
       assert.equal(recovered.workerRunId, session.workerRunId);
       const before = terminalSnapshot(consoleSnapshotBefore, session.id);
@@ -615,47 +567,61 @@ async function runDrill(): Promise<void> {
     const replayedSideEffectAppend = await eventStore.append(sideEffectEvent);
     assert.equal(replayedSideEffectAppend.sequence, firstSideEffectAppend.sequence);
     const eventsAfter = await eventStore.readAll();
-    assert.deepEqual(eventsAfter, eventsBefore);
+    assert.deepEqual(eventsAfter.slice(0, eventsBefore.length), eventsBefore);
+    const recoveryEvents = eventsAfter.slice(eventsBefore.length);
+    assert.equal(recoveryEvents.length, 3);
+    assert(recoveryEvents.every((entry) => entry.event.type === "worker.readopted"));
+    assert.deepEqual(recoveryEvents.map((entry) => entry.event.workerRunId).sort(), [
+      "run-1",
+      "run-2",
+      "run-3",
+    ]);
     assert.equal(eventsAfter.filter((entry) => entry.event.id === operationId).length, 1);
+    assert.equal(new Set(eventsAfter.map((entry) => entry.event.id)).size, eventsAfter.length);
     const chain = await eventStore.verify();
     assert.deepEqual(chain, { valid: true, count: eventsAfter.length });
     const projectionAfter = projectMission(
       eventsAfter.map((entry) => entry.event),
       missionId,
     );
-    assert.deepEqual(projectionAfter, projectionBefore);
+    assert.deepEqual(projectionIdentity(projectionAfter), projectionIdentity(projectionBefore));
+    assert.equal(projectionAfter.eventCount, projectionBefore.eventCount + recoveryEvents.length);
 
     const report = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       issue: "VUH-693",
       outcome: "pass",
       invocation: "pnpm exec tsx scripts/m1-exit-gate.ts",
       crash: {
         controlPlaneSignal: "SIGKILL",
+        runnerSignal: "SIGKILL",
         consoleSignal: "SIGKILL",
+        runnerClient: "@sapling/runner --recovery-probe",
         consoleClient: "@sapling/tui --recovery-probe",
         consoleConsumedTerminalReplay: true,
-        workersAliveDuringCrash: workers.length,
+        workersAliveDuringCrash: runnerSnapshotBefore.manifest.workers.length,
+      },
+      runner: {
+        previousPid: runnerSnapshotBefore.runnerPid,
+        recoveredPid: runnerSnapshotAfter.runnerPid,
+        previousStartOrdinal: runnerSnapshotBefore.startOrdinal,
+        recoveredStartOrdinal: runnerSnapshotAfter.startOrdinal,
+        readoptedWorkers: runnerSnapshotAfter.reconciliation.readopted.length,
+        lostWorkers: runnerSnapshotAfter.reconciliation.failed.length,
+        duplicateWorkers: 0,
       },
       mission: {
         missionId,
         profileHash,
         state: projectionAfter.state,
         recordExact: true,
-        projectionExact: true,
-        eventLogExact: true,
+        operationalProjectionExact: true,
+        eventLogPrefixExact: true,
+        recoveryEventCount: recoveryEvents.length,
         eventCount: eventsAfter.length,
         hashChainValid: chain.valid,
       },
-      leases: leasesAfter.map((lease) => ({
-        leaseId: lease.id,
-        workerRunId: lease.workerRunId,
-        taskId: lease.taskId,
-        pid: lease.pid,
-        processStartedAt: lease.processStartedAt,
-        state: lease.state,
-        exactAfterRecovery: true,
-      })),
+      leases: leaseProofs,
       terminals: terminalProofs,
       sideEffects: {
         operationId,
@@ -691,19 +657,39 @@ async function runDrill(): Promise<void> {
       controlAfter.stdout.join("").replaceAll(stateRoot, "<state-root>"),
       "utf8",
     );
+    await writeFile(join(outputDir, "07-runner-before.json"), scrub(runnerSnapshotBefore, stateRoot), "utf8");
+    await writeFile(join(outputDir, "08-runner-after.json"), scrub(runnerSnapshotAfter, stateRoot), "utf8");
+    await writeFile(
+      join(outputDir, "09-runner-before.log"),
+      runnerBefore.stdout.join("").replaceAll(stateRoot, "<state-root>"),
+      "utf8",
+    );
+    await writeFile(
+      join(outputDir, "10-runner-after.log"),
+      runnerAfter.stdout.join("").replaceAll(stateRoot, "<state-root>"),
+      "utf8",
+    );
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   } finally {
     await Promise.all(controls.map(killGroup));
+    await Promise.all(runners.map(killGroup));
     await Promise.all(consoles.map((consoleProcess) => killChild(consoleProcess)));
-    for (const worker of workers) worker.transport.kill();
-    await Promise.all(workers.map((worker) => waitForChildExit(worker.child)));
-    for (const lease of leases) await leaseManager.complete(lease.id);
-    await replayServer?.close();
+    const manifest =
+      runnerStatus?.manifest ??
+      (await waitForFile<RunnerRecoveryStatus["manifest"]>(
+        join(stateRoot, "runner-manifest.json"),
+        250,
+      ).catch(() => undefined));
+    const workerPids = new Set([
+      ...(manifest?.workers.map((worker) => worker.pid) ?? []),
+      ...(await discoverWorkerPids(stateRoot)),
+    ]);
+    await Promise.all([...workerPids].map(killWorker));
+    const cleanupLeases = new ProcessLeaseManager({ rootDir: stateRoot, events: eventStore });
+    for (const lease of await cleanupLeases.list()) await cleanupLeases.complete(lease.id);
     eventStore.close();
     await rm(stateRoot, { recursive: true, force: true });
   }
 }
 
-const role = argument("--role");
-if (role === "worker") await runWorker();
-else await runDrill();
+await runDrill();

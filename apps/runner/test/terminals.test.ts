@@ -48,6 +48,28 @@ async function collect(
 const line = (index: number) => `line-${String(index).padStart(6, "0")}\n`;
 
 describe("TerminalManager", () => {
+  it("restores a stable terminal identity without allowing duplicate ownership", () => {
+    const manager = new TerminalManager();
+    const restored = manager.spawnTerminal({
+      id: "terminal-run-1",
+      workerRunId: "run-1",
+      title: "restored",
+      command: "unused",
+      transport: scriptedTransport(),
+    });
+
+    expect(restored.id).toBe("terminal-run-1");
+    expect(() =>
+      manager.spawnTerminal({
+        id: restored.id,
+        workerRunId: "run-2",
+        title: "duplicate",
+        command: "unused",
+        transport: scriptedTransport(),
+      }),
+    ).toThrow(/already exists/);
+  });
+
   it("resumes mid-stream reconnects gap-free with no duplicated or lost bytes", async () => {
     const transport = scriptedTransport();
     const manager = new TerminalManager();
