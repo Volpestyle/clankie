@@ -1,0 +1,152 @@
+schemaVersion: "1"
+id: minecraft-private-overlay
+kind: overlay
+description: Bounded private-world Minecraft policy with explicit lane, server, world, action, and loss limits.
+actions:
+  minecraft.session.connect:
+    default: deny
+    rules:
+      - id: minecraft-local-private-connect
+        effect: allow
+        when:
+          sourceLanes: [tui]
+          authorityTiers: [authenticated]
+          minecraftServerScopes: [local_private]
+          minecraftServerIds: [local-private]
+          minecraftWorldIds: [private-world]
+        obligations: [bind_session_lease, keep_credentials_in_runner]
+        reason: Authenticated TUI may connect to the allowlisted local private world.
+  minecraft.session.disconnect:
+    default: deny
+    rules:
+      - id: minecraft-emergency-disconnect
+        effect: allow
+        when:
+          sourceLanes: [tui, discord_voice, gameplay]
+          minecraftServerIds: [local-private]
+          minecraftWorldIds: [private-world]
+        obligations: [audit_disconnect]
+        reason: Any active lane may stop the allowlisted private session.
+  minecraft.world.observe:
+    default: deny
+    rules:
+      - id: minecraft-private-observe
+        effect: allow
+        when: &bounded_private_gameplay
+          sourceLanes: [gameplay]
+          authorityTiers: [autonomous]
+          minecraftServerScopes: [local_private]
+          minecraftServerIds: [local-private]
+          minecraftWorldIds: [private-world]
+          maxMinecraftRadius: 64
+          maxMinecraftBlockChanges: 16
+          maxMinecraftTravelDistance: 128
+          maxMinecraftActionDurationMs: 60000
+          maxMinecraftRetries: 1
+          maxMinecraftInventoryLossItems: 8
+        obligations: [retain_bounded_evidence]
+        reason: Gameplay may observe within the private-world lease.
+  minecraft.world.navigate:
+    default: deny
+    rules:
+      - id: minecraft-private-navigate
+        effect: allow
+        when: *bounded_private_gameplay
+        obligations: [stop_at_travel_limit]
+        reason: Gameplay may navigate within the private-world travel bound.
+  minecraft.world.break:
+    default: deny
+    rules:
+      - id: minecraft-private-break
+        effect: allow
+        when: *bounded_private_gameplay
+        obligations: [stop_at_block_quota]
+        reason: Gameplay may break blocks within the private-world change quota.
+  minecraft.world.place:
+    default: deny
+    rules:
+      - id: minecraft-private-place
+        effect: allow
+        when: *bounded_private_gameplay
+        obligations: [stop_at_block_quota]
+        reason: Gameplay may place blocks within the private-world change quota.
+  minecraft.world.craft:
+    default: deny
+    rules:
+      - id: minecraft-private-craft
+        effect: allow
+        when: *bounded_private_gameplay
+        obligations: [stop_at_inventory_loss_limit]
+        reason: Gameplay may craft within the private-world inventory bound.
+  minecraft.world.interact:
+    default: deny
+    rules:
+      - id: minecraft-private-interact
+        effect: allow
+        when: *bounded_private_gameplay
+        obligations: [stop_at_inventory_loss_limit]
+        reason: Gameplay may interact within the private-world lease.
+  minecraft.combat.hostile_mob:
+    default: deny
+    rules:
+      - id: minecraft-private-hostile-mob-combat
+        effect: allow
+        when:
+          sourceLanes: [gameplay]
+          authorityTiers: [autonomous]
+          minecraftServerScopes: [local_private]
+          minecraftServerIds: [local-private]
+          minecraftWorldIds: [private-world]
+          maxMinecraftRadius: 64
+          maxMinecraftBlockChanges: 16
+          maxMinecraftTravelDistance: 128
+          maxMinecraftActionDurationMs: 60000
+          maxMinecraftRetries: 1
+          maxMinecraftInventoryLossItems: 8
+          minecraftCombatPolicies: [hostile_mobs]
+        obligations: [stop_at_inventory_loss_limit]
+        reason: Gameplay may defend against hostile mobs when the lease permits it.
+  minecraft.combat.player:
+    default: require_approval
+    rules:
+      - id: minecraft-private-player-combat-approved
+        effect: allow
+        when:
+          sourceLanes: [gameplay]
+          authorityTiers: [autonomous]
+          minecraftServerScopes: [local_private]
+          minecraftServerIds: [local-private]
+          minecraftWorldIds: [private-world]
+          maxMinecraftRadius: 64
+          maxMinecraftBlockChanges: 16
+          maxMinecraftTravelDistance: 128
+          maxMinecraftActionDurationMs: 60000
+          maxMinecraftRetries: 1
+          maxMinecraftInventoryLossItems: 8
+          minHumanApprovals: 1
+          minecraftCombatPolicies: [players]
+        obligations: [record_authenticated_approval, stop_at_inventory_loss_limit]
+        reason: Player combat requires an approval bound to these exact assumptions.
+  minecraft.chat.public:
+    default: require_approval
+    rules:
+      - id: minecraft-private-public-chat-approved
+        effect: allow
+        when:
+          sourceLanes: [gameplay]
+          authorityTiers: [autonomous]
+          minecraftServerScopes: [local_private]
+          minecraftServerIds: [local-private]
+          minecraftWorldIds: [private-world]
+          maxMinecraftRadius: 64
+          maxMinecraftBlockChanges: 16
+          maxMinecraftTravelDistance: 128
+          maxMinecraftActionDurationMs: 60000
+          maxMinecraftRetries: 1
+          maxMinecraftInventoryLossItems: 8
+          minHumanApprovals: 1
+        obligations: [record_authenticated_approval, redact_private_context]
+        reason: Public chat requires an approval bound to these exact assumptions.
+  minecraft.server.command:
+    default: deny
+    rules: []

@@ -8,6 +8,7 @@ import type {
   Risk,
   TaskKind,
 } from "@sapling/protocol";
+import { CommandAuthoritySchema, IntentContextSchema } from "@sapling/protocol";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 
@@ -26,6 +27,81 @@ export const ConnectorRiskClassSchema = z.enum([
   "destructive",
 ]);
 export type ConnectorRiskClass = z.infer<typeof ConnectorRiskClassSchema>;
+
+export const MinecraftCapabilitySchema = z.enum([
+  "minecraft.session.connect",
+  "minecraft.session.disconnect",
+  "minecraft.world.observe",
+  "minecraft.world.navigate",
+  "minecraft.world.break",
+  "minecraft.world.place",
+  "minecraft.world.craft",
+  "minecraft.world.interact",
+  "minecraft.combat.hostile_mob",
+  "minecraft.combat.player",
+  "minecraft.chat.public",
+  "minecraft.server.command",
+]);
+export type MinecraftCapability = z.infer<typeof MinecraftCapabilitySchema>;
+
+export const MinecraftServerScopeSchema = z.enum(["local_private", "remote_private", "public"]);
+export type MinecraftServerScope = z.infer<typeof MinecraftServerScopeSchema>;
+
+export const MinecraftPolicyLimitsSchema = z
+  .object({
+    radius: z.number().nonnegative(),
+    blockChanges: z.number().int().nonnegative(),
+    travelDistance: z.number().nonnegative(),
+    actionDurationMs: z.number().int().positive(),
+    retries: z.number().int().nonnegative(),
+    inventoryLossItems: z.number().int().nonnegative(),
+    combatPolicy: z.enum(["none", "hostile_mobs", "players"]),
+  })
+  .strict();
+export type MinecraftPolicyLimits = z.infer<typeof MinecraftPolicyLimitsSchema>;
+
+export const MinecraftUntrustedContentSchema = z
+  .object({
+    source: z.enum(["server_text", "chat", "sign", "book", "plugin"]),
+    content: z.string().max(4_096),
+    untrusted: z.literal(true),
+  })
+  .strict();
+
+export const MinecraftApprovalSchema = z
+  .object({
+    approvalId: z.string().min(1),
+    authority: CommandAuthoritySchema,
+    assumptionsHash: z.string().regex(/^[a-f0-9]{64}$/u),
+    approvedAt: z.string().datetime(),
+  })
+  .strict();
+export type MinecraftApprovalRecord = z.infer<typeof MinecraftApprovalSchema>;
+const MinecraftApprovalBrand = Symbol("trusted-minecraft-approval");
+export interface TrustedMinecraftApproval extends MinecraftApprovalRecord {
+  readonly [MinecraftApprovalBrand]: true;
+}
+
+/** Marks an approval record loaded by the trusted approval-store boundary. */
+export function createTrustedMinecraftApproval(approval: MinecraftApprovalRecord): TrustedMinecraftApproval {
+  return { ...MinecraftApprovalSchema.parse(approval), [MinecraftApprovalBrand]: true };
+}
+
+export const MinecraftPolicyContextSchema = z
+  .object({
+    intent: IntentContextSchema,
+    server: z
+      .object({
+        serverId: z.string().min(1),
+        worldId: z.string().min(1),
+        scope: MinecraftServerScopeSchema,
+      })
+      .strict(),
+    limits: MinecraftPolicyLimitsSchema,
+    untrustedContent: z.array(MinecraftUntrustedContentSchema).default([]),
+  })
+  .strict();
+export type MinecraftPolicyContext = z.infer<typeof MinecraftPolicyContextSchema>;
 
 export const AuthorityBindingSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("operator") }),
@@ -53,6 +129,18 @@ const ActionRuleSchema = z.object({
       environments: z.array(z.string()).optional(),
       repositories: z.array(z.string()).optional(),
       excludePaths: z.array(z.string()).optional(),
+      sourceLanes: z.array(z.enum(["tui", "discord_voice", "gameplay"])).optional(),
+      authorityTiers: z.array(z.enum(["authenticated", "ambient", "autonomous", "system"])).optional(),
+      minecraftServerScopes: z.array(MinecraftServerScopeSchema).optional(),
+      minecraftServerIds: z.array(z.string().min(1)).optional(),
+      minecraftWorldIds: z.array(z.string().min(1)).optional(),
+      minecraftCombatPolicies: z.array(z.enum(["none", "hostile_mobs", "players"])).optional(),
+      maxMinecraftRadius: z.number().nonnegative().optional(),
+      maxMinecraftBlockChanges: z.number().int().nonnegative().optional(),
+      maxMinecraftTravelDistance: z.number().nonnegative().optional(),
+      maxMinecraftActionDurationMs: z.number().int().positive().optional(),
+      maxMinecraftRetries: z.number().int().nonnegative().optional(),
+      maxMinecraftInventoryLossItems: z.number().int().nonnegative().optional(),
     })
     .default({}),
   obligations: z.array(z.string()).default([]),
@@ -205,6 +293,23 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
+/** Binds an authenticated approval to the exact action and mutable Minecraft assumptions. */
+export function minecraftApprovalAssumptionsHash(
+  action: MinecraftCapability,
+  context: Pick<MinecraftPolicyContext, "intent" | "server" | "limits">,
+): string {
+  return createHash("sha256")
+    .update(
+      stableJson({
+        action,
+        server: context.server,
+        goalVersion: context.intent.expectedGoalVersion,
+        limits: context.limits,
+      }),
+    )
+    .digest("hex");
+}
+
 function mergeObjects(base: unknown, override: unknown): unknown {
   if (Array.isArray(override)) return override;
   if (override && typeof override === "object" && base && typeof base === "object" && !Array.isArray(base)) {
@@ -315,7 +420,11 @@ function globPrefixMatches(pattern: string, path: string): boolean {
   return pattern === path;
 }
 
-function matchesRule(request: ActionRequest, rule: z.infer<typeof ActionRuleSchema>): boolean {
+function matchesRule(
+  request: ActionRequest,
+  rule: z.infer<typeof ActionRuleSchema>,
+  minecraft?: MinecraftPolicyContext,
+): boolean {
   const when = rule.when;
   if (when.maxRisk && RiskOrder[request.context.risk] > RiskOrder[when.maxRisk]) return false;
   if (
@@ -337,6 +446,60 @@ function matchesRule(request: ActionRequest, rule: z.infer<typeof ActionRuleSche
   ) {
     return false;
   }
+  const minecraftPredicatePresent =
+    when.sourceLanes !== undefined ||
+    when.authorityTiers !== undefined ||
+    when.minecraftServerScopes !== undefined ||
+    when.minecraftServerIds !== undefined ||
+    when.minecraftWorldIds !== undefined ||
+    when.minecraftCombatPolicies !== undefined ||
+    when.maxMinecraftRadius !== undefined ||
+    when.maxMinecraftBlockChanges !== undefined ||
+    when.maxMinecraftTravelDistance !== undefined ||
+    when.maxMinecraftActionDurationMs !== undefined ||
+    when.maxMinecraftRetries !== undefined ||
+    when.maxMinecraftInventoryLossItems !== undefined;
+  if (minecraftPredicatePresent && !minecraft) return false;
+  if (!minecraft) return true;
+  if (when.sourceLanes && !when.sourceLanes.includes(minecraft.intent.sourceLane)) return false;
+  if (when.authorityTiers && !when.authorityTiers.includes(minecraft.intent.authority.tier)) return false;
+  if (when.minecraftServerScopes && !when.minecraftServerScopes.includes(minecraft.server.scope))
+    return false;
+  if (when.minecraftServerIds && !when.minecraftServerIds.includes(minecraft.server.serverId)) return false;
+  if (when.minecraftWorldIds && !when.minecraftWorldIds.includes(minecraft.server.worldId)) return false;
+  if (when.minecraftCombatPolicies && !when.minecraftCombatPolicies.includes(minecraft.limits.combatPolicy)) {
+    return false;
+  }
+  if (when.maxMinecraftRadius !== undefined && minecraft.limits.radius > when.maxMinecraftRadius) {
+    return false;
+  }
+  if (
+    when.maxMinecraftBlockChanges !== undefined &&
+    minecraft.limits.blockChanges > when.maxMinecraftBlockChanges
+  ) {
+    return false;
+  }
+  if (
+    when.maxMinecraftTravelDistance !== undefined &&
+    minecraft.limits.travelDistance > when.maxMinecraftTravelDistance
+  ) {
+    return false;
+  }
+  if (
+    when.maxMinecraftActionDurationMs !== undefined &&
+    minecraft.limits.actionDurationMs > when.maxMinecraftActionDurationMs
+  ) {
+    return false;
+  }
+  if (when.maxMinecraftRetries !== undefined && minecraft.limits.retries > when.maxMinecraftRetries) {
+    return false;
+  }
+  if (
+    when.maxMinecraftInventoryLossItems !== undefined &&
+    minecraft.limits.inventoryLossItems > when.maxMinecraftInventoryLossItems
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -344,9 +507,10 @@ function decidePolicy(
   request: ActionRequest,
   policy: z.infer<typeof ActionPolicySchema>,
   policyId: string,
+  minecraft?: MinecraftPolicyContext,
 ): ActionDecision {
   for (const rule of policy.rules) {
-    if (matchesRule(request, rule)) {
+    if (matchesRule(request, rule, minecraft)) {
       return {
         effect: rule.effect,
         reason: rule.reason,
@@ -392,10 +556,11 @@ function applyInvariantFloor(
   };
 }
 
-export function decideAction(
+function decideActionCore(
   doctrine: CompiledDoctrine,
   request: ActionRequest,
   classification?: ActionClassification,
+  minecraft?: MinecraftPolicyContext,
 ): ActionDecision {
   if (
     classification &&
@@ -410,7 +575,11 @@ export function decideAction(
   }
   const policy = doctrine.profile.actions[request.action];
   if (policy) {
-    return applyInvariantFloor(request, classification, decidePolicy(request, policy, request.action));
+    return applyInvariantFloor(
+      request,
+      classification,
+      decidePolicy(request, policy, request.action, minecraft),
+    );
   }
 
   if (classification) {
@@ -430,6 +599,137 @@ export function decideAction(
     matchedPolicyIds: ["implicit-deny"],
     obligations: [],
   });
+}
+
+export function decideAction(
+  doctrine: CompiledDoctrine,
+  request: ActionRequest,
+  classification?: ActionClassification,
+): ActionDecision {
+  if (request.action.startsWith("minecraft.")) {
+    return {
+      effect: "deny",
+      reason: "Minecraft actions require trusted lane, server, world, goal, and limit context.",
+      matchedPolicyIds: ["minecraft-context-required"],
+      obligations: [],
+    };
+  }
+  return decideActionCore(doctrine, request, classification);
+}
+
+const MINECRAFT_APPROVAL_FLOOR = new Set<MinecraftCapability>([
+  "minecraft.combat.player",
+  "minecraft.chat.public",
+  "minecraft.server.command",
+]);
+const MINECRAFT_EXPLICIT_RULE_REQUIRED = new Set<MinecraftCapability>([
+  "minecraft.session.connect",
+  "minecraft.combat.player",
+  "minecraft.chat.public",
+  "minecraft.server.command",
+]);
+
+/**
+ * Evaluates a Minecraft action using trusted, typed environment context. Raw
+ * server/chat/sign/book/plugin text is validated as untrusted data and never
+ * participates in rule matching.
+ */
+export function decideMinecraftAction(
+  doctrine: CompiledDoctrine,
+  request: ActionRequest,
+  context: MinecraftPolicyContext,
+  approval?: TrustedMinecraftApproval,
+): ActionDecision {
+  const parsedCapability = MinecraftCapabilitySchema.safeParse(request.action);
+  if (!parsedCapability.success) {
+    return {
+      effect: "deny",
+      reason: `Unknown Minecraft capability ${request.action}; deny by default.`,
+      matchedPolicyIds: ["minecraft-unknown-capability"],
+      obligations: [],
+    };
+  }
+  const minecraft = MinecraftPolicyContextSchema.parse(context);
+  if (request.context.profileHash !== doctrine.profileHash) {
+    return {
+      effect: "deny",
+      reason: "Minecraft request doctrine hash is stale.",
+      matchedPolicyIds: ["minecraft-profile-mismatch"],
+      obligations: [],
+    };
+  }
+  if (
+    request.resource.type !== "minecraft_world" ||
+    request.resource.id !== minecraft.server.worldId ||
+    request.resource.environment !== minecraft.server.serverId
+  ) {
+    return {
+      effect: "deny",
+      reason: "Minecraft request resource does not match the trusted server/world binding.",
+      matchedPolicyIds: ["minecraft-resource-mismatch"],
+      obligations: [],
+    };
+  }
+
+  const capability = parsedCapability.data;
+  const expectedAssumptions = minecraftApprovalAssumptionsHash(capability, minecraft);
+  const approvalIsAuthenticated =
+    approval?.[MinecraftApprovalBrand] === true &&
+    approval?.authority.tier === "authenticated" &&
+    approval.authority.principal.kind === "human" &&
+    approval.assumptionsHash === expectedAssumptions;
+  const guardedRequest: ActionRequest = {
+    ...request,
+    context: { ...request.context, humanApprovals: approvalIsAuthenticated ? 1 : 0 },
+  };
+  let decision = decideActionCore(doctrine, guardedRequest, undefined, minecraft);
+  if (
+    MINECRAFT_EXPLICIT_RULE_REQUIRED.has(capability) &&
+    decision.effect === "allow" &&
+    decision.matchedPolicyIds.includes(`${capability}:default`)
+  ) {
+    return {
+      effect: "deny",
+      reason: `${capability} requires a matching named rule; a permissive default is insufficient.`,
+      matchedPolicyIds: [...decision.matchedPolicyIds, "minecraft-floor:explicit-rule-required"],
+      obligations: [],
+    };
+  }
+  const approvalFloorApplies =
+    MINECRAFT_APPROVAL_FLOOR.has(capability) ||
+    (capability === "minecraft.session.connect" && minecraft.server.scope !== "local_private");
+  if (approvalFloorApplies && decision.effect === "allow" && !approvalIsAuthenticated) {
+    decision = {
+      effect: "require_approval",
+      reason: `${decision.reason} Minecraft policy requires authenticated human approval.`,
+      matchedPolicyIds: [...decision.matchedPolicyIds, "minecraft-floor:authenticated-approval"],
+      obligations: decision.obligations,
+    };
+  }
+  if (decision.effect === "require_approval") {
+    return {
+      ...decision,
+      obligations: [...new Set([...decision.obligations, "approve_on_authenticated_surface"])],
+    };
+  }
+  return decision;
+}
+
+export function decideMinecraftCapabilityRequest(
+  doctrine: CompiledDoctrine,
+  request: ActionRequest,
+  context: MinecraftPolicyContext,
+  approval?: TrustedMinecraftApproval,
+): ActionDecision {
+  if (request.principal.kind !== "worker") {
+    return {
+      effect: "deny",
+      reason: "Minecraft capabilities may only be issued to authenticated worker runs.",
+      matchedPolicyIds: ["minecraft-capability-worker-only"],
+      obligations: [],
+    };
+  }
+  return decideMinecraftAction(doctrine, request, context, approval);
 }
 
 /**

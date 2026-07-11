@@ -20,6 +20,14 @@ capabilities, optional resources, policy obligations, and expiry.
 - Credential summaries pass through `redactCredential()` before entering a UI
   or structured log.
 
+Licensed Minecraft account credentials use `createMinecraftCredentialStore()`.
+This runner-only factory accepts the dedicated macOS Keychain service and has
+no file fallback or environment override. Its operation failures are reduced
+to `redactCredentialError()` summaries before entering events or support data;
+raw Microsoft/Minecraft authentication responses remain local secret material.
+The generic file store refuses to write or load `minecraft` provider IDs, so a
+caller cannot accidentally route a licensed account through the CI fallback.
+
 The Keychain implementation invokes `/usr/bin/security` through `execFile`, not
 a shell. Secret JSON is passed as a single argv value because the CLI has no
 non-interactive stdin form; it is never placed in a worker environment or
@@ -34,6 +42,12 @@ not widen a grant. Tokens are rejected before `issuedAt` and at or after
 lifetime. Signed obligation identifiers travel with the grant so a privileged
 connector receives the policy constraints attached to the original allow
 decision. A doctrine-hash mismatch invalidates the grant immediately.
+
+Minecraft grants add a strict session/lane/server/world/goal/limits binding.
+Motor capabilities require the `gameplay` lane, expire within 60 seconds, and
+are rejected when any bound assumption changes. The audit stream records only
+a SHA-256 binding fingerprint, never the server identifier, world identifier,
+limit hash, or account credential.
 
 `AuditedCapabilityBroker` is the runtime entry point:
 

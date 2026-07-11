@@ -73,6 +73,10 @@ export function normalizeProviderId(providerId: string): string {
   return normalized;
 }
 
+function isMinecraftProviderId(providerId: string): boolean {
+  return providerId === "minecraft" || providerId.startsWith("minecraft/");
+}
+
 /** An entry in the credential file that failed schema validation and was skipped on read. */
 export interface CredentialLoadIssue {
   providerId: string;
@@ -117,6 +121,12 @@ export class FileCredentialStore implements CredentialStore {
 
   public set(providerId: string, credential: ProviderCredential): Promise<void> {
     const id = normalizeProviderId(providerId);
+    if (isMinecraftProviderId(id)) {
+      throw new CredentialOperationError(
+        "unsupported_platform",
+        "Licensed Minecraft credentials require the runner-owned macOS Keychain store.",
+      );
+    }
     const parsed = ProviderCredentialSchema.parse(credential);
     return this.enqueue(async () => {
       const { credentials } = await this.load();
@@ -178,6 +188,20 @@ export class FileCredentialStore implements CredentialStore {
     const credentials: Record<string, ProviderCredential> = {};
     const issues: CredentialLoadIssue[] = [];
     for (const [id, value] of Object.entries(parsed as Record<string, unknown>)) {
+      let normalizedId: string;
+      try {
+        normalizedId = normalizeProviderId(id);
+      } catch (error) {
+        issues.push({ providerId: id, message: String(error) });
+        continue;
+      }
+      if (isMinecraftProviderId(normalizedId)) {
+        issues.push({
+          providerId: id,
+          message: "Licensed Minecraft credentials are not loaded from plaintext files.",
+        });
+        continue;
+      }
       const result = ProviderCredentialSchema.safeParse(value);
       if (!result.success) {
         issues.push({
@@ -186,11 +210,7 @@ export class FileCredentialStore implements CredentialStore {
         });
         continue;
       }
-      try {
-        credentials[normalizeProviderId(id)] = result.data;
-      } catch (error) {
-        issues.push({ providerId: id, message: String(error) });
-      }
+      credentials[normalizedId] = result.data;
     }
     return { credentials, issues };
   }
@@ -387,6 +407,97 @@ function isKeychainNotFound(error: unknown): boolean {
   if (error.message.includes("could not be found")) return true;
   const stderr = (error as Error & { stderr?: unknown }).stderr;
   return typeof stderr === "string" && stderr.includes("could not be found");
+}
+
+export type CredentialOperationErrorCode = "unsupported_platform" | "credential_operation_failed";
+
+export class CredentialOperationError extends Error {
+  public readonly code: CredentialOperationErrorCode;
+
+  public constructor(code: CredentialOperationErrorCode, message: string) {
+    super(message);
+    this.name = "CredentialOperationError";
+    this.code = code;
+  }
+}
+
+export interface RedactedCredentialError {
+  code: CredentialOperationErrorCode;
+  message: string;
+}
+
+/** Converts any raw Keychain/provider error into event- and support-safe data. */
+export function redactCredentialError(error: unknown): RedactedCredentialError {
+  if (error instanceof CredentialOperationError && error.code === "unsupported_platform") {
+    return {
+      code: "unsupported_platform",
+      message: "Credential store is unavailable on this platform.",
+    };
+  }
+  return {
+    code: "credential_operation_failed",
+    message: "Credential operation failed.",
+  };
+}
+
+class MinecraftCredentialStore implements CredentialStore {
+  private readonly keychain: KeychainCredentialStore;
+
+  public constructor(keychain: KeychainCredentialStore) {
+    this.keychain = keychain;
+  }
+
+  public get(providerId: string): Promise<ProviderCredential | undefined> {
+    return this.wrap(() => this.keychain.get(providerId));
+  }
+
+  public set(providerId: string, credential: ProviderCredential): Promise<void> {
+    return this.wrap(() => this.keychain.set(providerId, credential));
+  }
+
+  public delete(providerId: string): Promise<boolean> {
+    return this.wrap(() => this.keychain.delete(providerId));
+  }
+
+  public list(): Promise<Record<string, RedactedCredential>> {
+    return this.wrap(() => this.keychain.list());
+  }
+
+  private async wrap<T>(operation: () => Promise<T>): Promise<T> {
+    try {
+      return await operation();
+    } catch {
+      throw new CredentialOperationError(
+        "credential_operation_failed",
+        "Minecraft credential operation failed.",
+      );
+    }
+  }
+}
+
+export interface MinecraftCredentialStoreOptions extends KeychainCredentialStoreOptions {
+  platform?: string;
+}
+
+/**
+ * Creates the licensed Minecraft-account store. It deliberately has no file
+ * fallback: only the trusted runner on macOS may retrieve the Keychain secret.
+ */
+export function createMinecraftCredentialStore(
+  options: MinecraftCredentialStoreOptions = {},
+): CredentialStore {
+  if ((options.platform ?? process.platform) !== "darwin") {
+    throw new CredentialOperationError(
+      "unsupported_platform",
+      "Licensed Minecraft credentials require the runner-owned macOS Keychain store.",
+    );
+  }
+  return new MinecraftCredentialStore(
+    new KeychainCredentialStore({
+      service: options.service ?? "bot.clankie.minecraft.credentials",
+      ...(options.execFile ? { execFile: options.execFile } : {}),
+    }),
+  );
 }
 
 export interface DefaultCredentialStoreOptions {

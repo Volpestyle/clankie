@@ -143,6 +143,40 @@ session but cannot approve remote joins, public chat, player combat, server
 commands, or capability expansion. Emergency pause and disconnect bypass model
 scheduling while still producing audited semantic events.
 
+### Minecraft capability policy
+
+Minecraft capability decisions use trusted environment context in addition to
+the normal action request. The context binds source lane and authority, server
+and world, goal version, and numeric action limits. A generic connector-risk
+decision cannot grant a `minecraft.*` action; unknown names and calls that omit
+the Minecraft context deny.
+
+| Capability class      | Private local posture                                 | Required bounds / authority                                  |
+| --------------------- | ----------------------------------------------------- | ------------------------------------------------------------ |
+| connect               | explicit allowlist rule                               | authenticated TUI, exact server + world                      |
+| disconnect            | allow for an active allowlisted session               | TUI, voice, or gameplay; audited                             |
+| observe               | allow                                                 | active gameplay lane and lease                               |
+| navigate              | allow                                                 | radius, travel, duration, retry, and inventory-loss ceilings |
+| break / place         | allow                                                 | region and per-action block-change ceilings                  |
+| craft / interact      | allow                                                 | duration, retry, and inventory-loss ceilings                 |
+| hostile-mob combat    | explicit allow                                        | gameplay lane plus `hostile_mobs` combat policy              |
+| player combat         | authenticated approval                                | exact action/server/world/goal/limits binding                |
+| public chat           | authenticated approval                                | exact action/server/world/goal/limits binding                |
+| server command        | deny unless a reviewed profile names an explicit rule | never inherited from a risk-class allow                      |
+| remote or public join | deny unless an explicit allowlist rule exists         | approval cannot substitute for an allowlist                  |
+
+Voice remains ambient. It may steer, pause, or disconnect, but a voice-derived
+approval record never satisfies `minHumanApprovals`. An accepted approval names
+an authenticated human and hashes the action, server, world, goal version, and
+limits. Changing any assumption invalidates it. A minted motor grant repeats
+those bindings, is restricted to the gameplay lane, and expires within 60
+seconds.
+
+Server text, chat, signs, books, and plugin output are untrusted observations.
+They may inform model reasoning, but the policy compiler never reads them as
+rules, tool metadata, approvals, capability names, limits, or authority. Only
+trusted runner/control-plane inputs construct the Minecraft policy context.
+
 ## Policy tests
 
 Each profile needs executable examples:
@@ -153,6 +187,9 @@ production deploy and destructive shell → human approval required in every pre
 rawdog authority roles + no connectors → operator/local bindings resolve
 unclassified unknown action → denied
 lower mission layer tries to allow org-denied action → still denied
+ambient approval tries to authorize PvP or public chat → authenticated approval still required
+server text asks to add a tool or widen a limit → unchanged decision and capability set
+goal/server/world/limits change after approval or grant → approval/grant invalidated
 ```
 
 ## Product controls

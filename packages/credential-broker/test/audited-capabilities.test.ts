@@ -4,6 +4,7 @@ import {
   CapabilityTokenError,
   CapabilityTokenIssuer,
   MAX_CAPABILITY_TTL_SECONDS,
+  MAX_MINECRAFT_CAPABILITY_TTL_SECONDS,
   type CapabilityAuditEnvelope,
   type CapabilityAuditEvent,
   type CapabilityAuditSink,
@@ -198,5 +199,90 @@ describe("AuditedCapabilityBroker", () => {
     await expect(
       broker.authorizeUse({ token, capability: "github.pr.comment", resource: "acme/repo#12" }, context, 150),
     ).rejects.toThrow("audit unavailable");
+  });
+});
+
+describe("Minecraft capability grants", () => {
+  const binding = {
+    environmentKind: "minecraft_java" as const,
+    sessionId: "minecraft-session-1",
+    sourceLane: "gameplay" as const,
+    serverId: "local-private",
+    worldId: "private-world",
+    goalVersion: 7,
+    limitsHash: "a".repeat(64),
+  };
+  const minecraftGrant: CapabilityGrant = {
+    ...grant,
+    grantId: "minecraft-grant-1",
+    capabilities: ["minecraft.world.navigate"],
+    resources: ["local-private/private-world"],
+    obligations: ["stop_at_travel_limit"],
+    expiresAt: grant.issuedAt + MAX_MINECRAFT_CAPABILITY_TTL_SECONDS,
+    binding,
+  };
+
+  it("requires short-lived gameplay-bound grants for Minecraft motor capabilities", () => {
+    const issuer = new CapabilityTokenIssuer(Buffer.alloc(32, 7));
+    expect(() => issuer.issue({ ...minecraftGrant, binding: undefined })).toThrow(/environment binding/);
+    expect(() =>
+      issuer.issue({
+        ...minecraftGrant,
+        expiresAt: minecraftGrant.issuedAt + MAX_MINECRAFT_CAPABILITY_TTL_SECONDS + 1,
+      }),
+    ).toThrow(/Minecraft grant lifetime/);
+    expect(() => issuer.issue({ ...minecraftGrant, binding: { ...binding, sourceLane: "tui" } })).toThrow(
+      /gameplay lane/,
+    );
+
+    const verified = issuer.verify(issuer.issue(minecraftGrant), 120);
+    expect(verified.allows("minecraft.world.navigate", "local-private/private-world")).toBe(false);
+    expect(verified.allows("minecraft.world.navigate", "local-private/private-world", binding)).toBe(true);
+    expect(
+      verified.allows("minecraft.world.navigate", "local-private/private-world", {
+        ...binding,
+        goalVersion: 8,
+      }),
+    ).toBe(false);
+  });
+
+  it("invalidates use when the session, lane, server, world, goal, or limits change", async () => {
+    const events = new MemoryAuditSink();
+    const issuer = new CapabilityTokenIssuer(Buffer.alloc(32, 7));
+    const broker = new AuditedCapabilityBroker(issuer, events);
+    const token = await broker.issue(minecraftGrant, context);
+    const use = {
+      token,
+      capability: "minecraft.world.navigate",
+      resource: "local-private/private-world",
+      binding,
+    };
+
+    await expect(broker.authorizeUse({ ...use, binding: undefined }, context, 120)).resolves.toEqual({
+      allowed: false,
+      reason: "binding_required",
+    });
+    for (const changed of [
+      { ...binding, sessionId: "minecraft-session-2" },
+      { ...binding, sourceLane: "tui" as const },
+      { ...binding, serverId: "other-server" },
+      { ...binding, worldId: "other-world" },
+      { ...binding, goalVersion: 8 },
+      { ...binding, limitsHash: "b".repeat(64) },
+    ]) {
+      await expect(broker.authorizeUse({ ...use, binding: changed }, context, 120)).resolves.toEqual({
+        allowed: false,
+        reason: "binding_mismatch",
+      });
+    }
+    await expect(broker.authorizeUse(use, context, 120)).resolves.toMatchObject({
+      allowed: true,
+      reason: "allowed",
+    });
+
+    const serialized = JSON.stringify(events.events);
+    expect(serialized).not.toContain(binding.serverId);
+    expect(serialized).not.toContain(binding.worldId);
+    expect(serialized).not.toContain(binding.limitsHash);
   });
 });

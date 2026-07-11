@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
   CapabilityGrantSchema,
+  MinecraftCapabilityBindingSchema,
   CapabilityTokenError,
   type CapabilityGrant,
   type CapabilityTokenErrorCode,
@@ -46,6 +47,7 @@ export const CapabilityUseRequestSchema = z.object({
   token: z.string(),
   capability: z.string(),
   resource: z.string().optional(),
+  binding: MinecraftCapabilityBindingSchema.optional(),
 });
 export type CapabilityUseRequest = z.infer<typeof CapabilityUseRequestSchema>;
 
@@ -55,6 +57,8 @@ export type CapabilityUseReason =
   | "mission_mismatch"
   | "principal_mismatch"
   | "profile_mismatch"
+  | "binding_required"
+  | "binding_mismatch"
   | "capability_not_granted"
   | "resource_not_granted"
   | "replayed";
@@ -126,6 +130,7 @@ export class AuditedCapabilityBroker {
       capabilityFingerprints: parsed.capabilities.map(fingerprint),
       resourceFingerprints: parsed.resources.map(fingerprint),
       obligationFingerprints: parsed.obligations.map(fingerprint),
+      ...(parsed.binding ? { bindingFingerprint: fingerprint(JSON.stringify(parsed.binding)) } : {}),
       issuedAt: parsed.issuedAt,
       expiresAt: parsed.expiresAt,
     });
@@ -154,6 +159,16 @@ export class AuditedCapabilityBroker {
     }
     if (grant.profileHash !== context.profileHash) {
       return this.decide(false, "profile_mismatch", parsed, context, grant);
+    }
+    if (grant.binding !== undefined && parsed.binding === undefined) {
+      return this.decide(false, "binding_required", parsed, context, grant);
+    }
+    if (
+      grant.binding !== undefined &&
+      parsed.binding !== undefined &&
+      JSON.stringify(grant.binding) !== JSON.stringify(parsed.binding)
+    ) {
+      return this.decide(false, "binding_mismatch", parsed, context, grant);
     }
 
     const grantFingerprint = fingerprint(grant.grantId);
@@ -209,6 +224,9 @@ export class AuditedCapabilityBroker {
         ...(grant ? { grantFingerprint: fingerprint(grant.grantId) } : {}),
         capabilityFingerprint: fingerprint(request.capability),
         ...(request.resource === undefined ? {} : { resourceFingerprint: fingerprint(request.resource) }),
+        ...(request.binding === undefined
+          ? {}
+          : { bindingFingerprint: fingerprint(JSON.stringify(request.binding)) }),
         ...(attemptId ? { attemptId } : {}),
         reason,
       },

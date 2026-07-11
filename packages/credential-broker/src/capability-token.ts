@@ -2,6 +2,25 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 
 export const MAX_CAPABILITY_TTL_SECONDS = 15 * 60;
+export const MAX_MINECRAFT_CAPABILITY_TTL_SECONDS = 60;
+
+export const MinecraftCapabilityBindingSchema = z
+  .object({
+    environmentKind: z.literal("minecraft_java"),
+    sessionId: z.string().min(1),
+    sourceLane: z.enum(["tui", "gameplay"]),
+    serverId: z.string().min(1),
+    worldId: z.string().min(1),
+    goalVersion: z.number().int().nonnegative(),
+    limitsHash: z.string().regex(/^[a-f0-9]{64}$/u),
+  })
+  .strict();
+export type MinecraftCapabilityBinding = z.infer<typeof MinecraftCapabilityBindingSchema>;
+
+const MINECRAFT_LIFECYCLE_CAPABILITIES = new Set([
+  "minecraft.session.connect",
+  "minecraft.session.disconnect",
+]);
 
 export const CapabilityGrantSchema = z
   .object({
@@ -13,6 +32,7 @@ export const CapabilityGrantSchema = z
     capabilities: z.array(z.string().min(1)).min(1),
     resources: z.array(z.string().min(1)).default([]),
     obligations: z.array(z.string().min(1)).default([]),
+    binding: MinecraftCapabilityBindingSchema.optional(),
     issuedAt: z.number().int().nonnegative(),
     expiresAt: z.number().int().positive(),
     nonce: z.string().min(8),
@@ -32,6 +52,43 @@ export const CapabilityGrantSchema = z
         path: ["expiresAt"],
       });
     }
+    const minecraftCapabilities = grant.capabilities.filter((capability) =>
+      capability.startsWith("minecraft."),
+    );
+    if (minecraftCapabilities.length > 0 && grant.binding === undefined) {
+      context.addIssue({
+        code: "custom",
+        message: "Minecraft capabilities require an environment binding",
+        path: ["binding"],
+      });
+    }
+    if (
+      minecraftCapabilities.length > 0 &&
+      grant.expiresAt - grant.issuedAt > MAX_MINECRAFT_CAPABILITY_TTL_SECONDS
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: `Minecraft grant lifetime must not exceed ${String(MAX_MINECRAFT_CAPABILITY_TTL_SECONDS)} seconds`,
+        path: ["expiresAt"],
+      });
+    }
+    if (
+      grant.binding?.sourceLane !== "gameplay" &&
+      minecraftCapabilities.some((capability) => !MINECRAFT_LIFECYCLE_CAPABILITIES.has(capability))
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Minecraft motor capabilities require the gameplay lane",
+        path: ["binding", "sourceLane"],
+      });
+    }
+    if (grant.binding !== undefined && minecraftCapabilities.length === 0) {
+      context.addIssue({
+        code: "custom",
+        message: "Minecraft binding requires at least one Minecraft capability",
+        path: ["binding"],
+      });
+    }
   });
 export type CapabilityGrant = z.infer<typeof CapabilityGrantSchema>;
 
@@ -49,7 +106,7 @@ export class CapabilityTokenError extends Error {
 
 export interface VerifiedCapability {
   grant: CapabilityGrant;
-  allows(capability: string, resource?: string): boolean;
+  allows(capability: string, resource?: string, binding?: MinecraftCapabilityBinding): boolean;
 }
 
 /**
@@ -97,10 +154,21 @@ export class CapabilityTokenIssuer {
     }
     return {
       grant,
-      allows(capability, resource) {
+      allows(capability, resource, binding) {
         if (!grant.capabilities.includes(capability)) return false;
-        if (grant.resources.length === 0) return true;
-        return resource !== undefined && grant.resources.includes(resource);
+        if (grant.resources.length > 0 && (resource === undefined || !grant.resources.includes(resource))) {
+          return false;
+        }
+        if (grant.binding !== undefined) {
+          const parsedBinding = MinecraftCapabilityBindingSchema.safeParse(binding);
+          if (
+            !parsedBinding.success ||
+            JSON.stringify(grant.binding) !== JSON.stringify(parsedBinding.data)
+          ) {
+            return false;
+          }
+        }
+        return true;
       },
     };
   }
