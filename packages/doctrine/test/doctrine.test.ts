@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { ActionRequest } from "@sapling/protocol";
-import { compileDoctrine, decideAction, type OrchestrationProfile } from "../src/index.ts";
+import {
+  compileDoctrine,
+  decideAction,
+  decideCapabilityRequest,
+  permitsCapabilityGrant,
+  type OrchestrationProfile,
+} from "../src/index.ts";
 
 const base: OrchestrationProfile = {
   schemaVersion: "1",
@@ -84,6 +90,36 @@ describe("doctrine", () => {
     const compiled = compileDoctrine([base]);
     const unknown = { ...request("low", 1), action: "deployment.production.create" };
     expect(decideAction(compiled, unknown).effect).toBe("deny");
+  });
+
+  it("mints worker capabilities only for an explicit allow decision", () => {
+    const compiled = compileDoctrine([base]);
+    const merge = { ...request("low", 1), principal: { kind: "worker" as const, id: "run-1" } };
+    const allowed = decideCapabilityRequest(compiled, merge);
+    expect(allowed.effect).toBe("allow");
+    expect(permitsCapabilityGrant(allowed)).toBe(true);
+
+    const approvalRequired = decideCapabilityRequest(compiled, {
+      ...merge,
+      context: { ...merge.context, humanApprovals: 0 },
+    });
+    expect(approvalRequired.effect).toBe("require_approval");
+    expect(permitsCapabilityGrant(approvalRequired)).toBe(false);
+
+    for (const action of ["deployment.production.create", "package.release.publish"]) {
+      const denied = decideCapabilityRequest(compiled, { ...merge, action });
+      expect(denied.effect).toBe("deny");
+      expect(permitsCapabilityGrant(denied)).toBe(false);
+    }
+  });
+
+  it("refuses to issue a worker capability for another principal kind", () => {
+    const compiled = compileDoctrine([base]);
+    const decision = decideCapabilityRequest(compiled, request("low", 1));
+    expect(decision).toMatchObject({
+      effect: "deny",
+      matchedPolicyIds: ["capability-worker-only"],
+    });
   });
 
   it("does not let lower scopes loosen a higher-scope deny", () => {

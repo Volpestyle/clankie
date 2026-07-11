@@ -276,6 +276,28 @@ export function decideAction(doctrine: CompiledDoctrine, request: ActionRequest)
   };
 }
 
+/**
+ * Evaluates a worker's request for a connector capability. Capabilities are
+ * never issued on behalf of captains, humans, or system principals, and the
+ * caller must treat every result other than `allow` as a refusal to mint.
+ */
+export function decideCapabilityRequest(doctrine: CompiledDoctrine, request: ActionRequest): ActionDecision {
+  if (request.principal.kind !== "worker") {
+    return {
+      effect: "deny",
+      reason: "Connector capabilities may only be issued to authenticated worker runs.",
+      matchedPolicyIds: ["capability-worker-only"],
+      obligations: [],
+    };
+  }
+  return decideAction(doctrine, request);
+}
+
+/** The capability gateway's single grant condition. */
+export function permitsCapabilityGrant(decision: ActionDecision): boolean {
+  return decision.effect === "allow";
+}
+
 export async function loadDoctrineFile(path: string): Promise<OrchestrationProfile> {
   const raw = await readFile(path, "utf8");
   return OrchestrationProfileSchema.parse(parseYaml(raw));

@@ -2,8 +2,8 @@
 
 The credential broker is the local secret and short-lived capability boundary.
 Provider credentials stay in the macOS Keychain by default; workers receive
-signed grants that name only their mission, worker-run identity, allowed
-capabilities, optional resources, and expiry.
+signed grants that name only their mission, worker-run identity, doctrine hash, allowed
+capabilities, optional resources, policy obligations, and expiry.
 
 ## Credential storage
 
@@ -31,7 +31,9 @@ written to a plaintext config file.
 grants require the caller to present an exact resource; omitting a resource does
 not widen a grant. Tokens are rejected before `issuedAt` and at or after
 `expiresAt`, use canonical base64url encoding, and have a maximum 15-minute
-lifetime.
+lifetime. Signed obligation identifiers travel with the grant so a privileged
+connector receives the policy constraints attached to the original allow
+decision. A doctrine-hash mismatch invalidates the grant immediately.
 
 `AuditedCapabilityBroker` is the runtime entry point:
 
@@ -47,7 +49,7 @@ lifetime.
 4. If the event sink fails, issuance and authorization fail closed.
 
 Audit events include SHA-256 fingerprints for grant, capability, and resource
-identifiers plus trusted mission/worker correlation and expiry. Caller-controlled
+and obligation identifiers plus trusted mission/worker correlation and expiry. Caller-controlled
 strings are never copied into event data, so a malicious resource cannot smuggle
 a signed token, nonce, or provider credential into the log. The
 `CapabilityAuditSink` shape is compatible with the append/read surface of

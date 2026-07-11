@@ -15,8 +15,10 @@ const grant: CapabilityGrant = {
   grantId: "grant-1",
   principalId: "worker-run-1",
   missionId: "mission-1",
+  profileHash: "profile-1",
   capabilities: ["github.pr.comment"],
   resources: ["acme/repo#12"],
+  obligations: ["use_merge_queue"],
   issuedAt: 100,
   expiresAt: 200,
   nonce: "secret-nonce",
@@ -69,6 +71,7 @@ describe("CapabilityTokenIssuer", () => {
     expect(verified.allows("github.pr.comment", "acme/repo#12")).toBe(true);
     expect(verified.allows("github.pr.comment")).toBe(false);
     expect(verified.allows("github.pr.comment", "acme/other#12")).toBe(false);
+    expect(verified.grant.obligations).toEqual(["use_merge_queue"]);
   });
 });
 
@@ -118,6 +121,7 @@ describe("AuditedCapabilityBroker", () => {
     expect(serialized).not.toContain(rawCredential);
     expect(serialized).not.toContain("github.pr.comment");
     expect(serialized).not.toContain("acme/repo#12");
+    expect(serialized).not.toContain("use_merge_queue");
   });
 
   it("binds use to trusted mission/worker context and audits resource/time mismatches", async () => {
@@ -135,13 +139,16 @@ describe("AuditedCapabilityBroker", () => {
       broker.authorizeUse(request, { ...context, workerRunId: "worker-run-2" }, 150),
     ).resolves.toEqual({ allowed: false, reason: "principal_mismatch" });
     await expect(
+      broker.authorizeUse(request, { ...context, profileHash: "profile-2" }, 150),
+    ).resolves.toEqual({ allowed: false, reason: "profile_mismatch" });
+    await expect(
       broker.authorizeUse({ ...request, resource: "acme/other#12" }, context, 150),
     ).resolves.toEqual({ allowed: false, reason: "resource_not_granted" });
     await expect(broker.authorizeUse(request, context, 201)).resolves.toEqual({
       allowed: false,
       reason: "expired",
     });
-    expect(events.events.filter((event) => event.type === "capability.use.denied")).toHaveLength(4);
+    expect(events.events.filter((event) => event.type === "capability.use.denied")).toHaveLength(5);
   });
 
   it("rejects issuance whose trusted identity does not match the grant", async () => {

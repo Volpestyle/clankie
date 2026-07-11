@@ -54,6 +54,7 @@ export type CapabilityUseReason =
   | CapabilityTokenErrorCode
   | "mission_mismatch"
   | "principal_mismatch"
+  | "profile_mismatch"
   | "capability_not_granted"
   | "resource_not_granted"
   | "replayed";
@@ -112,7 +113,11 @@ export class AuditedCapabilityBroker {
 
   public async issue(grant: CapabilityGrant, context: CapabilityAuditContext): Promise<string> {
     const parsed = CapabilityGrantSchema.parse(grant);
-    if (parsed.missionId !== context.missionId || parsed.principalId !== context.workerRunId) {
+    if (
+      parsed.missionId !== context.missionId ||
+      parsed.principalId !== context.workerRunId ||
+      parsed.profileHash !== context.profileHash
+    ) {
       throw new Error("Capability grant identity does not match its trusted audit context");
     }
     const token = this.issuer.issue(parsed);
@@ -120,6 +125,7 @@ export class AuditedCapabilityBroker {
       grantFingerprint: fingerprint(parsed.grantId),
       capabilityFingerprints: parsed.capabilities.map(fingerprint),
       resourceFingerprints: parsed.resources.map(fingerprint),
+      obligationFingerprints: parsed.obligations.map(fingerprint),
       issuedAt: parsed.issuedAt,
       expiresAt: parsed.expiresAt,
     });
@@ -145,6 +151,9 @@ export class AuditedCapabilityBroker {
     }
     if (grant.principalId !== context.workerRunId) {
       return this.decide(false, "principal_mismatch", parsed, context, grant);
+    }
+    if (grant.profileHash !== context.profileHash) {
+      return this.decide(false, "profile_mismatch", parsed, context, grant);
     }
 
     const grantFingerprint = fingerprint(grant.grantId);

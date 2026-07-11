@@ -4,7 +4,13 @@ import { join, resolve } from "node:path";
 import { compileDoctrine, loadDoctrineFile, type CompiledDoctrine } from "@sapling/doctrine";
 import { SqliteEventStore } from "@sapling/event-store";
 import { beforeAll, describe, expect, it } from "vitest";
-import { createControlPlane } from "../src/app.ts";
+import {
+  createControlPlane,
+  type CapabilityBroker,
+  type GithubConnector,
+  type GithubConnectorOperation,
+  type TrustedWorkerIdentity,
+} from "../src/app.ts";
 
 let app: Awaited<ReturnType<typeof createControlPlane>>;
 let doctrine: CompiledDoctrine;
@@ -14,6 +20,13 @@ beforeAll(async () => {
   const profilePath = resolve(import.meta.dirname, "../../../doctrine/profiles/self-build-lab.yaml");
   doctrine = compileDoctrine([await loadDoctrineFile(profilePath)]);
   profileHash = doctrine.profileHash;
+  trustedWorker = {
+    missionId: "mission-capability",
+    taskId: "task-capability",
+    workerRunId: "worker-run-capability",
+    correlationId: "correlation-capability",
+    profileHash,
+  };
   app = await createControlPlane({ doctrine });
 });
 
@@ -131,5 +144,292 @@ describe("control plane", () => {
     expect((record.plan as { tasks: unknown[] }).tasks).toHaveLength(1);
     expect(await reopenedStore.verify()).toMatchObject({ valid: true, count: 2 });
     reopenedStore.close();
+  });
+});
+
+let trustedWorker: TrustedWorkerIdentity;
+
+function capabilityAction(action: string) {
+  return {
+    id: `request-${action}`,
+    action,
+    resource: {
+      type: "pull_request",
+      id: "184",
+      repository: "acme/example",
+      ...(action.startsWith("deployment.") ? { environment: "production" } : {}),
+    },
+  };
+}
+
+const resolveTrustedActionContext = () =>
+  Promise.resolve({ risk: "low" as const, checksPassed: true, humanApprovals: 1 });
+
+class RecordingCapabilityBroker implements CapabilityBroker {
+  public readonly issued: Array<Parameters<CapabilityBroker["issue"]>[0]> = [];
+  public readonly issueContexts: Array<Parameters<CapabilityBroker["issue"]>[1]> = [];
+  public readonly uses: Array<Parameters<CapabilityBroker["authorizeUse"]>[0]> = [];
+  private readonly grants = new Map<string, Parameters<CapabilityBroker["issue"]>[0]>();
+
+  public issue(
+    grant: Parameters<CapabilityBroker["issue"]>[0],
+    context: Parameters<CapabilityBroker["issue"]>[1],
+  ): Promise<string> {
+    const token = `signed-${grant.grantId}`;
+    this.issued.push(structuredClone(grant));
+    this.issueContexts.push(structuredClone(context));
+    this.grants.set(token, structuredClone(grant));
+    return Promise.resolve(token);
+  }
+
+  public authorizeUse(
+    request: Parameters<CapabilityBroker["authorizeUse"]>[0],
+    _context: Parameters<CapabilityBroker["authorizeUse"]>[1],
+    nowEpochSeconds?: number,
+  ): Promise<{ allowed: boolean; reason: string; grant?: { obligations: string[] } }> {
+    this.uses.push(structuredClone(request));
+    const grant = this.grants.get(request.token);
+    const allowed =
+      grant !== undefined &&
+      grant.capabilities.includes(request.capability) &&
+      request.resource !== undefined &&
+      grant.resources.includes(request.resource) &&
+      (nowEpochSeconds ?? 0) < grant.expiresAt;
+    if (allowed) this.grants.delete(request.token);
+    return Promise.resolve(
+      allowed
+        ? { allowed, reason: "allowed", grant: { obligations: grant.obligations } }
+        : { allowed, reason: "capability_not_granted" },
+    );
+  }
+}
+
+class RecordingGithubConnector implements GithubConnector {
+  public readonly operations: GithubConnectorOperation[] = [];
+
+  public execute(operation: GithubConnectorOperation): Promise<unknown> {
+    this.operations.push(structuredClone(operation));
+    return Promise.resolve({ accepted: true, operationId: "github-operation-1" });
+  }
+}
+
+describe("worker capability exchange", () => {
+  it("issues and consumes an audited, time-boxed GitHub capability without exposing credentials", async () => {
+    const broker = new RecordingCapabilityBroker();
+    const connector = new RecordingGithubConnector();
+    let nextId = 0;
+    const exchange = await createControlPlane({
+      doctrine,
+      capabilityBroker: broker,
+      githubConnector: connector,
+      resolveActionContext: resolveTrustedActionContext,
+      authenticateWorker: (request) =>
+        Promise.resolve(
+          request.headers.get("authorization") === "Bearer runner-session" ? trustedWorker : undefined,
+        ),
+      clock: () => new Date("2026-07-11T05:00:00.000Z"),
+      idFactory: () => `id-${String(++nextId)}-long-enough`,
+    });
+    const request = capabilityAction("github.pr.open");
+
+    const issued = await exchange.request(`/v1/workers/${trustedWorker.workerRunId}/capabilities`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer runner-session" },
+      body: JSON.stringify({ request, ttlSeconds: 60 }),
+    });
+    expect(issued.status).toBe(201);
+    const issuedBody = (await issued.json()) as {
+      token: string;
+      grant: { issuedAt: number; expiresAt: number };
+    };
+    expect(issuedBody.grant.expiresAt - issuedBody.grant.issuedAt).toBe(60);
+    expect(broker.issued).toHaveLength(1);
+    expect(broker.issueContexts[0]).toMatchObject({
+      missionId: trustedWorker.missionId,
+      taskId: trustedWorker.taskId,
+      workerRunId: trustedWorker.workerRunId,
+      profileHash,
+    });
+
+    const executed = await exchange.request(
+      `/v1/workers/${trustedWorker.workerRunId}/connectors/github/execute`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer runner-session" },
+        body: JSON.stringify({ token: issuedBody.token, request }),
+      },
+    );
+    expect(executed.status).toBe(200);
+    await expect(executed.json()).resolves.toEqual({
+      result: { accepted: true, operationId: "github-operation-1" },
+    });
+    expect(broker.uses).toHaveLength(1);
+    expect(connector.operations).toEqual([
+      {
+        action: "github.pr.open",
+        resource: request.resource,
+        missionId: trustedWorker.missionId,
+        taskId: trustedWorker.taskId,
+        workerRunId: trustedWorker.workerRunId,
+        correlationId: trustedWorker.correlationId,
+        obligations: [],
+      },
+    ]);
+    expect(JSON.stringify(connector.operations)).not.toMatch(/credential|token|secret|environment/iu);
+  });
+
+  it("refuses merge, deploy, and publish capabilities without an allow decision", async () => {
+    const broker = new RecordingCapabilityBroker();
+    const exchange = await createControlPlane({
+      doctrine,
+      capabilityBroker: broker,
+      resolveActionContext: resolveTrustedActionContext,
+      authenticateWorker: () => Promise.resolve(trustedWorker),
+    });
+
+    for (const action of ["github.pr.merge", "deployment.production.create", "package.release.publish"]) {
+      const response = await exchange.request(`/v1/workers/${trustedWorker.workerRunId}/capabilities`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ request: capabilityAction(action) }),
+      });
+      expect(response.status, action).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({ error: "capability_not_allowed" });
+    }
+    expect(broker.issued).toEqual([]);
+  });
+
+  it("binds the request to authenticated runner identity and exact GitHub scope", async () => {
+    const broker = new RecordingCapabilityBroker();
+    const connector = new RecordingGithubConnector();
+    const exchange = await createControlPlane({
+      doctrine,
+      capabilityBroker: broker,
+      githubConnector: connector,
+      resolveActionContext: resolveTrustedActionContext,
+      authenticateWorker: (request) =>
+        Promise.resolve(request.headers.has("authorization") ? trustedWorker : undefined),
+      clock: () => new Date("2026-07-11T05:00:00.000Z"),
+      idFactory: () => "fixed-id-long-enough",
+    });
+    const request = capabilityAction("github.pr.open");
+
+    const unauthenticated = await exchange.request(`/v1/workers/${trustedWorker.workerRunId}/capabilities`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ request }),
+    });
+    expect(unauthenticated.status).toBe(401);
+
+    const forged = await exchange.request("/v1/workers/other-run/capabilities", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "present" },
+      body: JSON.stringify({ request }),
+    });
+    expect(forged.status).toBe(403);
+    expect(broker.issued).toEqual([]);
+
+    const overlong = await exchange.request(`/v1/workers/${trustedWorker.workerRunId}/capabilities`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "present" },
+      body: JSON.stringify({ request, ttlSeconds: 901 }),
+    });
+    expect(overlong.status).toBe(400);
+    expect(broker.issued).toEqual([]);
+
+    const issued = await exchange.request(`/v1/workers/${trustedWorker.workerRunId}/capabilities`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "present" },
+      body: JSON.stringify({ request }),
+    });
+    const { token } = (await issued.json()) as { token: string };
+    const widened = await exchange.request(
+      `/v1/workers/${trustedWorker.workerRunId}/connectors/github/execute`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "present" },
+        body: JSON.stringify({
+          token,
+          request: { ...request, resource: { ...request.resource, id: "185" } },
+        }),
+      },
+    );
+    expect(widened.status).toBe(403);
+    await expect(widened.json()).resolves.toMatchObject({ error: "capability_use_denied" });
+    expect(connector.operations).toEqual([]);
+  });
+
+  it("ignores forged policy facts and carries trusted allow obligations into execution", async () => {
+    const obligatedDoctrine = compileDoctrine([
+      {
+        ...doctrine.profile,
+        id: "obligated-capability-test",
+        actions: {
+          ...doctrine.profile.actions,
+          "github.pr.open": {
+            default: "deny",
+            rules: [
+              {
+                id: "approved-open",
+                effect: "allow",
+                when: { minHumanApprovals: 1, checksPassed: true },
+                obligations: ["record_github_evidence"],
+                reason: "Trusted checks and approval permit the operation.",
+              },
+            ],
+          },
+        },
+      },
+    ]);
+    const obligatedIdentity = { ...trustedWorker, profileHash: obligatedDoctrine.profileHash };
+    const deniedBroker = new RecordingCapabilityBroker();
+    const denied = await createControlPlane({
+      doctrine: obligatedDoctrine,
+      capabilityBroker: deniedBroker,
+      authenticateWorker: () => Promise.resolve(obligatedIdentity),
+      resolveActionContext: () => Promise.resolve({ risk: "low", checksPassed: true, humanApprovals: 0 }),
+    });
+    const request = capabilityAction("github.pr.open");
+    const forged = await denied.request(`/v1/workers/${obligatedIdentity.workerRunId}/capabilities`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        request: {
+          ...request,
+          principal: { kind: "human", id: "forged-human" },
+          context: { risk: "low", checksPassed: true, humanApprovals: 999 },
+        },
+      }),
+    });
+    expect(forged.status).toBe(403);
+    expect(deniedBroker.issued).toEqual([]);
+
+    const broker = new RecordingCapabilityBroker();
+    const connector = new RecordingGithubConnector();
+    const allowed = await createControlPlane({
+      doctrine: obligatedDoctrine,
+      capabilityBroker: broker,
+      githubConnector: connector,
+      authenticateWorker: () => Promise.resolve(obligatedIdentity),
+      resolveActionContext: () => Promise.resolve({ risk: "low", checksPassed: true, humanApprovals: 1 }),
+    });
+    const issueResponse = await allowed.request(`/v1/workers/${obligatedIdentity.workerRunId}/capabilities`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ request }),
+    });
+    expect(issueResponse.status).toBe(201);
+    expect(broker.issued[0]?.obligations).toEqual(["record_github_evidence"]);
+    const { token } = (await issueResponse.json()) as { token: string };
+    const executeResponse = await allowed.request(
+      `/v1/workers/${obligatedIdentity.workerRunId}/connectors/github/execute`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token, request }),
+      },
+    );
+    expect(executeResponse.status).toBe(200);
+    expect(connector.operations[0]?.obligations).toEqual(["record_github_evidence"]);
   });
 });
