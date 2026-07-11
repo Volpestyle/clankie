@@ -11,23 +11,50 @@ import { z } from "zod";
 // config files; they belong to the credential broker.
 // ---------------------------------------------------------------------------
 
-/** Matches apiKey / api_key / api-key / token in any casing. */
+/** Matches authorization, API-key, token, and secret fields in any casing/style. */
 function isSecretOptionKey(key: string): boolean {
-  const normalized = key.toLowerCase().replace(/[_-]/g, "");
-  return normalized === "apikey" || normalized === "token";
+  const words = key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  const normalized = words.join("");
+  return (
+    words.includes("authorization") ||
+    normalized.endsWith("apikey") ||
+    words.includes("token") ||
+    words.includes("secret")
+  );
 }
 
-const ProviderOptionsSchema = z.record(z.string(), z.unknown()).superRefine((options, ctx) => {
-  for (const key of Object.keys(options)) {
-    if (!isSecretOptionKey(key)) continue;
+function rejectSecretOptionKeys(
+  value: unknown,
+  ctx: z.RefinementCtx,
+  path: Array<string | number> = [],
+): void {
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => rejectSecretOptionKeys(entry, ctx, [...path, index]));
+    return;
+  }
+  if (typeof value !== "object" || value === null) return;
+  for (const [key, entry] of Object.entries(value)) {
+    const entryPath = [...path, key];
+    if (!isSecretOptionKey(key)) {
+      rejectSecretOptionKeys(entry, ctx, entryPath);
+      continue;
+    }
     ctx.addIssue({
       code: "custom",
-      path: [key],
+      path: entryPath,
       message:
         `Secrets never live in config files. Remove provider option "${key}" and run \`/auth\` ` +
         `to store the credential in the credential broker (@sapling/credential-broker) instead.`,
     });
   }
+}
+
+const ProviderOptionsSchema = z.record(z.string(), z.unknown()).superRefine((options, ctx) => {
+  rejectSecretOptionKeys(options, ctx);
 });
 
 export const ProviderConfigSchema = z.looseObject({

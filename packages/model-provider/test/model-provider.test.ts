@@ -149,15 +149,25 @@ describe("loadConfig", () => {
 });
 
 describe("ClankieConfigSchema", () => {
-  it.each(["apiKey", "api_key", "API_KEY", "api-key", "token", "Token"])(
-    "rejects provider option key %s",
-    (key) => {
-      const result = ClankieConfigSchema.safeParse({
-        provider: { some: { options: { [key]: "secret" } } },
-      });
-      expect(result.success).toBe(false);
-    },
-  );
+  it.each([
+    "apiKey",
+    "api_key",
+    "API_KEY",
+    "api-key",
+    "x-api-key",
+    "Authorization",
+    "authorization",
+    "token",
+    "accessToken",
+    "refresh_token",
+    "secret",
+    "clientSecret",
+  ])("rejects provider option key %s", (key) => {
+    const result = ClankieConfigSchema.safeParse({
+      provider: { some: { options: { [key]: "secret" } } },
+    });
+    expect(result.success).toBe(false);
+  });
 
   it("accepts non-secret provider options and unknown top-level keys", () => {
     const result = ClankieConfigSchema.safeParse({
@@ -177,6 +187,26 @@ describe("findRepoConfigPath", () => {
 });
 
 describe("updateGlobalConfig", () => {
+  it("rejects nested authorization headers instead of serializing them", async () => {
+    const { env, globalPath } = await makeConfigEnv();
+    const marker = "Bearer fake-test-marker";
+
+    await expect(
+      updateGlobalConfig(
+        () => ({ provider: { custom: { options: { headers: { authorization: marker } } } } }),
+        { env },
+      ),
+    ).rejects.toMatchObject({
+      issues: [
+        {
+          path: ["provider", "custom", "options", "headers", "authorization"],
+          message: expect.stringMatching(/\/auth.*credential broker/i),
+        },
+      ],
+    });
+    await expect(readFile(globalPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("applies both of two concurrent updates via the queue, atomically", async () => {
     const { env, globalPath } = await makeConfigEnv();
     const [first, second] = await Promise.all([
