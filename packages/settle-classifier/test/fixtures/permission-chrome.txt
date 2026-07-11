@@ -1,0 +1,6 @@
+Would you like to allow this command?
+
+$ pnpm publish
+
+1. Yes, proceed
+2. No, deny

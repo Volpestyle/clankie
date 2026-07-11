@@ -1,0 +1,3 @@
+I inspected the conflicting changes and both branches modify the same API contract.
+There are two safe paths, but they produce different public behavior.
+Tell me whether to wait for the other owner or proceed with the compatibility adapter.
