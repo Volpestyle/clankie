@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { compileDoctrine, type OrchestrationProfile } from "@sapling/doctrine";
 import { MissionPlanSchema, type WorkerResult } from "@sapling/protocol";
 import { StaticWorkerRouter, type WorkerAdapter } from "@sapling/worker-sdk";
-import { MissionEngine } from "../src/index.ts";
+import { MissionEngine, MissionPlanValidationError } from "../src/index.ts";
 
 const profile: OrchestrationProfile = {
   schemaVersion: "1",
@@ -59,6 +59,52 @@ function worker(id: string, kinds: Array<"implementation" | "verification">): Wo
 }
 
 describe("MissionEngine", () => {
+  it("rejects an invalid plan with evidence before accepting any mission state", () => {
+    const doctrine = compileDoctrine([profile]);
+    const invalidPlan = MissionPlanSchema.parse({
+      missionId: "m-invalid",
+      goal: "reject invalid execution",
+      rationale: "the engine admission boundary must be deterministic",
+      profileHash: doctrine.profileHash,
+      successCriteria: ["no invalid mission state is created"],
+      tasks: [
+        {
+          id: "one",
+          title: "One",
+          objective: "Depend on two",
+          kind: "implementation",
+          role: "implementer",
+          dependsOn: ["two"],
+          successCriteria: ["one completes"],
+          evidenceRequirements: ["one evidence"],
+        },
+        {
+          id: "two",
+          title: "Two",
+          objective: "Depend on one",
+          kind: "implementation",
+          role: "implementer",
+          dependsOn: ["one"],
+          successCriteria: ["two completes"],
+          evidenceRequirements: ["two evidence"],
+        },
+      ],
+    });
+
+    expect(() => new MissionEngine(invalidPlan, doctrine, { workspacePath: "/tmp" })).toThrow(
+      MissionPlanValidationError,
+    );
+    try {
+      new MissionEngine(invalidPlan, doctrine, { workspacePath: "/tmp" });
+    } catch (error) {
+      expect((error as MissionPlanValidationError).evidence).toMatchObject({
+        valid: false,
+        missionId: "m-invalid",
+        issues: [expect.objectContaining({ code: "cycle", taskIds: ["one", "two"] })],
+      });
+    }
+  });
+
   it("leases, records, settles, and replays pull worker attempts idempotently", () => {
     const doctrine = compileDoctrine([profile]);
     const plan = MissionPlanSchema.parse({
@@ -67,6 +113,18 @@ describe("MissionEngine", () => {
       rationale: "exercise the runner pull boundary",
       profileHash: doctrine.profileHash,
       successCriteria: ["implementation and verification settle"],
+      assumptions: ["the runner retains claims for active attempts"],
+      risks: ["a stale claim could settle the wrong task"],
+      humanDecisionsRequired: ["approve execution before the mission starts"],
+      plannedActions: [
+        {
+          id: "run-checks",
+          taskId: "verify",
+          action: "execute repository checks",
+          resource: { type: "workspace", id: "test-workspace" },
+          rationale: "verification requires deterministic evidence",
+        },
+      ],
       tasks: [
         {
           id: "implement",
@@ -94,6 +152,18 @@ describe("MissionEngine", () => {
     const engine = new MissionEngine(plan, doctrine, {
       workspacePath: "/tmp",
       idFactory: () => `id-${++id}`,
+    });
+    expect(engine.getSnapshot().planReview).toMatchObject({
+      assumptions: ["the runner retains claims for active attempts"],
+      risks: ["a stale claim could settle the wrong task"],
+      humanDecisionsRequired: ["approve execution before the mission starts"],
+      plannedActions: [expect.objectContaining({ id: "run-checks", taskId: "verify" })],
+      validation: {
+        valid: true,
+        taskCount: 2,
+        plannedActionIds: ["run-checks"],
+        issues: [],
+      },
     });
     const implementer = worker("codex-implementer", ["implementation"]).descriptor;
     const verifier = worker("codex-verifier", ["verification"]).descriptor;

@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { CompiledDoctrine } from "@sapling/doctrine";
 import {
-  assertValidDag,
   type ApprovalRecord,
   type DomainEvent,
   type MissionPlan,
@@ -11,6 +10,9 @@ import {
   type WorkerResult,
 } from "@sapling/protocol";
 import type { WorkerAdapter, WorkerDescriptor, WorkerRouter } from "@sapling/worker-sdk";
+import { assertValidMissionPlan, type MissionPlanValidationEvidence } from "./plan-validator.ts";
+
+export * from "./plan-validator.ts";
 
 export interface TaskRuntime {
   spec: TaskSpec;
@@ -33,8 +35,14 @@ export interface MissionSnapshot {
   profileHash: string;
   tasks: TaskRuntime[];
   approvals: ApprovalRecord[];
+  planReview: MissionPlanReview;
   eventCount: number;
 }
+
+export type MissionPlanReview = Pick<
+  MissionPlan,
+  "rationale" | "assumptions" | "risks" | "humanDecisionsRequired" | "plannedActions"
+> & { validation: MissionPlanValidationEvidence };
 
 export interface MissionEngineOptions {
   workspacePath: string;
@@ -93,16 +101,18 @@ export class MissionEngine {
   private readonly clock: () => Date;
   private readonly idFactory: () => string;
   private readonly correlationId: string;
+  private planValidation: MissionPlanValidationEvidence;
 
   private readonly plan: MissionPlan;
   private readonly doctrine: CompiledDoctrine;
   private readonly options: MissionEngineOptions;
 
   public constructor(plan: MissionPlan, doctrine: CompiledDoctrine, options: MissionEngineOptions) {
+    const planValidation = assertValidMissionPlan(plan);
     this.plan = plan;
     this.doctrine = doctrine;
     this.options = options;
-    assertValidDag(plan.tasks);
+    this.planValidation = planValidation;
     this.clock = options.clock ?? (() => new Date());
     this.idFactory = options.idFactory ?? randomUUID;
     this.correlationId =
@@ -133,6 +143,14 @@ export class MissionEngine {
       profileHash: this.plan.profileHash,
       tasks: [...this.tasks.values()].map((task) => structuredClone(task)),
       approvals: structuredClone(this.approvals),
+      planReview: {
+        rationale: this.plan.rationale,
+        assumptions: structuredClone(this.plan.assumptions),
+        risks: structuredClone(this.plan.risks),
+        humanDecisionsRequired: structuredClone(this.plan.humanDecisionsRequired),
+        plannedActions: structuredClone(this.plan.plannedActions),
+        validation: structuredClone(this.planValidation),
+      },
       eventCount: this.events.length,
     };
   }
@@ -148,11 +166,11 @@ export class MissionEngine {
   }
 
   public addTask(spec: TaskSpec, causationId?: string): void {
-    if (this.tasks.has(spec.id)) throw new Error(`Task ${spec.id} already exists`);
-    for (const dependency of spec.dependsOn) {
-      if (!this.tasks.has(dependency))
-        throw new Error(`Task ${spec.id} depends on unknown task ${dependency}`);
-    }
+    const validation = assertValidMissionPlan({
+      ...this.plan,
+      tasks: [...this.tasks.values()].map((task) => task.spec).concat(spec),
+    });
+    this.planValidation = validation;
     this.tasks.set(spec.id, { spec, state: "queued", attempts: 0 });
     this.emit("task.added", { title: spec.title, kind: spec.kind }, spec.id, undefined, causationId);
     if (this.state === "failed" || this.state === "blocked") this.state = "running";
