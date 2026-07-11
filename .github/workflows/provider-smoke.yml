@@ -1,0 +1,20 @@
+name: Provider smoke tests
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: macos-latest
+    environment: provider-smoke
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.11.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 24.12.0, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: echo "Real provider smoke execution remains opt-in and must use disposable worktrees and environment-scoped secrets."

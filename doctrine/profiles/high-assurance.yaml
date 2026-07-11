@@ -1,0 +1,60 @@
+schemaVersion: "1"
+id: high-assurance
+description: Conservative policy for security-sensitive or regulated repositories.
+planning:
+  requirePlanApproval: true
+  scopeExpansion: forbid
+  targetReviewMinutes: 10
+  softChangedLines: 150
+  hardChangedLines: 350
+  maxLogicalConcernsPerPr: 1
+topology:
+  maxParallelWorkers: 2
+  maxDelegationDepth: 1
+  defaultExecution: runner_visible
+  route:
+    - kinds: [research, planning]
+      execution: eve_subagent
+verification:
+  independentVerifier: true
+  differentHarnessPreferred: true
+  requireEvidence: true
+  requiredChecks: [format, lint, typecheck, unit, integration, security, license, rollback]
+budgets:
+  maxMissionCostUsd: 75
+  maxTaskRetries: 1
+  maxMissionWallMinutes: 480
+authority:
+  product_intent: work_tracker
+  acceptance_criteria: work_tracker
+  implementation_state: github
+  test_state: ci
+  approved_design: figma
+  technical_decisions: repository_adrs
+  active_execution_state: harness
+actions:
+  github.pr.open:
+    default: require_approval
+    rules: []
+  github.pr.merge:
+    default: require_approval
+    rules: []
+  deployment.preview.create:
+    default: require_approval
+    rules: []
+  deployment.production.create:
+    default: deny
+    rules: []
+  package.install:
+    default: require_approval
+    rules: []
+  shell.destructive:
+    default: deny
+    rules: []
+  memory.profile.write:
+    default: deny
+    rules: []
+memory:
+  rawTranscriptRetentionDays: 0
+  inferredFacts: deny
+  publicToPrivatePropagation: false

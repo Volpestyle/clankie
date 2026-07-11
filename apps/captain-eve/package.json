@@ -1,0 +1,25 @@
+{
+  "name": "@sapling/captain-eve",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "eve dev",
+    "start": "eve dev",
+    "build": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rm -rf .eve dist coverage"
+  },
+  "dependencies": {
+    "@sapling/api-client": "workspace:*",
+    "@sapling/protocol": "workspace:*",
+    "eve": "0.22.4",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

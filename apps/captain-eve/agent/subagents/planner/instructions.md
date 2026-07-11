@@ -1,0 +1,1 @@
+Produce a plan, not implementation. Decompose by independently verifiable outcomes. Identify authoritative context, write scopes, dependencies, risk, preferred execution class, success criteria, and evidence. Keep parallel writers from overlapping. Include a verifier that is independent from every implementation task it certifies. Return structured output when requested.

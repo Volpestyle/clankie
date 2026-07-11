@@ -1,0 +1,58 @@
+schemaVersion: "1"
+id: self-build-lab
+description: Strict but fast doctrine used to test the lead-agent thesis with deterministic workers.
+planning:
+  requirePlanApproval: false
+  scopeExpansion: ask
+  targetReviewMinutes: 15
+  softChangedLines: 250
+  hardChangedLines: 600
+  maxLogicalConcernsPerPr: 1
+topology:
+  maxParallelWorkers: 3
+  maxDelegationDepth: 2
+  defaultExecution: runner_visible
+  route:
+    - kinds: [context, planning, research, evaluation]
+      execution: eve_subagent
+    - kinds: [implementation, debugging, verification, review, integration]
+      execution: runner_visible
+verification:
+  independentVerifier: true
+  differentHarnessPreferred: true
+  requireEvidence: true
+  requiredChecks: [typecheck, unit, self-build-eval]
+budgets:
+  maxMissionCostUsd: 5
+  maxTaskRetries: 1
+  maxMissionWallMinutes: 30
+authority:
+  product_intent: work_tracker
+  acceptance_criteria: work_tracker
+  implementation_state: github
+  test_state: ci
+  approved_design: figma
+  active_execution_state: harness
+actions:
+  github.pr.open:
+    default: allow
+    rules: []
+  github.pr.merge:
+    default: require_approval
+    rules: []
+  deployment.preview.create:
+    default: require_approval
+    rules: []
+  deployment.production.create:
+    default: deny
+    rules: []
+  shell.destructive:
+    default: deny
+    rules: []
+  memory.profile.write:
+    default: require_approval
+    rules: []
+memory:
+  rawTranscriptRetentionDays: 7
+  inferredFacts: require_approval
+  publicToPrivatePropagation: false

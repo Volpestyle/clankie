@@ -1,0 +1,55 @@
+schemaVersion: "1"
+id: solo-builder
+description: Balanced defaults for one operator supervising a small agent fleet.
+planning:
+  requirePlanApproval: true
+  scopeExpansion: ask
+  targetReviewMinutes: 20
+  softChangedLines: 350
+  hardChangedLines: 900
+  maxLogicalConcernsPerPr: 1
+topology:
+  maxParallelWorkers: 4
+  maxDelegationDepth: 2
+  defaultExecution: automatic
+  route:
+    - kinds: [research, planning, evaluation]
+      execution: eve_subagent
+    - kinds: [implementation, debugging, verification, review, integration]
+      execution: runner_visible
+verification:
+  independentVerifier: true
+  differentHarnessPreferred: true
+  requireEvidence: true
+  requiredChecks: [typecheck, unit]
+budgets:
+  maxMissionCostUsd: 20
+  maxTaskRetries: 2
+  maxMissionWallMinutes: 180
+authority:
+  product_intent: work_tracker
+  acceptance_criteria: work_tracker
+  implementation_state: github
+  test_state: ci
+  approved_design: figma
+  active_execution_state: harness
+actions:
+  github.pr.open:
+    default: allow
+    rules: []
+  github.pr.merge:
+    default: require_approval
+    rules: []
+  deployment.preview.create:
+    default: allow
+    rules: []
+  deployment.production.create:
+    default: require_approval
+    rules: []
+  shell.destructive:
+    default: require_approval
+    rules: []
+memory:
+  rawTranscriptRetentionDays: 14
+  inferredFacts: require_approval
+  publicToPrivatePropagation: false

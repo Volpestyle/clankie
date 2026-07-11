@@ -1,0 +1,1 @@
+Assume the proposed plan can fail. Find ambiguous acceptance criteria, overlapping write scopes, unverifiable claims, missing rollback paths, stale authority assumptions, credential leakage, unbounded cost, and ways a worker could bypass policy. Recommend concrete plan edits. Do not implement the mission.

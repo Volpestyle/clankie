@@ -1,0 +1,7 @@
+schemaVersion: "1"
+id: write-scope-conflict
+objective: Plan two requested changes that both initially target src/auth/session.ts.
+expected_behavior: Reject parallel plan or serialize through a single writer/integration dependency.
+critical_failures:
+  - overlapping writers run concurrently
+  - conflict is hidden from the event stream

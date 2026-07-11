@@ -1,0 +1,110 @@
+import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
+import { compileDoctrine, decideAction, loadDoctrineFile, type CompiledDoctrine } from "@sapling/doctrine";
+import { createLogger } from "@sapling/observability";
+import { ActionRequestSchema, MissionPlanSchema, type MissionPlan } from "@sapling/protocol";
+import { Hono } from "hono";
+import { z } from "zod";
+
+const logger = createLogger({ service: "sapling-control-plane", version: "0.1.0" });
+
+interface MissionRecord {
+  id: string;
+  goal: string;
+  context: Record<string, unknown>;
+  state: "draft" | "planned";
+  plan?: MissionPlan;
+  createdAt: string;
+}
+
+export interface ControlPlaneDependencies {
+  doctrine: CompiledDoctrine;
+}
+
+export function createControlPlane(dependencies: ControlPlaneDependencies): Hono {
+  const missions = new Map<string, MissionRecord>();
+  const app = new Hono();
+
+  app.get("/health", (context) =>
+    context.json({
+      ok: true,
+      service: "sapling-control-plane",
+      doctrine: dependencies.doctrine.profile.id,
+      profileHash: dependencies.doctrine.profileHash,
+    }),
+  );
+
+  app.post("/v1/missions", async (context) => {
+    const input = z
+      .object({ goal: z.string().min(1), context: z.record(z.string(), z.unknown()).default({}) })
+      .parse(await context.req.json());
+    const id = `mission-${randomUUID().slice(0, 12)}`;
+    missions.set(id, {
+      id,
+      goal: input.goal,
+      context: input.context,
+      state: "draft",
+      createdAt: new Date().toISOString(),
+    });
+    logger.info({ missionId: id }, "mission created");
+    return context.json({ missionId: id }, 201);
+  });
+
+  app.put("/v1/missions/:id/plan", async (context) => {
+    const id = context.req.param("id");
+    const mission = missions.get(id);
+    if (!mission) return context.json({ error: "mission_not_found" }, 404);
+    const plan = MissionPlanSchema.parse(await context.req.json());
+    if (plan.missionId !== id) return context.json({ error: "mission_id_mismatch" }, 409);
+    if (plan.profileHash !== dependencies.doctrine.profileHash) {
+      return context.json(
+        { error: "doctrine_hash_mismatch", expected: dependencies.doctrine.profileHash },
+        409,
+      );
+    }
+    mission.plan = plan;
+    mission.state = "planned";
+    logger.info({ missionId: id, taskCount: plan.tasks.length }, "mission planned");
+    return context.json(plan);
+  });
+
+  app.get("/v1/missions/:id", (context) => {
+    const mission = missions.get(context.req.param("id"));
+    return mission ? context.json(mission) : context.json({ error: "mission_not_found" }, 404);
+  });
+
+  app.post("/v1/actions/decide", async (context) => {
+    const request = ActionRequestSchema.parse(await context.req.json());
+    if (request.context.profileHash !== dependencies.doctrine.profileHash) {
+      return context.json({
+        effect: "deny",
+        reason: "The action was requested under a stale doctrine hash.",
+        matchedPolicyIds: ["stale-doctrine"],
+        obligations: [],
+      });
+    }
+    const decision = decideAction(dependencies.doctrine, request);
+    logger.info(
+      { missionId: request.context.missionId, action: request.action, effect: decision.effect },
+      "action decided",
+    );
+    return context.json(decision);
+  });
+
+  app.post("/v1/workers/:id/steer", async (context) => {
+    const workerRunId = context.req.param("id");
+    const input = z.object({ input: z.string().min(1).max(20_000) }).parse(await context.req.json());
+    logger.info({ workerRunId, inputLength: input.input.length }, "worker steering accepted by API shell");
+    return context.json(
+      { accepted: false, reason: "Runner command bus is not connected in the skeleton." },
+      501,
+    );
+  });
+
+  return app;
+}
+
+export async function loadDefaultDoctrine(): Promise<CompiledDoctrine> {
+  const doctrinePath = resolve(process.env.SAPLING_DOCTRINE ?? "doctrine/profiles/self-build-lab.yaml");
+  return compileDoctrine([await loadDoctrineFile(doctrinePath)]);
+}

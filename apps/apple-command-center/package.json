@@ -1,0 +1,33 @@
+{
+  "name": "@sapling/apple-command-center",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "echo 'Generate the iOS/macOS native shells first; see README.md'",
+    "build": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rm -rf dist coverage"
+  },
+  "dependencies": {
+    "@sapling/garden-model": "workspace:*",
+    "@sapling/protocol": "workspace:*",
+    "@sapling/terminal-protocol": "workspace:*",
+    "@shopify/react-native-skia": "2.6.9",
+    "react": "19.1.4",
+    "react-native": "0.81.6",
+    "react-native-gesture-handler": "3.0.2",
+    "react-native-reanimated": "3.19.1",
+    "zustand": "5.0.14"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "@types/react": "19.1.4",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  },
+  "optionalDependencies": {
+    "react-native-macos": "0.81.8"
+  }
+}

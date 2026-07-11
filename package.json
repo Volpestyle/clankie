@@ -1,0 +1,40 @@
+{
+  "name": "sapling-agent-os",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first agent fleet operating system and self-building lead-agent laboratory.",
+  "type": "module",
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "build": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p apps/apple-command-center/tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p apps/apple-command-center/tsconfig.json",
+    "test": "vitest run --config vitest.config.ts",
+    "test:unit": "vitest run --config vitest.config.ts packages/",
+    "test:e2e": "pnpm --filter @sapling/lead-agent-lab test:e2e",
+    "eval:self-build": "pnpm --filter @sapling/lead-agent-lab eval:self-build",
+    "eval:all": "pnpm eval:self-build && turbo run eval",
+    "lint": "oxlint --deny-warnings .",
+    "fmt": "oxfmt --write .",
+    "fmt:check": "oxfmt --check .",
+    "check": "pnpm skills:sync && pnpm fmt:check && pnpm lint && pnpm docs:check && pnpm arch:check && pnpm typecheck && pnpm test && pnpm eval:self-build",
+    "doctor": "node scripts/doctor.mjs",
+    "arch:check": "node scripts/check-architecture.mjs",
+    "support:bundle": "node scripts/support-bundle.mjs",
+    "clean": "turbo run clean && rm -rf .turbo artifacts .data",
+    "skills:sync": "node scripts/sync-agent-skills.mjs",
+    "docs:check": "node scripts/check-doc-links.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "oxfmt": "0.58.0",
+    "oxlint": "1.73.0",
+    "tsx": "4.23.0",
+    "turbo": "2.10.4",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@11.11.0"
+}

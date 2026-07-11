@@ -1,0 +1,54 @@
+schemaVersion: "1"
+id: careful-maintainer
+description: Small changes, limited scope expansion, independent review, and human-controlled integration.
+planning:
+  requirePlanApproval: true
+  scopeExpansion: forbid
+  targetReviewMinutes: 15
+  softChangedLines: 200
+  hardChangedLines: 500
+  maxLogicalConcernsPerPr: 1
+topology:
+  maxParallelWorkers: 3
+  maxDelegationDepth: 1
+  defaultExecution: runner_visible
+  route:
+    - kinds: [research, planning, evaluation]
+      execution: eve_subagent
+verification:
+  independentVerifier: true
+  differentHarnessPreferred: true
+  requireEvidence: true
+  requiredChecks: [format, lint, typecheck, unit, integration]
+budgets:
+  maxMissionCostUsd: 30
+  maxTaskRetries: 1
+  maxMissionWallMinutes: 240
+authority:
+  product_intent: work_tracker
+  acceptance_criteria: work_tracker
+  implementation_state: github
+  test_state: ci
+  approved_design: figma
+  technical_decisions: repository_adrs
+  active_execution_state: harness
+actions:
+  github.pr.open:
+    default: allow
+    rules: []
+  github.pr.merge:
+    default: require_approval
+    rules: []
+  deployment.preview.create:
+    default: require_approval
+    rules: []
+  deployment.production.create:
+    default: deny
+    rules: []
+  shell.destructive:
+    default: deny
+    rules: []
+memory:
+  rawTranscriptRetentionDays: 7
+  inferredFacts: deny
+  publicToPrivatePropagation: false

@@ -1,0 +1,32 @@
+{
+  "name": "@sapling/lead-agent-lab",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:e2e": "vitest run test/self-build.e2e.test.ts",
+    "eval:self-build": "tsx src/index.ts --write-artifacts",
+    "eval": "tsx src/index.ts --write-artifacts",
+    "clean": "rm -rf dist coverage"
+  },
+  "dependencies": {
+    "@sapling/doctrine": "workspace:*",
+    "@sapling/evals": "workspace:*",
+    "@sapling/event-store": "workspace:*",
+    "@sapling/garden-model": "workspace:*",
+    "@sapling/mission-engine": "workspace:*",
+    "@sapling/protocol": "workspace:*",
+    "@sapling/worker-sdk": "workspace:*",
+    "@sapling/worker-sim": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "tsx": "4.23.0",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}
