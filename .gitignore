@@ -15,6 +15,7 @@ macos/Pods/
 .pnpm-store/
 build/
 .next/
+.output/
 DerivedData/
 *.xcuserstate
 .env.*

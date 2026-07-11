@@ -40,18 +40,18 @@ def sheet_program(colors):
     bands = [
         [fr.FRAMES[n] for n in [
             "idle0", "idle1", "idleSway", "walk0", "walk1", "walk2", "walk3",
-            "work0", "workSwing", "workImpact", "carry0", "carryBobL", "carryBobR",
+            "work0", "workSwing", "workImpact", "carry0", "carryLift", "carrySettle",
             "blocked0", "blocked1", "sleep0", "sleep1", "sleep2", "wilt0", "wilt1",
             "poof0", "poof1", "poof2"]],
         [fr.FRAMES[n] for n in [
             "sideIdle0", "sideWalk0", "sideWalk1", "sideWalk2", "sideWalk3",
-            "sideCarry0", "sideCarryBobF", "sideCarryBobB"]] +
+            "sideCarry0", "sideCarryLift", "sideCarrySettle"]] +
         [fr.mirror(fr.FRAMES[n]) for n in [
             "sideIdle0", "sideWalk0", "sideWalk1", "sideWalk2", "sideWalk3",
-            "sideCarry0", "sideCarryBobF", "sideCarryBobB"]],
+            "sideCarry0", "sideCarryLift", "sideCarrySettle"]],
         [fr.FRAMES[n] for n in [
             "backIdle0", "backWalk0", "backWalk1", "backWalk2", "backWalk3",
-            "backCarry0", "backCarryBobL", "backCarryBobR"]],
+            "backCarry0", "backCarryLift", "backCarrySettle"]],
     ]
     cellw, cellh = fr.W + GAP, fr.H + GAP + 4
     w = max(len(b) for b in bands) * cellw + GAP

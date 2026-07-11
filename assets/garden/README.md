@@ -22,10 +22,10 @@ front-facing.
 | `idle` | 4 | long holds, a rare 1px crown sway, snappy blink |
 | `walk` | 4 | contact/passing cycle; crown lags left/right on the passing frames |
 | `work` | 4 | dig: wind-up, fast swing, impact (squash + dust flecks), recover beat |
-| `carry` | 4 | leaf held overhead; body bobs toward it while the leaf floats and lags |
+| `carry` | 4 | broad frond hugged against the chest below visible shoulders, outlined hands wrapped over its sides, crown untouched; heave cycle — lift 1px, settle 1px |
 | `blocked` | 2 | hands up, worried; eyes glance sideways on the second beat |
 | `sleep` | 4 | soft half-mast crown (distinct from wilt), slow 3-phase breath |
-| `wilt` | 2 | fully flopped crown, slow sag — the failed/dying state |
+| `wilt` | 2 | stem hooked over with the leaf mass slumped down the head's right side, dead nub left, head lolling; slow sag — the failed/dying state |
 | `poof` | 3 | dust-cloud disappearance |
 | `walk-side` / `walk-back` | 4 | same counts/timing as front `walk` |
 | `carry-side` / `carry-back` | 4 | same counts/timing as front `carry` |

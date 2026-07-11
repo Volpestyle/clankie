@@ -1,0 +1,493 @@
+<title>Clankie Garden — Asset Dashboard</title>
+<style>
+  :root {
+    --ground: #f4ecd8;
+    --panel: #faf4e4;
+    --panel-2: #efe5cc;
+    --ink: #3a2c20;
+    --ink-mute: #7a6a52;
+    --line: #d8cbab;
+    --line-hard: #503b2c;
+    --accent: #7d8f41;
+    --accent-ink: #f4ecd8;
+    --check-a: #e9dfc6;
+    --check-b: #dfd3b4;
+    --shadow: rgba(80, 59, 44, 0.22);
+    --green: #7d8f41; --teal: #34988c; --amber: #c47a2c; --purple: #7d5cb0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #1a1f23;
+      --panel: #242a2e;
+      --panel-2: #2b3237;
+      --ink: #e8ece4;
+      --ink-mute: #96a096;
+      --line: #39424a;
+      --line-hard: #4d5860;
+      --accent: #c6d668;
+      --accent-ink: #1a1f23;
+      --check-a: #262d32;
+      --check-b: #202629;
+      --shadow: rgba(0, 0, 0, 0.45);
+      --green: #c6d668; --teal: #63d0bd; --amber: #f0b24a; --purple: #b79ce2;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #1a1f23; --panel: #242a2e; --panel-2: #2b3237;
+    --ink: #e8ece4; --ink-mute: #96a096; --line: #39424a; --line-hard: #4d5860;
+    --accent: #c6d668; --accent-ink: #1a1f23;
+    --check-a: #262d32; --check-b: #202629; --shadow: rgba(0, 0, 0, 0.45);
+    --green: #c6d668; --teal: #63d0bd; --amber: #f0b24a; --purple: #b79ce2;
+  }
+  :root[data-theme="light"] {
+    --ground: #f4ecd8; --panel: #faf4e4; --panel-2: #efe5cc;
+    --ink: #3a2c20; --ink-mute: #7a6a52; --line: #d8cbab; --line-hard: #503b2c;
+    --accent: #7d8f41; --accent-ink: #f4ecd8;
+    --check-a: #e9dfc6; --check-b: #dfd3b4; --shadow: rgba(80, 59, 44, 0.22);
+    --green: #7d8f41; --teal: #34988c; --amber: #c47a2c; --purple: #7d5cb0;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font: 15px/1.55 system-ui, -apple-system, sans-serif;
+  }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  img.px, .px-bg { image-rendering: pixelated; }
+
+  /* ---------- header ---------- */
+  header {
+    position: sticky; top: 0; z-index: 20;
+    background: var(--panel);
+    border-bottom: 2px solid var(--line-hard);
+    padding: 10px 20px;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand .sprite {
+    width: 36px; height: 42px;
+    image-rendering: pixelated;
+  }
+  h1 {
+    margin: 0;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 15px; font-weight: 700;
+    letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .brand small {
+    display: block;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px; font-weight: 400;
+    color: var(--ink-mute); letter-spacing: 0.04em;
+  }
+  .spacer { flex: 1; }
+  header input[type="search"] {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 13px;
+    color: var(--ink);
+    background: var(--ground);
+    border: 2px solid var(--line-hard);
+    padding: 6px 10px;
+    width: 220px;
+  }
+  header input[type="search"]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .zoom {
+    display: flex; align-items: center; gap: 0;
+    border: 2px solid var(--line-hard);
+  }
+  .zoom span {
+    font-family: ui-monospace, monospace; font-size: 11px;
+    letter-spacing: 0.08em; color: var(--ink-mute);
+    padding: 0 8px;
+  }
+  .zoom button {
+    font-family: ui-monospace, monospace; font-size: 13px; font-weight: 700;
+    background: var(--panel); color: var(--ink);
+    border: 0; border-left: 1px solid var(--line);
+    padding: 6px 11px; cursor: pointer;
+  }
+  .zoom button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+  .zoom button:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+
+  /* ---------- stat strip ---------- */
+  .stats {
+    display: flex; flex-wrap: wrap; gap: 10px;
+    padding: 18px 20px 0;
+    max-width: 1200px; margin: 0 auto;
+  }
+  .stat {
+    background: var(--panel);
+    border: 2px solid var(--line-hard);
+    box-shadow: 3px 3px 0 var(--shadow);
+    padding: 8px 14px;
+    font-family: ui-monospace, monospace;
+  }
+  .stat b {
+    display: block; font-size: 20px;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat span {
+    font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.1em; color: var(--ink-mute);
+  }
+
+  /* ---------- sections ---------- */
+  main { max-width: 1200px; margin: 0 auto; padding: 8px 20px 80px; }
+  section { margin-top: 40px; }
+  section.hidden { display: none; }
+  .sec-head { display: flex; align-items: baseline; gap: 10px; border-bottom: 2px solid var(--line-hard); padding-bottom: 6px; margin-bottom: 16px; }
+  .sec-head h2 {
+    margin: 0;
+    font-family: ui-monospace, monospace;
+    font-size: 13px; font-weight: 700;
+    letter-spacing: 0.14em; text-transform: uppercase;
+  }
+  .sec-head .count {
+    font-family: ui-monospace, monospace; font-size: 11px;
+    color: var(--ink-mute); font-variant-numeric: tabular-nums;
+  }
+  .sec-head .note { font-size: 12px; color: var(--ink-mute); margin-left: auto; text-align: right; }
+
+  /* ---------- palette ---------- */
+  .swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+  .swatch {
+    display: flex; flex-direction: column;
+    border: 2px solid var(--line-hard);
+    background: var(--panel);
+    min-width: 74px;
+  }
+  .swatch .chip { height: 34px; border-bottom: 2px solid var(--line-hard); }
+  .swatch .chip.split { display: flex; }
+  .swatch .chip.split i { flex: 1; }
+  .swatch label { font-family: ui-monospace, monospace; font-size: 10px; padding: 3px 6px 0; letter-spacing: 0.04em; }
+  .swatch code { font-family: ui-monospace, monospace; font-size: 9.5px; color: var(--ink-mute); padding: 0 6px 4px; }
+
+  /* ---------- cards ---------- */
+  .grid { display: grid; gap: 14px; }
+  .grid.chars { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
+  .grid.anims { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+  .grid.props { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+  .card {
+    background: var(--panel);
+    border: 2px solid var(--line-hard);
+    box-shadow: 3px 3px 0 var(--shadow);
+    display: flex; flex-direction: column;
+  }
+  .card.hidden { display: none; }
+  .preview {
+    display: flex; align-items: center; justify-content: center;
+    padding: 14px; min-height: 120px;
+    background:
+      repeating-conic-gradient(var(--check-a) 0% 25%, var(--check-b) 0% 50%)
+      0 0 / 16px 16px;
+    border-bottom: 2px solid var(--line-hard);
+    overflow: auto;
+  }
+  .card-body { padding: 9px 12px 11px; }
+  .card-body h3 {
+    margin: 0;
+    font-family: ui-monospace, monospace;
+    font-size: 12.5px; font-weight: 700; letter-spacing: 0.03em;
+    display: flex; align-items: center; gap: 7px;
+  }
+  .dot { width: 10px; height: 10px; flex: none; border: 1.5px solid var(--line-hard); }
+  .meta {
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px; color: var(--ink-mute);
+    margin-top: 3px; font-variant-numeric: tabular-nums;
+  }
+  .desc { font-size: 12px; color: var(--ink-mute); margin-top: 5px; line-height: 1.45; }
+  .tag-mirror {
+    font-family: ui-monospace, monospace; font-size: 9px;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    border: 1.5px solid var(--ink-mute); color: var(--ink-mute);
+    padding: 1px 5px; margin-left: auto;
+  }
+  .strip-wrap { border-top: 2px solid var(--line); background: var(--panel-2); padding: 8px 10px; overflow-x: auto; }
+  .strip-wrap img { display: block; height: 48px; width: auto; image-rendering: pixelated; }
+
+  /* ---------- atlas ---------- */
+  .atlas-tools { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+  .atlas-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+  .aframe {
+    background: var(--panel);
+    border: 1.5px solid var(--line);
+    padding: 6px;
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    cursor: default;
+  }
+  .aframe:hover { border-color: var(--accent); }
+  .aframe.hidden { display: none; }
+  .aframe .cell {
+    background-image: var(--atlas);
+    background-repeat: no-repeat;
+  }
+  .aframe label {
+    font-family: ui-monospace, monospace; font-size: 9px;
+    color: var(--ink-mute); max-width: 96px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  details {
+    margin-top: 16px;
+    border: 2px solid var(--line-hard);
+    background: var(--panel);
+  }
+  summary {
+    font-family: ui-monospace, monospace; font-size: 12px; font-weight: 700;
+    letter-spacing: 0.06em;
+    padding: 9px 14px; cursor: pointer; user-select: none;
+  }
+  summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  summary .meta-inline { font-weight: 400; color: var(--ink-mute); font-size: 10.5px; margin-left: 8px; }
+  .sheet-scroll { border-top: 2px solid var(--line-hard); overflow: auto; max-height: 70vh; padding: 12px;
+    background: repeating-conic-gradient(var(--check-a) 0% 25%, var(--check-b) 0% 50%) 0 0 / 16px 16px; }
+  .sheet-scroll img { display: block; image-rendering: pixelated; }
+
+  /* ---------- sources table ---------- */
+  .tbl-wrap { overflow-x: auto; border: 2px solid var(--line-hard); background: var(--panel); }
+  table { border-collapse: collapse; width: 100%; font-family: ui-monospace, monospace; font-size: 11.5px; }
+  th {
+    text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--ink-mute); border-bottom: 2px solid var(--line-hard);
+    padding: 8px 14px;
+  }
+  td { padding: 5px 14px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+  tr:last-child td { border-bottom: 0; }
+  tr.hidden { display: none; }
+  td.num { text-align: right; color: var(--ink-mute); }
+
+  footer {
+    max-width: 1200px; margin: 0 auto; padding: 0 20px 40px;
+    font-size: 12px; color: var(--ink-mute);
+  }
+  footer code { font-family: ui-monospace, monospace; font-size: 11px; }
+  .notice {
+    border: 2px dashed var(--line-hard);
+    background: var(--panel);
+    padding: 14px 16px;
+    font-size: 13px; color: var(--ink-mute);
+    grid-column: 1 / -1;
+  }
+  .notice code { font-family: ui-monospace, monospace; font-size: 11.5px; color: var(--ink); }
+</style>
+
+<header>
+  <div class="brand">
+    <img id="brandSprite" class="sprite px" alt="clankie idle animation">
+    <div>
+      <h1>Clankie Garden · Assets</h1>
+      <small id="brandPath">assets/ — clankie-v2</small>
+    </div>
+  </div>
+  <div class="spacer"></div>
+  <input id="search" type="search" placeholder="filter assets…" aria-label="Filter assets by name">
+  <div class="zoom" role="group" aria-label="Pixel zoom">
+    <span>zoom</span>
+    <button data-z="2">2×</button>
+    <button data-z="4" aria-pressed="true">4×</button>
+    <button data-z="6">6×</button>
+    <button data-z="8">8×</button>
+  </div>
+</header>
+
+<div class="stats" id="stats"></div>
+
+<main>
+  <section id="sec-palette">
+    <div class="sec-head"><h2>Palette</h2><span class="count" id="paletteCount"></span>
+      <span class="note">base colors shared by all clankies · leaf variants light/dark</span></div>
+    <div class="swatches" id="swatches"></div>
+  </section>
+
+  <section id="sec-chars" data-filterable>
+    <div class="sec-head"><h2>Characters</h2><span class="count">4 variants · 24×28 · 43 frames each</span>
+      <span class="note">idle GIF preview · full animation set lives in the .aseprite tags</span></div>
+    <div class="grid chars" id="chars"></div>
+  </section>
+
+  <section id="sec-anims" data-filterable>
+    <div class="sec-head"><h2>Animations</h2><span class="count" id="animCount"></span>
+      <span class="note">review renders (×8) — GIF + frame strip per tag</span></div>
+    <div class="grid anims" id="anims"></div>
+  </section>
+
+  <section id="sec-props" data-filterable>
+    <div class="sec-head"><h2>Props &amp; Scene</h2><span class="count" id="propCount"></span></div>
+    <div class="grid props" id="props"></div>
+  </section>
+
+  <section id="sec-atlas" data-filterable>
+    <div class="sec-head"><h2>Atlas Explorer</h2><span class="count" id="atlasCount"></span>
+      <span class="note">leafguy-atlas.png — every frame cut from atlas.gen.ts coordinates</span></div>
+    <div class="atlas-grid" id="atlasGrid"></div>
+    <details id="atlasFull">
+      <summary>Full atlas image <span class="meta-inline" id="atlasMeta"></span></summary>
+      <div class="sheet-scroll"><img id="atlasImg" alt="leafguy atlas spritesheet"></div>
+    </details>
+    <div id="sheets"></div>
+  </section>
+
+  <section id="sec-sources" data-filterable>
+    <div class="sec-head"><h2>Aseprite Sources</h2><span class="count" id="srcCount"></span>
+      <span class="note">authoritative .aseprite files — PNGs/GIFs above are exports</span></div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>path</th><th style="text-align:right">size</th></tr></thead>
+        <tbody id="srcRows"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<footer>
+  Source of truth: sprite grids in <code>assets/garden/tools/frames.py</code> → regenerate with
+  <code>gen_program.py</code> + <code>mcp_drive.py</code>. Atlas manifest: <code>assets/garden-atlas/atlas.gen.ts</code>.
+  Review renders are transient (<code>review/</code>, untracked). All previews render at native pixels — use the zoom control.
+</footer>
+
+<script>
+/*__DATA__*/
+(function () {
+  const D = window.DATA;
+  const $ = (s) => document.querySelector(s);
+  const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const kb = (b) => b < 1024 ? b + " B" : (b / 1024).toFixed(1) + " KB";
+  let zoom = 4;
+
+  // brand sprite: green idle gif
+  $("#brandSprite").src = D.characters[0].gif.uri;
+
+  // stats
+  const S = D.stats;
+  $("#stats").innerHTML = [
+    [S.files, "files in assets/"],
+    [D.characters.length, "variants"],
+    [D.anims.length, "animation renders"],
+    [S.atlasFrames, "atlas frames"],
+    [S.sources, "aseprite sources"],
+  ].map(([n, l]) => `<div class="stat"><b>${n}</b><span>${l}</span></div>`).join("");
+
+  // palette
+  const sw = [];
+  for (const c of D.palette.base)
+    sw.push(`<div class="swatch"><div class="chip" style="background:${c.hex}"></div><label>${c.name}</label><code>${c.hex}</code></div>`);
+  for (const v of D.palette.variants)
+    sw.push(`<div class="swatch"><div class="chip split"><i style="background:${v.light}"></i><i style="background:${v.dark}"></i></div><label>leaf ${v.name}</label><code>${v.light} / ${v.dark}</code></div>`);
+  $("#swatches").innerHTML = sw.join("");
+  $("#paletteCount").textContent = `${D.palette.base.length} base + ${D.palette.variants.length} variants`;
+
+  // characters
+  $("#chars").innerHTML = D.characters.map((c) => `
+    <div class="card" data-name="${esc(c.name)}">
+      <div class="preview"><img class="px zoomable" src="${c.gif.uri}" width="${c.gif.w}" height="${c.gif.h}"
+        data-w="${c.gif.w}" data-h="${c.gif.h}" alt="${esc(c.name)} idle animation"></div>
+      <div class="card-body">
+        <h3><span class="dot" style="background:${c.chip.light}"></span>${esc(c.name)}</h3>
+        <div class="meta">${c.png.w}×${c.png.h} · ${c.frames} frames · gif ${kb(c.gif.bytes)} · src ${kb(c.srcBytes)}</div>
+      </div>
+    </div>`).join("");
+
+  // animations
+  $("#anims").innerHTML = D.anims.length === 0
+    ? `<div class="notice">Review renders not found — they live in the untracked <code>assets/garden/review/</code>.
+       Generate them with <code>python3 assets/garden/tools/render_review.py</code> and rebuild.</div>`
+    : D.anims.map((a) => `
+    <div class="card" data-name="${esc(a.tag)}">
+      <div class="preview"><img class="px" src="${a.gif.uri}" width="${a.gif.w}" height="${a.gif.h}"
+        style="max-width:100%;height:auto" alt="${esc(a.tag)} animation"></div>
+      <div class="card-body">
+        <h3>${esc(a.tag)}${a.mirror ? '<span class="tag-mirror">mirror check</span>' : ""}</h3>
+        <div class="meta">${a.frames} frames · gif ${kb(a.gif.bytes)} · strip ${a.strip.w}×${a.strip.h}</div>
+        <div class="desc">${esc(a.desc)}</div>
+      </div>
+      <div class="strip-wrap"><img src="${a.strip.uri}" alt="${esc(a.tag)} frame strip"></div>
+    </div>`).join("");
+  $("#animCount").textContent = `${D.anims.length} tags`;
+
+  // props + scenes
+  const propCard = (p, note) => `
+    <div class="card" data-name="${esc(p.name)}">
+      <div class="preview"><img class="px zoomable" src="${p.uri}" width="${p.w}" height="${p.h}"
+        data-w="${p.w}" data-h="${p.h}" alt="${esc(p.name)}"></div>
+      <div class="card-body">
+        <h3>${esc(p.name.replace(/\.(png|gif)$/, ""))}</h3>
+        <div class="meta">${p.w}×${p.h} · ${kb(p.bytes)}</div>
+        ${note ? `<div class="desc">${esc(note)}</div>` : ""}
+      </div>
+    </div>`;
+  $("#props").innerHTML =
+    D.props.map((p) => propCard(p)).join("") +
+    `<div class="card" data-name="garden-scene" style="grid-column:1/-1">
+      <div class="preview"><img class="px zoomable" src="${D.scenes[0].uri}" width="160" height="90"
+        data-w="160" data-h="90" data-maxz="5" alt="garden scene"></div>
+      <div class="card-body">
+        <h3>garden-scene</h3>
+        <div class="meta">160×90 native · ${kb(D.scenes[0].bytes)} · ${esc(D.scenes[0].note)}</div>
+      </div>
+    </div>`;
+  $("#propCount").textContent = `${D.props.length} props + 1 scene`;
+
+  // atlas explorer
+  document.documentElement.style.setProperty("--atlas", `url("${D.atlas.uri}")`);
+  $("#atlasGrid").innerHTML = D.atlas.frames.map((f) => `
+    <div class="aframe" data-name="${esc(f.name)}" title="${esc(f.name)} — ${f.w}×${f.h} @ (${f.x},${f.y})">
+      <div class="cell px-bg" data-x="${f.x}" data-y="${f.y}" data-w="${f.w}" data-h="${f.h}"></div>
+      <label>${esc(f.name)}</label>
+    </div>`).join("");
+  $("#atlasCount").textContent = `${D.atlas.frames.length} frames · ${D.atlas.w}×${D.atlas.h}`;
+  $("#atlasImg").src = D.atlas.uri;
+  $("#atlasImg").style.width = D.atlas.w * 2 + "px";
+  $("#atlasMeta").textContent = `${D.atlas.w}×${D.atlas.h} · ${kb(D.atlas.bytes)}`;
+
+  // contact sheets
+  $("#sheets").innerHTML = D.sheets.map((s) => `
+    <details data-name="${esc(s.name)}">
+      <summary>${esc(s.name)} <span class="meta-inline">${s.w}×${s.h} · ${kb(s.bytes)} — ${esc(s.note)}</span></summary>
+      <div class="sheet-scroll"><img src="${s.uri}" style="width:${Math.min(s.w, 2200)}px" alt="${esc(s.note)}"></div>
+    </details>`).join("");
+
+  // sources table
+  $("#srcRows").innerHTML = D.sources.map((s) => `
+    <tr data-name="${esc(s.path)}"><td>${esc(s.path)}</td><td class="num">${kb(s.bytes)}</td></tr>`).join("");
+  $("#srcCount").textContent = `${D.sources.length} files · ${kb(D.sources.reduce((a, s) => a + s.bytes, 0))}`;
+
+  // ---- zoom ----
+  function applyZoom() {
+    document.querySelectorAll(".zoomable").forEach((el) => {
+      const z = Math.min(zoom, +(el.dataset.maxz || 99));
+      el.style.width = el.dataset.w * z + "px";
+      el.style.height = el.dataset.h * z + "px";
+    });
+    document.querySelectorAll(".aframe .cell").forEach((el) => {
+      const z = zoom;
+      el.style.width = el.dataset.w * z + "px";
+      el.style.height = el.dataset.h * z + "px";
+      el.style.backgroundPosition = `${-el.dataset.x * z}px ${-el.dataset.y * z}px`;
+      el.style.backgroundSize = `${D.atlas.w * z}px ${D.atlas.h * z}px`;
+    });
+  }
+  document.querySelectorAll(".zoom button").forEach((b) =>
+    b.addEventListener("click", () => {
+      zoom = +b.dataset.z;
+      document.querySelectorAll(".zoom button").forEach((x) => x.setAttribute("aria-pressed", x === b));
+      applyZoom();
+    }));
+  applyZoom();
+
+  // ---- search filter ----
+  $("#search").addEventListener("input", (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    document.querySelectorAll("[data-name]").forEach((el) => {
+      el.classList.toggle("hidden", !!q && !el.dataset.name.toLowerCase().includes(q));
+    });
+    document.querySelectorAll("section[data-filterable]").forEach((sec) => {
+      const any = sec.querySelector("[data-name]:not(.hidden)");
+      sec.classList.toggle("hidden", !!q && !any);
+    });
+  });
+})();
+</script>

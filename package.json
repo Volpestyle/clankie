@@ -24,7 +24,9 @@
     "skills:sync": "node scripts/sync-agent-skills.mjs",
     "skills:check": "node scripts/sync-agent-skills.mjs --check",
     "docs:check": "node scripts/check-doc-links.mjs",
-    "garden:atlas": "node scripts/garden-sprites/generate.mjs"
+    "garden:atlas": "node scripts/garden-sprites/generate.mjs",
+    "assets:dashboard": "node scripts/asset-dashboard/build.mjs",
+    "assets:dashboard:watch": "node scripts/asset-dashboard/build.mjs --serve"
   },
   "devDependencies": {
     "@types/node": "24.12.4",
