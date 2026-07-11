@@ -62,10 +62,10 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     case "captain-mission": {
       await interaction.deferReply({ ephemeral: true });
       const goal = interaction.options.getString("goal", true);
-      const doctrineId = interaction.options.getString("doctrine") ?? "careful-maintainer";
+      const doctrineId = interaction.options.getString("doctrine") ?? "structured";
       const mission = await api.createMission({ goal, doctrineId });
       await interaction.editReply(
-        `Created mission **${mission.missionId}** under doctrine **${doctrineId}**. Plan approval is the next gate.`,
+        `Created mission **${mission.missionId}** under doctrine **${doctrineId}**.`,
       );
       return;
     }

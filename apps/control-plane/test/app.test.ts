@@ -1,12 +1,18 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { compileDoctrine, loadDoctrineFile, type CompiledDoctrine } from "@sapling/doctrine";
+import {
+  compileDoctrine,
+  createConnectorActionClassifier,
+  loadDoctrineFile,
+  type CompiledDoctrine,
+} from "@sapling/doctrine";
 import { SqliteEventStore } from "@sapling/event-store";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   createControlPlane,
   type CapabilityBroker,
+  type ConnectorActionClassifier,
   type GithubConnector,
   type GithubConnectorOperation,
   type TrustedWorkerIdentity,
@@ -165,6 +171,17 @@ function capabilityAction(action: string) {
 const resolveTrustedActionContext = () =>
   Promise.resolve({ risk: "low" as const, checksPassed: true, humanApprovals: 1 });
 
+const classifyMetadata = createConnectorActionClassifier([
+  { action: "github.pr.open", riskClass: "reversible-write" },
+  { action: "github.pr.merge", riskClass: "irreversible-write" },
+  { action: "deployment.production.create", riskClass: "irreversible-write" },
+  { action: "package.release.publish", riskClass: "publish-external" },
+  { action: "unreal.scene.delete", riskClass: "destructive" },
+  { action: "vcs.push.main", riskClass: "publish-external" },
+]);
+const classifyConnectorAction = ((request) =>
+  classifyMetadata(request.action)) satisfies ConnectorActionClassifier;
+
 class RecordingCapabilityBroker implements CapabilityBroker {
   public readonly issued: Array<Parameters<CapabilityBroker["issue"]>[0]> = [];
   public readonly issueContexts: Array<Parameters<CapabilityBroker["issue"]>[1]> = [];
@@ -221,6 +238,7 @@ describe("worker capability exchange", () => {
     const exchange = await createControlPlane({
       doctrine,
       capabilityBroker: broker,
+      classifyConnectorAction,
       githubConnector: connector,
       resolveActionContext: resolveTrustedActionContext,
       authenticateWorker: (request) =>
@@ -284,6 +302,7 @@ describe("worker capability exchange", () => {
     const exchange = await createControlPlane({
       doctrine,
       capabilityBroker: broker,
+      classifyConnectorAction,
       resolveActionContext: resolveTrustedActionContext,
       authenticateWorker: () => Promise.resolve(trustedWorker),
     });
@@ -300,12 +319,69 @@ describe("worker capability exchange", () => {
     expect(broker.issued).toEqual([]);
   });
 
+  it("uses trusted connector metadata and ignores worker-supplied risk classification", async () => {
+    const broker = new RecordingCapabilityBroker();
+    const exchange = await createControlPlane({
+      doctrine,
+      capabilityBroker: broker,
+      classifyConnectorAction,
+      resolveActionContext: resolveTrustedActionContext,
+      authenticateWorker: () => Promise.resolve(trustedWorker),
+    });
+    const request = capabilityAction("unreal.scene.delete");
+    const response = await exchange.request(`/v1/workers/${trustedWorker.workerRunId}/capabilities`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ request: { ...request, riskClass: "read" } }),
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "capability_not_allowed",
+      decision: {
+        effect: "require_approval",
+        matchedPolicyIds: ["risk-class:destructive:default"],
+      },
+    });
+    expect(broker.issued).toEqual([]);
+  });
+
+  it("applies publish-external floor to rawdog push-main capabilities", async () => {
+    const rawdog = compileDoctrine([
+      await loadDoctrineFile(resolve(import.meta.dirname, "../../../doctrine/profiles/rawdog.yaml")),
+    ]);
+    const identity = { ...trustedWorker, profileHash: rawdog.profileHash };
+    const broker = new RecordingCapabilityBroker();
+    const exchange = await createControlPlane({
+      doctrine: rawdog,
+      capabilityBroker: broker,
+      classifyConnectorAction,
+      resolveActionContext: resolveTrustedActionContext,
+      authenticateWorker: () => Promise.resolve(identity),
+    });
+    const response = await exchange.request(`/v1/workers/${identity.workerRunId}/capabilities`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ request: capabilityAction("vcs.push.main") }),
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      decision: {
+        effect: "require_approval",
+        matchedPolicyIds: ["vcs.push.main:default", "invariant-floor:human-approval"],
+      },
+    });
+    expect(broker.issued).toEqual([]);
+  });
+
   it("binds the request to authenticated runner identity and exact GitHub scope", async () => {
     const broker = new RecordingCapabilityBroker();
     const connector = new RecordingGithubConnector();
     const exchange = await createControlPlane({
       doctrine,
       capabilityBroker: broker,
+      classifyConnectorAction,
       githubConnector: connector,
       resolveActionContext: resolveTrustedActionContext,
       authenticateWorker: (request) =>
@@ -387,6 +463,7 @@ describe("worker capability exchange", () => {
     const denied = await createControlPlane({
       doctrine: obligatedDoctrine,
       capabilityBroker: deniedBroker,
+      classifyConnectorAction,
       authenticateWorker: () => Promise.resolve(obligatedIdentity),
       resolveActionContext: () => Promise.resolve({ risk: "low", checksPassed: true, humanApprovals: 0 }),
     });
@@ -410,6 +487,7 @@ describe("worker capability exchange", () => {
     const allowed = await createControlPlane({
       doctrine: obligatedDoctrine,
       capabilityBroker: broker,
+      classifyConnectorAction,
       githubConnector: connector,
       authenticateWorker: () => Promise.resolve(obligatedIdentity),
       resolveActionContext: () => Promise.resolve({ risk: "low", checksPassed: true, humanApprovals: 1 }),
@@ -439,6 +517,7 @@ describe("worker capability exchange", () => {
     const exchange = await createControlPlane({
       doctrine,
       capabilityBroker: broker,
+      classifyConnectorAction,
       authenticateWorker: () => Promise.resolve(trustedWorker),
       resolveActionContext: resolveTrustedActionContext,
       githubConnector: {

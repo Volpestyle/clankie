@@ -1,7 +1,7 @@
 # Contributing
 
 1. Open or select an issue with explicit acceptance criteria.
-2. Choose the closest doctrine profile; default to `careful-maintainer`.
+2. Choose the closest ceremony preset; default to `structured` and layer the high-assurance overlay when the work needs stricter assurance.
 3. Create an isolated branch/worktree.
 4. Keep one logical concern per pull request.
 5. Add or update deterministic tests before claiming completion.

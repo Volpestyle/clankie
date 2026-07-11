@@ -14,9 +14,9 @@ export const commands = [
         .setDescription("Doctrine profile id.")
         .setRequired(false)
         .addChoices(
-          { name: "Solo Builder", value: "solo-builder" },
-          { name: "Careful Maintainer", value: "careful-maintainer" },
-          { name: "High Assurance", value: "high-assurance" },
+          { name: "Rawdog", value: "rawdog" },
+          { name: "Structured", value: "structured" },
+          { name: "Fine Control", value: "fine-control" },
         ),
     ),
   new SlashCommandBuilder()

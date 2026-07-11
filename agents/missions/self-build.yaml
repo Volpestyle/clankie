@@ -1,6 +1,6 @@
 name: self-build-runtime
 objective: Improve one bounded part of Sapling Agent OS using the same governed lead/worker/evaluator loop the product is intended to provide.
-doctrine: careful-maintainer
+doctrine: fine-control
 required_roles: [planner, implementer, verifier, evaluator]
 constraints:
   separate_evaluator_change: true

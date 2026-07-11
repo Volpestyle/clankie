@@ -6,6 +6,7 @@ import {
   decideCapabilityRequest,
   loadDoctrineFile,
   permitsCapabilityGrant,
+  type ActionClassification,
   type CompiledDoctrine,
 } from "@sapling/doctrine";
 import type { EventStore } from "@sapling/event-store";
@@ -43,6 +44,8 @@ export interface ControlPlaneDependencies {
   authenticateWorker?: WorkerAuthenticator;
   /** Resolves policy facts from authoritative mission/check/approval state, never from the worker body. */
   resolveActionContext?: ActionContextProvider;
+  /** Resolves risk from trusted connector metadata, never from the worker request body. */
+  classifyConnectorAction?: ConnectorActionClassifier;
   /** Runner-owned privileged connector. Its credential access is not part of this interface. */
   githubConnector?: GithubConnector;
   clock?: () => Date;
@@ -78,6 +81,10 @@ export type ActionContextProvider = (
   identity: TrustedWorkerIdentity,
   request: CapabilityActionInput,
 ) => Promise<TrustedActionContext | undefined>;
+
+export type ConnectorActionClassifier = (
+  request: CapabilityActionInput,
+) => ActionClassification | undefined | Promise<ActionClassification | undefined>;
 
 export interface CapabilityGrantInput {
   version: 1;
@@ -244,6 +251,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     if (
       !dependencies.authenticateWorker ||
       !dependencies.resolveActionContext ||
+      !dependencies.classifyConnectorAction ||
       !dependencies.capabilityBroker
     ) {
       return context.json({ error: "capability_exchange_unavailable" }, 503);
@@ -266,6 +274,10 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     if (!trustedContext) {
       return context.json({ error: "action_context_unavailable" }, 403);
     }
+    const classification = await dependencies.classifyConnectorAction(input.request);
+    if (!classification) {
+      return context.json({ error: "connector_action_unclassified" }, 403);
+    }
 
     const actionRequest = ActionRequestSchema.parse({
       ...input.request,
@@ -277,7 +289,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
         profileHash: identity.profileHash,
       },
     });
-    const decision = decideCapabilityRequest(dependencies.doctrine, actionRequest);
+    const decision = decideCapabilityRequest(dependencies.doctrine, actionRequest, classification);
     logger.info(
       {
         missionId: identity.missionId,

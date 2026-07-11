@@ -4,6 +4,8 @@ Official Discord application/bot integration only. Do not automate a normal Disc
 
 The V1 bridge uses slash commands and explicit `/captain-join` / `/captain-leave` voice consent. Audio transcription, speaker memory, and retention are intentionally absent until their disclosure, consent, deletion, and visibility policies are implemented.
 
+`/captain-mission` offers the three user ceremony presets: `rawdog`, `structured`, and `fine-control`. It defaults to `structured`; internal fixtures and doctrine overlays are not exposed as presets.
+
 Required environment variables:
 
 ```bash

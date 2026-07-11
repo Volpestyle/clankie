@@ -18,7 +18,8 @@ sequenceDiagram
 
     W->>C: Request action + exact resource
     C->>C: Authenticate runner session
-    C->>C: Resolve trusted risk, checks, and approvals
+    C->>C: Resolve trusted checks, approvals, and mission risk
+    C->>C: Classify action from registered connector metadata
     C->>D: Decide under immutable profile hash
     alt decision is allow
         C->>B: Issue mission/worker/action/resource grant
@@ -35,9 +36,12 @@ sequenceDiagram
 `POST /v1/workers/:id/capabilities` mints only when doctrine returns
 `allow`; `deny` and `require_approval` are both refusals. The grant is bound
 to the authenticated mission, task, worker run, action, resource, doctrine
-hash, signed policy obligations, and an expiry of at most 15 minutes. Risk,
-check, approval, change, and cost facts come from an injected authoritative
-context provider; worker-supplied policy facts are discarded.
+hash, signed policy obligations, and an expiry of at most 15 minutes. Check,
+approval, change, cost, and mission-risk facts come from an injected
+authoritative context provider. The connector risk class comes from an
+injected metadata classifier that produces opaque, in-process
+classifications. Worker-supplied policy facts and class fields are discarded,
+and unclassified connector actions fail closed.
 
 `POST /v1/workers/:id/connectors/github/execute` consumes that exact grant
 before invoking the connector. The control plane receives an abstract broker
