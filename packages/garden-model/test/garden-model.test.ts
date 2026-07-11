@@ -86,4 +86,102 @@ describe("garden projection", () => {
     expect(world.agents[0]?.state).toBe("failed");
     expect(world.agents[0]?.attention).toBe("none");
   });
+
+  it("projects waiting-user attention and clears it when work resumes", () => {
+    const events: DomainEvent[] = [
+      {
+        ...base,
+        id: "1",
+        type: "worker.started",
+        taskId: "implement",
+        workerRunId: "run1",
+        data: { workerId: "codex-1", harness: "codex", taskKind: "implementation" },
+      },
+      {
+        ...base,
+        id: "2",
+        type: "worker.waiting_user",
+        taskId: "implement",
+        workerRunId: "run1",
+        data: {
+          state: "waiting_user",
+          source: "codex.app_server",
+          tier: 0,
+          confidence: 1,
+          observedAt: base.occurredAt,
+          questionSummary: "Approve the scoped command?",
+        },
+      },
+    ];
+
+    const waiting = projectGarden(events);
+    expect(waiting.agents[0]).toMatchObject({
+      state: "waiting_user",
+      attention: "action_required",
+      summary: "Approve the scoped command?",
+    });
+    expect(waiting.attentionQueue).toEqual([
+      expect.objectContaining({ workerRunId: "run1", label: "Approve the scoped command?" }),
+    ]);
+
+    events.push({
+      ...base,
+      id: "3",
+      type: "worker.turn.started",
+      taskId: "implement",
+      workerRunId: "run1",
+      data: {
+        state: "working",
+        source: "codex.app_server",
+        tier: 0,
+        confidence: 1,
+        observedAt: base.occurredAt,
+      },
+    });
+    const resumed = projectGarden(events);
+    expect(resumed.agents[0]).toMatchObject({ state: "working", attention: "none" });
+    expect(resumed.attentionQueue).toEqual([]);
+  });
+
+  it("projects dependency waits and settled turns", () => {
+    const events: DomainEvent[] = [
+      {
+        ...base,
+        id: "1",
+        type: "worker.started",
+        taskId: "verify",
+        workerRunId: "run1",
+        data: { workerId: "claude-1", harness: "claude", taskKind: "verification" },
+      },
+      {
+        ...base,
+        id: "2",
+        type: "worker.waiting_dependency",
+        taskId: "verify",
+        workerRunId: "run1",
+        data: { summary: "Waiting for implementation evidence" },
+      },
+    ];
+
+    expect(projectGarden(events).agents[0]).toMatchObject({
+      state: "waiting_dependency",
+      summary: "Waiting for implementation evidence",
+    });
+
+    events.push({
+      ...base,
+      id: "3",
+      type: "worker.turn.settled",
+      taskId: "verify",
+      workerRunId: "run1",
+      data: {
+        state: "idle",
+        source: "claude.agent_sdk",
+        tier: 0,
+        confidence: 1,
+        observedAt: base.occurredAt,
+      },
+    });
+    expect(projectGarden(events).agents[0]).toMatchObject({ state: "idle", summary: "Turn settled" });
+  });
 });

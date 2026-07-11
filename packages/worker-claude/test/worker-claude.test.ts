@@ -43,13 +43,30 @@ runWorkerAdapterContract(
       assigned = input.prompt.includes("task-contract") && input.options.cwd === "/tmp/worker-contract";
       return (async function* () {
         yield { type: "system", subtype: "init", session_id: "claude-session" };
+        yield { type: "assistant", message: { content: [] }, session_id: "claude-session" };
+        const canUseTool = input.options.canUseTool;
+        if (typeof canUseTool !== "function") throw new Error("Missing Claude permission callback");
+        await canUseTool(
+          "Bash",
+          { command: "pnpm test" },
+          {
+            signal: new AbortController().signal,
+            toolUseID: "tool-1",
+            requestId: "permission-1",
+            title: "Allow the worker to run the scoped test?",
+          },
+        );
         yield { type: "result", result: "Claude contract complete.", is_error: false };
       })();
     };
     return {
-      adapter: new ClaudeWorkerAdapter({ query }),
+      adapter: new ClaudeWorkerAdapter({
+        query,
+        canUseTool: async () => ({ behavior: "allow" }),
+      }),
       assigned: () => assigned,
       nativeSessionId: "claude-session",
+      statusSource: "claude.agent_sdk",
     };
   },
   () => {

@@ -8,6 +8,7 @@ export interface SuccessContractFixture {
   adapter: WorkerAdapter;
   assigned(): boolean;
   nativeSessionId: string | null;
+  statusSource?: string;
 }
 
 export interface CancellationContractFixture {
@@ -34,6 +35,45 @@ export function runWorkerAdapterContract(
       expect(fixture.assigned()).toBe(true);
       expect(events.length).toBeGreaterThan(0);
       expect(events.every((event) => event.workerRunId === "run-contract")).toBe(true);
+      if (fixture.statusSource) {
+        expect(events).toContainEqual(
+          expect.objectContaining({
+            type: "worker.turn.started",
+            data: expect.objectContaining({
+              state: "working",
+              source: fixture.statusSource,
+              tier: 0,
+              confidence: 1,
+              observedAt: expect.any(String),
+            }),
+          }),
+        );
+        expect(events).toContainEqual(
+          expect.objectContaining({
+            type: "worker.waiting_user",
+            data: expect.objectContaining({
+              state: "waiting_user",
+              source: fixture.statusSource,
+              tier: 0,
+              confidence: 1,
+              observedAt: expect.any(String),
+              questionSummary: expect.any(String),
+            }),
+          }),
+        );
+        expect(events).toContainEqual(
+          expect.objectContaining({
+            type: "worker.turn.settled",
+            data: expect.objectContaining({
+              state: "idle",
+              source: fixture.statusSource,
+              tier: 0,
+              confidence: 1,
+              observedAt: expect.any(String),
+            }),
+          }),
+        );
+      }
       if (fixture.nativeSessionId) {
         expect(result.outputs.nativeSessionId).toBe(fixture.nativeSessionId);
         expect(events).toContainEqual(

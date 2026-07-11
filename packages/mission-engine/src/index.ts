@@ -173,7 +173,8 @@ export class MissionEngine {
     if (previous) {
       const runtime = this.tasks.get(previous.task.id);
       const stillActive =
-        runtime?.state === "running" &&
+        runtime !== undefined &&
+        isActiveWorkerTaskState(runtime.state) &&
         runtime.workerRunId === previous.workerRunId &&
         runtime.attempts === previous.attempt;
       if (!stillActive) return undefined;
@@ -186,7 +187,7 @@ export class MissionEngine {
       return structuredClone(previous);
     }
     const active = [...this.tasks.values()].filter(
-      (task) => task.state === "leased" || task.state === "running",
+      (task) => task.state === "leased" || isActiveWorkerTaskState(task.state),
     ).length;
     if (active >= this.doctrine.scheduler.maxParallelWorkers) return undefined;
 
@@ -262,6 +263,7 @@ export class MissionEngine {
     }
     const runtime = this.findActiveRun(input.workerRunId, input.attempt, runnerId);
     const event = this.emit(input.type, input.data, runtime.spec.id, input.workerRunId, input.eventId);
+    this.applyWorkerStatusEvent(runtime, input.type);
     this.workerEventsById.set(eventKey, event);
     return structuredClone(event);
   }
@@ -339,7 +341,7 @@ export class MissionEngine {
     const expired: TaskRuntime[] = [];
     for (const runtime of this.tasks.values()) {
       if (
-        runtime.state !== "running" ||
+        !isActiveWorkerTaskState(runtime.state) ||
         !runtime.workerRunId ||
         !runtime.leaseExpiresAt ||
         Date.parse(runtime.leaseExpiresAt) > now.getTime()
@@ -362,7 +364,7 @@ export class MissionEngine {
   public expireWorkerLease(taskId: string, workerRunId: string, reason: string): TaskRuntime {
     const runtime = this.tasks.get(taskId);
     if (!runtime) throw new Error(`Unknown task ${taskId}`);
-    if (runtime.state !== "leased" && runtime.state !== "running") {
+    if (runtime.state !== "leased" && !isActiveWorkerTaskState(runtime.state)) {
       return structuredClone(runtime);
     }
     if (runtime.workerRunId !== workerRunId) {
@@ -480,7 +482,7 @@ export class MissionEngine {
     if (!runtime) {
       throw new WorkerRunConflictError("unknown_worker_run", `Unknown active worker run ${workerRunId}`);
     }
-    if (runtime.attempts !== attempt || runtime.state !== "running") {
+    if (runtime.attempts !== attempt || !isActiveWorkerTaskState(runtime.state)) {
       throw new WorkerRunConflictError(
         "stale_worker_run",
         `Worker run ${workerRunId} attempt ${attempt} is not the active attempt`,
@@ -551,6 +553,16 @@ export class MissionEngine {
         runtime.leaseExpiresAt = event.data.leaseExpiresAt;
       }
       return;
+    }
+    if (
+      (event.type === "worker.waiting_user" || event.type === "worker.turn.started") &&
+      event.taskId &&
+      event.workerRunId
+    ) {
+      const runtime = this.tasks.get(event.taskId);
+      if (runtime?.workerRunId === event.workerRunId) {
+        this.applyWorkerStatusEvent(runtime, event.type);
+      }
     }
     if (event.type === "task.requeued" && event.taskId) {
       const runtime = this.tasks.get(event.taskId);
@@ -648,7 +660,9 @@ export class MissionEngine {
     // A lease expiry can requeue or fail this task while the worker promise is
     // still in flight; a stale settle must never overwrite the recovered state.
     const isStale = () =>
-      runtime.attempts !== attempt || runtime.state !== "running" || runtime.workerRunId !== workerRunId;
+      runtime.attempts !== attempt ||
+      !isActiveWorkerTaskState(runtime.state) ||
+      runtime.workerRunId !== workerRunId;
     try {
       const result = await worker.run({
         missionId: this.plan.missionId,
@@ -660,6 +674,7 @@ export class MissionEngine {
         signal: abortController.signal,
         emit: (partial) => {
           this.emit(partial.type, partial.data, partial.taskId, workerRunId, partial.causationId);
+          this.applyWorkerStatusEvent(runtime, partial.type);
         },
       });
       if (isStale()) {
@@ -719,6 +734,16 @@ export class MissionEngine {
     return structuredClone(runtime);
   }
 
+  private applyWorkerStatusEvent(runtime: TaskRuntime, type: string): void {
+    if (type === "worker.waiting_user") {
+      runtime.state = "waiting_user";
+      this.recomputeState();
+    } else if (type === "worker.turn.started" && runtime.state === "waiting_user") {
+      runtime.state = "running";
+      this.recomputeState();
+    }
+  }
+
   private emit(
     type: string,
     data: Record<string, unknown>,
@@ -746,4 +771,8 @@ export class MissionEngine {
 
 function workerEventKey(workerRunId: string, attempt: number, eventId: string): string {
   return `${workerRunId}\0${attempt}\0${eventId}`;
+}
+
+function isActiveWorkerTaskState(state: TaskState): boolean {
+  return state === "running" || state === "waiting_user";
 }

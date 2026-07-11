@@ -123,6 +123,39 @@ describe("MissionEngine", () => {
       }),
     ).toEqual(event);
 
+    engine.recordWorkerEvent({
+      workerRunId: assignment?.workerRunId ?? "missing",
+      attempt: 1,
+      eventId: "provider-event-waiting",
+      type: "worker.waiting_user",
+      data: {
+        state: "waiting_user",
+        source: "codex.app_server",
+        tier: 0,
+        confidence: 1,
+        observedAt: "2026-07-11T12:00:00.000Z",
+        questionSummary: "Approve the command?",
+      },
+    });
+    expect(engine.getTask("implement").state).toBe("waiting_user");
+    expect(engine.getSnapshot().state).toBe("blocked");
+
+    engine.recordWorkerEvent({
+      workerRunId: assignment?.workerRunId ?? "missing",
+      attempt: 1,
+      eventId: "provider-event-resumed",
+      type: "worker.turn.started",
+      data: {
+        state: "working",
+        source: "codex.app_server",
+        tier: 0,
+        confidence: 1,
+        observedAt: "2026-07-11T12:00:01.000Z",
+      },
+    });
+    expect(engine.getTask("implement").state).toBe("running");
+    expect(engine.getSnapshot().state).toBe("running");
+
     const result: WorkerResult = {
       status: "succeeded",
       summary: "candidate written",

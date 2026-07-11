@@ -2,6 +2,9 @@ import { JsonlRpcProcess, waitForMessage, type JsonlRpcTransport, type JsonObjec
 import type { TaskKind, WorkerResult } from "@sapling/protocol";
 import {
   cancelledWorkerResult,
+  emitWorkerTurnSettled,
+  emitWorkerTurnStarted,
+  emitWorkerWaitingUser,
   type WorkerAdapter,
   type WorkerDescriptor,
   type WorkerRunContext,
@@ -210,6 +213,17 @@ export class CodexWorkerAdapter implements WorkerAdapter {
         },
         onNotification: (notification) => {
           const method = typeof notification.method === "string" ? notification.method : "codex.notification";
+          if (method === "turn/started") {
+            emitWorkerTurnStarted(context, "codex.app_server");
+          } else if (method === "turn/completed") {
+            emitWorkerTurnSettled(context, "codex.app_server");
+          } else if (isCodexWaitingUserRequest(method)) {
+            emitWorkerWaitingUser(
+              context,
+              "codex.app_server",
+              summarizeCodexWaitingRequest(method, notification.params),
+            );
+          }
           context.emit({
             type: `provider.codex.${method.replaceAll("/", ".")}`,
             missionId: context.missionId,
@@ -264,6 +278,37 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+const CODEX_WAITING_USER_METHODS = new Set([
+  "item/commandExecution/requestApproval",
+  "item/fileChange/requestApproval",
+  "item/tool/requestUserInput",
+  "mcpServer/elicitation/request",
+  "item/permissions/requestApproval",
+  "applyPatchApproval",
+  "execCommandApproval",
+]);
+
+function isCodexWaitingUserRequest(method: string): boolean {
+  return CODEX_WAITING_USER_METHODS.has(method);
+}
+
+function summarizeCodexWaitingRequest(method: string, value: unknown): string {
+  const params = asRecord(value);
+  if (method === "item/tool/requestUserInput") {
+    const questions = Array.isArray(params.questions) ? params.questions : [];
+    const first = asRecord(questions[0]);
+    if (typeof first.question === "string" && first.question.trim()) return first.question;
+  }
+  for (const key of ["message", "reason", "command"] as const) {
+    const summary = params[key];
+    if (typeof summary === "string" && summary.trim()) return summary;
+  }
+  if (method === "item/fileChange/requestApproval" && typeof params.grantRoot === "string") {
+    return `Approve writes under ${params.grantRoot}?`;
+  }
+  return `Approval required: ${method}`;
 }
 
 function readNestedString(value: unknown, path: string[]): string {

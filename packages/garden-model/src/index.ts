@@ -114,7 +114,31 @@ export function projectGarden(events: DomainEvent[]): GardenWorld {
       const agent = agents.get(event.workerRunId);
       if (!agent) continue;
       agent.lastEventAt = event.occurredAt;
-      if (event.type === "worker.progress") {
+      if (event.type === "worker.turn.started") {
+        agent.state = "working";
+        agent.attention = "none";
+        agent.summary = "Working";
+        attention.delete(`worker:${agent.workerRunId}`);
+      } else if (event.type === "worker.turn.settled") {
+        agent.state = "idle";
+        agent.attention = "none";
+        agent.summary = "Turn settled";
+        attention.delete(`worker:${agent.workerRunId}`);
+      } else if (event.type === "worker.waiting_user") {
+        agent.state = "waiting_user";
+        agent.attention = "action_required";
+        agent.summary = String(event.data.questionSummary ?? "User input required");
+        attention.set(`worker:${agent.workerRunId}`, {
+          workerRunId: agent.workerRunId,
+          ...(event.taskId ? { taskId: event.taskId } : {}),
+          label: agent.summary,
+          urgency: "action_required",
+        });
+      } else if (event.type === "worker.waiting_dependency" || event.type === "task.waiting_dependency") {
+        agent.state = "waiting_dependency";
+        agent.attention = "none";
+        agent.summary = String(event.data.summary ?? "Waiting for a dependency");
+      } else if (event.type === "worker.progress") {
         agent.summary = String(event.data.message ?? "Working");
       } else if (event.type === "task.failed" || event.type === "worker.crashed") {
         agent.state = "failed";

@@ -331,6 +331,65 @@ export const DomainEventSchema = EventBaseSchema.extend({
 });
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
 
+export const WorkerStatusStateSchema = z.enum([
+  "unknown",
+  "working",
+  "idle",
+  "waiting_dependency",
+  "waiting_user",
+  "blocked",
+  "failed",
+  "completed",
+  "offline",
+]);
+export type WorkerStatusState = z.infer<typeof WorkerStatusStateSchema>;
+
+export const WorkerStatusProvenanceSchema = z.object({
+  source: z.string().min(1),
+  tier: z.union([z.literal(0), z.literal(1), z.literal(2)]),
+  confidence: z.number().min(0).max(1),
+  observedAt: z.string().datetime(),
+});
+export type WorkerStatusProvenance = z.infer<typeof WorkerStatusProvenanceSchema>;
+
+export const WorkerTurnStartedDataSchema = WorkerStatusProvenanceSchema.extend({
+  state: z.literal("working"),
+});
+export type WorkerTurnStartedData = z.infer<typeof WorkerTurnStartedDataSchema>;
+
+export const WorkerTurnSettledDataSchema = WorkerStatusProvenanceSchema.extend({
+  state: z.literal("idle"),
+});
+export type WorkerTurnSettledData = z.infer<typeof WorkerTurnSettledDataSchema>;
+
+export const WorkerWaitingUserDataSchema = WorkerStatusProvenanceSchema.extend({
+  state: z.literal("waiting_user"),
+  questionSummary: z.string().trim().min(1),
+});
+export type WorkerWaitingUserData = z.infer<typeof WorkerWaitingUserDataSchema>;
+
+export const WorkerStatusEventSchema = z.discriminatedUnion("type", [
+  EventBaseSchema.extend({
+    type: z.literal("worker.turn.started"),
+    taskId: TaskIdSchema,
+    workerRunId: WorkerRunIdSchema,
+    data: WorkerTurnStartedDataSchema,
+  }),
+  EventBaseSchema.extend({
+    type: z.literal("worker.turn.settled"),
+    taskId: TaskIdSchema,
+    workerRunId: WorkerRunIdSchema,
+    data: WorkerTurnSettledDataSchema,
+  }),
+  EventBaseSchema.extend({
+    type: z.literal("worker.waiting_user"),
+    taskId: TaskIdSchema,
+    workerRunId: WorkerRunIdSchema,
+    data: WorkerWaitingUserDataSchema,
+  }),
+]);
+export type WorkerStatusEvent = z.infer<typeof WorkerStatusEventSchema>;
+
 export const ApprovalRecordSchema = z.object({
   actionRequestId: z.string().min(1),
   decision: z.enum(["approved", "rejected"]),

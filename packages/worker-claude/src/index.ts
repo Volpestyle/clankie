@@ -1,7 +1,10 @@
-import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
+import { query as sdkQuery, type CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 import type { TaskKind, WorkerResult } from "@sapling/protocol";
 import {
   cancelledWorkerResult,
+  emitWorkerTurnSettled,
+  emitWorkerTurnStarted,
+  emitWorkerWaitingUser,
   type WorkerAdapter,
   type WorkerDescriptor,
   type WorkerRunContext,
@@ -15,6 +18,7 @@ export interface ClaudeWorkerOptions {
   maxTurns?: number;
   settingSources?: Array<"user" | "project" | "local">;
   query?: ClaudeQuery;
+  canUseTool?: CanUseTool;
 }
 
 export type ClaudeMessage = Record<string, unknown>;
@@ -79,6 +83,20 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
         permissionMode: writeEnabled ? "acceptEdits" : "default",
         settingSources: this.options.settingSources ?? ["project"],
         abortController,
+        ...(this.options.canUseTool
+          ? {
+              canUseTool: async (...args: Parameters<CanUseTool>) => {
+                emitWorkerWaitingUser(
+                  context,
+                  "claude.agent_sdk",
+                  summarizeClaudePermission(args[0], args[2]),
+                );
+                const decision = await this.options.canUseTool?.(...args);
+                emitWorkerTurnStarted(context, "claude.agent_sdk");
+                return decision ?? null;
+              },
+            }
+          : {}),
       },
     });
 
@@ -86,6 +104,9 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
       for await (const message of stream) {
         if (context.signal.aborted) throw new Error("Claude Agent SDK run aborted");
         messageCount += 1;
+        if (message.type === "assistant") {
+          emitWorkerTurnStarted(context, "claude.agent_sdk");
+        }
         if (
           !sessionId &&
           message.type === "system" &&
@@ -104,6 +125,7 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
         }
         if (typeof message.result === "string") resultText = message.result;
         if (message.type === "result") {
+          emitWorkerTurnSettled(context, "claude.agent_sdk");
           failed = message.is_error === true;
           if (failed)
             diagnosis =
@@ -164,4 +186,11 @@ function summarizeClaudeMessage(message: ClaudeMessage): Record<string, unknown>
     parentToolUseId: message.parent_tool_use_id ?? null,
     isError: message.is_error ?? false,
   };
+}
+
+function summarizeClaudePermission(toolName: string, options: Parameters<CanUseTool>[2]): string {
+  for (const candidate of [options.title, options.description, options.decisionReason]) {
+    if (candidate?.trim()) return candidate;
+  }
+  return `Approval required for ${toolName}`;
 }

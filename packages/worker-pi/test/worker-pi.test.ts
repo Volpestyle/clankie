@@ -50,6 +50,7 @@ runWorkerAdapterContract(
       }),
       assigned: () => spawnedCorrectly && transport.assigned,
       nativeSessionId: "pi-session",
+      statusSource: "pi.rpc",
     };
   },
   () => {
@@ -89,7 +90,16 @@ class RecordedPiTransport implements JsonlRpcTransport {
     if (message.type === "prompt") {
       this.assigned = typeof message.message === "string" && message.message.includes("task-contract");
       this.startRun?.();
-      if (this.mode === "success") this.emit({ type: "agent_settled" });
+      this.emit({ type: "turn_start" });
+      if (this.mode === "success") {
+        this.emit({
+          type: "extension_ui_request",
+          id: "pi-question-1",
+          method: "confirm",
+          title: "Continue the Pi contract run?",
+        });
+        this.emit({ type: "agent_settled" });
+      }
       return { data: {} };
     }
     if (message.type === "abort") {

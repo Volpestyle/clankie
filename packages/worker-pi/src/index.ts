@@ -2,6 +2,9 @@ import { JsonlRpcProcess, waitForMessage, type JsonlRpcTransport, type JsonObjec
 import type { TaskKind, WorkerResult } from "@sapling/protocol";
 import {
   cancelledWorkerResult,
+  emitWorkerTurnSettled,
+  emitWorkerTurnStarted,
+  emitWorkerWaitingUser,
   type WorkerAdapter,
   type WorkerDescriptor,
   type WorkerRunContext,
@@ -129,6 +132,13 @@ export class PiWorkerAdapter implements WorkerAdapter {
     const client = new PiRpcClient(context.workspacePath, this.options);
     const unsubscribe = client.onMessage((message) => {
       const providerType = typeof message.type === "string" ? message.type : "event";
+      if (providerType === "turn_start") {
+        emitWorkerTurnStarted(context, "pi.rpc");
+      } else if (providerType === "agent_settled") {
+        emitWorkerTurnSettled(context, "pi.rpc");
+      } else if (isPiDialogRequest(message)) {
+        emitWorkerWaitingUser(context, "pi.rpc", summarizePiDialogRequest(message));
+      }
       context.emit({
         type: `provider.pi.${providerType}`,
         missionId: context.missionId,
@@ -209,6 +219,20 @@ function sanitizePiEvent(message: JsonObject): Record<string, unknown> {
     };
   }
   return { type: message.type ?? "event" };
+}
+
+const PI_DIALOG_METHODS = new Set(["select", "confirm", "input", "editor"]);
+
+function isPiDialogRequest(message: JsonObject): boolean {
+  return message.type === "extension_ui_request" && PI_DIALOG_METHODS.has(String(message.method));
+}
+
+function summarizePiDialogRequest(message: JsonObject): string {
+  for (const key of ["title", "message", "placeholder"] as const) {
+    const summary = message[key];
+    if (typeof summary === "string" && summary.trim()) return summary;
+  }
+  return `Pi requires ${String(message.method ?? "user input")}`;
 }
 
 function summarizeStats(response: JsonObject): string {

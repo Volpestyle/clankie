@@ -44,6 +44,7 @@ runWorkerAdapterContract(
       adapter: new CodexWorkerAdapter({ transportFactory: () => transport }),
       assigned: () => transport.assigned,
       nativeSessionId: "codex-thread",
+      statusSource: "codex.app_server",
     };
   },
   () => {
@@ -87,6 +88,10 @@ class RecordedCodexTransport implements JsonlRpcTransport {
       this.assigned =
         params.cwd === "/tmp/worker-contract" && JSON.stringify(params.input).includes("task-contract");
       this.startRun?.();
+      this.emit({
+        method: "turn/started",
+        params: { threadId: "codex-thread", turn: { id: "codex-turn", status: "inProgress" } },
+      });
       if (this.mode === "success") this.complete("completed");
       return { result: { turn: { id: "codex-turn" } } };
     }
@@ -103,6 +108,18 @@ class RecordedCodexTransport implements JsonlRpcTransport {
   }
 
   private complete(status: string): void {
+    if (this.mode === "success") {
+      this.emit({
+        id: "request-user-input-1",
+        method: "item/tool/requestUserInput",
+        params: {
+          threadId: "codex-thread",
+          turnId: "codex-turn",
+          itemId: "item-1",
+          questions: [{ id: "confirm", question: "Continue with the scoped change?" }],
+        },
+      });
+    }
     this.emit({ method: "item/agentMessage/delta", params: { delta: "Codex contract complete." } });
     this.emit({
       method: "turn/completed",

@@ -1,4 +1,4 @@
-import type { DomainEvent, Harness, TaskSpec, WorkerResult } from "@sapling/protocol";
+import type { DomainEvent, Harness, TaskSpec, WorkerResult, WorkerStatusProvenance } from "@sapling/protocol";
 
 export interface WorkerCapabilities {
   kinds: TaskSpec["kind"][];
@@ -32,6 +32,58 @@ export interface WorkerAdapter {
   run(context: WorkerRunContext): Promise<WorkerResult>;
   steer?(runId: string, input: string): Promise<void>;
   cancel?(runId: string): Promise<void>;
+}
+
+export type NativeWorkerStatusSource = "codex.app_server" | "claude.agent_sdk" | "pi.rpc";
+
+export function emitWorkerTurnStarted(context: WorkerRunContext, source: NativeWorkerStatusSource): void {
+  context.emit({
+    type: "worker.turn.started",
+    missionId: context.missionId,
+    taskId: context.task.id,
+    workerRunId: context.workerRunId,
+    profileHash: context.profileHash,
+    data: { state: "working", ...tierZeroProvenance(source) },
+  });
+}
+
+export function emitWorkerTurnSettled(context: WorkerRunContext, source: NativeWorkerStatusSource): void {
+  context.emit({
+    type: "worker.turn.settled",
+    missionId: context.missionId,
+    taskId: context.task.id,
+    workerRunId: context.workerRunId,
+    profileHash: context.profileHash,
+    data: { state: "idle", ...tierZeroProvenance(source) },
+  });
+}
+
+export function emitWorkerWaitingUser(
+  context: WorkerRunContext,
+  source: NativeWorkerStatusSource,
+  questionSummary: string,
+): void {
+  context.emit({
+    type: "worker.waiting_user",
+    missionId: context.missionId,
+    taskId: context.task.id,
+    workerRunId: context.workerRunId,
+    profileHash: context.profileHash,
+    data: {
+      state: "waiting_user",
+      ...tierZeroProvenance(source),
+      questionSummary: questionSummary.trim() || "Worker requires user input.",
+    },
+  });
+}
+
+function tierZeroProvenance(source: NativeWorkerStatusSource): WorkerStatusProvenance {
+  return {
+    source,
+    tier: 0,
+    confidence: 1,
+    observedAt: new Date().toISOString(),
+  };
 }
 
 export function cancelledWorkerResult(workerRunId: string, provider: string): WorkerResult {

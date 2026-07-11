@@ -5,6 +5,7 @@ import {
   CharacterSnapshotSchema,
   IntentCommandSchema,
   MissionPlanSchema,
+  WorkerStatusEventSchema,
 } from "../src/index.ts";
 
 describe("protocol", () => {
@@ -277,5 +278,42 @@ describe("protocol", () => {
         ],
       }),
     ).toThrow(/not declared by the mission/);
+  });
+
+  it("validates additive worker status events with provenance", () => {
+    expect(
+      WorkerStatusEventSchema.parse({
+        id: "status-1",
+        occurredAt: "2026-07-11T12:00:00.000Z",
+        missionId: "mission-1",
+        taskId: "task-1",
+        workerRunId: "run-1",
+        correlationId: "correlation-1",
+        profileHash: "profile-1",
+        type: "worker.waiting_user",
+        data: {
+          state: "waiting_user",
+          source: "codex.app_server",
+          tier: 0,
+          confidence: 1,
+          observedAt: "2026-07-11T12:00:00.000Z",
+          questionSummary: "Approve the requested command?",
+        },
+      }),
+    ).toMatchObject({ type: "worker.waiting_user", data: { tier: 0, confidence: 1 } });
+
+    expect(() =>
+      WorkerStatusEventSchema.parse({
+        id: "status-2",
+        occurredAt: "2026-07-11T12:00:00.000Z",
+        missionId: "mission-1",
+        taskId: "task-1",
+        workerRunId: "run-1",
+        correlationId: "correlation-1",
+        profileHash: "profile-1",
+        type: "worker.turn.settled",
+        data: { state: "idle", source: "pi.rpc", tier: 0, confidence: 1 },
+      }),
+    ).toThrow(/observedAt/);
   });
 });
