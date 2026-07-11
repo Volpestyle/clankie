@@ -1,5 +1,8 @@
 import { homedir } from "node:os";
+import { join } from "node:path";
+import { SqliteEventStore } from "@sapling/event-store";
 import { createLogger } from "@sapling/observability";
+import { ProcessLeaseManager } from "./process-leases.ts";
 import { defaultWorktreeRoot, WorktreeManager } from "./worktrees.ts";
 
 const logger = createLogger({
@@ -44,6 +47,30 @@ if (repoPath) {
   }
 } else {
   logger.info("SAPLING_REPO_PATH is unset; worktree management is idle");
+}
+
+const runnerStateRoot = process.env.SAPLING_RUNNER_STATE ?? join(homedir(), ".sapling", "runner");
+try {
+  const processLeases = new ProcessLeaseManager({
+    rootDir: runnerStateRoot,
+    events: new SqliteEventStore(join(runnerStateRoot, "runner-events.db")),
+  });
+  const reconciled = await processLeases.reconcile();
+  logger.info(
+    {
+      runnerStateRoot,
+      readopted: reconciled.readopted.length,
+      failed: reconciled.failed.length,
+      retained: reconciled.retained.length,
+      corruptRemoved: reconciled.corruptRemoved.length,
+    },
+    "startup process-lease reconciliation finished",
+  );
+} catch (error) {
+  logger.error(
+    { runnerStateRoot, err: error instanceof Error ? error.message : String(error) },
+    "startup process-lease reconciliation failed; runner continuing",
+  );
 }
 
 logger.warn(

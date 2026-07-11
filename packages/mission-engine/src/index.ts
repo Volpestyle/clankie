@@ -48,11 +48,14 @@ export class MissionEngine {
   private readonly idFactory: () => string;
   private readonly correlationId: string;
 
-  public constructor(
-    private readonly plan: MissionPlan,
-    private readonly doctrine: CompiledDoctrine,
-    private readonly options: MissionEngineOptions,
-  ) {
+  private readonly plan: MissionPlan;
+  private readonly doctrine: CompiledDoctrine;
+  private readonly options: MissionEngineOptions;
+
+  public constructor(plan: MissionPlan, doctrine: CompiledDoctrine, options: MissionEngineOptions) {
+    this.plan = plan;
+    this.doctrine = doctrine;
+    this.options = options;
     assertValidDag(plan.tasks);
     this.clock = options.clock ?? (() => new Date());
     this.idFactory = options.idFactory ?? randomUUID;
@@ -100,6 +103,39 @@ export class MissionEngine {
 
   public recordEvent(type: string, data: Record<string, unknown>, taskId?: string): DomainEvent {
     return this.emit(type, data, taskId);
+  }
+
+  /**
+   * Lease surface for the runner: a worker whose process lease expired or was
+   * lost leaves its task in a recoverable state — requeued while attempts
+   * remain, failed explicitly otherwise. Never a silent loss. Idempotent for
+   * tasks that are not currently leased or running.
+   */
+  public expireWorkerLease(taskId: string, workerRunId: string, reason: string): TaskRuntime {
+    const runtime = this.tasks.get(taskId);
+    if (!runtime) throw new Error(`Unknown task ${taskId}`);
+    if (runtime.state !== "leased" && runtime.state !== "running") {
+      return structuredClone(runtime);
+    }
+    if (runtime.attempts < runtime.spec.maxAttempts) {
+      runtime.state = "queued";
+      delete runtime.workerId;
+      delete runtime.workerHarness;
+      this.emit("task.requeued", { reason, attempt: runtime.attempts }, taskId, workerRunId);
+    } else {
+      runtime.state = "failed";
+      runtime.completedAt = this.clock().toISOString();
+      runtime.result = {
+        status: "failed",
+        summary: "Worker lease expired with no attempts remaining.",
+        evidence: [],
+        outputs: {},
+        diagnosis: reason,
+      };
+      this.emit("task.failed", { summary: runtime.result.summary, diagnosis: reason }, taskId, workerRunId);
+    }
+    this.recomputeState();
+    return structuredClone(runtime);
   }
 
   public recordApproval(record: ApprovalRecord): void {
@@ -213,6 +249,10 @@ export class MissionEngine {
     this.emit("task.started", { title: runtime.spec.title }, runtime.spec.id, workerRunId);
 
     const abortController = new AbortController();
+    const attempt = runtime.attempts;
+    // A lease expiry can requeue or fail this task while the worker promise is
+    // still in flight; a stale settle must never overwrite the recovered state.
+    const isStale = () => runtime.attempts !== attempt || runtime.state !== "running";
     try {
       const result = await worker.run({
         missionId: this.plan.missionId,
@@ -225,6 +265,15 @@ export class MissionEngine {
           this.emit(partial.type, partial.data, partial.taskId, partial.workerRunId, partial.causationId);
         },
       });
+      if (isStale()) {
+        this.emit(
+          "worker.result.discarded",
+          { workerId: worker.descriptor.id, staleAttempt: attempt, result: result.status },
+          runtime.spec.id,
+          workerRunId,
+        );
+        return structuredClone(runtime);
+      }
       runtime.result = result;
       runtime.completedAt = this.clock().toISOString();
       runtime.state =
@@ -242,6 +291,15 @@ export class MissionEngine {
         workerRunId,
       );
     } catch (error) {
+      if (isStale()) {
+        this.emit(
+          "worker.result.discarded",
+          { workerId: worker.descriptor.id, staleAttempt: attempt, result: "error" },
+          runtime.spec.id,
+          workerRunId,
+        );
+        return structuredClone(runtime);
+      }
       runtime.completedAt = this.clock().toISOString();
       runtime.state = "failed";
       runtime.result = {

@@ -62,7 +62,7 @@ export function projectMission(events: readonly DomainEvent[], missionId?: strin
 }
 
 function taskTransition(type: string): TaskState | undefined {
-  if (type === "task.added") return "queued";
+  if (type === "task.added" || type === "task.requeued") return "queued";
   const candidate = TaskStateSchema.safeParse(type.slice("task.".length));
   return candidate.success ? candidate.data : undefined;
 }

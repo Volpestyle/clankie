@@ -12,6 +12,7 @@
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {
+    "@sapling/event-store": "workspace:*",
     "@sapling/observability": "workspace:*",
     "@sapling/protocol": "workspace:*",
     "@sapling/terminal-protocol": "workspace:*",
