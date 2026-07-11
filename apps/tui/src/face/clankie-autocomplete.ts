@@ -423,7 +423,9 @@ function staticArgumentSpec(commandName: string, context: ArgumentContext): Stat
     case "discord-token":
       return values(["status", "--user-token", "--voice"], ["/discord-token status"]);
     case "model":
-      return modelArguments(context);
+      return modelRoleArguments("model");
+    case "provider":
+      return modelRoleArguments("provider");
     case "auth":
       return authArguments(context);
     case "setup":
@@ -548,36 +550,10 @@ function staticArgumentSpec(commandName: string, context: ArgumentContext): Stat
   }
 }
 
-function modelArguments(context: ArgumentContext): StaticArgumentSpec {
-  const provider = context.args[0]?.toLowerCase();
-  if (provider === "status") return { values: [], examples: ["/model status"] };
-  if (provider === "openai") {
-    return values(["gpt-5.5", "gpt-5.4"], ["/model openai gpt-5.5", "/auth openai"]);
-  }
-  if (provider === "codex") {
-    return values(
-      ["gpt-5.5", "gpt-5.4", "gpt-5.3-codex-spark", "minimal", "low", "medium", "high", "xhigh"],
-      ["/model codex gpt-5.5 high", "/model claude", "/model local qwen3-coder"],
-    );
-  }
-  if (provider === "claude") {
-    return values(["claude-opus-4-8", "claude-sonnet-4-6"], ["/model claude claude-opus-4-8"]);
-  }
-  if (provider === "local") {
-    return {
-      values: [],
-      examples: ["/model local qwen3-coder:30b", "/model local qwen3-coder:30b http://127.0.0.1:11434/v1"],
-    };
-  }
-  if (provider === "xai") {
-    return values(["grok-4", "grok-4-fast", "grok-3"], ["/model xai grok-4"]);
-  }
-  if (provider === "gemini") {
-    return values(["gemini-3-pro", "gemini-2.5-pro", "gemini-2.5-flash"], ["/model gemini gemini-3-pro"]);
-  }
+function modelRoleArguments(command: "model" | "provider"): StaticArgumentSpec {
   return values(
-    ["status", "openai", "codex", "claude", "local", "xai", "gemini"],
-    ["/model status", "/model openai gpt-5.5", "/model xai grok-4", "/model gemini gemini-2.5-pro"],
+    ["status", "small", "voice"],
+    [`/${command}`, `/${command} small`, `/${command} voice`, `/${command} status`],
   );
 }
 

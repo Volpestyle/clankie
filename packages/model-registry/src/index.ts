@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import bundledSnapshot from "../data/models-dev-snapshot.json" with { type: "json" };
 
 // ---------------------------------------------------------------------------
 // Schemas — deliberately lenient. models.dev evolves faster than this package
@@ -73,13 +73,11 @@ type CacheEnvelope = z.infer<typeof CacheEnvelopeSchema>;
 // Bundled snapshot
 // ---------------------------------------------------------------------------
 
-const bundledSnapshotPath = join(import.meta.dirname, "..", "data", "models-dev-snapshot.json");
-
 let bundledCatalog: Catalog | undefined;
 
 /** Parses the vendored models.dev snapshot shipped with this package. Memoized after first load. */
 export function loadBundledCatalog(): Catalog {
-  bundledCatalog ??= CatalogSchema.parse(JSON.parse(readFileSync(bundledSnapshotPath, "utf8")));
+  bundledCatalog ??= CatalogSchema.parse(bundledSnapshot);
   return bundledCatalog;
 }
 

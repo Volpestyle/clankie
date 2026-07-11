@@ -76,10 +76,17 @@ const commands: ClankieAutocompleteCommand[] = [
     takesArgument: true,
   },
   {
+    name: "provider",
+    aliases: [],
+    description: "Choose which provider the model picker browses",
+    argumentHint: "[small|voice|status]",
+    takesArgument: true,
+  },
+  {
     name: "model",
     aliases: [],
-    description: "Choose Clankie's brain route, model, and required route auth",
-    argumentHint: "[status|codex|claude|local|xai|gemini] [id] [effort]",
+    description: "Choose a model from the selected provider",
+    argumentHint: "[small|voice|status]",
     takesArgument: true,
   },
   {
@@ -263,7 +270,8 @@ describe("argument suggestions", () => {
   }
 
   it("completes model, auth, and effort arguments", async () => {
-    expect((await items("/model c", 8)).some((item) => item.value === "codex")).toBe(true);
+    expect((await items("/provider sm", 12)).some((item) => item.value === "small")).toBe(true);
+    expect((await items("/model sm", 9)).some((item) => item.value === "small")).toBe(true);
     expect((await items("/model st", 9)).some((item) => item.value === "status")).toBe(true);
     expect((await items("/auth st", 8)).some((item) => item.value === "status")).toBe(true);
     expect((await items("/auth xa", 8)).some((item) => item.value === "xai")).toBe(true);

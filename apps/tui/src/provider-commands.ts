@@ -1,5 +1,5 @@
 /**
- * Provider/model configuration wizards: /auth, /model, /effort (VUH-760).
+ * Provider/model configuration wizards: /auth, /provider, /model, /effort (VUH-760).
  * Guided SetupFlow modals over the registry (@sapling/model-registry), the
  * credential broker, and clankie.json (@sapling/model-provider). Secrets go
  * only to the credential store and render only redacted.
@@ -22,6 +22,7 @@ import {
   effortVariantsFor,
   formatModelRef,
   loadConfig,
+  mergedCatalog,
   parseModelRef,
   resolveProviders,
   resolveRole,
@@ -71,6 +72,7 @@ const MODEL_ROLES = {
 type RoleKey = "model" | "small_model" | "voice_model";
 
 export function buildProviderCommands(services: ProviderServices): FaceShellCommand[] {
+  const selectedProviders = new Map<RoleKey, string>();
   return [
     {
       name: "auth",
@@ -87,9 +89,29 @@ export function buildProviderCommands(services: ProviderServices): FaceShellComm
       },
     },
     {
+      name: "provider",
+      aliases: [],
+      description: "Choose which provider /model browses (also: /provider small)",
+      argumentHint: "[small|voice|status]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        const arg = argument.trim().toLowerCase();
+        if (arg === "status") {
+          await showProviderStatus(shell, services, selectedProviders);
+          return;
+        }
+        const role = (MODEL_ROLES as Record<string, RoleKey | undefined>)[arg];
+        if (role === undefined) {
+          shell.insertCommandResult("/provider", "Usage: /provider [small|voice|status]", "error");
+          return;
+        }
+        await runProviderWizard(shell, services, role, selectedProviders);
+      },
+    },
+    {
       name: "model",
       aliases: [],
-      description: "Pick the captain model from the live registry (also: /model small)",
+      description: "Pick a model from the selected provider (also: /model small)",
       argumentHint: "[small|voice|status]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
@@ -103,7 +125,7 @@ export function buildProviderCommands(services: ProviderServices): FaceShellComm
           shell.insertCommandResult("/model", "Usage: /model [small|voice|status]", "error");
           return;
         }
-        await runModelWizard(shell, services, role);
+        await runModelWizard(shell, services, role, selectedProviders);
       },
     },
     {
@@ -301,7 +323,7 @@ async function codexOauthFlow(shell: ClankieFaceShell, services: ProviderService
     flow.renderLine("ChatGPT subscription connected.", "success");
     shell.insertCommandResult(
       "/auth",
-      `ChatGPT subscription connected (stored as ${CODEX_PROVIDER_ID}). Pick it via /model.`,
+      `ChatGPT subscription connected (stored as ${CODEX_PROVIDER_ID}). Pick it via /provider, then /model.`,
       "success",
     );
   } catch (error) {
@@ -343,7 +365,11 @@ async function removeCredentialFlow(shell: ClankieFaceShell, services: ProviderS
   shell.insertCommandResult("/auth", `Removed credential for ${id}.`, "success");
 }
 
-// --- /model ---
+// --- /provider + /model ---
+
+function roleLabel(role: RoleKey): string {
+  return role.replace("_", " ");
+}
 
 function modelHint(model: ModelEntry): string {
   const parts: string[] = [];
@@ -373,35 +399,57 @@ async function showModelStatus(shell: ClankieFaceShell, services: ProviderServic
   shell.insertCommandResult("/model status", lines.join("\n"), "success");
 }
 
-async function runModelWizard(
+async function showProviderStatus(
+  shell: ClankieFaceShell,
+  services: ProviderServices,
+  selectedProviders: ReadonlyMap<RoleKey, string>,
+): Promise<void> {
+  const { config } = await loadConfig({ env: services.env, cwd: services.cwd });
+  const lines = (["model", "small_model", "voice_model"] as const).map((role) => {
+    const configured = config[role] === undefined ? undefined : parseModelRef(config[role]);
+    const selected = selectedProviders.get(role) ?? configured?.providerId;
+    const pending =
+      selected !== undefined && selected !== configured?.providerId
+        ? ` (pending /model; configured ${configured?.providerId ?? "unset"})`
+        : "";
+    return `${role}: ${selected ?? "unset — run /provider"}${pending}`;
+  });
+  shell.insertCommandResult("/provider status", lines.join("\n"), "success");
+}
+
+async function runProviderWizard(
   shell: ClankieFaceShell,
   services: ProviderServices,
   role: RoleKey,
+  selectedProviders: Map<RoleKey, string>,
 ): Promise<void> {
   const flow = shell.setupFlow;
-  flow.begin(`choose ${role.replace("_", " ")}`);
+  flow.begin(`choose provider for ${roleLabel(role)}`);
   try {
     for (;;) {
-      const catalog: Catalog = await services.registry.catalog();
+      const catalog = await services.registry.catalog();
       const { config } = await loadConfig({ env: services.env, cwd: services.cwd });
       const credentialIds = Object.keys(await services.store.list());
       const providers = resolveProviders({ config, catalog, credentialIds, env: services.env });
+      const configured = config[role] === undefined ? undefined : parseModelRef(config[role]);
+      const currentProvider = selectedProviders.get(role) ?? configured?.providerId;
       const picked = await flow.readSelect({
         kind: "single",
-        message: `Provider for ${role.replace("_", " ")}`,
-        options: providers.slice(0, 200).map((provider) => ({
+        message: `Provider for ${roleLabel(role)} (${providers.length} available — type to filter)`,
+        options: providers.map((provider) => ({
           value: provider.id,
           label: provider.name,
           hint: provider.connected ? "connected" : "needs /auth",
         })),
         statusActions: [{ value: "__refresh__", label: "refresh registry (models.dev)" }],
+        ...(currentProvider === undefined ? {} : { currentValue: currentProvider }),
         required: true,
         allowBack: true,
       });
       const providerId = picked?.[0];
       if (providerId === undefined) {
         flow.end();
-        shell.insertCommandResult("/model", "Model selection cancelled.", "error");
+        shell.insertCommandResult("/provider", "Provider selection cancelled.", "error");
         return;
       }
       if (providerId === "__refresh__") {
@@ -410,29 +458,103 @@ async function runModelWizard(
         flow.renderLine(`Registry refreshed (${result.source}).`, "success");
         continue;
       }
-      const models = listModels(catalog, providerId);
+      selectedProviders.set(role, providerId);
+      const provider = providers.find((candidate) => candidate.id === providerId);
+      flow.end();
+      shell.insertCommandResult(
+        "/provider",
+        [
+          `Provider for ${roleLabel(role)} set to ${providerId}. Run /model to choose the actual model.`,
+          ...(provider !== undefined && !provider.connected
+            ? [`Note: ${providerId} has no credential yet — run /auth before real captain turns.`]
+            : []),
+        ].join("\n"),
+        "success",
+      );
+      return;
+    }
+  } catch (error) {
+    flow.end();
+    throw error;
+  }
+}
+
+async function runModelWizard(
+  shell: ClankieFaceShell,
+  services: ProviderServices,
+  role: RoleKey,
+  selectedProviders: Map<RoleKey, string>,
+): Promise<void> {
+  const flow = shell.setupFlow;
+  flow.begin(`choose ${roleLabel(role)}`);
+  try {
+    for (;;) {
+      const catalog: Catalog = await services.registry.catalog();
+      const { config } = await loadConfig({ env: services.env, cwd: services.cwd });
+      const effectiveCatalog = mergedCatalog(config, catalog);
+      const credentialIds = Object.keys(await services.store.list());
+      const providers = resolveProviders({ config, catalog, credentialIds, env: services.env });
+      const configured = config[role] === undefined ? undefined : parseModelRef(config[role]);
+      const providerId = selectedProviders.get(role) ?? configured?.providerId;
+      if (providerId === undefined) {
+        flow.end();
+        shell.insertCommandResult(
+          "/model",
+          `No provider selected for ${roleLabel(role)} — run /provider${role === "model" ? "" : ` ${role === "small_model" ? "small" : "voice"}`} first.`,
+          "error",
+        );
+        return;
+      }
+      const provider = providers.find((candidate) => candidate.id === providerId);
+      if (provider === undefined) {
+        selectedProviders.delete(role);
+        flow.end();
+        shell.insertCommandResult(
+          "/model",
+          `Provider ${providerId} is not currently enabled — run /provider to choose another.`,
+          "error",
+        );
+        return;
+      }
+      const models = listModels(effectiveCatalog, providerId);
       if (models.length === 0) {
-        flow.renderLine(`No models listed for ${providerId} — add custom models in clankie.json.`, "warning");
-        continue;
+        flow.end();
+        shell.insertCommandResult(
+          "/model",
+          `No models listed for ${providerId} — add custom models in clankie.json or run /provider to choose another.`,
+          "error",
+        );
+        return;
       }
       const currentRef = config[role];
       const currentParsed = currentRef === undefined ? undefined : parseModelRef(currentRef);
       const currentModelId = currentParsed?.providerId === providerId ? currentParsed.modelId : undefined;
       const pickedModel = await flow.readSelect({
         kind: "single",
-        message: `Model (${models.length} listed, newest first — type to filter)`,
+        message: `Model from ${provider.name} (${models.length} listed, newest first — type to filter)`,
         options: models.map((model) => ({
           value: model.id,
           label: model.id,
           hint: modelHint(model),
           description: model.name,
         })),
+        statusActions: [{ value: "__refresh__", label: "refresh registry (models.dev)" }],
         ...(currentModelId === undefined ? {} : { currentValue: currentModelId }),
         required: true,
         allowBack: true,
       });
       const modelId = pickedModel?.[0];
-      if (modelId === undefined) continue;
+      if (modelId === undefined) {
+        flow.end();
+        shell.insertCommandResult("/model", "Model selection cancelled.", "error");
+        return;
+      }
+      if (modelId === "__refresh__") {
+        flow.setStatus("refreshing registry…");
+        const result = await services.registry.refresh(true);
+        flow.renderLine(`Registry refreshed (${result.source}).`, "success");
+        continue;
+      }
       const ref = formatModelRef({ providerId, modelId });
       const updated = await updateGlobalConfig(
         (current) => {
@@ -441,13 +563,13 @@ async function runModelWizard(
         { env: services.env },
       );
       services.onConfigChanged(updated);
-      const provider = providers.find((candidate) => candidate.id === providerId);
+      selectedProviders.delete(role);
       flow.end();
       shell.insertCommandResult(
         "/model",
         [
-          `${role.replace("_", " ")} set to ${ref}.`,
-          ...(provider !== undefined && !provider.connected
+          `${roleLabel(role)} set to ${ref}.`,
+          ...(!provider.connected
             ? [`Note: ${providerId} has no credential yet — run /auth before real captain turns.`]
             : []),
         ].join("\n"),
@@ -469,7 +591,11 @@ async function runEffortWizard(shell: ClankieFaceShell, services: ProviderServic
   const { config } = await loadConfig({ env: services.env, cwd: services.cwd });
   const resolved = resolveRole("model", { config, catalog });
   if (resolved === undefined) {
-    shell.insertCommandResult("/effort", "No captain model configured — run /model first.", "error");
+    shell.insertCommandResult(
+      "/effort",
+      "No captain model configured — run /provider, then /model first.",
+      "error",
+    );
     return;
   }
   if (resolved.model === undefined || !supportsReasoning(resolved.model)) {
