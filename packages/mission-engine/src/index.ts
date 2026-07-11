@@ -16,6 +16,7 @@ export interface TaskRuntime {
   spec: TaskSpec;
   state: TaskState;
   attempts: number;
+  workerRunId?: string;
   workerId?: string;
   workerHarness?: string;
   result?: WorkerResult;
@@ -117,8 +118,18 @@ export class MissionEngine {
     if (runtime.state !== "leased" && runtime.state !== "running") {
       return structuredClone(runtime);
     }
+    if (runtime.workerRunId !== workerRunId) {
+      this.emit(
+        "worker.lease.expiry.discarded",
+        { reason, activeWorkerRunId: runtime.workerRunId },
+        taskId,
+        workerRunId,
+      );
+      return structuredClone(runtime);
+    }
     if (runtime.attempts < runtime.spec.maxAttempts) {
       runtime.state = "queued";
+      delete runtime.workerRunId;
       delete runtime.workerId;
       delete runtime.workerHarness;
       this.emit("task.requeued", { reason, attempt: runtime.attempts }, taskId, workerRunId);
@@ -133,6 +144,7 @@ export class MissionEngine {
         diagnosis: reason,
       };
       this.emit("task.failed", { summary: runtime.result.summary, diagnosis: reason }, taskId, workerRunId);
+      delete runtime.workerRunId;
     }
     this.recomputeState();
     return structuredClone(runtime);
@@ -235,6 +247,7 @@ export class MissionEngine {
     runtime.state = "running";
     runtime.startedAt = this.clock().toISOString();
     const workerRunId = this.idFactory();
+    runtime.workerRunId = workerRunId;
     this.emit(
       "worker.started",
       {
@@ -252,7 +265,8 @@ export class MissionEngine {
     const attempt = runtime.attempts;
     // A lease expiry can requeue or fail this task while the worker promise is
     // still in flight; a stale settle must never overwrite the recovered state.
-    const isStale = () => runtime.attempts !== attempt || runtime.state !== "running";
+    const isStale = () =>
+      runtime.attempts !== attempt || runtime.state !== "running" || runtime.workerRunId !== workerRunId;
     try {
       const result = await worker.run({
         missionId: this.plan.missionId,
@@ -290,6 +304,7 @@ export class MissionEngine {
         runtime.spec.id,
         workerRunId,
       );
+      delete runtime.workerRunId;
     } catch (error) {
       if (isStale()) {
         this.emit(
@@ -316,6 +331,7 @@ export class MissionEngine {
         workerRunId,
       );
       this.emit("worker.crashed", { workerId: worker.descriptor.id }, runtime.spec.id, workerRunId);
+      delete runtime.workerRunId;
     }
     return structuredClone(runtime);
   }
