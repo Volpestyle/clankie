@@ -9,12 +9,14 @@ description: Use when starting, replanning, or finalizing a governed multi-agent
 1. Create the mission, load effective doctrine, and gather each field from its declared authority.
 2. Ask the planner for a `MissionPlanSchema` plan, then ask the critic to attack acceptance ambiguity, write conflicts, missing evidence, policy exposure, and budget risk.
 3. Revise and submit only a valid DAG whose tasks have explicit roles, disjoint parallel write scopes, observable success criteria, and non-empty evidence requirements.
+4. After the control plane accepts the plan, invoke `start_mission`. Coding is a governed runner capability: the captain never opens a shell, edits files, or treats provider completion as independent verification.
 
 ## During execution
 
 1. Follow semantic events and budgets. Quiet terminal output is not completion evidence.
-2. Preserve failed branches and artifacts. Load `debug-mission` before adding recovery work.
-3. Send every privileged action through policy; a planned action is never permission.
+2. Treat implementation success as a retained candidate awaiting its explicit verification task. Read live task results with `get_mission`.
+3. Preserve failed branches and artifacts. Load `debug-mission` before adding recovery work.
+4. Send every privileged action through policy; a planned action is never permission.
 
 ## Before completion
 

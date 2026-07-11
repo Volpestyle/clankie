@@ -4,6 +4,12 @@ This service owns mission state, doctrine compilation, action decisions, approva
 
 It must never own provider subscription credentials or terminal processes. Those remain on the local runner.
 
+## Runner pull execution
+
+After a validated implementation-plus-read-only-verification plan is submitted, an authenticated captain starts it with `POST /v1/missions/:id/start`. An authenticated runner pulls work from `POST /v1/runner/claims`, heartbeats the server-owned attempt lease, reports allowlisted idempotent semantic events, and settles the exact attempt. `GET /v1/missions/:id` includes the live task snapshot and results.
+
+The execution boundary is fail-closed: `SAPLING_CAPTAIN_TOKEN` authenticates start separately from `SAPLING_RUNNER_TOKEN`; missing configuration returns an unavailable error and invalid credentials return an authentication error. Production authenticators compare bearer credentials in constant time and bind the runner ID from server configuration, never a caller header. The control plane owns serialized scheduling and replay only. Codex, Git worktrees, provider processes, and credentials remain in the runner.
+
 ## Capability exchange
 
 The worker capability routes compose three injected boundaries:

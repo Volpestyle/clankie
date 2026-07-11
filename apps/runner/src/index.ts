@@ -1,9 +1,15 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { SaplingApiClient } from "@sapling/api-client";
 import { SqliteEventStore } from "@sapling/event-store";
 import { createLogger } from "@sapling/observability";
+import { CodexWorkerAdapter } from "@sapling/worker-codex";
+import type { WorkerAdapter } from "@sapling/worker-sdk";
+import { MissionWorker } from "./mission-worker.ts";
 import { ProcessLeaseManager } from "./process-leases.ts";
 import { defaultWorktreeRoot, WorktreeManager } from "./worktrees.ts";
+import { buildWorkerEnvironment } from "./worker-environment.ts";
+import { parseVerificationChecks } from "./verification-checks.ts";
 
 if (process.argv.includes("--recovery-probe")) {
   const { runRecoveryProbeFromCli } = await import("./recovery-probe.ts");
@@ -26,8 +32,9 @@ logger.info(
 );
 
 const repoPath = process.env.SAPLING_REPO_PATH;
+let worktrees: WorktreeManager | undefined;
 if (repoPath) {
-  const worktrees = new WorktreeManager({
+  worktrees = new WorktreeManager({
     repoPath,
     rootDir: process.env.SAPLING_WORKTREE_ROOT ?? defaultWorktreeRoot(repoPath, homedir()),
   });
@@ -79,5 +86,55 @@ try {
 }
 
 logger.warn(
-  "No persistent command channel is connected. Implement milestone M2 before real worker execution.",
+  "Interactive session steering is deferred; the runner pull worker only supports start-to-settle execution.",
 );
+
+const runnerToken = process.env.SAPLING_RUNNER_TOKEN;
+if (!repoPath) {
+  logger.error("SAPLING_REPO_PATH is required; mission execution is unavailable");
+} else if (!runnerToken) {
+  logger.error("SAPLING_RUNNER_TOKEN is required; mission execution is unavailable");
+} else if (worktrees) {
+  const workerEnvironment = buildWorkerEnvironment(process.env);
+  const verificationChecks = parseVerificationChecks(process.env.SAPLING_VERIFICATION_CHECKS);
+  const implementer = new CodexWorkerAdapter({
+    id: "codex-implementer",
+    displayName: "Codex implementer",
+    kinds: ["implementation", "debugging", "integration"],
+    environment: workerEnvironment,
+  });
+  const verifierCodex = new CodexWorkerAdapter({
+    id: "codex-verifier",
+    displayName: "Codex verifier",
+    kinds: ["verification", "review"],
+    environment: workerEnvironment,
+  });
+  const verifier: WorkerAdapter = {
+    descriptor: {
+      ...verifierCodex.descriptor,
+      capabilities: { ...verifierCodex.descriptor.capabilities, canWrite: false },
+    },
+    run: (context) => verifierCodex.run(context),
+  };
+  const abort = new AbortController();
+  process.once("SIGINT", () => abort.abort());
+  process.once("SIGTERM", () => abort.abort());
+  const missionWorker = new MissionWorker({
+    client: new SaplingApiClient({
+      baseUrl: process.env.SAPLING_CONTROL_PLANE_URL ?? "http://127.0.0.1:4310",
+      runnerToken,
+      runnerId: process.env.SAPLING_RUNNER_ID ?? "local",
+    }),
+    adapters: [implementer, verifier],
+    worktrees,
+    artifactRoot: process.env.SAPLING_ARTIFACT_ROOT ?? join(runnerStateRoot, "artifacts"),
+    workerEnvironment,
+    verificationChecks,
+    ...(process.env.SAPLING_BASE_REF ? { baseRef: process.env.SAPLING_BASE_REF } : {}),
+  });
+  logger.info(
+    { workerIds: [implementer.descriptor.id, verifier.descriptor.id] },
+    "runner pull worker started",
+  );
+  await missionWorker.runForever(abort.signal);
+}

@@ -15,8 +15,10 @@
     "@hono/node-server": "2.0.8",
     "@sapling/doctrine": "workspace:*",
     "@sapling/event-store": "workspace:*",
+    "@sapling/mission-engine": "workspace:*",
     "@sapling/observability": "workspace:*",
     "@sapling/protocol": "workspace:*",
+    "@sapling/worker-sdk": "workspace:*",
     "hono": "4.12.28",
     "zod": "4.4.3"
   },

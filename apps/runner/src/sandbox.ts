@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { access, realpath } from "node:fs/promises";
+import { access, open, realpath } from "node:fs/promises";
 import { createServer, request as requestHttp, type IncomingMessage, type Server } from "node:http";
 import { connect, isIP } from "node:net";
+import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Duplex } from "node:stream";
 import type { EventStore } from "@sapling/event-store";
 import type { ActionDecision, ActionRequest, Risk } from "@sapling/protocol";
@@ -73,6 +74,38 @@ export class ShellSandbox {
     environment: NodeJS.ProcessEnv,
     requested: SandboxEscalation = {},
   ): Promise<PreparedSandbox> {
+    return this.prepareInternal(identity, invocation, environment, requested);
+  }
+
+  /**
+   * Verification executes candidate-controlled code with a narrower read boundary than a general worker.
+   * Only the candidate, its explicitly declared dependency inputs, and the resolved tool runtime are readable.
+   */
+  public async prepareVerification(
+    identity: SandboxRunIdentity,
+    invocation: { command: string; args: string[] },
+    environment: NodeJS.ProcessEnv,
+    dependencyRoots: readonly string[] = [],
+  ): Promise<PreparedSandbox> {
+    const workspace = await realpath(identity.workspacePath);
+    const resolvedInvocation = await resolveInvocation(invocation, environment, workspace);
+    const dependencies = await resolveDependencyRoots(dependencyRoots, environment, workspace);
+    return this.prepareInternal(
+      identity,
+      resolvedInvocation.invocation,
+      buildVerificationEnvironment(environment, workspace),
+      {},
+      [workspace, ...VERIFICATION_SYSTEM_READ_ROOTS, ...resolvedInvocation.readRoots, ...dependencies],
+    );
+  }
+
+  private async prepareInternal(
+    identity: SandboxRunIdentity,
+    invocation: { command: string; args: string[] },
+    environment: NodeJS.ProcessEnv,
+    requested: SandboxEscalation,
+    readableRoots?: readonly string[],
+  ): Promise<PreparedSandbox> {
     const workspace = await realpath(identity.workspacePath);
     const networkHosts = [...new Set((requested.networkHosts ?? []).map(normalizeHost))].sort();
     const additionalRoots = await Promise.all(
@@ -110,7 +143,7 @@ export class ShellSandbox {
     }
     const proxy = networkHosts.length > 0 ? await AllowlistProxy.start(networkHosts) : undefined;
     const writableRoots = [workspace, ...additionalRoots];
-    const profile = buildSeatbeltProfile(writableRoots, proxy?.port);
+    const profile = buildSeatbeltProfile(writableRoots, proxy?.port, readableRoots);
     const proxyUrl = proxy ? `http://127.0.0.1:${String(proxy.port)}` : undefined;
     return {
       command: this.options.executable,
@@ -196,7 +229,176 @@ export class ShellSandbox {
     }
   }
 }
-function buildSeatbeltProfile(writableRoots: string[], proxyPort?: number): string {
+
+function buildVerificationEnvironment(environment: NodeJS.ProcessEnv, workspace: string): NodeJS.ProcessEnv {
+  const restricted: NodeJS.ProcessEnv = {
+    ...environment,
+    HOME: workspace,
+    TMPDIR: workspace,
+    TMP: workspace,
+    TEMP: workspace,
+    OPENSSL_CONF: "/dev/null",
+  };
+  delete restricted.CODEX_HOME;
+  delete restricted.XDG_CONFIG_HOME;
+  delete restricted.XDG_CACHE_HOME;
+  return restricted;
+}
+
+const VERIFICATION_SYSTEM_READ_ROOTS = [
+  "/System/Library",
+  "/System/Volumes/Preboot/Cryptexes",
+  "/Library/Apple",
+  "/usr/lib",
+  "/usr/share",
+  "/private/etc/ssl",
+  "/private/etc/localtime",
+  "/private/var/db/timezone",
+  "/dev/null",
+  "/dev/dtracehelper",
+  "/dev/urandom",
+] as const;
+
+async function resolveInvocation(
+  invocation: { command: string; args: string[] },
+  environment: NodeJS.ProcessEnv,
+  workspace: string,
+): Promise<{ invocation: { command: string; args: string[] }; readRoots: string[] }> {
+  const executable = await resolveExecutable(invocation.command, environment, workspace);
+  const executables = new Set<string>();
+  await collectExecutableRuntime(executable, environment, workspace, executables, 0);
+  return {
+    invocation: { command: executable, args: invocation.args },
+    readRoots: [...executables].flatMap((path) => [path, ...toolRuntimeRoots(path)]),
+  };
+}
+
+async function collectExecutableRuntime(
+  executable: string,
+  environment: NodeJS.ProcessEnv,
+  workspace: string,
+  executables: Set<string>,
+  depth: number,
+): Promise<void> {
+  if (executables.has(executable) || depth > 3) return;
+  executables.add(executable);
+  const shebang = await readShebang(executable);
+  if (!shebang) return;
+  const [interpreter, ...arguments_] = shebang.split(/\s+/u);
+  if (!interpreter) return;
+  const resolvedInterpreter = await resolveExecutable(interpreter, environment, workspace);
+  await collectExecutableRuntime(resolvedInterpreter, environment, workspace, executables, depth + 1);
+  if (resolvedInterpreter.endsWith("/env")) {
+    const envCommand = arguments_.find((argument) => !argument.startsWith("-"));
+    if (envCommand) {
+      const resolvedEnvCommand = await resolveExecutable(envCommand, environment, workspace);
+      await collectExecutableRuntime(resolvedEnvCommand, environment, workspace, executables, depth + 1);
+    }
+  }
+}
+
+async function readShebang(path: string): Promise<string | undefined> {
+  const handle = await open(path, "r");
+  try {
+    const buffer = Buffer.alloc(512);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    const firstLine = buffer.subarray(0, bytesRead).toString("utf8").split("\n", 1)[0];
+    return firstLine?.startsWith("#!") ? firstLine.slice(2).trim() : undefined;
+  } finally {
+    await handle.close();
+  }
+}
+
+async function resolveExecutable(
+  command: string,
+  environment: NodeJS.ProcessEnv,
+  workspace: string,
+): Promise<string> {
+  const candidates =
+    isAbsolute(command) || command.includes(sep)
+      ? [resolve(workspace, command)]
+      : (environment.PATH ?? "/usr/bin:/bin:/usr/sbin:/sbin")
+          .split(delimiter)
+          .filter(Boolean)
+          .map((directory) => resolve(directory, command));
+  for (const candidate of candidates) {
+    try {
+      await access(candidate, constants.X_OK);
+      return await realpath(candidate);
+    } catch {
+      // Continue through the trusted PATH without exposing candidate paths in evidence.
+    }
+  }
+  throw new SandboxPreparationError({
+    operation: "platform",
+    reason: "The configured verification executable is unavailable",
+  });
+}
+
+function toolRuntimeRoots(executable: string): string[] {
+  const cellar = /^(.*\/Cellar\/[^/]+\/[^/]+)(?:\/|$)/u.exec(executable)?.[1];
+  if (cellar) {
+    const cellarRoot = /^(.*\/Cellar)(?:\/|$)/u.exec(cellar)?.[1];
+    return cellarRoot ? [cellar, cellarRoot] : [cellar];
+  }
+  const nodeModule = /^(.*\/lib\/node_modules\/(?:@[^/]+\/)?[^/]+)(?:\/|$)/u.exec(executable)?.[1];
+  return [nodeModule ?? dirname(executable)];
+}
+
+async function resolveDependencyRoots(
+  roots: readonly string[],
+  environment: NodeJS.ProcessEnv,
+  workspace: string,
+): Promise<string[]> {
+  const home = environment.HOME ? await canonicalizeExisting(environment.HOME) : undefined;
+  const sensitiveRoots = [
+    environment.CODEX_HOME,
+    environment.XDG_CONFIG_HOME,
+    environment.XDG_CACHE_HOME,
+    home ? join(home, ".sapling") : undefined,
+  ].filter((path): path is string => Boolean(path));
+  const resolvedRoots: string[] = [];
+  for (const root of roots) {
+    if (!isAbsolute(root)) {
+      throw new SandboxPreparationError({
+        operation: "policy",
+        reason: "Verification dependency roots must be absolute",
+      });
+    }
+    const canonical = await realpath(root);
+    if (isWithin(canonical, workspace)) continue;
+    if (
+      (home && (isWithin(canonical, home) || isWithin(home, canonical))) ||
+      sensitiveRoots.some((sensitive) => isWithin(canonical, sensitive) || isWithin(sensitive, canonical))
+    ) {
+      throw new SandboxPreparationError({
+        operation: "policy",
+        reason: "Verification dependency root overlaps runner-private state",
+      });
+    }
+    resolvedRoots.push(canonical);
+  }
+  return [...new Set(resolvedRoots)];
+}
+
+async function canonicalizeExisting(path: string): Promise<string> {
+  try {
+    return await realpath(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+function isWithin(path: string, root: string): boolean {
+  const relativePath = relative(root, path);
+  return relativePath === "" || (relativePath !== ".." && !relativePath.startsWith(`..${sep}`));
+}
+
+function buildSeatbeltProfile(
+  writableRoots: string[],
+  proxyPort?: number,
+  readableRoots?: readonly string[],
+): string {
   const writeFilters = [
     `(literal "/dev/null")`,
     `(literal "/dev/dtracehelper")`,
@@ -204,6 +406,16 @@ function buildSeatbeltProfile(writableRoots: string[], proxyPort?: number): stri
     ...writableRoots.map((path) => `(subpath ${JSON.stringify(path)})`),
   ];
   const denyOutsideWrites = writeFilters.map((filter) => `(require-not ${filter})`).join(" ");
+  const readFilters = readableRoots
+    ? [
+        `(literal "/")`,
+        ...[...new Set(readableRoots)].flatMap((path) => [
+          `(literal ${JSON.stringify(path)})`,
+          `(subpath ${JSON.stringify(path)})`,
+        ]),
+      ]
+    : [];
+  const denyOutsideReads = readFilters.map((filter) => `(require-not ${filter})`).join(" ");
   const networkFilter =
     proxyPort === undefined
       ? ""
@@ -212,10 +424,12 @@ function buildSeatbeltProfile(writableRoots: string[], proxyPort?: number): stri
     "(version 1)",
     "(deny default)",
     `(deny file-write* (require-all ${denyOutsideWrites}) (with send-signal SIGKILL))`,
+    ...(readableRoots ? [`(deny file-read-data (require-all ${denyOutsideReads}))`] : []),
     `(deny network-outbound${networkFilter} (with send-signal SIGKILL))`,
     "(allow process-exec process-fork)",
     "(allow sysctl-read)",
-    "(allow file-read*)",
+    ...(readableRoots ? ["(allow file-read-metadata)"] : []),
+    readableRoots ? `(allow file-read-data ${readFilters.join(" ")})` : "(allow file-read*)",
     `(allow file-write* ${writeFilters.join(" ")})`,
     ...(proxyPort === undefined
       ? []

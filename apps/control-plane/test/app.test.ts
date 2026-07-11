@@ -10,6 +10,7 @@ import {
 import { SqliteEventStore } from "@sapling/event-store";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
+  createBearerAuthenticator,
   createControlPlane,
   type CapabilityBroker,
   type ConnectorActionClassifier,
@@ -37,6 +38,401 @@ beforeAll(async () => {
 });
 
 describe("control plane", () => {
+  it("binds bearer authentication to server-configured identity and ignores caller runner IDs", async () => {
+    const authenticate = createBearerAuthenticator("fixed-secret", { runnerId: "server-runner" });
+    await expect(
+      authenticate(
+        new Request("http://localhost", {
+          headers: {
+            authorization: "Bearer fixed-secret",
+            "x-sapling-runner-id": "caller-selected-runner",
+          },
+        }),
+      ),
+    ).resolves.toEqual({ runnerId: "server-runner" });
+    await expect(
+      authenticate(new Request("http://localhost", { headers: { authorization: "Bearer wrong" } })),
+    ).resolves.toBeUndefined();
+  });
+
+  it("authenticates pull execution and makes claim, event, and settlement idempotent", async () => {
+    const execution = await createControlPlane({
+      doctrine,
+      authenticateRunner: (request) =>
+        Promise.resolve(
+          request.headers.get("authorization") === "Bearer runner-secret"
+            ? { runnerId: "runner-test" }
+            : request.headers.get("authorization") === "Bearer other-runner"
+              ? { runnerId: "runner-other" }
+              : undefined,
+        ),
+      authenticateCaptain: (request) =>
+        Promise.resolve(
+          request.headers.get("authorization") === "Bearer captain-secret"
+            ? { captainId: "captain-test" }
+            : undefined,
+        ),
+    });
+    const unavailable = await app.request("/v1/runner/claims", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ claimId: "unavailable", workers: [] }),
+    });
+    expect(unavailable.status).toBe(503);
+    const unauthorized = await execution.request("/v1/runner/claims", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ claimId: "unauthorized", workers: [] }),
+    });
+    expect(unauthorized.status).toBe(401);
+
+    const created = await execution.request("/v1/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ goal: "Pull one candidate" }),
+    });
+    const { missionId } = (await created.json()) as { missionId: string };
+    const plan = {
+      missionId,
+      goal: "Pull one candidate",
+      rationale: "Exercise the authenticated runner boundary.",
+      tasks: [
+        {
+          id: "implement",
+          title: "Implement",
+          objective: "Write the candidate.",
+          kind: "implementation",
+          role: "implementer",
+          writeScope: ["src/**"],
+          successCriteria: ["Candidate is written."],
+          evidenceRequirements: ["Diff artifact."],
+        },
+        {
+          id: "verify",
+          title: "Verify",
+          objective: "Inspect the retained candidate.",
+          kind: "verification",
+          role: "verifier",
+          dependsOn: ["implement"],
+          successCriteria: ["Candidate is correct."],
+          evidenceRequirements: ["Verification report."],
+        },
+      ],
+      successCriteria: ["Both tasks settle."],
+      profileHash,
+    };
+    expect(
+      (
+        await execution.request(`/v1/missions/${missionId}/plan`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(plan),
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await execution.request(`/v1/missions/${missionId}/start`, {
+          method: "POST",
+          headers: { authorization: "Bearer captain-secret" },
+        })
+      ).status,
+    ).toBe(202);
+    expect(
+      (
+        await execution.request(`/v1/missions/${missionId}/plan`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(plan),
+        })
+      ).status,
+    ).toBe(409);
+
+    const headers = {
+      authorization: "Bearer runner-secret",
+      "content-type": "application/json",
+      "x-sapling-runner-id": "runner-test",
+    };
+    const workers = [
+      {
+        id: "codex-implementer",
+        displayName: "Codex implementer",
+        harness: "codex",
+        capabilities: {
+          kinds: ["implementation"],
+          canWrite: true,
+          supportsStructuredEvents: true,
+          supportsTerminal: true,
+          supportsNativeSession: true,
+        },
+      },
+      {
+        id: "codex-verifier",
+        displayName: "Codex verifier",
+        harness: "codex",
+        capabilities: {
+          kinds: ["verification"],
+          canWrite: false,
+          supportsStructuredEvents: true,
+          supportsTerminal: true,
+          supportsNativeSession: true,
+        },
+      },
+    ];
+    const claimBody = JSON.stringify({ claimId: "claim-1", workers });
+    const claimed = await execution.request("/v1/runner/claims", {
+      method: "POST",
+      headers,
+      body: claimBody,
+    });
+    const first = (await claimed.json()) as { assignment: { workerRunId: string; attempt: number } };
+    const duplicate = await execution.request("/v1/runner/claims", {
+      method: "POST",
+      headers,
+      body: claimBody,
+    });
+    await expect(duplicate.json()).resolves.toEqual(first);
+
+    const workerRunId = first.assignment.workerRunId;
+    const otherRunnerHeaders = {
+      authorization: "Bearer other-runner",
+      "content-type": "application/json",
+    };
+    const rejectedOwner = await execution.request(`/v1/runner/workers/${workerRunId}/heartbeat`, {
+      method: "POST",
+      headers: otherRunnerHeaders,
+      body: JSON.stringify({ attempt: 1 }),
+    });
+    expect(rejectedOwner.status).toBe(409);
+    await expect(rejectedOwner.json()).resolves.toMatchObject({ error: "worker_runner_mismatch" });
+    const eventBody = JSON.stringify({
+      attempt: 1,
+      eventId: "event-1",
+      type: "worker.command.completed",
+      data: { exitCode: 0 },
+    });
+    const stale = await execution.request(`/v1/runner/workers/${workerRunId}/events`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        attempt: 2,
+        eventId: "stale-event",
+        type: "worker.command.completed",
+        data: {},
+      }),
+    });
+    expect(stale.status).toBe(409);
+    await expect(stale.json()).resolves.toMatchObject({ error: "stale_worker_run" });
+    const eventOne = await execution.request(`/v1/runner/workers/${workerRunId}/events`, {
+      method: "POST",
+      headers,
+      body: eventBody,
+    });
+    const stolenDuplicate = await execution.request(`/v1/runner/workers/${workerRunId}/events`, {
+      method: "POST",
+      headers: otherRunnerHeaders,
+      body: eventBody,
+    });
+    expect(stolenDuplicate.status).toBe(409);
+    const eventTwo = await execution.request(`/v1/runner/workers/${workerRunId}/events`, {
+      method: "POST",
+      headers,
+      body: eventBody,
+    });
+    await expect(eventTwo.json()).resolves.toEqual(await eventOne.json());
+    const injected = await execution.request(`/v1/runner/workers/${workerRunId}/events`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        attempt: 1,
+        eventId: "injected",
+        type: "mission.succeeded",
+        data: {},
+      }),
+    });
+    expect(injected.status).toBe(400);
+
+    const settlementBody = JSON.stringify({
+      attempt: 1,
+      result: { status: "succeeded", summary: "done", evidence: [], outputs: {} },
+    });
+    const settledOne = await execution.request(`/v1/runner/workers/${workerRunId}/settle`, {
+      method: "POST",
+      headers,
+      body: settlementBody,
+    });
+    const settledTwo = await execution.request(`/v1/runner/workers/${workerRunId}/settle`, {
+      method: "POST",
+      headers,
+      body: settlementBody,
+    });
+    expect(settledOne.status).toBe(200);
+    expect(settledTwo.status).toBe(200);
+    expect(
+      (
+        await execution.request("/v1/runner/claims", {
+          method: "POST",
+          headers,
+          body: claimBody,
+        })
+      ).status,
+    ).toBe(204);
+    const verificationClaim = await execution.request("/v1/runner/claims", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ claimId: "claim-2", workers }),
+    });
+    const verification = (await verificationClaim.json()) as {
+      assignment: { workerRunId: string; attempt: number };
+    };
+    const verified = await execution.request(
+      `/v1/runner/workers/${verification.assignment.workerRunId}/settle`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          attempt: verification.assignment.attempt,
+          result: {
+            status: "succeeded",
+            summary: "verified",
+            evidence: [{ kind: "test_report", label: "runner-check", summary: "passed" }],
+            outputs: {},
+          },
+        }),
+      },
+    );
+    expect(verified.status).toBe(200);
+    const live = await execution.request(`/v1/missions/${missionId}`);
+    const mission = (await live.json()) as {
+      id: string;
+      state: string;
+      tasks: Array<{ spec: { id: string }; state: string; result?: { summary: string } }>;
+    };
+    expect(mission).toMatchObject({ id: missionId, state: "succeeded" });
+    expect(mission.tasks.find((task) => task.spec.id === "implement")).toMatchObject({
+      state: "succeeded",
+      result: { summary: "done" },
+    });
+  });
+
+  it("fails mission start closed without configured and authenticated captain authority", async () => {
+    const noCaptain = await createControlPlane({
+      doctrine,
+      authenticateRunner: () => Promise.resolve({ runnerId: "runner" }),
+    });
+    const created = await noCaptain.request("/v1/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ goal: "do not start" }),
+    });
+    const { missionId } = (await created.json()) as { missionId: string };
+    expect((await noCaptain.request(`/v1/missions/${missionId}/start`, { method: "POST" })).status).toBe(503);
+
+    const protectedStart = await createControlPlane({
+      doctrine,
+      authenticateRunner: () => Promise.resolve({ runnerId: "runner" }),
+      authenticateCaptain: () => Promise.resolve(undefined),
+    });
+    expect((await protectedStart.request("/v1/missions/missing/start", { method: "POST" })).status).toBe(401);
+    const noRunner = await createControlPlane({
+      doctrine,
+      authenticateCaptain: () => Promise.resolve({ captainId: "captain" }),
+    });
+    expect(
+      (
+        await noRunner.request("/v1/missions/missing/start", {
+          method: "POST",
+          headers: { authorization: "Bearer captain" },
+        })
+      ).status,
+    ).toBe(503);
+  });
+
+  it("rejects an unsupported or poisoned plan before persistence", async () => {
+    const created = await app.request("/v1/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ goal: "reject poison" }),
+    });
+    const { missionId } = (await created.json()) as { missionId: string };
+    const rejected = await app.request(`/v1/missions/${missionId}/plan`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        missionId,
+        goal: "reject poison",
+        rationale: "invalid dependency",
+        successCriteria: ["never persisted"],
+        profileHash,
+        tasks: [
+          {
+            id: "implement",
+            title: "Implement",
+            objective: "Implement",
+            kind: "implementation",
+            role: "implementer",
+            writeScope: ["src/**"],
+            successCriteria: ["done"],
+            evidenceRequirements: ["diff"],
+          },
+          {
+            id: "verify",
+            title: "Verify",
+            objective: "Verify",
+            kind: "verification",
+            role: "verifier",
+            dependsOn: ["missing"],
+            successCriteria: ["done"],
+            evidenceRequirements: ["test report"],
+          },
+        ],
+      }),
+    });
+    expect(rejected.status).toBe(400);
+    await expect((await app.request(`/v1/missions/${missionId}`)).json()).resolves.toMatchObject({
+      state: "draft",
+    });
+
+    const wrongRole = await app.request(`/v1/missions/${missionId}/plan`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        missionId,
+        goal: "reject poison",
+        rationale: "implementation role is authoritative",
+        successCriteria: ["never persisted"],
+        profileHash,
+        tasks: [
+          {
+            id: "implement",
+            title: "Implement",
+            objective: "Implement",
+            kind: "implementation",
+            role: "verifier",
+            writeScope: ["src/**"],
+            successCriteria: ["done"],
+            evidenceRequirements: ["diff"],
+          },
+          {
+            id: "verify",
+            title: "Verify",
+            objective: "Verify",
+            kind: "verification",
+            role: "verifier",
+            dependsOn: ["implement"],
+            successCriteria: ["done"],
+            evidenceRequirements: ["test report"],
+          },
+        ],
+      }),
+    });
+    expect(wrongRole.status).toBe(400);
+    await expect(wrongRole.json()).resolves.toMatchObject({
+      error: "unsupported_mission_plan",
+      message: expect.stringContaining("implementer role"),
+    });
+  });
+
   it("reports the compiled doctrine and persists a mission draft", async () => {
     const health = await app.request("/health");
     expect(health.status).toBe(200);
@@ -105,7 +501,19 @@ describe("control plane", () => {
   it("rebuilds mission records from the SQLite event store after a restart", async () => {
     const storePath = join(await mkdtemp(join(tmpdir(), "sapling-control-plane-")), "events.db");
     const store = new SqliteEventStore(storePath);
-    const durable = await createControlPlane({ doctrine, eventStore: store });
+    const authenticateRunner = (request: Request) =>
+      Promise.resolve(
+        request.headers.get("authorization") === "Bearer durable-runner"
+          ? { runnerId: "durable-runner" }
+          : undefined,
+      );
+    const authenticateCaptain = () => Promise.resolve({ captainId: "durable-captain" });
+    const durable = await createControlPlane({
+      doctrine,
+      eventStore: store,
+      authenticateRunner,
+      authenticateCaptain,
+    });
 
     const created = await durable.request("/v1/missions", {
       method: "POST",
@@ -121,11 +529,22 @@ describe("control plane", () => {
       rationale: "Restart-recovery coverage for the durable event store.",
       tasks: [
         {
-          id: "t-1",
+          id: "implement",
+          title: "Implement durability",
+          objective: "Create a retained candidate.",
+          kind: "implementation",
+          role: "implementer",
+          writeScope: ["src/**"],
+          successCriteria: ["Candidate exists."],
+          evidenceRequirements: ["Diff exists."],
+        },
+        {
+          id: "verify",
           title: "Prove durability",
-          objective: "Confirm the mission record survives a control-plane restart.",
+          objective: "Confirm the mission result survives a control-plane restart.",
           kind: "verification",
           role: "verifier",
+          dependsOn: ["implement"],
           successCriteria: ["The mission and its plan are rebuilt from the event log."],
           evidenceRequirements: ["The replayed mission matches the stored plan."],
         },
@@ -139,17 +558,163 @@ describe("control plane", () => {
       body: JSON.stringify(plan),
     });
     expect(planned.status).toBe(200);
+    expect((await durable.request(`/v1/missions/${missionId}/start`, { method: "POST" })).status).toBe(202);
+    const runnerHeaders = {
+      authorization: "Bearer durable-runner",
+      "content-type": "application/json",
+    };
+    const claimed = await durable.request("/v1/runner/claims", {
+      method: "POST",
+      headers: runnerHeaders,
+      body: JSON.stringify({
+        claimId: "durable-claim",
+        workers: [
+          {
+            id: "codex-implementer",
+            displayName: "Codex implementer",
+            harness: "codex",
+            capabilities: {
+              kinds: ["implementation"],
+              canWrite: true,
+              supportsStructuredEvents: true,
+              supportsTerminal: true,
+              supportsNativeSession: true,
+            },
+          },
+          {
+            id: "codex-verifier",
+            displayName: "Codex verifier",
+            harness: "codex",
+            capabilities: {
+              kinds: ["verification"],
+              canWrite: false,
+              supportsStructuredEvents: true,
+              supportsTerminal: true,
+              supportsNativeSession: true,
+            },
+          },
+        ],
+      }),
+    });
+    const { assignment } = (await claimed.json()) as {
+      assignment: { workerRunId: string; attempt: number };
+    };
+    expect(
+      (
+        await durable.request(`/v1/runner/workers/${assignment.workerRunId}/settle`, {
+          method: "POST",
+          headers: runnerHeaders,
+          body: JSON.stringify({
+            attempt: assignment.attempt,
+            result: { status: "succeeded", summary: "durable result", evidence: [], outputs: {} },
+          }),
+        })
+      ).status,
+    ).toBe(200);
+    const verificationClaim = await durable.request("/v1/runner/claims", {
+      method: "POST",
+      headers: runnerHeaders,
+      body: JSON.stringify({
+        claimId: "durable-verification-claim",
+        workers: [
+          {
+            id: "codex-verifier",
+            displayName: "Codex verifier",
+            harness: "codex",
+            capabilities: {
+              kinds: ["verification"],
+              canWrite: false,
+              supportsStructuredEvents: true,
+              supportsTerminal: true,
+              supportsNativeSession: true,
+            },
+          },
+        ],
+      }),
+    });
+    const { assignment: verificationAssignment } = (await verificationClaim.json()) as {
+      assignment: { workerRunId: string; attempt: number };
+    };
+    expect(
+      (
+        await durable.request(`/v1/runner/workers/${verificationAssignment.workerRunId}/settle`, {
+          method: "POST",
+          headers: runnerHeaders,
+          body: JSON.stringify({
+            attempt: verificationAssignment.attempt,
+            result: {
+              status: "succeeded",
+              summary: "durable verification",
+              evidence: [{ kind: "test_report", label: "durable-check", summary: "passed" }],
+              outputs: {},
+            },
+          }),
+        })
+      ).status,
+    ).toBe(200);
+    const duplicateVerificationBody = JSON.stringify({
+      attempt: verificationAssignment.attempt,
+      result: {
+        status: "succeeded",
+        summary: "durable verification",
+        evidence: [{ kind: "test_report", label: "durable-check", summary: "passed" }],
+        outputs: {},
+      },
+    });
+    expect(
+      (
+        await durable.request(`/v1/runner/workers/${verificationAssignment.workerRunId}/settle`, {
+          method: "POST",
+          headers: runnerHeaders,
+          body: duplicateVerificationBody,
+        })
+      ).status,
+    ).toBe(200);
+    expect(await store.verify()).toMatchObject({ valid: true, count: 14 });
     store.close();
 
     const reopenedStore = new SqliteEventStore(storePath);
-    const restarted = await createControlPlane({ doctrine, eventStore: reopenedStore });
+    const restarted = await createControlPlane({
+      doctrine,
+      eventStore: reopenedStore,
+      authenticateRunner,
+      authenticateCaptain,
+    });
     const fetched = await restarted.request(`/v1/missions/${missionId}`);
     expect(fetched.status).toBe(200);
     const record = (await fetched.json()) as Record<string, unknown>;
-    expect(record).toMatchObject({ id: missionId, goal: "Survive a restart", state: "planned" });
-    expect((record.plan as { tasks: unknown[] }).tasks).toHaveLength(1);
-    expect(await reopenedStore.verify()).toMatchObject({ valid: true, count: 2 });
+    expect(record).toMatchObject({ id: missionId, goal: "Survive a restart", state: "succeeded" });
+    expect((record.plan as { tasks: unknown[] }).tasks).toHaveLength(2);
+    expect(record.tasks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          state: "succeeded",
+          result: { summary: "durable result", evidence: [], outputs: {}, status: "succeeded" },
+        }),
+        expect.objectContaining({
+          state: "succeeded",
+          result: expect.objectContaining({ summary: "durable verification" }),
+        }),
+      ]),
+    );
+    expect(
+      (
+        await restarted.request(`/v1/runner/workers/${verificationAssignment.workerRunId}/settle`, {
+          method: "POST",
+          headers: runnerHeaders,
+          body: duplicateVerificationBody,
+        })
+      ).status,
+    ).toBe(200);
+    expect(await reopenedStore.verify()).toMatchObject({ valid: true, count: 14 });
     reopenedStore.close();
+
+    const staleStore = new SqliteEventStore(storePath);
+    const staleDoctrine = compileDoctrine([{ ...doctrine.profile, id: "changed-after-persistence" }]);
+    await expect(createControlPlane({ doctrine: staleDoctrine, eventStore: staleStore })).rejects.toThrow(
+      /doctrine .* is stale/u,
+    );
+    staleStore.close();
   });
 });
 

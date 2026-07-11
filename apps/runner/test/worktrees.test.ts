@@ -103,6 +103,85 @@ describe("WorktreeManager", () => {
     expect(await survivor.listLeases()).toEqual([]);
   });
 
+  it("atomically manifests and reacquires a preserved dirty mission candidate", async () => {
+    const { manager, repoPath, rootDir } = await makeManager();
+    const candidate = await manager.create(holder("run-candidate"));
+    await manager.persistCandidate(candidate);
+    await writeFile(join(candidate.path, "candidate.ts"), "export const retained = true;\n", "utf8");
+
+    const restarted = new WorktreeManager({ repoPath, rootDir, isProcessAlive: () => false });
+    expect((await restarted.reclaimOrphans()).preserved).toHaveLength(1);
+    const recovered = await restarted.recoverCandidate("m-1", holder("run-verifier"));
+    expect(recovered).toMatchObject({
+      path: candidate.path,
+      branch: candidate.branch,
+      baseCommit: candidate.baseCommit,
+      workerRunId: "run-verifier",
+    });
+    await expect(readFile(join(recovered.path, "candidate.ts"), "utf8")).resolves.toContain(
+      "retained = true",
+    );
+  });
+
+  it.each([
+    { state: "clean", ignoredPath: undefined },
+    { state: "ignored-only", ignoredPath: ".env" },
+  ])("preserves and reacquires a manifested $state candidate after restart", async ({ ignoredPath }) => {
+    const { manager, repoPath, rootDir } = await makeManager();
+    if (ignoredPath) {
+      await writeFile(join(repoPath, ".gitignore"), `${ignoredPath}\n`, "utf8");
+      await git(repoPath, ["add", ".gitignore"]);
+      await git(repoPath, ["commit", "-m", "ignore local candidate state"]);
+    }
+    const candidate = await manager.create(holder("run-candidate"));
+    await manager.persistCandidate(candidate);
+    if (ignoredPath) await writeFile(join(candidate.path, ignoredPath), "retained secret\n", "utf8");
+
+    const restarted = new WorktreeManager({ repoPath, rootDir, isProcessAlive: () => false });
+    const report = await restarted.reclaimOrphans();
+    expect(report.removed).toEqual([]);
+    expect(report.preserved.map((entry) => entry.leaseId)).toEqual([candidate.id]);
+    expect(await restarted.listLeases()).toEqual([]);
+    await expect(readFile(join(candidate.path, "README.md"), "utf8")).resolves.toContain("fixture");
+
+    const recovered = await restarted.recoverCandidate("m-1", holder("run-verifier"));
+    expect(recovered.path).toBe(candidate.path);
+    if (ignoredPath) {
+      await expect(readFile(join(recovered.path, ignoredPath), "utf8")).resolves.toContain("retained secret");
+    }
+  });
+
+  it("fails candidate recovery closed for missing, corrupt, and mismatched manifests", async () => {
+    const { manager, repoPath, rootDir } = await makeManager();
+    await expect(manager.recoverCandidate("missing", holder("run-missing"))).rejects.toThrow(
+      /candidate_manifest_missing/u,
+    );
+
+    const candidate = await manager.create(holder("run-candidate"));
+    await manager.persistCandidate(candidate);
+    await writeFile(join(candidate.path, "candidate.ts"), "dirty\n");
+    const restarted = new WorktreeManager({ repoPath, rootDir, isProcessAlive: () => false });
+    await restarted.reclaimOrphans();
+    const [manifestName] = await readdir(join(rootDir, "candidates"));
+    const manifestPath = join(rootDir, "candidates", manifestName as string);
+    await writeFile(manifestPath, "{broken", "utf8");
+    await expect(restarted.recoverCandidate("m-1", holder("run-corrupt"))).rejects.toThrow(/corrupt/u);
+
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify({
+        missionId: "m-1",
+        path: candidate.path,
+        branch: "sapling/wrong/branch",
+        baseCommit: candidate.baseCommit,
+      })}\n`,
+      "utf8",
+    );
+    await expect(restarted.recoverCandidate("m-1", holder("run-mismatch"))).rejects.toThrow(
+      /does not match/u,
+    );
+  });
+
   it("rejects aliased spellings of an already-leased physical path", async () => {
     const { manager } = await makeManager();
     const real = await mkdtemp(join(tmpdir(), "sapling-alias-real-"));

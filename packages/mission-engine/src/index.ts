@@ -10,7 +10,7 @@ import {
   type TaskState,
   type WorkerResult,
 } from "@sapling/protocol";
-import type { WorkerAdapter, WorkerRouter } from "@sapling/worker-sdk";
+import type { WorkerAdapter, WorkerDescriptor, WorkerRouter } from "@sapling/worker-sdk";
 
 export interface TaskRuntime {
   spec: TaskSpec;
@@ -19,6 +19,8 @@ export interface TaskRuntime {
   workerRunId?: string;
   workerId?: string;
   workerHarness?: string;
+  runnerId?: string;
+  leaseExpiresAt?: string;
   result?: WorkerResult;
   startedAt?: string;
   completedAt?: string;
@@ -38,12 +40,55 @@ export interface MissionEngineOptions {
   workspacePath: string;
   clock?: () => Date;
   idFactory?: () => string;
+  replayEvents?: readonly DomainEvent[];
+}
+
+export interface WorkerAssignment {
+  missionId: string;
+  profileHash: string;
+  workerRunId: string;
+  attempt: number;
+  task: TaskSpec;
+  worker: WorkerDescriptor;
+  runnerId: string;
+  leaseExpiresAt: string;
+}
+
+export interface WorkerEventInput {
+  workerRunId: string;
+  attempt: number;
+  eventId: string;
+  type: string;
+  data: Record<string, unknown>;
+}
+
+export class WorkerRunConflictError extends Error {
+  public readonly code:
+    | "unknown_worker_run"
+    | "stale_worker_run"
+    | "worker_runner_mismatch"
+    | "conflicting_settlement";
+
+  public constructor(
+    code: "unknown_worker_run" | "stale_worker_run" | "worker_runner_mismatch" | "conflicting_settlement",
+    message: string,
+  ) {
+    super(message);
+    this.code = code;
+    this.name = "WorkerRunConflictError";
+  }
 }
 
 export class MissionEngine {
   private readonly tasks = new Map<string, TaskRuntime>();
   private readonly events: DomainEvent[] = [];
   private readonly approvals: ApprovalRecord[] = [];
+  private readonly assignmentsByClaimId = new Map<string, WorkerAssignment>();
+  private readonly workerEventsById = new Map<string, DomainEvent>();
+  private readonly settledRuns = new Map<
+    string,
+    { attempt: number; result: WorkerResult; taskId: string; runnerId: string }
+  >();
   private state: MissionState = "draft";
   private readonly clock: () => Date;
   private readonly idFactory: () => string;
@@ -60,13 +105,24 @@ export class MissionEngine {
     assertValidDag(plan.tasks);
     this.clock = options.clock ?? (() => new Date());
     this.idFactory = options.idFactory ?? randomUUID;
-    this.correlationId = this.idFactory();
+    this.correlationId =
+      options.replayEvents?.find((event) => event.missionId === plan.missionId)?.correlationId ??
+      this.idFactory();
     for (const task of plan.tasks) {
       this.tasks.set(task.id, { spec: task, state: "queued", attempts: 0 });
     }
-    this.state = "running";
-    this.emit("mission.created", { goal: plan.goal, taskCount: plan.tasks.length });
-    this.emit("mission.started", { doctrine: doctrine.profile.id });
+    const replayEvents = options.replayEvents?.filter((event) => event.missionId === plan.missionId) ?? [];
+    if (replayEvents.length > 0) {
+      for (const event of replayEvents) {
+        this.events.push(structuredClone(event));
+        this.applyReplayEvent(event);
+      }
+      this.recomputeState();
+    } else {
+      this.state = "running";
+      this.emit("mission.created", { goal: plan.goal, taskCount: plan.tasks.length });
+      this.emit("mission.started", { doctrine: doctrine.profile.id });
+    }
   }
 
   public getSnapshot(): MissionSnapshot {
@@ -106,6 +162,197 @@ export class MissionEngine {
     return this.emit(type, data, taskId);
   }
 
+  /** Lease one dependency-ready task to an eligible runner worker. */
+  public leaseReadyTask(
+    workers: readonly WorkerDescriptor[],
+    claimId: string,
+    runnerId = "local",
+    leaseDurationMs = 30_000,
+  ): WorkerAssignment | undefined {
+    const previous = this.assignmentsByClaimId.get(claimId);
+    if (previous) {
+      const runtime = this.tasks.get(previous.task.id);
+      const stillActive =
+        runtime?.state === "running" &&
+        runtime.workerRunId === previous.workerRunId &&
+        runtime.attempts === previous.attempt;
+      if (!stillActive) return undefined;
+      if (previous.runnerId !== runnerId) {
+        throw new WorkerRunConflictError(
+          "worker_runner_mismatch",
+          `Claim ${claimId} belongs to runner ${previous.runnerId}`,
+        );
+      }
+      return structuredClone(previous);
+    }
+    const active = [...this.tasks.values()].filter(
+      (task) => task.state === "leased" || task.state === "running",
+    ).length;
+    if (active >= this.doctrine.scheduler.maxParallelWorkers) return undefined;
+
+    for (const runtime of this.tasks.values()) {
+      if (
+        runtime.state !== "queued" ||
+        !runtime.spec.dependsOn.every((dependency) => this.tasks.get(dependency)?.state === "succeeded")
+      ) {
+        continue;
+      }
+      const excluded = this.excludedWorkers(runtime.spec);
+      const worker = workers.find(
+        (candidate) =>
+          !excluded.has(candidate.id) &&
+          candidate.capabilities.kinds.includes(runtime.spec.kind) &&
+          (!runtime.spec.preferredHarness || candidate.harness === runtime.spec.preferredHarness) &&
+          (runtime.spec.writeScope.length === 0 || candidate.capabilities.canWrite),
+      );
+      if (!worker) continue;
+
+      runtime.attempts += 1;
+      runtime.state = "running";
+      runtime.startedAt = this.clock().toISOString();
+      runtime.workerRunId = this.idFactory();
+      runtime.workerId = worker.id;
+      runtime.workerHarness = worker.harness;
+      runtime.runnerId = runnerId;
+      runtime.leaseExpiresAt = new Date(this.clock().getTime() + leaseDurationMs).toISOString();
+      const assignment: WorkerAssignment = {
+        missionId: this.plan.missionId,
+        profileHash: this.plan.profileHash,
+        workerRunId: runtime.workerRunId,
+        attempt: runtime.attempts,
+        task: structuredClone(runtime.spec),
+        worker: structuredClone(worker),
+        runnerId,
+        leaseExpiresAt: runtime.leaseExpiresAt,
+      };
+      this.assignmentsByClaimId.set(claimId, assignment);
+      this.emit(
+        "worker.leased",
+        {
+          claimId,
+          attempt: runtime.attempts,
+          worker: structuredClone(worker),
+          runnerId,
+          leaseExpiresAt: runtime.leaseExpiresAt,
+        },
+        runtime.spec.id,
+        runtime.workerRunId,
+      );
+      this.emit("task.started", { title: runtime.spec.title }, runtime.spec.id, runtime.workerRunId);
+      this.recomputeState();
+      return structuredClone(assignment);
+    }
+    this.recomputeState();
+    return undefined;
+  }
+
+  /** Record one runner/provider event exactly once for the active attempt. */
+  public recordWorkerEvent(input: WorkerEventInput, runnerId = "local"): DomainEvent {
+    const eventKey = workerEventKey(input.workerRunId, input.attempt, input.eventId);
+    const previous = this.workerEventsById.get(eventKey);
+    if (previous) {
+      const owner = previous.taskId ? this.tasks.get(previous.taskId)?.runnerId : undefined;
+      if (owner !== runnerId) {
+        throw new WorkerRunConflictError(
+          "worker_runner_mismatch",
+          `Worker run ${input.workerRunId} belongs to runner ${owner ?? "unknown"}`,
+        );
+      }
+      return structuredClone(previous);
+    }
+    const runtime = this.findActiveRun(input.workerRunId, input.attempt, runnerId);
+    const event = this.emit(input.type, input.data, runtime.spec.id, input.workerRunId, input.eventId);
+    this.workerEventsById.set(eventKey, event);
+    return structuredClone(event);
+  }
+
+  /** Settle an exact worker attempt. Replays return the first settlement without another transition. */
+  public settleWorkerRun(
+    workerRunId: string,
+    attempt: number,
+    result: WorkerResult,
+    runnerId = "local",
+  ): TaskRuntime {
+    const settled = this.settledRuns.get(workerRunId);
+    if (settled) {
+      if (settled.runnerId !== runnerId) {
+        throw new WorkerRunConflictError(
+          "worker_runner_mismatch",
+          `Worker run ${workerRunId} belongs to runner ${settled.runnerId}`,
+        );
+      }
+      if (settled.attempt !== attempt || JSON.stringify(settled.result) !== JSON.stringify(result)) {
+        throw new WorkerRunConflictError(
+          "conflicting_settlement",
+          `Worker run ${workerRunId} was already settled with a different result`,
+        );
+      }
+      return this.getTask(settled.taskId);
+    }
+    const runtime = this.findActiveRun(workerRunId, attempt, runnerId);
+    runtime.result = structuredClone(result);
+    runtime.completedAt = this.clock().toISOString();
+    runtime.state =
+      result.status === "succeeded" ? "succeeded" : result.status === "blocked" ? "blocked" : "failed";
+    this.settledRuns.set(workerRunId, {
+      attempt,
+      result: structuredClone(result),
+      taskId: runtime.spec.id,
+      runnerId,
+    });
+    this.emit(
+      `task.${runtime.state}`,
+      { summary: result.summary, evidenceCount: result.evidence.length, diagnosis: result.diagnosis },
+      runtime.spec.id,
+      workerRunId,
+    );
+    this.emit(
+      "worker.settled",
+      { attempt, workerId: runtime.workerId, result: structuredClone(result) },
+      runtime.spec.id,
+      workerRunId,
+    );
+    delete runtime.workerRunId;
+    delete runtime.leaseExpiresAt;
+    this.recomputeState();
+    return structuredClone(runtime);
+  }
+
+  public heartbeatWorkerRun(
+    workerRunId: string,
+    attempt: number,
+    runnerId: string,
+    leaseDurationMs = 30_000,
+  ): TaskRuntime {
+    const runtime = this.findActiveRun(workerRunId, attempt, runnerId);
+    runtime.leaseExpiresAt = new Date(this.clock().getTime() + leaseDurationMs).toISOString();
+    this.emit(
+      "worker.lease.renewed",
+      { attempt, runnerId, leaseExpiresAt: runtime.leaseExpiresAt },
+      runtime.spec.id,
+      workerRunId,
+    );
+    return structuredClone(runtime);
+  }
+
+  public expireAbandonedWorkerRuns(now = this.clock()): TaskRuntime[] {
+    const expired: TaskRuntime[] = [];
+    for (const runtime of this.tasks.values()) {
+      if (
+        runtime.state !== "running" ||
+        !runtime.workerRunId ||
+        !runtime.leaseExpiresAt ||
+        Date.parse(runtime.leaseExpiresAt) > now.getTime()
+      ) {
+        continue;
+      }
+      expired.push(
+        this.expireWorkerLease(runtime.spec.id, runtime.workerRunId, "runner heartbeat lease expired"),
+      );
+    }
+    return expired;
+  }
+
   /**
    * Lease surface for the runner: a worker whose process lease expired or was
    * lost leaves its task in a recoverable state — requeued while attempts
@@ -132,6 +379,8 @@ export class MissionEngine {
       delete runtime.workerRunId;
       delete runtime.workerId;
       delete runtime.workerHarness;
+      delete runtime.runnerId;
+      delete runtime.leaseExpiresAt;
       this.emit("task.requeued", { reason, attempt: runtime.attempts }, taskId, workerRunId);
     } else {
       runtime.state = "failed";
@@ -145,6 +394,7 @@ export class MissionEngine {
       };
       this.emit("task.failed", { summary: runtime.result.summary, diagnosis: reason }, taskId, workerRunId);
       delete runtime.workerRunId;
+      delete runtime.leaseExpiresAt;
     }
     this.recomputeState();
     return structuredClone(runtime);
@@ -212,6 +462,138 @@ export class MissionEngine {
       return;
     }
     this.state = "running";
+  }
+
+  private excludedWorkers(spec: TaskSpec): Set<string> {
+    const excluded = new Set<string>();
+    if (spec.kind === "verification" && this.doctrine.profile.verification.independentVerifier) {
+      for (const dependency of spec.dependsOn) {
+        const dependencyWorker = this.tasks.get(dependency)?.workerId;
+        if (dependencyWorker) excluded.add(dependencyWorker);
+      }
+    }
+    return excluded;
+  }
+
+  private findActiveRun(workerRunId: string, attempt: number, runnerId?: string): TaskRuntime {
+    const runtime = [...this.tasks.values()].find((candidate) => candidate.workerRunId === workerRunId);
+    if (!runtime) {
+      throw new WorkerRunConflictError("unknown_worker_run", `Unknown active worker run ${workerRunId}`);
+    }
+    if (runtime.attempts !== attempt || runtime.state !== "running") {
+      throw new WorkerRunConflictError(
+        "stale_worker_run",
+        `Worker run ${workerRunId} attempt ${attempt} is not the active attempt`,
+      );
+    }
+    if (runnerId !== undefined && runtime.runnerId !== runnerId) {
+      throw new WorkerRunConflictError(
+        "worker_runner_mismatch",
+        `Worker run ${workerRunId} belongs to runner ${runtime.runnerId ?? "unknown"}`,
+      );
+    }
+    return runtime;
+  }
+
+  private applyReplayEvent(event: DomainEvent): void {
+    if (event.type === "worker.leased" && event.taskId && event.workerRunId) {
+      const runtime = this.tasks.get(event.taskId);
+      const worker = event.data.worker as WorkerDescriptor | undefined;
+      const attempt = typeof event.data.attempt === "number" ? event.data.attempt : undefined;
+      const claimId = typeof event.data.claimId === "string" ? event.data.claimId : undefined;
+      const runnerId = typeof event.data.runnerId === "string" ? event.data.runnerId : undefined;
+      const leaseExpiresAt =
+        typeof event.data.leaseExpiresAt === "string" ? event.data.leaseExpiresAt : undefined;
+      if (!runtime || !worker || !attempt || !claimId || !runnerId || !leaseExpiresAt) return;
+      runtime.state = "running";
+      runtime.attempts = attempt;
+      runtime.workerRunId = event.workerRunId;
+      runtime.workerId = worker.id;
+      runtime.workerHarness = worker.harness;
+      runtime.runnerId = runnerId;
+      runtime.leaseExpiresAt = leaseExpiresAt;
+      runtime.startedAt = event.occurredAt;
+      this.assignmentsByClaimId.set(claimId, {
+        missionId: this.plan.missionId,
+        profileHash: this.plan.profileHash,
+        workerRunId: event.workerRunId,
+        attempt,
+        task: structuredClone(runtime.spec),
+        worker: structuredClone(worker),
+        runnerId,
+        leaseExpiresAt,
+      });
+      return;
+    }
+    if (event.type === "worker.settled" && event.taskId && event.workerRunId) {
+      const runtime = this.tasks.get(event.taskId);
+      const result = event.data.result as WorkerResult | undefined;
+      const attempt = typeof event.data.attempt === "number" ? event.data.attempt : undefined;
+      if (!runtime || !result || !attempt) return;
+      runtime.attempts = attempt;
+      runtime.result = structuredClone(result);
+      runtime.completedAt = event.occurredAt;
+      runtime.state =
+        result.status === "succeeded" ? "succeeded" : result.status === "blocked" ? "blocked" : "failed";
+      delete runtime.workerRunId;
+      delete runtime.leaseExpiresAt;
+      this.settledRuns.set(event.workerRunId, {
+        attempt,
+        result: structuredClone(result),
+        taskId: runtime.spec.id,
+        runnerId: runtime.runnerId ?? "unknown",
+      });
+      return;
+    }
+    if (event.type === "worker.lease.renewed" && event.taskId && event.workerRunId) {
+      const runtime = this.tasks.get(event.taskId);
+      if (runtime?.workerRunId === event.workerRunId && typeof event.data.leaseExpiresAt === "string") {
+        runtime.leaseExpiresAt = event.data.leaseExpiresAt;
+      }
+      return;
+    }
+    if (event.type === "task.requeued" && event.taskId) {
+      const runtime = this.tasks.get(event.taskId);
+      if (runtime) {
+        runtime.state = "queued";
+        delete runtime.workerRunId;
+        delete runtime.workerId;
+        delete runtime.workerHarness;
+        delete runtime.runnerId;
+        delete runtime.leaseExpiresAt;
+      }
+      return;
+    }
+    if (event.type === "task.failed" && event.taskId) {
+      const runtime = this.tasks.get(event.taskId);
+      if (runtime) {
+        runtime.state = "failed";
+        runtime.completedAt = event.occurredAt;
+        runtime.result = {
+          status: "failed",
+          summary: typeof event.data.summary === "string" ? event.data.summary : "Worker attempt failed.",
+          evidence: [],
+          outputs: {},
+          ...(typeof event.data.diagnosis === "string" ? { diagnosis: event.data.diagnosis } : {}),
+        };
+        delete runtime.workerRunId;
+        delete runtime.leaseExpiresAt;
+      }
+      return;
+    }
+    if (event.type === "mission.succeeded") {
+      this.state = "succeeded";
+      return;
+    }
+    if (event.workerRunId && event.type !== "task.started" && event.taskId) {
+      const attempt = this.tasks.get(event.taskId)?.attempts;
+      if (attempt) {
+        this.workerEventsById.set(
+          workerEventKey(event.workerRunId, attempt, event.causationId ?? event.id),
+          event,
+        );
+      }
+    }
   }
 
   private async runTask(runtime: TaskRuntime, router: WorkerRouter): Promise<TaskRuntime> {
@@ -343,9 +725,10 @@ export class MissionEngine {
     taskId?: string,
     workerRunId?: string,
     causationId?: string,
+    eventId?: string,
   ): DomainEvent {
     const event: DomainEvent = {
-      id: this.idFactory(),
+      id: eventId ?? this.idFactory(),
       occurredAt: this.clock().toISOString(),
       missionId: this.plan.missionId,
       correlationId: this.correlationId,
@@ -359,4 +742,8 @@ export class MissionEngine {
     this.events.push(event);
     return event;
   }
+}
+
+function workerEventKey(workerRunId: string, attempt: number, eventId: string): string {
+  return `${workerRunId}\0${attempt}\0${eventId}`;
 }

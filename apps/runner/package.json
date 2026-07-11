@@ -12,10 +12,12 @@
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {
+    "@sapling/api-client": "workspace:*",
     "@sapling/event-store": "workspace:*",
     "@sapling/observability": "workspace:*",
     "@sapling/protocol": "workspace:*",
     "@sapling/terminal-protocol": "workspace:*",
+    "@sapling/worker-codex": "workspace:*",
     "@sapling/worker-sdk": "workspace:*"
   },
   "devDependencies": {

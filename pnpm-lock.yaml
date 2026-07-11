@@ -128,12 +128,18 @@ importers:
       '@sapling/event-store':
         specifier: workspace:*
         version: link:../../packages/event-store
+      '@sapling/mission-engine':
+        specifier: workspace:*
+        version: link:../../packages/mission-engine
       '@sapling/observability':
         specifier: workspace:*
         version: link:../../packages/observability
       '@sapling/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@sapling/worker-sdk':
+        specifier: workspace:*
+        version: link:../../packages/worker-sdk
       hono:
         specifier: 4.12.28
         version: 4.12.28
@@ -323,6 +329,9 @@ importers:
 
   apps/runner:
     dependencies:
+      '@sapling/api-client':
+        specifier: workspace:*
+        version: link:../../packages/api-client
       '@sapling/event-store':
         specifier: workspace:*
         version: link:../../packages/event-store
@@ -335,6 +344,9 @@ importers:
       '@sapling/terminal-protocol':
         specifier: workspace:*
         version: link:../../packages/terminal-protocol
+      '@sapling/worker-codex':
+        specifier: workspace:*
+        version: link:../../packages/worker-codex
       '@sapling/worker-sdk':
         specifier: workspace:*
         version: link:../../packages/worker-sdk

@@ -59,6 +59,130 @@ function worker(id: string, kinds: Array<"implementation" | "verification">): Wo
 }
 
 describe("MissionEngine", () => {
+  it("leases, records, settles, and replays pull worker attempts idempotently", () => {
+    const doctrine = compileDoctrine([profile]);
+    const plan = MissionPlanSchema.parse({
+      missionId: "m-pull",
+      goal: "run a retained candidate",
+      rationale: "exercise the runner pull boundary",
+      profileHash: doctrine.profileHash,
+      successCriteria: ["implementation and verification settle"],
+      tasks: [
+        {
+          id: "implement",
+          title: "Implement",
+          objective: "write the candidate",
+          kind: "implementation",
+          role: "implementer",
+          writeScope: ["src/**"],
+          successCriteria: ["candidate exists"],
+          evidenceRequirements: ["diff"],
+        },
+        {
+          id: "verify",
+          title: "Verify",
+          objective: "inspect the candidate",
+          kind: "verification",
+          role: "verifier",
+          dependsOn: ["implement"],
+          successCriteria: ["candidate passes"],
+          evidenceRequirements: ["test report"],
+        },
+      ],
+    });
+    let id = 0;
+    const engine = new MissionEngine(plan, doctrine, {
+      workspacePath: "/tmp",
+      idFactory: () => `id-${++id}`,
+    });
+    const implementer = worker("codex-implementer", ["implementation"]).descriptor;
+    const verifier = worker("codex-verifier", ["verification"]).descriptor;
+
+    const assignment = engine.leaseReadyTask([implementer, verifier], "runner:claim-1");
+    expect(assignment).toMatchObject({ task: { id: "implement" }, attempt: 1 });
+    expect(engine.leaseReadyTask([implementer, verifier], "runner:claim-1")).toEqual(assignment);
+    expect(engine.getEvents().filter((event) => event.type === "worker.leased")).toHaveLength(1);
+    expect(() =>
+      engine.heartbeatWorkerRun(assignment?.workerRunId ?? "missing", 1, "different-runner"),
+    ).toThrow(/belongs to runner local/u);
+
+    const event = engine.recordWorkerEvent({
+      workerRunId: assignment?.workerRunId ?? "missing",
+      attempt: 1,
+      eventId: "provider-event-1",
+      type: "worker.command.completed",
+      data: { command: "pnpm test", exitCode: 0 },
+    });
+    expect(
+      engine.recordWorkerEvent({
+        workerRunId: assignment?.workerRunId ?? "missing",
+        attempt: 1,
+        eventId: "provider-event-1",
+        type: "worker.command.completed",
+        data: { command: "ignored duplicate", exitCode: 1 },
+      }),
+    ).toEqual(event);
+
+    const result: WorkerResult = {
+      status: "succeeded",
+      summary: "candidate written",
+      evidence: [{ kind: "diff", label: "candidate", summary: "one changed file" }],
+      outputs: {},
+    };
+    expect(engine.settleWorkerRun(assignment?.workerRunId ?? "missing", 1, result).state).toBe("succeeded");
+    expect(engine.settleWorkerRun(assignment?.workerRunId ?? "missing", 1, result).state).toBe("succeeded");
+    expect(engine.getEvents().filter((candidate) => candidate.type === "worker.settled")).toHaveLength(1);
+    expect(engine.leaseReadyTask([implementer, verifier], "runner:claim-1")).toBeUndefined();
+
+    const replayed = new MissionEngine(plan, doctrine, {
+      workspacePath: "/tmp",
+      replayEvents: engine.getEvents(),
+    });
+    expect(replayed.getTask("implement")).toMatchObject({ state: "succeeded", result });
+    const verification = replayed.leaseReadyTask([implementer, verifier], "runner:claim-2");
+    expect(verification).toMatchObject({ task: { id: "verify" }, worker: { id: "codex-verifier" } });
+  });
+
+  it("keeps an active claim with its owner and requeues the exact abandoned attempt after expiry", () => {
+    const doctrine = compileDoctrine([profile]);
+    const plan = MissionPlanSchema.parse({
+      missionId: "m-expiry",
+      goal: "recover an abandoned claim",
+      rationale: "lease recovery must be deterministic",
+      profileHash: doctrine.profileHash,
+      successCriteria: ["attempt is requeued"],
+      tasks: [
+        {
+          id: "implement",
+          title: "Implement",
+          objective: "write candidate",
+          kind: "implementation",
+          role: "implementer",
+          maxAttempts: 2,
+          writeScope: ["src/**"],
+          successCriteria: ["done"],
+          evidenceRequirements: ["diff"],
+        },
+      ],
+    });
+    let now = new Date("2026-07-11T00:00:00.000Z");
+    const engine = new MissionEngine(plan, doctrine, {
+      workspacePath: "/tmp",
+      clock: () => now,
+    });
+    const implementer = worker("codex-implementer", ["implementation"]).descriptor;
+    const first = engine.leaseReadyTask([implementer], "runner-a:claim", "runner-a", 1_000);
+    expect(first).toMatchObject({ attempt: 1, runnerId: "runner-a" });
+    expect(engine.leaseReadyTask([implementer], "runner-b:claim", "runner-b", 1_000)).toBeUndefined();
+
+    now = new Date("2026-07-11T00:00:02.000Z");
+    expect(engine.expireAbandonedWorkerRuns()).toEqual([
+      expect.objectContaining({ state: "queued", attempts: 1 }),
+    ]);
+    const recovered = engine.leaseReadyTask([implementer], "runner-b:retry", "runner-b", 1_000);
+    expect(recovered).toMatchObject({ attempt: 2, runnerId: "runner-b" });
+  });
+
   it("binds provider session events to the engine-issued worker run ID", async () => {
     const doctrine = compileDoctrine([profile]);
     const plan = MissionPlanSchema.parse({

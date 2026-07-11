@@ -77,6 +77,18 @@ control plane, never the terminal plane. "Done" is a projection concern
 - agent resumes only after handback and optional summary;
 - forced release requires higher authority and is audited.
 
+## Captain worker control (operator parity)
+
+The captain controls its workers through the same command surface a human
+operator uses ([ADR 0018](adr/0018-captain-worker-control-parity.md)): worker-pane
+slash commands (`/goal`, `/model`, `/effort`, steering text) for pane-hosted
+harness workers, and the same vocabulary mapped onto protocol methods for
+adapter-hosted workers. There is no captain-only control API. Arming a
+harness's native `/goal` loop at delegation time is part of this surface.
+Captain input is automated input under the takeover rules above — a human
+control lease pauses it — and parity covers steering and configuration only;
+approvals stay on authenticated surfaces.
+
 ## Herdr boundary
 
 Herdr is an optional external pane host. Use its process/socket/session API through a `TerminalProvider`; do not scrape the rendered screen and do not make Herdr the persistence model. Keep native PTY and tmux adapters available.

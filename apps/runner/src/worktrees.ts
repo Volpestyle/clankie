@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, realpath, unlink, writeFile } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { mkdir, readFile, readdir, realpath, rename, unlink, writeFile } from "node:fs/promises";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { createLogger } from "@sapling/observability";
 
@@ -25,6 +25,13 @@ export interface WorktreeHolder {
   missionId: string;
   taskId: string;
   workerRunId: string;
+}
+
+export interface MissionCandidateManifest {
+  missionId: string;
+  path: string;
+  branch: string;
+  baseCommit: string;
 }
 
 export interface ReleaseResult {
@@ -143,6 +150,20 @@ export class WorktreeManager {
           continue;
         }
         try {
+          if (await this.hasMatchingCandidateManifest(entry.lease)) {
+            await unlink(entry.file);
+            const result: ReleaseResult = {
+              leaseId: entry.lease.id,
+              path: entry.lease.path,
+              outcome: "preserved",
+            };
+            report.preserved.push(result);
+            logger.warn(
+              { leaseId: entry.lease.id, path: entry.lease.path, missionId: entry.lease.missionId },
+              "manifested mission candidate preserved during orphan reclamation",
+            );
+            continue;
+          }
           const result = await this.settle(entry.lease);
           report[result.outcome].push(result);
         } catch (error) {
@@ -171,6 +192,105 @@ export class WorktreeManager {
 
   public listLeases(): Promise<WorktreeLease[]> {
     return this.enqueue(() => this.readLeases());
+  }
+
+  /** Atomically records the retained candidate independently of a process-owned lease. */
+  public persistCandidate(lease: WorktreeLease): Promise<MissionCandidateManifest> {
+    return this.enqueue(async () => {
+      if (!lease.branch || !lease.baseCommit) {
+        throw new Error(`Worktree lease ${lease.id} is not a branch candidate`);
+      }
+      const manifest: MissionCandidateManifest = {
+        missionId: lease.missionId,
+        path: lease.path,
+        branch: lease.branch,
+        baseCommit: lease.baseCommit,
+      };
+      const directory = join(this.rootDir, "candidates");
+      await mkdir(directory, { recursive: true });
+      const destination = this.candidateFile(lease.missionId);
+      const temporary = `${destination}.${randomUUID()}.tmp`;
+      await writeFile(temporary, `${JSON.stringify(manifest, null, 2)}\n`, {
+        encoding: "utf8",
+        flag: "wx",
+      });
+      await rename(temporary, destination);
+      return structuredClone(manifest);
+    });
+  }
+
+  /** Rebinds a preserved candidate after generic orphan reclamation removed its process lease. */
+  public recoverCandidate(missionId: string, holder: WorktreeHolder): Promise<WorktreeLease> {
+    return this.enqueue(async () => {
+      const manifest = await this.readCandidateManifest(missionId);
+      const canonicalPath = await this.canonicalize(manifest.path);
+      const treesRoot = await this.canonicalize(join(this.rootDir, "trees"));
+      const relativePath = relative(treesRoot, canonicalPath);
+      if (
+        relativePath === ".." ||
+        relativePath.startsWith(`..${sep}`) ||
+        resolve(canonicalPath) === treesRoot
+      ) {
+        throw new Error(`Candidate path ${canonicalPath} is outside the runner worktree root`);
+      }
+      const repositoryRoot = (await this.git(canonicalPath, ["rev-parse", "--show-toplevel"])).trim();
+      const branch = (await this.git(canonicalPath, ["symbolic-ref", "--short", "HEAD"])).trim();
+      const baseCommit = (
+        await this.git(canonicalPath, ["rev-parse", "--verify", `${manifest.baseCommit}^{commit}`])
+      ).trim();
+      const mergeBase = (await this.git(canonicalPath, ["merge-base", manifest.baseCommit, "HEAD"])).trim();
+      if (
+        resolve(repositoryRoot) !== canonicalPath ||
+        branch !== manifest.branch ||
+        baseCommit !== manifest.baseCommit ||
+        mergeBase !== manifest.baseCommit
+      ) {
+        throw new Error(`Candidate manifest for mission ${missionId} does not match the retained worktree`);
+      }
+      return this.writeLease({
+        id: randomUUID(),
+        path: canonicalPath,
+        branch: manifest.branch,
+        baseCommit: manifest.baseCommit,
+        holder,
+      });
+    });
+  }
+
+  private async hasMatchingCandidateManifest(lease: WorktreeLease): Promise<boolean> {
+    let manifest: MissionCandidateManifest;
+    try {
+      manifest = await this.readCandidateManifest(lease.missionId);
+    } catch (error) {
+      if (String(error).includes(`candidate_manifest_missing:${lease.missionId}`)) return false;
+      throw error;
+    }
+    const canonicalManifestPath = await this.canonicalize(manifest.path);
+    if (
+      canonicalManifestPath !== lease.path ||
+      manifest.branch !== lease.branch ||
+      manifest.baseCommit !== lease.baseCommit
+    ) {
+      throw new Error(
+        `Candidate manifest for mission ${lease.missionId} does not match orphaned lease ${lease.id}`,
+      );
+    }
+    return true;
+  }
+
+  private async readCandidateManifest(missionId: string): Promise<MissionCandidateManifest> {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await readFile(this.candidateFile(missionId), "utf8"));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new Error(`candidate_manifest_missing:${missionId}`);
+      }
+      throw new Error(
+        `Candidate manifest for mission ${missionId} is corrupt: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    return parseCandidateManifest(parsed, missionId);
   }
 
   private async settle(lease: WorktreeLease): Promise<ReleaseResult> {
@@ -330,6 +450,11 @@ export class WorktreeManager {
     return join(this.rootDir, "leases", `${key}.json`);
   }
 
+  private candidateFile(missionId: string): string {
+    const key = createHash("sha256").update(missionId).digest("hex");
+    return join(this.rootDir, "candidates", `${key}.json`);
+  }
+
   private async git(cwd: string, args: string[]): Promise<string> {
     const result = await execFileAsync("git", args, { cwd, maxBuffer: 10 * 1024 * 1024 });
     return result.stdout;
@@ -340,6 +465,27 @@ export class WorktreeManager {
     this.queue = next.catch(() => undefined);
     return next;
   }
+}
+
+function parseCandidateManifest(value: unknown, missionId: string): MissionCandidateManifest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Candidate manifest for mission ${missionId} is invalid`);
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    record.missionId !== missionId ||
+    typeof record.path !== "string" ||
+    typeof record.branch !== "string" ||
+    typeof record.baseCommit !== "string"
+  ) {
+    throw new Error(`Candidate manifest for mission ${missionId} has mismatched fields`);
+  }
+  return {
+    missionId,
+    path: record.path,
+    branch: record.branch,
+    baseCommit: record.baseCommit,
+  };
 }
 
 export function defaultWorktreeRoot(repoPath: string, home: string): string {
