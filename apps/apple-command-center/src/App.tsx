@@ -1,5 +1,6 @@
 import React from "react";
 import { Pressable, SafeAreaView, StyleSheet, Text, View } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { ExecutionGraph } from "./graph/ExecutionGraph.tsx";
 import { GardenCanvas } from "./garden/GardenCanvas.tsx";
 import { useCommandCenterStore, type CommandCenterMode } from "./state/store.ts";
@@ -23,27 +24,30 @@ export default function App() {
   const selectWorker = useCommandCenterStore((state) => state.selectWorker);
 
   return (
-    <SafeAreaView style={styles.root}>
-      <View style={styles.toolbar}>
-        <Text style={styles.brand}>Sapling</Text>
-        <View style={styles.modeGroup}>
-          <ModeButton mode="garden" label="Garden" />
-          <ModeButton mode="graph" label="Graph" />
-          <ModeButton mode="terminal" label="Terminal" />
+    <GestureHandlerRootView style={styles.gestureRoot}>
+      <SafeAreaView style={styles.root}>
+        <View style={styles.toolbar}>
+          <Text style={styles.brand}>Sapling</Text>
+          <View style={styles.modeGroup}>
+            <ModeButton mode="garden" label="Garden" />
+            <ModeButton mode="graph" label="Graph" />
+            <ModeButton mode="terminal" label="Terminal" />
+          </View>
         </View>
-      </View>
-      <View style={styles.content}>
-        {mode === "garden" ? <GardenCanvas world={world} onSelect={selectWorker} /> : null}
-        {mode === "graph" ? <ExecutionGraph events={events} /> : null}
-        {mode === "terminal" ? (
-          <TerminalSurface terminalId={terminalId} mode="observe" style={styles.content} />
-        ) : null}
-      </View>
-    </SafeAreaView>
+        <View style={styles.content}>
+          {mode === "garden" ? <GardenCanvas world={world} onSelect={selectWorker} /> : null}
+          {mode === "graph" ? <ExecutionGraph events={events} /> : null}
+          {mode === "terminal" ? (
+            <TerminalSurface terminalId={terminalId} mode="observe" style={styles.content} />
+          ) : null}
+        </View>
+      </SafeAreaView>
+    </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
+  gestureRoot: { flex: 1 },
   root: { flex: 1, backgroundColor: "#F4F7F1" },
   toolbar: {
     height: 56,

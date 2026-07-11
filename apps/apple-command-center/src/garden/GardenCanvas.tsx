@@ -2,6 +2,7 @@ import React, { useMemo } from "react";
 import { Canvas, Circle, Group, Line, Rect, vec } from "@shopify/react-native-skia";
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import type { GardenAgent, GardenLocation, GardenWorld } from "@sapling/garden-model";
+import { ClankieAtlasSprite } from "./ClankieAtlasSprite.tsx";
 
 const stationOrder: GardenLocation[] = [
   "observatory",
@@ -100,6 +101,9 @@ export function GardenCanvas({
           />
         ))}
       </View>
+      <View pointerEvents="box-none" style={[styles.spriteStage, { height: canvasHeight }]}>
+        <ClankieAtlasSprite />
+      </View>
       <View style={styles.legend}>
         <Text style={styles.legendTitle}>Mission {world.missionId}</Text>
         <Text style={styles.legendText}>
@@ -112,6 +116,13 @@ export function GardenCanvas({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#E8F0DF" },
+  spriteStage: {
+    position: "absolute",
+    top: 28,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+  },
   legend: {
     padding: 12,
     backgroundColor: "#F7FAF3",

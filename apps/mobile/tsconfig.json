@@ -6,7 +6,23 @@
     "moduleResolution": "Bundler",
     "module": "ESNext",
     "allowImportingTsExtensions": true,
-    "allowJs": true
+    "allowJs": true,
+    "baseUrl": ".",
+    "paths": {
+      "@shopify/react-native-skia": ["node_modules/@shopify/react-native-skia"],
+      "react": ["node_modules/@types/react/index.d.ts"],
+      "react/jsx-runtime": ["node_modules/@types/react/jsx-runtime.d.ts"],
+      "react-native": ["node_modules/react-native"],
+      "react-native-gesture-handler": ["node_modules/react-native-gesture-handler"],
+      "react-native-reanimated": ["node_modules/react-native-reanimated"]
+    }
   },
-  "include": ["index.js", "app.config.js", "babel.config.js", "metro.config.js"]
+  "include": [
+    "index.js",
+    "app.config.js",
+    "babel.config.js",
+    "metro.config.js",
+    "../apple-command-center/src/**/*.ts",
+    "../apple-command-center/src/**/*.tsx"
+  ]
 }
