@@ -4,9 +4,9 @@ import { defineConfig } from "vitest/config";
 
 const repoRoot = fileURLToPath(new URL(".", import.meta.url));
 const packagePath = relative(repoRoot, resolve(process.cwd())).replaceAll("\\", "/");
-const packageTestPattern = /^(?:apps|packages)\/[^/]+$/u.test(packagePath)
+const packageTestPattern = /^(?:apps|integrations|packages)\/[^/]+$/u.test(packagePath)
   ? [`${packagePath}/test/**/*.test.ts`]
-  : ["packages/*/test/**/*.test.ts", "apps/*/test/**/*.test.ts"];
+  : ["packages/*/test/**/*.test.ts", "apps/*/test/**/*.test.ts", "integrations/*/test/**/*.test.ts"];
 
 export default defineConfig({
   root: repoRoot,

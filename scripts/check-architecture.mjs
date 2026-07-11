@@ -9,7 +9,11 @@ async function packageDirectories(parent) {
   return entries.filter((entry) => entry.isDirectory()).map((entry) => resolve(root, parent, entry.name));
 }
 
-const directories = [...(await packageDirectories("packages")), ...(await packageDirectories("apps"))];
+const directories = [
+  ...(await packageDirectories("packages")),
+  ...(await packageDirectories("apps")),
+  ...(await packageDirectories("integrations")),
+];
 const manifests = new Map();
 for (const directory of directories) {
   try {

@@ -1,0 +1,27 @@
+schema-version: 1
+scenario-id: collect-craft-place
+scenario-version: 1
+minecraft-version: 1.21.11
+world-id: private-paper-world
+world-name: world
+world-seed: 774042
+player-name: Clankie
+max-duration-seconds: 300
+max-events: 256
+minimum-logs: 8
+allowed-logs:
+  - OAK_LOG
+  - BIRCH_LOG
+  - SPRUCE_LOG
+spawn: { x: 0.5, y: 65.0, z: 0.5, yaw: 0.0, pitch: 0.0 }
+target-min: { x: -2, y: 65, z: 6 }
+target-max: { x: 2, y: 67, z: 10 }
+reset-blocks:
+  - '-4,65,2,OAK_LOG'
+  - '-3,65,2,OAK_LOG'
+  - '-2,65,2,OAK_LOG'
+  - '-1,65,2,OAK_LOG'
+  - '1,65,2,OAK_LOG'
+  - '2,65,2,OAK_LOG'
+  - '3,65,2,OAK_LOG'
+  - '4,65,2,OAK_LOG'

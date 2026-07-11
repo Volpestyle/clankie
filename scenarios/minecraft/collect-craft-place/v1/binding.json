@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "environment": {
+    "schemaVersion": 1,
+    "environmentKind": "minecraft_java",
+    "characterId": "clankie",
+    "worldId": "private-paper-world",
+    "lane": "gameplay"
+  },
+  "scenarioId": "collect-craft-place",
+  "scenarioVersion": 1,
+  "fixtureSha256": "177331287aa35f03ed6e887e74e510bd675881e53f2a759c36f3a184877199ea"
+}

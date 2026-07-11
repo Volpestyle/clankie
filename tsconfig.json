@@ -14,6 +14,7 @@
     "apps/relay/**/*.ts",
     "apps/runner/**/*.ts",
     "apps/tui/**/*.ts",
+    "integrations/**/*.ts",
     "packages/**/*.ts"
   ],
   "exclude": ["node_modules", "dist", ".data", "artifacts", "apps/apple-command-center/**"]
