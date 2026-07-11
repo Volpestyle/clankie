@@ -1,7 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 
@@ -78,6 +79,22 @@ export interface CredentialLoadIssue {
   message: string;
 }
 
+const operationQueues = new Map<string, Promise<unknown>>();
+
+function enqueueSerialized<T>(key: string, operation: () => Promise<T>): Promise<T> {
+  const previous = operationQueues.get(key) ?? Promise.resolve();
+  const result = previous.then(operation);
+  const settled = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  operationQueues.set(key, settled);
+  void settled.finally(() => {
+    if (operationQueues.get(key) === settled) operationQueues.delete(key);
+  });
+  return result;
+}
+
 /**
  * Fallback store: a single JSON file (`Record<providerId, ProviderCredential>`) with
  * 0600 permissions inside a 0700 parent directory. Writes are atomic (temp file +
@@ -85,12 +102,12 @@ export interface CredentialLoadIssue {
  * individual invalid entries are skipped on read and surfaced via `loadIssues()`.
  */
 export class FileCredentialStore implements CredentialStore {
-  private queue: Promise<unknown> = Promise.resolve();
-
   private readonly filePath: string;
+  private readonly queueKey: string;
 
   public constructor(filePath: string) {
     this.filePath = filePath;
+    this.queueKey = `file:${resolve(filePath)}`;
   }
 
   public async get(providerId: string): Promise<ProviderCredential | undefined> {
@@ -132,9 +149,7 @@ export class FileCredentialStore implements CredentialStore {
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.queue.then(operation);
-    this.queue = result.catch(() => undefined);
-    return result;
+    return enqueueSerialized(this.queueKey, operation);
   }
 
   private async load(): Promise<{
@@ -181,8 +196,10 @@ export class FileCredentialStore implements CredentialStore {
   }
 
   private async persist(credentials: Record<string, ProviderCredential>): Promise<void> {
-    await mkdir(dirname(this.filePath), { recursive: true, mode: 0o700 });
-    const temporaryPath = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;
+    const parentDirectory = dirname(this.filePath);
+    await mkdir(parentDirectory, { recursive: true, mode: 0o700 });
+    await chmod(parentDirectory, 0o700);
+    const temporaryPath = `${this.filePath}.${process.pid}.${randomUUID()}.tmp`;
     await writeFile(temporaryPath, `${JSON.stringify(credentials, null, 2)}\n`, {
       encoding: "utf8",
       mode: 0o600,
@@ -201,6 +218,7 @@ async function defaultExecFile(file: string, args: string[]): Promise<{ stdout: 
 
 /** Account name that holds the JSON array of providerIds, so list() never dumps the keychain. */
 const INDEX_ACCOUNT = "__index__";
+const SECURITY_CLI = "/usr/bin/security";
 
 export interface KeychainCredentialStoreOptions {
   /** Keychain service name; defaults to "bot.clankie.credentials". */
@@ -221,56 +239,83 @@ export interface KeychainCredentialStoreOptions {
  */
 export class KeychainCredentialStore implements CredentialStore {
   private readonly service: string;
+  private readonly queueKey: string;
   private readonly execFile: (file: string, args: string[]) => Promise<{ stdout: string; stderr: string }>;
 
   public constructor(options: KeychainCredentialStoreOptions = {}) {
     this.service = options.service ?? "bot.clankie.credentials";
+    this.queueKey = `keychain:${this.service}`;
     this.execFile = options.execFile ?? defaultExecFile;
   }
 
-  public async get(providerId: string): Promise<ProviderCredential | undefined> {
-    const raw = await this.read(normalizeProviderId(providerId));
+  public get(providerId: string): Promise<ProviderCredential | undefined> {
+    const id = normalizeProviderId(providerId);
+    return this.enqueue(() => this.getDirect(id));
+  }
+
+  public set(providerId: string, credential: ProviderCredential): Promise<void> {
+    const id = normalizeProviderId(providerId);
+    const parsed = ProviderCredentialSchema.parse(credential);
+    return this.enqueue(async () => {
+      const previous = await this.read(id);
+      const index = await this.readIndex();
+      const indexChanged = !index.includes(id);
+      try {
+        // Publish the index before creating a new secret. If the index write
+        // fails, no unindexed credential can be orphaned in the Keychain.
+        if (indexChanged) await this.writeIndex([...index, id].sort());
+        await this.write(id, JSON.stringify(parsed));
+      } catch (error) {
+        if (indexChanged) await this.writeIndex(index).catch(() => undefined);
+        await this.restore(id, previous).catch(() => undefined);
+        throw error;
+      }
+    });
+  }
+
+  public delete(providerId: string): Promise<boolean> {
+    const id = normalizeProviderId(providerId);
+    return this.enqueue(async () => {
+      const previous = await this.read(id);
+      if (previous === undefined) return false;
+      const index = await this.readIndex();
+      if (!(await this.deleteDirect(id))) return false;
+      // A failed index update leaves only a stale index entry: list() skips the
+      // missing item, and a future mutation repairs the index. Restoring the
+      // secret here would be a more dangerous partial-failure state.
+      if (index.includes(id)) await this.writeIndex(index.filter((entry) => entry !== id));
+      return true;
+    });
+  }
+
+  public list(): Promise<Record<string, RedactedCredential>> {
+    return this.enqueue(async () => {
+      const redacted: Record<string, RedactedCredential> = {};
+      for (const id of await this.readIndex()) {
+        try {
+          const credential = await this.getDirect(id);
+          if (credential !== undefined) redacted[id] = redactCredential(credential);
+        } catch {
+          // A missing or malformed entry must not break listing the rest.
+        }
+      }
+      return redacted;
+    });
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    return enqueueSerialized(this.queueKey, operation);
+  }
+
+  private async getDirect(id: string): Promise<ProviderCredential | undefined> {
+    const raw = await this.read(id);
     if (raw === undefined) return undefined;
     return ProviderCredentialSchema.parse(JSON.parse(raw));
   }
 
-  public async set(providerId: string, credential: ProviderCredential): Promise<void> {
-    const id = normalizeProviderId(providerId);
-    const parsed = ProviderCredentialSchema.parse(credential);
-    await this.write(id, JSON.stringify(parsed));
-    const index = await this.readIndex();
-    if (!index.includes(id)) await this.writeIndex([...index, id].sort());
-  }
-
-  public async delete(providerId: string): Promise<boolean> {
-    const id = normalizeProviderId(providerId);
-    try {
-      await this.execFile("security", ["delete-generic-password", "-s", this.service, "-a", id]);
-    } catch (error) {
-      if (isKeychainNotFound(error)) return false;
-      throw error;
-    }
-    const index = await this.readIndex();
-    if (index.includes(id)) await this.writeIndex(index.filter((entry) => entry !== id));
-    return true;
-  }
-
-  public async list(): Promise<Record<string, RedactedCredential>> {
-    const redacted: Record<string, RedactedCredential> = {};
-    for (const id of await this.readIndex()) {
-      try {
-        const credential = await this.get(id);
-        if (credential !== undefined) redacted[id] = redactCredential(credential);
-      } catch {
-        // A missing or malformed entry must not break listing the rest.
-      }
-    }
-    return redacted;
-  }
-
   private async read(account: string): Promise<string | undefined> {
     try {
-      const { stdout } = await this.execFile("security", [
+      const { stdout } = await this.execFile(SECURITY_CLI, [
         "find-generic-password",
         "-s",
         this.service,
@@ -287,7 +332,7 @@ export class KeychainCredentialStore implements CredentialStore {
 
   private async write(account: string, secret: string): Promise<void> {
     // -U updates an existing item in place instead of failing with "already exists".
-    await this.execFile("security", [
+    await this.execFile(SECURITY_CLI, [
       "add-generic-password",
       "-U",
       "-s",
@@ -299,15 +344,36 @@ export class KeychainCredentialStore implements CredentialStore {
     ]);
   }
 
+  private async deleteDirect(account: string): Promise<boolean> {
+    try {
+      await this.execFile(SECURITY_CLI, ["delete-generic-password", "-s", this.service, "-a", account]);
+      return true;
+    } catch (error) {
+      if (isKeychainNotFound(error)) return false;
+      throw error;
+    }
+  }
+
+  private async restore(account: string, previous: string | undefined): Promise<void> {
+    if (previous === undefined) {
+      await this.deleteDirect(account);
+      return;
+    }
+    await this.write(account, previous);
+  }
+
   private async readIndex(): Promise<string[]> {
     const raw = await this.read(INDEX_ACCOUNT);
     if (raw === undefined) return [];
     try {
       const parsed: unknown = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return [];
-      return parsed.filter((entry): entry is string => typeof entry === "string");
-    } catch {
-      return [];
+      if (!Array.isArray(parsed)) throw new Error("index is not an array");
+      if (parsed.some((entry) => typeof entry !== "string")) {
+        throw new Error("index contains a non-string providerId");
+      }
+      return parsed;
+    } catch (error) {
+      throw new Error(`Keychain credential index is malformed: ${String(error)}`);
     }
   }
 
