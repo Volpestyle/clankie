@@ -19,3 +19,6 @@ DerivedData/
 *.xcuserstate
 .env.*
 !.env.example
+
+# eve framework runtime cache
+**/.eve/cache/

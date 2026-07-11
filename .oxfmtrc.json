@@ -5,5 +5,5 @@
   "semi": true,
   "singleQuote": false,
   "trailingComma": "all",
-  "ignorePatterns": ["artifacts/**", ".data/**"]
+  "ignorePatterns": ["artifacts/**", ".data/**", "**/.eve/cache/**", "packages/model-registry/data/**"]
 }
