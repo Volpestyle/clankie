@@ -1,6 +1,21 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 
+export {
+  createDefaultCredentialStore,
+  FileCredentialStore,
+  KeychainCredentialStore,
+  normalizeProviderId,
+  ProviderCredentialSchema,
+  redactCredential,
+  type CredentialLoadIssue,
+  type CredentialStore,
+  type DefaultCredentialStoreOptions,
+  type KeychainCredentialStoreOptions,
+  type ProviderCredential,
+  type RedactedCredential,
+} from "./credential-store.ts";
+
 export const CapabilityGrantSchema = z.object({
   version: z.literal(1),
   grantId: z.string().min(1),
@@ -24,7 +39,10 @@ export interface VerifiedCapability {
  * exchange a grant for one narrowly scoped privileged operation at the broker boundary.
  */
 export class CapabilityTokenIssuer {
-  public constructor(private readonly signingKey: Uint8Array) {
+  private readonly signingKey: Uint8Array;
+
+  public constructor(signingKey: Uint8Array) {
+    this.signingKey = signingKey;
     if (signingKey.byteLength < 32) throw new Error("Capability signing key must be at least 32 bytes");
   }
 
