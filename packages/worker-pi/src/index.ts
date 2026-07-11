@@ -1,6 +1,11 @@
-import { JsonlRpcProcess, waitForMessage, type JsonObject } from "@sapling/jsonl-rpc";
+import { JsonlRpcProcess, waitForMessage, type JsonlRpcTransport, type JsonObject } from "@sapling/jsonl-rpc";
 import type { TaskKind, WorkerResult } from "@sapling/protocol";
-import type { WorkerAdapter, WorkerDescriptor, WorkerRunContext } from "@sapling/worker-sdk";
+import {
+  cancelledWorkerResult,
+  type WorkerAdapter,
+  type WorkerDescriptor,
+  type WorkerRunContext,
+} from "@sapling/worker-sdk";
 
 export interface PiRpcOptions {
   command?: string;
@@ -9,10 +14,23 @@ export interface PiRpcOptions {
   sessionDirectory?: string;
   environment?: NodeJS.ProcessEnv;
   timeoutMs?: number;
+  transportFactory?: (context: { cwd: string; args: string[] }) => JsonlRpcTransport;
 }
 
-export class PiRpcClient {
-  private readonly rpc: JsonlRpcProcess;
+export interface PiClient {
+  onMessage(listener: (message: JsonObject) => void): () => void;
+  prompt(message: string, signal?: AbortSignal, timeoutMs?: number): Promise<PiPromptResult>;
+  close(): Promise<void>;
+}
+
+export interface PiPromptResult {
+  text: string;
+  state: JsonObject;
+  stats: JsonObject;
+}
+
+export class PiRpcClient implements PiClient {
+  private readonly rpc: JsonlRpcTransport;
 
   public constructor(cwd: string, options: PiRpcOptions = {}) {
     const args = ["--mode", "rpc"];
@@ -20,13 +38,15 @@ export class PiRpcClient {
     if (options.model) args.push("--model", options.model);
     if (options.sessionDirectory) args.push("--session-dir", options.sessionDirectory);
     else args.push("--no-session");
-    this.rpc = new JsonlRpcProcess({
-      command: options.command ?? "pi",
-      args,
-      cwd,
-      env: options.environment ?? process.env,
-      requestTimeoutMs: options.timeoutMs ?? 15 * 60_000,
-    });
+    this.rpc =
+      options.transportFactory?.({ cwd, args }) ??
+      new JsonlRpcProcess({
+        command: options.command ?? "pi",
+        args,
+        cwd,
+        env: options.environment ?? process.env,
+        requestTimeoutMs: options.timeoutMs ?? 15 * 60_000,
+      });
   }
 
   public onMessage(listener: (message: JsonObject) => void): () => void {
@@ -37,18 +57,31 @@ export class PiRpcClient {
     message: string,
     signal?: AbortSignal,
     timeoutMs = 15 * 60_000,
-  ): Promise<{
-    text: string;
-    state: JsonObject;
-    stats: JsonObject;
-  }> {
-    await this.rpc.request({ type: "prompt", message });
+  ): Promise<PiPromptResult> {
+    const terminalWait = new AbortController();
+    const settled = waitForMessage(
+      this.rpc,
+      (event) => event.type === "agent_settled",
+      timeoutMs,
+      terminalWait.signal,
+    );
+    try {
+      await this.rpc.request({ type: "prompt", message });
+    } catch (error) {
+      terminalWait.abort(error);
+      await settled.catch(() => undefined);
+      throw error;
+    }
     const abort = () => {
       void this.rpc.request({ type: "abort" }, 10_000).catch(() => undefined);
     };
-    signal?.addEventListener("abort", abort, { once: true });
-    await waitForMessage(this.rpc, (event) => event.type === "agent_settled", timeoutMs);
-    signal?.removeEventListener("abort", abort);
+    if (signal?.aborted) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
+    try {
+      await settled;
+    } finally {
+      signal?.removeEventListener("abort", abort);
+    }
     const textResponse = await this.rpc.request({ type: "get_last_assistant_text" });
     const state = await this.rpc.request({ type: "get_state" });
     const stats = await this.rpc.request({ type: "get_session_stats" });
@@ -72,8 +105,10 @@ export interface PiWorkerOptions extends PiRpcOptions {
 
 export class PiWorkerAdapter implements WorkerAdapter {
   public readonly descriptor: WorkerDescriptor;
+  private readonly options: PiWorkerOptions;
 
-  public constructor(private readonly options: PiWorkerOptions = {}) {
+  public constructor(options: PiWorkerOptions = {}) {
+    this.options = options;
     this.descriptor = {
       id: options.id ?? "pi-rpc",
       displayName: options.displayName ?? "Pi",
@@ -90,6 +125,7 @@ export class PiWorkerAdapter implements WorkerAdapter {
   }
 
   public async run(context: WorkerRunContext): Promise<WorkerResult> {
+    if (context.signal.aborted) return cancelledWorkerResult(context.workerRunId, "Pi");
     const client = new PiRpcClient(context.workspacePath, this.options);
     const unsubscribe = client.onMessage((message) => {
       const providerType = typeof message.type === "string" ? message.type : "event";
@@ -97,17 +133,31 @@ export class PiWorkerAdapter implements WorkerAdapter {
         type: `provider.pi.${providerType}`,
         missionId: context.missionId,
         taskId: context.task.id,
+        workerRunId: context.workerRunId,
         profileHash: context.profileHash,
         data: sanitizePiEvent(message),
       });
     });
     try {
       const result = await client.prompt(renderPiPrompt(context), context.signal, this.options.timeoutMs);
+      const nativeSessionId = readNestedString(result.stats, ["data", "sessionId"]);
+      if (nativeSessionId) {
+        context.emit({
+          type: "worker.native_session.bound",
+          missionId: context.missionId,
+          taskId: context.task.id,
+          workerRunId: context.workerRunId,
+          profileHash: context.profileHash,
+          data: { provider: "pi", nativeSessionId },
+        });
+      }
       return {
         status: context.signal.aborted ? "failed" : "succeeded",
         summary: result.text.trim() || "Pi completed the task without a textual summary.",
         evidence: [{ kind: "log", label: "pi-rpc-session", summary: summarizeStats(result.stats) }],
         outputs: {
+          workerRunId: context.workerRunId,
+          nativeSessionId: nativeSessionId ?? null,
           state: result.state.data ?? null,
           stats: result.stats.data ?? null,
         },

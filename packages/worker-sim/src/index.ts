@@ -1,5 +1,5 @@
 import type { Harness, TaskKind, WorkerResult } from "@sapling/protocol";
-import type { WorkerAdapter, WorkerRunContext } from "@sapling/worker-sdk";
+import { cancelledWorkerResult, type WorkerAdapter, type WorkerRunContext } from "@sapling/worker-sdk";
 
 export type SimulatedTaskHandler = (context: WorkerRunContext) => Promise<WorkerResult> | WorkerResult;
 
@@ -17,7 +17,10 @@ export interface SimulatedWorkerOptions {
 export class SimulatedWorkerAdapter implements WorkerAdapter {
   public readonly descriptor;
 
-  public constructor(private readonly options: SimulatedWorkerOptions) {
+  private readonly options: SimulatedWorkerOptions;
+
+  public constructor(options: SimulatedWorkerOptions) {
+    this.options = options;
     this.descriptor = {
       id: options.id,
       displayName: options.displayName ?? options.id,
@@ -33,17 +36,20 @@ export class SimulatedWorkerAdapter implements WorkerAdapter {
   }
 
   public async run(context: WorkerRunContext): Promise<WorkerResult> {
+    if (context.signal.aborted) return cancelledWorkerResult(context.workerRunId, "Simulated");
     if (this.options.latencyMs) {
       await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(resolve, this.options.latencyMs);
-        context.signal.addEventListener(
-          "abort",
-          () => {
-            clearTimeout(timer);
-            reject(new Error("Simulated worker aborted"));
-          },
-          { once: true },
-        );
+        const complete = () => {
+          context.signal.removeEventListener("abort", abort);
+          resolve();
+        };
+        const timer = setTimeout(complete, this.options.latencyMs);
+        const abort = () => {
+          clearTimeout(timer);
+          context.signal.removeEventListener("abort", abort);
+          reject(new Error("Simulated worker aborted"));
+        };
+        context.signal.addEventListener("abort", abort, { once: true });
       });
     }
 
@@ -51,6 +57,7 @@ export class SimulatedWorkerAdapter implements WorkerAdapter {
       type: "worker.progress",
       missionId: context.missionId,
       taskId: context.task.id,
+      workerRunId: context.workerRunId,
       profileHash: context.profileHash,
       data: { message: `${this.descriptor.displayName} started ${context.task.title}` },
     });
@@ -61,9 +68,10 @@ export class SimulatedWorkerAdapter implements WorkerAdapter {
         status: "failed",
         summary: `No simulated handler for ${context.task.kind}.`,
         evidence: [],
-        outputs: {},
+        outputs: { workerRunId: context.workerRunId },
       };
     }
-    return handler(context);
+    const result = await handler(context);
+    return { ...result, outputs: { ...result.outputs, workerRunId: context.workerRunId } };
   }
 }

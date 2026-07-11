@@ -52,7 +52,7 @@ export class ShellWorkerAdapter implements WorkerAdapter {
         {
           missionId: context.missionId,
           taskId: context.task.id,
-          workerRunId: `${context.missionId}:${context.task.id}:attempt-${String(context.attempt)}`,
+          workerRunId: context.workerRunId,
           profileHash: context.profileHash,
           risk: context.task.risk,
           workspacePath: context.workspacePath,

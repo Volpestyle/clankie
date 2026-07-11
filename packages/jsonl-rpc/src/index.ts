@@ -8,6 +8,13 @@ import { StringDecoder } from "node:string_decoder";
 export type JsonObject = Record<string, unknown>;
 export type JsonlMessageHandler = (message: JsonObject) => void;
 
+export interface JsonlRpcTransport {
+  onMessage(handler: JsonlMessageHandler): () => void;
+  notify(message: JsonObject): void;
+  request(message: JsonObject, timeoutMs?: number): Promise<JsonObject>;
+  close(signal?: NodeJS.Signals): Promise<void>;
+}
+
 /**
  * Strict LF-delimited JSON parser. It intentionally does not use node:readline,
  * because several agent protocols permit Unicode line separators inside JSON strings.
@@ -72,7 +79,7 @@ export interface JsonlRpcProcessOptions {
  * Lightweight subprocess transport shared by Pi RPC and Codex App Server.
  * It owns framing, correlation, stderr capture, exit propagation, and listener cleanup.
  */
-export class JsonlRpcProcess {
+export class JsonlRpcProcess implements JsonlRpcTransport {
   private readonly process: ChildProcessWithoutNullStreams;
   private readonly decoder = new StrictJsonlDecoder();
   private readonly pending = new Map<string | number, PendingRequest>();
@@ -179,22 +186,34 @@ export class JsonlRpcProcess {
 }
 
 export function waitForMessage(
-  process: JsonlRpcProcess,
+  process: Pick<JsonlRpcTransport, "onMessage">,
   predicate: (message: JsonObject) => boolean,
   timeoutMs = 120_000,
+  signal?: AbortSignal,
 ): Promise<JsonObject> {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
+    let unsubscribe: () => void = () => undefined;
+    const cleanup = () => {
+      clearTimeout(timeout);
       unsubscribe();
+      signal?.removeEventListener("abort", abort);
+    };
+    const abort = () => {
+      cleanup();
+      reject(signal?.reason instanceof Error ? signal.reason : new Error("Message wait aborted"));
+    };
+    const timeout = setTimeout(() => {
+      cleanup();
       reject(new Error(`Timed out waiting for JSONL message after ${timeoutMs}ms`));
     }, timeoutMs);
     timeout.unref?.();
-    const unsubscribe = process.onMessage((message) => {
+    unsubscribe = process.onMessage((message) => {
       if (!predicate(message)) return;
-      clearTimeout(timeout);
-      unsubscribe();
+      cleanup();
       resolve(message);
     });
+    if (signal?.aborted) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
   });
 }
 

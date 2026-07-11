@@ -1,6 +1,11 @@
-import { JsonlRpcProcess, waitForMessage, type JsonObject } from "@sapling/jsonl-rpc";
+import { JsonlRpcProcess, waitForMessage, type JsonlRpcTransport, type JsonObject } from "@sapling/jsonl-rpc";
 import type { TaskKind, WorkerResult } from "@sapling/protocol";
-import type { WorkerAdapter, WorkerDescriptor, WorkerRunContext } from "@sapling/worker-sdk";
+import {
+  cancelledWorkerResult,
+  type WorkerAdapter,
+  type WorkerDescriptor,
+  type WorkerRunContext,
+} from "@sapling/worker-sdk";
 
 export interface CodexAppServerOptions {
   command?: string;
@@ -10,6 +15,7 @@ export interface CodexAppServerOptions {
   clientVersion?: string;
   environment?: NodeJS.ProcessEnv;
   turnTimeoutMs?: number;
+  transportFactory?: () => JsonlRpcTransport;
 }
 
 export interface CodexTurnResult {
@@ -20,17 +26,36 @@ export interface CodexTurnResult {
   notifications: JsonObject[];
 }
 
-export class CodexAppServerClient {
-  private readonly rpc: JsonlRpcProcess;
+export interface CodexTurnInput {
+  cwd: string;
+  prompt: string;
+  model?: string;
+  writeEnabled: boolean;
+  signal?: AbortSignal;
+  onSession?: (threadId: string) => void;
+  onNotification?: (message: JsonObject) => void;
+}
+
+export interface CodexTurnClient {
+  runTurn(input: CodexTurnInput): Promise<CodexTurnResult>;
+  close(): Promise<void>;
+}
+
+export class CodexAppServerClient implements CodexTurnClient {
+  private readonly rpc: JsonlRpcTransport;
+  private readonly options: CodexAppServerOptions;
   private initialized = false;
 
-  public constructor(private readonly options: CodexAppServerOptions = {}) {
-    this.rpc = new JsonlRpcProcess({
-      command: options.command ?? "codex",
-      args: ["app-server", "--listen", "stdio://"],
-      env: options.environment ?? process.env,
-      requestTimeoutMs: options.turnTimeoutMs ?? 15 * 60_000,
-    });
+  public constructor(options: CodexAppServerOptions = {}) {
+    this.options = options;
+    this.rpc =
+      options.transportFactory?.() ??
+      new JsonlRpcProcess({
+        command: options.command ?? "codex",
+        args: ["app-server", "--listen", "stdio://"],
+        env: options.environment ?? process.env,
+        requestTimeoutMs: options.turnTimeoutMs ?? 15 * 60_000,
+      });
   }
 
   public async initialize(): Promise<void> {
@@ -49,14 +74,7 @@ export class CodexAppServerClient {
     this.initialized = true;
   }
 
-  public async runTurn(input: {
-    cwd: string;
-    prompt: string;
-    model?: string;
-    writeEnabled: boolean;
-    signal?: AbortSignal;
-    onNotification?: (message: JsonObject) => void;
-  }): Promise<CodexTurnResult> {
+  public async runTurn(input: CodexTurnInput): Promise<CodexTurnResult> {
     await this.initialize();
     const notifications: JsonObject[] = [];
     let text = "";
@@ -83,34 +101,54 @@ export class CodexAppServerClient {
         },
       });
       const threadId = readNestedString(started, ["result", "thread", "id"]);
-      const turnResponse = await this.rpc.request({
-        method: "turn/start",
-        params: {
-          threadId,
-          cwd: input.cwd,
-          approvalPolicy: "never",
-          sandboxPolicy: input.writeEnabled
-            ? { type: "workspaceWrite", writableRoots: [input.cwd], networkAccess: false }
-            : { type: "readOnly", networkAccess: false },
-          input: [{ type: "text", text: input.prompt }],
-        },
-      });
-      const turnId = readNestedString(turnResponse, ["result", "turn", "id"]);
+      input.onSession?.(threadId);
+      let turnId: string | undefined;
+      const terminalWait = new AbortController();
+      const completedPromise = waitForMessage(
+        this.rpc,
+        (message) =>
+          message.method === "turn/completed" &&
+          readNestedStringOrUndefined(message, ["params", "threadId"]) === threadId &&
+          (turnId === undefined || readNestedStringOrUndefined(message, ["params", "turn", "id"]) === turnId),
+        this.options.turnTimeoutMs ?? 15 * 60_000,
+        terminalWait.signal,
+      );
+      let turnResponse: JsonObject;
+      try {
+        turnResponse = await this.rpc.request({
+          method: "turn/start",
+          params: {
+            threadId,
+            cwd: input.cwd,
+            approvalPolicy: "never",
+            sandboxPolicy: input.writeEnabled
+              ? { type: "workspaceWrite", writableRoots: [input.cwd], networkAccess: false }
+              : { type: "readOnly", networkAccess: false },
+            input: [{ type: "text", text: input.prompt }],
+          },
+        });
+      } catch (error) {
+        terminalWait.abort(error);
+        await completedPromise.catch(() => undefined);
+        throw error;
+      }
+      turnId = readNestedString(turnResponse, ["result", "turn", "id"]);
       const abort = () => {
         void this.rpc
           .request({ method: "turn/interrupt", params: { threadId, turnId } }, 10_000)
           .catch(() => undefined);
       };
-      input.signal?.addEventListener("abort", abort, { once: true });
-      const completed = await waitForMessage(
-        this.rpc,
-        (message) =>
-          message.method === "turn/completed" &&
-          readNestedStringOrUndefined(message, ["params", "threadId"]) === threadId &&
-          readNestedStringOrUndefined(message, ["params", "turn", "id"]) === turnId,
-        this.options.turnTimeoutMs ?? 15 * 60_000,
-      );
-      input.signal?.removeEventListener("abort", abort);
+      if (input.signal?.aborted) abort();
+      else input.signal?.addEventListener("abort", abort, { once: true });
+      let completed: JsonObject;
+      try {
+        completed = await completedPromise;
+      } finally {
+        input.signal?.removeEventListener("abort", abort);
+      }
+      if (readNestedStringOrUndefined(completed, ["params", "turn", "id"]) !== turnId) {
+        throw new Error("Codex completed an unexpected turn");
+      }
       const status = readNestedStringOrUndefined(completed, ["params", "turn", "status"]) ?? "completed";
       return { threadId, turnId, status, text, notifications };
     } finally {
@@ -131,8 +169,10 @@ export interface CodexWorkerOptions extends CodexAppServerOptions {
 
 export class CodexWorkerAdapter implements WorkerAdapter {
   public readonly descriptor: WorkerDescriptor;
+  private readonly options: CodexWorkerOptions;
 
-  public constructor(private readonly options: CodexWorkerOptions = {}) {
+  public constructor(options: CodexWorkerOptions = {}) {
+    this.options = options;
     this.descriptor = {
       id: options.id ?? "codex-app-server",
       displayName: options.displayName ?? "Codex",
@@ -149,6 +189,7 @@ export class CodexWorkerAdapter implements WorkerAdapter {
   }
 
   public async run(context: WorkerRunContext): Promise<WorkerResult> {
+    if (context.signal.aborted) return cancelledWorkerResult(context.workerRunId, "Codex");
     const client = new CodexAppServerClient(this.options);
     const writeEnabled = ["implementation", "debugging", "integration", "design"].includes(context.task.kind);
     try {
@@ -157,12 +198,23 @@ export class CodexWorkerAdapter implements WorkerAdapter {
         prompt: renderTaskPrompt(context),
         writeEnabled,
         signal: context.signal,
+        onSession: (nativeSessionId) => {
+          context.emit({
+            type: "worker.native_session.bound",
+            missionId: context.missionId,
+            taskId: context.task.id,
+            workerRunId: context.workerRunId,
+            profileHash: context.profileHash,
+            data: { provider: "codex", nativeSessionId },
+          });
+        },
         onNotification: (notification) => {
           const method = typeof notification.method === "string" ? notification.method : "codex.notification";
           context.emit({
             type: `provider.codex.${method.replaceAll("/", ".")}`,
             missionId: context.missionId,
             taskId: context.task.id,
+            workerRunId: context.workerRunId,
             profileHash: context.profileHash,
             data: { method, params: notification.params ?? null },
           });
@@ -180,6 +232,7 @@ export class CodexWorkerAdapter implements WorkerAdapter {
           },
         ],
         outputs: {
+          workerRunId: context.workerRunId,
           nativeSessionId: result.threadId,
           nativeTurnId: result.turnId,
           notificationCount: result.notifications.length,
@@ -196,7 +249,7 @@ export function renderTaskPrompt(context: WorkerRunContext): string {
   return [
     "You are a worker in a governed multi-agent mission.",
     `Mission: ${context.missionId}`,
-    `Task: ${context.task.title}`,
+    `Task ${context.task.id}: ${context.task.title}`,
     `Role: ${context.task.role}`,
     `Objective: ${context.task.objective}`,
     `Success criteria:\n${context.task.successCriteria.map((item) => `- ${item}`).join("\n")}`,

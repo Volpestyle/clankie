@@ -59,6 +59,49 @@ function worker(id: string, kinds: Array<"implementation" | "verification">): Wo
 }
 
 describe("MissionEngine", () => {
+  it("binds provider session events to the engine-issued worker run ID", async () => {
+    const doctrine = compileDoctrine([profile]);
+    const plan = MissionPlanSchema.parse({
+      missionId: "m-native-session",
+      goal: "preserve identity",
+      rationale: "provider events require trusted run identity",
+      profileHash: doctrine.profileHash,
+      successCriteria: ["identity is preserved"],
+      tasks: [
+        {
+          id: "native",
+          title: "Bind session",
+          objective: "Emit a provider session event",
+          kind: "implementation",
+          role: "implementer",
+          successCriteria: ["session is bound"],
+          evidenceRequirements: ["session event"],
+        },
+      ],
+    });
+    const adapter: WorkerAdapter = {
+      ...worker("native", ["implementation"]),
+      async run(context): Promise<WorkerResult> {
+        context.emit({
+          type: "worker.native_session.bound",
+          missionId: context.missionId,
+          taskId: context.task.id,
+          workerRunId: "provider-controlled-id",
+          profileHash: context.profileHash,
+          data: { nativeSessionId: "session-1" },
+        });
+        return { status: "succeeded", summary: "done", evidence: [], outputs: {} };
+      },
+    };
+    const engine = new MissionEngine(plan, doctrine, { workspacePath: "/tmp" });
+    await engine.runUntilIdle(new StaticWorkerRouter([adapter]));
+    const started = engine.getEvents().find((event) => event.type === "worker.started");
+    const bound = engine.getEvents().find((event) => event.type === "worker.native_session.bound");
+    expect(bound?.workerRunId).toBe(started?.workerRunId);
+    expect(bound?.workerRunId).not.toBe("provider-controlled-id");
+    expect(bound?.data).toEqual({ nativeSessionId: "session-1" });
+  });
+
   it("uses an independent worker for verification", async () => {
     const doctrine = compileDoctrine([profile]);
     const plan = MissionPlanSchema.parse({

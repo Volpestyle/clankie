@@ -29,6 +29,7 @@ async function workspace(): Promise<string> {
 function runContext(path: string, events: Array<Omit<DomainEvent, "id" | "occurredAt" | "correlationId">>) {
   return {
     missionId: "mission-sandbox",
+    workerRunId: "run-sandbox",
     task: {
       id: "task-sandbox",
       title: "Exercise sandbox",
@@ -179,7 +180,7 @@ describe.skipIf(process.platform !== "darwin")("macOS shell sandbox", () => {
     expect(event).toMatchObject({
       type: "sandbox.escalation.decided",
       missionId: "mission-sandbox",
-      workerRunId: "mission-sandbox:task-sandbox:attempt-1",
+      workerRunId: "run-sandbox",
       data: {
         effect: "allow",
         reason: "Fixture permits one exact host.",

@@ -18,6 +18,7 @@ export interface WorkerDescriptor {
 
 export interface WorkerRunContext {
   missionId: string;
+  workerRunId: string;
   task: TaskSpec;
   workspacePath: string;
   profileHash: string;
@@ -33,12 +34,25 @@ export interface WorkerAdapter {
   cancel?(runId: string): Promise<void>;
 }
 
+export function cancelledWorkerResult(workerRunId: string, provider: string): WorkerResult {
+  return {
+    status: "failed",
+    summary: `${provider} worker run was cancelled before provider startup.`,
+    evidence: [{ kind: "log", label: "worker-cancelled", summary: "Pre-start cancellation observed." }],
+    outputs: { workerRunId, nativeSessionId: null },
+    diagnosis: "Worker run was already cancelled",
+  };
+}
+
 export interface WorkerRouter {
   select(task: TaskSpec, excludedWorkerIds?: ReadonlySet<string>): WorkerAdapter;
 }
 
 export class StaticWorkerRouter implements WorkerRouter {
-  public constructor(private readonly workers: WorkerAdapter[]) {
+  private readonly workers: WorkerAdapter[];
+
+  public constructor(workers: WorkerAdapter[]) {
+    this.workers = workers;
     if (workers.length === 0) throw new Error("At least one worker is required");
   }
 

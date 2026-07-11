@@ -270,13 +270,14 @@ export class MissionEngine {
     try {
       const result = await worker.run({
         missionId: this.plan.missionId,
+        workerRunId,
         task: runtime.spec,
         workspacePath: this.options.workspacePath,
         profileHash: this.plan.profileHash,
         attempt: runtime.attempts,
         signal: abortController.signal,
         emit: (partial) => {
-          this.emit(partial.type, partial.data, partial.taskId, partial.workerRunId, partial.causationId);
+          this.emit(partial.type, partial.data, partial.taskId, workerRunId, partial.causationId);
         },
       });
       if (isStale()) {

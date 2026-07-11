@@ -1,6 +1,11 @@
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import type { TaskKind, WorkerResult } from "@sapling/protocol";
-import type { WorkerAdapter, WorkerDescriptor, WorkerRunContext } from "@sapling/worker-sdk";
+import {
+  cancelledWorkerResult,
+  type WorkerAdapter,
+  type WorkerDescriptor,
+  type WorkerRunContext,
+} from "@sapling/worker-sdk";
 
 export interface ClaudeWorkerOptions {
   id?: string;
@@ -9,20 +14,23 @@ export interface ClaudeWorkerOptions {
   kinds?: TaskKind[];
   maxTurns?: number;
   settingSources?: Array<"user" | "project" | "local">;
+  query?: ClaudeQuery;
 }
 
-type ClaudeMessage = Record<string, unknown>;
-type ClaudeQuery = (input: {
+export type ClaudeMessage = Record<string, unknown>;
+export type ClaudeQuery = (input: {
   prompt: string;
   options: Record<string, unknown>;
 }) => AsyncIterable<ClaudeMessage>;
 
-const query = sdkQuery as unknown as ClaudeQuery;
+const defaultQuery = sdkQuery as unknown as ClaudeQuery;
 
 export class ClaudeWorkerAdapter implements WorkerAdapter {
   public readonly descriptor: WorkerDescriptor;
+  private readonly options: ClaudeWorkerOptions;
 
-  public constructor(private readonly options: ClaudeWorkerOptions = {}) {
+  public constructor(options: ClaudeWorkerOptions = {}) {
+    this.options = options;
     this.descriptor = {
       id: options.id ?? "claude-agent-sdk",
       displayName: options.displayName ?? "Claude Agent",
@@ -46,6 +54,7 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
   }
 
   public async run(context: WorkerRunContext): Promise<WorkerResult> {
+    if (context.signal.aborted) return cancelledWorkerResult(context.workerRunId, "Claude");
     const writeEnabled = ["implementation", "debugging", "integration", "design"].includes(context.task.kind);
     const allowedTools = writeEnabled
       ? ["Read", "Glob", "Grep", "Edit", "Write", "Bash"]
@@ -55,8 +64,12 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
     let failed = false;
     let diagnosis: string | undefined;
     let messageCount = 0;
+    const abortController = new AbortController();
+    const abort = () => abortController.abort(context.signal.reason);
+    if (context.signal.aborted) abort();
+    else context.signal.addEventListener("abort", abort, { once: true });
 
-    const stream = query({
+    const stream = (this.options.query ?? defaultQuery)({
       prompt: renderClaudePrompt(context),
       options: {
         cwd: context.workspacePath,
@@ -65,31 +78,50 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
         maxTurns: this.options.maxTurns ?? 24,
         permissionMode: writeEnabled ? "acceptEdits" : "default",
         settingSources: this.options.settingSources ?? ["project"],
+        abortController,
       },
     });
 
-    for await (const message of stream) {
-      if (context.signal.aborted) throw new Error("Claude Agent SDK run aborted");
-      messageCount += 1;
-      if (message.type === "system" && message.subtype === "init" && typeof message.session_id === "string") {
-        sessionId = message.session_id;
+    try {
+      for await (const message of stream) {
+        if (context.signal.aborted) throw new Error("Claude Agent SDK run aborted");
+        messageCount += 1;
+        if (
+          !sessionId &&
+          message.type === "system" &&
+          message.subtype === "init" &&
+          typeof message.session_id === "string"
+        ) {
+          sessionId = message.session_id;
+          context.emit({
+            type: "worker.native_session.bound",
+            missionId: context.missionId,
+            taskId: context.task.id,
+            workerRunId: context.workerRunId,
+            profileHash: context.profileHash,
+            data: { provider: "claude", nativeSessionId: sessionId },
+          });
+        }
+        if (typeof message.result === "string") resultText = message.result;
+        if (message.type === "result") {
+          failed = message.is_error === true;
+          if (failed)
+            diagnosis =
+              typeof message.result === "string"
+                ? message.result
+                : "Claude Agent SDK returned an error result.";
+        }
+        context.emit({
+          type: `provider.claude.${String(message.type ?? "message")}`,
+          missionId: context.missionId,
+          taskId: context.task.id,
+          workerRunId: context.workerRunId,
+          profileHash: context.profileHash,
+          data: summarizeClaudeMessage(message),
+        });
       }
-      if (typeof message.result === "string") resultText = message.result;
-      if (message.type === "result") {
-        failed = message.is_error === true;
-        if (failed)
-          diagnosis =
-            typeof message.result === "string"
-              ? message.result
-              : "Claude Agent SDK returned an error result.";
-      }
-      context.emit({
-        type: `provider.claude.${String(message.type ?? "message")}`,
-        missionId: context.missionId,
-        taskId: context.task.id,
-        profileHash: context.profileHash,
-        data: summarizeClaudeMessage(message),
-      });
+    } finally {
+      context.signal.removeEventListener("abort", abort);
     }
 
     return {
@@ -102,7 +134,7 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
           summary: `session=${sessionId ?? "unknown"} messages=${messageCount}`,
         },
       ],
-      outputs: { nativeSessionId: sessionId ?? null, messageCount },
+      outputs: { workerRunId: context.workerRunId, nativeSessionId: sessionId ?? null, messageCount },
       ...(diagnosis ? { diagnosis } : {}),
     };
   }
