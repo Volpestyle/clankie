@@ -27,6 +27,16 @@ Do not begin implementation until the task has a bounded objective, success crit
 
 Use the role instructions in `agents/roles/` and the load-on-demand skills in `.agents/skills/`.
 
+## The lead seat and self-development phases
+
+Who occupies the lead role changes by phase; the authority rules in this contract never do ([ADR 0017](docs/adr/0017-self-development-operating-model.md)):
+
+1. **Scaffolding (current):** external harness sessions (Claude Code, Codex) lead build waves that construct Clankie's own lead machinery, coordinating per `docs/11-development.md`.
+2. **M2 proof:** Clankie's Eve captain leads the frozen scenario (`docs/02-lead-agent-e2e-proof.md`) to pass the evaluation gate.
+3. **Supervised self-development:** Clankie's captain is the default lead for real tracker missions on this repository; the owner approves privileged actions through authenticated surfaces, and evaluator agents score each mission run.
+
+"Clankie developing himself" refers to phase 3 — Clankie as lead spawning his own workers under supervision. It never means an external agent session fanning out sub-workers indefinitely, and never unsupervised operation.
+
 ## Required task loop
 
 1. Restate the task contract and identify any conflict with repository doctrine.

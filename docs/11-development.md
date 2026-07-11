@@ -46,7 +46,8 @@ the TUI. For separate development processes:
 
 ```bash
 pnpm --filter @sapling/control-plane dev
-pnpm --filter @sapling/captain-eve exec eve dev --no-ui --host 127.0.0.1 --port 4321
+pnpm --filter @sapling/captain-eve exec eve build
+pnpm --filter @sapling/captain-eve exec eve start --host 127.0.0.1 --port 4321
 SAPLING_CAPTAIN_URL=http://127.0.0.1:4321 pnpm --filter @sapling/tui dev
 ```
 
@@ -72,7 +73,7 @@ The shared React Native source is present, but native iOS/macOS projects are not
 
 ## Concurrent work through the tracker (interim)
 
-Until the tracker connector lands ([VUH-764](https://linear.app/vuhlp/issue/VUH-764)), concurrent agent sessions coordinate on Linear directly under these rules:
+This is the scaffolding-phase protocol ([ADR 0017](adr/0017-self-development-operating-model.md)): external agent sessions lead build waves until Clankie's captain takes the lead seat after the M2 gate. Until the tracker connector lands ([VUH-764](https://linear.app/vuhlp/issue/VUH-764)), concurrent agent sessions coordinate on Linear directly under these rules:
 
 - All agent sessions post as the single shared identity (`volpestyle+clanky@gmail.com`) — never a personal account or a per-agent seat. Sign every comment with agent name, role, and worker/session ID.
 - Claim before starting: self-assign the issue and move it to In Progress, then re-read the issue to confirm the claim stuck. If another session claimed it first, pick a different issue.
