@@ -19,12 +19,14 @@ import {
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 import type { MenuOption } from "./shell/setup-flow.ts";
 import { MissionDashboard } from "./components/mission-dashboard.ts";
+import type { MissionObserver } from "./observation/mission-observer.ts";
 import { pushTimeline, type ConsoleState, type DoctrineSettings } from "./session/state.ts";
 
 type StatusTone = "normal" | "active" | "ok" | "warn" | "bad" | "muted";
 
 export interface ConsoleCommandContext {
   readonly state: ConsoleState;
+  readonly observer?: MissionObserver;
   readonly captain?: {
     readonly connectionState: string;
     readonly hasActiveTurn: boolean;
@@ -34,8 +36,9 @@ export interface ConsoleCommandContext {
 }
 
 export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellCommand[] {
-  const { state, captain } = context;
+  const { state, captain, observer } = context;
   const commands: FaceShellCommand[] = [];
+  const dashboard = () => observer?.dashboard ?? state.dashboard;
 
   const statusHelpers = (shell: ClankieFaceShell) => {
     const { ansi } = shell.theme;
@@ -92,10 +95,27 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "mission",
       aliases: ["m"],
-      description: "Show the mission dashboard: roster, attention, event tail",
-      takesArgument: false,
-      run(_argument, shell): void {
-        shell.insertCommandComponent("/mission", new MissionDashboard(() => state.dashboard), "success");
+      description: "Observe missions; select by id or move with next/prev",
+      argumentHint: "[list|next|prev|<mission-id>]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        const selector = argument.trim();
+        if (selector.length > 0 && selector !== "list") {
+          if (observer === undefined || !(await observer.selectMission(selector))) {
+            shell.insertCommandResult(
+              `/mission ${selector}`,
+              `Unknown mission selector: ${selector}. Use /mission list.`,
+              "error",
+            );
+            return;
+          }
+        }
+        shell.insertCommandComponent(
+          selector.length === 0 ? "/mission" : `/mission ${selector}`,
+          new MissionDashboard(dashboard),
+          "success",
+        );
+        shell.refreshStatusView();
       },
     },
     {
@@ -169,17 +189,18 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       takesArgument: false,
       run(_argument, shell): void {
         const s = statusHelpers(shell);
+        const observed = dashboard();
         shell.insertCommandResult(
           "/status",
           [
             s.title("Console"),
-            s.line("mission", state.dashboard.mission, "active"),
-            s.line("doctrine", state.dashboard.doctrine, "active"),
-            s.line("workers", String(state.dashboard.agents.length), "normal"),
+            s.line("mission", observed.mission, "active"),
+            s.line("doctrine", observed.doctrine, "active"),
+            s.line("workers", String(observed.agents.length), "normal"),
             s.line(
               "attention",
-              String(state.dashboard.attention.length),
-              state.dashboard.attention.length > 0 ? "warn" : "ok",
+              String(observed.attention.length),
+              observed.attention.length > 0 ? "warn" : "ok",
             ),
             s.line(
               "approvals pending",
@@ -194,7 +215,11 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
             ...(captain?.tokenStatus === undefined || captain.tokenStatus.length === 0
               ? []
               : [s.line("model usage", captain.tokenStatus, "normal")]),
-            s.line("control plane", "mission projection unavailable", "muted"),
+            s.line(
+              "mission observer",
+              `${observed.connection} · cursor #${observed.cursor.toString()}`,
+              "ok",
+            ),
           ].join("\n"),
           "success",
         );

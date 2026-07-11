@@ -31,8 +31,12 @@ export interface ConsoleState {
 export function createInitialConsoleState(): ConsoleState {
   return {
     dashboard: {
+      connection: "event log unavailable",
+      cursor: 0,
       mission: "No active mission",
       doctrine: "control-plane projection unavailable",
+      missions: [],
+      tasks: [],
       agents: [],
       attention: [],
       timeline: [],

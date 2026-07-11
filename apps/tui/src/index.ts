@@ -11,6 +11,9 @@ import { createInitialConsoleState } from "./session/state.ts";
 import { EveCaptainSession } from "./session/eve-captain.ts";
 import { CaptainSessionCursorStore } from "./session/session-cursor.ts";
 import { runRecoveryProbe } from "./recovery-probe.ts";
+import { MissionDashboard } from "./components/mission-dashboard.ts";
+import { SqliteMissionEventSource } from "./observation/mission-events.ts";
+import { MissionObserver } from "./observation/mission-observer.ts";
 
 const repoRoot = resolve(import.meta.dirname, "..", "..", "..");
 
@@ -21,6 +24,19 @@ if (process.stdin.isTTY !== true || process.stdout.isTTY !== true) {
   process.exit(1);
 }
 
+const missionObserver = new MissionObserver({
+  source: new SqliteMissionEventSource(
+    resolve(process.env.SAPLING_EVENT_STORE ?? join(repoRoot, "artifacts", "control-plane", "events.db")),
+  ),
+  checkpointPath: join(repoRoot, ".data", "tui", "mission-observer.json"),
+});
+await missionObserver.restore();
+try {
+  await missionObserver.refresh();
+} catch {
+  // The control plane may start after the face. The observer retries below and
+  // keeps any durable checkpoint visible in the meantime.
+}
 const state = createInitialConsoleState();
 let currentModelRef: string | undefined;
 const captain = new EveCaptainSession({
@@ -37,7 +53,10 @@ const services = createProviderServices({
     applyModelDisplay(config);
   },
 });
-const commands = [...buildConsoleCommands({ state, captain }), ...buildProviderCommands(services)];
+const commands = [
+  ...buildConsoleCommands({ state, captain, observer: missionObserver }),
+  ...buildProviderCommands(services),
+];
 
 function stageFromEnv(): { label?: string; value?: string } {
   if (process.env.HERDR_ENV === "1") {
@@ -69,10 +88,14 @@ const shell = new ClankieFaceShell({
   statusExtras: () => [
     currentModelRef ?? "model unset — /provider then /model",
     captain.connectionState,
+    missionObserver.dashboard.connection,
     ...(captain.tokenStatus.length === 0 ? [] : [captain.tokenStatus]),
   ],
   onPrompt: (prompt, activeShell, signal) => captain.prompt(prompt, activeShell, signal),
   interruptMode: "detach",
+  onExit: () => {
+    missionObserver.stop();
+  },
 });
 
 function applyModelDisplay(config: ClankieConfig): void {
@@ -113,6 +136,15 @@ process.on("unhandledRejection", (reason) => {
 });
 
 shell.start();
+missionObserver.start(
+  () => {
+    shell.requestRender();
+    shell.refreshStatusView();
+  },
+  (error) => {
+    shell.refreshStatus(`mission observer: ${error.message}`);
+  },
+);
 shell.insertMarkdown(
   [
     "**Notice**",
@@ -124,6 +156,7 @@ shell.insertMarkdown(
     "Try /auth, /provider, /model, /status — or type a prompt.",
   ].join("\n"),
 );
+shell.insertCommandComponent("/mission", new MissionDashboard(() => missionObserver.dashboard), "success");
 shell.refreshStatus("ready");
 void loadConfig({ env: process.env, cwd: repoRoot })
   .then(({ config }) => {

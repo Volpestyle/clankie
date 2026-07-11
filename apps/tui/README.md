@@ -7,6 +7,14 @@ control-plane client for authoritative mission data. It must not become a
 second scheduler or infer task state by scraping terminal text; `arch:check`
 forbids importing `@sapling/mission-engine`.
 
+The mission observer is read-only. It replays the control plane's authoritative
+local SQLite event log by global sequence, projects the mission list/task tree/
+worker roster/event tail, and saves a sanitized mode-0600 cursor checkpoint at
+`.data/tui/mission-observer.json`. The SQLite connection is opened with
+`readOnly` and `PRAGMA query_only`; the observer exposes only mission selection
+and next/previous navigation. `SAPLING_EVENT_STORE` overrides the default
+`artifacts/control-plane/events.db` path.
+
 Run after installing with Node 24 (requires a TTY):
 
 ```bash
@@ -50,12 +58,16 @@ src/provider-commands.ts  /auth /provider /model /effort wizards (VUH-760) over
                   @sapling/model-registry, @sapling/credential-broker, and
                   @sapling/model-provider (clankie.json config).
 src/session/      Durable Eve client cursor, replay-safe stream renderer, and
-                  empty placeholders for pending control-plane projections.
+                  console state outside the read-only mission observer.
+src/observation/  Read-only sequenced event source, durable observer cursor,
+                  and mission/task/worker projections.
 ```
 
 ## Interactions
 
 - Type `/` for the command typeahead; Tab completes, Enter runs.
+- `/mission` opens the live observer; `/mission list`, `/mission next`,
+  `/mission prev`, and `/mission <id>` provide read-only selection/navigation.
 - `Ctrl+/` opens the fuzzy command workbench; `Ctrl+T` toggles transcript focus.
 - `!` on an empty input enters the inline shell escape (Esc exits; Ctrl+C kills the running command).
 - Esc detaches from an in-flight captain turn. Eve has no server-side cancel
