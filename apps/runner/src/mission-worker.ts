@@ -347,6 +347,8 @@ export class MissionWorker {
 
 const RUNNER_EVENT_TYPES = new Set([
   "worker.native_session.bound",
+  "worker.turn.started",
+  "worker.turn.settled",
   "worker.waiting_user",
   "worker.command.completed",
   "worker.file_change.completed",

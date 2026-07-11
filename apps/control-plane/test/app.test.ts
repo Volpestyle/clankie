@@ -252,6 +252,23 @@ describe("control plane", () => {
     });
     expect(injected.status).toBe(400);
 
+    for (const [turnEventId, turnType, state] of [
+      ["turn-started-1", "worker.turn.started", "working"],
+      ["turn-settled-1", "worker.turn.settled", "settled"],
+    ]) {
+      const turnEvent = await execution.request(`/v1/runner/workers/${workerRunId}/events`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          attempt: 1,
+          eventId: turnEventId,
+          type: turnType,
+          data: { state, tier: 0, source: "adapter", confidence: 1, observedAt: "2026-07-11T00:00:00.000Z" },
+        }),
+      });
+      await expect(turnEvent.json()).resolves.toMatchObject({ accepted: true });
+    }
+
     const settlementBody = JSON.stringify({
       attempt: 1,
       result: { status: "succeeded", summary: "done", evidence: [], outputs: {} },
