@@ -111,6 +111,7 @@ export interface CapabilityBroker {
 }
 
 export interface GithubConnectorOperation {
+  operationId: string;
   action: string;
   resource: ActionResource;
   missionId: string;
@@ -121,7 +122,7 @@ export interface GithubConnectorOperation {
 }
 
 export interface GithubConnector {
-  execute(operation: GithubConnectorOperation): Promise<unknown>;
+  execute(operation: GithubConnectorOperation): Promise<void>;
 }
 
 const CapabilityActionSchema = z.object({
@@ -250,7 +251,13 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     const identity = await dependencies.authenticateWorker(context.req.raw);
     if (!identity) return context.json({ error: "worker_authentication_required" }, 401);
 
-    const parsedInput = CapabilityRequestSchema.safeParse(await context.req.json());
+    let body: unknown;
+    try {
+      body = await context.req.json();
+    } catch {
+      return context.json({ error: "invalid_capability_request" }, 400);
+    }
+    const parsedInput = CapabilityRequestSchema.safeParse(body);
     if (!parsedInput.success) return context.json({ error: "invalid_capability_request" }, 400);
     const input = parsedInput.data;
     const identityError = validateWorkerBinding(context.req.param("id"), identity, dependencies);
@@ -326,7 +333,13 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     const identity = await dependencies.authenticateWorker(context.req.raw);
     if (!identity) return context.json({ error: "worker_authentication_required" }, 401);
 
-    const parsedInput = ConnectorUseSchema.safeParse(await context.req.json());
+    let body: unknown;
+    try {
+      body = await context.req.json();
+    } catch {
+      return context.json({ error: "invalid_connector_request" }, 400);
+    }
+    const parsedInput = ConnectorUseSchema.safeParse(body);
     if (!parsedInput.success) return context.json({ error: "invalid_connector_request" }, 400);
     const input = parsedInput.data;
     const identityError = validateWorkerBinding(context.req.param("id"), identity, dependencies);
@@ -350,7 +363,9 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       return context.json({ error: "capability_grant_missing" }, 500);
     }
 
+    const operationId = `github-operation-${idFactory()}`;
     const operation: GithubConnectorOperation = {
+      operationId,
       action: input.request.action,
       resource: input.request.resource,
       missionId: identity.missionId,
@@ -359,16 +374,20 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       obligations: use.grant.obligations,
       ...(identity.taskId ? { taskId: identity.taskId } : {}),
     };
-    const result = await dependencies.githubConnector.execute(operation);
+    const connectorResult: unknown = await dependencies.githubConnector.execute(operation);
+    if (connectorResult !== undefined) {
+      return context.json({ error: "invalid_connector_result" }, 502);
+    }
     logger.info(
       {
         missionId: identity.missionId,
         workerRunId: identity.workerRunId,
         action: input.request.action,
+        operationId,
       },
       "privileged GitHub connector operation completed",
     );
-    return context.json({ result });
+    return context.json({ result: { accepted: true, operationId } });
   });
 
   app.post("/v1/workers/:id/steer", async (context) => {

@@ -43,4 +43,7 @@ context provider; worker-supplied policy facts are discarded.
 before invoking the connector. The control plane receives an abstract broker
 and connector from the local runner. Neither interface exposes a provider
 credential or worker environment, so secrets remain inside the privileged
-connector boundary.
+connector boundary. The runner generates the operation/idempotency ID and the
+connector returns no payload. Any unexpected connector result fails closed;
+the worker receives only the runner-generated ID and a constant acceptance
+flag.

@@ -207,9 +207,9 @@ class RecordingCapabilityBroker implements CapabilityBroker {
 class RecordingGithubConnector implements GithubConnector {
   public readonly operations: GithubConnectorOperation[] = [];
 
-  public execute(operation: GithubConnectorOperation): Promise<unknown> {
+  public execute(operation: GithubConnectorOperation): Promise<void> {
     this.operations.push(structuredClone(operation));
-    return Promise.resolve({ accepted: true, operationId: "github-operation-1" });
+    return Promise.resolve();
   }
 }
 
@@ -261,11 +261,12 @@ describe("worker capability exchange", () => {
     );
     expect(executed.status).toBe(200);
     await expect(executed.json()).resolves.toEqual({
-      result: { accepted: true, operationId: "github-operation-1" },
+      result: { accepted: true, operationId: "github-operation-id-3-long-enough" },
     });
     expect(broker.uses).toHaveLength(1);
     expect(connector.operations).toEqual([
       {
+        operationId: "github-operation-id-3-long-enough",
         action: "github.pr.open",
         resource: request.resource,
         missionId: trustedWorker.missionId,
@@ -431,5 +432,64 @@ describe("worker capability exchange", () => {
     );
     expect(executeResponse.status).toBe(200);
     expect(connector.operations[0]?.obligations).toEqual(["record_github_evidence"]);
+  });
+
+  it("rejects malformed JSON and secret-bearing connector results", async () => {
+    const broker = new RecordingCapabilityBroker();
+    const exchange = await createControlPlane({
+      doctrine,
+      capabilityBroker: broker,
+      authenticateWorker: () => Promise.resolve(trustedWorker),
+      resolveActionContext: resolveTrustedActionContext,
+      githubConnector: {
+        execute: (() =>
+          Promise.resolve({
+            credential: "ghp_ENV_SECRET_MUST_NOT_LEAK",
+          })) as unknown as GithubConnector["execute"],
+      },
+    });
+    const request = capabilityAction("github.pr.open");
+
+    const malformedCapability = await exchange.request(
+      `/v1/workers/${trustedWorker.workerRunId}/capabilities`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{",
+      },
+    );
+    expect(malformedCapability.status).toBe(400);
+    expect(broker.issued).toEqual([]);
+
+    const issued = await exchange.request(`/v1/workers/${trustedWorker.workerRunId}/capabilities`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ request }),
+    });
+    const { token } = (await issued.json()) as { token: string };
+
+    const malformedUse = await exchange.request(
+      `/v1/workers/${trustedWorker.workerRunId}/connectors/github/execute`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{",
+      },
+    );
+    expect(malformedUse.status).toBe(400);
+    expect(broker.uses).toEqual([]);
+
+    const executed = await exchange.request(
+      `/v1/workers/${trustedWorker.workerRunId}/connectors/github/execute`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token, request }),
+      },
+    );
+    expect(executed.status).toBe(502);
+    const responseText = await executed.text();
+    expect(responseText).toBe('{"error":"invalid_connector_result"}');
+    expect(responseText).not.toContain("ghp_ENV_SECRET_MUST_NOT_LEAK");
   });
 });
