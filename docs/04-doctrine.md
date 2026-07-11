@@ -2,6 +2,18 @@
 
 Doctrine is a versioned operating contract, not a prompt-only preference sheet.
 
+## Ceremony presets
+
+User-facing doctrine starts from one of three integration-ceremony presets:
+
+| Preset         | External connectors | Integration path | Change shape                         |
+| -------------- | ------------------- | ---------------- | ------------------------------------ |
+| `rawdog`       | none required       | direct to main   | broad scope, typecheck + unit checks |
+| `structured`   | optional            | large PRs        | generous line budgets                |
+| `fine-control` | required bindings   | review gate      | small PRs, full checks, no expansion |
+
+Presets govern ceremony, not safety. `self-build-lab` is an internal evaluation fixture. High-assurance operation is an overlay layered over a preset, so assurance does not consume a fourth slot on the ceremony axis. An overlay may tighten planning, topology, verification, budgets, risk posture, actions, and memory, but it never replaces the base preset's identity, ceremony, or authority bindings.
+
 ## Control categories
 
 - **Preference:** influences planner scoring; may be exceeded with explanation.
@@ -32,7 +44,8 @@ A lower layer may become stricter. It may not loosen a higher-scope deny. Compil
 - worker topology/routing;
 - verification independence and checks;
 - cost/time/retry budgets;
-- field-level source authority;
+- role-first source authority bindings;
+- connector risk-class posture;
 - action policies and obligations;
 - memory retention and propagation.
 
@@ -46,7 +59,7 @@ A compiled profile produces:
 - worker routing rules;
 - action policy index;
 - verification contract;
-- authority map;
+- authority-role bindings;
 - adherence metrics.
 
 Never send the full organization policy to every model. Give each participant the minimum projection required for its role.
@@ -62,15 +75,51 @@ Never send the full organization policy to every model. Give each participant th
 
 Material changes create a `doctrine.changed` event and invalidate any approval whose assumptions no longer hold.
 
+## Connector-neutral policy
+
+Connectors are an open, MCP-first ecosystem. Doctrine never requires a vendor noun. Each connector action declares one risk class:
+
+| Risk class           | Meaning                                                     |
+| -------------------- | ----------------------------------------------------------- |
+| `read`               | observes state without changing it                          |
+| `reversible-write`   | changes state with a reliable compensating operation        |
+| `irreversible-write` | changes state that cannot be reliably restored              |
+| `publish-external`   | sends content or artifacts outside the local trust boundary |
+| `destructive`        | deletes, destroys, or materially damages state              |
+
+The preset supplies the default policy for each class. A specific action such as a provider's PR operation may override that class posture, but it cannot weaken the invariant floor. An action from a never-before-seen connector is evaluated from its declared class; an unclassified unknown action is denied.
+
+The capability exchange accepts the same classified action request. The connector adapter registers authenticated tool metadata with the doctrine classifier, which returns an opaque in-process classification for the policy decision. Worker-supplied class fields and model-written rationale are ignored.
+
+## Authority-role bindings
+
+Authority is expressed as abstract roles first, then bound by the workspace or repository:
+
+| Role                     | Example binding, not a requirement      |
+| ------------------------ | --------------------------------------- |
+| `product_intent`         | operator or a work-tracking connector   |
+| `acceptance_criteria`    | operator or a work-tracking connector   |
+| `approved_design`        | repository asset or a design connector  |
+| `implementation_state`   | local VCS or a code-host connector      |
+| `test_state`             | local command results or a CI connector |
+| `technical_decisions`    | repository ADRs                         |
+| `active_execution_state` | local harness event store               |
+
+Bindings name the source that owns each field; they do not copy one source over another. `rawdog` resolves every role to the operator or local state, so a mission can run with zero external connectors. `fine-control` expects explicit connector bindings for collaborative product, design, implementation, and test roles. Actual connector choices are workspace configuration, not preset requirements.
+
+## Invariant floor
+
+Every compiled profile keeps independent verification enabled and denies test-integrity weakening. Production deployment, `publish-external`, and `destructive` actions require human approval in every preset. A lower doctrine layer or vendor-specific override may become stricter, but never reduce this floor.
+
 ## Policy tests
 
 Each profile needs executable examples:
 
 ```text
-low-risk verified docs PR + one human approval → merge allowed/approval as configured
-high-risk auth path → human merge required
-production deploy → denied in community default
-unknown action → denied
+unknown destructive connector action → human approval required from risk class alone
+production deploy and destructive shell → human approval required in every preset
+rawdog authority roles + no connectors → operator/local bindings resolve
+unclassified unknown action → denied
 lower mission layer tries to allow org-denied action → still denied
 ```
 

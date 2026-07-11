@@ -18,7 +18,7 @@ Biomes remain stable to preserve spatial memory. Temporary execution state moves
 | --------------- | ------------------------- |
 | Observatory     | planning/orchestration    |
 | Seed Library    | context/tracker/docs      |
-| Design Pond     | Figma/design              |
+| Design Pond     | approved-design authority |
 | Build Grove     | implementation/debugging  |
 | Test Greenhouse | tests/evals/CI            |
 | Review Pavilion | review/critique           |
@@ -29,6 +29,8 @@ Biomes remain stable to preserve spatial memory. Temporary execution state moves
 | Archive Tree    | completed history/memory  |
 
 The exact system state remains visible in the inspector; metaphor never replaces technical truth.
+
+The Design Pond is the station for whichever source is bound to the `approved_design` authority role. That may be a design connector, repository assets, or the operator; the garden does not assume a particular vendor.
 
 ## Visual channels
 

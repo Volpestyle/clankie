@@ -1,6 +1,10 @@
 schemaVersion: "1"
 id: self-build-lab
-description: Strict but fast doctrine used to test the lead-agent thesis with deterministic workers.
+kind: internal
+description: Internal eval fixture used to test the lead-agent thesis with deterministic workers.
+ceremony:
+  externalConnectors: none
+  integrationFlow: direct_main
 planning:
   requirePlanApproval: false
   scopeExpansion: ask
@@ -27,13 +31,27 @@ budgets:
   maxTaskRetries: 1
   maxMissionWallMinutes: 30
 authority:
-  product_intent: work_tracker
-  acceptance_criteria: work_tracker
-  implementation_state: github
-  test_state: ci
-  approved_design: figma
-  active_execution_state: harness
+  product_intent: { kind: operator }
+  acceptance_criteria: { kind: operator }
+  implementation_state: { kind: local, source: repository }
+  test_state: { kind: local, source: command_results }
+  approved_design: { kind: local, source: repository }
+  technical_decisions: { kind: local, source: repository_adrs }
+  active_execution_state: { kind: local, source: harness_event_store }
+riskClasses:
+  read: { default: allow, rules: [] }
+  reversible-write: { default: allow, rules: [] }
+  irreversible-write: { default: require_approval, rules: [] }
+  publish-external: { default: require_approval, rules: [] }
+  destructive: { default: require_approval, rules: [] }
 actions:
+  vcs.change.open:
+    default: allow
+    rules: []
+  vcs.change.integrate:
+    default: require_approval
+    rules: []
+  # Recorded provider fixture overrides; user presets remain connector-neutral.
   github.pr.open:
     default: allow
     rules: []
@@ -44,9 +62,12 @@ actions:
     default: require_approval
     rules: []
   deployment.production.create:
-    default: deny
+    default: require_approval
     rules: []
   shell.destructive:
+    default: require_approval
+    rules: []
+  test.integrity.weaken:
     default: deny
     rules: []
   memory.profile.write:
