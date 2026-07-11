@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "client": "@sapling/tui recovery probe",
+  "mission": {
+    "id": "mission-ee733384-4cb",
+    "goal": "M1 crash recovery drill",
+    "context": {
+      "issue": "VUH-693",
+      "workers": 3
+    },
+    "state": "planned",
+    "createdAt": "2026-07-11T07:33:44.506Z",
+    "plan": {
+      "missionId": "mission-ee733384-4cb",
+      "goal": "M1 crash recovery drill",
+      "rationale": "Prove the trusted runner survives control-plane and console crashes.",
+      "tasks": [
+        {
+          "id": "worker-a",
+          "title": "Run worker-a",
+          "objective": "Continue producing terminal output across client-process crashes.",
+          "kind": "implementation",
+          "role": "implementer",
+          "dependsOn": [],
+          "executionClass": "runner_visible",
+          "risk": "low",
+          "writeScope": [],
+          "successCriteria": ["Worker stays live through reconnect."],
+          "evidenceRequirements": ["Lease and terminal replay evidence are attached."],
+          "maxAttempts": 1,
+          "metadata": {}
+        },
+        {
+          "id": "worker-b",
+          "title": "Run worker-b",
+          "objective": "Continue producing terminal output across client-process crashes.",
+          "kind": "implementation",
+          "role": "implementer",
+          "dependsOn": [],
+          "executionClass": "runner_visible",
+          "risk": "low",
+          "writeScope": [],
+          "successCriteria": ["Worker stays live through reconnect."],
+          "evidenceRequirements": ["Lease and terminal replay evidence are attached."],
+          "maxAttempts": 1,
+          "metadata": {}
+        },
+        {
+          "id": "worker-c",
+          "title": "Run worker-c",
+          "objective": "Continue producing terminal output across client-process crashes.",
+          "kind": "implementation",
+          "role": "implementer",
+          "dependsOn": [],
+          "executionClass": "runner_visible",
+          "risk": "low",
+          "writeScope": [],
+          "successCriteria": ["Worker stays live through reconnect."],
+          "evidenceRequirements": ["Lease and terminal replay evidence are attached."],
+          "maxAttempts": 1,
+          "metadata": {}
+        }
+      ],
+      "successCriteria": ["All three workers remain live and state recovers exactly."],
+      "assumptions": [],
+      "risks": [],
+      "humanDecisionsRequired": [],
+      "plannedActions": [],
+      "profileHash": "1a7fbc876f4556b5"
+    }
+  },
+  "terminals": [
+    {
+      "terminalId": "term-2a61d8a1-a67",
+      "workerRunId": "run-1",
+      "lastSequence": 6,
+      "bytes": "cnVuLTE6ZnJhbWU6MDAwMQpydW4tMTpmcmFtZTowMDAyCnJ1bi0xOmZyYW1lOjAwMDMKcnVuLTE6ZnJhbWU6MDAwNApydW4tMTpmcmFtZTowMDA1CnJ1bi0xOmZyYW1lOjAwMDYK",
+      "receivedSequences": [0, 1, 2, 3, 4, 5, 6]
+    },
+    {
+      "terminalId": "term-ad192818-f49",
+      "workerRunId": "run-2",
+      "lastSequence": 6,
+      "bytes": "cnVuLTI6ZnJhbWU6MDAwMQpydW4tMjpmcmFtZTowMDAyCnJ1bi0yOmZyYW1lOjAwMDMKcnVuLTI6ZnJhbWU6MDAwNApydW4tMjpmcmFtZTowMDA1CnJ1bi0yOmZyYW1lOjAwMDYK",
+      "receivedSequences": [0, 1, 2, 3, 4, 5, 6]
+    },
+    {
+      "terminalId": "term-5e996259-456",
+      "workerRunId": "run-3",
+      "lastSequence": 6,
+      "bytes": "cnVuLTM6ZnJhbWU6MDAwMQpydW4tMzpmcmFtZTowMDAyCnJ1bi0zOmZyYW1lOjAwMDMKcnVuLTM6ZnJhbWU6MDAwNApydW4tMzpmcmFtZTowMDA1CnJ1bi0zOmZyYW1lOjAwMDYK",
+      "receivedSequences": [0, 1, 2, 3, 4, 5, 6]
+    }
+  ]
+}

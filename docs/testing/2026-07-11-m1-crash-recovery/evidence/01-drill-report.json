@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "issue": "VUH-693",
+  "outcome": "pass",
+  "invocation": "pnpm exec tsx scripts/m1-exit-gate.ts",
+  "crash": {
+    "controlPlaneSignal": "SIGKILL",
+    "consoleSignal": "SIGKILL",
+    "consoleClient": "@sapling/tui --recovery-probe",
+    "consoleConsumedTerminalReplay": true,
+    "workersAliveDuringCrash": 3
+  },
+  "mission": {
+    "missionId": "mission-ee733384-4cb",
+    "profileHash": "1a7fbc876f4556b5",
+    "state": "running",
+    "recordExact": true,
+    "projectionExact": true,
+    "eventLogExact": true,
+    "eventCount": 12,
+    "hashChainValid": true
+  },
+  "leases": [
+    {
+      "leaseId": "62bbf4e2-8d29-4e4b-9653-797678e23a78",
+      "workerRunId": "run-1",
+      "taskId": "worker-a",
+      "pid": 39867,
+      "processStartedAt": "Sat Jul 11 02:33:44 2026",
+      "state": "live",
+      "exactAfterRecovery": true
+    },
+    {
+      "leaseId": "80b749a6-d224-4e22-8cea-911a90c5c52f",
+      "workerRunId": "run-2",
+      "taskId": "worker-b",
+      "pid": 39883,
+      "processStartedAt": "Sat Jul 11 02:33:44 2026",
+      "state": "live",
+      "exactAfterRecovery": true
+    },
+    {
+      "leaseId": "772538ac-8787-4f07-84e5-1fe372cf7d22",
+      "workerRunId": "run-3",
+      "taskId": "worker-c",
+      "pid": 39899,
+      "processStartedAt": "Sat Jul 11 02:33:44 2026",
+      "state": "live",
+      "exactAfterRecovery": true
+    }
+  ],
+  "terminals": [
+    {
+      "terminalId": "term-2a61d8a1-a67",
+      "workerRunId": "run-1",
+      "preCrashSequence": 6,
+      "recoveredSequence": 17,
+      "resumedFirstSequence": 7,
+      "replayedBytes": 289,
+      "gapFree": true,
+      "byteExact": true
+    },
+    {
+      "terminalId": "term-ad192818-f49",
+      "workerRunId": "run-2",
+      "preCrashSequence": 6,
+      "recoveredSequence": 17,
+      "resumedFirstSequence": 7,
+      "replayedBytes": 289,
+      "gapFree": true,
+      "byteExact": true
+    },
+    {
+      "terminalId": "term-5e996259-456",
+      "workerRunId": "run-3",
+      "preCrashSequence": 6,
+      "recoveredSequence": 17,
+      "resumedFirstSequence": 7,
+      "replayedBytes": 289,
+      "gapFree": true,
+      "byteExact": true
+    }
+  ],
+  "sideEffects": {
+    "operationId": "mission-ee733384-4cb:side-effect:1",
+    "attempts": 2,
+    "executions": 1,
+    "eventOccurrences": 1,
+    "idempotentSequence": 12
+  }
+}

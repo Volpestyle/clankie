@@ -141,6 +141,7 @@ Read [`AGENTS.md`](AGENTS.md) before assigning work to any autonomous coding age
 - [`docs/10-security-threat-model.md`](docs/10-security-threat-model.md)
 - [`docs/11-development.md`](docs/11-development.md)
 - [`docs/12-release-criteria.md`](docs/12-release-criteria.md)
+- [`docs/testing/`](docs/testing/) — dated, re-runnable verification archives
 
 ## Open-core boundary
 

@@ -1,0 +1,4 @@
+{"level":30,"time":"2026-07-11T07:33:44.466Z","service":"sapling-control-plane","version":"0.1.0","missionCount":0,"msg":"mission records rebuilt from event store"}
+{"level":30,"time":"2026-07-11T07:33:44.467Z","service":"sapling-control-plane","version":"0.1.0","port":60422,"profileHash":"1a7fbc876f4556b5","eventStorePath":"<state-root>/events.db","msg":"control plane listening"}
+{"level":30,"time":"2026-07-11T07:33:44.507Z","service":"sapling-control-plane","version":"0.1.0","missionId":"mission-ee733384-4cb","msg":"mission created"}
+{"level":30,"time":"2026-07-11T07:33:44.511Z","service":"sapling-control-plane","version":"0.1.0","missionId":"mission-ee733384-4cb","taskCount":3,"msg":"mission planned"}

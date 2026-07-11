@@ -9,3 +9,9 @@ Run after installing with Node 24:
 ```bash
 pnpm --filter @sapling/tui dev
 ```
+
+The same executable has a non-interactive `--recovery-probe` mode for the M1
+crash/reconnect gate. It reads mission state through `@sapling/api-client`,
+consumes sequenced terminal replay from the runner semantic boundary, writes
+an atomic cursor checkpoint, and remains alive so the drill can crash the real
+TUI process. This is a CI proof surface, not an alternate operator interface.

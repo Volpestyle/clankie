@@ -12,6 +12,9 @@ import {
 } from "@earendil-works/pi-tui";
 import chalk from "chalk";
 import { MissionDashboard, type DashboardState } from "./components/mission-dashboard.ts";
+import { runRecoveryProbe } from "./recovery-probe.ts";
+
+if (process.argv.includes("--recovery-probe")) await runRecoveryProbe();
 
 const terminal = new ProcessTerminal();
 const tui = new TUI(terminal);
