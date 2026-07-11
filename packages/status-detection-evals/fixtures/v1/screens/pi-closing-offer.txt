@@ -1,0 +1,2 @@
+assistant/final
+The adapter is implemented and the suite is green. I can add an optional usage example if you want.

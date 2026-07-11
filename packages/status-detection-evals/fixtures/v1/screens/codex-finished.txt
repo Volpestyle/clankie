@@ -1,0 +1,5 @@
+• Ran pnpm --filter @sapling/example test
+  └ Test Files  1 passed (1)
+    Tests       6 passed (6)
+
+Implemented the bounded package change. The focused tests pass and no remaining risk is known.

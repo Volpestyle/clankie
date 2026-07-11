@@ -1,0 +1,7 @@
+Do you want to allow this tool action?
+
+❯ 1. Yes
+  2. Yes, and remember for this session
+  3. No
+
+Esc to cancel · Tab to amend

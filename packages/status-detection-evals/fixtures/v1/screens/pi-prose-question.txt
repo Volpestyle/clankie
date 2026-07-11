@@ -1,0 +1,5 @@
+assistant/analysis
+Both endpoints are available, but the repository does not declare which environment owns this client.
+
+assistant/final
+Which endpoint should the client target?

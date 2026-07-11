@@ -1,0 +1,6 @@
+Would you like to allow this command?
+
+  1. Yes, proceed
+  2. No, cancel
+
+Press enter to confirm or esc to go back

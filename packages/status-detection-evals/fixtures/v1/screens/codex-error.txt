@@ -1,0 +1,4 @@
+• Ran pnpm --filter @sapling/example test
+  └ Error: fixture database could not be opened
+
+The worker stopped because the required fixture is missing. No implementation result was produced.

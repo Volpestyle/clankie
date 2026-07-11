@@ -1,0 +1,3 @@
+I found two authoritative schemas that currently disagree. Continuing would choose an owner and alter compatibility behavior.
+
+Which schema should own the new field?
