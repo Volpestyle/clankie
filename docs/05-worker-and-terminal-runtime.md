@@ -47,6 +47,8 @@ Separate planes:
 
 Every terminal frame carries a monotonically increasing sequence. Reconnect asks from the last sequence; when unavailable, runner sends a terminal snapshot.
 
+`TerminalManager` in `apps/runner/src/terminals.ts` implements this: output frames live in a bounded per-terminal replay buffer; evicted bytes fold into a rolling byte-tail snapshot, so snapshot + buffer is always a gap-free suffix of the stream. Reconnects inside the buffer resume exactly; older or missing sequences are resynced from the snapshot. Lagging observers are resynced from a fresh snapshot instead of buffering unbounded frames (backpressure). Input and resize require a live control lease; observation does not. Worker processes attach through a `TerminalTransport` — the built-in pipe transport merges stdout/stderr; a native PTY transport slots in behind the same interface.
+
 ## Human takeover
 
 - observers may read according to RBAC;
