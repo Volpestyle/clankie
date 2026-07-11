@@ -1,0 +1,18 @@
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# generated native projects (expo prebuild)
+/ios
+/android
+
+# Metro
+.metro-health-check*
+
+# local env files
+.env*.local
+
+*.tsbuildinfo
+.DS_Store

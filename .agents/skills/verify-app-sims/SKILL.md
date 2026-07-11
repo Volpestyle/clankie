@@ -10,6 +10,7 @@ Prefer captured evidence (screenshots, frame diffs, logs, process samples) over 
 
 - Two lanes per [ADR 0009](../../../docs/adr/0009-per-shell-react-native-versions.md): mobile (Expo SDK 57 / RN 0.86 / Reanimated 4.5) and macOS (react-native-macos 0.81 / Reanimated 3.19). Shared code sticks to the Reanimated 3/4-common API subset.
 - The dev-server port is **baked into native builds** (`RCT_METRO_PORT`); `run-macos --port` does NOT retarget an already-built app. Convention: macOS Metro on **8081**, mobile Metro on **8082** (`expo start --port 8082`).
+- A stale Metro from another checkout/scratchpad answers `/status` on the conventional port and the app silently loads the **wrong bundle**. Before reusing a running Metro, verify the listener's cwd is your app dir: `lsof -a -p "$(lsof -tnP -iTCP:8082 -sTCP:LISTEN)" -d cwd -Fn` (`apps/mobile/scripts/ios-device.sh` does this and dies on foreign owners).
 - Metro monorepo wiring for shared-source shells: `watchFolders` + `resolver.nodeModulesPaths` with hierarchical lookup **left on** — `disableHierarchicalLookup: true` breaks Expo's internal imports (first symptom: `Unable to resolve module expo-asset`). `expo-asset` must also be an explicit dependency of the Expo shell.
 
 ## Interactive prompts stall pane runs

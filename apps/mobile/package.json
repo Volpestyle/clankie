@@ -1,0 +1,36 @@
+{
+  "name": "@sapling/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start --dev-client --port 8082",
+    "ios": "expo run:ios --port 8082",
+    "ios:device": "CLANKIE_VARIANT=dev bash scripts/ios-device.sh",
+    "android": "expo run:android --port 8082",
+    "build": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rm -rf .expo ios android dist coverage"
+  },
+  "dependencies": {
+    "@sapling/apple-command-center": "workspace:*",
+    "@shopify/react-native-skia": "2.6.9",
+    "expo": "~57.0.1",
+    "expo-asset": "~57.0.2",
+    "expo-dev-client": "~57.0.3",
+    "expo-splash-screen": "~57.0.1",
+    "expo-status-bar": "~57.0.0",
+    "react": "19.2.3",
+    "react-native": "0.86.0",
+    "react-native-gesture-handler": "~2.32.0",
+    "react-native-reanimated": "4.5.0",
+    "react-native-worklets": "0.10.1"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.29.0",
+    "@types/react": "~19.2.0",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

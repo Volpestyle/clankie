@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "Sapling",
+    "slug": "sapling-command-center",
+    "version": "0.1.0",
+    "scheme": "sapling",
+    "orientation": "default",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "bundleIdentifier": "io.clankie.v2",
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "io.clankie.v2"
+    }
+  }
+}
