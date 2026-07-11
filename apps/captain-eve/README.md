@@ -14,9 +14,14 @@ Run the headless service directly when developing the TUI without the
 `clankie` launcher:
 
 ```bash
-pnpm --filter @sapling/captain-eve exec eve dev --no-ui --host 127.0.0.1 --port 4321
+pnpm --filter @sapling/captain-eve exec eve build
+pnpm --filter @sapling/captain-eve exec eve start --host 127.0.0.1 --port 4321
 SAPLING_CAPTAIN_URL=http://127.0.0.1:4321 pnpm --filter @sapling/tui dev
 ```
+
+Use `eve dev --no-ui` only while editing the authored captain itself. The shared
+operator service uses built output so a process restart never leaves a durable
+session pointing at a pruned development snapshot.
 
 Eve owns durable conversation execution, replay, and compaction. Clients store
 only their continuation/session cursor. Mission state remains authoritative in

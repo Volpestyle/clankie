@@ -3,14 +3,30 @@ import { dirname } from "node:path";
 import type { SessionState } from "eve/client";
 
 export interface CaptainSessionCursor extends SessionState {
+  readonly version: 2;
+  readonly active: boolean;
+  readonly generation: string;
+}
+
+export interface LegacyCaptainSessionCursor extends SessionState {
   readonly version: 1;
   readonly active: boolean;
 }
 
-function parseCursor(value: unknown): CaptainSessionCursor | undefined {
+export type StoredCaptainSessionCursor = CaptainSessionCursor | LegacyCaptainSessionCursor;
+
+function parseCursor(value: unknown): StoredCaptainSessionCursor | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const record = value as Record<string, unknown>;
-  if (record.version !== 1 || typeof record.active !== "boolean") return undefined;
+  if ((record.version !== 1 && record.version !== 2) || typeof record.active !== "boolean") {
+    return undefined;
+  }
+  if (
+    record.version === 2 &&
+    (typeof record.generation !== "string" || !/^[a-f0-9]{64}$/u.test(record.generation))
+  ) {
+    return undefined;
+  }
   if (!Number.isSafeInteger(record.streamIndex) || (record.streamIndex as number) < 0) return undefined;
   if (
     record.sessionId !== undefined &&
@@ -25,8 +41,7 @@ function parseCursor(value: unknown): CaptainSessionCursor | undefined {
   if (record.active === true && record.sessionId === undefined) return undefined;
   if (record.sessionId === undefined && record.continuationToken !== undefined) return undefined;
   if (record.sessionId === undefined && record.streamIndex !== 0) return undefined;
-  return {
-    version: 1,
+  const state = {
     active: record.active,
     streamIndex: record.streamIndex as number,
     ...(record.sessionId === undefined ? {} : { sessionId: record.sessionId as string }),
@@ -34,6 +49,9 @@ function parseCursor(value: unknown): CaptainSessionCursor | undefined {
       ? {}
       : { continuationToken: record.continuationToken as string }),
   };
+  return record.version === 2
+    ? { ...state, version: 2, generation: record.generation as string }
+    : { ...state, version: 1 };
 }
 
 export class CaptainSessionCursorStore {
@@ -44,7 +62,7 @@ export class CaptainSessionCursorStore {
     this.path = path;
   }
 
-  public async read(): Promise<CaptainSessionCursor | undefined> {
+  public async read(): Promise<StoredCaptainSessionCursor | undefined> {
     try {
       const parsed = parseCursor(JSON.parse(await readFile(this.path, "utf8")));
       if (parsed === undefined) {
@@ -81,6 +99,6 @@ export class CaptainSessionCursorStore {
   }
 }
 
-export function emptyCaptainCursor(): CaptainSessionCursor {
-  return { version: 1, active: false, streamIndex: 0 };
+export function emptyCaptainCursor(generation: string): CaptainSessionCursor {
+  return { version: 2, active: false, generation, streamIndex: 0 };
 }

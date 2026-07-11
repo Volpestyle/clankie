@@ -1,6 +1,6 @@
 import type { ChildProcess, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -12,6 +12,21 @@ import {
   EVE_WORKFLOW_ID,
   isCaptainInfo,
 } from "../src/session/captain-identity.ts";
+
+const TEST_GENERATION = "a".repeat(64);
+
+function completedChild(exitCode: number): ChildProcess {
+  const child = Object.assign(new EventEmitter(), {
+    exitCode: null as number | null,
+    pid: undefined,
+    kill: () => true,
+  });
+  queueMicrotask(() => {
+    child.exitCode = exitCode;
+    child.emit("exit", exitCode, null);
+  });
+  return child as unknown as ChildProcess;
+}
 
 function captainInfo(name = CAPTAIN_AGENT_NAME): unknown {
   return {
@@ -63,6 +78,127 @@ describe("ensureCaptainService", () => {
     ).rejects.toThrow("must use a loopback http URL");
   });
 
+  it("builds the captain before starting the durable production runtime", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "captain-service-test-"));
+    const calls: Array<{ args: readonly string[]; command: string }> = [];
+    const statuses: string[] = [];
+    let ready = false;
+    const child = Object.assign(new EventEmitter(), {
+      exitCode: null,
+      pid: undefined,
+      kill: () => true,
+    }) as unknown as ChildProcess;
+    const spawnBuildImpl = ((command: string, args: readonly string[]) => {
+      calls.push({ command, args });
+      return completedChild(0);
+    }) as unknown as typeof spawn;
+    const spawnImpl = ((command: string, args: readonly string[]) => {
+      calls.push({ command, args });
+      ready = true;
+      return child;
+    }) as unknown as typeof spawn;
+
+    try {
+      const handle = await ensureCaptainService({
+        repoRoot: "/repo",
+        host: "http://127.0.0.1:4321",
+        env: { XDG_STATE_HOME: stateRoot },
+        fetchImpl: async (input) => {
+          if (!ready) throw new TypeError("fetch failed");
+          return String(input).endsWith("/eve/v1/info")
+            ? Response.json(captainInfo())
+            : Response.json({ ok: true, status: "ready", workflowId: EVE_WORKFLOW_ID });
+        },
+        onStatus: (status) => statuses.push(status),
+        readBuildGenerationImpl: () => TEST_GENERATION,
+        spawnBuildImpl,
+        spawnImpl,
+      });
+
+      expect(handle.owned).toBe(true);
+      expect(handle.generation).toBe(TEST_GENERATION);
+      expect(statuses).toEqual([
+        "Checking for a running captain…",
+        "Building the durable captain…",
+        "Starting the durable captain…",
+      ]);
+      expect(calls).toEqual([
+        {
+          command: "pnpm",
+          args: ["--filter", "@sapling/captain-eve", "exec", "eve", "build"],
+        },
+        {
+          command: "pnpm",
+          args: [
+            "--filter",
+            "@sapling/captain-eve",
+            "exec",
+            "eve",
+            "start",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "4321",
+          ],
+        },
+      ]);
+      const serviceStatePath = join(stateRoot, "clankie", "captain-eve-service.json");
+      expect(JSON.parse(await readFile(serviceStatePath, "utf8"))).toMatchObject({
+        generation: TEST_GENERATION,
+        host: "http://127.0.0.1:4321",
+        version: 1,
+      });
+      expect((await stat(serviceStatePath)).mode & 0o777).toBe(0o600);
+    } finally {
+      await rm(stateRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not start a service when the captain build fails", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "captain-service-test-"));
+    try {
+      await expect(
+        ensureCaptainService({
+          repoRoot: "/repo",
+          host: "http://127.0.0.1:4321",
+          env: { XDG_STATE_HOME: stateRoot },
+          fetchImpl: async () => {
+            throw new TypeError("fetch failed");
+          },
+          readBuildGenerationImpl: () => TEST_GENERATION,
+          spawnBuildImpl: (() => completedChild(1)) as unknown as typeof spawn,
+          spawnImpl: (() => {
+            throw new Error("start must not run");
+          }) as unknown as typeof spawn,
+        }),
+      ).rejects.toThrow("build exited with code 1");
+    } finally {
+      await rm(stateRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("fails immediately when an unhealthy process already occupies the endpoint", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "captain-service-test-"));
+    try {
+      await expect(
+        ensureCaptainService({
+          repoRoot: "/repo",
+          host: "http://127.0.0.1:4321",
+          env: { XDG_STATE_HOME: stateRoot },
+          fetchImpl: async () => new Response(null, { status: 503 }),
+          spawnBuildImpl: (() => {
+            throw new Error("build must not run");
+          }) as unknown as typeof spawn,
+          spawnImpl: (() => {
+            throw new Error("start must not run");
+          }) as unknown as typeof spawn,
+        }),
+      ).rejects.toThrow("occupied but unhealthy");
+    } finally {
+      await rm(stateRoot, { recursive: true, force: true });
+    }
+  });
+
   it("turns an asynchronous spawn failure into an actionable startup error", async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), "captain-service-test-"));
     const child = Object.assign(new EventEmitter(), {
@@ -81,7 +217,11 @@ describe("ensureCaptainService", () => {
           repoRoot: "/unused",
           host: "http://127.0.0.1:4321",
           env: { XDG_STATE_HOME: stateRoot },
-          fetchImpl: async () => new Response(null, { status: 503 }),
+          fetchImpl: async () => {
+            throw new TypeError("fetch failed");
+          },
+          readBuildGenerationImpl: () => TEST_GENERATION,
+          spawnBuildImpl: (() => completedChild(0)) as unknown as typeof spawn,
           spawnImpl,
           timeoutMs: 500,
         }),

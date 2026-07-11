@@ -25,6 +25,9 @@ const state = createInitialConsoleState();
 let currentModelRef: string | undefined;
 const captain = new EveCaptainSession({
   host: process.env.SAPLING_CAPTAIN_URL ?? "http://127.0.0.1:4321",
+  ...(process.env.SAPLING_CAPTAIN_GENERATION === undefined
+    ? {}
+    : { generation: process.env.SAPLING_CAPTAIN_GENERATION }),
   cursorStore: new CaptainSessionCursorStore(join(repoRoot, ".data", "tui", "captain-session.json")),
 });
 await captain.initialize();
@@ -64,7 +67,7 @@ const shell = new ClankieFaceShell({
   bannerFields: baseBannerFields,
   historyPath: join(repoRoot, ".data", "tui", "prompt-history.jsonl"),
   statusExtras: () => [
-    currentModelRef ?? "model unset — /model",
+    currentModelRef ?? "model unset — /provider then /model",
     captain.connectionState,
     ...(captain.tokenStatus.length === 0 ? [] : [captain.tokenStatus]),
   ],
@@ -115,9 +118,10 @@ shell.insertMarkdown(
     "**Notice**",
     "",
     captain.connectionState === "live"
-      ? "Connected to the durable local Eve captain. Plain prompts now reach the configured model."
+      ? (captain.startupNotice ??
+        "Connected to the durable local Eve captain. Plain prompts now reach the configured model.")
       : "The captain service is unavailable. Direct `clankie` startup normally launches it; check the captain log.",
-    "Try /auth, /model, /status — or type a prompt.",
+    "Try /auth, /provider, /model, /status — or type a prompt.",
   ].join("\n"),
 );
 shell.refreshStatus("ready");

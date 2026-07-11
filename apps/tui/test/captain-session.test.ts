@@ -15,6 +15,7 @@ import { CaptainSessionCursorStore, type CaptainSessionCursor } from "../src/ses
 import type { ClankieFaceShell, FaceBlockHandle } from "../src/shell/shell.ts";
 
 const tempDirs: string[] = [];
+const TEST_GENERATION = "a".repeat(64);
 
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
@@ -31,8 +32,9 @@ describe("CaptainSessionCursorStore", () => {
   it("writes the capability-like cursor atomically with private permissions", async () => {
     const { path, store } = await temporaryStore();
     const cursor: CaptainSessionCursor = {
-      version: 1,
+      version: 2,
       active: true,
+      generation: TEST_GENERATION,
       sessionId: "session-test",
       continuationToken: "continuation-secret",
       streamIndex: 7,
@@ -55,7 +57,7 @@ describe("CaptainSessionCursorStore", () => {
 });
 
 function emptyCursorForTest(): CaptainSessionCursor {
-  return { version: 1, active: false, streamIndex: 0 };
+  return { version: 2, active: false, generation: TEST_GENERATION, streamIndex: 0 };
 }
 
 class TestBlock implements FaceBlockHandle {
@@ -215,6 +217,7 @@ describe("EveCaptainSession", () => {
       host: "http://127.0.0.1:4321",
       cursorStore: store,
       client: fake.client,
+      generation: TEST_GENERATION,
     });
     const view = testShell();
     captain.setContextWindowTokens(1_000);
@@ -244,6 +247,7 @@ describe("EveCaptainSession", () => {
       host: "http://127.0.0.1:4321",
       cursorStore: store,
       client: fake.client,
+      generation: TEST_GENERATION,
     });
     await captain.initialize();
     await captain.prompt("first", testShell().shell, new AbortController().signal);
@@ -267,6 +271,7 @@ describe("EveCaptainSession", () => {
       host: "http://127.0.0.1:4321",
       cursorStore: store,
       client: fake.client,
+      generation: TEST_GENERATION,
     });
     await first.initialize();
     await first.prompt("first", testShell().shell, new AbortController().signal);
@@ -277,6 +282,7 @@ describe("EveCaptainSession", () => {
       host: "http://127.0.0.1:4321",
       cursorStore: store,
       client: fake.client,
+      generation: TEST_GENERATION,
     });
     const replay = testShell();
     await restarted.initialize();
@@ -290,6 +296,96 @@ describe("EveCaptainSession", () => {
     expect(fake.sent).toEqual(["first", "second", "third"]);
     expect(fake.starts.at(-1)).toBe(turnEvents("first", 1).length + turnEvents("second", 2).length);
     expect(replay.blocks.map((block) => block.markdown).join("\n")).toContain("Live reply 3");
+  });
+
+  it("retires a settled cursor from an incompatible captain build before sending", async () => {
+    const { path, store } = await temporaryStore();
+    await store.write({
+      version: 2,
+      active: false,
+      generation: "b".repeat(64),
+      sessionId: "session-old-build",
+      continuationToken: "old-continuation",
+      streamIndex: 9,
+    });
+    const fake = fakeClient();
+    const captain = new EveCaptainSession({
+      host: "http://127.0.0.1:4321",
+      cursorStore: store,
+      client: fake.client,
+      generation: TEST_GENERATION,
+    });
+
+    await captain.initialize();
+    expect(captain.startupNotice).toContain("started a fresh conversation");
+    await captain.prompt("fresh", testShell().shell, new AbortController().signal);
+
+    expect(fake.sent).toEqual(["fresh"]);
+    expect(fake.states.every((state) => state.sessionId !== "session-old-build")).toBe(true);
+    expect(JSON.parse(await readFile(path, "utf8"))).toMatchObject({
+      generation: TEST_GENERATION,
+      sessionId: "session-live",
+      version: 2,
+    });
+  });
+
+  it("migrates a settled legacy cursor without contacting its dev session", async () => {
+    const { path, store } = await temporaryStore();
+    await store.write(emptyCursorForTest());
+    await writeFile(
+      path,
+      `${JSON.stringify({
+        version: 1,
+        active: false,
+        sessionId: "legacy-dev-session",
+        continuationToken: "legacy-continuation",
+        streamIndex: 7,
+      })}\n`,
+      "utf8",
+    );
+    const fake = fakeClient();
+    const captain = new EveCaptainSession({
+      host: "http://127.0.0.1:4321",
+      cursorStore: store,
+      client: fake.client,
+      generation: TEST_GENERATION,
+    });
+
+    await captain.initialize();
+    expect(captain.startupNotice).toContain("started a fresh conversation");
+    await captain.prompt("after-migration", testShell().shell, new AbortController().signal);
+    expect(fake.sent).toEqual(["after-migration"]);
+    expect(fake.states.every((state) => state.sessionId !== "legacy-dev-session")).toBe(true);
+  });
+
+  it("blocks an active cursor from an incompatible build until /new explicitly abandons it", async () => {
+    const { store } = await temporaryStore();
+    await store.write({
+      version: 2,
+      active: true,
+      generation: "b".repeat(64),
+      sessionId: "session-active-old-build",
+      continuationToken: "old-active-continuation",
+      streamIndex: 4,
+    });
+    const fake = fakeClient();
+    const captain = new EveCaptainSession({
+      host: "http://127.0.0.1:4321",
+      cursorStore: store,
+      client: fake.client,
+      generation: TEST_GENERATION,
+    });
+
+    await captain.initialize();
+    expect(captain.startupNotice).toContain("may still be active");
+    await expect(
+      captain.prompt("must-not-send", testShell().shell, new AbortController().signal),
+    ).rejects.toThrow("may have produced mission side effects");
+    expect(fake.sent).toEqual([]);
+
+    await captain.newSession();
+    await captain.prompt("explicitly-fresh", testShell().shell, new AbortController().signal);
+    expect(fake.sent).toEqual(["explicitly-fresh"]);
   });
 });
 

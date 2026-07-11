@@ -1,11 +1,15 @@
 import { Client, type HandleMessageStreamEvent, type SessionState } from "eve/client";
 import type { ClankieFaceShell } from "../shell/shell.ts";
-import { assertCaptainEndpoint, assertLoopbackCaptainHost } from "./captain-identity.ts";
+import {
+  assertCaptainEndpoint,
+  assertLoopbackCaptainHost,
+  captainInfoGeneration,
+} from "./captain-identity.ts";
 import { EveFaceRenderer, formatTokenFlow } from "./eve-renderer.ts";
 import {
   CaptainSessionCursorStore,
   emptyCaptainCursor,
-  type CaptainSessionCursor,
+  type StoredCaptainSessionCursor,
 } from "./session-cursor.ts";
 
 export type CaptainConnectionState = "connecting" | "live" | "detached" | "unavailable" | "failed";
@@ -14,6 +18,7 @@ export interface EveCaptainOptions {
   readonly host: string;
   readonly cursorStore: CaptainSessionCursorStore;
   readonly client?: Client;
+  readonly generation?: string;
 }
 
 function isBoundary(event: HandleMessageStreamEvent): boolean {
@@ -33,7 +38,11 @@ function isAbort(error: unknown): boolean {
 export class EveCaptainSession {
   private readonly client: Client;
   private readonly store: CaptainSessionCursorStore;
-  private cursor: CaptainSessionCursor = emptyCaptainCursor();
+  private readonly configuredGeneration: string | undefined;
+  private cursor: StoredCaptainSessionCursor | undefined;
+  private serviceGeneration: string | undefined;
+  private incompatibleGeneration = false;
+  private generationReset = false;
   private renderer: EveFaceRenderer | undefined;
   private connection: CaptainConnectionState = "connecting";
   private generation = 0;
@@ -50,6 +59,7 @@ export class EveCaptainSession {
         redirect: "error",
       });
     this.store = options.cursorStore;
+    this.configuredGeneration = options.generation;
   }
 
   public get connectionState(): CaptainConnectionState {
@@ -57,7 +67,17 @@ export class EveCaptainSession {
   }
 
   public get hasActiveTurn(): boolean {
-    return this.cursor.active;
+    return this.cursor?.active ?? false;
+  }
+
+  public get startupNotice(): string | undefined {
+    if (this.incompatibleGeneration) {
+      return "The captain changed while the previous turn may still be active. Check mission state, then use /new to explicitly abandon that conversation before sending another prompt.";
+    }
+    if (this.generationReset) {
+      return "The captain build changed, so Clankie started a fresh conversation. Mission state is unchanged.";
+    }
+    return undefined;
   }
 
   public get tokenStatus(): string {
@@ -69,9 +89,9 @@ export class EveCaptainSession {
   }
 
   public async initialize(): Promise<void> {
-    this.cursor = (await this.store.read()) ?? emptyCaptainCursor();
+    this.cursor = await this.store.read();
     try {
-      assertCaptainEndpoint(await this.client.health(), await this.client.info());
+      await this.connect();
       this.connection = "live";
     } catch {
       this.connection = "unavailable";
@@ -80,7 +100,8 @@ export class EveCaptainSession {
 
   public async attach(shell: ClankieFaceShell): Promise<void> {
     this.renderer ??= new EveFaceRenderer(shell);
-    if (this.connection !== "live" || this.cursor.sessionId === undefined) return;
+    if (this.connection !== "live" || this.incompatibleGeneration || this.cursor?.sessionId === undefined)
+      return;
     this.renderer.resetSession();
     await this.consume(shell, 0, undefined, true);
   }
@@ -89,12 +110,20 @@ export class EveCaptainSession {
     this.renderer ??= new EveFaceRenderer(shell);
     if (this.connection !== "live") {
       try {
-        assertCaptainEndpoint(await this.client.health(), await this.client.info());
+        await this.connect();
         this.connection = "live";
       } catch {
         this.connection = "unavailable";
         throw new Error("Captain service is unavailable. Restart clankie or run the captain Eve service.");
       }
+    }
+    if (this.incompatibleGeneration) {
+      throw new Error(
+        "The prior captain turn belongs to a different build and may have produced mission side effects. Check mission state, then use /new to explicitly abandon it.",
+      );
+    }
+    if (this.cursor === undefined || this.serviceGeneration === undefined) {
+      throw new Error("Captain runtime identity is unavailable; refusing to create an unversioned session.");
     }
     if (this.cursor.active) {
       shell.setTurnLoaderMessage("Reattaching to the active captain turn...");
@@ -107,8 +136,9 @@ export class EveCaptainSession {
     const session = this.client.session(previous);
     const response = await session.send({ message: prompt });
     this.cursor = {
-      version: 1,
+      version: 2,
       active: true,
+      generation: this.serviceGeneration,
       sessionId: response.sessionId,
       streamIndex: previous.sessionId === response.sessionId ? previous.streamIndex : 0,
       ...(response.continuationToken === undefined
@@ -122,11 +152,16 @@ export class EveCaptainSession {
   }
 
   public async newSession(): Promise<void> {
-    if (this.cursor.active) {
+    if (this.cursor?.active && !this.incompatibleGeneration) {
       throw new Error("The captain is still working. Wait for the active turn to settle before /new.");
     }
     this.generation += 1;
-    this.cursor = emptyCaptainCursor();
+    if (this.serviceGeneration === undefined) {
+      throw new Error("Captain runtime identity is unavailable; cannot start a versioned session.");
+    }
+    this.cursor = emptyCaptainCursor(this.serviceGeneration);
+    this.incompatibleGeneration = false;
+    this.generationReset = false;
     this.renderer?.resetSession();
     await this.store.clear();
   }
@@ -137,20 +172,19 @@ export class EveCaptainSession {
     signal: AbortSignal | undefined,
     replay: boolean,
   ): Promise<void> {
-    const sessionId = this.cursor.sessionId;
-    if (sessionId === undefined) return;
+    const cursor = this.cursor;
+    if (cursor === undefined || cursor.sessionId === undefined) return;
+    const sessionId = cursor.sessionId;
     const generation = ++this.generation;
-    const replayTarget = replay ? this.cursor.streamIndex : undefined;
-    const replayedTurnWasActive = replay ? this.cursor.active : false;
+    const replayTarget = replay ? cursor.streamIndex : undefined;
+    const replayedTurnWasActive = replay ? cursor.active : false;
     let nextIndex = startIndex;
     if (replay) this.renderer?.resetSession();
     try {
       const state: SessionState = {
         sessionId,
         streamIndex: startIndex,
-        ...(this.cursor.continuationToken === undefined
-          ? {}
-          : { continuationToken: this.cursor.continuationToken }),
+        ...(cursor.continuationToken === undefined ? {} : { continuationToken: cursor.continuationToken }),
       };
       for await (const event of this.client
         .session(state)
@@ -168,11 +202,16 @@ export class EveCaptainSession {
           if (replayComplete && !replayedTurnWasActive) return;
           continue;
         }
+        const current = this.cursor;
+        if (current === undefined) {
+          throw new Error("Captain session cursor disappeared while consuming its event stream");
+        }
         this.cursor = reset
-          ? emptyCaptainCursor()
+          ? emptyCaptainCursor(this.requireServiceGeneration())
           : {
-              ...this.cursor,
-              version: 1,
+              ...current,
+              version: 2,
+              generation: this.requireServiceGeneration(),
               active: boundary ? false : true,
               sessionId,
               streamIndex: nextIndex,
@@ -191,5 +230,35 @@ export class EveCaptainSession {
       this.connection = "failed";
       throw error;
     }
+  }
+
+  private requireServiceGeneration(): string {
+    if (this.serviceGeneration === undefined) {
+      throw new Error("Captain runtime identity is unavailable");
+    }
+    return this.serviceGeneration;
+  }
+
+  private async connect(): Promise<void> {
+    const [health, info] = await Promise.all([this.client.health(), this.client.info()]);
+    assertCaptainEndpoint(health, info);
+    const generation = this.configuredGeneration ?? captainInfoGeneration(info);
+    if (generation === undefined) {
+      throw new Error("The captain endpoint did not expose enough identity to version its session cursor");
+    }
+    this.serviceGeneration = generation;
+    const saved = this.cursor;
+    if (saved === undefined) {
+      this.cursor = emptyCaptainCursor(generation);
+      return;
+    }
+    if (saved.version === 2 && saved.generation === generation) return;
+    if (saved.active) {
+      this.incompatibleGeneration = true;
+      return;
+    }
+    this.cursor = emptyCaptainCursor(generation);
+    this.generationReset = true;
+    await this.store.clear();
   }
 }

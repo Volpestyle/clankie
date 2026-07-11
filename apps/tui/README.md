@@ -15,12 +15,16 @@ pnpm --filter @sapling/tui dev # from the repo
 ```
 
 `clankie` attaches to a healthy captain at `SAPLING_CAPTAIN_URL` (default
-`http://127.0.0.1:4321`) or starts one shared `eve dev --no-ui` process. Captain
+`http://127.0.0.1:4321`) or builds and starts one shared `eve start` process. The
+built runtime keeps durable sessions independent of hot-reload snapshot cleanup. Captain
 logs stay out of the fullscreen terminal at
 `${XDG_STATE_HOME:-~/.local/state}/clankie/captain-eve.log`. The service remains
 available when one TUI face exits, so sibling Herdr panes do not disconnect one
-another. Direct `pnpm --filter @sapling/tui dev` expects the captain service to
-be started separately.
+another. Before the fullscreen face opens, the launcher displays its current
+startup stage. An occupied but unhealthy endpoint fails immediately with
+recovery guidance instead of waiting for the startup deadline. Direct
+`pnpm --filter @sapling/tui dev` expects the captain service to be started
+separately.
 
 The same executable has a non-interactive `--recovery-probe` mode for the M1
 crash/reconnect gate. It reads mission state through `@sapling/api-client`,
@@ -42,7 +46,7 @@ src/shell/   The face shell: layout assembly, central input router, overlay +
              loader, prompt history. Extracted from v1's scripts/clankie.ts.
 src/commands.ts   Console slash commands (/help /mission /doctrine /approvals
                   /eval /layout /clear /new /status /exit).
-src/provider-commands.ts  /auth /model /effort wizards (VUH-760) over
+src/provider-commands.ts  /auth /provider /model /effort wizards (VUH-760) over
                   @sapling/model-registry, @sapling/credential-broker, and
                   @sapling/model-provider (clankie.json config).
 src/session/      Durable Eve client cursor, replay-safe stream renderer, and
@@ -59,12 +63,15 @@ src/session/      Durable Eve client cursor, replay-safe stream renderer, and
   another prompt.
 - Mouse: wheel scrolls, drag selects (OSC-52 copy), scrollbar gutter drags, click collapses tool blocks.
 - `/layout` moves the input/status bands, toggles the header, and picks the spinner (`CLANKIE_TUI_*` env vars seed the defaults).
-- `/auth` manages provider credentials (API keys in the Keychain broker, ChatGPT/Codex OAuth, harness-login guidance); `/model` picks captain models from the models.dev registry; `/effort` sets reasoning variants. Non-secret config lands in `~/.config/clankie/clankie.json`.
+- `/auth` manages provider credentials (API keys in the Keychain broker, ChatGPT/Codex OAuth, harness-login guidance); `/provider` chooses a provider context per model role; `/model` picks an actual model from that provider in the models.dev registry; `/effort` sets reasoning variants. Provider intent stays process-local and is reconstructed from the configured `provider/model` ref after restart, so non-secret config has one authority in `~/.config/clankie/clankie.json`.
 - OpenAI API-key access is `openai/<model>`; ChatGPT subscription access is the
   explicit `openai-codex/<model>` provider. They never borrow each other's
   credentials.
 - The Eve cursor is stored atomically with mode 0600 under
   `.data/tui/captain-session.json`. It is capability-like local state and is
-  excluded from mission events and support bundles.
+  excluded from mission events and support bundles. Its hashed build generation
+  prevents a cursor from crossing incompatible captain artifacts: settled
+  conversations reset visibly, while active turns require explicit `/new`
+  abandonment after mission-state inspection.
 
 Known gap from the v1 port: drag-and-drop attachment paste rewriting stayed behind (`tui-attachments.ts` is coupled to the v1 brain's attachment pipeline); it returns with the control-plane attachment path.

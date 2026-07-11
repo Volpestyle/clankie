@@ -40,6 +40,7 @@ describe("captain Eve authored surface", () => {
       "create_mission",
       "decide_action",
       "get_mission",
+      "start_mission",
       "steer_worker",
       "submit_plan",
     ]);

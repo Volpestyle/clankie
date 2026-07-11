@@ -25,6 +25,14 @@ broker, then calls only the narrow authored mission tools. Mission state
 remains authoritative in the control plane; Eve text and tool-stream events
 are presentation data.
 
+The singleton runs the output of `eve build` through `eve start`. The launcher
+serializes first-build ownership across concurrent faces, then attaches every
+face to the same loopback process. Development hot reload remains an authored
+captain development tool, not the durable operator runtime: `eve dev` pins
+sessions to immutable source snapshots that its retention policy may later
+prune, while built sessions contain bundled runtime artifacts and survive a
+process restart without an ephemeral filesystem path.
+
 ```mermaid
 flowchart LR
   TUI[Clankie TUI] -->|loopback Eve session API| EVE[Captain Eve service]
@@ -41,10 +49,13 @@ flowchart LR
 ```
 
 The TUI persists only the Eve `sessionId`, `continuationToken`, and consumed
-event index in a mode-0600 local cursor file. Eve owns conversation history and
-compaction. The control plane may project redacted session identifiers and
-semantic mission events, but never raw continuation tokens or private model
-stream content.
+event index plus a SHA-256 build generation in a mode-0600 local cursor file.
+Eve owns conversation history and compaction. A settled cursor from another
+generation resets with an operator notice. An active incompatible cursor stays
+blocked until `/new` explicitly abandons it, because its old turn may already
+have emitted mission side effects. The control plane may project redacted
+session identifiers and semantic mission events, but never raw continuation
+tokens or private model stream content.
 
 ChatGPT subscription access is an explicit provider identity,
 `openai-codex`. It presents only models verified against the streamed Codex
@@ -73,6 +84,12 @@ cursor and waits for a session boundary before sending another plain prompt.
   stricter privacy and retention semantics.
 - **Treat stream abort as turn cancellation** — rejected because Eve only
   cancels the HTTP observation; the accepted durable run may continue.
+- **Run the shared singleton with `eve dev`** — rejected because a durable
+  between-turn session can retain a development snapshot after snapshot
+  cleanup removes its compiled manifest.
+- **Discard a cursor whenever the development snapshot changes** — rejected
+  because it hides the lifecycle error by losing conversation state and can
+  abandon an active turn that already produced mission side effects.
 
 ## Consequences
 
@@ -81,6 +98,8 @@ cursor and waits for a session boundary before sending another plain prompt.
   mission-dispatch and session-management acceptance criteria.
 - The captain service, not the TUI, resolves provider credentials into an
   opaque language model.
+- The launcher builds only when no compatible shared service is healthy; the
+  resulting `.output` is generated, ignored local state.
 - Direct credential configuration in the TUI remains a transitional local UX;
   moving credential mutation behind a narrow runner API does not change the
   session boundary.
