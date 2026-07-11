@@ -38,10 +38,13 @@ export class NoopAnalyticsSink implements AnalyticsSink {
 }
 
 export class ConsentGatedAnalytics implements AnalyticsSink {
-  public constructor(
-    private readonly enabled: () => boolean,
-    private readonly delegate: AnalyticsSink,
-  ) {}
+  private readonly enabled: () => boolean;
+  private readonly delegate: AnalyticsSink;
+
+  public constructor(enabled: () => boolean, delegate: AnalyticsSink) {
+    this.enabled = enabled;
+    this.delegate = delegate;
+  }
 
   public async capture(event: ProductEvent): Promise<void> {
     if (!this.enabled()) return;

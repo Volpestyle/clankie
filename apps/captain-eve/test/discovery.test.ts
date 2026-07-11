@@ -12,6 +12,11 @@ describe("captain Eve authored surface", () => {
     const result = spawnSync("pnpm", ["exec", "eve", "info", "--json"], {
       cwd: appRoot,
       encoding: "utf8",
+      env: {
+        ...process.env,
+        NODE_ENV: "test",
+        CAPTAIN_TEST_MODEL: "openai/gpt-5.6-luna",
+      },
     });
 
     expect(result.error).toBeUndefined();
@@ -21,6 +26,7 @@ describe("captain Eve authored surface", () => {
     expect(jsonStart, result.stdout).toBeGreaterThanOrEqual(0);
     const info = JSON.parse(result.stdout.slice(jsonStart)) as {
       diagnostics: { errors: number; warnings: number };
+      tools: string[];
       skills: string[];
       status: string;
     };
@@ -30,6 +36,13 @@ describe("captain Eve authored surface", () => {
       status: "ready",
     });
     expect(info.skills).toEqual(["debug-mission", "evaluate-mission", "lead-mission"]);
+    expect(info.tools).toEqual([
+      "create_mission",
+      "decide_action",
+      "get_mission",
+      "steer_worker",
+      "submit_plan",
+    ]);
   });
 
   it("validates canonical provider skill packages", () => {
@@ -49,6 +62,7 @@ describe("captain Eve authored surface", () => {
 
       for (const match of markdown.matchAll(/(?:`|\()((?:references)\/[^`)\s]+\.md)(?:`|\))/gu)) {
         const reference = match[1];
+        if (reference === undefined) continue;
         expect(lstatSync(resolve(skillRoot, reference)).isFile(), `${skillFile}: ${reference}`).toBe(true);
       }
     }

@@ -43,13 +43,13 @@ Model refs are `"providerId/modelId"` strings; `parseModelRef` splits on the **f
 
 `effortVariantsFor(providerId, model)` generates the reasoning presets a model supports (empty for non-reasoning models), keyed by provider family:
 
-| family                                            | variants                                             | body shape                                            |
-| ------------------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------- |
-| openai / azure / openai-codex / openai-compatible | `low` `medium` `high` (+ `minimal` for gpt-5 family) | `{reasoning_effort}`                                  |
-| anthropic                                         | `think-8k` `think-16k` `think-32k`                   | `{thinking: {type: "enabled", budget_tokens}}`        |
-| xai                                               | `low` `high`                                         | `{reasoning_effort}`                                  |
-| google                                            | `think-8k` `think-16k` `think-24k`                   | `{thinkingConfig: {includeThoughts, thinkingBudget}}` |
-| other reasoning providers                         | `low` `medium` `high`                                | `{reasoning_effort}`                                  |
+| family                                            | variants                                                                | body shape                                            |
+| ------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------- |
+| openai / azure / openai-codex / openai-compatible | `low` `medium` `high` (+ `minimal` for supported gpt-5 models; not 5.5) | `{reasoning_effort}`                                  |
+| anthropic                                         | `think-8k` `think-16k` `think-32k`                                      | `{thinking: {type: "enabled", budget_tokens}}`        |
+| xai                                               | `low` `high`                                                            | `{reasoning_effort}`                                  |
+| google                                            | `think-8k` `think-16k` `think-24k`                                      | `{thinkingConfig: {includeThoughts, thinkingBudget}}` |
+| other reasoning providers                         | `low` `medium` `high`                                                   | `{reasoning_effort}`                                  |
 
 Variant bodies are provider **wire-format** data (snake_case for OpenAI-style APIs). Lowering to AI SDK `providerOptions` happens at generate time via `variantProviderOptions` — a variant is data, not a model mutation.
 

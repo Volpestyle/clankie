@@ -15,7 +15,11 @@ import {
 export class JsonlEventStore implements EventStore {
   private queue: Promise<unknown> = Promise.resolve();
 
-  public constructor(private readonly path: string) {}
+  private readonly path: string;
+
+  public constructor(path: string) {
+    this.path = path;
+  }
 
   public append(event: DomainEvent): Promise<StoredEvent> {
     const operation = this.queue.then(async () => {

@@ -265,10 +265,27 @@ describe("resolveProviders", () => {
       credentialIds: ["xai"],
       env: { OPENAI_API_KEY: "sk-env" },
     });
-    expect(resolved.map((provider) => provider.id)).toEqual(["openai", "xai", "anthropic"]);
-    expect(resolved.map((provider) => provider.connection)).toEqual(["env", "credential", "none"]);
-    expect(resolved.map((provider) => provider.connected)).toEqual([true, true, false]);
+    expect(resolved.map((provider) => provider.id)).toEqual(["openai", "xai", "anthropic", "openai-codex"]);
+    expect(resolved.map((provider) => provider.connection)).toEqual(["env", "credential", "none", "none"]);
+    expect(resolved.map((provider) => provider.connected)).toEqual([true, true, false, false]);
     expect(resolved.every((provider) => !provider.declaredInConfig)).toBe(true);
+  });
+
+  it("keeps OpenAI API-key and ChatGPT subscription credentials explicit and independent", () => {
+    const resolved = resolveProviders({
+      config: {},
+      catalog: fakeCatalog,
+      credentialIds: ["openai-codex"],
+      env: {},
+    });
+    expect(resolved.find((provider) => provider.id === "openai-codex")).toMatchObject({
+      connected: true,
+      connection: "credential",
+    });
+    expect(resolved.find((provider) => provider.id === "openai")).toMatchObject({
+      connected: false,
+      connection: "none",
+    });
   });
 
   it("drops disabled providers and honors the enabled allowlist", () => {
@@ -356,6 +373,9 @@ describe("effortVariantsFor", () => {
 
     const gpt5 = effortVariantsFor("openai", fakeModel("gpt-5-test", true));
     expect(gpt5.map((variant) => variant.id)).toEqual(["minimal", "low", "medium", "high"]);
+
+    const gpt55 = effortVariantsFor("openai-codex", fakeModel("gpt-5.5", true));
+    expect(gpt55.map((variant) => variant.id)).toEqual(["low", "medium", "high"]);
 
     const compatible = effortVariantsFor("openai-compatible", fakeModel("some-reasoner", true));
     expect(compatible.map((variant) => variant.id)).toEqual(["low", "medium", "high"]);

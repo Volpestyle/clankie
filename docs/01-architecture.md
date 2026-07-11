@@ -34,6 +34,7 @@ Discord text/voice      Pi TUI       iOS/macOS garden/graph/terminal
 - external tracker/design/chat content;
 - terminal output and ANSI sequences;
 - downloaded skills/plugins;
+- persona and skin content (`soul.md`, asset packs);
 - worker summaries and self-reported success.
 
 ### Trusted deterministic services
@@ -46,6 +47,41 @@ Discord text/voice      Pi TUI       iOS/macOS garden/graph/terminal
 - terminal control leases;
 - event sequencing and audit chain;
 - acceptance-test results and artifact hashing.
+
+## Interactive environments
+
+Embodied integrations use one logical character with separate durable captain
+lanes for TUI, Discord voice, and gameplay. The lanes share a versioned
+character projection, not continuation tokens or copied transcripts. A
+deterministic intent arbiter compares `goalVersion` before a command reaches a
+runner-owned environment lease.
+
+```mermaid
+flowchart LR
+  T[TUI lane] --> I[Intent arbiter]
+  V[Discord voice lane] --> I
+  G[Gameplay lane] --> I
+  C[(Character snapshot)] --> T
+  C --> V
+  C --> G
+  I --> L[Runner-owned environment lease]
+  L --> M[Minecraft MCP adapter]
+  M --> B[Mineflayer motor loop]
+  B --> E[Semantic events]
+  E --> C
+  B -. bounded references .-> A[(Tick / packet artifacts)]
+```
+
+Session phase and lane determine tool exposure. An inactive Minecraft session
+exposes `join` and `status`. Only an active `gameplay` lane receives observation
+and motor-action tools; TUI and Discord retain status, steering, pause, and
+disconnect controls. Pause, disconnect, lease loss, or failure removes the
+gameplay surface without waiting for a model turn.
+
+All environment commands carry source lane, principal and authority tier,
+correlation identity, and expected goal version. Long-running work returns an
+action handle immediately. Mineflayer and Paper types remain behind adapters;
+the shared protocol contains only versioned provider-neutral schemas.
 
 ## Control flow
 
@@ -66,7 +102,7 @@ Discord text/voice      Pi TUI       iOS/macOS garden/graph/terminal
 ```text
 protocol
   ↑
-terminal-protocol   analytics   observability   jsonl-rpc
+terminal-protocol   interactive-environment   analytics   observability   jsonl-rpc
   ↑                      ↑           ↑             ↑
 worker-sdk   doctrine   garden-model   event-store   credential-broker
   ↑             ↑             ↑

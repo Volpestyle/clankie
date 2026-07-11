@@ -24,7 +24,7 @@ describe("MissionDashboard", () => {
     const dashboard = new MissionDashboard(() => state);
     const lines = dashboard.render(24);
 
-    expect(lines.join("\n")).toContain("SAPLING");
+    expect(lines.join("\n")).toContain("CLANKIE");
     expect(lines.every((line) => visibleWidth(line) <= 24)).toBe(true);
     expect(() => dashboard.invalidate()).not.toThrow();
   });

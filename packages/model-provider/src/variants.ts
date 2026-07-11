@@ -17,10 +17,11 @@ const OPENAI_FAMILY_PROVIDERS = new Set(["openai", "openai-codex", "azure", "ope
 
 /**
  * Matches gpt-5 family ids ("gpt-5", "gpt-5-nano", "gpt-5.2", "openai/gpt-5-codex")
- * without false-matching "gpt-50" or "gpt-5o". The gpt-5 family additionally
- * accepts the `minimal` reasoning effort.
+ * without false-matching "gpt-50" or "gpt-5o". Most of the gpt-5 family
+ * additionally accepts `minimal`; GPT-5.5 explicitly does not.
  */
 const GPT5_FAMILY_RE = /(?:^|\/)gpt-5(?:[.-]|$)/;
+const GPT55_FAMILY_RE = /(?:^|\/)gpt-5\.5(?:[.-]|$)/;
 
 const WIDELY_SUPPORTED_EFFORTS = ["low", "medium", "high"];
 
@@ -45,9 +46,11 @@ export function effortVariantsFor(providerId: string, model: ModelEntry): ModelV
   const provider = providerId.toLowerCase();
 
   if (OPENAI_FAMILY_PROVIDERS.has(provider)) {
-    const efforts = GPT5_FAMILY_RE.test(model.id.toLowerCase())
-      ? ["minimal", ...WIDELY_SUPPORTED_EFFORTS]
-      : WIDELY_SUPPORTED_EFFORTS;
+    const modelId = model.id.toLowerCase();
+    const efforts =
+      GPT5_FAMILY_RE.test(modelId) && !GPT55_FAMILY_RE.test(modelId)
+        ? ["minimal", ...WIDELY_SUPPORTED_EFFORTS]
+        : WIDELY_SUPPORTED_EFFORTS;
     return efforts.map(effortVariant);
   }
 

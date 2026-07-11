@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 
@@ -79,11 +78,8 @@ for (const directory of workerDirectories) {
   }
 }
 
-for (const providerTarget of [".claude/skills", ".pi/agent/skills", ".codex/skills"]) {
-  const canonical = await hashTree(resolve(root, ".agents/skills"));
-  const target = await hashTree(resolve(root, providerTarget));
-  if (canonical !== target) violations.push(`${providerTarget} is out of sync; run pnpm skills:sync`);
-}
+// Provider skill mirrors are symlinks to `.agents/skills`; `pnpm skills:check`
+// owns that invariant so this walk never has to follow them.
 
 if (violations.length) {
   console.error("Architecture invariant violations:");
@@ -102,14 +98,4 @@ async function walk(directory) {
     else result.push(path);
   }
   return result;
-}
-
-async function hashTree(directory) {
-  const hash = createHash("sha256");
-  const files = (await walk(directory)).sort();
-  for (const path of files) {
-    hash.update(path.slice(directory.length));
-    hash.update(await readFile(path));
-  }
-  return hash.digest("hex");
 }

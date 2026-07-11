@@ -2,6 +2,9 @@
   "name": "@sapling/tui",
   "version": "0.1.0",
   "private": true,
+  "bin": {
+    "clankie": "./bin/clankie.ts"
+  },
   "type": "module",
   "scripts": {
     "dev": "tsx src/index.ts",
@@ -14,7 +17,11 @@
   "dependencies": {
     "@earendil-works/pi-tui": "0.80.6",
     "@sapling/api-client": "workspace:*",
-    "chalk": "5.6.2"
+    "@sapling/credential-broker": "workspace:*",
+    "@sapling/model-provider": "workspace:*",
+    "@sapling/model-registry": "workspace:*",
+    "chalk": "5.6.2",
+    "eve": "0.22.4"
   },
   "devDependencies": {
     "@types/node": "24.12.4",

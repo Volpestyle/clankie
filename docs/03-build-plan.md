@@ -69,14 +69,18 @@ Exit gate: garden operations cover assignment, steering, pause, retry, approval,
 
 Exit gate: suspend the app during active work, then resume with no state loss or duplicated command.
 
-## Milestone 6 — Discord and voice
+## Milestone 6 — Discord presence and voice
+
+The agent joins the team's server as a persistent member: one character, continuous memory, ambient supervision.
 
 - Official Discord bot application; no user credentials.
-- Slash commands, threads, role-aware approvals, visible memory controls.
+- Slash commands, threads, visible memory controls.
+- Attention-queue narration: the agent speaks or posts when mission state crosses an attention threshold (blocker, approval, budget, verification result).
+- Channel authority tiers per doctrine: Discord roles bind to command tiers; steering and queries in-channel, approvals deep-link to an authenticated surface.
 - Voice join/leave by explicit command, clear transcription indication, no raw-audio retention by default.
 - Long-lived voice service separate from serverless request handlers.
 
-Exit gate: consent, retention, deletion, and cross-channel visibility tests pass before voice memory ships.
+Exit gate: consent, retention, deletion, and cross-channel visibility tests pass before voice memory ships; ambient-channel approval attempts are rejected in tests.
 
 ## Milestone 7 — garden progression
 

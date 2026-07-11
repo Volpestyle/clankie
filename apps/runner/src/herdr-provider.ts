@@ -13,7 +13,11 @@ import type {
  * socket/session API; it must not scrape rendered terminal pixels.
  */
 export class HerdrTerminalProvider implements TerminalProvider {
-  public constructor(private readonly socketPath: string) {}
+  private readonly socketPath: string;
+
+  public constructor(socketPath: string) {
+    this.socketPath = socketPath;
+  }
 
   public async listSessions(): Promise<TerminalSession[]> {
     throw new Error(`Herdr adapter not connected: ${this.socketPath}`);

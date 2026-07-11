@@ -22,10 +22,10 @@ Reanimated 3 (regressing the carry-over) or dropping macOS until
 
 Run **two version lanes** importing one framework-neutral shared package:
 
-| Lane | Shell | Versions |
-| --- | --- | --- |
-| Mobile | Expo dev-client (iOS + Android) | Expo SDK 57, RN 0.86, Reanimated 4.5 + `react-native-worklets`, Skia 2.6.9 |
-| Desktop | bare `react-native-macos` | RN 0.81.6, `react-native-macos` 0.81.8, Reanimated 3.19, gesture-handler 3.0.2, Skia 2.6.9, new architecture **on** (`RCT_NEW_ARCH_ENABLED=1` at pod install) |
+| Lane    | Shell                           | Versions                                                                                                                                                      |
+| ------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mobile  | Expo dev-client (iOS + Android) | Expo SDK 57, RN 0.86, Reanimated 4.5 + `react-native-worklets`, Skia 2.6.9                                                                                    |
+| Desktop | bare `react-native-macos`       | RN 0.81.6, `react-native-macos` 0.81.8, Reanimated 3.19, gesture-handler 3.0.2, Skia 2.6.9, new architecture **on** (`RCT_NEW_ARCH_ENABLED=1` at pod install) |
 
 Shared code is constrained to the **API subset present in both Reanimated
 3.19 and 4.5** and otherwise version-agnostic:

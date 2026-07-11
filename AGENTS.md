@@ -96,11 +96,17 @@ Use the field-level authority map in doctrine. By default:
 - GitHub: implementation and review state;
 - CI: check results;
 - Figma: approved visual design;
+- Aseprite sources: pixel-art assets;
 - repository ADRs: technical decisions;
 - harness event store: active execution state;
 - chat: advisory until promoted to a recorded decision.
 
 Report drift; never silently overwrite one authoritative source from another.
+
+## Pixel art and 2D assets
+
+- All 2D pixel art (sprites, atlases, skin-pack raster assets) is authored in Aseprite. Agents create and edit it through the Aseprite MCP server — never by hand-writing pixel data, generating raster images through other tools, or editing exported PNGs directly.
+- `.aseprite` source files are the authority for pixel-art assets; exported atlases are generated artifacts and flow through the sprite pipeline.
 
 ## Change shape
 

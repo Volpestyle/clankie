@@ -55,6 +55,18 @@ Durable transports restore their previous terminal ID when a runner restarts.
 The manager rejects duplicate IDs, so a recovered session cannot race a second
 owner or silently fork a client's replay cursor.
 
+## Status derivation
+
+Agent status (`working`, `waiting_user`, `waiting_dependency`, `blocked`,
+`failed`, `completed`, offline) is resolved through the tiered signal ladder in
+ADR 0015: adapter protocol events first (turn lifecycle; a pending approval or
+question is `waiting_user`), then runner leases and exit codes, then untrusted
+heuristics (herdr `agent_status`, settle-then-classify with a local model),
+which may only fill `unknown` or raise attention — never override a higher
+tier. Status events carry `{tier, source, confidence, observedAt}` and ride the
+control plane, never the terminal plane. "Done" is a projection concern
+(completed + unacknowledged), not a detected state.
+
 ## Human takeover
 
 - observers may read according to RBAC;
@@ -68,3 +80,5 @@ owner or silently fork a client's replay cursor.
 ## Herdr boundary
 
 Herdr is an optional external pane host. Use its process/socket/session API through a `TerminalProvider`; do not scrape the rendered screen and do not make Herdr the persistence model. Keep native PTY and tmux adapters available.
+
+When running under Herdr (`HERDR_ENV=1`), clankie panes self-report status over the socket (`pane.report_agent`) so Herdr displays them natively, and Herdr's `pane.agent_status_changed` events are ingested as a Tier-2 status signal (ADR 0015). Neither direction requires a Herdr fork.

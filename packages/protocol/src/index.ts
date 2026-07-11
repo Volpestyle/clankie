@@ -3,6 +3,105 @@ import { z } from "zod";
 export const MissionIdSchema = z.string().min(1);
 export const TaskIdSchema = z.string().min(1);
 export const WorkerRunIdSchema = z.string().min(1);
+export const EnvironmentSessionIdSchema = z.string().min(1);
+export const WorldIdSchema = z.string().min(1);
+export const CharacterIdSchema = z.string().min(1);
+export const ActionIdSchema = z.string().min(1);
+
+export type EnvironmentSessionId = z.infer<typeof EnvironmentSessionIdSchema>;
+export type WorldId = z.infer<typeof WorldIdSchema>;
+export type CharacterId = z.infer<typeof CharacterIdSchema>;
+export type ActionId = z.infer<typeof ActionIdSchema>;
+
+export const CaptainLaneSchema = z.enum(["tui", "discord_voice", "gameplay"]);
+export type CaptainLane = z.infer<typeof CaptainLaneSchema>;
+
+export const CommandAuthoritySchema = z.object({
+  principal: z.object({
+    kind: z.enum(["captain", "human", "system"]),
+    id: z.string().min(1),
+  }),
+  tier: z.enum(["authenticated", "ambient", "autonomous", "system"]),
+});
+export type CommandAuthority = z.infer<typeof CommandAuthoritySchema>;
+
+export const IntentContextSchema = z
+  .object({
+    sourceLane: CaptainLaneSchema,
+    authority: CommandAuthoritySchema,
+    correlationId: z.string().min(1),
+    causationId: z.string().min(1).optional(),
+    expectedGoalVersion: z.number().int().nonnegative(),
+  })
+  .superRefine((context, refinement) => {
+    const { kind } = context.authority.principal;
+    const { tier } = context.authority;
+    if (kind === "system" && tier === "system") return;
+    const expectedTier = {
+      tui: "authenticated",
+      discord_voice: "ambient",
+      gameplay: "autonomous",
+    }[context.sourceLane];
+    if (tier !== expectedTier) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["authority", "tier"],
+        message: `${context.sourceLane} commands require ${expectedTier} authority`,
+      });
+    }
+  });
+export type IntentContext = z.infer<typeof IntentContextSchema>;
+
+export const InteractiveEnvironmentBindingSchema = z.object({
+  schemaVersion: z.literal(1),
+  environmentKind: z.string().min(1),
+  characterId: CharacterIdSchema,
+  worldId: WorldIdSchema,
+  lane: z.literal("gameplay"),
+  environmentSessionId: EnvironmentSessionIdSchema.optional(),
+});
+export type InteractiveEnvironmentBinding = z.infer<typeof InteractiveEnvironmentBindingSchema>;
+
+export const CharacterSnapshotSchema = z.object({
+  schemaVersion: z.literal(1),
+  characterId: CharacterIdSchema,
+  goalVersion: z.number().int().nonnegative(),
+  activeWorldId: WorldIdSchema.optional(),
+  activeEnvironmentSessionId: EnvironmentSessionIdSchema.optional(),
+  activeMissionId: MissionIdSchema.optional(),
+  goal: z
+    .object({
+      kind: z.string().min(1),
+      summary: z.string().min(1),
+    })
+    .optional(),
+  activeActionId: ActionIdSchema.optional(),
+  sharedMemoryRefs: z.array(z.string().min(1)).default([]),
+  updatedAt: z.string().datetime(),
+});
+export type CharacterSnapshot = z.infer<typeof CharacterSnapshotSchema>;
+
+export const IntentCommandSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    intentId: z.string().min(1),
+    characterId: CharacterIdSchema,
+    context: IntentContextSchema,
+    type: z.enum(["set_goal", "steer", "pause", "resume", "stop", "disconnect"]),
+    goal: z
+      .object({
+        kind: z.string().min(1),
+        summary: z.string().min(1),
+      })
+      .optional(),
+    createdAt: z.string().datetime(),
+  })
+  .superRefine((command, context) => {
+    if (command.type === "set_goal" && !command.goal) {
+      context.addIssue({ code: "custom", path: ["goal"], message: "set_goal requires a goal" });
+    }
+  });
+export type IntentCommand = z.infer<typeof IntentCommandSchema>;
 
 export const RiskSchema = z.enum(["low", "medium", "high", "critical"]);
 export type Risk = z.infer<typeof RiskSchema>;
@@ -96,6 +195,7 @@ export const TaskSpecSchema = z.object({
   estimatedDurationMinutes: z.number().int().positive().optional(),
   estimatedCostUsd: z.number().nonnegative().optional(),
   maxAttempts: z.number().int().positive().default(1),
+  environmentBinding: InteractiveEnvironmentBindingSchema.optional(),
   metadata: z.record(z.string(), z.unknown()).default({}),
 });
 export type TaskSpec = z.infer<typeof TaskSpecSchema>;
@@ -128,6 +228,7 @@ export const MissionPlanSchema = z
     risks: z.array(z.string().min(1)).default([]),
     humanDecisionsRequired: z.array(z.string().min(1)).default([]),
     plannedActions: z.array(PlannedActionSchema).default([]),
+    environmentBindings: z.array(InteractiveEnvironmentBindingSchema).default([]),
     profileHash: z.string().min(1),
   })
   .superRefine((plan, context) => {
@@ -147,6 +248,23 @@ export const MissionPlanSchema = z
           code: "custom",
           message: `Planned action ${action.id} references unknown task ${action.taskId}`,
           path: ["plannedActions"],
+        });
+      }
+    }
+    for (const [taskIndex, task] of plan.tasks.entries()) {
+      const binding = task.environmentBinding;
+      if (!binding) continue;
+      const declaredByMission = plan.environmentBindings.some(
+        (missionBinding) =>
+          missionBinding.environmentKind === binding.environmentKind &&
+          missionBinding.characterId === binding.characterId &&
+          missionBinding.worldId === binding.worldId,
+      );
+      if (!declaredByMission) {
+        context.addIssue({
+          code: "custom",
+          message: `Task ${task.id} environment binding is not declared by the mission`,
+          path: ["tasks", taskIndex, "environmentBinding"],
         });
       }
     }

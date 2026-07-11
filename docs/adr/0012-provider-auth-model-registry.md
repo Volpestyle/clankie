@@ -12,9 +12,17 @@ Captain model access is configured through three cooperating layers, borrowing o
 
 **Captain auth supports all three methods** (decided over API-keys-only): API keys, Anthropic Pro/Max subscription OAuth, and ChatGPT/Codex subscription OAuth with its ToS-critical request adaptation (endpoint reroute to the codex backend, `ChatGPT-Account-Id`/`originator` headers, single-flight lazy refresh). Worker harnesses are untouched by all of this: per ADR 0006 they are provider-native adapters whose own logins (Codex CLI, Claude Code, Pi) remain the source of worker auth; the `/auth` wizard guides those logins rather than re-implementing them.
 
+OpenAI API-key and ChatGPT subscription access are separate provider
+identities: `openai` and `openai-codex`. The latter projects the supported
+verified Codex-backend model catalog with zero subscription cost and forces the Codex
+Responses request contract (`instructions`, `store:false`, OAuth headers).
+There is no implicit credential fallback between the identities.
+
 The operator UX is the TUI's guided SetupFlow wizards (`/auth`, `/model`, `/effort`, later `/voice`), per ADR 0011. The live voice model for Discord calls has no baked-in default — `/voice` prompts (gpt-realtime, Grok voice agent, Gemini Live, local) and rides the same registry and credential store.
 
-Session/context management for the captain (M2) adopts opencode's compaction split: summarize when tokens cross `usable = context − reserved`, prune old tool outputs separately, preserve tail turns; token accounting `{input, output, reasoning, cache}` with ctx% surfaced in the status bar.
+Session/context management follows ADR 0014: Eve owns durable conversation
+history, replay, compaction, and step usage; the TUI stores a private channel
+cursor and displays context usage from registry limits.
 
 ## Options weighed
 

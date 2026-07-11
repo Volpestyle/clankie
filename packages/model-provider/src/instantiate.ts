@@ -5,7 +5,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createXai } from "@ai-sdk/xai";
 import type { ProviderCredential } from "@sapling/credential-broker";
 import type { ProviderEntry } from "@sapling/model-registry";
-import type { JSONValue, LanguageModel } from "ai";
+import { wrapLanguageModel, type JSONValue, type LanguageModel } from "ai";
 import type { ModelVariant } from "./variants.ts";
 
 // ---------------------------------------------------------------------------
@@ -125,6 +125,34 @@ export function createLanguageModel(input: CreateLanguageModelInput): LanguageMo
         ...(headers !== undefined && { headers }),
       })(input.modelId);
   }
+}
+
+export interface CreateCodexLanguageModelInput {
+  readonly modelId: string;
+  readonly fetchImpl: typeof fetch;
+  readonly instructions: string;
+}
+
+/**
+ * Constructs the ChatGPT-subscription Responses model and makes the backend's
+ * non-optional request contract impossible for callers to omit.
+ */
+export function createCodexLanguageModel(input: CreateCodexLanguageModelInput): LanguageModel {
+  const provider = createOpenAI({ apiKey: OAUTH_PLACEHOLDER_API_KEY, fetch: input.fetchImpl });
+  return wrapLanguageModel({
+    model: provider.responses(input.modelId),
+    middleware: {
+      transformParams: async ({ params }) => {
+        const providerOptions = params.providerOptions ?? {};
+        const openai = { ...providerOptions.openai } as Record<string, JSONValue>;
+        if (typeof openai.instructions !== "string" || openai.instructions.length === 0) {
+          openai.instructions = input.instructions;
+        }
+        openai.store = false;
+        return { ...params, providerOptions: { ...providerOptions, openai } };
+      },
+    },
+  });
 }
 
 // ---------------------------------------------------------------------------

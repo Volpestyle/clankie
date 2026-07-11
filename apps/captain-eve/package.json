@@ -13,12 +13,14 @@
   },
   "dependencies": {
     "@sapling/api-client": "workspace:*",
+    "@sapling/model-provider": "workspace:*",
     "@sapling/protocol": "workspace:*",
     "eve": "0.22.4",
     "zod": "4.4.3"
   },
   "devDependencies": {
     "@types/node": "24.12.4",
+    "microsandbox": "^0.6.6",
     "typescript": "5.9.3",
     "vitest": "4.1.10"
   }

@@ -1,5 +1,9 @@
 # Third-party notices
 
+Vendored code:
+
+- `apps/tui/src/face/agent-spinners.ts` — spinner frame data ported from expo-agent-spinners (MIT © eronred), carried over from the v1 clankie face.
+
 The initial architecture is designed around, but does not vendor, the following projects:
 
 - Vercel Eve — Apache-2.0.

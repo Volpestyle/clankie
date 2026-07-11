@@ -2,9 +2,15 @@
 
 ## Category
 
-Sapling Agent OS is a local-first **agent fleet operating system**. Its wedge is heterogeneous-worker leadership, visible execution, artifact verification, policy enforcement, and human control—not generic chat, personality, or channel breadth.
+Sapling Agent OS is a local-first **agent fleet operating system embodied as a persistent teammate**. Underneath: heterogeneous-worker leadership, visible execution, artifact verification, policy enforcement, and human control. On top: one continuous character with memory, personality, and presence in the places a team already lives.
 
 The primary product object is a Mission. Chat, Discord, voice, TUI, graph, garden, and mobile are channels and projections over shared mission state.
+
+## Presence and personality
+
+Presence is ambient supervision: the agent inhabits the team's social space and speaks when mission state crosses an attention threshold, so oversight happens where the team already is. Personality is the trust layer that makes supervision cheap—one consistent, legible character whose memory carries the working relationship (repositories, doctrine preferences, past mistakes) across sessions and channels.
+
+Personality is data, never authority. A persona definition (`soul.md`) shapes tone and presentation; it cannot alter doctrine, permissions, routing, or evidence requirements. Ambient channels carry reduced command authority: voice and chat can steer and query, while approvals require an authenticated surface. See `04-doctrine.md`.
 
 ## Core promise
 
@@ -21,7 +27,7 @@ A user supplies an outcome. The lead:
 
 ## Product surfaces
 
-- **Captain:** persistent personality and mission leadership through Eve.
+- **Lead (Captain):** persistent persona, memory, and mission leadership through Eve.
 - **Doctrine:** predefined knobs and exact organization policy.
 - **Runner:** trusted local execution and credential boundary.
 - **Garden:** spatial fleet control and attention management.
@@ -68,4 +74,4 @@ The moat is the accumulated operational system:
 - evaluation data about what leadership strategies work;
 - remote/mobile control;
 - a verified ecosystem of skills and workflows;
-- the garden interaction model and persistent user attachment.
+- the garden interaction model, persona and memory continuity, and persistent user attachment.

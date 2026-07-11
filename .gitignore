@@ -22,3 +22,4 @@ DerivedData/
 
 # eve framework generated runtime and discovery artifacts
 **/.eve/
+**/.workflow-data/

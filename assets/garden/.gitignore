@@ -1,0 +1,8 @@
+# transient regeneration byproducts (see README "Regenerating")
+program.json
+*-x8.png
+*-x8.aseprite
+*-x5.aseprite
+*-idle.aseprite
+review/
+__pycache__/

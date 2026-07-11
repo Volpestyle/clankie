@@ -4,6 +4,24 @@ This is the lead-agent runtime. Eve supplies durable sessions, filesystem-author
 
 The only authored tools call a narrow control-plane API. They do not expose a generic application-runtime shell or raw credentials.
 
+The service resolves the captain model dynamically from layered Clankie config
+through `@sapling/model-provider`. Provider credentials remain behind the local
+credential broker; the TUI sees only Eve session events. The built-in Eve
+shell, filesystem, and web tools are explicitly disabled, leaving the authored
+mission tools plus framework coordination primitives.
+
+Run the headless service directly when developing the TUI without the
+`clankie` launcher:
+
+```bash
+pnpm --filter @sapling/captain-eve exec eve dev --no-ui --host 127.0.0.1 --port 4321
+SAPLING_CAPTAIN_URL=http://127.0.0.1:4321 pnpm --filter @sapling/tui dev
+```
+
+Eve owns durable conversation execution, replay, and compaction. Clients store
+only their continuation/session cursor. Mission state remains authoritative in
+the control plane.
+
 ## Skill verification
 
 `pnpm --filter @sapling/captain-eve test` compiles the authored Eve surface without provider credentials and verifies that all mission skills are discovered. `pnpm --filter @sapling/captain-eve exec eve eval --list` validates the behavior-eval definitions.

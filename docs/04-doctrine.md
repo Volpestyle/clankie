@@ -111,6 +111,38 @@ Bindings name the source that owns each field; they do not copy one source over 
 
 Every compiled profile keeps independent verification enabled and denies test-integrity weakening. Production deployment, `publish-external`, and `destructive` actions require human approval in every preset. A lower doctrine layer or vendor-specific override may become stricter, but never reduce this floor.
 
+## Persona and channel authority
+
+Persona content (`soul.md`, skin packs, character assets) is model-controlled input. It shapes tone, voice, and presentation only. The doctrine compiler ignores it: persona can never loosen a permission, change routing or authority, reduce evidence requirements, or alter budgets. Persona content that instructs otherwise is treated as prompt injection.
+
+Channels carry command-authority tiers, bound per workspace like authority roles:
+
+- **Authenticated surfaces** (paired iOS/macOS device, authenticated TUI session): full command authority, including approvals.
+- **Ambient channels** (Discord text/voice): steer, query, pause, and resume only. Approval of privileged or irreversible actions is never accepted from an ambient channel; the agent responds with a link to an authenticated surface.
+
+Workspace bindings map channel identities (for example Discord roles) to command tiers. Voice input is treated as unauthenticated speech regardless of the speaking account.
+
+## Interactive-environment capability projection
+
+Environment phase, captain lane, an active runner lease, and the compiled
+doctrine profile jointly determine the available capability set. Model text,
+Minecraft chat, signs, books, plugins, and MCP metadata cannot widen it.
+
+| Session phase | TUI / Discord surface            | Gameplay-lane surface                                             |
+| ------------- | -------------------------------- | ----------------------------------------------------------------- |
+| off / failed  | join, status                     | join, status                                                      |
+| starting      | status, cancel join              | status, cancel join                                               |
+| active        | status, steer, pause, disconnect | observe, bounded actions, action status/cancel, pause, disconnect |
+| paused        | status, resume, disconnect       | status, resume, disconnect                                        |
+| stopping      | status                           | status                                                            |
+
+The projection is deny-by-default. A capability disappears immediately when
+the phase or lease no longer permits it, and pending uses are invalidated.
+Discord voice remains ambient authority: it can steer or stop an allowed
+session but cannot approve remote joins, public chat, player combat, server
+commands, or capability expansion. Emergency pause and disconnect bypass model
+scheduling while still producing audited semantic events.
+
 ## Policy tests
 
 Each profile needs executable examples:
@@ -125,4 +157,4 @@ lower mission layer tries to allow org-denied action → still denied
 
 ## Product controls
 
-Expose six coherent macro controls—initiative, autonomy, change granularity, parallelism, assurance, visibility, and economy—then show their exact expansion. Hard permissions are never silently changed by a slider.
+Expose seven coherent macro controls—initiative, autonomy, change granularity, parallelism, assurance, visibility, and economy—then show their exact expansion. Hard permissions are never silently changed by a slider.

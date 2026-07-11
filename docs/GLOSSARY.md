@@ -13,6 +13,9 @@
 - **Capability:** named action a principal may request.
 - **Approval:** human decision attached to one action request and its assumptions.
 - **Evidence:** observed command, test report, diff, review, screenshot, artifact, or log.
+- **Persona (`soul.md`):** model-controlled character definition; shapes tone and presentation, never authority.
+- **Ambient channel:** presence surface (Discord text/voice) where the agent lives as a member; carries reduced command authority.
+- **Authenticated surface:** paired device or authenticated session with full command authority, including approvals.
 - **Biome:** stable spatial representation of a project/repository.
 - **Station:** workflow phase within a biome.
 - **Control lease:** exclusive authority to send input to a terminal session.

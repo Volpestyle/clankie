@@ -39,14 +39,18 @@ function stateIcon(state: DashboardAgent["state"]): string {
 }
 
 export class MissionDashboard implements Component {
-  public constructor(private readonly getState: () => DashboardState) {}
+  private readonly getState: () => DashboardState;
+
+  public constructor(getState: () => DashboardState) {
+    this.getState = getState;
+  }
 
   public invalidate(): void {}
 
   public render(width: number): string[] {
     const state = this.getState();
     const lines: string[] = [];
-    lines.push(pad(chalk.bold(` SAPLING  ${state.mission}`), width));
+    lines.push(pad(chalk.bold(` CLANKIE  ${state.mission}`), width));
     lines.push(
       pad(
         chalk.dim(
@@ -72,8 +76,6 @@ export class MissionDashboard implements Component {
     lines.push("");
     lines.push(pad(chalk.bold(" EVENT TAIL"), width));
     for (const item of state.timeline.slice(-6)) lines.push(pad(` ${chalk.dim("›")} ${item}`, width));
-    lines.push("");
-    lines.push(pad(chalk.dim(" /doctrine  /eval  /help  /quit"), width));
     return lines;
   }
 }

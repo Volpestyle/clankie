@@ -8,6 +8,7 @@ import {
   type ProviderEntry,
 } from "@sapling/model-registry";
 import { parseModelRef, type ClankieConfig } from "./config.ts";
+import { withCodexSubscriptionProvider } from "./codex-catalog.ts";
 
 // ---------------------------------------------------------------------------
 // Catalog merging — config-declared providers/models overlaid on the registry
@@ -17,6 +18,7 @@ import { parseModelRef, type ClankieConfig } from "./config.ts";
 // ---------------------------------------------------------------------------
 
 export function mergedCatalog(config: ClankieConfig, catalog: Catalog): Catalog {
+  catalog = withCodexSubscriptionProvider(catalog);
   const providerConfigs = config.provider;
   if (providerConfigs === undefined || Object.keys(providerConfigs).length === 0) return catalog;
   const custom: CustomProviders = {};
