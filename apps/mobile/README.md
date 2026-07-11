@@ -14,7 +14,7 @@ sync when the shared package gains a new per-lane native dependency.
 
 App identity follows the clankies variant pattern (`app.config.js`): standalone
 builds are `io.clankie.v2` / "Sapling", dev-client builds
-(`CLANKIE_VARIANT=dev`) are `io.clankie.v2.dev` / "Sapling Dev" so both can
+(`CLANKIE_VARIANT=dev`) are `io.clankie.v2.dev` / "Clankie Dev" so both can
 coexist on one device.
 
 ```sh

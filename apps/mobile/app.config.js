@@ -11,7 +11,7 @@
 // scripts/ios-device.sh (which targets -scheme Sapling) works for both.
 
 const DEV_BUNDLE_ID = "io.clankie.v2.dev";
-const DEV_DISPLAY_NAME = "Sapling Dev";
+const DEV_DISPLAY_NAME = "Clankie Dev";
 
 /** @param {{ config: import('@expo/config-types').ExpoConfig }} ctx */
 module.exports = ({ config }) => {

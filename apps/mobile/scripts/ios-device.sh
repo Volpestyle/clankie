@@ -11,6 +11,13 @@
 # builds/installs the dev client on the device, and launches it pointed at that
 # Metro.
 #
+# iOS ATS: plain http:// to a fully-qualified domain like *.ts.net is blocked
+# by App Transport Security (raw IPs and .local names are exempt, FQDNs are
+# not), and the block fires before DNS — the app shows "Could not connect to
+# development server" / "requires the use of a secure connection". app.json
+# ships the required NSExceptionDomains entry for ts.net; keep it when touching
+# NSAppTransportSecurity.
+#
 # Usage:  pnpm ios:device [<target>]      (auto-detects the one connected iOS device)
 #           <target> = hardware UDID · CoreDevice UUID · exact device name ·
 #           a comma-separated list of those · or "all" for every connected device.
@@ -331,7 +338,7 @@ while IFS=$'\t' read -r HW_UDID CORE_ID DEVICE_NAME DEVICE_TYPE; do
   log "Launching the dev client at $METRO_URL on $DEVICE_NAME (device must be unlocked)…"
   if ! xcrun devicectl device process launch --terminate-existing \
         --device "$CORE_ID" --payload-url "$DEV_CLIENT_URL" "$BUNDLE_ID"; then
-    log "Auto-launch failed on $DEVICE_NAME (device locked?). Open Sapling Dev → dev launcher → enter: $METRO_URL"
+    log "Auto-launch failed on $DEVICE_NAME (device locked?). Open Clankie Dev → dev launcher → enter: $METRO_URL"
     LAUNCH_WARNED=1
   fi
 done <<EOF
@@ -339,6 +346,6 @@ $DEVICE_LINES
 EOF
 
 if [ "$LAUNCH_WARNED" = "1" ]; then
-  log "One or more devices didn't auto-launch — unlock them and reopen Sapling Dev pointed at $METRO_URL."
+  log "One or more devices didn't auto-launch — unlock them and reopen Clankie Dev pointed at $METRO_URL."
 fi
 log "Done. Reload JS from the Metro pane (screen -r sapling-metro) with 'r'."
