@@ -23,6 +23,12 @@ import {
 } from "@clankie/mission-engine";
 import { createLogger } from "@clankie/observability";
 import {
+  MemoryFactSchema,
+  type ApplyProposalResult,
+  type MemoryFact,
+  type RecallCardOptions,
+} from "@clankie/memory-store";
+import {
   ApprovalDecisionInputSchema,
   ApprovalRequestRecordSchema,
   ApprovalRequestStatusSchema,
@@ -34,6 +40,7 @@ import {
   resolveDiscordPresenceLedgerContent,
   LinearChannelTurnRequestSchema,
   MissionPlanSchema,
+  MissionTriggerSchema,
   TaskSpecSchema,
   TrackerNarrativeWriteSchema,
   WorkerResultSchema,
@@ -51,6 +58,7 @@ import {
   type DiscordPresenceWriteResult,
   type DomainEvent,
   type MissionPlan,
+  type MissionTrigger,
   type Risk,
   type TaskSpec,
   type TrackerNarrativeWriteResult,
@@ -86,6 +94,7 @@ import {
 } from "./worker-steering.ts";
 import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
 import type { CaptainChannelTurnPort } from "./eve-captain-turn.ts";
+import { applyMissionTriggerEvent, dueOccurrences, MissionTriggerInputSchema } from "./mission-triggers.ts";
 import {
   DoctrineAttentionPolicy,
   EventStoreAttentionDeliveryStore,
@@ -107,6 +116,20 @@ interface MissionRecord {
   createdAt: string;
 }
 
+interface StoredMemoryProposal {
+  readonly proposalId: string;
+  readonly approvalRequestId: string;
+  readonly fact: MemoryFact;
+  readonly submittedAt: string;
+  readonly principal: { kind: "captain" | "worker"; id: string };
+}
+
+export interface MemoryStorePort {
+  applyApprovedProposal(input: unknown): ApplyProposalResult;
+  recallCard(options: RecallCardOptions): string;
+  pruneRetention(now?: Date): readonly string[];
+}
+
 export interface ControlPlaneDependencies {
   doctrine: CompiledDoctrine;
   /** Durable mission event log; when provided, mission records are rebuilt from it on startup. */
@@ -119,6 +142,10 @@ export interface ControlPlaneDependencies {
   resolveActionContext?: ActionContextProvider;
   /** Resolves risk from trusted connector metadata, never from the worker request body. */
   classifyConnectorAction?: ConnectorActionClassifier;
+  /** Trusted metadata classifier for trigger CRUD. Defaults to the built-in trigger action catalog. */
+  classifyTriggerAction?: ConnectorActionClassifier;
+  /** Trusted bounded memory projection. Its SQLite handle remains private to the control plane. */
+  memoryStore?: MemoryStorePort;
   /** Runner-owned privileged connector. Its credential access is not part of this interface. */
   githubConnector?: GithubConnector;
   /** Trusted policy-gated tracker mirror. Its provider credential is not part of this interface. */
@@ -145,6 +172,8 @@ export interface ControlPlaneDependencies {
   captainLeaseDurationMs?: number;
   /** Test-tunable interval for sparse durable heartbeat records. */
   captainHeartbeatRecordIntervalMs?: number;
+  /** Test-tunable memory maintenance cadence. Production defaults to one day. */
+  memoryMaintenanceIntervalMs?: number;
   /** Test-tunable approval lifetime. Production defaults to fifteen minutes. */
   approvalRequestTtlMs?: number;
   clock?: () => Date;
@@ -431,6 +460,14 @@ const TrackerMutationRequestSchema = z.object({
   idempotencyKey: z.string().min(1),
 });
 
+const MemoryProposalRequestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    proposalId: z.string().min(1).max(256),
+    fact: MemoryFactSchema,
+  })
+  .strict();
+
 const ApprovalStatusQuerySchema = z.object({
   status: ApprovalRequestStatusSchema.default("pending"),
 });
@@ -514,6 +551,10 @@ const classifyDiscordPresenceAction = createConnectorActionClassifier([
   ...DISCORD_PRESENCE_NON_NARRATIVE_ACTION_METADATA,
 ]);
 
+const classifyBuiltInTriggerAction = createConnectorActionClassifier([
+  { action: "mission.trigger.write", riskClass: "reversible-write" },
+]);
+
 const ALLOWED_RUNNER_EVENT_TYPES = new Set([
   "worker.native_session.bound",
   "worker.turn.started",
@@ -530,10 +571,14 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
   const clock = dependencies.clock ?? (() => new Date());
   const idFactory = dependencies.idFactory ?? randomUUID;
   const missions = new Map<string, MissionRecord>();
+  const missionTriggers = new Map<string, MissionTrigger>();
+  const memoryProposals = new Map<string, StoredMemoryProposal>();
+  const committedMemoryProposals = new Set<string>();
   const engines = new Map<string, MissionEngine>();
   const missionLocks = new Map<string, Promise<unknown>>();
   const approvalLocks = new Map<string, Promise<unknown>>();
   const discordPresenceLocks = new Map<string, Promise<unknown>>();
+  const triggerEvaluationLocks = new Map<string, Promise<unknown>>();
   const claimMissions = new Map<string, string>();
   const approvalRequests = new Map<string, ApprovalRequestRecord>();
   const narrativeResults = new Map<
@@ -586,6 +631,8 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     for (const stored of await dependencies.eventStore.readAll()) {
       storedEvents.push(stored.event);
       applyMissionEvent(missions, stored.event);
+      applyMissionTriggerEvent(missionTriggers, stored.event);
+      applyMemoryEvent(memoryProposals, committedMemoryProposals, stored.event);
       applyApprovalEvent(approvalRequests, consumedApprovalIds, stored.event);
       if (stored.event.type === "worker.leased" && typeof stored.event.data.claimId === "string") {
         claimMissions.set(stored.event.data.claimId, stored.event.missionId);
@@ -631,6 +678,61 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     return event;
   };
 
+  const commitApprovedMemoryProposal = async (
+    proposal: StoredMemoryProposal,
+    approval: ApprovalRequestRecord,
+  ): Promise<ApplyProposalResult | undefined> => {
+    if (!dependencies.memoryStore || committedMemoryProposals.has(proposal.proposalId)) return undefined;
+    if (
+      approval.id !== proposal.approvalRequestId ||
+      approval.action !== "memory.profile.write" ||
+      approval.status !== "approved" ||
+      approval.missionId !== proposal.fact.provenance.missionId ||
+      approval.profileHash !== dependencies.doctrine.profileHash ||
+      approval.decidedAt === undefined ||
+      approval.decidedBy === undefined
+    ) {
+      throw new Error("Memory proposal approval does not match the authenticated approval projection");
+    }
+    const result = dependencies.memoryStore.applyApprovedProposal({
+      schemaVersion: 1,
+      proposalId: proposal.proposalId,
+      approval: {
+        approvalId: approval.id,
+        status: "approved",
+        approvedAt: approval.decidedAt,
+        approvedBy: approval.decidedBy,
+      },
+      fact: proposal.fact,
+    });
+    await recordEvent(
+      "memory.proposal.committed",
+      proposal.fact.provenance.missionId,
+      clock().toISOString(),
+      {
+        proposalId: proposal.proposalId,
+        approvalRequestId: proposal.approvalRequestId,
+        factId: result.fact.factId,
+        merged: result.merged,
+        evictedFactIds: [...result.evictedFactIds],
+      },
+      { correlationId: proposal.fact.provenance.correlationId },
+    );
+    committedMemoryProposals.add(proposal.proposalId);
+    return result;
+  };
+
+  const pruneMemory = async (reason: "doctrine_loaded" | "maintenance"): Promise<readonly string[]> => {
+    if (!dependencies.memoryStore) return [];
+    const prunedFactIds = dependencies.memoryStore.pruneRetention(clock());
+    await recordEvent("memory.retention.pruned", "memory:retention", clock().toISOString(), {
+      reason,
+      rawTranscriptRetentionDays: dependencies.doctrine.profile.memory.rawTranscriptRetentionDays,
+      prunedFactIds: [...prunedFactIds],
+    });
+    return prunedFactIds;
+  };
+
   const persistApprovalRequest = async (
     request: ActionRequest,
     rationale: ActionDecision,
@@ -668,9 +770,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       return approval;
     });
 
-  const expireApprovalIfNeeded = async (
-    approval: ApprovalRequestRecord,
-  ): Promise<ApprovalRequestRecord> => {
+  const expireApprovalIfNeeded = async (approval: ApprovalRequestRecord): Promise<ApprovalRequestRecord> => {
     if (approval.status !== "pending" || approval.resource.type !== "discord-attachment") return approval;
     const expiresAtMs = Date.parse(approval.requestedAt) + APPROVAL_REQUEST_TTL_MS;
     if (clock().getTime() < expiresAtMs) return approval;
@@ -698,6 +798,33 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
   };
 
   const persistedEventIds = new Set(storedEvents.map((event) => event.id));
+  if (dependencies.memoryStore) {
+    for (const proposal of memoryProposals.values()) {
+      const approval = approvalRequests.get(proposal.approvalRequestId);
+      if (approval?.status === "approved" && !committedMemoryProposals.has(proposal.proposalId)) {
+        await commitApprovedMemoryProposal(proposal, approval);
+      }
+    }
+    const previousRetention = [...storedEvents]
+      .reverse()
+      .find((event) => event.type === "memory.retention.pruned")?.data.rawTranscriptRetentionDays;
+    if (previousRetention !== dependencies.doctrine.profile.memory.rawTranscriptRetentionDays) {
+      await pruneMemory("doctrine_loaded");
+    }
+  }
+
+  const memoryMaintenanceTimer = setInterval(
+    () => {
+      void pruneMemory("maintenance").catch((error: unknown) =>
+        logger.error(
+          { error: error instanceof Error ? error.message : String(error) },
+          "memory retention maintenance failed",
+        ),
+      );
+    },
+    dependencies.memoryMaintenanceIntervalMs ?? 24 * 60 * 60 * 1_000,
+  );
+  memoryMaintenanceTimer.unref();
   const flushEngine = async (engine: MissionEngine): Promise<void> => {
     for (const event of engine.getEvents()) {
       if (persistedEventIds.has(event.id)) continue;
@@ -778,6 +905,124 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
   };
 
   const app = new Hono();
+
+  const createMissionDraft = async (
+    goal: string,
+    missionContext: Record<string, unknown>,
+    occurredAt = clock().toISOString(),
+    requestedId?: string,
+  ): Promise<string> => {
+    const id = requestedId ?? `mission-${idFactory().slice(0, 12)}`;
+    if (missions.has(id)) return id;
+    await recordEvent("mission.drafted", id, occurredAt, { goal, context: missionContext });
+    missions.set(id, { id, goal, context: missionContext, state: "draft", createdAt: occurredAt });
+    logger.info({ missionId: id }, "mission created");
+    return id;
+  };
+
+  const authorizeTriggerMutation = async (
+    request: Request,
+    triggerId: string,
+  ): Promise<
+    { allowed: true; operatorId: string } | { allowed: false; error: string; status: 401 | 403 | 503 }
+  > => {
+    const operator = await authenticateOperator(request, dependencies);
+    if (operator === "unavailable")
+      return { allowed: false, error: "operator_authentication_unavailable", status: 503 };
+    if (!operator) return { allowed: false, error: "operator_authentication_required", status: 401 };
+    const classifier =
+      dependencies.classifyTriggerAction ??
+      ((input: CapabilityActionInput) => classifyBuiltInTriggerAction(input.action));
+    const input = {
+      id: `trigger-write-${triggerId}`,
+      action: "mission.trigger.write",
+      resource: { type: "mission-trigger", id: triggerId },
+    };
+    const classification = await classifier(input);
+    if (classification === undefined)
+      return { allowed: false, error: "trigger_action_unclassified", status: 403 };
+    const decision = decideAction(
+      dependencies.doctrine,
+      ActionRequestSchema.parse({
+        ...input,
+        principal: { kind: "human", id: operator.operatorId },
+        context: {
+          missionId: `trigger:${triggerId}`,
+          risk: "low",
+          humanApprovals: 0,
+          profileHash: dependencies.doctrine.profileHash,
+        },
+      }),
+      classification,
+    );
+    return decision.effect === "allow"
+      ? { allowed: true, operatorId: operator.operatorId }
+      : { allowed: false, error: `trigger_action_${decision.effect}`, status: 403 };
+  };
+
+  const evaluateDueTriggers = async (now: Date): Promise<{ fired: string[]; skipped: string[] }> => {
+    return withSerializedLock(triggerEvaluationLocks, "all", async () => {
+      const fired: string[] = [];
+      const skipped: string[] = [];
+      for (const current of [...missionTriggers.values()].sort((left, right) =>
+        left.id.localeCompare(right.id),
+      )) {
+        const due = dueOccurrences(current, now);
+        if (due.length === 0) continue;
+        const scheduledAt = due[0]!.toISOString();
+        const isLate =
+          current.schedule.kind === "once"
+            ? now.getTime() > due[0]!.getTime()
+            : now.getTime() - due[0]!.getTime() >= 60_000;
+        const shouldFire = !isLate || current.misfirePolicy === "run_once_late";
+        const trigger = MissionTriggerSchema.parse({
+          ...current,
+          lastEvaluatedAt: now.toISOString(),
+          updatedAt: now.toISOString(),
+        });
+        if (shouldFire) {
+          const missionId = await createMissionDraft(
+            trigger.goal,
+            {
+              ...trigger.context,
+              scheduledTrigger: { triggerId: trigger.id, scheduledAt },
+              doctrineBudgets: {
+                maxMissionCostUsd: dependencies.doctrine.profile.budgets.maxMissionCostUsd,
+                maxMissionWallMinutes: dependencies.doctrine.scheduler.maxMissionWallMinutes,
+                maxParallelWorkers: dependencies.doctrine.scheduler.maxParallelWorkers,
+              },
+            },
+            now.toISOString(),
+            `mission-${createHash("sha256").update(`${trigger.id}\0${scheduledAt}`).digest("hex").slice(0, 20)}`,
+          );
+          await recordEvent("mission.trigger.fired", `trigger:${trigger.id}`, now.toISOString(), {
+            trigger,
+            scheduledAt,
+            missionId,
+          });
+          fired.push(trigger.id);
+        } else {
+          await recordEvent("mission.trigger.skipped", `trigger:${trigger.id}`, now.toISOString(), {
+            trigger,
+            scheduledAt,
+          });
+          skipped.push(trigger.id);
+        }
+        missionTriggers.set(trigger.id, trigger);
+      }
+      return { fired, skipped };
+    });
+  };
+
+  const triggerTimer = setInterval(() => {
+    void evaluateDueTriggers(clock()).catch((error: unknown) =>
+      logger.error(
+        { error: error instanceof Error ? error.message : String(error) },
+        "mission trigger evaluation failed",
+      ),
+    );
+  }, 30_000);
+  triggerTimer.unref();
 
   app.get("/health", (context) =>
     context.json({
@@ -1021,125 +1266,131 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
         return context.json(previous.result);
       }
 
-    const classification = classifyDiscordPresenceAction(write.action);
-    if (classification === undefined) {
-      return context.json({ error: "discord_presence_action_unclassified" }, 400);
-    }
-    const request = ActionRequestSchema.parse({
-      id: write.idempotencyKey,
-      principal: {
-        kind: "worker",
-        id: write.identity.workerRunId ?? write.identity.characterId,
-        role: "discord-presence-adapter",
-      },
-      action: write.action,
-      resource:
-        write.payload.kind === "send_attachment"
-          ? {
-              type: "discord-attachment",
-              id: write.payload.artifactRef,
-              repository: `sha256:${fingerprint}`,
-              environment: write.payload.channelId,
-            }
-          : {
-              type: "discord-channel",
-              id:
-                "channelId" in write.payload
-                  ? write.payload.channelId
-                  : "guildId" in write.payload
-                    ? write.payload.guildId
-                    : write.action,
-            },
-      context: {
-        missionId: write.identity.missionId,
-        ...(write.identity.taskId === undefined ? {} : { taskId: write.identity.taskId }),
-        risk: classification.riskClass === "publish-external" ? "high" : "low",
-        profileHash: write.identity.profileHash,
-      },
-    });
-
-    const ledgerContent = resolveDiscordPresenceLedgerContent(write);
-    const priorApprovalRecord = approvalRequests.get(request.id);
-    if (priorApprovalRecord && !sameApprovalRequest(priorApprovalRecord, request, write.identity.correlationId)) {
-      return context.json({ error: "discord_presence_idempotency_conflict" }, 409);
-    }
-    const priorApproval = priorApprovalRecord
-      ? await expireApprovalIfNeeded(priorApprovalRecord)
-      : undefined;
-    if (priorApproval?.status === "denied") {
-      const expired = priorApproval.reason === "approval_expired";
-      return context.json(
-        {
-          error: expired ? "discord_presence_approval_expired" : "discord_presence_approval_denied",
-          approval: approvalHandle(priorApproval, APPROVAL_REQUEST_TTL_MS),
+      const classification = classifyDiscordPresenceAction(write.action);
+      if (classification === undefined) {
+        return context.json({ error: "discord_presence_action_unclassified" }, 400);
+      }
+      const request = ActionRequestSchema.parse({
+        id: write.idempotencyKey,
+        principal: {
+          kind: "worker",
+          id: write.identity.workerRunId ?? write.identity.characterId,
+          role: "discord-presence-adapter",
         },
-        403,
-      );
-    }
-    const evaluatedRequest = priorApproval?.status === "approved" ? withHumanApproval(request) : request;
-    const decision =
-      priorApproval?.status === "approved"
-        ? {
-            effect: "allow" as const,
-            reason: "The authenticated operator approved this exact Discord presence write.",
-            matchedPolicyIds: ["operator-approval:approved"],
-            obligations: priorApproval.rationale.obligations,
-          }
-        : classification.riskClass === "narrative-write"
-        ? narrativePolicy.decide({
-            request: evaluatedRequest,
-            classification,
-            correlationId: write.identity.correlationId,
-            content: ledgerContent,
-          })
-        : decideAction(dependencies.doctrine, evaluatedRequest, classification);
+        action: write.action,
+        resource:
+          write.payload.kind === "send_attachment"
+            ? {
+                type: "discord-attachment",
+                id: write.payload.artifactRef,
+                repository: `sha256:${fingerprint}`,
+                environment: write.payload.channelId,
+              }
+            : {
+                type: "discord-channel",
+                id:
+                  "channelId" in write.payload
+                    ? write.payload.channelId
+                    : "guildId" in write.payload
+                      ? write.payload.guildId
+                      : write.action,
+              },
+        context: {
+          missionId: write.identity.missionId,
+          ...(write.identity.taskId === undefined ? {} : { taskId: write.identity.taskId }),
+          risk: classification.riskClass === "publish-external" ? "high" : "low",
+          profileHash: write.identity.profileHash,
+        },
+      });
 
-    if (decision.effect !== "allow") {
-      if (decision.effect === "require_approval") {
-        const approval = await persistApprovalRequest(request, decision, write.identity.correlationId);
+      const ledgerContent = resolveDiscordPresenceLedgerContent(write);
+      const priorApprovalRecord = approvalRequests.get(request.id);
+      if (
+        priorApprovalRecord &&
+        !sameApprovalRequest(priorApprovalRecord, request, write.identity.correlationId)
+      ) {
+        return context.json({ error: "discord_presence_idempotency_conflict" }, 409);
+      }
+      const priorApproval = priorApprovalRecord
+        ? await expireApprovalIfNeeded(priorApprovalRecord)
+        : undefined;
+      if (priorApproval?.status === "denied") {
+        const expired = priorApproval.reason === "approval_expired";
         return context.json(
-          { error: "discord_presence_approval_required", approval: approvalHandle(approval, APPROVAL_REQUEST_TTL_MS) },
-          202,
+          {
+            error: expired ? "discord_presence_approval_expired" : "discord_presence_approval_denied",
+            approval: approvalHandle(priorApproval, APPROVAL_REQUEST_TTL_MS),
+          },
+          403,
         );
       }
-      logger.warn(
-        {
-          service: "clankie-control-plane",
-          missionId: write.identity.missionId,
-          correlationId: write.identity.correlationId,
-          action: write.action,
-          effect: decision.effect,
-        },
-        "Discord presence action denied",
-      );
-      return context.json({ error: "discord_presence_not_allowed", decision }, 403);
-    }
+      const evaluatedRequest = priorApproval?.status === "approved" ? withHumanApproval(request) : request;
+      const decision =
+        priorApproval?.status === "approved"
+          ? {
+              effect: "allow" as const,
+              reason: "The authenticated operator approved this exact Discord presence write.",
+              matchedPolicyIds: ["operator-approval:approved"],
+              obligations: priorApproval.rationale.obligations,
+            }
+          : classification.riskClass === "narrative-write"
+            ? narrativePolicy.decide({
+                request: evaluatedRequest,
+                classification,
+                correlationId: write.identity.correlationId,
+                content: ledgerContent,
+              })
+            : decideAction(dependencies.doctrine, evaluatedRequest, classification);
 
-    try {
-      const result = await discordPresenceRuntime.execute(write);
-      discordPresenceResults.set(write.idempotencyKey, {
-        fingerprint,
-        result,
-        expiresAtMs: clock().getTime() + DISCORD_PRESENCE_RETENTION_MS,
-      });
-      logger.info(
-        {
-          service: "clankie-control-plane",
-          missionId: write.identity.missionId,
-          correlationId: write.identity.correlationId,
-          action: write.action,
-          transportKind: result.transportKind,
-        },
-        "Discord presence action completed",
-      );
-      return context.json(result);
-    } catch (error) {
-      const code =
-        error instanceof Error && error.message.startsWith("discord_presence_")
-          ? error.message
-          : "discord_presence_failed";
-      return context.json({ error: code }, 502);
-    }
+      if (decision.effect !== "allow") {
+        if (decision.effect === "require_approval") {
+          const approval = await persistApprovalRequest(request, decision, write.identity.correlationId);
+          return context.json(
+            {
+              error: "discord_presence_approval_required",
+              approval: approvalHandle(approval, APPROVAL_REQUEST_TTL_MS),
+            },
+            202,
+          );
+        }
+        logger.warn(
+          {
+            service: "clankie-control-plane",
+            missionId: write.identity.missionId,
+            correlationId: write.identity.correlationId,
+            action: write.action,
+            effect: decision.effect,
+          },
+          "Discord presence action denied",
+        );
+        return context.json({ error: "discord_presence_not_allowed", decision }, 403);
+      }
+
+      try {
+        const result = await discordPresenceRuntime.execute(write);
+        discordPresenceResults.set(write.idempotencyKey, {
+          fingerprint,
+          result,
+          expiresAtMs: clock().getTime() + DISCORD_PRESENCE_RETENTION_MS,
+        });
+        logger.info(
+          {
+            service: "clankie-control-plane",
+            missionId: write.identity.missionId,
+            correlationId: write.identity.correlationId,
+            action: write.action,
+            transportKind: result.transportKind,
+          },
+          "Discord presence action completed",
+        );
+        return context.json(result);
+      } catch (error) {
+        const code =
+          error instanceof Error && error.message.startsWith("discord_presence_")
+            ? error.message
+            : "discord_presence_failed";
+        return context.json({ error: code }, 502);
+      }
     });
   });
 
@@ -1281,12 +1532,169 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     const input = z
       .object({ goal: z.string().min(1), context: z.record(z.string(), z.unknown()).default({}) })
       .parse(await context.req.json());
-    const id = `mission-${randomUUID().slice(0, 12)}`;
-    const createdAt = new Date().toISOString();
-    await recordEvent("mission.drafted", id, createdAt, { goal: input.goal, context: input.context });
-    missions.set(id, { id, goal: input.goal, context: input.context, state: "draft", createdAt });
-    logger.info({ missionId: id }, "mission created");
+    const id = await createMissionDraft(input.goal, input.context);
     return context.json({ missionId: id }, 201);
+  });
+
+  app.get("/v1/mission-triggers", (context) =>
+    context.json({
+      triggers: [...missionTriggers.values()].sort((left, right) => left.id.localeCompare(right.id)),
+    }),
+  );
+
+  app.post("/v1/mission-triggers", async (context) => {
+    const body = await readJson(context.req.raw);
+    const requested = z.record(z.string(), z.unknown()).safeParse(body);
+    const id =
+      requested.success && typeof requested.data.id === "string" && requested.data.id.length > 0
+        ? requested.data.id
+        : `trigger-${idFactory().slice(0, 12)}`;
+    const authorization = await authorizeTriggerMutation(context.req.raw, id);
+    if (!authorization.allowed) return context.json({ error: authorization.error }, authorization.status);
+    if (!dependencies.eventStore) return context.json({ error: "mission_trigger_store_unavailable" }, 503);
+    const parsed = MissionTriggerInputSchema.safeParse(body);
+    if (!parsed.success)
+      return context.json({ error: "invalid_mission_trigger", issues: parsed.error.issues }, 400);
+    if (missionTriggers.has(id)) return context.json({ error: "mission_trigger_exists" }, 409);
+    const now = clock().toISOString();
+    const { id: _requestedId, ...triggerInput } = parsed.data;
+    const trigger = MissionTriggerSchema.parse({
+      schemaVersion: 1,
+      id,
+      ...triggerInput,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await recordEvent("mission.trigger.created", `trigger:${id}`, now, { trigger });
+    missionTriggers.set(id, trigger);
+    return context.json({ trigger }, 201);
+  });
+
+  app.put("/v1/mission-triggers/:id", async (context) => {
+    const id = context.req.param("id");
+    const authorization = await authorizeTriggerMutation(context.req.raw, id);
+    if (!authorization.allowed) return context.json({ error: authorization.error }, authorization.status);
+    if (!dependencies.eventStore) return context.json({ error: "mission_trigger_store_unavailable" }, 503);
+    const current = missionTriggers.get(id);
+    if (!current) return context.json({ error: "mission_trigger_not_found" }, 404);
+    const parsed = MissionTriggerInputSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success)
+      return context.json({ error: "invalid_mission_trigger", issues: parsed.error.issues }, 400);
+    const now = clock().toISOString();
+    const { id: _ignoredId, ...triggerInput } = parsed.data;
+    const trigger = MissionTriggerSchema.parse({
+      schemaVersion: 1,
+      id,
+      ...triggerInput,
+      createdAt: current.createdAt,
+      updatedAt: now,
+    });
+    await recordEvent("mission.trigger.updated", `trigger:${id}`, now, { trigger });
+    missionTriggers.set(id, trigger);
+    return context.json({ trigger });
+  });
+
+  app.delete("/v1/mission-triggers/:id", async (context) => {
+    const id = context.req.param("id");
+    const authorization = await authorizeTriggerMutation(context.req.raw, id);
+    if (!authorization.allowed) return context.json({ error: authorization.error }, authorization.status);
+    if (!dependencies.eventStore) return context.json({ error: "mission_trigger_store_unavailable" }, 503);
+    if (!missionTriggers.has(id)) return context.json({ error: "mission_trigger_not_found" }, 404);
+    await recordEvent("mission.trigger.deleted", `trigger:${id}`, clock().toISOString(), { triggerId: id });
+    missionTriggers.delete(id);
+    return context.body(null, 204);
+  });
+
+  app.post("/v1/mission-triggers/evaluate", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (!dependencies.eventStore) return context.json({ error: "mission_trigger_store_unavailable" }, 503);
+    return context.json(await evaluateDueTriggers(clock()));
+  });
+
+  app.post("/v1/memory/proposals", async (context) => {
+    if (!dependencies.memoryStore || !dependencies.eventStore) {
+      return context.json({ error: "memory_store_unavailable" }, 503);
+    }
+    const parsed = MemoryProposalRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_memory_proposal" }, 400);
+    const worker = dependencies.authenticateWorker
+      ? await dependencies.authenticateWorker(context.req.raw)
+      : undefined;
+    const captain = worker ? undefined : await authenticateCaptain(context.req.raw, dependencies);
+    if (!dependencies.authenticateWorker && captain === "unavailable") {
+      return context.json({ error: "memory_proposal_authentication_unavailable" }, 503);
+    }
+    if (!worker && (!captain || captain === "unavailable")) {
+      return context.json({ error: "memory_proposal_authentication_required" }, 401);
+    }
+    const proposalInput = parsed.data;
+    if (
+      worker &&
+      (proposalInput.fact.provenance.missionId !== worker.missionId ||
+        proposalInput.fact.provenance.correlationId !== worker.correlationId)
+    ) {
+      return context.json({ error: "memory_proposal_identity_mismatch" }, 403);
+    }
+    const principal = worker
+      ? ({ kind: "worker", id: worker.workerRunId } as const)
+      : ({ kind: "captain", id: (captain as TrustedCaptainIdentity).captainId } as const);
+    const approvalRequestId = `memory:${proposalInput.proposalId}`;
+    const proposal: StoredMemoryProposal = {
+      proposalId: proposalInput.proposalId,
+      approvalRequestId,
+      fact: proposalInput.fact,
+      submittedAt: clock().toISOString(),
+      principal,
+    };
+    const existing = memoryProposals.get(proposal.proposalId);
+    if (existing) {
+      if (
+        JSON.stringify({ fact: existing.fact, principal: existing.principal }) !==
+        JSON.stringify({ fact: proposal.fact, principal: proposal.principal })
+      ) {
+        return context.json({ error: "memory_proposal_idempotency_conflict" }, 409);
+      }
+      return context.json({ proposal: existing, approval: approvalRequests.get(existing.approvalRequestId) });
+    }
+    const request = ActionRequestSchema.parse({
+      id: approvalRequestId,
+      principal,
+      action: "memory.profile.write",
+      resource: { type: "memory-proposal", id: proposal.proposalId },
+      context: {
+        missionId: proposal.fact.provenance.missionId,
+        risk: "low",
+        humanApprovals: 0,
+        profileHash: dependencies.doctrine.profileHash,
+      },
+    });
+    const decision = decideAction(dependencies.doctrine, request);
+    await recordEvent(
+      "memory.proposal.submitted",
+      proposal.fact.provenance.missionId,
+      proposal.submittedAt,
+      { proposal },
+      { correlationId: proposal.fact.provenance.correlationId },
+    );
+    memoryProposals.set(proposal.proposalId, proposal);
+    if (decision.effect === "deny") {
+      await recordEvent(
+        "memory.proposal.denied",
+        proposal.fact.provenance.missionId,
+        clock().toISOString(),
+        { proposalId: proposal.proposalId, reason: decision.reason, source: "doctrine" },
+        { correlationId: proposal.fact.provenance.correlationId },
+      );
+      return context.json({ error: "memory_proposal_denied", decision }, 403);
+    }
+    if (decision.effect !== "require_approval") {
+      return context.json({ error: "memory_proposal_approval_required" }, 409);
+    }
+    const approval = await persistApprovalRequest(request, decision, proposal.fact.provenance.correlationId);
+    return context.json({ proposal, approval }, 202);
   });
 
   app.put("/v1/missions/:id/plan", async (context) => {
@@ -1331,7 +1739,15 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
           400,
         );
       }
-      await recordEvent("mission.planned", id, clock().toISOString(), { plan });
+      const memoryRecall = dependencies.memoryStore?.recallCard({ query: plan.goal });
+      const captainMissionContext = [dependencies.doctrine.plannerCard, memoryRecall]
+        .filter((value): value is string => value !== undefined)
+        .join("\n\n");
+      mission.context = { ...mission.context, captainMissionContext };
+      await recordEvent("mission.planned", id, clock().toISOString(), {
+        plan,
+        context: mission.context,
+      });
       mission.plan = plan;
       mission.state = "planned";
       logger.info({ missionId: id, taskCount: plan.tasks.length }, "mission planned");
@@ -1467,6 +1883,14 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
         return leased;
       });
       if (assignment) {
+        const memoryRecall = dependencies.memoryStore?.recallCard({
+          query: `${assignment.task.title} ${assignment.task.objective}`,
+          maxFacts: 6,
+          maxCharacters: 2_048,
+        });
+        if (memoryRecall !== undefined) {
+          assignment.task.metadata = { ...assignment.task.metadata, memoryRecall };
+        }
         logger.info(
           { runnerId: runner.runnerId, missionId: assignment.missionId, workerRunId: assignment.workerRunId },
           "worker task leased",
@@ -1700,7 +2124,8 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       if (!current) return context.json({ error: "approval_not_found" }, 404);
       if (current.status !== "pending") {
         const requestedStatus = parsed.data.decision === "approve" ? "approved" : "denied";
-        if (current.status === requestedStatus && current.reason === parsed.data.reason) return context.json(current);
+        if (current.status === requestedStatus && current.reason === parsed.data.reason)
+          return context.json(current);
         return context.json({ error: "approval_already_decided", approval: current }, 409);
       }
       const status = parsed.data.decision === "approve" ? "approved" : "denied";
@@ -1720,6 +2145,25 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
         approvalEnvelope(approval),
       );
       approvalRequests.set(approval.id, approval);
+      if (approval.action === "memory.profile.write") {
+        const proposal = [...memoryProposals.values()].find(
+          (candidate) => candidate.approvalRequestId === approval.id,
+        );
+        if (!proposal) throw new Error(`Memory approval ${approval.id} has no durable proposal`);
+        await recordEvent(
+          status === "approved" ? "memory.proposal.approved" : "memory.proposal.denied",
+          proposal.fact.provenance.missionId,
+          decidedAt,
+          {
+            proposalId: proposal.proposalId,
+            approvalRequestId: approval.id,
+            reason: approval.reason,
+            source: "operator",
+          },
+          { correlationId: proposal.fact.provenance.correlationId },
+        );
+        if (status === "approved") await commitApprovedMemoryProposal(proposal, approval);
+      }
       logger.info(
         { missionId: approval.missionId, approvalId: approval.id, status, operatorId: operator.operatorId },
         "approval decided",
@@ -2203,7 +2647,10 @@ function approvalEnvelope(approval: ApprovalRequestRecord): {
   };
 }
 
-function approvalHandle(approval: ApprovalRequestRecord, ttlMs: number): {
+function approvalHandle(
+  approval: ApprovalRequestRecord,
+  ttlMs: number,
+): {
   id: string;
   status: ApprovalRequestRecord["status"];
   fingerprint?: string;
@@ -2754,12 +3201,37 @@ function applyMissionEvent(missions: Map<string, MissionRecord>, event: DomainEv
       return;
     }
     mission.plan = MissionPlanSchema.parse(event.data.plan);
+    const context = z.record(z.string(), z.unknown()).safeParse(event.data.context);
+    if (context.success) mission.context = context.data;
     mission.state = "planned";
     return;
   }
   if (event.type === "mission.execution.started") {
     const mission = missions.get(event.missionId);
     if (mission) mission.state = "running";
+  }
+}
+
+function applyMemoryEvent(
+  proposals: Map<string, StoredMemoryProposal>,
+  committed: Set<string>,
+  event: DomainEvent,
+): void {
+  if (event.type === "memory.proposal.submitted") {
+    const proposal = z
+      .object({
+        proposalId: z.string().min(1),
+        approvalRequestId: z.string().min(1),
+        fact: MemoryFactSchema,
+        submittedAt: z.string().datetime(),
+        principal: z.object({ kind: z.enum(["captain", "worker"]), id: z.string().min(1) }),
+      })
+      .parse(event.data.proposal);
+    proposals.set(proposal.proposalId, proposal);
+    return;
+  }
+  if (event.type === "memory.proposal.committed") {
+    committed.add(z.string().min(1).parse(event.data.proposalId));
   }
 }
 

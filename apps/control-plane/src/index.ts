@@ -4,6 +4,7 @@ import { serve } from "@hono/node-server";
 import { compileDoctrine, loadDoctrineFile, projectCaptainCeremony } from "@clankie/doctrine";
 import { SqliteEventStore } from "@clankie/event-store";
 import { createLogger } from "@clankie/observability";
+import { MemoryStore } from "@clankie/memory-store";
 import type {
   AttentionDeliveryAdapter,
   LinearAgentRuntimePort,
@@ -26,6 +27,10 @@ const doctrinePath = process.env.CLANKIE_DOCTRINE
 const doctrine = compileDoctrine([await loadDoctrineFile(doctrinePath)]);
 const eventStorePath = resolve(process.env.CLANKIE_EVENT_STORE ?? "artifacts/control-plane/events.db");
 const eventStore = new SqliteEventStore(eventStorePath);
+const memoryStorePath = resolve(process.env.CLANKIE_MEMORY_STORE ?? "artifacts/control-plane/memory.db");
+const memoryStore = new MemoryStore(memoryStorePath, {
+  doctrine: doctrine.profile.memory,
+});
 const runnerToken = process.env.CLANKIE_RUNNER_TOKEN;
 const captainToken = process.env.CLANKIE_CAPTAIN_TOKEN;
 const operatorToken = process.env.CLANKIE_OPERATOR_TOKEN;
@@ -52,6 +57,7 @@ const discordPresenceRuntime = await loadDiscordPresenceRuntime(
 const app = await createControlPlane({
   doctrine,
   eventStore,
+  memoryStore,
   workerSteeringStore: new FileWorkerSteeringStore(`${eventStorePath}.steering.json`),
   authorizeWorkerSteer: createDeterministicWorkerSteerAuthorizer(),
   ...(linearAgentRuntime === undefined
@@ -97,7 +103,10 @@ const app = await createControlPlane({
 const port = Number(process.env.PORT ?? 4310);
 const hostname = "127.0.0.1";
 serve({ fetch: app.fetch, port, hostname });
-logger.info({ hostname, port, profileHash: doctrine.profileHash, eventStorePath }, "control plane listening");
+logger.info(
+  { hostname, port, profileHash: doctrine.profileHash, eventStorePath, memoryStorePath },
+  "control plane listening",
+);
 
 function parseCaptainSteerSourceLane(value: string): "discord_text" | "discord_voice" | "api" {
   if (value === "discord_text" || value === "discord_voice" || value === "api") return value;

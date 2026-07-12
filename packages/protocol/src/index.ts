@@ -377,6 +377,55 @@ export const DomainEventSchema = EventBaseSchema.extend({
 });
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
 
+export const MissionTriggerScheduleSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("cron"), expression: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("once"), at: z.string().datetime() }).strict(),
+]);
+export type MissionTriggerSchedule = z.infer<typeof MissionTriggerScheduleSchema>;
+
+export const MissionTriggerSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    id: z.string().min(1),
+    goal: z.string().min(1),
+    context: z.record(z.string(), z.unknown()).default({}),
+    schedule: MissionTriggerScheduleSchema,
+    misfirePolicy: z.enum(["skip", "run_once_late"]),
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+    lastEvaluatedAt: z.string().datetime().optional(),
+  })
+  .strict();
+export type MissionTrigger = z.infer<typeof MissionTriggerSchema>;
+
+export const MissionTriggerEventSchema = z.discriminatedUnion("type", [
+  EventBaseSchema.extend({
+    type: z.literal("mission.trigger.created"),
+    data: z.object({ trigger: MissionTriggerSchema }),
+  }),
+  EventBaseSchema.extend({
+    type: z.literal("mission.trigger.updated"),
+    data: z.object({ trigger: MissionTriggerSchema }),
+  }),
+  EventBaseSchema.extend({
+    type: z.literal("mission.trigger.fired"),
+    data: z.object({
+      trigger: MissionTriggerSchema,
+      scheduledAt: z.string().datetime(),
+      missionId: MissionIdSchema,
+    }),
+  }),
+  EventBaseSchema.extend({
+    type: z.literal("mission.trigger.skipped"),
+    data: z.object({ trigger: MissionTriggerSchema, scheduledAt: z.string().datetime() }),
+  }),
+  EventBaseSchema.extend({
+    type: z.literal("mission.trigger.deleted"),
+    data: z.object({ triggerId: z.string().min(1) }),
+  }),
+]);
+export type MissionTriggerEvent = z.infer<typeof MissionTriggerEventSchema>;
+
 export const ApprovalEventSchema = z
   .discriminatedUnion("type", [
     EventBaseSchema.extend({
@@ -904,19 +953,79 @@ export const DiscordPresenceChannelTurnRequestSchema = z
 export type DiscordPresenceChannelTurnRequest = z.infer<typeof DiscordPresenceChannelTurnRequestSchema>;
 
 export const DiscordPresenceActionRequestSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("reply"), channelId: z.string().min(1), messageId: z.string().min(1), content: z.string().min(1).max(2_000) }).strict(),
-  z.object({ kind: z.literal("react"), channelId: z.string().min(1), messageId: z.string().min(1), emoji: z.string().min(1).max(64) }).strict(),
-  z.object({ kind: z.literal("unreact"), channelId: z.string().min(1), messageId: z.string().min(1), emoji: z.string().min(1).max(64) }).strict(),
-  z.object({ kind: z.literal("send_message"), channelId: z.string().min(1), content: z.string().min(1).max(2_000), replyToMessageId: z.string().min(1).optional() }).strict(),
-  z.object({ kind: z.literal("edit_own_message"), channelId: z.string().min(1), messageId: z.string().min(1), content: z.string().min(1).max(2_000) }).strict(),
-  z.object({ kind: z.literal("delete_own_message"), channelId: z.string().min(1), messageId: z.string().min(1) }).strict(),
-  z.object({ kind: z.literal("send_attachment"), channelId: z.string().min(1), content: z.string().max(2_000).optional(), artifactRef: z.string().min(1), filename: z.string().min(1).max(256) }).strict(),
+  z
+    .object({
+      kind: z.literal("reply"),
+      channelId: z.string().min(1),
+      messageId: z.string().min(1),
+      content: z.string().min(1).max(2_000),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("react"),
+      channelId: z.string().min(1),
+      messageId: z.string().min(1),
+      emoji: z.string().min(1).max(64),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("unreact"),
+      channelId: z.string().min(1),
+      messageId: z.string().min(1),
+      emoji: z.string().min(1).max(64),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("send_message"),
+      channelId: z.string().min(1),
+      content: z.string().min(1).max(2_000),
+      replyToMessageId: z.string().min(1).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("edit_own_message"),
+      channelId: z.string().min(1),
+      messageId: z.string().min(1),
+      content: z.string().min(1).max(2_000),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("delete_own_message"),
+      channelId: z.string().min(1),
+      messageId: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("send_attachment"),
+      channelId: z.string().min(1),
+      content: z.string().max(2_000).optional(),
+      artifactRef: z.string().min(1),
+      filename: z.string().min(1).max(256),
+    })
+    .strict(),
   z.object({ kind: z.literal("typing_start"), channelId: z.string().min(1) }).strict(),
-  z.object({ kind: z.literal("create_thread"), channelId: z.string().min(1), messageId: z.string().min(1).optional(), name: z.string().min(1).max(100) }).strict(),
+  z
+    .object({
+      kind: z.literal("create_thread"),
+      channelId: z.string().min(1),
+      messageId: z.string().min(1).optional(),
+      name: z.string().min(1).max(100),
+    })
+    .strict(),
   z.object({ kind: z.literal("join_thread"), channelId: z.string().min(1) }).strict(),
-  z.object({ kind: z.literal("voice_join"), guildId: z.string().min(1), channelId: z.string().min(1) }).strict(),
+  z
+    .object({ kind: z.literal("voice_join"), guildId: z.string().min(1), channelId: z.string().min(1) })
+    .strict(),
   z.object({ kind: z.literal("voice_leave"), guildId: z.string().min(1) }).strict(),
-  z.object({ kind: z.literal("go_live_start"), guildId: z.string().min(1), channelId: z.string().min(1) }).strict(),
+  z
+    .object({ kind: z.literal("go_live_start"), guildId: z.string().min(1), channelId: z.string().min(1) })
+    .strict(),
   z.object({ kind: z.literal("go_live_stop"), guildId: z.string().min(1) }).strict(),
 ]);
 export type DiscordPresenceActionRequest = z.infer<typeof DiscordPresenceActionRequestSchema>;
