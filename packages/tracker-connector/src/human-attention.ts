@@ -1,12 +1,14 @@
 import { createHash } from "node:crypto";
 import type { CaptainCeremonyProjection } from "@clankie/doctrine";
 import {
+  CeremonyTargetRoleSchema,
   HumanAttentionRequestSchema,
   HumanAttentionResponseSchema,
   type DomainEvent,
   type HumanAttentionRequest,
   type HumanAttentionResponse,
   type CeremonyDirectNotificationMode,
+  type CeremonyTargetRole,
 } from "@clankie/protocol";
 import type { TrackerPolicyDecision, TrackerPolicyGateway, TrackerWriteRequest } from "./types.ts";
 import {
@@ -51,14 +53,38 @@ export interface AttentionDeliveryAdapter {
   }>;
 }
 
-/** Durable idempotent store (mission event projection or equivalent). */
+export interface PendingAttentionRecord {
+  readonly request: HumanAttentionRequest;
+  /** Must match verified agent-session event organization id (workspace). */
+  readonly workspaceId: string;
+  readonly issueId?: string;
+  readonly agentSessionId?: string;
+  readonly rootCommentId?: string | null;
+}
+
+/** Durable delivery + correlation context written together. */
+export interface StoredAttentionDelivery {
+  readonly result: AttentionDeliveryResult;
+  readonly pending: PendingAttentionRecord;
+}
+
+/**
+ * Durable idempotent store (mission event projection or equivalent).
+ * Concurrent deliveries for the same key must serialize through `runExclusive`
+ * so the adapter factory runs at most once and a single durable result is stored.
+ */
 export interface AttentionDeliveryStore {
-  get(idempotencyKey: string): Promise<AttentionDeliveryResult | undefined>;
-  put(
+  get(idempotencyKey: string): Promise<StoredAttentionDelivery | undefined>;
+  /**
+   * If a prior delivery exists for the key, fingerprint-check and return it
+   * without invoking factory. Otherwise run factory exactly once under an
+   * exclusive lock for the key and persist the returned record.
+   */
+  runExclusive(
     idempotencyKey: string,
     fingerprint: string,
-    result: AttentionDeliveryResult,
-  ): Promise<void>;
+    factory: () => Promise<StoredAttentionDelivery>,
+  ): Promise<StoredAttentionDelivery>;
 }
 
 export interface DeliverHumanAttentionInput {
@@ -171,30 +197,52 @@ export function deliveryIdempotencyKey(requestId: string, fingerprint: string): 
   return createHash("sha256").update(`attention:${requestId}:${fingerprint}`).digest("hex");
 }
 
+function pendingFromDelivery(
+  request: HumanAttentionRequest,
+  binding: WorkspaceTrackerBinding,
+): PendingAttentionRecord {
+  return {
+    request,
+    workspaceId: binding.workspaceId,
+    ...(request.trackerRef?.externalRef === undefined
+      ? {}
+      : { issueId: request.trackerRef.externalRef }),
+  };
+}
+
 /**
  * Deliver a human-attention request through a trusted workspace binding.
  * Idempotent by requestId with content-aware fingerprint conflict detection.
- * Policy-evaluates every action with a truthful TrackerWriteRequest action
- * (or marks unsupported). Never claims delivery from configured intent alone.
+ * Ceremony-disabled deliveries still participate in the same store/fingerprint
+ * path. Concurrent identical deliveries serialize via store.runExclusive.
  */
 export async function deliverHumanAttention(
   input: DeliverHumanAttentionInput,
 ): Promise<AttentionDeliveryResult> {
+  const request = HumanAttentionRequestSchema.parse(input.request);
+  const storeKey = deliveryStoreKey(request.requestId);
+  const pending = pendingFromDelivery(request, input.binding);
+
   if (!input.projection.humanAttention.enabled) {
-    const now = (input.clock ?? (() => new Date()))().toISOString();
-    const request = HumanAttentionRequestSchema.parse(input.request);
-    return {
-      requestId: request.requestId,
-      missionId: request.missionId,
-      correlationId: request.correlationId,
-      aggregate: "unsupported",
-      actions: [],
-      fingerprint: "ceremony-disabled",
-      deliveredAt: now,
-    };
+    const fingerprint = deliveryFingerprint(input.binding, [], request);
+    const stored = await input.store.runExclusive(storeKey, fingerprint, async () => {
+      const now = (input.clock ?? (() => new Date()))().toISOString();
+      return {
+        pending,
+        result: {
+          requestId: request.requestId,
+          missionId: request.missionId,
+          correlationId: request.correlationId,
+          aggregate: "unsupported",
+          actions: [],
+          fingerprint,
+          deliveredAt: now,
+        },
+      };
+    });
+    return stored.result;
   }
 
-  const request = HumanAttentionRequestSchema.parse(input.request);
   const directNotification: CeremonyDirectNotificationMode =
     request.directNotification ?? input.projection.humanAttention.directNotification;
 
@@ -216,117 +264,138 @@ export async function deliverHumanAttention(
   }
 
   const fingerprint = deliveryFingerprint(input.binding, resolved.actions, request);
-  const storeKey = deliveryStoreKey(request.requestId);
-  const prior = await input.store.get(storeKey);
-  if (prior !== undefined) {
-    if (prior.fingerprint !== fingerprint) {
-      throw new Error("Human-attention delivery idempotency conflict for request content/fingerprint");
+
+  const stored = await input.store.runExclusive(storeKey, fingerprint, async () => {
+    const actionResults: AttentionActionResult[] = [];
+    if (resolved.actions.length === 0) {
+      const now = (input.clock ?? (() => new Date()))().toISOString();
+      return {
+        pending,
+        result: {
+          requestId: request.requestId,
+          missionId: request.missionId,
+          correlationId: request.correlationId,
+          aggregate: enforceRequiredDirectNotification(directNotification, [], "unsupported"),
+          actions: [],
+          fingerprint,
+          deliveredAt: now,
+        },
+      };
     }
-    return prior;
-  }
 
-  const actionResults: AttentionActionResult[] = [];
-  if (resolved.actions.length === 0) {
-    const now = (input.clock ?? (() => new Date()))().toISOString();
-    const result: AttentionDeliveryResult = {
-      requestId: request.requestId,
-      missionId: request.missionId,
-      correlationId: request.correlationId,
-      aggregate: enforceRequiredDirectNotification(directNotification, [], "unsupported"),
-      actions: [],
-      fingerprint,
-      deliveredAt: now,
-    };
-    await input.store.put(storeKey, fingerprint, result);
-    return result;
-  }
+    for (const action of resolved.actions) {
+      const policyAction = policyActionForCapability(action.capability.kind);
+      if (policyAction === undefined) {
+        actionResults.push({
+          kind: action.capability.kind,
+          principalId: action.capability.principalId,
+          ...(action.surface === undefined ? {} : { surface: action.surface }),
+          status: "unsupported",
+          detail: `No exact doctrine/policy action truthfully describes capability ${action.capability.kind}`,
+          isFallback: action.isFallback,
+        });
+        continue;
+      }
 
-  for (const action of resolved.actions) {
-    const policyAction = policyActionForCapability(action.capability.kind);
-    if (policyAction === undefined) {
+      const writeRequest: TrackerWriteRequest = {
+        action: policyAction,
+        riskClass: "reversible-write",
+        missionId: input.missionIdForPolicy ?? request.missionId,
+        ref: {
+          connector: "workspace",
+          workspaceId: input.binding.workspaceId,
+          issueId: request.trackerRef?.externalRef ?? request.requestId,
+        },
+        idempotencyKey: `${storeKey}:${action.capability.kind}:${action.capability.principalId}`,
+      };
+      const decision: TrackerPolicyDecision = await input.policy.authorize(writeRequest);
+      if (decision.effect !== "allow") {
+        actionResults.push({
+          kind: action.capability.kind,
+          principalId: action.capability.principalId,
+          ...(action.surface === undefined ? {} : { surface: action.surface }),
+          status: "denied",
+          detail: decision.reason,
+          isFallback: action.isFallback,
+        });
+        continue;
+      }
+
+      const attempt = await input.adapter.attempt(action);
+      if (attempt.unsupported === true) {
+        actionResults.push({
+          kind: action.capability.kind,
+          principalId: action.capability.principalId,
+          ...(action.surface === undefined ? {} : { surface: action.surface }),
+          status: "unsupported",
+          ...(attempt.detail === undefined ? {} : { detail: attempt.detail }),
+          isFallback: action.isFallback,
+        });
+        continue;
+      }
       actionResults.push({
         kind: action.capability.kind,
         principalId: action.capability.principalId,
         ...(action.surface === undefined ? {} : { surface: action.surface }),
-        status: "unsupported",
-        detail: `No exact doctrine/policy action truthfully describes capability ${action.capability.kind}`,
-        isFallback: action.isFallback,
-      });
-      continue;
-    }
-
-    const writeRequest: TrackerWriteRequest = {
-      action: policyAction,
-      riskClass: "reversible-write",
-      missionId: input.missionIdForPolicy ?? request.missionId,
-      ref: {
-        connector: "workspace",
-        workspaceId: input.binding.workspaceId,
-        issueId: request.trackerRef?.externalRef ?? request.requestId,
-      },
-      idempotencyKey: `${storeKey}:${action.capability.kind}:${action.capability.principalId}`,
-    };
-    const decision: TrackerPolicyDecision = await input.policy.authorize(writeRequest);
-    if (decision.effect !== "allow") {
-      actionResults.push({
-        kind: action.capability.kind,
-        principalId: action.capability.principalId,
-        ...(action.surface === undefined ? {} : { surface: action.surface }),
-        status: "denied",
-        detail: decision.reason,
-        isFallback: action.isFallback,
-      });
-      continue;
-    }
-
-    const attempt = await input.adapter.attempt(action);
-    if (attempt.unsupported === true) {
-      actionResults.push({
-        kind: action.capability.kind,
-        principalId: action.capability.principalId,
-        ...(action.surface === undefined ? {} : { surface: action.surface }),
-        status: "unsupported",
+        status: attempt.ok ? "succeeded" : "failed",
         ...(attempt.detail === undefined ? {} : { detail: attempt.detail }),
         isFallback: action.isFallback,
       });
-      continue;
     }
-    actionResults.push({
-      kind: action.capability.kind,
-      principalId: action.capability.principalId,
-      ...(action.surface === undefined ? {} : { surface: action.surface }),
-      status: attempt.ok ? "succeeded" : "failed",
-      ...(attempt.detail === undefined ? {} : { detail: attempt.detail }),
-      isFallback: action.isFallback,
-    });
-  }
 
-  const now = (input.clock ?? (() => new Date()))().toISOString();
-  const aggregate = enforceRequiredDirectNotification(
-    directNotification,
-    actionResults,
-    aggregateOf(actionResults),
-  );
-  const result: AttentionDeliveryResult = {
-    requestId: request.requestId,
-    missionId: request.missionId,
-    correlationId: request.correlationId,
-    aggregate,
-    actions: actionResults,
-    fingerprint,
-    deliveredAt: now,
-  };
-  await input.store.put(storeKey, fingerprint, result);
-  return result;
+    const now = (input.clock ?? (() => new Date()))().toISOString();
+    const aggregate = enforceRequiredDirectNotification(
+      directNotification,
+      actionResults,
+      aggregateOf(actionResults),
+    );
+    return {
+      pending,
+      result: {
+        requestId: request.requestId,
+        missionId: request.missionId,
+        correlationId: request.correlationId,
+        aggregate,
+        actions: actionResults,
+        fingerprint,
+        deliveredAt: now,
+      },
+    };
+  });
+
+  return stored.result;
 }
 
-export interface PendingAttentionRecord {
-  readonly request: HumanAttentionRequest;
-  /** Must match verified agent-session event organization id (workspace). */
-  readonly workspaceId: string;
-  readonly issueId?: string;
-  readonly agentSessionId?: string;
-  readonly rootCommentId?: string | null;
+const DECISIONS = new Set(["approve", "deny", "defer", "clarify", "redirect"]);
+
+/**
+ * Extract actor role, decision, and rationale from a verified authoritative event.
+ * Accepts a typed `attentionResponse` / `humanAttentionResponse` object or the same
+ * fields on the event data root. Caller-supplied authority is never used.
+ */
+export function authorityFromVerifiedEvent(event: DomainEvent):
+  | {
+      readonly actorRole: CeremonyTargetRole;
+      readonly decision: HumanAttentionResponse["decision"];
+      readonly rationale: string;
+    }
+  | undefined {
+  const data = event.data as Record<string, unknown>;
+  const candidates: unknown[] = [data.attentionResponse, data.humanAttentionResponse, data];
+  for (const candidate of candidates) {
+    if (candidate === null || typeof candidate !== "object") continue;
+    const record = candidate as Record<string, unknown>;
+    const actorRole = CeremonyTargetRoleSchema.safeParse(record.actorRole);
+    const decision =
+      typeof record.decision === "string" && DECISIONS.has(record.decision)
+        ? (record.decision as HumanAttentionResponse["decision"])
+        : undefined;
+    const rationale = typeof record.rationale === "string" ? record.rationale.trim() : "";
+    if (actorRole.success && decision !== undefined && rationale.length > 0) {
+      return { actorRole: actorRole.data, decision, rationale };
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -352,10 +421,12 @@ export function rootCommentIdFromAgentSessionEvent(event: DomainEvent): string |
 }
 
 /**
- * Correlate a **verified** agent-session DomainEvent to a pending attention request.
+ * Correlate a **verified** agent-session DomainEvent to a pending attention request
+ * already loaded from the durable trusted store (never from the HTTP caller).
  * - workspaceId must equal event.data.organization.id
  * - event.occurredAt must not be older than request.createdAt
- * - root comment uses event comment/root fields (see rootCommentIdFromAgentSessionEvent)
+ * - root comment uses event comment/root fields
+ * - actorRole/decision/rationale come from the verified event (see authorityFromVerifiedEvent)
  * Only `tracker.agent-session.created` / `prompted` may resolve.
  */
 export function correlateAgentSessionToAttention(input: {
@@ -363,8 +434,8 @@ export function correlateAgentSessionToAttention(input: {
   readonly event: DomainEvent;
   readonly responseId: string;
   readonly actorRole: HumanAttentionResponse["actorRole"];
-  readonly decision?: HumanAttentionResponse["decision"];
-  readonly rationale?: string;
+  readonly decision: HumanAttentionResponse["decision"];
+  readonly rationale: string;
   readonly clock?: () => Date;
 }): HumanAttentionResponse | undefined {
   const type = input.event.type;
@@ -409,9 +480,8 @@ export function correlateAgentSessionToAttention(input: {
     requestId: input.pending.request.requestId,
     correlationId: input.pending.request.correlationId,
     actorRole: input.actorRole,
-    decision: input.decision ?? "clarify",
-    rationale:
-      input.rationale ?? "Authoritative agent-session response correlated to pending attention.",
+    decision: input.decision,
+    rationale: input.rationale,
     createdAt,
     ...(input.pending.request.trackerRef === undefined
       ? {}
@@ -438,3 +508,4 @@ export function attentionDeliveryEventData(result: AttentionDeliveryResult): Rec
     actions: result.actions,
   };
 }
+

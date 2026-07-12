@@ -81,8 +81,10 @@ so both live files are skipped.
 ## Tracker ceremony (issue drafts + human attention)
 
 `validateIssueDraft` is a pure validator driven by `CaptainCeremonyProjection` (from
-`@clankie/doctrine`). It enforces required product impact, configurable heading,
-section placement, and max summary sentences **before** any connector write.
+`@clankie/doctrine`). It enforces required product impact (including non-empty
+`bodyMarkdown` when product impact is required), no prose before the first
+heading, configurable heading/placement, and max summary sentences (HTML `<br>`
+normalized so it cannot compress sentences) **before** any connector write.
 
 `WorkspaceTrackerBinding` maps semantic target roles and notification surfaces to
 **opaque principals** and provider-neutral capabilities. Provider-specific Linear
@@ -98,6 +100,11 @@ outcomes remain `delivered` | `partial` | `unsupported` | `fallback`. When
 `delivered` — marker/comment-only bindings demote to `unsupported` or `fallback`,
 never `delivered`. Per-action `denied` stays distinguishable from `unsupported`
 even when the aggregate collapses to `unsupported`.
+
+Control-plane correlate accepts only `requestId` + `verifiedEventId` (+ response
+id / profile hash). Pending request context is loaded from the durable delivery
+store (never caller-supplied). Actor role, decision, and rationale are derived
+from the verified event (`attentionResponse` / typed fields), not the HTTP body.
 
 `correlateAgentSessionToAttention` resolves pending attention only from verified
 `tracker.agent-session.created` / `prompted` events. It requires

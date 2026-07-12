@@ -1,8 +1,29 @@
 import type { CaptainCeremonyProjection } from "@clankie/doctrine";
 
 /**
- * Extract a trusted ceremony projection from Eve channel metadata / client context.
- * Accepts only structured objects — never free-form model text.
+ * Structural check that a candidate projection matches a trusted compiled projection
+ * for security-sensitive ceremony controls. Arbitrary metadata that disables draft
+ * validation, human attention, or independent verification is rejected.
+ */
+export function isTrustedCeremonyProjection(
+  candidate: CaptainCeremonyProjection,
+  trusted: CaptainCeremonyProjection,
+): boolean {
+  return (
+    candidate.profileId === trusted.profileId &&
+    candidate.profileHash === trusted.profileHash &&
+    candidate.issueDraft.enabled === trusted.issueDraft.enabled &&
+    candidate.issueDraft.requireProductImpact === trusted.issueDraft.requireProductImpact &&
+    candidate.humanAttention.enabled === trusted.humanAttention.enabled &&
+    candidate.independentVerifierRequired === trusted.independentVerifierRequired &&
+    candidate.externalConnectors === trusted.externalConnectors &&
+    candidate.integrationFlow === trusted.integrationFlow
+  );
+}
+
+/**
+ * Extract a ceremony projection object from Eve channel metadata.
+ * Shape-only: callers must validate against a trusted compiled projection.
  */
 export function ceremonyProjectionFromChannel(channel: {
   readonly metadata?: Readonly<Record<string, unknown>>;
@@ -16,6 +37,26 @@ export function ceremonyProjectionFromChannel(channel: {
   if (record.issueDraft === null || typeof record.issueDraft !== "object") return undefined;
   if (record.humanAttention === null || typeof record.humanAttention !== "object") return undefined;
   return raw as CaptainCeremonyProjection;
+}
+
+/**
+ * Resolve the projection used for captain prompt composition.
+ * Prefer trusted compiled doctrine. Channel metadata is accepted only when it
+ * matches the trusted projection; mismatched/untrusted projections are rejected.
+ */
+export function resolveTrustedCeremonyProjection(
+  channel: { readonly metadata?: Readonly<Record<string, unknown>> },
+  trusted: CaptainCeremonyProjection,
+): { readonly projection: CaptainCeremonyProjection } | { readonly rejected: true; readonly reason: string } {
+  const fromChannel = ceremonyProjectionFromChannel(channel);
+  if (fromChannel === undefined) {
+    return { projection: trusted };
+  }
+  if (!isTrustedCeremonyProjection(fromChannel, trusted)) {
+    return { rejected: true, reason: "untrusted_ceremony_projection" };
+  }
+  // Always use the trusted compiled object, never the untrusted channel copy.
+  return { projection: trusted };
 }
 
 /**
@@ -67,20 +108,37 @@ export function formatCeremonyInstructions(projection: CaptainCeremonyProjection
   return lines.join("\n");
 }
 
+/**
+ * Build ceremony instructions from trusted compiled doctrine.
+ * `trusted` is required — channel metadata alone cannot supply a projection that
+ * disables draft/attention/independent verification.
+ */
 export function captainCeremonyInstructions(
   channel: { readonly metadata?: Readonly<Record<string, unknown>> },
-  fallback?: CaptainCeremonyProjection,
+  trusted?: CaptainCeremonyProjection,
 ): string {
-  const projection = ceremonyProjectionFromChannel(channel) ?? fallback;
-  if (projection === undefined) {
+  if (trusted === undefined) {
     return [
       "# Tracker ceremony",
       "",
-      "No compiled ceremony projection was supplied in trusted client context for this turn.",
+      "No trusted compiled ceremony projection was supplied for this turn.",
       "Use governed control-plane tools for draft validation and human attention.",
       "Never invent provider-specific principals, labels, emails, or mentions.",
       "Never claim a human was notified or has replied without a governed tool result.",
     ].join("\n");
   }
-  return formatCeremonyInstructions(projection);
+
+  const resolved = resolveTrustedCeremonyProjection(channel, trusted);
+  if ("rejected" in resolved) {
+    return [
+      "# Tracker ceremony",
+      "",
+      "Rejected untrusted ceremony projection from channel metadata.",
+      "Using the trusted compiled doctrine projection only.",
+      "Arbitrary metadata cannot disable draft validation, human attention, or independent verification.",
+      "",
+      formatCeremonyInstructions(trusted),
+    ].join("\n");
+  }
+  return formatCeremonyInstructions(resolved.projection);
 }

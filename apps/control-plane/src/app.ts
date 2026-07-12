@@ -664,7 +664,9 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       return approval;
     });
 
-  const expireApprovalIfNeeded = async (approval: ApprovalRequestRecord): Promise<ApprovalRequestRecord> => {
+  const expireApprovalIfNeeded = async (
+    approval: ApprovalRequestRecord,
+  ): Promise<ApprovalRequestRecord> => {
     if (approval.status !== "pending" || approval.resource.type !== "discord-attachment") return approval;
     const expiresAtMs = Date.parse(approval.requestedAt) + APPROVAL_REQUEST_TTL_MS;
     if (clock().getTime() < expiresAtMs) return approval;
@@ -858,6 +860,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     }
   });
 
+
   app.post("/v1/tracker/issue-drafts/validate", async (context) => {
     const captain = await authenticateCaptain(context.req.raw, dependencies);
     if (captain === "unavailable") return context.json({ error: "captain_authentication_unavailable" }, 503);
@@ -933,16 +936,17 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     }
     try {
       const body = await readJson(context.req.raw);
-      const result = ceremonyRuntime.correlate(body);
+      const result = await ceremonyRuntime.correlate(body);
       if ("ok" in result && result.ok === false) {
         return context.json(result, 409);
       }
-      if (dependencies.eventStore && !("ok" in result)) {
-        const missionId =
-          typeof (body as { pending?: { request?: { missionId?: string } } }).pending?.request?.missionId ===
-          "string"
-            ? (body as { pending: { request: { missionId: string } } }).pending.request.missionId
-            : "unknown";
+      if (dependencies.eventStore && !("ok" in result) && attentionStore !== undefined) {
+        const requestId =
+          typeof (body as { requestId?: string }).requestId === "string"
+            ? (body as { requestId: string }).requestId
+            : result.requestId;
+        const pending = await attentionStore.get(`attention-request:${requestId}`);
+        const missionId = pending?.result.missionId ?? "unknown";
         await recordEvent("tracker.human-attention.responded", missionId, clock().toISOString(), {
           ...result,
         });
@@ -984,131 +988,125 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
         return context.json(previous.result);
       }
 
-      const classification = classifyDiscordPresenceAction(write.action);
-      if (classification === undefined) {
-        return context.json({ error: "discord_presence_action_unclassified" }, 400);
-      }
-      const request = ActionRequestSchema.parse({
-        id: write.idempotencyKey,
-        principal: {
-          kind: "worker",
-          id: write.identity.workerRunId ?? write.identity.characterId,
-          role: "discord-presence-adapter",
-        },
-        action: write.action,
-        resource:
-          write.payload.kind === "send_attachment"
-            ? {
-                type: "discord-attachment",
-                id: write.payload.artifactRef,
-                repository: `sha256:${fingerprint}`,
-                environment: write.payload.channelId,
-              }
-            : {
-                type: "discord-channel",
-                id:
-                  "channelId" in write.payload
-                    ? write.payload.channelId
-                    : "guildId" in write.payload
-                      ? write.payload.guildId
-                      : write.action,
-              },
-        context: {
-          missionId: write.identity.missionId,
-          ...(write.identity.taskId === undefined ? {} : { taskId: write.identity.taskId }),
-          risk: classification.riskClass === "publish-external" ? "high" : "low",
-          profileHash: write.identity.profileHash,
-        },
-      });
-
-      const ledgerContent = resolveDiscordPresenceLedgerContent(write);
-      const priorApprovalRecord = approvalRequests.get(request.id);
-      if (
-        priorApprovalRecord &&
-        !sameApprovalRequest(priorApprovalRecord, request, write.identity.correlationId)
-      ) {
-        return context.json({ error: "discord_presence_idempotency_conflict" }, 409);
-      }
-      const priorApproval = priorApprovalRecord
-        ? await expireApprovalIfNeeded(priorApprovalRecord)
-        : undefined;
-      if (priorApproval?.status === "denied") {
-        const expired = priorApproval.reason === "approval_expired";
-        return context.json(
-          {
-            error: expired ? "discord_presence_approval_expired" : "discord_presence_approval_denied",
-            approval: approvalHandle(priorApproval, APPROVAL_REQUEST_TTL_MS),
-          },
-          403,
-        );
-      }
-      const evaluatedRequest = priorApproval?.status === "approved" ? withHumanApproval(request) : request;
-      const decision =
-        priorApproval?.status === "approved"
+    const classification = classifyDiscordPresenceAction(write.action);
+    if (classification === undefined) {
+      return context.json({ error: "discord_presence_action_unclassified" }, 400);
+    }
+    const request = ActionRequestSchema.parse({
+      id: write.idempotencyKey,
+      principal: {
+        kind: "worker",
+        id: write.identity.workerRunId ?? write.identity.characterId,
+        role: "discord-presence-adapter",
+      },
+      action: write.action,
+      resource:
+        write.payload.kind === "send_attachment"
           ? {
-              effect: "allow" as const,
-              reason: "The authenticated operator approved this exact Discord presence write.",
-              matchedPolicyIds: ["operator-approval:approved"],
-              obligations: priorApproval.rationale.obligations,
+              type: "discord-attachment",
+              id: write.payload.artifactRef,
+              repository: `sha256:${fingerprint}`,
+              environment: write.payload.channelId,
             }
-          : classification.riskClass === "narrative-write"
-            ? narrativePolicy.decide({
-                request: evaluatedRequest,
-                classification,
-                correlationId: write.identity.correlationId,
-                content: ledgerContent,
-              })
-            : decideAction(dependencies.doctrine, evaluatedRequest, classification);
-
-      if (decision.effect !== "allow") {
-        if (decision.effect === "require_approval") {
-          const approval = await persistApprovalRequest(request, decision, write.identity.correlationId);
-          return context.json(
-            {
-              error: "discord_presence_approval_required",
-              approval: approvalHandle(approval, APPROVAL_REQUEST_TTL_MS),
+          : {
+              type: "discord-channel",
+              id:
+                "channelId" in write.payload
+                  ? write.payload.channelId
+                  : "guildId" in write.payload
+                    ? write.payload.guildId
+                    : write.action,
             },
-            202,
-          );
-        }
-        logger.warn(
-          {
-            service: "clankie-control-plane",
-            missionId: write.identity.missionId,
-            correlationId: write.identity.correlationId,
-            action: write.action,
-            effect: decision.effect,
-          },
-          "Discord presence action denied",
-        );
-        return context.json({ error: "discord_presence_not_allowed", decision }, 403);
-      }
+      context: {
+        missionId: write.identity.missionId,
+        ...(write.identity.taskId === undefined ? {} : { taskId: write.identity.taskId }),
+        risk: classification.riskClass === "publish-external" ? "high" : "low",
+        profileHash: write.identity.profileHash,
+      },
+    });
 
-      try {
-        const result = await discordPresenceRuntime.execute(write);
-        discordPresenceResults.set(write.idempotencyKey, {
-          fingerprint,
-          result,
-          expiresAtMs: clock().getTime() + DISCORD_PRESENCE_RETENTION_MS,
-        });
-        logger.info(
-          {
-            service: "clankie-control-plane",
-            missionId: write.identity.missionId,
+    const ledgerContent = resolveDiscordPresenceLedgerContent(write);
+    const priorApprovalRecord = approvalRequests.get(request.id);
+    if (priorApprovalRecord && !sameApprovalRequest(priorApprovalRecord, request, write.identity.correlationId)) {
+      return context.json({ error: "discord_presence_idempotency_conflict" }, 409);
+    }
+    const priorApproval = priorApprovalRecord
+      ? await expireApprovalIfNeeded(priorApprovalRecord)
+      : undefined;
+    if (priorApproval?.status === "denied") {
+      const expired = priorApproval.reason === "approval_expired";
+      return context.json(
+        {
+          error: expired ? "discord_presence_approval_expired" : "discord_presence_approval_denied",
+          approval: approvalHandle(priorApproval, APPROVAL_REQUEST_TTL_MS),
+        },
+        403,
+      );
+    }
+    const evaluatedRequest = priorApproval?.status === "approved" ? withHumanApproval(request) : request;
+    const decision =
+      priorApproval?.status === "approved"
+        ? {
+            effect: "allow" as const,
+            reason: "The authenticated operator approved this exact Discord presence write.",
+            matchedPolicyIds: ["operator-approval:approved"],
+            obligations: priorApproval.rationale.obligations,
+          }
+        : classification.riskClass === "narrative-write"
+        ? narrativePolicy.decide({
+            request: evaluatedRequest,
+            classification,
             correlationId: write.identity.correlationId,
-            action: write.action,
-            transportKind: result.transportKind,
-          },
-          "Discord presence action completed",
+            content: ledgerContent,
+          })
+        : decideAction(dependencies.doctrine, evaluatedRequest, classification);
+
+    if (decision.effect !== "allow") {
+      if (decision.effect === "require_approval") {
+        const approval = await persistApprovalRequest(request, decision, write.identity.correlationId);
+        return context.json(
+          { error: "discord_presence_approval_required", approval: approvalHandle(approval, APPROVAL_REQUEST_TTL_MS) },
+          202,
         );
-        return context.json(result);
-      } catch (error) {
-        const code =
-          error instanceof Error && error.message.startsWith("discord_presence_")
-            ? error.message
-            : "discord_presence_failed";
-        return context.json({ error: code }, 502);
       }
+      logger.warn(
+        {
+          service: "clankie-control-plane",
+          missionId: write.identity.missionId,
+          correlationId: write.identity.correlationId,
+          action: write.action,
+          effect: decision.effect,
+        },
+        "Discord presence action denied",
+      );
+      return context.json({ error: "discord_presence_not_allowed", decision }, 403);
+    }
+
+    try {
+      const result = await discordPresenceRuntime.execute(write);
+      discordPresenceResults.set(write.idempotencyKey, {
+        fingerprint,
+        result,
+        expiresAtMs: clock().getTime() + DISCORD_PRESENCE_RETENTION_MS,
+      });
+      logger.info(
+        {
+          service: "clankie-control-plane",
+          missionId: write.identity.missionId,
+          correlationId: write.identity.correlationId,
+          action: write.action,
+          transportKind: result.transportKind,
+        },
+        "Discord presence action completed",
+      );
+      return context.json(result);
+    } catch (error) {
+      const code =
+        error instanceof Error && error.message.startsWith("discord_presence_")
+          ? error.message
+          : "discord_presence_failed";
+      return context.json({ error: code }, 502);
+    }
     });
   });
 
@@ -1669,8 +1667,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       if (!current) return context.json({ error: "approval_not_found" }, 404);
       if (current.status !== "pending") {
         const requestedStatus = parsed.data.decision === "approve" ? "approved" : "denied";
-        if (current.status === requestedStatus && current.reason === parsed.data.reason)
-          return context.json(current);
+        if (current.status === requestedStatus && current.reason === parsed.data.reason) return context.json(current);
         return context.json({ error: "approval_already_decided", approval: current }, 409);
       }
       const status = parsed.data.decision === "approve" ? "approved" : "denied";
@@ -2173,10 +2170,7 @@ function approvalEnvelope(approval: ApprovalRequestRecord): {
   };
 }
 
-function approvalHandle(
-  approval: ApprovalRequestRecord,
-  ttlMs: number,
-): {
+function approvalHandle(approval: ApprovalRequestRecord, ttlMs: number): {
   id: string;
   status: ApprovalRequestRecord["status"];
   fingerprint?: string;

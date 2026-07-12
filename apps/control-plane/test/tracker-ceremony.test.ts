@@ -4,6 +4,7 @@ import type { WorkspaceTrackerBinding } from "@clankie/tracker-connector";
 import { describe, expect, it } from "vitest";
 import {
   DoctrineAttentionPolicy,
+  EventStoreAttentionDeliveryStore,
   InMemoryAttentionDeliveryStore,
   createTrackerCeremonyRuntime,
 } from "../src/tracker-ceremony.ts";
@@ -68,6 +69,28 @@ const trustedBinding: WorkspaceTrackerBinding = {
   },
 };
 
+const draftBody = "## Product impact\n\nUsers get clearer impact.\n";
+
+function attentionRequest(overrides?: Record<string, unknown>) {
+  return {
+    schemaVersion: 1,
+    requestId: "attn-cp-1",
+    missionId: "mission-cp",
+    correlationId: "corr-cp",
+    targetRole: "operator",
+    requestKind: "decision_needed",
+    actionableAsk: "Please decide.",
+    blocking: true,
+    authorityImpact: "narrow",
+    urgency: "blocking",
+    notificationSurfaces: ["operator_inbox"],
+    directNotification: "best_effort",
+    createdAt: "2026-07-12T14:00:00.000Z",
+    trackerRef: { correlationId: "corr-cp", externalRef: "issue-9" },
+    ...overrides,
+  };
+}
+
 describe("control-plane tracker ceremony runtime", () => {
   it("validates issue drafts against the compiled projection with profile hash", () => {
     const compiled = doctrine();
@@ -81,6 +104,7 @@ describe("control-plane tracker ceremony runtime", () => {
     });
     const ok = runtime.validateDraft({
       profileHash: compiled.profileHash,
+      bodyMarkdown: draftBody,
       draft: {
         schemaVersion: 1,
         draftId: "d1",
@@ -126,24 +150,7 @@ describe("control-plane tracker ceremony runtime", () => {
     const delivered = await runtime.deliverAttention({
       profileHash: compiled.profileHash,
       workspaceId: "ws-1",
-      request: {
-        schemaVersion: 1,
-        requestId: "attn-cp-1",
-        missionId: "mission-cp",
-        correlationId: "corr-cp",
-        targetRole: "operator",
-        requestKind: "decision_needed",
-        actionableAsk: "Please decide.",
-        blocking: true,
-        authorityImpact: "narrow",
-        urgency: "blocking",
-        notificationSurfaces: ["operator_inbox"],
-        // best_effort: comment/assign-only bindings may claim delivered.
-        // required mode forbids delivered without successful direct_notify.
-        directNotification: "best_effort",
-        createdAt: "2026-07-12T14:00:00.000Z",
-        trackerRef: { correlationId: "corr-cp", externalRef: "issue-9" },
-      },
+      request: attentionRequest(),
     });
     expect(delivered.aggregate).toBe("delivered");
 
@@ -151,26 +158,14 @@ describe("control-plane tracker ceremony runtime", () => {
       runtime.deliverAttention({
         profileHash: compiled.profileHash,
         workspaceId: "unknown-ws",
-        request: {
-          schemaVersion: 1,
-          requestId: "attn-cp-2",
-          missionId: "mission-cp",
-          correlationId: "corr-cp-2",
-          targetRole: "operator",
-          requestKind: "decision_needed",
-          actionableAsk: "Please decide.",
-          blocking: true,
-          authorityImpact: "narrow",
-          urgency: "blocking",
-          notificationSurfaces: ["operator_inbox"],
-          createdAt: "2026-07-12T14:00:00.000Z",
-        },
+        request: attentionRequest({ requestId: "attn-cp-2", correlationId: "corr-cp-2" }),
       }),
     ).rejects.toThrow(/workspace_binding_unavailable/u);
   });
 
-  it("correlates only verified event ids already in the trusted store", () => {
+  it("correlates only from durable store pending + verified event authority", async () => {
     const compiled = doctrine();
+    const store = new InMemoryAttentionDeliveryStore();
     const verified: DomainEvent = {
       id: "verified-evt-1",
       occurredAt: "2026-07-12T15:00:00.000Z",
@@ -184,6 +179,69 @@ describe("control-plane tracker ceremony runtime", () => {
         session: { id: "sess-9" },
         appActor: { id: "app" },
         actor: { id: "human" },
+        attentionResponse: {
+          actorRole: "operator",
+          decision: "approve",
+          rationale: "Looks good.",
+        },
+      },
+    };
+    const events = new Map<string, DomainEvent>([[verified.id, verified]]);
+    const runtime = createTrackerCeremonyRuntime({
+      doctrine: compiled,
+      policy: new DoctrineAttentionPolicy(compiled),
+      adapter: { attempt: async () => ({ ok: true }) },
+      store,
+      bindingResolver: { resolve: () => trustedBinding },
+      lookupVerifiedEvent: (id) => events.get(id),
+      clock: () => new Date("2026-07-12T15:00:00.000Z"),
+    });
+
+    await runtime.deliverAttention({
+      profileHash: compiled.profileHash,
+      workspaceId: "ws-1",
+      request: attentionRequest(),
+    });
+
+    const correlated = await runtime.correlate({
+      profileHash: compiled.profileHash,
+      requestId: "attn-cp-1",
+      verifiedEventId: "verified-evt-1",
+      responseId: "resp-1",
+    });
+    expect(correlated).toMatchObject({ requestId: "attn-cp-1", decision: "approve" });
+
+    expect(
+      await runtime.correlate({
+        profileHash: compiled.profileHash,
+        requestId: "attn-cp-1",
+        verifiedEventId: "never-stored",
+        responseId: "resp-2",
+      }),
+    ).toEqual({ ok: false, reason: "verified_event_not_found" });
+  });
+
+  it("counterexample: rejects undelivered fabricated pending with caller-supplied authority", async () => {
+    const compiled = doctrine();
+    const verified: DomainEvent = {
+      id: "verified-evt-attacker",
+      occurredAt: "2026-07-12T15:00:00.000Z",
+      missionId: "attacker-mission",
+      correlationId: "corr-attacker",
+      profileHash: compiled.profileHash,
+      type: "tracker.agent-session.prompted",
+      data: {
+        organization: { id: "ws-1" },
+        issue: { id: "issue-9" },
+        session: { id: "sess-9" },
+        appActor: { id: "app" },
+        actor: { id: "human" },
+        // Even if the event has authority, no prior delivery → pending_not_found
+        attentionResponse: {
+          actorRole: "operator",
+          decision: "approve",
+          rationale: "Attacker-supplied approve.",
+        },
       },
     };
     const events = new Map<string, DomainEvent>([[verified.id, verified]]);
@@ -197,51 +255,97 @@ describe("control-plane tracker ceremony runtime", () => {
       clock: () => new Date("2026-07-12T15:00:00.000Z"),
     });
 
-    const pendingRequest = {
-      schemaVersion: 1,
-      requestId: "attn-cp-1",
-      missionId: "mission-cp",
-      correlationId: "corr-cp",
-      targetRole: "operator",
-      requestKind: "decision_needed",
-      actionableAsk: "Please decide.",
-      blocking: true,
-      authorityImpact: "narrow",
-      urgency: "blocking",
-      notificationSurfaces: ["operator_inbox"],
-      createdAt: "2026-07-12T14:00:00.000Z",
-    };
-
-    const correlated = runtime.correlate({
+    // Caller cannot supply pending/request/decision/actorRole — schema rejects extra keys
+    // and undelivered requestId cannot resolve.
+    const result = await runtime.correlate({
       profileHash: compiled.profileHash,
-      pending: {
-        request: pendingRequest,
-        workspaceId: "ws-1",
-        issueId: "issue-9",
-        agentSessionId: "sess-9",
-      },
-      verifiedEventId: "verified-evt-1",
-      responseId: "resp-1",
-      actorRole: "operator",
-      decision: "approve",
-      rationale: "Looks good.",
+      requestId: "never-delivered-attn",
+      verifiedEventId: "verified-evt-attacker",
+      responseId: "resp-attacker",
     });
-    expect(correlated).toMatchObject({ requestId: "attn-cp-1", decision: "approve" });
+    expect(result).toEqual({ ok: false, reason: "pending_not_found" });
 
-    // Raw masquerading payload is not accepted — only event ids.
-    expect(
+    // Strict schema: fabricated pending + decision must not be accepted
+    await expect(
       runtime.correlate({
         profileHash: compiled.profileHash,
+        // intentional attacker-shaped payload with caller-supplied authority
         pending: {
-          request: pendingRequest,
+          request: attentionRequest({
+            requestId: "fabricated",
+            missionId: "attacker-mission",
+          }),
           workspaceId: "ws-1",
-          issueId: "issue-9",
         },
-        verifiedEventId: "never-stored",
-        responseId: "resp-2",
+        verifiedEventId: "verified-evt-attacker",
+        responseId: "resp-x",
         actorRole: "operator",
-      }),
-    ).toEqual({ ok: false, reason: "verified_event_not_found" });
+        decision: "approve",
+        rationale: "Looks good.",
+      } as never),
+    ).rejects.toThrow();
+  });
+
+  it("EventStoreAttentionDeliveryStore concurrent identical deliveries adapter once", async () => {
+    const compiled = doctrine();
+    const events: DomainEvent[] = [];
+    const storeBackend = {
+      async append(event: DomainEvent) {
+        const existing = events.find((e) => e.id === event.id);
+        if (existing !== undefined) {
+          if (JSON.stringify(existing) !== JSON.stringify(event)) {
+            throw new Error("event id conflict");
+          }
+          return { sequence: 1, previousHash: "GENESIS", hash: "h", event: existing };
+        }
+        events.push(event);
+        return { sequence: events.length, previousHash: "GENESIS", hash: "h", event };
+      },
+      async readAll() {
+        return events.map((event, index) => ({
+          sequence: index + 1,
+          previousHash: "GENESIS",
+          hash: "h",
+          event,
+        }));
+      },
+      async verify() {
+        return { valid: true, count: events.length };
+      },
+    };
+    const store = new EventStoreAttentionDeliveryStore(storeBackend, {
+      profileHash: compiled.profileHash,
+      idFactory: () => "id",
+      clock: () => new Date("2026-07-12T15:00:00.000Z"),
+    });
+    let attempts = 0;
+    const runtime = createTrackerCeremonyRuntime({
+      doctrine: compiled,
+      policy: new DoctrineAttentionPolicy(compiled),
+      adapter: {
+        attempt: async () => {
+          attempts += 1;
+          await new Promise((r) => setTimeout(r, 5));
+          return { ok: true };
+        },
+      },
+      store,
+      bindingResolver: { resolve: () => trustedBinding },
+      lookupVerifiedEvent: () => undefined,
+      clock: () => new Date("2026-07-12T15:00:00.000Z"),
+    });
+    const payload = {
+      profileHash: compiled.profileHash,
+      workspaceId: "ws-1",
+      request: attentionRequest({ requestId: "attn-concurrent" }),
+    };
+    const [a, b] = await Promise.all([
+      runtime.deliverAttention(payload),
+      runtime.deliverAttention(payload),
+    ]);
+    expect(a).toEqual(b);
+    expect(attempts).toBe(a.actions.length);
+    expect(events.filter((e) => e.type === "tracker.human-attention.store")).toHaveLength(1);
   });
 
   it("DoctrineAttentionPolicy fails closed for unknown tracker actions", async () => {

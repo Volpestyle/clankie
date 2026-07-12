@@ -7,7 +7,9 @@ export type IssueDraftValidationCode =
   | "product_impact_required"
   | "product_impact_summary_too_long"
   | "heading_missing"
-  | "section_placement";
+  | "section_placement"
+  | "body_required"
+  | "prose_before_heading";
 
 export interface IssueDraftDiagnostic {
   readonly code: IssueDraftValidationCode;
@@ -27,19 +29,26 @@ export interface ValidateIssueDraftInput {
   /** Effective captain ceremony projection (from compileDoctrine + projectCaptainCeremony). */
   readonly projection: CaptainCeremonyProjection;
   /**
-   * Optional fully rendered issue body used to enforce heading + sectionPlacement.
-   * Connectors that only hold structured fields may omit this; heading/placement
-   * checks then pass without body layout evidence.
+   * Fully rendered issue body used to enforce heading + sectionPlacement.
+   * Required (non-empty) when the ceremony requires product impact.
    */
   readonly bodyMarkdown?: string;
 }
 
-/** Count sentences with a simple terminator split (., !, ?). Empty → 0. */
+/**
+ * Count sentences with terminator split (., !, ?).
+ * HTML line breaks (`<br>`, `<br/>`) are normalized to separators so they cannot
+ * compress multiple sentences into one.
+ */
 export function countSummarySentences(summary: string): number {
-  const trimmed = summary.trim();
-  if (trimmed.length === 0) return 0;
-  const parts = trimmed
-    .split(/(?<=[.!?])\s+/u)
+  const normalized = summary
+    .replace(/<\s*br\s*\/?\s*>/giu, "\n")
+    .replace(/<\/\s*p\s*>/giu, "\n")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (normalized.length === 0) return 0;
+  const parts = normalized
+    .split(/(?<=[.!?])(?:\s+|$)/u)
     .map((part) => part.trim())
     .filter((part) => part.length > 0);
   return parts.length === 0 ? 1 : parts.length;
@@ -58,6 +67,18 @@ function firstMarkdownSectionTitle(body: string): string | undefined {
     if (bold?.[1]) return bold[1].trim();
   }
   return undefined;
+}
+
+/** True when non-whitespace prose appears before the first markdown heading line. */
+export function hasProseBeforeFirstHeading(body: string): boolean {
+  for (const line of body.split(/\r?\n/u)) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) continue;
+    if (/^#{1,6}\s+\S/u.test(trimmed)) return false;
+    if (/^\*\*.+?:?\*\*\s*$/u.test(trimmed)) return false;
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -115,8 +136,26 @@ export function validateIssueDraft(input: ValidateIssueDraftInput): IssueDraftVa
     });
   }
 
-  const body = input.bodyMarkdown?.trim();
+  const bodyRaw = input.bodyMarkdown;
+  const body = bodyRaw?.trim();
+  if (rules.requireProductImpact && (body === undefined || body.length === 0)) {
+    diagnostics.push({
+      code: "body_required",
+      message: "Rendered bodyMarkdown is required when the ceremony requires product impact.",
+      path: ["bodyMarkdown"],
+    });
+    return { ok: false, draft, diagnostics };
+  }
+
   if (body !== undefined && body.length > 0) {
+    if (hasProseBeforeFirstHeading(body)) {
+      diagnostics.push({
+        code: "prose_before_heading",
+        message: "Rendered body must not include prose or content before the first required heading.",
+        path: ["bodyMarkdown"],
+      });
+    }
+
     const headingRe = headingPattern(rules.heading);
     if (!headingRe.test(body)) {
       diagnostics.push({
@@ -150,7 +189,6 @@ export function validateIssueDraft(input: ValidateIssueDraftInput): IssueDraftVa
         });
       }
     }
-    // after_summary: presence of heading is sufficient (checked above).
   }
 
   return {

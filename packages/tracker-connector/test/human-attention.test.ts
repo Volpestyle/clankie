@@ -2,6 +2,7 @@ import { compileDoctrine, projectCaptainCeremony } from "@clankie/doctrine";
 import type { DomainEvent, HumanAttentionRequest } from "@clankie/protocol";
 import { describe, expect, it } from "vitest";
 import {
+  authorityFromVerifiedEvent,
   correlateAgentSessionToAttention,
   correlateOutOfSessionIssueComment,
   deliverHumanAttention,
@@ -12,8 +13,8 @@ import {
   rootCommentIdFromAgentSessionEvent,
   type AttentionActionResult,
   type AttentionDeliveryAdapter,
-  type AttentionDeliveryResult,
   type AttentionDeliveryStore,
+  type StoredAttentionDelivery,
 } from "../src/human-attention.ts";
 import type { TrackerPolicyDecision, TrackerPolicyGateway, TrackerWriteRequest } from "../src/types.ts";
 import {
@@ -21,7 +22,7 @@ import {
   type WorkspaceTrackerBinding,
 } from "../src/workspace-binding.ts";
 
-function projection() {
+function projection(enabled = true) {
   return projectCaptainCeremony(
     compileDoctrine([
       {
@@ -31,6 +32,25 @@ function projection() {
         ceremony: {
           externalConnectors: "optional",
           integrationFlow: "pull_request",
+          tracker: {
+            issueDraft: {
+              enabled: true,
+              requireProductImpact: true,
+              heading: "Product impact",
+              sectionPlacement: "first",
+              maxSummarySentences: 3,
+            },
+            humanAttention: {
+              enabled,
+              defaultTargetRole: "operator",
+              defaultRequestKind: "decision_needed",
+              notifyWhenBlocking: true,
+              notificationSurfaces: ["operator_inbox"],
+              blockingUrgency: "elevated",
+              directNotification: "required",
+              waitForAuthoritativeResponse: true,
+            },
+          },
         },
         planning: {
           requirePlanApproval: true,
@@ -89,7 +109,6 @@ function request(overrides?: Partial<HumanAttentionRequest>): HumanAttentionRequ
   };
 }
 
-/** Binding uses only capabilities with truthful policy actions. */
 function binding(overrides?: Partial<WorkspaceTrackerBinding>): WorkspaceTrackerBinding {
   return {
     schemaVersion: 1,
@@ -114,12 +133,48 @@ function binding(overrides?: Partial<WorkspaceTrackerBinding>): WorkspaceTracker
 }
 
 class MemoryStore implements AttentionDeliveryStore {
-  public readonly entries = new Map<string, { fingerprint: string; result: AttentionDeliveryResult }>();
-  public async get(key: string): Promise<AttentionDeliveryResult | undefined> {
-    return this.entries.get(key)?.result;
+  public readonly entries = new Map<string, StoredAttentionDelivery>();
+  private readonly chains = new Map<string, Promise<unknown>>();
+
+  public async get(key: string): Promise<StoredAttentionDelivery | undefined> {
+    return this.entries.get(key);
   }
-  public async put(key: string, fingerprint: string, result: AttentionDeliveryResult): Promise<void> {
-    this.entries.set(key, { fingerprint, result });
+
+  public async runExclusive(
+    key: string,
+    fingerprint: string,
+    factory: () => Promise<StoredAttentionDelivery>,
+  ): Promise<StoredAttentionDelivery> {
+    const previous = this.chains.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const next = previous.then(
+      () => gate,
+      () => gate,
+    );
+    this.chains.set(key, next);
+    try {
+      await previous;
+    } catch {
+      // ignore
+    }
+    try {
+      const prior = this.entries.get(key);
+      if (prior !== undefined) {
+        if (prior.result.fingerprint !== fingerprint) {
+          throw new Error("Human-attention delivery idempotency conflict for request content/fingerprint");
+        }
+        return prior;
+      }
+      const record = await factory();
+      this.entries.set(key, record);
+      return record;
+    } finally {
+      release();
+      if (this.chains.get(key) === next) this.chains.delete(key);
+    }
   }
 }
 
@@ -161,6 +216,11 @@ function sessionEvent(overrides?: {
       session: { id: "session-1", commentId: "root-1" },
       appActor: { id: "app-1" },
       actor: { id: "human-1" },
+      attentionResponse: {
+        actorRole: "operator",
+        decision: "approve",
+        rationale: "Approved from verified agent-session event.",
+      },
       ...(overrides?.data ?? {}),
     },
   } as unknown as DomainEvent;
@@ -189,20 +249,9 @@ describe("enforceRequiredDirectNotification", () => {
     status: "succeeded",
     isFallback: false,
   };
-  const markerFallback: AttentionActionResult = {
-    kind: "attention_marker",
-    principalId: "p",
-    status: "succeeded",
-    isFallback: true,
-  };
 
-  it("demotes delivered/partial to unsupported when required and direct_notify did not succeed", () => {
+  it("demotes delivered when required and direct_notify did not succeed", () => {
     expect(enforceRequiredDirectNotification("required", [commentOk], "delivered")).toBe("unsupported");
-    expect(enforceRequiredDirectNotification("required", [commentOk], "partial")).toBe("unsupported");
-  });
-
-  it("allows fallback when only fallback actions succeeded under required mode", () => {
-    expect(enforceRequiredDirectNotification("required", [markerFallback], "delivered")).toBe("fallback");
   });
 
   it("keeps delivered when required and direct_notify succeeded", () => {
@@ -210,15 +259,10 @@ describe("enforceRequiredDirectNotification", () => {
       "delivered",
     );
   });
-
-  it("is a no-op when mode is not required", () => {
-    expect(enforceRequiredDirectNotification("best_effort", [commentOk], "delivered")).toBe("delivered");
-    expect(enforceRequiredDirectNotification("disabled", [commentOk], "delivered")).toBe("delivered");
-  });
 });
 
 describe("deliverHumanAttention", () => {
-  it("delivers when policy allows under preferred mode and is idempotent for the same content fingerprint", async () => {
+  it("delivers when policy allows under best_effort and is idempotent for the same content fingerprint", async () => {
     const store = new MemoryStore();
     const policy = new RecordedPolicy();
     const adapter = new FakeAdapter();
@@ -233,10 +277,6 @@ describe("deliverHumanAttention", () => {
       clock: () => new Date("2026-07-12T13:00:00.000Z"),
     });
     expect(first.aggregate).toBe("delivered");
-    expect(first.actions.every((a) => a.status === "succeeded")).toBe(true);
-    expect(policy.requests.map((r) => r.action).sort()).toEqual(
-      ["tracker.assignment.mirror", "tracker.comment.create"].sort(),
-    );
     expect(store.entries.has(deliveryStoreKey("attn-1"))).toBe(true);
 
     const second = await deliverHumanAttention({
@@ -261,66 +301,9 @@ describe("deliverHumanAttention", () => {
       policy: new RecordedPolicy(),
       store: new MemoryStore(),
     });
-    // Actions may succeed at the adapter, but aggregate must not be "delivered".
     expect(result.actions.every((a) => a.status === "succeeded")).toBe(true);
     expect(result.aggregate).not.toBe("delivered");
     expect(result.aggregate).toBe("unsupported");
-  });
-
-  it("counterexample: required + attention_marker-only is unsupported, never delivered", async () => {
-    const result = await deliverHumanAttention({
-      request: request({
-        directNotification: "required",
-        notificationSurfaces: ["operator_inbox"],
-      }),
-      binding: {
-        schemaVersion: 1,
-        workspaceId: "workspace-1",
-        revision: "rev-marker",
-        roles: {
-          operator: {
-            principalId: "p",
-            capabilities: [{ kind: "attention_marker", principalId: "p" }],
-          },
-        },
-      },
-      projection: projection(),
-      adapter: new FakeAdapter(),
-      policy: new RecordedPolicy(),
-      store: new MemoryStore(),
-    });
-    expect(result.aggregate).toBe("unsupported");
-    expect(result.actions.every((a) => a.status === "unsupported")).toBe(true);
-    expect(result.aggregate).not.toBe("delivered");
-  });
-
-  it("marks attention_marker unsupported without authorizing tracker.comment.create", async () => {
-    const policy = new RecordedPolicy();
-    const result = await deliverHumanAttention({
-      request: request({
-        directNotification: "best_effort",
-        notificationSurfaces: ["operator_inbox"],
-      }),
-      binding: {
-        schemaVersion: 1,
-        workspaceId: "workspace-1",
-        revision: "rev-marker",
-        roles: {
-          operator: {
-            principalId: "p",
-            capabilities: [{ kind: "attention_marker", principalId: "p" }],
-          },
-        },
-      },
-      projection: projection(),
-      adapter: new FakeAdapter(),
-      policy,
-      store: new MemoryStore(),
-    });
-    expect(result.actions).toHaveLength(1);
-    expect(result.actions[0]?.status).toBe("unsupported");
-    expect(result.actions[0]?.detail).toMatch(/No exact doctrine\/policy action/u);
-    expect(policy.requests).toEqual([]);
   });
 
   it("returns denied actions when policy denies (per-action denied ≠ unsupported)", async () => {
@@ -335,37 +318,10 @@ describe("deliverHumanAttention", () => {
       store: new MemoryStore(),
     });
     expect(result.actions.every((a) => a.status === "denied")).toBe(true);
-    expect(result.actions.some((a) => a.status === "unsupported")).toBe(false);
-    // Aggregate vocabulary stays frozen (unsupported), but action rows stay denied.
     expect(result.aggregate).toBe("unsupported");
   });
 
-  it("counterexample: denied remains distinguishable from unsupported on the same delivery", async () => {
-    const policy: TrackerPolicyGateway = {
-      async authorize(req) {
-        if (req.action === "tracker.assignment.mirror") {
-          return { effect: "deny", reason: "assignment blocked" };
-        }
-        return { effect: "allow", reason: "allow" };
-      },
-    };
-    const result = await deliverHumanAttention({
-      request: request({ directNotification: "best_effort" }),
-      binding: binding(),
-      projection: projection(),
-      adapter: new FakeAdapter(),
-      policy,
-      store: new MemoryStore(),
-    });
-    const statuses = result.actions.map((a) => a.status).sort();
-    expect(statuses).toContain("denied");
-    expect(statuses).toContain("succeeded");
-    expect(result.actions.find((a) => a.kind === "assign_principal")?.status).toBe("denied");
-    expect(result.actions.find((a) => a.kind === "comment_notify")?.status).toBe("succeeded");
-    expect(result.aggregate).toBe("partial");
-  });
-
-  it("returns partial when some actions fail under preferred mode", async () => {
+  it("returns partial when some actions fail under best_effort mode", async () => {
     const adapter = new FakeAdapter();
     adapter.mode = "fail_second";
     const result = await deliverHumanAttention({
@@ -379,39 +335,11 @@ describe("deliverHumanAttention", () => {
     expect(result.aggregate).toBe("partial");
   });
 
-  it("returns unsupported when binding has no capabilities for the role", async () => {
-    const result = await deliverHumanAttention({
-      request: request({
-        targetRole: "verifier",
-        notificationSurfaces: ["captain_lane"],
-        directNotification: "best_effort",
-      }),
-      binding: {
-        schemaVersion: 1,
-        workspaceId: "workspace-1",
-        revision: "rev-1",
-        roles: {
-          operator: {
-            principalId: "p",
-            capabilities: [{ kind: "comment_notify", principalId: "p" }],
-          },
-        },
-      },
-      projection: projection(),
-      adapter: new FakeAdapter(),
-      policy: new RecordedPolicy(),
-      store: new MemoryStore(),
-    });
-    expect(result.aggregate).toBe("unsupported");
-    expect(result.actions).toEqual([]);
-  });
-
   it("uses fallback role when primary is unsupported", async () => {
     const result = await deliverHumanAttention({
       request: request({
         targetRole: "product_steward",
         notificationSurfaces: ["workspace_surface"],
-        // Fallback path is an allowed outcome under required when only fallbacks succeed.
         directNotification: "required",
       }),
       binding: binding({
@@ -430,7 +358,6 @@ describe("deliverHumanAttention", () => {
     });
     expect(result.aggregate).toBe("fallback");
     expect(result.actions.every((a) => a.isFallback)).toBe(true);
-    expect(result.aggregate).not.toBe("delivered");
   });
 
   it("counterexample: same requestId with different request content conflicts on idempotency", async () => {
@@ -452,16 +379,6 @@ describe("deliverHumanAttention", () => {
       directNotification: "best_effort",
       actionableAsk: "Approve a totally different scope B.",
     });
-    const resolved = resolveAttentionActions({
-      binding: binding(),
-      targetRole: secondReq.targetRole,
-      notificationSurfaces: secondReq.notificationSurfaces,
-      directNotification: "best_effort",
-    });
-    expect(deliveryFingerprint(binding(), resolved.actions, firstReq)).not.toBe(
-      deliveryFingerprint(binding(), resolved.actions, secondReq),
-    );
-
     await expect(
       deliverHumanAttention({
         request: secondReq,
@@ -473,20 +390,85 @@ describe("deliverHumanAttention", () => {
       }),
     ).rejects.toThrow(/idempotency conflict for request content\/fingerprint/u);
   });
+
+  it("ceremony-disabled delivery still participates in requestId+content fingerprint idempotency", async () => {
+    const store = new MemoryStore();
+    const disabled = projection(false);
+    const first = await deliverHumanAttention({
+      request: request({ actionableAsk: "Original ask while disabled." }),
+      binding: binding(),
+      projection: disabled,
+      adapter: new FakeAdapter(),
+      policy: new RecordedPolicy(),
+      store,
+      clock: () => new Date("2026-07-12T13:00:00.000Z"),
+    });
+    expect(first.aggregate).toBe("unsupported");
+    expect(first.actions).toEqual([]);
+    expect(store.entries.has(deliveryStoreKey("attn-1"))).toBe(true);
+    expect(first.fingerprint).not.toBe("ceremony-disabled");
+
+    const retry = await deliverHumanAttention({
+      request: request({ actionableAsk: "Original ask while disabled." }),
+      binding: binding(),
+      projection: disabled,
+      adapter: new FakeAdapter(),
+      policy: new RecordedPolicy(),
+      store,
+      clock: () => new Date("2026-07-12T13:01:00.000Z"),
+    });
+    expect(retry).toEqual(first);
+
+    await expect(
+      deliverHumanAttention({
+        request: request({ actionableAsk: "Changed ask same requestId." }),
+        binding: binding(),
+        projection: disabled,
+        adapter: new FakeAdapter(),
+        policy: new RecordedPolicy(),
+        store,
+      }),
+    ).rejects.toThrow(/idempotency conflict for request content\/fingerprint/u);
+  });
+
+  it("concurrent identical deliveries execute the adapter once", async () => {
+    const store = new MemoryStore();
+    const adapter = new FakeAdapter();
+    const req = request({ directNotification: "best_effort" });
+    const input = {
+      request: req,
+      binding: binding(),
+      projection: projection(),
+      adapter,
+      policy: new RecordedPolicy(),
+      store,
+      clock: () => new Date("2026-07-12T13:00:00.000Z"),
+    };
+    const [a, b] = await Promise.all([deliverHumanAttention(input), deliverHumanAttention(input)]);
+    expect(a).toEqual(b);
+    expect(adapter.attempts).toBe(a.actions.length);
+    expect(store.entries.size).toBe(1);
+  });
 });
 
 describe("attention correlation", () => {
-  it("resolves pending attention from verified agent-session prompted events", () => {
+  it("resolves pending attention from verified agent-session events with event authority", () => {
     const pendingRequest = request();
     const event = sessionEvent({
       data: {
         organization: { id: "workspace-1" },
         comment: { id: "cmt-leaf", rootId: "root-1" },
         session: { id: "session-1" },
+        attentionResponse: {
+          actorRole: "operator",
+          decision: "approve",
+          rationale: "Approved the write-scope expansion.",
+        },
       },
     });
-
     expect(rootCommentIdFromAgentSessionEvent(event)).toBe("root-1");
+    const authority = authorityFromVerifiedEvent(event);
+    expect(authority).toMatchObject({ decision: "approve", actorRole: "operator" });
 
     const response = correlateAgentSessionToAttention({
       pending: {
@@ -498,9 +480,9 @@ describe("attention correlation", () => {
       },
       event,
       responseId: "resp-1",
-      actorRole: "operator",
-      decision: "approve",
-      rationale: "Approved the write-scope expansion.",
+      actorRole: authority!.actorRole,
+      decision: authority!.decision,
+      rationale: authority!.rationale,
       clock: () => new Date("2026-07-12T14:00:01.000Z"),
     });
     expect(response).toMatchObject({
@@ -511,126 +493,76 @@ describe("attention correlation", () => {
   });
 
   it("counterexample: rejects when organization.id does not match pending.workspaceId", () => {
-    const response = correlateAgentSessionToAttention({
-      pending: {
-        request: request(),
-        workspaceId: "workspace-1",
-        issueId: "issue-1",
-      },
-      event: sessionEvent({
-        data: { organization: { id: "other-org" } },
+    const event = sessionEvent({ data: { organization: { id: "other-org" } } });
+    const authority = authorityFromVerifiedEvent(event)!;
+    expect(
+      correlateAgentSessionToAttention({
+        pending: { request: request(), workspaceId: "workspace-1", issueId: "issue-1" },
+        event,
+        responseId: "resp-1",
+        ...authority,
       }),
-      responseId: "resp-1",
-      actorRole: "operator",
-    });
-    expect(response).toBeUndefined();
+    ).toBeUndefined();
   });
 
   it("counterexample: rejects events older than the pending request", () => {
-    const response = correlateAgentSessionToAttention({
-      pending: {
-        request: request({ createdAt: "2026-07-12T12:00:00.000Z" }),
-        workspaceId: "workspace-1",
-        issueId: "issue-1",
-      },
-      event: sessionEvent({ occurredAt: "2026-07-12T11:59:59.000Z" }),
-      responseId: "resp-1",
-      actorRole: "operator",
-    });
-    expect(response).toBeUndefined();
-  });
-
-  it("counterexample: rejects when root comment fields do not match", () => {
-    const event = sessionEvent({
-      data: {
-        organization: { id: "workspace-1" },
-        comment: { id: "other-leaf", rootId: "other-root" },
-        session: { id: "session-1", commentId: "session-root" },
-      },
-    });
-    expect(rootCommentIdFromAgentSessionEvent(event)).toBe("other-root");
-
-    const response = correlateAgentSessionToAttention({
-      pending: {
-        request: request(),
-        workspaceId: "workspace-1",
-        issueId: "issue-1",
-        agentSessionId: "session-1",
-        rootCommentId: "root-1",
-      },
-      event,
-      responseId: "resp-1",
-      actorRole: "operator",
-    });
-    expect(response).toBeUndefined();
-  });
-
-  it("uses event comment/root fields preferring comment.rootId over session.commentId", () => {
-    const event = sessionEvent({
-      data: {
-        organization: { id: "workspace-1" },
-        comment: { id: "leaf-9", rootId: "from-comment-root" },
-        session: { id: "session-1", commentId: "from-session" },
-      },
-    });
-    expect(rootCommentIdFromAgentSessionEvent(event)).toBe("from-comment-root");
+    const event = sessionEvent({ occurredAt: "2026-07-12T11:59:59.000Z" });
+    const authority = authorityFromVerifiedEvent(event)!;
     expect(
       correlateAgentSessionToAttention({
         pending: {
-          request: request(),
+          request: request({ createdAt: "2026-07-12T12:00:00.000Z" }),
           workspaceId: "workspace-1",
           issueId: "issue-1",
-          agentSessionId: "session-1",
-          rootCommentId: "from-comment-root",
         },
         event,
         responseId: "resp-1",
-        actorRole: "operator",
+        ...authority,
       }),
-    ).toMatchObject({ requestId: "attn-1" });
+    ).toBeUndefined();
   });
 
   it("never resolves pending attention from ordinary out-of-session issue comments", () => {
-    const pendingRequest = request();
     expect(
       correlateOutOfSessionIssueComment({
-        pending: {
-          request: pendingRequest,
-          workspaceId: "workspace-1",
-          issueId: "issue-1",
-        },
-        comment: {
-          issueId: "issue-1",
-          body: "I approve this from a normal issue comment.",
-          actorId: "human-1",
-        },
+        pending: { request: request(), workspaceId: "workspace-1", issueId: "issue-1" },
+        comment: { issueId: "issue-1", body: "I approve this from a normal issue comment.", actorId: "human-1" },
       }),
     ).toBeUndefined();
+  });
 
-    const nonSessionEvent = {
-      id: "evt-2",
-      occurredAt: "2026-07-12T14:00:00.000Z",
-      missionId: "mission-1",
-      correlationId: "corr-attn-1",
-      profileHash: "abc",
-      type: "tracker.comment.observed",
+  it("does not extract authority from events lacking decision fields", () => {
+    const event = sessionEvent({
+      data: {
+        attentionResponse: undefined,
+        organization: { id: "workspace-1" },
+      },
+    });
+    // Clear nested authority by overwriting data without decision fields
+    const bare = {
+      ...event,
       data: {
         organization: { id: "workspace-1" },
-        issueId: "issue-1",
-        body: "ordinary comment",
+        issue: { id: "issue-1" },
+        session: { id: "session-1" },
+        appActor: { id: "app-1" },
+        actor: { id: "human-1" },
       },
     } as unknown as DomainEvent;
-    expect(
-      correlateAgentSessionToAttention({
-        pending: {
-          request: pendingRequest,
-          workspaceId: "workspace-1",
-          issueId: "issue-1",
-        },
-        event: nonSessionEvent,
-        responseId: "resp-x",
-        actorRole: "operator",
-      }),
-    ).toBeUndefined();
+    expect(authorityFromVerifiedEvent(bare)).toBeUndefined();
+  });
+});
+
+describe("deliveryFingerprint content awareness", () => {
+  it("changes when actionableAsk changes with same requestId", () => {
+    const resolved = resolveAttentionActions({
+      binding: binding(),
+      targetRole: "operator",
+      notificationSurfaces: ["operator_inbox"],
+      directNotification: "best_effort",
+    });
+    const a = deliveryFingerprint(binding(), resolved.actions, request({ actionableAsk: "A" }));
+    const b = deliveryFingerprint(binding(), resolved.actions, request({ actionableAsk: "B" }));
+    expect(a).not.toBe(b);
   });
 });

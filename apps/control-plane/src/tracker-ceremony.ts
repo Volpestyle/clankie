@@ -1,18 +1,19 @@
 import { decideAction, projectCaptainCeremony, type CompiledDoctrine } from "@clankie/doctrine";
 import type { EventStore } from "@clankie/event-store";
 import {
-  HumanAttentionRequestSchema,
   type DomainEvent,
   type HumanAttentionResponse,
 } from "@clankie/protocol";
 import {
+  authorityFromVerifiedEvent,
   correlateAgentSessionToAttention,
   deliverHumanAttention,
+  deliveryStoreKey,
   validateIssueDraft,
   type AttentionDeliveryAdapter,
   type AttentionDeliveryResult,
   type AttentionDeliveryStore,
-  type PendingAttentionRecord,
+  type StoredAttentionDelivery,
   type TrackerPolicyGateway,
   type TrackerWriteRequest,
   type WorkspaceTrackerBinding,
@@ -37,23 +38,15 @@ export const DeliverHumanAttentionRequestSchema = z
   .strict();
 
 /**
- * Correlation accepts a durable verified event id, not a raw agent-session payload.
- * Callers must have already accepted the event into the event store (or equivalent).
+ * Correlation accepts only requestId + verifiedEventId (+ responseId/profileHash).
+ * Pending request and correlation context load from the durable store.
+ * Actor role / decision / rationale come from the verified event — never the caller.
  */
 export const CorrelateAttentionRequestSchema = z
   .object({
-    pending: z.object({
-      request: z.unknown(),
-      workspaceId: z.string().min(1),
-      issueId: z.string().min(1).optional(),
-      agentSessionId: z.string().min(1).optional(),
-      rootCommentId: z.string().nullable().optional(),
-    }),
+    requestId: z.string().min(1),
     verifiedEventId: z.string().min(1),
     responseId: z.string().min(1),
-    actorRole: z.enum(["operator", "captain", "product_steward", "reviewer", "verifier"]),
-    decision: z.enum(["approve", "deny", "defer", "clarify", "redirect"]).optional(),
-    rationale: z.string().min(1).optional(),
     profileHash: z.string().min(1),
   })
   .strict();
@@ -66,7 +59,9 @@ export interface WorkspaceBindingResolver {
 export interface TrackerCeremonyRuntime {
   validateDraft(raw: unknown): ReturnType<typeof validateIssueDraft>;
   deliverAttention(raw: unknown): Promise<AttentionDeliveryResult>;
-  correlate(raw: unknown): HumanAttentionResponse | { ok: false; reason: string };
+  correlate(
+    raw: unknown,
+  ): Promise<HumanAttentionResponse | { ok: false; reason: string }>;
 }
 
 /**
@@ -104,7 +99,40 @@ export class DoctrineAttentionPolicy implements TrackerPolicyGateway {
   }
 }
 
-/** Durable attention store backed by the mission event log. */
+/** Serialize concurrent work for a key within a process. */
+class KeyExclusive {
+  private readonly chains = new Map<string, Promise<unknown>>();
+
+  public async run<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const previous = this.chains.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const next = previous.then(
+      () => gate,
+      () => gate,
+    );
+    this.chains.set(key, next);
+    try {
+      await previous;
+    } catch {
+      // prior failure must not block the next waiter
+    }
+    try {
+      return await fn();
+    } finally {
+      release();
+      if (this.chains.get(key) === next) this.chains.delete(key);
+    }
+  }
+}
+
+/**
+ * Durable attention store backed by the mission event log.
+ * Concurrent put/get for the same request key is serialized; durable event id is
+ * deterministic per key so a second append of the same result is idempotent.
+ */
 export class EventStoreAttentionDeliveryStore implements AttentionDeliveryStore {
   private readonly eventStore: EventStore;
   private readonly options: {
@@ -112,6 +140,7 @@ export class EventStoreAttentionDeliveryStore implements AttentionDeliveryStore 
     readonly idFactory: () => string;
     readonly clock: () => Date;
   };
+  private readonly exclusive = new KeyExclusive();
 
   public constructor(
     eventStore: EventStore,
@@ -125,44 +154,87 @@ export class EventStoreAttentionDeliveryStore implements AttentionDeliveryStore 
     this.options = options;
   }
 
-  public async get(idempotencyKey: string): Promise<AttentionDeliveryResult | undefined> {
+  public async get(idempotencyKey: string): Promise<StoredAttentionDelivery | undefined> {
     const entries = await this.eventStore.readAll();
     for (let index = entries.length - 1; index >= 0; index -= 1) {
       const event = entries[index]?.event;
       if (event?.type !== "tracker.human-attention.store") continue;
       if (event.data.idempotencyKey !== idempotencyKey) continue;
-      return event.data.result as AttentionDeliveryResult;
+      const result = event.data.result as AttentionDeliveryResult;
+      const pending = event.data.pending as StoredAttentionDelivery["pending"] | undefined;
+      if (pending === undefined || typeof pending.workspaceId !== "string" || pending.workspaceId.length === 0) {
+        // Rows without trusted pending context cannot back correlation.
+        continue;
+      }
+      return { result, pending };
     }
     return undefined;
   }
 
-  public async put(
+  public async runExclusive(
     idempotencyKey: string,
     fingerprint: string,
-    result: AttentionDeliveryResult,
-  ): Promise<void> {
-    await this.eventStore.append({
-      id: this.options.idFactory(),
-      occurredAt: this.options.clock().toISOString(),
-      missionId: result.missionId,
-      correlationId: result.correlationId,
-      profileHash: this.options.profileHash,
-      type: "tracker.human-attention.store",
-      data: { idempotencyKey, fingerprint, result },
+    factory: () => Promise<StoredAttentionDelivery>,
+  ): Promise<StoredAttentionDelivery> {
+    return this.exclusive.run(idempotencyKey, async () => {
+      const prior = await this.get(idempotencyKey);
+      if (prior !== undefined && prior.pending.workspaceId !== "") {
+        if (prior.result.fingerprint !== fingerprint) {
+          throw new Error("Human-attention delivery idempotency conflict for request content/fingerprint");
+        }
+        return prior;
+      }
+      const record = await factory();
+      if (record.result.fingerprint !== fingerprint) {
+        throw new Error("Human-attention delivery factory fingerprint mismatch");
+      }
+      // Deterministic event id: concurrent/process restarts re-append identically.
+      const eventId = `tracker.human-attention.store:${idempotencyKey}`;
+      await this.eventStore.append({
+        id: eventId,
+        occurredAt: this.options.clock().toISOString(),
+        missionId: record.result.missionId,
+        correlationId: record.result.correlationId,
+        profileHash: this.options.profileHash,
+        type: "tracker.human-attention.store",
+        data: {
+          idempotencyKey,
+          fingerprint,
+          result: record.result,
+          pending: record.pending,
+        },
+      });
+      return record;
     });
   }
 }
 
 /** In-memory store for unit tests only — never a production default. */
 export class InMemoryAttentionDeliveryStore implements AttentionDeliveryStore {
-  private readonly entries = new Map<string, { fingerprint: string; result: AttentionDeliveryResult }>();
+  public readonly entries = new Map<string, StoredAttentionDelivery>();
+  private readonly exclusive = new KeyExclusive();
 
-  public async get(key: string): Promise<AttentionDeliveryResult | undefined> {
-    return this.entries.get(key)?.result;
+  public async get(key: string): Promise<StoredAttentionDelivery | undefined> {
+    return this.entries.get(key);
   }
 
-  public async put(key: string, fingerprint: string, result: AttentionDeliveryResult): Promise<void> {
-    this.entries.set(key, { fingerprint, result });
+  public async runExclusive(
+    key: string,
+    fingerprint: string,
+    factory: () => Promise<StoredAttentionDelivery>,
+  ): Promise<StoredAttentionDelivery> {
+    return this.exclusive.run(key, async () => {
+      const prior = this.entries.get(key);
+      if (prior !== undefined) {
+        if (prior.result.fingerprint !== fingerprint) {
+          throw new Error("Human-attention delivery idempotency conflict for request content/fingerprint");
+        }
+        return prior;
+      }
+      const record = await factory();
+      this.entries.set(key, record);
+      return record;
+    });
   }
 }
 
@@ -222,10 +294,14 @@ export function createTrackerCeremonyRuntime(input: {
         ...(input.clock === undefined ? {} : { clock: input.clock }),
       });
     },
-    correlate(raw) {
+    async correlate(raw) {
       const parsed = CorrelateAttentionRequestSchema.parse(raw);
       if (parsed.profileHash !== input.doctrine.profileHash) {
         throw new Error("doctrine_hash_mismatch");
+      }
+      const stored = await input.store.get(deliveryStoreKey(parsed.requestId));
+      if (stored === undefined) {
+        return { ok: false as const, reason: "pending_not_found" };
       }
       const event = input.lookupVerifiedEvent(parsed.verifiedEventId);
       if (event === undefined) {
@@ -234,24 +310,17 @@ export function createTrackerCeremonyRuntime(input: {
       if (event.type !== "tracker.agent-session.created" && event.type !== "tracker.agent-session.prompted") {
         return { ok: false as const, reason: "event_not_agent_session" };
       }
-      const pending: PendingAttentionRecord = {
-        request: HumanAttentionRequestSchema.parse(parsed.pending.request),
-        workspaceId: parsed.pending.workspaceId,
-        ...(parsed.pending.issueId === undefined ? {} : { issueId: parsed.pending.issueId }),
-        ...(parsed.pending.agentSessionId === undefined
-          ? {}
-          : { agentSessionId: parsed.pending.agentSessionId }),
-        ...(parsed.pending.rootCommentId === undefined
-          ? {}
-          : { rootCommentId: parsed.pending.rootCommentId }),
-      };
+      const authority = authorityFromVerifiedEvent(event);
+      if (authority === undefined) {
+        return { ok: false as const, reason: "event_authority_missing" };
+      }
       const response = correlateAgentSessionToAttention({
-        pending,
+        pending: stored.pending,
         event,
         responseId: parsed.responseId,
-        actorRole: parsed.actorRole,
-        ...(parsed.decision === undefined ? {} : { decision: parsed.decision }),
-        ...(parsed.rationale === undefined ? {} : { rationale: parsed.rationale }),
+        actorRole: authority.actorRole,
+        decision: authority.decision,
+        rationale: authority.rationale,
         ...(input.clock === undefined ? {} : { clock: input.clock }),
       });
       if (response === undefined) {
