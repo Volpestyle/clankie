@@ -1,11 +1,7 @@
 import { compileDoctrine, projectCaptainCeremony } from "@clankie/doctrine";
 import type { TrackerIssueDraft } from "@clankie/protocol";
 import { describe, expect, it } from "vitest";
-import {
-  countSummarySentences,
-  hasProseBeforeFirstHeading,
-  validateIssueDraft,
-} from "../src/issue-draft.ts";
+import { countSummarySentences, hasProseBeforeFirstHeading, validateIssueDraft } from "../src/issue-draft.ts";
 
 function baseProjection(overrides?: {
   requireProductImpact?: boolean;
@@ -213,6 +209,37 @@ describe("validateIssueDraft", () => {
       draft: draft(),
       projection,
       bodyMarkdown: "## Why this matters\n\nImpact\n\n## Summary\n\nHello",
+    });
+    expect(ok.ok).toBe(true);
+  });
+
+  it("enforces after_summary as immediate heading adjacency", () => {
+    const projection = baseProjection({ sectionPlacement: "after_summary" });
+    const beforeSummary = validateIssueDraft({
+      draft: draft(),
+      projection,
+      bodyMarkdown: "## Product impact\n\nImpact\n\n## Summary\n\nSummary text",
+    });
+    expect(beforeSummary.ok).toBe(false);
+
+    const noSummary = validateIssueDraft({
+      draft: draft(),
+      projection,
+      bodyMarkdown: "## Details\n\nDetails\n\n## Product impact\n\nImpact",
+    });
+    expect(noSummary.ok).toBe(false);
+
+    const intervening = validateIssueDraft({
+      draft: draft(),
+      projection,
+      bodyMarkdown: "## Summary\n\nSummary text\n\n## Details\n\nDetails\n\n## Product impact\n\nImpact",
+    });
+    expect(intervening.ok).toBe(false);
+
+    const ok = validateIssueDraft({
+      draft: draft(),
+      projection,
+      bodyMarkdown: "## Summary\n\nSummary text\n\n## Product impact\n\nImpact\n\n## Details\n\nDetails",
     });
     expect(ok.ok).toBe(true);
   });

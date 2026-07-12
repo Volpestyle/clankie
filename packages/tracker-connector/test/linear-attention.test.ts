@@ -1,5 +1,11 @@
+import type { CaptainCeremonyProjection } from "@clankie/doctrine";
 import type { HumanAttentionRequest } from "@clankie/protocol";
 import { describe, expect, it } from "vitest";
+import {
+  deliverHumanAttention,
+  type AttentionDeliveryAttemptInput,
+  type AttentionDeliveryStore,
+} from "../src/human-attention.ts";
 import { createLinearAttentionRuntime, type LinearAttentionClient } from "../src/linear-attention.ts";
 
 const request: HumanAttentionRequest = {
@@ -66,7 +72,7 @@ describe("Linear attention runtime", () => {
 
     const binding = runtime.bindingResolver.resolve("workspace-1")!;
     for (const capability of binding.roles.operator!.capabilities) {
-      const result = await runtime.adapter.attempt({
+      const attempt: Omit<AttentionDeliveryAttemptInput, "authorizedContent"> = {
         workspaceId: "workspace-1",
         request,
         idempotencyToken: `token-${capability.kind}`,
@@ -76,6 +82,11 @@ describe("Linear attention runtime", () => {
           directNotification: "required",
           isFallback: false,
         },
+      };
+      const authorizedContent = runtime.adapter.policyContent(attempt);
+      const result = await runtime.adapter.attempt({
+        ...attempt,
+        ...(authorizedContent === undefined ? {} : { authorizedContent }),
       });
       expect(result.ok).toBe(true);
     }
@@ -100,5 +111,87 @@ describe("Linear attention runtime", () => {
         body: expect.stringContaining("@James Volpe Choose the launch option."),
       }),
     ]);
+  });
+
+  it("authorizes the exact rendered comment, including mention and response instructions", async () => {
+    const comments: string[] = [];
+    const client: LinearAttentionClient = {
+      async assignIssue() {},
+      async applyIssueLabel() {},
+      async createIssueComment(input) {
+        comments.push(input.body);
+      },
+    };
+    const runtime = createLinearAttentionRuntime(
+      [
+        {
+          workspaceId: "workspace-1",
+          binding: {
+            schemaVersion: 1,
+            workspaceId: "workspace-1",
+            revision: "1",
+            roles: {
+              operator: {
+                principalId: "linear-user-james",
+                capabilities: [{ kind: "direct_notify", principalId: "linear-user-james" }],
+              },
+            },
+          },
+          principals: {
+            "linear-user-james": {
+              principalId: "linear-user-james",
+              mention: "@James Volpe",
+            },
+          },
+        },
+      ],
+      () => client,
+    );
+    const projection: CaptainCeremonyProjection = {
+      profileId: "test",
+      profileHash: "hash",
+      externalConnectors: "required",
+      integrationFlow: "review_gate",
+      issueDraft: {
+        enabled: true,
+        requireProductImpact: true,
+        heading: "Product impact",
+        sectionPlacement: "first",
+        maxSummarySentences: 3,
+      },
+      humanAttention: {
+        enabled: true,
+        defaultTargetRole: "operator",
+        defaultRequestKind: "decision_needed",
+        notifyWhenBlocking: true,
+        notificationSurfaces: ["operator_inbox"],
+        blockingUrgency: "blocking",
+        directNotification: "required",
+        waitForAuthoritativeResponse: true,
+      },
+      independentVerifierRequired: true,
+    };
+    const store: AttentionDeliveryStore = {
+      durableSingleFlight: false,
+      get: async () => undefined,
+      runExclusive: async (_context, factory) => factory(),
+    };
+    const result = await deliverHumanAttention({
+      request: { ...request, actionableAsk: "x".repeat(16_384), directNotification: "required" },
+      binding: runtime.bindingResolver.resolve("workspace-1")!,
+      projection,
+      adapter: runtime.adapter,
+      store,
+      policy: {
+        authorize: async (write) => ({
+          effect: new TextEncoder().encode(write.content ?? "").byteLength <= 16_384 ? "allow" : "deny",
+          reason: "structured narrative byte guardrail",
+        }),
+      },
+    });
+
+    expect(result.aggregate).toBe("unsupported");
+    expect(result.actions).toEqual([expect.objectContaining({ kind: "direct_notify", status: "denied" })]);
+    expect(comments).toEqual([]);
   });
 });

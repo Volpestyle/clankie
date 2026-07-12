@@ -60,13 +60,21 @@ function headingPattern(heading: string): RegExp {
 }
 
 function firstMarkdownSectionTitle(body: string): string | undefined {
+  return markdownSectionTitles(body)[0];
+}
+
+function markdownSectionTitles(body: string): string[] {
+  const titles: string[] = [];
   for (const line of body.split(/\r?\n/u)) {
     const atx = line.match(/^#{1,6}\s+(.+?)\s*$/u);
-    if (atx?.[1]) return atx[1].trim();
+    if (atx?.[1]) {
+      titles.push(atx[1].trim());
+      continue;
+    }
     const bold = line.match(/^\*\*(.+?):?\*\*\s*$/u);
-    if (bold?.[1]) return bold[1].trim();
+    if (bold?.[1]) titles.push(bold[1].trim());
   }
-  return undefined;
+  return titles;
 }
 
 /** True when non-whitespace prose appears before the first markdown heading line. */
@@ -172,15 +180,20 @@ export function validateIssueDraft(input: ValidateIssueDraftInput): IssueDraftVa
           path: ["bodyMarkdown"],
         });
       }
-    } else if (rules.sectionPlacement === "last") {
-      const lines = body.split(/\r?\n/u);
-      let lastHeading: string | undefined;
-      for (const line of lines) {
-        const atx = line.match(/^#{1,6}\s+(.+?)\s*$/u);
-        if (atx?.[1]) lastHeading = atx[1].trim();
-        const bold = line.match(/^\*\*(.+?):?\*\*\s*$/u);
-        if (bold?.[1]) lastHeading = bold[1].trim();
+    } else if (rules.sectionPlacement === "after_summary") {
+      const titles = markdownSectionTitles(body).map((title) => title.toLowerCase());
+      const summaryIndex = titles.indexOf("summary");
+      const productImpactIndex = titles.indexOf(rules.heading.toLowerCase());
+      if (summaryIndex < 0 || productImpactIndex !== summaryIndex + 1) {
+        diagnostics.push({
+          code: "section_placement",
+          message: `Ceremony requires product-impact section immediately after Summary.`,
+          path: ["bodyMarkdown"],
+        });
       }
+    } else if (rules.sectionPlacement === "last") {
+      const titles = markdownSectionTitles(body);
+      const lastHeading = titles.at(-1);
       if (lastHeading !== undefined && lastHeading.toLowerCase() !== rules.heading.toLowerCase()) {
         diagnostics.push({
           code: "section_placement",

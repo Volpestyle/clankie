@@ -1,4 +1,4 @@
-# ADR 0028: Connector-neutral tracker ceremony and human-attention contract
+# ADR 0029: Connector-neutral tracker ceremony and human-attention contract
 
 Status: accepted (VUH-845).
 

@@ -192,6 +192,12 @@ class FakeAdapter implements AttentionDeliveryAdapter {
   public attempts = 0;
   public tokens: string[] = [];
   public mode: "ok" | "fail_second" | "unsupported" = "ok";
+  public policyContent(input: AttentionDeliveryAttemptInput): string | undefined {
+    return input.action.capability.kind === "comment_notify" ||
+      input.action.capability.kind === "direct_notify"
+      ? input.request.actionableAsk
+      : undefined;
+  }
   public async attempt(
     input: AttentionDeliveryAttemptInput,
   ): Promise<{ ok: boolean; unsupported?: boolean; detail?: string }> {
@@ -651,5 +657,22 @@ describe("deliveryFingerprint content awareness", () => {
     const a = deliveryFingerprint(binding(), resolved.actions, request({ actionableAsk: "A" }));
     const b = deliveryFingerprint(binding(), resolved.actions, request({ actionableAsk: "B" }));
     expect(a).not.toBe(b);
+  });
+
+  it.each([
+    ["taskId", { taskId: "task-2" }],
+    ["workerRunId", { workerRunId: "worker-run-2" }],
+    ["createdAt", { createdAt: "2026-07-12T12:01:00.000Z" }],
+    ["expiresAt", { expiresAt: "2026-07-12T13:00:00.000Z" }],
+  ] as const)("changes when %s changes with same requestId", (_field, override) => {
+    const resolved = resolveAttentionActions({
+      binding: binding(),
+      targetRole: "operator",
+      notificationSurfaces: ["operator_inbox"],
+      directNotification: "best_effort",
+    });
+    const baseline = deliveryFingerprint(binding(), resolved.actions, request());
+    const changed = deliveryFingerprint(binding(), resolved.actions, request(override));
+    expect(changed).not.toBe(baseline);
   });
 });

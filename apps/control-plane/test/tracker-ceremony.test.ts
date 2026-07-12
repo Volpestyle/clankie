@@ -6,6 +6,7 @@ import { SqliteEventStore } from "@clankie/event-store";
 import type { DomainEvent } from "@clankie/protocol";
 import type { AttentionDeliveryAttemptInput, WorkspaceTrackerBinding } from "@clankie/tracker-connector";
 import { describe, expect, it } from "vitest";
+import { createControlPlane } from "../src/app.ts";
 import {
   DoctrineAttentionPolicy,
   EventStoreAttentionDeliveryStore,
@@ -114,13 +115,89 @@ function attentionRequest(overrides?: Record<string, unknown>) {
   };
 }
 
+function testPolicyContent(input: AttentionDeliveryAttemptInput): string | undefined {
+  return input.action.capability.kind === "comment_notify" || input.action.capability.kind === "direct_notify"
+    ? input.request.actionableAsk
+    : undefined;
+}
+
 describe("control-plane tracker ceremony runtime", () => {
+  it("records delivery and response envelope correlation/task identity from the request", async () => {
+    const compiled = doctrine();
+    const dir = mkdtempSync(join(tmpdir(), "attn-http-envelope-"));
+    const store = new SqliteEventStore(join(dir, "events.sqlite"));
+    const verified: DomainEvent = {
+      id: "verified-http-response",
+      occurredAt: "2026-07-12T15:00:00.000Z",
+      missionId: "mission-cp",
+      taskId: "task-cp",
+      workerRunId: "worker-cp",
+      correlationId: "corr-cp",
+      profileHash: compiled.profileHash,
+      type: "tracker.agent-session.prompted",
+      data: {
+        organization: { id: "ws-1" },
+        issue: { id: "issue-9" },
+        actor: { id: "human" },
+        activity: {
+          id: "activity-http-response",
+          body: "clankie-response attn-cp-1 approve: Approved through the bound provider identity.",
+        },
+      },
+    };
+    await store.append(verified);
+    let id = 0;
+    const app = await createControlPlane({
+      doctrine: compiled,
+      eventStore: store,
+      authenticateCaptain: () => Promise.resolve({ captainId: "captain-1", steerSourceLane: "api" }),
+      workspaceBindingResolver: { resolve: () => trustedBinding },
+      attentionDeliveryAdapter: {
+        policyContent: (input) => input.request.actionableAsk,
+        attempt: async () => ({ ok: true }),
+      },
+      idFactory: () => `http-envelope-${String(++id)}`,
+      clock: () => new Date("2026-07-12T15:01:00.000Z"),
+    });
+    const headers = { "content-type": "application/json", authorization: "Bearer captain" };
+    const request = attentionRequest({ taskId: "task-cp", workerRunId: "worker-cp" });
+    const deliveredResponse = await app.request("/v1/tracker/human-attention/deliver", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ profileHash: compiled.profileHash, workspaceId: "ws-1", request }),
+    });
+    expect(deliveredResponse.status).toBe(200);
+    const correlatedResponse = await app.request("/v1/tracker/human-attention/correlate", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        profileHash: compiled.profileHash,
+        requestId: "attn-cp-1",
+        verifiedEventId: verified.id,
+      }),
+    });
+    expect(correlatedResponse.status).toBe(200);
+
+    const events = (await store.readAll()).map(({ event }) => event);
+    for (const type of ["tracker.human-attention.delivered", "tracker.human-attention.responded"] as const) {
+      expect(events.find((event) => event.type === type)).toMatchObject({
+        missionId: "mission-cp",
+        taskId: "task-cp",
+        workerRunId: "worker-cp",
+        correlationId: "corr-cp",
+        profileHash: compiled.profileHash,
+      });
+    }
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it("validates issue drafts against the compiled projection with profile hash", () => {
     const compiled = doctrine();
     const runtime = createTrackerCeremonyRuntime({
       doctrine: compiled,
       policy: new DoctrineAttentionPolicy(compiled),
-      adapter: { attempt: async () => ({ ok: true }) },
+      adapter: { policyContent: testPolicyContent, attempt: async () => ({ ok: true }) },
       store: new InMemoryAttentionDeliveryStore(),
       bindingResolver: { resolve: () => trustedBinding },
       lookupVerifiedEvent: () => undefined,
@@ -161,7 +238,7 @@ describe("control-plane tracker ceremony runtime", () => {
     const runtime = createTrackerCeremonyRuntime({
       doctrine: compiled,
       policy: new DoctrineAttentionPolicy(compiled),
-      adapter: { attempt: async () => ({ ok: true }) },
+      adapter: { policyContent: testPolicyContent, attempt: async () => ({ ok: true }) },
       store: new InMemoryAttentionDeliveryStore(),
       bindingResolver: {
         resolve: (workspaceId) => (workspaceId === "ws-1" ? trustedBinding : undefined),
@@ -219,7 +296,7 @@ describe("control-plane tracker ceremony runtime", () => {
     const runtime = createTrackerCeremonyRuntime({
       doctrine: compiled,
       policy: new DoctrineAttentionPolicy(compiled),
-      adapter: { attempt: async () => ({ ok: true }) },
+      adapter: { policyContent: testPolicyContent, attempt: async () => ({ ok: true }) },
       store,
       bindingResolver: { resolve: () => trustedBinding },
       lookupVerifiedEvent: (id) => events.get(id),
@@ -293,7 +370,7 @@ describe("control-plane tracker ceremony runtime", () => {
     const runtime = createTrackerCeremonyRuntime({
       doctrine: compiled,
       policy: new DoctrineAttentionPolicy(compiled),
-      adapter: { attempt: async () => ({ ok: true }) },
+      adapter: { policyContent: testPolicyContent, attempt: async () => ({ ok: true }) },
       store: new InMemoryAttentionDeliveryStore(),
       bindingResolver: { resolve: () => trustedBinding },
       lookupVerifiedEvent: (id) => events.get(id),
@@ -373,6 +450,7 @@ describe("control-plane tracker ceremony runtime", () => {
     const tokens: string[] = [];
     let attempts = 0;
     const adapter = {
+      policyContent: testPolicyContent,
       attempt: async (input: AttentionDeliveryAttemptInput) => {
         attempts += 1;
         tokens.push(input.idempotencyToken);
@@ -456,6 +534,7 @@ describe("control-plane tracker ceremony runtime", () => {
     const tokens: string[] = [];
     let crashAfterProviderAttempt = true;
     const adapter = {
+      policyContent: testPolicyContent,
       attempt: async (input: AttentionDeliveryAttemptInput) => {
         tokens.push(input.idempotencyToken);
         if (crashAfterProviderAttempt) throw new Error("simulated_process_crash");

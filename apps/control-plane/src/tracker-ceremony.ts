@@ -468,6 +468,10 @@ export class InMemoryAttentionDeliveryStore implements AttentionDeliveryStore {
 
 /** Adapter that marks all capabilities unsupported (honest without Linear extension). */
 export class UnsupportedAttentionAdapter implements AttentionDeliveryAdapter {
+  public policyContent(_input: AttentionDeliveryAttemptInput): string | undefined {
+    return undefined;
+  }
+
   public async attempt(
     _input: AttentionDeliveryAttemptInput,
   ): Promise<{ ok: boolean; unsupported?: boolean; detail?: string }> {
