@@ -571,6 +571,8 @@ describe("doctrine", () => {
     expect(hardened.profile.authority).toEqual(structured.authority);
     expect(hardened.profile.planning.hardChangedLines).toBe(350);
     expect(hardened.profile.riskClasses?.["reversible-write"].default).toBe("require_approval");
+    expect(hardened.profile.actions["discord.presence.reply"]?.default).toBe("deny");
+    expect(hardened.profile.actions["discord.presence.send_attachment"]?.default).toBe("deny");
     expect(hardened.profileHash).not.toBe(baseline.profileHash);
   });
 

@@ -68,7 +68,7 @@ user. Runtime binding + phase + doctrine select availability. Go Live requires
 | --- | --- |
 | ADR + protocol stubs | done |
 | **P1 outbound bot-transport** via `POST /v1/discord/presence-actions` + bot REST executor | **done** — policy-gated catalog execution only; not free-form DM/chat ingress |
-| **P1.5 publish-external completion** | **follow-up** — today `require_approval` for attachment/go_live returns 403 without minting an approval-store request; wire `require_approval` → `ApprovalRequest` → authenticated resume → re-execute before attachments can succeed |
+| **P1.5 publish-external completion** | Attachments follow `require_approval` → bounded `ApprovalRequest` → authenticated resume → exact-idempotency-key re-execution. Denied and expired requests remain terminal. Approval records and semantic events retain only the artifact reference and write hash; the privileged bot runtime resolves and verifies bytes. Go Live remains unavailable on bot transport. |
 | **P2 ingress** (channel-turn / DM / mention → Eve bounded turn) | **next explicit task** — `DiscordPresenceChannelTurnRequestSchema` is frozen for this path but not yet consumed by a gateway handler or control-plane turn route |
 | P2 user_session transport | **kept follow-up** — VUH-836, isolated personal-lab runtime |
 | P3 Go Live watch media | **kept follow-up** — VUH-840, bounded sampled observations |

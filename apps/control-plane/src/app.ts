@@ -1507,7 +1507,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     const unexpired = await expireApprovalIfNeeded(pending);
     if (unexpired.status !== "pending") {
       if (unexpired.status === "denied" && unexpired.reason === "approval_expired") {
-        return context.json(unexpired);
+        return context.json({ error: "approval_already_expired", approval: unexpired }, 409);
       }
       const requestedStatus = parsed.data.decision === "approve" ? "approved" : "denied";
       if (unexpired.status === requestedStatus && unexpired.reason === parsed.data.reason) {

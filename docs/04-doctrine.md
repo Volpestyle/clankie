@@ -75,6 +75,10 @@ Never send the full organization policy to every model. Give each participant th
 
 Material changes create a `doctrine.changed` event and invalidate any approval whose assumptions no longer hold.
 
+The high-assurance overlay denies every `discord.presence.*` action at the
+profile layer. Presence endpoints return 403 without invoking a transport while
+that overlay is active.
+
 ## Connector-neutral policy
 
 Connectors are an open, MCP-first ecosystem. Doctrine never requires a vendor noun. Each connector action declares one risk class:
