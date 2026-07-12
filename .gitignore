@@ -19,7 +19,6 @@ build/
 DerivedData/
 *.xcuserstate
 .env.*
-!.env.example
 
 # eve framework generated runtime and discovery artifacts
 **/.eve/

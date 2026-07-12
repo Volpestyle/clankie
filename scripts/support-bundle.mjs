@@ -43,7 +43,7 @@ await writeFile(
   "utf8",
 );
 
-for (const path of ["package.json", "pnpm-lock.yaml", ".node-version", ".env.example"]) {
+for (const path of ["package.json", "pnpm-lock.yaml", ".node-version"]) {
   try {
     await cp(resolve(root, path), resolve(directory, basename(path)));
   } catch {

@@ -11,7 +11,7 @@
 - Xcode for iOS/macOS shells
 - optional JDK 21 for the Minecraft Paper verifier lab (`integrations/minecraft-paper-verifier`); without it the aggregate eval lane skips that build with a notice
 - optional Docker for local telemetry/sandboxes
-- optional Codex CLI, Pi coding agent, and provider credentials
+- optional Codex CLI and Pi coding agent
 
 Run:
 
@@ -21,6 +21,12 @@ pnpm install
 pnpm doctor
 pnpm check
 ```
+
+There is no `.env` file. Model and integration credentials live in the
+credential broker (macOS Keychain, or a mode-0600 file store selected by
+`CLANKIE_CREDENTIALS_FILE` on other platforms) and are added from inside the
+TUI via `/auth`. Shell-exported provider keys remain a supported fallback for
+worker harnesses; `pnpm doctor` reports both, redacted.
 
 ## Local service ports
 
@@ -39,6 +45,7 @@ pnpm eval:self-build
 ## Start operator surfaces
 
 ```bash
+pnpm cli:install # once: symlink apps/tui/bin/clankie.ts into ~/.local/bin
 clankie
 ```
 
@@ -100,8 +107,12 @@ The TUI is built against `@earendil-works/pi-tui`, not Ink or a generic abstract
 ```bash
 codex --version
 pi --version
-printenv ANTHROPIC_API_KEY >/dev/null
+pnpm eval:real-workers:readiness
 ```
+
+The readiness script checks broker-stored credentials (added via `/auth` in
+the TUI) alongside harness CLI logins; a shell-exported `ANTHROPIC_API_KEY` is
+an accepted fallback for the Claude worker.
 
 Run provider contract smoke tests in disposable worktrees before enabling them in a mission. Keep provider integration tests opt-in and exclude them from credential-free CI.
 

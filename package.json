@@ -22,6 +22,7 @@
     "fmt:check": "oxfmt --check .",
     "check": "pnpm skills:check && pnpm fmt:check && pnpm lint && pnpm docs:check && pnpm arch:check && pnpm typecheck && pnpm test && pnpm eval:self-build",
     "doctor": "node scripts/doctor.mjs",
+    "cli:install": "node scripts/install-cli.mjs",
     "arch:check": "node scripts/check-architecture.mjs",
     "support:bundle": "node scripts/support-bundle.mjs",
     "clean": "turbo run clean && rm -rf .turbo artifacts .data",

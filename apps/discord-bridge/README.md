@@ -10,10 +10,12 @@ Discord is an ambient authority surface. `DISCORD_AMBIENT_ROLE_IDS` is a comma-s
 
 `/captain-memory` exposes the enforced bridge invariant: the bot does not request the Discord message-content intent, capture channel transcripts, infer speaker memory, or retain slash-command text after forwarding it. `forget` removes only the live bridge-owned thread/mission correlation and projection cache, renames and archives the thread so it is not rebound after restart, and explicitly does not claim to delete Discord history or authoritative control-plane/captain memory.
 
-Required configuration:
+Required configuration. First store the bot token in the credential broker:
+run `clankie`, then `/auth` → “Add / update API key” → “Other…” → provider id
+`discord_bot`. The token is never read from an environment variable; both
+`DISCORD_BOT_TOKEN` and `DISCORD_USER_TOKEN` are hard startup errors.
 
 ```bash
-# Store the bot token as provider `discord_bot` through the credential broker.
 DISCORD_APPLICATION_ID=...
 DISCORD_GUILD_ID=...          # optional, faster command registration in development
 DISCORD_AMBIENT_ROLE_IDS=...  # comma-separated roles allowed to create/steer missions

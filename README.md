@@ -17,7 +17,7 @@ you only when authority is required.
 [![built on eve](https://img.shields.io/badge/lead%20agent-eve-7c3aed?style=flat-square)](https://eve.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 
-[**Why**](#why-clankie) · [**How it works**](#how-it-works) · [**Presence**](#presence-a-teammate-in-the-room) · [**Evals**](#evals) · [**Laws**](#repository-laws) · [**Apps**](#main-applications) · [**Docs**](#documentation-map)
+[**Why**](#why-clankie) · [**How it works**](#how-it-works) · [**Get started**](#get-started) · [**Presence**](#presence) · [**Evals**](#evals) · [**Laws**](#repository-laws) · [**Apps**](#main-applications) · [**Docs**](#documentation-map)
 
 </div>
 
@@ -95,7 +95,7 @@ Social channels are **membership**. Garden, graph, and terminal are
 Clankie is built to **join the places you and/or your team already works**, Discord
 , Slack, iMessage, and more.
 
-- **Membership.** Clankie is a real community member: an 
+- **Membership.** Clankie is a real community member: an
   account in the server, addressable, role-bound, visible in the same channels
   and mission threads as everyone else.
 - **Same Clankie everywhere.** Discord, TUI, garden, and the free command-center app are windows onto
@@ -107,28 +107,50 @@ Clankie is built to **join the places you and/or your team already works**, Disc
 A day in the life: after showing clankie some memes in discord livestream, you `@clankie` in `#eng` to cut a release branch for ur developing app, Uber, for cycle enthusiasts.
 It opens a mission thread, spawns workers you can still inspect in the garden or terminal,
 posts when review is ready, and only hands off to an authenticated surface when
-something irreversible needs a human. 
+something irreversible needs a human.
 
-| Surface | Role | Authority |
-| --- | --- | --- |
-| **Discord** (shipped bridge) | Ambient teammate: missions, status, steer, optional voice join | Create / steer / query; never complete privileged approvals |
-| **Slack & peers** | Same ambient contract | Protocol-shaped; adapters as they land |
-| **TUI · garden · phone** | High-trust operator views | Inspect fleet, take over terminals, drive authenticated flows |
-| **Authenticated surface** | Approvals and irreversible actions | Merge, deploy, doctrine, recorded human authority |
+| Surface                      | Role                                                           | Authority                                                     |
+| ---------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------- |
+| **Discord** (shipped bridge) | Ambient teammate: missions, status, steer, optional voice join | Create / steer / query; never complete privileged approvals   |
+| **Slack & peers**            | Same ambient contract                                          | Protocol-shaped; adapters as they land                        |
+| **TUI · garden · phone**     | High-trust operator views                                      | Inspect fleet, take over terminals, drive authenticated flows |
+| **Authenticated surface**    | Approvals and irreversible actions                             | Merge, deploy, doctrine, recorded human authority             |
 
 The Discord bridge is the first ambient channel (`apps/discord-bridge`): official
 bot only, role-bound ambient vs approval handoff, mission threads as
 presentation over control-plane state. See
 [`docs/04-doctrine.md`](docs/04-doctrine.md) for persona and channel authority.
 
-## Evals
+## Get started
 
 Requirements: Node 24+, pnpm 11+, and Git.
 
 ```bash
 corepack enable
 pnpm install
-pnpm doctor
+pnpm doctor          # toolchain and credential-broker status
+pnpm eval:self-build # offline control-loop proof — needs no credentials
+pnpm cli:install     # symlink the `clankie` launcher into ~/.local/bin
+clankie              # start the captain service and open the operator TUI
+```
+
+Secrets live in the credential broker (macOS Keychain, or a mode-0600 file
+store elsewhere) — there is no `.env` file. Configure everything from inside
+the TUI:
+
+- `/auth` — add a provider API key, or connect a ChatGPT / Claude
+  subscription via OAuth. Keys render redacted and never touch the repo.
+- `/provider` and `/model` — pick the captain model.
+- Integration tokens are stored through the same flow: `/auth` → “Add /
+  update API key” → “Other…”, then enter the provider id (for example
+  `discord_bot` for the Discord bot token).
+
+`pnpm doctor` reports what the broker currently holds (redacted provider ids
+only — never key material).
+
+## Evals
+
+```bash
 pnpm eval:self-build
 ```
 
@@ -179,15 +201,15 @@ evidentiary gate.
 
 ## Main applications
 
-| App | Responsibility |
-| --- | --- |
-| `apps/captain-eve` | Eve-based captain: personality, conversation, planning, critique, synthesis |
-| `apps/control-plane` | Mission API, doctrine compilation, scheduling, policy, approvals |
-| `apps/runner` | Worktrees, processes, PTYs, credentials, provider sessions, control leases |
-| `apps/tui` | Operator console (`@earendil-works/pi-tui`) |
+| App                   | Responsibility                                                                                                   |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `apps/captain-eve`    | Eve-based captain: personality, conversation, planning, critique, synthesis                                      |
+| `apps/control-plane`  | Mission API, doctrine compilation, scheduling, policy, approvals                                                 |
+| `apps/runner`         | Worktrees, processes, PTYs, credentials, provider sessions, control leases                                       |
+| `apps/tui`            | Operator console (`@earendil-works/pi-tui`)                                                                      |
 | `apps/discord-bridge` | Ambient teammate surface (official bot): mission threads, steer, voice join/leave; approvals never complete here |
-| `apps/relay` | Dev remote relay (semantic control vs terminal data planes) |
-| `apps/lead-agent-lab` | Deterministic self-build and lead-agent evaluation laboratory |
+| `apps/relay`          | Dev remote relay (semantic control vs terminal data planes)                                                      |
+| `apps/lead-agent-lab` | Deterministic self-build and lead-agent evaluation laboratory                                                    |
 
 The free graphical command center (iOS / Android / macOS) is a **separate private product repo** (`clankie-app`). This monorepo is the agent OS and public protocols.
 
@@ -209,7 +231,8 @@ garden-model         operational events → spatial presentation state
 ## Development commands
 
 ```bash
-pnpm doctor              # toolchain and optional integration checks
+pnpm doctor              # toolchain, credential broker, and launcher checks
+pnpm cli:install         # symlink the `clankie` launcher into ~/.local/bin
 pnpm arch:check          # dependency and privilege-boundary invariants
 pnpm typecheck
 pnpm test

@@ -1,7 +1,9 @@
 import { execFile } from "node:child_process";
-import { access, readFile } from "node:fs/promises";
+import { access } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { resolve } from "node:path";
 
 const execFileAsync = promisify(execFile);
 const root = resolve(import.meta.dirname, "..");
@@ -21,7 +23,7 @@ result(
 );
 
 for (const check of [
-  ["pnpm", true, ["--version"], "Enable Corepack and install pnpm 11."],
+  ["pnpm", true, ["--version"], "Enable Corepack and install pnpm 11.", 11],
   ["git", true, ["--version"], "Install Git."],
   ["docker", false, ["--version"], "Optional: install Docker for telemetry and sandbox experiments."],
   ["codex", false, ["--version"], "Optional: install/authenticate Codex CLI for App Server workers."],
@@ -29,10 +31,14 @@ for (const check of [
   ["herdr", false, ["--version"], "Optional: install Herdr as an external pane host."],
   ["xcodebuild", false, ["-version"], "Required only for iOS/macOS native shells."],
 ]) {
-  const [command, required, args, remediation] = check;
+  const [command, required, args, remediation, minimumMajor] = check;
   try {
     const { stdout, stderr } = await execFileAsync(command, args, { timeout: 5_000 });
-    result(command, required, true, `${stdout}${stderr}`.trim().split("\n")[0] ?? "available", remediation);
+    const detail = `${stdout}${stderr}`.trim().split("\n")[0] ?? "available";
+    const detectedMajor = Number(detail.match(/\d+/u)?.[0]);
+    const ok =
+      minimumMajor === undefined || (Number.isFinite(detectedMajor) && detectedMajor >= minimumMajor);
+    result(command, required, ok, detail, remediation);
   } catch {
     result(command, required, false, "not available", remediation);
   }
@@ -51,29 +57,55 @@ try {
   );
 }
 
-const envExample = await readFile(resolve(root, ".env.example"), "utf8");
-const configuredProviders = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DISCORD_BOT_TOKEN"].filter(
-  (name) => process.env[name],
-);
-result(
-  "provider credentials",
-  false,
-  configuredProviders.length > 0,
-  configuredProviders.length
-    ? `configured: ${configuredProviders.join(", ")}`
-    : "none configured; offline lab remains available",
-  "Copy only needed keys from .env.example into a local secret manager; never commit .env.",
-);
-if (!envExample.includes("CLANKIE_ANALYTICS_ENABLED=false")) {
+// Credentials live in the credential broker (macOS Keychain or a mode-0600 file
+// store), never in env files. list() returns redacted summaries only.
+try {
+  const storePath = resolve(root, "packages/credential-broker/src/credential-store.ts");
+  const { createDefaultCredentialStore } = await import(pathToFileURL(storePath).href);
+  const listed = await createDefaultCredentialStore().list();
+  const ids = Object.keys(listed).sort();
   result(
-    "analytics default",
-    true,
+    "credential broker",
     false,
-    "missing disabled-by-default setting",
-    "Restore analytics-disabled default in .env.example.",
+    ids.length > 0,
+    ids.length > 0
+      ? `${ids.length} stored: ${ids.join(", ")}`
+      : "no credentials stored; the offline lab needs none",
+    "Run `clankie`, then /auth to add provider keys or subscriptions (Discord bot token: provider `discord_bot`).",
   );
-} else {
-  result("analytics default", true, true, "disabled by default", "");
+} catch (error) {
+  const detail = error instanceof Error ? error.message.split("\n")[0] : "unknown error";
+  result(
+    "credential broker",
+    false,
+    false,
+    `status unavailable (${detail})`,
+    "Run pnpm install, then re-run pnpm doctor.",
+  );
+}
+
+const shellFallback = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"].filter((name) => process.env[name]);
+if (shellFallback.length > 0) {
+  result(
+    "provider env fallback",
+    false,
+    true,
+    `exported in shell: ${shellFallback.join(", ")} (broker credentials take precedence)`,
+    "",
+  );
+}
+
+try {
+  await access(join(homedir(), ".local", "bin", "clankie"));
+  result("clankie launcher", false, true, "~/.local/bin/clankie installed", "");
+} catch {
+  result(
+    "clankie launcher",
+    false,
+    false,
+    "not installed",
+    "Run pnpm cli:install to symlink the launcher into ~/.local/bin.",
+  );
 }
 
 const width = Math.max(...results.map((entry) => entry.name.length));
