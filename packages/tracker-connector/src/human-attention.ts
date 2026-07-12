@@ -488,7 +488,7 @@ export function responseFromVerifiedEvent(
   const escapedRequestId = pending.request.requestId.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
   const match = activity.body.match(
     new RegExp(
-      "(?:^|\\s)clankie-response\\s+`?" +
+      "^\\s*clankie-response\\s+`?" +
         escapedRequestId +
         "`?\\s+(approve|deny|defer|clarify|redirect)\\s*:\\s*(.+?)\\s*$",
       "iu",
