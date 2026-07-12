@@ -1,10 +1,9 @@
 import { compileDoctrine, projectCaptainCeremony, type CaptainCeremonyProjection } from "@clankie/doctrine";
+import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   captainCeremonyInstructions,
-  ceremonyProjectionFromChannel,
-  isTrustedCeremonyProjection,
-  resolveTrustedCeremonyProjection,
+  verifyCeremonyProjectionEnvelope,
 } from "../lib/ceremony-instructions.ts";
 
 function projection() {
@@ -54,28 +53,23 @@ function projection() {
 describe("captain ceremony instructions", () => {
   it("renders the trusted projection without provider nouns", () => {
     const proj = projection();
-    const markdown = captainCeremonyInstructions(
-      { metadata: { ceremonyProjection: proj } },
-      proj,
-    );
+    const markdown = captainCeremonyInstructions(proj);
     expect(markdown).toContain("Tracker ceremony (compiled projection)");
     expect(markdown).toContain(proj.profileId);
     expect(markdown).toContain("Product impact");
     expect(markdown).toContain("operator");
     expect(markdown).not.toMatch(/James|gmail\.com|@|label:|Linear/iu);
-    expect(ceremonyProjectionFromChannel({ metadata: { ceremonyProjection: proj } })?.profileHash).toBe(
-      proj.profileHash,
-    );
   });
 
   it("falls back safely when no trusted projection is supplied", () => {
-    const markdown = captainCeremonyInstructions({});
+    const markdown = captainCeremonyInstructions();
     expect(markdown).toContain("No trusted compiled ceremony projection");
     expect(markdown).not.toMatch(/James|gmail\.com/iu);
   });
 
-  it("rejects mismatched/untrusted channel projection that disables ceremony controls", () => {
+  it("accepts only a correctly signed projection envelope", () => {
     const trusted = projection();
+    const token = "captain-secret";
     const malicious = {
       ...trusted,
       issueDraft: { ...trusted.issueDraft, enabled: false, requireProductImpact: false },
@@ -83,19 +77,24 @@ describe("captain ceremony instructions", () => {
       independentVerifierRequired: false,
     } as CaptainCeremonyProjection;
 
-    expect(isTrustedCeremonyProjection(malicious, trusted)).toBe(false);
-    expect(resolveTrustedCeremonyProjection({ metadata: { ceremonyProjection: malicious } }, trusted)).toEqual(
-      { rejected: true, reason: "untrusted_ceremony_projection" },
-    );
-
-    const markdown = captainCeremonyInstructions(
-      { metadata: { ceremonyProjection: malicious } },
-      trusted,
-    );
-    expect(markdown).toContain("Rejected untrusted ceremony projection");
-    expect(markdown).toContain("Using the trusted compiled doctrine projection only");
-    // Trusted projection still governs instructions — cannot disable via metadata.
-    expect(markdown).toContain("Enabled: yes");
-    expect(markdown).toContain(`Independent verifier required: ${trusted.independentVerifierRequired ? "yes" : "no"}`);
+    expect(
+      verifyCeremonyProjectionEnvelope(
+        { ceremonyProjection: malicious, ceremonyProjectionSignature: sign(trusted, token) },
+        token,
+      ),
+    ).toBeUndefined();
+    expect(verifyCeremonyProjectionEnvelope({ ceremonyProjection: malicious }, token)).toBeUndefined();
+    expect(
+      verifyCeremonyProjectionEnvelope(
+        { ceremonyProjection: trusted, ceremonyProjectionSignature: sign(trusted, token) },
+        token,
+      ),
+    ).toEqual(trusted);
   });
 });
+
+function sign(projection: CaptainCeremonyProjection, token: string): string {
+  return createHmac("sha256", token)
+    .update(`clankie:captain-ceremony:v1\0${JSON.stringify(projection)}`)
+    .digest("hex");
+}

@@ -1,6 +1,5 @@
 import { z } from "zod";
 import {
-  CeremonyDirectNotificationModeSchema,
   CeremonyNotificationSurfaceSchema,
   CeremonyTargetRoleSchema,
   type CeremonyDirectNotificationMode,

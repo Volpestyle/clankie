@@ -89,7 +89,11 @@ normalized so it cannot compress sentences) **before** any connector write.
 `WorkspaceTrackerBinding` maps semantic target roles and notification surfaces to
 **opaque principals** and provider-neutral capabilities. Provider-specific Linear
 identity/assignment/mention configuration belongs only in Linear adapter/binding
-fixtures — never in protocol, doctrine, or captain projection text.
+configuration — never in protocol, doctrine, or captain projection text.
+`createLinearAttentionRuntime` maps the default assignment, attention-marker,
+and direct-notification capabilities to a credential-owning `LinearAttentionClient`.
+The generated comment contains the configured mention, smallest typed ask, and
+blocking state; stable provider idempotency keys accompany all three writes.
 
 `deliverHumanAttention` policy-evaluates every attempted action with a truthful
 `TrackerWriteRequest` action (or marks the action `unsupported`). Store keys are
@@ -99,8 +103,8 @@ fields so the same id with different ask/role/surfaces conflicts. Each adapter
 providers must use as their external idempotency key. Durable single-flight is a
 store obligation (`AttentionDeliveryStore.durableSingleFlight`): production reserves
 on the **real mission stream** via `appendExpected` at the stream's current
-revision (event data carries `requestId` + `fingerprint`); contenders re-read the
-mission stream for the claim. Generic EventStore without `appendExpected` fails
+revision (event data carries `requestId`, `fingerprint`, claim owner, and lease);
+contenders wait for the active owner, and only take over an expired claim. Generic EventStore without `appendExpected` fails
 closed. An in-memory mutex is process-local only and is **not** durable
 exactly-once. Aggregate outcomes remain
 `delivered` | `partial` | `unsupported` | `fallback`. When
@@ -109,10 +113,15 @@ exactly-once. Aggregate outcomes remain
 never `delivered`. Per-action `denied` stays distinguishable from `unsupported`
 even when the aggregate collapses to `unsupported`.
 
-Control-plane correlate accepts only `requestId` + `verifiedEventId` (+ response
-id / profile hash). Pending request context is loaded from the durable delivery
-store (never caller-supplied). Actor role, decision, and rationale are derived
-from the verified event (`attentionResponse` / typed fields), not the HTTP body.
+Control-plane correlate accepts only `requestId` + `verifiedEventId` + profile
+hash. Pending request context is loaded from the durable delivery store (never
+caller-supplied). The verified event contains the complete typed
+`HumanAttentionResponse`; mission, profile, envelope correlation, request,
+response correlation, tracker reference, and timestamps must all match.
+Linear agent-thread replies use the deterministic command emitted in the direct
+notification (`clankie-response <requestId> <decision>: <rationale>`), and the
+prompt actor must equal the provider principal bound to the target semantic role.
+Free-form approval prose remains advisory and cannot close the request.
 
 `correlateAgentSessionToAttention` resolves pending attention only from verified
 `tracker.agent-session.created` / `prompted` events. It requires

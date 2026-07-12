@@ -88,6 +88,8 @@ export interface TrackerClient {
 export const TrackerWriteActionSchema = z.enum([
   "tracker.comment.create",
   "tracker.assignment.mirror",
+  "tracker.assignment.update",
+  "tracker.attention.marker.apply",
   "tracker.priority.update",
   "tracker.completion.update",
 ]);
@@ -99,6 +101,8 @@ export interface TrackerWriteRequest {
   missionId: string;
   ref: TrackerIssueRef;
   idempotencyKey: string;
+  correlationId?: string;
+  content?: string;
 }
 
 export interface TrackerPolicyDecision {

@@ -181,9 +181,10 @@ With captain model credentials configured, run `pnpm --filter @clankie/captain-e
 
 ## Tracker ceremony projection
 
-The captain loads the effective compiled tracker ceremony through trusted
-control-plane `clientContext` (and channel metadata) into the dynamic
-`agent/instructions/ceremony.ts` module. A short root rule in `instructions.md`
+The captain loads the effective compiled tracker ceremony from an
+HMAC-authenticated channel-metadata envelope signed by the control plane with
+`CLANKIE_CAPTAIN_TOKEN`. Unsigned or modified caller context is ignored by the
+dynamic `agent/instructions/ceremony.ts` module. A short root rule in `instructions.md`
 requires following that projection and governed tools for draft validation and
 human-attention delivery. Portable captain surfaces never hard-code personal
 emails, tracker labels, or mention syntax. Notification delivery is not a reply;

@@ -16,7 +16,6 @@ import type {
   TaskKind,
 } from "@clankie/protocol";
 import {
-  CeremonyAuthorityImpactSchema,
   CeremonyDirectNotificationModeSchema,
   CeremonyNotificationSurfaceSchema,
   CeremonySectionPlacementSchema,

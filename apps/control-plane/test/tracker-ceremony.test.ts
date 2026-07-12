@@ -45,8 +45,27 @@ function doctrine() {
       },
       budgets: { maxMissionCostUsd: 10, maxTaskRetries: 1, maxMissionWallMinutes: 60 },
       authority: {},
+      riskClasses: {
+        read: { default: "allow", rules: [] },
+        "narrative-write": {
+          default: "allow",
+          rules: [],
+          guardrail: {
+            windowSeconds: 60,
+            maxWritesPerWindow: 20,
+            maxBytesPerWrite: 16384,
+            maxBytesPerWindow: 65536,
+          },
+        },
+        "reversible-write": { default: "allow", rules: [] },
+        "irreversible-write": { default: "require_approval", rules: [] },
+        "publish-external": { default: "require_approval", rules: [] },
+        destructive: { default: "require_approval", rules: [] },
+      },
       actions: {
         "tracker.assignment.mirror": { default: "allow", rules: [] },
+        "tracker.assignment.update": { default: "allow", rules: [] },
+        "tracker.attention.marker.apply": { default: "allow", rules: [] },
         "tracker.comment.create": { default: "allow", rules: [] },
       },
       memory: {
@@ -64,10 +83,10 @@ const trustedBinding: WorkspaceTrackerBinding = {
   revision: "r1",
   roles: {
     operator: {
-      principalId: "principal-op",
+      principalId: "human",
       capabilities: [
-        { kind: "comment_notify", principalId: "principal-op" },
-        { kind: "assign_principal", principalId: "principal-op" },
+        { kind: "comment_notify", principalId: "human" },
+        { kind: "assign_principal", principalId: "human" },
       ],
     },
   },
@@ -184,9 +203,15 @@ describe("control-plane tracker ceremony runtime", () => {
         appActor: { id: "app" },
         actor: { id: "human" },
         attentionResponse: {
+          schemaVersion: 1,
+          responseId: "resp-1",
+          requestId: "attn-cp-1",
+          correlationId: "corr-cp",
           actorRole: "operator",
           decision: "approve",
           rationale: "Looks good.",
+          trackerRef: { correlationId: "corr-cp", externalRef: "issue-9" },
+          createdAt: "2026-07-12T15:00:00.000Z",
         },
       },
     };
@@ -211,16 +236,27 @@ describe("control-plane tracker ceremony runtime", () => {
       profileHash: compiled.profileHash,
       requestId: "attn-cp-1",
       verifiedEventId: "verified-evt-1",
-      responseId: "resp-1",
     });
     expect(correlated).toMatchObject({ requestId: "attn-cp-1", decision: "approve" });
+
+    await runtime.deliverAttention({
+      profileHash: compiled.profileHash,
+      workspaceId: "ws-1",
+      request: attentionRequest({ requestId: "attn-cp-2" }),
+    });
+    expect(
+      await runtime.correlate({
+        profileHash: compiled.profileHash,
+        requestId: "attn-cp-2",
+        verifiedEventId: "verified-evt-1",
+      }),
+    ).toEqual({ ok: false, reason: "no_correlation" });
 
     expect(
       await runtime.correlate({
         profileHash: compiled.profileHash,
         requestId: "attn-cp-1",
         verifiedEventId: "never-stored",
-        responseId: "resp-2",
       }),
     ).toEqual({ ok: false, reason: "verified_event_not_found" });
   });
@@ -242,9 +278,14 @@ describe("control-plane tracker ceremony runtime", () => {
         actor: { id: "human" },
         // Even if the event has authority, no prior delivery → pending_not_found
         attentionResponse: {
+          schemaVersion: 1,
+          responseId: "resp-attacker",
+          requestId: "never-delivered-attn",
+          correlationId: "corr-attacker",
           actorRole: "operator",
           decision: "approve",
           rationale: "Attacker-supplied approve.",
+          createdAt: "2026-07-12T15:00:00.000Z",
         },
       },
     };
@@ -265,7 +306,6 @@ describe("control-plane tracker ceremony runtime", () => {
       profileHash: compiled.profileHash,
       requestId: "never-delivered-attn",
       verifiedEventId: "verified-evt-attacker",
-      responseId: "resp-attacker",
     });
     expect(result).toEqual({ ok: false, reason: "pending_not_found" });
 
@@ -282,7 +322,6 @@ describe("control-plane tracker ceremony runtime", () => {
           workspaceId: "ws-1",
         },
         verifiedEventId: "verified-evt-attacker",
-        responseId: "resp-x",
         actorRole: "operator",
         decision: "approve",
         rationale: "Looks good.",
@@ -325,7 +364,10 @@ describe("control-plane tracker ceremony runtime", () => {
     const backendA = new SqliteEventStore(dbPath);
     const backendB = new SqliteEventStore(dbPath);
     const storeA = new EventStoreAttentionDeliveryStore(backendA, opts);
-    const storeB = new EventStoreAttentionDeliveryStore(backendB, opts);
+    const storeB = new EventStoreAttentionDeliveryStore(backendB, {
+      ...opts,
+      clock: () => new Date("2026-07-12T15:00:00.001Z"),
+    });
     expect(storeA.durableSingleFlight).toBe(true);
 
     const tokens: string[] = [];
@@ -387,7 +429,7 @@ describe("control-plane tracker ceremony runtime", () => {
     expect(completes.length).toBe(1);
     expect(completes[0]?.event.missionId).toBe("mission-cp");
     expect(reserves[0]?.event.missionId).toBe("mission-cp");
-    expect(attempts).toBeGreaterThanOrEqual(a.actions.length);
+    expect(attempts).toBe(a.actions.length);
     // Every action kind gets a stable token; duplicates under recovery re-use it.
     const uniqueTokens = new Set(tokens);
     expect(uniqueTokens.size).toBe(a.actions.length);
@@ -400,7 +442,7 @@ describe("control-plane tracker ceremony runtime", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("restart after reserve-only reuses completion path with stable tokens", async () => {
+  it("restart after reserve-only reuses provider tokens after lease takeover", async () => {
     const compiled = doctrine();
     const dir = mkdtempSync(join(tmpdir(), "attn-restart-"));
     const dbPath = join(dir, "events.sqlite");
@@ -412,14 +454,14 @@ describe("control-plane tracker ceremony runtime", () => {
     const backend1 = new SqliteEventStore(dbPath);
     const store1 = new EventStoreAttentionDeliveryStore(backend1, opts);
     const tokens: string[] = [];
+    let crashAfterProviderAttempt = true;
     const adapter = {
       attempt: async (input: AttentionDeliveryAttemptInput) => {
         tokens.push(input.idempotencyToken);
+        if (crashAfterProviderAttempt) throw new Error("simulated_process_crash");
         return { ok: true as const };
       },
     };
-    // Simulate crash: reserve without complete by calling runExclusive factory that throws after reserve.
-    // First delivery succeeds fully.
     const runtime1 = createTrackerCeremonyRuntime({
       doctrine: compiled,
       policy: new DoctrineAttentionPolicy(compiled),
@@ -434,13 +476,17 @@ describe("control-plane tracker ceremony runtime", () => {
       workspaceId: "ws-1",
       request: attentionRequest({ requestId: "attn-restart" }),
     };
-    const first = await runtime1.deliverAttention(payload);
+    await expect(runtime1.deliverAttention(payload)).rejects.toThrow(/simulated_process_crash/u);
+    expect(tokens.length).toBe(1);
     backend1.close();
 
-    // New process: new connections on same SQLite — returns prior durable complete, no new adapter calls.
-    const tokensBefore = tokens.length;
+    // New process after lease expiry resumes with the exact same provider token.
+    crashAfterProviderAttempt = false;
     const backend2 = new SqliteEventStore(dbPath);
-    const store2 = new EventStoreAttentionDeliveryStore(backend2, opts);
+    const store2 = new EventStoreAttentionDeliveryStore(backend2, {
+      ...opts,
+      clock: () => new Date("2026-07-12T15:01:00.000Z"),
+    });
     const runtime2 = createTrackerCeremonyRuntime({
       doctrine: compiled,
       policy: new DoctrineAttentionPolicy(compiled),
@@ -451,8 +497,9 @@ describe("control-plane tracker ceremony runtime", () => {
       clock: () => new Date("2026-07-12T16:00:00.000Z"),
     });
     const second = await runtime2.deliverAttention(payload);
-    expect(second).toEqual(first);
-    expect(tokens.length).toBe(tokensBefore);
+    expect(second.requestId).toBe("attn-restart");
+    expect(tokens.length).toBeGreaterThan(1);
+    expect(new Set(tokens).size).toBe(second.actions.length);
 
     backend2.close();
     rmSync(dir, { recursive: true, force: true });

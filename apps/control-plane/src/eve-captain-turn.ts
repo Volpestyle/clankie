@@ -1,4 +1,5 @@
 import type { CaptainCeremonyProjection } from "@clankie/doctrine";
+import { createHmac } from "node:crypto";
 import {
   CaptainChannelTurnResultSchema,
   LinearAgentThreadContextSchema,
@@ -23,6 +24,8 @@ export interface EveCaptainChannelTurnOptions {
   readonly fetchImpl?: typeof fetch;
   /** Trusted compiled ceremony projection supplied into Eve clientContext. */
   readonly ceremonyProjection?: CaptainCeremonyProjection;
+  /** Shared captain credential used only to authenticate the projection envelope. */
+  readonly captainToken?: string;
 }
 
 interface EveSessionCursor {
@@ -42,11 +45,16 @@ export class EveCaptainChannelTurnPort implements CaptainChannelTurnPort {
   private readonly fetchImpl: typeof fetch;
   private readonly sessions = new Map<string, EveSessionCursor>();
   private readonly ceremonyProjection: CaptainCeremonyProjection | undefined;
+  private readonly ceremonyProjectionSignature: string | undefined;
 
   public constructor(options: EveCaptainChannelTurnOptions) {
     this.baseUrl = assertLoopbackUrl(options.baseUrl);
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.ceremonyProjection = options.ceremonyProjection;
+    this.ceremonyProjectionSignature =
+      options.ceremonyProjection === undefined || options.captainToken === undefined
+        ? undefined
+        : signCeremonyProjection(options.ceremonyProjection, options.captainToken);
   }
 
   public async submit(rawInput: CaptainChannelTurnSubmission): Promise<CaptainChannelTurnResult> {
@@ -71,9 +79,14 @@ export class EveCaptainChannelTurnPort implements CaptainChannelTurnPort {
             workspaceId: request.identity.workspaceId,
             issueId: request.issue.id,
             agentSessionId: request.session.id,
-            ...(this.ceremonyProjection === undefined
+            ...(this.ceremonyProjection === undefined || this.ceremonyProjectionSignature === undefined
               ? {}
-              : { metadata: { ceremonyProjection: this.ceremonyProjection } }),
+              : {
+                  metadata: {
+                    ceremonyProjection: this.ceremonyProjection,
+                    ceremonyProjectionSignature: this.ceremonyProjectionSignature,
+                  },
+                }),
           },
           identity: {
             missionId: request.identity.missionId,
@@ -84,7 +97,6 @@ export class EveCaptainChannelTurnPort implements CaptainChannelTurnPort {
             deliveryId: request.deliveryId,
           },
           thread,
-          ...(this.ceremonyProjection === undefined ? {} : { ceremonyProjection: this.ceremonyProjection }),
         },
         ...(previous?.continuationToken === undefined
           ? {}
@@ -162,6 +174,12 @@ export class EveCaptainChannelTurnPort implements CaptainChannelTurnPort {
       code: "captain_boundary_missing",
     });
   }
+}
+
+export function signCeremonyProjection(projection: CaptainCeremonyProjection, captainToken: string): string {
+  return createHmac("sha256", captainToken)
+    .update(`clankie:captain-ceremony:v1\0${JSON.stringify(projection)}`)
+    .digest("hex");
 }
 
 async function readNdjson(stream: ReadableStream<Uint8Array>): Promise<unknown[]> {

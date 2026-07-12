@@ -1,62 +1,36 @@
 import type { CaptainCeremonyProjection } from "@clankie/doctrine";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 /**
- * Structural check that a candidate projection matches a trusted compiled projection
- * for security-sensitive ceremony controls. Arbitrary metadata that disables draft
- * validation, human attention, or independent verification is rejected.
+ * Authenticate a compiled projection supplied through caller-controlled Eve
+ * context. Shape checks prevent malformed signed data from reaching the renderer.
  */
-export function isTrustedCeremonyProjection(
-  candidate: CaptainCeremonyProjection,
-  trusted: CaptainCeremonyProjection,
-): boolean {
-  return (
-    candidate.profileId === trusted.profileId &&
-    candidate.profileHash === trusted.profileHash &&
-    candidate.issueDraft.enabled === trusted.issueDraft.enabled &&
-    candidate.issueDraft.requireProductImpact === trusted.issueDraft.requireProductImpact &&
-    candidate.humanAttention.enabled === trusted.humanAttention.enabled &&
-    candidate.independentVerifierRequired === trusted.independentVerifierRequired &&
-    candidate.externalConnectors === trusted.externalConnectors &&
-    candidate.integrationFlow === trusted.integrationFlow
-  );
-}
-
-/**
- * Extract a ceremony projection object from Eve channel metadata.
- * Shape-only: callers must validate against a trusted compiled projection.
- */
-export function ceremonyProjectionFromChannel(channel: {
-  readonly metadata?: Readonly<Record<string, unknown>>;
-}): CaptainCeremonyProjection | undefined {
-  const raw = channel.metadata?.ceremonyProjection;
-  if (raw === null || typeof raw !== "object") return undefined;
-  const record = raw as Record<string, unknown>;
-  if (typeof record.profileId !== "string" || typeof record.profileHash !== "string") {
+export function verifyCeremonyProjectionEnvelope(
+  context: Readonly<Record<string, unknown>> | undefined,
+  captainToken: string | undefined,
+): CaptainCeremonyProjection | undefined {
+  if (context === undefined || captainToken === undefined || captainToken.length === 0) return undefined;
+  const projection = context.ceremonyProjection;
+  const signature = context.ceremonyProjectionSignature;
+  if (projection === null || typeof projection !== "object") return undefined;
+  if (typeof signature !== "string" || !/^[a-f0-9]{64}$/u.test(signature)) return undefined;
+  const record = projection as Record<string, unknown>;
+  if (
+    typeof record.profileId !== "string" ||
+    typeof record.profileHash !== "string" ||
+    record.issueDraft === null ||
+    typeof record.issueDraft !== "object" ||
+    record.humanAttention === null ||
+    typeof record.humanAttention !== "object"
+  ) {
     return undefined;
   }
-  if (record.issueDraft === null || typeof record.issueDraft !== "object") return undefined;
-  if (record.humanAttention === null || typeof record.humanAttention !== "object") return undefined;
-  return raw as CaptainCeremonyProjection;
-}
-
-/**
- * Resolve the projection used for captain prompt composition.
- * Prefer trusted compiled doctrine. Channel metadata is accepted only when it
- * matches the trusted projection; mismatched/untrusted projections are rejected.
- */
-export function resolveTrustedCeremonyProjection(
-  channel: { readonly metadata?: Readonly<Record<string, unknown>> },
-  trusted: CaptainCeremonyProjection,
-): { readonly projection: CaptainCeremonyProjection } | { readonly rejected: true; readonly reason: string } {
-  const fromChannel = ceremonyProjectionFromChannel(channel);
-  if (fromChannel === undefined) {
-    return { projection: trusted };
-  }
-  if (!isTrustedCeremonyProjection(fromChannel, trusted)) {
-    return { rejected: true, reason: "untrusted_ceremony_projection" };
-  }
-  // Always use the trusted compiled object, never the untrusted channel copy.
-  return { projection: trusted };
+  const expected = createHmac("sha256", captainToken)
+    .update(`clankie:captain-ceremony:v1\0${JSON.stringify(projection)}`)
+    .digest();
+  const supplied = Buffer.from(signature, "hex");
+  if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return undefined;
+  return projection as CaptainCeremonyProjection;
 }
 
 /**
@@ -113,10 +87,7 @@ export function formatCeremonyInstructions(projection: CaptainCeremonyProjection
  * `trusted` is required — channel metadata alone cannot supply a projection that
  * disables draft/attention/independent verification.
  */
-export function captainCeremonyInstructions(
-  channel: { readonly metadata?: Readonly<Record<string, unknown>> },
-  trusted?: CaptainCeremonyProjection,
-): string {
+export function captainCeremonyInstructions(trusted?: CaptainCeremonyProjection): string {
   if (trusted === undefined) {
     return [
       "# Tracker ceremony",
@@ -128,17 +99,5 @@ export function captainCeremonyInstructions(
     ].join("\n");
   }
 
-  const resolved = resolveTrustedCeremonyProjection(channel, trusted);
-  if ("rejected" in resolved) {
-    return [
-      "# Tracker ceremony",
-      "",
-      "Rejected untrusted ceremony projection from channel metadata.",
-      "Using the trusted compiled doctrine projection only.",
-      "Arbitrary metadata cannot disable draft validation, human attention, or independent verification.",
-      "",
-      formatCeremonyInstructions(trusted),
-    ].join("\n");
-  }
-  return formatCeremonyInstructions(resolved.projection);
+  return formatCeremonyInstructions(trusted);
 }

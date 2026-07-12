@@ -1,14 +1,12 @@
 import { createHash } from "node:crypto";
 import type { CaptainCeremonyProjection } from "@clankie/doctrine";
 import {
-  CeremonyTargetRoleSchema,
   HumanAttentionRequestSchema,
   HumanAttentionResponseSchema,
   type DomainEvent,
   type HumanAttentionRequest,
   type HumanAttentionResponse,
   type CeremonyDirectNotificationMode,
-  type CeremonyTargetRole,
 } from "@clankie/protocol";
 import type { TrackerPolicyDecision, TrackerPolicyGateway, TrackerWriteRequest } from "./types.ts";
 import {
@@ -66,6 +64,10 @@ export function actionIdempotencyToken(
 
 export interface AttentionDeliveryAttemptInput {
   readonly action: ResolvedAttentionAction;
+  /** Validated semantic request used to render the provider action. */
+  readonly request: HumanAttentionRequest;
+  /** Trusted workspace identity from the resolved binding. */
+  readonly workspaceId: string;
   /**
    * Provider seam obligation: pass this unchanged on every retry of the same
    * logical action. Adapters must treat it as their external idempotency key.
@@ -168,12 +170,13 @@ export function policyActionForCapability(
 ): TrackerWriteRequest["action"] | undefined {
   switch (kind) {
     case "assign_principal":
-      return "tracker.assignment.mirror";
+      return "tracker.assignment.update";
     case "comment_notify":
-      return "tracker.comment.create";
-    case "surface_notify":
     case "direct_notify":
+      return "tracker.comment.create";
     case "attention_marker":
+      return "tracker.attention.marker.apply";
+    case "surface_notify":
       return undefined;
   }
 }
@@ -265,9 +268,7 @@ function pendingFromDelivery(
   return {
     request,
     workspaceId: binding.workspaceId,
-    ...(request.trackerRef?.externalRef === undefined
-      ? {}
-      : { issueId: request.trackerRef.externalRef }),
+    ...(request.trackerRef?.externalRef === undefined ? {} : { issueId: request.trackerRef.externalRef }),
   };
 }
 
@@ -343,137 +344,168 @@ export async function deliverHumanAttention(
       fingerprint,
     },
     async () => {
-    const actionResults: AttentionActionResult[] = [];
-    if (resolved.actions.length === 0) {
+      const actionResults: AttentionActionResult[] = [];
+      if (resolved.actions.length === 0) {
+        const now = (input.clock ?? (() => new Date()))().toISOString();
+        return {
+          pending,
+          result: {
+            requestId: request.requestId,
+            missionId: request.missionId,
+            correlationId: request.correlationId,
+            aggregate: enforceRequiredDirectNotification(directNotification, [], "unsupported"),
+            actions: [],
+            fingerprint,
+            deliveredAt: now,
+          },
+        };
+      }
+
+      for (const action of resolved.actions) {
+        const policyAction = policyActionForCapability(action.capability.kind);
+        if (policyAction === undefined) {
+          actionResults.push({
+            kind: action.capability.kind,
+            principalId: action.capability.principalId,
+            ...(action.surface === undefined ? {} : { surface: action.surface }),
+            status: "unsupported",
+            detail: `No exact doctrine/policy action truthfully describes capability ${action.capability.kind}`,
+            isFallback: action.isFallback,
+          });
+          continue;
+        }
+
+        const writeRequest: TrackerWriteRequest = {
+          action: policyAction,
+          riskClass: "reversible-write",
+          missionId: input.missionIdForPolicy ?? request.missionId,
+          ref: {
+            connector: "workspace",
+            workspaceId: input.binding.workspaceId,
+            issueId: request.trackerRef?.externalRef ?? request.requestId,
+          },
+          idempotencyKey: `${request.requestId}:${action.capability.kind}:${action.capability.principalId}`,
+          correlationId: request.correlationId,
+          content: request.actionableAsk,
+        };
+        const decision: TrackerPolicyDecision = await input.policy.authorize(writeRequest);
+        if (decision.effect !== "allow") {
+          actionResults.push({
+            kind: action.capability.kind,
+            principalId: action.capability.principalId,
+            ...(action.surface === undefined ? {} : { surface: action.surface }),
+            status: "denied",
+            detail: decision.reason,
+            isFallback: action.isFallback,
+          });
+          continue;
+        }
+
+        const idempotencyToken = actionIdempotencyToken(request.requestId, fingerprint, action);
+        const attempt = await input.adapter.attempt({
+          action,
+          request,
+          workspaceId: input.binding.workspaceId,
+          idempotencyToken,
+        });
+        if (attempt.unsupported === true) {
+          actionResults.push({
+            kind: action.capability.kind,
+            principalId: action.capability.principalId,
+            ...(action.surface === undefined ? {} : { surface: action.surface }),
+            status: "unsupported",
+            ...(attempt.detail === undefined ? {} : { detail: attempt.detail }),
+            isFallback: action.isFallback,
+          });
+          continue;
+        }
+        actionResults.push({
+          kind: action.capability.kind,
+          principalId: action.capability.principalId,
+          ...(action.surface === undefined ? {} : { surface: action.surface }),
+          status: attempt.ok ? "succeeded" : "failed",
+          ...(attempt.detail === undefined ? {} : { detail: attempt.detail }),
+          isFallback: action.isFallback,
+        });
+      }
+
       const now = (input.clock ?? (() => new Date()))().toISOString();
+      const aggregate = enforceRequiredDirectNotification(
+        directNotification,
+        actionResults,
+        aggregateOf(actionResults),
+      );
       return {
         pending,
         result: {
           requestId: request.requestId,
           missionId: request.missionId,
           correlationId: request.correlationId,
-          aggregate: enforceRequiredDirectNotification(directNotification, [], "unsupported"),
-          actions: [],
+          aggregate,
+          actions: actionResults,
           fingerprint,
           deliveredAt: now,
         },
       };
-    }
-
-    for (const action of resolved.actions) {
-      const policyAction = policyActionForCapability(action.capability.kind);
-      if (policyAction === undefined) {
-        actionResults.push({
-          kind: action.capability.kind,
-          principalId: action.capability.principalId,
-          ...(action.surface === undefined ? {} : { surface: action.surface }),
-          status: "unsupported",
-          detail: `No exact doctrine/policy action truthfully describes capability ${action.capability.kind}`,
-          isFallback: action.isFallback,
-        });
-        continue;
-      }
-
-      const writeRequest: TrackerWriteRequest = {
-        action: policyAction,
-        riskClass: "reversible-write",
-        missionId: input.missionIdForPolicy ?? request.missionId,
-        ref: {
-          connector: "workspace",
-          workspaceId: input.binding.workspaceId,
-          issueId: request.trackerRef?.externalRef ?? request.requestId,
-        },
-        idempotencyKey: `${request.requestId}:${action.capability.kind}:${action.capability.principalId}`,
-      };
-      const decision: TrackerPolicyDecision = await input.policy.authorize(writeRequest);
-      if (decision.effect !== "allow") {
-        actionResults.push({
-          kind: action.capability.kind,
-          principalId: action.capability.principalId,
-          ...(action.surface === undefined ? {} : { surface: action.surface }),
-          status: "denied",
-          detail: decision.reason,
-          isFallback: action.isFallback,
-        });
-        continue;
-      }
-
-      const idempotencyToken = actionIdempotencyToken(request.requestId, fingerprint, action);
-      const attempt = await input.adapter.attempt({ action, idempotencyToken });
-      if (attempt.unsupported === true) {
-        actionResults.push({
-          kind: action.capability.kind,
-          principalId: action.capability.principalId,
-          ...(action.surface === undefined ? {} : { surface: action.surface }),
-          status: "unsupported",
-          ...(attempt.detail === undefined ? {} : { detail: attempt.detail }),
-          isFallback: action.isFallback,
-        });
-        continue;
-      }
-      actionResults.push({
-        kind: action.capability.kind,
-        principalId: action.capability.principalId,
-        ...(action.surface === undefined ? {} : { surface: action.surface }),
-        status: attempt.ok ? "succeeded" : "failed",
-        ...(attempt.detail === undefined ? {} : { detail: attempt.detail }),
-        isFallback: action.isFallback,
-      });
-    }
-
-    const now = (input.clock ?? (() => new Date()))().toISOString();
-    const aggregate = enforceRequiredDirectNotification(
-      directNotification,
-      actionResults,
-      aggregateOf(actionResults),
-    );
-    return {
-      pending,
-      result: {
-        requestId: request.requestId,
-        missionId: request.missionId,
-        correlationId: request.correlationId,
-        aggregate,
-        actions: actionResults,
-        fingerprint,
-        deliveredAt: now,
-      },
-    };
-  });
+    },
+  );
 
   return stored.result;
 }
 
-const DECISIONS = new Set(["approve", "deny", "defer", "clarify", "redirect"]);
+/**
+ * Extract the complete typed response from a verified authoritative event.
+ * Partial/root-level decision fields are deliberately rejected: request and
+ * correlation identity must travel with the authoritative response.
+ */
+export function authorityFromVerifiedEvent(event: DomainEvent): HumanAttentionResponse | undefined {
+  const data = event.data as Record<string, unknown>;
+  const parsed = HumanAttentionResponseSchema.safeParse(data.attentionResponse);
+  return parsed.success ? parsed.data : undefined;
+}
 
 /**
- * Extract actor role, decision, and rationale from a verified authoritative event.
- * Accepts a typed `attentionResponse` / `humanAttentionResponse` object or the same
- * fields on the event data root. Caller-supplied authority is never used.
+ * Deterministically turn a verified agent-session prompt into a typed response.
+ * The actor must equal the provider principal bound to the pending semantic role.
+ * Free-form approval prose is never interpreted; Linear humans use the explicit
+ * `clankie-response <requestId> <decision>: <rationale>` command emitted by the
+ * notification adapter.
  */
-export function authorityFromVerifiedEvent(event: DomainEvent):
-  | {
-      readonly actorRole: CeremonyTargetRole;
-      readonly decision: HumanAttentionResponse["decision"];
-      readonly rationale: string;
-    }
-  | undefined {
+export function responseFromVerifiedEvent(
+  event: DomainEvent,
+  pending: PendingAttentionRecord,
+  binding: WorkspaceTrackerBinding,
+): HumanAttentionResponse | undefined {
+  const role = binding.roles[pending.request.targetRole];
+  if (role === undefined) return undefined;
   const data = event.data as Record<string, unknown>;
-  const candidates: unknown[] = [data.attentionResponse, data.humanAttentionResponse, data];
-  for (const candidate of candidates) {
-    if (candidate === null || typeof candidate !== "object") continue;
-    const record = candidate as Record<string, unknown>;
-    const actorRole = CeremonyTargetRoleSchema.safeParse(record.actorRole);
-    const decision =
-      typeof record.decision === "string" && DECISIONS.has(record.decision)
-        ? (record.decision as HumanAttentionResponse["decision"])
-        : undefined;
-    const rationale = typeof record.rationale === "string" ? record.rationale.trim() : "";
-    if (actorRole.success && decision !== undefined && rationale.length > 0) {
-      return { actorRole: actorRole.data, decision, rationale };
-    }
-  }
-  return undefined;
+  const actor = data.actor as { id?: string } | undefined;
+  if (actor?.id !== role.principalId) return undefined;
+  const embedded = authorityFromVerifiedEvent(event);
+  if (embedded !== undefined) return embedded;
+  const activity = data.activity as { id?: string; body?: string } | undefined;
+  if (typeof activity?.body !== "string") return undefined;
+  const escapedRequestId = pending.request.requestId.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const match = activity.body.match(
+    new RegExp(
+      "(?:^|\\s)clankie-response\\s+`?" +
+        escapedRequestId +
+        "`?\\s+(approve|deny|defer|clarify|redirect)\\s*:\\s*(.+?)\\s*$",
+      "iu",
+    ),
+  );
+  if (match?.[1] === undefined || match[2] === undefined || match[2].trim().length === 0) return undefined;
+  return HumanAttentionResponseSchema.parse({
+    schemaVersion: 1,
+    responseId: activity.id ?? event.id,
+    requestId: pending.request.requestId,
+    correlationId: pending.request.correlationId,
+    actorRole: pending.request.targetRole,
+    decision: match[1].toLowerCase(),
+    rationale: match[2].trim(),
+    ...(pending.request.trackerRef === undefined ? {} : { trackerRef: pending.request.trackerRef }),
+    createdAt: event.occurredAt,
+  });
 }
 
 /**
@@ -485,10 +517,12 @@ export function rootCommentIdFromAgentSessionEvent(event: DomainEvent): string |
   const comment = data.comment as { id?: string | null; rootId?: string | null } | undefined;
   if (typeof comment?.rootId === "string" && comment.rootId.length > 0) return comment.rootId;
   if (typeof comment?.id === "string" && comment.id.length > 0) return comment.id;
-  const session = data.session as {
-    commentId?: string | null;
-    sourceCommentId?: string | null;
-  } | undefined;
+  const session = data.session as
+    | {
+        commentId?: string | null;
+        sourceCommentId?: string | null;
+      }
+    | undefined;
   if (typeof session?.sourceCommentId === "string" && session.sourceCommentId.length > 0) {
     return session.sourceCommentId;
   }
@@ -510,11 +544,7 @@ export function rootCommentIdFromAgentSessionEvent(event: DomainEvent): string |
 export function correlateAgentSessionToAttention(input: {
   readonly pending: PendingAttentionRecord;
   readonly event: DomainEvent;
-  readonly responseId: string;
-  readonly actorRole: HumanAttentionResponse["actorRole"];
-  readonly decision: HumanAttentionResponse["decision"];
-  readonly rationale: string;
-  readonly clock?: () => Date;
+  readonly response: HumanAttentionResponse;
 }): HumanAttentionResponse | undefined {
   const type = input.event.type;
   if (type !== "tracker.agent-session.created" && type !== "tracker.agent-session.prompted") {
@@ -550,21 +580,17 @@ export function correlateAgentSessionToAttention(input: {
   if (actor?.id !== undefined && appActor?.id !== undefined && actor.id === appActor.id) {
     return undefined;
   }
-
-  const createdAt = (input.clock ?? (() => new Date()))().toISOString();
-  return HumanAttentionResponseSchema.parse({
-    schemaVersion: 1,
-    responseId: input.responseId,
-    requestId: input.pending.request.requestId,
-    correlationId: input.pending.request.correlationId,
-    actorRole: input.actorRole,
-    decision: input.decision,
-    rationale: input.rationale,
-    createdAt,
-    ...(input.pending.request.trackerRef === undefined
-      ? {}
-      : { trackerRef: input.pending.request.trackerRef }),
-  });
+  const response = HumanAttentionResponseSchema.parse(input.response);
+  if (response.requestId !== input.pending.request.requestId) return undefined;
+  if (response.correlationId !== input.pending.request.correlationId) return undefined;
+  if (
+    JSON.stringify(response.trackerRef ?? null) !== JSON.stringify(input.pending.request.trackerRef ?? null)
+  ) {
+    return undefined;
+  }
+  const responseMs = Date.parse(response.createdAt);
+  if (!Number.isFinite(responseMs) || responseMs < requestCreatedMs || responseMs > eventMs) return undefined;
+  return response;
 }
 
 /** Explicit counterexample: ordinary issue comments never resolve pending attention. */

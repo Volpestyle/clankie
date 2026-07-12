@@ -10,6 +10,7 @@ import {
   deliveryFingerprint,
   enforceRequiredDirectNotification,
   policyActionForCapability,
+  responseFromVerifiedEvent,
   rootCommentIdFromAgentSessionEvent,
   type AttentionActionResult,
   type AttentionDeliveryAdapter,
@@ -18,10 +19,7 @@ import {
   type StoredAttentionDelivery,
 } from "../src/human-attention.ts";
 import type { TrackerPolicyDecision, TrackerPolicyGateway, TrackerWriteRequest } from "../src/types.ts";
-import {
-  resolveAttentionActions,
-  type WorkspaceTrackerBinding,
-} from "../src/workspace-binding.ts";
+import { resolveAttentionActions, type WorkspaceTrackerBinding } from "../src/workspace-binding.ts";
 
 function projection(enabled = true) {
   return projectCaptainCeremony(
@@ -224,22 +222,28 @@ function sessionEvent(overrides?: {
       appActor: { id: "app-1" },
       actor: { id: "human-1" },
       attentionResponse: {
+        schemaVersion: 1,
+        responseId: "resp-1",
+        requestId: "attn-1",
+        correlationId: "corr-attn-1",
         actorRole: "operator",
         decision: "approve",
         rationale: "Approved from verified agent-session event.",
+        trackerRef: { correlationId: "corr-attn-1", externalRef: "issue-1" },
+        createdAt: "2026-07-12T13:59:59.000Z",
       },
-      ...(overrides?.data ?? {}),
+      ...overrides?.data,
     },
   } as unknown as DomainEvent;
 }
 
 describe("policyActionForCapability", () => {
   it("maps only capabilities with truthful side-effect actions", () => {
-    expect(policyActionForCapability("assign_principal")).toBe("tracker.assignment.mirror");
+    expect(policyActionForCapability("assign_principal")).toBe("tracker.assignment.update");
     expect(policyActionForCapability("comment_notify")).toBe("tracker.comment.create");
-    expect(policyActionForCapability("attention_marker")).toBeUndefined();
+    expect(policyActionForCapability("attention_marker")).toBe("tracker.attention.marker.apply");
     expect(policyActionForCapability("surface_notify")).toBeUndefined();
-    expect(policyActionForCapability("direct_notify")).toBeUndefined();
+    expect(policyActionForCapability("direct_notify")).toBe("tracker.comment.create");
   });
 });
 
@@ -486,9 +490,15 @@ describe("attention correlation", () => {
         comment: { id: "cmt-leaf", rootId: "root-1" },
         session: { id: "session-1" },
         attentionResponse: {
+          schemaVersion: 1,
+          responseId: "resp-1",
+          requestId: "attn-1",
+          correlationId: "corr-attn-1",
           actorRole: "operator",
           decision: "approve",
           rationale: "Approved the write-scope expansion.",
+          trackerRef: { correlationId: "corr-attn-1", externalRef: "issue-1" },
+          createdAt: "2026-07-12T13:59:59.000Z",
         },
       },
     });
@@ -505,11 +515,7 @@ describe("attention correlation", () => {
         rootCommentId: "root-1",
       },
       event,
-      responseId: "resp-1",
-      actorRole: authority!.actorRole,
-      decision: authority!.decision,
-      rationale: authority!.rationale,
-      clock: () => new Date("2026-07-12T14:00:01.000Z"),
+      response: authority!,
     });
     expect(response).toMatchObject({
       requestId: "attn-1",
@@ -525,8 +531,7 @@ describe("attention correlation", () => {
       correlateAgentSessionToAttention({
         pending: { request: request(), workspaceId: "workspace-1", issueId: "issue-1" },
         event,
-        responseId: "resp-1",
-        ...authority,
+        response: authority,
       }),
     ).toBeUndefined();
   });
@@ -542,8 +547,7 @@ describe("attention correlation", () => {
           issueId: "issue-1",
         },
         event,
-        responseId: "resp-1",
-        ...authority,
+        response: authority,
       }),
     ).toBeUndefined();
   });
@@ -552,7 +556,11 @@ describe("attention correlation", () => {
     expect(
       correlateOutOfSessionIssueComment({
         pending: { request: request(), workspaceId: "workspace-1", issueId: "issue-1" },
-        comment: { issueId: "issue-1", body: "I approve this from a normal issue comment.", actorId: "human-1" },
+        comment: {
+          issueId: "issue-1",
+          body: "I approve this from a normal issue comment.",
+          actorId: "human-1",
+        },
       }),
     ).toBeUndefined();
   });
@@ -576,6 +584,43 @@ describe("attention correlation", () => {
       },
     } as unknown as DomainEvent;
     expect(authorityFromVerifiedEvent(bare)).toBeUndefined();
+  });
+
+  it("parses only the exact response command from the bound provider principal", () => {
+    const pending = { request: request(), workspaceId: "workspace-1", issueId: "issue-1" };
+    const event = sessionEvent({
+      data: {
+        attentionResponse: undefined,
+        actor: { id: "principal-operator" },
+        activity: {
+          id: "activity-response-1",
+          body: "@Clankie clankie-response `attn-1` approve: Ship the durable option.",
+        },
+      },
+    });
+    expect(responseFromVerifiedEvent(event, pending, binding())).toMatchObject({
+      responseId: "activity-response-1",
+      requestId: "attn-1",
+      decision: "approve",
+      rationale: "Ship the durable option.",
+    });
+    expect(
+      responseFromVerifiedEvent(
+        { ...event, data: { ...event.data, actor: { id: "someone-else" } } },
+        pending,
+        binding(),
+      ),
+    ).toBeUndefined();
+    expect(
+      responseFromVerifiedEvent(
+        {
+          ...event,
+          data: { ...event.data, activity: { id: "a2", body: "Looks good, approved." } },
+        },
+        pending,
+        binding(),
+      ),
+    ).toBeUndefined();
   });
 });
 

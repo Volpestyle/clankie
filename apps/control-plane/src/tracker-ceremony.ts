@@ -1,17 +1,19 @@
-import { decideAction, projectCaptainCeremony, type CompiledDoctrine } from "@clankie/doctrine";
 import {
-  OptimisticConcurrencyError,
-  type EventStore,
-  type ProjectionEventStore,
-} from "@clankie/event-store";
+  createConnectorActionClassifier,
+  createNarrativeWritePolicy,
+  decideAction,
+  projectCaptainCeremony,
+  type CompiledDoctrine,
+  type NarrativeWritePolicyEvaluator,
+} from "@clankie/doctrine";
+import { randomUUID } from "node:crypto";
+import { setTimeout as sleep } from "node:timers/promises";
+import { OptimisticConcurrencyError, type EventStore, type ProjectionEventStore } from "@clankie/event-store";
+import { type DomainEvent, type HumanAttentionResponse } from "@clankie/protocol";
 import {
-  type DomainEvent,
-  type HumanAttentionResponse,
-} from "@clankie/protocol";
-import {
-  authorityFromVerifiedEvent,
   correlateAgentSessionToAttention,
   deliverHumanAttention,
+  responseFromVerifiedEvent,
   validateIssueDraft,
   type AttentionDeliveryAdapter,
   type AttentionDeliveryAttemptInput,
@@ -28,9 +30,7 @@ import { z } from "zod";
 /** True when the event store supports durable compare-and-append streams. */
 export function isProjectionEventStore(store: EventStore): store is ProjectionEventStore {
   const candidate = store as ProjectionEventStore;
-  return (
-    typeof candidate.appendExpected === "function" && typeof candidate.readStream === "function"
-  );
+  return typeof candidate.appendExpected === "function" && typeof candidate.readStream === "function";
 }
 
 export const ValidateIssueDraftRequestSchema = z
@@ -59,7 +59,6 @@ export const CorrelateAttentionRequestSchema = z
   .object({
     requestId: z.string().min(1),
     verifiedEventId: z.string().min(1),
-    responseId: z.string().min(1),
     profileHash: z.string().min(1),
   })
   .strict();
@@ -72,9 +71,7 @@ export interface WorkspaceBindingResolver {
 export interface TrackerCeremonyRuntime {
   validateDraft(raw: unknown): ReturnType<typeof validateIssueDraft>;
   deliverAttention(raw: unknown): Promise<AttentionDeliveryResult>;
-  correlate(
-    raw: unknown,
-  ): Promise<HumanAttentionResponse | { ok: false; reason: string }>;
+  correlate(raw: unknown): Promise<HumanAttentionResponse | { ok: false; reason: string }>;
 }
 
 /**
@@ -83,9 +80,14 @@ export interface TrackerCeremonyRuntime {
  */
 export class DoctrineAttentionPolicy implements TrackerPolicyGateway {
   private readonly doctrine: CompiledDoctrine;
+  private readonly narrativePolicy: NarrativeWritePolicyEvaluator;
+  private readonly classify = createConnectorActionClassifier([
+    { action: "tracker.comment.create", riskClass: "narrative-write", narrativeKind: "issue-comment" },
+  ]);
 
   public constructor(doctrine: CompiledDoctrine) {
     this.doctrine = doctrine;
+    this.narrativePolicy = createNarrativeWritePolicy(doctrine);
   }
 
   public async authorize(request: TrackerWriteRequest): Promise<{
@@ -93,7 +95,7 @@ export class DoctrineAttentionPolicy implements TrackerPolicyGateway {
     reason: string;
     obligations?: readonly string[];
   }> {
-    const decision = decideAction(this.doctrine, {
+    const actionRequest = {
       id: request.idempotencyKey,
       principal: { kind: "captain", id: "tracker-ceremony" },
       action: request.action,
@@ -103,7 +105,17 @@ export class DoctrineAttentionPolicy implements TrackerPolicyGateway {
         risk: "low",
         profileHash: this.doctrine.profileHash,
       },
-    });
+    } as const;
+    const classification = this.classify(request.action);
+    const decision =
+      classification?.riskClass === "narrative-write"
+        ? this.narrativePolicy.decide({
+            request: actionRequest,
+            classification,
+            correlationId: request.correlationId ?? "",
+            content: request.content ?? "",
+          })
+        : decideAction(this.doctrine, actionRequest, classification);
     return {
       effect: decision.effect,
       reason: decision.reason,
@@ -173,9 +185,12 @@ export class EventStoreAttentionDeliveryStore implements AttentionDeliveryStore 
     readonly profileHash: string;
     readonly idFactory: () => string;
     readonly clock: () => Date;
+    readonly claimLeaseMs: number;
+    readonly claimPollMs: number;
   };
   /** Optional same-process assist only — durability is mission-stream reserve/complete. */
   private readonly processLocal = new ProcessLocalKeyExclusive();
+  private readonly storeInstanceId = randomUUID();
 
   public constructor(
     eventStore: EventStore,
@@ -183,6 +198,8 @@ export class EventStoreAttentionDeliveryStore implements AttentionDeliveryStore 
       readonly profileHash: string;
       readonly idFactory: () => string;
       readonly clock: () => Date;
+      readonly claimLeaseMs?: number;
+      readonly claimPollMs?: number;
     },
   ) {
     if (!isProjectionEventStore(eventStore)) {
@@ -191,7 +208,11 @@ export class EventStoreAttentionDeliveryStore implements AttentionDeliveryStore 
       );
     }
     this.eventStore = eventStore;
-    this.options = options;
+    this.options = {
+      ...options,
+      claimLeaseMs: options.claimLeaseMs ?? 30_000,
+      claimPollMs: options.claimPollMs ?? 10,
+    };
   }
 
   public async get(requestId: string): Promise<StoredAttentionDelivery | undefined> {
@@ -209,46 +230,69 @@ export class EventStoreAttentionDeliveryStore implements AttentionDeliveryStore 
     context: AttentionDeliveryClaimContext,
     factory: () => Promise<StoredAttentionDelivery>,
   ): Promise<StoredAttentionDelivery> {
-    const { missionId, requestId, correlationId, fingerprint } = context;
+    const { missionId, requestId, fingerprint } = context;
+    const ownerId = `${this.storeInstanceId}:${this.options.idFactory()}`;
     // Process-local assist only; cross-process correctness is mission-stream claim.
     return this.processLocal.run(`${missionId}:${requestId}`, async () => {
-      const claim = await this.ensureReserved(context);
-      if (claim.complete !== undefined) {
-        return this.requireFingerprint(claim.complete, fingerprint);
-      }
-      if (claim.reserve === undefined) {
-        throw new Error(
-          "attention_delivery_reservation_failed_closed: could not reserve or observe a durable claim on the mission stream",
-        );
-      }
-      if (claim.reserve.fingerprint !== fingerprint) {
-        throw new Error("Human-attention delivery idempotency conflict for request content/fingerprint");
-      }
+      for (;;) {
+        const claim = await this.ensureOwnedReservation(context, ownerId);
+        if (claim.complete !== undefined) {
+          return this.requireFingerprint(claim.complete, fingerprint);
+        }
+        if (claim.reserve.fingerprint !== fingerprint) {
+          throw new Error("Human-attention delivery idempotency conflict for request content/fingerprint");
+        }
+        if (claim.reserve.ownerId !== ownerId) {
+          const waitMs = Math.max(
+            1,
+            Math.min(
+              this.options.claimPollMs,
+              Date.parse(claim.reserve.leaseExpiresAt) - this.options.clock().getTime(),
+            ),
+          );
+          await sleep(waitMs);
+          continue;
+        }
 
-      // Claim-resume after crash: re-run factory with stable action tokens.
-      const record = await factory();
-      if (record.result.fingerprint !== fingerprint) {
-        throw new Error("Human-attention delivery factory fingerprint mismatch");
+        // Claim-resume after lease expiry: re-run with stable provider tokens.
+        const record = await factory();
+        if (record.result.fingerprint !== fingerprint) {
+          throw new Error("Human-attention delivery factory fingerprint mismatch");
+        }
+        return this.ensureCompleted(context, record);
       }
-
-      return this.ensureCompleted(context, record);
     });
   }
 
-  private async ensureReserved(context: AttentionDeliveryClaimContext): Promise<{
-    readonly reserve: { readonly fingerprint: string } | undefined;
+  private async ensureOwnedReservation(
+    context: AttentionDeliveryClaimContext,
+    ownerId: string,
+  ): Promise<{
+    readonly reserve: {
+      readonly fingerprint: string;
+      readonly ownerId: string;
+      readonly leaseExpiresAt: string;
+    };
     readonly complete: StoredAttentionDelivery | undefined;
   }> {
     const { missionId, requestId, correlationId, fingerprint } = context;
     for (let attempt = 0; attempt < MAX_STREAM_CLAIM_ATTEMPTS; attempt += 1) {
       const state = await this.readMissionClaim(missionId, requestId);
-      if (state.complete !== undefined || state.reserve !== undefined) {
-        return state;
+      if (state.complete !== undefined) {
+        return {
+          complete: state.complete,
+          reserve: state.reserve ?? this.syntheticReserve(fingerprint, ownerId),
+        };
       }
+      const nowMs = this.options.clock().getTime();
+      if (state.reserve !== undefined && Date.parse(state.reserve.leaseExpiresAt) > nowMs) {
+        return { complete: undefined, reserve: state.reserve };
+      }
+      const leaseExpiresAt = new Date(nowMs + this.options.claimLeaseMs).toISOString();
       try {
         await this.eventStore.appendExpected(
           {
-            id: attentionReserveEventId(requestId),
+            id: `${attentionReserveEventId(requestId)}:${ownerId}`,
             occurredAt: this.options.clock().toISOString(),
             missionId,
             correlationId,
@@ -257,6 +301,8 @@ export class EventStoreAttentionDeliveryStore implements AttentionDeliveryStore 
             data: {
               requestId,
               fingerprint,
+              ownerId,
+              leaseExpiresAt,
               phase: "reserved",
             },
           },
@@ -268,9 +314,16 @@ export class EventStoreAttentionDeliveryStore implements AttentionDeliveryStore 
         continue;
       }
       // Re-read after successful reserve so we observe our own claim.
-      return this.readMissionClaim(missionId, requestId);
+      const after = await this.readMissionClaim(missionId, requestId);
+      if (after.reserve !== undefined) return { complete: after.complete, reserve: after.reserve };
     }
-    return this.readMissionClaim(missionId, requestId);
+    throw new Error(
+      "attention_delivery_reservation_failed_closed: could not reserve or observe a durable claim on the mission stream",
+    );
+  }
+
+  private syntheticReserve(fingerprint: string, ownerId: string) {
+    return { fingerprint, ownerId, leaseExpiresAt: new Date(0).toISOString() };
   }
 
   private async ensureCompleted(
@@ -305,13 +358,11 @@ export class EventStoreAttentionDeliveryStore implements AttentionDeliveryStore 
           expectedRevision: state.streamLength,
         });
       } catch (error) {
-        if (!(error instanceof OptimisticConcurrencyError)) throw error;
-        // Deterministic complete id: concurrent identical complete is idempotent.
-        try {
-          await this.eventStore.append(completeEvent);
-        } catch {
-          // Another writer finished — re-read.
+        const afterError = await this.readMissionClaim(missionId, requestId);
+        if (afterError.complete !== undefined) {
+          return this.requireFingerprint(afterError.complete, fingerprint);
         }
+        if (!(error instanceof OptimisticConcurrencyError)) throw error;
         continue;
       }
       const after = await this.readMissionClaim(missionId, requestId);
@@ -324,10 +375,7 @@ export class EventStoreAttentionDeliveryStore implements AttentionDeliveryStore 
     );
   }
 
-  private requireFingerprint(
-    record: StoredAttentionDelivery,
-    fingerprint: string,
-  ): StoredAttentionDelivery {
+  private requireFingerprint(record: StoredAttentionDelivery, fingerprint: string): StoredAttentionDelivery {
     if (record.result.fingerprint !== fingerprint) {
       throw new Error("Human-attention delivery idempotency conflict for request content/fingerprint");
     }
@@ -353,18 +401,28 @@ export class EventStoreAttentionDeliveryStore implements AttentionDeliveryStore 
     requestId: string,
   ): Promise<{
     readonly streamLength: number;
-    readonly reserve: { readonly fingerprint: string } | undefined;
+    readonly reserve:
+      | {
+          readonly fingerprint: string;
+          readonly ownerId: string;
+          readonly leaseExpiresAt: string;
+        }
+      | undefined;
     readonly complete: StoredAttentionDelivery | undefined;
   }> {
     const entries = await this.eventStore.readStream(missionId);
-    let reserve: { fingerprint: string } | undefined;
+    let reserve: { fingerprint: string; ownerId: string; leaseExpiresAt: string } | undefined;
     let complete: StoredAttentionDelivery | undefined;
     for (const entry of entries) {
       const event = entry.event;
       if (event.data.requestId !== requestId) continue;
       if (event.type === "tracker.human-attention.reserve") {
         const fp = event.data.fingerprint;
-        if (typeof fp === "string") reserve = { fingerprint: fp };
+        const ownerId = event.data.ownerId;
+        const leaseExpiresAt = event.data.leaseExpiresAt;
+        if (typeof fp === "string" && typeof ownerId === "string" && typeof leaseExpiresAt === "string") {
+          reserve = { fingerprint: fp, ownerId, leaseExpiresAt };
+        }
       }
       if (event.type === "tracker.human-attention.store") {
         const parsed = this.completeFromEvent(event);
@@ -482,18 +540,27 @@ export function createTrackerCeremonyRuntime(input: {
       if (event.type !== "tracker.agent-session.created" && event.type !== "tracker.agent-session.prompted") {
         return { ok: false as const, reason: "event_not_agent_session" };
       }
-      const authority = authorityFromVerifiedEvent(event);
+      if (event.missionId !== stored.pending.request.missionId) {
+        return { ok: false as const, reason: "event_mission_mismatch" };
+      }
+      if (event.profileHash !== input.doctrine.profileHash) {
+        return { ok: false as const, reason: "event_profile_mismatch" };
+      }
+      if (event.correlationId !== stored.pending.request.correlationId) {
+        return { ok: false as const, reason: "event_correlation_mismatch" };
+      }
+      const binding = input.bindingResolver.resolve(stored.pending.workspaceId);
+      if (binding === undefined) {
+        return { ok: false as const, reason: "workspace_binding_unavailable" };
+      }
+      const authority = responseFromVerifiedEvent(event, stored.pending, binding);
       if (authority === undefined) {
         return { ok: false as const, reason: "event_authority_missing" };
       }
       const response = correlateAgentSessionToAttention({
         pending: stored.pending,
         event,
-        responseId: parsed.responseId,
-        actorRole: authority.actorRole,
-        decision: authority.decision,
-        rationale: authority.rationale,
-        ...(input.clock === undefined ? {} : { clock: input.clock }),
+        response: authority,
       });
       if (response === undefined) {
         return { ok: false as const, reason: "no_correlation" };
