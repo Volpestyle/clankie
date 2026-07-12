@@ -122,6 +122,10 @@ Captain input is automated input under the takeover rules above — a human
 control lease pauses it — and parity covers steering and configuration only;
 approvals stay on authenticated surfaces.
 
+The canonical [`clankie-lead` skill](../.agents/skills/clankie-lead/SKILL.md)
+defines this captain path, and its [delegation protocol](../.agents/skills/clankie-lead/references/delegation-protocol.md)
+specifies bounded briefs, goal arming, run receipts, harvest, resume, and cleanup.
+
 ## Herdr boundary
 
 Herdr is an optional external pane host. Use its process/socket/session API through a `TerminalProvider`; do not scrape the rendered screen and do not make Herdr the persistence model. Keep native PTY and tmux adapters available.
