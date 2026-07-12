@@ -340,6 +340,9 @@ importers:
       '@clankie/model-registry':
         specifier: workspace:*
         version: link:../../packages/model-registry
+      '@clankie/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
       '@earendil-works/pi-tui':
         specifier: 0.80.6
         version: 0.80.6

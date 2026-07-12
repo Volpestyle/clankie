@@ -15,11 +15,12 @@
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {
-    "@earendil-works/pi-tui": "0.80.6",
     "@clankie/api-client": "workspace:*",
     "@clankie/credential-broker": "workspace:*",
     "@clankie/model-provider": "workspace:*",
     "@clankie/model-registry": "workspace:*",
+    "@clankie/observability": "workspace:*",
+    "@earendil-works/pi-tui": "0.80.6",
     "chalk": "5.6.2",
     "eve": "0.22.4"
   },

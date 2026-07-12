@@ -1,5 +1,6 @@
 import { chmodSync, closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { Client, isCurrentTurnBoundaryEvent, type HandleMessageStreamEvent } from "eve/client";
 import {
   captainServiceStatePath,
@@ -15,14 +16,26 @@ import {
 } from "./captain-service.ts";
 import { assertCaptainEndpoint, captainInfoGeneration } from "../src/session/captain-identity.ts";
 import {
+  reportHerdrAgent,
+  reportHerdrMetadata,
+  type HerdrCommandRunner,
+} from "../src/session/herdr-report.ts";
+import {
   CaptainSessionCursorStore,
   emptyCaptainCursor,
   type CaptainSessionCursor,
   type StoredCaptainSessionCursor,
 } from "../src/session/session-cursor.ts";
+import { emptyTraceCursor, TraceCursorStore } from "../src/session/trace-cursor.ts";
+import { formatTraceLines, renderTraceEvent, type TraceRenderMode } from "../src/session/trace-renderer.ts";
+import { parseTraceLane, type TraceCursor, type TraceLane } from "../src/session/trace-types.ts";
 
 const HEADLESS_CURSOR_NAME = "captain-headless-session.json";
 const HEADLESS_LOCK_NAME = "captain-headless-session.lock";
+const TRACE_CURSOR_NAME = "captain-trace-session.json";
+/** Default typed lane for the HTTP headless captain session (captain-eve channel mapping). */
+const DEFAULT_TRACE_LANE: TraceLane = "tui";
+const TRACE_IDLE_POLL_MS = 500;
 
 type Writable = { write(chunk: string): unknown };
 
@@ -32,15 +45,24 @@ export interface HeadlessCaptainCommandOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly fetchImpl?: typeof fetch;
   readonly host?: string;
+  readonly herdrRunCommand?: HerdrCommandRunner;
+  readonly maxTraceEvents?: number;
   readonly readStdin?: () => Promise<string>;
   readonly repoRoot: string;
   readonly restartImpl?: (options: RestartCaptainServiceOptions) => Promise<CaptainServiceHandle>;
+  readonly sleepImpl?: (ms: number) => Promise<void>;
   readonly stderr?: Writable;
   readonly stdout?: Writable;
+  /** Test hook: stop the long-lived trace loop after the current stream ends. */
+  readonly traceOnce?: boolean;
 }
 
 export function headlessCaptainCursorPath(env: NodeJS.ProcessEnv = process.env): string {
   return join(captainStateDirectory(env), HEADLESS_CURSOR_NAME);
+}
+
+export function traceCaptainCursorPath(env: NodeJS.ProcessEnv = process.env): string {
+  return join(captainStateDirectory(env), TRACE_CURSOR_NAME);
 }
 
 function headlessCaptainLockPath(env: NodeJS.ProcessEnv): string {
@@ -115,6 +137,8 @@ function commandHelp(): string {
     "  msg [--new] <message>    Send without opening the TTY face; omit message to read stdin",
     "  watch [--timeout SEC]    Stream JSONL events until the active turn settles",
     "  wait [--timeout SEC]     Wait silently and print the final boundary",
+    "  trace [--json] [--lane LANE] [--timeout SEC]",
+    "                           Live render-only reasoning/tool stream (stays across turns)",
     "",
     "With no command, clankie opens the fullscreen operator console and requires a TTY.",
   ].join("\n");
@@ -128,6 +152,7 @@ export function isHeadlessCaptainCommand(command: string | undefined): boolean {
     command === "msg" ||
     command === "watch" ||
     command === "wait" ||
+    command === "trace" ||
     command === "help" ||
     command === "--help" ||
     command === "-h"
@@ -287,6 +312,43 @@ function parseTimeout(args: readonly string[]): number | undefined {
   return seconds * 1_000;
 }
 
+interface TraceCliOptions {
+  readonly json: boolean;
+  readonly lane: TraceLane;
+  readonly timeoutMs: number | undefined;
+}
+
+function parseTraceArgs(args: readonly string[]): TraceCliOptions {
+  let json = false;
+  let lane: TraceLane = DEFAULT_TRACE_LANE;
+  let timeoutMs: number | undefined;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--json") {
+      json = true;
+      continue;
+    }
+    if (arg === "--lane") {
+      const value = args[index + 1];
+      if (value === undefined) throw new Error("Usage: clankie trace [--json] [--lane LANE] [--timeout SEC]");
+      lane = parseTraceLane(value);
+      index += 1;
+      continue;
+    }
+    if (arg === "--timeout") {
+      const value = args[index + 1];
+      if (value === undefined) throw new Error("Usage: clankie trace [--json] [--lane LANE] [--timeout SEC]");
+      const seconds = Number(value);
+      if (!Number.isFinite(seconds) || seconds <= 0) throw new Error("Timeout must be a positive number.");
+      timeoutMs = seconds * 1_000;
+      index += 1;
+      continue;
+    }
+    throw new Error("Usage: clankie trace [--json] [--lane LANE] [--timeout SEC]");
+  }
+  return { json, lane, timeoutMs };
+}
+
 function boundaryState(event: HandleMessageStreamEvent): "completed" | "failed" | "waiting" | undefined {
   if (event.type === "session.completed") return "completed";
   if (event.type === "session.failed") return "failed";
@@ -366,6 +428,218 @@ async function runWatch(
   });
 }
 
+/**
+ * Consume one Eve session event stream without exiting on turn boundaries.
+ * Advances only the identity-only trace cursor; never writes event payloads.
+ * Returns the updated cursor and how many events were observed.
+ */
+export async function processTraceStream(input: {
+  readonly events: AsyncIterable<HandleMessageStreamEvent>;
+  readonly cursor: TraceCursor;
+  readonly mode: TraceRenderMode;
+  readonly write: (line: string) => void;
+  readonly onCursor?: (cursor: TraceCursor) => Promise<void>;
+  readonly maxEvents?: number;
+  readonly signal?: AbortSignal;
+}): Promise<{ cursor: TraceCursor; eventsSeen: number; hitBoundary: boolean }> {
+  let cursor = input.cursor;
+  let eventsSeen = 0;
+  let hitBoundary = false;
+  for await (const event of input.events) {
+    if (input.signal?.aborted) break;
+    eventsSeen += 1;
+    const nextIndex = cursor.streamIndex + 1;
+    const boundary = boundaryState(event);
+    if (boundary !== undefined) hitBoundary = true;
+    // Stay subscribed across turn settle: active reflects turn state only.
+    cursor = {
+      version: 1,
+      generation: cursor.generation,
+      streamIndex: nextIndex,
+      lane: cursor.lane,
+      active: boundary === undefined,
+      ...(cursor.sessionId === undefined ? {} : { sessionId: cursor.sessionId }),
+    };
+    const lines = formatTraceLines(
+      renderTraceEvent({
+        lane: cursor.lane,
+        event,
+        ...(cursor.sessionId === undefined ? {} : { sessionId: cursor.sessionId }),
+        streamIndex: nextIndex,
+      }),
+      input.mode,
+    );
+    for (const line of lines) input.write(`${line}\n`);
+    if (input.onCursor !== undefined) await input.onCursor(cursor);
+    // Unlike watch/wait, never break on isCurrentTurnBoundaryEvent.
+    if (input.maxEvents !== undefined && eventsSeen >= input.maxEvents) break;
+  }
+  return { cursor, eventsSeen, hitBoundary };
+}
+
+async function resolveTraceSession(input: {
+  readonly env: NodeJS.ProcessEnv;
+  readonly generation: string;
+  readonly lane: TraceLane;
+  readonly store: TraceCursorStore;
+}): Promise<TraceCursor> {
+  const stored = await input.store.read();
+  if (stored !== undefined && stored.generation === input.generation && stored.sessionId !== undefined) {
+    return { ...stored, lane: input.lane };
+  }
+  // Adopt the active headless session identity (session id only — no payloads).
+  const headless = await new CaptainSessionCursorStore(headlessCaptainCursorPath(input.env)).read();
+  if (
+    headless?.sessionId !== undefined &&
+    (headless.version !== 2 || headless.generation === input.generation)
+  ) {
+    return {
+      version: 1,
+      generation: input.generation,
+      sessionId: headless.sessionId,
+      streamIndex: stored?.sessionId === headless.sessionId ? (stored.streamIndex ?? 0) : 0,
+      lane: input.lane,
+      active: headless.active,
+    };
+  }
+  if (stored !== undefined && stored.generation === input.generation) {
+    return { ...stored, lane: input.lane };
+  }
+  return emptyTraceCursor(input.generation, input.lane);
+}
+
+async function runTrace(args: readonly string[], options: HeadlessCaptainCommandOptions): Promise<number> {
+  const cli = parseTraceArgs(args);
+  const env = options.env ?? process.env;
+  const host = commandHost(options);
+  const stdout = options.stdout ?? process.stdout;
+  const mode: TraceRenderMode = cli.json ? "json" : "human";
+  const delay = options.sleepImpl ?? sleep;
+  const store = new TraceCursorStore(traceCaptainCursorPath(env));
+
+  const record = readCaptainServiceRecord(captainServiceStatePath(env), host);
+  const connected = await connectCaptain({
+    host,
+    ...(options.clientFactory === undefined ? {} : { clientFactory: options.clientFactory }),
+    ...(record?.generation === undefined ? {} : { generation: record.generation }),
+  });
+
+  let cursor = await resolveTraceSession({
+    env,
+    generation: connected.generation,
+    lane: cli.lane,
+    store,
+  });
+  await store.write(cursor);
+
+  const herdrOpts = {
+    env,
+    ...(options.herdrRunCommand === undefined ? {} : { runCommand: options.herdrRunCommand }),
+  };
+  await reportHerdrMetadata({
+    ...herdrOpts,
+    title: "clankie trace",
+    customStatus: `lane=${cursor.lane}`,
+    agent: "clankie-trace",
+  });
+  await reportHerdrAgent("working", {
+    ...herdrOpts,
+    message: "tracing captain session stream",
+  });
+
+  const controller = new AbortController();
+  const timer =
+    cli.timeoutMs === undefined
+      ? undefined
+      : setTimeout(() => {
+          controller.abort();
+        }, cli.timeoutMs);
+
+  let totalEvents = 0;
+  try {
+    while (!controller.signal.aborted) {
+      if (cursor.sessionId === undefined) {
+        cursor = await resolveTraceSession({
+          env,
+          generation: connected.generation,
+          lane: cli.lane,
+          store,
+        });
+        if (cursor.sessionId === undefined) {
+          if (options.traceOnce === true) break;
+          await delay(TRACE_IDLE_POLL_MS);
+          continue;
+        }
+        await store.write(cursor);
+      }
+
+      const sessionState = {
+        streamIndex: cursor.streamIndex,
+        sessionId: cursor.sessionId,
+      };
+      try {
+        const result = await processTraceStream({
+          events: connected.client.session(sessionState).stream({
+            startIndex: cursor.streamIndex,
+            signal: controller.signal,
+          }),
+          cursor,
+          mode,
+          write: (line) => {
+            stdout.write(line);
+          },
+          onCursor: async (next) => {
+            cursor = next;
+            await store.write(next);
+          },
+          ...(options.maxTraceEvents === undefined
+            ? {}
+            : { maxEvents: Math.max(0, options.maxTraceEvents - totalEvents) }),
+          signal: controller.signal,
+        });
+        cursor = result.cursor;
+        totalEvents += result.eventsSeen;
+        await store.write(cursor);
+        if (options.maxTraceEvents !== undefined && totalEvents >= options.maxTraceEvents) break;
+        if (options.traceOnce === true) break;
+        if (controller.signal.aborted) break;
+        // Stream ended: reconnect with identity-only cursor (no payload on disk).
+        await delay(TRACE_IDLE_POLL_MS);
+        // Re-adopt headless session if a new turn started under a new session id.
+        const refreshed = await resolveTraceSession({
+          env,
+          generation: connected.generation,
+          lane: cli.lane,
+          store,
+        });
+        if (refreshed.sessionId !== cursor.sessionId) {
+          cursor = refreshed;
+          await store.write(cursor);
+        }
+      } catch (error) {
+        if (controller.signal.aborted) break;
+        throw error;
+      }
+    }
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    await reportHerdrAgent(controller.signal.aborted ? "idle" : "idle", {
+      ...herdrOpts,
+      message: "trace stopped",
+    }).catch(() => undefined);
+  }
+
+  if (controller.signal.aborted && cli.timeoutMs !== undefined) {
+    outputJson(options.stderr ?? process.stderr, {
+      ok: false,
+      status: "timeout",
+      ...(cursor.sessionId === undefined ? {} : { sessionId: cursor.sessionId }),
+    });
+    return 124;
+  }
+  return 0;
+}
+
 export async function runHeadlessCaptainCommand(
   args: readonly string[],
   options: HeadlessCaptainCommandOptions,
@@ -377,6 +651,7 @@ export async function runHeadlessCaptainCommand(
     if (command === "msg") return await runMessage(args.slice(1), options);
     if (command === "watch") return await runWatch(args.slice(1), options, false);
     if (command === "wait") return await runWatch(args.slice(1), options, true);
+    if (command === "trace") return await runTrace(args.slice(1), options);
     if (command === "help" || command === "--help" || command === "-h") {
       (options.stdout ?? process.stdout).write(`${commandHelp()}\n`);
       return 0;

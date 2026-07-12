@@ -25,6 +25,9 @@ clankie restart                # restart only a launcher-owned captain
 clankie msg "status report"    # submit on the isolated headless session
 clankie watch --timeout 600    # JSONL events until the turn settles
 clankie wait --timeout 600     # final boundary only
+clankie trace                  # live reasoning/tool stream; stays across turns
+clankie trace --json           # machine-readable NDJSON (redacted)
+clankie trace --lane gameplay  # typed session-context lane label
 pnpm --filter @clankie/tui dev # from the repo
 ```
 
@@ -52,6 +55,48 @@ fixture. `health`/`status` never start a service and never probe the nonexistent
 consume the Eve semantic stream from a private mode-0600 cursor under
 `${XDG_STATE_HOME:-~/.local/state}/clankie/`, separate from the fullscreen
 face's `.data/tui/captain-session.json` cursor.
+
+### `clankie trace` (read-only live thinking surface)
+
+`clankie trace` is a **render-only** subscriber of the live Eve `/eve/v1/session`
+NDJSON stream (same source as `watch`). It is not a second control surface: no
+steering, no scheduling, no mission-engine imports, and no state inference from
+terminal text.
+
+- **Stays across turns.** Unlike `watch`/`wait`, a turn boundary
+  (`session.waiting` / `session.completed`) does not exit the process. The
+  client reconnects with its identity-only cursor so consecutive turns keep
+  streaming in one pane.
+- **Lane tags from typed context only.** Every rendered line is prefixed with a
+  typed captain lane (`tui`, `discord_voice`, `discord_presence`, `gameplay`).
+  Lane labels come from session context (default HTTP headless path → `tui` per
+  captain-eve channel mapping, or an explicit `--lane` value). They are never
+  inferred from model/reasoning prose. The public Eve stream event body does not
+  stamp lane per event; multi-lane fan-in of concurrent sessions would need a
+  public session→lane listing API before a live multi-session merge can be
+  trustworthy without operator/session context.
+- **No payload persistence.** The mode-0600 checkpoint at
+  `${XDG_STATE_HOME:-~/.local/state}/clankie/captain-trace-session.json` holds
+  only sanitized continuation identity (`generation`, `sessionId`, `streamIndex`,
+  `lane`, `active`). Reasoning text, prompts, tool inputs, and tool outputs are
+  never written to disk by the trace client.
+- **Render-time redaction.** Tool inputs/outputs pass through
+  `@clankie/observability`'s `sanitizeForSupportBundle` so secrets such as
+  `Authorization` headers render as `[REDACTED]` (same central key list as
+  support bundles — no forked redaction table).
+- **`--json`.** Emits one redacted JSON object per renderable event for machine
+  consumers; human mode dims reasoning and prints `name(args-summary)` tool
+  lines.
+- **Herdr pane.** Inside Herdr (`HERDR_ENV=1`), the process calls
+  `herdr pane report-agent` / `report-metadata` so the pane shows captain-trace
+  status and siblings can wait on it. Outside Herdr those calls are inert.
+
+Dedicated Herdr pane (from a sibling pane):
+
+```bash
+NEW=$(herdr pane split --direction right --no-focus | python3 -c 'import sys,json; print(json.load(sys.stdin)["result"]["pane"]["pane_id"])')
+herdr pane run "$NEW" "clankie trace"
+```
 
 The `clankie` command runs `bin/clankie.ts` under Node's native type stripping, so the whole dependency graph stays erasable TypeScript (no enums, namespaces, or constructor parameter properties) — enforced repo-wide by `erasableSyntaxOnly` in `tsconfig.base.json`.
 
