@@ -36,7 +36,7 @@ export function verifyCeremonyProjectionEnvelope(
 /**
  * Captain-owned markdown renderer over a trusted CaptainCeremonyProjection.
  * Lives in captain-eve (not tracker-connector): connector owns validation/delivery;
- * captain owns prompt composition (VUH-844 / ADR 0028 boundary).
+ * captain owns prompt composition (VUH-844 / ADR 0029 boundary).
  */
 export function formatCeremonyInstructions(projection: CaptainCeremonyProjection): string {
   const draft = projection.issueDraft;
