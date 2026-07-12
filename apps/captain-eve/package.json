@@ -18,7 +18,6 @@
     "@clankie/event-store": "workspace:*",
     "@clankie/model-provider": "workspace:*",
     "@clankie/protocol": "workspace:*",
-    "@clankie/tracker-connector": "workspace:*",
     "eve": "0.22.4",
     "zod": "4.4.3"
   },

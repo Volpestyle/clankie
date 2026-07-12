@@ -1,4 +1,3 @@
-export * from "./ceremony-projection.ts";
 export * from "./human-attention.ts";
 export * from "./issue-draft.ts";
 export * from "./linear.ts";

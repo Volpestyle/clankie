@@ -98,6 +98,3 @@ alone never claims delivery.
 `tracker.agent-session.created` / `prompted` identities with matching workspace/
 issue/session/root correlation. Ordinary out-of-session issue comments never
 resolve a request (`correlateOutOfSessionIssueComment` is an explicit no-op).
-
-`formatCeremonyInstructions` renders a portable captain-facing markdown projection
-without provider nouns.
