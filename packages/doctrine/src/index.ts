@@ -4,9 +4,24 @@ import type {
   ActionDecision,
   ActionEffect,
   ActionRequest,
+  CeremonyAuthorityImpact,
+  CeremonyDirectNotificationMode,
+  CeremonyNotificationSurface,
+  CeremonySectionPlacement,
+  CeremonyTargetRole,
+  CeremonyUrgency,
   ExecutionClass,
+  HumanAttentionRequestKind,
   Risk,
   TaskKind,
+} from "@clankie/protocol";
+import {
+  CeremonyDirectNotificationModeSchema,
+  CeremonyNotificationSurfaceSchema,
+  CeremonySectionPlacementSchema,
+  CeremonyTargetRoleSchema,
+  CeremonyUrgencySchema,
+  HumanAttentionRequestKindSchema,
 } from "@clankie/protocol";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
@@ -110,7 +125,47 @@ export const OrchestrationProfileSchema = z.object({
     .object({
       externalConnectors: z.enum(["none", "optional", "required"]),
       integrationFlow: z.enum(["direct_main", "pull_request", "review_gate"]),
+      /**
+       * Optional tracker-ceremony customization (VUH-845). Omitted on base
+       * presets that only set connector/integration ceremony so existing
+       * equality fixtures stay stable; projection supplies deterministic defaults.
+       */
+      tracker: z
+        .object({
+          issueDraft: z
+            .object({
+              enabled: z.boolean(),
+              requireProductImpact: z.boolean(),
+              /** Configurable Product impact section heading. */
+              heading: z.string().trim().min(1).default("Product impact"),
+              /** Where the product-impact section is placed in the draft body. */
+              sectionPlacement: CeremonySectionPlacementSchema.default("first"),
+              /** Concise maximum length for the product-impact summary (sentences). */
+              maxSummarySentences: z.number().int().positive().default(3),
+            })
+            .strict(),
+          humanAttention: z
+            .object({
+              enabled: z.boolean(),
+              defaultTargetRole: CeremonyTargetRoleSchema,
+              defaultRequestKind: HumanAttentionRequestKindSchema,
+              notifyWhenBlocking: z.boolean(),
+              notificationSurfaces: z.array(CeremonyNotificationSurfaceSchema).min(1),
+              blockingUrgency: CeremonyUrgencySchema,
+              /** Semantic direct-notification mode (not a provider operation). */
+              directNotification: CeremonyDirectNotificationModeSchema.default("required"),
+              /**
+               * When true (default), blocking attention gates wait for an
+               * authoritative HumanAttentionResponse before the mission proceeds.
+               */
+              waitForAuthoritativeResponse: z.boolean().default(true),
+            })
+            .strict(),
+        })
+        .strict()
+        .optional(),
     })
+    .strict()
     .optional(),
   planning: z.object({
     requirePlanApproval: z.boolean().default(true),
@@ -257,6 +312,180 @@ export interface CompiledDoctrine {
   };
   routing: Record<TaskKind, ExecutionClass>;
 }
+
+/** Five VUH-844/845 ceremony controls shared by defaults and projection. */
+export const DEFAULT_PRODUCT_IMPACT_HEADING = "Product impact";
+export const DEFAULT_PRODUCT_IMPACT_SECTION_PLACEMENT: CeremonySectionPlacement = "first";
+export const DEFAULT_PRODUCT_IMPACT_MAX_SUMMARY_SENTENCES = 3;
+export const DEFAULT_DIRECT_NOTIFICATION: CeremonyDirectNotificationMode = "required";
+export const DEFAULT_WAIT_FOR_AUTHORITATIVE_RESPONSE = true;
+
+/** Resolved tracker ceremony used by captains (connector-neutral, no I/O). */
+export interface CaptainCeremonyProjection {
+  profileId: string;
+  profileHash: string;
+  externalConnectors: "none" | "optional" | "required";
+  integrationFlow: "direct_main" | "pull_request" | "review_gate";
+  issueDraft: {
+    enabled: boolean;
+    requireProductImpact: boolean;
+    /** Configurable Product impact section heading. */
+    heading: string;
+    /** Section placement in the draft body (default first). */
+    sectionPlacement: CeremonySectionPlacement;
+    /** Concise maximum length for product-impact summary (sentences). */
+    maxSummarySentences: number;
+  };
+  humanAttention: {
+    enabled: boolean;
+    defaultTargetRole: CeremonyTargetRole;
+    defaultRequestKind: HumanAttentionRequestKind;
+    notifyWhenBlocking: boolean;
+    notificationSurfaces: CeremonyNotificationSurface[];
+    blockingUrgency: CeremonyUrgency;
+    /** Semantic direct-notification mode for attention delivery. */
+    directNotification: CeremonyDirectNotificationMode;
+    /**
+     * When true, blocking attention waits for an authoritative response
+     * before the mission proceeds (default true).
+     */
+    waitForAuthoritativeResponse: boolean;
+  };
+  /** True when the invariant independent-verifier floor is active. */
+  independentVerifierRequired: boolean;
+}
+
+type TrackerCeremony = NonNullable<NonNullable<OrchestrationProfile["ceremony"]>["tracker"]>;
+
+function withIssueDraftControls(
+  issueDraft: TrackerCeremony["issueDraft"],
+): CaptainCeremonyProjection["issueDraft"] {
+  return {
+    enabled: issueDraft.enabled,
+    requireProductImpact: issueDraft.requireProductImpact,
+    heading: issueDraft.heading ?? DEFAULT_PRODUCT_IMPACT_HEADING,
+    sectionPlacement: issueDraft.sectionPlacement ?? DEFAULT_PRODUCT_IMPACT_SECTION_PLACEMENT,
+    maxSummarySentences: issueDraft.maxSummarySentences ?? DEFAULT_PRODUCT_IMPACT_MAX_SUMMARY_SENTENCES,
+  };
+}
+
+function withHumanAttentionControls(
+  humanAttention: TrackerCeremony["humanAttention"],
+): CaptainCeremonyProjection["humanAttention"] {
+  return {
+    enabled: humanAttention.enabled,
+    defaultTargetRole: humanAttention.defaultTargetRole,
+    defaultRequestKind: humanAttention.defaultRequestKind,
+    notifyWhenBlocking: humanAttention.notifyWhenBlocking,
+    notificationSurfaces: [...humanAttention.notificationSurfaces],
+    blockingUrgency: humanAttention.blockingUrgency,
+    directNotification: humanAttention.directNotification ?? DEFAULT_DIRECT_NOTIFICATION,
+    waitForAuthoritativeResponse:
+      humanAttention.waitForAuthoritativeResponse ?? DEFAULT_WAIT_FOR_AUTHORITATIVE_RESPONSE,
+  };
+}
+
+/**
+ * Deterministic defaults when a profile omits `ceremony.tracker`.
+ * Derived only from connector/integration ceremony — never from provider nouns.
+ * Always includes the five VUH-844 ceremony controls with stated defaults.
+ */
+export function defaultTrackerCeremony(input: {
+  externalConnectors: "none" | "optional" | "required";
+  integrationFlow: "direct_main" | "pull_request" | "review_gate";
+}): TrackerCeremony {
+  const productImpactControls = {
+    heading: DEFAULT_PRODUCT_IMPACT_HEADING,
+    sectionPlacement: DEFAULT_PRODUCT_IMPACT_SECTION_PLACEMENT,
+    maxSummarySentences: DEFAULT_PRODUCT_IMPACT_MAX_SUMMARY_SENTENCES,
+  } as const;
+  const attentionControls = {
+    directNotification: DEFAULT_DIRECT_NOTIFICATION,
+    waitForAuthoritativeResponse: DEFAULT_WAIT_FOR_AUTHORITATIVE_RESPONSE,
+  } as const;
+
+  if (input.externalConnectors === "none" || input.integrationFlow === "direct_main") {
+    return {
+      issueDraft: { enabled: false, requireProductImpact: false, ...productImpactControls },
+      humanAttention: {
+        enabled: true,
+        defaultTargetRole: "operator",
+        defaultRequestKind: "blocker_resolution",
+        notifyWhenBlocking: true,
+        notificationSurfaces: ["operator_inbox"],
+        blockingUrgency: "blocking",
+        ...attentionControls,
+      },
+    };
+  }
+  if (input.externalConnectors === "required" || input.integrationFlow === "review_gate") {
+    return {
+      issueDraft: { enabled: true, requireProductImpact: true, ...productImpactControls },
+      humanAttention: {
+        enabled: true,
+        defaultTargetRole: "product_steward",
+        defaultRequestKind: "approval_needed",
+        notifyWhenBlocking: true,
+        notificationSurfaces: ["captain_lane", "operator_inbox", "workspace_surface"],
+        blockingUrgency: "blocking",
+        ...attentionControls,
+      },
+    };
+  }
+  // optional connectors / pull_request (structured)
+  return {
+    issueDraft: { enabled: true, requireProductImpact: true, ...productImpactControls },
+    humanAttention: {
+      enabled: true,
+      defaultTargetRole: "operator",
+      defaultRequestKind: "decision_needed",
+      notifyWhenBlocking: true,
+      notificationSurfaces: ["captain_lane", "operator_inbox"],
+      blockingUrgency: "elevated",
+      ...attentionControls,
+    },
+  };
+}
+
+/**
+ * Concise captain-facing ceremony projection. Pure: no tracker connector I/O.
+ * Overlay layers never carry ceremony (stripped at merge); only base/non-overlay
+ * layers can customize tracker ceremony fields. Always exposes the five VUH-844
+ * controls so VUH-846 can validate/deliver without guessing.
+ */
+export function projectCaptainCeremony(compiled: CompiledDoctrine): CaptainCeremonyProjection {
+  const ceremony = compiled.profile.ceremony ?? {
+    externalConnectors: "optional" as const,
+    integrationFlow: "pull_request" as const,
+  };
+  const tracker =
+    ceremony.tracker ??
+    defaultTrackerCeremony({
+      externalConnectors: ceremony.externalConnectors,
+      integrationFlow: ceremony.integrationFlow,
+    });
+  return {
+    profileId: compiled.profile.id,
+    profileHash: compiled.profileHash,
+    externalConnectors: ceremony.externalConnectors,
+    integrationFlow: ceremony.integrationFlow,
+    issueDraft: withIssueDraftControls(tracker.issueDraft),
+    humanAttention: withHumanAttentionControls(tracker.humanAttention),
+    independentVerifierRequired: compiled.profile.verification.independentVerifier,
+  };
+}
+
+// Re-export ceremony field schemas so doctrine consumers need not reach into protocol
+// for the projection contract surface.
+export type {
+  CeremonyAuthorityImpact,
+  CeremonyDirectNotificationMode,
+  CeremonyNotificationSurface,
+  CeremonySectionPlacement,
+  CeremonyTargetRole,
+  CeremonyUrgency,
+  HumanAttentionRequestKind,
+};
 
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;

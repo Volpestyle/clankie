@@ -49,6 +49,8 @@ actions:
   web.fetch: { default: deny, rules: [] }
   web.browse: { default: deny, rules: [] }
   tracker.assignment.mirror: { default: require_approval, rules: [] }
+  tracker.assignment.update: { default: require_approval, rules: [] }
+  tracker.attention.marker.apply: { default: require_approval, rules: [] }
   tracker.status.update: { default: require_approval, rules: [] }
   tracker.priority.update: { default: require_approval, rules: [] }
   tracker.acceptance-criteria.update: { default: require_approval, rules: [] }
