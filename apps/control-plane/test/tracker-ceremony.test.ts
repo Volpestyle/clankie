@@ -138,6 +138,9 @@ describe("control-plane tracker ceremony runtime", () => {
         authorityImpact: "narrow",
         urgency: "blocking",
         notificationSurfaces: ["operator_inbox"],
+        // best_effort: comment/assign-only bindings may claim delivered.
+        // required mode forbids delivered without successful direct_notify.
+        directNotification: "best_effort",
         createdAt: "2026-07-12T14:00:00.000Z",
         trackerRef: { correlationId: "corr-cp", externalRef: "issue-9" },
       },
@@ -176,6 +179,7 @@ describe("control-plane tracker ceremony runtime", () => {
       profileHash: compiled.profileHash,
       type: "tracker.agent-session.prompted",
       data: {
+        organization: { id: "ws-1" },
         issue: { id: "issue-9" },
         session: { id: "sess-9" },
         appActor: { id: "app" },

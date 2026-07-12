@@ -89,12 +89,20 @@ section placement, and max summary sentences **before** any connector write.
 identity/assignment/mention configuration belongs only in Linear adapter/binding
 fixtures — never in protocol, doctrine, or captain projection text.
 
-`deliverHumanAttention` policy-evaluates every attempted action, is idempotent by
-request id + binding fingerprint, and returns typed per-action plus aggregate
-outcomes: `delivered`, `partial`, `unsupported`, or `fallback`. Configured intent
-alone never claims delivery.
+`deliverHumanAttention` policy-evaluates every attempted action with a truthful
+`TrackerWriteRequest` action (or marks the action `unsupported`). Store keys are
+stable per `requestId`; the content fingerprint includes binding **and** request
+fields so the same id with different ask/role/surfaces conflicts. Aggregate
+outcomes remain `delivered` | `partial` | `unsupported` | `fallback`. When
+`directNotification=required`, a successful `direct_notify` is mandatory for
+`delivered` — marker/comment-only bindings demote to `unsupported` or `fallback`,
+never `delivered`. Per-action `denied` stays distinguishable from `unsupported`
+even when the aggregate collapses to `unsupported`.
 
 `correlateAgentSessionToAttention` resolves pending attention only from verified
-`tracker.agent-session.created` / `prompted` identities with matching workspace/
-issue/session/root correlation. Ordinary out-of-session issue comments never
-resolve a request (`correlateOutOfSessionIssueComment` is an explicit no-op).
+`tracker.agent-session.created` / `prompted` events. It requires
+`pending.workspaceId === event.data.organization.id`, rejects events older than
+`request.createdAt`, and matches root comments via event comment/root fields
+(`comment.rootId` / `comment.id`, then session source/comment ids). Ordinary
+out-of-session issue comments never resolve a request
+(`correlateOutOfSessionIssueComment` is an explicit no-op).

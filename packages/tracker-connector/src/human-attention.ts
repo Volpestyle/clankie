@@ -54,7 +54,11 @@ export interface AttentionDeliveryAdapter {
 /** Durable idempotent store (mission event projection or equivalent). */
 export interface AttentionDeliveryStore {
   get(idempotencyKey: string): Promise<AttentionDeliveryResult | undefined>;
-  put(idempotencyKey: string, fingerprint: string, result: AttentionDeliveryResult): Promise<void>;
+  put(
+    idempotencyKey: string,
+    fingerprint: string,
+    result: AttentionDeliveryResult,
+  ): Promise<void>;
 }
 
 export interface DeliverHumanAttentionInput {
@@ -80,15 +84,12 @@ export function policyActionForCapability(
 ): TrackerWriteRequest["action"] | undefined {
   switch (kind) {
     case "assign_principal":
-      // Truthful only when the adapter performs assignment mirror.
       return "tracker.assignment.mirror";
     case "comment_notify":
-      // Truthful only when the adapter posts a tracker comment.
       return "tracker.comment.create";
     case "surface_notify":
     case "direct_notify":
     case "attention_marker":
-      // No exact doctrine action that describes these side effects yet.
       return undefined;
   }
 }
@@ -96,26 +97,85 @@ export function policyActionForCapability(
 function aggregateOf(actions: readonly AttentionActionResult[]): AttentionAggregateOutcome {
   if (actions.length === 0) return "unsupported";
   const succeeded = actions.filter((action) => action.status === "succeeded");
-  const unsupported = actions.every(
+  const allTerminalUnsupportedOrDenied = actions.every(
     (action) => action.status === "unsupported" || action.status === "denied",
   );
   if (succeeded.length === actions.length) {
     return actions.some((action) => action.isFallback) ? "fallback" : "delivered";
   }
-  if (succeeded.length === 0 && unsupported) return "unsupported";
+  if (succeeded.length === 0 && allTerminalUnsupportedOrDenied) return "unsupported";
   if (succeeded.length === 0) return "unsupported";
   return "partial";
 }
 
+/**
+ * When directNotification is required, a successful direct_notify is mandatory
+ * for aggregate "delivered". Marker/comment-only bindings must never claim delivered.
+ * Per-action denied vs unsupported remains on each action row.
+ */
+export function enforceRequiredDirectNotification(
+  mode: CeremonyDirectNotificationMode,
+  actions: readonly AttentionActionResult[],
+  aggregate: AttentionAggregateOutcome,
+): AttentionAggregateOutcome {
+  if (mode !== "required") return aggregate;
+  const directSucceeded = actions.some(
+    (action) => action.kind === "direct_notify" && action.status === "succeeded",
+  );
+  if (directSucceeded) return aggregate;
+  if (aggregate === "delivered" || aggregate === "partial") {
+    return actions.some((action) => action.isFallback && action.status === "succeeded")
+      ? "fallback"
+      : "unsupported";
+  }
+  return aggregate;
+}
+
+/** Store key is request-id stable so content fingerprint conflicts are detectable. */
+export function deliveryStoreKey(requestId: string): string {
+  return `attention-request:${requestId}`;
+}
+
+/**
+ * Fingerprint includes binding revision/actions **and** request content so a
+ * replay with the same requestId but different ask/role/surfaces conflicts.
+ */
+export function deliveryFingerprint(
+  binding: WorkspaceTrackerBinding,
+  actions: readonly ResolvedAttentionAction[],
+  request: HumanAttentionRequest,
+): string {
+  const payload = {
+    binding: bindingFingerprint(binding, actions),
+    request: {
+      requestId: request.requestId,
+      missionId: request.missionId,
+      correlationId: request.correlationId,
+      targetRole: request.targetRole,
+      requestKind: request.requestKind,
+      actionableAsk: request.actionableAsk,
+      blocking: request.blocking,
+      authorityImpact: request.authorityImpact,
+      urgency: request.urgency,
+      notificationSurfaces: [...request.notificationSurfaces],
+      directNotification: request.directNotification ?? null,
+      waitForAuthoritativeResponse: request.waitForAuthoritativeResponse ?? null,
+      trackerRef: request.trackerRef ?? null,
+    },
+  };
+  return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+/** @deprecated use deliveryStoreKey — kept as alias for callers hashing by request+fingerprint */
 export function deliveryIdempotencyKey(requestId: string, fingerprint: string): string {
   return createHash("sha256").update(`attention:${requestId}:${fingerprint}`).digest("hex");
 }
 
 /**
  * Deliver a human-attention request through a trusted workspace binding.
- * Idempotent by requestId + binding fingerprint. Policy-evaluates every action
- * with a truthful TrackerWriteRequest action (or marks unsupported).
- * Never claims delivery from configured intent alone.
+ * Idempotent by requestId with content-aware fingerprint conflict detection.
+ * Policy-evaluates every action with a truthful TrackerWriteRequest action
+ * (or marks unsupported). Never claims delivery from configured intent alone.
  */
 export async function deliverHumanAttention(
   input: DeliverHumanAttentionInput,
@@ -155,12 +215,12 @@ export async function deliverHumanAttention(
     });
   }
 
-  const fingerprint = bindingFingerprint(input.binding, resolved.actions);
-  const idempotencyKey = deliveryIdempotencyKey(request.requestId, fingerprint);
-  const prior = await input.store.get(idempotencyKey);
+  const fingerprint = deliveryFingerprint(input.binding, resolved.actions, request);
+  const storeKey = deliveryStoreKey(request.requestId);
+  const prior = await input.store.get(storeKey);
   if (prior !== undefined) {
     if (prior.fingerprint !== fingerprint) {
-      throw new Error("Human-attention delivery idempotency conflict for request fingerprint");
+      throw new Error("Human-attention delivery idempotency conflict for request content/fingerprint");
     }
     return prior;
   }
@@ -172,12 +232,12 @@ export async function deliverHumanAttention(
       requestId: request.requestId,
       missionId: request.missionId,
       correlationId: request.correlationId,
-      aggregate: "unsupported",
+      aggregate: enforceRequiredDirectNotification(directNotification, [], "unsupported"),
       actions: [],
       fingerprint,
       deliveredAt: now,
     };
-    await input.store.put(idempotencyKey, fingerprint, result);
+    await input.store.put(storeKey, fingerprint, result);
     return result;
   }
 
@@ -204,7 +264,7 @@ export async function deliverHumanAttention(
         workspaceId: input.binding.workspaceId,
         issueId: request.trackerRef?.externalRef ?? request.requestId,
       },
-      idempotencyKey: `${idempotencyKey}:${action.capability.kind}:${action.capability.principalId}`,
+      idempotencyKey: `${storeKey}:${action.capability.kind}:${action.capability.principalId}`,
     };
     const decision: TrackerPolicyDecision = await input.policy.authorize(writeRequest);
     if (decision.effect !== "allow") {
@@ -242,21 +302,27 @@ export async function deliverHumanAttention(
   }
 
   const now = (input.clock ?? (() => new Date()))().toISOString();
+  const aggregate = enforceRequiredDirectNotification(
+    directNotification,
+    actionResults,
+    aggregateOf(actionResults),
+  );
   const result: AttentionDeliveryResult = {
     requestId: request.requestId,
     missionId: request.missionId,
     correlationId: request.correlationId,
-    aggregate: aggregateOf(actionResults),
+    aggregate,
     actions: actionResults,
     fingerprint,
     deliveredAt: now,
   };
-  await input.store.put(idempotencyKey, fingerprint, result);
+  await input.store.put(storeKey, fingerprint, result);
   return result;
 }
 
 export interface PendingAttentionRecord {
   readonly request: HumanAttentionRequest;
+  /** Must match verified agent-session event organization id (workspace). */
   readonly workspaceId: string;
   readonly issueId?: string;
   readonly agentSessionId?: string;
@@ -264,10 +330,33 @@ export interface PendingAttentionRecord {
 }
 
 /**
+ * Root/source comment identity from a verified agent-session event.
+ * Prefers event.data.comment fields, then session root/source ids.
+ */
+export function rootCommentIdFromAgentSessionEvent(event: DomainEvent): string | null {
+  const data = event.data as Record<string, unknown>;
+  const comment = data.comment as { id?: string | null; rootId?: string | null } | undefined;
+  if (typeof comment?.rootId === "string" && comment.rootId.length > 0) return comment.rootId;
+  if (typeof comment?.id === "string" && comment.id.length > 0) return comment.id;
+  const session = data.session as {
+    commentId?: string | null;
+    sourceCommentId?: string | null;
+  } | undefined;
+  if (typeof session?.sourceCommentId === "string" && session.sourceCommentId.length > 0) {
+    return session.sourceCommentId;
+  }
+  if (typeof session?.commentId === "string" && session.commentId.length > 0) {
+    return session.commentId;
+  }
+  return null;
+}
+
+/**
  * Correlate a **verified** agent-session DomainEvent to a pending attention request.
- * Callers must supply an event already accepted into the durable event store
- * (or equivalent trusted verification path) — never a raw unauthenticated HTTP body.
- * Only `tracker.agent-session.created` / `tracker.agent-session.prompted` may resolve.
+ * - workspaceId must equal event.data.organization.id
+ * - event.occurredAt must not be older than request.createdAt
+ * - root comment uses event comment/root fields (see rootCommentIdFromAgentSessionEvent)
+ * Only `tracker.agent-session.created` / `prompted` may resolve.
  */
 export function correlateAgentSessionToAttention(input: {
   readonly pending: PendingAttentionRecord;
@@ -283,14 +372,19 @@ export function correlateAgentSessionToAttention(input: {
     return undefined;
   }
   const data = input.event.data as Record<string, unknown>;
+  const organization = data.organization as { id?: string } | undefined;
+  if (organization?.id !== input.pending.workspaceId) {
+    return undefined;
+  }
+
+  const requestCreatedMs = Date.parse(input.pending.request.createdAt);
+  const eventMs = Date.parse(input.event.occurredAt);
+  if (!Number.isFinite(requestCreatedMs) || !Number.isFinite(eventMs) || eventMs < requestCreatedMs) {
+    return undefined;
+  }
+
   const issue = data.issue as { id?: string } | undefined;
-  const session = data.session as
-    | {
-        id?: string;
-        commentId?: string | null;
-        sourceCommentId?: string | null;
-      }
-    | undefined;
+  const session = data.session as { id?: string } | undefined;
   const appActor = data.appActor as { id?: string } | undefined;
   const actor = data.actor as { id?: string } | undefined;
 
@@ -301,8 +395,8 @@ export function correlateAgentSessionToAttention(input: {
     return undefined;
   }
   if (input.pending.rootCommentId !== undefined && input.pending.rootCommentId !== null) {
-    const root = session?.commentId ?? session?.sourceCommentId ?? null;
-    if (root !== input.pending.rootCommentId) return undefined;
+    const rootFromEvent = rootCommentIdFromAgentSessionEvent(input.event);
+    if (rootFromEvent !== input.pending.rootCommentId) return undefined;
   }
   if (actor?.id !== undefined && appActor?.id !== undefined && actor.id === appActor.id) {
     return undefined;
@@ -316,7 +410,8 @@ export function correlateAgentSessionToAttention(input: {
     correlationId: input.pending.request.correlationId,
     actorRole: input.actorRole,
     decision: input.decision ?? "clarify",
-    rationale: input.rationale ?? "Authoritative agent-session response correlated to pending attention.",
+    rationale:
+      input.rationale ?? "Authoritative agent-session response correlated to pending attention.",
     createdAt,
     ...(input.pending.request.trackerRef === undefined
       ? {}
