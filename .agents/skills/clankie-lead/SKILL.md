@@ -23,12 +23,13 @@ This protocol is adapted from the pinned v1 `clankie-lead` snapshot `04734df9`. 
 
 1. Create the worker assignment in the mission engine before starting a process or pane. Record the mission, task, worker-run, correlation, doctrine, and profile identities.
 2. Give the worker a bounded brief containing objective, authoritative context, role, dependencies, write/read scope, success criteria, evidence, verification commands, budget, and stop conditions. Point tracker-capable workers at the issue and full comment thread instead of copying stale product context.
-3. For a pane-hosted harness, use the pane's normal operator commands:
+3. During scaffolding, pane-hosted workers run in Herdr. Spawn them with `herdr pane split` + `herdr pane run` (or the Clanky spawn surface when available), confirm identity with `herdr pane list`, and wait on completion with `clanky watch` / `herdr wait` rather than polling pane text. Never substitute a harness's built-in delegation backend (for example Codex cloud agents) for mission workers: those runs are invisible to the pane transport, mission accounting, and the harvest contracts in this protocol, and a lead waiting on them starves.
+4. For a pane-hosted harness, use the pane's normal operator commands:
    - `/model <model>` and `/effort <level>` for supported configuration;
    - plain steering text for bounded course corrections;
    - `/goal <task and definition of done>` at spawn readiness or immediately after spawn to arm the native completion loop.
-4. For an adapter-hosted worker, use the same vocabulary through its typed protocol mapping. The mission task lifecycle is its `/goal` equivalent; do not inject terminal commands into a protocol-native session.
-5. Attribute every captain input. A human control lease pauses automated captain input.
+5. For an adapter-hosted worker, use the same vocabulary through its typed protocol mapping. The mission task lifecycle is its `/goal` equivalent; do not inject terminal commands into a protocol-native session.
+6. Attribute every captain input. A human control lease pauses automated captain input.
 
 Operator parity covers configuration and steering only. Never send approval answers, credentials, policy overrides, merge commands, deployment permission, or other privileged decisions into a worker pane. Request privileged action through policy and wait for an authenticated human approval surface.
 
