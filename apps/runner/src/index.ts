@@ -204,6 +204,17 @@ if (!repoPath) {
   if ("claudeWebTools" in fleet && fleet.claudeWebTools.length > 0) {
     logger.info({ webTools: fleet.claudeWebTools }, "native web research tools granted to Claude worker");
   }
+  if ("browser" in fleet && fleet.browser) {
+    logger.info(
+      {
+        action: fleet.browser.action,
+        projection: fleet.browser.status,
+        reason: fleet.browser.reason,
+        ...(fleet.browser.version ? { version: fleet.browser.version } : {}),
+      },
+      "agent-browser capability projected through doctrine",
+    );
+  }
   if (fleet.adapters.length === 0) {
     logger.error("No provider passed readiness; mission execution remains fail-closed");
   } else {

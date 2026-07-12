@@ -722,3 +722,69 @@ describe("mcp registry and web tool projection", () => {
     expect(fleet.mcp).toBeUndefined();
   });
 });
+
+describe("agent-browser projection", () => {
+  const doctrinePath = join(
+    import.meta.dirname,
+    "..",
+    "..",
+    "..",
+    "doctrine",
+    "profiles",
+    "self-build-lab.yaml",
+  );
+
+  it("projects no browser capability while the operator flag is off", async () => {
+    const fleet = await createReadyProviderFleet({
+      environment: {},
+      workerEnvironment: { PATH: process.env.PATH, HOME: "/synthetic/home" },
+      runnerStateRoot: await mkdtemp(join(tmpdir(), "clankie-browser-off-")),
+      doctrine: compileDoctrine([await loadDoctrineFile(doctrinePath)]),
+    });
+    expect(fleet.browser).toBeUndefined();
+  });
+
+  it("fails closed without compiled doctrine", async () => {
+    const fleet = await createReadyProviderFleet({
+      environment: { CLANKIE_BROWSER_ENABLED: "true" },
+      workerEnvironment: { PATH: process.env.PATH, HOME: "/synthetic/home" },
+      runnerStateRoot: await mkdtemp(join(tmpdir(), "clankie-browser-no-doctrine-")),
+    });
+    expect(fleet.browser).toMatchObject({ status: "withheld", reason: "compiled_doctrine_required" });
+  });
+
+  it("withholds browser capability when doctrine denies web.browse", async () => {
+    const base = await loadDoctrineFile(doctrinePath);
+    const fleet = await createReadyProviderFleet({
+      environment: { CLANKIE_BROWSER_ENABLED: "true" },
+      workerEnvironment: { PATH: process.env.PATH, HOME: "/synthetic/home" },
+      runnerStateRoot: await mkdtemp(join(tmpdir(), "clankie-browser-denied-")),
+      doctrine: compileDoctrine([
+        base,
+        {
+          schemaVersion: "1",
+          id: "deny-browser-overlay",
+          description: "Denies browser control.",
+          kind: "overlay",
+          actions: { "web.browse": { default: "deny", rules: [] } },
+        },
+      ]),
+    });
+    expect(fleet.browser).toMatchObject({ status: "withheld", reason: "doctrine_withheld" });
+  });
+
+  it("requires binary and daemon readiness after doctrine allows browser control", async () => {
+    const fleet = await createReadyProviderFleet({
+      environment: { CLANKIE_BROWSER_ENABLED: "true" },
+      workerEnvironment: { PATH: process.env.PATH, HOME: "/synthetic/home" },
+      runnerStateRoot: await mkdtemp(join(tmpdir(), "clankie-browser-ready-")),
+      doctrine: compileDoctrine([await loadDoctrineFile(doctrinePath)]),
+      probes: {
+        executable: () => Promise.resolve("agent-browser-1.0.0"),
+        browserDaemon: (_command, environment) =>
+          Promise.resolve(Boolean(environment.AGENT_BROWSER_ACTION_POLICY)),
+      },
+    });
+    expect(fleet.browser).toMatchObject({ status: "ready", version: "agent-browser-1.0.0" });
+  });
+});

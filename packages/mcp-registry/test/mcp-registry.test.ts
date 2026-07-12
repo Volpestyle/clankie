@@ -9,6 +9,7 @@ import {
   mcpToolAction,
   McpRegistrySchema,
   projectMcpToolGrants,
+  projectBrowserToolGrant,
   projectMcpWorkerServers,
   projectWebToolGrants,
   resolveCredentialEnvironment,
@@ -142,6 +143,26 @@ describe("projectWebToolGrants", () => {
     ]);
     const grants = projectWebToolGrants(doctrine, { principalId: "test-worker" });
     expect(grants).toEqual({ webSearch: false, webFetch: false });
+  });
+});
+
+describe("projectBrowserToolGrant", () => {
+  it("allows the read-class browser action under self-build-lab", async () => {
+    expect(projectBrowserToolGrant(await compiledDoctrine(), { principalId: "test-worker" })).toBe(true);
+  });
+
+  it("withholds browser control when an overlay denies the exact action", async () => {
+    const doctrine = compileDoctrine([
+      await loadDoctrineFile(doctrinePath),
+      {
+        schemaVersion: "1",
+        id: "deny-browser-overlay",
+        description: "Denies browser control.",
+        kind: "overlay",
+        actions: { "web.browse": { default: "deny", rules: [] } },
+      },
+    ]);
+    expect(projectBrowserToolGrant(doctrine, { principalId: "test-worker" })).toBe(false);
   });
 });
 

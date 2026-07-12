@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import type { CompiledDoctrine } from "@clankie/doctrine";
 import {
+  projectBrowserToolGrant,
   projectMcpToolGrants,
   projectMcpWorkerServers,
   projectWebToolGrants,
@@ -67,6 +68,15 @@ export interface ReadyProviderFleet {
   mcp?: FleetMcpReport;
   /** Native web tools granted to the Claude worker after doctrine projection. */
   claudeWebTools: ClaudeWebTool[];
+  /** Read-only agent-browser capability projected into the Codex shell. */
+  browser?: BrowserControlReport;
+}
+
+export interface BrowserControlReport {
+  action: "web.browse";
+  status: "ready" | "withheld" | "unavailable";
+  reason: string;
+  version?: string;
 }
 
 export interface ProviderFactoryOptions {
@@ -106,6 +116,7 @@ export interface ProviderFactoryOptions {
       ollamaUrl: URL;
       sessionRoot: string;
     }) => Promise<boolean>;
+    browserDaemon?: (command: string, environment: NodeJS.ProcessEnv) => Promise<boolean>;
   };
 }
 
@@ -115,12 +126,85 @@ export async function createReadyProviderFleet(options: ProviderFactoryOptions):
   const metadata = new Map<string, ProviderMetadata>();
   const mcp = projectFleetMcp(options);
   const webTools = claudeWebTools(options);
+  const browser = await prepareBrowserControl(options);
   const reports = await Promise.all([
-    prepareCodex(options, adapters, metadata, mcp),
+    prepareCodex(options, adapters, metadata, mcp, browser),
     prepareClaude(options, adapters, metadata, mcp, webTools),
     preparePi(options, adapters, metadata),
   ]);
-  return { adapters, metadata, reports, claudeWebTools: webTools, ...(mcp ? { mcp } : {}) };
+  return {
+    adapters,
+    metadata,
+    reports,
+    claudeWebTools: webTools,
+    ...(mcp ? { mcp } : {}),
+    ...(browser ? { browser: browser.report } : {}),
+  };
+}
+
+interface PreparedBrowserControl {
+  report: BrowserControlReport;
+  environment?: NodeJS.ProcessEnv;
+}
+
+async function prepareBrowserControl(
+  options: ProviderFactoryOptions,
+): Promise<PreparedBrowserControl | undefined> {
+  if (!enabled(options.environment.CLANKIE_BROWSER_ENABLED)) return undefined;
+  if (!options.doctrine) {
+    return { report: { action: "web.browse", status: "withheld", reason: "compiled_doctrine_required" } };
+  }
+  if (!projectBrowserToolGrant(options.doctrine, { principalId: "codex-implementation" })) {
+    return { report: { action: "web.browse", status: "withheld", reason: "doctrine_withheld" } };
+  }
+  const command = options.environment.CLANKIE_AGENT_BROWSER_EXECUTABLE?.trim() || "agent-browser";
+  try {
+    const version = await (options.probes?.executable ?? defaultExecutableProbe)(
+      command,
+      options.environment,
+    );
+    const stateRoot = join(providerToolHome(options, "codex"), "browser");
+    const socketDirectory = join(stateRoot, "run");
+    const policyPath = join(stateRoot, "read-only-policy.json");
+    await preparePrivateDirectory(socketDirectory);
+    await writeJsonIfChanged(policyPath, {
+      default: "deny",
+      allow: ["navigate", "snapshot", "scroll", "wait", "read", "get"],
+    });
+    const browserEnvironment = {
+      AGENT_BROWSER_SOCKET_DIR: socketDirectory,
+      AGENT_BROWSER_ACTION_POLICY: policyPath,
+      AGENT_BROWSER_CONTENT_BOUNDARIES: "1",
+      AGENT_BROWSER_RESTORE_SAVE: "never",
+      AGENT_BROWSER_IDLE_TIMEOUT_MS: "300000",
+    };
+    const daemonReady = await (options.probes?.browserDaemon ?? defaultBrowserDaemon)(command, {
+      ...options.workerEnvironment,
+      ...browserEnvironment,
+    });
+    if (!daemonReady) {
+      return { report: { action: "web.browse", status: "unavailable", reason: "daemon_unavailable" } };
+    }
+    return {
+      report: { action: "web.browse", status: "ready", reason: "doctrine_allowed", version },
+      environment: browserEnvironment,
+    };
+  } catch {
+    return { report: { action: "web.browse", status: "unavailable", reason: "binary_unavailable" } };
+  }
+}
+
+async function defaultBrowserDaemon(command: string, environment: NodeJS.ProcessEnv): Promise<boolean> {
+  try {
+    await execFileAsync(command, ["open"], {
+      env: environment,
+      timeout: 15_000,
+      maxBuffer: 64 * 1024,
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -186,6 +270,7 @@ async function prepareCodex(
   adapters: WorkerAdapter[],
   metadata: Map<string, ProviderMetadata>,
   mcp?: FleetMcpReport,
+  browser?: PreparedBrowserControl,
 ): Promise<ProviderReadinessReport> {
   const workerId = "codex-implementation";
   if (!enabled(options.environment.CLANKIE_CODEX_ENABLED)) return disabled("codex", workerId);
@@ -237,6 +322,7 @@ async function prepareCodex(
   const toolHome = providerToolHome(options, "codex");
   await preparePrivateDirectory(toolHome);
   const toolEnvironment = buildToolEnvironment(options.workerEnvironment, toolHome);
+  if (browser?.report.status === "ready") Object.assign(toolEnvironment, browser.environment);
   const deniedReadPaths = providerPrivatePaths(options, [codexHome]);
   const boundaryReady = await (options.probes?.codexBoundary ?? defaultCodexBoundary)({
     command,

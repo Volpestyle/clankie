@@ -185,10 +185,23 @@ export function projectMcpToolGrants(
 
 export const WEB_SEARCH_ACTION = "web.search";
 export const WEB_FETCH_ACTION = "web.fetch";
+export const WEB_BROWSE_ACTION = "web.browse";
 
 export interface WebToolGrants {
   webSearch: boolean;
   webFetch: boolean;
+}
+
+/** Projects read-only browser control through the same connector-neutral read boundary. */
+export function projectBrowserToolGrant(doctrine: CompiledDoctrine, input: { principalId: string }): boolean {
+  const classify = createConnectorActionClassifier([{ action: WEB_BROWSE_ACTION, riskClass: "read" }]);
+  return (
+    decideAction(
+      doctrine,
+      projectionRequest(WEB_BROWSE_ACTION, input.principalId, doctrine),
+      classify(WEB_BROWSE_ACTION),
+    ).effect === "allow"
+  );
 }
 
 /**
