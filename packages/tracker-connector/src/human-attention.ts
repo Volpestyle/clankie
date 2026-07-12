@@ -73,9 +73,20 @@ export interface AttentionDeliveryAttemptInput {
    * logical action. Adapters must treat it as their external idempotency key.
    */
   readonly idempotencyToken: string;
+  /**
+   * Exact narrative content authorized by policy for this provider action.
+   * Narrative adapters must write this value unchanged; non-narrative actions
+   * leave it undefined.
+   */
+  readonly authorizedContent?: string;
 }
 
 export interface AttentionDeliveryAdapter {
+  /**
+   * Deterministically render the exact provider narrative before authorization.
+   * Return undefined for actions that do not write narrative content.
+   */
+  policyContent(input: Omit<AttentionDeliveryAttemptInput, "authorizedContent">): string | undefined;
   /**
    * Attempt one resolved capability. `unsupported: true` means the adapter cannot
    * perform this capability (not a transient failure).
@@ -237,23 +248,20 @@ export function deliveryFingerprint(
 ): string {
   const payload = {
     binding: bindingFingerprint(binding, actions),
-    request: {
-      requestId: request.requestId,
-      missionId: request.missionId,
-      correlationId: request.correlationId,
-      targetRole: request.targetRole,
-      requestKind: request.requestKind,
-      actionableAsk: request.actionableAsk,
-      blocking: request.blocking,
-      authorityImpact: request.authorityImpact,
-      urgency: request.urgency,
-      notificationSurfaces: [...request.notificationSurfaces],
-      directNotification: request.directNotification ?? null,
-      waitForAuthoritativeResponse: request.waitForAuthoritativeResponse ?? null,
-      trackerRef: request.trackerRef ?? null,
-    },
+    request,
   };
-  return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+  return createHash("sha256").update(canonicalJson(payload)).digest("hex");
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => item !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right));
+    return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
 
 /** @deprecated use deliveryStoreKey — kept as alias for callers hashing by request+fingerprint */
@@ -375,6 +383,14 @@ export async function deliverHumanAttention(
           continue;
         }
 
+        const idempotencyToken = actionIdempotencyToken(request.requestId, fingerprint, action);
+        const attemptInput: Omit<AttentionDeliveryAttemptInput, "authorizedContent"> = {
+          action,
+          request,
+          workspaceId: input.binding.workspaceId,
+          idempotencyToken,
+        };
+        const policyContent = input.adapter.policyContent(attemptInput);
         const writeRequest: TrackerWriteRequest = {
           action: policyAction,
           riskClass: "reversible-write",
@@ -386,7 +402,7 @@ export async function deliverHumanAttention(
           },
           idempotencyKey: `${request.requestId}:${action.capability.kind}:${action.capability.principalId}`,
           correlationId: request.correlationId,
-          content: request.actionableAsk,
+          ...(policyContent === undefined ? {} : { content: policyContent }),
         };
         const decision: TrackerPolicyDecision = await input.policy.authorize(writeRequest);
         if (decision.effect !== "allow") {
@@ -401,12 +417,9 @@ export async function deliverHumanAttention(
           continue;
         }
 
-        const idempotencyToken = actionIdempotencyToken(request.requestId, fingerprint, action);
         const attempt = await input.adapter.attempt({
-          action,
-          request,
-          workspaceId: input.binding.workspaceId,
-          idempotencyToken,
+          ...attemptInput,
+          ...(policyContent === undefined ? {} : { authorizedContent: policyContent }),
         });
         if (attempt.unsupported === true) {
           actionResults.push({

@@ -901,13 +901,29 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       const body = await readJson(context.req.raw);
       const result = await ceremonyRuntime.deliverAttention(body);
       if (dependencies.eventStore) {
-        await recordEvent("tracker.human-attention.delivered", result.missionId, clock().toISOString(), {
-          requestId: result.requestId,
-          correlationId: result.correlationId,
-          aggregate: result.aggregate,
-          fingerprint: result.fingerprint,
-          actions: result.actions,
-        });
+        const delivered = await attentionStore.get(result.requestId);
+        await recordEvent(
+          "tracker.human-attention.delivered",
+          result.missionId,
+          clock().toISOString(),
+          {
+            requestId: result.requestId,
+            correlationId: result.correlationId,
+            aggregate: result.aggregate,
+            fingerprint: result.fingerprint,
+            actions: result.actions,
+          },
+          {
+            correlationId: result.correlationId,
+            profileHash: dependencies.doctrine.profileHash,
+            ...(delivered?.pending.request.taskId === undefined
+              ? {}
+              : { taskId: delivered.pending.request.taskId }),
+            ...(delivered?.pending.request.workerRunId === undefined
+              ? {}
+              : { workerRunId: delivered.pending.request.workerRunId }),
+          },
+        );
       }
       return context.json(result);
     } catch (error) {
@@ -951,9 +967,22 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
             : result.requestId;
         const pending = await attentionStore.get(requestId);
         const missionId = pending?.result.missionId ?? "unknown";
-        await recordEvent("tracker.human-attention.responded", missionId, clock().toISOString(), {
-          ...result,
-        });
+        await recordEvent(
+          "tracker.human-attention.responded",
+          missionId,
+          clock().toISOString(),
+          { ...result },
+          {
+            correlationId: result.correlationId,
+            profileHash: dependencies.doctrine.profileHash,
+            ...(pending?.pending.request.taskId === undefined
+              ? {}
+              : { taskId: pending.pending.request.taskId }),
+            ...(pending?.pending.request.workerRunId === undefined
+              ? {}
+              : { workerRunId: pending.pending.request.workerRunId }),
+          },
+        );
       }
       return context.json(result);
     } catch (error) {

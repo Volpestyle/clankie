@@ -84,6 +84,16 @@ export function createLinearAttentionRuntime(
       },
     },
     adapter: {
+      policyContent(input) {
+        if (
+          input.action.capability.kind !== "direct_notify" &&
+          input.action.capability.kind !== "comment_notify"
+        ) {
+          return undefined;
+        }
+        const principal = configs.get(input.workspaceId)?.principals[input.action.capability.principalId];
+        return principal === undefined ? undefined : renderLinearAttentionComment(principal.mention, input);
+      },
       async attempt(input) {
         const config = configs.get(input.workspaceId);
         const client = clientForWorkspace(input.workspaceId);
@@ -126,9 +136,12 @@ export function createLinearAttentionRuntime(
             return { ok: true };
           case "direct_notify":
           case "comment_notify":
+            if (input.authorizedContent === undefined) {
+              return { ok: false, unsupported: true, detail: "Linear comment was not policy-authorized" };
+            }
             await client.createIssueComment({
               issueId,
-              body: renderLinearAttentionComment(principal.mention, input),
+              body: input.authorizedContent,
               idempotencyKey: input.idempotencyToken,
             });
             return { ok: true };
