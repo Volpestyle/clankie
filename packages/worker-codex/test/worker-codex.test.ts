@@ -5,6 +5,7 @@ import {
   CodexAppServerClient,
   CodexWorkerAdapter,
   codexAppServerArguments,
+  codexMcpServerArguments,
   completedCodexItem,
   renderTaskPrompt,
 } from "../src/index.ts";
@@ -37,6 +38,31 @@ describe("Codex tool boundary", () => {
     expect(() => codexAppServerArguments({ deniedReadPaths: ["/runner/auth.json"] })).toThrow(
       "codex_tool_boundary_environment_required",
     );
+  });
+
+  it("declares doctrine-projected MCP servers as strict inline-table overrides", () => {
+    const args = codexAppServerArguments({
+      deniedReadPaths: ["/runner/auth.json"],
+      toolEnvironment: { HOME: "/runner/tool-home", PATH: "/usr/bin:/bin" },
+      mcpServers: [
+        {
+          name: "ddg_search",
+          command: "uvx",
+          args: ["duckduckgo-mcp-server"],
+          env: { DDG_REGION: "us-en" },
+        },
+      ],
+    });
+    const serialized = args.join("\n");
+    expect(serialized).toContain(
+      'mcp_servers.ddg_search={ command = "uvx", args = ["duckduckgo-mcp-server"], env = { "DDG_REGION" = "us-en" } }',
+    );
+  });
+
+  it("rejects MCP server names that are not strict TOML-safe identifiers", () => {
+    expect(() =>
+      codexMcpServerArguments([{ name: "ddg-search", command: "uvx", args: [], env: {} }]),
+    ).toThrow("codex_mcp_server_name_invalid");
   });
 });
 

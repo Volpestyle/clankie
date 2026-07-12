@@ -13,8 +13,10 @@
   },
   "dependencies": {
     "@clankie/api-client": "workspace:*",
+    "@clankie/doctrine": "workspace:*",
     "@clankie/environment-runtime": "workspace:*",
     "@clankie/event-store": "workspace:*",
+    "@clankie/mcp-registry": "workspace:*",
     "@clankie/observability": "workspace:*",
     "@clankie/protocol": "workspace:*",
     "@clankie/terminal-protocol": "workspace:*",

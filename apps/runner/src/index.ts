@@ -1,7 +1,9 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { ClankieApiClient } from "@clankie/api-client";
+import { compileDoctrine, loadDoctrineFile, type CompiledDoctrine } from "@clankie/doctrine";
 import { SqliteEventStore } from "@clankie/event-store";
+import { loadMcpRegistryFile, type McpRegistry } from "@clankie/mcp-registry";
 import { createLogger } from "@clankie/observability";
 import { MissionWorker } from "./mission-worker.ts";
 import { ProcessLeaseManager } from "./process-leases.ts";
@@ -96,12 +98,45 @@ if (!repoPath) {
 } else if (worktrees) {
   const workerEnvironment = buildWorkerEnvironment(process.env);
   const verificationChecks = parseVerificationChecks(process.env.CLANKIE_VERIFICATION_CHECKS);
+  let doctrine: CompiledDoctrine | undefined;
+  let mcpRegistry: McpRegistry | undefined;
+  const doctrinePath = process.env.CLANKIE_DOCTRINE?.trim();
+  const mcpRegistryPath = process.env.CLANKIE_MCP_REGISTRY?.trim();
+  if (doctrinePath) {
+    try {
+      doctrine = compileDoctrine([await loadDoctrineFile(doctrinePath)]);
+    } catch (error) {
+      logger.error(
+        { doctrinePath, err: error instanceof Error ? error.message : String(error) },
+        "doctrine profile failed to compile; MCP and web tool projection stays fail-closed",
+      );
+    }
+  }
+  if (mcpRegistryPath) {
+    if (!doctrine) {
+      logger.error(
+        { mcpRegistryPath },
+        "CLANKIE_MCP_REGISTRY is set without a compiled CLANKIE_DOCTRINE profile; no MCP tool will be projected",
+      );
+    } else {
+      try {
+        mcpRegistry = await loadMcpRegistryFile(mcpRegistryPath);
+      } catch (error) {
+        logger.error(
+          { mcpRegistryPath, err: error instanceof Error ? error.message : String(error) },
+          "MCP registry failed to load; no MCP tool will be projected",
+        );
+      }
+    }
+  }
   const fleet = simWorkersEnabled(process.env)
     ? { adapters: buildWorkerAdapters(process.env, workerEnvironment), metadata: undefined, reports: [] }
     : await createReadyProviderFleet({
         environment: process.env,
         workerEnvironment,
         runnerStateRoot,
+        ...(doctrine ? { doctrine } : {}),
+        ...(mcpRegistry ? { mcpRegistry } : {}),
         sandbox: new ShellSandbox({
           events: runnerEvents,
           decideEscalation: (request) =>
@@ -151,6 +186,23 @@ if (!repoPath) {
     };
     if (report.status === "unavailable") logger.warn(fields, "provider is not advertised");
     else logger.info(fields, "provider readiness evaluated");
+  }
+  if ("mcp" in fleet && fleet.mcp) {
+    logger.info(
+      {
+        allowedActions: fleet.mcp.grants.allowed.map((grant) => grant.action),
+        withheldActions: fleet.mcp.grants.withheld.map((grant) => ({
+          action: grant.action,
+          effect: grant.effect,
+        })),
+        claudeWithheldServers: fleet.mcp.claude.withheldServers,
+        codexWithheldServers: fleet.mcp.codex.withheldServers,
+      },
+      "mcp registry projected through doctrine",
+    );
+  }
+  if ("claudeWebTools" in fleet && fleet.claudeWebTools.length > 0) {
+    logger.info({ webTools: fleet.claudeWebTools }, "native web research tools granted to Claude worker");
   }
   if (fleet.adapters.length === 0) {
     logger.error("No provider passed readiness; mission execution remains fail-closed");

@@ -1,6 +1,8 @@
 import { chmod, mkdtemp, rename, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { compileDoctrine, loadDoctrineFile } from "@clankie/doctrine";
+import { McpRegistrySchema } from "@clankie/mcp-registry";
 import { resolveBundledPiRpcEntry } from "@clankie/worker-pi";
 import type { WorkerRunContext } from "@clankie/worker-sdk";
 import { describe, expect, it } from "vitest";
@@ -611,3 +613,112 @@ for await (const line of createInterface({ input: process.stdin })) {
   return command;
 }
 import { createServer } from "node:http";
+
+describe("mcp registry and web tool projection", () => {
+  const doctrinePath = join(
+    import.meta.dirname,
+    "..",
+    "..",
+    "..",
+    "doctrine",
+    "profiles",
+    "self-build-lab.yaml",
+  );
+  const registry = McpRegistrySchema.parse({
+    schemaVersion: "1",
+    servers: [
+      {
+        name: "ddg_search",
+        description: "DuckDuckGo web search",
+        transport: { type: "stdio", command: "uvx", args: ["duckduckgo-mcp-server"] },
+        kinds: ["research"],
+        tools: [{ name: "search", riskClass: "read" }],
+      },
+      {
+        name: "tracker",
+        description: "Tracker with a doctrine-withheld destructive tool",
+        transport: { type: "stdio", command: "tracker-mcp", args: [] },
+        tools: [
+          { name: "get_issue", riskClass: "read" },
+          { name: "delete_issue", riskClass: "destructive" },
+        ],
+      },
+    ],
+  });
+
+  async function claudeReadyFleet(environment: NodeJS.ProcessEnv, doctrineLayers?: unknown[]) {
+    const base = await loadDoctrineFile(doctrinePath);
+    return createReadyProviderFleet({
+      environment: {
+        CLANKIE_CLAUDE_ENABLED: "true",
+        CLANKIE_CLAUDE_MODEL: "claude-verifier",
+        CLANKIE_CLAUDE_EXECUTABLE: "/provider/claude",
+        ANTHROPIC_API_KEY: "SECRET_CLAUDE_AUTH",
+        ...environment,
+      },
+      workerEnvironment: { PATH: process.env.PATH, HOME: "/synthetic/home" },
+      runnerStateRoot: await mkdtemp(join(tmpdir(), "clankie-provider-mcp-")),
+      doctrine: compileDoctrine([base, ...(doctrineLayers ?? [])] as Parameters<typeof compileDoctrine>[0]),
+      mcpRegistry: registry,
+      probes: {
+        executable: () => Promise.resolve("1.0.0"),
+        isolation: () => Promise.resolve(true),
+        claudeAuth: () => Promise.resolve(true),
+      },
+    });
+  }
+
+  it("projects only doctrine-allowed tools and reports withheld grants", async () => {
+    const fleet = await claudeReadyFleet({});
+    expect(fleet.mcp?.grants.allowed.map((grant) => grant.action).sort()).toEqual([
+      "mcp.ddg_search.search",
+      "mcp.tracker.get_issue",
+    ]);
+    expect(fleet.mcp?.grants.withheld).toMatchObject([
+      { action: "mcp.tracker.delete_issue", effect: "require_approval" },
+    ]);
+    // Claude filters per tool; Codex drops the partially-allowed server entirely.
+    expect(fleet.mcp?.claude.servers.map((server) => server.name).sort()).toEqual(["ddg_search", "tracker"]);
+    expect(fleet.mcp?.codex.servers.map((server) => server.name)).toEqual(["ddg_search"]);
+    expect(fleet.mcp?.codex.withheldServers.map((entry) => entry.name)).toContain("tracker");
+  });
+
+  it("grants native web tools only when the operator flag and doctrine agree", async () => {
+    const withoutFlag = await claudeReadyFleet({});
+    expect(withoutFlag.claudeWebTools).toEqual([]);
+    // The research-scoped registry server alone opts the worker into research tasks.
+    expect(withoutFlag.adapters[0]?.descriptor.capabilities.kinds).toContain("research");
+
+    const withFlag = await claudeReadyFleet({ CLANKIE_CLAUDE_WEB_RESEARCH_ENABLED: "true" });
+    expect(withFlag.claudeWebTools).toEqual(["WebSearch", "WebFetch"]);
+    expect(withFlag.adapters[0]?.descriptor.capabilities.kinds).toContain("research");
+  });
+
+  it("withholds web tools when a doctrine overlay denies the exact actions", async () => {
+    const denyOverlay = {
+      schemaVersion: "1",
+      id: "deny-web-overlay",
+      description: "Denies native web research actions.",
+      kind: "overlay",
+      actions: {
+        "web.search": { default: "deny", rules: [] },
+        "web.fetch": { default: "deny", rules: [] },
+      },
+    };
+    const fleet = await claudeReadyFleet({ CLANKIE_CLAUDE_WEB_RESEARCH_ENABLED: "true" }, [denyOverlay]);
+    expect(fleet.claudeWebTools).toEqual([]);
+    // Registry read tools remain allowed; only the web actions are denied, so
+    // research stays available through the research-scoped MCP server.
+    expect(fleet.mcp?.grants.allowed.map((grant) => grant.action)).toContain("mcp.ddg_search.search");
+  });
+
+  it("projects no MCP tool without a compiled doctrine profile", async () => {
+    const fleet = await createReadyProviderFleet({
+      environment: {},
+      workerEnvironment: { PATH: process.env.PATH, HOME: "/synthetic/home" },
+      runnerStateRoot: await mkdtemp(join(tmpdir(), "clankie-provider-mcp-closed-")),
+      mcpRegistry: registry,
+    });
+    expect(fleet.mcp).toBeUndefined();
+  });
+});

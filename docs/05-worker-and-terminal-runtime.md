@@ -22,6 +22,10 @@ Mission → Task → WorkerRun
 
 Provider-native approval prompts do not replace product policy. The runner withholds privileged credentials and confines filesystem/network capability.
 
+### Connector tools (MCP and web research)
+
+Workers gain external tools only through the doctrine-projected MCP registry ([ADR 0027](adr/0027-mcp-worker-tool-projection.md), `doctrine/mcp-registry.example.yaml`). At fleet build the runner evaluates every registered tool as `mcp.<server>.<tool>` against the compiled profile and injects only exact `allow` grants: per-tool for Claude (`mcp__<server>__<tool>` allowlist plus a PreToolUse hook that denies ungranted non-filesystem tools), per-server for Codex strict config (a server with any withheld tool is dropped), and never for Pi, which stays offline. Registry servers may be scoped to task kinds; server processes receive only their declared static and credential-allowlist environment. With `CLANKIE_CLAUDE_WEB_RESEARCH_ENABLED=true` and a doctrine allow for the read-class `web.search`/`web.fetch` actions, the Claude worker additionally exposes native WebSearch/WebFetch on `research` tasks and advertises the `research` kind. The runner logs allowed and withheld projections at startup.
+
 ### Readiness and advertisement
 
 Provider configuration is opt-in. The runner advertises a descriptor only when executable/version, authentication, model, and enforced-isolation readiness all pass. Stable readiness issue codes explain unavailable providers without copying credential content or raw subprocess errors. The production default advertises no coding provider until at least one complete configuration passes.

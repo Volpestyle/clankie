@@ -19,12 +19,34 @@ import {
   type WorkerRunContext,
 } from "@clankie/worker-sdk";
 
+/**
+ * One MCP server pre-approved by the runner's doctrine projection. The
+ * adapter treats this as opaque, already-authorized configuration: it never
+ * widens `allowedTools`, and servers scoped to `kinds` stay invisible to
+ * every other task kind.
+ */
+export interface ClaudeMcpServer {
+  name: string;
+  /** Task kinds allowed to see this server. Omitted means every kind. */
+  kinds?: TaskKind[];
+  /** Claude Agent SDK-shaped server config (stdio command/args/env or http url). */
+  config: Record<string, unknown>;
+  /** Bare tool names doctrine allows on this server. */
+  allowedTools: string[];
+}
+
+export type ClaudeWebTool = "WebSearch" | "WebFetch";
+
 export interface ClaudeWorkerOptions {
   id?: string;
   displayName?: string;
   model?: string;
   kinds?: TaskKind[];
   maxTurns?: number;
+  /** Doctrine-projected MCP servers supplied by the runner. */
+  mcpServers?: ClaudeMcpServer[];
+  /** Native provider web tools granted by the runner; applied to research tasks only. */
+  webTools?: ClaudeWebTool[];
   settingSources?: Array<"user" | "project" | "local">;
   pathToClaudeCodeExecutable?: string;
   credentialEnvironmentVariables?: string[];
@@ -92,7 +114,19 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
     if (context.signal.aborted) return cancelledWorkerResult(context.workerRunId, "Claude");
     if (this.options.requireCredentialBoundary) assertCredentialBoundary(this.options);
     const writeEnabled = ["implementation", "debugging", "integration", "design"].includes(context.task.kind);
-    const allowedTools = writeEnabled ? ["Read", "Glob", "Grep", "Edit", "Write"] : ["Read", "Glob", "Grep"];
+    const webTools = context.task.kind === "research" ? (this.options.webTools ?? []) : [];
+    const mcpServers = (this.options.mcpServers ?? []).filter(
+      (server) => !server.kinds || server.kinds.includes(context.task.kind),
+    );
+    const mcpToolNames = mcpServers.flatMap((server) =>
+      server.allowedTools.map((tool) => `mcp__${server.name}__${tool}`),
+    );
+    const nativeTools = [
+      ...(writeEnabled ? ["Read", "Glob", "Grep", "Edit", "Write"] : ["Read", "Glob", "Grep"]),
+      ...webTools,
+    ];
+    const allowedTools = [...nativeTools, ...mcpToolNames];
+    const grantedTools = new Set<string>([...webTools, ...mcpToolNames]);
     let resultText = "";
     let sessionId: string | undefined;
     let failed = false;
@@ -113,14 +147,17 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
         maxTurns: this.options.maxTurns ?? 24,
         permissionMode: writeEnabled ? "acceptEdits" : "dontAsk",
         settingSources: this.options.settingSources ?? [],
-        tools: allowedTools,
+        tools: nativeTools,
         disallowedTools: writeEnabled ? ["Bash"] : ["Edit", "Write", "Bash"],
         pathToClaudeCodeExecutable: this.options.pathToClaudeCodeExecutable,
         sandbox: claudeSandboxSettings(this.options, writeEnabled ? [] : [context.workspacePath]),
         settings: claudeSessionSettings(this.options),
         hooks: {
-          PreToolUse: [{ hooks: [claudeCandidateToolHook(context.workspacePath)] }],
+          PreToolUse: [{ hooks: [claudeCandidateToolHook(context.workspacePath, grantedTools)] }],
         },
+        ...(mcpServers.length > 0
+          ? { mcpServers: Object.fromEntries(mcpServers.map((server) => [server.name, server.config])) }
+          : {}),
         abortController,
         ...(this.options.environment ? { env: this.options.environment } : {}),
         ...(this.options.canUseTool
@@ -219,12 +256,19 @@ function assertCredentialBoundary(options: ClaudeWorkerOptions): void {
   if (!options.credentialFiles?.length) throw new Error("claude_tool_boundary_denied_paths_required");
 }
 
-/** Programmatic hook that makes the candidate root the only model-tool filesystem authority. */
-export function claudeCandidateToolHook(workspacePath: string): HookCallback {
+/**
+ * Programmatic hook that makes the candidate root the only model-tool
+ * filesystem authority. Non-filesystem tools pass only when the runner
+ * granted them explicitly (web tools and doctrine-projected MCP tools).
+ */
+export function claudeCandidateToolHook(
+  workspacePath: string,
+  grantedTools: ReadonlySet<string> = new Set(),
+): HookCallback {
   return async (input): Promise<HookJSONOutput> => {
     if (input.hook_event_name !== "PreToolUse") return {};
     const toolInput = asRecord(input.tool_input);
-    if (!(await claudeToolAccessAllowed(input.tool_name, toolInput, workspacePath))) {
+    if (!(await claudeToolAccessAllowed(input.tool_name, toolInput, workspacePath, grantedTools))) {
       return {
         hookSpecificOutput: {
           hookEventName: "PreToolUse",
@@ -247,7 +291,9 @@ async function claudeToolAccessAllowed(
   toolName: string,
   input: Record<string, unknown>,
   workspacePath: string,
+  grantedTools: ReadonlySet<string>,
 ): Promise<boolean> {
+  if (grantedTools.has(toolName)) return true;
   if (["Read", "Edit", "Write"].includes(toolName)) {
     return typeof input.file_path === "string" && input.file_path.trim().length > 0
       ? pathInsideCandidate(input.file_path, workspacePath)

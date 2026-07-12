@@ -171,6 +171,120 @@ function context(): WorkerRunContext {
   };
 }
 
+describe("doctrine-projected MCP servers and web tools", () => {
+  const researchContext = (): WorkerRunContext => {
+    const base = context();
+    return {
+      ...base,
+      task: { ...base.task, id: "research", kind: "research", role: "verifier", writeScope: [] },
+    };
+  };
+  const mcpServers = [
+    {
+      name: "ddg_search",
+      kinds: ["research" as const],
+      config: { type: "stdio", command: "uvx", args: ["duckduckgo-mcp-server"], env: {} },
+      allowedTools: ["search", "fetch_content"],
+    },
+    {
+      name: "tracker",
+      config: { type: "http", url: "https://mcp.example.com/sse" },
+      allowedTools: ["get_issue"],
+    },
+  ];
+
+  it("exposes granted servers and web tools to a research task", async () => {
+    let options: Record<string, unknown> | undefined;
+    const query: ClaudeQuery = (input) => {
+      options = input.options;
+      return recordedStream();
+    };
+    const adapter = new ClaudeWorkerAdapter({ query, mcpServers, webTools: ["WebSearch", "WebFetch"] });
+
+    const result = await adapter.run(researchContext());
+
+    expect(result.status).toBe("succeeded");
+    expect(options?.mcpServers).toEqual({
+      ddg_search: mcpServers[0]?.config,
+      tracker: mcpServers[1]?.config,
+    });
+    expect(options?.allowedTools).toEqual(
+      expect.arrayContaining([
+        "WebSearch",
+        "WebFetch",
+        "mcp__ddg_search__search",
+        "mcp__ddg_search__fetch_content",
+        "mcp__tracker__get_issue",
+      ]),
+    );
+    // Native tool restriction never lists MCP names; they flow through mcpServers.
+    expect(options?.tools).toEqual(["Read", "Glob", "Grep", "WebSearch", "WebFetch"]);
+    expect(options?.disallowedTools).toEqual(["Edit", "Write", "Bash"]);
+  });
+
+  it("hides kind-scoped servers and web tools from non-research tasks", async () => {
+    let options: Record<string, unknown> | undefined;
+    const query: ClaudeQuery = (input) => {
+      options = input.options;
+      return recordedStream();
+    };
+    const adapter = new ClaudeWorkerAdapter({ query, mcpServers, webTools: ["WebSearch"] });
+
+    await adapter.run(context());
+
+    expect(options?.mcpServers).toEqual({ tracker: mcpServers[1]?.config });
+    expect(options?.allowedTools).not.toEqual(expect.arrayContaining(["WebSearch"]));
+    expect(options?.allowedTools).not.toEqual(expect.arrayContaining(["mcp__ddg_search__search"]));
+    expect(options?.allowedTools).toEqual(expect.arrayContaining(["mcp__tracker__get_issue"]));
+  });
+
+  it("omits the mcpServers option entirely when nothing is granted", async () => {
+    let options: Record<string, unknown> | undefined;
+    const query: ClaudeQuery = (input) => {
+      options = input.options;
+      return recordedStream();
+    };
+    const adapter = new ClaudeWorkerAdapter({ query });
+
+    await adapter.run(context());
+
+    expect(options && "mcpServers" in options).toBe(false);
+  });
+
+  it("hook-allows only runner-granted non-filesystem tools", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "clankie-claude-mcp-"));
+    const granted = new Set(["WebSearch", "mcp__ddg_search__search"]);
+    const hook = claudeCandidateToolHook(workspace, granted);
+    const invoke = (toolName: string) =>
+      hook(
+        {
+          hook_event_name: "PreToolUse",
+          tool_name: toolName,
+          tool_input: { query: "clankie" },
+          tool_use_id: toolName,
+          session_id: "session",
+          transcript_path: "",
+          cwd: workspace,
+        },
+        toolName,
+        { signal: new AbortController().signal },
+      );
+    expect(await invoke("WebSearch")).toMatchObject({
+      hookSpecificOutput: { permissionDecision: "allow" },
+    });
+    expect(await invoke("mcp__ddg_search__search")).toMatchObject({
+      hookSpecificOutput: { permissionDecision: "allow" },
+    });
+    // Ungranted network-capable tools stay denied even if the model requests them.
+    expect(await invoke("WebFetch")).toMatchObject({
+      hookSpecificOutput: { permissionDecision: "deny" },
+    });
+    expect(await invoke("mcp__tracker__delete_issue")).toMatchObject({
+      hookSpecificOutput: { permissionDecision: "deny" },
+    });
+  });
+});
+
 describe("Claude sandbox boundary", () => {
   it("preserves SDK auth while denying credential state and write tools to a verifier", async () => {
     let options: Record<string, unknown> | undefined;

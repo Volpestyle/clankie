@@ -1,0 +1,83 @@
+# Example MCP connector registry. Copy, edit, and point CLANKIE_MCP_REGISTRY
+# at your copy. This file is trusted runner configuration: models never author
+# or mutate it.
+#
+# Every tool you declare carries exactly one risk class:
+#   read | reversible-write | irreversible-write | publish-external | destructive
+# Doctrine projects each tool as the action `mcp.<server>.<tool>`; workers only
+# receive tools whose decision is exactly `allow`. Undeclared tools are never
+# projected. Approval-gated classes stay on the privileged connector path.
+#
+# Server names are lowercase with underscores (TOML- and tool-prefix-safe).
+# `credentialEnvironment` lists runner-host environment variable names
+# forwarded to the server process — a positive allowlist, never the whole env.
+# `kinds` limits which task kinds see a server (omit for all kinds).
+#
+# Codex cannot filter individual MCP tools, so it only receives servers whose
+# every declared tool is allowed; Claude filters per tool.
+schemaVersion: "1"
+servers:
+  # Free web search without an API key (pip/uvx installable).
+  - name: ddg_search
+    description: DuckDuckGo web search and page fetch
+    transport: { type: stdio, command: uvx, args: [duckduckgo-mcp-server] }
+    kinds: [research]
+    tools:
+      - { name: search, riskClass: read }
+      - { name: fetch_content, riskClass: read }
+
+  # Work tracker. Read tools flow to workers; mutations stay approval-gated
+  # (doctrine already requires approval for tracker authority mutations).
+  # - name: linear
+  #   description: Linear tracker connector
+  #   transport: { type: stdio, command: npx, args: [-y, mcp-remote, "https://mcp.linear.app/sse"] }
+  #   tools:
+  #     - { name: get_issue, riskClass: read }
+  #     - { name: list_issues, riskClass: read }
+  #     - { name: save_comment, riskClass: reversible-write }
+
+  # GitHub read access for research/review tasks.
+  # - name: github
+  #   description: GitHub repository reader
+  #   transport: { type: stdio, command: npx, args: [-y, "@modelcontextprotocol/server-github"] }
+  #   credentialEnvironment: [GITHUB_PERSONAL_ACCESS_TOKEN]
+  #   tools:
+  #     - { name: get_file_contents, riskClass: read }
+  #     - { name: search_code, riskClass: read }
+  #     - { name: list_pull_requests, riskClass: read }
+
+  # Figma design reads (approved visual design is Figma-authoritative).
+  # - name: figma
+  #   description: Figma design reader
+  #   transport: { type: stdio, command: npx, args: [-y, figma-developer-mcp, --stdio] }
+  #   credentialEnvironment: [FIGMA_API_KEY]
+  #   kinds: [research, design, review]
+  #   tools:
+  #     - { name: get_figma_data, riskClass: read }
+
+  # Aseprite pixel-art authoring (product pixel art lives in the private
+  # clankie-app repo; agents author .aseprite sources only through this server).
+  # - name: aseprite
+  #   description: Aseprite pixel-art authoring
+  #   transport: { type: stdio, command: aseprite-mcp, args: [] }
+  #   kinds: [design, implementation]
+  #   tools:
+  #     - { name: get_sprite_info, riskClass: read }
+  #     - { name: draw_pixels, riskClass: reversible-write }
+  #     - { name: export_sprite, riskClass: reversible-write }
+
+  # Blender and Unreal Engine scene work.
+  # - name: blender
+  #   description: Blender scene authoring
+  #   transport: { type: stdio, command: uvx, args: [blender-mcp] }
+  #   kinds: [design, implementation]
+  #   tools:
+  #     - { name: get_scene_info, riskClass: read }
+  #     - { name: execute_blender_code, riskClass: reversible-write }
+  # - name: unreal
+  #   description: Unreal Engine editor bridge
+  #   transport: { type: stdio, command: uvx, args: [unreal-mcp] }
+  #   kinds: [design, implementation]
+  #   tools:
+  #     - { name: get_actors_in_level, riskClass: read }
+  #     - { name: spawn_actor, riskClass: reversible-write }

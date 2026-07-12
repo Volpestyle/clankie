@@ -92,6 +92,10 @@ The preset supplies the default policy for each class. A specific action such as
 
 The capability exchange accepts the same classified action request. The connector adapter registers authenticated tool metadata with the doctrine classifier, which returns an opaque in-process classification for the policy decision. Worker-supplied class fields and model-written rationale are ignored.
 
+### Worker MCP tool projection
+
+The operator-authored MCP registry (`CLANKIE_MCP_REGISTRY`, `@clankie/mcp-registry`, [ADR 0027](adr/0027-mcp-worker-tool-projection.md)) is how workers gain direct connector tools. Every registered tool declares exactly one risk class above (never `narrative-write`) and is projected as the action `mcp.<server>.<tool>` through the compiled profile at fleet build. Only an exact `allow` reaches a worker; `require_approval` and `deny` both withhold the tool because a worker cannot pause mid-tool for a human. Undeclared tools are never projected, preserving the unclassified-action denial. The provider-native web research actions `web.search` and `web.fetch` follow the same projection as read-class actions gating the Claude worker's built-in WebSearch/WebFetch on `research` tasks; the high-assurance overlay denies both exactly.
+
 ### Narrative tracker writes
 
 `narrative-write` is a narrow connector-neutral whitelist, not the complement of privileged writes. Trusted connector metadata can classify only these normalized kinds:

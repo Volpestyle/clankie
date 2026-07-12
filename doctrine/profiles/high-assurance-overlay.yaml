@@ -45,6 +45,8 @@ actions:
   package.install: { default: require_approval, rules: [] }
   test.integrity.weaken: { default: deny, rules: [] }
   memory.profile.write: { default: deny, rules: [] }
+  web.search: { default: deny, rules: [] }
+  web.fetch: { default: deny, rules: [] }
   tracker.assignment.mirror: { default: require_approval, rules: [] }
   tracker.status.update: { default: require_approval, rules: [] }
   tracker.priority.update: { default: require_approval, rules: [] }

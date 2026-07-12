@@ -6,8 +6,22 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { ClaudeWorkerAdapter, CLAUDE_AGENT_SDK_VERSION } from "@clankie/worker-claude";
-import { CodexWorkerAdapter, probeCodexToolBoundary } from "@clankie/worker-codex";
+import type { CompiledDoctrine } from "@clankie/doctrine";
+import {
+  projectMcpToolGrants,
+  projectMcpWorkerServers,
+  projectWebToolGrants,
+  type McpGrantProjection,
+  type McpRegistry,
+  type McpWorkerProjection,
+} from "@clankie/mcp-registry";
+import {
+  ClaudeWorkerAdapter,
+  CLAUDE_AGENT_SDK_VERSION,
+  type ClaudeMcpServer,
+  type ClaudeWebTool,
+} from "@clankie/worker-claude";
+import { CodexWorkerAdapter, probeCodexToolBoundary, type CodexMcpServer } from "@clankie/worker-codex";
 import {
   PiWorkerAdapter,
   PiRpcClient,
@@ -39,16 +53,30 @@ export interface ProviderReadinessReport {
   issues: ProviderReadinessIssue[];
 }
 
+export interface FleetMcpReport {
+  grants: McpGrantProjection;
+  claude: McpWorkerProjection;
+  codex: McpWorkerProjection;
+}
+
 export interface ReadyProviderFleet {
   adapters: WorkerAdapter[];
   metadata: ReadonlyMap<string, ProviderMetadata>;
   reports: ProviderReadinessReport[];
+  /** Doctrine projection of the MCP registry, present when a registry is configured. */
+  mcp?: FleetMcpReport;
+  /** Native web tools granted to the Claude worker after doctrine projection. */
+  claudeWebTools: ClaudeWebTool[];
 }
 
 export interface ProviderFactoryOptions {
   environment: NodeJS.ProcessEnv;
   workerEnvironment: NodeJS.ProcessEnv;
   runnerStateRoot: string;
+  /** Compiled doctrine profile; required for MCP and web-tool projection. */
+  doctrine?: CompiledDoctrine;
+  /** Operator-authored MCP connector registry; projected through doctrine before any worker sees a tool. */
+  mcpRegistry?: McpRegistry;
   sandbox?: {
     prepare(
       identity: SandboxRunIdentity,
@@ -85,18 +113,79 @@ export interface ProviderFactoryOptions {
 export async function createReadyProviderFleet(options: ProviderFactoryOptions): Promise<ReadyProviderFleet> {
   const adapters: WorkerAdapter[] = [];
   const metadata = new Map<string, ProviderMetadata>();
+  const mcp = projectFleetMcp(options);
+  const webTools = claudeWebTools(options);
   const reports = await Promise.all([
-    prepareCodex(options, adapters, metadata),
-    prepareClaude(options, adapters, metadata),
+    prepareCodex(options, adapters, metadata, mcp),
+    prepareClaude(options, adapters, metadata, mcp, webTools),
     preparePi(options, adapters, metadata),
   ]);
-  return { adapters, metadata, reports };
+  return { adapters, metadata, reports, claudeWebTools: webTools, ...(mcp ? { mcp } : {}) };
+}
+
+/**
+ * Projects the operator MCP registry through compiled doctrine once per fleet
+ * build. Fails closed: without a compiled doctrine profile no MCP tool is
+ * ever projected, and only exact `allow` decisions reach a worker.
+ */
+function projectFleetMcp(options: ProviderFactoryOptions): FleetMcpReport | undefined {
+  if (!options.mcpRegistry || !options.doctrine) return undefined;
+  const grants = projectMcpToolGrants(options.mcpRegistry, options.doctrine, {
+    principalId: "runner-fleet",
+  });
+  return {
+    grants,
+    claude: projectMcpWorkerServers(options.mcpRegistry, grants, {
+      hostEnvironment: options.environment,
+      toolGranularity: "tool",
+    }),
+    codex: projectMcpWorkerServers(options.mcpRegistry, grants, {
+      hostEnvironment: options.environment,
+      toolGranularity: "server",
+    }),
+  };
+}
+
+function claudeMcpServers(mcp: FleetMcpReport | undefined): ClaudeMcpServer[] {
+  return (mcp?.claude.servers ?? []).map((server) => ({
+    name: server.name,
+    ...(server.kinds ? { kinds: server.kinds } : {}),
+    config: server.config as unknown as Record<string, unknown>,
+    allowedTools: server.allowedTools,
+  }));
+}
+
+/** Native web research tools require both the operator enable flag and a doctrine allow. */
+function claudeWebTools(options: ProviderFactoryOptions): ClaudeWebTool[] {
+  if (!enabled(options.environment.CLANKIE_CLAUDE_WEB_RESEARCH_ENABLED) || !options.doctrine) return [];
+  const grants = projectWebToolGrants(options.doctrine, { principalId: "claude-verification" });
+  return [
+    ...(grants.webSearch ? (["WebSearch"] as const) : []),
+    ...(grants.webFetch ? (["WebFetch"] as const) : []),
+  ];
+}
+
+/** Codex declares MCP servers in strict config; only stdio transports are supported there. */
+function codexMcpServers(mcp: FleetMcpReport | undefined): CodexMcpServer[] {
+  const servers: CodexMcpServer[] = [];
+  for (const server of mcp?.codex.servers ?? []) {
+    if (server.config.type !== "stdio") continue;
+    servers.push({
+      name: server.name,
+      ...(server.kinds ? { kinds: server.kinds } : {}),
+      command: server.config.command,
+      args: server.config.args,
+      env: server.config.env,
+    });
+  }
+  return servers;
 }
 
 async function prepareCodex(
   options: ProviderFactoryOptions,
   adapters: WorkerAdapter[],
   metadata: Map<string, ProviderMetadata>,
+  mcp?: FleetMcpReport,
 ): Promise<ProviderReadinessReport> {
   const workerId = "codex-implementation";
   if (!enabled(options.environment.CLANKIE_CODEX_ENABLED)) return disabled("codex", workerId);
@@ -171,6 +260,7 @@ async function prepareCodex(
     environment: options.workerEnvironment,
     toolEnvironment,
     deniedReadPaths,
+    mcpServers: codexMcpServers(mcp),
   });
   adapters.push(adapter);
   metadata.set(workerId, { provider: "codex", version });
@@ -181,6 +271,8 @@ async function prepareClaude(
   options: ProviderFactoryOptions,
   adapters: WorkerAdapter[],
   metadata: Map<string, ProviderMetadata>,
+  mcp?: FleetMcpReport,
+  webTools: ClaudeWebTool[] = [],
 ): Promise<ProviderReadinessReport> {
   const workerId = "claude-verification";
   if (!enabled(options.environment.CLANKIE_CLAUDE_ENABLED)) return disabled("claude", workerId);
@@ -216,16 +308,21 @@ async function prepareClaude(
     configDirectory,
     options.environment.GOOGLE_APPLICATION_CREDENTIALS,
   ]);
+  const mcpServers = claudeMcpServers(mcp);
+  const researchEnabled =
+    webTools.length > 0 || mcpServers.some((server) => server.kinds?.includes("research"));
   const adapter = new ClaudeWorkerAdapter({
     id: workerId,
     displayName: "Claude verification",
-    kinds: ["verification", "review"],
+    kinds: researchEnabled ? ["verification", "review", "research"] : ["verification", "review"],
     model,
     environment: claudeEnvironment,
     pathToClaudeCodeExecutable: command,
     settingSources: [],
     credentialFiles: protectedFiles,
     requireCredentialBoundary: true,
+    mcpServers,
+    webTools,
   });
   const readOnly: WorkerAdapter = {
     descriptor: {

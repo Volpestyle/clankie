@@ -13,6 +13,22 @@ import {
   type WorkerSteerCommand,
 } from "@clankie/worker-sdk";
 
+/**
+ * One stdio MCP server pre-approved by the runner's doctrine projection.
+ * Codex cannot filter individual MCP tools, so the runner only projects
+ * servers whose every declared tool doctrine allows. The server process is a
+ * connector adapter started by Codex itself; `env` is the resolved credential
+ * allowlist, never the provider parent environment.
+ */
+export interface CodexMcpServer {
+  name: string;
+  /** Task kinds allowed to see this server. Omitted means every kind. */
+  kinds?: TaskKind[];
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+}
+
 export interface CodexAppServerOptions {
   command?: string;
   model?: string;
@@ -24,6 +40,8 @@ export interface CodexAppServerOptions {
   toolEnvironment?: NodeJS.ProcessEnv;
   /** Absolute host-private paths denied to every model-invoked tool. */
   deniedReadPaths?: string[];
+  /** Doctrine-projected MCP servers supplied by the runner. */
+  mcpServers?: CodexMcpServer[];
   turnTimeoutMs?: number;
   transportFactory?: () => JsonlRpcTransport;
 }
@@ -264,6 +282,25 @@ export function codexAppServerArguments(options: CodexAppServerOptions): string[
     if (!value || !/^[A-Z][A-Z0-9_]*$/u.test(name)) continue;
     args.push("-c", `shell_environment_policy.set.${name}=${JSON.stringify(value)}`);
   }
+  args.push(...codexMcpServerArguments(options.mcpServers ?? []));
+  return args;
+}
+
+/** Inline-table `-c` overrides declaring each doctrine-projected MCP server. */
+export function codexMcpServerArguments(servers: readonly CodexMcpServer[]): string[] {
+  const args: string[] = [];
+  for (const server of [...servers].sort((left, right) => left.name.localeCompare(right.name))) {
+    if (!/^[a-z][a-z0-9_]*$/u.test(server.name)) {
+      throw new Error(`codex_mcp_server_name_invalid:${server.name}`);
+    }
+    const environment = Object.entries(server.env)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([name, value]) => `${tomlQuotedKey(name)} = ${JSON.stringify(value)}`);
+    args.push(
+      "-c",
+      `mcp_servers.${server.name}={ command = ${JSON.stringify(server.command)}, args = ${JSON.stringify(server.args)}, env = { ${environment.join(", ")} } }`,
+    );
+  }
   return args;
 }
 
@@ -336,7 +373,10 @@ export class CodexWorkerAdapter implements WorkerAdapter {
 
   public async run(context: WorkerRunContext): Promise<WorkerResult> {
     if (context.signal.aborted) return cancelledWorkerResult(context.workerRunId, "Codex");
-    const client = new CodexAppServerClient(this.options);
+    const mcpServers = (this.options.mcpServers ?? []).filter(
+      (server) => !server.kinds || server.kinds.includes(context.task.kind),
+    );
+    const client = new CodexAppServerClient({ ...this.options, mcpServers });
     this.activeClients.set(context.workerRunId, client);
     const writeEnabled = ["implementation", "debugging", "integration", "design"].includes(context.task.kind);
     try {
