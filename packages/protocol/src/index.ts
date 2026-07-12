@@ -1019,3 +1019,128 @@ export const DiscordPresenceWriteResultSchema = z
   })
   .strict();
 export type DiscordPresenceWriteResult = z.infer<typeof DiscordPresenceWriteResultSchema>;
+
+// ---------------------------------------------------------------------------
+// Connector-neutral tracker ceremony (VUH-845)
+// Semantic roles and notification surfaces only — no provider, principal
+// identity, or tracker-vendor nouns.
+// ---------------------------------------------------------------------------
+
+/** Semantic role that may receive human-attention or product-impact asks. */
+export const CeremonyTargetRoleSchema = z.enum([
+  "operator",
+  "captain",
+  "product_steward",
+  "reviewer",
+  "verifier",
+]);
+export type CeremonyTargetRole = z.infer<typeof CeremonyTargetRoleSchema>;
+
+/** Kind of human-attention request (what the captain needs, not how it is delivered). */
+export const HumanAttentionRequestKindSchema = z.enum([
+  "approval_needed",
+  "decision_needed",
+  "clarification_needed",
+  "review_needed",
+  "blocker_resolution",
+]);
+export type HumanAttentionRequestKind = z.infer<typeof HumanAttentionRequestKindSchema>;
+
+/** Surfaces that may carry a notification requirement (connector-neutral). */
+export const CeremonyNotificationSurfaceSchema = z.enum([
+  "captain_lane",
+  "operator_inbox",
+  "workspace_surface",
+]);
+export type CeremonyNotificationSurface = z.infer<typeof CeremonyNotificationSurfaceSchema>;
+
+export const CeremonyAuthorityImpactSchema = z.enum(["none", "narrow", "broad", "doctrine"]);
+export type CeremonyAuthorityImpact = z.infer<typeof CeremonyAuthorityImpactSchema>;
+
+export const CeremonyUrgencySchema = z.enum(["routine", "elevated", "blocking"]);
+export type CeremonyUrgency = z.infer<typeof CeremonyUrgencySchema>;
+
+/**
+ * Opaque tracker correlation. Connectors bind `externalRef`; protocol never
+ * names a tracker vendor or principal.
+ */
+export const TrackerCorrelationRefSchema = z
+  .object({
+    correlationId: z.string().min(1),
+    externalRef: z.string().min(1).optional(),
+  })
+  .strict();
+export type TrackerCorrelationRef = z.infer<typeof TrackerCorrelationRefSchema>;
+
+/** Product-impact facts required on impact-led issue drafts. */
+export const ProductImpactSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    summary: z.string().min(1),
+    userVisibleChange: z.boolean(),
+    risk: RiskSchema,
+    authorityImpact: CeremonyAuthorityImpactSchema,
+  })
+  .strict();
+export type ProductImpact = z.infer<typeof ProductImpactSchema>;
+
+/**
+ * Connector-neutral draft for a tracker issue. Captains and runtimes validate
+ * this shape before any connector delivery (VUH-846+).
+ */
+export const TrackerIssueDraftSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    draftId: z.string().min(1),
+    missionId: MissionIdSchema,
+    taskId: TaskIdSchema.optional(),
+    correlationId: z.string().min(1),
+    title: z.string().min(1),
+    objective: z.string().min(1),
+    productImpact: ProductImpactSchema,
+    acceptanceCriteria: z.array(z.string().min(1)).min(1),
+    writeScope: z.array(z.string().min(1)).default([]),
+    trackerRef: TrackerCorrelationRefSchema.optional(),
+    createdAt: z.string().datetime(),
+  })
+  .strict();
+export type TrackerIssueDraft = z.infer<typeof TrackerIssueDraftSchema>;
+
+/** Request that a human (by semantic role) attend to a mission decision. */
+export const HumanAttentionRequestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    requestId: z.string().min(1),
+    missionId: MissionIdSchema,
+    taskId: TaskIdSchema.optional(),
+    workerRunId: WorkerRunIdSchema.optional(),
+    correlationId: z.string().min(1),
+    targetRole: CeremonyTargetRoleSchema,
+    requestKind: HumanAttentionRequestKindSchema,
+    actionableAsk: z.string().min(1),
+    blocking: z.boolean(),
+    authorityImpact: CeremonyAuthorityImpactSchema,
+    urgency: CeremonyUrgencySchema.default("elevated"),
+    notificationSurfaces: z.array(CeremonyNotificationSurfaceSchema).min(1),
+    trackerRef: TrackerCorrelationRefSchema.optional(),
+    createdAt: z.string().datetime(),
+    expiresAt: z.string().datetime().optional(),
+  })
+  .strict();
+export type HumanAttentionRequest = z.infer<typeof HumanAttentionRequestSchema>;
+
+/** Response from the role that attended the request. */
+export const HumanAttentionResponseSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    responseId: z.string().min(1),
+    requestId: z.string().min(1),
+    correlationId: z.string().min(1),
+    actorRole: CeremonyTargetRoleSchema,
+    decision: z.enum(["approve", "deny", "defer", "clarify", "redirect"]),
+    rationale: z.string().min(1),
+    trackerRef: TrackerCorrelationRefSchema.optional(),
+    createdAt: z.string().datetime(),
+  })
+  .strict();
+export type HumanAttentionResponse = z.infer<typeof HumanAttentionResponseSchema>;

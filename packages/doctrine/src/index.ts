@@ -4,9 +4,21 @@ import type {
   ActionDecision,
   ActionEffect,
   ActionRequest,
+  CeremonyAuthorityImpact,
+  CeremonyNotificationSurface,
+  CeremonyTargetRole,
+  CeremonyUrgency,
   ExecutionClass,
+  HumanAttentionRequestKind,
   Risk,
   TaskKind,
+} from "@clankie/protocol";
+import {
+  CeremonyAuthorityImpactSchema,
+  CeremonyNotificationSurfaceSchema,
+  CeremonyTargetRoleSchema,
+  CeremonyUrgencySchema,
+  HumanAttentionRequestKindSchema,
 } from "@clankie/protocol";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
@@ -110,7 +122,34 @@ export const OrchestrationProfileSchema = z.object({
     .object({
       externalConnectors: z.enum(["none", "optional", "required"]),
       integrationFlow: z.enum(["direct_main", "pull_request", "review_gate"]),
+      /**
+       * Optional tracker-ceremony customization (VUH-845). Omitted on base
+       * presets that only set connector/integration ceremony so existing
+       * equality fixtures stay stable; projection supplies deterministic defaults.
+       */
+      tracker: z
+        .object({
+          issueDraft: z
+            .object({
+              enabled: z.boolean(),
+              requireProductImpact: z.boolean(),
+            })
+            .strict(),
+          humanAttention: z
+            .object({
+              enabled: z.boolean(),
+              defaultTargetRole: CeremonyTargetRoleSchema,
+              defaultRequestKind: HumanAttentionRequestKindSchema,
+              notifyWhenBlocking: z.boolean(),
+              notificationSurfaces: z.array(CeremonyNotificationSurfaceSchema).min(1),
+              blockingUrgency: CeremonyUrgencySchema,
+            })
+            .strict(),
+        })
+        .strict()
+        .optional(),
     })
+    .strict()
     .optional(),
   planning: z.object({
     requirePlanApproval: z.boolean().default(true),
@@ -257,6 +296,116 @@ export interface CompiledDoctrine {
   };
   routing: Record<TaskKind, ExecutionClass>;
 }
+
+/** Resolved tracker ceremony used by captains (connector-neutral, no I/O). */
+export interface CaptainCeremonyProjection {
+  profileId: string;
+  profileHash: string;
+  externalConnectors: "none" | "optional" | "required";
+  integrationFlow: "direct_main" | "pull_request" | "review_gate";
+  issueDraft: {
+    enabled: boolean;
+    requireProductImpact: boolean;
+  };
+  humanAttention: {
+    enabled: boolean;
+    defaultTargetRole: CeremonyTargetRole;
+    defaultRequestKind: HumanAttentionRequestKind;
+    notifyWhenBlocking: boolean;
+    notificationSurfaces: CeremonyNotificationSurface[];
+    blockingUrgency: CeremonyUrgency;
+  };
+  /** True when the invariant independent-verifier floor is active. */
+  independentVerifierRequired: boolean;
+}
+
+/**
+ * Deterministic defaults when a profile omits `ceremony.tracker`.
+ * Derived only from connector/integration ceremony — never from provider nouns.
+ */
+export function defaultTrackerCeremony(input: {
+  externalConnectors: "none" | "optional" | "required";
+  integrationFlow: "direct_main" | "pull_request" | "review_gate";
+}): NonNullable<NonNullable<OrchestrationProfile["ceremony"]>["tracker"]> {
+  if (input.externalConnectors === "none" || input.integrationFlow === "direct_main") {
+    return {
+      issueDraft: { enabled: false, requireProductImpact: false },
+      humanAttention: {
+        enabled: true,
+        defaultTargetRole: "operator",
+        defaultRequestKind: "blocker_resolution",
+        notifyWhenBlocking: true,
+        notificationSurfaces: ["operator_inbox"],
+        blockingUrgency: "blocking",
+      },
+    };
+  }
+  if (input.externalConnectors === "required" || input.integrationFlow === "review_gate") {
+    return {
+      issueDraft: { enabled: true, requireProductImpact: true },
+      humanAttention: {
+        enabled: true,
+        defaultTargetRole: "product_steward",
+        defaultRequestKind: "approval_needed",
+        notifyWhenBlocking: true,
+        notificationSurfaces: ["captain_lane", "operator_inbox", "workspace_surface"],
+        blockingUrgency: "blocking",
+      },
+    };
+  }
+  // optional connectors / pull_request (structured)
+  return {
+    issueDraft: { enabled: true, requireProductImpact: true },
+    humanAttention: {
+      enabled: true,
+      defaultTargetRole: "operator",
+      defaultRequestKind: "decision_needed",
+      notifyWhenBlocking: true,
+      notificationSurfaces: ["captain_lane", "operator_inbox"],
+      blockingUrgency: "elevated",
+    },
+  };
+}
+
+/**
+ * Concise captain-facing ceremony projection. Pure: no tracker connector I/O.
+ * Overlay layers never carry ceremony (stripped at merge); only base/non-overlay
+ * layers can customize tracker ceremony fields.
+ */
+export function projectCaptainCeremony(compiled: CompiledDoctrine): CaptainCeremonyProjection {
+  const ceremony = compiled.profile.ceremony ?? {
+    externalConnectors: "optional" as const,
+    integrationFlow: "pull_request" as const,
+  };
+  const tracker =
+    ceremony.tracker ??
+    defaultTrackerCeremony({
+      externalConnectors: ceremony.externalConnectors,
+      integrationFlow: ceremony.integrationFlow,
+    });
+  return {
+    profileId: compiled.profile.id,
+    profileHash: compiled.profileHash,
+    externalConnectors: ceremony.externalConnectors,
+    integrationFlow: ceremony.integrationFlow,
+    issueDraft: { ...tracker.issueDraft },
+    humanAttention: {
+      ...tracker.humanAttention,
+      notificationSurfaces: [...tracker.humanAttention.notificationSurfaces],
+    },
+    independentVerifierRequired: compiled.profile.verification.independentVerifier,
+  };
+}
+
+// Re-export ceremony field schemas so doctrine consumers need not reach into protocol
+// for the projection contract surface.
+export type {
+  CeremonyAuthorityImpact,
+  CeremonyNotificationSurface,
+  CeremonyTargetRole,
+  CeremonyUrgency,
+  HumanAttentionRequestKind,
+};
 
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
