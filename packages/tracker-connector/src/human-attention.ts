@@ -103,6 +103,10 @@ export interface PendingAttentionRecord {
   readonly request: HumanAttentionRequest;
   /** Must match verified agent-session event organization id (workspace). */
   readonly workspaceId: string;
+  /** Semantic role selected during delivery; absent on legacy stored records. */
+  readonly authorizedResponderRole?: HumanAttentionRequest["targetRole"];
+  /** Opaque provider principal selected during delivery; absent on legacy stored records. */
+  readonly authorizedResponderPrincipalId?: string;
   readonly issueId?: string;
   readonly agentSessionId?: string;
   readonly rootCommentId?: string | null;
@@ -272,10 +276,20 @@ export function deliveryIdempotencyKey(requestId: string, fingerprint: string): 
 function pendingFromDelivery(
   request: HumanAttentionRequest,
   binding: WorkspaceTrackerBinding,
+  authorizedResponder?: {
+    readonly role: HumanAttentionRequest["targetRole"];
+    readonly principalId: string;
+  },
 ): PendingAttentionRecord {
   return {
     request,
     workspaceId: binding.workspaceId,
+    ...(authorizedResponder === undefined
+      ? {}
+      : {
+          authorizedResponderRole: authorizedResponder.role,
+          authorizedResponderPrincipalId: authorizedResponder.principalId,
+        }),
     ...(request.trackerRef?.externalRef === undefined ? {} : { issueId: request.trackerRef.externalRef }),
   };
 }
@@ -292,7 +306,7 @@ export async function deliverHumanAttention(
   input: DeliverHumanAttentionInput,
 ): Promise<AttentionDeliveryResult> {
   const request = HumanAttentionRequestSchema.parse(input.request);
-  const pending = pendingFromDelivery(request, input.binding);
+  const unresolvedPending = pendingFromDelivery(request, input.binding);
 
   if (!input.projection.humanAttention.enabled) {
     const fingerprint = deliveryFingerprint(input.binding, [], request);
@@ -306,7 +320,7 @@ export async function deliverHumanAttention(
       async () => {
         const now = (input.clock ?? (() => new Date()))().toISOString();
         return {
-          pending,
+          pending: unresolvedPending,
           result: {
             requestId: request.requestId,
             missionId: request.missionId,
@@ -341,6 +355,17 @@ export async function deliverHumanAttention(
       useFallback: true,
     });
   }
+
+  const resolvedRole = resolved.actions[0]?.targetRole;
+  const resolvedPrincipal =
+    resolvedRole === undefined ? undefined : input.binding.roles[resolvedRole]?.principalId;
+  const pending = pendingFromDelivery(
+    request,
+    input.binding,
+    resolvedRole === undefined || resolvedPrincipal === undefined
+      ? undefined
+      : { role: resolvedRole, principalId: resolvedPrincipal },
+  );
 
   const fingerprint = deliveryFingerprint(input.binding, resolved.actions, request);
 
@@ -489,13 +514,17 @@ export function responseFromVerifiedEvent(
   pending: PendingAttentionRecord,
   binding: WorkspaceTrackerBinding,
 ): HumanAttentionResponse | undefined {
-  const role = binding.roles[pending.request.targetRole];
-  if (role === undefined) return undefined;
+  const authorizedResponderRole = pending.authorizedResponderRole ?? pending.request.targetRole;
+  const authorizedResponderPrincipalId =
+    pending.authorizedResponderPrincipalId ?? binding.roles[authorizedResponderRole]?.principalId;
+  if (authorizedResponderPrincipalId === undefined) return undefined;
   const data = event.data as Record<string, unknown>;
   const actor = data.actor as { id?: string } | undefined;
-  if (actor?.id !== role.principalId) return undefined;
+  if (actor?.id !== authorizedResponderPrincipalId) return undefined;
   const embedded = authorityFromVerifiedEvent(event);
-  if (embedded !== undefined) return embedded;
+  if (embedded !== undefined) {
+    return embedded.actorRole === authorizedResponderRole ? embedded : undefined;
+  }
   const activity = data.activity as { id?: string; body?: string } | undefined;
   if (typeof activity?.body !== "string") return undefined;
   const escapedRequestId = pending.request.requestId.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
@@ -513,7 +542,7 @@ export function responseFromVerifiedEvent(
     responseId: activity.id ?? event.id,
     requestId: pending.request.requestId,
     correlationId: pending.request.correlationId,
-    actorRole: pending.request.targetRole,
+    actorRole: authorizedResponderRole,
     decision: match[1].toLowerCase(),
     rationale: match[2].trim(),
     ...(pending.request.trackerRef === undefined ? {} : { trackerRef: pending.request.trackerRef }),
@@ -594,6 +623,8 @@ export function correlateAgentSessionToAttention(input: {
     return undefined;
   }
   const response = HumanAttentionResponseSchema.parse(input.response);
+  const authorizedResponderRole = input.pending.authorizedResponderRole ?? input.pending.request.targetRole;
+  if (response.actorRole !== authorizedResponderRole) return undefined;
   if (response.requestId !== input.pending.request.requestId) return undefined;
   if (response.correlationId !== input.pending.request.correlationId) return undefined;
   if (

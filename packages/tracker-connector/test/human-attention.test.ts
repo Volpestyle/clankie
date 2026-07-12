@@ -353,28 +353,49 @@ describe("deliverHumanAttention", () => {
   });
 
   it("uses fallback role when primary is unsupported", async () => {
+    const store = new MemoryStore();
+    const fallbackBinding = binding({
+      roles: {
+        reviewer: {
+          principalId: "principal-reviewer",
+          capabilities: [{ kind: "comment_notify", principalId: "principal-reviewer" }],
+        },
+      },
+      fallbackRole: "reviewer",
+    });
     const result = await deliverHumanAttention({
       request: request({
         targetRole: "product_steward",
         notificationSurfaces: ["workspace_surface"],
         directNotification: "required",
       }),
-      binding: binding({
-        roles: {
-          reviewer: {
-            principalId: "principal-reviewer",
-            capabilities: [{ kind: "comment_notify", principalId: "principal-reviewer" }],
-          },
-        },
-        fallbackRole: "reviewer",
-      }),
+      binding: fallbackBinding,
       projection: projection(),
       adapter: new FakeAdapter(),
       policy: new RecordedPolicy(),
-      store: new MemoryStore(),
+      store,
     });
     expect(result.aggregate).toBe("fallback");
     expect(result.actions.every((a) => a.isFallback)).toBe(true);
+
+    const pending = (await store.get("attn-1"))!.pending;
+    expect(pending).toMatchObject({
+      authorizedResponderRole: "reviewer",
+      authorizedResponderPrincipalId: "principal-reviewer",
+    });
+    const event = sessionEvent({
+      data: {
+        attentionResponse: undefined,
+        actor: { id: "principal-reviewer" },
+        activity: {
+          id: "fallback-response-1",
+          body: "clankie-response `attn-1` approve: Reviewer approved as fallback.",
+        },
+      },
+    });
+    const response = responseFromVerifiedEvent(event, pending, fallbackBinding);
+    expect(response).toMatchObject({ actorRole: "reviewer", decision: "approve" });
+    expect(correlateAgentSessionToAttention({ pending, event, response: response! })).toEqual(response);
   });
 
   it("counterexample: same requestId with different request content conflicts on idempotency", async () => {
@@ -643,6 +664,36 @@ describe("attention correlation", () => {
         binding(),
       ),
     ).toBeUndefined();
+  });
+
+  it("rejects an embedded actor role that differs from the authorized responder role", () => {
+    const pending = {
+      request: request(),
+      workspaceId: "workspace-1",
+      issueId: "issue-1",
+      authorizedResponderRole: "operator" as const,
+      authorizedResponderPrincipalId: "principal-operator",
+    };
+    const event = sessionEvent({
+      data: {
+        actor: { id: "principal-operator" },
+        attentionResponse: {
+          schemaVersion: 1,
+          responseId: "role-mismatch-response",
+          requestId: "attn-1",
+          correlationId: "corr-attn-1",
+          actorRole: "reviewer",
+          decision: "approve",
+          rationale: "This embedded role is not authorized for the pending request.",
+          trackerRef: { correlationId: "corr-attn-1", externalRef: "issue-1" },
+          createdAt: "2026-07-12T13:59:59.000Z",
+        },
+      },
+    });
+    const authority = authorityFromVerifiedEvent(event)!;
+
+    expect(responseFromVerifiedEvent(event, pending, binding())).toBeUndefined();
+    expect(correlateAgentSessionToAttention({ pending, event, response: authority })).toBeUndefined();
   });
 });
 

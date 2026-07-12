@@ -119,9 +119,12 @@ caller-supplied). The verified event contains the complete typed
 `HumanAttentionResponse`; mission, profile, envelope correlation, request,
 response correlation, tracker reference, and timestamps must all match.
 Linear agent-thread replies use the deterministic command emitted in the direct
-notification (`clankie-response <requestId> <decision>: <rationale>`), and the
-prompt actor must equal the provider principal bound to the target semantic role.
-Free-form approval prose remains advisory and cannot close the request.
+notification (`clankie-response <requestId> <decision>: <rationale>`). Delivery
+durably records the resolved responder semantic role and opaque provider
+principal, including fallback resolution; the prompt actor and typed response
+role must match that stored authority. Legacy pending records derive authority
+from the requested target role and its current binding. Free-form approval prose
+remains advisory and cannot close the request.
 
 `correlateAgentSessionToAttention` resolves pending attention only from verified
 `tracker.agent-session.created` / `prompted` events. It requires
