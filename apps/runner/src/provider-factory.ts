@@ -104,6 +104,7 @@ export interface ProviderFactoryOptions {
       environment: NodeJS.ProcessEnv;
       toolEnvironment: NodeJS.ProcessEnv;
       deniedReadPaths: string[];
+      mcpServers: CodexMcpServer[];
     }) => Promise<boolean>;
     claudeAuth?: (environment: NodeJS.ProcessEnv, configDirectory: string) => Promise<boolean>;
     ollamaModels?: (url: URL) => Promise<string[]>;
@@ -324,11 +325,14 @@ async function prepareCodex(
   const toolEnvironment = buildToolEnvironment(options.workerEnvironment, toolHome);
   if (browser?.report.status === "ready") Object.assign(toolEnvironment, browser.environment);
   const deniedReadPaths = providerPrivatePaths(options, [codexHome]);
+  // The boundary probe carries the projected MCP servers so a strict-config
+  // rejection fails readiness instead of surfacing on the first mission turn.
   const boundaryReady = await (options.probes?.codexBoundary ?? defaultCodexBoundary)({
     command,
     environment: options.workerEnvironment,
     toolEnvironment,
     deniedReadPaths,
+    mcpServers: codexMcpServers(mcp),
   });
   if (!boundaryReady) {
     issues.push({
@@ -1114,6 +1118,7 @@ function defaultCodexBoundary(input: {
   environment: NodeJS.ProcessEnv;
   toolEnvironment: NodeJS.ProcessEnv;
   deniedReadPaths: string[];
+  mcpServers: CodexMcpServer[];
 }): Promise<boolean> {
   return (async () => {
     const directory = await mkdtemp(join(tmpdir(), "clankie-codex-boundary-"));
@@ -1126,6 +1131,7 @@ function defaultCodexBoundary(input: {
           environment: input.environment,
           toolEnvironment: input.toolEnvironment,
           deniedReadPaths: input.deniedReadPaths,
+          mcpServers: input.mcpServers,
           turnTimeoutMs: 5_000,
         },
         sentinel,
