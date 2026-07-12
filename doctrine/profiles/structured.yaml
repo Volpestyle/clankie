@@ -53,6 +53,8 @@ actions:
   vcs.change.open: { default: allow, rules: [] }
   vcs.change.integrate: { default: require_approval, rules: [] }
   tracker.assignment.mirror: { default: allow, rules: [] }
+  tracker.assignment.update: { default: allow, rules: [] }
+  tracker.attention.marker.apply: { default: allow, rules: [] }
   tracker.status.update: { default: require_approval, rules: [] }
   tracker.priority.update: { default: require_approval, rules: [] }
   tracker.acceptance-criteria.update: { default: require_approval, rules: [] }

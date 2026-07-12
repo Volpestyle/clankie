@@ -1,5 +1,5 @@
 import { SpanStatusCode, trace, type Attributes } from "@opentelemetry/api";
-import pino, { type Logger, type LoggerOptions } from "pino";
+import pino, { type DestinationStream, type Logger, type LoggerOptions } from "pino";
 
 const defaultRedactPaths = [
   "req.headers.authorization",
@@ -14,6 +14,9 @@ const defaultRedactPaths = [
   "env.OPENAI_API_KEY",
   "env.ANTHROPIC_API_KEY",
   "env.DISCORD_BOT_TOKEN",
+  "credential.key",
+  "credentials.*.key",
+  "discord_bot.key",
 ];
 
 export interface LoggerContext {
@@ -26,7 +29,11 @@ export interface LoggerContext {
   correlationId?: string;
 }
 
-export function createLogger(context: LoggerContext, options: LoggerOptions = {}): Logger {
+export function createLogger(
+  context: LoggerContext,
+  options: LoggerOptions = {},
+  destination?: DestinationStream,
+): Logger {
   return pino({
     level: process.env.CLANKIE_LOG_LEVEL ?? "info",
     base: context,
@@ -36,7 +43,7 @@ export function createLogger(context: LoggerContext, options: LoggerOptions = {}
     },
     timestamp: pino.stdTimeFunctions.isoTime,
     ...options,
-  });
+  }, destination);
 }
 
 export function childLogger(logger: Logger, context: Omit<LoggerContext, "service">): Logger {
@@ -86,7 +93,7 @@ export function sanitizeForSupportBundle(value: unknown): unknown {
   if (!value || typeof value !== "object") return value;
   const output: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-    if (/token|secret|password|authorization|api[_-]?key/i.test(key)) {
+    if (/^(?:key|.*token|.*secret|.*password|authorization|api[_-]?key)$/i.test(key)) {
       output[key] = "[REDACTED]";
     } else {
       output[key] = sanitizeForSupportBundle(entry);

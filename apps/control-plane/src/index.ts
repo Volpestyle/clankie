@@ -1,11 +1,15 @@
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { serve } from "@hono/node-server";
-import { compileDoctrine, loadDoctrineFile } from "@clankie/doctrine";
+import { compileDoctrine, loadDoctrineFile, projectCaptainCeremony } from "@clankie/doctrine";
 import { SqliteEventStore } from "@clankie/event-store";
 import { createLogger } from "@clankie/observability";
 import { MemoryStore } from "@clankie/memory-store";
-import type { LinearAgentRuntimePort } from "@clankie/tracker-connector";
+import type {
+  AttentionDeliveryAdapter,
+  LinearAgentRuntimePort,
+  WorkspaceTrackerBinding,
+} from "@clankie/tracker-connector";
 import {
   createBearerAuthenticator,
   createControlPlane,
@@ -35,6 +39,18 @@ const captainSteerSourceLane = parseCaptainSteerSourceLane(
   process.env.CLANKIE_CAPTAIN_STEER_SOURCE_LANE ?? "api",
 );
 const linearAgentRuntime = await loadLinearAgentRuntime(process.env.CLANKIE_LINEAR_AGENT_RUNTIME_MODULE);
+const linearAttentionRuntime = await loadLinearAttentionRuntime(
+  process.env.CLANKIE_LINEAR_ATTENTION_RUNTIME_MODULE,
+);
+if (
+  linearAgentRuntime !== undefined &&
+  projectCaptainCeremony(doctrine).humanAttention.enabled &&
+  linearAttentionRuntime === undefined
+) {
+  throw new Error(
+    "CLANKIE_LINEAR_ATTENTION_RUNTIME_MODULE is required when the Linear agent runtime and human-attention ceremony are enabled",
+  );
+}
 const discordPresenceRuntime = await loadDiscordPresenceRuntime(
   process.env.CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE,
 );
@@ -50,7 +66,15 @@ const app = await createControlPlane({
         linearAgentRuntime,
         captainChannelTurns: new EveCaptainChannelTurnPort({
           baseUrl: process.env.CLANKIE_CAPTAIN_URL ?? "http://127.0.0.1:4321",
+          ceremonyProjection: projectCaptainCeremony(doctrine),
+          ...(captainToken === undefined ? {} : { captainToken }),
         }),
+      }),
+  ...(linearAttentionRuntime === undefined
+    ? {}
+    : {
+        workspaceBindingResolver: linearAttentionRuntime.bindingResolver,
+        attentionDeliveryAdapter: linearAttentionRuntime.adapter,
       }),
   ...(discordPresenceRuntime === undefined ? {} : { discordPresenceRuntime }),
   ...(process.env.CLANKIE_REPO_PATH ? { workspacePath: process.env.CLANKIE_REPO_PATH } : {}),
@@ -121,6 +145,32 @@ async function loadDiscordPresenceRuntime(
     throw new Error("createDiscordPresenceRuntime() returned an invalid runtime port");
   }
   return runtime as unknown as DiscordPresenceRuntimePort;
+}
+
+interface LinearAttentionRuntimeModule {
+  readonly bindingResolver: { resolve(workspaceId: string): WorkspaceTrackerBinding | undefined };
+  readonly adapter: AttentionDeliveryAdapter;
+}
+
+async function loadLinearAttentionRuntime(
+  modulePath: string | undefined,
+): Promise<LinearAttentionRuntimeModule | undefined> {
+  if (modulePath === undefined) return undefined;
+  const loaded: unknown = await import(pathToFileURL(resolve(modulePath)).href);
+  if (!isRecord(loaded) || typeof loaded.createLinearAttentionRuntime !== "function") {
+    throw new Error("CLANKIE_LINEAR_ATTENTION_RUNTIME_MODULE must export createLinearAttentionRuntime()");
+  }
+  const runtime: unknown = await loaded.createLinearAttentionRuntime();
+  if (
+    !isRecord(runtime) ||
+    !isRecord(runtime.bindingResolver) ||
+    typeof runtime.bindingResolver.resolve !== "function" ||
+    !isRecord(runtime.adapter) ||
+    typeof runtime.adapter.attempt !== "function"
+  ) {
+    throw new Error("createLinearAttentionRuntime() returned an invalid runtime port");
+  }
+  return runtime as unknown as LinearAttentionRuntimeModule;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

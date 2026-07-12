@@ -1,5 +1,5 @@
 {
-  "name": "@clankie/tracker-connector",
+  "name": "@clankie/media-connector",
   "version": "0.1.0",
   "private": false,
   "type": "module",
@@ -10,7 +10,6 @@
     "build": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "test:live": "CLANKIE_LINEAR_LIVE_SMOKE=1 CLANKIE_LINEAR_AGENT_LIVE_SMOKE=1 vitest run test/*-live.test.ts",
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {

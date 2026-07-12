@@ -71,6 +71,8 @@ import {
   TrackerIssueRefSchema,
   TrackerMissionContractSchema,
   TrackerPolicyError,
+  type AttentionDeliveryAdapter,
+  type AttentionDeliveryStore,
   type LinearAgentRuntimePort,
   type TrackerEventAttribution,
   type TrackerMirrorPort,
@@ -93,6 +95,14 @@ import {
 import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
 import type { CaptainChannelTurnPort } from "./eve-captain-turn.ts";
 import { applyMissionTriggerEvent, dueOccurrences, MissionTriggerInputSchema } from "./mission-triggers.ts";
+import {
+  DoctrineAttentionPolicy,
+  EventStoreAttentionDeliveryStore,
+  UnsupportedAttentionAdapter,
+  createTrackerCeremonyRuntime,
+  isProjectionEventStore,
+  type WorkspaceBindingResolver,
+} from "./tracker-ceremony.ts";
 
 const logger = createLogger({ service: "clankie-control-plane", version: "0.1.0" });
 const LINEAR_DELIVERY_RETENTION_MS = 7 * 60 * 60 * 1_000;
@@ -170,6 +180,19 @@ export interface ControlPlaneDependencies {
   idFactory?: () => string;
   workerSteeringStore?: WorkerSteeringStore;
   authorizeWorkerSteer?: WorkerSteerAuthorizer;
+  /**
+   * Trusted workspace → binding resolver. Bindings are never taken from request bodies.
+   * Required for human-attention delivery routes.
+   */
+  workspaceBindingResolver?: WorkspaceBindingResolver;
+  /** Attention delivery adapter; defaults to unsupported-only when delivery is enabled. */
+  attentionDeliveryAdapter?: AttentionDeliveryAdapter;
+  /**
+   * Durable attention delivery store. When omitted and eventStore is present,
+   * EventStoreAttentionDeliveryStore is used. Without a durable store, deliver returns 503.
+   * In-memory stores are test-only and must be injected explicitly.
+   */
+  attentionDeliveryStore?: AttentionDeliveryStore;
 }
 
 export type WorkerSteerAuthorizer = (input: {
@@ -578,6 +601,32 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
   const consumedApprovalIds = new Set<string>();
   const storedEvents: DomainEvent[] = [];
   const steeringStore = dependencies.workerSteeringStore ?? new InMemoryWorkerSteeringStore();
+  // Durable single-flight requires ProjectionEventStore (appendExpected/readStream).
+  // Plain EventStore or missing store → deliver fails closed (503), never silent
+  // process-local-only production default.
+  const attentionStore =
+    dependencies.attentionDeliveryStore ??
+    (dependencies.eventStore !== undefined && isProjectionEventStore(dependencies.eventStore)
+      ? new EventStoreAttentionDeliveryStore(dependencies.eventStore, {
+          profileHash: dependencies.doctrine.profileHash,
+          idFactory,
+          clock,
+        })
+      : undefined);
+  const ceremonyRuntime =
+    attentionStore === undefined
+      ? undefined
+      : createTrackerCeremonyRuntime({
+          doctrine: dependencies.doctrine,
+          policy: new DoctrineAttentionPolicy(dependencies.doctrine),
+          adapter: dependencies.attentionDeliveryAdapter ?? new UnsupportedAttentionAdapter(),
+          store: attentionStore,
+          bindingResolver: dependencies.workspaceBindingResolver ?? {
+            resolve: () => undefined,
+          },
+          lookupVerifiedEvent: (eventId) => storedEvents.find((event) => event.id === eventId),
+          clock,
+        });
   if (dependencies.eventStore) {
     for (const stored of await dependencies.eventStore.readAll()) {
       storedEvents.push(stored.event);
@@ -1057,6 +1106,138 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       return context.json(result);
     } catch {
       return context.json({ error: "tracker_narrative_failed" }, 502);
+    }
+  });
+
+
+  app.post("/v1/tracker/issue-drafts/validate", async (context) => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") return context.json({ error: "captain_authentication_unavailable" }, 503);
+    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
+    if (ceremonyRuntime === undefined) {
+      return context.json({ error: "tracker_ceremony_runtime_unavailable" }, 503);
+    }
+    try {
+      const body = await readJson(context.req.raw);
+      const result = ceremonyRuntime.validateDraft(body);
+      return context.json(result, result.ok ? 200 : 400);
+    } catch (error) {
+      if (error instanceof Error && error.message === "doctrine_hash_mismatch") {
+        return context.json(
+          { error: "doctrine_hash_mismatch", expected: dependencies.doctrine.profileHash },
+          409,
+        );
+      }
+      return context.json({ error: "invalid_issue_draft_validation" }, 400);
+    }
+  });
+
+  app.post("/v1/tracker/human-attention/deliver", async (context) => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") return context.json({ error: "captain_authentication_unavailable" }, 503);
+    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
+    if (ceremonyRuntime === undefined || attentionStore === undefined) {
+      return context.json({ error: "attention_delivery_store_unavailable" }, 503);
+    }
+    if (dependencies.workspaceBindingResolver === undefined) {
+      return context.json({ error: "workspace_binding_resolver_unavailable" }, 503);
+    }
+    try {
+      const body = await readJson(context.req.raw);
+      const result = await ceremonyRuntime.deliverAttention(body);
+      if (dependencies.eventStore) {
+        const delivered = await attentionStore.get(result.requestId);
+        await recordEvent(
+          "tracker.human-attention.delivered",
+          result.missionId,
+          clock().toISOString(),
+          {
+            requestId: result.requestId,
+            correlationId: result.correlationId,
+            aggregate: result.aggregate,
+            fingerprint: result.fingerprint,
+            actions: result.actions,
+          },
+          {
+            correlationId: result.correlationId,
+            profileHash: dependencies.doctrine.profileHash,
+            ...(delivered?.pending.request.taskId === undefined
+              ? {}
+              : { taskId: delivered.pending.request.taskId }),
+            ...(delivered?.pending.request.workerRunId === undefined
+              ? {}
+              : { workerRunId: delivered.pending.request.workerRunId }),
+          },
+        );
+      }
+      return context.json(result);
+    } catch (error) {
+      if (error instanceof Error && error.message === "doctrine_hash_mismatch") {
+        return context.json(
+          { error: "doctrine_hash_mismatch", expected: dependencies.doctrine.profileHash },
+          409,
+        );
+      }
+      if (error instanceof Error && error.message === "workspace_binding_unavailable") {
+        return context.json({ error: "workspace_binding_unavailable" }, 404);
+      }
+      logger.warn(
+        {
+          service: "clankie-control-plane",
+          error: error instanceof Error ? error.message : String(error),
+        },
+        "human-attention delivery failed",
+      );
+      return context.json({ error: "human_attention_delivery_failed" }, 400);
+    }
+  });
+
+  app.post("/v1/tracker/human-attention/correlate", async (context) => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") return context.json({ error: "captain_authentication_unavailable" }, 503);
+    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
+    if (ceremonyRuntime === undefined) {
+      return context.json({ error: "tracker_ceremony_runtime_unavailable" }, 503);
+    }
+    try {
+      const body = await readJson(context.req.raw);
+      const result = await ceremonyRuntime.correlate(body);
+      if ("ok" in result && result.ok === false) {
+        return context.json(result, 409);
+      }
+      if (dependencies.eventStore && !("ok" in result) && attentionStore !== undefined) {
+        const requestId =
+          typeof (body as { requestId?: string }).requestId === "string"
+            ? (body as { requestId: string }).requestId
+            : result.requestId;
+        const pending = await attentionStore.get(requestId);
+        const missionId = pending?.result.missionId ?? "unknown";
+        await recordEvent(
+          "tracker.human-attention.responded",
+          missionId,
+          clock().toISOString(),
+          { ...result },
+          {
+            correlationId: result.correlationId,
+            profileHash: dependencies.doctrine.profileHash,
+            ...(pending?.pending.request.taskId === undefined
+              ? {}
+              : { taskId: pending.pending.request.taskId }),
+            ...(pending?.pending.request.workerRunId === undefined
+              ? {}
+              : { workerRunId: pending.pending.request.workerRunId }),
+          },
+        );
+      }
+      return context.json(result);
+    } catch (error) {
+      if (error instanceof Error && error.message === "doctrine_hash_mismatch") {
+        return context.json(
+          { error: "doctrine_hash_mismatch", expected: dependencies.doctrine.profileHash },
+          409,
+        );
+      }
+      return context.json({ error: "human_attention_correlation_failed" }, 400);
     }
   });
 
@@ -1930,7 +2111,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     const unexpired = await expireApprovalIfNeeded(pending);
     if (unexpired.status !== "pending") {
       if (unexpired.status === "denied" && unexpired.reason === "approval_expired") {
-        return context.json(unexpired);
+        return context.json({ error: "approval_already_expired", approval: unexpired }, 409);
       }
       const requestedStatus = parsed.data.decision === "approve" ? "approved" : "denied";
       if (unexpired.status === requestedStatus && unexpired.reason === parsed.data.reason) {

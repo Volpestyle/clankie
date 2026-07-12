@@ -77,3 +77,56 @@ The agent smoke uses a disposable session/issue and caller-supplied UUIDs from
 `CLANKIE_LINEAR_LIVE_ACTIVITY_ID`, and `CLANKIE_LINEAR_LIVE_REACTION_ID` so its
 writes are repeatable. Normal worker gates leave both live-smoke flags unset,
 so both live files are skipped.
+
+## Tracker ceremony (issue drafts + human attention)
+
+`validateIssueDraft` is a pure validator driven by `CaptainCeremonyProjection` (from
+`@clankie/doctrine`). It enforces required product impact (including non-empty
+`bodyMarkdown` when product impact is required), no prose before the first
+heading, configurable heading/placement, and max summary sentences (HTML `<br>`
+normalized so it cannot compress sentences) **before** any connector write.
+
+`WorkspaceTrackerBinding` maps semantic target roles and notification surfaces to
+**opaque principals** and provider-neutral capabilities. Provider-specific Linear
+identity/assignment/mention configuration belongs only in Linear adapter/binding
+configuration — never in protocol, doctrine, or captain projection text.
+`createLinearAttentionRuntime` maps the default assignment, attention-marker,
+and direct-notification capabilities to a credential-owning `LinearAttentionClient`.
+The generated comment contains the configured mention, smallest typed ask, and
+blocking state; stable provider idempotency keys accompany all three writes.
+
+`deliverHumanAttention` policy-evaluates every attempted action with a truthful
+`TrackerWriteRequest` action (or marks the action `unsupported`). Store keys are
+stable per `requestId`; the content fingerprint includes binding **and** request
+fields so the same id with different ask/role/surfaces conflicts. Each adapter
+`attempt` receives a stable `actionIdempotencyToken` (same on every retry) that
+providers must use as their external idempotency key. Durable single-flight is a
+store obligation (`AttentionDeliveryStore.durableSingleFlight`): production reserves
+on the **real mission stream** via `appendExpected` at the stream's current
+revision (event data carries `requestId`, `fingerprint`, claim owner, and lease);
+contenders wait for the active owner, and only take over an expired claim. Generic EventStore without `appendExpected` fails
+closed. An in-memory mutex is process-local only and is **not** durable
+exactly-once. Aggregate outcomes remain
+`delivered` | `partial` | `unsupported` | `fallback`. When
+`directNotification=required`, a successful `direct_notify` is mandatory for
+`delivered` — marker/comment-only bindings demote to `unsupported` or `fallback`,
+never `delivered`. Per-action `denied` stays distinguishable from `unsupported`
+even when the aggregate collapses to `unsupported`.
+
+Control-plane correlate accepts only `requestId` + `verifiedEventId` + profile
+hash. Pending request context is loaded from the durable delivery store (never
+caller-supplied). The verified event contains the complete typed
+`HumanAttentionResponse`; mission, profile, envelope correlation, request,
+response correlation, tracker reference, and timestamps must all match.
+Linear agent-thread replies use the deterministic command emitted in the direct
+notification (`clankie-response <requestId> <decision>: <rationale>`), and the
+prompt actor must equal the provider principal bound to the target semantic role.
+Free-form approval prose remains advisory and cannot close the request.
+
+`correlateAgentSessionToAttention` resolves pending attention only from verified
+`tracker.agent-session.created` / `prompted` events. It requires
+`pending.workspaceId === event.data.organization.id`, rejects events older than
+`request.createdAt`, and matches root comments via event comment/root fields
+(`comment.rootId` / `comment.id`, then session source/comment ids). Ordinary
+out-of-session issue comments never resolve a request
+(`correlateOutOfSessionIssueComment` is an explicit no-op).

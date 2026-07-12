@@ -49,10 +49,26 @@ actions:
   web.fetch: { default: deny, rules: [] }
   web.browse: { default: deny, rules: [] }
   tracker.assignment.mirror: { default: require_approval, rules: [] }
+  tracker.assignment.update: { default: require_approval, rules: [] }
+  tracker.attention.marker.apply: { default: require_approval, rules: [] }
   tracker.status.update: { default: require_approval, rules: [] }
   tracker.priority.update: { default: require_approval, rules: [] }
   tracker.acceptance-criteria.update: { default: require_approval, rules: [] }
   tracker.completion.update: { default: require_approval, rules: [] }
+  discord.presence.reply: { default: deny, rules: [] }
+  discord.presence.react: { default: deny, rules: [] }
+  discord.presence.unreact: { default: deny, rules: [] }
+  discord.presence.send_message: { default: deny, rules: [] }
+  discord.presence.edit_own_message: { default: deny, rules: [] }
+  discord.presence.delete_own_message: { default: deny, rules: [] }
+  discord.presence.send_attachment: { default: deny, rules: [] }
+  discord.presence.typing_start: { default: deny, rules: [] }
+  discord.presence.create_thread: { default: deny, rules: [] }
+  discord.presence.join_thread: { default: deny, rules: [] }
+  discord.presence.voice_join: { default: deny, rules: [] }
+  discord.presence.voice_leave: { default: deny, rules: [] }
+  discord.presence.go_live_start: { default: deny, rules: [] }
+  discord.presence.go_live_stop: { default: deny, rules: [] }
 memory:
   rawTranscriptRetentionDays: 0
   inferredFacts: deny
