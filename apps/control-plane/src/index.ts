@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { serve } from "@hono/node-server";
-import { compileDoctrine, loadDoctrineFile } from "@clankie/doctrine";
+import { compileDoctrine, loadDoctrineFile, projectCaptainCeremony } from "@clankie/doctrine";
 import { SqliteEventStore } from "@clankie/event-store";
 import { createLogger } from "@clankie/observability";
 import type { LinearAgentRuntimePort } from "@clankie/tracker-connector";
@@ -44,6 +44,7 @@ const app = await createControlPlane({
         linearAgentRuntime,
         captainChannelTurns: new EveCaptainChannelTurnPort({
           baseUrl: process.env.CLANKIE_CAPTAIN_URL ?? "http://127.0.0.1:4321",
+          ceremonyProjection: projectCaptainCeremony(doctrine),
         }),
       }),
   ...(discordPresenceRuntime === undefined ? {} : { discordPresenceRuntime }),
@@ -105,9 +106,7 @@ async function loadDiscordPresenceRuntime(
   if (modulePath === undefined) return undefined;
   const loaded: unknown = await import(pathToFileURL(resolve(modulePath)).href);
   if (!isRecord(loaded) || typeof loaded.createDiscordPresenceRuntime !== "function") {
-    throw new Error(
-      "CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE must export createDiscordPresenceRuntime()",
-    );
+    throw new Error("CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE must export createDiscordPresenceRuntime()");
   }
   const runtime: unknown = await loaded.createDiscordPresenceRuntime();
   if (!isRecord(runtime) || typeof runtime.execute !== "function") {

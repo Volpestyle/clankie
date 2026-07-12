@@ -190,7 +190,7 @@ credential-free `tracker.sync.failed` events.
 
 `POST /v1/discord/presence-actions` accepts bot-transport Discord presence writes (ADR 0024 P1), evaluates narrative or risk-class policy (shared narrative rate ledger), and executes via `discordPresenceRuntime` loaded from `CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE`.
 
-POST /v1/tracker/narratives` accepts only the five typed narrative actions (issue comment, thought, response, elicitation, and reaction) and evaluates exact content plus trusted correlation through one `createNarrativeWritePolicy()` instance retained for the compiled profile runtime. It then delegates to `LinearAgentRuntimePort`; non-narrative tracker mutations cannot enter this route.
+POST /v1/tracker/narratives`accepts only the five typed narrative actions (issue comment, thought, response, elicitation, and reaction) and evaluates exact content plus trusted correlation through one`createNarrativeWritePolicy()`instance retained for the compiled profile runtime. It then delegates to`LinearAgentRuntimePort`; non-narrative tracker mutations cannot enter this route.
 
 `POST /v1/captain/channel-turns` deduplicates by Linear delivery ID, reads the full thread through the trusted runtime, and calls Eve over its canonical loopback session/NDJSON surface. Only the triggering text and typed identities arrive from the bridge. The control plane supplies the authoritative thread in Eve client context and returns only `settled`, `waiting_user`, or a bounded failure.
 
@@ -201,3 +201,11 @@ The control-plane HTTP service binds to `127.0.0.1`. The narrative and captain-c
 ### Discord presence actions
 
 `POST /v1/discord/presence-actions` — ADR 0024 **P1 outbound** bot-transport presence catalog (not DM/chat ingress). Narrative actions share the mission narrative rate ledger; optional `content` is derived from the payload when omitted (emoji, typing sentinel, …). `publish-external` (attachments, Go Live) currently returns `require_approval` **without** minting an approval-store request — explicit follow-up before attachments can complete. Runtime: `CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE` exporting `createDiscordPresenceRuntime()`.
+
+## Tracker ceremony routes
+
+- `POST /v1/tracker/issue-drafts/validate` — pure draft validation against the compiled ceremony projection.
+- `POST /v1/tracker/human-attention/deliver` — policy-evaluated, idempotent attention delivery with typed aggregate outcomes.
+- `POST /v1/tracker/human-attention/correlate` — correlate verified agent-session events to pending attention (ordinary issue comments never match).
+
+Eve channel turns inject `ceremonyProjection` into trusted clientContext for captain dynamic instructions.

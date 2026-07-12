@@ -178,3 +178,13 @@ actually settles.
 `pnpm --filter @clankie/captain-eve test` compiles the authored Eve surface without provider credentials and verifies that all mission skills are discovered. `pnpm --filter @clankie/captain-eve exec eve eval --list` validates the behavior-eval definitions.
 
 With captain model credentials configured, run `pnpm --filter @clankie/captain-eve exec eve eval skills --strict` to verify that mission-shaped prompts load the matching skill and an unrelated prompt does not load one.
+
+## Tracker ceremony projection
+
+The captain loads the effective compiled tracker ceremony through trusted
+control-plane `clientContext` (and channel metadata) into the dynamic
+`agent/instructions/ceremony.ts` module. A short root rule in `instructions.md`
+requires following that projection and governed tools for draft validation and
+human-attention delivery. Portable captain surfaces never hard-code personal
+emails, tracker labels, or mention syntax. Notification delivery is not a reply;
+only verified agent-session correlation may close pending attention.

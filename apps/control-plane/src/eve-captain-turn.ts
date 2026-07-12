@@ -1,3 +1,4 @@
+import type { CaptainCeremonyProjection } from "@clankie/doctrine";
 import {
   CaptainChannelTurnResultSchema,
   LinearAgentThreadContextSchema,
@@ -20,6 +21,8 @@ export interface CaptainChannelTurnPort {
 export interface EveCaptainChannelTurnOptions {
   readonly baseUrl: string;
   readonly fetchImpl?: typeof fetch;
+  /** Trusted compiled ceremony projection supplied into Eve clientContext. */
+  readonly ceremonyProjection?: CaptainCeremonyProjection;
 }
 
 interface EveSessionCursor {
@@ -38,10 +41,12 @@ export class EveCaptainChannelTurnPort implements CaptainChannelTurnPort {
   private readonly baseUrl: URL;
   private readonly fetchImpl: typeof fetch;
   private readonly sessions = new Map<string, EveSessionCursor>();
+  private readonly ceremonyProjection: CaptainCeremonyProjection | undefined;
 
   public constructor(options: EveCaptainChannelTurnOptions) {
     this.baseUrl = assertLoopbackUrl(options.baseUrl);
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.ceremonyProjection = options.ceremonyProjection;
   }
 
   public async submit(rawInput: CaptainChannelTurnSubmission): Promise<CaptainChannelTurnResult> {
@@ -66,6 +71,9 @@ export class EveCaptainChannelTurnPort implements CaptainChannelTurnPort {
             workspaceId: request.identity.workspaceId,
             issueId: request.issue.id,
             agentSessionId: request.session.id,
+            ...(this.ceremonyProjection === undefined
+              ? {}
+              : { metadata: { ceremonyProjection: this.ceremonyProjection } }),
           },
           identity: {
             missionId: request.identity.missionId,
@@ -76,6 +84,7 @@ export class EveCaptainChannelTurnPort implements CaptainChannelTurnPort {
             deliveryId: request.deliveryId,
           },
           thread,
+          ...(this.ceremonyProjection === undefined ? {} : { ceremonyProjection: this.ceremonyProjection }),
         },
         ...(previous?.continuationToken === undefined
           ? {}

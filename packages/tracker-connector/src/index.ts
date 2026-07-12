@@ -1,3 +1,6 @@
+export * from "./ceremony-projection.ts";
+export * from "./human-attention.ts";
+export * from "./issue-draft.ts";
 export * from "./linear.ts";
 export * from "./linear-agent-auth.ts";
 export * from "./linear-agent-client.ts";
@@ -5,3 +8,4 @@ export * from "./linear-agent-events.ts";
 export * from "./linear-agent-runtime.ts";
 export * from "./mirror.ts";
 export * from "./types.ts";
+export * from "./workspace-binding.ts";

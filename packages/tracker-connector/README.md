@@ -77,3 +77,27 @@ The agent smoke uses a disposable session/issue and caller-supplied UUIDs from
 `CLANKIE_LINEAR_LIVE_ACTIVITY_ID`, and `CLANKIE_LINEAR_LIVE_REACTION_ID` so its
 writes are repeatable. Normal worker gates leave both live-smoke flags unset,
 so both live files are skipped.
+
+## Tracker ceremony (issue drafts + human attention)
+
+`validateIssueDraft` is a pure validator driven by `CaptainCeremonyProjection` (from
+`@clankie/doctrine`). It enforces required product impact, configurable heading,
+section placement, and max summary sentences **before** any connector write.
+
+`WorkspaceTrackerBinding` maps semantic target roles and notification surfaces to
+**opaque principals** and provider-neutral capabilities. Provider-specific Linear
+identity/assignment/mention configuration belongs only in Linear adapter/binding
+fixtures — never in protocol, doctrine, or captain projection text.
+
+`deliverHumanAttention` policy-evaluates every attempted action, is idempotent by
+request id + binding fingerprint, and returns typed per-action plus aggregate
+outcomes: `delivered`, `partial`, `unsupported`, or `fallback`. Configured intent
+alone never claims delivery.
+
+`correlateAgentSessionToAttention` resolves pending attention only from verified
+`tracker.agent-session.created` / `prompted` identities with matching workspace/
+issue/session/root correlation. Ordinary out-of-session issue comments never
+resolve a request (`correlateOutOfSessionIssueComment` is an explicit no-op).
+
+`formatCeremonyInstructions` renders a portable captain-facing markdown projection
+without provider nouns.
