@@ -41,12 +41,45 @@ export interface AttentionDeliveryResult {
   readonly deliveredAt: string;
 }
 
+/**
+ * Stable per-action idempotency token for provider seams.
+ * Same requestId + content fingerprint + action identity always yields the same
+ * token so retries / crash recovery re-use the provider's idempotent write key
+ * rather than creating a second side effect.
+ */
+export function actionIdempotencyToken(
+  requestId: string,
+  fingerprint: string,
+  action: ResolvedAttentionAction,
+): string {
+  const payload = {
+    v: 1,
+    requestId,
+    fingerprint,
+    kind: action.capability.kind,
+    principalId: action.capability.principalId,
+    surface: action.surface ?? null,
+    isFallback: action.isFallback,
+  };
+  return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+export interface AttentionDeliveryAttemptInput {
+  readonly action: ResolvedAttentionAction;
+  /**
+   * Provider seam obligation: pass this unchanged on every retry of the same
+   * logical action. Adapters must treat it as their external idempotency key.
+   */
+  readonly idempotencyToken: string;
+}
+
 export interface AttentionDeliveryAdapter {
   /**
    * Attempt one resolved capability. `unsupported: true` means the adapter cannot
    * perform this capability (not a transient failure).
+   * Callers always supply a stable `idempotencyToken` for durable provider dedupe.
    */
-  attempt(action: ResolvedAttentionAction): Promise<{
+  attempt(input: AttentionDeliveryAttemptInput): Promise<{
     ok: boolean;
     unsupported?: boolean;
     detail?: string;
@@ -69,16 +102,29 @@ export interface StoredAttentionDelivery {
 }
 
 /**
- * Durable idempotent store (mission event projection or equivalent).
- * Concurrent deliveries for the same key must serialize through `runExclusive`
- * so the adapter factory runs at most once and a single durable result is stored.
+ * Durable idempotent store for attention delivery.
+ *
+ * `durableSingleFlight === true` means the store provides a cross-process
+ * reservation + completion contract (compare-and-append / equivalent). A
+ * process-local mutex alone is **not** durable exactly-once and must report
+ * `durableSingleFlight === false` (test-only).
  */
 export interface AttentionDeliveryStore {
+  /**
+   * True when the store can reserve + complete across process restarts using a
+   * durable event log. False for in-memory / process-local helpers.
+   */
+  readonly durableSingleFlight: boolean;
   get(idempotencyKey: string): Promise<StoredAttentionDelivery | undefined>;
   /**
-   * If a prior delivery exists for the key, fingerprint-check and return it
-   * without invoking factory. Otherwise run factory exactly once under an
-   * exclusive lock for the key and persist the returned record.
+   * Single-flight delivery for a request key + content fingerprint.
+   *
+   * Durable implementations: reserve first (atomic), run factory only after
+   * reservation (or crash-recovery of an incomplete reservation), then append a
+   * deterministic completion record. Adapter side effects remain at-least-once
+   * under crash; stable `actionIdempotencyToken`s make retries safe at the
+   * provider seam. Process-local locks may reduce duplicate work but are not
+   * the durability mechanism.
    */
   runExclusive(
     idempotencyKey: string,
@@ -214,7 +260,9 @@ function pendingFromDelivery(
  * Deliver a human-attention request through a trusted workspace binding.
  * Idempotent by requestId with content-aware fingerprint conflict detection.
  * Ceremony-disabled deliveries still participate in the same store/fingerprint
- * path. Concurrent identical deliveries serialize via store.runExclusive.
+ * path. Single-flight is delegated to `store.runExclusive` (durable reservation
+ * when the store supports it). Each adapter attempt receives a stable
+ * `actionIdempotencyToken` so provider retries after crash do not double-write.
  */
 export async function deliverHumanAttention(
   input: DeliverHumanAttentionInput,
@@ -321,7 +369,8 @@ export async function deliverHumanAttention(
         continue;
       }
 
-      const attempt = await input.adapter.attempt(action);
+      const idempotencyToken = actionIdempotencyToken(request.requestId, fingerprint, action);
+      const attempt = await input.adapter.attempt({ action, idempotencyToken });
       if (attempt.unsupported === true) {
         actionResults.push({
           kind: action.capability.kind,

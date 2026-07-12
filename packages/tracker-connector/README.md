@@ -94,8 +94,13 @@ fixtures — never in protocol, doctrine, or captain projection text.
 `deliverHumanAttention` policy-evaluates every attempted action with a truthful
 `TrackerWriteRequest` action (or marks the action `unsupported`). Store keys are
 stable per `requestId`; the content fingerprint includes binding **and** request
-fields so the same id with different ask/role/surfaces conflicts. Aggregate
-outcomes remain `delivered` | `partial` | `unsupported` | `fallback`. When
+fields so the same id with different ask/role/surfaces conflicts. Each adapter
+`attempt` receives a stable `actionIdempotencyToken` (same on every retry) that
+providers must use as their external idempotency key. Durable single-flight is a
+store obligation (`AttentionDeliveryStore.durableSingleFlight`): production uses
+event-store reserve + compare-and-append completion; an in-memory mutex is
+process-local only and is **not** durable exactly-once. Aggregate outcomes remain
+`delivered` | `partial` | `unsupported` | `fallback`. When
 `directNotification=required`, a successful `direct_notify` is mandatory for
 `delivered` — marker/comment-only bindings demote to `unsupported` or `fallback`,
 never `delivered`. Per-action `denied` stays distinguishable from `unsupported`

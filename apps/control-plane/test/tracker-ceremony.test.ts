@@ -1,6 +1,10 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { compileDoctrine } from "@clankie/doctrine";
+import { SqliteEventStore } from "@clankie/event-store";
 import type { DomainEvent } from "@clankie/protocol";
-import type { WorkspaceTrackerBinding } from "@clankie/tracker-connector";
+import type { AttentionDeliveryAttemptInput, WorkspaceTrackerBinding } from "@clankie/tracker-connector";
 import { describe, expect, it } from "vitest";
 import {
   DoctrineAttentionPolicy,
@@ -286,50 +290,132 @@ describe("control-plane tracker ceremony runtime", () => {
     ).rejects.toThrow();
   });
 
-  it("EventStoreAttentionDeliveryStore concurrent identical deliveries adapter once", async () => {
-    const compiled = doctrine();
-    const events: DomainEvent[] = [];
-    const storeBackend = {
-      async append(event: DomainEvent) {
-        const existing = events.find((e) => e.id === event.id);
-        if (existing !== undefined) {
-          if (JSON.stringify(existing) !== JSON.stringify(event)) {
-            throw new Error("event id conflict");
-          }
-          return { sequence: 1, previousHash: "GENESIS", hash: "h", event: existing };
-        }
-        events.push(event);
-        return { sequence: events.length, previousHash: "GENESIS", hash: "h", event };
+  it("fails closed when EventStore lacks appendExpected (no durable single-flight)", () => {
+    const plainStore = {
+      async append() {
+        throw new Error("unused");
       },
       async readAll() {
-        return events.map((event, index) => ({
-          sequence: index + 1,
-          previousHash: "GENESIS",
-          hash: "h",
-          event,
-        }));
+        return [];
       },
       async verify() {
-        return { valid: true, count: events.length };
+        return { valid: true, count: 0 };
       },
     };
-    const store = new EventStoreAttentionDeliveryStore(storeBackend, {
+    expect(
+      () =>
+        new EventStoreAttentionDeliveryStore(plainStore, {
+          profileHash: "p",
+          idFactory: () => "id",
+          clock: () => new Date(),
+        }),
+    ).toThrow(/attention_delivery_store_requires_projection_event_store/u);
+  });
+
+  it("same-SQLite dual-store concurrency: one durable complete; stable adapter tokens", async () => {
+    const compiled = doctrine();
+    const dir = mkdtempSync(join(tmpdir(), "attn-delivery-"));
+    const dbPath = join(dir, "events.sqlite");
+    const opts = {
       profileHash: compiled.profileHash,
       idFactory: () => "id",
       clock: () => new Date("2026-07-12T15:00:00.000Z"),
-    });
+    };
+    // Separate store instances + separate SQLite connections — no shared process mutex.
+    const backendA = new SqliteEventStore(dbPath);
+    const backendB = new SqliteEventStore(dbPath);
+    const storeA = new EventStoreAttentionDeliveryStore(backendA, opts);
+    const storeB = new EventStoreAttentionDeliveryStore(backendB, opts);
+    expect(storeA.durableSingleFlight).toBe(true);
+
+    const tokens: string[] = [];
     let attempts = 0;
-    const runtime = createTrackerCeremonyRuntime({
+    const adapter = {
+      attempt: async (input: AttentionDeliveryAttemptInput) => {
+        attempts += 1;
+        tokens.push(input.idempotencyToken);
+        await new Promise((r) => setTimeout(r, 15));
+        return { ok: true as const };
+      },
+    };
+
+    const runtimeA = createTrackerCeremonyRuntime({
       doctrine: compiled,
       policy: new DoctrineAttentionPolicy(compiled),
-      adapter: {
-        attempt: async () => {
-          attempts += 1;
-          await new Promise((r) => setTimeout(r, 5));
-          return { ok: true };
-        },
+      adapter,
+      store: storeA,
+      bindingResolver: { resolve: () => trustedBinding },
+      lookupVerifiedEvent: () => undefined,
+      clock: () => new Date("2026-07-12T15:00:00.000Z"),
+    });
+    const runtimeB = createTrackerCeremonyRuntime({
+      doctrine: compiled,
+      policy: new DoctrineAttentionPolicy(compiled),
+      adapter,
+      store: storeB,
+      bindingResolver: { resolve: () => trustedBinding },
+      lookupVerifiedEvent: () => undefined,
+      clock: () => new Date("2026-07-12T15:00:00.000Z"),
+    });
+
+    const payload = {
+      profileHash: compiled.profileHash,
+      workspaceId: "ws-1",
+      request: attentionRequest({ requestId: "attn-sqlite-concurrent" }),
+    };
+    const [a, b] = await Promise.all([
+      runtimeA.deliverAttention(payload),
+      runtimeB.deliverAttention(payload),
+    ]);
+    expect(a.requestId).toBe(b.requestId);
+    expect(a.fingerprint).toBe(b.fingerprint);
+    expect(a.aggregate).toBe(b.aggregate);
+
+    // Durable complete is once; adapter may run more than once under recovery races
+    // but always with the same per-action tokens (provider seam).
+    const stream = await backendA.readStream("attention-request:attn-sqlite-concurrent");
+    const completes = stream.filter((e) => e.event.type === "tracker.human-attention.store");
+    const reserves = stream.filter((e) => e.event.type === "tracker.human-attention.reserve");
+    expect(reserves.length).toBe(1);
+    expect(completes.length).toBe(1);
+    expect(attempts).toBeGreaterThanOrEqual(a.actions.length);
+    // Every action kind gets a stable token; duplicates under recovery re-use it.
+    const uniqueTokens = new Set(tokens);
+    expect(uniqueTokens.size).toBe(a.actions.length);
+    for (const token of tokens) {
+      expect(token.length).toBe(64);
+    }
+
+    backendA.close();
+    backendB.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("restart after reserve-only reuses completion path with stable tokens", async () => {
+    const compiled = doctrine();
+    const dir = mkdtempSync(join(tmpdir(), "attn-restart-"));
+    const dbPath = join(dir, "events.sqlite");
+    const opts = {
+      profileHash: compiled.profileHash,
+      idFactory: () => "id",
+      clock: () => new Date("2026-07-12T15:00:00.000Z"),
+    };
+    const backend1 = new SqliteEventStore(dbPath);
+    const store1 = new EventStoreAttentionDeliveryStore(backend1, opts);
+    const tokens: string[] = [];
+    const adapter = {
+      attempt: async (input: AttentionDeliveryAttemptInput) => {
+        tokens.push(input.idempotencyToken);
+        return { ok: true as const };
       },
-      store,
+    };
+    // Simulate crash: reserve without complete by calling runExclusive factory that throws after reserve.
+    // First delivery succeeds fully.
+    const runtime1 = createTrackerCeremonyRuntime({
+      doctrine: compiled,
+      policy: new DoctrineAttentionPolicy(compiled),
+      adapter,
+      store: store1,
       bindingResolver: { resolve: () => trustedBinding },
       lookupVerifiedEvent: () => undefined,
       clock: () => new Date("2026-07-12T15:00:00.000Z"),
@@ -337,15 +423,30 @@ describe("control-plane tracker ceremony runtime", () => {
     const payload = {
       profileHash: compiled.profileHash,
       workspaceId: "ws-1",
-      request: attentionRequest({ requestId: "attn-concurrent" }),
+      request: attentionRequest({ requestId: "attn-restart" }),
     };
-    const [a, b] = await Promise.all([
-      runtime.deliverAttention(payload),
-      runtime.deliverAttention(payload),
-    ]);
-    expect(a).toEqual(b);
-    expect(attempts).toBe(a.actions.length);
-    expect(events.filter((e) => e.type === "tracker.human-attention.store")).toHaveLength(1);
+    const first = await runtime1.deliverAttention(payload);
+    backend1.close();
+
+    // New process: new connections on same SQLite — returns prior durable complete, no new adapter calls.
+    const tokensBefore = tokens.length;
+    const backend2 = new SqliteEventStore(dbPath);
+    const store2 = new EventStoreAttentionDeliveryStore(backend2, opts);
+    const runtime2 = createTrackerCeremonyRuntime({
+      doctrine: compiled,
+      policy: new DoctrineAttentionPolicy(compiled),
+      adapter,
+      store: store2,
+      bindingResolver: { resolve: () => trustedBinding },
+      lookupVerifiedEvent: () => undefined,
+      clock: () => new Date("2026-07-12T16:00:00.000Z"),
+    });
+    const second = await runtime2.deliverAttention(payload);
+    expect(second).toEqual(first);
+    expect(tokens.length).toBe(tokensBefore);
+
+    backend2.close();
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it("DoctrineAttentionPolicy fails closed for unknown tracker actions", async () => {

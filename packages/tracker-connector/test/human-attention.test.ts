@@ -2,6 +2,7 @@ import { compileDoctrine, projectCaptainCeremony } from "@clankie/doctrine";
 import type { DomainEvent, HumanAttentionRequest } from "@clankie/protocol";
 import { describe, expect, it } from "vitest";
 import {
+  actionIdempotencyToken,
   authorityFromVerifiedEvent,
   correlateAgentSessionToAttention,
   correlateOutOfSessionIssueComment,
@@ -13,6 +14,7 @@ import {
   rootCommentIdFromAgentSessionEvent,
   type AttentionActionResult,
   type AttentionDeliveryAdapter,
+  type AttentionDeliveryAttemptInput,
   type AttentionDeliveryStore,
   type StoredAttentionDelivery,
 } from "../src/human-attention.ts";
@@ -132,7 +134,9 @@ function binding(overrides?: Partial<WorkspaceTrackerBinding>): WorkspaceTracker
   };
 }
 
+/** Test-only store: process-local, not durable single-flight. */
 class MemoryStore implements AttentionDeliveryStore {
+  public readonly durableSingleFlight = false as const;
   public readonly entries = new Map<string, StoredAttentionDelivery>();
   private readonly chains = new Map<string, Promise<unknown>>();
 
@@ -189,9 +193,13 @@ class RecordedPolicy implements TrackerPolicyGateway {
 
 class FakeAdapter implements AttentionDeliveryAdapter {
   public attempts = 0;
+  public tokens: string[] = [];
   public mode: "ok" | "fail_second" | "unsupported" = "ok";
-  public async attempt(): Promise<{ ok: boolean; unsupported?: boolean; detail?: string }> {
+  public async attempt(
+    input: AttentionDeliveryAttemptInput,
+  ): Promise<{ ok: boolean; unsupported?: boolean; detail?: string }> {
     this.attempts += 1;
+    this.tokens.push(input.idempotencyToken);
     if (this.mode === "unsupported") return { ok: false, unsupported: true, detail: "no capability" };
     if (this.mode === "fail_second" && this.attempts === 2) return { ok: false, detail: "transient" };
     return { ok: true };
@@ -431,8 +439,9 @@ describe("deliverHumanAttention", () => {
     ).rejects.toThrow(/idempotency conflict for request content\/fingerprint/u);
   });
 
-  it("concurrent identical deliveries execute the adapter once", async () => {
+  it("process-local concurrent deliveries coalesce; tokens are stable per action", async () => {
     const store = new MemoryStore();
+    expect(store.durableSingleFlight).toBe(false);
     const adapter = new FakeAdapter();
     const req = request({ directNotification: "best_effort" });
     const input = {
@@ -446,8 +455,26 @@ describe("deliverHumanAttention", () => {
     };
     const [a, b] = await Promise.all([deliverHumanAttention(input), deliverHumanAttention(input)]);
     expect(a).toEqual(b);
+    // Process-local mutex may coalesce work; this is not durable exactly-once.
     expect(adapter.attempts).toBe(a.actions.length);
     expect(store.entries.size).toBe(1);
+    expect(adapter.tokens).toHaveLength(a.actions.length);
+    expect(new Set(adapter.tokens).size).toBe(adapter.tokens.length);
+  });
+
+  it("actionIdempotencyToken is stable across retries of the same action identity", () => {
+    const resolved = resolveAttentionActions({
+      binding: binding(),
+      targetRole: "operator",
+      notificationSurfaces: ["operator_inbox", "captain_lane"],
+      directNotification: "best_effort",
+    });
+    const action = resolved.actions[0]!;
+    const fp = "fp-fixed";
+    const a = actionIdempotencyToken("attn-1", fp, action);
+    const b = actionIdempotencyToken("attn-1", fp, action);
+    expect(a).toBe(b);
+    expect(actionIdempotencyToken("attn-1", "other-fp", action)).not.toBe(a);
   });
 });
 

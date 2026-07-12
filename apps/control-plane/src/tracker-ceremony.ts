@@ -1,5 +1,9 @@
 import { decideAction, projectCaptainCeremony, type CompiledDoctrine } from "@clankie/doctrine";
-import type { EventStore } from "@clankie/event-store";
+import {
+  OptimisticConcurrencyError,
+  type EventStore,
+  type ProjectionEventStore,
+} from "@clankie/event-store";
 import {
   type DomainEvent,
   type HumanAttentionResponse,
@@ -11,6 +15,7 @@ import {
   deliveryStoreKey,
   validateIssueDraft,
   type AttentionDeliveryAdapter,
+  type AttentionDeliveryAttemptInput,
   type AttentionDeliveryResult,
   type AttentionDeliveryStore,
   type StoredAttentionDelivery,
@@ -19,6 +24,14 @@ import {
   type WorkspaceTrackerBinding,
 } from "@clankie/tracker-connector";
 import { z } from "zod";
+
+/** True when the event store supports durable compare-and-append streams. */
+export function isProjectionEventStore(store: EventStore): store is ProjectionEventStore {
+  const candidate = store as ProjectionEventStore;
+  return (
+    typeof candidate.appendExpected === "function" && typeof candidate.readStream === "function"
+  );
+}
 
 export const ValidateIssueDraftRequestSchema = z
   .object({
@@ -99,8 +112,8 @@ export class DoctrineAttentionPolicy implements TrackerPolicyGateway {
   }
 }
 
-/** Serialize concurrent work for a key within a process. */
-class KeyExclusive {
+/** Process-local serialization only — never the durability mechanism. */
+class ProcessLocalKeyExclusive {
   private readonly chains = new Map<string, Promise<unknown>>();
 
   public async run<T>(key: string, fn: () => Promise<T>): Promise<T> {
@@ -128,19 +141,37 @@ class KeyExclusive {
   }
 }
 
+function attentionReserveEventId(idempotencyKey: string): string {
+  return `tracker.human-attention.reserve:${idempotencyKey}`;
+}
+
+function attentionCompleteEventId(idempotencyKey: string): string {
+  return `tracker.human-attention.store:${idempotencyKey}`;
+}
+
 /**
- * Durable attention store backed by the mission event log.
- * Concurrent put/get for the same request key is serialized; durable event id is
- * deterministic per key so a second append of the same result is idempotent.
+ * Durable attention store backed by a ProjectionEventStore stream.
+ *
+ * Contract (VUH-844 durable idempotency):
+ * 1. Stream id = delivery store key (`attention-request:{requestId}`).
+ * 2. Atomic **reserve** via `appendExpected` at revision 0 (or recovery of an
+ *    existing incomplete reservation after crash).
+ * 3. Factory / adapter work runs only after reserve; adapters receive stable
+ *    per-action idempotency tokens (provider seam).
+ * 4. Deterministic **complete** event id; re-append of identical completion is
+ *    idempotent. In-process mutex may reduce duplicate work but is **not**
+ *    durable exactly-once by itself.
  */
 export class EventStoreAttentionDeliveryStore implements AttentionDeliveryStore {
-  private readonly eventStore: EventStore;
+  public readonly durableSingleFlight = true as const;
+  private readonly eventStore: ProjectionEventStore;
   private readonly options: {
     readonly profileHash: string;
     readonly idFactory: () => string;
     readonly clock: () => Date;
   };
-  private readonly exclusive = new KeyExclusive();
+  /** Optional same-process assist only — durability is reserve/complete. */
+  private readonly processLocal = new ProcessLocalKeyExclusive();
 
   public constructor(
     eventStore: EventStore,
@@ -150,25 +181,18 @@ export class EventStoreAttentionDeliveryStore implements AttentionDeliveryStore 
       readonly clock: () => Date;
     },
   ) {
+    if (!isProjectionEventStore(eventStore)) {
+      throw new Error(
+        "attention_delivery_store_requires_projection_event_store: EventStore must support appendExpected/readStream for durable single-flight",
+      );
+    }
     this.eventStore = eventStore;
     this.options = options;
   }
 
   public async get(idempotencyKey: string): Promise<StoredAttentionDelivery | undefined> {
-    const entries = await this.eventStore.readAll();
-    for (let index = entries.length - 1; index >= 0; index -= 1) {
-      const event = entries[index]?.event;
-      if (event?.type !== "tracker.human-attention.store") continue;
-      if (event.data.idempotencyKey !== idempotencyKey) continue;
-      const result = event.data.result as AttentionDeliveryResult;
-      const pending = event.data.pending as StoredAttentionDelivery["pending"] | undefined;
-      if (pending === undefined || typeof pending.workspaceId !== "string" || pending.workspaceId.length === 0) {
-        // Rows without trusted pending context cannot back correlation.
-        continue;
-      }
-      return { result, pending };
-    }
-    return undefined;
+    const state = await this.readStreamState(idempotencyKey);
+    return state.complete;
   }
 
   public async runExclusive(
@@ -176,24 +200,63 @@ export class EventStoreAttentionDeliveryStore implements AttentionDeliveryStore 
     fingerprint: string,
     factory: () => Promise<StoredAttentionDelivery>,
   ): Promise<StoredAttentionDelivery> {
-    return this.exclusive.run(idempotencyKey, async () => {
-      const prior = await this.get(idempotencyKey);
-      if (prior !== undefined && prior.pending.workspaceId !== "") {
-        if (prior.result.fingerprint !== fingerprint) {
-          throw new Error("Human-attention delivery idempotency conflict for request content/fingerprint");
-        }
-        return prior;
+    // Process-local assist only; cross-process correctness is reserve + complete.
+    return this.processLocal.run(idempotencyKey, async () => {
+      let state = await this.readStreamState(idempotencyKey);
+      if (state.complete !== undefined) {
+        return this.requireFingerprint(state.complete, fingerprint);
       }
+
+      if (state.reserve === undefined) {
+        try {
+          await this.eventStore.appendExpected(
+            {
+              id: attentionReserveEventId(idempotencyKey),
+              occurredAt: this.options.clock().toISOString(),
+              missionId: idempotencyKey,
+              correlationId: idempotencyKey,
+              profileHash: this.options.profileHash,
+              type: "tracker.human-attention.reserve",
+              data: { idempotencyKey, fingerprint, phase: "reserved" },
+            },
+            { streamId: idempotencyKey, expectedRevision: 0 },
+          );
+        } catch (error) {
+          if (!(error instanceof OptimisticConcurrencyError)) throw error;
+          // Another writer reserved first — fall through to re-read.
+        }
+        state = await this.readStreamState(idempotencyKey);
+        if (state.complete !== undefined) {
+          return this.requireFingerprint(state.complete, fingerprint);
+        }
+        if (state.reserve === undefined) {
+          throw new Error(
+            "attention_delivery_reservation_failed_closed: could not reserve or observe a durable reservation",
+          );
+        }
+      }
+
+      if (state.reserve.fingerprint !== fingerprint) {
+        throw new Error("Human-attention delivery idempotency conflict for request content/fingerprint");
+      }
+
+      // Crash recovery: incomplete reservation may re-run factory with the same
+      // stable action tokens (provider seam). Durable complete is still once.
       const record = await factory();
       if (record.result.fingerprint !== fingerprint) {
         throw new Error("Human-attention delivery factory fingerprint mismatch");
       }
-      // Deterministic event id: concurrent/process restarts re-append identically.
-      const eventId = `tracker.human-attention.store:${idempotencyKey}`;
-      await this.eventStore.append({
-        id: eventId,
+
+      // Re-read before complete: a concurrent writer may have finished.
+      state = await this.readStreamState(idempotencyKey);
+      if (state.complete !== undefined) {
+        return this.requireFingerprint(state.complete, fingerprint);
+      }
+
+      const completeEvent: DomainEvent = {
+        id: attentionCompleteEventId(idempotencyKey),
         occurredAt: this.options.clock().toISOString(),
-        missionId: record.result.missionId,
+        missionId: idempotencyKey,
         correlationId: record.result.correlationId,
         profileHash: this.options.profileHash,
         type: "tracker.human-attention.store",
@@ -202,17 +265,81 @@ export class EventStoreAttentionDeliveryStore implements AttentionDeliveryStore 
           fingerprint,
           result: record.result,
           pending: record.pending,
+          phase: "completed",
         },
-      });
-      return record;
+      };
+
+      try {
+        await this.eventStore.appendExpected(completeEvent, {
+          streamId: idempotencyKey,
+          expectedRevision: state.streamLength,
+        });
+      } catch (error) {
+        if (!(error instanceof OptimisticConcurrencyError)) throw error;
+        // Deterministic complete id: identical concurrent completion is idempotent.
+        await this.eventStore.append(completeEvent);
+      }
+
+      state = await this.readStreamState(idempotencyKey);
+      if (state.complete === undefined) {
+        throw new Error(
+          "attention_delivery_completion_failed_closed: durable completion record missing after append",
+        );
+      }
+      return this.requireFingerprint(state.complete, fingerprint);
     });
+  }
+
+  private requireFingerprint(
+    record: StoredAttentionDelivery,
+    fingerprint: string,
+  ): StoredAttentionDelivery {
+    if (record.result.fingerprint !== fingerprint) {
+      throw new Error("Human-attention delivery idempotency conflict for request content/fingerprint");
+    }
+    return record;
+  }
+
+  private async readStreamState(idempotencyKey: string): Promise<{
+    readonly streamLength: number;
+    readonly reserve: { readonly fingerprint: string } | undefined;
+    readonly complete: StoredAttentionDelivery | undefined;
+  }> {
+    const entries = await this.eventStore.readStream(idempotencyKey);
+    let reserve: { fingerprint: string } | undefined;
+    let complete: StoredAttentionDelivery | undefined;
+    for (const entry of entries) {
+      const event = entry.event;
+      if (event.type === "tracker.human-attention.reserve") {
+        const fp = event.data.fingerprint;
+        if (typeof fp === "string") reserve = { fingerprint: fp };
+      }
+      if (event.type === "tracker.human-attention.store") {
+        const result = event.data.result as AttentionDeliveryResult | undefined;
+        const pending = event.data.pending as StoredAttentionDelivery["pending"] | undefined;
+        if (
+          result !== undefined &&
+          pending !== undefined &&
+          typeof pending.workspaceId === "string" &&
+          pending.workspaceId.length > 0
+        ) {
+          complete = { result, pending };
+        }
+      }
+    }
+    return { streamLength: entries.length, reserve, complete };
   }
 }
 
-/** In-memory store for unit tests only — never a production default. */
+/**
+ * In-memory store for unit tests only — never a production default.
+ * `durableSingleFlight` is false: process-local mutex is **not** durable
+ * exactly-once across process/restart races.
+ */
 export class InMemoryAttentionDeliveryStore implements AttentionDeliveryStore {
+  public readonly durableSingleFlight = false as const;
   public readonly entries = new Map<string, StoredAttentionDelivery>();
-  private readonly exclusive = new KeyExclusive();
+  private readonly exclusive = new ProcessLocalKeyExclusive();
 
   public async get(key: string): Promise<StoredAttentionDelivery | undefined> {
     return this.entries.get(key);
@@ -240,7 +367,9 @@ export class InMemoryAttentionDeliveryStore implements AttentionDeliveryStore {
 
 /** Adapter that marks all capabilities unsupported (honest without Linear extension). */
 export class UnsupportedAttentionAdapter implements AttentionDeliveryAdapter {
-  public async attempt(): Promise<{ ok: boolean; unsupported?: boolean; detail?: string }> {
+  public async attempt(
+    _input: AttentionDeliveryAttemptInput,
+  ): Promise<{ ok: boolean; unsupported?: boolean; detail?: string }> {
     return {
       ok: false,
       unsupported: true,

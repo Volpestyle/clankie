@@ -91,6 +91,7 @@ import {
   EventStoreAttentionDeliveryStore,
   UnsupportedAttentionAdapter,
   createTrackerCeremonyRuntime,
+  isProjectionEventStore,
   type WorkspaceBindingResolver,
 } from "./tracker-ceremony.ts";
 
@@ -555,15 +556,18 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
   const consumedApprovalIds = new Set<string>();
   const storedEvents: DomainEvent[] = [];
   const steeringStore = dependencies.workerSteeringStore ?? new InMemoryWorkerSteeringStore();
+  // Durable single-flight requires ProjectionEventStore (appendExpected/readStream).
+  // Plain EventStore or missing store → deliver fails closed (503), never silent
+  // process-local-only production default.
   const attentionStore =
     dependencies.attentionDeliveryStore ??
-    (dependencies.eventStore === undefined
-      ? undefined
-      : new EventStoreAttentionDeliveryStore(dependencies.eventStore, {
+    (dependencies.eventStore !== undefined && isProjectionEventStore(dependencies.eventStore)
+      ? new EventStoreAttentionDeliveryStore(dependencies.eventStore, {
           profileHash: dependencies.doctrine.profileHash,
           idFactory,
           clock,
-        }));
+        })
+      : undefined);
   const ceremonyRuntime =
     attentionStore === undefined
       ? undefined
