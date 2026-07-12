@@ -1,4 +1,4 @@
-# ADR 0031: Conversation-scoped operator lanes
+# ADR 0032: Conversation-scoped operator lanes
 
 Status: accepted (James, 2026-07-12).
 
@@ -132,3 +132,4 @@ copied into the conversation registry.
   conversation.
 - The runner-owned worker-transcript projection remains separately redacted,
   authorized, retained, and auditable.
+

@@ -1,4 +1,4 @@
-# ADR 0029: Connector-neutral tracker ceremony and human-attention contract
+# ADR 0030: Connector-neutral tracker ceremony and human-attention contract
 
 Status: accepted (VUH-845).
 
@@ -111,3 +111,4 @@ receipts; session attachment and webhook verification remain connector concerns
   overlay rejection, floor preservation, and projection determinism.
 - Existing ceremony equality fixtures remain stable when `ceremony.tracker` is omitted.
 - Downstream VUH-846 implements delivery and correlation against these frozen shapes.
+
