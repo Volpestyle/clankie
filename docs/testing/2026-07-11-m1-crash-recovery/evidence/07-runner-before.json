@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 1,
+  "client": "@clankie/runner recovery probe",
+  "runnerPid": 61720,
+  "startOrdinal": 1,
+  "replayUrl": "http://127.0.0.1:61778/replay",
+  "manifest": {
+    "schemaVersion": 1,
+    "missionId": "mission-3280ef37-add",
+    "profileHash": "1a7fbc876f4556b5",
+    "workers": [
+      {
+        "workerRunId": "run-1",
+        "taskId": "worker-a",
+        "pid": 61721,
+        "leaseId": "f1dad8dd-ca9c-4221-8a47-f1effb557556",
+        "terminalId": "terminal-run-1",
+        "logPath": "<state-root>/workers/run-1.log"
+      },
+      {
+        "workerRunId": "run-2",
+        "taskId": "worker-b",
+        "pid": 61737,
+        "leaseId": "11338a84-cd12-46c1-89d4-b361dc70d5fa",
+        "terminalId": "terminal-run-2",
+        "logPath": "<state-root>/workers/run-2.log"
+      },
+      {
+        "workerRunId": "run-3",
+        "taskId": "worker-c",
+        "pid": 61753,
+        "leaseId": "4ab1ff13-487c-4475-9a93-356bb4785c4d",
+        "terminalId": "terminal-run-3",
+        "logPath": "<state-root>/workers/run-3.log"
+      }
+    ]
+  },
+  "leases": [
+    {
+      "id": "11338a84-cd12-46c1-89d4-b361dc70d5fa",
+      "missionId": "mission-3280ef37-add",
+      "taskId": "worker-b",
+      "workerRunId": "run-2",
+      "profileHash": "1a7fbc876f4556b5",
+      "pid": 61737,
+      "processStartedAt": "Sat Jul 11 03:07:06 2026",
+      "runnerPid": 61720,
+      "state": "live",
+      "registeredAt": "2026-07-11T08:07:07.031Z",
+      "heartbeatAt": "2026-07-11T08:07:07.031Z",
+      "expiresAt": "2026-07-11T08:07:37.031Z"
+    },
+    {
+      "id": "4ab1ff13-487c-4475-9a93-356bb4785c4d",
+      "missionId": "mission-3280ef37-add",
+      "taskId": "worker-c",
+      "workerRunId": "run-3",
+      "profileHash": "1a7fbc876f4556b5",
+      "pid": 61753,
+      "processStartedAt": "Sat Jul 11 03:07:07 2026",
+      "runnerPid": 61720,
+      "state": "live",
+      "registeredAt": "2026-07-11T08:07:07.083Z",
+      "heartbeatAt": "2026-07-11T08:07:07.083Z",
+      "expiresAt": "2026-07-11T08:07:37.083Z"
+    },
+    {
+      "id": "f1dad8dd-ca9c-4221-8a47-f1effb557556",
+      "missionId": "mission-3280ef37-add",
+      "taskId": "worker-a",
+      "workerRunId": "run-1",
+      "profileHash": "1a7fbc876f4556b5",
+      "pid": 61721,
+      "processStartedAt": "Sat Jul 11 03:07:06 2026",
+      "runnerPid": 61720,
+      "state": "live",
+      "registeredAt": "2026-07-11T08:07:06.979Z",
+      "heartbeatAt": "2026-07-11T08:07:06.979Z",
+      "expiresAt": "2026-07-11T08:07:36.979Z"
+    }
+  ],
+  "reconciliation": {
+    "readopted": [],
+    "failed": [],
+    "retained": [],
+    "resumedCancels": [],
+    "corruptRemoved": []
+  },
+  "terminals": [
+    {
+      "id": "terminal-run-1",
+      "workerRunId": "run-1",
+      "provider": "generic",
+      "title": "worker-a",
+      "columns": 120,
+      "rows": 40,
+      "lastSequence": 3
+    },
+    {
+      "id": "terminal-run-2",
+      "workerRunId": "run-2",
+      "provider": "generic",
+      "title": "worker-b",
+      "columns": 120,
+      "rows": 40,
+      "lastSequence": 3
+    },
+    {
+      "id": "terminal-run-3",
+      "workerRunId": "run-3",
+      "provider": "generic",
+      "title": "worker-c",
+      "columns": 120,
+      "rows": 40,
+      "lastSequence": 3
+    }
+  ]
+}

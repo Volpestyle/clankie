@@ -1,0 +1,10 @@
+{
+  "capacity": 1,
+  "timeline": [
+    "gameplay:start",
+    "gameplay:preempt_requested",
+    "gameplay:cancelled",
+    "tui:start",
+    "tui:complete"
+  ]
+}

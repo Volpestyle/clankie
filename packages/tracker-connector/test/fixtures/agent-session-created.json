@@ -1,0 +1,59 @@
+{
+  "action": "created",
+  "type": "AgentSessionEvent",
+  "organizationId": "organization-1",
+  "oauthClientId": "oauth-client-1",
+  "appUserId": "clankie-app-1",
+  "createdAt": "2026-07-11T22:00:00.000Z",
+  "webhookId": "webhook-1",
+  "webhookTimestamp": 1783807200000,
+  "promptContext": "<issue identifier=\"VUH-799\"><title>Register Clankie as a Linear agent</title></issue>",
+  "guidance": [
+    {
+      "origin": "workspace",
+      "body": "Keep credentials in the broker."
+    }
+  ],
+  "previousComments": [
+    {
+      "id": "comment-before-1",
+      "body": "Please use the existing tracker connector.",
+      "issueId": "issue-799",
+      "userId": "user-james"
+    }
+  ],
+  "agentSession": {
+    "id": "agent-session-1",
+    "appUserId": "clankie-app-1",
+    "organizationId": "organization-1",
+    "status": "pending",
+    "type": "commentThread",
+    "createdAt": "2026-07-11T22:00:00.000Z",
+    "updatedAt": "2026-07-11T22:00:00.000Z",
+    "issueId": "issue-799",
+    "issue": {
+      "id": "issue-799",
+      "identifier": "VUH-799",
+      "title": "Register Clankie as a Linear agent",
+      "description": "Agent-owned acceptance criteria",
+      "teamId": "team-vuhlp",
+      "url": "https://linear.app/vuhlp/issue/VUH-799/register-clankie"
+    },
+    "commentId": "comment-root-1",
+    "comment": {
+      "id": "comment-root-1",
+      "body": "@Clankie implement the agent-owned criteria.",
+      "issueId": "issue-799",
+      "userId": "user-james"
+    },
+    "sourceCommentId": "comment-source-1",
+    "creatorId": "user-james",
+    "creator": {
+      "id": "user-james",
+      "name": "James Volpe",
+      "email": "james@example.test",
+      "url": "https://linear.app/vuhlp/profiles/james"
+    },
+    "url": "https://linear.app/vuhlp/issue/VUH-799/register-clankie/agent-session-1"
+  }
+}

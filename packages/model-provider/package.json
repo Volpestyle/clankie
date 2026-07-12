@@ -1,0 +1,31 @@
+{
+  "name": "@clankie/model-provider",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "clean": "rm -rf dist coverage"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.11",
+    "@ai-sdk/google": "^4.0.11",
+    "@ai-sdk/openai": "^4.0.11",
+    "@ai-sdk/openai-compatible": "^3.0.7",
+    "@ai-sdk/xai": "^4.0.10",
+    "@clankie/credential-broker": "workspace:*",
+    "@clankie/model-registry": "workspace:*",
+    "ai": "^7.0.19",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

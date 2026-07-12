@@ -1,0 +1,16 @@
+name: self-build-runtime
+objective: Improve one bounded part of Clankie using the same governed lead/worker/evaluator loop the product is intended to provide.
+doctrine: fine-control
+required_roles: [planner, implementer, verifier, evaluator]
+constraints:
+  separate_evaluator_change: true
+  frozen_reproducer: true
+  independent_verifier: true
+  human_promotion_approval: true
+artifacts:
+  - plan.json
+  - events.jsonl
+  - diff.patch
+  - test-report.json
+  - evaluation-report.md
+  - rollback.md

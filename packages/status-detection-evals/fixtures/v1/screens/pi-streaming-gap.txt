@@ -1,0 +1,5 @@
+assistant/analysis
+I have loaded the package and am checking the event path now…
+
+tool
+Searching 48 files

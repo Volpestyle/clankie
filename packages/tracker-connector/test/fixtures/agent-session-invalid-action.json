@@ -1,0 +1,27 @@
+{
+  "action": "updated",
+  "type": "AgentSessionEvent",
+  "organizationId": "organization-1",
+  "oauthClientId": "oauth-client-1",
+  "appUserId": "clankie-app-1",
+  "createdAt": "2026-07-11T22:00:00.000Z",
+  "webhookId": "webhook-1",
+  "webhookTimestamp": 1783807200000,
+  "agentSession": {
+    "id": "agent-session-1",
+    "appUserId": "clankie-app-1",
+    "organizationId": "organization-1",
+    "status": "active",
+    "type": "commentThread",
+    "createdAt": "2026-07-11T22:00:00.000Z",
+    "updatedAt": "2026-07-11T22:00:00.000Z",
+    "issueId": "issue-799",
+    "issue": {
+      "id": "issue-799",
+      "identifier": "VUH-799",
+      "title": "Register Clankie as a Linear agent",
+      "teamId": "team-vuhlp",
+      "url": "https://linear.app/vuhlp/issue/VUH-799/register-clankie"
+    }
+  }
+}

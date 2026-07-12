@@ -1,0 +1,5 @@
+assistant/analysis
+The command returned exit code 1.
+
+tool/error
+RPC transport closed before agent_end; the turn did not complete.

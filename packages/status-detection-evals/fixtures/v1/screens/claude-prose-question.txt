@@ -1,0 +1,3 @@
+⏺ The migration can either retain legacy rows or replace them during the backfill. Both paths are valid but have different data-retention consequences.
+
+Should the migration preserve legacy rows?

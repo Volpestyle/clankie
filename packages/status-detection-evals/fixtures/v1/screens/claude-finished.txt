@@ -1,0 +1,5 @@
+⏺ Read(packages/example/src/index.ts)
+⏺ Bash(pnpm --filter @sapling/example test)
+  ⎿  Test Files  1 passed (1)
+
+Implementation is complete. Files changed and verification results are recorded above.

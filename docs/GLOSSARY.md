@@ -1,0 +1,21 @@
+# Glossary
+
+- **Captain/Lead:** persistent agent responsible for mission leadership and synthesis.
+- **Mission:** goal, doctrine, budget, success criteria, task graph, approvals, and artifacts.
+- **Task:** bounded unit with dependencies, role, execution class, scope, and evidence contract.
+- **Worker:** provider-native agent or process capable of executing a task.
+- **Worker run:** one attributable task execution with native session and terminal/artifact links.
+- **Doctrine:** versioned preferences, targets, constraints, permissions, authority, topology, and budgets.
+- **Ceremony preset:** one of `rawdog`, `structured`, or `fine-control`; selects integration ceremony without weakening the invariant floor.
+- **Connector risk class:** connector-neutral action category (`read`, `reversible-write`, `irreversible-write`, `publish-external`, or `destructive`) used for default policy.
+- **Authority role:** abstract source-of-truth slot such as `product_intent` or `approved_design`, bound to the operator, local state, or a workspace connector.
+- **Invariant floor:** safety rules every doctrine profile retains, including independent verification, test integrity, and human approval for production deployment, external publication, and destructive actions.
+- **Capability:** named action a principal may request.
+- **Approval:** human decision attached to one action request and its assumptions.
+- **Evidence:** observed command, test report, diff, review, screenshot, artifact, or log.
+- **Persona (`soul.md`):** model-controlled character definition; shapes tone and presentation, never authority.
+- **Ambient channel:** presence surface (Discord text/voice) where the agent lives as a member; carries reduced command authority.
+- **Authenticated surface:** paired device or authenticated session with full command authority, including approvals.
+- **Biome:** stable spatial representation of a project/repository.
+- **Station:** workflow phase within a biome.
+- **Control lease:** exclusive authority to send input to a terminal session.

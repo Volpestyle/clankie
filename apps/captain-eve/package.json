@@ -1,0 +1,29 @@
+{
+  "name": "@clankie/captain-eve",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "eve dev",
+    "start": "eve dev",
+    "build": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "clean": "rm -rf .eve dist coverage"
+  },
+  "dependencies": {
+    "@clankie/api-client": "workspace:*",
+    "@clankie/captain-runtime": "workspace:*",
+    "@clankie/event-store": "workspace:*",
+    "@clankie/model-provider": "workspace:*",
+    "@clankie/protocol": "workspace:*",
+    "eve": "0.22.4",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "microsandbox": "^0.6.6",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

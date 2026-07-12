@@ -1,0 +1,59 @@
+{
+  "action": "prompted",
+  "type": "AgentSessionEvent",
+  "organizationId": "organization-1",
+  "oauthClientId": "oauth-client-1",
+  "appUserId": "clankie-app-1",
+  "createdAt": "2026-07-11T22:05:00.000Z",
+  "webhookId": "webhook-self-prompted",
+  "webhookTimestamp": 1783807500000,
+  "agentActivity": {
+    "id": "agent-activity-self-prompt",
+    "agentSessionId": "agent-session-1",
+    "createdAt": "2026-07-11T22:05:00.000Z",
+    "updatedAt": "2026-07-11T22:05:00.000Z",
+    "sourceCommentId": "comment-self-prompt",
+    "userId": "clankie-app-1",
+    "user": {
+      "id": "clankie-app-1",
+      "name": "Clankie",
+      "email": "clankie@example.test",
+      "url": "https://linear.app/vuhlp/profiles/clankie"
+    },
+    "content": {
+      "type": "prompt",
+      "body": "This self-authored prompt must be rejected."
+    }
+  },
+  "agentSession": {
+    "id": "agent-session-1",
+    "appUserId": "clankie-app-1",
+    "organizationId": "organization-1",
+    "status": "active",
+    "type": "commentThread",
+    "createdAt": "2026-07-11T22:00:00.000Z",
+    "updatedAt": "2026-07-11T22:05:00.000Z",
+    "issueId": "issue-799",
+    "issue": {
+      "id": "issue-799",
+      "identifier": "VUH-799",
+      "title": "Register Clankie as a Linear agent",
+      "teamId": "team-vuhlp",
+      "url": "https://linear.app/vuhlp/issue/VUH-799/register-clankie"
+    },
+    "commentId": "comment-root-1",
+    "comment": {
+      "id": "comment-root-1",
+      "body": "Original human prompt.",
+      "issueId": "issue-799",
+      "userId": "user-james"
+    },
+    "creatorId": "user-james",
+    "creator": {
+      "id": "user-james",
+      "name": "James Volpe",
+      "email": "james@example.test",
+      "url": "https://linear.app/vuhlp/profiles/james"
+    }
+  }
+}

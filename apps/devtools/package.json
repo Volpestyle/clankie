@@ -1,0 +1,25 @@
+{
+  "name": "@clankie/devtools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "clean": "rm -rf dist coverage"
+  },
+  "dependencies": {
+    "@clankie/event-store": "workspace:*",
+    "@clankie/garden-model": "workspace:*",
+    "@clankie/protocol": "workspace:*",
+    "@clankie/status-resolver": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "tsx": "4.23.0",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

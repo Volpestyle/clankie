@@ -1,0 +1,32 @@
+{
+  "name": "@clankie/control-plane",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "build": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "clean": "rm -rf dist coverage"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.0.8",
+    "@clankie/doctrine": "workspace:*",
+    "@clankie/event-store": "workspace:*",
+    "@clankie/mission-engine": "workspace:*",
+    "@clankie/observability": "workspace:*",
+    "@clankie/protocol": "workspace:*",
+    "@clankie/tracker-connector": "workspace:*",
+    "@clankie/worker-sdk": "workspace:*",
+    "hono": "4.12.28",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "tsx": "4.23.0",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

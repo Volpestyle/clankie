@@ -1,0 +1,43 @@
+{
+  "action": "created",
+  "type": "AgentSessionEvent",
+  "organizationId": "organization-1",
+  "oauthClientId": "oauth-client-1",
+  "appUserId": "clankie-app-1",
+  "createdAt": "2026-07-11T22:00:00.000Z",
+  "webhookId": "webhook-cross-issue-previous-comment",
+  "webhookTimestamp": 1783807200000,
+  "promptContext": "<issue identifier=\"VUH-799\"><title>Cross-issue history</title></issue>",
+  "previousComments": [
+    {
+      "id": "comment-from-another-issue",
+      "body": "This history must not cross issue authority.",
+      "issueId": "different-issue",
+      "userId": "user-james"
+    }
+  ],
+  "agentSession": {
+    "id": "agent-session-cross-issue-history",
+    "appUserId": "clankie-app-1",
+    "organizationId": "organization-1",
+    "status": "pending",
+    "type": "commentThread",
+    "createdAt": "2026-07-11T22:00:00.000Z",
+    "updatedAt": "2026-07-11T22:00:00.000Z",
+    "issueId": "issue-799",
+    "issue": {
+      "id": "issue-799",
+      "identifier": "VUH-799",
+      "title": "Register Clankie as a Linear agent",
+      "teamId": "team-vuhlp",
+      "url": "https://linear.app/vuhlp/issue/VUH-799/register-clankie"
+    },
+    "creatorId": "user-james",
+    "creator": {
+      "id": "user-james",
+      "name": "James Volpe",
+      "email": "james@example.test",
+      "url": "https://linear.app/vuhlp/profiles/james"
+    }
+  }
+}

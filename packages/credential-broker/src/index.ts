@@ -1,0 +1,35 @@
+export {
+  AuditedCapabilityBroker,
+  CapabilityUseRequestSchema,
+  type CapabilityAuditContext,
+  type CapabilityAuditEnvelope,
+  type CapabilityAuditEvent,
+  type CapabilityAuditSink,
+  type AuditedCapabilityBrokerOptions,
+  type CapabilityUseDecision,
+  type CapabilityUseReason,
+  type CapabilityUseRequest,
+} from "./audited-capabilities.ts";
+export {
+  CapabilityGrantSchema,
+  CapabilityTokenError,
+  CapabilityTokenIssuer,
+  MAX_CAPABILITY_TTL_SECONDS,
+  type CapabilityGrant,
+  type CapabilityTokenErrorCode,
+  type VerifiedCapability,
+} from "./capability-token.ts";
+export {
+  createDefaultCredentialStore,
+  FileCredentialStore,
+  KeychainCredentialStore,
+  normalizeProviderId,
+  ProviderCredentialSchema,
+  redactCredential,
+  type CredentialLoadIssue,
+  type CredentialStore,
+  type DefaultCredentialStoreOptions,
+  type KeychainCredentialStoreOptions,
+  type ProviderCredential,
+  type RedactedCredential,
+} from "./credential-store.ts";

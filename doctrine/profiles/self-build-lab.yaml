@@ -1,0 +1,91 @@
+schemaVersion: "1"
+id: self-build-lab
+kind: internal
+description: Internal eval fixture used to test the lead-agent thesis with deterministic workers.
+ceremony:
+  externalConnectors: none
+  integrationFlow: direct_main
+planning:
+  requirePlanApproval: false
+  scopeExpansion: ask
+  targetReviewMinutes: 15
+  softChangedLines: 250
+  hardChangedLines: 600
+  maxLogicalConcernsPerPr: 1
+topology:
+  maxParallelWorkers: 3
+  maxDelegationDepth: 2
+  defaultExecution: runner_visible
+  route:
+    - kinds: [context, planning, research, evaluation]
+      execution: eve_subagent
+    - kinds: [implementation, debugging, verification, review, integration]
+      execution: runner_visible
+verification:
+  independentVerifier: true
+  differentHarnessPreferred: true
+  requireEvidence: true
+  requiredChecks: [typecheck, unit, self-build-eval]
+budgets:
+  maxMissionCostUsd: 5
+  maxTaskRetries: 1
+  maxMissionWallMinutes: 30
+authority:
+  product_intent: { kind: operator }
+  acceptance_criteria: { kind: operator }
+  implementation_state: { kind: local, source: repository }
+  test_state: { kind: local, source: command_results }
+  approved_design: { kind: local, source: repository }
+  technical_decisions: { kind: local, source: repository_adrs }
+  active_execution_state: { kind: local, source: harness_event_store }
+riskClasses:
+  read: { default: allow, rules: [] }
+  narrative-write:
+    default: allow
+    rules: []
+    obligations:
+      [record_mission_attribution, record_correlation_attribution, enforce_narrative_rate_volume_guardrail]
+    guardrail:
+      { windowSeconds: 60, maxWritesPerWindow: 20, maxBytesPerWrite: 16384, maxBytesPerWindow: 65536 }
+  reversible-write: { default: allow, rules: [] }
+  irreversible-write: { default: require_approval, rules: [] }
+  publish-external: { default: require_approval, rules: [] }
+  destructive: { default: require_approval, rules: [] }
+actions:
+  vcs.change.open:
+    default: allow
+    rules: []
+  vcs.change.integrate:
+    default: require_approval
+    rules: []
+  # Recorded provider fixture overrides; user presets remain connector-neutral.
+  github.pr.open:
+    default: allow
+    rules: []
+  github.pr.merge:
+    default: require_approval
+    rules: []
+  tracker.assignment.mirror: { default: allow, rules: [] }
+  tracker.status.update: { default: require_approval, rules: [] }
+  tracker.priority.update: { default: require_approval, rules: [] }
+  tracker.acceptance-criteria.update: { default: require_approval, rules: [] }
+  tracker.completion.update: { default: require_approval, rules: [] }
+  deployment.preview.create:
+    default: require_approval
+    rules: []
+  deployment.production.create:
+    default: require_approval
+    rules: []
+  shell.destructive:
+    default: require_approval
+    rules: []
+  test.integrity.weaken:
+    default: deny
+    rules: []
+  memory.profile.write:
+    default: require_approval
+    rules: []
+memory:
+  rawTranscriptRetentionDays: 7
+  inferredFacts: require_approval
+  publicToPrivatePropagation: false

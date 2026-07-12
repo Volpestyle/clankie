@@ -1,0 +1,73 @@
+[
+  {
+    "kind": "intent",
+    "expectedRevision": 0,
+    "value": {
+      "schemaVersion": 1,
+      "intentId": "gameplay-collect-1",
+      "characterId": "clankie",
+      "context": {
+        "sourceLane": "gameplay",
+        "authority": { "principal": { "kind": "captain", "id": "autonomy" }, "tier": "autonomous" },
+        "correlationId": "timeline-1",
+        "expectedGoalVersion": 0
+      },
+      "type": "set_goal",
+      "goal": { "kind": "collect", "summary": "Collect four oak logs" },
+      "createdAt": "2026-07-11T12:00:00.000Z"
+    }
+  },
+  {
+    "kind": "presence",
+    "expectedRevision": 1,
+    "idempotencyKey": "presence-1",
+    "value": {
+      "schemaVersion": 1,
+      "revision": 1,
+      "characterId": "clankie",
+      "phase": "active",
+      "goalVersion": 1,
+      "observedAt": "2026-07-11T12:00:00.100Z",
+      "sessionId": "paper-session-1",
+      "worldId": "frozen-lab",
+      "position": { "x": 1, "y": 64, "z": 2, "dimension": "overworld" },
+      "activeActionId": "action-collect-1"
+    }
+  },
+  {
+    "kind": "intent",
+    "expectedRevision": 2,
+    "value": {
+      "schemaVersion": 1,
+      "intentId": "tui-shelter-1",
+      "characterId": "clankie",
+      "context": {
+        "sourceLane": "tui",
+        "authority": { "principal": { "kind": "human", "id": "james" }, "tier": "authenticated" },
+        "correlationId": "timeline-1",
+        "causationId": "gameplay-collect-1",
+        "expectedGoalVersion": 1
+      },
+      "type": "set_goal",
+      "goal": { "kind": "build", "summary": "Build a shelter before night" },
+      "createdAt": "2026-07-11T12:00:00.200Z"
+    }
+  },
+  {
+    "kind": "intent",
+    "expectedRevision": 3,
+    "value": {
+      "schemaVersion": 1,
+      "intentId": "delayed-gameplay-steer-1",
+      "characterId": "clankie",
+      "context": {
+        "sourceLane": "gameplay",
+        "authority": { "principal": { "kind": "captain", "id": "autonomy" }, "tier": "autonomous" },
+        "correlationId": "timeline-1",
+        "expectedGoalVersion": 1
+      },
+      "type": "steer",
+      "createdAt": "2026-07-11T12:00:00.300Z"
+    }
+  }
+]

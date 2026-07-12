@@ -1,0 +1,4 @@
+⏺ Bash(pnpm --filter @sapling/example test)
+  ⎿  Error: Cannot find module './generated/schema.js'
+
+The task cannot continue because the generated schema is unavailable.

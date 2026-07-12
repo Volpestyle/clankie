@@ -1,0 +1,36 @@
+{
+  "name": "@clankie/lead-agent-lab",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:e2e": "vitest run test/self-build.e2e.test.ts",
+    "eval:self-build": "tsx src/index.ts --write-artifacts",
+    "eval:experiment": "tsx src/experiment-cli.ts --write-artifacts",
+    "eval:real-workers": "tsx src/real-workers-cli.ts",
+    "eval": "tsx src/index.ts --write-artifacts",
+    "clean": "rm -rf dist coverage"
+  },
+  "dependencies": {
+    "@clankie/api-client": "workspace:*",
+    "@clankie/doctrine": "workspace:*",
+    "@clankie/evals": "workspace:*",
+    "@clankie/event-store": "workspace:*",
+    "@clankie/garden-model": "workspace:*",
+    "@clankie/mission-engine": "workspace:*",
+    "@clankie/protocol": "workspace:*",
+    "@clankie/worker-sdk": "workspace:*",
+    "@clankie/worker-sim": "workspace:*",
+    "yaml": "2.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "tsx": "4.23.0",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

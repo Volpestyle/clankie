@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "client": "@clankie/tui recovery probe",
+  "mission": {
+    "id": "mission-3280ef37-add",
+    "goal": "M1 crash recovery drill",
+    "context": {
+      "issue": "VUH-693",
+      "workers": 3
+    },
+    "state": "planned",
+    "createdAt": "2026-07-11T08:07:06.788Z",
+    "plan": {
+      "missionId": "mission-3280ef37-add",
+      "goal": "M1 crash recovery drill",
+      "rationale": "Prove exact recovery after control-plane, runner, and TUI crashes.",
+      "tasks": [
+        {
+          "id": "worker-a",
+          "title": "Run worker-a",
+          "objective": "Continue producing terminal output while trusted client processes restart.",
+          "kind": "implementation",
+          "role": "implementer",
+          "dependsOn": [],
+          "executionClass": "runner_visible",
+          "risk": "low",
+          "writeScope": [],
+          "successCriteria": ["Worker stays live through runner re-adoption."],
+          "evidenceRequirements": ["Lease identity and terminal replay evidence are attached."],
+          "maxAttempts": 1,
+          "metadata": {}
+        },
+        {
+          "id": "worker-b",
+          "title": "Run worker-b",
+          "objective": "Continue producing terminal output while trusted client processes restart.",
+          "kind": "implementation",
+          "role": "implementer",
+          "dependsOn": [],
+          "executionClass": "runner_visible",
+          "risk": "low",
+          "writeScope": [],
+          "successCriteria": ["Worker stays live through runner re-adoption."],
+          "evidenceRequirements": ["Lease identity and terminal replay evidence are attached."],
+          "maxAttempts": 1,
+          "metadata": {}
+        },
+        {
+          "id": "worker-c",
+          "title": "Run worker-c",
+          "objective": "Continue producing terminal output while trusted client processes restart.",
+          "kind": "implementation",
+          "role": "implementer",
+          "dependsOn": [],
+          "executionClass": "runner_visible",
+          "risk": "low",
+          "writeScope": [],
+          "successCriteria": ["Worker stays live through runner re-adoption."],
+          "evidenceRequirements": ["Lease identity and terminal replay evidence are attached."],
+          "maxAttempts": 1,
+          "metadata": {}
+        }
+      ],
+      "successCriteria": ["All three workers remain live and state recovers exactly."],
+      "assumptions": [],
+      "risks": [],
+      "humanDecisionsRequired": [],
+      "plannedActions": [],
+      "profileHash": "1a7fbc876f4556b5"
+    }
+  },
+  "terminals": [
+    {
+      "terminalId": "terminal-run-1",
+      "workerRunId": "run-1",
+      "lastSequence": 21,
+      "bytes": "cnVuLTE6ZnJhbWU6MDAwMQpydW4tMTpmcmFtZTowMDAyCnJ1bi0xOmZyYW1lOjAwMDMKcnVuLTE6ZnJhbWU6MDAwNApydW4tMTpmcmFtZTowMDA1CnJ1bi0xOmZyYW1lOjAwMDYKcnVuLTE6ZnJhbWU6MDAwNwpydW4tMTpmcmFtZTowMDA4CnJ1bi0xOmZyYW1lOjAwMDkKcnVuLTE6ZnJhbWU6MDAxMApydW4tMTpmcmFtZTowMDExCnJ1bi0xOmZyYW1lOjAwMTIKcnVuLTE6ZnJhbWU6MDAxMwpydW4tMTpmcmFtZTowMDE0CnJ1bi0xOmZyYW1lOjAwMTUKcnVuLTE6ZnJhbWU6MDAxNgpydW4tMTpmcmFtZTowMDE3CnJ1bi0xOmZyYW1lOjAwMTgKcnVuLTE6ZnJhbWU6MDAxOQpydW4tMTpmcmFtZTowMDIwCnJ1bi0xOmZyYW1lOjAwMjEK",
+      "resumedFromSequence": 8,
+      "receivedSequences": [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
+    },
+    {
+      "terminalId": "terminal-run-2",
+      "workerRunId": "run-2",
+      "lastSequence": 21,
+      "bytes": "cnVuLTI6ZnJhbWU6MDAwMQpydW4tMjpmcmFtZTowMDAyCnJ1bi0yOmZyYW1lOjAwMDMKcnVuLTI6ZnJhbWU6MDAwNApydW4tMjpmcmFtZTowMDA1CnJ1bi0yOmZyYW1lOjAwMDYKcnVuLTI6ZnJhbWU6MDAwNwpydW4tMjpmcmFtZTowMDA4CnJ1bi0yOmZyYW1lOjAwMDkKcnVuLTI6ZnJhbWU6MDAxMApydW4tMjpmcmFtZTowMDExCnJ1bi0yOmZyYW1lOjAwMTIKcnVuLTI6ZnJhbWU6MDAxMwpydW4tMjpmcmFtZTowMDE0CnJ1bi0yOmZyYW1lOjAwMTUKcnVuLTI6ZnJhbWU6MDAxNgpydW4tMjpmcmFtZTowMDE3CnJ1bi0yOmZyYW1lOjAwMTgKcnVuLTI6ZnJhbWU6MDAxOQpydW4tMjpmcmFtZTowMDIwCnJ1bi0yOmZyYW1lOjAwMjEK",
+      "resumedFromSequence": 7,
+      "receivedSequences": [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
+    },
+    {
+      "terminalId": "terminal-run-3",
+      "workerRunId": "run-3",
+      "lastSequence": 20,
+      "bytes": "cnVuLTM6ZnJhbWU6MDAwMQpydW4tMzpmcmFtZTowMDAyCnJ1bi0zOmZyYW1lOjAwMDMKcnVuLTM6ZnJhbWU6MDAwNApydW4tMzpmcmFtZTowMDA1CnJ1bi0zOmZyYW1lOjAwMDYKcnVuLTM6ZnJhbWU6MDAwNwpydW4tMzpmcmFtZTowMDA4CnJ1bi0zOmZyYW1lOjAwMDkKcnVuLTM6ZnJhbWU6MDAxMApydW4tMzpmcmFtZTowMDExCnJ1bi0zOmZyYW1lOjAwMTIKcnVuLTM6ZnJhbWU6MDAxMwpydW4tMzpmcmFtZTowMDE0CnJ1bi0zOmZyYW1lOjAwMTUKcnVuLTM6ZnJhbWU6MDAxNgpydW4tMzpmcmFtZTowMDE3CnJ1bi0zOmZyYW1lOjAwMTgKcnVuLTM6ZnJhbWU6MDAxOQpydW4tMzpmcmFtZTowMDIwCg==",
+      "resumedFromSequence": 6,
+      "receivedSequences": [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+    }
+  ]
+}

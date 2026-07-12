@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "lib": ["ES2023"],
+    "types": ["node"]
+  },
+  "include": [
+    "apps/captain-eve/**/*.ts",
+    "apps/control-plane/**/*.ts",
+    "apps/devtools/**/*.ts",
+    "apps/discord-bridge/**/*.ts",
+    "apps/lead-agent-lab/**/*.ts",
+    "apps/relay/**/*.ts",
+    "apps/runner/**/*.ts",
+    "apps/tui/**/*.ts",
+    "integrations/**/*.ts",
+    "packages/**/*.ts"
+  ],
+  "exclude": ["node_modules", "dist", ".data", "artifacts"]
+}

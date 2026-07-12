@@ -1,0 +1,25 @@
+{
+  "name": "@clankie/worker-claude",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "clean": "rm -rf dist coverage"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.206",
+    "@clankie/protocol": "workspace:*",
+    "@clankie/worker-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

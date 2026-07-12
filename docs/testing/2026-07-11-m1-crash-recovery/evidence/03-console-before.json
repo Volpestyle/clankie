@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "client": "@clankie/tui recovery probe",
+  "mission": {
+    "id": "mission-3280ef37-add",
+    "goal": "M1 crash recovery drill",
+    "context": {
+      "issue": "VUH-693",
+      "workers": 3
+    },
+    "state": "planned",
+    "createdAt": "2026-07-11T08:07:06.788Z",
+    "plan": {
+      "missionId": "mission-3280ef37-add",
+      "goal": "M1 crash recovery drill",
+      "rationale": "Prove exact recovery after control-plane, runner, and TUI crashes.",
+      "tasks": [
+        {
+          "id": "worker-a",
+          "title": "Run worker-a",
+          "objective": "Continue producing terminal output while trusted client processes restart.",
+          "kind": "implementation",
+          "role": "implementer",
+          "dependsOn": [],
+          "executionClass": "runner_visible",
+          "risk": "low",
+          "writeScope": [],
+          "successCriteria": ["Worker stays live through runner re-adoption."],
+          "evidenceRequirements": ["Lease identity and terminal replay evidence are attached."],
+          "maxAttempts": 1,
+          "metadata": {}
+        },
+        {
+          "id": "worker-b",
+          "title": "Run worker-b",
+          "objective": "Continue producing terminal output while trusted client processes restart.",
+          "kind": "implementation",
+          "role": "implementer",
+          "dependsOn": [],
+          "executionClass": "runner_visible",
+          "risk": "low",
+          "writeScope": [],
+          "successCriteria": ["Worker stays live through runner re-adoption."],
+          "evidenceRequirements": ["Lease identity and terminal replay evidence are attached."],
+          "maxAttempts": 1,
+          "metadata": {}
+        },
+        {
+          "id": "worker-c",
+          "title": "Run worker-c",
+          "objective": "Continue producing terminal output while trusted client processes restart.",
+          "kind": "implementation",
+          "role": "implementer",
+          "dependsOn": [],
+          "executionClass": "runner_visible",
+          "risk": "low",
+          "writeScope": [],
+          "successCriteria": ["Worker stays live through runner re-adoption."],
+          "evidenceRequirements": ["Lease identity and terminal replay evidence are attached."],
+          "maxAttempts": 1,
+          "metadata": {}
+        }
+      ],
+      "successCriteria": ["All three workers remain live and state recovers exactly."],
+      "assumptions": [],
+      "risks": [],
+      "humanDecisionsRequired": [],
+      "plannedActions": [],
+      "profileHash": "1a7fbc876f4556b5"
+    }
+  },
+  "terminals": [
+    {
+      "terminalId": "terminal-run-1",
+      "workerRunId": "run-1",
+      "lastSequence": 8,
+      "bytes": "cnVuLTE6ZnJhbWU6MDAwMQpydW4tMTpmcmFtZTowMDAyCnJ1bi0xOmZyYW1lOjAwMDMKcnVuLTE6ZnJhbWU6MDAwNApydW4tMTpmcmFtZTowMDA1CnJ1bi0xOmZyYW1lOjAwMDYKcnVuLTE6ZnJhbWU6MDAwNwpydW4tMTpmcmFtZTowMDA4Cg==",
+      "receivedSequences": [0, 1, 2, 3, 4, 5, 6, 7, 8]
+    },
+    {
+      "terminalId": "terminal-run-2",
+      "workerRunId": "run-2",
+      "lastSequence": 7,
+      "bytes": "cnVuLTI6ZnJhbWU6MDAwMQpydW4tMjpmcmFtZTowMDAyCnJ1bi0yOmZyYW1lOjAwMDMKcnVuLTI6ZnJhbWU6MDAwNApydW4tMjpmcmFtZTowMDA1CnJ1bi0yOmZyYW1lOjAwMDYKcnVuLTI6ZnJhbWU6MDAwNwo=",
+      "receivedSequences": [0, 1, 2, 3, 4, 5, 6, 7]
+    },
+    {
+      "terminalId": "terminal-run-3",
+      "workerRunId": "run-3",
+      "lastSequence": 6,
+      "bytes": "cnVuLTM6ZnJhbWU6MDAwMQpydW4tMzpmcmFtZTowMDAyCnJ1bi0zOmZyYW1lOjAwMDMKcnVuLTM6ZnJhbWU6MDAwNApydW4tMzpmcmFtZTowMDA1CnJ1bi0zOmZyYW1lOjAwMDYK",
+      "receivedSequences": [0, 1, 2, 3, 4, 5, 6]
+    }
+  ]
+}

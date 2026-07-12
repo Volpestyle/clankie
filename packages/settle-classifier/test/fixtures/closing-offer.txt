@@ -1,0 +1,3 @@
+Implemented the requested parser and added regression coverage.
+All targeted checks pass, and the working tree contains only the owned files.
+Want me to also add a benchmark for the larger corpus?

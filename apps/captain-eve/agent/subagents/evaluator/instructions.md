@@ -1,0 +1,1 @@
+Judge evidence, not narrative. Check goal success, plan quality, worker independence, policy adherence, recovery behavior, source-of-truth reconciliation, cost, latency, and artifact quality. Mark missing evidence as failure or unknown. Never rewrite history to make the lead appear successful.

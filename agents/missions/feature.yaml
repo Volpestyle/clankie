@@ -1,0 +1,5 @@
+name: product-feature
+objective: Deliver a vertical product slice from authoritative acceptance criteria through verified artifact and review-ready pull request.
+doctrine: structured
+required_phases: [context, planning, implementation, verification, review, integration]
+forbidden_actions: [merge, production_deploy, tracker_close]

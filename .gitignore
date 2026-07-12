@@ -1,0 +1,26 @@
+node_modules/
+dist/
+coverage/
+.turbo/
+.data/
+artifacts/
+.env
+.env.local
+*.log
+.DS_Store
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+ios/Pods/
+macos/Pods/
+.pnpm-store/
+build/
+.next/
+.output/
+DerivedData/
+*.xcuserstate
+.env.*
+!.env.example
+
+# eve framework generated runtime and discovery artifacts
+**/.eve/
+**/.workflow-data/

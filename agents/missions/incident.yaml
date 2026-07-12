@@ -1,0 +1,7 @@
+name: incident-remediation
+objective: Contain, reproduce, repair, verify, and document an operational or security incident.
+doctrine: fine-control
+doctrine_overlays: [high-assurance-overlay]
+required_phases: [containment, evidence_preservation, reproduction, remediation, verification, postmortem]
+max_parallel_writers: 1
+human_approval: restoration

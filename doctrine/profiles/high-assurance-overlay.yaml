@@ -1,0 +1,56 @@
+schemaVersion: "1"
+id: high-assurance-overlay
+kind: overlay
+description: Layered example that tightens a preset for security-sensitive or regulated work.
+planning:
+  requirePlanApproval: true
+  scopeExpansion: forbid
+  targetReviewMinutes: 10
+  softChangedLines: 150
+  hardChangedLines: 350
+  maxLogicalConcernsPerPr: 1
+topology:
+  maxParallelWorkers: 2
+  maxDelegationDepth: 1
+  defaultExecution: runner_visible
+  route:
+    - kinds: [research, planning]
+      execution: eve_subagent
+verification:
+  independentVerifier: true
+  differentHarnessPreferred: true
+  requireEvidence: true
+  requiredChecks: [format, lint, typecheck, unit, integration, security, license, rollback]
+budgets:
+  maxMissionCostUsd: 75
+  maxTaskRetries: 1
+  maxMissionWallMinutes: 480
+riskClasses:
+  read: { default: allow, rules: [] }
+  narrative-write:
+    default: require_approval
+    rules: []
+    obligations:
+      [record_mission_attribution, record_correlation_attribution, enforce_narrative_rate_volume_guardrail]
+    guardrail: { windowSeconds: 60, maxWritesPerWindow: 10, maxBytesPerWrite: 8192, maxBytesPerWindow: 32768 }
+  reversible-write: { default: require_approval, rules: [] }
+  irreversible-write: { default: require_approval, rules: [] }
+  publish-external: { default: require_approval, rules: [] }
+  destructive: { default: require_approval, rules: [] }
+actions:
+  vcs.change.open: { default: require_approval, rules: [] }
+  vcs.change.integrate: { default: require_approval, rules: [] }
+  deployment.production.create: { default: require_approval, rules: [] }
+  shell.destructive: { default: require_approval, rules: [] }
+  package.install: { default: require_approval, rules: [] }
+  test.integrity.weaken: { default: deny, rules: [] }
+  memory.profile.write: { default: deny, rules: [] }
+  tracker.assignment.mirror: { default: require_approval, rules: [] }
+  tracker.status.update: { default: require_approval, rules: [] }
+  tracker.priority.update: { default: require_approval, rules: [] }
+  tracker.acceptance-criteria.update: { default: require_approval, rules: [] }
+  tracker.completion.update: { default: require_approval, rules: [] }
+memory:
+  rawTranscriptRetentionDays: 0
+  inferredFacts: deny
+  publicToPrivatePropagation: false

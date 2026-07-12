@@ -1,0 +1,429 @@
+{
+  "schemaVersion": 1,
+  "corpusId": "status-detection-v1",
+  "recordedAt": "2026-07-11",
+  "sourceDescription": "Sanitized terminal recordings preserve Codex, Claude, Pi, and foreign-pane rendering shapes while removing task content, paths, identifiers, and credentials. Replayed classifications are frozen local-model observations, not labels derived at evaluation time.",
+  "targets": {
+    "classification": {
+      "finished": { "precision": 0.75, "recall": 0.95 },
+      "awaiting_input_required": { "precision": 0.95, "recall": 0.95 },
+      "finished_with_offer": { "precision": 0.95, "recall": 0.95 },
+      "errored": { "precision": 0.95, "recall": 0.75 }
+    },
+    "ablation": {
+      "tier2Accuracy": 0.85,
+      "fullLadderAccuracy": 0.95,
+      "minimumFullLadderLift": 0.1,
+      "maximumHigherTierOverrideViolations": 0
+    }
+  },
+  "fixtures": [
+    {
+      "id": "codex-finished",
+      "provider": "codex",
+      "transcriptFile": "codex-finished.txt",
+      "captureKind": "sanitized_recording",
+      "expectedState": "idle",
+      "expectedClassification": "finished",
+      "replayedClassification": { "classification": "finished", "confidence": 0.98 },
+      "probePlan": [
+        { "outputSequence": 1, "observedAtMs": 0 },
+        { "outputSequence": 1, "observedAtMs": 3000 },
+        { "outputSequence": 1, "observedAtMs": 3100 },
+        { "outputSequence": 1, "observedAtMs": 3200 },
+        { "outputSequence": 1, "observedAtMs": 3700 }
+      ],
+      "higherTierSignals": [
+        {
+          "state": "idle",
+          "tier": 0,
+          "source": "codex.app_server",
+          "eventType": "worker.turn.settled",
+          "confidence": 1,
+          "observedAt": "2026-07-11T12:00:00.000Z"
+        }
+      ],
+      "notes": "Codex final answer after command evidence."
+    },
+    {
+      "id": "claude-finished",
+      "provider": "claude",
+      "transcriptFile": "claude-finished.txt",
+      "captureKind": "sanitized_recording",
+      "expectedState": "idle",
+      "expectedClassification": "finished",
+      "replayedClassification": { "classification": "finished", "confidence": 0.97 },
+      "probePlan": [
+        { "outputSequence": 1, "observedAtMs": 0 },
+        { "outputSequence": 1, "observedAtMs": 3000 },
+        { "outputSequence": 1, "observedAtMs": 3100 },
+        { "outputSequence": 1, "observedAtMs": 3200 },
+        { "outputSequence": 1, "observedAtMs": 3700 }
+      ],
+      "higherTierSignals": [
+        {
+          "state": "idle",
+          "tier": 0,
+          "source": "claude.agent_sdk",
+          "eventType": "worker.turn.settled",
+          "confidence": 1,
+          "observedAt": "2026-07-11T12:00:00.000Z"
+        }
+      ],
+      "notes": "Claude result rendering with completed checks."
+    },
+    {
+      "id": "pi-finished",
+      "provider": "pi",
+      "transcriptFile": "pi-finished.txt",
+      "captureKind": "sanitized_recording",
+      "expectedState": "idle",
+      "expectedClassification": "finished",
+      "replayedClassification": { "classification": "finished", "confidence": 0.96 },
+      "probePlan": [
+        { "outputSequence": 1, "observedAtMs": 0 },
+        { "outputSequence": 1, "observedAtMs": 3000 },
+        { "outputSequence": 1, "observedAtMs": 3100 },
+        { "outputSequence": 1, "observedAtMs": 3200 },
+        { "outputSequence": 1, "observedAtMs": 3700 }
+      ],
+      "higherTierSignals": [
+        {
+          "state": "idle",
+          "tier": 0,
+          "source": "pi.rpc",
+          "eventType": "worker.turn.settled",
+          "confidence": 1,
+          "observedAt": "2026-07-11T12:00:00.000Z"
+        }
+      ],
+      "notes": "Pi RPC assistant text after agent_end."
+    },
+    {
+      "id": "codex-closing-offer",
+      "provider": "codex",
+      "transcriptFile": "codex-closing-offer.txt",
+      "captureKind": "sanitized_recording",
+      "expectedState": "idle",
+      "expectedClassification": "finished_with_offer",
+      "replayedClassification": { "classification": "finished_with_offer", "confidence": 0.96 },
+      "probePlan": [
+        { "outputSequence": 1, "observedAtMs": 0 },
+        { "outputSequence": 1, "observedAtMs": 3000 },
+        { "outputSequence": 1, "observedAtMs": 3100 },
+        { "outputSequence": 1, "observedAtMs": 3200 },
+        { "outputSequence": 1, "observedAtMs": 3700 }
+      ],
+      "higherTierSignals": [
+        {
+          "state": "idle",
+          "tier": 0,
+          "source": "codex.app_server",
+          "eventType": "worker.turn.settled",
+          "confidence": 1,
+          "observedAt": "2026-07-11T12:00:00.000Z"
+        }
+      ],
+      "notes": "Closing-offer negative: optional follow-up is not required input."
+    },
+    {
+      "id": "claude-closing-offer",
+      "provider": "claude",
+      "transcriptFile": "claude-closing-offer.txt",
+      "captureKind": "sanitized_recording",
+      "expectedState": "idle",
+      "expectedClassification": "finished_with_offer",
+      "replayedClassification": { "classification": "finished_with_offer", "confidence": 0.95 },
+      "probePlan": [
+        { "outputSequence": 1, "observedAtMs": 0 },
+        { "outputSequence": 1, "observedAtMs": 3000 },
+        { "outputSequence": 1, "observedAtMs": 3100 },
+        { "outputSequence": 1, "observedAtMs": 3200 },
+        { "outputSequence": 1, "observedAtMs": 3700 }
+      ],
+      "higherTierSignals": [
+        {
+          "state": "idle",
+          "tier": 0,
+          "source": "claude.agent_sdk",
+          "eventType": "worker.turn.settled",
+          "confidence": 1,
+          "observedAt": "2026-07-11T12:00:00.000Z"
+        }
+      ],
+      "notes": "Claude optional follow-up after a complete result."
+    },
+    {
+      "id": "pi-closing-offer",
+      "provider": "pi",
+      "transcriptFile": "pi-closing-offer.txt",
+      "captureKind": "sanitized_recording",
+      "expectedState": "idle",
+      "expectedClassification": "finished_with_offer",
+      "replayedClassification": { "classification": "finished_with_offer", "confidence": 0.94 },
+      "probePlan": [
+        { "outputSequence": 1, "observedAtMs": 0 },
+        { "outputSequence": 1, "observedAtMs": 3000 },
+        { "outputSequence": 1, "observedAtMs": 3100 },
+        { "outputSequence": 1, "observedAtMs": 3200 },
+        { "outputSequence": 1, "observedAtMs": 3700 }
+      ],
+      "higherTierSignals": [
+        {
+          "state": "idle",
+          "tier": 0,
+          "source": "pi.rpc",
+          "eventType": "worker.turn.settled",
+          "confidence": 1,
+          "observedAt": "2026-07-11T12:00:00.000Z"
+        }
+      ],
+      "notes": "Pi optional extension after completion."
+    },
+    {
+      "id": "codex-prose-question",
+      "provider": "codex",
+      "transcriptFile": "codex-prose-question.txt",
+      "captureKind": "sanitized_recording",
+      "expectedState": "waiting_user",
+      "expectedClassification": "awaiting_input_required",
+      "replayedClassification": {
+        "classification": "awaiting_input_required",
+        "confidence": 0.94,
+        "questionSummary": "Which schema should own the new field?"
+      },
+      "probePlan": [
+        { "outputSequence": 1, "observedAtMs": 0 },
+        { "outputSequence": 1, "observedAtMs": 3000 },
+        { "outputSequence": 1, "observedAtMs": 3100 },
+        { "outputSequence": 1, "observedAtMs": 3200 },
+        { "outputSequence": 1, "observedAtMs": 3700 }
+      ],
+      "higherTierSignals": [],
+      "notes": "Required prose question without permission chrome."
+    },
+    {
+      "id": "claude-prose-question",
+      "provider": "claude",
+      "transcriptFile": "claude-prose-question.txt",
+      "captureKind": "sanitized_recording",
+      "expectedState": "waiting_user",
+      "expectedClassification": "awaiting_input_required",
+      "replayedClassification": {
+        "classification": "awaiting_input_required",
+        "confidence": 0.93,
+        "questionSummary": "Should the migration preserve legacy rows?"
+      },
+      "probePlan": [
+        { "outputSequence": 1, "observedAtMs": 0 },
+        { "outputSequence": 1, "observedAtMs": 3000 },
+        { "outputSequence": 1, "observedAtMs": 3100 },
+        { "outputSequence": 1, "observedAtMs": 3200 },
+        { "outputSequence": 1, "observedAtMs": 3700 }
+      ],
+      "higherTierSignals": [],
+      "notes": "Required choice described only in prose."
+    },
+    {
+      "id": "pi-prose-question",
+      "provider": "pi",
+      "transcriptFile": "pi-prose-question.txt",
+      "captureKind": "sanitized_recording",
+      "expectedState": "waiting_user",
+      "expectedClassification": "awaiting_input_required",
+      "replayedClassification": {
+        "classification": "awaiting_input_required",
+        "confidence": 0.92,
+        "questionSummary": "Which endpoint should the client target?"
+      },
+      "probePlan": [
+        { "outputSequence": 1, "observedAtMs": 0 },
+        { "outputSequence": 1, "observedAtMs": 3000 },
+        { "outputSequence": 1, "observedAtMs": 3100 },
+        { "outputSequence": 1, "observedAtMs": 3200 },
+        { "outputSequence": 1, "observedAtMs": 3700 }
+      ],
+      "higherTierSignals": [],
+      "notes": "Pi prose question outside an RPC dialog request."
+    },
+    {
+      "id": "codex-error",
+      "provider": "codex",
+      "transcriptFile": "codex-error.txt",
+      "captureKind": "sanitized_recording",
+      "expectedState": "failed",
+      "expectedClassification": "errored",
+      "replayedClassification": { "classification": "errored", "confidence": 0.96 },
+      "probePlan": [
+        { "outputSequence": 1, "observedAtMs": 0 },
+        { "outputSequence": 1, "observedAtMs": 3000 },
+        { "outputSequence": 1, "observedAtMs": 3100 },
+        { "outputSequence": 1, "observedAtMs": 3200 },
+        { "outputSequence": 1, "observedAtMs": 3700 }
+      ],
+      "higherTierSignals": [
+        {
+          "state": "failed",
+          "tier": 1,
+          "source": "runner.process_lease",
+          "eventType": "worker.process.failed",
+          "confidence": 1,
+          "observedAt": "2026-07-11T12:00:00.000Z"
+        }
+      ],
+      "notes": "Codex terminal error with an explicit fatal result."
+    },
+    {
+      "id": "claude-error",
+      "provider": "claude",
+      "transcriptFile": "claude-error.txt",
+      "captureKind": "sanitized_recording",
+      "expectedState": "failed",
+      "expectedClassification": "errored",
+      "replayedClassification": { "classification": "errored", "confidence": 0.95 },
+      "probePlan": [
+        { "outputSequence": 1, "observedAtMs": 0 },
+        { "outputSequence": 1, "observedAtMs": 3000 },
+        { "outputSequence": 1, "observedAtMs": 3100 },
+        { "outputSequence": 1, "observedAtMs": 3200 },
+        { "outputSequence": 1, "observedAtMs": 3700 }
+      ],
+      "higherTierSignals": [
+        {
+          "state": "failed",
+          "tier": 1,
+          "source": "runner.process_lease",
+          "eventType": "worker.process.failed",
+          "confidence": 1,
+          "observedAt": "2026-07-11T12:00:00.000Z"
+        }
+      ],
+      "notes": "Claude result is_error rendering."
+    },
+    {
+      "id": "pi-error",
+      "provider": "pi",
+      "transcriptFile": "pi-error.txt",
+      "captureKind": "sanitized_recording",
+      "expectedState": "failed",
+      "expectedClassification": "errored",
+      "replayedClassification": { "classification": "errored", "confidence": 0.94 },
+      "probePlan": [
+        { "outputSequence": 1, "observedAtMs": 0 },
+        { "outputSequence": 1, "observedAtMs": 3000 },
+        { "outputSequence": 1, "observedAtMs": 3100 },
+        { "outputSequence": 1, "observedAtMs": 3200 },
+        { "outputSequence": 1, "observedAtMs": 3700 }
+      ],
+      "higherTierSignals": [
+        {
+          "state": "failed",
+          "tier": 1,
+          "source": "runner.process_lease",
+          "eventType": "worker.process.failed",
+          "confidence": 1,
+          "observedAt": "2026-07-11T12:00:00.000Z"
+        }
+      ],
+      "notes": "Pi RPC error after agent_end."
+    },
+    {
+      "id": "codex-permission-dialog",
+      "provider": "codex",
+      "transcriptFile": "codex-permission-dialog.txt",
+      "captureKind": "sanitized_recording",
+      "expectedState": "waiting_user",
+      "expectedClassification": "awaiting_input_required",
+      "probePlan": [
+        { "outputSequence": 1, "observedAtMs": 0 },
+        { "outputSequence": 1, "observedAtMs": 3000, "permissionChromeVisible": true }
+      ],
+      "higherTierSignals": [
+        {
+          "state": "waiting_user",
+          "tier": 0,
+          "source": "codex.app_server",
+          "eventType": "worker.waiting_user",
+          "confidence": 1,
+          "observedAt": "2026-07-11T12:00:00.000Z"
+        }
+      ],
+      "notes": "Visible approval choices short-circuit the model."
+    },
+    {
+      "id": "claude-permission-dialog",
+      "provider": "claude",
+      "transcriptFile": "claude-permission-dialog.txt",
+      "captureKind": "sanitized_recording",
+      "expectedState": "waiting_user",
+      "expectedClassification": "awaiting_input_required",
+      "probePlan": [
+        { "outputSequence": 1, "observedAtMs": 0 },
+        { "outputSequence": 1, "observedAtMs": 3000, "permissionChromeVisible": true }
+      ],
+      "higherTierSignals": [
+        {
+          "state": "waiting_user",
+          "tier": 0,
+          "source": "claude.agent_sdk",
+          "eventType": "worker.waiting_user",
+          "confidence": 1,
+          "observedAt": "2026-07-11T12:00:00.000Z"
+        }
+      ],
+      "notes": "Claude tool permission callback rendered as visible choices."
+    },
+    {
+      "id": "pi-streaming-gap",
+      "provider": "pi",
+      "transcriptFile": "pi-streaming-gap.txt",
+      "captureKind": "sanitized_recording",
+      "expectedState": "working",
+      "probePlan": [
+        { "outputSequence": 1, "observedAtMs": 0 },
+        { "outputSequence": 2, "observedAtMs": 3000 },
+        { "outputSequence": 2, "observedAtMs": 3100 },
+        { "outputSequence": 2, "observedAtMs": 3200 },
+        { "outputSequence": 3, "observedAtMs": 3600 }
+      ],
+      "higherTierSignals": [
+        {
+          "state": "working",
+          "tier": 0,
+          "source": "pi.rpc",
+          "eventType": "worker.turn.started",
+          "confidence": 1,
+          "observedAt": "2026-07-11T12:00:00.000Z"
+        }
+      ],
+      "notes": "Mid-turn quiet gap resumes before the 700 ms hold; Tier 2 must stay unknown."
+    },
+    {
+      "id": "foreign-crash-exit",
+      "provider": "foreign",
+      "transcriptFile": "foreign-crash-exit.txt",
+      "captureKind": "sanitized_recording",
+      "expectedState": "failed",
+      "expectedClassification": "errored",
+      "replayedClassification": { "classification": "finished", "confidence": 0.71 },
+      "probePlan": [
+        { "outputSequence": 1, "observedAtMs": 0 },
+        { "outputSequence": 1, "observedAtMs": 3000 },
+        { "outputSequence": 1, "observedAtMs": 3100 },
+        { "outputSequence": 1, "observedAtMs": 3200 },
+        { "outputSequence": 1, "observedAtMs": 3700 }
+      ],
+      "higherTierSignals": [
+        {
+          "state": "failed",
+          "tier": 1,
+          "source": "runner.process_lease",
+          "eventType": "worker.lease.expired",
+          "confidence": 1,
+          "observedAt": "2026-07-11T12:00:00.000Z"
+        }
+      ],
+      "notes": "Crash after optimistic prose is intentionally invisible to Tier 2; Tier 1 corrects it."
+    }
+  ]
+}

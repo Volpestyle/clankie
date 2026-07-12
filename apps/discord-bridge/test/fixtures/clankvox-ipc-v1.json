@@ -1,0 +1,53 @@
+{
+  "commands": {
+    "sessionOpen": {
+      "schemaVersion": 1,
+      "type": "session_open",
+      "endpoint": "voice.example.invalid:443",
+      "token": "test-voice-token",
+      "serverId": "100",
+      "sessionId": "session-1",
+      "userId": "200",
+      "daveChannelId": "300",
+      "sampleRate": 24000
+    },
+    "audio": {
+      "schemaVersion": 1,
+      "type": "audio",
+      "encoding": "pcm_s16le_base64",
+      "pcmBase64": "AQD//w==",
+      "sampleRate": 24000
+    },
+    "healthRequest": { "schemaVersion": 1, "type": "health_request" },
+    "sessionClose": { "schemaVersion": 1, "type": "session_close", "reason": "operator_leave" }
+  },
+  "events": {
+    "processReady": { "schemaVersion": 1, "type": "process_ready" },
+    "sessionReady": {
+      "schemaVersion": 1,
+      "type": "session_state",
+      "state": "ready",
+      "daveState": "ready"
+    },
+    "speakingStart": { "schemaVersion": 1, "type": "speaking_start", "userId": "42" },
+    "transportStats": {
+      "schemaVersion": 1,
+      "type": "transport_stats",
+      "uptimeMs": 123456,
+      "tick": { "total": 10, "skipped": 2, "slipEvents": 1, "maxGapMs": 61.5 },
+      "ipcLanes": { "controlDropped": 3, "audioDropped": 4, "logDropped": 5 },
+      "inboundAudio": {
+        "packets": 7,
+        "transportDecryptFail": 8,
+        "daveDecryptFail": 9,
+        "forwardLossGaps": 10,
+        "concealedFrames": 11
+      },
+      "outbound": { "rtpAudioSent": 17, "daveEncryptFail": 18 }
+    }
+  },
+  "userAudio": {
+    "lane": 1,
+    "payloadHex": "2a000000000000000304020000000200000001020304"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "name": "@clankie/minecraft-paper-verifier",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/contracts.ts"
+  },
+  "scripts": {
+    "build": "pnpm typecheck && ./scripts/gradle-if-jdk.sh build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "pnpm test:contracts && ./gradlew test",
+    "test:contracts": "vitest run",
+    "test:plugin": "./gradlew test",
+    "fixture:check": "./gradlew verifyFrozenFixture",
+    "clean": "rm -rf coverage dist && ./gradlew clean"
+  },
+  "dependencies": {
+    "@clankie/interactive-environment": "workspace:*",
+    "@clankie/protocol": "workspace:*",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

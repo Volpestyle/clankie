@@ -1,0 +1,19 @@
+name: Feature mission
+body:
+  - type: textarea
+    id: outcome
+    attributes: { label: Outcome, description: What observable result should exist? }
+    validations: { required: true }
+  - type: textarea
+    id: criteria
+    attributes: { label: Acceptance criteria, description: Frozen, testable conditions. }
+    validations: { required: true }
+  - type: dropdown
+    id: risk
+    attributes: { label: Risk, options: [low, medium, high, critical] }
+  - type: textarea
+    id: authority
+    attributes: { label: Authoritative sources, description: Tracker, GitHub, CI, Figma, ADRs, etc. }
+  - type: textarea
+    id: constraints
+    attributes: { label: Scope and constraints }

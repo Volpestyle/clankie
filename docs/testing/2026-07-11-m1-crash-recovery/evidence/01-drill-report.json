@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 2,
+  "issue": "VUH-693",
+  "outcome": "pass",
+  "invocation": "pnpm exec tsx scripts/m1-exit-gate.ts",
+  "crash": {
+    "controlPlaneSignal": "SIGKILL",
+    "runnerSignal": "SIGKILL",
+    "consoleSignal": "SIGKILL",
+    "runnerClient": "@clankie/runner --recovery-probe",
+    "consoleClient": "@clankie/tui --recovery-probe",
+    "consoleConsumedTerminalReplay": true,
+    "workersAliveDuringCrash": 3
+  },
+  "runner": {
+    "previousPid": 61720,
+    "recoveredPid": 61807,
+    "previousStartOrdinal": 1,
+    "recoveredStartOrdinal": 2,
+    "readoptedWorkers": 3,
+    "lostWorkers": 0,
+    "duplicateWorkers": 0
+  },
+  "mission": {
+    "missionId": "mission-3280ef37-add",
+    "profileHash": "1a7fbc876f4556b5",
+    "state": "running",
+    "recordExact": true,
+    "operationalProjectionExact": true,
+    "eventLogPrefixExact": true,
+    "recoveryEventCount": 3,
+    "eventCount": 15,
+    "hashChainValid": true
+  },
+  "leases": [
+    {
+      "leaseId": "f1dad8dd-ca9c-4221-8a47-f1effb557556",
+      "workerRunId": "run-1",
+      "taskId": "worker-a",
+      "pid": 61721,
+      "processStartedAt": "Sat Jul 11 03:07:06 2026",
+      "previousRunnerPid": 61720,
+      "recoveredRunnerPid": 61807,
+      "state": "live",
+      "identityExact": true,
+      "readopted": true
+    },
+    {
+      "leaseId": "11338a84-cd12-46c1-89d4-b361dc70d5fa",
+      "workerRunId": "run-2",
+      "taskId": "worker-b",
+      "pid": 61737,
+      "processStartedAt": "Sat Jul 11 03:07:06 2026",
+      "previousRunnerPid": 61720,
+      "recoveredRunnerPid": 61807,
+      "state": "live",
+      "identityExact": true,
+      "readopted": true
+    },
+    {
+      "leaseId": "4ab1ff13-487c-4475-9a93-356bb4785c4d",
+      "workerRunId": "run-3",
+      "taskId": "worker-c",
+      "pid": 61753,
+      "processStartedAt": "Sat Jul 11 03:07:07 2026",
+      "previousRunnerPid": 61720,
+      "recoveredRunnerPid": 61807,
+      "state": "live",
+      "identityExact": true,
+      "readopted": true
+    }
+  ],
+  "terminals": [
+    {
+      "terminalId": "terminal-run-1",
+      "workerRunId": "run-1",
+      "preCrashSequence": 8,
+      "recoveredSequence": 21,
+      "resumedFirstSequence": 9,
+      "replayedBytes": 357,
+      "gapFree": true,
+      "byteExact": true
+    },
+    {
+      "terminalId": "terminal-run-2",
+      "workerRunId": "run-2",
+      "preCrashSequence": 7,
+      "recoveredSequence": 21,
+      "resumedFirstSequence": 8,
+      "replayedBytes": 357,
+      "gapFree": true,
+      "byteExact": true
+    },
+    {
+      "terminalId": "terminal-run-3",
+      "workerRunId": "run-3",
+      "preCrashSequence": 6,
+      "recoveredSequence": 20,
+      "resumedFirstSequence": 7,
+      "replayedBytes": 340,
+      "gapFree": true,
+      "byteExact": true
+    }
+  ],
+  "sideEffects": {
+    "operationId": "mission-3280ef37-add:side-effect:1",
+    "attempts": 2,
+    "executions": 1,
+    "eventOccurrences": 1,
+    "idempotentSequence": 12
+  }
+}

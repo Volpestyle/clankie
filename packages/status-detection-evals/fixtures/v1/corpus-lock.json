@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "corpusId": "status-detection-v1",
+  "files": {
+    "manifest.json": "cc8b278926b875c983a0304d31f1c1250b80d3f83007227d1b778dbf52ecca63",
+    "screens/claude-closing-offer.txt": "5a7d62aa16f8dea7a7572ebb3101831f83f113a7567d69b7394defd91e38ce3c",
+    "screens/claude-error.txt": "926792fda7756688d38c82da3d519c4a668cee8a12d0c86b85bc1d7411bfb255",
+    "screens/claude-finished.txt": "5f1dcd2b672519950852877eba2d6835dc4be9e7b18c6e6e2a01e01d91f60c0f",
+    "screens/claude-permission-dialog.txt": "fd46d4a9076b19d27012e64c8372f01ae6fb8b8773678d6785a8912a86565216",
+    "screens/claude-prose-question.txt": "aab04ae0c5c4303e4eb0d499ab90580f408caba43d42cc27141250f16810e42b",
+    "screens/codex-closing-offer.txt": "aed095044adc16f35889ebd45f481908648749dffc6d4daf44db20d9ca46c938",
+    "screens/codex-error.txt": "439d0b7c4cb0968a0ad310fa75328ccd5458c3d3b16a22edff5431d19d221d0f",
+    "screens/codex-finished.txt": "43e594b33921667520d6fa7494a290b5749a802a6cc7191b6d7ec93d8933dd2d",
+    "screens/codex-permission-dialog.txt": "34655b8820fa1cd7539a0c5120bd2bf661343f451f29633a00150603330fdc91",
+    "screens/codex-prose-question.txt": "10d8d9f16ddb76aafff8081d24728e53fad17d70e73e86905f2ab86d927faf8f",
+    "screens/foreign-crash-exit.txt": "2ccac55e7d31084d6557dd73ebc88ceffebaa7566637fbc821ea04175447ab86",
+    "screens/pi-closing-offer.txt": "b9d289af3c33ee4b470c8a03a72269d37124c01d9005687f98ef1d8d1a2e673b",
+    "screens/pi-error.txt": "d104e039f9f1654b9f67d26fd9d4d79e15b2b5873cb74644e5eca72f53401abc",
+    "screens/pi-finished.txt": "b116490b02b9c729ef77b501b987e93a8394f4fcf6ee991f3c86b5ed8c795762",
+    "screens/pi-prose-question.txt": "af57276eea26a04c82870d5b38942e42eeeecf758d043b6b0d317e60cb6ce9a9",
+    "screens/pi-streaming-gap.txt": "8747d804a5f19aead3816600af65fcc79367e1c08207c428375cd05132783ce7"
+  }
+}

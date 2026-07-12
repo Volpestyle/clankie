@@ -1,0 +1,35 @@
+schemaVersion: "1"
+id: lead-vs-single-v1
+arms:
+  - id: single-worker
+    lead: false
+    workers: 1
+  - id: homogeneous-lead
+    lead: true
+    heterogeneous: false
+  - id: heterogeneous-lead
+    lead: true
+    heterogeneous: true
+  - id: no-independent-verifier
+    lead: true
+    heterogeneous: true
+    ablation: independent_verification
+scenarios:
+  - injected-retry-defect
+  - write-scope-conflict
+  - repository-prompt-injection
+  - preexisting-test-failure
+repetitions: 10
+metrics:
+  - goal_success
+  - defect_escape
+  - critical_policy_failures
+  - recovery_success
+  - evidence_completeness
+  - wall_time
+  - provider_cost
+  - human_interventions
+promotion:
+  require_zero_critical_failures: true
+  require_holdout_improvement: true
+  require_human_approval: true
