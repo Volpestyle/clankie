@@ -23,6 +23,12 @@ import {
 } from "@clankie/mission-engine";
 import { createLogger } from "@clankie/observability";
 import {
+  MemoryFactSchema,
+  type ApplyProposalResult,
+  type MemoryFact,
+  type RecallCardOptions,
+} from "@clankie/memory-store";
+import {
   ApprovalDecisionInputSchema,
   ApprovalRequestRecordSchema,
   ApprovalRequestStatusSchema,
@@ -100,6 +106,20 @@ interface MissionRecord {
   createdAt: string;
 }
 
+interface StoredMemoryProposal {
+  readonly proposalId: string;
+  readonly approvalRequestId: string;
+  readonly fact: MemoryFact;
+  readonly submittedAt: string;
+  readonly principal: { kind: "captain" | "worker"; id: string };
+}
+
+export interface MemoryStorePort {
+  applyApprovedProposal(input: unknown): ApplyProposalResult;
+  recallCard(options: RecallCardOptions): string;
+  pruneRetention(now?: Date): readonly string[];
+}
+
 export interface ControlPlaneDependencies {
   doctrine: CompiledDoctrine;
   /** Durable mission event log; when provided, mission records are rebuilt from it on startup. */
@@ -114,6 +134,8 @@ export interface ControlPlaneDependencies {
   classifyConnectorAction?: ConnectorActionClassifier;
   /** Trusted metadata classifier for trigger CRUD. Defaults to the built-in trigger action catalog. */
   classifyTriggerAction?: ConnectorActionClassifier;
+  /** Trusted bounded memory projection. Its SQLite handle remains private to the control plane. */
+  memoryStore?: MemoryStorePort;
   /** Runner-owned privileged connector. Its credential access is not part of this interface. */
   githubConnector?: GithubConnector;
   /** Trusted policy-gated tracker mirror. Its provider credential is not part of this interface. */
@@ -140,6 +162,8 @@ export interface ControlPlaneDependencies {
   captainLeaseDurationMs?: number;
   /** Test-tunable interval for sparse durable heartbeat records. */
   captainHeartbeatRecordIntervalMs?: number;
+  /** Test-tunable memory maintenance cadence. Production defaults to one day. */
+  memoryMaintenanceIntervalMs?: number;
   /** Test-tunable approval lifetime. Production defaults to fifteen minutes. */
   approvalRequestTtlMs?: number;
   clock?: () => Date;
@@ -413,6 +437,14 @@ const TrackerMutationRequestSchema = z.object({
   idempotencyKey: z.string().min(1),
 });
 
+const MemoryProposalRequestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    proposalId: z.string().min(1).max(256),
+    fact: MemoryFactSchema,
+  })
+  .strict();
+
 const ApprovalStatusQuerySchema = z.object({
   status: ApprovalRequestStatusSchema.default("pending"),
 });
@@ -517,6 +549,8 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
   const idFactory = dependencies.idFactory ?? randomUUID;
   const missions = new Map<string, MissionRecord>();
   const missionTriggers = new Map<string, MissionTrigger>();
+  const memoryProposals = new Map<string, StoredMemoryProposal>();
+  const committedMemoryProposals = new Set<string>();
   const engines = new Map<string, MissionEngine>();
   const missionLocks = new Map<string, Promise<unknown>>();
   const approvalLocks = new Map<string, Promise<unknown>>();
@@ -549,6 +583,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       storedEvents.push(stored.event);
       applyMissionEvent(missions, stored.event);
       applyMissionTriggerEvent(missionTriggers, stored.event);
+      applyMemoryEvent(memoryProposals, committedMemoryProposals, stored.event);
       applyApprovalEvent(approvalRequests, consumedApprovalIds, stored.event);
       if (stored.event.type === "worker.leased" && typeof stored.event.data.claimId === "string") {
         claimMissions.set(stored.event.data.claimId, stored.event.missionId);
@@ -592,6 +627,61 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     persistedEventIds.add(event.id);
     await syncTrackerEvent(event);
     return event;
+  };
+
+  const commitApprovedMemoryProposal = async (
+    proposal: StoredMemoryProposal,
+    approval: ApprovalRequestRecord,
+  ): Promise<ApplyProposalResult | undefined> => {
+    if (!dependencies.memoryStore || committedMemoryProposals.has(proposal.proposalId)) return undefined;
+    if (
+      approval.id !== proposal.approvalRequestId ||
+      approval.action !== "memory.profile.write" ||
+      approval.status !== "approved" ||
+      approval.missionId !== proposal.fact.provenance.missionId ||
+      approval.profileHash !== dependencies.doctrine.profileHash ||
+      approval.decidedAt === undefined ||
+      approval.decidedBy === undefined
+    ) {
+      throw new Error("Memory proposal approval does not match the authenticated approval projection");
+    }
+    const result = dependencies.memoryStore.applyApprovedProposal({
+      schemaVersion: 1,
+      proposalId: proposal.proposalId,
+      approval: {
+        approvalId: approval.id,
+        status: "approved",
+        approvedAt: approval.decidedAt,
+        approvedBy: approval.decidedBy,
+      },
+      fact: proposal.fact,
+    });
+    await recordEvent(
+      "memory.proposal.committed",
+      proposal.fact.provenance.missionId,
+      clock().toISOString(),
+      {
+        proposalId: proposal.proposalId,
+        approvalRequestId: proposal.approvalRequestId,
+        factId: result.fact.factId,
+        merged: result.merged,
+        evictedFactIds: [...result.evictedFactIds],
+      },
+      { correlationId: proposal.fact.provenance.correlationId },
+    );
+    committedMemoryProposals.add(proposal.proposalId);
+    return result;
+  };
+
+  const pruneMemory = async (reason: "doctrine_loaded" | "maintenance"): Promise<readonly string[]> => {
+    if (!dependencies.memoryStore) return [];
+    const prunedFactIds = dependencies.memoryStore.pruneRetention(clock());
+    await recordEvent("memory.retention.pruned", "memory:retention", clock().toISOString(), {
+      reason,
+      rawTranscriptRetentionDays: dependencies.doctrine.profile.memory.rawTranscriptRetentionDays,
+      prunedFactIds: [...prunedFactIds],
+    });
+    return prunedFactIds;
   };
 
   const persistApprovalRequest = async (
@@ -659,6 +749,33 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
   };
 
   const persistedEventIds = new Set(storedEvents.map((event) => event.id));
+  if (dependencies.memoryStore) {
+    for (const proposal of memoryProposals.values()) {
+      const approval = approvalRequests.get(proposal.approvalRequestId);
+      if (approval?.status === "approved" && !committedMemoryProposals.has(proposal.proposalId)) {
+        await commitApprovedMemoryProposal(proposal, approval);
+      }
+    }
+    const previousRetention = [...storedEvents]
+      .reverse()
+      .find((event) => event.type === "memory.retention.pruned")?.data.rawTranscriptRetentionDays;
+    if (previousRetention !== dependencies.doctrine.profile.memory.rawTranscriptRetentionDays) {
+      await pruneMemory("doctrine_loaded");
+    }
+  }
+
+  const memoryMaintenanceTimer = setInterval(
+    () => {
+      void pruneMemory("maintenance").catch((error: unknown) =>
+        logger.error(
+          { error: error instanceof Error ? error.message : String(error) },
+          "memory retention maintenance failed",
+        ),
+      );
+    },
+    dependencies.memoryMaintenanceIntervalMs ?? 24 * 60 * 60 * 1_000,
+  );
+  memoryMaintenanceTimer.unref();
   const flushEngine = async (engine: MissionEngine): Promise<void> => {
     for (const event of engine.getEvents()) {
       if (persistedEventIds.has(event.id)) continue;
@@ -1316,6 +1433,89 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     return context.json(await evaluateDueTriggers(clock()));
   });
 
+  app.post("/v1/memory/proposals", async (context) => {
+    if (!dependencies.memoryStore || !dependencies.eventStore) {
+      return context.json({ error: "memory_store_unavailable" }, 503);
+    }
+    const parsed = MemoryProposalRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_memory_proposal" }, 400);
+    const worker = dependencies.authenticateWorker
+      ? await dependencies.authenticateWorker(context.req.raw)
+      : undefined;
+    const captain = worker ? undefined : await authenticateCaptain(context.req.raw, dependencies);
+    if (!dependencies.authenticateWorker && captain === "unavailable") {
+      return context.json({ error: "memory_proposal_authentication_unavailable" }, 503);
+    }
+    if (!worker && (!captain || captain === "unavailable")) {
+      return context.json({ error: "memory_proposal_authentication_required" }, 401);
+    }
+    const proposalInput = parsed.data;
+    if (
+      worker &&
+      (proposalInput.fact.provenance.missionId !== worker.missionId ||
+        proposalInput.fact.provenance.correlationId !== worker.correlationId)
+    ) {
+      return context.json({ error: "memory_proposal_identity_mismatch" }, 403);
+    }
+    const principal = worker
+      ? ({ kind: "worker", id: worker.workerRunId } as const)
+      : ({ kind: "captain", id: (captain as TrustedCaptainIdentity).captainId } as const);
+    const approvalRequestId = `memory:${proposalInput.proposalId}`;
+    const proposal: StoredMemoryProposal = {
+      proposalId: proposalInput.proposalId,
+      approvalRequestId,
+      fact: proposalInput.fact,
+      submittedAt: clock().toISOString(),
+      principal,
+    };
+    const existing = memoryProposals.get(proposal.proposalId);
+    if (existing) {
+      if (
+        JSON.stringify({ fact: existing.fact, principal: existing.principal }) !==
+        JSON.stringify({ fact: proposal.fact, principal: proposal.principal })
+      ) {
+        return context.json({ error: "memory_proposal_idempotency_conflict" }, 409);
+      }
+      return context.json({ proposal: existing, approval: approvalRequests.get(existing.approvalRequestId) });
+    }
+    const request = ActionRequestSchema.parse({
+      id: approvalRequestId,
+      principal,
+      action: "memory.profile.write",
+      resource: { type: "memory-proposal", id: proposal.proposalId },
+      context: {
+        missionId: proposal.fact.provenance.missionId,
+        risk: "low",
+        humanApprovals: 0,
+        profileHash: dependencies.doctrine.profileHash,
+      },
+    });
+    const decision = decideAction(dependencies.doctrine, request);
+    await recordEvent(
+      "memory.proposal.submitted",
+      proposal.fact.provenance.missionId,
+      proposal.submittedAt,
+      { proposal },
+      { correlationId: proposal.fact.provenance.correlationId },
+    );
+    memoryProposals.set(proposal.proposalId, proposal);
+    if (decision.effect === "deny") {
+      await recordEvent(
+        "memory.proposal.denied",
+        proposal.fact.provenance.missionId,
+        clock().toISOString(),
+        { proposalId: proposal.proposalId, reason: decision.reason, source: "doctrine" },
+        { correlationId: proposal.fact.provenance.correlationId },
+      );
+      return context.json({ error: "memory_proposal_denied", decision }, 403);
+    }
+    if (decision.effect !== "require_approval") {
+      return context.json({ error: "memory_proposal_approval_required" }, 409);
+    }
+    const approval = await persistApprovalRequest(request, decision, proposal.fact.provenance.correlationId);
+    return context.json({ proposal, approval }, 202);
+  });
+
   app.put("/v1/missions/:id/plan", async (context) => {
     const id = context.req.param("id");
     const body = await readJson(context.req.raw);
@@ -1358,7 +1558,15 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
           400,
         );
       }
-      await recordEvent("mission.planned", id, clock().toISOString(), { plan });
+      const memoryRecall = dependencies.memoryStore?.recallCard({ query: plan.goal });
+      const captainMissionContext = [dependencies.doctrine.plannerCard, memoryRecall]
+        .filter((value): value is string => value !== undefined)
+        .join("\n\n");
+      mission.context = { ...mission.context, captainMissionContext };
+      await recordEvent("mission.planned", id, clock().toISOString(), {
+        plan,
+        context: mission.context,
+      });
       mission.plan = plan;
       mission.state = "planned";
       logger.info({ missionId: id, taskCount: plan.tasks.length }, "mission planned");
@@ -1494,6 +1702,14 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
         return leased;
       });
       if (assignment) {
+        const memoryRecall = dependencies.memoryStore?.recallCard({
+          query: `${assignment.task.title} ${assignment.task.objective}`,
+          maxFacts: 6,
+          maxCharacters: 2_048,
+        });
+        if (memoryRecall !== undefined) {
+          assignment.task.metadata = { ...assignment.task.metadata, memoryRecall };
+        }
         logger.info(
           { runnerId: runner.runnerId, missionId: assignment.missionId, workerRunId: assignment.workerRunId },
           "worker task leased",
@@ -1748,6 +1964,25 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
         approvalEnvelope(approval),
       );
       approvalRequests.set(approval.id, approval);
+      if (approval.action === "memory.profile.write") {
+        const proposal = [...memoryProposals.values()].find(
+          (candidate) => candidate.approvalRequestId === approval.id,
+        );
+        if (!proposal) throw new Error(`Memory approval ${approval.id} has no durable proposal`);
+        await recordEvent(
+          status === "approved" ? "memory.proposal.approved" : "memory.proposal.denied",
+          proposal.fact.provenance.missionId,
+          decidedAt,
+          {
+            proposalId: proposal.proposalId,
+            approvalRequestId: approval.id,
+            reason: approval.reason,
+            source: "operator",
+          },
+          { correlationId: proposal.fact.provenance.correlationId },
+        );
+        if (status === "approved") await commitApprovedMemoryProposal(proposal, approval);
+      }
       logger.info(
         { missionId: approval.missionId, approvalId: approval.id, status, operatorId: operator.operatorId },
         "approval decided",
@@ -2785,12 +3020,37 @@ function applyMissionEvent(missions: Map<string, MissionRecord>, event: DomainEv
       return;
     }
     mission.plan = MissionPlanSchema.parse(event.data.plan);
+    const context = z.record(z.string(), z.unknown()).safeParse(event.data.context);
+    if (context.success) mission.context = context.data;
     mission.state = "planned";
     return;
   }
   if (event.type === "mission.execution.started") {
     const mission = missions.get(event.missionId);
     if (mission) mission.state = "running";
+  }
+}
+
+function applyMemoryEvent(
+  proposals: Map<string, StoredMemoryProposal>,
+  committed: Set<string>,
+  event: DomainEvent,
+): void {
+  if (event.type === "memory.proposal.submitted") {
+    const proposal = z
+      .object({
+        proposalId: z.string().min(1),
+        approvalRequestId: z.string().min(1),
+        fact: MemoryFactSchema,
+        submittedAt: z.string().datetime(),
+        principal: z.object({ kind: z.enum(["captain", "worker"]), id: z.string().min(1) }),
+      })
+      .parse(event.data.proposal);
+    proposals.set(proposal.proposalId, proposal);
+    return;
+  }
+  if (event.type === "memory.proposal.committed") {
+    committed.add(z.string().min(1).parse(event.data.proposalId));
   }
 }
 

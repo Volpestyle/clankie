@@ -12,14 +12,15 @@
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {
-    "@hono/node-server": "2.0.8",
     "@clankie/doctrine": "workspace:*",
     "@clankie/event-store": "workspace:*",
+    "@clankie/memory-store": "workspace:*",
     "@clankie/mission-engine": "workspace:*",
     "@clankie/observability": "workspace:*",
     "@clankie/protocol": "workspace:*",
     "@clankie/tracker-connector": "workspace:*",
     "@clankie/worker-sdk": "workspace:*",
+    "@hono/node-server": "2.0.8",
     "hono": "4.12.28",
     "zod": "4.4.3"
   },

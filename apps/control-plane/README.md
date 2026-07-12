@@ -12,6 +12,14 @@ Trigger create, update, and delete operations require an authenticated operator 
 
 `skip` drops a missed occurrence, while `run_once_late` creates one catch-up mission regardless of how many cron occurrences elapsed. Evaluation is serialized and the mission identity is deterministic per trigger occurrence, preventing concurrent evaluation or restart retries from producing a catch-up storm. Created, updated, deleted, fired, and skipped transitions are semantic events in the durable event store.
 
+## Governed mission memory
+
+The control plane is the trusted caller of `@clankie/memory-store`. An authenticated worker or captain may submit a strict bounded fact proposal, but submission only emits `memory.proposal.submitted` and evaluates the existing `memory.profile.write` action. A denial emits `memory.proposal.denied`; `require_approval` creates an ordinary durable approval request. The store is never called directly from model input.
+
+An authenticated operator decision remains authoritative in the approval projection. Approval emits `memory.proposal.approved`, and only then does the control plane rebuild the store's approved envelope from the recorded proposal and approval before calling `applyApprovedProposal`. Commit emits `memory.proposal.committed`. Replay reconciles an approved proposal without a commit event, while the store's proposal receipt and the control-plane commit projection make retries idempotent. Operator denial emits the same denied semantic event without mutating memory.
+
+At plan time, bounded keyword recall is combined with the doctrine planner card in `captainMissionContext`. Runner assignments receive a smaller task-query recall excerpt in task metadata. Both projections are untrusted context, not authority or instructions. Retention pruning runs when the loaded doctrine retention differs from the last recorded run and on a daily maintenance cadence; every run emits `memory.retention.pruned` with bounded fact ids and no fact bodies.
+
 ## Runner pull execution
 
 After a validated implementation-plus-read-only-verification plan is submitted, an authenticated captain starts it with `POST /v1/missions/:id/start`. An authenticated runner pulls work from `POST /v1/runner/claims`, heartbeats the server-owned attempt lease, reports allowlisted idempotent semantic events, and settles the exact attempt. `GET /v1/missions/:id` includes the live task snapshot and results.
