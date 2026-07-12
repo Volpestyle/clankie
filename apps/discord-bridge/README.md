@@ -40,3 +40,14 @@ does not capture or forward audio. VUH-806 replaces it for ClankVox sessions wit
 adapter. It must not call `joinVoiceChannel()` for the same session because that function creates
 its own voice networking once the gateway packets arrive. See
 [`ADR 0025`](../../docs/adr/0025-clankvox-placement-and-ipc.md).
+
+## Presence actions (ADR 0024 P1)
+
+Policy-gated bot presence actions (reply, react, send, …) execute through the control plane:
+
+```bash
+CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE=$PWD/apps/discord-bridge/src/presence-runtime-module.ts
+```
+
+The module uses `DISCORD_BOT_TOKEN` only. User tokens and Go Live are not accepted on this path.
+See [`ADR 0024`](../../docs/adr/0024-discord-dual-plane-presence.md).

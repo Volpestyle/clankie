@@ -13,7 +13,7 @@ export type WorldId = z.infer<typeof WorldIdSchema>;
 export type CharacterId = z.infer<typeof CharacterIdSchema>;
 export type ActionId = z.infer<typeof ActionIdSchema>;
 
-export const CaptainLaneSchema = z.enum(["tui", "discord_voice", "gameplay"]);
+export const CaptainLaneSchema = z.enum(["tui", "discord_voice", "discord_presence", "gameplay"]);
 export type CaptainLane = z.infer<typeof CaptainLaneSchema>;
 
 export const CommandAuthoritySchema = z.object({
@@ -40,6 +40,7 @@ export const IntentContextSchema = z
     const expectedTier = {
       tui: "authenticated",
       discord_voice: "ambient",
+      discord_presence: "ambient",
       gameplay: "autonomous",
     }[context.sourceLane];
     if (tier !== expectedTier) {
@@ -805,3 +806,216 @@ export const TrackerNarrativeWriteResultSchema = z
   })
   .strict();
 export type TrackerNarrativeWriteResult = z.infer<typeof TrackerNarrativeWriteResultSchema>;
+
+/** Transport-agnostic Discord presence action names (ADR 0024). No bot/user token fields. */
+export const DiscordPresenceActionSchema = z.enum([
+  "discord.presence.reply",
+  "discord.presence.react",
+  "discord.presence.unreact",
+  "discord.presence.send_message",
+  "discord.presence.edit_own_message",
+  "discord.presence.delete_own_message",
+  "discord.presence.send_attachment",
+  "discord.presence.typing_start",
+  "discord.presence.create_thread",
+  "discord.presence.join_thread",
+  "discord.presence.voice_join",
+  "discord.presence.voice_leave",
+  "discord.presence.go_live_start",
+  "discord.presence.go_live_stop",
+]);
+export type DiscordPresenceAction = z.infer<typeof DiscordPresenceActionSchema>;
+
+export const DiscordPresenceActionRiskClassSchema = z.enum([
+  "narrative-write",
+  "reversible-write",
+  "publish-external",
+  "destructive",
+]);
+export type DiscordPresenceActionRiskClass = z.infer<typeof DiscordPresenceActionRiskClassSchema>;
+
+export const DISCORD_PRESENCE_ACTION_RISK_CLASS: Readonly<
+  Record<DiscordPresenceAction, DiscordPresenceActionRiskClass>
+> = {
+  "discord.presence.reply": "narrative-write",
+  "discord.presence.react": "narrative-write",
+  "discord.presence.unreact": "narrative-write",
+  "discord.presence.send_message": "narrative-write",
+  "discord.presence.edit_own_message": "reversible-write",
+  "discord.presence.delete_own_message": "reversible-write",
+  "discord.presence.send_attachment": "publish-external",
+  "discord.presence.typing_start": "narrative-write",
+  "discord.presence.create_thread": "reversible-write",
+  "discord.presence.join_thread": "reversible-write",
+  "discord.presence.voice_join": "reversible-write",
+  "discord.presence.voice_leave": "reversible-write",
+  "discord.presence.go_live_start": "publish-external",
+  "discord.presence.go_live_stop": "publish-external",
+};
+
+export const DiscordPresenceChannelIdentitySchema = z
+  .object({
+    missionId: MissionIdSchema.optional(),
+    taskId: TaskIdSchema.optional(),
+    workerRunId: WorkerRunIdSchema.optional(),
+    correlationId: z.string().min(1),
+    profileHash: z.string().min(1),
+    characterId: CharacterIdSchema,
+    credentialRef: z.string().min(1),
+    transportKind: z.enum(["bot", "user_session"]),
+  })
+  .strict();
+export type DiscordPresenceChannelIdentity = z.infer<typeof DiscordPresenceChannelIdentitySchema>;
+
+export const DISCORD_PRESENCE_TRIGGER_BODY_MAX = 16_384;
+export const DISCORD_PRESENCE_CONTEXT_MESSAGES_MAX = 50;
+
+export const DiscordPresenceChannelTurnRequestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    deliveryId: z.string().min(1),
+    identity: DiscordPresenceChannelIdentitySchema,
+    trigger: z
+      .object({
+        kind: z.enum(["message", "mention", "dm", "reaction", "voice_event", "slash_handoff"]),
+        id: z.string().min(1),
+        guildId: z.string().min(1).optional(),
+        channelId: z.string().min(1),
+        messageId: z.string().min(1).optional(),
+        actorId: z.string().min(1),
+        body: z.string().min(1).max(DISCORD_PRESENCE_TRIGGER_BODY_MAX).optional(),
+      })
+      .strict(),
+    contextMessages: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1),
+            authorId: z.string().min(1),
+            body: z.string().max(DISCORD_PRESENCE_TRIGGER_BODY_MAX),
+            createdAt: z.string().datetime(),
+          })
+          .strict(),
+      )
+      .max(DISCORD_PRESENCE_CONTEXT_MESSAGES_MAX)
+      .default([]),
+  })
+  .strict();
+export type DiscordPresenceChannelTurnRequest = z.infer<typeof DiscordPresenceChannelTurnRequestSchema>;
+
+export const DiscordPresenceActionRequestSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("reply"), channelId: z.string().min(1), messageId: z.string().min(1), content: z.string().min(1).max(2_000) }).strict(),
+  z.object({ kind: z.literal("react"), channelId: z.string().min(1), messageId: z.string().min(1), emoji: z.string().min(1).max(64) }).strict(),
+  z.object({ kind: z.literal("unreact"), channelId: z.string().min(1), messageId: z.string().min(1), emoji: z.string().min(1).max(64) }).strict(),
+  z.object({ kind: z.literal("send_message"), channelId: z.string().min(1), content: z.string().min(1).max(2_000), replyToMessageId: z.string().min(1).optional() }).strict(),
+  z.object({ kind: z.literal("edit_own_message"), channelId: z.string().min(1), messageId: z.string().min(1), content: z.string().min(1).max(2_000) }).strict(),
+  z.object({ kind: z.literal("delete_own_message"), channelId: z.string().min(1), messageId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("send_attachment"), channelId: z.string().min(1), content: z.string().max(2_000).optional(), artifactRef: z.string().min(1), filename: z.string().min(1).max(256) }).strict(),
+  z.object({ kind: z.literal("typing_start"), channelId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("create_thread"), channelId: z.string().min(1), messageId: z.string().min(1).optional(), name: z.string().min(1).max(100) }).strict(),
+  z.object({ kind: z.literal("join_thread"), channelId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("voice_join"), guildId: z.string().min(1), channelId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("voice_leave"), guildId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("go_live_start"), guildId: z.string().min(1), channelId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("go_live_stop"), guildId: z.string().min(1) }).strict(),
+]);
+export type DiscordPresenceActionRequest = z.infer<typeof DiscordPresenceActionRequestSchema>;
+
+export const DISCORD_PRESENCE_ACTION_PAYLOAD_KIND: Readonly<
+  Record<DiscordPresenceAction, DiscordPresenceActionRequest["kind"]>
+> = {
+  "discord.presence.reply": "reply",
+  "discord.presence.react": "react",
+  "discord.presence.unreact": "unreact",
+  "discord.presence.send_message": "send_message",
+  "discord.presence.edit_own_message": "edit_own_message",
+  "discord.presence.delete_own_message": "delete_own_message",
+  "discord.presence.send_attachment": "send_attachment",
+  "discord.presence.typing_start": "typing_start",
+  "discord.presence.create_thread": "create_thread",
+  "discord.presence.join_thread": "join_thread",
+  "discord.presence.voice_join": "voice_join",
+  "discord.presence.voice_leave": "voice_leave",
+  "discord.presence.go_live_start": "go_live_start",
+  "discord.presence.go_live_stop": "go_live_stop",
+};
+
+export const DiscordPresenceWriteSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    idempotencyKey: z.string().min(1),
+    action: DiscordPresenceActionSchema,
+    identity: DiscordPresenceChannelIdentitySchema.extend({
+      missionId: MissionIdSchema,
+      transportKind: z.literal("bot"),
+    }).strict(),
+    /**
+     * Optional ledger attribution. When omitted, `resolveDiscordPresenceLedgerContent`
+     * derives a non-empty string from the payload (emoji, filename, typing sentinel, …).
+     */
+    content: z.string().min(1).max(16_384).optional(),
+    payload: DiscordPresenceActionRequestSchema,
+  })
+  .strict()
+  .superRefine((write, context) => {
+    const expectedKind = DISCORD_PRESENCE_ACTION_PAYLOAD_KIND[write.action];
+    if (write.payload.kind !== expectedKind) {
+      context.addIssue({
+        code: "custom",
+        path: ["payload", "kind"],
+        message: `${write.action} requires payload kind ${expectedKind}`,
+      });
+    }
+  });
+export type DiscordPresenceWrite = z.infer<typeof DiscordPresenceWriteSchema>;
+
+/**
+ * Content used by the narrative rate/volume ledger. Prefer explicit `content`,
+ * otherwise derive from the transport-agnostic payload so react/typing need no
+ * fabricated body.
+ */
+export function resolveDiscordPresenceLedgerContent(
+  write: Pick<DiscordPresenceWrite, "content" | "payload">,
+): string {
+  if (write.content !== undefined && write.content.length > 0) return write.content;
+  const { payload } = write;
+  switch (payload.kind) {
+    case "reply":
+    case "send_message":
+    case "edit_own_message":
+      return payload.content;
+    case "react":
+    case "unreact":
+      return payload.emoji;
+    case "typing_start":
+      return "typing";
+    case "send_attachment":
+      return payload.content && payload.content.length > 0 ? payload.content : payload.filename;
+    case "delete_own_message":
+      return "delete";
+    case "create_thread":
+      return payload.name;
+    case "join_thread":
+      return "join_thread";
+    case "voice_join":
+    case "voice_leave":
+    case "go_live_start":
+    case "go_live_stop":
+      return payload.kind;
+    default: {
+      const _exhaustive: never = payload;
+      return String(_exhaustive);
+    }
+  }
+}
+
+export const DiscordPresenceWriteResultSchema = z
+  .object({
+    id: z.string().min(1),
+    action: DiscordPresenceActionSchema,
+    transportKind: z.literal("bot"),
+    channelId: z.string().min(1).optional(),
+    messageId: z.string().min(1).optional(),
+  })
+  .strict();
+export type DiscordPresenceWriteResult = z.infer<typeof DiscordPresenceWriteResultSchema>;

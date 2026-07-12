@@ -197,7 +197,7 @@ export class CaptainLaneRegistry {
       CREATE TABLE IF NOT EXISTS captain_lanes (
         lane_key TEXT PRIMARY KEY,
         character_id TEXT NOT NULL,
-        lane TEXT NOT NULL CHECK (lane IN ('tui', 'discord_voice', 'gameplay')),
+        lane TEXT NOT NULL CHECK (lane IN ('tui', 'discord_voice', 'discord_presence', 'gameplay')),
         target_id TEXT NOT NULL,
         session_id TEXT UNIQUE,
         continuation_token TEXT UNIQUE,

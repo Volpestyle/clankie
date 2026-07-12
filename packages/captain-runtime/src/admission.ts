@@ -43,6 +43,7 @@ interface ActiveAdmission {
 const PRIORITY: Readonly<Record<CaptainLane, number>> = {
   tui: 300,
   discord_voice: 200,
+  discord_presence: 200,
   gameplay: 100,
 };
 

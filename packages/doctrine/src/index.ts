@@ -34,6 +34,11 @@ export const NarrativeWriteKindSchema = z.enum([
   "agent-activity-response",
   "agent-activity-elicitation",
   "emoji-reaction",
+  "discord-reply",
+  "discord-react",
+  "discord-unreact",
+  "discord-send-message",
+  "discord-typing",
 ]);
 export type NarrativeWriteKind = z.infer<typeof NarrativeWriteKindSchema>;
 
@@ -506,6 +511,15 @@ export function decideAction(
     };
   }
 
+  if (request.action.startsWith("discord.presence.") && classification === undefined) {
+    return {
+      effect: "deny",
+      reason: `Discord presence action ${request.action} is not explicitly classified by doctrine.`,
+      matchedPolicyIds: ["discord-presence:implicit-deny"],
+      obligations: [],
+    };
+  }
+
   if (classification) {
     const classPolicy = doctrine.profile.riskClasses?.[classification.riskClass];
     if (classPolicy) {
@@ -568,7 +582,7 @@ export function createNarrativeWritePolicy(
       if (classification.riskClass !== "narrative-write" || !classification.narrativeKind) {
         return {
           effect: "deny",
-          reason: "The action is not a whitelisted narrative tracker write.",
+          reason: "The action is not a whitelisted narrative write.",
           matchedPolicyIds: ["narrative-write:whitelist"],
           obligations: [],
         };

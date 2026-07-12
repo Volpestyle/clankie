@@ -1,7 +1,7 @@
 # @clankie/interactive-environment
 
-Provider-neutral contracts for durable embodied environments and the initial
-Minecraft Java profile. The package defines session phases, leases, commands,
+Provider-neutral contracts for durable embodied environments: Minecraft Java and
+Discord presence (ADR 0024). The package defines session phases, leases, commands,
 action handles, observations, semantic events, bounded telemetry references,
 and deterministic lane-scoped tool exposure.
 

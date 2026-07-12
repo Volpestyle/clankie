@@ -33,6 +33,9 @@ The selective import retains voice RTP/Opus, PCM conversion and internal mixing,
 transport AEAD, DAVE audio, speaking/capture state, and transport statistics. The only governed
 outbound media input is generic `audio`. It does not retain v1 music/YouTube/player-control IPC,
 Go Live, video, user-token paths, v1 Realtime orchestration, or transcript-pane naming.
+User-session Go Live and transport-agnostic Discord presence are owned by
+[`ADR 0024`](0024-discord-dual-plane-presence.md); they must not fold user credentials into this
+bot-only media plane.
 
 ### One Discord media owner
 

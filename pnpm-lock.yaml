@@ -146,6 +146,12 @@ importers:
       '@clankie/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
+      '@clankie/interactive-environment':
+        specifier: workspace:*
+        version: link:../../packages/interactive-environment
+      '@clankie/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
       '@discordjs/voice':
         specifier: 0.19.2
         version: 0.19.2(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)

@@ -30,7 +30,10 @@ export function sourcePriority(context: IntentContext): CharacterSourcePriority 
   if (context.sourceLane === "tui" && context.authority.tier === "authenticated") {
     return "authenticated_tui";
   }
-  if (context.sourceLane === "discord_voice" && context.authority.tier === "ambient") {
+  if (
+    (context.sourceLane === "discord_voice" || context.sourceLane === "discord_presence") &&
+    context.authority.tier === "ambient"
+  ) {
     return "ambient_voice";
   }
   return "gameplay_autonomy";

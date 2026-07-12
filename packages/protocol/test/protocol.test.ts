@@ -8,7 +8,13 @@ import {
   CaptainPresenceReportSchema,
   CaptainLaneSchema,
   CharacterSnapshotSchema,
+  DISCORD_PRESENCE_ACTION_RISK_CLASS,
+  DiscordPresenceActionSchema,
+  DiscordPresenceChannelTurnRequestSchema,
+  DiscordPresenceWriteSchema,
+  resolveDiscordPresenceLedgerContent,
   IntentCommandSchema,
+  IntentContextSchema,
   MissionPlanSchema,
   TrackerNarrativeActionSchema,
   TrackerNarrativeWriteSchema,
@@ -287,6 +293,7 @@ describe("protocol", () => {
 
   it("rejects unknown captain lanes and intents without concurrency guards", () => {
     expect(() => CaptainLaneSchema.parse("global")).toThrow();
+    expect(CaptainLaneSchema.options).toEqual(["tui", "discord_voice", "discord_presence", "gameplay"]);
     expect(() =>
       IntentCommandSchema.parse({
         schemaVersion: 1,
@@ -304,6 +311,63 @@ describe("protocol", () => {
         createdAt: "2026-07-11T12:00:01.000Z",
       }),
     ).toThrow(/expectedGoalVersion/);
+  });
+
+
+  it("requires ambient authority for discord_presence and freezes presence write bot transport", () => {
+    expect(
+      IntentContextSchema.parse({
+        sourceLane: "discord_presence",
+        authority: { principal: { kind: "human", id: "friend" }, tier: "ambient" },
+        correlationId: "corr-presence",
+        expectedGoalVersion: 0,
+      }),
+    ).toMatchObject({ sourceLane: "discord_presence" });
+    expect(DiscordPresenceActionSchema.options).toContain("discord.presence.go_live_start");
+    expect(DISCORD_PRESENCE_ACTION_RISK_CLASS["discord.presence.react"]).toBe("narrative-write");
+    const write = DiscordPresenceWriteSchema.parse({
+      schemaVersion: 1,
+      idempotencyKey: "k1",
+      action: "discord.presence.send_message",
+      identity: {
+        missionId: "m1",
+        correlationId: "c1",
+        profileHash: "p1",
+        characterId: "clankie",
+        credentialRef: "broker:discord_bot:lab",
+        transportKind: "bot",
+      },
+      content: "hi",
+      payload: { kind: "send_message", channelId: "ch", content: "hi" },
+    });
+    expect(write.identity.transportKind).toBe("bot");
+    const react = DiscordPresenceWriteSchema.parse({
+      schemaVersion: 1,
+      idempotencyKey: "k-react",
+      action: "discord.presence.react",
+      identity: write.identity,
+      payload: { kind: "react", channelId: "ch", messageId: "m1", emoji: "👍" },
+    });
+    expect(react.content).toBeUndefined();
+    expect(resolveDiscordPresenceLedgerContent(react)).toBe("👍");
+    expect(resolveDiscordPresenceLedgerContent({ payload: { kind: "typing_start", channelId: "c" } })).toBe(
+      "typing",
+    );
+    // Channel-turn schema is frozen for P2 ingress; not consumed by a route yet.
+    expect(
+      DiscordPresenceChannelTurnRequestSchema.parse({
+        schemaVersion: 1,
+        deliveryId: "d1",
+        identity: {
+          correlationId: "c1",
+          profileHash: "p1",
+          characterId: "clankie",
+          credentialRef: "broker:discord_bot:lab",
+          transportKind: "bot",
+        },
+        trigger: { kind: "dm", id: "m1", channelId: "dm1", actorId: "u1", body: "hey" },
+      }).trigger.kind,
+    ).toBe("dm");
   });
 
   it("binds missions and tasks to the same gameplay world contract", () => {

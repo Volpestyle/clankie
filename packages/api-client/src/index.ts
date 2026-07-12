@@ -3,6 +3,8 @@ import {
   ActionDecisionSchema,
   CaptainChannelTurnResultSchema,
   CaptainPresenceReportSchema,
+  DiscordPresenceWriteResultSchema,
+  DiscordPresenceWriteSchema,
   LinearChannelTurnRequestSchema,
   MissionPlanSchema,
   TrackerNarrativeWriteResultSchema,
@@ -14,6 +16,8 @@ import {
   type CaptainPresenceReport,
   type DomainEvent,
   type CaptainChannelTurnResult,
+  type DiscordPresenceWrite,
+  type DiscordPresenceWriteResult,
   type LinearChannelTurnRequest,
   type MissionPlan,
   type TaskSpec,
@@ -221,6 +225,21 @@ export class ClankieApiClient {
       body: JSON.stringify(write),
     });
     return TrackerNarrativeWriteResultSchema.parse(result);
+  }
+
+  /**
+   * Requests a policy-evaluated Discord presence action (ADR 0024 P1 bot transport).
+   * Bot credentials stay in the control-plane presence runtime module.
+   */
+  public async executeDiscordPresenceAction(
+    input: DiscordPresenceWrite,
+  ): Promise<DiscordPresenceWriteResult> {
+    const write = DiscordPresenceWriteSchema.parse(input);
+    const result = await this.request<unknown>("/v1/discord/presence-actions", {
+      method: "POST",
+      body: JSON.stringify(write),
+    });
+    return DiscordPresenceWriteResultSchema.parse(result);
   }
 
   public async listApprovals(status: ApprovalRequestStatus = "pending"): Promise<ApprovalRequestRecord[]> {

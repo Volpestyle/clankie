@@ -10,6 +10,7 @@ import {
   createControlPlane,
   createDeterministicWorkerSteerAuthorizer,
 } from "./app.ts";
+import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
 import { EveCaptainChannelTurnPort } from "./eve-captain-turn.ts";
 import { FileWorkerSteeringStore } from "./worker-steering.ts";
 
@@ -29,6 +30,9 @@ const captainSteerSourceLane = parseCaptainSteerSourceLane(
   process.env.CLANKIE_CAPTAIN_STEER_SOURCE_LANE ?? "api",
 );
 const linearAgentRuntime = await loadLinearAgentRuntime(process.env.CLANKIE_LINEAR_AGENT_RUNTIME_MODULE);
+const discordPresenceRuntime = await loadDiscordPresenceRuntime(
+  process.env.CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE,
+);
 const app = await createControlPlane({
   doctrine,
   eventStore,
@@ -42,6 +46,7 @@ const app = await createControlPlane({
           baseUrl: process.env.CLANKIE_CAPTAIN_URL ?? "http://127.0.0.1:4321",
         }),
       }),
+  ...(discordPresenceRuntime === undefined ? {} : { discordPresenceRuntime }),
   ...(process.env.CLANKIE_REPO_PATH ? { workspacePath: process.env.CLANKIE_REPO_PATH } : {}),
   ...(runnerToken
     ? {
@@ -92,6 +97,23 @@ async function loadLinearAgentRuntime(
     throw new Error("createLinearAgentRuntime() returned an invalid runtime port");
   }
   return runtime as unknown as LinearAgentRuntimePort;
+}
+
+async function loadDiscordPresenceRuntime(
+  modulePath: string | undefined,
+): Promise<DiscordPresenceRuntimePort | undefined> {
+  if (modulePath === undefined) return undefined;
+  const loaded: unknown = await import(pathToFileURL(resolve(modulePath)).href);
+  if (!isRecord(loaded) || typeof loaded.createDiscordPresenceRuntime !== "function") {
+    throw new Error(
+      "CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE must export createDiscordPresenceRuntime()",
+    );
+  }
+  const runtime: unknown = await loaded.createDiscordPresenceRuntime();
+  if (!isRecord(runtime) || typeof runtime.execute !== "function") {
+    throw new Error("createDiscordPresenceRuntime() returned an invalid runtime port");
+  }
+  return runtime as unknown as DiscordPresenceRuntimePort;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

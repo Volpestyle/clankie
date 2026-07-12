@@ -30,6 +30,8 @@ import {
   ActionRequestSchema,
   CaptainChannelTurnResultSchema,
   CaptainPresenceReportSchema,
+  DiscordPresenceWriteSchema,
+  resolveDiscordPresenceLedgerContent,
   LinearChannelTurnRequestSchema,
   MissionPlanSchema,
   TaskSpecSchema,
@@ -46,6 +48,7 @@ import {
   type ActionRequest,
   type ApprovalRequestRecord,
   type CaptainChannelTurnResult,
+  type DiscordPresenceWriteResult,
   type DomainEvent,
   type MissionPlan,
   type Risk,
@@ -79,6 +82,7 @@ import {
   type WorkerSteeringStore,
   type WorkerSteerOutcome,
 } from "./worker-steering.ts";
+import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
 import type { CaptainChannelTurnPort } from "./eve-captain-turn.ts";
 
 const logger = createLogger({ service: "clankie-control-plane", version: "0.1.0" });
@@ -113,6 +117,11 @@ export interface ControlPlaneDependencies {
   linearAgentRuntime?: LinearAgentRuntimePort;
   /** Trusted Eve turn adapter. Model credentials remain inside the Eve service. */
   captainChannelTurns?: CaptainChannelTurnPort;
+  /**
+   * Privileged Discord presence executor (bot transport for ADR 0024 P1).
+   * Bot credentials remain inside the trusted runtime module.
+   */
+  discordPresenceRuntime?: DiscordPresenceRuntimePort;
   /** Authenticates the outbound local runner. Missing configuration leaves execution unavailable. */
   authenticateRunner?: RunnerAuthenticator;
   /** Authenticates the captain/operator starting an already validated plan. */
@@ -401,32 +410,83 @@ const ApprovalStatusQuerySchema = z.object({
   status: ApprovalRequestStatusSchema.default("pending"),
 });
 
-const classifyNarrativeAction = createConnectorActionClassifier([
+const TRACKER_NARRATIVE_ACTION_METADATA = [
   {
     action: "tracker.comment.create",
-    riskClass: "narrative-write",
-    narrativeKind: "issue-comment",
+    riskClass: "narrative-write" as const,
+    narrativeKind: "issue-comment" as const,
   },
   {
     action: "tracker.agent-activity.thought.create",
-    riskClass: "narrative-write",
-    narrativeKind: "agent-activity-thought",
+    riskClass: "narrative-write" as const,
+    narrativeKind: "agent-activity-thought" as const,
   },
   {
     action: "tracker.agent-activity.response.create",
-    riskClass: "narrative-write",
-    narrativeKind: "agent-activity-response",
+    riskClass: "narrative-write" as const,
+    narrativeKind: "agent-activity-response" as const,
   },
   {
     action: "tracker.agent-activity.elicitation.create",
-    riskClass: "narrative-write",
-    narrativeKind: "agent-activity-elicitation",
+    riskClass: "narrative-write" as const,
+    narrativeKind: "agent-activity-elicitation" as const,
   },
   {
     action: "tracker.reaction.create",
-    riskClass: "narrative-write",
-    narrativeKind: "emoji-reaction",
+    riskClass: "narrative-write" as const,
+    narrativeKind: "emoji-reaction" as const,
   },
+] as const;
+
+/** Shared Discord narrative entries — single source for tracker classifier + presence classifier. */
+const DISCORD_PRESENCE_NARRATIVE_ACTION_METADATA = [
+  {
+    action: "discord.presence.reply",
+    riskClass: "narrative-write" as const,
+    narrativeKind: "discord-reply" as const,
+  },
+  {
+    action: "discord.presence.react",
+    riskClass: "narrative-write" as const,
+    narrativeKind: "discord-react" as const,
+  },
+  {
+    action: "discord.presence.unreact",
+    riskClass: "narrative-write" as const,
+    narrativeKind: "discord-unreact" as const,
+  },
+  {
+    action: "discord.presence.send_message",
+    riskClass: "narrative-write" as const,
+    narrativeKind: "discord-send-message" as const,
+  },
+  {
+    action: "discord.presence.typing_start",
+    riskClass: "narrative-write" as const,
+    narrativeKind: "discord-typing" as const,
+  },
+] as const;
+
+const DISCORD_PRESENCE_NON_NARRATIVE_ACTION_METADATA = [
+  { action: "discord.presence.edit_own_message", riskClass: "reversible-write" as const },
+  { action: "discord.presence.delete_own_message", riskClass: "reversible-write" as const },
+  { action: "discord.presence.create_thread", riskClass: "reversible-write" as const },
+  { action: "discord.presence.join_thread", riskClass: "reversible-write" as const },
+  { action: "discord.presence.voice_join", riskClass: "reversible-write" as const },
+  { action: "discord.presence.voice_leave", riskClass: "reversible-write" as const },
+  { action: "discord.presence.send_attachment", riskClass: "publish-external" as const },
+  { action: "discord.presence.go_live_start", riskClass: "publish-external" as const },
+  { action: "discord.presence.go_live_stop", riskClass: "publish-external" as const },
+] as const;
+
+const classifyNarrativeAction = createConnectorActionClassifier([
+  ...TRACKER_NARRATIVE_ACTION_METADATA,
+  ...DISCORD_PRESENCE_NARRATIVE_ACTION_METADATA,
+]);
+
+const classifyDiscordPresenceAction = createConnectorActionClassifier([
+  ...DISCORD_PRESENCE_NARRATIVE_ACTION_METADATA,
+  ...DISCORD_PRESENCE_NON_NARRATIVE_ACTION_METADATA,
 ]);
 
 const ALLOWED_RUNNER_EVENT_TYPES = new Set([
@@ -454,6 +514,11 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     string,
     { fingerprint: string; result: TrackerNarrativeWriteResult; expiresAtMs: number }
   >();
+  const discordPresenceResults = new Map<
+    string,
+    { fingerprint: string; result: DiscordPresenceWriteResult; expiresAtMs: number }
+  >();
+  const DISCORD_PRESENCE_RETENTION_MS = 7 * 60 * 60 * 1_000;
   const captainTurnResults = new Map<
     string,
     { fingerprint: string; result: Promise<CaptainChannelTurnResult>; expiresAtMs: number }
@@ -714,6 +779,114 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       return context.json(result);
     } catch {
       return context.json({ error: "tracker_narrative_failed" }, 502);
+    }
+  });
+
+
+  app.post("/v1/discord/presence-actions", async (context) => {
+    if (!dependencies.discordPresenceRuntime) {
+      return context.json({ error: "discord_presence_runtime_unavailable" }, 503);
+    }
+    const parsed = DiscordPresenceWriteSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_discord_presence_write" }, 400);
+    const write = parsed.data;
+    if (write.identity.profileHash !== dependencies.doctrine.profileHash) {
+      return context.json({ error: "doctrine_hash_mismatch" }, 409);
+    }
+    if (write.identity.transportKind !== "bot") {
+      return context.json({ error: "discord_presence_transport_unsupported" }, 400);
+    }
+    const fingerprint = createHash("sha256").update(JSON.stringify(write)).digest("hex");
+    pruneExpired(discordPresenceResults, clock().getTime());
+    const previous = discordPresenceResults.get(write.idempotencyKey);
+    if (previous !== undefined) {
+      if (previous.fingerprint !== fingerprint) {
+        return context.json({ error: "discord_presence_idempotency_conflict" }, 409);
+      }
+      return context.json(previous.result);
+    }
+
+    const classification = classifyDiscordPresenceAction(write.action);
+    if (classification === undefined) {
+      return context.json({ error: "discord_presence_action_unclassified" }, 400);
+    }
+    const request = ActionRequestSchema.parse({
+      id: write.idempotencyKey,
+      principal: {
+        kind: "worker",
+        id: write.identity.workerRunId ?? write.identity.characterId,
+        role: "discord-presence-adapter",
+      },
+      action: write.action,
+      resource: {
+        type: "discord-channel",
+        id:
+          "channelId" in write.payload
+            ? write.payload.channelId
+            : "guildId" in write.payload
+              ? write.payload.guildId
+              : write.action,
+      },
+      context: {
+        missionId: write.identity.missionId,
+        ...(write.identity.taskId === undefined ? {} : { taskId: write.identity.taskId }),
+        risk: classification.riskClass === "publish-external" ? "high" : "low",
+        profileHash: write.identity.profileHash,
+      },
+    });
+
+    const ledgerContent = resolveDiscordPresenceLedgerContent(write);
+    const decision =
+      classification.riskClass === "narrative-write"
+        ? narrativePolicy.decide({
+            request,
+            classification,
+            correlationId: write.identity.correlationId,
+            content: ledgerContent,
+          })
+        : decideAction(dependencies.doctrine, request, classification);
+
+    if (decision.effect !== "allow") {
+      // P1: publish-external (attachment/go_live) returns require_approval but does not
+      // yet mint an approval-store request; attachments cannot complete until that
+      // follow-up wires require_approval → ApprovalRequest → resume (see ADR 0024).
+      logger.warn(
+        {
+          service: "clankie-control-plane",
+          missionId: write.identity.missionId,
+          correlationId: write.identity.correlationId,
+          action: write.action,
+          effect: decision.effect,
+        },
+        "Discord presence action denied",
+      );
+      return context.json({ error: "discord_presence_not_allowed", decision }, 403);
+    }
+
+    try {
+      const result = await dependencies.discordPresenceRuntime.execute(write);
+      discordPresenceResults.set(write.idempotencyKey, {
+        fingerprint,
+        result,
+        expiresAtMs: clock().getTime() + DISCORD_PRESENCE_RETENTION_MS,
+      });
+      logger.info(
+        {
+          service: "clankie-control-plane",
+          missionId: write.identity.missionId,
+          correlationId: write.identity.correlationId,
+          action: write.action,
+          transportKind: result.transportKind,
+        },
+        "Discord presence action completed",
+      );
+      return context.json(result);
+    } catch (error) {
+      const code =
+        error instanceof Error && error.message.startsWith("discord_presence_")
+          ? error.message
+          : "discord_presence_failed";
+      return context.json({ error: code }, 502);
     }
   });
 

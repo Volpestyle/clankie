@@ -98,7 +98,8 @@ The capability exchange accepts the same classified action request. The connecto
 
 - issue comments;
 - agent-session thought, response, and elicitation activities;
-- emoji reactions.
+- emoji reactions;
+- Discord presence reply, react, unreact, send-message, and typing ([ADR 0024](adr/0024-discord-dual-plane-presence.md)).
 
 The three ceremony presets allow this class without human approval. Every allow decision records the mission and correlation attribution and carries the configured rate/volume obligation. The trusted narrative evaluator enforces a fixed 60-second mission window of at most 20 writes, 16,384 bytes per write, and 65,536 bytes in the window. Correlation rotation does not reset the mission window.
 

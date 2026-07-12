@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
+  DISCORD_PRESENCE_CATALOG,
+  DiscordPresenceActionRequestSchema,
+  DiscordPresenceToolExposureSchema,
+  DiscordPresenceTransportBindingSchema,
   EnvironmentActionResultSchema,
   EnvironmentCommandSchema,
   EnvironmentEventSchema,
   EnvironmentLeaseSchema,
+  isDiscordPresenceActionAvailable,
   MinecraftCommandSchema,
   MinecraftObservationSchema,
   MinecraftToolExposureSchema,
+  resolveDiscordPresenceToolExposure,
   resolveMinecraftToolExposure,
 } from "../src/index.ts";
 import { actionResultFixtures, validEnvironmentLease, validStartActionCommand } from "./fixtures.ts";
@@ -135,7 +141,7 @@ describe("Minecraft profile", () => {
 
   it("exposes only lifecycle tools until Minecraft is actively playing", () => {
     for (const phase of ["off", "starting", "paused", "stopping", "failed"] as const) {
-      for (const lane of ["tui", "discord_voice", "gameplay"] as const) {
+      for (const lane of ["tui", "discord_voice", "discord_presence", "gameplay"] as const) {
         expect(resolveMinecraftToolExposure(phase, lane).gameplayTools).toEqual([]);
       }
     }
@@ -148,6 +154,7 @@ describe("Minecraft profile", () => {
   it("exposes gameplay tools only to the active gameplay lane", () => {
     expect(resolveMinecraftToolExposure("active", "tui").gameplayTools).toEqual([]);
     expect(resolveMinecraftToolExposure("active", "discord_voice").gameplayTools).toEqual([]);
+    expect(resolveMinecraftToolExposure("active", "discord_presence").gameplayTools).toEqual([]);
     expect(resolveMinecraftToolExposure("active", "gameplay").gameplayTools).toEqual([
       "minecraft_observe",
       "minecraft_start_action",
@@ -167,5 +174,52 @@ describe("Minecraft profile", () => {
         gameplayTools: ["minecraft_start_action"],
       }),
     ).toThrow(/invalid gameplay tool exposure/);
+  });
+
+  it("keeps Discord presence actions transport-agnostic and gates Go Live to user_session", () => {
+    expect(
+      DiscordPresenceActionRequestSchema.parse({
+        kind: "reply",
+        channelId: "channel-1",
+        messageId: "message-1",
+        content: "hello from the catalog",
+      }),
+    ).toMatchObject({ kind: "reply" });
+    expect(
+      DiscordPresenceTransportBindingSchema.parse({
+        schemaVersion: 1,
+        kind: "user_session",
+        credentialRef: "broker:discord_user_session:lab",
+        resourceScope: { dmPolicy: "owner_only" },
+      }),
+    ).toMatchObject({ kind: "user_session" });
+    expect(
+      isDiscordPresenceActionAvailable({
+        action: "discord.presence.go_live_start",
+        phase: "voice_active",
+        transportKind: "user_session",
+      }),
+    ).toBe(true);
+    expect(
+      isDiscordPresenceActionAvailable({
+        action: "discord.presence.go_live_start",
+        phase: "voice_active",
+        transportKind: "bot",
+      }),
+    ).toBe(false);
+    expect(DISCORD_PRESENCE_CATALOG.length).toBeGreaterThan(0);
+    expect(resolveDiscordPresenceToolExposure("present", "discord_presence").presenceTools).toContain(
+      "discord_presence_act",
+    );
+    expect(resolveDiscordPresenceToolExposure("present", "tui").presenceTools).toEqual([]);
+    expect(() =>
+      DiscordPresenceToolExposureSchema.parse({
+        schemaVersion: 1,
+        phase: "present",
+        lane: "tui",
+        lifecycleTools: ["discord_presence_status", "discord_presence_disconnect"],
+        presenceTools: ["discord_presence_act"],
+      }),
+    ).toThrow(/invalid presence tool exposure/);
   });
 });
