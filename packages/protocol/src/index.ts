@@ -1060,6 +1060,21 @@ export type CeremonyAuthorityImpact = z.infer<typeof CeremonyAuthorityImpactSche
 export const CeremonyUrgencySchema = z.enum(["routine", "elevated", "blocking"]);
 export type CeremonyUrgency = z.infer<typeof CeremonyUrgencySchema>;
 
+/** Where the product-impact section sits in a drafted issue body. */
+export const CeremonySectionPlacementSchema = z.enum(["first", "after_summary", "last"]);
+export type CeremonySectionPlacement = z.infer<typeof CeremonySectionPlacementSchema>;
+
+/**
+ * Semantic direct-notification mode for human attention (not a provider operation).
+ * Connectors map this to delivery policy in VUH-846+.
+ */
+export const CeremonyDirectNotificationModeSchema = z.enum(["required", "best_effort", "disabled"]);
+export type CeremonyDirectNotificationMode = z.infer<typeof CeremonyDirectNotificationModeSchema>;
+
+/** Authored text that must be non-empty after trim (asks, rationales, impact summary). */
+export const CeremonyAuthoredTextSchema = z.string().trim().min(1);
+export type CeremonyAuthoredText = z.infer<typeof CeremonyAuthoredTextSchema>;
+
 /**
  * Opaque tracker correlation. Connectors bind `externalRef`; protocol never
  * names a tracker vendor or principal.
@@ -1072,11 +1087,39 @@ export const TrackerCorrelationRefSchema = z
   .strict();
 export type TrackerCorrelationRef = z.infer<typeof TrackerCorrelationRefSchema>;
 
+function refineCorrelationConflict(
+  topLevel: string,
+  trackerRef: { correlationId: string } | undefined,
+  context: z.RefinementCtx,
+): void {
+  if (trackerRef !== undefined && trackerRef.correlationId !== topLevel) {
+    context.addIssue({
+      code: "custom",
+      path: ["trackerRef", "correlationId"],
+      message: "trackerRef.correlationId must match the top-level correlationId when both are present",
+    });
+  }
+}
+
+function refineExpiresAfterCreated(
+  createdAt: string,
+  expiresAt: string | undefined,
+  context: z.RefinementCtx,
+): void {
+  if (expiresAt !== undefined && expiresAt <= createdAt) {
+    context.addIssue({
+      code: "custom",
+      path: ["expiresAt"],
+      message: "expiresAt must be strictly after createdAt",
+    });
+  }
+}
+
 /** Product-impact facts required on impact-led issue drafts. */
 export const ProductImpactSchema = z
   .object({
     schemaVersion: z.literal(1),
-    summary: z.string().min(1),
+    summary: CeremonyAuthoredTextSchema,
     userVisibleChange: z.boolean(),
     risk: RiskSchema,
     authorityImpact: CeremonyAuthorityImpactSchema,
@@ -1095,15 +1138,18 @@ export const TrackerIssueDraftSchema = z
     missionId: MissionIdSchema,
     taskId: TaskIdSchema.optional(),
     correlationId: z.string().min(1),
-    title: z.string().min(1),
-    objective: z.string().min(1),
+    title: CeremonyAuthoredTextSchema,
+    objective: CeremonyAuthoredTextSchema,
     productImpact: ProductImpactSchema,
-    acceptanceCriteria: z.array(z.string().min(1)).min(1),
+    acceptanceCriteria: z.array(CeremonyAuthoredTextSchema).min(1),
     writeScope: z.array(z.string().min(1)).default([]),
     trackerRef: TrackerCorrelationRefSchema.optional(),
     createdAt: z.string().datetime(),
   })
-  .strict();
+  .strict()
+  .superRefine((draft, context) => {
+    refineCorrelationConflict(draft.correlationId, draft.trackerRef, context);
+  });
 export type TrackerIssueDraft = z.infer<typeof TrackerIssueDraftSchema>;
 
 /** Request that a human (by semantic role) attend to a mission decision. */
@@ -1117,16 +1163,27 @@ export const HumanAttentionRequestSchema = z
     correlationId: z.string().min(1),
     targetRole: CeremonyTargetRoleSchema,
     requestKind: HumanAttentionRequestKindSchema,
-    actionableAsk: z.string().min(1),
+    actionableAsk: CeremonyAuthoredTextSchema,
     blocking: z.boolean(),
     authorityImpact: CeremonyAuthorityImpactSchema,
     urgency: CeremonyUrgencySchema.default("elevated"),
     notificationSurfaces: z.array(CeremonyNotificationSurfaceSchema).min(1),
+    /** Semantic direct-notification mode for this request (ceremony default may supply). */
+    directNotification: CeremonyDirectNotificationModeSchema.optional(),
+    /**
+     * When true, the mission must wait for an authoritative HumanAttentionResponse
+     * before proceeding past this attention gate.
+     */
+    waitForAuthoritativeResponse: z.boolean().optional(),
     trackerRef: TrackerCorrelationRefSchema.optional(),
     createdAt: z.string().datetime(),
     expiresAt: z.string().datetime().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((request, context) => {
+    refineExpiresAfterCreated(request.createdAt, request.expiresAt, context);
+    refineCorrelationConflict(request.correlationId, request.trackerRef, context);
+  });
 export type HumanAttentionRequest = z.infer<typeof HumanAttentionRequestSchema>;
 
 /** Response from the role that attended the request. */
@@ -1138,9 +1195,12 @@ export const HumanAttentionResponseSchema = z
     correlationId: z.string().min(1),
     actorRole: CeremonyTargetRoleSchema,
     decision: z.enum(["approve", "deny", "defer", "clarify", "redirect"]),
-    rationale: z.string().min(1),
+    rationale: CeremonyAuthoredTextSchema,
     trackerRef: TrackerCorrelationRefSchema.optional(),
     createdAt: z.string().datetime(),
   })
-  .strict();
+  .strict()
+  .superRefine((response, context) => {
+    refineCorrelationConflict(response.correlationId, response.trackerRef, context);
+  });
 export type HumanAttentionResponse = z.infer<typeof HumanAttentionResponseSchema>;

@@ -32,14 +32,23 @@ opaque `externalRef` values only at delivery time (VUH-846+).
 
 ### Doctrine owns customizable ceremony defaults
 
-`ceremony.tracker` is an optional structured block on base/non-overlay layers:
-
-- `issueDraft.enabled` / `requireProductImpact`
-- `humanAttention` defaults (role, request kind, notify-when-blocking, surfaces, urgency)
-
+`ceremony.tracker` is an optional structured block on base/non-overlay layers.
 When omitted, `defaultTrackerCeremony` / `projectCaptainCeremony` derive
 deterministic defaults from `externalConnectors` + `integrationFlow` so existing
 presets keep compiling without shape churn.
+
+#### Decision / defaults table (five VUH-844 ceremony controls)
+
+| Control                         | Field                                         | Default when unset                                     |
+| ------------------------------- | --------------------------------------------- | ------------------------------------------------------ |
+| Product impact heading          | `issueDraft.heading`                          | `Product impact`                                       |
+| Section placement               | `issueDraft.sectionPlacement`                 | `first`                                                |
+| Concise maximum length          | `issueDraft.maxSummarySentences`              | `3` (sentences)                                        |
+| Direct-notification mode        | `humanAttention.directNotification`           | `required` (`required` \| `best_effort` \| `disabled`) |
+| Wait for authoritative response | `humanAttention.waitForAuthoritativeResponse` | `true` (blocking attention gates wait)                 |
+
+Also retained: `issueDraft.enabled` / `requireProductImpact`, and human-attention role,
+request kind, notify-when-blocking, surfaces, and urgency defaults keyed by ceremony style.
 
 **Overlays still cannot set ceremony** (`DoctrineOverlaySchema` uses
 `ceremony: z.never().optional()`; `applyLayer` drops ceremony). Tracker ceremony
@@ -54,9 +63,18 @@ customization is therefore:
 ### Captain projection is pure and connector-free
 
 `projectCaptainCeremony(compiled)` returns a concise deterministic projection
-(profile id/hash, connector/integration ceremony, resolved issue-draft and
-human-attention defaults, independent-verifier flag). Captains exercise it
-without opening a tracker connector or session.
+including profile id/hash, connector/integration ceremony, **all five controls
+above**, remaining issue-draft/human-attention defaults, and the
+independent-verifier flag. Captains exercise it without opening a tracker
+connector or session. VUH-846 validates and delivers against this projection
+without guessing ceremony knobs.
+
+### Protocol boundary refinements
+
+Portable schemas reject whitespace-only authored text (`actionableAsk`,
+`rationale`, product-impact `summary`, draft title/objective), require
+`expiresAt` strictly after `createdAt` when set, and reject conflicting
+top-level vs nested `trackerRef.correlationId` when both are present.
 
 ## Alternatives considered
 

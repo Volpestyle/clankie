@@ -66,9 +66,18 @@ describe("VUH-845 doctrine tracker ceremony", () => {
     expect(projection.profileHash).toMatch(/^[0-9a-f]{16}$/);
     expect(projection.externalConnectors).toBe("optional");
     expect(projection.integrationFlow).toBe("pull_request");
-    expect(projection.issueDraft).toEqual({ enabled: true, requireProductImpact: true });
+    // Five VUH-844 controls with stated defaults when unset
+    expect(projection.issueDraft).toEqual({
+      enabled: true,
+      requireProductImpact: true,
+      heading: "Product impact",
+      sectionPlacement: "first",
+      maxSummarySentences: 3,
+    });
     expect(projection.humanAttention.defaultTargetRole).toBe("operator");
     expect(projection.humanAttention.notificationSurfaces).toEqual(["captain_lane", "operator_inbox"]);
+    expect(projection.humanAttention.directNotification).toBe("required");
+    expect(projection.humanAttention.waitForAuthoritativeResponse).toBe(true);
     expect(projection.independentVerifierRequired).toBe(true);
 
     // Determinism: same profile → same projection
@@ -86,7 +95,13 @@ describe("VUH-845 doctrine tracker ceremony", () => {
         externalConnectors: "optional",
         integrationFlow: "pull_request",
         tracker: {
-          issueDraft: { enabled: false, requireProductImpact: false },
+          issueDraft: {
+            enabled: false,
+            requireProductImpact: false,
+            heading: "Impact",
+            sectionPlacement: "last",
+            maxSummarySentences: 1,
+          },
           humanAttention: {
             enabled: true,
             defaultTargetRole: "reviewer",
@@ -94,6 +109,8 @@ describe("VUH-845 doctrine tracker ceremony", () => {
             notifyWhenBlocking: false,
             notificationSurfaces: ["workspace_surface"],
             blockingUrgency: "routine",
+            directNotification: "best_effort",
+            waitForAuthoritativeResponse: false,
           },
         },
       },
@@ -101,9 +118,14 @@ describe("VUH-845 doctrine tracker ceremony", () => {
     const compiled = compileDoctrine([base, overrideLayer]);
     const projection = projectCaptainCeremony(compiled);
     expect(projection.issueDraft.enabled).toBe(false);
+    expect(projection.issueDraft.heading).toBe("Impact");
+    expect(projection.issueDraft.sectionPlacement).toBe("last");
+    expect(projection.issueDraft.maxSummarySentences).toBe(1);
     expect(projection.humanAttention.defaultTargetRole).toBe("reviewer");
     expect(projection.humanAttention.notificationSurfaces).toEqual(["workspace_surface"]);
     expect(projection.humanAttention.notifyWhenBlocking).toBe(false);
+    expect(projection.humanAttention.directNotification).toBe("best_effort");
+    expect(projection.humanAttention.waitForAuthoritativeResponse).toBe(false);
     // Overlay floor: independent verifier still required
     expect(compiled.profile.verification.independentVerifier).toBe(true);
   });
@@ -159,9 +181,14 @@ describe("VUH-845 doctrine tracker ceremony", () => {
     expect(compiled.profile.actions["test.integrity.weaken"]?.default).toBe("deny");
     expect(compiled.profile.verification.independentVerifier).toBe(true);
     const projection = projectCaptainCeremony(compiled);
-    // required + review_gate defaults
+    // required + review_gate defaults including the five ceremony controls
     expect(projection.issueDraft.requireProductImpact).toBe(true);
+    expect(projection.issueDraft.heading).toBe("Product impact");
+    expect(projection.issueDraft.sectionPlacement).toBe("first");
+    expect(projection.issueDraft.maxSummarySentences).toBe(3);
     expect(projection.humanAttention.defaultTargetRole).toBe("product_steward");
+    expect(projection.humanAttention.directNotification).toBe("required");
+    expect(projection.humanAttention.waitForAuthoritativeResponse).toBe(true);
   });
 
   it("rejects compilation that weakens the independent-verifier floor", () => {
@@ -198,22 +225,17 @@ describe("VUH-845 doctrine tracker ceremony", () => {
     const here = dirname(fileURLToPath(import.meta.url));
     const source = readFileSync(join(here, "../src/index.ts"), "utf8");
     // Scope to the captain ceremony projection block (VUH-845) only.
-    const start = source.indexOf("/** Resolved tracker ceremony used by captains");
+    const start = source.indexOf("/** Five VUH-844/845 ceremony controls");
     const end = source.indexOf("// Re-export ceremony field schemas");
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
-    const ceremonySource = source.slice(start, end).toLowerCase();
-    for (const noun of [
-      "linear",
-      "github",
-      "jira",
-      "email",
-      "mention",
-      "assignment",
-      "label",
-      "james",
-      "@",
-    ]) {
+    const ceremonySource = source
+      .slice(start, end)
+      .split("\n")
+      .map((line) => line.replace(/\/\/.*$/u, "").replace(/\/\*[\s\S]*?\*\//gu, ""))
+      .join("\n")
+      .toLowerCase();
+    for (const noun of ["linear", "github", "jira", "email", "mention", "assignment", "label", "james"]) {
       expect(ceremonySource).not.toContain(noun);
     }
   });

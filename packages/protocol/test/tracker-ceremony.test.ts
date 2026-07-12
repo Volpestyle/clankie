@@ -107,6 +107,78 @@ describe("VUH-845 tracker ceremony protocol", () => {
     ).toThrow();
   });
 
+  it("rejects whitespace-only actionableAsk and authored decision text", () => {
+    expect(() =>
+      HumanAttentionRequestSchema.parse({ ...validAttentionRequest, actionableAsk: "   \t\n  " }),
+    ).toThrow();
+    expect(() =>
+      HumanAttentionResponseSchema.parse({
+        schemaVersion: 1,
+        responseId: "attn-resp-ws",
+        requestId: "attn-1",
+        correlationId: "corr-ceremony-1",
+        actorRole: "operator",
+        decision: "approve",
+        rationale: "   ",
+        createdAt: "2026-07-12T12:10:00.000Z",
+      }),
+    ).toThrow();
+    expect(() => ProductImpactSchema.parse({ ...validImpact, summary: " \n " })).toThrow();
+  });
+
+  it("rejects expiresAt that is not strictly after createdAt", () => {
+    expect(() =>
+      HumanAttentionRequestSchema.parse({
+        ...validAttentionRequest,
+        createdAt: "2026-07-12T12:05:00.000Z",
+        expiresAt: "2026-07-12T12:05:00.000Z",
+      }),
+    ).toThrow();
+    expect(() =>
+      HumanAttentionRequestSchema.parse({
+        ...validAttentionRequest,
+        createdAt: "2026-07-12T12:05:00.000Z",
+        expiresAt: "2026-07-12T12:00:00.000Z",
+      }),
+    ).toThrow();
+    const ok = HumanAttentionRequestSchema.parse({
+      ...validAttentionRequest,
+      createdAt: "2026-07-12T12:05:00.000Z",
+      expiresAt: "2026-07-12T13:00:00.000Z",
+    });
+    expect(ok.expiresAt).toBe("2026-07-12T13:00:00.000Z");
+  });
+
+  it("rejects conflicting top-level and nested tracker correlationIds", () => {
+    expect(() =>
+      HumanAttentionRequestSchema.parse({
+        ...validAttentionRequest,
+        correlationId: "corr-top",
+        trackerRef: { correlationId: "corr-nested", externalRef: "opaque" },
+      }),
+    ).toThrow();
+    expect(() =>
+      TrackerIssueDraftSchema.parse({
+        ...validDraft,
+        correlationId: "corr-top",
+        trackerRef: { correlationId: "corr-nested" },
+      }),
+    ).toThrow();
+    expect(() =>
+      HumanAttentionResponseSchema.parse({
+        schemaVersion: 1,
+        responseId: "attn-resp-1",
+        requestId: "attn-1",
+        correlationId: "corr-top",
+        actorRole: "operator",
+        decision: "approve",
+        rationale: "ok",
+        trackerRef: { correlationId: "corr-nested" },
+        createdAt: "2026-07-12T12:10:00.000Z",
+      }),
+    ).toThrow();
+  });
+
   it("exposes only semantic target roles (no provider principal nouns)", () => {
     expect(CeremonyTargetRoleSchema.options).toEqual([
       "operator",
