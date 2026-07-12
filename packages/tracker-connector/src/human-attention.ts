@@ -31,6 +31,7 @@ export type AttentionAggregateOutcome = "delivered" | "partial" | "unsupported" 
 
 export interface AttentionDeliveryResult {
   readonly requestId: string;
+  readonly missionId: string;
   readonly correlationId: string;
   readonly aggregate: AttentionAggregateOutcome;
   readonly actions: readonly AttentionActionResult[];
@@ -58,6 +59,7 @@ export interface AttentionDeliveryStore {
 
 export interface DeliverHumanAttentionInput {
   readonly request: unknown;
+  /** Trusted binding resolved by control plane — never from the request body. */
   readonly binding: WorkspaceTrackerBinding;
   readonly projection: CaptainCeremonyProjection;
   readonly adapter: AttentionDeliveryAdapter;
@@ -67,17 +69,27 @@ export interface DeliverHumanAttentionInput {
   readonly missionIdForPolicy?: string;
 }
 
-function mapAttentionActionToWriteAction(
+/**
+ * Map a capability to a TrackerWriteRequest action only when the action
+ * truthfully names the adapter side effect. Capabilities without an exact
+ * policy action return undefined → delivery marks unsupported (preferable
+ * to authorizing the wrong action).
+ */
+export function policyActionForCapability(
   kind: ResolvedAttentionAction["capability"]["kind"],
-): TrackerWriteRequest["action"] {
+): TrackerWriteRequest["action"] | undefined {
   switch (kind) {
     case "assign_principal":
+      // Truthful only when the adapter performs assignment mirror.
       return "tracker.assignment.mirror";
     case "comment_notify":
+      // Truthful only when the adapter posts a tracker comment.
+      return "tracker.comment.create";
     case "surface_notify":
     case "direct_notify":
     case "attention_marker":
-      return "tracker.comment.create";
+      // No exact doctrine action that describes these side effects yet.
+      return undefined;
   }
 }
 
@@ -95,13 +107,14 @@ function aggregateOf(actions: readonly AttentionActionResult[]): AttentionAggreg
   return "partial";
 }
 
-function deliveryIdempotencyKey(requestId: string, fingerprint: string): string {
+export function deliveryIdempotencyKey(requestId: string, fingerprint: string): string {
   return createHash("sha256").update(`attention:${requestId}:${fingerprint}`).digest("hex");
 }
 
 /**
- * Deliver a human-attention request through a provider-neutral binding.
- * Idempotent by requestId + binding fingerprint. Policy-evaluates every action.
+ * Deliver a human-attention request through a trusted workspace binding.
+ * Idempotent by requestId + binding fingerprint. Policy-evaluates every action
+ * with a truthful TrackerWriteRequest action (or marks unsupported).
  * Never claims delivery from configured intent alone.
  */
 export async function deliverHumanAttention(
@@ -112,6 +125,7 @@ export async function deliverHumanAttention(
     const request = HumanAttentionRequestSchema.parse(input.request);
     return {
       requestId: request.requestId,
+      missionId: request.missionId,
       correlationId: request.correlationId,
       aggregate: "unsupported",
       actions: [],
@@ -156,6 +170,7 @@ export async function deliverHumanAttention(
     const now = (input.clock ?? (() => new Date()))().toISOString();
     const result: AttentionDeliveryResult = {
       requestId: request.requestId,
+      missionId: request.missionId,
       correlationId: request.correlationId,
       aggregate: "unsupported",
       actions: [],
@@ -167,11 +182,21 @@ export async function deliverHumanAttention(
   }
 
   for (const action of resolved.actions) {
+    const policyAction = policyActionForCapability(action.capability.kind);
+    if (policyAction === undefined) {
+      actionResults.push({
+        kind: action.capability.kind,
+        principalId: action.capability.principalId,
+        ...(action.surface === undefined ? {} : { surface: action.surface }),
+        status: "unsupported",
+        detail: `No exact doctrine/policy action truthfully describes capability ${action.capability.kind}`,
+        isFallback: action.isFallback,
+      });
+      continue;
+    }
+
     const writeRequest: TrackerWriteRequest = {
-      action: mapAttentionActionToWriteAction(action.capability.kind),
-      // Assignment mirrors stay reversible; narrative notify paths use the same
-      // reversible class as TrackerMirror comment publishes (narrative rate policy
-      // is applied separately by control-plane narrative routes when used).
+      action: policyAction,
       riskClass: "reversible-write",
       missionId: input.missionIdForPolicy ?? request.missionId,
       ref: {
@@ -219,6 +244,7 @@ export async function deliverHumanAttention(
   const now = (input.clock ?? (() => new Date()))().toISOString();
   const result: AttentionDeliveryResult = {
     requestId: request.requestId,
+    missionId: request.missionId,
     correlationId: request.correlationId,
     aggregate: aggregateOf(actionResults),
     actions: actionResults,
@@ -238,9 +264,10 @@ export interface PendingAttentionRecord {
 }
 
 /**
- * Correlate a verified agent-session DomainEvent to a pending attention request.
+ * Correlate a **verified** agent-session DomainEvent to a pending attention request.
+ * Callers must supply an event already accepted into the durable event store
+ * (or equivalent trusted verification path) — never a raw unauthenticated HTTP body.
  * Only `tracker.agent-session.created` / `tracker.agent-session.prompted` may resolve.
- * Ordinary out-of-session comments never match.
  */
 export function correlateAgentSessionToAttention(input: {
   readonly pending: PendingAttentionRecord;
@@ -277,7 +304,6 @@ export function correlateAgentSessionToAttention(input: {
     const root = session?.commentId ?? session?.sourceCommentId ?? null;
     if (root !== input.pending.rootCommentId) return undefined;
   }
-  // Self-authored app actor cannot close attention.
   if (actor?.id !== undefined && appActor?.id !== undefined && actor.id === appActor.id) {
     return undefined;
   }
@@ -298,9 +324,7 @@ export function correlateAgentSessionToAttention(input: {
   });
 }
 
-/**
- * Explicit counterexample path: ordinary issue-comment shaped payloads never resolve.
- */
+/** Explicit counterexample: ordinary issue comments never resolve pending attention. */
 export function correlateOutOfSessionIssueComment(_input: {
   readonly pending: PendingAttentionRecord;
   readonly comment: { readonly issueId: string; readonly body: string; readonly actorId?: string };
@@ -311,6 +335,7 @@ export function correlateOutOfSessionIssueComment(_input: {
 export function attentionDeliveryEventData(result: AttentionDeliveryResult): Record<string, unknown> {
   return {
     requestId: result.requestId,
+    missionId: result.missionId,
     correlationId: result.correlationId,
     aggregate: result.aggregate,
     fingerprint: result.fingerprint,

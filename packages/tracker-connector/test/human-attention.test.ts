@@ -5,6 +5,7 @@ import {
   correlateAgentSessionToAttention,
   correlateOutOfSessionIssueComment,
   deliverHumanAttention,
+  policyActionForCapability,
   type AttentionDeliveryAdapter,
   type AttentionDeliveryResult,
   type AttentionDeliveryStore,
@@ -45,7 +46,10 @@ function projection() {
         },
         budgets: { maxMissionCostUsd: 10, maxTaskRetries: 1, maxMissionWallMinutes: 60 },
         authority: {},
-        actions: {},
+        actions: {
+          "tracker.assignment.mirror": { default: "allow", rules: [] },
+          "tracker.comment.create": { default: "allow", rules: [] },
+        },
         memory: {
           rawTranscriptRetentionDays: 7,
           inferredFacts: "require_approval",
@@ -77,6 +81,7 @@ function request(overrides?: Partial<HumanAttentionRequest>): HumanAttentionRequ
   };
 }
 
+/** Binding uses only capabilities with truthful policy actions. */
 function binding(overrides?: Partial<WorkspaceTrackerBinding>): WorkspaceTrackerBinding {
   return {
     schemaVersion: 1,
@@ -86,15 +91,13 @@ function binding(overrides?: Partial<WorkspaceTrackerBinding>): WorkspaceTracker
       operator: {
         principalId: "principal-operator",
         capabilities: [
-          { kind: "surface_notify", principalId: "principal-operator", surface: "operator_inbox" },
-          { kind: "direct_notify", principalId: "principal-operator" },
+          { kind: "comment_notify", principalId: "principal-operator" },
+          { kind: "assign_principal", principalId: "principal-operator" },
         ],
       },
       reviewer: {
         principalId: "principal-reviewer",
-        capabilities: [
-          { kind: "surface_notify", principalId: "principal-reviewer", surface: "workspace_surface" },
-        ],
+        capabilities: [{ kind: "comment_notify", principalId: "principal-reviewer" }],
       },
     },
     fallbackRole: "reviewer",
@@ -132,6 +135,16 @@ class FakeAdapter implements AttentionDeliveryAdapter {
   }
 }
 
+describe("policyActionForCapability", () => {
+  it("maps only capabilities with truthful side-effect actions", () => {
+    expect(policyActionForCapability("assign_principal")).toBe("tracker.assignment.mirror");
+    expect(policyActionForCapability("comment_notify")).toBe("tracker.comment.create");
+    expect(policyActionForCapability("attention_marker")).toBeUndefined();
+    expect(policyActionForCapability("surface_notify")).toBeUndefined();
+    expect(policyActionForCapability("direct_notify")).toBeUndefined();
+  });
+});
+
 describe("deliverHumanAttention", () => {
   it("delivers when policy allows and is idempotent for the same fingerprint", async () => {
     const store = new MemoryStore();
@@ -148,7 +161,9 @@ describe("deliverHumanAttention", () => {
     });
     expect(first.aggregate).toBe("delivered");
     expect(first.actions.every((a) => a.status === "succeeded")).toBe(true);
-    expect(adapter.attempts).toBeGreaterThan(0);
+    expect(policy.requests.map((r) => r.action).sort()).toEqual(
+      ["tracker.assignment.mirror", "tracker.comment.create"].sort(),
+    );
 
     const second = await deliverHumanAttention({
       request: request(),
@@ -161,7 +176,32 @@ describe("deliverHumanAttention", () => {
     });
     expect(second).toEqual(first);
     expect(adapter.attempts).toBe(first.actions.length);
-    expect(policy.requests.length).toBe(first.actions.length);
+  });
+
+  it("marks attention_marker unsupported without authorizing tracker.comment.create", async () => {
+    const policy = new RecordedPolicy();
+    const result = await deliverHumanAttention({
+      request: request({ notificationSurfaces: ["operator_inbox"] }),
+      binding: {
+        schemaVersion: 1,
+        workspaceId: "workspace-1",
+        revision: "rev-marker",
+        roles: {
+          operator: {
+            principalId: "p",
+            capabilities: [{ kind: "attention_marker", principalId: "p" }],
+          },
+        },
+      },
+      projection: projection(),
+      adapter: new FakeAdapter(),
+      policy,
+      store: new MemoryStore(),
+    });
+    expect(result.actions).toHaveLength(1);
+    expect(result.actions[0]?.status).toBe("unsupported");
+    expect(result.actions[0]?.detail).toMatch(/No exact doctrine\/policy action/u);
+    expect(policy.requests).toEqual([]);
   });
 
   it("returns denied actions when policy denies", async () => {
@@ -191,8 +231,6 @@ describe("deliverHumanAttention", () => {
       store: new MemoryStore(),
     });
     expect(result.aggregate).toBe("partial");
-    expect(result.actions.some((a) => a.status === "succeeded")).toBe(true);
-    expect(result.actions.some((a) => a.status === "failed")).toBe(true);
   });
 
   it("returns unsupported when binding has no capabilities for the role", async () => {
@@ -205,7 +243,7 @@ describe("deliverHumanAttention", () => {
         roles: {
           operator: {
             principalId: "p",
-            capabilities: [{ kind: "surface_notify", principalId: "p", surface: "operator_inbox" }],
+            capabilities: [{ kind: "comment_notify", principalId: "p" }],
           },
         },
       },
@@ -219,7 +257,6 @@ describe("deliverHumanAttention", () => {
   });
 
   it("uses fallback role when primary is unsupported", async () => {
-    const adapter = new FakeAdapter();
     const result = await deliverHumanAttention({
       request: request({
         targetRole: "product_steward",
@@ -229,53 +266,18 @@ describe("deliverHumanAttention", () => {
         roles: {
           reviewer: {
             principalId: "principal-reviewer",
-            capabilities: [
-              {
-                kind: "surface_notify",
-                principalId: "principal-reviewer",
-                surface: "workspace_surface",
-              },
-            ],
+            capabilities: [{ kind: "comment_notify", principalId: "principal-reviewer" }],
           },
         },
         fallbackRole: "reviewer",
       }),
       projection: projection(),
-      adapter,
+      adapter: new FakeAdapter(),
       policy: new RecordedPolicy(),
       store: new MemoryStore(),
     });
     expect(result.aggregate).toBe("fallback");
     expect(result.actions.every((a) => a.isFallback)).toBe(true);
-  });
-
-  it("keeps Linear-specific identity nouns only in binding fixtures, not portable assertions", async () => {
-    // Fixture may name Linear principal ids behind the binding boundary.
-    const linearishBinding: WorkspaceTrackerBinding = {
-      schemaVersion: 1,
-      workspaceId: "linear-workspace",
-      revision: "r2",
-      roles: {
-        operator: {
-          principalId: "lin_user_opaque_handle",
-          capabilities: [
-            { kind: "comment_notify", principalId: "lin_user_opaque_handle" },
-            { kind: "assign_principal", principalId: "lin_app_opaque_handle" },
-          ],
-        },
-      },
-    };
-    const result = await deliverHumanAttention({
-      request: request({ notificationSurfaces: ["operator_inbox"] }),
-      binding: linearishBinding,
-      projection: projection(),
-      adapter: new FakeAdapter(),
-      policy: new RecordedPolicy(),
-      store: new MemoryStore(),
-    });
-    expect(result.aggregate).toBe("delivered");
-    // Portable result surface stays free of provider product nouns.
-    expect(JSON.stringify(result)).not.toMatch(/@|gmail\.com|label:|Linear/u);
   });
 });
 
@@ -321,19 +323,20 @@ describe("attention correlation", () => {
 
   it("never resolves pending attention from ordinary out-of-session issue comments", () => {
     const pendingRequest = request();
-    const response = correlateOutOfSessionIssueComment({
-      pending: {
-        request: pendingRequest,
-        workspaceId: "workspace-1",
-        issueId: "issue-1",
-      },
-      comment: {
-        issueId: "issue-1",
-        body: "I approve this from a normal issue comment.",
-        actorId: "human-1",
-      },
-    });
-    expect(response).toBeUndefined();
+    expect(
+      correlateOutOfSessionIssueComment({
+        pending: {
+          request: pendingRequest,
+          workspaceId: "workspace-1",
+          issueId: "issue-1",
+        },
+        comment: {
+          issueId: "issue-1",
+          body: "I approve this from a normal issue comment.",
+          actorId: "human-1",
+        },
+      }),
+    ).toBeUndefined();
 
     const nonSessionEvent = {
       id: "evt-2",

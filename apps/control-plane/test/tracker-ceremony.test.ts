@@ -1,7 +1,12 @@
 import { compileDoctrine } from "@clankie/doctrine";
+import type { DomainEvent } from "@clankie/protocol";
+import type { WorkspaceTrackerBinding } from "@clankie/tracker-connector";
 import { describe, expect, it } from "vitest";
-import { InMemoryAttentionDeliveryStore, createTrackerCeremonyRuntime } from "../src/tracker-ceremony.ts";
-import type { AttentionDeliveryAdapter, TrackerPolicyGateway } from "@clankie/tracker-connector";
+import {
+  DoctrineAttentionPolicy,
+  InMemoryAttentionDeliveryStore,
+  createTrackerCeremonyRuntime,
+} from "../src/tracker-ceremony.ts";
 
 function doctrine() {
   return compileDoctrine([
@@ -35,7 +40,10 @@ function doctrine() {
       },
       budgets: { maxMissionCostUsd: 10, maxTaskRetries: 1, maxMissionWallMinutes: 60 },
       authority: {},
-      actions: {},
+      actions: {
+        "tracker.assignment.mirror": { default: "allow", rules: [] },
+        "tracker.comment.create": { default: "allow", rules: [] },
+      },
       memory: {
         rawTranscriptRetentionDays: 7,
         inferredFacts: "require_approval",
@@ -45,15 +53,34 @@ function doctrine() {
   ]);
 }
 
+const trustedBinding: WorkspaceTrackerBinding = {
+  schemaVersion: 1,
+  workspaceId: "ws-1",
+  revision: "r1",
+  roles: {
+    operator: {
+      principalId: "principal-op",
+      capabilities: [
+        { kind: "comment_notify", principalId: "principal-op" },
+        { kind: "assign_principal", principalId: "principal-op" },
+      ],
+    },
+  },
+};
+
 describe("control-plane tracker ceremony runtime", () => {
-  it("validates issue drafts against the compiled projection", () => {
+  it("validates issue drafts against the compiled projection with profile hash", () => {
+    const compiled = doctrine();
     const runtime = createTrackerCeremonyRuntime({
-      doctrine: doctrine(),
-      policy: { authorize: async () => ({ effect: "allow", reason: "ok" }) },
+      doctrine: compiled,
+      policy: new DoctrineAttentionPolicy(compiled),
       adapter: { attempt: async () => ({ ok: true }) },
       store: new InMemoryAttentionDeliveryStore(),
+      bindingResolver: { resolve: () => trustedBinding },
+      lookupVerifiedEvent: () => undefined,
     });
     const ok = runtime.validateDraft({
+      profileHash: compiled.profileHash,
       draft: {
         schemaVersion: 1,
         draftId: "d1",
@@ -74,20 +101,95 @@ describe("control-plane tracker ceremony runtime", () => {
       },
     });
     expect(ok.ok).toBe(true);
+    expect(() =>
+      runtime.validateDraft({
+        profileHash: "stale-hash",
+        draft: {},
+      }),
+    ).toThrow(/doctrine_hash_mismatch/u);
   });
 
-  it("correlates agent-session prompted events and rejects ordinary comment shapes", async () => {
-    const allow: TrackerPolicyGateway = {
-      authorize: async () => ({ effect: "allow", reason: "ok" }),
-    };
-    const adapter: AttentionDeliveryAdapter = {
-      attempt: async () => ({ ok: true }),
-    };
+  it("resolves binding from trusted resolver and rejects client-supplied bindings", async () => {
+    const compiled = doctrine();
     const runtime = createTrackerCeremonyRuntime({
-      doctrine: doctrine(),
-      policy: allow,
-      adapter,
+      doctrine: compiled,
+      policy: new DoctrineAttentionPolicy(compiled),
+      adapter: { attempt: async () => ({ ok: true }) },
       store: new InMemoryAttentionDeliveryStore(),
+      bindingResolver: {
+        resolve: (workspaceId) => (workspaceId === "ws-1" ? trustedBinding : undefined),
+      },
+      lookupVerifiedEvent: () => undefined,
+      clock: () => new Date("2026-07-12T15:00:00.000Z"),
+    });
+
+    const delivered = await runtime.deliverAttention({
+      profileHash: compiled.profileHash,
+      workspaceId: "ws-1",
+      request: {
+        schemaVersion: 1,
+        requestId: "attn-cp-1",
+        missionId: "mission-cp",
+        correlationId: "corr-cp",
+        targetRole: "operator",
+        requestKind: "decision_needed",
+        actionableAsk: "Please decide.",
+        blocking: true,
+        authorityImpact: "narrow",
+        urgency: "blocking",
+        notificationSurfaces: ["operator_inbox"],
+        createdAt: "2026-07-12T14:00:00.000Z",
+        trackerRef: { correlationId: "corr-cp", externalRef: "issue-9" },
+      },
+    });
+    expect(delivered.aggregate).toBe("delivered");
+
+    await expect(
+      runtime.deliverAttention({
+        profileHash: compiled.profileHash,
+        workspaceId: "unknown-ws",
+        request: {
+          schemaVersion: 1,
+          requestId: "attn-cp-2",
+          missionId: "mission-cp",
+          correlationId: "corr-cp-2",
+          targetRole: "operator",
+          requestKind: "decision_needed",
+          actionableAsk: "Please decide.",
+          blocking: true,
+          authorityImpact: "narrow",
+          urgency: "blocking",
+          notificationSurfaces: ["operator_inbox"],
+          createdAt: "2026-07-12T14:00:00.000Z",
+        },
+      }),
+    ).rejects.toThrow(/workspace_binding_unavailable/u);
+  });
+
+  it("correlates only verified event ids already in the trusted store", () => {
+    const compiled = doctrine();
+    const verified: DomainEvent = {
+      id: "verified-evt-1",
+      occurredAt: "2026-07-12T15:00:00.000Z",
+      missionId: "mission-cp",
+      correlationId: "corr-cp",
+      profileHash: compiled.profileHash,
+      type: "tracker.agent-session.prompted",
+      data: {
+        issue: { id: "issue-9" },
+        session: { id: "sess-9" },
+        appActor: { id: "app" },
+        actor: { id: "human" },
+      },
+    };
+    const events = new Map<string, DomainEvent>([[verified.id, verified]]);
+    const runtime = createTrackerCeremonyRuntime({
+      doctrine: compiled,
+      policy: new DoctrineAttentionPolicy(compiled),
+      adapter: { attempt: async () => ({ ok: true }) },
+      store: new InMemoryAttentionDeliveryStore(),
+      bindingResolver: { resolve: () => trustedBinding },
+      lookupVerifiedEvent: (id) => events.get(id),
       clock: () => new Date("2026-07-12T15:00:00.000Z"),
     });
 
@@ -107,26 +209,14 @@ describe("control-plane tracker ceremony runtime", () => {
     };
 
     const correlated = runtime.correlate({
+      profileHash: compiled.profileHash,
       pending: {
         request: pendingRequest,
         workspaceId: "ws-1",
         issueId: "issue-9",
         agentSessionId: "sess-9",
       },
-      event: {
-        id: "e1",
-        occurredAt: "2026-07-12T15:00:00.000Z",
-        missionId: "mission-cp",
-        correlationId: "corr-cp",
-        profileHash: "h",
-        type: "tracker.agent-session.prompted",
-        data: {
-          issue: { id: "issue-9" },
-          session: { id: "sess-9" },
-          appActor: { id: "app" },
-          actor: { id: "human" },
-        },
-      },
+      verifiedEventId: "verified-evt-1",
       responseId: "resp-1",
       actorRole: "operator",
       decision: "approve",
@@ -134,24 +224,31 @@ describe("control-plane tracker ceremony runtime", () => {
     });
     expect(correlated).toMatchObject({ requestId: "attn-cp-1", decision: "approve" });
 
-    const rejected = runtime.correlate({
-      pending: {
-        request: pendingRequest,
-        workspaceId: "ws-1",
-        issueId: "issue-9",
-      },
-      event: {
-        id: "e2",
-        occurredAt: "2026-07-12T15:00:00.000Z",
-        missionId: "mission-cp",
-        correlationId: "corr-cp",
-        profileHash: "h",
-        type: "tracker.comment.observed",
-        data: { issueId: "issue-9" },
-      },
-      responseId: "resp-2",
-      actorRole: "operator",
+    // Raw masquerading payload is not accepted — only event ids.
+    expect(
+      runtime.correlate({
+        profileHash: compiled.profileHash,
+        pending: {
+          request: pendingRequest,
+          workspaceId: "ws-1",
+          issueId: "issue-9",
+        },
+        verifiedEventId: "never-stored",
+        responseId: "resp-2",
+        actorRole: "operator",
+      }),
+    ).toEqual({ ok: false, reason: "verified_event_not_found" });
+  });
+
+  it("DoctrineAttentionPolicy fails closed for unknown tracker actions", async () => {
+    const policy = new DoctrineAttentionPolicy(doctrine());
+    const denied = await policy.authorize({
+      action: "tracker.completion.update",
+      riskClass: "irreversible-write",
+      missionId: "m",
+      ref: { connector: "workspace", workspaceId: "w", issueId: "i" },
+      idempotencyKey: "k",
     });
-    expect(rejected).toEqual({ ok: false, reason: "no_correlation" });
+    expect(denied.effect).not.toBe("allow");
   });
 });
