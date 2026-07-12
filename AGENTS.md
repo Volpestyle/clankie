@@ -113,6 +113,12 @@ Use the field-level authority map in doctrine. By default:
 
 Report drift; never silently overwrite one authoritative source from another.
 
+## Tracker writing and human escalation
+
+- Start every new or substantially rewritten tracker issue with a `## Product impact` section: one to three concise sentences stating the user, operator, or developer outcome and the consequence of leaving the work undone. Describe impact, not implementation.
+- When Linear is the selected tracker and work needs James specifically, assign it to `volpestyle@gmail.com`, apply `needs-human`, and @mention `@James Volpe` in a comment containing the smallest actionable request and whether it blocks progress. Assignment and labels do not substitute for the mention.
+- Record the answer in the authoritative tracker thread before acting when it changes product intent, priority, acceptance criteria, or completion state.
+
 ## Pixel art and 2D assets
 
 Product garden pixel art, atlases, and the sprite pipeline live in the private **`clankie-app`** monorepo (not this agent OS tree). When working there:
