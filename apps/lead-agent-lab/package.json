@@ -12,6 +12,7 @@
     "eval:self-build": "tsx src/index.ts --write-artifacts",
     "eval:experiment": "tsx src/experiment-cli.ts --write-artifacts",
     "eval:real-workers": "tsx src/real-workers-cli.ts",
+    "eval:herdr-harness": "tsx src/herdr-harness-cli.ts",
     "eval": "tsx src/index.ts --write-artifacts",
     "clean": "rm -rf dist coverage"
   },

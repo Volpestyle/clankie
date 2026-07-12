@@ -15,6 +15,7 @@
     "eval:experiment": "pnpm --filter @clankie/lead-agent-lab eval:experiment",
     "eval:real-workers": "pnpm --filter @clankie/lead-agent-lab eval:real-workers",
     "eval:real-workers:readiness": "node scripts/real-provider-readiness.mjs",
+    "eval:herdr-harness": "pnpm --filter @clankie/lead-agent-lab eval:herdr-harness",
     "eval:all": "pnpm eval:self-build && turbo run eval",
     "lint": "oxlint --deny-warnings .",
     "fmt": "oxfmt --write .",
