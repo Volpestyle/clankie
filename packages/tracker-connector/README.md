@@ -97,9 +97,12 @@ stable per `requestId`; the content fingerprint includes binding **and** request
 fields so the same id with different ask/role/surfaces conflicts. Each adapter
 `attempt` receives a stable `actionIdempotencyToken` (same on every retry) that
 providers must use as their external idempotency key. Durable single-flight is a
-store obligation (`AttentionDeliveryStore.durableSingleFlight`): production uses
-event-store reserve + compare-and-append completion; an in-memory mutex is
-process-local only and is **not** durable exactly-once. Aggregate outcomes remain
+store obligation (`AttentionDeliveryStore.durableSingleFlight`): production reserves
+on the **real mission stream** via `appendExpected` at the stream's current
+revision (event data carries `requestId` + `fingerprint`); contenders re-read the
+mission stream for the claim. Generic EventStore without `appendExpected` fails
+closed. An in-memory mutex is process-local only and is **not** durable
+exactly-once. Aggregate outcomes remain
 `delivered` | `partial` | `unsupported` | `fallback`. When
 `directNotification=required`, a successful `direct_notify` is mandatory for
 `delivered` — marker/comment-only bindings demote to `unsupported` or `fallback`,

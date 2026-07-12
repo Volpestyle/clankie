@@ -8,7 +8,6 @@ import {
   correlateOutOfSessionIssueComment,
   deliverHumanAttention,
   deliveryFingerprint,
-  deliveryStoreKey,
   enforceRequiredDirectNotification,
   policyActionForCapability,
   rootCommentIdFromAgentSessionEvent,
@@ -140,15 +139,15 @@ class MemoryStore implements AttentionDeliveryStore {
   public readonly entries = new Map<string, StoredAttentionDelivery>();
   private readonly chains = new Map<string, Promise<unknown>>();
 
-  public async get(key: string): Promise<StoredAttentionDelivery | undefined> {
-    return this.entries.get(key);
+  public async get(requestId: string): Promise<StoredAttentionDelivery | undefined> {
+    return this.entries.get(requestId);
   }
 
   public async runExclusive(
-    key: string,
-    fingerprint: string,
+    context: import("../src/human-attention.ts").AttentionDeliveryClaimContext,
     factory: () => Promise<StoredAttentionDelivery>,
   ): Promise<StoredAttentionDelivery> {
+    const key = context.requestId;
     const previous = this.chains.get(key) ?? Promise.resolve();
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -167,7 +166,7 @@ class MemoryStore implements AttentionDeliveryStore {
     try {
       const prior = this.entries.get(key);
       if (prior !== undefined) {
-        if (prior.result.fingerprint !== fingerprint) {
+        if (prior.result.fingerprint !== context.fingerprint) {
           throw new Error("Human-attention delivery idempotency conflict for request content/fingerprint");
         }
         return prior;
@@ -285,7 +284,7 @@ describe("deliverHumanAttention", () => {
       clock: () => new Date("2026-07-12T13:00:00.000Z"),
     });
     expect(first.aggregate).toBe("delivered");
-    expect(store.entries.has(deliveryStoreKey("attn-1"))).toBe(true);
+    expect(store.entries.has("attn-1")).toBe(true);
 
     const second = await deliverHumanAttention({
       request: preferred,
@@ -413,7 +412,7 @@ describe("deliverHumanAttention", () => {
     });
     expect(first.aggregate).toBe("unsupported");
     expect(first.actions).toEqual([]);
-    expect(store.entries.has(deliveryStoreKey("attn-1"))).toBe(true);
+    expect(store.entries.has("attn-1")).toBe(true);
     expect(first.fingerprint).not.toBe("ceremony-disabled");
 
     const retry = await deliverHumanAttention({

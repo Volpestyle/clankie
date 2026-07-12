@@ -949,7 +949,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
           typeof (body as { requestId?: string }).requestId === "string"
             ? (body as { requestId: string }).requestId
             : result.requestId;
-        const pending = await attentionStore.get(`attention-request:${requestId}`);
+        const pending = await attentionStore.get(requestId);
         const missionId = pending?.result.missionId ?? "unknown";
         await recordEvent("tracker.human-attention.responded", missionId, clock().toISOString(), {
           ...result,

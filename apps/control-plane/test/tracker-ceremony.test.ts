@@ -371,13 +371,22 @@ describe("control-plane tracker ceremony runtime", () => {
     expect(a.fingerprint).toBe(b.fingerprint);
     expect(a.aggregate).toBe(b.aggregate);
 
-    // Durable complete is once; adapter may run more than once under recovery races
-    // but always with the same per-action tokens (provider seam).
-    const stream = await backendA.readStream("attention-request:attn-sqlite-concurrent");
-    const completes = stream.filter((e) => e.event.type === "tracker.human-attention.store");
-    const reserves = stream.filter((e) => e.event.type === "tracker.human-attention.reserve");
+    // Claims live on the real mission stream (mission-cp), never a synthetic attention stream.
+    const stream = await backendA.readStream("mission-cp");
+    const completes = stream.filter(
+      (e) =>
+        e.event.type === "tracker.human-attention.store" &&
+        e.event.data.requestId === "attn-sqlite-concurrent",
+    );
+    const reserves = stream.filter(
+      (e) =>
+        e.event.type === "tracker.human-attention.reserve" &&
+        e.event.data.requestId === "attn-sqlite-concurrent",
+    );
     expect(reserves.length).toBe(1);
     expect(completes.length).toBe(1);
+    expect(completes[0]?.event.missionId).toBe("mission-cp");
+    expect(reserves[0]?.event.missionId).toBe("mission-cp");
     expect(attempts).toBeGreaterThanOrEqual(a.actions.length);
     // Every action kind gets a stable token; duplicates under recovery re-use it.
     const uniqueTokens = new Set(tokens);

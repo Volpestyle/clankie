@@ -102,33 +102,45 @@ export interface StoredAttentionDelivery {
 }
 
 /**
+ * Claim context for durable single-flight on the real mission stream.
+ * ProjectionEventStore streams are missionId-based — never fake missionId as an
+ * attention-request synthetic stream id.
+ */
+export interface AttentionDeliveryClaimContext {
+  readonly missionId: string;
+  readonly requestId: string;
+  readonly correlationId: string;
+  readonly fingerprint: string;
+}
+
+/**
  * Durable idempotent store for attention delivery.
  *
  * `durableSingleFlight === true` means the store provides a cross-process
- * reservation + completion contract (compare-and-append / equivalent). A
- * process-local mutex alone is **not** durable exactly-once and must report
- * `durableSingleFlight === false` (test-only).
+ * reservation + completion contract on the **real mission stream** (compare-
+ * and-append at current mission revision). A process-local mutex alone is
+ * **not** durable exactly-once and must report `durableSingleFlight === false`.
  */
 export interface AttentionDeliveryStore {
   /**
    * True when the store can reserve + complete across process restarts using a
-   * durable event log. False for in-memory / process-local helpers.
+   * durable mission event log. False for in-memory / process-local helpers.
    */
   readonly durableSingleFlight: boolean;
-  get(idempotencyKey: string): Promise<StoredAttentionDelivery | undefined>;
+  /** Lookup completed delivery by requestId (from durable log / test map). */
+  get(requestId: string): Promise<StoredAttentionDelivery | undefined>;
   /**
-   * Single-flight delivery for a request key + content fingerprint.
+   * Single-flight delivery for a request on its mission stream.
    *
-   * Durable implementations: reserve first (atomic), run factory only after
-   * reservation (or crash-recovery of an incomplete reservation), then append a
-   * deterministic completion record. Adapter side effects remain at-least-once
-   * under crash; stable `actionIdempotencyToken`s make retries safe at the
-   * provider seam. Process-local locks may reduce duplicate work but are not
-   * the durability mechanism.
+   * Durable implementations: reserve on the real mission stream via
+   * `appendExpected` at the stream's **current** revision with event data
+   * `requestId` + `fingerprint`; concurrent contenders re-read the mission
+   * stream to find the claim. Factory runs after reserve (or claim-resume
+   * after crash) with stable `actionIdempotencyToken`s. Complete is a
+   * deterministic event id on the same mission stream.
    */
   runExclusive(
-    idempotencyKey: string,
-    fingerprint: string,
+    context: AttentionDeliveryClaimContext,
     factory: () => Promise<StoredAttentionDelivery>,
   ): Promise<StoredAttentionDelivery>;
 }
@@ -203,7 +215,10 @@ export function enforceRequiredDirectNotification(
   return aggregate;
 }
 
-/** Store key is request-id stable so content fingerprint conflicts are detectable. */
+/**
+ * Logical lookup key for a pending/completed attention request (not a mission
+ * stream id — ProjectionEventStore streams remain missionId-based).
+ */
 export function deliveryStoreKey(requestId: string): string {
   return `attention-request:${requestId}`;
 }
@@ -268,26 +283,33 @@ export async function deliverHumanAttention(
   input: DeliverHumanAttentionInput,
 ): Promise<AttentionDeliveryResult> {
   const request = HumanAttentionRequestSchema.parse(input.request);
-  const storeKey = deliveryStoreKey(request.requestId);
   const pending = pendingFromDelivery(request, input.binding);
 
   if (!input.projection.humanAttention.enabled) {
     const fingerprint = deliveryFingerprint(input.binding, [], request);
-    const stored = await input.store.runExclusive(storeKey, fingerprint, async () => {
-      const now = (input.clock ?? (() => new Date()))().toISOString();
-      return {
-        pending,
-        result: {
-          requestId: request.requestId,
-          missionId: request.missionId,
-          correlationId: request.correlationId,
-          aggregate: "unsupported",
-          actions: [],
-          fingerprint,
-          deliveredAt: now,
-        },
-      };
-    });
+    const stored = await input.store.runExclusive(
+      {
+        missionId: request.missionId,
+        requestId: request.requestId,
+        correlationId: request.correlationId,
+        fingerprint,
+      },
+      async () => {
+        const now = (input.clock ?? (() => new Date()))().toISOString();
+        return {
+          pending,
+          result: {
+            requestId: request.requestId,
+            missionId: request.missionId,
+            correlationId: request.correlationId,
+            aggregate: "unsupported",
+            actions: [],
+            fingerprint,
+            deliveredAt: now,
+          },
+        };
+      },
+    );
     return stored.result;
   }
 
@@ -313,7 +335,14 @@ export async function deliverHumanAttention(
 
   const fingerprint = deliveryFingerprint(input.binding, resolved.actions, request);
 
-  const stored = await input.store.runExclusive(storeKey, fingerprint, async () => {
+  const stored = await input.store.runExclusive(
+    {
+      missionId: request.missionId,
+      requestId: request.requestId,
+      correlationId: request.correlationId,
+      fingerprint,
+    },
+    async () => {
     const actionResults: AttentionActionResult[] = [];
     if (resolved.actions.length === 0) {
       const now = (input.clock ?? (() => new Date()))().toISOString();
@@ -354,7 +383,7 @@ export async function deliverHumanAttention(
           workspaceId: input.binding.workspaceId,
           issueId: request.trackerRef?.externalRef ?? request.requestId,
         },
-        idempotencyKey: `${storeKey}:${action.capability.kind}:${action.capability.principalId}`,
+        idempotencyKey: `${request.requestId}:${action.capability.kind}:${action.capability.principalId}`,
       };
       const decision: TrackerPolicyDecision = await input.policy.authorize(writeRequest);
       if (decision.effect !== "allow") {
