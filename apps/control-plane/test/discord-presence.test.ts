@@ -1,10 +1,13 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { compileDoctrine, loadDoctrineFile } from "@clankie/doctrine";
+import { compileDoctrine, loadDoctrineFile, loadDoctrineLayerFile } from "@clankie/doctrine";
+import { FileCredentialStore } from "../../../packages/credential-broker/src/index.ts";
 import { SqliteEventStore } from "@clankie/event-store";
 import type { DiscordPresenceWrite, DiscordPresenceWriteResult } from "@clankie/protocol";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+import { createDiscordPresenceRuntime } from "../../discord-bridge/src/presence-runtime-module.ts";
 import { createControlPlane, type TrustedOperatorIdentity } from "../src/app.ts";
 import type { DiscordPresenceRuntimePort } from "../src/discord-presence-runtime.ts";
 
@@ -17,6 +20,33 @@ beforeAll(async () => {
 });
 
 describe("Discord presence control-plane runtime (ADR 0024 P1)", () => {
+  it("returns 403 without executing when the profile denies Discord presence", async () => {
+    const runtime = new RecordingPresenceRuntime();
+    const highAssurance = compileDoctrine([
+      await loadDoctrineFile(resolve(import.meta.dirname, "../../../doctrine/profiles/structured.yaml")),
+      await loadDoctrineLayerFile(
+        resolve(import.meta.dirname, "../../../doctrine/profiles/high-assurance-overlay.yaml"),
+      ),
+    ]);
+    const app = await createControlPlane({ doctrine: highAssurance, discordPresenceRuntime: runtime });
+    const deniedWrite = presenceWrite({
+      idempotencyKey: "presence-profile-deny",
+      action: "discord.presence.reply",
+      payload: { kind: "reply", channelId: "c1", messageId: "m1", content: "denied" },
+    });
+    const response = await post(
+      app,
+      "/v1/discord/presence-actions",
+      {
+        ...deniedWrite,
+        identity: { ...deniedWrite.identity, profileHash: highAssurance.profileHash },
+      },
+    );
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ decision: { effect: "deny" } });
+    expect(runtime.writes).toHaveLength(0);
+  });
+
   it("allows bot narrative actions through the retained narrative policy and executor", async () => {
     const runtime = new RecordingPresenceRuntime();
     const app = await createControlPlane({
@@ -211,8 +241,73 @@ describe("Discord presence control-plane runtime (ADR 0024 P1)", () => {
       expect(response.status).toBe(403);
       await expect(response.json()).resolves.toMatchObject({ error: "discord_presence_approval_expired" });
     }
-    expect((await decide(app, expired.idempotencyKey, "approve", "Too late.")).status).toBe(200);
+    for (let index = 0; index < 2; index += 1) {
+      const approval = await decide(app, expired.idempotencyKey, "approve", "Too late.");
+      expect(approval.status).toBe(409);
+      await expect(approval.json()).resolves.toMatchObject({
+        error: "approval_already_expired",
+        approval: { id: expired.idempotencyKey, status: "denied", reason: "approval_expired" },
+      });
+    }
     expect(runtime.writes).toHaveLength(0);
+  });
+
+  it("resumes through the broker-backed production runtime and hash-bound resolver", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-presence-production-"));
+    const credentialPath = join(root, "credentials.json");
+    const artifactRoot = join(root, "artifacts");
+    await new FileCredentialStore(credentialPath).set("discord_bot", {
+      type: "api",
+      key: "broker-only-token",
+    });
+    await mkdir(artifactRoot, { mode: 0o700 });
+    const bytes = Buffer.from("production-image-bytes");
+    await writeFile(join(artifactRoot, "shot.png"), bytes, { mode: 0o600 });
+    expect((await stat(credentialPath)).mode & 0o777).toBe(0o600);
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    const previousEnv = { ...process.env };
+    const store = new SqliteEventStore(join(root, "events.db"));
+    try {
+      delete process.env.DISCORD_BOT_TOKEN;
+      delete process.env.DISCORD_USER_TOKEN;
+      process.env.CLANKIE_CREDENTIALS_FILE = credentialPath;
+      process.env.CLANKIE_DISCORD_ATTACHMENT_ROOT = artifactRoot;
+      process.env.DISCORD_PRESENCE_CHANNEL_IDS = "channel-allowed";
+      const postDiscord = vi.fn(async (_route: string, _request?: unknown) => ({ id: "discord-message-1" }));
+      const runtime = createDiscordPresenceRuntime({
+        rest: { post: postDiscord, put: vi.fn(), delete: vi.fn(), patch: vi.fn() } as never,
+      });
+      const app = await createControlPlane({
+        doctrine,
+        eventStore: store,
+        discordPresenceRuntime: runtime,
+        authenticateOperator: operator,
+      });
+      const write = presenceWrite({
+        idempotencyKey: "presence-production-attachment",
+        action: "discord.presence.send_attachment",
+        payload: {
+          kind: "send_attachment",
+          channelId: "channel-allowed",
+          artifactRef: `sha256:${digest}:shot.png`,
+          filename: "shot.png",
+        },
+      });
+      expect((await post(app, "/v1/discord/presence-actions", write)).status).toBe(202);
+      expect((await decide(app, write.idempotencyKey, "approve", "Approved on TUI.")).status).toBe(200);
+      expect((await post(app, "/v1/discord/presence-actions", write)).status).toBe(200);
+      expect((await post(app, "/v1/discord/presence-actions", write)).status).toBe(200);
+      expect(postDiscord).toHaveBeenCalledOnce();
+      const request = postDiscord.mock.calls[0]?.[1] as { files?: Array<{ data?: Buffer }> };
+      expect(request.files?.[0]?.data).toEqual(bytes);
+      const retained = JSON.stringify((await store.readAll()).map(({ event }) => event));
+      expect(retained).toContain(`sha256:${digest}:shot.png`);
+      expect(retained).not.toContain(bytes.toString());
+    } finally {
+      process.env = previousEnv;
+      store.close();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("returns 503 when the presence runtime is not configured", async () => {

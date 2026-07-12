@@ -3,6 +3,7 @@ import {
   DiscordBotCredentialProvider,
 } from "@clankie/credential-broker";
 import type { DiscordPresenceWrite } from "@clankie/protocol";
+import type { REST } from "discord.js";
 import { createFilesystemAttachmentResolver } from "./attachment-resolver.ts";
 import { createDiscordBotPresenceRuntime } from "./bot-presence-runtime.ts";
 
@@ -10,7 +11,7 @@ import { createDiscordBotPresenceRuntime } from "./bot-presence-runtime.ts";
  * Trusted control-plane load target (CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE).
  * Loads the official bot token through the credential broker; never from env.
  */
-export function createDiscordPresenceRuntime(): {
+export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
   execute(write: DiscordPresenceWrite): ReturnType<ReturnType<typeof createDiscordBotPresenceRuntime>["execute"]>;
 } {
   if (process.env.DISCORD_USER_TOKEN) {
@@ -45,6 +46,7 @@ export function createDiscordPresenceRuntime(): {
       const botToken = await provider.resolveBotToken({ grant, ...request });
       return createDiscordBotPresenceRuntime({
         botToken,
+        ...(options.rest === undefined ? {} : { rest: options.rest }),
         resolveAttachment: createFilesystemAttachmentResolver(process.env.CLANKIE_DISCORD_ATTACHMENT_ROOT),
       }).execute(write);
     },
