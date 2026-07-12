@@ -132,4 +132,3 @@ copied into the conversation registry.
   conversation.
 - The runner-owned worker-transcript projection remains separately redacted,
   authorized, retained, and auditable.
-

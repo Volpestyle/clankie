@@ -111,4 +111,3 @@ receipts; session attachment and webhook verification remain connector concerns
   overlay rejection, floor preservation, and projection determinism.
 - Existing ceremony equality fixtures remain stable when `ceremony.tracker` is omitted.
 - Downstream VUH-846 implements delivery and correlation against these frozen shapes.
-

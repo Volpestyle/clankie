@@ -55,4 +55,3 @@ instructions; unsigned or modified channel/client context is advisory only.
 - Linear identities, labels, and mention syntax stay out of protocol and doctrine.
 - Missing provider bindings, credentials, signatures, or durable stores are
   explicit unavailable/unsupported outcomes rather than claimed delivery.
-
