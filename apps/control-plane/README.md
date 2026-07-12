@@ -4,6 +4,14 @@ This service owns mission state, doctrine compilation, action decisions, approva
 
 It must never own provider subscription credentials or terminal processes. Those remain on the local runner.
 
+## Time-triggered missions
+
+Mission triggers are durable event-replayed records with either a one-shot ISO timestamp or a UTC five-field cron schedule. The cron subset accepts `*`, one numeric value, comma-separated numeric values, and `*/step`; ranges, names, aliases, and other syntax fail validation. A 30-second control-plane evaluator and the authenticated manual evaluation seam use the same pure `nextFireAfter` calculation.
+
+Trigger create, update, and delete operations require an authenticated operator and are classified as the reversible action `mission.trigger.write`. Missing classification, denial, and approval-required results all fail closed without mutation. Firing uses the ordinary mission-draft path and records the compiled doctrine cost, wall-time, and parallel-worker bounds in scheduled context; planning and execution still enforce the same immutable doctrine profile as operator-created missions.
+
+`skip` drops a missed occurrence, while `run_once_late` creates one catch-up mission regardless of how many cron occurrences elapsed. Evaluation is serialized and the mission identity is deterministic per trigger occurrence, preventing concurrent evaluation or restart retries from producing a catch-up storm. Created, updated, deleted, fired, and skipped transitions are semantic events in the durable event store.
+
 ## Runner pull execution
 
 After a validated implementation-plus-read-only-verification plan is submitted, an authenticated captain starts it with `POST /v1/missions/:id/start`. An authenticated runner pulls work from `POST /v1/runner/claims`, heartbeats the server-owned attempt lease, reports allowlisted idempotent semantic events, and settles the exact attempt. `GET /v1/missions/:id` includes the live task snapshot and results.
@@ -190,7 +198,7 @@ credential-free `tracker.sync.failed` events.
 
 `POST /v1/discord/presence-actions` accepts bot-transport Discord presence writes (ADR 0024 P1), evaluates narrative or risk-class policy (shared narrative rate ledger), and executes via `discordPresenceRuntime` loaded from `CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE`.
 
-POST /v1/tracker/narratives` accepts only the five typed narrative actions (issue comment, thought, response, elicitation, and reaction) and evaluates exact content plus trusted correlation through one `createNarrativeWritePolicy()` instance retained for the compiled profile runtime. It then delegates to `LinearAgentRuntimePort`; non-narrative tracker mutations cannot enter this route.
+POST /v1/tracker/narratives`accepts only the five typed narrative actions (issue comment, thought, response, elicitation, and reaction) and evaluates exact content plus trusted correlation through one`createNarrativeWritePolicy()`instance retained for the compiled profile runtime. It then delegates to`LinearAgentRuntimePort`; non-narrative tracker mutations cannot enter this route.
 
 `POST /v1/captain/channel-turns` deduplicates by Linear delivery ID, reads the full thread through the trusted runtime, and calls Eve over its canonical loopback session/NDJSON surface. Only the triggering text and typed identities arrive from the bridge. The control plane supplies the authoritative thread in Eve client context and returns only `settled`, `waiting_user`, or a bounded failure.
 

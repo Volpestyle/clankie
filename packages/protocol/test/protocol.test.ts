@@ -16,12 +16,37 @@ import {
   IntentCommandSchema,
   IntentContextSchema,
   MissionPlanSchema,
+  MissionTriggerEventSchema,
+  MissionTriggerSchema,
   TrackerNarrativeActionSchema,
   TrackerNarrativeWriteSchema,
   WorkerStatusEventSchema,
 } from "../src/index.ts";
 
 describe("protocol", () => {
+  it("validates additive mission trigger records and semantic events", () => {
+    const trigger = MissionTriggerSchema.parse({
+      schemaVersion: 1,
+      id: "daily-review",
+      goal: "Review repository health",
+      schedule: { kind: "cron", expression: "0 9 * * 1,2,3,4,5" },
+      misfirePolicy: "run_once_late",
+      createdAt: "2026-07-12T00:00:00.000Z",
+      updatedAt: "2026-07-12T00:00:00.000Z",
+    });
+    expect(
+      MissionTriggerEventSchema.parse({
+        id: "event-trigger-created",
+        occurredAt: trigger.createdAt,
+        missionId: "trigger:daily-review",
+        correlationId: "trigger:daily-review",
+        profileHash: "profile-trigger",
+        type: "mission.trigger.created",
+        data: { trigger },
+      }),
+    ).toMatchObject({ type: "mission.trigger.created", data: { trigger: { id: "daily-review" } } });
+  });
+
   it("exposes exactly the five policy-classified tracker narrative actions", () => {
     expect(TrackerNarrativeActionSchema.options).toEqual([
       "tracker.comment.create",
@@ -312,7 +337,6 @@ describe("protocol", () => {
       }),
     ).toThrow(/expectedGoalVersion/);
   });
-
 
   it("requires ambient authority for discord_presence and freezes presence write bot transport", () => {
     expect(
