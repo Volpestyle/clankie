@@ -61,10 +61,7 @@ export async function writeEvidenceBundle(input: EvidenceBundleInput): Promise<W
     recordedAt: new Date().toISOString(),
   };
   const directory = resolve(input.artifactRoot, safeName(input.missionId));
-  const path = join(
-    directory,
-    `${safeName(input.workerRunId)}-attempt-${input.attempt}.evidence.json`,
-  );
+  const path = join(directory, `${safeName(input.workerRunId)}-attempt-${input.attempt}.evidence.json`);
   await mkdir(directory, { recursive: true });
   await writeFile(path, `${JSON.stringify(bundle, null, 2)}\n`, "utf8");
   return {

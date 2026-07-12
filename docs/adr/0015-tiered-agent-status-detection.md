@@ -9,14 +9,14 @@ agent — each worker and Clankie-the-captain — is working, idle, waiting on a
 human, blocked, failed, completed, or offline. `AgentVisualState` and
 `projectGarden` in `packages/garden-model` already define the vocabulary and
 the event→state projection; process leases (`apps/runner/src/process-leases.ts`)
-already prove liveness. What was undecided is where the state *signals* come
+already prove liveness. What was undecided is where the state _signals_ come
 from and which signal wins when they disagree.
 
 Herdr answers this for arbitrary harness panes by screen-scraping: per-agent
 TOML manifests match the live screen and OSC title, with a hook-authority
 path for agents that self-report over its socket. That works for a generic
 pane host, but it has a structural ceiling: blocked-detection rules are
-deliberately strict, so a harness that stops with a *prose* question ("Tell me
+deliberately strict, so a harness that stops with a _prose_ question ("Tell me
 whether to wait or proceed anyway") falls back to idle. No finite rule set can
 enumerate every way a model phrases a question.
 
@@ -62,7 +62,7 @@ flowchart TD
 ```
 
 **Settle-then-classify.** Heuristic status runs in two stages, and the
-expensive stage triggers on *settle transitions*, never per output change — a
+expensive stage triggers on _settle transitions_, never per output change — a
 streaming pane's status is already known, and per-change classification is
 racy and wasteful. Stage one is mechanical settle detection (quiet probes,
 stable screen signature, ~700ms working→idle hold, prompt-box bypass, startup

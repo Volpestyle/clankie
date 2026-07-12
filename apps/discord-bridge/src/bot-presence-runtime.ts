@@ -193,9 +193,9 @@ export function encodeReactionEmoji(emoji: string): string {
   return encodeURIComponent(trimmed);
 }
 
-export function createDiscordBotPresenceRuntime(
-  options: DiscordBotPresenceRuntimeOptions,
-): { execute: DiscordBotPresenceRuntime["execute"] } {
+export function createDiscordBotPresenceRuntime(options: DiscordBotPresenceRuntimeOptions): {
+  execute: DiscordBotPresenceRuntime["execute"];
+} {
   const runtime = new DiscordBotPresenceRuntime(options);
   return {
     execute: (write) => runtime.execute(write),

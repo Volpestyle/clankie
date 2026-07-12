@@ -28,6 +28,8 @@ describe("filesystem attachment resolver", () => {
     await writeFile(join(outside, "private.png"), data);
     await symlink(join(outside, "private.png"), join(root, "escape.png"));
     const digest = createHash("sha256").update(data).digest("hex");
-    await expect(createFilesystemAttachmentResolver(root)(`sha256:${digest}:escape.png`)).rejects.toThrow(/outside_root/);
+    await expect(createFilesystemAttachmentResolver(root)(`sha256:${digest}:escape.png`)).rejects.toThrow(
+      /outside_root/,
+    );
   });
 });

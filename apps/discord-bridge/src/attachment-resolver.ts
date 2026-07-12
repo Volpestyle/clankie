@@ -33,8 +33,11 @@ export function createFilesystemAttachmentResolver(root: string | undefined) {
 
 function contentTypeFor(path: string): string | undefined {
   const types: Record<string, string> = {
-    ".gif": "image/gif", ".jpeg": "image/jpeg", ".jpg": "image/jpeg",
-    ".png": "image/png", ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
   };
   return types[extname(path).toLowerCase()];
 }

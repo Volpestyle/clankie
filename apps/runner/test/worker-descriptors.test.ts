@@ -68,9 +68,15 @@ describe("buildWorkerAdapters", () => {
     const implementer = adapters.find((adapter) => adapter.descriptor.id === "sim-implementer");
     const emitted: Array<{ type: string; data: Record<string, unknown> }> = [];
     const result = await implementer?.run(
-      context(workspacePath, "implementation", "implementer", {
-        sim: { files: { "src/retry.mjs": "export const DEFECT = true;\n" } },
-      }, emitted),
+      context(
+        workspacePath,
+        "implementation",
+        "implementer",
+        {
+          sim: { files: { "src/retry.mjs": "export const DEFECT = true;\n" } },
+        },
+        emitted,
+      ),
     );
 
     expect(result).toMatchObject({ status: "succeeded" });
@@ -93,9 +99,15 @@ describe("buildWorkerAdapters", () => {
     const implementer = adapters.find((adapter) => adapter.descriptor.id === "sim-implementer");
     await expect(
       implementer?.run(
-        context(workspacePath, "implementation", "implementer", {
-          sim: { files: { "../escape.txt": "outside" } },
-        }, []),
+        context(
+          workspacePath,
+          "implementation",
+          "implementer",
+          {
+            sim: { files: { "../escape.txt": "outside" } },
+          },
+          [],
+        ),
       ),
     ).rejects.toThrow(/outside the candidate/u);
   });

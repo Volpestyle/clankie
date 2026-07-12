@@ -141,7 +141,13 @@ export async function runExperiment(options: RunExperimentOptions = {}): Promise
   const perCriterion: CriterionDelta[] = treatment.report.criteria.map((tc) => {
     const baseline_ = passFail(baseline.report, tc.id);
     const treatment_ = passFail(treatment.report, tc.id);
-    return { id: tc.id, label: tc.label, baseline: baseline_, treatment: treatment_, changed: baseline_ !== treatment_ };
+    return {
+      id: tc.id,
+      label: tc.label,
+      baseline: baseline_,
+      treatment: treatment_,
+      changed: baseline_ !== treatment_,
+    };
   });
 
   const report: ExperimentComparisonReport = {
@@ -187,7 +193,11 @@ export async function runExperiment(options: RunExperimentOptions = {}): Promise
       `${JSON.stringify(report, null, 2)}\n`,
       "utf8",
     );
-    await writeFile(join(artifactDirectory, "lead-vs-single-report.md"), comparisonToMarkdown(report), "utf8");
+    await writeFile(
+      join(artifactDirectory, "lead-vs-single-report.md"),
+      comparisonToMarkdown(report),
+      "utf8",
+    );
     for (const [armId, run] of [
       ["single-worker", baseline] as const,
       ["heterogeneous-lead", treatment] as const,

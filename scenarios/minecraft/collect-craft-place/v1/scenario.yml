@@ -17,11 +17,11 @@ spawn: { x: 0.5, y: 65.0, z: 0.5, yaw: 0.0, pitch: 0.0 }
 target-min: { x: -2, y: 65, z: 6 }
 target-max: { x: 2, y: 67, z: 10 }
 reset-blocks:
-  - '-4,65,2,OAK_LOG'
-  - '-3,65,2,OAK_LOG'
-  - '-2,65,2,OAK_LOG'
-  - '-1,65,2,OAK_LOG'
-  - '1,65,2,OAK_LOG'
-  - '2,65,2,OAK_LOG'
-  - '3,65,2,OAK_LOG'
-  - '4,65,2,OAK_LOG'
+  - "-4,65,2,OAK_LOG"
+  - "-3,65,2,OAK_LOG"
+  - "-2,65,2,OAK_LOG"
+  - "-1,65,2,OAK_LOG"
+  - "1,65,2,OAK_LOG"
+  - "2,65,2,OAK_LOG"
+  - "3,65,2,OAK_LOG"
+  - "4,65,2,OAK_LOG"

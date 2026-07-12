@@ -353,7 +353,6 @@ export class MissionEngine {
     return structuredClone(this.verificationContract(task.spec));
   }
 
-
   /** Add one trusted debugger + unchanged re-verifier pair after an observed verifier failure. */
   public addRecoveryPair(input: RecoveryPairInput): RecoveryPair {
     if (
@@ -669,9 +668,7 @@ export class MissionEngine {
     isCapable: (candidate: WorkerDescriptor) => boolean,
   ): void {
     if (excluded.size === 0 || this.verificationStarveSignaled.has(runtime.spec.id)) return;
-    const excludedCapable = workers.filter(
-      (candidate) => excluded.has(candidate.id) && isCapable(candidate),
-    );
+    const excludedCapable = workers.filter((candidate) => excluded.has(candidate.id) && isCapable(candidate));
     if (excludedCapable.length === 0) return;
     this.verificationStarveSignaled.add(runtime.spec.id);
     this.emit(

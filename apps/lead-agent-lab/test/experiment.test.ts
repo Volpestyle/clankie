@@ -100,7 +100,10 @@ describe("experiment runner", () => {
     expect(report.evaluator.threshold).toBe(0.85);
     expect(report.evaluator.digestSha256).toMatch(/^[a-f0-9]{64}$/u);
 
-    const executed = report.arms.filter((a) => a.executed).map((a) => a.id).sort();
+    const executed = report.arms
+      .filter((a) => a.executed)
+      .map((a) => a.id)
+      .sort();
     expect(executed).toEqual(["heterogeneous-lead", "single-worker"]);
     const skipped = report.arms.filter((a) => !a.executed);
     expect(skipped.map((a) => a.id).sort()).toEqual(["homogeneous-lead", "no-independent-verifier"]);

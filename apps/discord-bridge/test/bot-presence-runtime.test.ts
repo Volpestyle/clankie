@@ -126,8 +126,7 @@ describe("encodeReactionEmoji", () => {
 });
 
 function write(
-  partial: Pick<DiscordPresenceWrite, "action" | "payload"> &
-    Partial<Pick<DiscordPresenceWrite, "content">>,
+  partial: Pick<DiscordPresenceWrite, "action" | "payload"> & Partial<Pick<DiscordPresenceWrite, "content">>,
 ): DiscordPresenceWrite {
   return {
     schemaVersion: 1,

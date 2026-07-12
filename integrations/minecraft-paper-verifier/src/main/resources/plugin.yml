@@ -3,7 +3,7 @@ version: 0.1.0
 main: io.clankie.verifier.MinecraftPaperVerifierPlugin
 description: Server-authoritative frozen scenario verifier for the private Clankie laboratory
 author: Clankie
-api-version: '1.21.11'
+api-version: "1.21.11"
 commands:
   mcscenario:
     description: Console-only frozen scenario lifecycle

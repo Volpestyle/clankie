@@ -1,7 +1,4 @@
-import {
-  createDefaultCredentialStore,
-  DiscordBotCredentialProvider,
-} from "@clankie/credential-broker";
+import { createDefaultCredentialStore, DiscordBotCredentialProvider } from "@clankie/credential-broker";
 import type { DiscordPresenceWrite } from "@clankie/protocol";
 import type { REST } from "discord.js";
 import { createFilesystemAttachmentResolver } from "./attachment-resolver.ts";
@@ -12,7 +9,9 @@ import { createDiscordBotPresenceRuntime } from "./bot-presence-runtime.ts";
  * Loads the official bot token through the credential broker; never from env.
  */
 export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
-  execute(write: DiscordPresenceWrite): ReturnType<ReturnType<typeof createDiscordBotPresenceRuntime>["execute"]>;
+  execute(
+    write: DiscordPresenceWrite,
+  ): ReturnType<ReturnType<typeof createDiscordBotPresenceRuntime>["execute"]>;
 } {
   if (process.env.DISCORD_USER_TOKEN) {
     throw new Error(
@@ -54,5 +53,10 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
 }
 
 function commaSeparated(value: string | undefined): string[] {
-  return value?.split(",").map((item) => item.trim()).filter(Boolean) ?? [];
+  return (
+    value
+      ?.split(",")
+      .map((item) => item.trim())
+      .filter(Boolean) ?? []
+  );
 }

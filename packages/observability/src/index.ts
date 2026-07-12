@@ -34,16 +34,19 @@ export function createLogger(
   options: LoggerOptions = {},
   destination?: DestinationStream,
 ): Logger {
-  return pino({
-    level: process.env.CLANKIE_LOG_LEVEL ?? "info",
-    base: context,
-    redact: {
-      paths: defaultRedactPaths,
-      censor: "[REDACTED]",
+  return pino(
+    {
+      level: process.env.CLANKIE_LOG_LEVEL ?? "info",
+      base: context,
+      redact: {
+        paths: defaultRedactPaths,
+        censor: "[REDACTED]",
+      },
+      timestamp: pino.stdTimeFunctions.isoTime,
+      ...options,
     },
-    timestamp: pino.stdTimeFunctions.isoTime,
-    ...options,
-  }, destination);
+    destination,
+  );
 }
 
 export function childLogger(logger: Logger, context: Omit<LoggerContext, "service">): Logger {

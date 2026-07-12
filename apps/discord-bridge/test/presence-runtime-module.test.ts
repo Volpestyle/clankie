@@ -36,15 +36,21 @@ describe("presence runtime credential loading", () => {
     process.env.DISCORD_PRESENCE_CHANNEL_IDS = "channel-1";
     const { createDiscordPresenceRuntime } = await import("../src/presence-runtime-module.ts");
     const runtime = createDiscordPresenceRuntime();
-    await expect(runtime.execute({
-      schemaVersion: 1,
-      idempotencyKey: "write-1",
-      action: "discord.presence.send_message",
-      identity: {
-        missionId: "mission-1", correlationId: "corr-1", profileHash: "profile-1",
-        characterId: "character-1", credentialRef: "discord_bot", transportKind: "bot",
-      },
-      payload: { kind: "send_message", channelId: "channel-not-allowed", content: "hi" },
-    })).rejects.toThrow(/channel_not_allowed/);
+    await expect(
+      runtime.execute({
+        schemaVersion: 1,
+        idempotencyKey: "write-1",
+        action: "discord.presence.send_message",
+        identity: {
+          missionId: "mission-1",
+          correlationId: "corr-1",
+          profileHash: "profile-1",
+          characterId: "character-1",
+          credentialRef: "discord_bot",
+          transportKind: "bot",
+        },
+        payload: { kind: "send_message", channelId: "channel-not-allowed", content: "hi" },
+      }),
+    ).rejects.toThrow(/channel_not_allowed/);
   });
 });

@@ -13,10 +13,10 @@
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "0.80.6",
     "@clankie/jsonl-rpc": "workspace:*",
     "@clankie/protocol": "workspace:*",
-    "@clankie/worker-sdk": "workspace:*"
+    "@clankie/worker-sdk": "workspace:*",
+    "@earendil-works/pi-coding-agent": "0.80.6"
   },
   "devDependencies": {
     "@types/node": "24.12.4",

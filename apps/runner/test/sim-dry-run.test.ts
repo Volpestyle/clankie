@@ -59,118 +59,110 @@ describe("sim full-graph dry run", () => {
     server?.close();
   });
 
-  it(
-    "completes the full frozen graph under runner isolation on an isolated port without provider credentials",
-    async () => {
-      const fixture = await gitFixture();
-      const control = new ControlEndpoint([...GRAPH], "dry-run-runner-token");
-      server = control.server;
-      const port = await control.listen();
-      expect(port).toBeGreaterThan(0);
+  it("completes the full frozen graph under runner isolation on an isolated port without provider credentials", async () => {
+    const fixture = await gitFixture();
+    const control = new ControlEndpoint([...GRAPH], "dry-run-runner-token");
+    server = control.server;
+    const port = await control.listen();
+    expect(port).toBeGreaterThan(0);
 
-      // Sim adapters are constructed from an environment holding no provider
-      // credential; the runner token only authenticates the pull channel.
-      const adapters = buildWorkerAdapters({ CLANKIE_SIM_WORKERS: "1" }, {});
-      const worker = new MissionWorker({
-        client: new ClankieApiClient({
-          baseUrl: `http://127.0.0.1:${port}`,
-          runnerToken: "dry-run-runner-token",
-          runnerId: "dry-run-runner",
-        }),
-        adapters,
-        worktrees: new WorktreeManager({ repoPath: fixture.repo, rootDir: fixture.worktrees }),
-        artifactRoot: fixture.artifacts,
-        workerEnvironment: buildWorkerEnvironment(process.env),
-        verificationChecks: [
-          {
-            id: "fixture-tests",
-            command: process.execPath,
-            args: [
-              "-e",
-              'const c = require("node:fs").readFileSync("src/retry.mjs", "utf8"); process.exit(c.includes("DEFECT") ? 7 : 0);',
-            ],
-          },
-        ],
-        heartbeatIntervalMs: 50,
+    // Sim adapters are constructed from an environment holding no provider
+    // credential; the runner token only authenticates the pull channel.
+    const adapters = buildWorkerAdapters({ CLANKIE_SIM_WORKERS: "1" }, {});
+    const worker = new MissionWorker({
+      client: new ClankieApiClient({
+        baseUrl: `http://127.0.0.1:${port}`,
+        runnerToken: "dry-run-runner-token",
+        runnerId: "dry-run-runner",
+      }),
+      adapters,
+      worktrees: new WorktreeManager({ repoPath: fixture.repo, rootDir: fixture.worktrees }),
+      artifactRoot: fixture.artifacts,
+      workerEnvironment: buildWorkerEnvironment(process.env),
+      verificationChecks: [
+        {
+          id: "fixture-tests",
+          command: process.execPath,
+          args: [
+            "-e",
+            'const c = require("node:fs").readFileSync("src/retry.mjs", "utf8"); process.exit(c.includes("DEFECT") ? 7 : 0);',
+          ],
+        },
+      ],
+      heartbeatIntervalMs: 50,
+    });
+
+    while (await worker.runOnce()) {
+      // drain the graph one authenticated claim at a time
+    }
+
+    expect(control.settlements.map((settlement) => settlement.workerRunId)).toEqual([
+      "run-context",
+      "run-implement",
+      "run-verify-initial",
+      "run-debug",
+      "run-verify-repair",
+    ]);
+    const statusByRun = new Map(
+      control.settlements.map((settlement) => [settlement.workerRunId, settlement.result.status]),
+    );
+    expect(statusByRun.get("run-context")).toBe("succeeded");
+    expect(statusByRun.get("run-implement")).toBe("succeeded");
+    expect(statusByRun.get("run-verify-initial")).toBe("failed");
+    expect(statusByRun.get("run-debug")).toBe("succeeded");
+    expect(statusByRun.get("run-verify-repair")).toBe("succeeded");
+
+    const initialVerification = control.settlements.find(
+      (settlement) => settlement.workerRunId === "run-verify-initial",
+    );
+    expect(initialVerification?.result.diagnosis).toContain("fixture-tests exited 7");
+
+    // Native session ids are preserved in settled outputs and recorded events.
+    for (const settlement of control.settlements) {
+      expect(settlement.result.outputs.nativeSessionId).toBe(`sim:${settlement.workerRunId}`);
+    }
+    const boundSessions = control.events.filter((event) => event.type === "worker.native_session.bound");
+    expect(boundSessions).toHaveLength(GRAPH.length);
+
+    // A per-worker evidence bundle exists for every run, alongside the diff artifacts.
+    for (const { workerRunId, task: spec } of GRAPH) {
+      const bundlePath = join(fixture.artifacts, "mission-dry-run", `${workerRunId}-attempt-1.evidence.json`);
+      const bundle = JSON.parse(await readFile(bundlePath, "utf8")) as Record<string, unknown>;
+      expect(bundle).toMatchObject({
+        missionId: "mission-dry-run",
+        taskId: spec.id,
+        workerRunId,
+        nativeSessionId: `sim:${workerRunId}`,
       });
-
-      while (await worker.runOnce()) {
-        // drain the graph one authenticated claim at a time
+      for (const key of [
+        "summary",
+        "files_changed",
+        "commands_run",
+        "checks",
+        "artifacts",
+        "remaining_risks",
+        "assumptions",
+      ]) {
+        expect(bundle, `${workerRunId} bundle key ${key}`).toHaveProperty(key);
       }
-
-      expect(control.settlements.map((settlement) => settlement.workerRunId)).toEqual([
-        "run-context",
-        "run-implement",
-        "run-verify-initial",
-        "run-debug",
-        "run-verify-repair",
-      ]);
-      const statusByRun = new Map(
-        control.settlements.map((settlement) => [settlement.workerRunId, settlement.result.status]),
-      );
-      expect(statusByRun.get("run-context")).toBe("succeeded");
-      expect(statusByRun.get("run-implement")).toBe("succeeded");
-      expect(statusByRun.get("run-verify-initial")).toBe("failed");
-      expect(statusByRun.get("run-debug")).toBe("succeeded");
-      expect(statusByRun.get("run-verify-repair")).toBe("succeeded");
-
-      const initialVerification = control.settlements.find(
-        (settlement) => settlement.workerRunId === "run-verify-initial",
-      );
-      expect(initialVerification?.result.diagnosis).toContain("fixture-tests exited 7");
-
-      // Native session ids are preserved in settled outputs and recorded events.
-      for (const settlement of control.settlements) {
-        expect(settlement.result.outputs.nativeSessionId).toBe(`sim:${settlement.workerRunId}`);
-      }
-      const boundSessions = control.events.filter((event) => event.type === "worker.native_session.bound");
-      expect(boundSessions).toHaveLength(GRAPH.length);
-
-      // A per-worker evidence bundle exists for every run, alongside the diff artifacts.
-      for (const { workerRunId, task: spec } of GRAPH) {
-        const bundlePath = join(
-          fixture.artifacts,
-          "mission-dry-run",
-          `${workerRunId}-attempt-1.evidence.json`,
-        );
-        const bundle = JSON.parse(await readFile(bundlePath, "utf8")) as Record<string, unknown>;
-        expect(bundle).toMatchObject({
-          missionId: "mission-dry-run",
-          taskId: spec.id,
-          workerRunId,
-          nativeSessionId: `sim:${workerRunId}`,
-        });
-        for (const key of [
-          "summary",
-          "files_changed",
-          "commands_run",
-          "checks",
-          "artifacts",
-          "remaining_risks",
-          "assumptions",
-        ]) {
-          expect(bundle, `${workerRunId} bundle key ${key}`).toHaveProperty(key);
-        }
-      }
-      const implementBundle = JSON.parse(
-        await readFile(
-          join(fixture.artifacts, "mission-dry-run", "run-implement-attempt-1.evidence.json"),
-          "utf8",
-        ),
-      ) as { files_changed: string[]; artifacts: string[] };
-      expect(implementBundle.files_changed).toContain("src/retry.mjs");
-      expect(implementBundle.artifacts.some((uri) => uri.startsWith("artifact://runner-diff/"))).toBe(true);
-      const failedVerifyBundle = JSON.parse(
-        await readFile(
-          join(fixture.artifacts, "mission-dry-run", "run-verify-initial-attempt-1.evidence.json"),
-          "utf8",
-        ),
-      ) as { checks: Array<{ command: string; exit_code: number; result: string }> };
-      expect(failedVerifyBundle.checks).toHaveLength(1);
-      expect(failedVerifyBundle.checks[0]).toMatchObject({ exit_code: 7, result: "failed" });
-    },
-    120_000,
-  );
+    }
+    const implementBundle = JSON.parse(
+      await readFile(
+        join(fixture.artifacts, "mission-dry-run", "run-implement-attempt-1.evidence.json"),
+        "utf8",
+      ),
+    ) as { files_changed: string[]; artifacts: string[] };
+    expect(implementBundle.files_changed).toContain("src/retry.mjs");
+    expect(implementBundle.artifacts.some((uri) => uri.startsWith("artifact://runner-diff/"))).toBe(true);
+    const failedVerifyBundle = JSON.parse(
+      await readFile(
+        join(fixture.artifacts, "mission-dry-run", "run-verify-initial-attempt-1.evidence.json"),
+        "utf8",
+      ),
+    ) as { checks: Array<{ command: string; exit_code: number; result: string }> };
+    expect(failedVerifyBundle.checks).toHaveLength(1);
+    expect(failedVerifyBundle.checks[0]).toMatchObject({ exit_code: 7, result: "failed" });
+  }, 120_000);
 });
 
 /** Minimal authenticated control endpoint implementing the runner pull routes. */
@@ -208,7 +200,9 @@ class ControlEndpoint {
   ): Promise<void> {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(chunk as Buffer);
-    const body = chunks.length ? (JSON.parse(Buffer.concat(chunks).toString("utf8")) as never) : ({} as never);
+    const body = chunks.length
+      ? (JSON.parse(Buffer.concat(chunks).toString("utf8")) as never)
+      : ({} as never);
     if (request.headers.authorization !== `Bearer ${this.token}`) {
       response.writeHead(401, { "content-type": "application/json" });
       response.end(JSON.stringify({ error: "unauthenticated_runner" }));

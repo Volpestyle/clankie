@@ -77,7 +77,11 @@ function frozenPlan() {
     successCriteria: ["The five-task frozen graph recovers via debug + re-verify."],
     tasks: [
       task("inspect-context", { kind: "context", role: "planner", writeScope: [] }),
-      task("implement-retry", { kind: "implementation", role: "implementer", dependsOn: ["inspect-context"] }),
+      task("implement-retry", {
+        kind: "implementation",
+        role: "implementer",
+        dependsOn: ["inspect-context"],
+      }),
       task("verify-initial", {
         kind: "verification",
         role: "verifier",
@@ -149,7 +153,8 @@ function checkingVerifier(options: { failInitial: boolean; failRepair?: boolean 
 }
 
 const planner = () => adapter("sim-planner", ["context"], false, async (c) => succeed(c.task.id));
-const implementer = () => adapter("sim-implementer", ["implementation"], true, async (c) => succeed(c.task.id));
+const implementer = () =>
+  adapter("sim-implementer", ["implementation"], true, async (c) => succeed(c.task.id));
 const debuggerWorker = () => adapter("sim-debugger", ["debugging"], true, async (c) => succeed(c.task.id));
 
 describe("VUH-827 static frozen-graph recovery", () => {
@@ -177,9 +182,7 @@ describe("VUH-827 static frozen-graph recovery", () => {
     expect(engine.getTask("verify-repair").workerId).toBe("sim-verifier");
 
     // The bridge bound strict failure evidence at runtime.
-    const bound = engine
-      .getEvents()
-      .find((event) => event.type === "debugger.failure_evidence.bound");
+    const bound = engine.getEvents().find((event) => event.type === "debugger.failure_evidence.bound");
     expect(bound?.taskId).toBe("debug-retry");
     expect(bound?.data).toMatchObject({
       sourceTaskId: "verify-initial",
@@ -216,7 +219,9 @@ describe("VUH-827 static frozen-graph recovery", () => {
       status: "failed",
       summary: "Trusted runner verification checks did not pass.",
       diagnosis: "unit exited 1",
-      evidence: [{ kind: "diff", label: "runner-observed-git-diff", uri: "artifact://d/verify-1", summary: "x" }],
+      evidence: [
+        { kind: "diff", label: "runner-observed-git-diff", uri: "artifact://d/verify-1", summary: "x" },
+      ],
       outputs: {},
     }));
     await engine.runUntilIdle(new StaticWorkerRouter([implementer(), failingVerifier]));

@@ -194,7 +194,8 @@ async function runScriptedSimTask(context: WorkerRunContext, canWrite: boolean):
 
 function parseSimScript(metadata: Record<string, unknown>): SimTaskScript {
   const sim = metadata.sim;
-  const record = sim && typeof sim === "object" && !Array.isArray(sim) ? (sim as Record<string, unknown>) : {};
+  const record =
+    sim && typeof sim === "object" && !Array.isArray(sim) ? (sim as Record<string, unknown>) : {};
   const files: Record<string, string> = {};
   if (record.files && typeof record.files === "object" && !Array.isArray(record.files)) {
     for (const [path, content] of Object.entries(record.files as Record<string, unknown>)) {

@@ -35,9 +35,9 @@ before a particular Go Live path is usable.
 
 ### Dual planes, one character
 
-| Plane | Process | Auth | Role |
-| --- | --- | --- | --- |
-| Ambient bot | `apps/discord-bridge` | Official bot token | Slash, mission threads, ambient steer |
+| Plane         | Process                                               | Auth                                      | Role                                                          |
+| ------------- | ----------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------- |
+| Ambient bot   | `apps/discord-bridge`                                 | Official bot token                        | Slash, mission threads, ambient steer                         |
 | Presence body | bot runtime plus isolated opt-in user-session runtime | Transport binding `bot` \| `user_session` | Catalog actions via policy; user session is personal-lab only |
 
 Invariants: no shared gateway for bot+user tokens; models never hold Discord credentials;
@@ -56,24 +56,24 @@ user. Runtime binding + phase + doctrine select availability. Go Live requires
 
 ### Doctrine risk classes
 
-| Family | Class |
-| --- | --- |
-| reply, react, unreact, send_message, typing | `narrative-write` (shared rate ledger) |
-| edit/delete own, thread ops, voice join/leave | `reversible-write` |
-| attachment, go_live | `publish-external` |
+| Family                                        | Class                                  |
+| --------------------------------------------- | -------------------------------------- |
+| reply, react, unreact, send_message, typing   | `narrative-write` (shared rate ledger) |
+| edit/delete own, thread ops, voice join/leave | `reversible-write`                     |
+| attachment, go_live                           | `publish-external`                     |
 
 ### Phasing
 
-| Phase | Status |
-| --- | --- |
-| ADR + protocol stubs | done |
-| **P1 outbound bot-transport** via `POST /v1/discord/presence-actions` + bot REST executor | **done** — policy-gated catalog execution only; not free-form DM/chat ingress |
-| **P1.5 publish-external completion** | Attachments follow `require_approval` → bounded `ApprovalRequest` → authenticated resume → exact-idempotency-key re-execution. Denied and expired requests remain terminal. Approval records and semantic events retain only the artifact reference and write hash; the privileged bot runtime resolves and verifies bytes. Go Live remains unavailable on bot transport. |
-| **P2 ingress** (channel-turn / DM / mention → Eve bounded turn) | **next explicit task** — `DiscordPresenceChannelTurnRequestSchema` is frozen for this path but not yet consumed by a gateway handler or control-plane turn route |
-| P2 user_session transport | **kept follow-up** — VUH-836, isolated personal-lab runtime |
-| P3 Go Live watch media | **kept follow-up** — VUH-840, bounded sampled observations |
-| P3 Go Live publish media | **kept follow-up** — VUH-841, governed video playback/rendered surfaces |
-| P4 mission coupling | later |
+| Phase                                                                                     | Status                                                                                                                                                                                                                                                                                                                                                                    |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ADR + protocol stubs                                                                      | done                                                                                                                                                                                                                                                                                                                                                                      |
+| **P1 outbound bot-transport** via `POST /v1/discord/presence-actions` + bot REST executor | **done** — policy-gated catalog execution only; not free-form DM/chat ingress                                                                                                                                                                                                                                                                                             |
+| **P1.5 publish-external completion**                                                      | Attachments follow `require_approval` → bounded `ApprovalRequest` → authenticated resume → exact-idempotency-key re-execution. Denied and expired requests remain terminal. Approval records and semantic events retain only the artifact reference and write hash; the privileged bot runtime resolves and verifies bytes. Go Live remains unavailable on bot transport. |
+| **P2 ingress** (channel-turn / DM / mention → Eve bounded turn)                           | **next explicit task** — `DiscordPresenceChannelTurnRequestSchema` is frozen for this path but not yet consumed by a gateway handler or control-plane turn route                                                                                                                                                                                                          |
+| P2 user_session transport                                                                 | **kept follow-up** — VUH-836, isolated personal-lab runtime                                                                                                                                                                                                                                                                                                               |
+| P3 Go Live watch media                                                                    | **kept follow-up** — VUH-840, bounded sampled observations                                                                                                                                                                                                                                                                                                                |
+| P3 Go Live publish media                                                                  | **kept follow-up** — VUH-841, governed video playback/rendered surfaces                                                                                                                                                                                                                                                                                                   |
+| P4 mission coupling                                                                       | later                                                                                                                                                                                                                                                                                                                                                                     |
 
 P1 does **not** deliver “DM Clankie and he responds.” That is P2 ingress.
 

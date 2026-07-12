@@ -249,7 +249,8 @@ function buildStages(): StageSpec[] {
   ];
 }
 
-const NUDGE_PATTERN = /trust this folder|do you trust|yes, allow|allow access|accept the terms|press enter to continue/i;
+const NUDGE_PATTERN =
+  /trust this folder|do you trust|yes, allow|allow access|accept the terms|press enter to continue/i;
 
 async function waitForStageCompletion(paneId: string, record: StageRecord): Promise<void> {
   const startedAt = Date.now();
@@ -373,12 +374,7 @@ export async function runHerdrHarnessArm(): Promise<HerdrHarnessResult> {
 
     const promptFile = join(outputDirectory, `${stage.taskId}.prompt.txt`);
     await writeFile(promptFile, stage.prompt({ checkFailure: designedFailure }), "utf8");
-    await herdr([
-      "pane",
-      "run",
-      paneId,
-      `cd ${shellQuote(candidate)} && ${stage.launch(promptFile)}`,
-    ]);
+    await herdr(["pane", "run", paneId, `cd ${shellQuote(candidate)} && ${stage.launch(promptFile)}`]);
     await waitForStageCompletion(paneId, record);
     record.endedAt = new Date().toISOString();
 
@@ -402,12 +398,7 @@ export async function runHerdrHarnessArm(): Promise<HerdrHarnessResult> {
       );
     }
     await git(candidate, ["add", "-A"]);
-    await git(candidate, [
-      "commit",
-      "--allow-empty",
-      "-m",
-      `stage: ${stage.taskId} (${stage.harness})`,
-    ]);
+    await git(candidate, ["commit", "--allow-empty", "-m", `stage: ${stage.taskId} (${stage.harness})`]);
     const diffFile = join(outputDirectory, `${stage.taskId}.diff`);
     await writeFile(diffFile, await git(candidate, ["show", "--stat", "--patch", "HEAD"]), "utf8");
     record.diffFile = diffFile;

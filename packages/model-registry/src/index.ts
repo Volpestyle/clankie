@@ -74,10 +74,9 @@ export const ProviderEntrySchema = z.looseObject({
 });
 export type ProviderEntry = z.infer<typeof ProviderEntrySchema>;
 
-export const CatalogSchema = z.record(
-  z.string(),
-  ProviderEntrySchema.catch({ id: "", name: "", env: [], models: {} }),
-).catch({});
+export const CatalogSchema = z
+  .record(z.string(), ProviderEntrySchema.catch({ id: "", name: "", env: [], models: {} }))
+  .catch({});
 export type Catalog = z.infer<typeof CatalogSchema>;
 
 const CacheEnvelopeSchema = z.object({

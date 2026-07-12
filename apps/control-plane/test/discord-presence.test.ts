@@ -34,14 +34,10 @@ describe("Discord presence control-plane runtime (ADR 0024 P1)", () => {
       action: "discord.presence.reply",
       payload: { kind: "reply", channelId: "c1", messageId: "m1", content: "denied" },
     });
-    const response = await post(
-      app,
-      "/v1/discord/presence-actions",
-      {
-        ...deniedWrite,
-        identity: { ...deniedWrite.identity, profileHash: highAssurance.profileHash },
-      },
-    );
+    const response = await post(app, "/v1/discord/presence-actions", {
+      ...deniedWrite,
+      identity: { ...deniedWrite.identity, profileHash: highAssurance.profileHash },
+    });
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({ decision: { effect: "deny" } });
     expect(runtime.writes).toHaveLength(0);

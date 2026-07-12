@@ -1109,7 +1109,6 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     }
   });
 
-
   app.post("/v1/tracker/issue-drafts/validate", async (context) => {
     const captain = await authenticateCaptain(context.req.raw, dependencies);
     if (captain === "unavailable") return context.json({ error: "captain_authentication_unavailable" }, 503);

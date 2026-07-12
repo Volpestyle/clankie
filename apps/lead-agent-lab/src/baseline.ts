@@ -56,7 +56,8 @@ export async function runSingleAgentBaseline(options: BaselineRunOptions = {}): 
       {
         id: "solo-implement",
         title: "Single-agent implement + self-certify",
-        objective: "One agent implements the retry helper and declares the work done, with no external check.",
+        objective:
+          "One agent implements the retry helper and declares the work done, with no external check.",
         kind: "implementation",
         role: "implementer",
         executionClass: "runner_visible",
@@ -133,5 +134,11 @@ export async function runSingleAgentBaseline(options: BaselineRunOptions = {}): 
   );
 
   if (!options.keepWorkspace) await rm(workspacePath, { recursive: true, force: true });
-  return { report, events, workspacePath, groundTruthPassed: groundTruth.ok, profileHash: doctrine.profileHash };
+  return {
+    report,
+    events,
+    workspacePath,
+    groundTruthPassed: groundTruth.ok,
+    profileHash: doctrine.profileHash,
+  };
 }

@@ -8,15 +8,22 @@ export const DISCORD_USER_SESSION_PROVIDER_ID = "discord_user_session";
 export const DISCORD_PRESENCE_CAPABILITIES = ["discord.presence.act", "discord.presence.read"] as const;
 export type DiscordPresenceCapability = (typeof DISCORD_PRESENCE_CAPABILITIES)[number];
 
-export const DiscordBotGrantRequestSchema = z.object({
-  principalId: z.string().min(1),
-  missionId: z.string().min(1),
-  profileHash: z.string().min(1),
-  capability: z.enum(DISCORD_PRESENCE_CAPABILITIES),
-  guildIds: z.array(z.string().min(1)).default([]),
-  channelIds: z.array(z.string().min(1)).default([]),
-  ttlSeconds: z.number().int().positive().max(15 * 60).default(60),
-}).strict();
+export const DiscordBotGrantRequestSchema = z
+  .object({
+    principalId: z.string().min(1),
+    missionId: z.string().min(1),
+    profileHash: z.string().min(1),
+    capability: z.enum(DISCORD_PRESENCE_CAPABILITIES),
+    guildIds: z.array(z.string().min(1)).default([]),
+    channelIds: z.array(z.string().min(1)).default([]),
+    ttlSeconds: z
+      .number()
+      .int()
+      .positive()
+      .max(15 * 60)
+      .default(60),
+  })
+  .strict();
 export type DiscordBotGrantRequest = z.input<typeof DiscordBotGrantRequestSchema>;
 
 export interface DiscordBotCredentialProviderOptions {

@@ -16,7 +16,9 @@ describe("support bundle redaction", () => {
 
     const destination = new PassThrough();
     let output = "";
-    destination.on("data", (chunk: Buffer) => { output += chunk.toString("utf8"); });
+    destination.on("data", (chunk: Buffer) => {
+      output += chunk.toString("utf8");
+    });
     const logger = createLogger({ service: "redaction-fixture" }, { timestamp: false }, destination);
     logger.info(credential, "broker credential fixture");
     expect(output).not.toContain(marker);
