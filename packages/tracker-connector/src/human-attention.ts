@@ -586,4 +586,3 @@ export function attentionDeliveryEventData(result: AttentionDeliveryResult): Rec
     actions: result.actions,
   };
 }
-
