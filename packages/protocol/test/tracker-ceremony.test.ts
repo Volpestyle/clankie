@@ -149,6 +149,19 @@ describe("VUH-845 tracker ceremony protocol", () => {
     expect(ok.expiresAt).toBe("2026-07-12T13:00:00.000Z");
   });
 
+  it("accepts chronologically later expiresAt with fractional seconds (not lexical order)", () => {
+    // Verifier counterexample: createdAt=…T12:00:00Z expiresAt=…T12:00:00.001Z
+    // is chronologically later but loses under pure string comparison.
+    const ok = HumanAttentionRequestSchema.parse({
+      ...validAttentionRequest,
+      createdAt: "2026-07-12T12:00:00Z",
+      expiresAt: "2026-07-12T12:00:00.001Z",
+    });
+    expect(ok.expiresAt).toBe("2026-07-12T12:00:00.001Z");
+    // z.string().datetime() in this repo only accepts Z-suffix forms; offset
+    // forms (e.g. +00:00) are rejected by format validation before refinement.
+  });
+
   it("rejects conflicting top-level and nested tracker correlationIds", () => {
     expect(() =>
       HumanAttentionRequestSchema.parse({

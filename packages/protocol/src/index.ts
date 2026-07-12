@@ -1106,7 +1106,12 @@ function refineExpiresAfterCreated(
   expiresAt: string | undefined,
   context: z.RefinementCtx,
 ): void {
-  if (expiresAt !== undefined && expiresAt <= createdAt) {
+  if (expiresAt === undefined) return;
+  // Compare parsed instants numerically — lexical RFC3339 string order rejects
+  // valid fractional-second and equivalent-offset pairs (e.g. Z vs .001Z).
+  const createdMs = Date.parse(createdAt);
+  const expiresMs = Date.parse(expiresAt);
+  if (!Number.isFinite(createdMs) || !Number.isFinite(expiresMs) || expiresMs <= createdMs) {
     context.addIssue({
       code: "custom",
       path: ["expiresAt"],
