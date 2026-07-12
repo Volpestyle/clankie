@@ -38,6 +38,9 @@ importers:
       '@clankie/captain-runtime':
         specifier: workspace:*
         version: link:../../packages/captain-runtime
+      '@clankie/doctrine':
+        specifier: workspace:*
+        version: link:../../packages/doctrine
       '@clankie/event-store':
         specifier: workspace:*
         version: link:../../packages/event-store
@@ -840,6 +843,9 @@ importers:
 
   packages/tracker-connector:
     dependencies:
+      '@clankie/doctrine':
+        specifier: workspace:*
+        version: link:../doctrine
       '@clankie/protocol':
         specifier: workspace:*
         version: link:../protocol

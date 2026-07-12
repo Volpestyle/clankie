@@ -186,18 +186,26 @@ credential-free `tracker.sync.failed` events.
 
 ## Linear narrative and captain channel seam
 
-`POST /v1/tracker/narratives
-
 `POST /v1/discord/presence-actions` accepts bot-transport Discord presence writes (ADR 0024 P1), evaluates narrative or risk-class policy (shared narrative rate ledger), and executes via `discordPresenceRuntime` loaded from `CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE`.
 
-POST /v1/tracker/narratives` accepts only the five typed narrative actions (issue comment, thought, response, elicitation, and reaction) and evaluates exact content plus trusted correlation through one `createNarrativeWritePolicy()` instance retained for the compiled profile runtime. It then delegates to `LinearAgentRuntimePort`; non-narrative tracker mutations cannot enter this route.
+`POST /v1/tracker/narratives` accepts only the five typed narrative actions (issue comment, thought, response, elicitation, and reaction) and evaluates exact content plus trusted correlation through one `createNarrativeWritePolicy()` instance retained for the compiled profile runtime. It then delegates to `LinearAgentRuntimePort`; non-narrative tracker mutations cannot enter this route.
 
 `POST /v1/captain/channel-turns` deduplicates by Linear delivery ID, reads the full thread through the trusted runtime, and calls Eve over its canonical loopback session/NDJSON surface. Only the triggering text and typed identities arrive from the bridge. The control plane supplies the authoritative thread in Eve client context and returns only `settled`, `waiting_user`, or a bounded failure.
 
 At startup, `CLANKIE_LINEAR_AGENT_RUNTIME_MODULE` may name an absolute trusted local module exporting `createLinearAgentRuntime()`. The module owns broker-backed construction; the control plane receives only the credential-free port. When it is absent, both Linear runtime routes fail unavailable. `CLANKIE_CAPTAIN_URL` defaults to the loopback Eve service.
+
+When Linear human attention is enabled, `CLANKIE_LINEAR_ATTENTION_RUNTIME_MODULE` is required and exports `createLinearAttentionRuntime()`. Its credential-owning client and workspace config map semantic `operator` capabilities to the provider assignee, `needs-human` label, and direct mention. Startup fails closed when the Linear agent runtime is enabled without this companion runtime.
 
 The control-plane HTTP service binds to `127.0.0.1`. The narrative and captain-channel routes rely on that local process boundary and are not public connector APIs.
 
 ### Discord presence actions
 
 `POST /v1/discord/presence-actions` — ADR 0024 **P1 outbound** bot-transport presence catalog (not DM/chat ingress). Narrative actions share the mission narrative rate ledger; optional `content` is derived from the payload when omitted (emoji, typing sentinel, …). Attachments mint a bounded approval request carrying only the artifact reference and write hash. An authenticated operator decision resumes the exact idempotency key; denial and expiry remain terminal. The broker-backed runtime resolves `sha256:<digest>:<relative-path>` beneath `CLANKIE_DISCORD_ATTACHMENT_ROOT`, verifies the bytes inside the privileged Discord boundary, and never places bytes in control-plane events or logs. Runtime: `CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE` exporting `createDiscordPresenceRuntime()`.
+
+## Tracker ceremony routes
+
+- `POST /v1/tracker/issue-drafts/validate` — pure draft validation against the compiled ceremony projection.
+- `POST /v1/tracker/human-attention/deliver` — policy-evaluated, idempotent attention delivery with typed aggregate outcomes.
+- `POST /v1/tracker/human-attention/correlate` — correlate verified agent-session events to pending attention (ordinary issue comments never match).
+
+Eve channel turns carry the ceremony projection only in an HMAC-authenticated channel-metadata envelope signed with `CLANKIE_CAPTAIN_TOKEN`. Unsigned or modified caller context is ignored.
