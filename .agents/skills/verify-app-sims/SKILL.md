@@ -4,14 +4,20 @@ description: Use when running or verifying the command-center app (or spike slic
 
 # Verify the app on simulators
 
+> **Repo home:** the graphical command center lives in the private product monorepo
+> **`Volpestyle/clankie-app`** (`~/dev/clankie-app`), not this agent OS tree.
+> Paths like `apps/mobile` and `apps/macos` below are relative to **clankie-app**.
+> Prefer running this skill from a checkout of that repo. ADR 0009 version-lane
+> notes remain historical in this monorepo's `docs/adr/`.
+
 Prefer captured evidence (screenshots, frame diffs, logs, process samples) over "it looked fine". Animation claims need two frames compared, not one.
 
 ## Version lanes and Metro ports
 
-- Two lanes per [ADR 0009](../../../docs/adr/0009-per-shell-react-native-versions.md): mobile (Expo SDK 57 / RN 0.86 / Reanimated 4.5) and macOS (react-native-macos 0.81 / Reanimated 3.19). Shared code sticks to the Reanimated 3/4-common API subset.
+- Two lanes per ADR 0009 (in the product repo): mobile (Expo SDK 57 / RN 0.86 / Reanimated 4.5) and macOS (react-native-macos 0.81 / Reanimated 3.19). Shared code sticks to the Reanimated 3/4-common API subset.
 - The dev-server port is **baked into native builds** (`RCT_METRO_PORT`); `run-macos --port` does NOT retarget an already-built app. Convention: macOS Metro on **8081**, mobile Metro on **8082** (`expo start --port 8082`).
-- A stale Metro from another checkout/scratchpad answers `/status` on the conventional port and the app silently loads the **wrong bundle**. Before reusing a running Metro, verify the listener's cwd is your app dir: `lsof -a -p "$(lsof -tnP -iTCP:8082 -sTCP:LISTEN)" -d cwd -Fn` (`apps/mobile/scripts/ios-device.sh` does this and dies on foreign owners).
-- Metro monorepo wiring for shared-source shells: `watchFolders` + `resolver.nodeModulesPaths` with hierarchical lookup **left on** — `disableHierarchicalLookup: true` breaks Expo's internal imports (first symptom: `Unable to resolve module expo-asset`). `expo-asset` must also be an explicit dependency of the Expo shell.
+- A stale Metro from another checkout/scratchpad answers `/status` on the conventional port and the app silently loads the **wrong bundle**. Before reusing a running Metro, verify the listener's cwd is your app dir: `lsof -a -p "$(lsof -tnP -iTCP:8082 -sTCP:LISTEN)" -d cwd -Fn` (`apps/mobile/scripts/ios-device.sh` in clankie-app does this and dies on foreign owners).
+- Metro monorepo wiring for shared-source shells: `watchFolders` + `resolver.nodeModulesPaths` with hierarchical lookup **left on** — `disableHierarchicalLookup: true` breaks Expo's internal imports (first symptom: `Unable to resolve module expo-asset`). `expo-asset` must also be an explicit dependency of the Expo shell. In clankie-app, also watch sibling agent-OS `packages/` for protocol links (`scripts/metro-workspace.cjs`).
 
 ## Interactive prompts stall pane runs
 
@@ -19,7 +25,7 @@ Prefer captured evidence (screenshots, frame diffs, logs, process samples) over 
 
 ## iOS simulator
 
-- Bundle id: don't guess — `xcrun simctl listapps booted | grep -v com.apple` (Expo prebuild derives it from the owner, e.g. `com.volpestyle.mobile`).
+- Bundle id: don't guess — `xcrun simctl listapps booted | grep -v com.apple` (Expo prebuild derives it from the owner, e.g. `io.clankie.v2` / `io.clankie.v2.dev`).
 - Screenshot: `xcrun simctl io booted screenshot f.png`. Animation proof: two shots ~1.5s apart, then `cmp` (PIL is not installed; downscale with `sips -Z 1000 in.png --out out.png`).
 - The Expo dev-menu onboarding sheet covers the app on every fresh launch and `simctl` cannot tap. Disable it instead:
   `xcrun simctl spawn booted defaults write <bundleid> EXDevMenuIsOnboardingFinished -bool YES`, then `simctl terminate` + `launch`.
