@@ -33,3 +33,13 @@ export {
   type ProviderCredential,
   type RedactedCredential,
 } from "./credential-store.ts";
+export {
+  DISCORD_BOT_PROVIDER_ID,
+  DISCORD_PRESENCE_CAPABILITIES,
+  DISCORD_USER_SESSION_PROVIDER_ID,
+  DiscordBotCredentialProvider,
+  DiscordBotGrantRequestSchema,
+  type DiscordBotCredentialProviderOptions,
+  type DiscordBotGrantRequest,
+  type DiscordPresenceCapability,
+} from "./discord-bot-provider.ts";

@@ -1,5 +1,6 @@
 import { getVoiceConnection, joinVoiceChannel } from "@discordjs/voice";
 import { ClankieApiClient } from "@clankie/api-client";
+import { createDefaultCredentialStore, DISCORD_BOT_PROVIDER_ID } from "@clankie/credential-broker";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 import {
@@ -27,11 +28,18 @@ import {
 } from "./steering.ts";
 import { MissionThreadRegistry, ZERO_RETENTION_STATUS, threadNameForMission } from "./thread-registry.ts";
 
-const token = process.env.DISCORD_BOT_TOKEN;
+if (process.env.DISCORD_USER_TOKEN) {
+  throw new Error("DISCORD_USER_TOKEN must not be set for the official Discord bot bridge.");
+}
+if (process.env.DISCORD_BOT_TOKEN) {
+  throw new Error("DISCORD_BOT_TOKEN must not be set. Store discord_bot in the credential broker.");
+}
+const credential = await createDefaultCredentialStore().get(DISCORD_BOT_PROVIDER_ID);
+const token = credential?.type === "api" ? credential.key : undefined;
 const applicationId = process.env.DISCORD_APPLICATION_ID;
 if (!token || !applicationId) {
   throw new Error(
-    "DISCORD_BOT_TOKEN and DISCORD_APPLICATION_ID are required. Normal Discord user credentials are unsupported.",
+    "A brokered discord_bot API credential and DISCORD_APPLICATION_ID are required. Normal Discord user credentials are unsupported.",
   );
 }
 

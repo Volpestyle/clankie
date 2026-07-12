@@ -6,8 +6,10 @@ Status: accepted (James, 2026-07-11; VUH-804).
 
 ClankVox is the Rust media sidecar carried selectively from the v1 Clankie repository. The v2
 bridge needs Discord voice WebSocket/UDP, RTP/Opus pacing, transport encryption, DAVE, inbound
-speaker audio, and transport health without inheriting the v1 brain, Go Live/video, user-token,
-music/YouTube, or player-control surfaces.
+speaker audio, and transport health without inheriting the v1 brain, its Go Live/video and
+user-token implementation, music/YouTube, or player-control surfaces. ADR 0024 keeps Go Live in
+v2 as a separately gated personal-lab capability; this ADR does not import that capability into
+the core voice boundary.
 
 The source snapshot is `Volpestyle/clankie@04734df9ec1ec4665a233c4c64f0a51a9d3b0b83`, path
 `clankvox/`, Git tree `11f24ddcfc3ee62d45b83638e788877f39cd8fdc`. VUH-805 records
@@ -34,8 +36,9 @@ transport AEAD, DAVE audio, speaking/capture state, and transport statistics. Th
 outbound media input is generic `audio`. It does not retain v1 music/YouTube/player-control IPC,
 Go Live, video, user-token paths, v1 Realtime orchestration, or transcript-pane naming.
 User-session Go Live and transport-agnostic Discord presence are owned by
-[`ADR 0024`](0024-discord-dual-plane-presence.md); they must not fold user credentials into this
-bot-only media plane.
+[`ADR 0024`](0024-discord-dual-plane-presence.md). VUH-840 and VUH-841 may extend ClankVox or
+select a sibling media owner behind a new ADR and versioned boundary, but they must not fold user
+credentials or video into this schema-1 bot-only media plane.
 
 ### One Discord media owner
 
@@ -209,3 +212,6 @@ second version word to the v1 header. `user_audio_end` closes the current per-sp
 - VUH-807 supplies the first live official-bot/DAVE proof.
 - VUH-808 and VUH-810 share this media boundary without coupling the voice brain to Discord
   transport.
+- VUH-836 supplies the isolated, opt-in user-session transport. VUH-840 and VUH-841 own receive
+  and publish media respectively; each requires an ADR extension and preserves the single-owner
+  invariant. VUH-246 remains historical v1 evidence, not executable v2 work.

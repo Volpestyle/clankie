@@ -25,6 +25,20 @@ a shell. Secret JSON is passed as a single argv value because the CLI has no
 non-interactive stdin form; it is never placed in a worker environment or
 written to a plaintext config file.
 
+## Discord providers
+
+`discord_bot` stores the official bot token as an API credential. The trusted
+presence adapter issues `discord.presence.act` or `discord.presence.read` grants
+bound to a mission, principal, doctrine profile, expiry, and explicit
+`discord:guild:*` / `discord:channel:*` resources. The provider refuses resources
+outside its configured allowlists and resolves connection material only after a
+matching grant is verified. The token is never placed in a worker, captain,
+control-plane, or bridge process environment.
+
+`discord_user_session` is a reserved provider identifier only. It has no
+implementation or credential-loading path; user-session transport remains a
+separate gated follow-up (VUH-751 / VUH-836).
+
 ## Capability boundary
 
 `CapabilityTokenIssuer` signs and verifies bounded HMAC grants. Resource-scoped

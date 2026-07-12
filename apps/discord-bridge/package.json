@@ -14,6 +14,7 @@
   "dependencies": {
     "@discordjs/voice": "0.19.2",
     "@clankie/api-client": "workspace:*",
+    "@clankie/credential-broker": "workspace:*",
     "@clankie/interactive-environment": "workspace:*",
     "@clankie/protocol": "workspace:*",
     "discord.js": "14.26.4",

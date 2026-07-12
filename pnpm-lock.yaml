@@ -146,6 +146,9 @@ importers:
       '@clankie/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
+      '@clankie/credential-broker':
+        specifier: workspace:*
+        version: link:../../packages/credential-broker
       '@clankie/interactive-environment':
         specifier: workspace:*
         version: link:../../packages/interactive-environment

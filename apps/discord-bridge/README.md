@@ -10,10 +10,10 @@ Discord is an ambient authority surface. `DISCORD_AMBIENT_ROLE_IDS` is a comma-s
 
 `/captain-memory` exposes the enforced bridge invariant: the bot does not request the Discord message-content intent, capture channel transcripts, infer speaker memory, or retain slash-command text after forwarding it. `forget` removes only the live bridge-owned thread/mission correlation and projection cache, renames and archives the thread so it is not rebound after restart, and explicitly does not claim to delete Discord history or authoritative control-plane/captain memory.
 
-Required environment variables:
+Required configuration:
 
 ```bash
-DISCORD_BOT_TOKEN=...
+# Store the bot token as provider `discord_bot` through the credential broker.
 DISCORD_APPLICATION_ID=...
 DISCORD_GUILD_ID=...          # optional, faster command registration in development
 DISCORD_AMBIENT_ROLE_IDS=...  # comma-separated roles allowed to create/steer missions
@@ -47,7 +47,11 @@ Policy-gated bot presence actions (reply, react, send, …) execute through the 
 
 ```bash
 CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE=$PWD/apps/discord-bridge/src/presence-runtime-module.ts
+DISCORD_PRESENCE_GUILD_IDS=...   # comma-separated broker grant allowlist
+DISCORD_PRESENCE_CHANNEL_IDS=... # comma-separated broker grant allowlist
 ```
 
-The module uses `DISCORD_BOT_TOKEN` only. User tokens and Go Live are not accepted on this path.
+The module loads `discord_bot` only through the credential broker. Both
+`DISCORD_BOT_TOKEN` and `DISCORD_USER_TOKEN` are hard startup errors; user-session
+transport and Go Live are not accepted on this path.
 See [`ADR 0024`](../../docs/adr/0024-discord-dual-plane-presence.md).

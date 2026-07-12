@@ -229,7 +229,7 @@ export class ClankieApiClient {
 
   /**
    * Requests a policy-evaluated Discord presence action (ADR 0024 P1 bot transport).
-   * Bot credentials stay in the control-plane presence runtime module.
+   * Bot credentials stay behind the credential broker used by the trusted presence runtime module.
    */
   public async executeDiscordPresenceAction(
     input: DiscordPresenceWrite,

@@ -101,8 +101,13 @@ captain semantic event streams.
 
 The accepted placement is `apps/clankvox/`. VUH-805 creates the complete Cargo crate and pnpm
 package facade atomically after the upstream AGPL-3.0-or-later versus repository Apache-2.0
-licensing disposition is recorded. The boundary deliberately excludes Go Live/video, user-token
-paths, v1 Realtime orchestration, and v1 music/YouTube/player-control IPC. See
+licensing disposition is recorded. This schema-1, official-bot boundary deliberately excludes
+Go Live/video, user-session paths, v1 Realtime orchestration, and v1 music/YouTube/player-control
+IPC. Go Live watch and publish remain in v2 as isolated, explicitly enabled personal-lab
+capabilities: VUH-836 owns the separate user-session transport, VUH-840 owns bounded stream
+observation, and VUH-841 owns governed publishing. Those paths require a new versioned media
+boundary and may not make the bot and user-session transports co-own a voice/media session. See
+[`ADR 0024`](adr/0024-discord-dual-plane-presence.md) and
 [`ADR 0025`](adr/0025-clankvox-placement-and-ipc.md).
 
 ## Control flow
