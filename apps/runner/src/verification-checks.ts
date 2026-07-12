@@ -30,11 +30,22 @@ const VERIFICATION_ACCESS_CONTRACT = {
   runnerPrivateState: "denied",
 } as const;
 
+export interface VerificationFailedCheck {
+  /** Stable check id used as the exact-command identity for failure evidence. */
+  command: string;
+  exitCode: number;
+}
+
 export interface VerificationCheckResult {
   passed: boolean;
   evidence: Evidence[];
   failures: string[];
   checks: Array<{ command: string; exit_code: number; result: "passed" | "failed" }>;
+  /**
+   * First failed check with a known exit code, authored only from trusted
+   * runner execution (never from provider text). Consumed as WorkerResult.failedCheck.
+   */
+  failedCheck?: VerificationFailedCheck;
 }
 
 export interface VerificationSandbox {
@@ -136,6 +147,7 @@ export async function runVerificationChecks(
   const evidence: Evidence[] = [];
   const failures: string[] = [];
   const checkFacts: VerificationCheckResult["checks"] = [];
+  let failedCheck: VerificationFailedCheck | undefined;
   const sandbox = options.sandbox ?? new ShellSandbox();
   for (const check of checks) {
     if (options.signal.aborted) {
@@ -199,6 +211,11 @@ export async function runVerificationChecks(
       exit_code: exitCode,
       result: exitCode === 0 ? "passed" : "failed",
     });
+    // First failed check wins: command identity is the trusted check id (same
+    // stable string previously carried in the diagnosis free-form text).
+    if (exitCode !== 0 && failedCheck === undefined) {
+      failedCheck = { command: check.id, exitCode };
+    }
     if (outputMetadata && (outputMetadata.stdoutBytes > 0 || outputMetadata.stderrBytes > 0)) {
       evidence.push({
         kind: "log",
@@ -207,7 +224,13 @@ export async function runVerificationChecks(
       });
     }
   }
-  return { passed: failures.length === 0, evidence, failures, checks: checkFacts };
+  return {
+    passed: failures.length === 0,
+    evidence,
+    failures,
+    checks: checkFacts,
+    ...(failedCheck ? { failedCheck } : {}),
+  };
 }
 
 interface CapturedOutputMetadata {

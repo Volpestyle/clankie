@@ -933,12 +933,27 @@ export const MissionPlanSchema = z
   });
 export type MissionPlan = z.infer<typeof MissionPlanSchema>;
 
+/**
+ * Runner-authored fact for a trusted verification check that failed.
+ * Populated only from real check execution at the runner trust boundary —
+ * never from provider prose, diagnosis text, or model-reported identities.
+ * The mission-engine static failure-evidence bridge consumes this directly
+ * (command + exitCode) without parsing free-form strings.
+ */
+export const FailedCheckSchema = z.object({
+  command: z.string().min(1),
+  exitCode: z.number().int(),
+});
+export type FailedCheck = z.infer<typeof FailedCheckSchema>;
+
 export const WorkerResultSchema = z.object({
   status: z.enum(["succeeded", "failed", "blocked"]),
   summary: z.string().min(1),
   evidence: z.array(EvidenceSchema).default([]),
   outputs: z.record(z.string(), z.unknown()).default({}),
   diagnosis: z.string().optional(),
+  /** Optional structured failed-check carrier (VUH-828); additive and runner-authored only. */
+  failedCheck: FailedCheckSchema.optional(),
 });
 export type WorkerResult = z.infer<typeof WorkerResultSchema>;
 

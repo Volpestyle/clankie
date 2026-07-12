@@ -958,17 +958,16 @@ export class MissionEngine {
   }
 
   /**
-   * Bridge for static frozen-scenario plans (VUH-827). When a planned
+   * Bridge for static frozen-scenario plans (VUH-827 / VUH-828). When a planned
    * verification task has failed and a planned debugging task depends on it, the
    * debugger can only ready if `getFailureEvidence` resolves — but static plans
    * never call `addDebuggerTask`. Synthesize the strict `FailureEvidence` from
-   * the verification's recorded runtime result (exact failing command, exit
-   * code, and output artifact the runner already reported) and bind it, so the
-   * existing `dependenciesReady` debugger path readies the repair. The bound
-   * evidence satisfies `isFailureEvidence` exactly; no debugger contract is
-   * imposed (that stays the explicit `addDebuggerTask` regime). When the failure
-   * yields no reproducible command/exit-code (e.g. no runner check ran), the
-   * debugger cannot ready and a dependency-starve event is emitted once.
+   * the verification's runner-authored structured `failedCheck` (exact command
+   * and exit code) plus an output-artifact ref, and bind it with the same
+   * `DEBUGGER_CONTRACT_METADATA_KEY` that `addDebuggerTask` sets so successful
+   * settlement without exact reproduction + before/after repair evidence fails.
+   * When the failure yields no structured failed-check (e.g. no runner check
+   * ran), the debugger cannot ready and a dependency-starve event is emitted once.
    */
   private reconcileFailedVerificationBridges(options: { emit: boolean }): void {
     for (const verification of this.tasks.values()) {
@@ -990,6 +989,8 @@ export class MissionEngine {
             metadata: {
               ...debugging.spec.metadata,
               [FAILURE_EVIDENCE_METADATA_KEY]: structuredClone(evidence),
+              // Same strict contract as addDebuggerTask (VUH-828).
+              [DEBUGGER_CONTRACT_METADATA_KEY]: true,
             },
           };
           if (options.emit && !this.runtimeEvidenceBound.has(debugging.spec.id)) {
@@ -1013,7 +1014,7 @@ export class MissionEngine {
             "task.debugger_evidence_starved",
             {
               reason:
-                "The source verification failed without a reproducible runner check (no command/exit-code to bind as failure evidence); this debugging task cannot ready. Supply a verification whose failure is a runner check, or add the debugger with explicit evidence.",
+                "The source verification failed without a runner-authored structured failed-check (no command/exit-code to bind as failure evidence); this debugging task cannot ready. Supply a verification whose failure carries WorkerResult.failedCheck from trusted check execution, or add the debugger with explicit evidence.",
               sourceTaskId: verification.spec.id,
             },
             debugging.spec.id,
@@ -1025,17 +1026,18 @@ export class MissionEngine {
 
   /**
    * Build strict `FailureEvidence` from a failed verification's runtime result.
-   * The failing command and exit code come from the runner's failure diagnosis
-   * (`"<check> exited <n>"`) or a `runner-check:*` evidence summary; the output
-   * artifact is the runner's observed-diff evidence uri. Returns undefined when
-   * no reproducible command/exit-code is present — never fabricates a failure.
+   * Command and exit code come only from the runner-authored structured
+   * `WorkerResult.failedCheck` carrier (VUH-828) — never from diagnosis or
+   * evidence free-form text. The output artifact is the runner's observed-diff
+   * evidence uri when present. Returns undefined when no structured failed-check
+   * is present — never fabricates a failure and never parses strings.
    */
   private synthesizeFailureEvidence(
     verification: TaskRuntime,
     result: WorkerResult,
   ): FailureEvidence | undefined {
-    const parsed = parseFailedRunnerCheck(result);
-    if (!parsed) return undefined;
+    const structured = structuredFailedCheck(result);
+    if (!structured) return undefined;
     const sourceWorkerRunId = this.settledWorkerRunIdFor(verification.spec.id);
     const outputArtifact = failureOutputArtifactRef(
       result,
@@ -1049,8 +1051,8 @@ export class MissionEngine {
       // exact attempt on replay, push-path rehydration falls back to 1.
       sourceAttempt: Math.max(verification.attempts, 1),
       ...(sourceWorkerRunId ? { sourceWorkerRunId } : {}),
-      command: parsed.command,
-      exitCode: parsed.exitCode,
+      command: structured.command,
+      exitCode: structured.exitCode,
       outputArtifact,
     };
     return isFailureEvidence(evidence) ? evidence : undefined;
@@ -1783,35 +1785,15 @@ function isFailureEvidence(value: unknown): value is FailureEvidence {
 }
 
 /**
- * Extract the failing command and exit code the runner reported for a failed
- * verification. Prefers the failure diagnosis (`"<check> exited <n>[; ...]"`,
- * the runner's `checks.failures` join), then a `runner-check:*` evidence
- * summary. Returns undefined when the failure carries no reproducible check.
+ * Read the runner-authored structured failed-check carrier. Returns undefined
+ * when absent or malformed — never falls back to diagnosis/summary string parsing.
  */
-function parseFailedRunnerCheck(result: WorkerResult): { command: string; exitCode: number } | undefined {
-  if (typeof result.diagnosis === "string") {
-    const fromDiagnosis = matchExited(result.diagnosis);
-    if (fromDiagnosis) return fromDiagnosis;
-  }
-  for (const evidence of result.evidence) {
-    if (typeof evidence.label === "string" && evidence.label.startsWith("runner-check:")) {
-      const parsed = matchExited(evidence.summary);
-      if (parsed) {
-        const command = evidence.label.slice("runner-check:".length).trim();
-        return { command: command.length > 0 ? command : parsed.command, exitCode: parsed.exitCode };
-      }
-    }
-  }
-  return undefined;
-}
-
-function matchExited(text: string): { command: string; exitCode: number } | undefined {
-  const match = /(.+?)\s+exited\s+(-?\d+)/u.exec(text);
-  if (!match) return undefined;
-  const command = (match[1] ?? "").trim();
-  const exitCode = Number.parseInt(match[2] ?? "", 10);
-  if (command.length === 0 || !Number.isInteger(exitCode)) return undefined;
-  return { command, exitCode };
+function structuredFailedCheck(result: WorkerResult): { command: string; exitCode: number } | undefined {
+  const candidate = result.failedCheck;
+  if (!candidate || typeof candidate !== "object") return undefined;
+  if (typeof candidate.command !== "string" || candidate.command.length === 0) return undefined;
+  if (typeof candidate.exitCode !== "number" || !Number.isInteger(candidate.exitCode)) return undefined;
+  return { command: candidate.command, exitCode: candidate.exitCode };
 }
 
 /**

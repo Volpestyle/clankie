@@ -35,7 +35,15 @@ the existing `task.started` and `task.succeeded`/`task.failed` events, while
 debugger evidence transitions use dedicated `debugger.*` events. Raw model
 reasoning is never part of the debugger input.
 
+Static frozen plans that never call `addDebuggerTask` use a runtime bridge: when
+a planned verification fails with a runner-authored `WorkerResult.failedCheck`
+and a planned debugging task depends on it, the engine binds the same failure
+evidence and strict debugger-contract metadata that `addDebuggerTask` would set.
+Settlement without exact reproduction plus before/after repair evidence fails.
+The bridge never parses diagnosis or evidence free-form text for command/exit
+code — only the structured failed-check carrier.
+
 The package intentionally keeps these contracts in `TaskSpec.metadata` so the
-wire protocol remains additive-free while the protocol is frozen. The runner
-continues to enforce the filesystem read-only boundary and trusted acceptance
-checks at execution time.
+wire protocol stays additive. The runner continues to enforce the filesystem
+read-only boundary and trusted acceptance checks at execution time, and is the
+only author of `WorkerResult.failedCheck`.
