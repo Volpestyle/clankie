@@ -7,10 +7,12 @@ import {
   Client,
   GatewayIntentBits,
   GuildMember,
+  Partials,
   REST,
   Routes,
   ThreadAutoArchiveDuration,
   type ChatInputCommandInteraction,
+  type Message,
 } from "discord.js";
 import {
   authorizeAmbientCommand,
@@ -27,6 +29,12 @@ import {
   workerSteerIntentForDiscordChoice,
 } from "./steering.ts";
 import { MissionThreadRegistry, ZERO_RETENTION_STATUS, threadNameForMission } from "./thread-registry.ts";
+import {
+  DiscordTextIngress,
+  parseDiscordDmPolicy,
+  parseDiscordIdSet,
+  type DiscordInboundContextMessage,
+} from "./text-ingress.ts";
 
 if (process.env.DISCORD_USER_TOKEN) {
   throw new Error("DISCORD_USER_TOKEN must not be set for the official Discord bot bridge.");
@@ -55,12 +63,39 @@ const roleBindings: DiscordRoleBindings = {
   ambientRoleIds: parseRoleIds(process.env.DISCORD_AMBIENT_ROLE_IDS),
   approvalRoleIds: parseRoleIds(process.env.DISCORD_APPROVAL_ROLE_IDS),
 };
+const textIngressEnabled = process.env.DISCORD_TEXT_INGRESS_ENABLED === "true";
+const textIngressContextLimit = parseContextMessageLimit(process.env.DISCORD_INGRESS_CONTEXT_MESSAGES);
+const textIngress = textIngressEnabled
+  ? new DiscordTextIngress(
+      api,
+      {
+        characterId: process.env.CLANKIE_CHARACTER_ID ?? "clankie",
+        credentialRef: "discord_bot",
+        guildIds: parseDiscordIdSet(process.env.DISCORD_INGRESS_GUILD_IDS),
+        channelIds: parseDiscordIdSet(process.env.DISCORD_INGRESS_CHANNEL_IDS),
+        dmPolicy: parseDiscordDmPolicy(process.env.DISCORD_INGRESS_DM_POLICY),
+        ...(process.env.DISCORD_OWNER_USER_ID === undefined
+          ? {}
+          : { ownerUserId: process.env.DISCORD_OWNER_USER_ID }),
+        dmUserIds: parseDiscordIdSet(process.env.DISCORD_INGRESS_DM_USER_IDS),
+        contextMessageLimit: textIngressContextLimit,
+        authenticatedSurfaceUrl,
+      },
+      (event) => console.info(event, "Discord text ingress event"),
+    )
+  : undefined;
 const registry = new MissionThreadRegistry({
   statePath: bridgeStatePath(),
 });
 const client = new Client({
-  // MessageContent is intentionally absent: this bridge never captures Discord transcripts.
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildVoiceStates,
+    ...(textIngressEnabled
+      ? [GatewayIntentBits.GuildMessages, GatewayIntentBits.DirectMessages, GatewayIntentBits.MessageContent]
+      : []),
+  ],
+  partials: textIngressEnabled ? [Partials.Channel] : [],
 });
 const projector = new MissionThreadProjector(
   registry,
@@ -100,8 +135,39 @@ client.once("ready", async () => {
   }
   projector.start();
   console.log(
-    `Discord bot ready as ${client.user?.tag ?? "unknown"}; registered ${commands.length} commands and restored ${registry.entries().length} mission thread(s).`,
+    `Discord bot ready as ${client.user?.tag ?? "unknown"}; registered ${commands.length} commands, restored ${registry.entries().length} mission thread(s), text ingress ${textIngressEnabled ? "enabled" : "disabled"}.`,
   );
+});
+
+client.on("messageCreate", async (message) => {
+  if (!textIngress) return;
+  try {
+    const result = await textIngress.handle({
+      id: message.id,
+      ...(message.guildId === null ? {} : { guildId: message.guildId }),
+      channelId: message.channelId,
+      authorId: message.author.id,
+      authorIsBot: message.author.bot || message.author.id === client.user?.id,
+      mentionsBot: client.user !== null && message.mentions.users.has(client.user.id),
+      body: message.content,
+      loadContextMessages: () => readDiscordContext(message, textIngressContextLimit),
+    });
+    if (result.state === "failed") {
+      console.error(
+        { deliveryId: message.id, channelId: message.channelId, code: result.code },
+        "Discord text ingress failed",
+      );
+    }
+  } catch (error) {
+    console.error(
+      {
+        deliveryId: message.id,
+        channelId: message.channelId,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      "Discord text ingress handler failed",
+    );
+  }
 });
 
 client.on("interactionCreate", async (interaction) => {
@@ -359,6 +425,30 @@ function missionIdForInteraction(interaction: ChatInputCommandInteraction): stri
 function pollInterval(): number {
   const configured = Number(process.env.DISCORD_MISSION_POLL_INTERVAL_MS ?? "5000");
   return Number.isFinite(configured) && configured >= 1_000 ? configured : 5_000;
+}
+
+function parseContextMessageLimit(value: string | undefined): number {
+  const parsed = Number(value ?? "10");
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 50) {
+    throw new Error("DISCORD_INGRESS_CONTEXT_MESSAGES must be an integer from 0 to 50");
+  }
+  return parsed;
+}
+
+async function readDiscordContext(
+  message: Message,
+  limit: number,
+): Promise<readonly DiscordInboundContextMessage[]> {
+  if (limit === 0) return [];
+  const messages = await message.channel.messages.fetch({ before: message.id, limit });
+  return [...messages.values()]
+    .sort((left, right) => left.createdTimestamp - right.createdTimestamp)
+    .map((candidate) => ({
+      id: candidate.id,
+      authorId: candidate.author.id,
+      body: candidate.content,
+      createdAt: candidate.createdAt.toISOString(),
+    }));
 }
 
 function bridgeStatePath(): string {

@@ -54,6 +54,11 @@ if (
 const discordPresenceRuntime = await loadDiscordPresenceRuntime(
   process.env.CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE,
 );
+const captainChannelTurns = new EveCaptainChannelTurnPort({
+  baseUrl: process.env.CLANKIE_CAPTAIN_URL ?? "http://127.0.0.1:4321",
+  ceremonyProjection: projectCaptainCeremony(doctrine),
+  ...(captainToken === undefined ? {} : { captainToken }),
+});
 const app = await createControlPlane({
   doctrine,
   eventStore,
@@ -64,12 +69,8 @@ const app = await createControlPlane({
     ? {}
     : {
         linearAgentRuntime,
-        captainChannelTurns: new EveCaptainChannelTurnPort({
-          baseUrl: process.env.CLANKIE_CAPTAIN_URL ?? "http://127.0.0.1:4321",
-          ceremonyProjection: projectCaptainCeremony(doctrine),
-          ...(captainToken === undefined ? {} : { captainToken }),
-        }),
       }),
+  captainChannelTurns,
   ...(linearAttentionRuntime === undefined
     ? {}
     : {

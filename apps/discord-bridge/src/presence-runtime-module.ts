@@ -33,9 +33,14 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
       const guildIds = "guildId" in write.payload ? [write.payload.guildId] : [];
       const channelIds = "channelId" in write.payload ? [write.payload.channelId] : [];
       const principalId = write.identity.workerRunId ?? write.identity.characterId;
+      // Capability grants predate ambient presence scopes and retain a missionId
+      // field. Keep non-mission grants isolated under the stable presence session;
+      // this value is never promoted to mission state or an approval record.
+      const capabilityScopeId =
+        write.identity.missionId ?? `discord-presence:${write.identity.presenceSessionId ?? "unknown"}`;
       const request = {
         principalId,
-        missionId: write.identity.missionId,
+        missionId: capabilityScopeId,
         profileHash: write.identity.profileHash,
         capability: "discord.presence.act" as const,
         guildIds,

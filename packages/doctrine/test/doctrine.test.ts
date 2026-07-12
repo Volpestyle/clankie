@@ -294,6 +294,31 @@ describe("doctrine", () => {
     }
   });
 
+  it("keeps ambient presence rate attribution separate from mission attribution", async () => {
+    const doctrine = compileDoctrine([await loadDoctrineFile(resolve(profileDirectory, "rawdog.yaml"))]);
+    const narrativePolicy = createNarrativeWritePolicy(doctrine, { now: () => 0 });
+    const action = "discord.presence.reply";
+    const classification = createConnectorActionClassifier([
+      { action, riskClass: "narrative-write", narrativeKind: "discord-reply" },
+    ])(action)!;
+    const decision = narrativePolicy.decide({
+      request: { ...trackerRequest(doctrine, action), resource: { type: "discord-channel", id: "dm-1" } },
+      classification,
+      correlationId: "discord-message:1",
+      content: "Hello",
+      attribution: { kind: "presence", id: "discord:dm:dm-1" },
+    });
+
+    expect(decision).toMatchObject({ effect: "allow" });
+    expect(decision.obligations).toEqual(
+      expect.arrayContaining([
+        "record_presence_attribution:discord:dm:dm-1",
+        "record_correlation_attribution:discord-message:1",
+      ]),
+    );
+    expect(decision.obligations).not.toContain("record_mission_attribution:mission-narrative");
+  });
+
   it("keeps tracker authority mutations gated and unknown mutations fail closed for the same identity", async () => {
     for (const id of ["rawdog", "structured", "fine-control"]) {
       const doctrine = compileDoctrine([await loadDoctrineFile(resolve(profileDirectory, `${id}.yaml`))]);

@@ -1,7 +1,7 @@
 # ADR 0024: Dual Discord planes and transport-agnostic presence
 
 Status: accepted (James, 2026-07-11; Go Live/user-session scope confirmed 2026-07-12 in
-VUH-751). P1 **outbound** bot-transport policy path implemented.
+VUH-751). P1 outbound and P2 bounded text ingress are implemented.
 
 ## Context
 
@@ -69,13 +69,13 @@ user. Runtime binding + phase + doctrine select availability. Go Live requires
 | ADR + protocol stubs                                                                      | done                                                                                                                                                                                                                                                                                                                                                                      |
 | **P1 outbound bot-transport** via `POST /v1/discord/presence-actions` + bot REST executor | **done** — policy-gated catalog execution only; not free-form DM/chat ingress                                                                                                                                                                                                                                                                                             |
 | **P1.5 publish-external completion**                                                      | Attachments follow `require_approval` → bounded `ApprovalRequest` → authenticated resume → exact-idempotency-key re-execution. Denied and expired requests remain terminal. Approval records and semantic events retain only the artifact reference and write hash; the privileged bot runtime resolves and verifies bytes. Go Live remains unavailable on bot transport. |
-| **P2 ingress** (channel-turn / DM / mention → Eve bounded turn)                           | **next explicit task** — `DiscordPresenceChannelTurnRequestSchema` is frozen for this path but not yet consumed by a gateway handler or control-plane turn route                                                                                                                                                                                                          |
+| **P2 ingress** (channel-turn / DM / mention → Eve bounded turn)                           | **implemented** — explicit opt-in Message Content intent, deny-by-default guild/channel and DM policy, Discord text only in ephemeral Eve `clientContext`, a content-free durable message, no retained continuation cursor, authenticated `discord_presence` lane addressing, and policy-gated reply. Live bot verification remains a separate gate.                      |
 | P2 user_session transport                                                                 | **kept follow-up** — VUH-836, isolated personal-lab runtime                                                                                                                                                                                                                                                                                                               |
 | P3 Go Live watch media                                                                    | **kept follow-up** — VUH-840, bounded sampled observations                                                                                                                                                                                                                                                                                                                |
 | P3 Go Live publish media                                                                  | **kept follow-up** — VUH-841, governed video playback/rendered surfaces                                                                                                                                                                                                                                                                                                   |
 | P4 mission coupling                                                                       | later                                                                                                                                                                                                                                                                                                                                                                     |
 
-P1 does **not** deliver “DM Clankie and he responds.” That is P2 ingress.
+Ambient turns without mission coupling carry a stable `presenceSessionId`. Narrative writes use that first-class scope for rate and correlation attribution; they do not fabricate mission events. Non-narrative writes continue to require real mission attribution.
 
 ### Session phase (P1 pin)
 
@@ -89,8 +89,8 @@ presence session state.
   ledger (content may be omitted and derived for react/typing), publish-external stops at
   doctrine decision without approval minting (explicit debt), bot executor lives in
   `apps/discord-bridge` and loads via `CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE`.
-- User-session credentials, Go Live media, and inbound channel turns remain out of P1. They are
-  retained in v2 through separately gated follow-ups rather than folded into the bot executor.
+- User-session credentials and Go Live media remain separately gated follow-ups rather than being folded into the bot executor.
+- P2 text ingress requests Message Content only under explicit configuration, fetches bounded context only after admission, keeps Discord text in Eve's ephemeral `clientContext` rather than durable session history, excludes raw message bodies from ingress evidence, and returns settled text through the existing bot presence policy path.
 - VUH-836 owns the secondary user-session process, credential isolation, explicit opt-in event,
   deny-by-default profiles, and the invariant that bot and user-session transports never co-own a
   voice/media session.

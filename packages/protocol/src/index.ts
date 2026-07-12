@@ -907,6 +907,8 @@ export const DiscordPresenceChannelIdentitySchema = z
     missionId: MissionIdSchema.optional(),
     taskId: TaskIdSchema.optional(),
     workerRunId: WorkerRunIdSchema.optional(),
+    /** Stable bounded-turn scope when ambient presence is not coupled to a mission. */
+    presenceSessionId: z.string().min(1).optional(),
     correlationId: z.string().min(1),
     profileHash: z.string().min(1),
     characterId: CharacterIdSchema,
@@ -949,7 +951,16 @@ export const DiscordPresenceChannelTurnRequestSchema = z
       .max(DISCORD_PRESENCE_CONTEXT_MESSAGES_MAX)
       .default([]),
   })
-  .strict();
+  .strict()
+  .superRefine((request, context) => {
+    if (request.identity.missionId === undefined && request.identity.presenceSessionId === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["identity", "presenceSessionId"],
+        message: "Discord channel turns require missionId or presenceSessionId attribution",
+      });
+    }
+  });
 export type DiscordPresenceChannelTurnRequest = z.infer<typeof DiscordPresenceChannelTurnRequestSchema>;
 
 export const DiscordPresenceActionRequestSchema = z.discriminatedUnion("kind", [
@@ -1054,10 +1065,7 @@ export const DiscordPresenceWriteSchema = z
     schemaVersion: z.literal(1),
     idempotencyKey: z.string().min(1),
     action: DiscordPresenceActionSchema,
-    identity: DiscordPresenceChannelIdentitySchema.extend({
-      missionId: MissionIdSchema,
-      transportKind: z.literal("bot"),
-    }).strict(),
+    identity: DiscordPresenceChannelIdentitySchema.extend({ transportKind: z.literal("bot") }).strict(),
     /**
      * Optional ledger attribution. When omitted, `resolveDiscordPresenceLedgerContent`
      * derives a non-empty string from the payload (emoji, filename, typing sentinel, …).
@@ -1073,6 +1081,23 @@ export const DiscordPresenceWriteSchema = z
         code: "custom",
         path: ["payload", "kind"],
         message: `${write.action} requires payload kind ${expectedKind}`,
+      });
+    }
+    if (write.identity.missionId === undefined && write.identity.presenceSessionId === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["identity", "presenceSessionId"],
+        message: "Discord presence writes require missionId or presenceSessionId attribution",
+      });
+    }
+    if (
+      DISCORD_PRESENCE_ACTION_RISK_CLASS[write.action] !== "narrative-write" &&
+      write.identity.missionId === undefined
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["identity", "missionId"],
+        message: "Non-narrative Discord presence writes require mission attribution",
       });
     }
   });

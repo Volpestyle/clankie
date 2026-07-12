@@ -2,6 +2,46 @@ import { describe, expect, it, vi } from "vitest";
 import { ClankieApiClient } from "../src/index.ts";
 
 describe("ClankieApiClient runner surface", () => {
+  it("authenticates bounded Discord presence channel turns", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe("http://127.0.0.1:4310/v1/captain/channel-turns");
+      expect(init?.headers).toMatchObject({ authorization: "Bearer captain-secret" });
+      expect(JSON.parse(String(init?.body))).toMatchObject({
+        deliveryId: "message-1",
+        identity: { presenceSessionId: "discord:dm:dm-1" },
+        trigger: { kind: "dm", body: "hello" },
+      });
+      return Response.json({
+        state: "settled",
+        captainSessionId: "eve-session-1",
+        turnId: "turn-1",
+        response: "Hi there.",
+      });
+    });
+    const client = new ClankieApiClient({
+      baseUrl: "http://127.0.0.1:4310",
+      fetchImpl,
+      captainToken: "captain-secret",
+    });
+
+    await expect(
+      client.submitDiscordCaptainChannelTurn({
+        schemaVersion: 1,
+        deliveryId: "message-1",
+        identity: {
+          presenceSessionId: "discord:dm:dm-1",
+          correlationId: "discord-message:message-1",
+          profileHash: "profile-1",
+          characterId: "clankie",
+          credentialRef: "discord_bot",
+          transportKind: "bot",
+        },
+        trigger: { kind: "dm", id: "message-1", channelId: "dm-1", actorId: "james", body: "hello" },
+        contextMessages: [],
+      }),
+    ).resolves.toMatchObject({ state: "settled", response: "Hi there." });
+  });
+
   it("carries issue comments through the credential-free narrative route", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
       expect(String(input)).toBe("http://127.0.0.1:4310/v1/tracker/narratives");

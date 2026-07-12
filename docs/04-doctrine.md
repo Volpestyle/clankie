@@ -109,7 +109,7 @@ The operator-authored MCP registry (`CLANKIE_MCP_REGISTRY`, `@clankie/mcp-regist
 - emoji reactions;
 - Discord presence reply, react, unreact, send-message, and typing ([ADR 0024](adr/0024-discord-dual-plane-presence.md)).
 
-The three ceremony presets allow this class without human approval. Every allow decision records the mission and correlation attribution and carries the configured rate/volume obligation. The trusted narrative evaluator enforces a fixed 60-second mission window of at most 20 writes, 16,384 bytes per write, and 65,536 bytes in the window. Correlation rotation does not reset the mission window.
+The three ceremony presets allow this class without human approval. Every allow decision records its mission or ambient presence-session attribution plus correlation attribution and carries the configured rate/volume obligation. The trusted narrative evaluator enforces a fixed 60-second attribution window of at most 20 writes, 16,384 bytes per write, and 65,536 bytes in the window. Correlation rotation does not reset the attribution window.
 
 Tracker assignment mirrors retain their existing reversible posture. Status transitions, priority edits, acceptance-criteria edits, and completion-state changes have exact `require_approval` policies backed by the invariant authority floor, so a lower layer cannot convert them to `allow`. A new tracker mutation that is not named by doctrine is denied even when connector metadata describes it as a generic reversible write. Tracker reads retain the ordinary `read` posture.
 
@@ -178,7 +178,7 @@ rawdog authority roles + no connectors → operator/local bindings resolve
 unclassified unknown action → denied
 lower mission layer tries to allow org-denied action → still denied
 narrative write without the trusted rate ledger → denied
-whitelisted narrative write within its mission window → allowed with mission/correlation obligations
+whitelisted narrative write within its attribution window → allowed with mission-or-presence/correlation obligations
 tracker authority mutation or unknown tracker mutation → approval required or denied
 ```
 

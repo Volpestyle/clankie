@@ -773,6 +773,8 @@ export interface NarrativeWriteAttempt {
   classification: ActionClassification;
   correlationId: string;
   content: string;
+  /** Defaults to the request mission; ambient presence may supply its own durable lane scope. */
+  attribution?: { kind: "mission" | "presence"; id: string };
 }
 
 export interface NarrativeWritePolicyEvaluator {
@@ -800,7 +802,7 @@ export function createNarrativeWritePolicy(
   options: NarrativeWritePolicyOptions = {},
 ): NarrativeWritePolicyEvaluator {
   const now = options.now ?? Date.now;
-  const usageByMission = new Map<string, NarrativeUsageWindow>();
+  const usageByAttribution = new Map<string, NarrativeUsageWindow>();
   let lastPrunedWindow: number | undefined;
 
   return {
@@ -869,13 +871,18 @@ export function createNarrativeWritePolicy(
       }
 
       const window = Math.floor(now() / (guardrail.windowSeconds * 1_000));
+      const attribution = attempt.attribution ?? {
+        kind: "mission" as const,
+        id: request.context.missionId,
+      };
+      const attributionKey = `${attribution.kind}:${attribution.id}`;
       if (lastPrunedWindow !== window) {
-        for (const [missionId, usage] of usageByMission) {
-          if (usage.window !== window) usageByMission.delete(missionId);
+        for (const [scope, usage] of usageByAttribution) {
+          if (usage.window !== window) usageByAttribution.delete(scope);
         }
         lastPrunedWindow = window;
       }
-      const current = usageByMission.get(request.context.missionId);
+      const current = usageByAttribution.get(attributionKey);
       const usage = current?.window === window ? current : { window, writes: 0, bytes: 0 };
       if (usage.writes + 1 > guardrail.maxWritesPerWindow) {
         return narrativeGuardrailDenial(
@@ -892,7 +899,7 @@ export function createNarrativeWritePolicy(
         );
       }
 
-      usageByMission.set(request.context.missionId, {
+      usageByAttribution.set(attributionKey, {
         window,
         writes: usage.writes + 1,
         bytes: usage.bytes + contentBytes,
@@ -902,7 +909,7 @@ export function createNarrativeWritePolicy(
         matchedPolicyIds: [...decision.matchedPolicyIds, "narrative-write:guardrail"],
         obligations: uniqueStrings([
           ...decision.obligations,
-          `record_mission_attribution:${request.context.missionId}`,
+          `record_${attribution.kind}_attribution:${attribution.id}`,
           `record_correlation_attribution:${correlation.data}`,
           `enforce_narrative_guardrail:${guardrail.maxWritesPerWindow}/${guardrail.windowSeconds}s:${guardrail.maxBytesPerWindow}b`,
         ]),

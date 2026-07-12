@@ -3,6 +3,7 @@ import {
   ActionDecisionSchema,
   CaptainChannelTurnResultSchema,
   CaptainPresenceReportSchema,
+  DiscordPresenceChannelTurnRequestSchema,
   DiscordPresenceWriteResultSchema,
   DiscordPresenceWriteSchema,
   LinearChannelTurnRequestSchema,
@@ -18,6 +19,7 @@ import {
   type CaptainChannelTurnResult,
   type DiscordPresenceWrite,
   type DiscordPresenceWriteResult,
+  type DiscordPresenceChannelTurnRequest,
   type LinearChannelTurnRequest,
   type MissionPlan,
   type TaskSpec,
@@ -120,6 +122,13 @@ export interface RecoveryPairRequest {
   reverify: TaskSpec;
 }
 
+export interface ControlPlaneHealth {
+  ok: true;
+  service: "clankie-control-plane";
+  doctrine: string;
+  profileHash: string;
+}
+
 export class ClankieApiClient {
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
@@ -199,6 +208,10 @@ export class ClankieApiClient {
     return this.request(`/v1/missions/${missionId}`);
   }
 
+  public async getHealth(): Promise<ControlPlaneHealth> {
+    return this.request<ControlPlaneHealth>("/health");
+  }
+
   public async requestAction(input: ActionRequest) {
     const result = await this.request<unknown>("/v1/actions/decide", {
       method: "POST",
@@ -212,6 +225,19 @@ export class ClankieApiClient {
     const request = LinearChannelTurnRequestSchema.parse(input);
     const result = await this.request<unknown>("/v1/captain/channel-turns", {
       method: "POST",
+      body: JSON.stringify(request),
+    });
+    return CaptainChannelTurnResultSchema.parse(result);
+  }
+
+  /** Submits a bounded, ambient Discord text turn through the authenticated captain lane. */
+  public async submitDiscordCaptainChannelTurn(
+    input: DiscordPresenceChannelTurnRequest,
+  ): Promise<CaptainChannelTurnResult> {
+    const request = DiscordPresenceChannelTurnRequestSchema.parse(input);
+    const result = await this.request<unknown>("/v1/captain/channel-turns", {
+      method: "POST",
+      headers: this.captainHeaders(),
       body: JSON.stringify(request),
     });
     return CaptainChannelTurnResultSchema.parse(result);

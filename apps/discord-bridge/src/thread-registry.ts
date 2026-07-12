@@ -6,8 +6,9 @@ const THREAD_PREFIX = "clankie-";
 const LEGACY_GUILD_SCOPE = "local-test-scope";
 
 export const ZERO_RETENTION_STATUS =
-  "Discord transcript retention is **off**. The bridge does not request message-content access, " +
-  "capture channel transcripts, infer speaker memory, or retain slash-command text after forwarding it. " +
+  "Discord transcript retention is **off**. The bridge does not persist channel transcripts, infer speaker memory, " +
+  "or retain slash-command text after forwarding it. Message-content access is requested only when bounded text ingress is explicitly enabled; " +
+  "the trigger and configured context are turn-only and excluded from ingress evidence. " +
   "It keeps only a thread-to-mission correlation and projected lifecycle counters while the thread is bound.";
 
 export interface MissionThreadBinding {

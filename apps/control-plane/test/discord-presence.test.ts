@@ -75,6 +75,34 @@ describe("Discord presence control-plane runtime (ADR 0024 P1)", () => {
     expect(runtime.writes).toHaveLength(1);
   });
 
+  it("allows ambient narrative replies under presence-session attribution without a mission", async () => {
+    const runtime = new RecordingPresenceRuntime();
+    const app = await createControlPlane({ doctrine, discordPresenceRuntime: runtime });
+    const write = presenceWrite({
+      idempotencyKey: "presence-ambient-reply",
+      action: "discord.presence.reply",
+      payload: {
+        kind: "reply",
+        channelId: "dm-1",
+        messageId: "message-1",
+        content: "Hello from the presence lane.",
+      },
+    });
+
+    const response = await post(app, "/v1/discord/presence-actions", {
+      ...write,
+      identity: {
+        ...write.identity,
+        missionId: undefined,
+        presenceSessionId: "discord:dm:dm-1",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(runtime.writes[0]?.identity).toMatchObject({ presenceSessionId: "discord:dm:dm-1" });
+    expect(runtime.writes[0]?.identity.missionId).toBeUndefined();
+  });
+
   it("deduplicates by idempotency key and conflicts on payload drift", async () => {
     const runtime = new RecordingPresenceRuntime();
     const app = await createControlPlane({

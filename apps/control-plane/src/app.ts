@@ -36,6 +36,7 @@ import {
   ActionRequestSchema,
   CaptainChannelTurnResultSchema,
   CaptainPresenceReportSchema,
+  DiscordPresenceChannelTurnRequestSchema,
   DiscordPresenceWriteSchema,
   resolveDiscordPresenceLedgerContent,
   LinearChannelTurnRequestSchema,
@@ -1295,7 +1296,11 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
                       : write.action,
               },
         context: {
-          missionId: write.identity.missionId,
+          // ActionRequest v1 requires a policy scope in its missionId slot. Ambient
+          // narrative writes use a first-class presence attribution in the retained
+          // narrative ledger and are never recorded as mission events.
+          missionId:
+            write.identity.missionId ?? `discord-presence:${write.identity.presenceSessionId ?? "unknown"}`,
           ...(write.identity.taskId === undefined ? {} : { taskId: write.identity.taskId }),
           risk: classification.riskClass === "publish-external" ? "high" : "low",
           profileHash: write.identity.profileHash,
@@ -1338,6 +1343,14 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
                 classification,
                 correlationId: write.identity.correlationId,
                 content: ledgerContent,
+                ...(write.identity.missionId === undefined && write.identity.presenceSessionId !== undefined
+                  ? {
+                      attribution: {
+                        kind: "presence" as const,
+                        id: write.identity.presenceSessionId,
+                      },
+                    }
+                  : {}),
               })
             : decideAction(dependencies.doctrine, evaluatedRequest, classification);
 
@@ -1355,7 +1368,10 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
         logger.warn(
           {
             service: "clankie-control-plane",
-            missionId: write.identity.missionId,
+            ...(write.identity.missionId === undefined ? {} : { missionId: write.identity.missionId }),
+            ...(write.identity.presenceSessionId === undefined
+              ? {}
+              : { presenceSessionId: write.identity.presenceSessionId }),
             correlationId: write.identity.correlationId,
             action: write.action,
             effect: decision.effect,
@@ -1375,7 +1391,10 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
         logger.info(
           {
             service: "clankie-control-plane",
-            missionId: write.identity.missionId,
+            ...(write.identity.missionId === undefined ? {} : { missionId: write.identity.missionId }),
+            ...(write.identity.presenceSessionId === undefined
+              ? {}
+              : { presenceSessionId: write.identity.presenceSessionId }),
             correlationId: write.identity.correlationId,
             action: write.action,
             transportKind: result.transportKind,
@@ -1394,31 +1413,58 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
   });
 
   app.post("/v1/captain/channel-turns", async (context) => {
-    if (!dependencies.linearAgentRuntime || !dependencies.captainChannelTurns) {
+    if (!dependencies.captainChannelTurns) {
       return context.json({ error: "captain_channel_runtime_unavailable" }, 503);
     }
-    const linearAgentRuntime = dependencies.linearAgentRuntime;
     const captainChannelTurns = dependencies.captainChannelTurns;
-    const parsed = LinearChannelTurnRequestSchema.safeParse(await readJson(context.req.raw));
-    if (!parsed.success) return context.json({ error: "invalid_captain_channel_turn" }, 400);
-    const request = parsed.data;
+    const body = await readJson(context.req.raw);
+    const linear = LinearChannelTurnRequestSchema.safeParse(body);
+    const parsedTurn = linear.success
+      ? { provider: "linear" as const, request: linear.data }
+      : (() => {
+          const discord = DiscordPresenceChannelTurnRequestSchema.safeParse(body);
+          return discord.success ? { provider: "discord" as const, request: discord.data } : undefined;
+        })();
+    if (parsedTurn === undefined) {
+      return context.json({ error: "invalid_captain_channel_turn" }, 400);
+    }
+    const { request, provider } = parsedTurn;
+    if (provider === "linear" && !dependencies.linearAgentRuntime) {
+      return context.json({ error: "linear_agent_runtime_unavailable" }, 503);
+    }
+    if (provider === "discord") {
+      const captain = await authenticateCaptain(context.req.raw, dependencies);
+      if (captain === "unavailable") return context.json({ error: "captain_execution_unavailable" }, 503);
+      if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
+      if (captain.steerSourceLane !== "discord_text") {
+        return context.json({ error: "discord_channel_authority_required" }, 403);
+      }
+    }
     if (request.identity.profileHash !== dependencies.doctrine.profileHash) {
       return context.json({ error: "doctrine_hash_mismatch" }, 409);
     }
     const fingerprint = createHash("sha256").update(JSON.stringify(request)).digest("hex");
     pruneExpired(captainTurnResults, clock().getTime());
-    const previous = captainTurnResults.get(request.deliveryId);
+    const deliveryKey = `${provider}:${request.deliveryId}`;
+    const previous = captainTurnResults.get(deliveryKey);
     if (previous !== undefined && previous.fingerprint !== fingerprint) {
       return context.json({ error: "captain_turn_idempotency_conflict" }, 409);
     }
     const turn =
       previous?.result ??
       (async () => {
-        const thread = await linearAgentRuntime.readThread(request);
-        return CaptainChannelTurnResultSchema.parse(await captainChannelTurns.submit({ request, thread }));
+        if (parsedTurn.provider === "linear") {
+          const thread = await dependencies.linearAgentRuntime!.readThread(parsedTurn.request);
+          return CaptainChannelTurnResultSchema.parse(
+            await captainChannelTurns.submit({ request: parsedTurn.request, thread }),
+          );
+        }
+        return CaptainChannelTurnResultSchema.parse(
+          await captainChannelTurns.submit({ request: parsedTurn.request }),
+        );
       })();
     if (previous === undefined) {
-      captainTurnResults.set(request.deliveryId, {
+      captainTurnResults.set(deliveryKey, {
         fingerprint,
         result: turn,
         expiresAtMs: clock().getTime() + LINEAR_DELIVERY_RETENTION_MS,
@@ -1429,19 +1475,24 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       logger.info(
         {
           service: "clankie-control-plane",
-          missionId: request.identity.missionId,
-          taskId: request.identity.taskId,
-          workerRunId: request.identity.workerRunId,
+          ...(request.identity.missionId === undefined ? {} : { missionId: request.identity.missionId }),
+          ...(request.identity.taskId === undefined ? {} : { taskId: request.identity.taskId }),
+          ...(request.identity.workerRunId === undefined
+            ? {}
+            : { workerRunId: request.identity.workerRunId }),
+          ...(!("presenceSessionId" in request.identity) || request.identity.presenceSessionId === undefined
+            ? {}
+            : { presenceSessionId: request.identity.presenceSessionId }),
           correlationId: request.identity.correlationId,
           deliveryId: request.deliveryId,
           state: result.state,
         },
-        "Linear channel captain turn settled",
+        `${provider === "linear" ? "Linear" : "Discord"} channel captain turn settled`,
       );
       return context.json(result);
     } catch {
-      if (captainTurnResults.get(request.deliveryId)?.result === turn) {
-        captainTurnResults.delete(request.deliveryId);
+      if (captainTurnResults.get(deliveryKey)?.result === turn) {
+        captainTurnResults.delete(deliveryKey);
       }
       return context.json({ error: "captain_channel_turn_failed" }, 502);
     }

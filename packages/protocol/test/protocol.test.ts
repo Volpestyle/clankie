@@ -377,21 +377,38 @@ describe("protocol", () => {
     expect(resolveDiscordPresenceLedgerContent({ payload: { kind: "typing_start", channelId: "c" } })).toBe(
       "typing",
     );
-    // Channel-turn schema is frozen for P2 ingress; not consumed by a route yet.
+    const ambientTurn = DiscordPresenceChannelTurnRequestSchema.parse({
+      schemaVersion: 1,
+      deliveryId: "d1",
+      identity: {
+        presenceSessionId: "discord:dm:dm1",
+        correlationId: "c1",
+        profileHash: "p1",
+        characterId: "clankie",
+        credentialRef: "broker:discord_bot:lab",
+        transportKind: "bot",
+      },
+      trigger: { kind: "dm", id: "m1", channelId: "dm1", actorId: "u1", body: "hey" },
+    });
+    expect(ambientTurn.trigger.kind).toBe("dm");
     expect(
-      DiscordPresenceChannelTurnRequestSchema.parse({
+      DiscordPresenceWriteSchema.parse({
         schemaVersion: 1,
-        deliveryId: "d1",
-        identity: {
-          correlationId: "c1",
-          profileHash: "p1",
-          characterId: "clankie",
-          credentialRef: "broker:discord_bot:lab",
-          transportKind: "bot",
-        },
-        trigger: { kind: "dm", id: "m1", channelId: "dm1", actorId: "u1", body: "hey" },
-      }).trigger.kind,
-    ).toBe("dm");
+        idempotencyKey: "ambient-reply",
+        action: "discord.presence.reply",
+        identity: ambientTurn.identity,
+        payload: { kind: "reply", channelId: "dm1", messageId: "m1", content: "hello" },
+      }).identity.presenceSessionId,
+    ).toBe("discord:dm:dm1");
+    expect(() =>
+      DiscordPresenceWriteSchema.parse({
+        schemaVersion: 1,
+        idempotencyKey: "ambient-thread",
+        action: "discord.presence.create_thread",
+        identity: ambientTurn.identity,
+        payload: { kind: "create_thread", channelId: "dm1", messageId: "m1", name: "nope" },
+      }),
+    ).toThrow(/mission attribution/);
   });
 
   it("binds missions and tasks to the same gameplay world contract", () => {
