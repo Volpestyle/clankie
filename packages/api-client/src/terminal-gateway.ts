@@ -162,6 +162,11 @@ export class TerminalGatewayClient {
       if (message.type !== "terminal.discovery" || message.requestId !== requestId) {
         throw new TerminalGatewayClientError("unexpected_message");
       }
+      // An observe-only client cannot proceed without the observe grant: reject a
+      // correlated discovery whose granted scopes omit observe before mapping.
+      if (!message.grantedScopes.includes("observe")) {
+        throw new TerminalGatewayClientError("unexpected_message");
+      }
       return message.sessions.map(mapSession);
     } finally {
       await safeClose(duplex);
@@ -210,6 +215,10 @@ async function* driveObserve(
     }
     const parsed = TerminalServerMessageSchema.safeParse(result.value);
     if (!parsed.success) throw new TerminalGatewayClientError("malformed_server_message");
+    // A schema-valid terminal.error is a gateway failure in every phase — initial
+    // subscribe, initial resume, resync ack, the required snapshot phase, and the
+    // tail — so classify it once here rather than as a phase-specific surprise.
+    if (parsed.data.type === "terminal.error") throw new TerminalGatewayClientError("gateway_error");
     return parsed.data;
   }
 
@@ -360,7 +369,11 @@ async function* driveObserve(
         if (snapshot.type !== "terminal.snapshot") {
           throw new TerminalGatewayClientError("snapshot_required");
         }
-        yield* consumeSnapshotEvent(snapshot);
+        // Resume snapshot fence: a server-chosen snapshot must restore state at or
+        // beyond the requested cursor N. A lower boundary regresses the app view to
+        // a stale sequence, so require boundary.afterSequence >= N (same floor
+        // mechanism as geometry resync).
+        yield* consumeSnapshotEvent(snapshot, request.afterSequence);
       } else {
         // Retained replay/live must tail strictly after N: the acknowledged
         // cursor has to equal the requested resume cursor, or a lower cursor
@@ -433,10 +446,8 @@ async function* driveObserve(
         yield* recoverViaResync(wireCursor, "reconnect");
         break;
       }
-      case "terminal.error": {
-        throw new TerminalGatewayClientError("gateway_error");
-      }
       default: {
+        // terminal.error is already classified as gateway_error in nextServerMessage.
         throw new TerminalGatewayClientError("unexpected_message");
       }
     }

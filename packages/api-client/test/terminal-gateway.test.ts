@@ -289,6 +289,38 @@ describe("TerminalGatewayClient.listSessions", () => {
     });
     await expect(client.listSessions()).rejects.toMatchObject({ code: "unexpected_message" });
   });
+
+  it("rejects a correlated discovery whose granted scopes omit observe", async () => {
+    const { client } = makeClient((sent, context) => {
+      if (sent.type === "terminal.discover") {
+        context.push({
+          protocolVersion: 1,
+          type: "terminal.discovery",
+          requestId: sent.requestId,
+          grantedScopes: ["control"],
+          sessions: [discoverySession("t-runner", "runner_pty", "Runner PTY")],
+        });
+      }
+    });
+    await expect(client.listSessions()).rejects.toMatchObject({ code: "unexpected_message" });
+  });
+
+  it("accepts a discovery whose granted scopes include observe alongside control", async () => {
+    const { client } = makeClient((sent, context) => {
+      if (sent.type === "terminal.discover") {
+        context.push({
+          protocolVersion: 1,
+          type: "terminal.discovery",
+          requestId: sent.requestId,
+          grantedScopes: ["observe", "control"],
+          sessions: [discoverySession("t-runner", "runner_pty", "Runner PTY")],
+        });
+      }
+    });
+    await expect(client.listSessions()).resolves.toMatchObject([
+      { terminalId: "t-runner", source: "runner" },
+    ]);
+  });
 });
 
 describe("TerminalGatewayClient.observe fresh subscribe", () => {
@@ -676,6 +708,104 @@ describe("TerminalGatewayClient.observe cursor integrity", () => {
     ]);
     const resync = getDuplex().sent.find((message) => message.type === "terminal.resync");
     expect(resync).toMatchObject({ cursor: { sequence: 1 }, cause: "reconnect" });
+  });
+
+  it("rejects a resume snapshot whose boundary regresses below the requested cursor (probe D)", async () => {
+    const { client } = makeClient((sent, context) => {
+      if (sent.type === "terminal.resume") {
+        context.push(
+          subscribedMessage({ requestId: sent.requestId, initialDelivery: "snapshot", cursor: 5 }),
+        );
+        context.push(snapshotMessage({ afterSequence: 2 })); // boundary 2 < requested 5
+        context.push(outputMessage(3));
+      }
+    });
+    await expect(
+      collect(client.observe({ terminalId, afterSequence: 5, signal: new AbortController().signal })),
+    ).rejects.toMatchObject({ code: "unexpected_message" });
+  });
+
+  it("accepts a resume snapshot whose boundary equals the requested cursor", async () => {
+    const { client } = makeClient((sent, context) => {
+      if (sent.type === "terminal.resume") {
+        context.push(
+          subscribedMessage({ requestId: sent.requestId, initialDelivery: "snapshot", cursor: 5 }),
+        );
+        context.push(snapshotMessage({ afterSequence: 5 })); // boundary == requested 5
+        context.push(outputMessage(6));
+        context.push(closedMessage(7));
+      }
+    });
+
+    const events = await collect(
+      client.observe({ terminalId, afterSequence: 5, signal: new AbortController().signal }),
+    );
+
+    expect(eventTypes(events)).toEqual(["capabilities", "snapshot", "output", "closed"]);
+    expect(events[1]).toMatchObject({ snapshot: { boundary: { afterSequence: 5 } } });
+    expect(events[2]).toMatchObject({ frame: { sequence: 6 } });
+  });
+});
+
+describe("TerminalGatewayClient.observe gateway error classification", () => {
+  const gatewayError = (requestId?: string) => ({
+    protocolVersion: 1,
+    type: "terminal.error",
+    requestId: requestId ?? null,
+    terminalId,
+    code: "internal",
+    message: "server-detail-must-not-leak",
+    retryable: false,
+  });
+
+  async function expectGatewayError(iterable: AsyncIterable<TerminalGatewayStreamEvent>): Promise<void> {
+    let caught: unknown;
+    try {
+      await collect(iterable);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(TerminalGatewayClientError);
+    expect((caught as TerminalGatewayClientError).code).toBe("gateway_error");
+    expect((caught as TerminalGatewayClientError).message).not.toContain("server-detail-must-not-leak");
+  }
+
+  it("classifies terminal.error during the initial subscribe as gateway_error", async () => {
+    const { client } = makeClient((sent, context) => {
+      if (sent.type === "terminal.subscribe") context.push(gatewayError(sent.requestId));
+    });
+    await expectGatewayError(client.observe({ terminalId, signal: new AbortController().signal }));
+  });
+
+  it("classifies terminal.error during the initial resume as gateway_error", async () => {
+    const { client } = makeClient((sent, context) => {
+      if (sent.type === "terminal.resume") context.push(gatewayError(sent.requestId));
+    });
+    await expectGatewayError(
+      client.observe({ terminalId, afterSequence: 5, signal: new AbortController().signal }),
+    );
+  });
+
+  it("classifies terminal.error during the resync ack as gateway_error", async () => {
+    const { client } = makeClient((sent, context) => {
+      if (sent.type === "terminal.resume") context.push(resyncRequiredMessage(5));
+      else if (sent.type === "terminal.resync") context.push(gatewayError(sent.requestId));
+    });
+    await expectGatewayError(
+      client.observe({ terminalId, afterSequence: 5, signal: new AbortController().signal }),
+    );
+  });
+
+  it("classifies terminal.error during the required snapshot phase as gateway_error", async () => {
+    const { client } = makeClient((sent, context) => {
+      if (sent.type === "terminal.subscribe") {
+        context.push(
+          subscribedMessage({ requestId: sent.requestId, initialDelivery: "snapshot", cursor: 0 }),
+        );
+        context.push(gatewayError()); // expected snapshot, gateway error instead
+      }
+    });
+    await expectGatewayError(client.observe({ terminalId, signal: new AbortController().signal }));
   });
 });
 
