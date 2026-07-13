@@ -57,6 +57,40 @@ export interface TerminalManagerOptions {
   onHumanControlChanged?: (workerRunId: string, active: boolean) => void;
 }
 
+/** Authoritative closure identity retained independently of replay eviction. */
+export interface TerminalClosure {
+  sequence: number;
+  reason: "exited" | "terminated";
+  exitCode: number | null;
+  signal: null;
+  closedAt: string;
+}
+
+/** Atomic read-only manager state used by the terminal wire gateway. */
+export interface TerminalObservation {
+  terminalId: string;
+  workerRunId: string;
+  title: string;
+  source: TerminalAttemptContext["source"];
+  columns: number;
+  rows: number;
+  lastSequence: number;
+  retainedFromSequence: number;
+  snapshot: { sequence: number; data: string; columns: number; rows: number };
+  closure: TerminalClosure | null;
+}
+
+/** Current serialized VT state at one parser-quiescent sequence boundary. */
+export interface TerminalSnapshotProjection {
+  sequence: number;
+  data: string;
+  columns: number;
+  rows: number;
+  closure: TerminalClosure | null;
+}
+
+export type TerminalResumeDisposition = "replay" | "live" | "unavailable";
+
 interface BufferedFrame {
   frame: TerminalFrame;
   bytes: number;
@@ -67,6 +101,7 @@ interface Observer {
   done: boolean;
   resync: boolean;
   replayNextSequence: number | undefined;
+  aborted: boolean;
 }
 interface TerminalRecord {
   session: TerminalSession;
@@ -82,6 +117,8 @@ interface TerminalRecord {
   humanControl: boolean;
   parserBoundary: ParserBoundary;
   snapshot: { sequence: number; data: string; columns: number; rows: number };
+  closure: TerminalClosure | null;
+  snapshotWaiters: Set<() => void>;
 }
 
 class ParserBoundary {
@@ -214,6 +251,8 @@ export class TerminalManager implements TerminalProvider {
         columns,
         rows,
       },
+      closure: null,
+      snapshotWaiters: new Set(),
     };
     this.terminals.set(id, record);
     transport.onData((chunk) => {
@@ -253,7 +292,154 @@ export class TerminalManager implements TerminalProvider {
     );
   }
 
-  public async *observe(terminalId: string, fromSequence?: number): AsyncIterable<TerminalFrame> {
+  public observation(terminalId: string): TerminalObservation {
+    return this.observeState(this.mustGet(terminalId));
+  }
+
+  public openObservations(): TerminalObservation[] {
+    return [...this.terminals.values()]
+      .filter((record) => !record.closed)
+      .map((record) => this.observeState(record));
+  }
+
+  public resumeDisposition(terminalId: string, fromSequence: number): TerminalResumeDisposition {
+    const record = this.mustGet(terminalId);
+    if (!this.isResumable(record, fromSequence)) return "unavailable";
+    return record.frames.some(({ frame }) => frame.sequence > fromSequence) ? "replay" : "live";
+  }
+
+  /** Number of live observers, exposed to prove attachment teardown deterministically. */
+  public observerCount(terminalId: string): number {
+    return this.mustGet(terminalId).observers.size;
+  }
+
+  /**
+   * Await a current VT projection at a quiescent boundary at or beyond the
+   * requested floor. This never mutates the accepted VUH-868 replay snapshot.
+   */
+  public async awaitSnapshotProjection(
+    terminalId: string,
+    minBoundary: number,
+    signal: AbortSignal,
+  ): Promise<
+    | { status: "projected"; projection: TerminalSnapshotProjection }
+    | { status: "unavailable" }
+    | { status: "aborted" }
+  > {
+    const record = this.mustGet(terminalId);
+    if (minBoundary > record.session.lastSequence) return { status: "unavailable" };
+    for (;;) {
+      if (signal.aborted) return { status: "aborted" };
+      if (record.session.lastSequence >= minBoundary) {
+        const projected = await this.projectConsistently(record, signal);
+        if (projected === "aborted") return { status: "aborted" };
+        if (projected !== "waiting") return { status: "projected", projection: projected };
+      }
+      if (record.closed) return { status: "unavailable" };
+      const sequence = record.session.lastSequence;
+      const woke = await this.waitForSnapshotStateChange(record, sequence, minBoundary, signal);
+      if (woke === "aborted") return { status: "aborted" };
+    }
+  }
+
+  private async projectConsistently(
+    record: TerminalRecord,
+    signal: AbortSignal,
+  ): Promise<TerminalSnapshotProjection | "waiting" | "aborted"> {
+    let result: TerminalSnapshotProjection | "waiting" = "waiting";
+    const task = record.pipeline.then(() => {
+      result = record.parserBoundary.quiescent ? this.projectNow(record) : "waiting";
+    });
+    record.pipeline = task;
+    if (signal.aborted) return "aborted";
+    const outcome = await new Promise<"done" | "aborted">((resolve) => {
+      const onAbort = (): void => {
+        cleanup();
+        resolve("aborted");
+      };
+      const cleanup = (): void => signal.removeEventListener("abort", onAbort);
+      signal.addEventListener("abort", onAbort, { once: true });
+      void task.then(() => {
+        cleanup();
+        resolve("done");
+      });
+      if (signal.aborted) onAbort();
+    });
+    return outcome === "aborted" ? "aborted" : result;
+  }
+
+  private projectNow(record: TerminalRecord): TerminalSnapshotProjection {
+    return {
+      sequence: record.session.lastSequence,
+      data: Buffer.from(record.serializer.serialize() || "\u001bc").toString("base64"),
+      columns: record.session.columns,
+      rows: record.session.rows,
+      closure: record.closure ? { ...record.closure } : null,
+    };
+  }
+
+  /** Register then recheck so an append between observation and registration cannot be missed. */
+  private waitForSnapshotStateChange(
+    record: TerminalRecord,
+    observedSequence: number,
+    minBoundary: number,
+    signal: AbortSignal,
+  ): Promise<"woke" | "aborted"> {
+    return new Promise((resolve) => {
+      let settled = false;
+      const cleanup = (): void => {
+        record.snapshotWaiters.delete(wake);
+        signal.removeEventListener("abort", onAbort);
+      };
+      const finish = (outcome: "woke" | "aborted"): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(outcome);
+      };
+      const wake = (): void => finish("woke");
+      const onAbort = (): void => finish("aborted");
+      if (signal.aborted) {
+        finish("aborted");
+        return;
+      }
+      record.snapshotWaiters.add(wake);
+      signal.addEventListener("abort", onAbort, { once: true });
+      if (
+        signal.aborted ||
+        record.closed ||
+        record.session.lastSequence !== observedSequence ||
+        (record.session.lastSequence >= minBoundary && record.parserBoundary.quiescent)
+      ) {
+        queueMicrotask(signal.aborted ? onAbort : wake);
+      }
+    });
+  }
+
+  private wakeSnapshotWaiters(record: TerminalRecord): void {
+    for (const wake of record.snapshotWaiters) wake();
+  }
+
+  private observeState(record: TerminalRecord): TerminalObservation {
+    return {
+      terminalId: record.session.id,
+      workerRunId: record.session.workerRunId,
+      title: record.session.title,
+      source: record.context.source,
+      columns: record.session.columns,
+      rows: record.session.rows,
+      lastSequence: record.session.lastSequence,
+      retainedFromSequence: record.frames[0]?.frame.sequence ?? record.session.lastSequence + 1,
+      snapshot: { ...record.snapshot },
+      closure: record.closure ? { ...record.closure } : null,
+    };
+  }
+
+  public async *observe(
+    terminalId: string,
+    fromSequence?: number,
+    signal?: AbortSignal,
+  ): AsyncIterable<TerminalFrame> {
     const record = this.mustGet(terminalId);
     const observer: Observer = {
       queue: [],
@@ -261,7 +447,14 @@ export class TerminalManager implements TerminalProvider {
       done: record.closed,
       resync: false,
       replayNextSequence: undefined,
+      aborted: signal?.aborted ?? false,
     };
+    const onAbort = (): void => {
+      observer.aborted = true;
+      observer.wake?.();
+      observer.wake = undefined;
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
     record.observers.add(observer);
     let horizon = fromSequence ?? -1;
     try {
@@ -269,6 +462,7 @@ export class TerminalManager implements TerminalProvider {
         horizon = this.beginSnapshotReplay(record, observer);
       } else observer.replayNextSequence = fromSequence + 1;
       while (true) {
+        if (observer.aborted) break;
         if (observer.resync) {
           observer.resync = false;
           observer.queue.length = 0;
@@ -280,6 +474,10 @@ export class TerminalManager implements TerminalProvider {
           if (observer.done || observer.replayNextSequence !== undefined) break;
           await new Promise<void>((resolve) => {
             observer.wake = resolve;
+            if (observer.aborted) {
+              observer.wake = undefined;
+              resolve();
+            }
           });
           continue;
         }
@@ -289,6 +487,8 @@ export class TerminalManager implements TerminalProvider {
         if (frame.type === "closed") break;
       }
     } finally {
+      signal?.removeEventListener("abort", onAbort);
+      observer.wake = undefined;
       record.observers.delete(observer);
     }
   }
@@ -404,11 +604,19 @@ export class TerminalManager implements TerminalProvider {
       (sequence) => ({ type: "closed", terminalId: record.session.id, sequence, exitCode }),
       0,
     );
+    record.closure = {
+      sequence: record.session.lastSequence,
+      reason: exitCode === null ? "terminated" : "exited",
+      exitCode,
+      signal: null,
+      closedAt: new Date().toISOString(),
+    };
     for (const o of record.observers) {
       o.done = true;
       o.wake?.();
       o.wake = undefined;
     }
+    this.wakeSnapshotWaiters(record);
   }
   private appendFrame(
     record: TerminalRecord,
@@ -433,6 +641,7 @@ export class TerminalManager implements TerminalProvider {
       o.wake?.();
       o.wake = undefined;
     }
+    this.wakeSnapshotWaiters(record);
   }
   private snapshotFrame(record: TerminalRecord): TerminalFrame {
     return {

@@ -15,6 +15,11 @@ import { buildConfiguredShellAdapter, buildWorkerAdapters, simWorkersEnabled } f
 import { buildWorkerEnvironment } from "./worker-environment.ts";
 import { parseVerificationChecks } from "./verification-checks.ts";
 import { TerminalManager } from "./terminals.ts";
+import {
+  installDevHandoffShutdown,
+  readDevHandoffConfig,
+  startTerminalGatewayDevHandoff,
+} from "./terminal-gateway-dev-handoff.ts";
 
 if (process.argv.includes("--recovery-probe")) {
   const { runRecoveryProbeFromCli } = await import("./recovery-probe.ts");
@@ -89,6 +94,30 @@ try {
   logger.error(
     { runnerStateRoot, err: error instanceof Error ? error.message : String(error) },
     "startup process-lease reconciliation failed; runner continuing",
+  );
+}
+
+// Observe-only terminal gateway dev handoff is explicit opt-in and fail-closed: a disabled or
+// misconfigured gateway never binds and never blocks runner mission execution. Startup logs carry
+// only static reason codes and safe counts — never a token, header, identifier, or raw error text.
+try {
+  const devHandoffConfig = readDevHandoffConfig(process.env);
+  if (devHandoffConfig) {
+    const handoff = await startTerminalGatewayDevHandoff({
+      manager: terminalManager,
+      config: devHandoffConfig,
+      logger,
+    });
+    logger.info(
+      { event: "terminal.gateway.enabled", host: handoff.address.host, port: handoff.address.port },
+      "observe-only terminal gateway enabled",
+    );
+    installDevHandoffShutdown(handoff, { logger });
+  }
+} catch {
+  logger.error(
+    { event: "terminal.gateway.disabled", reason: "startup_failed" },
+    "terminal gateway failed to start; runner mission execution continues",
   );
 }
 

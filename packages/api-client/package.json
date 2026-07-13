@@ -13,7 +13,8 @@
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {
-    "@clankie/protocol": "workspace:*"
+    "@clankie/protocol": "workspace:*",
+    "@clankie/terminal-protocol": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "24.12.4",

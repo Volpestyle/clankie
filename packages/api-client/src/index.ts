@@ -28,6 +28,8 @@ import {
   type WorkerResult,
 } from "@clankie/protocol";
 
+export * from "./terminal-gateway.ts";
+
 export interface ClankieApiClientOptions {
   baseUrl: string;
   fetchImpl?: typeof fetch;

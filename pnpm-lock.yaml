@@ -333,10 +333,16 @@ importers:
       node-pty:
         specifier: 1.2.0-beta.14
         version: 1.2.0-beta.14
+      ws:
+        specifier: 8.21.0
+        version: 8.21.0
     devDependencies:
       '@types/node':
         specifier: 24.12.4
         version: 24.12.4
+      '@types/ws':
+        specifier: 8.18.1
+        version: 8.18.1
       tsx:
         specifier: 4.23.0
         version: 4.23.0
@@ -435,6 +441,9 @@ importers:
       '@clankie/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@clankie/terminal-protocol':
+        specifier: workspace:*
+        version: link:../terminal-protocol
     devDependencies:
       '@types/node':
         specifier: 24.12.4
