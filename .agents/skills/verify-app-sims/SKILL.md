@@ -30,6 +30,8 @@ Prefer captured evidence (screenshots, frame diffs, logs, process samples) over 
 - The Expo dev-menu onboarding sheet covers the app on every fresh launch and `simctl` cannot tap. Disable it instead:
   `xcrun simctl spawn booted defaults write <bundleid> EXDevMenuIsOnboardingFinished -bool YES`, then `simctl terminate` + `launch`.
 - Force a clean relaunch: `xcrun simctl terminate booted <bundleid>; xcrun simctl launch booted <bundleid>`. Reload JS from the Expo CLI pane by sending `r`.
+- Tapping/driving UI: `idb` is installed but broken (asyncio crash under Homebrew Python 3.14). Use **Maestro** (`~/.maestro/bin/maestro`) with `JAVA_HOME=$(brew --prefix openjdk@21)/libexec/openjdk.jdk/Contents/Home` on PATH: `maestro --device <udid> test flow.yaml`. Do not click the Simulator window from the host (cliclick/AppleScript) — it may be behind the user's active windows and clicks hit whatever is on top.
+- Maestro selector gotchas: an RN `Pressable` with an `accessibilityLabel` masks its child `Text` (match the label, not the text); prefer `testID` + `tapOn: {id: ...}` — a label-matched tap can resolve to an offscreen/covered duplicate and physically land on the floating dock. `takeScreenshot: /abs/path` accepts absolute paths; failure artifacts land in `~/.maestro/tests/<timestamp>/`.
 
 ## Android emulator (fully headless)
 
