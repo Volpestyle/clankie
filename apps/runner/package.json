@@ -9,6 +9,7 @@
     "build": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
+    "terminal:lifecycle-evidence": "vitest run test/terminal-lifecycle-evidence.test.ts",
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {
@@ -24,7 +25,10 @@
     "@clankie/worker-codex": "workspace:*",
     "@clankie/worker-pi": "workspace:*",
     "@clankie/worker-sdk": "workspace:*",
-    "@clankie/worker-sim": "workspace:*"
+    "@clankie/worker-sim": "workspace:*",
+    "@xterm/addon-serialize": "0.14.0",
+    "@xterm/headless": "6.0.0",
+    "node-pty": "1.2.0-beta.14"
   },
   "devDependencies": {
     "@types/node": "24.12.4",

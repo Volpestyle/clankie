@@ -11,9 +11,10 @@ import { createReadyProviderFleet } from "./provider-factory.ts";
 import { publishProviderReadinessSignal } from "./provider-readiness-signal.ts";
 import { ShellSandbox } from "./sandbox.ts";
 import { defaultWorktreeRoot, WorktreeManager } from "./worktrees.ts";
-import { buildWorkerAdapters, simWorkersEnabled } from "./worker-descriptors.ts";
+import { buildConfiguredShellAdapter, buildWorkerAdapters, simWorkersEnabled } from "./worker-descriptors.ts";
 import { buildWorkerEnvironment } from "./worker-environment.ts";
 import { parseVerificationChecks } from "./verification-checks.ts";
+import { TerminalManager } from "./terminals.ts";
 
 if (process.argv.includes("--recovery-probe")) {
   const { runRecoveryProbeFromCli } = await import("./recovery-probe.ts");
@@ -66,6 +67,7 @@ if (repoPath) {
 }
 
 const runnerStateRoot = process.env.CLANKIE_RUNNER_STATE ?? join(homedir(), ".clankie", "runner");
+const terminalManager = new TerminalManager();
 const runnerEvents = new SqliteEventStore(join(runnerStateRoot, "runner-events.db"));
 try {
   const processLeases = new ProcessLeaseManager({
@@ -129,6 +131,25 @@ if (!repoPath) {
       }
     }
   }
+  const providerSandbox = new ShellSandbox({
+    events: runnerEvents,
+    decideEscalation: (request) =>
+      Promise.resolve(
+        request.action === "runner.sandbox.escalate"
+          ? {
+              effect: "allow" as const,
+              reason: "Runner configuration permits the pinned Pi process to reach exact localhost Ollama.",
+              matchedPolicyIds: ["runner.pi.local-ollama"],
+              obligations: [],
+            }
+          : {
+              effect: "deny" as const,
+              reason: "Provider sandbox bypass is not configured.",
+              matchedPolicyIds: ["runner.provider.fail-closed"],
+              obligations: [],
+            },
+      ),
+  });
   const fleet = simWorkersEnabled(process.env)
     ? { adapters: buildWorkerAdapters(process.env, workerEnvironment), metadata: undefined, reports: [] }
     : await createReadyProviderFleet({
@@ -137,27 +158,15 @@ if (!repoPath) {
         runnerStateRoot,
         ...(doctrine ? { doctrine } : {}),
         ...(mcpRegistry ? { mcpRegistry } : {}),
-        sandbox: new ShellSandbox({
-          events: runnerEvents,
-          decideEscalation: (request) =>
-            Promise.resolve(
-              request.action === "runner.sandbox.escalate"
-                ? {
-                    effect: "allow" as const,
-                    reason:
-                      "Runner configuration permits the pinned Pi process to reach exact localhost Ollama.",
-                    matchedPolicyIds: ["runner.pi.local-ollama"],
-                    obligations: [],
-                  }
-                : {
-                    effect: "deny" as const,
-                    reason: "Provider sandbox bypass is not configured.",
-                    matchedPolicyIds: ["runner.provider.fail-closed"],
-                    obligations: [],
-                  },
-            ),
-        }),
+        sandbox: providerSandbox,
       });
+  const configuredShell = buildConfiguredShellAdapter(
+    process.env,
+    workerEnvironment,
+    terminalManager,
+    providerSandbox,
+  );
+  if (configuredShell) fleet.adapters.push(configuredShell);
   const readinessPath = process.env.CLANKIE_RUNNER_READINESS_PATH?.trim();
   const readinessNonce = process.env.CLANKIE_RUNNER_READINESS_NONCE?.trim();
   if (Boolean(readinessPath) !== Boolean(readinessNonce)) {
@@ -234,6 +243,8 @@ if (!repoPath) {
       verificationChecks,
       ...(fleet.metadata ? { providerMetadata: fleet.metadata } : {}),
       waitingUserPolicy: process.env.CLANKIE_NONINTERACTIVE_WAITING_USER === "allow" ? "allow" : "block",
+      hasHumanControlLease: (workerRunId) => terminalManager.hasHumanControl(workerRunId),
+      terminalManager,
       ...(process.env.CLANKIE_BASE_REF ? { baseRef: process.env.CLANKIE_BASE_REF } : {}),
     });
     logger.info(

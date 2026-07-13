@@ -1,5 +1,6 @@
-import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { SerializeAddon } from "@xterm/addon-serialize";
+import { Terminal } from "@xterm/headless";
 import { createLogger } from "@clankie/observability";
 import {
   encodeTerminalBytes,
@@ -8,166 +9,275 @@ import {
   type TerminalProvider,
   type TerminalSession,
 } from "@clankie/terminal-protocol";
+import { spawn, type IPty } from "node-pty";
 import { ControlLeaseManager } from "./control-leases.ts";
 
 const logger = createLogger({ service: "clankie-runner-terminals", version: "0.1.0" });
 
-/**
- * Process transport behind the terminal manager. The pipe transport below is
- * always available; a native PTY implementation (node-pty) plugs in behind the
- * same interface without changing sequencing, replay, or lease semantics.
- */
 export interface TerminalTransport {
   write(bytes: Uint8Array): void;
   resize(columns: number, rows: number): void;
-  kill(): void;
+  kill(signal?: string): void;
   onData(listener: (chunk: Buffer) => void): void;
-  onExit(listener: (exitCode: number | null) => void): void;
+  onExit(listener: (exitCode: number | null, signal?: string) => void): void;
+}
+
+export interface TerminalAttemptContext {
+  missionId: string;
+  taskId: string;
+  workerRunId: string;
+  attempt: number;
+  provider: string;
+  source: "runner_pty";
+  nativeSessionId?: string;
 }
 
 export interface SpawnTerminalOptions {
-  /** Stable session identity when restoring a durable terminal after runner restart. */
   id?: string;
   workerRunId: string;
   title: string;
   command: string;
   args?: string[];
   cwd?: string;
+  env?: NodeJS.ProcessEnv;
   columns?: number;
   rows?: number;
   transport?: TerminalTransport;
-  /** Session label for clients; defaults to "generic" (the pipe transport has no TTY semantics). */
   provider?: TerminalSession["provider"];
+  context?: Omit<TerminalAttemptContext, "workerRunId" | "source">;
 }
 
 export interface TerminalManagerOptions {
-  /** Ring-buffer budget for replayable frames, per terminal. */
   maxBufferedBytes?: number;
-  /** Rolling snapshot tail size, per terminal. */
+  /** Deprecated compatibility option; VT snapshots are complete and never byte-truncated. */
   maxSnapshotBytes?: number;
-  /** Per-observer pending-frame budget before it is resynced from a snapshot. */
   maxObserverQueueFrames?: number;
-  /** Frame-count cap for the replay buffer (bounds zero-byte frame floods). */
   maxBufferedFrames?: number;
   leases?: ControlLeaseManager;
+  onHumanControlChanged?: (workerRunId: string, active: boolean) => void;
 }
 
 interface BufferedFrame {
   frame: TerminalFrame;
   bytes: number;
 }
-
 interface Observer {
   queue: TerminalFrame[];
   wake: (() => void) | undefined;
   done: boolean;
+  resync: boolean;
 }
-
 interface TerminalRecord {
   session: TerminalSession;
+  context: TerminalAttemptContext;
   transport: TerminalTransport;
+  emulator: Terminal;
+  serializer: SerializeAddon;
   frames: BufferedFrame[];
   bufferedBytes: number;
-  snapshotTail: Buffer;
-  /** Sequence covered by the snapshot: every byte at or before it is folded into snapshotTail. */
-  snapshotSequence: number;
   observers: Set<Observer>;
   closed: boolean;
+  pipeline: Promise<void>;
+  humanControl: boolean;
+  parserBoundary: ParserBoundary;
+  snapshot: { sequence: number; data: string; columns: number; rows: number };
 }
 
-/**
- * Terminal manager for worker processes (docs/05 "Terminal protocol").
- *
- * Every frame carries a monotonically increasing per-terminal sequence.
- * Output that falls out of the bounded replay buffer is folded into a rolling
- * byte-tail snapshot, so `snapshot + buffered frames` is always a gap-free
- * suffix of the stream. Reconnecting clients resume from their last sequence
- * when it is still buffered and are otherwise resynced from the snapshot —
- * never with duplicated or missing buffered bytes. Input and resize require a
- * live control lease; observation does not (observe vs control at the
- * protocol layer).
- */
+class ParserBoundary {
+  private utf8 = 0;
+  private escape: "ground" | "esc" | "csi" | "osc" | "osc_esc" | "dcs" | "dcs_esc" = "ground";
+  public feed(bytes: Uint8Array): void {
+    for (const byte of bytes) {
+      if (this.utf8 > 0) {
+        if ((byte & 0xc0) === 0x80) this.utf8 -= 1;
+        else {
+          this.utf8 = 0;
+          this.feed(Uint8Array.of(byte));
+        }
+        continue;
+      }
+      if (byte >= 0xc2 && byte <= 0xdf) {
+        this.utf8 = 1;
+        continue;
+      }
+      if (byte >= 0xe0 && byte <= 0xef) {
+        this.utf8 = 2;
+        continue;
+      }
+      if (byte >= 0xf0 && byte <= 0xf4) {
+        this.utf8 = 3;
+        continue;
+      }
+      if (this.escape === "ground") {
+        if (byte === 0x1b) this.escape = "esc";
+        continue;
+      }
+      if (byte === 0x18 || byte === 0x1a || byte === 0x9c) {
+        this.escape = "ground";
+        continue;
+      }
+      if (this.escape === "esc") {
+        if (byte === 0x5b) this.escape = "csi";
+        else if (byte === 0x5d) this.escape = "osc";
+        else if (byte === 0x50) this.escape = "dcs";
+        else if (byte < 0x20 || byte > 0x2f) this.escape = "ground";
+        continue;
+      }
+      if (this.escape === "csi") {
+        if (byte >= 0x40 && byte <= 0x7e) this.escape = "ground";
+        continue;
+      }
+      if (this.escape === "osc" || this.escape === "dcs") {
+        if (byte === 0x07 && this.escape === "osc") this.escape = "ground";
+        else if (byte === 0x1b) this.escape = this.escape === "osc" ? "osc_esc" : "dcs_esc";
+        continue;
+      }
+      if (this.escape === "osc_esc" || this.escape === "dcs_esc") {
+        if (byte === 0x5c) this.escape = "ground";
+        else this.escape = this.escape === "osc_esc" ? "osc" : "dcs";
+      }
+    }
+  }
+  public get quiescent(): boolean {
+    return this.utf8 === 0 && this.escape === "ground";
+  }
+}
+
+/** Runner-authoritative ownership of native PTYs, ordered VT state, replay and control. */
 export class TerminalManager implements TerminalProvider {
   private readonly terminals = new Map<string, TerminalRecord>();
   private readonly leases: ControlLeaseManager;
   private readonly maxBufferedBytes: number;
-  private readonly maxSnapshotBytes: number;
   private readonly maxObserverQueueFrames: number;
   private readonly maxBufferedFrames: number;
+  private readonly onHumanControlChanged?: TerminalManagerOptions["onHumanControlChanged"];
 
   public constructor(options: TerminalManagerOptions = {}) {
     this.leases = options.leases ?? new ControlLeaseManager();
     this.maxBufferedBytes = options.maxBufferedBytes ?? 512 * 1024;
-    this.maxSnapshotBytes = options.maxSnapshotBytes ?? 256 * 1024;
     this.maxObserverQueueFrames = options.maxObserverQueueFrames ?? 1024;
     this.maxBufferedFrames = options.maxBufferedFrames ?? 8192;
+    this.onHumanControlChanged = options.onHumanControlChanged;
   }
 
   public spawnTerminal(options: SpawnTerminalOptions): TerminalSession {
     const id = options.id ?? `term-${randomUUID().slice(0, 12)}`;
-    if (id.length === 0) throw new Error("Terminal id must not be empty");
-    if (this.terminals.has(id)) throw new Error(`Terminal ${id} already exists`);
+    if (!id || this.terminals.has(id))
+      throw new Error(!id ? "Terminal id must not be empty" : `Terminal ${id} already exists`);
+    const columns = options.columns ?? 120;
+    const rows = options.rows ?? 40;
     const transport =
       options.transport ??
-      spawnPipeTransport(options.command, options.args ?? [], options.cwd ?? process.cwd());
+      spawnNativePtyTransport(options.command, options.args ?? [], {
+        cwd: options.cwd ?? process.cwd(),
+        columns,
+        rows,
+        ...(options.env ? { env: options.env } : {}),
+      });
+    const emulator = new Terminal({ cols: columns, rows, allowProposedApi: true });
+    const serializer = new SerializeAddon();
+    emulator.loadAddon(serializer);
     const session: TerminalSession = {
       id,
       workerRunId: options.workerRunId,
-      provider: options.provider ?? "generic",
+      provider: options.provider ?? "native_pty",
       title: options.title,
-      columns: options.columns ?? 120,
-      rows: options.rows ?? 40,
+      columns,
+      rows,
       lastSequence: 0,
     };
     const record: TerminalRecord = {
       session,
+      context: {
+        missionId: options.context?.missionId ?? "local",
+        taskId: options.context?.taskId ?? "local",
+        workerRunId: options.workerRunId,
+        attempt: options.context?.attempt ?? 1,
+        provider: options.context?.provider ?? String(session.provider),
+        source: "runner_pty",
+        ...(options.context?.nativeSessionId ? { nativeSessionId: options.context.nativeSessionId } : {}),
+      },
       transport,
+      emulator,
+      serializer,
       frames: [],
       bufferedBytes: 0,
-      snapshotTail: Buffer.alloc(0),
-      snapshotSequence: 0,
       observers: new Set(),
       closed: false,
+      pipeline: Promise.resolve(),
+      humanControl: false,
+      parserBoundary: new ParserBoundary(),
+      snapshot: {
+        sequence: 0,
+        data: Buffer.from("\u001bc").toString("base64"),
+        columns,
+        rows,
+      },
     };
     this.terminals.set(id, record);
-    transport.onData((chunk) => this.appendOutput(record, chunk));
-    transport.onExit((exitCode) => this.appendClosed(record, exitCode));
+    transport.onData((chunk) => {
+      record.pipeline = record.pipeline.then(() => this.appendOutput(record, chunk));
+    });
+    transport.onExit((exitCode, signal) => {
+      record.pipeline = record.pipeline.then(() => this.appendClosed(record, exitCode, signal));
+    });
     logger.info(
-      { terminalId: id, workerRunId: options.workerRunId, command: options.command },
+      { terminalId: id, workerRunId: options.workerRunId, source: "runner_pty" },
       "terminal spawned",
     );
     return { ...session };
   }
 
+  public bindNativeSession(workerRunId: string, attempt: number, nativeSessionId: string): void {
+    for (const record of this.terminals.values())
+      if (record.context.workerRunId === workerRunId && record.context.attempt === attempt && !record.closed)
+        record.context.nativeSessionId = nativeSessionId;
+  }
+
+  public context(terminalId: string): Readonly<TerminalAttemptContext> {
+    return structuredClone(this.mustGet(terminalId).context);
+  }
+  public whenIdle(terminalId: string): Promise<void> {
+    return this.mustGet(terminalId).pipeline;
+  }
+  public hasHumanControl(workerRunId: string): boolean {
+    this.expireLeases();
+    return [...this.terminals.values()].some(
+      (r) => r.context.workerRunId === workerRunId && r.humanControl && !r.closed,
+    );
+  }
   public listSessions(): Promise<TerminalSession[]> {
-    return Promise.resolve([...this.terminals.values()].map((record) => ({ ...record.session })));
+    return Promise.resolve(
+      [...this.terminals.values()].filter((r) => !r.closed).map((r) => ({ ...r.session })),
+    );
   }
 
   public async *observe(terminalId: string, fromSequence?: number): AsyncIterable<TerminalFrame> {
     const record = this.mustGet(terminalId);
-    const observer: Observer = { queue: [], wake: undefined, done: record.closed };
+    const observer: Observer = { queue: [], wake: undefined, done: record.closed, resync: false };
     record.observers.add(observer);
+    let horizon = fromSequence ?? -1;
     try {
-      // Seed the backlog into the queue synchronously — no suspension between
-      // reading the terminal state and registering for live frames, so a
-      // reconnecting client can never observe a gap. Live frames appended
-      // during iteration land behind the backlog and are deduped via horizon.
-      let horizon: number;
-      if (fromSequence !== undefined && this.isResumable(record, fromSequence)) {
-        horizon = fromSequence;
-      } else {
-        observer.queue.push(this.snapshotFrame(record));
-        horizon = record.snapshotSequence;
-      }
-      for (const buffered of record.frames) {
-        if (buffered.frame.sequence > horizon) observer.queue.push(buffered.frame);
-      }
+      if (fromSequence === undefined || !this.isResumable(record, fromSequence)) {
+        const snapshot = this.snapshotFrame(record);
+        observer.queue.push(snapshot, ...this.framesAfter(record, snapshot.sequence));
+        horizon = snapshot.sequence - 1;
+      } else
+        for (const item of record.frames)
+          if (item.frame.sequence > fromSequence) observer.queue.push(item.frame);
       while (true) {
+        if (observer.resync) {
+          observer.resync = false;
+          observer.queue.length = 0;
+          const snapshot = this.snapshotFrame(record);
+          observer.queue.push(snapshot, ...this.framesAfter(record, snapshot.sequence));
+          horizon = snapshot.sequence - 1;
+        }
         const frame = observer.queue.shift();
         if (!frame) {
           if (observer.done) break;
-          await new Promise<void>((resolvePromise) => {
-            observer.wake = resolvePromise;
+          await new Promise<void>((resolve) => {
+            observer.wake = resolve;
           });
           continue;
         }
@@ -182,56 +292,57 @@ export class TerminalManager implements TerminalProvider {
   }
 
   public async acquireControl(terminalId: string, principalId: string): Promise<ControlLease> {
-    this.mustGet(terminalId);
-    return this.leases.acquire(terminalId, principalId);
+    const record = this.mustGet(terminalId);
+    if (record.closed) throw new Error(`Terminal ${terminalId} is closed`);
+    const lease = this.leases.acquire(terminalId, principalId);
+    this.setHumanControl(record, true);
+    return lease;
   }
-
+  public renewControl(terminalId: string, leaseId: string, durationMs = 60_000): ControlLease {
+    return this.leases.renew(terminalId, leaseId, durationMs);
+  }
   public async sendInput(terminalId: string, leaseId: string, bytes: Uint8Array): Promise<void> {
-    const record = this.mustGet(terminalId);
-    const lease = this.leases.assert(terminalId, leaseId);
-    if (lease.mode !== "control") {
-      throw new Error(`Lease ${leaseId} is ${lease.mode}-only; input requires a control lease`);
-    }
-    if (record.closed) throw new Error(`Terminal ${terminalId} is closed`);
-    record.transport.write(bytes);
+    const r = this.mustGet(terminalId);
+    this.assertControlLease(terminalId, leaseId);
+    if (r.closed) throw new Error(`Terminal ${terminalId} is closed`);
+    r.transport.write(bytes);
   }
-
   public async resize(terminalId: string, leaseId: string, columns: number, rows: number): Promise<void> {
-    const record = this.mustGet(terminalId);
-    const lease = this.leases.assert(terminalId, leaseId);
-    if (lease.mode !== "control") {
-      throw new Error(`Lease ${leaseId} is ${lease.mode}-only; resize requires a control lease`);
-    }
-    if (record.closed) throw new Error(`Terminal ${terminalId} is closed`);
-    record.transport.resize(columns, rows);
-    record.session.columns = columns;
-    record.session.rows = rows;
-    this.appendFrame(
-      record,
-      (sequence) => ({ type: "resized", terminalId: record.session.id, sequence, columns, rows }),
-      0,
-    );
+    const r = this.mustGet(terminalId);
+    this.assertControlLease(terminalId, leaseId);
+    if (r.closed) throw new Error(`Terminal ${terminalId} is closed`);
+    r.transport.resize(columns, rows);
+    r.emulator.resize(columns, rows);
+    r.session.columns = columns;
+    r.session.rows = rows;
+    this.appendFrame(r, (sequence) => ({ type: "resized", terminalId, sequence, columns, rows }), 0);
   }
-
   public async releaseControl(terminalId: string, leaseId: string): Promise<void> {
-    this.mustGet(terminalId);
+    const r = this.mustGet(terminalId);
     this.leases.release(terminalId, leaseId);
+    this.setHumanControl(r, false);
   }
-
+  public cancel(terminalId: string): void {
+    const r = this.mustGet(terminalId);
+    r.transport.kill("SIGTERM");
+  }
   public kill(terminalId: string): void {
-    this.mustGet(terminalId).transport.kill();
+    this.mustGet(terminalId).transport.kill("SIGKILL");
+  }
+  public closeOrphanedRecords(): string[] {
+    const ids: string[] = [];
+    for (const [id, r] of this.terminals)
+      if (!r.closed) {
+        ids.push(id);
+        void this.appendClosed(r, null);
+      }
+    return ids;
   }
 
-  private appendOutput(record: TerminalRecord, chunk: Buffer): void {
-    if (record.closed) {
-      // Bytes sequenced after "closed" would be undeliverable (observers end
-      // at the closed frame); drop them loudly instead.
-      logger.warn(
-        { terminalId: record.session.id, droppedBytes: chunk.byteLength },
-        "output after terminal close dropped",
-      );
-      return;
-    }
+  private async appendOutput(record: TerminalRecord, chunk: Buffer): Promise<void> {
+    if (record.closed || chunk.length === 0) return;
+    record.parserBoundary.feed(chunk);
+    await new Promise<void>((resolve) => record.emulator.write(chunk, resolve));
     this.appendFrame(
       record,
       (sequence) => ({
@@ -243,120 +354,123 @@ export class TerminalManager implements TerminalProvider {
       }),
       chunk.byteLength,
     );
+    if (record.parserBoundary.quiescent)
+      record.snapshot = {
+        sequence: record.session.lastSequence,
+        data: Buffer.from(record.serializer.serialize() || "\u001bc").toString("base64"),
+        columns: record.session.columns,
+        rows: record.session.rows,
+      };
   }
-
-  private appendClosed(record: TerminalRecord, exitCode: number | null): void {
+  private async appendClosed(
+    record: TerminalRecord,
+    exitCode: number | null,
+    _signal?: string,
+  ): Promise<void> {
     if (record.closed) return;
     record.closed = true;
+    this.leases.revoke(record.session.id);
+    this.setHumanControl(record, false);
     this.appendFrame(
       record,
       (sequence) => ({ type: "closed", terminalId: record.session.id, sequence, exitCode }),
       0,
     );
-    for (const observer of record.observers) {
-      observer.done = true;
-      observer.wake?.();
-      observer.wake = undefined;
+    for (const o of record.observers) {
+      o.done = true;
+      o.wake?.();
+      o.wake = undefined;
     }
   }
-
   private appendFrame(
     record: TerminalRecord,
     build: (sequence: number) => TerminalFrame,
     bytes: number,
   ): void {
-    record.session.lastSequence += 1;
-    const frame = build(record.session.lastSequence);
+    const frame = build(++record.session.lastSequence);
     record.frames.push({ frame, bytes });
     record.bufferedBytes += bytes;
-    this.evict(record);
-    for (const observer of record.observers) {
-      if (observer.queue.length >= this.maxObserverQueueFrames) {
-        // Backpressure: a lagging observer is resynced from a fresh snapshot
-        // instead of buffering unbounded frames.
-        observer.queue.length = 0;
-        observer.queue.push(this.snapshotFrame(record));
-        for (const buffered of record.frames) {
-          if (buffered.frame.sequence > record.snapshotSequence) observer.queue.push(buffered.frame);
-        }
-      } else {
-        observer.queue.push(frame);
-      }
-      observer.wake?.();
-      observer.wake = undefined;
+    while (record.bufferedBytes > this.maxBufferedBytes || record.frames.length > this.maxBufferedFrames) {
+      const old = record.frames.shift();
+      if (!old) break;
+      record.bufferedBytes -= old.bytes;
+    }
+    for (const o of record.observers) {
+      if (o.queue.length >= this.maxObserverQueueFrames) o.resync = true;
+      else o.queue.push(frame);
+      o.wake?.();
+      o.wake = undefined;
     }
   }
-
-  private evict(record: TerminalRecord): void {
-    while (
-      (record.bufferedBytes > this.maxBufferedBytes || record.frames.length > this.maxBufferedFrames) &&
-      record.frames.length > 0
-    ) {
-      const evicted = record.frames.shift() as BufferedFrame;
-      record.bufferedBytes -= evicted.bytes;
-      record.snapshotSequence = evicted.frame.sequence;
-      if (evicted.frame.type === "output") {
-        const bytes = Buffer.from(evicted.frame.data, "base64");
-        record.snapshotTail = Buffer.concat([record.snapshotTail, bytes]);
-        if (record.snapshotTail.byteLength > this.maxSnapshotBytes) {
-          record.snapshotTail = record.snapshotTail.subarray(
-            record.snapshotTail.byteLength - this.maxSnapshotBytes,
-          );
-        }
-      }
-    }
-  }
-
   private snapshotFrame(record: TerminalRecord): TerminalFrame {
     return {
       type: "snapshot",
       terminalId: record.session.id,
-      sequence: record.snapshotSequence,
+      sequence: record.snapshot.sequence,
       encoding: "base64",
-      data: record.snapshotTail.toString("base64"),
-      columns: record.session.columns,
-      rows: record.session.rows,
+      data: record.snapshot.data,
+      columns: record.snapshot.columns,
+      rows: record.snapshot.rows,
     };
   }
-
-  private isResumable(record: TerminalRecord, fromSequence: number): boolean {
-    if (fromSequence > record.session.lastSequence) return false;
-    return fromSequence >= record.snapshotSequence;
+  private framesAfter(record: TerminalRecord, sequence: number): TerminalFrame[] {
+    return record.frames.filter((item) => item.frame.sequence > sequence).map((item) => item.frame);
   }
-
-  private mustGet(terminalId: string): TerminalRecord {
-    const record = this.terminals.get(terminalId);
-    if (!record) throw new Error(`Unknown terminal ${terminalId}`);
-    return record;
+  private isResumable(record: TerminalRecord, sequence: number): boolean {
+    return (
+      sequence <= record.session.lastSequence &&
+      (record.frames[0]?.frame.sequence ?? record.session.lastSequence + 1) <= sequence + 1
+    );
+  }
+  private mustGet(id: string): TerminalRecord {
+    const r = this.terminals.get(id);
+    if (!r) throw new Error(`Unknown terminal ${id}`);
+    return r;
+  }
+  private assertControlLease(terminalId: string, leaseId: string): ControlLease {
+    const lease = this.leases.assert(terminalId, leaseId);
+    if (lease.mode !== "control") throw new Error("An observe-only lease is not a valid control lease");
+    return lease;
+  }
+  private setHumanControl(record: TerminalRecord, active: boolean): void {
+    if (record.humanControl === active) return;
+    record.humanControl = active;
+    this.onHumanControlChanged?.(record.context.workerRunId, active);
+  }
+  private expireLeases(): void {
+    for (const r of this.terminals.values())
+      if (r.humanControl && !this.leases.active(r.session.id)) this.setHumanControl(r, false);
   }
 }
 
-/** Pipe-based transport: stdout and stderr merged into one ordered stream. */
-export function spawnPipeTransport(command: string, args: string[], cwd: string): TerminalTransport {
-  const child = spawn(command, args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
-  // Input can race process death before the exit event lands; an unhandled
-  // stdin error event would otherwise take down the whole runner (EPIPE).
-  child.stdin.on("error", () => undefined);
+export function spawnNativePtyTransport(
+  command: string,
+  args: string[],
+  options: { cwd: string; columns: number; rows: number; env?: NodeJS.ProcessEnv },
+): TerminalTransport {
+  const env = Object.fromEntries(
+    Object.entries(options.env ?? {}).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
+  env.TERM = "xterm-256color";
+  const pty: IPty = spawn(command, args, {
+    name: "xterm-256color",
+    cols: options.columns,
+    rows: options.rows,
+    cwd: options.cwd,
+    env,
+    encoding: null,
+  });
   return {
-    write: (bytes) => {
-      if (child.stdin.destroyed || !child.stdin.writable) {
-        throw new Error("Terminal input channel is closed");
-      }
-      child.stdin.write(bytes, () => undefined);
-    },
-    resize: () => {
-      // Pipes have no window size; the resized frame still reaches observers.
-    },
-    kill: () => {
-      child.kill("SIGKILL");
-    },
+    write: (bytes) => pty.write(Buffer.from(bytes)),
+    resize: (columns, rows) => pty.resize(columns, rows),
+    kill: (signal = "SIGKILL") => pty.kill(signal),
     onData: (listener) => {
-      child.stdout.on("data", listener);
-      child.stderr.on("data", listener);
+      pty.onData((data) => listener(Buffer.isBuffer(data) ? data : Buffer.from(data, "utf8")));
     },
     onExit: (listener) => {
-      child.on("exit", (code) => listener(code));
-      child.on("error", () => listener(null));
+      pty.onExit(({ exitCode, signal }) => listener(exitCode, signal ? String(signal) : undefined));
     },
   };
 }
