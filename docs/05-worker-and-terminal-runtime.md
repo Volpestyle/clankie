@@ -74,19 +74,82 @@ Steps 1, 2, 4, and 10 are implemented by `WorktreeManager` in `apps/runner/src/w
 
 ## Terminal protocol
 
-Separate planes:
+The serialized boundary is schema version 1 from
+`@clankie/terminal-protocol` ([ADR 0033](adr/0033-terminal-wire-and-vt-restore-snapshots.md)).
+Its strict client/server message unions cover discovery, capability negotiation,
+subscribe/resume/resync, sequence-numbered output/geometry/closure, VT restore
+snapshots, typed errors, owner state, lease lifecycle, and attributed
+idempotent input/resize. Unknown versions, fields, invalid boundaries,
+non-canonical base64, and unattributed control messages fail closed.
 
-- semantic control events: prioritized, low volume;
-- terminal snapshots/deltas/input/resize: high volume;
-- artifacts: authenticated object retrieval.
+The three planes stay separate:
 
-Every terminal frame carries a monotonically increasing sequence. Reconnect asks from the last sequence; when unavailable, runner sends a terminal snapshot.
+- semantic control events are prioritized and low volume;
+- terminal output, VT restore sequences, input, and resize are high-volume raw
+  data and never enter semantic events, logs, analytics, crash reports, or
+  ordinary support bundles;
+- artifacts use authenticated object retrieval rather than terminal messages.
 
-`TerminalManager` in `apps/runner/src/terminals.ts` implements this: output frames live in a bounded per-terminal replay buffer; evicted bytes fold into a rolling byte-tail snapshot, so snapshot + buffer is always a gap-free suffix of the stream. Reconnects inside the buffer resume exactly; older or missing sequences are resynced from the snapshot. Lagging observers are resynced from a fresh snapshot instead of buffering unbounded frames (backpressure). Input and resize require a live control lease; observation does not. Worker processes attach through a `TerminalTransport` — the built-in pipe transport merges stdout/stderr; a native PTY transport slots in behind the same interface.
+### Ordering, resume, and snapshots
 
-Durable transports restore their previous terminal ID when a runner restarts.
-The manager rejects duplicate IDs, so a recovered session cannot race a second
-owner or silently fork a client's replay cursor.
+Each terminal has one monotonic data sequence shared by output, geometry, and
+closure messages. A receiver applies exactly `lastAppliedSequence + 1`,
+discards a sequence at or below the last applied value as a duplicate, and
+stops applying on a larger value while it sends `terminal.resync`. This is the
+only gap/duplicate rule.
+
+On resume, the client's typed replay cursor carries its last applied sequence.
+The runner replays from `lastAppliedSequence + 1` when that entire
+contiguous range remains available. Otherwise it sends
+`terminal.resync_required`, discards that subscription's partial replay, and
+sends a snapshot. The snapshot contains geometry plus a `vt_restore_v1`
+sequence representing visible headless VT state _after_ sequence N; its
+boundary states both `afterSequence: N` and `nextSequence: N + 1`. Clients reset
+their emulator, apply the restore sequence, then accept only frame N+1. A
+snapshot is never a bounded PTY byte tail.
+
+`terminal.subscribed` binds the request to a subscription ID and starting
+cursor, and declares whether initial delivery is live-only, replay, or a
+following snapshot. This lets a source that truthfully lacks snapshot/resume
+support offer observation from a precise live boundary without pretending it
+can reconstruct earlier state.
+
+The runner uses a real PTY and feeds the exact ordered bytes through a
+TypeScript-owned quiescence/framing layer into `@xterm/headless`; snapshots use
+`@xterm/addon-serialize`. Publication waits until all bytes through N have been
+applied and the UTF-8/VT parser is quiescent, because addon serialization does
+not make partial parser state part of the restore contract. Geometry changes
+are applied to the headless terminal in the same sequence lane before later
+output. Immutable package fixtures prove snapshot-at-N plus frames after N
+equals uninterrupted visible state for alternate screen, cursor, SGR color,
+resize, and split UTF-8 output.
+
+### Discovery, control, and idempotency
+
+Discovery reports source capability independently from device authorization.
+A source may be read-only, replayable without control, unable to resize, or
+unable to accept input. `input` or `resize` capability requires lease support;
+resume requires VT restore snapshots. The authenticated device receives an
+explicit `observe` and/or `control` scope, so a capable source never implies a
+device may control it.
+
+The runner owns exactly one renewable control lease per terminal. Acquire,
+renew, release, expiry, rejection, and the current nullable owner are explicit
+messages; owner state has its own monotonic revision. Every lease operation and
+every input/resize request carries principal, device, and client-instance
+attribution. Input and resize additionally carry an operation ID. The runner
+deduplicates by `(leaseId, operation type, operationId)`: an exact retry returns
+`disposition: duplicate` without applying again, while reuse with different
+content fails with `operation_conflict`. Relay transport never owns or grants a
+lease.
+
+`TerminalManager` in `apps/runner/src/terminals.ts` remains a deprecated
+pre-v1 in-process adapter with a generic pipe transport and rolling byte-tail
+frames. Its legacy exports stay compile-compatible but are not accepted by the
+serialized v1 schema and must not cross direct or relay transports. VUH-868
+replaces that adapter with the real-PTY/headless-VT implementation. Durable
+transports restore their previous terminal ID when a runner restarts; duplicate
+IDs remain rejected so recovery cannot fork a replay cursor.
 
 ## Status derivation
 
@@ -102,10 +165,11 @@ control plane, never the terminal plane. "Done" is a projection concern
 
 ## Human takeover
 
-- observers may read according to RBAC;
-- one control lease by default;
+- observers may read only with an authenticated `observe` device scope;
+- exactly one renewable control lease exists per terminal;
 - acquiring a lease pauses automated input;
-- all input is attributed to user/device;
+- all lease, input, and resize operations are attributed to principal, device,
+  and client instance;
 - lease expires or is explicitly released;
 - agent resumes only after handback and optional summary;
 - forced release requires higher authority and is audited.

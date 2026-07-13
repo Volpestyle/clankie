@@ -110,6 +110,29 @@ boundary and may not make the bot and user-session transports co-own a voice/med
 [`ADR 0024`](adr/0024-discord-dual-plane-presence.md) and
 [`ADR 0025`](adr/0025-clankvox-placement-and-ipc.md).
 
+## Terminal data plane
+
+Terminal traffic uses the strict provider-neutral v1 contract in
+`@clankie/terminal-protocol` ([ADR 0033](adr/0033-terminal-wire-and-vt-restore-snapshots.md)).
+The trusted runner is the only owner of real PTYs, ordered replay state, headless
+VT state, and the one renewable control lease. It applies PTY bytes to
+`@xterm/headless`, serializes visible state with `@xterm/addon-serialize`, and
+publishes the resulting VT restore sequence with geometry at an exact,
+parser-quiescent terminal sequence boundary. A raw byte tail is not a snapshot.
+
+Authenticated clients connect either directly to the runner gateway or through
+the relay. The relay transports validated terminal messages but never owns a
+PTY, sequence history, VT emulator, or control lease. TypeScript at the runner
+boundary owns sequencing, resume, duplicate/gap handling, snapshot publication,
+idempotent input/resize, and lease expiry.
+
+Terminal output, restore sequences, input, and resize remain a high-volume data
+plane. They never become semantic mission events and never enter structured
+logs, analytics, crash reports, or ordinary support bundles. Only bounded
+metadata such as terminal identity, geometry, sequence boundaries, capability
+flags, lease lifecycle, and typed error codes crosses the semantic/diagnostic
+boundary; artifacts use their separately authenticated retrieval plane.
+
 ## Control flow
 
 1. A channel normalizes user intent into a command.

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "cursor-color",
+  "initialGeometry": { "columns": 12, "rows": 4 },
+  "events": [
+    { "type": "output", "sequence": 1, "data": "G1syShtbSBtbMzFtUkVEG1swbQ==" },
+    { "type": "output", "sequence": 2, "data": "G1szOzVIG1szMm1H" },
+    { "type": "output", "sequence": 3, "data": "G1sxOzhIG1szNG1C" },
+    { "type": "output", "sequence": 4, "data": "G1s0OzJIG1swbUVORA==" }
+  ],
+  "snapshot": {
+    "boundary": { "afterSequence": 2, "nextSequence": 3, "parserState": "quiescent" },
+    "geometry": { "columns": 12, "rows": 4 },
+    "restore": "G1syShtbSBtbMzFtUkVEG1swbRtbMzs1SBtbMzJtRw=="
+  },
+  "expected": {
+    "activeBuffer": "primary",
+    "geometry": { "columns": 12, "rows": 4 },
+    "cursor": { "row": 4, "column": 5, "color": "default" },
+    "lines": ["RED    B", "", "    G", " END"],
+    "coloredCells": [
+      { "row": 1, "column": 1, "text": "RED", "color": "red" },
+      { "row": 1, "column": 8, "text": "B", "color": "blue" },
+      { "row": 3, "column": 5, "text": "G", "color": "green" }
+    ]
+  }
+}

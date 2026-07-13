@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "resize-utf8",
+  "initialGeometry": { "columns": 8, "rows": 3 },
+  "events": [
+    { "type": "output", "sequence": 1, "data": "G1syShtbSGNhZsM=" },
+    { "type": "output", "sequence": 2, "data": "qSDOuw==" },
+    { "type": "geometry", "sequence": 3, "geometry": { "columns": 12, "rows": 4 } },
+    { "type": "output", "sequence": 4, "data": "G1syOzFI6Q==" },
+    { "type": "output", "sequence": 5, "data": "m6o=" }
+  ],
+  "snapshot": {
+    "boundary": { "afterSequence": 3, "nextSequence": 4, "parserState": "quiescent" },
+    "geometry": { "columns": 12, "rows": 4 },
+    "restore": "G1syShtbSGNhZsOpIM67"
+  },
+  "expected": {
+    "activeBuffer": "primary",
+    "geometry": { "columns": 12, "rows": 4 },
+    "cursor": { "row": 2, "column": 2, "color": "default" },
+    "lines": ["café λ", "雪", "", ""],
+    "coloredCells": []
+  }
+}
