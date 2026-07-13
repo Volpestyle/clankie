@@ -426,6 +426,9 @@ importers:
       '@clankie/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@clankie/terminal-protocol':
+        specifier: workspace:*
+        version: link:../terminal-protocol
     devDependencies:
       '@types/node':
         specifier: 24.12.4
