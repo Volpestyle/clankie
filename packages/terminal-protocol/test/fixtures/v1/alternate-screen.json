@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "alternate-screen",
+  "initialGeometry": { "columns": 12, "rows": 4 },
+  "events": [
+    { "type": "output", "sequence": 1, "data": "c2hlbGw+IA==" },
+    { "type": "output", "sequence": 2, "data": "G1s/MTA0OWgbWzJKG1tIREFTSA==" },
+    { "type": "output", "sequence": 3, "data": "G1syOzNIG1szMm1PSxtbMG0=" },
+    { "type": "output", "sequence": 4, "data": "G1szOzFIG1szNG1SRUFEWQ==" }
+  ],
+  "snapshot": {
+    "boundary": { "afterSequence": 2, "nextSequence": 3, "parserState": "quiescent" },
+    "geometry": { "columns": 12, "rows": 4 },
+    "restore": "G1s/MTA0OWgbWzJKG1tIREFTSA=="
+  },
+  "expected": {
+    "activeBuffer": "alternate",
+    "geometry": { "columns": 12, "rows": 4 },
+    "cursor": { "row": 3, "column": 6, "color": "blue" },
+    "lines": ["DASH", "  OK", "READY", ""],
+    "coloredCells": [
+      { "row": 2, "column": 3, "text": "OK", "color": "green" },
+      { "row": 3, "column": 1, "text": "READY", "color": "blue" }
+    ]
+  }
+}

@@ -6,6 +6,9 @@ import type { TaskKind, WorkerResult } from "@clankie/protocol";
 import type { WorkerAdapter, WorkerRunContext } from "@clankie/worker-sdk";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve, sep } from "node:path";
+import { ShellWorkerAdapter } from "./shell-worker.ts";
+import type { ShellSandbox } from "./sandbox.ts";
+import type { TerminalManager } from "./terminals.ts";
 
 /**
  * Injectable adapter constructors, defaulting to the real provider adapters.
@@ -74,6 +77,37 @@ export function buildWorkerAdapters(
 export function simWorkersEnabled(env: NodeJS.ProcessEnv): boolean {
   const value = env.CLANKIE_SIM_WORKERS?.trim().toLowerCase();
   return value === "1" || value === "true";
+}
+
+/** Opt-in generic shell seat; invalid configuration is unavailable rather than silently pipe-backed. */
+export function buildConfiguredShellAdapter(
+  env: NodeJS.ProcessEnv,
+  workerEnvironment: NodeJS.ProcessEnv,
+  terminalManager: TerminalManager,
+  sandbox: ShellSandbox,
+): ShellWorkerAdapter | undefined {
+  const encoded = env.CLANKIE_SHELL_WORKER_COMMAND?.trim();
+  if (!encoded) return undefined;
+  let command: unknown;
+  try {
+    command = JSON.parse(encoded);
+  } catch {
+    throw new Error("CLANKIE_SHELL_WORKER_COMMAND must be a JSON string array");
+  }
+  if (
+    !Array.isArray(command) ||
+    command.length === 0 ||
+    command.some((part) => typeof part !== "string" || part.length === 0)
+  )
+    throw new Error("CLANKIE_SHELL_WORKER_COMMAND must be a non-empty JSON string array");
+  const [executable, ...args] = command as string[];
+  return new ShellWorkerAdapter({
+    id: "generic-shell",
+    terminalManager,
+    sandbox,
+    environmentForTask: () => workerEnvironment,
+    commandForTask: () => ({ command: executable as string, args }),
+  });
 }
 
 /** Read-only descriptor wrapper matching the existing codex-verifier pattern. */

@@ -12,7 +12,7 @@ export class ControlLeaseManager {
     }
     const now = Date.now();
     const lease: ControlLease = {
-      id: randomUUID(),
+      id: existing?.id ?? randomUUID(),
       terminalId,
       principalId,
       acquiredAt: new Date(now).toISOString(),
@@ -23,10 +23,22 @@ export class ControlLeaseManager {
     return lease;
   }
 
+  public renew(terminalId: string, leaseId: string, durationMs = 60_000): ControlLease {
+    const lease = this.assert(terminalId, leaseId);
+    lease.expiresAt = new Date(Date.now() + durationMs).toISOString();
+    this.byTerminal.set(terminalId, lease);
+    return structuredClone(lease);
+  }
+
+  public revoke(terminalId: string): void {
+    this.byTerminal.delete(terminalId);
+  }
+
   public assert(terminalId: string, leaseId: string): ControlLease {
     this.expireStale();
     const lease = this.byTerminal.get(terminalId);
-    if (!lease || lease.id !== leaseId) throw new Error("A valid control lease is required");
+    if (!lease || lease.id !== leaseId || lease.mode !== "control")
+      throw new Error("A valid control lease is required");
     return lease;
   }
 
