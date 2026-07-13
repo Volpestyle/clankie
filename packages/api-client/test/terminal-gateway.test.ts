@@ -593,6 +593,92 @@ describe("TerminalGatewayClient.observe closure convergence", () => {
   });
 });
 
+describe("TerminalGatewayClient.observe cursor integrity", () => {
+  it("rejects a retained replay resume whose ack cursor is lower than the requested cursor", async () => {
+    const { client } = makeClient((sent, context) => {
+      if (sent.type === "terminal.resume") {
+        context.push(subscribedMessage({ requestId: sent.requestId, initialDelivery: "replay", cursor: 4 }));
+        context.push(outputMessage(5));
+      }
+    });
+    await expect(
+      collect(client.observe({ terminalId, afterSequence: 5, signal: new AbortController().signal })),
+    ).rejects.toMatchObject({ code: "unexpected_message" });
+  });
+
+  it("rejects a retained live resume whose ack cursor is higher than the requested cursor", async () => {
+    const { client } = makeClient((sent, context) => {
+      if (sent.type === "terminal.resume") {
+        context.push(subscribedMessage({ requestId: sent.requestId, initialDelivery: "live", cursor: 6 }));
+        context.push(outputMessage(7));
+      }
+    });
+    await expect(
+      collect(client.observe({ terminalId, afterSequence: 5, signal: new AbortController().signal })),
+    ).rejects.toMatchObject({ code: "unexpected_message" });
+  });
+
+  it("rejects an initial resync_required whose requested cursor does not match the resume cursor", async () => {
+    const { client } = makeClient((sent, context) => {
+      if (sent.type === "terminal.resume") {
+        context.push(resyncRequiredMessage(4)); // resume was from 5
+      }
+    });
+    await expect(
+      collect(client.observe({ terminalId, afterSequence: 5, signal: new AbortController().signal })),
+    ).rejects.toMatchObject({ code: "unexpected_message" });
+  });
+
+  it("rejects an active resync_required whose requested cursor does not match the app cursor", async () => {
+    const { client } = makeClient((sent, context) => {
+      if (sent.type === "terminal.subscribe") {
+        context.push(
+          subscribedMessage({ requestId: sent.requestId, initialDelivery: "snapshot", cursor: 0 }),
+        );
+        context.push(snapshotMessage({ afterSequence: 0 }));
+        context.push(outputMessage(1)); // app cursor -> 1
+        context.push(resyncRequiredMessage(99)); // stale/mismatched
+      }
+    });
+    await expect(
+      collect(client.observe({ terminalId, signal: new AbortController().signal })),
+    ).rejects.toMatchObject({ code: "unexpected_message" });
+  });
+
+  it("recovers an active resync_required that matches the app cursor", async () => {
+    const { client, getDuplex } = makeClient((sent, context) => {
+      if (sent.type === "terminal.subscribe") {
+        context.push(
+          subscribedMessage({ requestId: sent.requestId, initialDelivery: "snapshot", cursor: 0 }),
+        );
+        context.push(snapshotMessage({ afterSequence: 0 }));
+        context.push(outputMessage(1)); // app cursor -> 1
+        context.push(resyncRequiredMessage(1)); // matches app cursor
+      } else if (sent.type === "terminal.resync") {
+        context.push(
+          subscribedMessage({ requestId: sent.requestId, initialDelivery: "snapshot", cursor: 4 }),
+        );
+        context.push(snapshotMessage({ afterSequence: 5 }));
+        context.push(outputMessage(6));
+        context.push(closedMessage(7));
+      }
+    });
+
+    const events = await collect(client.observe({ terminalId, signal: new AbortController().signal }));
+
+    expect(eventTypes(events)).toEqual([
+      "capabilities",
+      "snapshot",
+      "output",
+      "snapshot",
+      "output",
+      "closed",
+    ]);
+    const resync = getDuplex().sent.find((message) => message.type === "terminal.resync");
+    expect(resync).toMatchObject({ cursor: { sequence: 1 }, cause: "reconnect" });
+  });
+});
+
 describe("TerminalGatewayClient.observe transport and safety", () => {
   it("fails closed on a malformed server payload without echoing it", async () => {
     const secret = "super-secret-terminal-bytes";

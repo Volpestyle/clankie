@@ -223,6 +223,17 @@ async function* driveObserve(
     }
   }
 
+  // A resync-required notice must name the exact cursor the client resumed or
+  // resynced from; a stale or mismatched cursor is rejected rather than acted on.
+  function requireResyncNotice(
+    notice: { terminalId: string; requestedAfterSequence: number },
+    expectedCursor: number,
+  ): void {
+    if (notice.terminalId !== terminalId || notice.requestedAfterSequence !== expectedCursor) {
+      throw new TerminalGatewayClientError("unexpected_message");
+    }
+  }
+
   function* applySubscribedAck(ack: TerminalSubscribedMessage): Generator<TerminalGatewayStreamEvent> {
     if (ack.terminalId !== terminalId || ack.requestId !== expectedAckRequestId) {
       throw new TerminalGatewayClientError("unexpected_message");
@@ -310,9 +321,7 @@ async function* driveObserve(
         return;
       }
       if (message.type === "terminal.resync_required") {
-        if (message.terminalId !== terminalId) {
-          throw new TerminalGatewayClientError("unexpected_message");
-        }
+        requireResyncNotice(message, cursorSequence);
         continue;
       }
       throw new TerminalGatewayClientError("unexpected_message");
@@ -353,11 +362,17 @@ async function* driveObserve(
         }
         yield* consumeSnapshotEvent(snapshot);
       } else {
+        // Retained replay/live must tail strictly after N: the acknowledged
+        // cursor has to equal the requested resume cursor, or a lower cursor
+        // re-yields applied frames and a higher cursor silently skips data.
+        if (first.cursor.sequence !== request.afterSequence) {
+          throw new TerminalGatewayClientError("unexpected_message");
+        }
         wireCursor = first.cursor.sequence;
         yield* maybeEmitPendingClose();
       }
     } else if (first.type === "terminal.resync_required") {
-      if (first.terminalId !== terminalId) throw new TerminalGatewayClientError("unexpected_message");
+      requireResyncNotice(first, request.afterSequence);
       yield* recoverViaResync(request.afterSequence, "reconnect");
     } else {
       throw new TerminalGatewayClientError("unexpected_message");
@@ -414,7 +429,7 @@ async function* driveObserve(
         break;
       }
       case "terminal.resync_required": {
-        if (message.terminalId !== terminalId) throw new TerminalGatewayClientError("unexpected_message");
+        requireResyncNotice(message, wireCursor);
         yield* recoverViaResync(wireCursor, "reconnect");
         break;
       }
