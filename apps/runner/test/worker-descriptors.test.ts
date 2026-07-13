@@ -8,10 +8,38 @@ import { CodexWorkerAdapter, type CodexWorkerOptions } from "@clankie/worker-cod
 import { ClaudeWorkerAdapter, type ClaudeWorkerOptions } from "@clankie/worker-claude";
 import { PiWorkerAdapter, type PiWorkerOptions } from "@clankie/worker-pi";
 import { afterEach, describe, expect, it } from "vitest";
-import { buildWorkerAdapters, simWorkersEnabled } from "../src/worker-descriptors.ts";
+import {
+  buildConfiguredShellAdapter,
+  buildWorkerAdapters,
+  simWorkersEnabled,
+} from "../src/worker-descriptors.ts";
 import { buildWorkerEnvironment } from "../src/worker-environment.ts";
+import { TerminalManager } from "../src/terminals.ts";
+import { ShellSandbox } from "../src/sandbox.ts";
 
 describe("buildWorkerAdapters", () => {
+  it("builds the opt-in generic fleet seat with the runner singleton and native PTY", async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), "clankie-generic-shell-"));
+    const terminals = new TerminalManager();
+    const adapter = buildConfiguredShellAdapter(
+      {
+        CLANKIE_SHELL_WORKER_COMMAND: JSON.stringify([
+          process.execPath,
+          "-e",
+          "if(!process.stdout.isTTY)process.exit(7)",
+        ]),
+      },
+      { PATH: process.env.PATH },
+      terminals,
+      new ShellSandbox(),
+    );
+    const result = await adapter?.run(context(workspacePath, "implementation", "implementer", {}, []));
+    expect(result).toMatchObject({ status: "succeeded", outputs: { terminalId: expect.any(String) } });
+    expect(terminals.context(String(result?.outputs.terminalId))).toMatchObject({
+      workerRunId: "run-sim-test",
+      provider: "generic-shell",
+    });
+  });
   it("registers codex, claude, and pi descriptors role-appropriate to the frozen scenario", () => {
     const adapters = buildWorkerAdapters({}, { PATH: "/toolchain/bin" });
     const byId = new Map(adapters.map((adapter) => [adapter.descriptor.id, adapter.descriptor]));

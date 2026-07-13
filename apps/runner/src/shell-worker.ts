@@ -9,6 +9,7 @@ import {
   type SandboxDenial,
   type SandboxEscalation,
 } from "./sandbox.ts";
+import type { TerminalManager } from "./terminals.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -19,6 +20,7 @@ export interface ShellWorkerOptions {
   sandboxForTask?: (context: WorkerRunContext) => SandboxEscalation;
   environmentForTask?: (context: WorkerRunContext) => NodeJS.ProcessEnv;
   timeoutMs?: number;
+  terminalManager?: TerminalManager;
 }
 
 export class ShellWorkerAdapter implements WorkerAdapter {
@@ -79,6 +81,9 @@ export class ShellWorkerAdapter implements WorkerAdapter {
       profileHash: context.profileHash,
       data: { command: invocation.command, args: invocation.args, sandboxProfile: prepared.profile },
     });
+    if (this.options.terminalManager) {
+      return this.runInTerminal(context, invocation, prepared);
+    }
     try {
       const result = await execFileAsync(prepared.command, prepared.args, {
         cwd: context.workspacePath,
@@ -131,6 +136,64 @@ export class ShellWorkerAdapter implements WorkerAdapter {
         diagnosis: value.message,
       };
     } finally {
+      await prepared.close();
+    }
+  }
+
+  private async runInTerminal(
+    context: WorkerRunContext,
+    invocation: { command: string; args: string[] },
+    prepared: PreparedSandbox,
+  ): Promise<WorkerResult> {
+    const manager = this.options.terminalManager as TerminalManager;
+    const session = manager.spawnTerminal({
+      workerRunId: context.workerRunId,
+      title: this.descriptor.displayName,
+      command: prepared.command,
+      args: prepared.args,
+      cwd: context.workspacePath,
+      env: prepared.environment,
+      context: {
+        missionId: context.missionId,
+        taskId: context.task.id,
+        attempt: context.attempt,
+        provider: this.descriptor.id,
+      },
+    });
+    const abort = () => manager.cancel(session.id);
+    context.signal.addEventListener("abort", abort, { once: true });
+    const timeout = setTimeout(abort, this.options.timeoutMs ?? 30 * 60_000);
+    let exitCode: number | null = null;
+    try {
+      for await (const frame of manager.observe(session.id)) {
+        if (frame.type === "closed") exitCode = frame.exitCode;
+      }
+      const denials = await prepared.collectDenials();
+      if (denials.length > 0)
+        return sandboxFailure(context, invocation, prepared.profile, denials, exitCode ?? undefined);
+      return exitCode === 0
+        ? {
+            status: "succeeded",
+            summary: `${invocation.command} completed successfully in a native PTY.`,
+            evidence: [
+              {
+                kind: "command",
+                label: "shell-command",
+                summary: "Interactive command completed in runner terminal.",
+              },
+            ],
+            outputs: { terminalId: session.id, sandboxProfile: prepared.profile },
+          }
+        : {
+            status: "failed",
+            summary: `${invocation.command} failed in a native PTY.`,
+            evidence: [],
+            outputs: { terminalId: session.id, exitCode },
+            diagnosis: "Interactive command exited unsuccessfully.",
+          };
+    } finally {
+      clearTimeout(timeout);
+      context.signal.removeEventListener("abort", abort);
       await prepared.close();
     }
   }

@@ -15,6 +15,7 @@ import {
 } from "./evidence-bundle.ts";
 import type { ProviderMetadata } from "./provider-factory.ts";
 import type { WorktreeLease, WorktreeManager } from "./worktrees.ts";
+import type { TerminalManager } from "./terminals.ts";
 import {
   runVerificationChecks,
   type VerificationCheck,
@@ -67,6 +68,7 @@ export interface MissionWorkerOptions {
   evidenceStore?: AttemptEvidenceStore;
   steeringPollIntervalMs?: number;
   hasHumanControlLease?: (workerRunId: string) => boolean | Promise<boolean>;
+  terminalManager?: Pick<TerminalManager, "bindNativeSession">;
 }
 
 interface AttemptFacts {
@@ -244,6 +246,11 @@ export class MissionWorker {
             if (!data) return;
             if (event.type === "worker.native_session.bound" && typeof data.nativeSessionId === "string") {
               nativeSessionId = data.nativeSessionId;
+              this.options.terminalManager?.bindNativeSession(
+                assignment.workerRunId,
+                assignment.attempt,
+                data.nativeSessionId,
+              );
             }
             if (event.type === "worker.command.completed" && typeof data.commandFingerprint === "string") {
               commands.push(`provider:${String(data.provider)}:sha256:${data.commandFingerprint}`);
