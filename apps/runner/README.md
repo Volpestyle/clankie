@@ -4,6 +4,11 @@ The runner is the trust boundary that owns worktrees, worker processes, PTYs, pr
 
 The production runner creates one `TerminalManager`. Generic interactive commands run in a native `node-pty` terminal with runner-supplied environment only; Codex App Server JSON-RPC, Claude Agent SDK, and Pi RPC retain their protocol-native control transports and are never relabeled as PTYs. The manager owns ordered raw-byte replay, headless `@xterm/headless` state, `@xterm/addon-serialize` VT restore snapshots at parser-quiescent boundaries, live-attempt correlation, bounded observers, and the single renewable human-control lease. Closed terminals leave discovery deterministically; restart marks non-reattachable PTY records orphaned and closed. Do not put merge, deployment, or organization-wide connector tokens inside worker environments.
 
+`pnpm --filter @clankie/runner terminal:lifecycle-evidence` runs the immutable interactive
+terminal contract and writes a reproducible evidence manifest under
+`artifacts/runner/terminal-lifecycle/`. The manifest contains only safe phase identifiers,
+exit state, and hashes; terminal bytes, input, credentials, and lease tokens are never retained.
+
 ## Interactive environments
 
 `createRunnerEnvironmentLifecycle()` composes a concrete environment adapter

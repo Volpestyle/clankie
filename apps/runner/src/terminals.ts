@@ -80,7 +80,7 @@ interface TerminalRecord {
   pipeline: Promise<void>;
   humanControl: boolean;
   parserBoundary: ParserBoundary;
-  snapshot: { sequence: number; data: string };
+  snapshot: { sequence: number; data: string; columns: number; rows: number };
 }
 
 class ParserBoundary {
@@ -112,11 +112,15 @@ class ParserBoundary {
         if (byte === 0x1b) this.escape = "esc";
         continue;
       }
+      if (byte === 0x18 || byte === 0x1a || byte === 0x9c) {
+        this.escape = "ground";
+        continue;
+      }
       if (this.escape === "esc") {
         if (byte === 0x5b) this.escape = "csi";
         else if (byte === 0x5d) this.escape = "osc";
         else if (byte === 0x50) this.escape = "dcs";
-        else this.escape = "ground";
+        else if (byte < 0x20 || byte > 0x2f) this.escape = "ground";
         continue;
       }
       if (this.escape === "csi") {
@@ -203,7 +207,12 @@ export class TerminalManager implements TerminalProvider {
       pipeline: Promise.resolve(),
       humanControl: false,
       parserBoundary: new ParserBoundary(),
-      snapshot: { sequence: 0, data: Buffer.from("\u001bc").toString("base64") },
+      snapshot: {
+        sequence: 0,
+        data: Buffer.from("\u001bc").toString("base64"),
+        columns,
+        rows,
+      },
     };
     this.terminals.set(id, record);
     transport.onData((chunk) => {
@@ -250,8 +259,9 @@ export class TerminalManager implements TerminalProvider {
     let horizon = fromSequence ?? -1;
     try {
       if (fromSequence === undefined || !this.isResumable(record, fromSequence)) {
-        observer.queue.push(this.snapshotFrame(record));
-        horizon = record.session.lastSequence;
+        const snapshot = this.snapshotFrame(record);
+        observer.queue.push(snapshot, ...this.framesAfter(record, snapshot.sequence));
+        horizon = snapshot.sequence - 1;
       } else
         for (const item of record.frames)
           if (item.frame.sequence > fromSequence) observer.queue.push(item.frame);
@@ -259,8 +269,9 @@ export class TerminalManager implements TerminalProvider {
         if (observer.resync) {
           observer.resync = false;
           observer.queue.length = 0;
-          observer.queue.push(this.snapshotFrame(record));
-          horizon = record.session.lastSequence;
+          const snapshot = this.snapshotFrame(record);
+          observer.queue.push(snapshot, ...this.framesAfter(record, snapshot.sequence));
+          horizon = snapshot.sequence - 1;
         }
         const frame = observer.queue.shift();
         if (!frame) {
@@ -292,13 +303,13 @@ export class TerminalManager implements TerminalProvider {
   }
   public async sendInput(terminalId: string, leaseId: string, bytes: Uint8Array): Promise<void> {
     const r = this.mustGet(terminalId);
-    this.leases.assert(terminalId, leaseId);
+    this.assertControlLease(terminalId, leaseId);
     if (r.closed) throw new Error(`Terminal ${terminalId} is closed`);
     r.transport.write(bytes);
   }
   public async resize(terminalId: string, leaseId: string, columns: number, rows: number): Promise<void> {
     const r = this.mustGet(terminalId);
-    this.leases.assert(terminalId, leaseId);
+    this.assertControlLease(terminalId, leaseId);
     if (r.closed) throw new Error(`Terminal ${terminalId} is closed`);
     r.transport.resize(columns, rows);
     r.emulator.resize(columns, rows);
@@ -347,6 +358,8 @@ export class TerminalManager implements TerminalProvider {
       record.snapshot = {
         sequence: record.session.lastSequence,
         data: Buffer.from(record.serializer.serialize() || "\u001bc").toString("base64"),
+        columns: record.session.columns,
+        rows: record.session.rows,
       };
   }
   private async appendClosed(
@@ -396,9 +409,12 @@ export class TerminalManager implements TerminalProvider {
       sequence: record.snapshot.sequence,
       encoding: "base64",
       data: record.snapshot.data,
-      columns: record.session.columns,
-      rows: record.session.rows,
+      columns: record.snapshot.columns,
+      rows: record.snapshot.rows,
     };
+  }
+  private framesAfter(record: TerminalRecord, sequence: number): TerminalFrame[] {
+    return record.frames.filter((item) => item.frame.sequence > sequence).map((item) => item.frame);
   }
   private isResumable(record: TerminalRecord, sequence: number): boolean {
     return (
@@ -410,6 +426,11 @@ export class TerminalManager implements TerminalProvider {
     const r = this.terminals.get(id);
     if (!r) throw new Error(`Unknown terminal ${id}`);
     return r;
+  }
+  private assertControlLease(terminalId: string, leaseId: string): ControlLease {
+    const lease = this.leases.assert(terminalId, leaseId);
+    if (lease.mode !== "control") throw new Error("An observe-only lease is not a valid control lease");
+    return lease;
   }
   private setHumanControl(record: TerminalRecord, active: boolean): void {
     if (record.humanControl === active) return;

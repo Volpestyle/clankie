@@ -9,6 +9,7 @@
     "build": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
+    "terminal:lifecycle-evidence": "vitest run test/terminal-lifecycle-evidence.test.ts",
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {

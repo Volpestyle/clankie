@@ -37,7 +37,8 @@ export class ControlLeaseManager {
   public assert(terminalId: string, leaseId: string): ControlLease {
     this.expireStale();
     const lease = this.byTerminal.get(terminalId);
-    if (!lease || lease.id !== leaseId) throw new Error("A valid control lease is required");
+    if (!lease || lease.id !== leaseId || lease.mode !== "control")
+      throw new Error("A valid control lease is required");
     return lease;
   }
 
