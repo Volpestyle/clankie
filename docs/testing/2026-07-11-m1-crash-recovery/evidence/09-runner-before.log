@@ -1,0 +1,4 @@
+{"level":30,"time":"2026-07-11T08:07:07.085Z","service":"clankie-runner-terminals","version":"0.1.0","terminalId":"terminal-run-1","workerRunId":"run-1","command":"/opt/homebrew/Cellar/node/26.3.1/bin/node","msg":"terminal spawned"}
+{"level":30,"time":"2026-07-11T08:07:07.085Z","service":"clankie-runner-terminals","version":"0.1.0","terminalId":"terminal-run-2","workerRunId":"run-2","command":"/opt/homebrew/Cellar/node/26.3.1/bin/node","msg":"terminal spawned"}
+{"level":30,"time":"2026-07-11T08:07:07.085Z","service":"clankie-runner-terminals","version":"0.1.0","terminalId":"terminal-run-3","workerRunId":"run-3","command":"/opt/homebrew/Cellar/node/26.3.1/bin/node","msg":"terminal spawned"}
+clankie-runner: recovery checkpoint ready

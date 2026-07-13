@@ -1,0 +1,4 @@
+{"level":30,"time":"2026-07-11T08:07:06.732Z","service":"clankie-control-plane","version":"0.1.0","missionCount":0,"msg":"mission records rebuilt from event store"}
+{"level":30,"time":"2026-07-11T08:07:06.733Z","service":"clankie-control-plane","version":"0.1.0","port":61777,"profileHash":"1a7fbc876f4556b5","eventStorePath":"<state-root>/events.db","msg":"control plane listening"}
+{"level":30,"time":"2026-07-11T08:07:06.789Z","service":"clankie-control-plane","version":"0.1.0","missionId":"mission-3280ef37-add","msg":"mission created"}
+{"level":30,"time":"2026-07-11T08:07:06.793Z","service":"clankie-control-plane","version":"0.1.0","missionId":"mission-3280ef37-add","taskCount":3,"msg":"mission planned"}
