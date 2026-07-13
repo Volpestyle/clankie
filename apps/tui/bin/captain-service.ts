@@ -454,6 +454,10 @@ export async function ensureCaptainService(
   while (Date.now() < deadline) {
     if ((await probeCaptain(host, fetchImpl)) === "healthy") {
       releaseLock();
+      // The detached captain must not hold the launcher's event loop open, or
+      // one-shot commands like `clankie restart` hang after reporting ready.
+      // stop/stopSync can still signal an unref'd child.
+      serviceChild.unref();
       return {
         host,
         owned: true,

@@ -89,10 +89,14 @@ describe("ensureCaptainService", () => {
     const calls: Array<{ args: readonly string[]; command: string }> = [];
     const statuses: string[] = [];
     let ready = false;
+    let unreffed = 0;
     const child = Object.assign(new EventEmitter(), {
       exitCode: null,
       pid: undefined,
       kill: () => true,
+      unref: () => {
+        unreffed += 1;
+      },
     }) as unknown as ChildProcess;
     const spawnBuildImpl = ((command: string, args: readonly string[]) => {
       calls.push({ command, args });
@@ -123,6 +127,7 @@ describe("ensureCaptainService", () => {
 
       expect(handle.owned).toBe(true);
       expect(handle.generation).toBe(TEST_GENERATION);
+      expect(unreffed).toBe(1);
       expect(statuses).toEqual([
         "Checking for a running captain…",
         "Building the durable captain…",
