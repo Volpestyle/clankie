@@ -53,6 +53,19 @@ export async function reconcileEveLaneSession(input: {
   readonly state?: "active" | "waiting" | "completed" | "failed";
 }): Promise<void> {
   const runtime = await captainLaneRuntime();
+  await reconcileEveLaneSessionWithRuntime(runtime, input);
+}
+
+/** Injectable hook core: production and provider-free integration tests share the exact resolver path. */
+export async function reconcileEveLaneSessionWithRuntime(
+  runtime: Pick<CaptainLaneRuntime, "identity" | "registry" | "conversations">,
+  input: {
+    readonly channel: EveChannelLaneContext;
+    readonly sessionId: string;
+    readonly continuationToken?: string;
+    readonly state?: "active" | "waiting" | "completed" | "failed";
+  },
+): Promise<void> {
   const address = captainLaneAddress(input.channel, runtime.identity.characterId);
   if (address.lane === "operator") {
     // Resolve the conversation by its Eve session identity first (the service

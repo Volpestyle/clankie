@@ -39,6 +39,7 @@ import {
   MissionTriggerEventSchema,
   MissionTriggerSchema,
   createOperatorConversationServiceClient,
+  OPERATOR_CONVERSATION_REF_MAX,
   OperatorConversationAttachmentSchema,
   OperatorConversationInputResponseSchema,
   OperatorConversationRecoverySchema,
@@ -161,6 +162,26 @@ describe("protocol", () => {
         text: "ok",
         streaming: false,
         continuationToken: "secret",
+      }),
+    ).toThrow();
+    expect(() =>
+      OperatorConversationStreamEventSchema.parse({
+        ...base,
+        type: "worker_transcript",
+        workerRunId: "w".repeat(OPERATOR_CONVERSATION_REF_MAX + 1),
+        phase: "tail",
+        summary: "bounded summary",
+      }),
+    ).toThrow();
+    expect(() =>
+      SubmitOperatorConversationTurnSchema.parse({
+        schemaVersion: 1,
+        kind: "worker_steer",
+        conversationId: "global-default",
+        surfaceClientId: "rn",
+        expectedRevision: 1,
+        workerRunId: "w".repeat(OPERATOR_CONVERSATION_REF_MAX + 1),
+        intent: { type: "focus", target: "failing_test" },
       }),
     ).toThrow();
     // A message event validates and carries no provider/credential surface.

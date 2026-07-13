@@ -1,14 +1,19 @@
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
 import {
   createOperatorConversationServiceClient,
   OPERATOR_CONVERSATION_DISPATCH_PATH,
+  OperatorConversationCursorSchema,
   OperatorConversationIdSchema,
   OperatorConversationServiceResultSchema,
+  OperatorSurfaceClientIdSchema,
   type OperatorConversation,
+  type OperatorConversationRecovery,
   type OperatorConversationScope,
   type OperatorConversationServiceClient,
   type OperatorConversationServiceDispatch,
+  type OperatorConversationStreamEvent,
 } from "@clankie/protocol";
 
 /**
@@ -41,9 +46,24 @@ export function createCaptainOperatorConversationClient(
     if (!response.ok) {
       throw new Error(`Operator conversation dispatch failed with status ${response.status}`);
     }
-    return OperatorConversationServiceResultSchema.parse(await response.json());
+    try {
+      return OperatorConversationServiceResultSchema.parse(await response.json());
+    } catch (error) {
+      throw new OperatorConversationClientError(
+        "Captain conversation response failed schema validation",
+        error,
+      );
+    }
   };
   return createOperatorConversationServiceClient(dispatch);
+}
+
+/** A display-safe client error whose message never contains a response body. */
+export class OperatorConversationClientError extends Error {
+  public constructor(message: string, cause?: unknown) {
+    super(message, { cause });
+    this.name = "OperatorConversationClientError";
+  }
 }
 
 export class OperatorConversationSelection {
@@ -147,7 +167,7 @@ export class OperatorConversationSelectionStore {
     if (!OperatorConversationIdSchema.safeParse(conversationId).success) {
       throw new OperatorConversationSelectionStoreError(`Refusing to persist invalid conversation id`);
     }
-    await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
+    await ensurePrivateParent(this.path);
     const temporary = `${this.path}.${process.pid}.tmp`;
     await writeFile(temporary, `${JSON.stringify({ version: 1, conversationId })}\n`, {
       encoding: "utf8",
@@ -212,4 +232,288 @@ export function parseDirectConversation(args: readonly string[]): {
     conversationId,
     remaining: [...args.slice(0, index), ...args.slice(index + 2)],
   };
+}
+
+interface StoredOperatorConversationTailState {
+  readonly version: 1;
+  readonly surfaceClientId: string;
+  readonly cursors: readonly {
+    readonly conversationId: string;
+    readonly cursor: string;
+  }[];
+}
+
+/**
+ * Durable per-surface tail state. The stable surface id and one opaque cursor
+ * per conversation make restart and conversation switching resume the exact
+ * server-owned log boundary rather than a process-global Eve session.
+ */
+export class OperatorConversationTailStore {
+  private readonly path: string;
+  private state: StoredOperatorConversationTailState | undefined;
+
+  public constructor(path: string) {
+    this.path = path;
+  }
+
+  public async initialize(): Promise<void> {
+    if (this.state !== undefined) return;
+    let raw: string;
+    try {
+      raw = await readFile(this.path, "utf8");
+    } catch (error) {
+      if (!isErrnoException(error) || error.code !== "ENOENT") {
+        throw new OperatorConversationSelectionStoreError(
+          `Operator conversation tail state is unreadable: ${isErrnoException(error) ? error.code : "error"}`,
+        );
+      }
+      this.state = {
+        version: 1,
+        surfaceClientId: `tui-${randomUUID()}`,
+        cursors: [],
+      };
+      await this.persist();
+      return;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new OperatorConversationSelectionStoreError("Operator conversation tail state is corrupt JSON");
+    }
+    if (!isStoredTailState(parsed)) {
+      throw new OperatorConversationSelectionStoreError(
+        "Operator conversation tail state has an invalid schema, version, id, or cursor",
+      );
+    }
+    this.state = parsed;
+  }
+
+  public get surfaceClientId(): string {
+    return this.requiredState().surfaceClientId;
+  }
+
+  public cursor(conversationId: string): string | undefined {
+    return this.requiredState().cursors.find((item) => item.conversationId === conversationId)?.cursor;
+  }
+
+  public async writeCursor(conversationId: string, cursor: string): Promise<void> {
+    if (
+      !OperatorConversationIdSchema.safeParse(conversationId).success ||
+      !OperatorConversationCursorSchema.safeParse(cursor).success
+    ) {
+      throw new OperatorConversationSelectionStoreError("Refusing to persist invalid tail state");
+    }
+    const current = this.requiredState();
+    const cursors = current.cursors.filter((item) => item.conversationId !== conversationId);
+    this.state = { ...current, cursors: [...cursors, { conversationId, cursor }] };
+    await this.persist();
+  }
+
+  private requiredState(): StoredOperatorConversationTailState {
+    if (this.state === undefined) {
+      throw new OperatorConversationSelectionStoreError(
+        "Operator conversation tail store must be initialized before use",
+      );
+    }
+    return this.state;
+  }
+
+  private async persist(): Promise<void> {
+    const state = this.requiredState();
+    await ensurePrivateParent(this.path);
+    const temporary = `${this.path}.${process.pid}.tmp`;
+    await writeFile(temporary, `${JSON.stringify(state)}\n`, { encoding: "utf8", mode: 0o600 });
+    await rename(temporary, this.path);
+    await chmod(this.path, 0o600);
+  }
+}
+
+async function ensurePrivateParent(path: string): Promise<void> {
+  const parent = dirname(path);
+  try {
+    await mkdir(parent, { recursive: true, mode: 0o700 });
+    await chmod(parent, 0o700);
+  } catch (error) {
+    throw new OperatorConversationSelectionStoreError(
+      `Operator conversation state parent cannot be secured: ${isErrnoException(error) ? error.code : "error"}`,
+    );
+  }
+}
+
+function isStoredTailState(input: unknown): input is StoredOperatorConversationTailState {
+  if (typeof input !== "object" || input === null) return false;
+  const value = input as Partial<StoredOperatorConversationTailState>;
+  if (
+    value.version !== 1 ||
+    !OperatorSurfaceClientIdSchema.safeParse(value.surfaceClientId).success ||
+    !Array.isArray(value.cursors) ||
+    value.cursors.length > 256
+  ) {
+    return false;
+  }
+  const ids = new Set<string>();
+  for (const item of value.cursors) {
+    if (
+      typeof item !== "object" ||
+      item === null ||
+      !OperatorConversationIdSchema.safeParse(item.conversationId).success ||
+      !OperatorConversationCursorSchema.safeParse(item.cursor).success ||
+      ids.has(item.conversationId)
+    ) {
+      return false;
+    }
+    ids.add(item.conversationId);
+  }
+  return true;
+}
+
+export interface OperatorConversationEventSink {
+  event(event: OperatorConversationStreamEvent): void;
+  recovery(recovery: OperatorConversationRecovery): void;
+}
+
+/**
+ * Production plain-prompt adapter. It snapshots the selected conversation for
+ * each prompt, catches up that surface's durable cursor, sends with the current
+ * revision fence, then consumes the typed tail until this accepted run reaches
+ * a terminal lifecycle event. No direct/default Eve session exists in this
+ * path, and aborting observation never cancels the already accepted turn.
+ */
+export class OperatorConversationPromptSession {
+  private readonly client: OperatorConversationClient;
+  private readonly selection: OperatorConversationSelection;
+  private readonly tails: OperatorConversationTailStore;
+  private readonly restores = new Map<string, Promise<boolean>>();
+
+  public constructor(input: {
+    readonly client: OperatorConversationClient;
+    readonly selection: OperatorConversationSelection;
+    readonly tails: OperatorConversationTailStore;
+  }) {
+    this.client = input.client;
+    this.selection = input.selection;
+    this.tails = input.tails;
+  }
+
+  public async initialize(): Promise<void> {
+    await this.tails.initialize();
+  }
+
+  /** Replays only unread durable history, persisting every rendered boundary. */
+  public async restore(sink: OperatorConversationEventSink): Promise<boolean> {
+    const conversationId = this.requiredConversationId();
+    return await this.restoreConversation(conversationId, sink);
+  }
+
+  private async restoreConversation(
+    conversationId: string,
+    sink: OperatorConversationEventSink,
+  ): Promise<boolean> {
+    const active = this.restores.get(conversationId);
+    if (active !== undefined) return await active;
+    const run = this.restoreConversationNow(conversationId, sink).finally(() => {
+      this.restores.delete(conversationId);
+    });
+    this.restores.set(conversationId, run);
+    return await run;
+  }
+
+  private async restoreConversationNow(
+    conversationId: string,
+    sink: OperatorConversationEventSink,
+  ): Promise<boolean> {
+    let cursor = this.tails.cursor(conversationId);
+    for (;;) {
+      const page = await this.client.replay({
+        schemaVersion: 1,
+        conversationId,
+        surfaceClientId: this.tails.surfaceClientId,
+        ...(cursor === undefined ? {} : { cursor }),
+        limit: 100,
+      });
+      if (page.status === "recover") {
+        sink.recovery(page);
+        return false;
+      }
+      for (const event of page.events) {
+        sink.event(event);
+        cursor = event.cursor;
+        await this.tails.writeCursor(conversationId, event.cursor);
+      }
+      if (!page.hasMore) return true;
+      cursor = page.nextCursor;
+    }
+  }
+
+  public async prompt(
+    message: string,
+    sink: OperatorConversationEventSink,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    // Snapshot selection once. A concurrent /conversation switch affects only
+    // the next prompt; it can never retarget an already submitted turn.
+    const conversationId = this.requiredConversationId();
+    if (!(await this.restoreConversation(conversationId, sink))) {
+      throw new OperatorConversationClientError(
+        "Conversation history requires an explicit recovery before sending",
+      );
+    }
+    const conversation = await this.client.get(conversationId);
+    if (conversation === undefined) {
+      throw new OperatorConversationClientError("Selected operator conversation no longer exists");
+    }
+    const accepted = await this.client.send({
+      schemaVersion: 1,
+      kind: "message",
+      conversationId,
+      surfaceClientId: this.tails.surfaceClientId,
+      expectedRevision: conversation.revision,
+      message,
+    });
+    if (accepted.status === "revision_conflict") {
+      throw new OperatorConversationClientError(
+        `Conversation changed at revision ${accepted.currentRevision}; retry the prompt`,
+      );
+    }
+    if (accepted.status === "unsupported") {
+      throw new OperatorConversationClientError("Captain does not support ordinary conversation messages");
+    }
+
+    const cursor = this.tails.cursor(conversationId);
+    for await (const item of this.client.tail(
+      {
+        schemaVersion: 1,
+        conversationId,
+        surfaceClientId: this.tails.surfaceClientId,
+        ...(cursor === undefined ? {} : { cursor }),
+        limit: 100,
+      },
+      signal,
+    )) {
+      if (item.kind === "recovery") {
+        sink.recovery(item.recovery);
+        return;
+      }
+      sink.event(item.event);
+      await this.tails.writeCursor(conversationId, item.event.cursor);
+      if (
+        item.event.type === "turn" &&
+        item.event.runId === accepted.runId &&
+        ["completed", "failed", "cancelled"].includes(item.event.phase)
+      ) {
+        return;
+      }
+    }
+  }
+
+  private requiredConversationId(): string {
+    const conversationId = this.selection.conversationId;
+    if (conversationId === undefined) {
+      throw new OperatorConversationClientError(
+        "No operator conversation is selected; use /conversation to choose one",
+      );
+    }
+    return conversationId;
+  }
 }

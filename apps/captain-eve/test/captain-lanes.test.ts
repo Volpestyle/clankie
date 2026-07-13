@@ -11,12 +11,20 @@ import {
   type CaptainIdentity,
 } from "@clankie/captain-runtime";
 import { routeAuth } from "eve/channels/auth";
+import type { SendFn, Session } from "eve/channels";
 import { captainLaneAddress, captainLaneInstructions } from "../lib/lanes/context.ts";
 import { redactEveStreamEvent } from "../lib/lanes/transcript.ts";
-import { runCaptainConversationTurn, type CaptainConversationClient } from "../lib/lanes/runtime.ts";
 import {
+  reconcileEveLaneSessionWithRuntime,
+  runCaptainConversationTurn,
+  type CaptainConversationClient,
+} from "../lib/lanes/runtime.ts";
+import {
+  authoredChannelClient,
   captainRouteAuth,
   handleOperatorConversationDispatch,
+  operatorChannelMetadata,
+  type OperatorChannelState,
 } from "../agent/channels/operator-conversations.ts";
 
 const identity: CaptainIdentity = {
@@ -286,6 +294,72 @@ describe("Eve captain operator conversation execution", () => {
     }) as HandleMessageStreamEvent;
   const completed = { type: "session.completed" } as HandleMessageStreamEvent;
 
+  it("carries authored channel state through metadata, lane resolution, and the lifecycle hook", async () => {
+    const root = await mkdtemp(join(tmpdir(), "captain-authored-channel-"));
+    roots.push(root);
+    let id = 0;
+    const registry = await openOperatorConversationRegistry(join(root, "captain.sqlite"), {
+      identity,
+      idFactory: () => `workspace-conversation-${++id}`,
+    });
+    const workspace = registry.create({ scope: { kind: "workspace", workspaceId: "w1" }, title: "W1" });
+    let sentState: OperatorChannelState | undefined;
+    const fakeSession = {
+      id: "session-authored",
+      continuationToken: "continuation-authored",
+      getEventStream: () =>
+        Promise.resolve(
+          new ReadableStream<HandleMessageStreamEvent>({
+            start(controller) {
+              controller.enqueue(completed);
+              controller.close();
+            },
+          }),
+        ),
+    } as unknown as Session;
+    const send: SendFn<OperatorChannelState> = async (_input, options) => {
+      sentState = options.state;
+      return fakeSession;
+    };
+    const channelClient = authoredChannelClient(send, {
+      principalId: "test",
+      principalType: "service",
+    } as never);
+    const turn = await channelClient.send({
+      conversationId: workspace.conversationId,
+      message: "hello",
+      continuationToken: workspace.conversationId,
+    });
+    expect(sentState).toEqual({ conversationId: workspace.conversationId });
+    const metadata = operatorChannelMetadata(sentState as OperatorChannelState);
+    expect(captainLaneAddress({ kind: "defineChannel", metadata }, identity.characterId)).toEqual({
+      characterId: identity.characterId,
+      lane: "operator",
+      targetId: workspace.conversationId,
+    });
+    await reconcileEveLaneSessionWithRuntime(
+      {
+        identity,
+        conversations: registry,
+        registry: { bindSession: () => Promise.resolve() } as never,
+      },
+      {
+        channel: { kind: "defineChannel", metadata },
+        sessionId: turn.sessionId,
+        ...(turn.continuationToken === undefined ? {} : { continuationToken: turn.continuationToken }),
+        state: "active",
+      },
+    );
+    expect(registry.privateSession(workspace.conversationId)).toEqual({
+      sessionId: "session-authored",
+      continuationToken: "continuation-authored",
+    });
+    const eventTypes: string[] = [];
+    for await (const event of turn.events(0)) eventTypes.push(event.type);
+    expect(eventTypes).toEqual(["session.completed"]);
+    registry.close();
+  });
+
   it("runs an accepted turn against the conversation session, publishing transcript and binding privately", async () => {
     const root = await mkdtemp(join(tmpdir(), "captain-exec-"));
     roots.push(root);
@@ -414,18 +488,54 @@ describe("Eve captain operator conversation execution", () => {
     registry.close();
   });
 
-  it("fails the dispatch route closed for non-loopback callers and accepts loopback", async () => {
-    const loopback = await routeAuth(
-      new Request("http://127.0.0.1/operator/v1/dispatch", { method: "POST" }),
-      captainRouteAuth(),
-    );
-    expect(loopback instanceof Response).toBe(false);
-    const remote = await routeAuth(
-      new Request("http://evil.example.com/operator/v1/dispatch", { method: "POST" }),
-      captainRouteAuth(),
-    );
-    expect(remote instanceof Response).toBe(true);
-    if (remote instanceof Response) expect(remote.status).toBe(401);
+  it("uses loopback auth only when no captain bearer is configured", async () => {
+    const previousToken = process.env.CLANKIE_CAPTAIN_TOKEN;
+    delete process.env.CLANKIE_CAPTAIN_TOKEN;
+    try {
+      const loopback = await routeAuth(
+        new Request("http://127.0.0.1/operator/v1/dispatch", { method: "POST" }),
+        captainRouteAuth(),
+      );
+      expect(loopback instanceof Response).toBe(false);
+      const remote = await routeAuth(
+        new Request("http://evil.example.com/operator/v1/dispatch", { method: "POST" }),
+        captainRouteAuth(),
+      );
+      expect(remote instanceof Response).toBe(true);
+      if (remote instanceof Response) expect(remote.status).toBe(401);
+    } finally {
+      if (previousToken === undefined) delete process.env.CLANKIE_CAPTAIN_TOKEN;
+      else process.env.CLANKIE_CAPTAIN_TOKEN = previousToken;
+    }
+  });
+
+  it("requires the captain bearer even for loopback when configured", async () => {
+    const previousToken = process.env.CLANKIE_CAPTAIN_TOKEN;
+    process.env.CLANKIE_CAPTAIN_TOKEN = "captain-secret";
+    try {
+      for (const authorization of [undefined, "Bearer wrong-secret"]) {
+        const result = await routeAuth(
+          new Request("http://127.0.0.1/operator/v1/dispatch", {
+            method: "POST",
+            ...(authorization === undefined ? {} : { headers: { authorization } }),
+          }),
+          captainRouteAuth(),
+        );
+        expect(result).toBeInstanceOf(Response);
+        if (result instanceof Response) expect(result.status).toBe(401);
+      }
+      const authenticated = await routeAuth(
+        new Request("http://127.0.0.1/operator/v1/dispatch", {
+          method: "POST",
+          headers: { authorization: "Bearer captain-secret" },
+        }),
+        captainRouteAuth(),
+      );
+      expect(authenticated instanceof Response).toBe(false);
+    } finally {
+      if (previousToken === undefined) delete process.env.CLANKIE_CAPTAIN_TOKEN;
+      else process.env.CLANKIE_CAPTAIN_TOKEN = previousToken;
+    }
   });
 
   it("dispatches operator conversation requests through the authenticated route", async () => {

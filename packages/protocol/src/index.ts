@@ -226,7 +226,7 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
   }).strict(),
   OperatorConversationEventEnvelopeSchema.extend({
     type: z.literal("worker_transcript"),
-    workerRunId: WorkerRunIdSchema,
+    workerRunId: OperatorConversationWorkerRunIdSchema,
     phase: z.enum(["snapshot", "tail"]),
     summary: z.string().max(OPERATOR_CONVERSATION_TEXT_MAX),
   }).strict(),
@@ -387,7 +387,7 @@ export const SubmitOperatorConversationTurnSchema = z.discriminatedUnion("kind",
   }).strict(),
   SubmitOperatorConversationTurnBaseSchema.extend({
     kind: z.literal("worker_steer"),
-    workerRunId: WorkerRunIdSchema,
+    workerRunId: OperatorConversationWorkerRunIdSchema,
     intent: OperatorConversationSteerIntentSchema,
   }).strict(),
 ]);

@@ -29,11 +29,11 @@ type CaptainRouteAuth = Exclude<Awaited<ReturnType<typeof routeAuth>>, Response>
  * through this channel's own `args.send`. The VUH-864 relay projects the same
  * route to physical devices; it never proxies approval completion.
  */
-interface OperatorChannelState {
+export interface OperatorChannelState {
   readonly conversationId: string;
 }
 
-function operatorChannelMetadata(state: OperatorChannelState): Readonly<Record<string, unknown>> {
+export function operatorChannelMetadata(state: OperatorChannelState): Readonly<Record<string, unknown>> {
   return { captainLane: "operator", captainTargetId: state.conversationId };
 }
 
@@ -44,13 +44,12 @@ function operatorChannelMetadata(state: OperatorChannelState): Readonly<Record<s
  * `routeAuth` fails closed with 401. VUH-864's relay authenticates in front.
  */
 export function captainRouteAuth(): readonly AuthFn<Request>[] {
-  return [captainBearerAuth(), localDev()];
+  const expected = process.env.CLANKIE_CAPTAIN_TOKEN?.trim();
+  return expected === undefined || expected.length === 0 ? [localDev()] : [captainBearerAuth(expected)];
 }
 
-function captainBearerAuth(): AuthFn<Request> {
+function captainBearerAuth(expected: string): AuthFn<Request> {
   return (request) => {
-    const expected = process.env.CLANKIE_CAPTAIN_TOKEN?.trim();
-    if (expected === undefined || expected.length === 0) return null;
     const token = extractBearerToken(request.headers.get("authorization"));
     if (token === null) return null;
     const provided = Buffer.from(token);
@@ -61,7 +60,7 @@ function captainBearerAuth(): AuthFn<Request> {
 }
 
 /** Adapts the authored channel `send` into the per-conversation turn driver. */
-function authoredChannelClient(
+export function authoredChannelClient(
   send: SendFn<OperatorChannelState>,
   auth: CaptainRouteAuth,
 ): CaptainConversationClient {

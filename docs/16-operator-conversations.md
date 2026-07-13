@@ -131,5 +131,21 @@ one). The `OperatorConversationSelectionStore` persists the selection fail-close
 raise) with an atomic 0600 write under a 0700 parent, and reloads it across
 restart. `resolveInitialConversation` confirms every `--chat` or persisted id
 against the server (`get`) before attaching, so a stale or attacker-supplied id
-can never bind. Conversation-bound replay cursors remain independent across TUI
-faces and other surfaces.
+can never bind.
+
+Every ordinary prompt snapshots that selected id, catches up unread history,
+sends a revision-fenced `message`, then renders only strict
+`OperatorConversationStreamEvent` items from the typed tail until the accepted
+run reaches a terminal event. It never falls back to the direct/default Eve
+session. A private `OperatorConversationTailStore` persists one stable TUI
+surface id and an opaque cursor per conversation, so restart and A-to-B switching
+resume the exact durable boundaries. Typed recovery is rendered once and stops
+the stream before the reset boundary; the TUI never auto-resyncs. Transport
+schema failures and recovery copy are display-safe and never echo raw response
+payloads.
+
+The authored-channel integration test uses eve 0.22.4's real `SendFn`/`Session`
+types with an in-process fake session. It proves `state.conversationId` becomes
+`metadata.captainTargetId`, resolves through `captainLaneAddress`, and reaches the
+same lifecycle-hook reconciliation core that binds the private conversation
+session. This metadata plumbing requires no paid model provider.
