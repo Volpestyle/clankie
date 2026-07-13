@@ -79,6 +79,17 @@ function sequences(frames: TerminalFrame[]): number[] {
   return frames.map((frame) => frame.sequence);
 }
 
+type QueueInspectableManager = {
+  terminals: Map<string, { observers: Set<{ queue: TerminalFrame[] }> }>;
+};
+
+function soleObserverQueueDepth(manager: TerminalManager, terminalId: string): number {
+  const record = (manager as unknown as QueueInspectableManager).terminals.get(terminalId);
+  expect(record, `terminal ${terminalId} must exist while its observer drains`).toBeDefined();
+  expect(record!.observers.size, `terminal ${terminalId} must have exactly one observer`).toBe(1);
+  return [...record!.observers][0]!.queue.length;
+}
+
 const line = (index: number) => `line-${String(index).padStart(6, "0")}\n`;
 
 const parserBoundaryCases: Array<{ name: string; partial: Buffer; completion: Buffer }> = [
@@ -423,6 +434,76 @@ describe("production terminal acceptance contract", () => {
       (frame): frame is Extract<TerminalFrame, { type: "resized" }> => frame.type === "resized",
     );
     expect(finalResize).toMatchObject({ columns: 84, rows: 25 });
+  });
+
+  it("never materializes a retained resize tail beyond the observer queue bound", async () => {
+    const observerQueueBound = 2;
+    const observedPeaks: Record<string, number> = {};
+    for (const path of ["fresh late join", "existing observer resync"] as const) {
+      const retainedResizeCount = 150;
+      const transport = scriptedTransport();
+      const manager = new TerminalManager({
+        maxObserverQueueFrames: observerQueueBound,
+        maxBufferedFrames: 200,
+        maxBufferedBytes: 1024 * 1024,
+      });
+      const session = manager.spawnTerminal({
+        workerRunId: `accept-bounded-replay-${path.replaceAll(" ", "-")}`,
+        title: path,
+        command: "unused",
+        transport,
+        columns: 80,
+        rows: 24,
+      });
+      const uninterrupted = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
+      const iterator = manager.observe(session.id)[Symbol.asyncIterator]();
+
+      if (path === "existing observer resync") {
+        const initial = await iterator.next();
+        expect(initial.value).toMatchObject({ type: "snapshot", sequence: 0 });
+        expect(soleObserverQueueDepth(manager, session.id)).toBeLessThanOrEqual(observerQueueBound);
+      }
+
+      const content = Buffer.from("quiescent");
+      transport.emit(content);
+      await writeTerminal(uninterrupted, content);
+      await manager.whenIdle(session.id);
+      const lease = await manager.acquireControl(session.id, "controller");
+      for (let index = 0; index < retainedResizeCount; index += 1) {
+        const columns = 80 + (index % 5);
+        const rows = 24 + (index % 3);
+        await manager.resize(session.id, lease.id, columns, rows);
+        uninterrupted.resize(columns, rows);
+      }
+      transport.finish();
+      await manager.whenIdle(session.id);
+
+      const frames: TerminalFrame[] = [];
+      const queueDepths: number[] = [];
+      const drainCap = retainedResizeCount + 5;
+      for (let pull = 0; pull < drainCap; pull += 1) {
+        const item = await iterator.next();
+        if (item.done) break;
+        frames.push(item.value);
+        queueDepths.push(soleObserverQueueDepth(manager, session.id));
+        if (item.value.type === "closed") break;
+      }
+
+      expect(frames.at(-1)?.type, `${path} must terminate within ${String(drainCap)} pulls`).toBe("closed");
+      expect(sequences(frames)).toEqual(frames.map((_, offset) => 1 + offset));
+      expect(frames).toHaveLength(retainedResizeCount + 2);
+      expect(frames.findLast((frame) => frame.type === "resized")).toMatchObject({
+        columns: 84,
+        rows: 26,
+      });
+      expect(await reconstruct(frames)).toBe(terminalDigest(uninterrupted));
+      observedPeaks[path] = Math.max(...queueDepths);
+    }
+    for (const [path, peak] of Object.entries(observedPeaks))
+      expect(
+        peak,
+        `observer queue peak for ${path} must stay within the configured bound; peaks=${JSON.stringify(observedPeaks)}`,
+      ).toBeLessThanOrEqual(observerQueueBound);
   });
 
   it.each(parserBoundaryCases)(
