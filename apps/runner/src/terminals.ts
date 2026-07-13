@@ -66,6 +66,7 @@ interface Observer {
   wake: (() => void) | undefined;
   done: boolean;
   resync: boolean;
+  replayNextSequence: number | undefined;
 }
 interface TerminalRecord {
   session: TerminalSession;
@@ -254,28 +255,29 @@ export class TerminalManager implements TerminalProvider {
 
   public async *observe(terminalId: string, fromSequence?: number): AsyncIterable<TerminalFrame> {
     const record = this.mustGet(terminalId);
-    const observer: Observer = { queue: [], wake: undefined, done: record.closed, resync: false };
+    const observer: Observer = {
+      queue: [],
+      wake: undefined,
+      done: record.closed,
+      resync: false,
+      replayNextSequence: undefined,
+    };
     record.observers.add(observer);
     let horizon = fromSequence ?? -1;
     try {
       if (fromSequence === undefined || !this.isResumable(record, fromSequence)) {
-        const snapshot = this.snapshotFrame(record);
-        observer.queue.push(snapshot, ...this.framesAfter(record, snapshot.sequence));
-        horizon = snapshot.sequence - 1;
-      } else
-        for (const item of record.frames)
-          if (item.frame.sequence > fromSequence) observer.queue.push(item.frame);
+        horizon = this.beginSnapshotReplay(record, observer);
+      } else observer.replayNextSequence = fromSequence + 1;
       while (true) {
         if (observer.resync) {
           observer.resync = false;
           observer.queue.length = 0;
-          const snapshot = this.snapshotFrame(record);
-          observer.queue.push(snapshot, ...this.framesAfter(record, snapshot.sequence));
-          horizon = snapshot.sequence - 1;
+          horizon = this.beginSnapshotReplay(record, observer);
         }
+        this.refillObserver(record, observer);
         const frame = observer.queue.shift();
         if (!frame) {
-          if (observer.done) break;
+          if (observer.done || observer.replayNextSequence !== undefined) break;
           await new Promise<void>((resolve) => {
             observer.wake = resolve;
           });
@@ -288,6 +290,37 @@ export class TerminalManager implements TerminalProvider {
       }
     } finally {
       record.observers.delete(observer);
+    }
+  }
+
+  private beginSnapshotReplay(record: TerminalRecord, observer: Observer): number {
+    const snapshot = this.snapshotFrame(record);
+    observer.queue.push(snapshot);
+    observer.replayNextSequence = snapshot.sequence + 1;
+    return snapshot.sequence - 1;
+  }
+
+  private refillObserver(record: TerminalRecord, observer: Observer): void {
+    while (observer.replayNextSequence !== undefined && observer.queue.length < this.maxObserverQueueFrames) {
+      const nextSequence = observer.replayNextSequence;
+      if (nextSequence > record.session.lastSequence) {
+        observer.replayNextSequence = undefined;
+        return;
+      }
+      const firstRetainedSequence = record.frames[0]?.frame.sequence;
+      if (firstRetainedSequence === undefined || firstRetainedSequence > nextSequence) {
+        observer.replayNextSequence = undefined;
+        observer.done = true;
+        return;
+      }
+      const item = record.frames.find(({ frame }) => frame.sequence === nextSequence);
+      if (!item) {
+        observer.replayNextSequence = undefined;
+        observer.done = true;
+        return;
+      }
+      observer.queue.push(item.frame);
+      observer.replayNextSequence = nextSequence + 1;
     }
   }
 
@@ -311,6 +344,7 @@ export class TerminalManager implements TerminalProvider {
     const r = this.mustGet(terminalId);
     this.assertControlLease(terminalId, leaseId);
     if (r.closed) throw new Error(`Terminal ${terminalId} is closed`);
+    if (r.frames.length >= this.maxBufferedFrames && r.parserBoundary.quiescent) this.captureSnapshot(r);
     r.transport.resize(columns, rows);
     r.emulator.resize(columns, rows);
     r.session.columns = columns;
@@ -354,13 +388,7 @@ export class TerminalManager implements TerminalProvider {
       }),
       chunk.byteLength,
     );
-    if (record.parserBoundary.quiescent)
-      record.snapshot = {
-        sequence: record.session.lastSequence,
-        data: Buffer.from(record.serializer.serialize() || "\u001bc").toString("base64"),
-        columns: record.session.columns,
-        rows: record.session.rows,
-      };
+    if (record.parserBoundary.quiescent) this.captureSnapshot(record);
   }
   private async appendClosed(
     record: TerminalRecord,
@@ -396,8 +424,12 @@ export class TerminalManager implements TerminalProvider {
       record.bufferedBytes -= old.bytes;
     }
     for (const o of record.observers) {
-      if (o.queue.length >= this.maxObserverQueueFrames) o.resync = true;
-      else o.queue.push(frame);
+      if (o.replayNextSequence === undefined && !o.resync) {
+        if (o.queue.length >= this.maxObserverQueueFrames) {
+          o.queue.length = 0;
+          o.resync = true;
+        } else o.queue.push(frame);
+      }
       o.wake?.();
       o.wake = undefined;
     }
@@ -413,8 +445,13 @@ export class TerminalManager implements TerminalProvider {
       rows: record.snapshot.rows,
     };
   }
-  private framesAfter(record: TerminalRecord, sequence: number): TerminalFrame[] {
-    return record.frames.filter((item) => item.frame.sequence > sequence).map((item) => item.frame);
+  private captureSnapshot(record: TerminalRecord): void {
+    record.snapshot = {
+      sequence: record.session.lastSequence,
+      data: Buffer.from(record.serializer.serialize() || "\u001bc").toString("base64"),
+      columns: record.session.columns,
+      rows: record.session.rows,
+    };
   }
   private isResumable(record: TerminalRecord, sequence: number): boolean {
     return (
