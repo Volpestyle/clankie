@@ -126,19 +126,32 @@ Graphical operator UI (Expo mobile shell, bare macOS shell, shared `@clankie/com
 
 This repository keeps the public contracts the app consumes (`@clankie/protocol`, `@clankie/terminal-protocol`, `@clankie/garden-model`) plus the TUI and backend surfaces. Product UI, art, and shell write scope: label `clankie-app` on Linear (hub [VUH-817](https://linear.app/vuhlp/issue/VUH-817)).
 
-## Concurrent work through the tracker (interim)
+## Concurrent work through the tracker
 
-This is the scaffolding-phase protocol ([ADR 0017](adr/0017-self-development-operating-model.md)): external agent sessions lead build waves until Clankie's captain takes the lead seat after the M2 gate. Until the tracker connector lands ([VUH-764](https://linear.app/vuhlp/issue/VUH-764)), concurrent agent sessions coordinate on Linear directly under these rules:
+During scaffolding, external agent sessions lead build waves until Clankie's captain takes
+the lead seat after the M2 gate ([ADR 0017](adr/0017-self-development-operating-model.md)).
+The tracker mirror imports the issue's intent, priority, acceptance criteria, revision, and
+Clankie app identity as an immutable mission contract. Upstream changes surface as drift;
+they never silently rewrite an active mission. See
+[ADR 0034](adr/0034-tracker-mirror-identity-and-authority.md) and the
+[`@clankie/tracker-connector` contract](../packages/tracker-connector/README.md).
 
-- All agent sessions post as the single shared identity (`volpestyle+clanky@gmail.com`) — never a personal account or a per-agent seat. Sign every comment with agent name, role, and worker/session ID.
-- Claim before starting: self-assign the issue and move it to In Progress, then re-read the issue to confirm the claim stuck. If another session claimed it first, pick a different issue.
-- One issue per worker, one autonomous writer per worktree; declared write scopes must not overlap (`AGENTS.md`).
-- Report results as issue comments using the completed-implementation evidence block from `AGENTS.md`.
-- Workers own all tracker narrative by default: evidence blocks, verification verdicts, blockers, and closure/landing summaries (the lead hands the worker the landing commit and observed gate results to include). The lead writes only terse authority acts — rulings, documented exceptions, scope grants, and status-transition flags.
-- The lead session verifies against acceptance criteria and transitions issues to Done; an implementer never marks its own issue completed.
-- The duty split above is the scaffolding-phase default, not doctrine: for Clankie it is an operator-configurable ceremony setting (the operator decides what the lead posts versus what workers post), tracked with the doctrine ceremony presets ([VUH-747](https://linear.app/vuhlp/issue/VUH-747)).
+- The mission engine owns task claims, leases, write scopes, attempts, and execution state.
+  Tracker assignment is a presentation mirror, never a coordination mutex.
+- All automated tracker writes use one Clankie app identity. Structured comment signatures
+  retain agent name, role, worker-run ID, and native session IDs; workers never receive
+  tracker credentials.
+- Workers report progress, evidence, verification findings, and blockers. The lead owns
+  issue structure, assignment, status transitions, and acceptance declarations.
+- Every outbound mutation crosses trusted policy. Priority, completion, and other
+  authority-changing writes do not inherit permission from narrative-comment policy.
+- One autonomous writer owns each worktree and concurrent declared write scopes do not
+  overlap (`AGENTS.md`).
 
-The tracker is authority for intent, priority, and acceptance criteria only. It is not a coordination mutex — conflict prevention lives in write scopes and worktree isolation.
+When an external scaffolding harness cannot use the connector transport, its lead performs
+the same policy and authorship protocol manually through the tracker: it records the claim,
+keeps worker-signed evidence in the issue thread, and retains mission-engine state as the
+execution authority. Manual transport is not a second task ledger.
 
 ## Linear captain channel
 
