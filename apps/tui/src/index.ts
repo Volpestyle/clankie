@@ -5,12 +5,20 @@
 import { join, resolve } from "node:path";
 import { ClankieApiClient } from "@clankie/api-client";
 import { loadConfig, resolveRole, type ClankieConfig } from "@clankie/model-provider";
+import { Client } from "eve/client";
 import { ClankieFaceShell } from "./shell/shell.ts";
 import { buildConsoleCommands } from "./commands.ts";
 import { buildProviderCommands, createProviderServices } from "./provider-commands.ts";
 import { createInitialConsoleState } from "./session/state.ts";
 import { EveCaptainSession } from "./session/eve-captain.ts";
 import { CaptainSessionCursorStore } from "./session/session-cursor.ts";
+import {
+  createCaptainOperatorConversationClient,
+  OperatorConversationSelection,
+  OperatorConversationSelectionStore,
+  parseDirectConversation,
+  resolveInitialConversation,
+} from "./session/operator-conversations.ts";
 import { runRecoveryProbe } from "./recovery-probe.ts";
 import { MissionDashboard } from "./components/mission-dashboard.ts";
 import { SqliteMissionEventSource } from "./observation/mission-events.ts";
@@ -60,11 +68,51 @@ const services = createProviderServices({
     applyModelDisplay(config);
   },
 });
+
+// Production operator conversation client over the captain's authenticated
+// dispatch route (Client.fetch). `--chat`/`/conversation` enumerate and select
+// the real server-owned registry; the selection persists (fail-closed) and
+// reloads across restart, confirmed against the server before attaching.
+const conversationClient = createCaptainOperatorConversationClient(
+  new Client({ host: process.env.CLANKIE_CAPTAIN_URL ?? "http://127.0.0.1:4321", redirect: "error" }),
+);
+const conversationSelectionStore = new OperatorConversationSelectionStore(
+  join(repoRoot, ".data", "tui", "operator-conversation.json"),
+);
+const conversationSelection = new OperatorConversationSelection(conversationClient);
+let conversationNotice: string | undefined;
+try {
+  const directConversationId = parseDirectConversation(process.argv.slice(2)).conversationId;
+  const initial = await resolveInitialConversation({
+    client: conversationClient,
+    store: conversationSelectionStore,
+    ...(directConversationId === undefined ? {} : { directConversationId }),
+  });
+  await conversationSelection.select(initial.conversationId);
+} catch (error) {
+  // The captain may not be ready yet, or the store is corrupt; surface it and
+  // keep the console usable (the /conversation command re-checks on demand).
+  conversationNotice = `conversation selection unavailable: ${error instanceof Error ? error.message : String(error)}`;
+}
+
+const conversationsContext = {
+  get conversationId(): string | undefined {
+    return conversationSelection.conversationId;
+  },
+  conversations: () => conversationSelection.conversations(),
+  select: async (conversationId: string) => {
+    const conversation = await conversationSelection.select(conversationId);
+    await conversationSelectionStore.write(conversation.conversationId);
+    return conversation;
+  },
+};
+
 const commands = [
   ...buildConsoleCommands({
     state,
     captain,
     observer: missionObserver,
+    conversations: conversationsContext,
     ...(approvalClient ? { approvalClient } : {}),
   }),
   ...buildProviderCommands(services),
@@ -165,6 +213,10 @@ shell.insertMarkdown(
       ? (captain.startupNotice ??
         "Connected to the durable local Eve captain. Plain prompts now reach the configured model.")
       : "The captain service is unavailable. Direct `clankie` startup normally launches it; check the captain log.",
+    ...(conversationSelection.conversationId === undefined
+      ? []
+      : [`Conversation: ${conversationSelection.conversationId} · /conversation to list or switch.`]),
+    ...(conversationNotice === undefined ? [] : [conversationNotice]),
     "Try /auth, /provider, /model, /status — or type a prompt.",
   ].join("\n"),
 );

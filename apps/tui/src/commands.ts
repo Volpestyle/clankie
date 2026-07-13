@@ -29,6 +29,18 @@ export interface ConsoleCommandContext {
   readonly state: ConsoleState;
   readonly observer?: MissionObserver;
   readonly approvalClient?: ApprovalInboxClient;
+  readonly conversations?: {
+    readonly conversationId?: string | undefined;
+    conversations(): Promise<
+      readonly {
+        readonly conversationId: string;
+        readonly title: string;
+        readonly isDefault: boolean;
+        readonly revision: number;
+      }[]
+    >;
+    select(conversationId: string): Promise<{ readonly conversationId: string; readonly title: string }>;
+  };
   readonly captain?: {
     readonly connectionState: string;
     readonly hasActiveTurn: boolean;
@@ -38,7 +50,7 @@ export interface ConsoleCommandContext {
 }
 
 export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellCommand[] {
-  const { state, captain, observer, approvalClient } = context;
+  const { state, captain, observer, approvalClient, conversations } = context;
   const commands: FaceShellCommand[] = [];
   const dashboard = () => observer?.dashboard ?? state.dashboard;
 
@@ -92,6 +104,44 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           `${ansi.dim("ctrl+/ command workbench · ctrl+t transcript focus · ! shell escape · esc detach")}`,
         );
         shell.insertCommandResult("/help", lines.join("\n"), "success");
+      },
+    },
+    {
+      name: "conversation",
+      aliases: ["chat"],
+      description: "List or select a server-owned operator conversation",
+      argumentHint: "[<conversation-id>]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        if (conversations === undefined) {
+          shell.insertCommandResult(
+            "/conversation",
+            "The captain conversation registry port is unavailable.",
+            "error",
+          );
+          return;
+        }
+        const selector = argument.trim();
+        if (selector.length > 0) {
+          const selected = await conversations.select(selector);
+          shell.insertCommandResult(
+            `/conversation ${selector}`,
+            `Selected ${selected.title} (${selected.conversationId}).`,
+            "success",
+          );
+          return;
+        }
+        const rows = await conversations.conversations();
+        shell.insertCommandResult(
+          "/conversation",
+          rows
+            .map(
+              (item) =>
+                `${item.conversationId === conversations.conversationId ? "*" : " "} ${item.title} · ${item.conversationId} · revision ${item.revision}${item.isDefault ? " · default" : ""}`,
+            )
+            .join("\n"),
+          "success",
+        );
       },
     },
     {

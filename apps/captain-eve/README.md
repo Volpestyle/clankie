@@ -150,10 +150,11 @@ flowchart LR
   R --> G[Garden captain + attention]
 ```
 
-## Concurrent captain lanes
+## Conversation-scoped captain lanes
 
-TUI, Discord voice, and gameplay use independent durable Eve sessions keyed by
-character, frozen lane kind, and channel target. A private mode-0600 SQLite
+Operator conversations, Discord voice/presence, and gameplay use independent
+durable Eve sessions. Operator sessions are keyed by server-owned conversation
+ID; non-operator lanes retain their channel target. A private mode-0600 SQLite
 registry owns each lane's session and continuation token. The redacted lane
 snapshots and provider-pressure traces cannot contain those tokens, and a token
 or session observed in a second lane fails closed.
@@ -165,13 +166,12 @@ voice and gameplay adapters must provide `captainLane` and `captainTargetId` in
 their existing Eve channel metadata; this package does not implement either
 channel.
 
-The provider admission controller serializes bursts only within one lane.
-Different lanes run concurrently when the configured provider capacity permits
-it. TUI has foreground reservation and highest priority, voice is admitted
-before gameplay for latency, and gameplay calls are cancellable borrowers. With
-a one-call limit, a foreground arrival aborts gameplay and TUI admits as soon as
-that call releases. Streamed model calls retain their permit until the stream
-actually settles.
+The provider admission controller serializes bursts within one conversation.
+Different conversations run concurrently when provider capacity permits it.
+Operator conversations outrank voice/presence and gameplay without a
+device-specific reservation. Streamed model calls retain their permit until the
+stream actually settles. See `docs/16-operator-conversations.md` for the public
+contract and v1 migration behavior.
 
 ## Skill verification
 

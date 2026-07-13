@@ -47,7 +47,7 @@ export class CaptainLaneExecutor {
       {
         requestId: input.requestId,
         laneKey: captainLaneKey(input.address),
-        lane: input.address.lane,
+        lane: input.address.lane === "tui" ? "operator" : input.address.lane,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
       },
       (signal) =>

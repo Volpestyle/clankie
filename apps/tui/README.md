@@ -20,6 +20,7 @@ control subcommands are non-interactive:
 
 ```bash
 clankie                        # via the bin/clankie.ts launcher (~/.local/bin symlink)
+clankie --chat <conversationId> # select an existing server-owned conversation
 clankie health                 # canonical /eve/v1/health + /eve/v1/info probe
 clankie restart                # restart only a launcher-owned captain
 clankie msg "status report"    # submit on the isolated headless session
@@ -126,6 +127,9 @@ src/observation/  Read-only sequenced event source, durable observer cursor,
 ## Interactions
 
 - Type `/` for the command typeahead; Tab completes, Enter runs.
+- `/conversation` lists the injected server registry and
+  `/conversation <conversationId>` selects an existing conversation. Each face
+  keeps an independent replay cursor; selection never creates a local chat ID.
 - `/mission` opens the live observer; `/mission list`, `/mission next`,
   `/mission prev`, and `/mission <id>` provide read-only selection/navigation.
 - `/approvals` loads pending requests from the control plane, shows the policy

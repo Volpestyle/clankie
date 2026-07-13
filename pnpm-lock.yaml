@@ -355,6 +355,9 @@ importers:
       '@clankie/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@clankie/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
       '@earendil-works/pi-tui':
         specifier: 0.80.6
         version: 0.80.6
