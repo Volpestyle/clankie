@@ -2,6 +2,7 @@ import { chmodSync, closeSync, mkdirSync, openSync, readFileSync, unlinkSync, wr
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { Client, isCurrentTurnBoundaryEvent, type HandleMessageStreamEvent } from "eve/client";
+import QRCode from "qrcode";
 import {
   captainServiceStatePath,
   captainStateDirectory,
@@ -29,6 +30,14 @@ import {
 import { emptyTraceCursor, TraceCursorStore } from "../src/session/trace-cursor.ts";
 import { formatTraceLines, renderTraceEvent, type TraceRenderMode } from "../src/session/trace-renderer.ts";
 import { parseTraceLane, type TraceCursor, type TraceLane } from "../src/session/trace-types.ts";
+import {
+  DEFAULT_CONTROL_PLANE_URL,
+  pairingFailureMessage,
+  PairingOfferError,
+  requestPairingOffer,
+  type PairingOffer,
+  type PairingOfferStatus,
+} from "./pairing-offer.ts";
 
 const HEADLESS_CURSOR_NAME = "captain-headless-session.json";
 const HEADLESS_LOCK_NAME = "captain-headless-session.lock";
@@ -139,6 +148,8 @@ function commandHelp(): string {
     "  wait [--timeout SEC]     Wait silently and print the final boundary",
     "  trace [--json] [--lane LANE] [--timeout SEC]",
     "                           Live render-only reasoning/tool stream (stays across turns)",
+    "  pair [--json] [--timeout SEC]",
+    "                           Show a one-time QR + code to pair a device (requires pairing service — VUH-727)",
     "",
     "With no command, clankie opens the fullscreen operator console and requires a TTY.",
   ].join("\n");
@@ -153,6 +164,7 @@ export function isHeadlessCaptainCommand(command: string | undefined): boolean {
     command === "watch" ||
     command === "wait" ||
     command === "trace" ||
+    command === "pair" ||
     command === "help" ||
     command === "--help" ||
     command === "-h"
@@ -640,6 +652,93 @@ async function runTrace(args: readonly string[], options: HeadlessCaptainCommand
   return 0;
 }
 
+interface PairCliOptions {
+  readonly json: boolean;
+  readonly timeoutMs: number;
+}
+
+const DEFAULT_PAIR_TIMEOUT_MS = 10_000;
+const PAIR_USAGE = "Usage: clankie pair [--json] [--timeout SEC]";
+
+function parsePairArgs(args: readonly string[]): PairCliOptions {
+  let json = false;
+  let timeoutMs = DEFAULT_PAIR_TIMEOUT_MS;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--json") {
+      json = true;
+      continue;
+    }
+    if (arg === "--timeout") {
+      const value = args[index + 1];
+      if (value === undefined) throw new Error(PAIR_USAGE);
+      const seconds = Number(value);
+      if (!Number.isFinite(seconds) || seconds <= 0) throw new Error("Timeout must be a positive number.");
+      timeoutMs = seconds * 1_000;
+      index += 1;
+      continue;
+    }
+    throw new Error(PAIR_USAGE);
+  }
+  return { json, timeoutMs };
+}
+
+/**
+ * `clankie pair` — request one short-lived, single-use pairing offer from the
+ * platform pairing service and render a scannable QR plus a copyable code/deep
+ * link. Fully headless: no captain/model session, no TTY requirement. Fails
+ * closed on every error path with an actionable, secret-free message. The QR,
+ * code, and deep link are secret-bearing display data — written to stdout for
+ * the operator, never logged, persisted, or echoed into error output.
+ */
+async function runPair(args: readonly string[], options: HeadlessCaptainCommandOptions): Promise<number> {
+  const { json, timeoutMs } = parsePairArgs(args);
+  const env = options.env ?? process.env;
+  const stdout = options.stdout ?? process.stdout;
+  const stderr = options.stderr ?? process.stderr;
+  const controlPlaneUrl = env.CLANKIE_CONTROL_PLANE_URL ?? DEFAULT_CONTROL_PLANE_URL;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let offer: PairingOffer;
+  try {
+    offer = await requestPairingOffer({
+      controlPlaneUrl,
+      operatorToken: env.CLANKIE_OPERATOR_TOKEN,
+      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    const status: PairingOfferStatus = error instanceof PairingOfferError ? error.status : "unavailable";
+    const message = error instanceof PairingOfferError ? error.message : pairingFailureMessage("unavailable");
+    if (json) outputJson(stdout, { ok: false, status, error: message });
+    else stderr.write(`clankie: ${message}\n`);
+    return 1;
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (json) {
+    outputJson(stdout, { ok: true, code: offer.code, deepLink: offer.deepLink, expiresAt: offer.expiresAt });
+    return 0;
+  }
+
+  const qr = await QRCode.toString(offer.deepLink, { type: "terminal", small: true });
+  stdout.write(
+    [
+      "Scan this QR with the Clankie app to pair this device:",
+      "",
+      qr,
+      `Pairing code: ${offer.code}`,
+      "Or open this link on the device:",
+      offer.deepLink,
+      `Expires ${offer.expiresAt} · single use — run \`clankie pair\` again for a new offer.`,
+      "",
+    ].join("\n"),
+  );
+  return 0;
+}
+
 export async function runHeadlessCaptainCommand(
   args: readonly string[],
   options: HeadlessCaptainCommandOptions,
@@ -652,6 +751,7 @@ export async function runHeadlessCaptainCommand(
     if (command === "watch") return await runWatch(args.slice(1), options, false);
     if (command === "wait") return await runWatch(args.slice(1), options, true);
     if (command === "trace") return await runTrace(args.slice(1), options);
+    if (command === "pair") return await runPair(args.slice(1), options);
     if (command === "help" || command === "--help" || command === "-h") {
       (options.stdout ?? process.stdout).write(`${commandHelp()}\n`);
       return 0;
