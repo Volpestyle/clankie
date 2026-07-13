@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 export const EVE_WORKFLOW_ID = "workflow//eve//workflowEntry";
 export const CAPTAIN_AGENT_NAME = "captain-eve";
 export const CAPTAIN_AUTHORED_TOOL_NAMES = [
+  "add_recovery",
   "create_mission",
   "decide_action",
   "get_mission",
