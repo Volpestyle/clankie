@@ -320,13 +320,29 @@ function releaseBuildLock(fd: number, path: string): void {
   }
 }
 
+/**
+ * How long to wait for a cold captain boot before giving up. A first boot runs a
+ * nitro build, loads the microsandbox template, and initializes the agent, which
+ * routinely exceeds the old fixed 30s. Tunable via
+ * `CLANKIE_CAPTAIN_STARTUP_TIMEOUT_MS`; the generous default keeps `clankie
+ * restart` from abandoning a captain that is still coming up.
+ */
+export const DEFAULT_CAPTAIN_STARTUP_TIMEOUT_MS = 120_000;
+
+export function captainStartupTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.CLANKIE_CAPTAIN_STARTUP_TIMEOUT_MS?.trim();
+  if (raw === undefined || raw.length === 0) return DEFAULT_CAPTAIN_STARTUP_TIMEOUT_MS;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : DEFAULT_CAPTAIN_STARTUP_TIMEOUT_MS;
+}
+
 export async function ensureCaptainService(
   options: EnsureCaptainServiceOptions,
 ): Promise<CaptainServiceHandle> {
   const host = options.host ?? options.env?.CLANKIE_CAPTAIN_URL ?? DEFAULT_CAPTAIN_URL;
   const fetchImpl = options.fetchImpl ?? fetch;
   const port = servicePort(host);
-  const timeoutMs = options.timeoutMs ?? 30_000;
+  const timeoutMs = options.timeoutMs ?? captainStartupTimeoutMs(options.env);
   const deadline = Date.now() + timeoutMs;
   const stateDir = captainStateDirectory(options.env);
   const serviceStatePath = join(stateDir, SERVICE_STATE_NAME);
@@ -472,9 +488,9 @@ export async function ensureCaptainService(
     }
     await sleep(100);
   }
-  stopChildSync(serviceChild);
   releaseLock();
   if (spawnError !== undefined) {
+    stopChildSync(serviceChild);
     throw new Error(`Captain Eve service could not start: ${spawnError.message}`, { cause: spawnError });
   }
   if (serviceChild.exitCode !== null) {
@@ -482,7 +498,16 @@ export async function ensureCaptainService(
       `Captain Eve service exited with code ${String(serviceChild.exitCode)}. See ${join(stateDir, "captain-eve.log")}.`,
     );
   }
-  throw new Error(`Captain Eve service did not become healthy at ${host} within the startup timeout.`);
+  // Deadline reached but the process is still alive and booting (a cold nitro
+  // build plus microsandbox load can exceed the window). Leave it running rather
+  // than killing a captain that may be seconds from ready: its service record is
+  // already written, so the next `clankie` call reuses it once health comes up.
+  serviceChild.unref();
+  throw new Error(
+    `Captain Eve is still starting at ${host} and did not report healthy within ${Math.round(
+      timeoutMs / 1_000,
+    )}s. It is still coming up in the background — run \`clankie status\` shortly, or raise CLANKIE_CAPTAIN_STARTUP_TIMEOUT_MS. See ${join(stateDir, "captain-eve.log")}.`,
+  );
 }
 
 export interface RestartCaptainServiceOptions extends EnsureCaptainServiceOptions {

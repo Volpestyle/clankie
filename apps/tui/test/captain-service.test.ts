@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  captainStartupTimeoutMs,
+  DEFAULT_CAPTAIN_STARTUP_TIMEOUT_MS,
   ensureCaptainService,
   restartCaptainService,
   type CaptainServiceHandle,
@@ -230,6 +232,54 @@ describe("ensureCaptainService", () => {
           timeoutMs: 500,
         }),
       ).rejects.toThrow("could not start: spawn pnpm ENOENT");
+    } finally {
+      await rm(stateRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("reads the startup timeout from the environment with a generous default", () => {
+    expect(captainStartupTimeoutMs({})).toBe(DEFAULT_CAPTAIN_STARTUP_TIMEOUT_MS);
+    expect(captainStartupTimeoutMs({ CLANKIE_CAPTAIN_STARTUP_TIMEOUT_MS: "5000" })).toBe(5000);
+    expect(captainStartupTimeoutMs({ CLANKIE_CAPTAIN_STARTUP_TIMEOUT_MS: "nope" })).toBe(
+      DEFAULT_CAPTAIN_STARTUP_TIMEOUT_MS,
+    );
+    expect(captainStartupTimeoutMs({ CLANKIE_CAPTAIN_STARTUP_TIMEOUT_MS: "-5" })).toBe(
+      DEFAULT_CAPTAIN_STARTUP_TIMEOUT_MS,
+    );
+  });
+
+  it("leaves a still-booting captain running instead of killing it when the deadline passes", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "captain-service-test-"));
+    const kills: NodeJS.Signals[] = [];
+    let unreffed = 0;
+    const child = Object.assign(new EventEmitter(), {
+      exitCode: null,
+      pid: 5150,
+      kill: (signal: NodeJS.Signals = "SIGTERM") => {
+        kills.push(signal);
+        return true;
+      },
+      unref: () => {
+        unreffed += 1;
+      },
+    }) as unknown as ChildProcess;
+    try {
+      await expect(
+        ensureCaptainService({
+          repoRoot: "/unused",
+          host: "http://127.0.0.1:4321",
+          env: { XDG_STATE_HOME: stateRoot },
+          fetchImpl: async () => {
+            throw new TypeError("fetch failed");
+          },
+          readBuildGenerationImpl: () => TEST_GENERATION,
+          spawnBuildImpl: (() => completedChild(0)) as unknown as typeof spawn,
+          spawnImpl: (() => child) as unknown as typeof spawn,
+          timeoutMs: 300,
+        }),
+      ).rejects.toThrow("still starting");
+      expect(kills).toEqual([]);
+      expect(unreffed).toBe(1);
     } finally {
       await rm(stateRoot, { recursive: true, force: true });
     }
