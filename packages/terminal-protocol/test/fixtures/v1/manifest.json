@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "algorithm": "sha256",
+  "fixtures": {
+    "alternate-screen.json": "7fe67e4d7909983573f9d533905ed55ab392bc5de2662e34e74e4a3fee97d8ae",
+    "cursor-color.json": "19179169eb9d66ae0c2df88ab0dea210c71ce7eb8e11fa2160f54a604ef4a208",
+    "resize-utf8.json": "d6ddb280d71bac9e2b8e8497cbc62b0d108834ae976ca238e80de76d1e8a998f"
+  }
+}
