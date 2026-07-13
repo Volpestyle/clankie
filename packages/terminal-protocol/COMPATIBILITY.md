@@ -28,7 +28,12 @@ restore snapshot is invalid. Discovery separately reports the authenticated
 device's granted `observe`/`control` scopes, so a capable source does not imply
 that a device is authorized to control it. `terminal.subscribed` declares
 whether initial delivery is live-only, replay, or a following snapshot, and
-pins the subscription's starting sequence cursor.
+pins the subscription's starting sequence cursor. Discovery pairs each complete
+capability value with its positive revision. Every fresh subscribe, resume, or
+resync attachment receives another complete current capability value plus
+`capabilitiesRevision` atomically on `terminal.subscribed`; this acknowledgement
+is the attached client's baseline even when capabilities changed after its
+earlier discovery or get request.
 
 Discovery, subscription acknowledgement, resync-required delivery, and every
 snapshot carry explicit `open` or `closed` lifecycle state. Closed state
@@ -36,10 +41,11 @@ includes the original sequenced close identity and remains authoritative after
 that stream frame leaves replay retention. A closed snapshot's closure
 sequence is at or before its exact snapshot boundary.
 
-`terminal.capabilities_changed` pushes the complete current capability set and
-its positive monotonic revision to each attached subscription. A client applies
-a revision greater than its last applied capability revision and ignores an
-equal or lower revision as a duplicate. A revision gap does not affect terminal
+After that baseline, `terminal.capabilities_changed` pushes the complete current
+capability set and its positive monotonic revision to each attached
+subscription. A client applies only a revision greater than
+`terminal.subscribed.capabilitiesRevision` or the last applied push, and ignores
+an equal or lower revision as stale. A revision gap does not affect terminal
 data sequencing: the complete pushed value supersedes older capability state.
 
 ## Ordering compatibility
@@ -75,8 +81,9 @@ boundary without exposing xterm objects in this public protocol package.
 
 The named public schemas and inferred types cover discovery/list/get
 capabilities, subscribe/resume/resync with an opaque branded replay cursor,
-exact-boundary snapshots, ordered output/geometry/closure, explicit lifecycle,
-revisioned capability changes, owner/lease lifecycle, attributed idempotent
+an atomic subscribed capability baseline, exact-boundary snapshots, ordered
+output/geometry/closure, explicit lifecycle, revisioned capability changes,
+owner/lease lifecycle, attributed idempotent
 input/resize, errors, and client/server/wire unions. `TerminalSequenceDisposition`
 and `classifyTerminalSequence` define duplicate-ignore and gap-resync. The three
 immutable fixtures above are the v1 golden replay inventory. Renderers consume

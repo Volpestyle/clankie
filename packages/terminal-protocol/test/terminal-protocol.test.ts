@@ -16,7 +16,9 @@ import {
   TerminalSequenceBoundarySchema,
   TerminalServerMessageSchema,
   TerminalSnapshotMessageSchema,
+  TerminalSubscribedMessageSchema,
   TerminalWireMessageSchema,
+  classifyTerminalCapabilitiesRevision,
   classifyTerminalSequence,
   decodeTerminalBytes,
   encodeTerminalBytes,
@@ -136,6 +138,7 @@ describe("terminal protocol v1 schemas", () => {
             lastSequence: 42,
             lifecycle: openLifecycle,
             capabilities: base,
+            capabilitiesRevision: 1,
           },
         ],
       }).grantedScopes,
@@ -381,6 +384,7 @@ describe("terminal protocol v1 schemas", () => {
               input: true,
               resize: true,
             },
+            capabilitiesRevision: 1,
           },
         ],
       },
@@ -408,6 +412,15 @@ describe("terminal protocol v1 schemas", () => {
         cursor: { sequence: 0 },
         initialDelivery: "snapshot",
         lifecycle: closedLifecycle,
+        capabilities: {
+          observe: true,
+          resume: true,
+          vtRestoreSnapshot: true,
+          controlLease: true,
+          input: true,
+          resize: true,
+        },
+        capabilitiesRevision: 1,
       },
       {
         ...streamBase,
@@ -521,6 +534,7 @@ describe("terminal protocol v1 schemas", () => {
         input: false,
         resize: false,
       },
+      capabilitiesRevision: 1,
     };
     expect(
       TerminalDiscoveryResponseSchema.safeParse({
@@ -571,6 +585,77 @@ describe("terminal protocol v1 schemas", () => {
     expect(TerminalCapabilitiesChangedMessageSchema.safeParse({ ...message, revision: 0 }).success).toBe(
       false,
     );
+  });
+
+  it("converges on the atomic subscribed capability baseline across an attach race", () => {
+    const revisionNCapabilities = {
+      observe: true as const,
+      resume: true,
+      vtRestoreSnapshot: true,
+      controlLease: true,
+      input: true,
+      resize: true,
+    };
+    const revisionNPlusOneCapabilities = {
+      ...revisionNCapabilities,
+      controlLease: false,
+      input: false,
+      resize: false,
+    };
+    const discovered = TerminalDiscoveryResponseSchema.parse({
+      protocolVersion: 1,
+      type: "terminal.discovery",
+      requestId: "discover-race",
+      grantedScopes: ["observe", "control"],
+      sessions: [
+        {
+          terminalId: "terminal-race",
+          workerRunId: "worker-race",
+          title: "Race",
+          source: "runner_pty",
+          geometry: { columns: 80, rows: 24 },
+          lastSequence: 10,
+          lifecycle: openLifecycle,
+          capabilities: revisionNCapabilities,
+          capabilitiesRevision: 7,
+        },
+      ],
+    });
+    expect(discovered.sessions[0]!.capabilitiesRevision).toBe(7);
+
+    // Capabilities change to N+1 before attach. The acknowledgement is the
+    // atomic baseline for subscribe, resume, and resync attachment paths.
+    const subscribed = TerminalSubscribedMessageSchema.parse({
+      protocolVersion: 1,
+      type: "terminal.subscribed",
+      requestId: "resume-race",
+      terminalId: "terminal-race",
+      subscriptionId: "subscription-race",
+      cursor: { sequence: 10 },
+      initialDelivery: "replay",
+      lifecycle: openLifecycle,
+      capabilities: revisionNPlusOneCapabilities,
+      capabilitiesRevision: 8,
+    });
+    let capabilities = subscribed.capabilities;
+    let revision = subscribed.capabilitiesRevision;
+    expect({ capabilities, revision }).toEqual({
+      capabilities: revisionNPlusOneCapabilities,
+      revision: 8,
+    });
+
+    for (const push of [
+      { revision: 7, capabilities: revisionNCapabilities },
+      { revision: 8, capabilities: revisionNCapabilities },
+      { revision: 9, capabilities: revisionNCapabilities },
+    ]) {
+      if (classifyTerminalCapabilitiesRevision(revision, push.revision) === "apply") {
+        capabilities = push.capabilities;
+        revision = push.revision;
+      }
+    }
+    expect({ capabilities, revision }).toEqual({ capabilities: revisionNCapabilities, revision: 9 });
+    expect(() => classifyTerminalCapabilitiesRevision(0, 1)).toThrow(RangeError);
   });
 });
 

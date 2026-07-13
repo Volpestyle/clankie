@@ -13,6 +13,7 @@ const RequestIdSchema = OpaqueIdSchema;
 const TimestampSchema = z.string().datetime({ offset: true });
 const SequenceSchema = z.number().int().nonnegative().max(MAX_TERMINAL_SEQUENCE);
 const FrameSequenceSchema = z.number().int().positive().max(MAX_TERMINAL_SEQUENCE);
+const CapabilityRevisionSchema = z.number().int().positive().max(MAX_TERMINAL_SEQUENCE);
 const TextSchema = z.string().min(1).max(512);
 
 function isCanonicalBase64(value: string): boolean {
@@ -137,6 +138,7 @@ export const TerminalDiscoverySessionSchema = z
     lastSequence: SequenceSchema,
     lifecycle: TerminalLifecycleSchema,
     capabilities: TerminalCapabilitiesSchema,
+    capabilitiesRevision: CapabilityRevisionSchema,
   })
   .strict()
   .superRefine((session, context) => {
@@ -206,7 +208,7 @@ export const TerminalCapabilitiesMessageSchema = z
     type: z.literal("terminal.capabilities"),
     requestId: RequestIdSchema,
     terminalId: OpaqueIdSchema,
-    revision: z.number().int().positive().max(MAX_TERMINAL_SEQUENCE),
+    revision: CapabilityRevisionSchema,
     capabilities: TerminalCapabilitiesSchema,
   })
   .strict();
@@ -218,7 +220,7 @@ export const TerminalCapabilitiesChangedMessageSchema = z
     type: z.literal("terminal.capabilities_changed"),
     terminalId: OpaqueIdSchema,
     subscriptionId: OpaqueIdSchema,
-    revision: z.number().int().positive().max(MAX_TERMINAL_SEQUENCE),
+    revision: CapabilityRevisionSchema,
     capabilities: TerminalCapabilitiesSchema,
   })
   .strict();
@@ -263,6 +265,8 @@ export const TerminalSubscribedMessageSchema = z
     cursor: TerminalReplayCursorSchema,
     initialDelivery: z.enum(["live", "snapshot", "replay"]),
     lifecycle: TerminalLifecycleSchema,
+    capabilities: TerminalCapabilitiesSchema,
+    capabilitiesRevision: CapabilityRevisionSchema,
   })
   .strict();
 export type TerminalSubscribedMessage = z.infer<typeof TerminalSubscribedMessageSchema>;
@@ -622,6 +626,24 @@ export const TerminalWireMessageSchema = z.union([TerminalClientMessageSchema, T
 export type TerminalWireMessage = z.infer<typeof TerminalWireMessageSchema>;
 
 export type TerminalSequenceDisposition = "apply" | "duplicate" | "gap";
+export type TerminalCapabilitiesRevisionDisposition = "apply" | "stale";
+
+/**
+ * Capability payloads are complete values. Establish state from the atomic
+ * subscribed baseline, then apply only pushes with a strictly greater revision.
+ */
+export function classifyTerminalCapabilitiesRevision(
+  lastAppliedRevision: number,
+  receivedRevision: number,
+): TerminalCapabilitiesRevisionDisposition {
+  if (!CapabilityRevisionSchema.safeParse(lastAppliedRevision).success) {
+    throw new RangeError("lastAppliedRevision must be a positive safe integer");
+  }
+  if (!CapabilityRevisionSchema.safeParse(receivedRevision).success) {
+    throw new RangeError("receivedRevision must be a positive safe integer");
+  }
+  return receivedRevision > lastAppliedRevision ? "apply" : "stale";
+}
 
 /**
  * The only v1 receive rule: apply exactly last+1, discard <= last as a

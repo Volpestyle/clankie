@@ -129,8 +129,9 @@ idempotent input/resize, and lease expiry.
 Discovery, subscribe, snapshot-resync delivery, and resync-required responses
 carry explicit open/closed lifecycle state, including the original sequenced
 closure identity. Attached clients receive complete revisioned
-`terminal.capabilities_changed` pushes independently of the terminal data
-sequence. Canonical byte validation and byte helpers require no Node globals,
+capabilities plus a positive revision atomically on every subscribe, resume, or
+resync acknowledgement, followed by `terminal.capabilities_changed` pushes only
+at greater revisions independently of the terminal data sequence. Canonical byte validation and byte helpers require no Node globals,
 so the same schema surface is safe in React Native and browser-like clients.
 
 Terminal output, restore sequences, input, and resize remain a high-volume data

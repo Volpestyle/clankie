@@ -118,7 +118,10 @@ assert a close sequence included through its exact boundary.
 
 `terminal.subscribed` binds the request to a subscription ID and starting
 cursor, and declares whether initial delivery is live-only, replay, or a
-following snapshot. This lets a source that truthfully lacks snapshot/resume
+following snapshot. It also atomically carries the complete current capabilities
+and positive `capabilitiesRevision` for every fresh subscribe, resume, or resync
+attachment. This baseline supersedes any earlier discovery/get result, closing
+the race where capabilities change before attachment. This lets a source that truthfully lacks snapshot/resume
 support offer observation from a precise live boundary without pretending it
 can reconstruct earlier state.
 
@@ -154,8 +157,9 @@ content fails with `operation_conflict`. Relay transport never owns or grants a
 lease.
 
 Capabilities have an independent positive monotonic revision. An attached
-client applies a complete `terminal.capabilities_changed` value only when its
-revision is newer and ignores duplicate or stale revisions. Because each push
+client starts from `terminal.subscribed.capabilitiesRevision`, then applies a
+complete `terminal.capabilities_changed` value only when its revision is
+greater than the baseline or last applied push and ignores duplicate or stale revisions. Because each push
 contains the complete capability set, a revision gap does not alter terminal
 data sequencing or require replay.
 

@@ -83,10 +83,13 @@ types for every serialized client and server message:
 Discovery, subscription acknowledgement, resync-required delivery, and
 snapshots carry explicit open/closed lifecycle state. Closed state repeats the
 original sequenced close identity, so closure survives replay eviction. Each
-attached subscription also receives a complete `terminal.capabilities_changed`
-push with a positive monotonic revision. Capability revisions are independent
-of the terminal data sequence: newer complete values replace older values and
-equal or lower revisions are ignored.
+discovery session carries complete capabilities with their positive revision.
+Every subscribe, resume, or resync attachment atomically receives complete
+current capabilities and `capabilitiesRevision` on `terminal.subscribed`, so a
+pre-attachment change cannot strand the client on stale discovery state. Later
+`terminal.capabilities_changed` pushes apply only at a revision greater than the
+baseline or last applied push. Capability revisions are independent of the
+terminal data sequence.
 
 Every top-level message carries `protocolVersion: 1`; discovery also states the
 supported version. Objects are strict. Unknown versions or fields, invalid
@@ -163,7 +166,8 @@ lease support; resume is invalid without VT restore snapshots. Discovery
 returns the authenticated device's granted `observe` and/or `control` scope.
 
 Capability changes are server-pushed to attached subscriptions as complete
-values with monotonic revisions. Clients apply only a revision greater than the
+values with monotonic revisions. Clients establish the atomic baseline from
+`terminal.subscribed`, then apply only a revision greater than the baseline or
 last applied capability revision. Lifecycle is likewise explicit on discovery,
 subscription, resync-required, and snapshot delivery; for a closed snapshot,
 the recorded closure sequence must be at or before `afterSequence`.
