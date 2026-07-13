@@ -417,7 +417,7 @@ export class TerminalManager implements TerminalProvider {
   }
 
   private wakeSnapshotWaiters(record: TerminalRecord): void {
-    for (const wake of [...record.snapshotWaiters]) wake();
+    for (const wake of record.snapshotWaiters) wake();
   }
 
   private observeState(record: TerminalRecord): TerminalObservation {
