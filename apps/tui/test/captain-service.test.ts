@@ -357,4 +357,41 @@ describe("restartCaptainService", () => {
       await rm(stateRoot, { recursive: true, force: true });
     }
   });
+
+  it("passes the env-configured startup timeout through to the ensure step", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "captain-restart-timeout-test-"));
+    const restarted: CaptainServiceHandle = {
+      generation: "b".repeat(64),
+      host: "http://127.0.0.1:4321",
+      owned: true,
+      stop: () => Promise.resolve(),
+      stopSync: () => undefined,
+    };
+    // Unreachable + no service record → restart skips the kill wait and calls
+    // ensureImpl directly, so we can capture the timeout it forwards.
+    const restartWith = async (env: NodeJS.ProcessEnv): Promise<number | undefined> => {
+      let seen: number | undefined;
+      await restartCaptainService({
+        repoRoot: "/repo",
+        host: "http://127.0.0.1:4321",
+        env,
+        fetchImpl: async () => {
+          throw new TypeError("fetch failed");
+        },
+        ensureImpl: async (ensureOptions) => {
+          seen = ensureOptions.timeoutMs;
+          return restarted;
+        },
+      });
+      return seen;
+    };
+    try {
+      expect(
+        await restartWith({ XDG_STATE_HOME: stateRoot, CLANKIE_CAPTAIN_STARTUP_TIMEOUT_MS: "90000" }),
+      ).toBe(90_000);
+      expect(await restartWith({ XDG_STATE_HOME: stateRoot })).toBe(DEFAULT_CAPTAIN_STARTUP_TIMEOUT_MS);
+    } finally {
+      await rm(stateRoot, { recursive: true, force: true });
+    }
+  });
 });

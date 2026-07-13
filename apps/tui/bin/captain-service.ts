@@ -538,7 +538,10 @@ export async function restartCaptainService(
 ): Promise<CaptainServiceHandle> {
   const host = options.host ?? options.env?.CLANKIE_CAPTAIN_URL ?? DEFAULT_CAPTAIN_URL;
   const fetchImpl = options.fetchImpl ?? fetch;
-  const timeoutMs = options.timeoutMs ?? 30_000;
+  // Same generous, env-tunable startup budget as the direct ensure path; the
+  // SIGTERM stop wait below stays capped at 10s via Math.min, so only the
+  // build/boot wait grows. Passed through explicitly to ensureCaptainService.
+  const timeoutMs = options.timeoutMs ?? captainStartupTimeoutMs(options.env);
   const statePath = captainServiceStatePath(options.env);
   const inspection = await inspectCaptain(host, fetchImpl);
   if (inspection.state === "unhealthy") {
