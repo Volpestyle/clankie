@@ -187,6 +187,48 @@ connector returns no payload. Any unexpected connector result fails closed;
 the worker receives only the runner-generated ID and a constant acceptance
 flag.
 
+## Device pairing and per-device permissions
+
+Pairing turns a `clankie pair` offer into a durable, per-device identity with
+host-authoritative grants. The flow (ADR 0035):
+
+```
+operator: POST /v1/pairing/offer        → QR deep link + typed code (5-min, single-use)
+device:   POST /v1/pairing/redeem        → pending device + offered grants + completion token
+device:   POST /v1/pairing/complete      → active device + session token
+device:   GET  /v1/devices/self          → restore session on launch
+device:   POST /v1/devices/self/session/refresh → new token (grants from projection)
+operator: GET  /v1/devices               → list devices
+operator: POST /v1/devices/:id/revoke    → revoke a device
+```
+
+| Route | Auth | Success | Fail-closed |
+| --- | --- | --- | --- |
+| `POST /v1/pairing/offer` | operator | offer wire | 503 / 401 |
+| `POST /v1/pairing/redeem` | offer secret or code | redeem response | 400 malformed · 409 consumed · 410 expired |
+| `POST /v1/pairing/complete` | completion token | session token | 410 expired · 409 replay · 403 revoked · 403 `terminal_control_not_grantable` |
+| `POST /v1/devices/self/session/refresh` | device | new token | 503 / 401 |
+| `GET /v1/devices/self` | device | self view | 503 / 401 |
+| `GET /v1/devices` | operator | device list | 503 / 401 |
+| `POST /v1/devices/:id/revoke` | operator | device row | 503 / 401 / 404 |
+
+Offers and completion tokens live in memory (5-minute and 10-minute TTLs); a
+restart drops in-flight pairings — fail closed. Device records are durable and
+event-sourced on the `device:${deviceId}` stream; the same transition function
+runs live and on replay, throwing on any impossible transition.
+
+Session tokens are HMAC-signed and carry **identity only** — `{version, deviceId,
+issuedAt, expiresAt, nonce}`, no grants. Grants and liveness come from the
+projection on every request, so refresh can never widen access and per-device
+revocation kills every token the device holds. The signing key is a mode-0600
+file auto-minted next to the event store (`CLANKIE_DEVICE_SESSION_KEY_PATH`
+overrides it); an unreadable key fails device routes closed with 503, and
+deleting the key revokes every device. `terminalControl` is never granted this
+slice (the runner gateway is observe-only); accepting it is denied without
+consuming the completion token so the device retries with Supervise. No event or
+log line carries a token, token hash, or offer secret — only `deviceId` and
+`offerId`.
+
 ## Tracker authority mirror
 
 The trusted `TrackerMirrorPort` imports intent, priority, and acceptance

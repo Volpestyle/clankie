@@ -1155,6 +1155,239 @@ export const DiscordPresenceWriteResultSchema = z
 export type DiscordPresenceWriteResult = z.infer<typeof DiscordPresenceWriteResultSchema>;
 
 // ---------------------------------------------------------------------------
+
+// --- Device pairing & registry (VUH-727) ---
+
+/** Platform a paired device reports at redemption. */
+export const DevicePlatformSchema = z.enum(["ios", "android", "macos", "unknown"]);
+export type DevicePlatform = z.infer<typeof DevicePlatformSchema>;
+
+/**
+ * Per-device capability grants — field-for-field the app's `PairingGrantSet`.
+ * `terminalControl` is never granted in this slice: the runner terminal gateway
+ * is observe-only, so {@link DeviceRecordSchema} rejects any record that carries
+ * it. The grant→terminal-scope mapping (`terminalObserve`→`observe`,
+ * `terminalControl`→`control`) lives in `@clankie/terminal-protocol` and is not
+ * wired here.
+ */
+export const DeviceGrantSetSchema = z.object({
+  chat: z.boolean(),
+  steer: z.boolean(),
+  terminalObserve: z.boolean(),
+  terminalControl: z.boolean(),
+});
+export type DeviceGrantSet = z.infer<typeof DeviceGrantSetSchema>;
+
+/** The Supervise preset offered at pairing: chat + steer + observe, never control. */
+export const SUPERVISE_GRANTS: DeviceGrantSet = {
+  chat: true,
+  steer: true,
+  terminalObserve: true,
+  terminalControl: false,
+};
+
+export const DeviceStatusSchema = z.enum(["pending", "active", "revoked"]);
+export type DeviceStatus = z.infer<typeof DeviceStatusSchema>;
+
+/**
+ * Durable device record projected from the `device:${deviceId}` event stream.
+ * Secret-free: it never carries the session token, its hash, or the offer
+ * secret. `grants` holds the offered set while pending and the accepted subset
+ * once active.
+ */
+export const DeviceRecordSchema = z
+  .object({
+    deviceId: z.string().min(1),
+    name: z.string().min(1).max(64),
+    platform: DevicePlatformSchema,
+    status: DeviceStatusSchema,
+    grants: DeviceGrantSetSchema,
+    offerId: z.string().min(1),
+    mintedBy: z.string().min(1),
+    createdAt: z.string().datetime(),
+    pendingExpiresAt: z.string().datetime(),
+    activatedAt: z.string().datetime().optional(),
+    lastRefreshAt: z.string().datetime().optional(),
+    revokedAt: z.string().datetime().optional(),
+    revokedBy: z.string().min(1).optional(),
+  })
+  .superRefine((record, context) => {
+    if (record.grants.terminalControl) {
+      context.addIssue({
+        code: "custom",
+        message: "terminalControl is not grantable in this slice",
+        path: ["grants", "terminalControl"],
+      });
+    }
+    if (record.status === "active" && record.activatedAt === undefined) {
+      context.addIssue({ code: "custom", message: "Active devices require activatedAt", path: ["status"] });
+    }
+    if (record.status === "revoked" && (record.revokedAt === undefined || record.revokedBy === undefined)) {
+      context.addIssue({
+        code: "custom",
+        message: "Revoked devices require revokedAt and revokedBy",
+        path: ["status"],
+      });
+    }
+  });
+export type DeviceRecord = z.infer<typeof DeviceRecordSchema>;
+
+/** Canonical `clankie pair` offer wire shape (server mints it, `clankie pair` renders it). */
+export const PairingOfferWireSchema = z.object({
+  version: z.literal(1),
+  deepLink: z.string().min(1),
+  code: z.string().min(1),
+  expiresAt: z.string().datetime(),
+});
+export type PairingOfferWire = z.infer<typeof PairingOfferWireSchema>;
+
+/** Host identity shown on the device's access-review screen. */
+export const PairingHostSchema = z.object({ name: z.string().min(1) });
+export type PairingHost = z.infer<typeof PairingHostSchema>;
+
+/** Redeem step: the offer secret or typed code is the capability; carries device metadata. */
+export const PairingRedeemRequestSchema = z
+  .object({
+    offerSecret: z.string().min(1).optional(),
+    code: z.string().min(1).optional(),
+    device: z.object({ name: z.string().min(1).max(64), platform: DevicePlatformSchema }),
+  })
+  .superRefine((body, context) => {
+    const provided = [body.offerSecret, body.code].filter((value) => value !== undefined);
+    if (provided.length !== 1) {
+      context.addIssue({
+        code: "custom",
+        message: "Provide exactly one of offerSecret or code",
+        path: ["offerSecret"],
+      });
+    }
+  });
+export type PairingRedeemRequest = z.infer<typeof PairingRedeemRequestSchema>;
+
+export const PairingRedeemResponseSchema = z.object({
+  deviceId: z.string().min(1),
+  host: PairingHostSchema,
+  offeredGrants: DeviceGrantSetSchema,
+  completionToken: z.string().min(1),
+  expiresAt: z.string().datetime(),
+});
+export type PairingRedeemResponse = z.infer<typeof PairingRedeemResponseSchema>;
+
+/** Complete step: the device accepts a subset of the offered grants. */
+export const PairingCompleteRequestSchema = z.object({
+  completionToken: z.string().min(1),
+  acceptedGrants: DeviceGrantSetSchema,
+});
+export type PairingCompleteRequest = z.infer<typeof PairingCompleteRequestSchema>;
+
+export const PairingCompleteResponseSchema = z.object({
+  deviceId: z.string().min(1),
+  deviceToken: z.string().min(1),
+  grants: DeviceGrantSetSchema,
+  sessionExpiresAt: z.string().datetime(),
+});
+export type PairingCompleteResponse = z.infer<typeof PairingCompleteResponseSchema>;
+
+export const DeviceSessionRefreshResponseSchema = z.object({
+  deviceToken: z.string().min(1),
+  grants: DeviceGrantSetSchema,
+  sessionExpiresAt: z.string().datetime(),
+});
+export type DeviceSessionRefreshResponse = z.infer<typeof DeviceSessionRefreshResponseSchema>;
+
+/** Device-authenticated view of its own registration, used to restore a session on launch. */
+export const DeviceSelfResponseSchema = z.object({
+  deviceId: z.string().min(1),
+  name: z.string().min(1),
+  platform: DevicePlatformSchema,
+  grants: DeviceGrantSetSchema,
+  host: PairingHostSchema,
+  sessionExpiresAt: z.string().datetime(),
+});
+export type DeviceSelfResponse = z.infer<typeof DeviceSelfResponseSchema>;
+
+/** Secret-free device row for the operator `GET /v1/devices` list. */
+export const DeviceListItemSchema = z.object({
+  deviceId: z.string().min(1),
+  name: z.string().min(1),
+  platform: DevicePlatformSchema,
+  status: DeviceStatusSchema,
+  grants: DeviceGrantSetSchema,
+  createdAt: z.string().datetime(),
+  activatedAt: z.string().datetime().optional(),
+  lastRefreshAt: z.string().datetime().optional(),
+  revokedAt: z.string().datetime().optional(),
+  revokedBy: z.string().min(1).optional(),
+});
+export type DeviceListItem = z.infer<typeof DeviceListItemSchema>;
+
+/**
+ * Content-free reason codes for the redeem/complete boundary. Extends the
+ * `clankie pair` client's fail-closed vocabulary (expired/consumed/revoked)
+ * with the malformed and terminal-control-denied cases redemption adds.
+ */
+export const PairingRedeemErrorSchema = z.object({
+  error: z.enum(["expired", "consumed", "revoked", "malformed", "terminal_control_not_grantable"]),
+});
+export type PairingRedeemError = z.infer<typeof PairingRedeemErrorSchema>;
+
+/**
+ * Durable device lifecycle events on the `device:${deviceId}` stream. Every
+ * `data` payload is secret-free; token material and offer secrets never appear.
+ */
+export const DeviceEventSchema = z.discriminatedUnion("type", [
+  EventBaseSchema.extend({
+    type: z.literal("device.pairing.redeemed"),
+    data: z.object({
+      schemaVersion: z.literal(1),
+      deviceId: z.string().min(1),
+      offerId: z.string().min(1),
+      name: z.string().min(1).max(64),
+      platform: DevicePlatformSchema,
+      offeredGrants: DeviceGrantSetSchema,
+      mintedBy: z.string().min(1),
+      pendingExpiresAt: z.string().datetime(),
+    }),
+  }),
+  EventBaseSchema.extend({
+    type: z.literal("device.activated"),
+    data: z.object({
+      schemaVersion: z.literal(1),
+      deviceId: z.string().min(1),
+      grants: DeviceGrantSetSchema,
+      sessionExpiresAt: z.string().datetime(),
+    }),
+  }),
+  EventBaseSchema.extend({
+    type: z.literal("device.session.refreshed"),
+    data: z.object({
+      schemaVersion: z.literal(1),
+      deviceId: z.string().min(1),
+      grants: DeviceGrantSetSchema,
+      sessionExpiresAt: z.string().datetime(),
+    }),
+  }),
+  EventBaseSchema.extend({
+    type: z.literal("device.grant.denied"),
+    data: z.object({
+      schemaVersion: z.literal(1),
+      deviceId: z.string().min(1),
+      requestedGrant: z.literal("terminalControl"),
+      reason: z.literal("terminal_control_not_grantable"),
+      stage: z.literal("complete"),
+    }),
+  }),
+  EventBaseSchema.extend({
+    type: z.literal("device.revoked"),
+    data: z.object({
+      schemaVersion: z.literal(1),
+      deviceId: z.string().min(1),
+      revokedBy: z.string().min(1),
+    }),
+  }),
+]);
+export type DeviceEvent = z.infer<typeof DeviceEventSchema>;
+
 // Connector-neutral tracker ceremony (VUH-845)
 // Semantic roles and notification surfaces only — no provider, principal
 // identity, or tracker-vendor nouns.

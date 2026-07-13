@@ -17,6 +17,7 @@
   "dependencies": {
     "@clankie/api-client": "workspace:*",
     "@clankie/credential-broker": "workspace:*",
+    "@clankie/protocol": "workspace:*",
     "@clankie/model-provider": "workspace:*",
     "@clankie/model-registry": "workspace:*",
     "@clankie/observability": "workspace:*",

@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { serve } from "@hono/node-server";
 import { compileDoctrine, loadDoctrineFile, projectCaptainCeremony } from "@clankie/doctrine";
@@ -15,6 +15,7 @@ import {
   createControlPlane,
   createDeterministicWorkerSteerAuthorizer,
 } from "./app.ts";
+import { loadOrCreateDeviceSessionKey } from "./device-session.ts";
 import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
 import { EveCaptainChannelTurnPort } from "./eve-captain-turn.ts";
 import { FileWorkerSteeringStore } from "./worker-steering.ts";
@@ -34,6 +35,16 @@ const memoryStore = new MemoryStore(memoryStorePath, {
 const runnerToken = process.env.CLANKIE_RUNNER_TOKEN;
 const captainToken = process.env.CLANKIE_CAPTAIN_TOKEN;
 const operatorToken = process.env.CLANKIE_OPERATOR_TOKEN;
+const deviceSessionKeyPath = process.env.CLANKIE_DEVICE_SESSION_KEY_PATH
+  ? resolve(process.env.CLANKIE_DEVICE_SESSION_KEY_PATH)
+  : join(dirname(eventStorePath), "device-session.key");
+const deviceSessionKey = await loadOrCreateDeviceSessionKey(deviceSessionKeyPath);
+if (deviceSessionKey === undefined) {
+  logger.warn(
+    { deviceSessionKeyPath },
+    "device session signing key unavailable; device pairing routes will fail closed (503)",
+  );
+}
 const runnerId = process.env.CLANKIE_RUNNER_ID ?? "local";
 const captainSteerSourceLane = parseCaptainSteerSourceLane(
   process.env.CLANKIE_CAPTAIN_STEER_SOURCE_LANE ?? "api",
@@ -65,6 +76,7 @@ const app = await createControlPlane({
   memoryStore,
   workerSteeringStore: new FileWorkerSteeringStore(`${eventStorePath}.steering.json`),
   authorizeWorkerSteer: createDeterministicWorkerSteerAuthorizer(),
+  ...(deviceSessionKey === undefined ? {} : { deviceSessionKey }),
   ...(linearAgentRuntime === undefined
     ? {}
     : {

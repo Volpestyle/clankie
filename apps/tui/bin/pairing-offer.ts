@@ -1,36 +1,25 @@
 import { z } from "zod";
+import { PairingOfferWireSchema, type PairingOfferWire } from "@clankie/protocol";
 
 // Narrow client for the device pairing-offer boundary. `clankie pair` (VUH-878)
-// requests a short-lived, single-use pairing offer from the authoritative
-// platform pairing service and renders it; it never mints grants or embeds
-// long-lived credentials locally.
-//
-// PROVISIONAL: the offer wire shape and the `/v1/pairing/offer` route below are
-// this command's working contract pending VUH-727, which remains authoritative
-// for device identity, offer issuance, expiry, refresh, revocation, and grant
-// semantics. When VUH-727 lands the canonical schema + endpoint, this client
-// swaps to import them (candidate home: `packages/protocol`). Kept local and
-// narrow on purpose so it does not front-run that authority or collide with the
-// in-flight api-client work (VUH-864/VUH-870).
+// requests a short-lived, single-use pairing offer from the control plane and
+// renders it; it never mints grants or embeds long-lived credentials locally.
+// The wire shape is the canonical `PairingOfferWireSchema` (VUH-727); a device
+// redeems the rendered offer against `/v1/pairing/redeem` separately.
 
 /** Default control-plane origin; the pairing service is expected to live here (loopback dev). */
 export const DEFAULT_CONTROL_PLANE_URL = "http://127.0.0.1:4310";
 
-/** Provisional pairing-offer route on the control plane (VUH-727 owns the final path). */
+/** Pairing-offer route on the control plane. */
 export const PAIRING_OFFER_PATH = "/v1/pairing/offer";
 
 /**
- * A single-use pairing offer minted by the pairing service. `deepLink` and
- * `code` are secret-bearing display data: render them, never log or persist them.
+ * A single-use pairing offer minted by the control plane. `deepLink` and `code`
+ * are secret-bearing display data: render them, never log or persist them.
  */
-export const PairingOfferSchema = z.object({
-  version: z.number().int().positive(),
-  deepLink: z.string().min(1),
-  code: z.string().min(1),
-  expiresAt: z.iso.datetime(),
-});
+export const PairingOfferSchema = PairingOfferWireSchema;
 
-export type PairingOffer = z.infer<typeof PairingOfferSchema>;
+export type PairingOffer = PairingOfferWire;
 
 /** Every failure the command must fail closed on (VUH-878 acceptance criteria). */
 export type PairingOfferStatus =

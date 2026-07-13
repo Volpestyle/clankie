@@ -38,6 +38,14 @@ import {
   type PairingOffer,
   type PairingOfferStatus,
 } from "./pairing-offer.ts";
+import {
+  DevicesCommandError,
+  devicesFailureMessage,
+  grantSummary,
+  listDevices,
+  revokeDevice,
+  type DeviceListItem,
+} from "./devices.ts";
 
 const HEADLESS_CURSOR_NAME = "captain-headless-session.json";
 const HEADLESS_LOCK_NAME = "captain-headless-session.lock";
@@ -149,7 +157,10 @@ function commandHelp(): string {
     "  trace [--json] [--lane LANE] [--timeout SEC]",
     "                           Live render-only reasoning/tool stream (stays across turns)",
     "  pair [--json] [--timeout SEC]",
-    "                           Show a one-time QR + code to pair a device (requires pairing service — VUH-727)",
+    "                           Show a one-time QR + code to pair a device",
+    "  devices [--json]         List paired devices",
+    "  devices revoke <id> [--json]",
+    "                           Revoke a device's access",
     "",
     "With no command, clankie opens the fullscreen operator console and requires a TTY.",
   ].join("\n");
@@ -165,6 +176,7 @@ export function isHeadlessCaptainCommand(command: string | undefined): boolean {
     command === "wait" ||
     command === "trace" ||
     command === "pair" ||
+    command === "devices" ||
     command === "help" ||
     command === "--help" ||
     command === "-h"
@@ -739,6 +751,97 @@ async function runPair(args: readonly string[], options: HeadlessCaptainCommandO
   return 0;
 }
 
+const DEVICES_USAGE = "Usage: clankie devices [--json] | clankie devices revoke <id> [--json]";
+const DEFAULT_DEVICES_TIMEOUT_MS = 10_000;
+
+type DevicesCliOptions =
+  | { readonly json: boolean; readonly subcommand: "list" }
+  | { readonly json: boolean; readonly subcommand: "revoke"; readonly deviceId: string };
+
+function parseDevicesArgs(args: readonly string[]): DevicesCliOptions {
+  let json = false;
+  const positional: string[] = [];
+  for (const arg of args) {
+    if (arg === "--json") {
+      json = true;
+      continue;
+    }
+    positional.push(arg);
+  }
+  if (positional.length === 0) return { json, subcommand: "list" };
+  if (positional[0] === "revoke") {
+    const deviceId = positional[1];
+    if (deviceId === undefined || positional.length > 2) throw new Error(DEVICES_USAGE);
+    return { json, subcommand: "revoke", deviceId };
+  }
+  throw new Error(DEVICES_USAGE);
+}
+
+/**
+ * `clankie devices` — list paired devices, or `clankie devices revoke <id>`.
+ * Operator-authenticated against the control plane, fully headless, fails closed
+ * with actionable, secret-free messages.
+ */
+async function runDevices(args: readonly string[], options: HeadlessCaptainCommandOptions): Promise<number> {
+  const parsed = parseDevicesArgs(args);
+  const env = options.env ?? process.env;
+  const stdout = options.stdout ?? process.stdout;
+  const stderr = options.stderr ?? process.stderr;
+  const controlPlaneUrl = env.CLANKIE_CONTROL_PLANE_URL ?? DEFAULT_CONTROL_PLANE_URL;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DEFAULT_DEVICES_TIMEOUT_MS);
+  const request = {
+    controlPlaneUrl,
+    operatorToken: env.CLANKIE_OPERATOR_TOKEN,
+    ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+    signal: controller.signal,
+  };
+  try {
+    if (parsed.subcommand === "revoke") {
+      const device = await revokeDevice(parsed.deviceId, request);
+      if (parsed.json) outputJson(stdout, { ok: true, device });
+      else stdout.write(`Revoked ${device.deviceId} (${device.name}).\n`);
+      return 0;
+    }
+    const devices = await listDevices(request);
+    if (parsed.json) outputJson(stdout, { ok: true, devices });
+    else stdout.write(`${formatDevicesTable(devices)}\n`);
+    return 0;
+  } catch (error) {
+    const status = error instanceof DevicesCommandError ? error.status : "unavailable";
+    const message =
+      error instanceof DevicesCommandError ? error.message : devicesFailureMessage("unavailable");
+    if (parsed.json) outputJson(stdout, { ok: false, status, error: message });
+    else stderr.write(`clankie: ${message}\n`);
+    return 1;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function formatDevicesTable(devices: readonly DeviceListItem[]): string {
+  if (devices.length === 0) return "No paired devices.";
+  const header = ["DEVICE", "NAME", "PLATFORM", "STATUS", "GRANTS", "PAIRED"] as const;
+  const rows = devices.map((device) => [
+    device.deviceId,
+    device.name,
+    device.platform,
+    device.status,
+    grantSummary(device),
+    device.activatedAt ?? device.createdAt,
+  ]);
+  const widths = header.map((label, column) =>
+    Math.max(label.length, ...rows.map((row) => (row[column] ?? "").length)),
+  );
+  const renderRow = (cells: readonly string[]): string =>
+    cells
+      .map((cell, column) => cell.padEnd(widths[column] ?? 0))
+      .join("  ")
+      .trimEnd();
+  return [renderRow(header), ...rows.map(renderRow)].join("\n");
+}
+
 export async function runHeadlessCaptainCommand(
   args: readonly string[],
   options: HeadlessCaptainCommandOptions,
@@ -752,6 +855,7 @@ export async function runHeadlessCaptainCommand(
     if (command === "wait") return await runWatch(args.slice(1), options, true);
     if (command === "trace") return await runTrace(args.slice(1), options);
     if (command === "pair") return await runPair(args.slice(1), options);
+    if (command === "devices") return await runDevices(args.slice(1), options);
     if (command === "help" || command === "--help" || command === "-h") {
       (options.stdout ?? process.stdout).write(`${commandHelp()}\n`);
       return 0;

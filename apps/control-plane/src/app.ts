@@ -1,4 +1,5 @@
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { hostname } from "node:os";
 import { resolve } from "node:path";
 import {
   compileDoctrine,
@@ -42,6 +43,9 @@ import {
   LinearChannelTurnRequestSchema,
   MissionPlanSchema,
   MissionTriggerSchema,
+  PairingCompleteRequestSchema,
+  PairingRedeemRequestSchema,
+  SUPERVISE_GRANTS,
   TaskSpecSchema,
   TrackerNarrativeWriteSchema,
   WorkerResultSchema,
@@ -56,7 +60,13 @@ import {
   type ActionRequest,
   type ApprovalRequestRecord,
   type CaptainChannelTurnResult,
+  type DeviceGrantSet,
+  type DeviceRecord,
+  type DeviceSelfResponse,
+  type DeviceSessionRefreshResponse,
   type DiscordPresenceWriteResult,
+  type PairingCompleteResponse,
+  type PairingRedeemResponse,
   type DomainEvent,
   type MissionPlan,
   type MissionTrigger,
@@ -96,6 +106,14 @@ import {
 import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
 import type { CaptainChannelTurnPort } from "./eve-captain-turn.ts";
 import { applyMissionTriggerEvent, dueOccurrences, MissionTriggerInputSchema } from "./mission-triggers.ts";
+import { mintPairingOffer, pairingOfferWire, PairingOfferStore } from "./pairing.ts";
+import { applyDeviceEvent, deviceListItem, isDevicePendingExpired, type DeviceRegistry } from "./devices.ts";
+import {
+  COMPLETION_TOKEN_TTL_MS,
+  DeviceSessionError,
+  DeviceSessionSigner,
+  mintDeviceSessionClaims,
+} from "./device-session.ts";
 import {
   DoctrineAttentionPolicy,
   EventStoreAttentionDeliveryStore,
@@ -115,6 +133,37 @@ interface MissionRecord {
   state: "draft" | "planned" | "running";
   plan?: MissionPlan;
   createdAt: string;
+}
+
+/**
+ * A redeemed-but-not-yet-completed pairing, held in memory only (single-use,
+ * ~10 min). The token secret is hashed into the map key; the value carries the
+ * offered grants and expiry. A control-plane restart drops these, so an
+ * in-flight pairing must restart — fail closed, same as an outstanding offer.
+ */
+interface PendingCompletion {
+  deviceId: string;
+  offeredGrants: DeviceGrantSet;
+  expiresAtMs: number;
+  consumed: boolean;
+}
+
+/** Index a completion token by hash so the raw secret is never stored. */
+function hashCompletionToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+/** Drop completion tokens whose window has passed (consumed or not). */
+function prunePendingCompletions(pending: Map<string, PendingCompletion>, now: Date): void {
+  const nowMs = now.getTime();
+  for (const [hash, record] of pending) {
+    if (record.expiresAtMs <= nowMs) pending.delete(hash);
+  }
+}
+
+/** True when every grant the device accepts was actually on offer. */
+function isSubsetGrants(accepted: DeviceGrantSet, offered: DeviceGrantSet): boolean {
+  return (Object.keys(accepted) as (keyof DeviceGrantSet)[]).every((key) => !accepted[key] || offered[key]);
 }
 
 interface StoredMemoryProposal {
@@ -166,6 +215,14 @@ export interface ControlPlaneDependencies {
   authenticateCaptain?: CaptainAuthenticator;
   /** Authenticates a human on an approval-capable operator surface. */
   authenticateOperator?: OperatorAuthenticator;
+  /**
+   * HMAC key (≥32 bytes) that signs device session tokens (VUH-727). When
+   * omitted, device authentication and pairing redemption fail closed (503).
+   * Production loads it from a mode-0600 key file; tests inject bytes directly.
+   */
+  deviceSessionKey?: Uint8Array;
+  /** Host name shown on a device's access-review screen. Defaults to the OS hostname. */
+  hostDisplayName?: string;
   /** Repository path supplied to mission runtime metadata; providers remain runner-owned. */
   workspacePath?: string;
   workerLeaseDurationMs?: number;
@@ -233,6 +290,16 @@ export interface TrustedOperatorIdentity {
 }
 
 export type OperatorAuthenticator = (request: Request) => Promise<TrustedOperatorIdentity | undefined>;
+
+export interface TrustedDeviceIdentity {
+  deviceId: string;
+  grants: DeviceGrantSet;
+  /** ISO expiry of the presented session token, echoed back to the device. */
+  sessionExpiresAt: string;
+}
+
+/** Why a device session token was rejected — all fail closed, but the app renders them differently. */
+export type DeviceAuthDenial = { denied: "expired" | "revoked" | "invalid" };
 
 export interface TrustedWorkerIdentity {
   missionId: string;
@@ -582,6 +649,15 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
   const triggerEvaluationLocks = new Map<string, Promise<unknown>>();
   const claimMissions = new Map<string, string>();
   const approvalRequests = new Map<string, ApprovalRequestRecord>();
+  const pairingOffers = new PairingOfferStore();
+  const devices: DeviceRegistry = new Map<string, DeviceRecord>();
+  const deviceLocks = new Map<string, Promise<unknown>>();
+  const completionTokens = new Map<string, PendingCompletion>();
+  const deviceSessionSigner =
+    dependencies.deviceSessionKey === undefined
+      ? undefined
+      : new DeviceSessionSigner(dependencies.deviceSessionKey);
+  const hostDisplayName = dependencies.hostDisplayName ?? hostname();
   const narrativeResults = new Map<
     string,
     { fingerprint: string; result: TrackerNarrativeWriteResult; expiresAtMs: number }
@@ -635,6 +711,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       applyMissionTriggerEvent(missionTriggers, stored.event);
       applyMemoryEvent(memoryProposals, committedMemoryProposals, stored.event);
       applyApprovalEvent(approvalRequests, consumedApprovalIds, stored.event);
+      applyDeviceEvent(devices, stored.event);
       if (stored.event.type === "worker.leased" && typeof stored.event.data.claimId === "string") {
         claimMissions.set(stored.event.data.claimId, stored.event.missionId);
       }
@@ -1024,6 +1101,45 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     );
   }, 30_000);
   triggerTimer.unref();
+
+  /**
+   * Authenticate a device session token against the durable projection. Returns
+   * "unavailable" when no signing key is configured (503), a typed denial when
+   * the token is missing/invalid/expired or the device is unknown/pending/revoked
+   * (401, all fail closed), or the trusted identity with the device's current
+   * grants read from the projection — never from the token.
+   */
+  const authenticateDevice = async (
+    request: Request,
+  ): Promise<TrustedDeviceIdentity | "unavailable" | DeviceAuthDenial> => {
+    if (deviceSessionSigner === undefined) return "unavailable";
+    const header = request.headers.get("authorization");
+    const token = header?.startsWith("Bearer ") ? header.slice("Bearer ".length).trim() : undefined;
+    if (token === undefined || token.length === 0) return { denied: "invalid" };
+    const now = clock();
+    let claims;
+    try {
+      claims = deviceSessionSigner.verify(token, Math.floor(now.getTime() / 1000));
+    } catch (error) {
+      if (error instanceof DeviceSessionError && error.code === "expired") return { denied: "expired" };
+      return { denied: "invalid" };
+    }
+    const record = devices.get(claims.deviceId);
+    if (record === undefined || isDevicePendingExpired(record, now)) return { denied: "invalid" };
+    if (record.status === "revoked") return { denied: "revoked" };
+    if (record.status !== "active") return { denied: "invalid" };
+    return {
+      deviceId: record.deviceId,
+      grants: record.grants,
+      sessionExpiresAt: new Date(claims.expiresAt * 1000).toISOString(),
+    };
+  };
+
+  const deviceDenialResponse = (context: Context, denial: DeviceAuthDenial) => {
+    if (denial.denied === "revoked") return context.json({ error: "revoked" }, 401);
+    if (denial.denied === "expired") return context.json({ error: "expired" }, 401);
+    return context.json({ error: "device_authentication_required" }, 401);
+  };
 
   app.get("/health", (context) =>
     context.json({
@@ -2219,6 +2335,257 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
         "approval decided",
       );
       return context.json(approval);
+    });
+  });
+
+  // Mint the server half of `clankie pair` (VUH-878): short-lived, single-use
+  // display data an operator hands to a device. Minting is an operator action;
+  // the response is never logged and events carry only the non-secret offer id.
+  // A device turns the offer into an identity via POST /v1/pairing/redeem.
+  app.post("/v1/pairing/offer", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const now = clock();
+    pairingOffers.prune(now);
+    const offer = mintPairingOffer({ now, mintedBy: operator.operatorId, idFactory });
+    pairingOffers.add(offer);
+    await recordEvent("pairing.offer.minted", `pairing:${offer.offerId}`, offer.createdAt, {
+      offerId: offer.offerId,
+      operatorId: operator.operatorId,
+      expiresAt: offer.expiresAt,
+    });
+    logger.info(
+      { offerId: offer.offerId, operatorId: operator.operatorId, expiresAt: offer.expiresAt },
+      "pairing offer minted",
+    );
+    return context.json(pairingOfferWire(offer));
+  });
+
+  // Redeem an offer secret or typed code (the secret IS the capability, so the
+  // route is unauthenticated) into a PENDING device plus a single-use completion
+  // token. The offer is consumed synchronously in the store, so a concurrent
+  // redemption of the same offer gets "consumed". No grants are conferred until
+  // POST /v1/pairing/complete.
+  app.post("/v1/pairing/redeem", async (context) => {
+    // Fail closed if sessions can't be signed — never consume an offer for a
+    // pairing that could not be completed.
+    if (deviceSessionSigner === undefined)
+      return context.json({ error: "device_authentication_unavailable" }, 503);
+    const parsed = PairingRedeemRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "malformed" }, 400);
+    const now = clock();
+    pairingOffers.prune(now);
+    prunePendingCompletions(completionTokens, now);
+    const taken = pairingOffers.take(
+      {
+        ...(parsed.data.offerSecret !== undefined ? { offerSecret: parsed.data.offerSecret } : {}),
+        ...(parsed.data.code !== undefined ? { code: parsed.data.code } : {}),
+      },
+      now,
+    );
+    if (!taken.ok) return context.json({ error: taken.error }, taken.error === "consumed" ? 409 : 410);
+    const deviceId = `device-${idFactory().slice(0, 12)}`;
+    const pendingExpiresAt = new Date(now.getTime() + COMPLETION_TOKEN_TTL_MS).toISOString();
+    const redeemed = await recordEvent("device.pairing.redeemed", `device:${deviceId}`, now.toISOString(), {
+      schemaVersion: 1,
+      deviceId,
+      offerId: taken.offer.offerId,
+      name: parsed.data.device.name,
+      platform: parsed.data.device.platform,
+      offeredGrants: SUPERVISE_GRANTS,
+      mintedBy: taken.offer.mintedBy,
+      pendingExpiresAt,
+    });
+    applyDeviceEvent(devices, redeemed);
+    const completionToken = randomBytes(32).toString("base64url");
+    completionTokens.set(hashCompletionToken(completionToken), {
+      deviceId,
+      offeredGrants: SUPERVISE_GRANTS,
+      expiresAtMs: now.getTime() + COMPLETION_TOKEN_TTL_MS,
+      consumed: false,
+    });
+    logger.info({ deviceId, offerId: taken.offer.offerId }, "pairing offer redeemed");
+    return context.json({
+      deviceId,
+      host: { name: hostDisplayName },
+      offeredGrants: SUPERVISE_GRANTS,
+      completionToken,
+      expiresAt: pendingExpiresAt,
+    } satisfies PairingRedeemResponse);
+  });
+
+  // Activate a pending device with the grants it accepts and issue its session
+  // token. Accepting terminalControl (not grantable this slice) is denied WITHOUT
+  // consuming the token, so the device can retry with the Supervise preset.
+  app.post("/v1/pairing/complete", async (context) => {
+    if (deviceSessionSigner === undefined)
+      return context.json({ error: "device_authentication_unavailable" }, 503);
+    const parsed = PairingCompleteRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "malformed" }, 400);
+    const now = clock();
+    prunePendingCompletions(completionTokens, now);
+    const tokenHash = hashCompletionToken(parsed.data.completionToken);
+    const pending = completionTokens.get(tokenHash);
+    if (pending === undefined || pending.expiresAtMs <= now.getTime())
+      return context.json({ error: "expired" }, 410);
+    if (pending.consumed) return context.json({ error: "consumed" }, 409);
+    const accepted = parsed.data.acceptedGrants;
+    if (accepted.terminalControl) {
+      const denied = await recordEvent(
+        "device.grant.denied",
+        `device:${pending.deviceId}`,
+        now.toISOString(),
+        {
+          schemaVersion: 1,
+          deviceId: pending.deviceId,
+          requestedGrant: "terminalControl",
+          reason: "terminal_control_not_grantable",
+          stage: "complete",
+        },
+      );
+      applyDeviceEvent(devices, denied);
+      return context.json(
+        { error: "terminal_control_not_grantable", offeredGrants: pending.offeredGrants },
+        403,
+      );
+    }
+    if (!isSubsetGrants(accepted, pending.offeredGrants)) return context.json({ error: "malformed" }, 400);
+    return withSerializedLock(deviceLocks, pending.deviceId, async () => {
+      const record = devices.get(pending.deviceId);
+      if (record === undefined || isDevicePendingExpired(record, now))
+        return context.json({ error: "expired" }, 410);
+      if (record.status === "revoked") return context.json({ error: "revoked" }, 403);
+      if (record.status !== "pending") return context.json({ error: "consumed" }, 409);
+      const current = completionTokens.get(tokenHash);
+      if (current === undefined || current.consumed) return context.json({ error: "consumed" }, 409);
+      current.consumed = true;
+      const claims = mintDeviceSessionClaims({
+        deviceId: pending.deviceId,
+        nowEpochSeconds: Math.floor(now.getTime() / 1000),
+      });
+      const deviceToken = deviceSessionSigner.issue(claims);
+      const sessionExpiresAt = new Date(claims.expiresAt * 1000).toISOString();
+      const activated = await recordEvent(
+        "device.activated",
+        `device:${pending.deviceId}`,
+        now.toISOString(),
+        {
+          schemaVersion: 1,
+          deviceId: pending.deviceId,
+          grants: accepted,
+          sessionExpiresAt,
+        },
+      );
+      applyDeviceEvent(devices, activated);
+      logger.info({ deviceId: pending.deviceId }, "device activated");
+      return context.json({
+        deviceId: pending.deviceId,
+        deviceToken,
+        grants: accepted,
+        sessionExpiresAt,
+      } satisfies PairingCompleteResponse);
+    });
+  });
+
+  // Renew a device's session token. Grants are always read from the durable
+  // projection, so a refresh can never widen access; a revoked device is denied.
+  app.post("/v1/devices/self/session/refresh", async (context) => {
+    const identity = await authenticateDevice(context.req.raw);
+    if (identity === "unavailable") return context.json({ error: "device_authentication_unavailable" }, 503);
+    if ("denied" in identity) return deviceDenialResponse(context, identity);
+    if (deviceSessionSigner === undefined)
+      return context.json({ error: "device_authentication_unavailable" }, 503);
+    const signer = deviceSessionSigner;
+    return withSerializedLock(deviceLocks, identity.deviceId, async () => {
+      const record = devices.get(identity.deviceId);
+      const now = clock();
+      if (record === undefined || isDevicePendingExpired(record, now) || record.status !== "active") {
+        return context.json(
+          { error: record?.status === "revoked" ? "revoked" : "device_authentication_required" },
+          401,
+        );
+      }
+      const claims = mintDeviceSessionClaims({
+        deviceId: identity.deviceId,
+        nowEpochSeconds: Math.floor(now.getTime() / 1000),
+      });
+      const deviceToken = signer.issue(claims);
+      const sessionExpiresAt = new Date(claims.expiresAt * 1000).toISOString();
+      const refreshed = await recordEvent(
+        "device.session.refreshed",
+        `device:${identity.deviceId}`,
+        now.toISOString(),
+        {
+          schemaVersion: 1,
+          deviceId: identity.deviceId,
+          grants: record.grants,
+          sessionExpiresAt,
+        },
+      );
+      applyDeviceEvent(devices, refreshed);
+      return context.json({
+        deviceToken,
+        grants: record.grants,
+        sessionExpiresAt,
+      } satisfies DeviceSessionRefreshResponse);
+    });
+  });
+
+  // A device reads its own registration to restore a session on launch.
+  app.get("/v1/devices/self", async (context) => {
+    const identity = await authenticateDevice(context.req.raw);
+    if (identity === "unavailable") return context.json({ error: "device_authentication_unavailable" }, 503);
+    if ("denied" in identity) return deviceDenialResponse(context, identity);
+    const record = devices.get(identity.deviceId);
+    if (record === undefined) return context.json({ error: "device_authentication_required" }, 401);
+    return context.json({
+      deviceId: record.deviceId,
+      name: record.name,
+      platform: record.platform,
+      grants: record.grants,
+      host: { name: hostDisplayName },
+      sessionExpiresAt: identity.sessionExpiresAt,
+    } satisfies DeviceSelfResponse);
+  });
+
+  // Operator device management: list and revoke. Revocation is per-device — it
+  // invalidates every session token the device holds on the next request.
+  app.get("/v1/devices", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const now = clock();
+    const items = [...devices.values()]
+      .filter((record) => !isDevicePendingExpired(record, now))
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .map(deviceListItem);
+    return context.json(items);
+  });
+
+  app.post("/v1/devices/:id/revoke", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const deviceId = context.req.param("id");
+    return withSerializedLock(deviceLocks, deviceId, async () => {
+      const now = clock();
+      const record = devices.get(deviceId);
+      if (record === undefined || isDevicePendingExpired(record, now))
+        return context.json({ error: "device_not_found" }, 404);
+      if (record.status === "revoked") return context.json(deviceListItem(record));
+      const event = await recordEvent("device.revoked", `device:${deviceId}`, now.toISOString(), {
+        schemaVersion: 1,
+        deviceId,
+        revokedBy: operator.operatorId,
+      });
+      applyDeviceEvent(devices, event);
+      logger.info({ deviceId, operatorId: operator.operatorId }, "device revoked");
+      const updated = devices.get(deviceId);
+      return context.json(deviceListItem(updated ?? record));
     });
   });
 
