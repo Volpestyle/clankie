@@ -27,7 +27,7 @@ This protocol is adapted from the pinned v1 `clankie-lead` snapshot `04734df9`. 
 4. For a pane-hosted harness, use the pane's normal operator commands:
    - `/model <model>` and `/effort <level>` for supported configuration;
    - plain steering text for bounded course corrections;
-   - `/goal <task and definition of done>` at spawn readiness or immediately after spawn to arm the native completion loop.
+   - `/goal <task and definition of done>` at spawn readiness or immediately after spawn to arm the native completion loop. Goal conditions are hard-capped at 4000 characters: keep the condition a short pointer (prompt path + DONE/BLOCKED sentinel check) with the full criteria in the worker's `prompt.md`. Verify the arm succeeded — a rejected arm leaves the worker silently idle with no completion signal, and every send (goal or steering) is delivered only when the pane's status flips to `working`.
 5. For an adapter-hosted worker, use the same vocabulary through its typed protocol mapping. The mission task lifecycle is its `/goal` equivalent; do not inject terminal commands into a protocol-native session.
 6. Attribute every captain input. A human control lease pauses automated captain input.
 
@@ -40,6 +40,8 @@ Operator parity covers configuration and steering only. Never send approval answ
 3. Treat `waiting_user` as a question to relay or an approval request to route. Never answer an approval by steering the pane.
 4. Use pane reads only for diagnosis or deliberate steering. Terminal silence, an idle heuristic, `DONE`, or a model's success claim is not verification.
 5. On blockage, preserve evidence and either answer an ordinary bounded question, replan, or escalate. Do not widen scope implicitly.
+6. A freeze order carries an explicit scope and lift condition, and the lift is an event, not an inference: when the landing that motivated a freeze completes, broadcast the lift to every party that received the freeze. A worker honoring a stale freeze is indistinguishable from a stalled worker unless its receipt says why it parked.
+7. When a candidate is superseded or a decisive counterexample lands, stop its in-flight verifiers immediately and record a partial receipt; verification spend on a dead candidate is waste, not rigor.
 
 ## Harvest and resume
 
