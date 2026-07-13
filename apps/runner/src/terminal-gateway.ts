@@ -354,6 +354,10 @@ class Connection {
         "attribution_mismatch",
         "attribution does not match token",
       );
+      // Attribution is an authorization boundary: queue the static typed error, then fail
+      // closed by terminating this connection's authority. No later frame on the socket —
+      // including a correctly attributed request sent right after — may be processed.
+      this.finalize("attribution_mismatch");
       return;
     }
     this.dispatch(message);

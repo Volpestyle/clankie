@@ -309,6 +309,36 @@ describe("terminal gateway — authentication", () => {
     const message = await client.next();
     expect(message).toMatchObject({ type: "terminal.error", code: "attribution_mismatch", retryable: false });
   });
+
+  it("fails closed on attribution mismatch: emits the static typed error, then closes and processes no later frame", async () => {
+    const manager = new TerminalManager();
+    spawn(manager);
+    const { authority, port } = await startGateway(manager);
+    const secretToken = token(authority);
+    const client = await connect(port, bearer(secretToken));
+    const closed = new Promise<void>((resolve) => client.socket.on("close", () => resolve()));
+    // A mismatched discover, immediately followed on the same socket by a correctly attributed one.
+    client.send({ ...discover("mismatch"), attribution: { ...ATTR, principalId: "someone-else" } });
+    client.send(discover("good"));
+    const error = await client.nextOfType("terminal.error");
+    expect(error).toMatchObject({
+      type: "terminal.error",
+      code: "attribution_mismatch",
+      retryable: false,
+      requestId: "mismatch",
+    });
+    // The authorization boundary is terminated: the socket closes and the correctly
+    // attributed follow-up on that same socket is never answered with a discovery.
+    await closed;
+    expect(client.socket.readyState).toBe(WebSocket.CLOSED);
+    expect(client.received.filter((message) => message.type === "terminal.discovery")).toHaveLength(0);
+    // Exactly one error and no duplicate close-driven error frame.
+    expect(client.received.filter((message) => message.type === "terminal.error")).toHaveLength(1);
+    // Static/redacted content only: no token or mismatched attribution payload is echoed back.
+    const serialized = JSON.stringify(error);
+    expect(serialized).not.toContain("someone-else");
+    expect(serialized).not.toContain(secretToken);
+  });
 });
 
 describe("terminal gateway — strict cf07 framing", () => {

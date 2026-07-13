@@ -148,7 +148,13 @@ export async function startTerminalGatewayDevHandoff(options: {
   }
 }
 
-/** Atomically stage a credential with mode 0600 using no-follow exclusive creation of a temp file. */
+/**
+ * Stage a mode-0600 credential and publish it no-clobber: build and close the
+ * complete temp descriptor first, then hard-link it into place. An occupied
+ * final path (regular file or symlink) fails closed with the EEXIST-class error
+ * and is never followed or replaced; partial JSON is never visible at the final
+ * path; the private temp is always removed.
+ */
 export async function writeTerminalGatewayCredential(
   path: string,
   credential: TerminalGatewayCredential,
@@ -164,11 +170,15 @@ export async function writeTerminalGatewayCredential(
     } finally {
       await handle.close();
     }
-    await rename(temporary, path);
-  } catch (error) {
-    // Never strand a token: remove the temp on any staging failure.
+    // link(2) publishes the finished descriptor only if the final name is absent:
+    // it fails with EEXIST on an occupied path and never follows a final-path
+    // symlink, so an existing file/symlink (inode, target, content, mode, and any
+    // open reader) is left untouched instead of being atomically replaced.
+    await link(temporary, path);
+  } finally {
+    // Never strand a token: remove the private temp after a successful publish
+    // and after any failure, without deleting or replacing the final path.
     await rm(temporary, { force: true });
-    throw error;
   }
 }
 

@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { lstat, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, open, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -64,6 +64,45 @@ describe("terminal gateway dev handoff", () => {
     expect(JSON.parse(await readFile(path, "utf8")).handoffId).toBe("handoff-1");
     await removeTerminalGatewayCredential(path, "handoff-1");
     await expect(lstat(path)).rejects.toThrow();
+  });
+
+  it("fails closed with EEXIST when the final path is a regular file, leaving it and open readers unchanged", async () => {
+    const directory = await root();
+    const path = join(directory, "handoff.json");
+    await writeFile(path, `${JSON.stringify(credential("existing-handoff"))}\n`, { mode: 0o600 });
+    const before = await lstat(path);
+    const reader = await open(path, "r");
+    try {
+      await expect(writeTerminalGatewayCredential(path, credential("new-handoff"))).rejects.toMatchObject({
+        code: "EEXIST",
+      });
+      // The occupant is untouched: same inode, same mode, same content — not atomically replaced.
+      const after = await lstat(path);
+      expect(after.ino).toBe(before.ino);
+      expect(after.mode & 0o777).toBe(0o600);
+      expect(JSON.parse(await readFile(path, "utf8")).handoffId).toBe("existing-handoff");
+      // The already-open reader FD still sees the original content.
+      expect(JSON.parse(await reader.readFile("utf8")).handoffId).toBe("existing-handoff");
+      // No private temp is stranded in the directory.
+      expect((await readdir(directory)).filter((name) => name.includes(".tmp"))).toHaveLength(0);
+    } finally {
+      await reader.close();
+    }
+  });
+
+  it("fails closed with EEXIST when the final path is a symlink, never following or replacing it", async () => {
+    const directory = await root();
+    const target = join(directory, "target.json");
+    const path = join(directory, "handoff.json");
+    await writeFile(target, `${JSON.stringify(credential("target-handoff"))}\n`, { mode: 0o600 });
+    await symlink(target, path);
+    await expect(writeTerminalGatewayCredential(path, credential("new-handoff"))).rejects.toMatchObject({
+      code: "EEXIST",
+    });
+    // The symlink itself and its target are both untouched: no clobber, no follow-through write.
+    expect((await lstat(path)).isSymbolicLink()).toBe(true);
+    expect(JSON.parse(await readFile(target, "utf8")).handoffId).toBe("target-handoff");
+    expect((await readdir(directory)).filter((name) => name.includes(".tmp"))).toHaveLength(0);
   });
 
   it("never follows or deletes a symlink during cleanup", async () => {
