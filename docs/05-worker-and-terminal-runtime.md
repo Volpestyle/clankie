@@ -79,7 +79,9 @@ The serialized boundary is schema version 1 from
 Its strict client/server message unions cover discovery, capability negotiation,
 subscribe/resume/resync, sequence-numbered output/geometry/closure, VT restore
 snapshots, typed errors, owner state, lease lifecycle, and attributed
-idempotent input/resize. Unknown versions, fields, invalid boundaries,
+idempotent input/resize. Discovery, subscription, resync, and snapshots carry
+explicit lifecycle state, while attached subscriptions receive complete
+revisioned `terminal.capabilities_changed` pushes. Unknown versions, fields, invalid boundaries,
 non-canonical base64, and unattributed control messages fail closed.
 
 The three planes stay separate:
@@ -108,6 +110,12 @@ boundary states both `afterSequence: N` and `nextSequence: N + 1`. Clients reset
 their emulator, apply the restore sequence, then accept only frame N+1. A
 snapshot is never a bounded PTY byte tail.
 
+Lifecycle state remains explicit throughout discovery and delivery. A closed
+terminal carries the original close sequence and details on subscribed,
+resync-required, and snapshot messages, so closure remains unambiguous after
+the ordered close frame is no longer retained. A closed snapshot may only
+assert a close sequence included through its exact boundary.
+
 `terminal.subscribed` binds the request to a subscription ID and starting
 cursor, and declares whether initial delivery is live-only, replay, or a
 following snapshot. This lets a source that truthfully lacks snapshot/resume
@@ -120,9 +128,11 @@ TypeScript-owned quiescence/framing layer into `@xterm/headless`; snapshots use
 applied and the UTF-8/VT parser is quiescent, because addon serialization does
 not make partial parser state part of the restore contract. Geometry changes
 are applied to the headless terminal in the same sequence lane before later
-output. Immutable package fixtures prove snapshot-at-N plus frames after N
-equals uninterrupted visible state for alternate screen, cursor, SGR color,
-resize, and split UTF-8 output.
+output. Immutable package fixtures prove protocol ordering and reconstruction
+invariants for snapshot-at-N plus frames after N against a deterministic
+reference terminal, covering alternate screen, cursor, SGR color, resize, and
+split UTF-8 output. VUH-868 owns conformance evidence from real
+`@xterm/headless` plus `@xterm/addon-serialize` output at the runner boundary.
 
 ### Discovery, control, and idempotency
 
@@ -142,6 +152,12 @@ deduplicates by `(leaseId, operation type, operationId)`: an exact retry returns
 `disposition: duplicate` without applying again, while reuse with different
 content fails with `operation_conflict`. Relay transport never owns or grants a
 lease.
+
+Capabilities have an independent positive monotonic revision. An attached
+client applies a complete `terminal.capabilities_changed` value only when its
+revision is newer and ignores duplicate or stale revisions. Because each push
+contains the complete capability set, a revision gap does not alter terminal
+data sequencing or require replay.
 
 `TerminalManager` in `apps/runner/src/terminals.ts` remains a deprecated
 pre-v1 in-process adapter with a generic pipe transport and rolling byte-tail

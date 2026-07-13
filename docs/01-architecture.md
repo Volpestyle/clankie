@@ -126,6 +126,13 @@ PTY, sequence history, VT emulator, or control lease. TypeScript at the runner
 boundary owns sequencing, resume, duplicate/gap handling, snapshot publication,
 idempotent input/resize, and lease expiry.
 
+Discovery, subscribe, snapshot-resync delivery, and resync-required responses
+carry explicit open/closed lifecycle state, including the original sequenced
+closure identity. Attached clients receive complete revisioned
+`terminal.capabilities_changed` pushes independently of the terminal data
+sequence. Canonical byte validation and byte helpers require no Node globals,
+so the same schema surface is safe in React Native and browser-like clients.
+
 Terminal output, restore sequences, input, and resize remain a high-volume data
 plane. They never become semantic mission events and never enter structured
 logs, analytics, crash reports, or ordinary support bundles. Only bounded

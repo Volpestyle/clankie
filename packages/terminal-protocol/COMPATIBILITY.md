@@ -7,6 +7,13 @@ closed. Additive optional fields may remain in v1 only after the strict readers
 are updated; breaking shape or semantic changes require a new version and an
 explicit translator.
 
+Canonical base64 validation and the exported byte encode/decode helpers use
+only JavaScript strings and `Uint8Array`; they do not require Node `Buffer` or
+browser `atob`/`btoa` globals. Public `safeParse` calls therefore return a Zod
+result rather than throwing when a Node global is absent.
+The deprecated adapter helper also preserves its empty-frame round trip, while
+the strict serialized wire continues to reject empty byte payloads.
+
 ## Capability combinations
 
 | Source shape        | observe | resume | VT snapshot | lease | input | resize |
@@ -22,6 +29,18 @@ device's granted `observe`/`control` scopes, so a capable source does not imply
 that a device is authorized to control it. `terminal.subscribed` declares
 whether initial delivery is live-only, replay, or a following snapshot, and
 pins the subscription's starting sequence cursor.
+
+Discovery, subscription acknowledgement, resync-required delivery, and every
+snapshot carry explicit `open` or `closed` lifecycle state. Closed state
+includes the original sequenced close identity and remains authoritative after
+that stream frame leaves replay retention. A closed snapshot's closure
+sequence is at or before its exact snapshot boundary.
+
+`terminal.capabilities_changed` pushes the complete current capability set and
+its positive monotonic revision to each attached subscription. A client applies
+a revision greater than its last applied capability revision and ignores an
+equal or lower revision as a duplicate. A revision gap does not affect terminal
+data sequencing: the complete pushed value supersedes older capability state.
 
 ## Ordering compatibility
 
@@ -45,7 +64,24 @@ outside the restore sequence.
 The test suite pins these hashes, validates each fixture strictly, compares the
 snapshot state at N with uninterrupted state at N, then applies every frame
 after N and compares the final visible state with uninterrupted consumption and
-the fixture's explicit expected screen.
+the fixture's explicit expected screen. These fixtures prove wire ordering,
+boundary, geometry, and reconstruction invariants against the package's
+deterministic reference terminal. They do not claim that their hand-authored
+restore bytes are output from `@xterm/headless` and `@xterm/addon-serialize`.
+VUH-868 owns real serializer production and conformance evidence at the runner
+boundary without exposing xterm objects in this public protocol package.
+
+## Public app-consumer inventory
+
+The named public schemas and inferred types cover discovery/list/get
+capabilities, subscribe/resume/resync with an opaque branded replay cursor,
+exact-boundary snapshots, ordered output/geometry/closure, explicit lifecycle,
+revisioned capability changes, owner/lease lifecycle, attributed idempotent
+input/resize, errors, and client/server/wire unions. `TerminalSequenceDisposition`
+and `classifyTerminalSequence` define duplicate-ignore and gap-resync. The three
+immutable fixtures above are the v1 golden replay inventory. Renderers consume
+only reset bytes plus geometry/boundary and subsequent feed bytes; transport,
+authentication, and leases remain outside the renderer.
 
 ## Pre-v1 adapter compatibility
 

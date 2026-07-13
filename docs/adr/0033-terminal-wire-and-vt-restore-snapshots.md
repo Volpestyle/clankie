@@ -44,7 +44,7 @@ flowchart LR
 
   subgraph RunnerBoundary[Trusted runner boundary]
     G[Terminal wire adapter<br/>strict v1 Zod parsing]
-    O[TypeScript ordering + resync<br/>idempotency + one lease]
+    O[TypeScript ordering + resync<br/>lifecycle + capability revisions<br/>idempotency + one lease]
     V[@xterm/headless<br/>+ addon-serialize]
     P[Real PTY]
   end
@@ -80,10 +80,23 @@ types for every serialized client and server message:
 - attributed, idempotent input and resize plus applied/duplicate
   acknowledgements.
 
+Discovery, subscription acknowledgement, resync-required delivery, and
+snapshots carry explicit open/closed lifecycle state. Closed state repeats the
+original sequenced close identity, so closure survives replay eviction. Each
+attached subscription also receives a complete `terminal.capabilities_changed`
+push with a positive monotonic revision. Capability revisions are independent
+of the terminal data sequence: newer complete values replace older values and
+equal or lower revisions are ignored.
+
 Every top-level message carries `protocolVersion: 1`; discovery also states the
 supported version. Objects are strict. Unknown versions or fields, invalid
 sequence/boundary values, malformed canonical base64, impossible capability
 combinations, and missing control attribution fail closed.
+
+Canonical base64 validation and public byte helpers are pure JavaScript over
+strings and `Uint8Array`. They do not bind to Node `Buffer` or browser encoding
+globals, and public Zod `safeParse` remains non-throwing when those globals are
+absent.
 
 The old `TerminalProvider`, `TerminalSession`, and `TerminalFrame` exports are a
 deprecated source-local adapter compatibility surface. They are not accepted
@@ -132,10 +145,14 @@ serialize a decoder or parser's partial state. If the current boundary is not
 quiescent, snapshot publication waits for a later sequence; replay continues
 normally meanwhile.
 
-The immutable v1 fixtures pin SHA-256 hashes and prove that snapshot-at-N plus
-all frames after N produces the same explicit visible state as uninterrupted
-consumption across alternate screen, cursor, SGR color, geometry changes, and
-split UTF-8 output.
+The immutable v1 fixtures pin SHA-256 hashes and prove the protocol ordering,
+boundary, geometry, and reconstruction invariants: snapshot-at-N plus all
+frames after N produces the same explicit visible state as uninterrupted
+consumption in the deterministic reference terminal across alternate screen,
+cursor, SGR color, geometry changes, and split UTF-8 output. They are not
+claimed as output from the real xterm serializer. VUH-868 owns conformance
+fixtures generated through `@xterm/headless` and `@xterm/addon-serialize` at the
+runner boundary.
 
 ### Capability and lease semantics
 
@@ -144,6 +161,12 @@ always explicit. A source can truthfully advertise no resume, no control
 lease, no input, or no resize. Input/resize capability is invalid without
 lease support; resume is invalid without VT restore snapshots. Discovery
 returns the authenticated device's granted `observe` and/or `control` scope.
+
+Capability changes are server-pushed to attached subscriptions as complete
+values with monotonic revisions. Clients apply only a revision greater than the
+last applied capability revision. Lifecycle is likewise explicit on discovery,
+subscription, resync-required, and snapshot delivery; for a closed snapshot,
+the recorded closure sequence must be at or before `afterSequence`.
 
 The runner owns at most one active lease. Lease requests, renewals, releases,
 expiry, and rejection are explicit. Owner state is nullable and revisioned.
@@ -207,3 +230,5 @@ gets a new fixture directory, manifest, and tested translator.
   real PTY, headless VT serializer, quiescence tracker, and the frozen schemas.
 - Protocol evolution requires explicit version/fixture work instead of
   permissive parsing.
+- React Native, browser-like, Node, and macOS-side JavaScript consumers share
+  the same runtime-neutral schema and byte-helper surface.

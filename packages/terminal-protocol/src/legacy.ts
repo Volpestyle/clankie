@@ -77,9 +77,46 @@ export interface TerminalProvider {
 }
 
 export function encodeTerminalBytes(bytes: Uint8Array): string {
-  return Buffer.from(bytes).toString("base64");
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  let encoded = "";
+  for (let index = 0; index < bytes.length; index += 3) {
+    const remaining = bytes.length - index;
+    const bits = (bytes[index]! << 16) | ((bytes[index + 1] ?? 0) << 8) | (bytes[index + 2] ?? 0);
+    encoded += alphabet[(bits >>> 18) & 63]!;
+    encoded += alphabet[(bits >>> 12) & 63]!;
+    encoded += remaining > 1 ? alphabet[(bits >>> 6) & 63]! : "=";
+    encoded += remaining > 2 ? alphabet[bits & 63]! : "=";
+  }
+  return encoded;
 }
 
 export function decodeTerminalBytes(data: string): Uint8Array {
-  return new Uint8Array(Buffer.from(data, "base64"));
+  if (data.length === 0) return new Uint8Array();
+  if (
+    data.length % 4 !== 0 ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(data)
+  ) {
+    throw new TypeError("expected canonical base64");
+  }
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const outputLength = (data.length / 4) * 3 - (data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0);
+  const bytes = new Uint8Array(outputLength);
+  let outputIndex = 0;
+  for (let index = 0; index < data.length; index += 4) {
+    const a = alphabet.indexOf(data[index]!);
+    const b = alphabet.indexOf(data[index + 1]!);
+    const c = data[index + 2] === "=" ? 0 : alphabet.indexOf(data[index + 2]!);
+    const d = data[index + 3] === "=" ? 0 : alphabet.indexOf(data[index + 3]!);
+    if (
+      (data[index + 2] === "=" && (b & 0b1111) !== 0) ||
+      (data[index + 3] === "=" && data[index + 2] !== "=" && (c & 0b11) !== 0)
+    ) {
+      throw new TypeError("expected canonical base64");
+    }
+    const bits = (a << 18) | (b << 12) | (c << 6) | d;
+    if (outputIndex < outputLength) bytes[outputIndex++] = (bits >>> 16) & 255;
+    if (outputIndex < outputLength) bytes[outputIndex++] = (bits >>> 8) & 255;
+    if (outputIndex < outputLength) bytes[outputIndex++] = bits & 255;
+  }
+  return bytes;
 }

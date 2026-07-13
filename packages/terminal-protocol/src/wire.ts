@@ -20,7 +20,10 @@ function isCanonicalBase64(value: string): boolean {
   if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
     return false;
   }
-  return Buffer.from(value, "base64").toString("base64") === value;
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  if (value.endsWith("==")) return (alphabet.indexOf(value.at(-3)!) & 0b1111) === 0;
+  if (value.endsWith("=")) return (alphabet.indexOf(value.at(-2)!) & 0b11) === 0;
+  return true;
 }
 
 export const TerminalBytesSchema = z
@@ -86,6 +89,44 @@ export const TerminalCapabilitiesSchema = z
   });
 export type TerminalCapabilities = z.infer<typeof TerminalCapabilitiesSchema>;
 
+export const TerminalLifecycleSchema = z.discriminatedUnion("state", [
+  z.object({ state: z.literal("open") }).strict(),
+  z
+    .object({
+      state: z.literal("closed"),
+      sequence: FrameSequenceSchema,
+      reason: z.enum(["exited", "signaled", "transport_lost", "terminated"]),
+      exitCode: z.number().int().nullable(),
+      signal: z.string().min(1).max(64).nullable(),
+      closedAt: TimestampSchema,
+    })
+    .strict()
+    .superRefine((lifecycle, context) => {
+      if (lifecycle.reason === "exited" && lifecycle.exitCode === null) {
+        context.addIssue({ code: "custom", path: ["exitCode"], message: "exited requires exitCode" });
+      }
+      if (lifecycle.reason === "exited" && lifecycle.signal !== null) {
+        context.addIssue({ code: "custom", path: ["signal"], message: "exited cannot carry signal" });
+      }
+      if (lifecycle.reason === "signaled" && lifecycle.signal === null) {
+        context.addIssue({ code: "custom", path: ["signal"], message: "signaled requires signal" });
+      }
+      if (lifecycle.reason === "signaled" && lifecycle.exitCode !== null) {
+        context.addIssue({ code: "custom", path: ["exitCode"], message: "signaled cannot carry exitCode" });
+      }
+      if (
+        (lifecycle.reason === "transport_lost" || lifecycle.reason === "terminated") &&
+        (lifecycle.exitCode !== null || lifecycle.signal !== null)
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "non-process closure cannot carry process exit details",
+        });
+      }
+    }),
+]);
+export type TerminalLifecycle = z.infer<typeof TerminalLifecycleSchema>;
+
 export const TerminalDiscoverySessionSchema = z
   .object({
     terminalId: OpaqueIdSchema,
@@ -94,9 +135,19 @@ export const TerminalDiscoverySessionSchema = z
     source: z.enum(["runner_pty", "herdr", "tmux", "generic"]),
     geometry: TerminalGeometrySchema,
     lastSequence: SequenceSchema,
+    lifecycle: TerminalLifecycleSchema,
     capabilities: TerminalCapabilitiesSchema,
   })
-  .strict();
+  .strict()
+  .superRefine((session, context) => {
+    if (session.lifecycle.state === "closed" && session.lifecycle.sequence > session.lastSequence) {
+      context.addIssue({
+        code: "custom",
+        path: ["lifecycle", "sequence"],
+        message: "closure cannot exceed lastSequence",
+      });
+    }
+  });
 export type TerminalDiscoverySession = z.infer<typeof TerminalDiscoverySessionSchema>;
 
 const ClientMessageBaseSchema = z
@@ -161,6 +212,18 @@ export const TerminalCapabilitiesMessageSchema = z
   .strict();
 export type TerminalCapabilitiesMessage = z.infer<typeof TerminalCapabilitiesMessageSchema>;
 
+export const TerminalCapabilitiesChangedMessageSchema = z
+  .object({
+    protocolVersion: ProtocolVersionSchema,
+    type: z.literal("terminal.capabilities_changed"),
+    terminalId: OpaqueIdSchema,
+    subscriptionId: OpaqueIdSchema,
+    revision: z.number().int().positive().max(MAX_TERMINAL_SEQUENCE),
+    capabilities: TerminalCapabilitiesSchema,
+  })
+  .strict();
+export type TerminalCapabilitiesChangedMessage = z.infer<typeof TerminalCapabilitiesChangedMessageSchema>;
+
 export const TerminalSubscribeRequestSchema = AttributedClientMessageBaseSchema.extend({
   type: z.literal("terminal.subscribe"),
   terminalId: OpaqueIdSchema,
@@ -199,6 +262,7 @@ export const TerminalSubscribedMessageSchema = z
     subscriptionId: OpaqueIdSchema,
     cursor: TerminalReplayCursorSchema,
     initialDelivery: z.enum(["live", "snapshot", "replay"]),
+    lifecycle: TerminalLifecycleSchema,
   })
   .strict();
 export type TerminalSubscribedMessage = z.infer<typeof TerminalSubscribedMessageSchema>;
@@ -240,7 +304,21 @@ export const TerminalSnapshotMessageSchema = StreamMessageBaseSchema.extend({
       data: TerminalBytesSchema,
     })
     .strict(),
-}).strict();
+  lifecycle: TerminalLifecycleSchema,
+})
+  .strict()
+  .superRefine((snapshot, context) => {
+    if (
+      snapshot.lifecycle.state === "closed" &&
+      snapshot.lifecycle.sequence > snapshot.boundary.afterSequence
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["lifecycle", "sequence"],
+        message: "snapshot closure must be included through its boundary",
+      });
+    }
+  });
 export type TerminalSnapshotMessage = z.infer<typeof TerminalSnapshotMessageSchema>;
 
 export const TerminalOutputMessageSchema = StreamMessageBaseSchema.extend({
@@ -328,6 +406,7 @@ export const TerminalResyncRequiredMessageSchema = z
     requestedAfterSequence: SequenceSchema,
     availableFromSequence: FrameSequenceSchema,
     reason: z.enum(["replay_unavailable", "invalid_cursor", "server_reset"]),
+    lifecycle: TerminalLifecycleSchema,
   })
   .strict();
 export type TerminalResyncRequiredMessage = z.infer<typeof TerminalResyncRequiredMessageSchema>;
@@ -521,6 +600,7 @@ export const TerminalServerMessageSchema = z.discriminatedUnion("type", [
   TerminalDiscoveryResponseSchema,
   TerminalListSessionsMessageSchema,
   TerminalCapabilitiesMessageSchema,
+  TerminalCapabilitiesChangedMessageSchema,
   TerminalSubscribedMessageSchema,
   TerminalSnapshotMessageSchema,
   TerminalOutputMessageSchema,

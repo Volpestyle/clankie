@@ -4,12 +4,14 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   TerminalCapabilitiesSchema,
+  TerminalCapabilitiesChangedMessageSchema,
   TerminalClientMessageSchema,
   TerminalDiscoveryResponseSchema,
   TerminalInputRequestSchema,
   TerminalLeaseGrantMessageSchema,
   TerminalLeaseRenewRequestSchema,
   TerminalOwnerStateMessageSchema,
+  TerminalOutputMessageSchema,
   TerminalResizeRequestSchema,
   TerminalSequenceBoundarySchema,
   TerminalServerMessageSchema,
@@ -33,8 +35,60 @@ const attribution = {
 };
 const timestamp = "2026-07-12T12:00:00.000Z";
 const laterTimestamp = "2026-07-12T12:01:00.000Z";
+const openLifecycle = { state: "open" as const };
+const closedLifecycle = {
+  state: "closed" as const,
+  sequence: 3,
+  reason: "exited" as const,
+  exitCode: 0,
+  signal: null,
+  closedAt: timestamp,
+};
 
 describe("terminal protocol v1 schemas", () => {
+  it("parses all byte-bearing messages and helpers without a Node Buffer global", () => {
+    const bufferDescriptor = Object.getOwnPropertyDescriptor(globalThis, "Buffer");
+    try {
+      expect(Reflect.deleteProperty(globalThis, "Buffer")).toBe(true);
+      const streamBase = { protocolVersion: 1, terminalId: "terminal-1", subscriptionId: "subscription-1" };
+      const messages = [
+        { ...streamBase, type: "terminal.output", sequence: 1, encoding: "base64", data: "aGk=" },
+        {
+          ...streamBase,
+          type: "terminal.snapshot",
+          boundary: { afterSequence: 0, nextSequence: 1, parserState: "quiescent" },
+          geometry: { columns: 80, rows: 24 },
+          restore: { format: "vt_restore_v1", encoding: "base64", data: "G1sySg==" },
+          lifecycle: openLifecycle,
+        },
+        {
+          protocolVersion: 1,
+          type: "terminal.input",
+          requestId: "input-1",
+          terminalId: "terminal-1",
+          leaseId: "lease-1",
+          operationId: "operation-1",
+          attribution,
+          encoding: "base64",
+          data: "aGk=",
+        },
+      ];
+      for (const message of messages) {
+        expect(() => TerminalWireMessageSchema.safeParse(message)).not.toThrow();
+        expect(TerminalWireMessageSchema.safeParse(message).success).toBe(true);
+      }
+      for (const data of ["%%%==", "aGk", "aG=k", "Zh==", "Zm9="]) {
+        expect(TerminalOutputMessageSchema.safeParse({ ...messages[0], data }).success, data).toBe(false);
+      }
+      const bytes = new TextEncoder().encode("portable");
+      expect(decodeTerminalBytes(encodeTerminalBytes(bytes))).toEqual(bytes);
+      expect(decodeTerminalBytes(encodeTerminalBytes(new Uint8Array()))).toEqual(new Uint8Array());
+      expect(() => decodeTerminalBytes("Zh==")).toThrow(TypeError);
+    } finally {
+      if (bufferDescriptor) Object.defineProperty(globalThis, "Buffer", bufferDescriptor);
+    }
+  });
+
   it("round-trips raw terminal bytes for the legacy adapter", () => {
     const bytes = new TextEncoder().encode("hello\u001b[31m");
     expect(decodeTerminalBytes(encodeTerminalBytes(bytes))).toEqual(bytes);
@@ -80,6 +134,7 @@ describe("terminal protocol v1 schemas", () => {
             source: "herdr",
             geometry: { columns: 100, rows: 30 },
             lastSequence: 42,
+            lifecycle: openLifecycle,
             capabilities: base,
           },
         ],
@@ -106,6 +161,7 @@ describe("terminal protocol v1 schemas", () => {
       boundary: { afterSequence: 4, nextSequence: 5, parserState: "quiescent" },
       geometry: { columns: 80, rows: 24 },
       restore: { format: "vt_restore_v1", encoding: "base64", data: "G1sySg==" },
+      lifecycle: openLifecycle,
     };
     expect(TerminalSnapshotMessageSchema.safeParse(snapshot).success).toBe(true);
     expect(TerminalServerMessageSchema.safeParse({ ...snapshot, protocolVersion: 2 }).success).toBe(false);
@@ -316,6 +372,7 @@ describe("terminal protocol v1 schemas", () => {
             source: "runner_pty",
             geometry: { columns: 80, rows: 24 },
             lastSequence: 3,
+            lifecycle: closedLifecycle,
             capabilities: {
               observe: true,
               resume: true,
@@ -350,6 +407,7 @@ describe("terminal protocol v1 schemas", () => {
         subscriptionId: "subscription-1",
         cursor: { sequence: 0 },
         initialDelivery: "snapshot",
+        lifecycle: closedLifecycle,
       },
       {
         ...streamBase,
@@ -357,6 +415,7 @@ describe("terminal protocol v1 schemas", () => {
         boundary: { afterSequence: 0, nextSequence: 1, parserState: "quiescent" },
         geometry: { columns: 80, rows: 24 },
         restore: { format: "vt_restore_v1", encoding: "base64", data: "G1sySg==" },
+        lifecycle: openLifecycle,
       },
       { ...streamBase, type: "terminal.output", sequence: 1, encoding: "base64", data: "aGk=" },
       {
@@ -384,6 +443,7 @@ describe("terminal protocol v1 schemas", () => {
         requestedAfterSequence: 1,
         availableFromSequence: 8,
         reason: "replay_unavailable",
+        lifecycle: closedLifecycle,
       },
       {
         protocolVersion: 1,
@@ -442,6 +502,75 @@ describe("terminal protocol v1 schemas", () => {
       expect(TerminalServerMessageSchema.safeParse(message).success).toBe(true);
       expect(TerminalWireMessageSchema.safeParse(message).success).toBe(true);
     }
+  });
+
+  it("preserves closed lifecycle across discovery and snapshot resync", () => {
+    const discovery = {
+      terminalId: "terminal-1",
+      workerRunId: "worker-1",
+      title: "Closed worker",
+      source: "runner_pty",
+      geometry: { columns: 80, rows: 24 },
+      lastSequence: 20,
+      lifecycle: closedLifecycle,
+      capabilities: {
+        observe: true,
+        resume: true,
+        vtRestoreSnapshot: true,
+        controlLease: false,
+        input: false,
+        resize: false,
+      },
+    };
+    expect(
+      TerminalDiscoveryResponseSchema.safeParse({
+        protocolVersion: 1,
+        type: "terminal.discovery",
+        requestId: "discover-1",
+        grantedScopes: ["observe"],
+        sessions: [discovery],
+      }).success,
+    ).toBe(true);
+    const snapshot = {
+      protocolVersion: 1,
+      type: "terminal.snapshot",
+      terminalId: "terminal-1",
+      subscriptionId: "subscription-1",
+      boundary: { afterSequence: 20, nextSequence: 21, parserState: "quiescent" },
+      geometry: { columns: 80, rows: 24 },
+      restore: { format: "vt_restore_v1", encoding: "base64", data: "G1sySg==" },
+      lifecycle: closedLifecycle,
+    };
+    expect(TerminalSnapshotMessageSchema.safeParse(snapshot).success).toBe(true);
+    expect(
+      TerminalSnapshotMessageSchema.safeParse({
+        ...snapshot,
+        boundary: { ...snapshot.boundary, afterSequence: 2, nextSequence: 3 },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("pushes revisioned capability changes to attached clients", () => {
+    const message = {
+      protocolVersion: 1,
+      type: "terminal.capabilities_changed",
+      terminalId: "terminal-1",
+      subscriptionId: "subscription-1",
+      revision: 2,
+      capabilities: {
+        observe: true,
+        resume: true,
+        vtRestoreSnapshot: true,
+        controlLease: false,
+        input: false,
+        resize: false,
+      },
+    };
+    expect(TerminalCapabilitiesChangedMessageSchema.safeParse(message).success).toBe(true);
+    expect(TerminalServerMessageSchema.safeParse(message).success).toBe(true);
+    expect(TerminalCapabilitiesChangedMessageSchema.safeParse({ ...message, revision: 0 }).success).toBe(
+      false,
+    );
   });
 });
 
