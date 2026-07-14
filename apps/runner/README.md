@@ -38,7 +38,7 @@ Herdr titles are presentation-only. A title containing an absolute path, the pri
 
 Herdr control is fail-closed: a host-injected ownership predicate must grant it, and every `pane.send_input` still requires the adapter's active terminal lease. The observe-only gateway intersects source capability with its device authority, so enabling Herdr does not add a remote control route.
 
-Native PTY cancellation signals the PTY-owned process group. Because a descendant can create a new session with `setsid(2)`, each termination signal also performs a bounded process-table sweep and signals descendant groups observed outside the PTY group. The sweep is best-effort rather than OS-level containment; if an observed out-of-group descendant remains live or inspection cannot complete, the runner emits a typed `terminal.process_tree_sweep` event and a structured warning containing aggregate counts, never command content or process identifiers.
+Native PTYs retain node-pty's process/session ownership and `pty.kill()` close semantics. Shell-worker timeout cancellation opts into a bounded process-table sweep that signals observed descendants by PID, including descendants that create a new session with `setsid(2)`, without replacing the PTY root's native termination path. The sweep is best-effort rather than OS-level containment; if an observed descendant remains live or inspection cannot complete, the runner emits a typed `terminal.process_tree_sweep` event and a structured warning containing aggregate counts, never command content or process identifiers.
 
 `pnpm --filter @clankie/runner terminal:lifecycle-evidence` runs the immutable interactive
 terminal contract and writes a reproducible evidence manifest under
