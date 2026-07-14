@@ -1166,10 +1166,17 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     return context.json({ error: "device_authentication_required" }, 401);
   };
 
-  const authorizeTranscriptRead = async (context: Context): Promise<Response | undefined> => {
+  type TranscriptReadDenial =
+    | {
+        body: ReturnType<typeof WorkerTranscriptAuthFailureSchema.parse>;
+        status: 401 | 403;
+      }
+    | { body: { error: "worker_transcript_authentication_unavailable" }; status: 503 };
+
+  const transcriptReadDenial = async (context: Context): Promise<TranscriptReadDenial | undefined> => {
     const identity = await authenticateDevice(context.req.raw);
     if (identity === "unavailable") {
-      return context.json({ error: "worker_transcript_authentication_unavailable" }, 503);
+      return { body: { error: "worker_transcript_authentication_unavailable" }, status: 503 };
     }
     if ("denied" in identity) {
       const reason =
@@ -1178,26 +1185,31 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
           : identity.denied === "revoked"
             ? "device_revoked"
             : "authentication_required";
-      return context.json(
-        WorkerTranscriptAuthFailureSchema.parse({
+      return {
+        body: WorkerTranscriptAuthFailureSchema.parse({
           schemaVersion: 1,
           outcome: "auth_failed",
           reason,
         }),
-        401,
-      );
+        status: 401,
+      };
     }
     if (!identity.grants.chat) {
-      return context.json(
-        WorkerTranscriptAuthFailureSchema.parse({
+      return {
+        body: WorkerTranscriptAuthFailureSchema.parse({
           schemaVersion: 1,
           outcome: "auth_failed",
           reason: "permission_denied",
         }),
-        403,
-      );
+        status: 403,
+      };
     }
     return undefined;
+  };
+
+  const authorizeTranscriptRead = async (context: Context): Promise<Response | undefined> => {
+    const denial = await transcriptReadDenial(context);
+    return denial ? context.json(denial.body, denial.status) : undefined;
   };
 
   app.get("/health", (context) =>
@@ -3184,6 +3196,18 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
               return;
             }
             if (next.value.entry.visibility !== "garden") continue;
+            const denial = await transcriptReadDenial(context);
+            if (denial) {
+              abort.abort();
+              await iterator.return?.();
+              if ("outcome" in denial.body) {
+                controller.enqueue(new TextEncoder().encode(`${JSON.stringify(denial.body)}\n`));
+                controller.close();
+              } else {
+                controller.error(new Error(denial.body.error));
+              }
+              return;
+            }
             controller.enqueue(new TextEncoder().encode(`${JSON.stringify(next.value)}\n`));
             return;
           }

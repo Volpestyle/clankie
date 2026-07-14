@@ -84,6 +84,41 @@ class FixtureTranscripts implements WorkerTranscriptReadPort {
   }
 }
 
+class RevocableTailTranscripts extends FixtureTranscripts {
+  private releaseSecondEntry!: () => void;
+  private readonly secondEntryReady = new Promise<void>((resolve) => {
+    this.releaseSecondEntry = resolve;
+  });
+
+  public release(): void {
+    this.releaseSecondEntry();
+  }
+
+  public override openTail(_key: WorkerTranscriptKey, _cursor: string, _signal: AbortSignal) {
+    const first = { ...fixture.entries[0]!, ...fixture.key };
+    const second = { ...fixture.entries[1]!, ...fixture.key };
+    const ready = this.secondEntryReady;
+    return Promise.resolve({
+      outcome: "tail" as const,
+      stream: (async function* () {
+        yield WorkerTranscriptTailLineSchema.parse({
+          schemaVersion: 1,
+          type: "worker_transcript.entry",
+          entry: first,
+          cursor: "transcript:1",
+        });
+        await ready;
+        yield WorkerTranscriptTailLineSchema.parse({
+          schemaVersion: 1,
+          type: "worker_transcript.entry",
+          entry: second,
+          cursor: "transcript:2",
+        });
+      })(),
+    });
+  }
+}
+
 async function makeApp(reader?: WorkerTranscriptReadPort, clock?: () => Date): Promise<Hono> {
   return createControlPlane({
     doctrine,
@@ -220,5 +255,28 @@ describe("control-plane worker transcript read/tail API", () => {
     });
     expect(revoked.status).toBe(401);
     expect(await revoked.json()).toMatchObject({ outcome: "auth_failed", reason: "device_revoked" });
+  });
+
+  it("terminates an active tail with typed auth failure when its device is revoked", async () => {
+    const transcripts = new RevocableTailTranscripts();
+    const app = await makeApp(transcripts);
+    const device = await pair(app, SUPERVISE_GRANTS);
+    const response = await app.request(tailPath(), {
+      headers: { authorization: `Bearer ${device.token}` },
+    });
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    const first = JSON.parse(decoder.decode((await reader.read()).value).trim()) as {
+      type: string;
+      entry: { sequence: number };
+    };
+    expect(first).toMatchObject({ type: "worker_transcript.entry", entry: { sequence: 1 } });
+
+    await app.request(`/v1/devices/${device.deviceId}/revoke`, { method: "POST", headers: OPERATOR });
+    transcripts.release();
+    const terminated = JSON.parse(decoder.decode((await reader.read()).value).trim()) as unknown;
+    expect(terminated).toMatchObject({ outcome: "auth_failed", reason: "device_revoked" });
+    expect((await reader.read()).done).toBe(true);
   });
 });
