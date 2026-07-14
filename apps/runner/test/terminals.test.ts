@@ -2,7 +2,11 @@ import { Terminal } from "@xterm/headless";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { TerminalManager, type TerminalTransport } from "../src/terminals.ts";
+import {
+  TerminalManager,
+  type TerminalProcessTreeSweepEvent,
+  type TerminalTransport,
+} from "../src/terminals.ts";
 import { ShellWorkerAdapter } from "../src/shell-worker.ts";
 import type { WorkerRunContext } from "@clankie/worker-sdk";
 
@@ -360,6 +364,82 @@ describe("production terminal lifecycle", () => {
     } finally {
       if (grandchildPid !== undefined && processIsAlive(grandchildPid)) {
         process.kill(grandchildPid, "SIGKILL");
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("sweeps a TERM-trapping descendant that creates its own session or reports survivors", async () => {
+    const root = await mkdtemp(join(process.cwd(), ".clankie-shell-worker-setsid-"));
+    const descendantPidPath = join(root, "descendant.pid");
+    const events: TerminalProcessTreeSweepEvent[] = [];
+    let descendantPid: number | undefined;
+    try {
+      const manager = new TerminalManager({ onProcessTreeSweep: (event) => events.push(event) });
+      const timeoutMs = 500;
+      const terminationGraceMs = 100;
+      const descendantScript =
+        "process.on('SIGTERM',()=>{});process.on('SIGHUP',()=>{});setInterval(()=>{},1000)";
+      const parentScript = [
+        "const {spawn}=require('node:child_process')",
+        "const fs=require('node:fs')",
+        "process.on('SIGTERM',()=>{})",
+        "process.on('SIGHUP',()=>{})",
+        `const child=spawn(process.execPath,['-e',${JSON.stringify(descendantScript)}],{detached:true,stdio:'ignore'})`,
+        `fs.writeFileSync(${JSON.stringify(descendantPidPath)},String(child.pid))`,
+        "child.unref()",
+        "setInterval(()=>{},1000)",
+      ].join(";");
+      const adapter = new ShellWorkerAdapter({
+        id: "term-trapping-setsid-tree",
+        terminalManager: manager,
+        timeoutMs,
+        terminationGraceMs,
+        commandForTask: () => ({
+          command: process.execPath,
+          args: ["--input-type=commonjs", "-e", parentScript],
+        }),
+      });
+      const context = {
+        missionId: "mission",
+        workerRunId: "term-trap-setsid-tree",
+        attempt: 1,
+        workspacePath: process.cwd(),
+        profileHash: "profile",
+        task: {
+          id: "task",
+          title: "trap TERM outside the PTY process group",
+          objective: "prove timeout escalation sweeps escaped descendant groups",
+          kind: "debugging",
+          risk: "low",
+          writeScope: [],
+          successCriteria: [],
+        },
+        signal: new AbortController().signal,
+        emit: () => undefined,
+      } as unknown as WorkerRunContext;
+
+      const result = await adapter.run(context);
+      descendantPid = Number(await readFile(descendantPidPath, "utf8"));
+      const descendantExited = await waitForProcessExit(descendantPid, terminationGraceMs + 1_000);
+      const survivorReported = events.some(
+        (event) => event.workerRunId === "term-trap-setsid-tree" && event.survivorCount > 0,
+      );
+
+      expect(result.status).toBe("failed");
+      expect(
+        events.some(
+          (event) =>
+            event.type === "terminal.process_tree_sweep" &&
+            event.workerRunId === "term-trap-setsid-tree" &&
+            event.escapedGroupCount > 0,
+        ),
+      ).toBe(true);
+      expect(descendantExited || survivorReported).toBe(true);
+      expect(await manager.listSessions()).toEqual([]);
+    } finally {
+      if (descendantPid !== undefined && processIsAlive(descendantPid)) {
+        process.kill(-descendantPid, "SIGKILL");
       }
       await rm(root, { recursive: true, force: true });
     }

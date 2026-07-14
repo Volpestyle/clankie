@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { Terminal } from "@xterm/headless";
 import { createLogger } from "@clankie/observability";
@@ -55,6 +56,19 @@ export interface TerminalManagerOptions {
   maxBufferedFrames?: number;
   leases?: ControlLeaseManager;
   onHumanControlChanged?: (workerRunId: string, active: boolean) => void;
+  onProcessTreeSweep?: (event: TerminalProcessTreeSweepEvent) => void;
+}
+
+/** Aggregate result of a bounded native-terminal descendant sweep. */
+export interface TerminalProcessTreeSweepEvent {
+  type: "terminal.process_tree_sweep";
+  terminalId: string;
+  workerRunId: string;
+  signal: string;
+  descendantCount: number;
+  escapedGroupCount: number;
+  survivorCount: number;
+  inspectionFailed: boolean;
 }
 
 /** Authoritative closure identity retained independently of replay eviction. */
@@ -189,6 +203,7 @@ export class TerminalManager implements TerminalProvider {
   private readonly maxObserverQueueFrames: number;
   private readonly maxBufferedFrames: number;
   private readonly onHumanControlChanged?: TerminalManagerOptions["onHumanControlChanged"];
+  private readonly onProcessTreeSweep?: TerminalManagerOptions["onProcessTreeSweep"];
 
   public constructor(options: TerminalManagerOptions = {}) {
     this.leases = options.leases ?? new ControlLeaseManager();
@@ -196,6 +211,7 @@ export class TerminalManager implements TerminalProvider {
     this.maxObserverQueueFrames = options.maxObserverQueueFrames ?? 1024;
     this.maxBufferedFrames = options.maxBufferedFrames ?? 8192;
     this.onHumanControlChanged = options.onHumanControlChanged;
+    this.onProcessTreeSweep = options.onProcessTreeSweep;
   }
 
   public spawnTerminal(options: SpawnTerminalOptions): TerminalSession {
@@ -211,6 +227,28 @@ export class TerminalManager implements TerminalProvider {
         columns,
         rows,
         ...(options.env ? { env: options.env } : {}),
+        onProcessTreeSweep: (outcome) => {
+          const event: TerminalProcessTreeSweepEvent = {
+            type: "terminal.process_tree_sweep",
+            terminalId: id,
+            workerRunId: options.workerRunId,
+            ...outcome,
+          };
+          if (event.survivorCount > 0 || event.inspectionFailed)
+            logger.warn(
+              {
+                terminalId: event.terminalId,
+                workerRunId: event.workerRunId,
+                signal: event.signal,
+                descendantCount: event.descendantCount,
+                escapedGroupCount: event.escapedGroupCount,
+                survivorCount: event.survivorCount,
+                inspectionFailed: event.inspectionFailed,
+              },
+              "terminal process-tree sweep left live descendants",
+            );
+          this.onProcessTreeSweep?.(event);
+        },
       });
     const emulator = new Terminal({ cols: columns, rows, allowProposedApi: true });
     const serializer = new SerializeAddon();
@@ -692,7 +730,13 @@ export class TerminalManager implements TerminalProvider {
 export function spawnNativePtyTransport(
   command: string,
   args: string[],
-  options: { cwd: string; columns: number; rows: number; env?: NodeJS.ProcessEnv },
+  options: {
+    cwd: string;
+    columns: number;
+    rows: number;
+    env?: NodeJS.ProcessEnv;
+    onProcessTreeSweep?: (outcome: ProcessTreeSweepOutcome) => void;
+  },
 ): TerminalTransport {
   const env = Object.fromEntries(
     Object.entries(options.env ?? {}).filter(
@@ -711,7 +755,7 @@ export function spawnNativePtyTransport(
   return {
     write: (bytes) => pty.write(Buffer.from(bytes)),
     resize: (columns, rows) => pty.resize(columns, rows),
-    kill: (signal = "SIGKILL") => signalOwnedPtyProcessGroup(pty, signal),
+    kill: (signal = "SIGKILL") => signalOwnedPtyProcessGroup(pty, signal, options.onProcessTreeSweep),
     onData: (listener) => {
       pty.onData((data) => listener(Buffer.isBuffer(data) ? data : Buffer.from(data, "utf8")));
     },
@@ -721,16 +765,130 @@ export function spawnNativePtyTransport(
   };
 }
 
-function signalOwnedPtyProcessGroup(pty: IPty, signal: string): void {
+interface ProcessTableRow {
+  pid: number;
+  ppid: number;
+  pgid: number;
+  state: string;
+}
+
+interface ProcessTreeSweepOutcome {
+  signal: string;
+  descendantCount: number;
+  escapedGroupCount: number;
+  survivorCount: number;
+  inspectionFailed: boolean;
+}
+
+const PROCESS_TREE_SNAPSHOT_TIMEOUT_MS = 100;
+const PROCESS_TREE_SWEEP_ATTEMPTS = 3;
+
+function signalOwnedPtyProcessGroup(
+  pty: IPty,
+  signal: string,
+  onSweep?: (outcome: ProcessTreeSweepOutcome) => void,
+): void {
   if (process.platform !== "win32") {
+    const knownDescendants = new Set<number>();
+    const escapedDescendants = new Set<number>();
+    const escapedGroups = new Set<number>();
+    let inspectionFailed = !collectDescendants(pty.pid, knownDescendants, escapedDescendants, escapedGroups);
+    signalGroups(escapedGroups, signal);
     try {
       // forkpty(3) makes the PTY child a session and process-group leader.
-      // Signal that owned group so descendants cannot outlive the worker.
+      // A descendant may call setsid(2) and leave that group, so the bounded
+      // process-table sweep also signals groups observed outside the PTY group.
       process.kill(-pty.pid, signal as NodeJS.Signals);
-      return;
     } catch {
       // The group may already be gone; retain node-pty's direct-child behavior.
+      pty.kill(signal);
     }
+    for (let attempt = 1; attempt < PROCESS_TREE_SWEEP_ATTEMPTS; attempt += 1) {
+      inspectionFailed =
+        !collectDescendants(pty.pid, knownDescendants, escapedDescendants, escapedGroups) || inspectionFailed;
+      signalGroups(escapedGroups, signal);
+    }
+    if (escapedDescendants.size > 0 || inspectionFailed) {
+      const live = liveProcessIds();
+      inspectionFailed = live === undefined || inspectionFailed;
+      onSweep?.({
+        signal,
+        descendantCount: knownDescendants.size,
+        escapedGroupCount: escapedGroups.size,
+        survivorCount: live
+          ? [...escapedDescendants].filter((pid) => live.has(pid)).length
+          : escapedDescendants.size,
+        inspectionFailed,
+      });
+    }
+    return;
   }
   pty.kill(signal);
+}
+
+function collectDescendants(
+  rootPid: number,
+  knownDescendants: Set<number>,
+  escapedDescendants: Set<number>,
+  escapedGroups: Set<number>,
+): boolean {
+  const table = readProcessTable();
+  if (!table) return false;
+  const parents = new Set<number>([rootPid, ...knownDescendants]);
+  let added = true;
+  while (added) {
+    added = false;
+    for (const row of table) {
+      if (row.state.startsWith("Z") || knownDescendants.has(row.pid) || !parents.has(row.ppid)) continue;
+      knownDescendants.add(row.pid);
+      parents.add(row.pid);
+      if (row.pgid !== rootPid && row.pgid > 1) {
+        escapedDescendants.add(row.pid);
+        escapedGroups.add(row.pgid);
+      }
+      added = true;
+    }
+  }
+  return true;
+}
+
+function signalGroups(groups: ReadonlySet<number>, signal: string): void {
+  for (const pgid of groups) {
+    try {
+      process.kill(-pgid, signal as NodeJS.Signals);
+    } catch {
+      // A group disappearing between the bounded snapshot and signal is success.
+    }
+  }
+}
+
+function liveProcessIds(): Set<number> | undefined {
+  const table = readProcessTable();
+  return table ? new Set(table.filter((row) => !row.state.startsWith("Z")).map((row) => row.pid)) : undefined;
+}
+
+function readProcessTable(): ProcessTableRow[] | undefined {
+  try {
+    const output = execFileSync("/bin/ps", ["-axo", "pid=,ppid=,pgid=,stat="], {
+      encoding: "utf8",
+      timeout: PROCESS_TREE_SNAPSHOT_TIMEOUT_MS,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    return output
+      .split("\n")
+      .map((line) => line.trim().split(/\s+/, 4))
+      .filter((fields) => fields.length === 4)
+      .map(([pid, ppid, pgid, state]) => ({
+        pid: Number(pid),
+        ppid: Number(ppid),
+        pgid: Number(pgid),
+        state: state ?? "",
+      }))
+      .filter(
+        (row) =>
+          Number.isSafeInteger(row.pid) && Number.isSafeInteger(row.ppid) && Number.isSafeInteger(row.pgid),
+      );
+  } catch {
+    return undefined;
+  }
 }
