@@ -212,6 +212,29 @@ specifies bounded briefs, goal arming, run receipts, harvest, resume, and cleanu
 
 ## Herdr boundary
 
-Herdr is an optional external pane host. Use its process/socket/session API through a `TerminalProvider`; do not scrape the rendered screen and do not make Herdr the persistence model. Keep native PTY and tmux adapters available.
+Herdr is an optional external pane host. The trusted runner uses `pane.list`, `pane.read`, `pane.attach`, and `pane.send_input` through `HerdrTerminalProvider`; clients see only the provider-neutral terminal contract. The stable Herdr `terminal_id` becomes `terminalId`. Compact `pane_id` values can change or be reused after a close, so they remain private request locators and never become client identity. Socket paths, Herdr session details, working directories, and credentials remain runner-private. Presentation titles containing an absolute path, the private pane ID, or a pane/session/socket marker become the generic `Herdr pane` label before discovery.
+
+Visible-state seeding and raw attachment form one bounded seam:
+
+```mermaid
+sequenceDiagram
+    participant R as Runner adapter
+    participant H as Herdr socket
+    participant V as Headless VT/replay
+    R->>H: pane.attach(pane_id)
+    H-->>R: pane_attached + buffered raw sequence
+    loop until two reads match and attach is quiet
+      R->>H: pane.read(visible, ansi)
+      H-->>R: visible ANSI state
+    end
+    R->>V: seed accepted visible state
+    R->>V: raw chunks strictly after seed seam
+    H-->>R: contiguous raw attach chunks
+    R->>V: ordered output frames and VT snapshots
+```
+
+Attach sequence discontinuity, transport loss, pane disappearance, and compact-ID replacement close the current terminal generation with an explicit typed lifecycle reason. A later attachment to the same stable terminal ID starts at a deterministic reset boundary after the previous observers drain; an old cursor therefore takes the normal resync path instead of silently crossing generations. Default geometry is 120×40 because the current Herdr visible-read response does not publish pane dimensions.
+
+Herdr panes advertise observe/resume/VT restore. They advertise no resize. They are read-only unless a runner-injected ownership policy grants control; even then input requires the active terminal control lease. The development gateway remains observe-only and intersects those source capabilities with device authorization.
 
 When running under Herdr (`HERDR_ENV=1`), clankie panes self-report status over the socket (`pane.report_agent`) so Herdr displays them natively, and Herdr's `pane.agent_status_changed` events are ingested as a Tier-2 status signal (ADR 0015). Neither direction requires a Herdr fork.

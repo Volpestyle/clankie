@@ -4,6 +4,7 @@ import { Terminal } from "@xterm/headless";
 import { createLogger } from "@clankie/observability";
 import {
   encodeTerminalBytes,
+  type TerminalCapabilities,
   type ControlLease,
   type TerminalFrame,
   type TerminalProvider,
@@ -19,7 +20,9 @@ export interface TerminalTransport {
   resize(columns: number, rows: number): void;
   kill(signal?: string): void;
   onData(listener: (chunk: Buffer) => void): void;
-  onExit(listener: (exitCode: number | null, signal?: string) => void): void;
+  onExit(
+    listener: (exitCode: number | null, signal?: string, reason?: TerminalClosure["reason"]) => void,
+  ): void;
 }
 
 export interface TerminalAttemptContext {
@@ -28,7 +31,7 @@ export interface TerminalAttemptContext {
   workerRunId: string;
   attempt: number;
   provider: string;
-  source: "runner_pty";
+  source: "runner_pty" | "herdr";
   nativeSessionId?: string;
 }
 
@@ -44,6 +47,7 @@ export interface SpawnTerminalOptions {
   rows?: number;
   transport?: TerminalTransport;
   provider?: TerminalSession["provider"];
+  source?: TerminalAttemptContext["source"];
   context?: Omit<TerminalAttemptContext, "workerRunId" | "source">;
 }
 
@@ -60,7 +64,7 @@ export interface TerminalManagerOptions {
 /** Authoritative closure identity retained independently of replay eviction. */
 export interface TerminalClosure {
   sequence: number;
-  reason: "exited" | "terminated";
+  reason: "exited" | "signaled" | "transport_lost" | "terminated" | "sequence_discontinuity";
   exitCode: number | null;
   signal: null;
   closedAt: string;
@@ -232,7 +236,7 @@ export class TerminalManager implements TerminalProvider {
         workerRunId: options.workerRunId,
         attempt: options.context?.attempt ?? 1,
         provider: options.context?.provider ?? String(session.provider),
-        source: "runner_pty",
+        source: options.source ?? "runner_pty",
         ...(options.context?.nativeSessionId ? { nativeSessionId: options.context.nativeSessionId } : {}),
       },
       transport,
@@ -258,11 +262,11 @@ export class TerminalManager implements TerminalProvider {
     transport.onData((chunk) => {
       record.pipeline = record.pipeline.then(() => this.appendOutput(record, chunk));
     });
-    transport.onExit((exitCode, signal) => {
-      record.pipeline = record.pipeline.then(() => this.appendClosed(record, exitCode, signal));
+    transport.onExit((exitCode, signal, reason) => {
+      record.pipeline = record.pipeline.then(() => this.appendClosed(record, exitCode, signal, reason));
     });
     logger.info(
-      { terminalId: id, workerRunId: options.workerRunId, source: "runner_pty" },
+      { terminalId: id, workerRunId: options.workerRunId, source: options.source ?? "runner_pty" },
       "terminal spawned",
     );
     return { ...session };
@@ -290,6 +294,27 @@ export class TerminalManager implements TerminalProvider {
     return Promise.resolve(
       [...this.terminals.values()].filter((r) => !r.closed).map((r) => ({ ...r.session })),
     );
+  }
+
+  public refresh(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  public capabilities(terminalId: string): TerminalCapabilities {
+    this.mustGet(terminalId);
+    return {
+      observe: true,
+      resume: true,
+      vtRestoreSnapshot: true,
+      controlLease: true,
+      input: true,
+      resize: true,
+    };
+  }
+
+  public capabilitiesRevision(terminalId: string): number {
+    this.mustGet(terminalId);
+    return 1;
   }
 
   public observation(terminalId: string): TerminalObservation {
@@ -568,9 +593,18 @@ export class TerminalManager implements TerminalProvider {
     for (const [id, r] of this.terminals)
       if (!r.closed) {
         ids.push(id);
-        void this.appendClosed(r, null);
+        void this.appendClosed(r, null, undefined, "terminated");
       }
     return ids;
+  }
+
+  /** Reuse a stable external identity only after its prior generation fully drained. */
+  public forgetClosedTerminal(terminalId: string): void {
+    const record = this.mustGet(terminalId);
+    if (!record.closed || record.observers.size > 0) {
+      throw new Error(`Terminal ${terminalId} is not a drained closed record`);
+    }
+    this.terminals.delete(terminalId);
   }
 
   private async appendOutput(record: TerminalRecord, chunk: Buffer): Promise<void> {
@@ -594,6 +628,7 @@ export class TerminalManager implements TerminalProvider {
     record: TerminalRecord,
     exitCode: number | null,
     _signal?: string,
+    reason?: TerminalClosure["reason"],
   ): Promise<void> {
     if (record.closed) return;
     record.closed = true;
@@ -606,7 +641,7 @@ export class TerminalManager implements TerminalProvider {
     );
     record.closure = {
       sequence: record.session.lastSequence,
-      reason: exitCode === null ? "terminated" : "exited",
+      reason: reason ?? (exitCode === null ? "terminated" : "exited"),
       exitCode,
       signal: null,
       closedAt: new Date().toISOString(),

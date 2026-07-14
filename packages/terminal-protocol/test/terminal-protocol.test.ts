@@ -6,10 +6,12 @@ import {
   TerminalCapabilitiesSchema,
   TerminalCapabilitiesChangedMessageSchema,
   TerminalClientMessageSchema,
+  TerminalClosedMessageSchema,
   TerminalDiscoveryResponseSchema,
   TerminalInputRequestSchema,
   TerminalLeaseGrantMessageSchema,
   TerminalLeaseRenewRequestSchema,
+  TerminalLifecycleSchema,
   TerminalOwnerStateMessageSchema,
   TerminalOutputMessageSchema,
   TerminalResizeRequestSchema,
@@ -48,6 +50,31 @@ const closedLifecycle = {
 };
 
 describe("terminal protocol v1 schemas", () => {
+  it("preserves a typed sequence-discontinuity lifecycle reason", () => {
+    const lifecycle = {
+      state: "closed",
+      sequence: 3,
+      reason: "sequence_discontinuity",
+      exitCode: null,
+      signal: null,
+      closedAt: timestamp,
+    };
+    expect(TerminalLifecycleSchema.parse(lifecycle)).toEqual(lifecycle);
+    expect(
+      TerminalClosedMessageSchema.parse({
+        protocolVersion: 1,
+        type: "terminal.closed",
+        terminalId: "terminal-1",
+        subscriptionId: "subscription-1",
+        sequence: 3,
+        reason: "sequence_discontinuity",
+        exitCode: null,
+        signal: null,
+        closedAt: timestamp,
+      }),
+    ).toMatchObject({ reason: "sequence_discontinuity" });
+  });
+
   it("parses all byte-bearing messages and helpers without a Node Buffer global", () => {
     const bufferDescriptor = Object.getOwnPropertyDescriptor(globalThis, "Buffer");
     try {

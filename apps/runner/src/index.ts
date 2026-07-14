@@ -15,6 +15,8 @@ import { buildConfiguredShellAdapter, buildWorkerAdapters, simWorkersEnabled } f
 import { buildWorkerEnvironment } from "./worker-environment.ts";
 import { parseVerificationChecks } from "./verification-checks.ts";
 import { TerminalManager } from "./terminals.ts";
+import { HerdrSocketTransport, HerdrTerminalProvider } from "./herdr-provider.ts";
+import { CompositeTerminalSourceProvider, type TerminalSourceProvider } from "./terminal-source.ts";
 import {
   installDevHandoffShutdown,
   readDevHandoffConfig,
@@ -115,8 +117,19 @@ try {
 try {
   const devHandoffConfig = readDevHandoffConfig(process.env);
   if (devHandoffConfig) {
+    let terminalSource: TerminalSourceProvider = terminalManager;
+    if (process.env.CLANKIE_HERDR_TERMINAL_SOURCE_ENABLED === "1") {
+      const socketPath = process.env.HERDR_SOCKET_PATH?.trim();
+      if (!socketPath) throw new Error("herdr_terminal_source_socket_missing");
+      const herdr = new HerdrTerminalProvider({
+        transport: new HerdrSocketTransport({ socketPath }),
+      });
+      await herdr.refresh();
+      terminalSource = new CompositeTerminalSourceProvider([terminalManager, herdr]);
+      await terminalSource.refresh();
+    }
     const handoff = await startTerminalGatewayDevHandoff({
-      manager: terminalManager,
+      manager: terminalSource,
       config: devHandoffConfig,
       logger,
     });
