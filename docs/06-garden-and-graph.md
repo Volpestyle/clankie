@@ -34,14 +34,24 @@ The Design Pond is the station for whichever source is bound to the `approved_de
 
 ## Visual channels
 
-- accent color + glyph: harness/provider;
-- accessory: role;
-- animation: execution state;
-- pulse/outline: attention severity;
-- ground ring: risk/approval/control;
-- location: phase;
-- path: relationship;
-- attached sprouts: collapsed subagents.
+Visual channels are presentation-contract semantics derived from the mission event stream:
+
+- harness/provider → accent color + glyph;
+- role → accessory;
+- execution state → animation;
+- attention severity → pulse/outline;
+- risk/approval/control → ground ring;
+- phase → location;
+- relationship → path;
+- collapsed subagents → attached sprouts.
+
+The selected `SkinPack` supplies the character poses, channel glyphs, accessories, rings, scene
+art, anchors, animation timing, palette, and typography used to render those semantics. The
+garden engine resolves semantic keys through the versioned skin contract; it does not import a
+hardcoded atlas. The built-in Clankies pixel atlas is the default skin, not garden state or
+authority. A skin changes presentation only and cannot change commands, policy, evidence, or
+mission truth. See
+[ADR 0005: Skin packs are versioned data behind an engine-owned loader](https://github.com/Volpestyle/clankie-app/blob/main/docs/adr/0005-skin-pack-contract-boundary.md).
 
 Never rely on color alone. Make all actions accessible outside the canvas.
 

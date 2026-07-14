@@ -14,6 +14,10 @@
 - **Approval:** human decision attached to one action request and its assumptions.
 - **Evidence:** observed command, test report, diff, review, screenshot, artifact, or log.
 - **Persona (`soul.md`):** model-controlled character definition; shapes tone and presentation, never authority.
+- **SkinPack:** versioned presentation data for character animation, scene art, visual-channel glyphs and overlays, anchors, palette, and typography. A SkinPack changes rendering only and never mission state or authority.
+- **Skin contract:** provider-neutral manifest and fail-closed loader boundary between a SkinPack and the garden engine. Engine modules resolve semantic keys through this contract instead of importing concrete atlas assets.
+- **Default skin:** bundled Clankies pixel SkinPack selected when a device has no valid persisted choice. It is one implementation of the skin contract, not a fixed garden model.
+- **Visual channel:** semantic presentation mapping for an operational fact, such as harness, role, execution state, attention, risk, phase, relationship, or collapsed subagents. The mission projection supplies the meaning and the selected SkinPack supplies its rendering.
 - **Ambient channel:** presence surface (Discord text/voice) where the agent lives as a member; carries reduced command authority.
 - **Authenticated surface:** paired device or authenticated session with full command authority, including approvals.
 - **Biome:** stable spatial representation of a project/repository.
