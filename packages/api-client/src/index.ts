@@ -29,11 +29,13 @@ import {
 } from "@clankie/protocol";
 import {
   DISCORD_PRESENCE_LIVE_PHASE_HEADER,
+  DISCORD_PRESENCE_LIVE_REVISION_HEADER,
+  DISCORD_PRESENCE_LIVE_SESSION_HEADER,
+  DiscordPresenceLiveClaimSchema,
   DiscordPresencePhaseEventSchema,
-  DiscordPresenceSessionPhaseSchema,
   DiscordPresenceSessionRecordSchema,
+  type DiscordPresenceLiveClaim,
   type DiscordPresencePhaseEvent,
-  type DiscordPresenceSessionPhase,
   type DiscordPresenceSessionRecord,
 } from "@clankie/interactive-environment";
 
@@ -270,15 +272,17 @@ export class ClankieApiClient {
    */
   public async executeDiscordPresenceAction(
     input: DiscordPresenceWrite,
-    livePhase: DiscordPresenceSessionPhase,
+    liveClaim: DiscordPresenceLiveClaim,
   ): Promise<DiscordPresenceWriteResult> {
     const write = DiscordPresenceWriteSchema.parse(input);
-    const phase = DiscordPresenceSessionPhaseSchema.parse(livePhase);
+    const claim = DiscordPresenceLiveClaimSchema.parse(liveClaim);
     const result = await this.request<unknown>("/v1/discord/presence-actions", {
       method: "POST",
       headers: {
         ...this.captainHeaders(),
-        [DISCORD_PRESENCE_LIVE_PHASE_HEADER]: phase,
+        [DISCORD_PRESENCE_LIVE_SESSION_HEADER]: claim.sessionId,
+        [DISCORD_PRESENCE_LIVE_PHASE_HEADER]: claim.phase,
+        [DISCORD_PRESENCE_LIVE_REVISION_HEADER]: String(claim.revision),
       },
       body: JSON.stringify(write),
     });

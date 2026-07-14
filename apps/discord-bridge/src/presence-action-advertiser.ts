@@ -1,7 +1,4 @@
-import type {
-  DiscordPresenceSessionPhase,
-  DiscordPresenceToolExposure,
-} from "@clankie/interactive-environment";
+import type { DiscordPresenceLiveClaim, DiscordPresenceToolExposure } from "@clankie/interactive-environment";
 import type {
   CaptainChannelTurnResult,
   DiscordPresenceChannelTurnRequest,
@@ -18,7 +15,7 @@ export interface DiscordPresenceActionDeliveryPort {
   ): Promise<CaptainChannelTurnResult>;
   executeDiscordPresenceAction(
     write: DiscordPresenceWrite,
-    livePhase: DiscordPresenceSessionPhase,
+    liveClaim: DiscordPresenceLiveClaim,
   ): Promise<DiscordPresenceWriteResult>;
 }
 
@@ -50,7 +47,16 @@ export function createAdvertisedDiscordPresencePort(
       if (!exposure.presenceTools.includes("discord_presence_act")) {
         throw new DiscordPresenceActToolUnavailableError(exposure);
       }
-      return await delegate.executeDiscordPresenceAction(write, exposure.phase);
+      const live = session.liveRecord;
+      if (live.phase !== exposure.phase) {
+        throw new DiscordPresenceActToolUnavailableError(session.toolCatalog("discord_presence").current);
+      }
+      return await delegate.executeDiscordPresenceAction(write, {
+        schemaVersion: 1,
+        sessionId: live.sessionId,
+        phase: live.phase,
+        revision: live.revision,
+      });
     },
   };
 }

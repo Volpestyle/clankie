@@ -85,12 +85,14 @@ describe("ClankieApiClient runner surface", () => {
     ).resolves.toMatchObject({ state: "settled", response: "Hi there." });
   });
 
-  it("authenticates presence actions with the bridge's live phase fence", async () => {
+  it("authenticates presence actions with the bridge's live session claim", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
       expect(String(input)).toBe("http://127.0.0.1:4310/v1/discord/presence-actions");
       expect(init?.headers).toMatchObject({
         authorization: "Bearer captain-secret",
         "x-clankie-discord-presence-phase": "present",
+        "x-clankie-discord-presence-revision": "2",
+        "x-clankie-discord-presence-session": "discord:bot:fixture",
       });
       return Response.json({
         id: "message-1:reply",
@@ -128,7 +130,12 @@ describe("ClankieApiClient runner surface", () => {
             content: "Hi there.",
           },
         },
-        "present",
+        {
+          schemaVersion: 1,
+          sessionId: "discord:bot:fixture",
+          phase: "present",
+          revision: 2,
+        },
       ),
     ).resolves.toMatchObject({ messageId: "reply-1" });
   });

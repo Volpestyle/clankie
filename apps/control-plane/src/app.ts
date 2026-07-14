@@ -25,8 +25,10 @@ import {
 import { createLogger } from "@clankie/observability";
 import {
   DISCORD_PRESENCE_LIVE_PHASE_HEADER,
+  DISCORD_PRESENCE_LIVE_REVISION_HEADER,
+  DISCORD_PRESENCE_LIVE_SESSION_HEADER,
+  DiscordPresenceLiveClaimSchema,
   DiscordPresencePhaseEventSchema,
-  DiscordPresenceSessionPhaseSchema,
   isDiscordPresenceActionAvailable,
   resolveDiscordPresencePhaseToolExposure,
 } from "@clankie/interactive-environment";
@@ -728,6 +730,9 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     logger.info({ missionCount: missions.size }, "mission records rebuilt from event store");
   }
   const discordPresenceSessions = new DiscordPresenceSessionProjection(storedEvents);
+  const discordPresenceLiveSessions = new Map(
+    discordPresenceSessions.list().map((session) => [discordPresenceBindingKey(session), session] as const),
+  );
 
   if (dependencies.trackerMirror) {
     for (const mission of missions.values()) {
@@ -1377,11 +1382,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     const parsed = DiscordPresencePhaseEventSchema.safeParse(await readJson(context.req.raw));
     if (!parsed.success) return context.json({ error: "invalid_discord_presence_phase_event" }, 400);
     const event = parsed.data;
-    const sessionKey = JSON.stringify([
-      event.data.session.transportKind,
-      event.data.session.characterId,
-      event.data.session.credentialRef,
-    ]);
+    const sessionKey = discordPresenceBindingKey(event.data.session);
     return withSerializedLock(discordPresenceSessionLocks, sessionKey, async () => {
       const domainEvent = discordPresenceDomainEvent(event, dependencies.doctrine.profileHash);
       if (persistedEventIds.has(event.id)) {
@@ -1396,9 +1397,14 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
         return context.json({ accepted: false, session });
       }
       try {
-        discordPresenceSessions.validate(event);
+        const observed = discordPresenceSessions.validate(event);
+        // The authenticated lifecycle event is live authority as soon as it
+        // validates. Advance this watermark before durable append so a stale
+        // active claim cannot race a loss transition awaiting persistence.
+        discordPresenceLiveSessions.set(sessionKey, observed);
         if (dependencies.eventStore) await dependencies.eventStore.append(domainEvent);
         const session = discordPresenceSessions.apply(event);
+        discordPresenceLiveSessions.set(sessionKey, session);
         storedEvents.push(domainEvent);
         persistedEventIds.add(domainEvent.id);
         return context.json({ accepted: true, session });
@@ -1422,22 +1428,15 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       return context.json({ error: "captain_authentication_unavailable" }, 503);
     }
     if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
-    const livePhase = DiscordPresenceSessionPhaseSchema.safeParse(
-      context.req.header(DISCORD_PRESENCE_LIVE_PHASE_HEADER),
-    );
-    if (!livePhase.success) {
-      return context.json({ error: "discord_presence_live_phase_required" }, 400);
-    }
-    const liveExposure = resolveDiscordPresencePhaseToolExposure(livePhase.data, "discord_presence");
-    if (!liveExposure.presenceTools.includes("discord_presence_act")) {
-      return context.json(
-        {
-          error: "discord_presence_action_unavailable",
-          phase: livePhase.data,
-          source: "live_session",
-        },
-        409,
-      );
+    const revisionHeader = context.req.header(DISCORD_PRESENCE_LIVE_REVISION_HEADER);
+    const liveClaim = DiscordPresenceLiveClaimSchema.safeParse({
+      schemaVersion: 1,
+      sessionId: context.req.header(DISCORD_PRESENCE_LIVE_SESSION_HEADER),
+      phase: context.req.header(DISCORD_PRESENCE_LIVE_PHASE_HEADER),
+      revision: revisionHeader === undefined ? undefined : Number(revisionHeader),
+    });
+    if (!liveClaim.success) {
+      return context.json({ error: "discord_presence_live_claim_required" }, 400);
     }
     if (!dependencies.discordPresenceRuntime) {
       return context.json({ error: "discord_presence_runtime_unavailable" }, 503);
@@ -1477,6 +1476,35 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
         !isDiscordPresenceActionAvailable({ action: write.action, session })
       ) {
         return context.json({ error: "discord_presence_action_unavailable", phase: session.phase }, 409);
+      }
+      const liveSession = discordPresenceLiveSessions.get(discordPresenceBindingKey(write.identity));
+      if (
+        liveSession === undefined ||
+        liveClaim.data.sessionId !== liveSession.sessionId ||
+        liveClaim.data.phase !== liveSession.phase ||
+        liveClaim.data.revision !== liveSession.revision
+      ) {
+        return context.json(
+          {
+            error: "discord_presence_live_claim_stale",
+            claimedRevision: liveClaim.data.revision,
+            ...(liveSession === undefined
+              ? {}
+              : { currentRevision: liveSession.revision, phase: liveSession.phase }),
+          },
+          409,
+        );
+      }
+      const liveExposure = resolveDiscordPresencePhaseToolExposure(liveClaim.data.phase, "discord_presence");
+      if (!liveExposure.presenceTools.includes("discord_presence_act")) {
+        return context.json(
+          {
+            error: "discord_presence_action_unavailable",
+            phase: liveClaim.data.phase,
+            source: "live_session",
+          },
+          409,
+        );
       }
       const request = ActionRequestSchema.parse({
         id: write.idempotencyKey,
@@ -3742,6 +3770,14 @@ function applyMemoryEvent(
   if (event.type === "memory.proposal.committed") {
     committed.add(z.string().min(1).parse(event.data.proposalId));
   }
+}
+
+function discordPresenceBindingKey(identity: {
+  readonly transportKind: "bot" | "user_session";
+  readonly characterId: string;
+  readonly credentialRef: string;
+}): string {
+  return JSON.stringify([identity.transportKind, identity.characterId, identity.credentialRef]);
 }
 
 export async function loadDefaultDoctrine(): Promise<CompiledDoctrine> {

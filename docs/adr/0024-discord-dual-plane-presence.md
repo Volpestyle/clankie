@@ -84,11 +84,13 @@ callbacks drive `off → connecting → present → voice_active` and the `degra
 loss states. Every transition is published as a typed
 `discord.presence.session.phase_changed` semantic event through the authenticated ambient
 captain channel. The control plane replays those events into a read-only projection and gates
-catalog execution and tool exposure from the projected record. The bridge also carries the
-retained live advertised-catalog phase on its authenticated action request, so immediate loss
-fences execution while durable publication is still in flight. The control plane requires both
-the live fence and durable projection to permit the action. Payload kinds never infer or widen
-phase.
+catalog execution and tool exposure from the projected record. The bridge also carries its
+presence session id, phase, and monotonic revision as a typed claim on each authenticated action
+request. The control plane advances its latest validated live-session watermark before awaiting
+durable publication and requires the action claim to match that watermark exactly. Immediate loss
+therefore fences execution while durable publication is still in flight, and a pre-loss claim
+cannot be replayed through that window. Both the live claim and durable projection must permit the
+action. Payload kinds never infer or widen phase.
 
 `degraded`, `failed`, and `off` remove act tools immediately. A disconnect, lease loss, or
 failure therefore makes subsequent actions unavailable without waiting for another model turn.

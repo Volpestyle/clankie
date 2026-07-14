@@ -214,6 +214,7 @@ export class DiscordPresenceSession {
       phase,
       gatewayConnected,
       voiceGuildIds: gatewayConnected ? [...this.voiceGuildIds].sort() : [],
+      revision: this.recordValue.revision + 1,
     });
     if (this.revokesActCapability(preview)) {
       this.liveRecordValue = preview;

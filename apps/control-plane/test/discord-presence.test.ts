@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { compileDoctrine, loadDoctrineFile, loadDoctrineLayerFile } from "@clankie/doctrine";
 import { FileCredentialStore } from "../../../packages/credential-broker/src/index.ts";
-import { SqliteEventStore } from "@clankie/event-store";
+import { SqliteEventStore, type EventStore, type StoredEvent } from "@clankie/event-store";
 import type { DiscordPresenceSessionRecord } from "@clankie/interactive-environment";
-import type { DiscordPresenceWrite, DiscordPresenceWriteResult } from "@clankie/protocol";
+import type { DiscordPresenceWrite, DiscordPresenceWriteResult, DomainEvent } from "@clankie/protocol";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { createDiscordPresenceRuntime } from "../../discord-bridge/src/presence-runtime-module.ts";
 import {
@@ -92,6 +92,8 @@ describe("Discord presence control-plane runtime (ADR 0024)", () => {
         authorization: "Bearer captain-secret",
         "content-type": "application/json",
         "x-clankie-discord-presence-phase": "degraded",
+        "x-clankie-discord-presence-revision": "3",
+        "x-clankie-discord-presence-session": "discord:bot:fixture",
       },
       body: JSON.stringify(
         presenceWrite({
@@ -104,14 +106,67 @@ describe("Discord presence control-plane runtime (ADR 0024)", () => {
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
-      error: "discord_presence_action_unavailable",
-      phase: "degraded",
-      source: "live_session",
+      error: "discord_presence_live_claim_stale",
+      claimedRevision: 3,
+      currentRevision: 2,
+      phase: "present",
     });
     expect(runtime.writes).toHaveLength(0);
   });
 
-  it("does not trust an unauthenticated live phase fence", async () => {
+  it("rejects a replayed pre-loss claim while loss durability awaits acknowledgement", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-presence-live-fence-"));
+    const durable = new SqliteEventStore(join(root, "events.db"));
+    const blocking = new BlockingLossEventStore(durable);
+    const runtime = new RecordingPresenceRuntime();
+    try {
+      const app = await createPresenceControlPlane({
+        doctrine,
+        eventStore: blocking,
+        discordPresenceRuntime: runtime,
+      });
+      const fresh = await post(
+        app,
+        "/v1/discord/presence-actions",
+        presenceWrite({
+          idempotencyKey: "presence-fresh-live-claim",
+          action: "discord.presence.send_message",
+          payload: { kind: "send_message", channelId: "c1", content: "allowed before loss" },
+        }),
+      );
+      expect(fresh.status).toBe(200);
+      expect(runtime.writes).toHaveLength(1);
+
+      const loss = recordPhase(app, "degraded", 3, "gateway_disconnected", "present");
+      await blocking.lossAppendStarted;
+      const replay = await post(
+        app,
+        "/v1/discord/presence-actions",
+        presenceWrite({
+          idempotencyKey: "presence-replayed-pre-loss-claim",
+          action: "discord.presence.send_message",
+          payload: { kind: "send_message", channelId: "c1", content: "must not execute" },
+        }),
+      );
+      expect(replay.status).toBe(409);
+      await expect(replay.json()).resolves.toEqual({
+        error: "discord_presence_live_claim_stale",
+        claimedRevision: 2,
+        currentRevision: 3,
+        phase: "degraded",
+      });
+      expect(runtime.writes).toHaveLength(1);
+
+      blocking.releaseLossAppend();
+      expect((await loss).status).toBe(200);
+    } finally {
+      blocking.releaseLossAppend();
+      durable.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not trust an unauthenticated live session claim", async () => {
     const runtime = new RecordingPresenceRuntime();
     const app = await createPresenceControlPlane({ doctrine, discordPresenceRuntime: runtime });
     const response = await app.request("/v1/discord/presence-actions", {
@@ -119,6 +174,8 @@ describe("Discord presence control-plane runtime (ADR 0024)", () => {
       headers: {
         "content-type": "application/json",
         "x-clankie-discord-presence-phase": "present",
+        "x-clankie-discord-presence-revision": "2",
+        "x-clankie-discord-presence-session": "discord:bot:fixture",
       },
       body: JSON.stringify(
         presenceWrite({
@@ -546,6 +603,47 @@ class RecordingPresenceRuntime implements DiscordPresenceRuntimePort {
   }
 }
 
+class BlockingLossEventStore implements EventStore {
+  private readonly durable: EventStore;
+  public readonly lossAppendStarted: Promise<void>;
+  private resolveLossAppendStarted: (() => void) | undefined;
+  private readonly lossAppendReleased: Promise<void>;
+  private resolveLossAppendReleased: (() => void) | undefined;
+
+  public constructor(durable: EventStore) {
+    this.durable = durable;
+    this.lossAppendStarted = new Promise((resolve) => {
+      this.resolveLossAppendStarted = resolve;
+    });
+    this.lossAppendReleased = new Promise((resolve) => {
+      this.resolveLossAppendReleased = resolve;
+    });
+  }
+
+  public async append(event: DomainEvent): Promise<StoredEvent> {
+    if (
+      event.type === "discord.presence.session.phase_changed" &&
+      event.data.reason === "gateway_disconnected"
+    ) {
+      this.resolveLossAppendStarted?.();
+      await this.lossAppendReleased;
+    }
+    return this.durable.append(event);
+  }
+
+  public readAll(): Promise<StoredEvent[]> {
+    return this.durable.readAll();
+  }
+
+  public verify() {
+    return this.durable.verify();
+  }
+
+  public releaseLossAppend(): void {
+    this.resolveLossAppendReleased?.();
+  }
+}
+
 async function createPresenceControlPlane(dependencies: ControlPlaneDependencies) {
   const app = await createControlPlane({
     ...dependencies,
@@ -635,6 +733,8 @@ async function post(app: Awaited<ReturnType<typeof createControlPlane>>, path: s
       authorization: "Bearer captain-secret",
       "content-type": "application/json",
       "x-clankie-discord-presence-phase": "present",
+      "x-clankie-discord-presence-revision": "2",
+      "x-clankie-discord-presence-session": "discord:bot:fixture",
     },
     body: JSON.stringify(body),
   });

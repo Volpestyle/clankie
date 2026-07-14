@@ -243,10 +243,19 @@ describe("Discord presence gateway session", () => {
     );
     await session.start();
     await session.gatewayReady();
+    const beforeLoss = write("before-loss");
+    await advertisedPort.executeDiscordPresenceAction(beforeLoss);
+    expect(execute).toHaveBeenCalledWith(beforeLoss, {
+      schemaVersion: 1,
+      sessionId: "discord:bot:loss-window",
+      phase: "present",
+      revision: 2,
+    });
+    execute.mockClear();
 
     const disconnect = session.gatewayDisconnected();
     expect(session.record.phase).toBe("present");
-    expect(session.liveRecord.phase).toBe("degraded");
+    expect(session.liveRecord).toMatchObject({ phase: "degraded", revision: 3 });
     await expect(advertisedPort.executeDiscordPresenceAction(write("window"))).rejects.toBeInstanceOf(
       DiscordPresenceActToolUnavailableError,
     );

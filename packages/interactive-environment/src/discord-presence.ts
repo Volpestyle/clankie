@@ -31,6 +31,18 @@ export type DiscordPresenceSessionPhase = z.infer<typeof DiscordPresenceSessionP
 
 /** Authenticated bridge-to-control-plane fence carrying immediate gateway truth. */
 export const DISCORD_PRESENCE_LIVE_PHASE_HEADER = "x-clankie-discord-presence-phase" as const;
+export const DISCORD_PRESENCE_LIVE_SESSION_HEADER = "x-clankie-discord-presence-session" as const;
+export const DISCORD_PRESENCE_LIVE_REVISION_HEADER = "x-clankie-discord-presence-revision" as const;
+
+export const DiscordPresenceLiveClaimSchema = z
+  .object({
+    schemaVersion: z.literal(INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION),
+    sessionId: z.string().min(1),
+    phase: DiscordPresenceSessionPhaseSchema,
+    revision: z.number().int().nonnegative(),
+  })
+  .strict();
+export type DiscordPresenceLiveClaim = z.infer<typeof DiscordPresenceLiveClaimSchema>;
 
 export const DiscordPresenceSessionRecordSchema = z
   .object({
