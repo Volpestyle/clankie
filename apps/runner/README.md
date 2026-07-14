@@ -4,6 +4,19 @@ The runner is the trust boundary that owns worktrees, worker processes, PTYs, pr
 
 The production runner creates one `TerminalManager`. Generic interactive commands run in a native `node-pty` terminal with runner-supplied environment only; Codex App Server JSON-RPC, Claude Agent SDK, and Pi RPC retain their protocol-native control transports and are never relabeled as PTYs. The manager owns ordered raw-byte replay, headless `@xterm/headless` state, `@xterm/addon-serialize` VT restore snapshots at parser-quiescent boundaries, live-attempt correlation, bounded observers, and the single renewable human-control lease. Closed terminals leave discovery deterministically; restart marks non-reattachable PTY records orphaned and closed. Do not put merge, deployment, or organization-wide connector tokens inside worker environments.
 
+### Terminal source capability mapping
+
+The internal `TerminalSourceProvider` composes runner-owned PTYs and optional Herdr panes behind the same frozen terminal wire. Set `CLANKIE_HERDR_TERMINAL_SOURCE_ENABLED=1` and provide the runner-only `HERDR_SOCKET_PATH` to add the Herdr source to the development terminal gateway. The socket path, Herdr pane ID, session metadata, working directory, and credentials never enter discovery, logs, or wire messages. Herdr's stable `terminal_id` is the public terminal identity; its compact, session-local `pane_id` is resolved again after discovery and stays inside the adapter.
+
+| Source                                   | Observe | Resume / VT restore | Control lease | Input | Resize |
+| ---------------------------------------- | ------- | ------------------- | ------------- | ----- | ------ |
+| Runner PTY                               | yes     | yes                 | yes           | yes   | yes    |
+| Herdr pane, default                      | yes     | yes                 | no            | no    | no     |
+| Herdr pane, runner policy grants control | yes     | yes                 | yes           | yes   | no     |
+| Development gateway intersection         | yes     | yes                 | no            | no    | no     |
+
+Herdr control is fail-closed: a host-injected ownership predicate must grant it, and every `pane.send_input` still requires the adapter's active terminal lease. The observe-only gateway intersects source capability with its device authority, so enabling Herdr does not add a remote control route.
+
 `pnpm --filter @clankie/runner terminal:lifecycle-evidence` runs the immutable interactive
 terminal contract and writes a reproducible evidence manifest under
 `artifacts/runner/terminal-lifecycle/`. The manifest contains only safe phase identifiers,

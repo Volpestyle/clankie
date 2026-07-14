@@ -20,7 +20,8 @@ import {
   type TerminalLifecycle,
   type TerminalStreamMessage,
 } from "@clankie/terminal-protocol";
-import type { TerminalManager, TerminalObservation } from "./terminals.ts";
+import type { TerminalSourceProvider } from "./terminal-source.ts";
+import type { TerminalObservation } from "./terminals.ts";
 import type { TerminalAccessGrant, TerminalTokenVerifier } from "./terminal-access-authority.ts";
 
 type Logger = ReturnType<typeof createLogger>;
@@ -29,16 +30,6 @@ export const TERMINAL_GATEWAY_DEFAULT_HOST = "127.0.0.1";
 export const TERMINAL_GATEWAY_DEFAULT_PORT = 4312;
 export const TERMINAL_GATEWAY_PATH = "/v1/terminals";
 
-/** Observe-only effective capabilities: control/input/resize are always denied at this endpoint. */
-const OBSERVE_ONLY_CAPABILITIES: TerminalCapabilities = {
-  observe: true,
-  resume: true,
-  vtRestoreSnapshot: true,
-  controlLease: false,
-  input: false,
-  resize: false,
-};
-const CAPABILITIES_REVISION = 1;
 const PROTOCOL_VERSION = 1;
 
 export interface TerminalGatewayRateLimit {
@@ -54,7 +45,7 @@ export interface TerminalGatewayConfig {
 }
 
 export interface TerminalGatewayOptions {
-  manager: TerminalManager;
+  manager: TerminalSourceProvider;
   authority: TerminalTokenVerifier;
   config?: TerminalGatewayConfig;
   logger?: Logger;
@@ -239,7 +230,7 @@ function rejectUpgrade(socket: Duplex, status: 401 | 403 | 404 | 405): void {
 interface ConnectionOptions {
   ws: WebSocket;
   grant: TerminalAccessGrant;
-  manager: TerminalManager;
+  manager: TerminalSourceProvider;
   logger: Logger;
   rateBucket: TokenBucket;
   maxInboundMessagesPerConnection: number;
@@ -252,7 +243,7 @@ class Connection {
   public readonly id = `conn-${randomUUID()}`;
   private readonly ws: WebSocket;
   private readonly grant: TerminalAccessGrant;
-  private readonly manager: TerminalManager;
+  private readonly manager: TerminalSourceProvider;
   private readonly logger: Logger;
   private readonly rateBucket: TokenBucket;
   private readonly maxInboundMessages: number;
@@ -366,7 +357,7 @@ class Connection {
   private dispatch(message: TerminalClientMessage): void {
     switch (message.type) {
       case "terminal.discover":
-        this.handleDiscover(message.requestId);
+        void this.handleDiscover(message.requestId);
         return;
       case "terminal.subscribe":
         // Fresh subscribe has no replay floor.
@@ -422,9 +413,10 @@ class Connection {
     });
   }
 
-  private handleDiscover(requestId: string): void {
+  private async handleDiscover(requestId: string): Promise<void> {
     let sessions: TerminalDiscoverySession[];
     try {
+      await this.manager.refresh();
       sessions = this.manager.openObservations().map((observation) => ({
         terminalId: observation.terminalId,
         workerRunId: observation.workerRunId,
@@ -433,8 +425,8 @@ class Connection {
         geometry: { columns: observation.columns, rows: observation.rows },
         lastSequence: observation.lastSequence,
         lifecycle: { state: "open" as const },
-        capabilities: OBSERVE_ONLY_CAPABILITIES,
-        capabilitiesRevision: CAPABILITIES_REVISION,
+        capabilities: this.effectiveCapabilities(observation.terminalId),
+        capabilitiesRevision: this.manager.capabilitiesRevision(observation.terminalId),
       }));
     } catch {
       this.sendError(requestId, null, "internal", "discovery failed");
@@ -462,8 +454,8 @@ class Connection {
       type: "terminal.capabilities",
       requestId,
       terminalId,
-      revision: CAPABILITIES_REVISION,
-      capabilities: OBSERVE_ONLY_CAPABILITIES,
+      revision: this.manager.capabilitiesRevision(terminalId),
+      capabilities: this.effectiveCapabilities(terminalId),
     });
   }
 
@@ -495,6 +487,8 @@ class Connection {
       return;
     }
     const { projection } = result;
+    const capabilities = this.effectiveCapabilities(terminalId);
+    const capabilitiesRevision = this.manager.capabilitiesRevision(terminalId);
     const subscriptionId = `sub-${randomUUID()}`;
     const lifecycle = lifecycleFromProjection(projection);
     const acked = this.sendGuarded(signal, TerminalSubscribedMessageSchema, {
@@ -506,8 +500,8 @@ class Connection {
       cursor: { sequence: projection.sequence },
       initialDelivery: "snapshot",
       lifecycle,
-      capabilities: OBSERVE_ONLY_CAPABILITIES,
-      capabilitiesRevision: CAPABILITIES_REVISION,
+      capabilities,
+      capabilitiesRevision,
     });
     if (!acked) return;
     const snapshotSent = this.sendGuarded(signal, TerminalStreamMessageSchema, {
@@ -558,6 +552,8 @@ class Connection {
       return;
     }
     const subscriptionId = `sub-${randomUUID()}`;
+    const capabilities = this.effectiveCapabilities(terminalId);
+    const capabilitiesRevision = this.manager.capabilitiesRevision(terminalId);
     const iterator = this.manager.observe(terminalId, afterSequence, signal)[Symbol.asyncIterator]();
     try {
       const acked = this.sendGuarded(signal, TerminalSubscribedMessageSchema, {
@@ -569,8 +565,8 @@ class Connection {
         cursor: { sequence: afterSequence },
         initialDelivery: disposition,
         lifecycle: lifecycleAtCursor(observation, afterSequence),
-        capabilities: OBSERVE_ONLY_CAPABILITIES,
-        capabilitiesRevision: CAPABILITIES_REVISION,
+        capabilities,
+        capabilitiesRevision,
       });
       if (!acked) return;
       await this.drain(signal, terminalId, subscriptionId, iterator, afterSequence);
@@ -728,6 +724,19 @@ class Connection {
       retryable: false,
     });
     this.ws.send(JSON.stringify(error));
+  }
+
+  /** This gateway remains observe-only while preserving each source's honest replay support. */
+  private effectiveCapabilities(terminalId: string): TerminalCapabilities {
+    const source = this.manager.capabilities(terminalId);
+    return {
+      observe: true,
+      resume: source.resume,
+      vtRestoreSnapshot: source.vtRestoreSnapshot,
+      controlLease: false,
+      input: false,
+      resize: false,
+    };
   }
 }
 

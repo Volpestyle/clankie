@@ -6,7 +6,7 @@ import type { EventEmitter } from "node:events";
 import { createLogger } from "@clankie/observability";
 import { TerminalAccessAuthority } from "./terminal-access-authority.ts";
 import { createTerminalGateway, TERMINAL_GATEWAY_PATH, type TerminalGateway } from "./terminal-gateway.ts";
-import type { TerminalManager } from "./terminals.ts";
+import type { TerminalSourceProvider } from "./terminal-source.ts";
 
 type Logger = ReturnType<typeof createLogger>;
 
@@ -78,7 +78,7 @@ export function readDevHandoffConfig(env: NodeJS.ProcessEnv): DevHandoffConfig |
  * (invalidating tokens server-side), then nonce-matched cleans the credential.
  */
 export async function startTerminalGatewayDevHandoff(options: {
-  manager: TerminalManager;
+  manager: TerminalSourceProvider;
   config: DevHandoffConfig;
   logger?: Logger;
 }): Promise<RunningDevHandoff> {
