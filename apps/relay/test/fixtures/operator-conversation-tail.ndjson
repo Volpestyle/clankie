@@ -1,0 +1,3 @@
+{"kind":"event","event":{"schemaVersion":1,"conversationId":"global-default","cursor":"rn-ios-recording:opaque:5","revision":5,"occurredAt":"2026-07-14T12:00:00.000Z","type":"message","role":"operator","text":"Show the current mission status.","streaming":false}}
+{"kind":"event","event":{"schemaVersion":1,"conversationId":"global-default","cursor":"rn-ios-recording:opaque:6","revision":5,"occurredAt":"2026-07-14T12:00:00.050Z","type":"turn","runId":"run-fixture-5","phase":"accepted"}}
+{"kind":"event","event":{"schemaVersion":1,"conversationId":"global-default","cursor":"rn-ios-recording:opaque:7","revision":6,"occurredAt":"2026-07-14T12:00:01.000Z","type":"turn","runId":"run-fixture-5","phase":"completed"}}

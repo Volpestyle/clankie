@@ -1,5 +1,5 @@
 import type { WebSocket } from "ws";
-import type { RelayEnvelope, RelayHello } from "./protocol.ts";
+import { isApprovalCompletionPayload, type RelayEnvelope, type RelayHello } from "./protocol.ts";
 
 interface Peer {
   socket: WebSocket;
@@ -26,6 +26,9 @@ export class RelayHub {
 
   public route(sender: RelayHello, envelope: RelayEnvelope): number {
     if (sender.workspaceId !== envelope.workspaceId) throw new Error("Cross-workspace relay attempt denied");
+    if (envelope.plane === "control" && isApprovalCompletionPayload(envelope.payload)) {
+      throw new Error("Approval completion is not routable through the relay");
+    }
     if (sender.role === "runner") {
       const peers = this.clients.get(sender.workspaceId);
       let delivered = 0;
