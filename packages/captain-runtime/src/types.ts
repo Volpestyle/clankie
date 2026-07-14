@@ -1,4 +1,9 @@
-import { CaptainLaneSchema, type CaptainLane } from "@clankie/protocol";
+import {
+  CaptainLaneSchema,
+  CaptainSessionLaneV2Schema,
+  type CaptainLane,
+  type CaptainSessionLaneV2,
+} from "@clankie/protocol";
 
 export interface CaptainIdentity {
   readonly agentDefinitionId: string;
@@ -11,6 +16,20 @@ export interface CaptainLaneAddress {
   readonly characterId: string;
   readonly lane: CaptainLane;
   readonly targetId: string;
+}
+
+export interface CaptainSessionLaneV2Address {
+  readonly characterId: string;
+  readonly lane: CaptainSessionLaneV2;
+  readonly targetId: string;
+}
+
+export function captainSessionLaneV2Key(address: CaptainSessionLaneV2Address): string {
+  return JSON.stringify([
+    boundedIdentifier(address.characterId, "Character id"),
+    CaptainSessionLaneV2Schema.parse(address.lane),
+    boundedIdentifier(address.targetId, "Lane target id"),
+  ]);
 }
 
 export type CaptainLaneSessionState = "active" | "waiting" | "completed" | "failed";
@@ -44,7 +63,7 @@ export interface CaptainRuntimeEvent {
   readonly type: CaptainRuntimeEventType;
   readonly occurredAt: string;
   readonly laneKey: string;
-  readonly lane: CaptainLane;
+  readonly lane: CaptainLane | CaptainSessionLaneV2;
   readonly requestId?: string;
   readonly reason?: string;
   readonly queueSequence?: number;

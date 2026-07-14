@@ -16,6 +16,658 @@ export type ActionId = z.infer<typeof ActionIdSchema>;
 export const CaptainLaneSchema = z.enum(["tui", "discord_voice", "discord_presence", "gameplay"]);
 export type CaptainLane = z.infer<typeof CaptainLaneSchema>;
 
+/**
+ * Durable captain execution lanes v2. CaptainLaneSchema is the frozen v1 wire
+ * enum and remains available for legacy dual-read migration only.
+ */
+export const CaptainSessionLaneV2Schema = z.enum([
+  "operator",
+  "discord_voice",
+  "discord_presence",
+  "gameplay",
+]);
+export type CaptainSessionLaneV2 = z.infer<typeof CaptainSessionLaneV2Schema>;
+
+// ---------------------------------------------------------------------------
+// Operator conversations (ADR 0032, VUH-769).
+//
+// Every schema below is a STRICT, provider-neutral, bounded public boundary
+// that RN/macOS/TUI consume through `@clankie/protocol` alone. Unknown fields
+// are rejected, not stripped; there is no `provider`, continuation-token, or
+// credential-shaped field anywhere in the surface, and every string/collection
+// is length-bounded so the shared app stream cannot carry an unbounded or
+// credential-bearing escape payload.
+// ---------------------------------------------------------------------------
+
+/** Bounds shared by the operator conversation boundary (documented, not magic). */
+export const OPERATOR_CONVERSATION_TITLE_MAX = 256;
+export const OPERATOR_CONVERSATION_TEXT_MAX = 16_384;
+export const OPERATOR_CONVERSATION_SUMMARY_MAX = 512;
+/** A submitted message is durably logged as a `message` event, so it shares that bound. */
+export const OPERATOR_CONVERSATION_MESSAGE_MAX = OPERATOR_CONVERSATION_TEXT_MAX;
+export const OPERATOR_CONVERSATION_CODE_MAX = 128;
+export const OPERATOR_CONVERSATION_REF_MAX = 512;
+export const OPERATOR_CONVERSATION_INPUT_OPTIONS_MAX = 32;
+export const OPERATOR_CONVERSATION_REPLAY_LIMIT_MAX = 500;
+export const OPERATOR_CONVERSATION_REPLAY_LIMIT_DEFAULT = 200;
+/** Public list responses are bounded so the app boundary carries no unbounded collection. */
+export const OPERATOR_CONVERSATION_LIST_MAX = 1_000;
+
+/** Locally-bounded worker run id for steering — never the globally-unbounded WorkerRunIdSchema. */
+export const OperatorConversationWorkerRunIdSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(OPERATOR_CONVERSATION_REF_MAX);
+export type OperatorConversationWorkerRunId = z.infer<typeof OperatorConversationWorkerRunIdSchema>;
+
+export const OperatorConversationIdSchema = z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX);
+export type OperatorConversationId = z.infer<typeof OperatorConversationIdSchema>;
+export const OperatorSurfaceClientIdSchema = z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX);
+export type OperatorSurfaceClientId = z.infer<typeof OperatorSurfaceClientIdSchema>;
+export const OperatorConversationCursorSchema = z.string().trim().min(1).max(4096);
+export type OperatorConversationCursor = z.infer<typeof OperatorConversationCursorSchema>;
+export const OperatorConversationRunIdSchema = z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX);
+export type OperatorConversationRunId = z.infer<typeof OperatorConversationRunIdSchema>;
+const OperatorConversationEventRefSchema = z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX);
+
+export const OperatorConversationScopeSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("global") }).strict(),
+  z.object({ kind: z.literal("workspace"), workspaceId: z.string().trim().min(1).max(512) }).strict(),
+]);
+export type OperatorConversationScope = z.infer<typeof OperatorConversationScopeSchema>;
+
+export const OperatorConversationSessionStateSchema = z.enum([
+  "unbound",
+  "active",
+  "waiting",
+  "completed",
+  "failed",
+]);
+export type OperatorConversationSessionState = z.infer<typeof OperatorConversationSessionStateSchema>;
+
+/** Public registry record. Provider credentials and continuation capabilities are impossible by schema. */
+export const OperatorConversationSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    conversationId: OperatorConversationIdSchema,
+    scope: OperatorConversationScopeSchema,
+    title: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TITLE_MAX),
+    isDefault: z.boolean(),
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+    sessionState: OperatorConversationSessionStateSchema,
+    revision: z.number().int().nonnegative(),
+  })
+  .strict();
+export type OperatorConversation = z.infer<typeof OperatorConversationSchema>;
+
+export const ListOperatorConversationsRequestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    scope: OperatorConversationScopeSchema.optional(),
+  })
+  .strict();
+export type ListOperatorConversationsRequest = z.infer<typeof ListOperatorConversationsRequestSchema>;
+export const ListOperatorConversationsResponseSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    conversations: z.array(OperatorConversationSchema).max(OPERATOR_CONVERSATION_LIST_MAX),
+  })
+  .strict();
+export type ListOperatorConversationsResponse = z.infer<typeof ListOperatorConversationsResponseSchema>;
+
+export const GetOperatorConversationRequestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    conversationId: OperatorConversationIdSchema,
+  })
+  .strict();
+export type GetOperatorConversationRequest = z.infer<typeof GetOperatorConversationRequestSchema>;
+export const GetOperatorConversationResponseSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    // Optional: a missing conversation is a typed not-found (get returns
+    // undefined), consistent with the callable `get` service result.
+    conversation: OperatorConversationSchema.optional(),
+  })
+  .strict();
+export type GetOperatorConversationResponse = z.infer<typeof GetOperatorConversationResponseSchema>;
+
+export const CreateOperatorConversationRequestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    scope: OperatorConversationScopeSchema,
+    title: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TITLE_MAX),
+  })
+  .strict();
+export type CreateOperatorConversationRequest = z.infer<typeof CreateOperatorConversationRequestSchema>;
+export const CreateOperatorConversationResponseSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    conversation: OperatorConversationSchema,
+  })
+  .strict();
+export type CreateOperatorConversationResponse = z.infer<typeof CreateOperatorConversationResponseSchema>;
+
+export const OperatorConversationAttachmentSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    conversationId: OperatorConversationIdSchema,
+    surfaceClientId: OperatorSurfaceClientIdSchema,
+    cursor: OperatorConversationCursorSchema.optional(),
+  })
+  .strict();
+export type OperatorConversationAttachment = z.infer<typeof OperatorConversationAttachmentSchema>;
+
+/**
+ * Strict discriminated public event union. Every app-renderable VUH-745 session
+ * event (message, reasoning, tool, typed input, auth/session lifecycle, turn
+ * lifecycle, redacted worker transcript) is a named bounded variant. Raw model,
+ * provider, continuation, and credential payloads are impossible by schema; the
+ * captain redacts to these shapes before publishing to the durable log/tail.
+ */
+const OperatorConversationEventEnvelopeSchema = z.object({
+  schemaVersion: z.literal(1),
+  conversationId: OperatorConversationIdSchema,
+  cursor: OperatorConversationCursorSchema,
+  revision: z.number().int().nonnegative(),
+  occurredAt: z.string().datetime(),
+});
+
+export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type", [
+  OperatorConversationEventEnvelopeSchema.extend({
+    type: z.literal("message"),
+    role: z.enum(["operator", "captain"]),
+    text: z.string().max(OPERATOR_CONVERSATION_TEXT_MAX),
+    streaming: z.boolean(),
+  }).strict(),
+  OperatorConversationEventEnvelopeSchema.extend({
+    type: z.literal("reasoning"),
+    text: z.string().max(OPERATOR_CONVERSATION_TEXT_MAX),
+    streaming: z.boolean(),
+  }).strict(),
+  OperatorConversationEventEnvelopeSchema.extend({
+    type: z.literal("tool"),
+    toolCallId: OperatorConversationEventRefSchema,
+    name: z.string().trim().min(1).max(OPERATOR_CONVERSATION_CODE_MAX),
+    phase: z.enum(["started", "completed", "failed"]),
+    summary: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
+  }).strict(),
+  OperatorConversationEventEnvelopeSchema.extend({
+    type: z.literal("input_requested"),
+    requestId: OperatorConversationEventRefSchema,
+    prompt: z.string().max(OPERATOR_CONVERSATION_TEXT_MAX),
+    inputKind: z.enum(["text", "choice", "approval"]),
+    options: z
+      .array(z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX))
+      .max(OPERATOR_CONVERSATION_INPUT_OPTIONS_MAX)
+      .default([]),
+  }).strict(),
+  OperatorConversationEventEnvelopeSchema.extend({
+    type: z.literal("input_resolved"),
+    requestId: OperatorConversationEventRefSchema,
+    outcome: z.enum(["submitted", "cancelled"]),
+  }).strict(),
+  OperatorConversationEventEnvelopeSchema.extend({
+    type: z.literal("auth"),
+    phase: z.enum(["required", "completed"]),
+    summary: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
+  }).strict(),
+  OperatorConversationEventEnvelopeSchema.extend({
+    type: z.literal("session"),
+    phase: z.enum(["started", "waiting", "completed", "failed"]),
+  }).strict(),
+  OperatorConversationEventEnvelopeSchema.extend({
+    type: z.literal("turn"),
+    runId: OperatorConversationRunIdSchema,
+    phase: z.enum(["accepted", "completed", "failed", "cancelled"]),
+    reasonCode: z.string().trim().min(1).max(OPERATOR_CONVERSATION_CODE_MAX).optional(),
+  }).strict(),
+  OperatorConversationEventEnvelopeSchema.extend({
+    type: z.literal("worker_transcript"),
+    workerRunId: OperatorConversationWorkerRunIdSchema,
+    phase: z.enum(["snapshot", "tail"]),
+    summary: z.string().max(OPERATOR_CONVERSATION_TEXT_MAX),
+  }).strict(),
+  /**
+   * Bounded forward-compatibility variant. A newer captain may name a semantic
+   * event an older app cannot render; it degrades to a bounded label only. It
+   * carries no free-form `data`, so it is not a provider/credential escape hatch.
+   */
+  OperatorConversationEventEnvelopeSchema.extend({
+    type: z.literal("unsupported"),
+    kind: z.string().trim().min(1).max(OPERATOR_CONVERSATION_CODE_MAX),
+    summary: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX),
+  }).strict(),
+]);
+export type OperatorConversationStreamEvent = z.infer<typeof OperatorConversationStreamEventSchema>;
+export type OperatorConversationStreamEventType = OperatorConversationStreamEvent["type"];
+
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
+/**
+ * A stream event minus its durable envelope (cursor/revision/occurredAt). The
+ * captain publishes redacted bodies of this shape; the registry stamps the
+ * envelope. Discrimination on `type` is preserved.
+ */
+export type OperatorConversationEventBody = DistributiveOmit<
+  OperatorConversationStreamEvent,
+  "schemaVersion" | "conversationId" | "cursor" | "revision" | "occurredAt"
+>;
+
+/**
+ * Bounded, pageable replay/tail request. `limit` caps the returned page; `cursor`
+ * is the exclusive lower bound (surface clients keep independent cursors).
+ */
+export const ReplayOperatorConversationRequestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    conversationId: OperatorConversationIdSchema,
+    surfaceClientId: OperatorSurfaceClientIdSchema,
+    cursor: OperatorConversationCursorSchema.optional(),
+    limit: z.number().int().positive().max(OPERATOR_CONVERSATION_REPLAY_LIMIT_MAX).optional(),
+  })
+  .strict();
+export type ReplayOperatorConversationRequest = z.infer<typeof ReplayOperatorConversationRequestSchema>;
+
+/** One bounded replay page with explicit retained lower bound and resume cursor. */
+export const OperatorConversationReplayPageSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    status: z.literal("page"),
+    conversationId: OperatorConversationIdSchema,
+    surfaceClientId: OperatorSurfaceClientIdSchema,
+    events: z.array(OperatorConversationStreamEventSchema).max(OPERATOR_CONVERSATION_REPLAY_LIMIT_MAX),
+    /** Oldest cursor still retained; clients below this must reset. */
+    retainedFromCursor: OperatorConversationCursorSchema,
+    /** Resume cursor for the next page (exclusive lower bound). */
+    nextCursor: OperatorConversationCursorSchema,
+    /** Latest durable cursor (upper bound). */
+    safeCursor: OperatorConversationCursorSchema,
+    hasMore: z.boolean(),
+  })
+  .strict();
+export type OperatorConversationReplayPage = z.infer<typeof OperatorConversationReplayPageSchema>;
+
+/** Stable recovery codes. Shape mirrors terminal recovery concepts (no import). */
+export const OperatorConversationRecoveryCodeSchema = z.enum([
+  "cursor_invalid",
+  "cursor_expired",
+  "cursor_reset",
+  "run_conflict",
+  "unknown_conversation",
+]);
+export type OperatorConversationRecoveryCode = z.infer<typeof OperatorConversationRecoveryCodeSchema>;
+
+/**
+ * Typed, non-throwing recovery outcome for client replay. `recoverable` states
+ * whether resetting to `resetCursor` restores a consistent stream.
+ */
+export const OperatorConversationRecoverySchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    status: z.literal("recover"),
+    conversationId: OperatorConversationIdSchema,
+    code: OperatorConversationRecoveryCodeSchema,
+    recoverable: z.boolean(),
+    resetCursor: OperatorConversationCursorSchema,
+    message: z.string().trim().min(1).max(OPERATOR_CONVERSATION_SUMMARY_MAX),
+  })
+  .strict();
+export type OperatorConversationRecovery = z.infer<typeof OperatorConversationRecoverySchema>;
+
+export const ReplayOperatorConversationResultSchema = z.discriminatedUnion("status", [
+  OperatorConversationReplayPageSchema,
+  OperatorConversationRecoverySchema,
+]);
+export type ReplayOperatorConversationResult = z.infer<typeof ReplayOperatorConversationResultSchema>;
+
+/**
+ * Typed operator input response payload (answers an `input_requested` event).
+ *
+ * `approval` is deliberately NOT an accepted response kind: the conversation
+ * lane must never widen approval authority (ADR 0032). An `input_requested`
+ * event may carry `inputKind: "approval"` as a non-authoritative render hint
+ * that points the operator to the dedicated authenticated approval surface, but
+ * a privileged approval can never be authorized by submitting over this lane.
+ */
+export const OperatorConversationInputResponseSchema = z.discriminatedUnion("inputKind", [
+  z
+    .object({
+      inputKind: z.literal("text"),
+      text: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TEXT_MAX),
+    })
+    .strict(),
+  z
+    .object({
+      inputKind: z.literal("choice"),
+      choice: z.string().trim().min(1).max(OPERATOR_CONVERSATION_SUMMARY_MAX),
+    })
+    .strict(),
+]);
+export type OperatorConversationInputResponse = z.infer<typeof OperatorConversationInputResponseSchema>;
+
+/** Typed worker steering intent carried on an operator conversation submit. */
+export const OperatorConversationSteerIntentSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      type: z.literal("focus"),
+      target: z.enum(["current_task", "failing_test", "acceptance_criteria", "scope", "diagnosis"]),
+    })
+    .strict(),
+  z.object({ type: z.literal("continue") }).strict(),
+  z.object({ type: z.literal("retry_last_step") }).strict(),
+  z.object({ type: z.literal("summarize_status") }).strict(),
+]);
+export type OperatorConversationSteerIntent = z.infer<typeof OperatorConversationSteerIntentSchema>;
+
+const SubmitOperatorConversationTurnBaseSchema = z.object({
+  schemaVersion: z.literal(1),
+  conversationId: OperatorConversationIdSchema,
+  surfaceClientId: OperatorSurfaceClientIdSchema,
+  expectedRevision: z.number().int().nonnegative(),
+});
+
+/**
+ * Revision-fenced submit. `message` is the ordinary turn; `input_response` and
+ * `worker_steer` are the VUH-745 typed variants. Variants not yet implementable
+ * from current captain primitives return a typed `unsupported` submit result
+ * rather than a false `accepted` (see docs/16-operator-conversations.md).
+ */
+export const SubmitOperatorConversationTurnSchema = z.discriminatedUnion("kind", [
+  SubmitOperatorConversationTurnBaseSchema.extend({
+    kind: z.literal("message"),
+    message: z.string().trim().min(1).max(OPERATOR_CONVERSATION_MESSAGE_MAX),
+  }).strict(),
+  SubmitOperatorConversationTurnBaseSchema.extend({
+    kind: z.literal("input_response"),
+    requestId: OperatorConversationEventRefSchema,
+    response: OperatorConversationInputResponseSchema,
+  }).strict(),
+  SubmitOperatorConversationTurnBaseSchema.extend({
+    kind: z.literal("worker_steer"),
+    workerRunId: OperatorConversationWorkerRunIdSchema,
+    intent: OperatorConversationSteerIntentSchema,
+  }).strict(),
+]);
+export type SubmitOperatorConversationTurn = z.infer<typeof SubmitOperatorConversationTurnSchema>;
+export type SubmitOperatorConversationTurnKind = SubmitOperatorConversationTurn["kind"];
+
+export const OperatorConversationTurnAcceptedSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    status: z.literal("accepted"),
+    conversationId: OperatorConversationIdSchema,
+    runId: OperatorConversationRunIdSchema,
+    revision: z.number().int().nonnegative(),
+    safeCursor: OperatorConversationCursorSchema,
+  })
+  .strict();
+export type OperatorConversationTurnAccepted = z.infer<typeof OperatorConversationTurnAcceptedSchema>;
+
+export const OperatorConversationRevisionConflictSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    status: z.literal("revision_conflict"),
+    conversationId: OperatorConversationIdSchema,
+    expectedRevision: z.number().int().nonnegative(),
+    currentRevision: z.number().int().nonnegative(),
+    safeCursor: OperatorConversationCursorSchema,
+  })
+  .strict();
+export type OperatorConversationRevisionConflict = z.infer<typeof OperatorConversationRevisionConflictSchema>;
+
+/** Honest deferral: a submit kind whose captain wiring has not landed yet. */
+export const OperatorConversationSubmitUnsupportedSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    status: z.literal("unsupported"),
+    conversationId: OperatorConversationIdSchema,
+    submitKind: z.enum(["message", "input_response", "worker_steer"]),
+    reason: z.string().trim().min(1).max(OPERATOR_CONVERSATION_SUMMARY_MAX),
+  })
+  .strict();
+export type OperatorConversationSubmitUnsupported = z.infer<
+  typeof OperatorConversationSubmitUnsupportedSchema
+>;
+
+export const SubmitOperatorConversationTurnResultSchema = z.discriminatedUnion("status", [
+  OperatorConversationTurnAcceptedSchema,
+  OperatorConversationRevisionConflictSchema,
+  OperatorConversationSubmitUnsupportedSchema,
+]);
+export type SubmitOperatorConversationTurnResult = z.infer<typeof SubmitOperatorConversationTurnResultSchema>;
+
+// ---------------------------------------------------------------------------
+// Callable service contract (VUH-769). A transport-neutral request/result
+// envelope any authenticated boundary (control plane, VUH-864 relay) mounts and
+// any RN/macOS/TUI client calls. This is the callable contract; VUH-864 owns the
+// physical HTTP/NDJSON transport that carries it.
+// ---------------------------------------------------------------------------
+
+/** The authenticated route path that carries the callable service contract. */
+export const OPERATOR_CONVERSATION_DISPATCH_PATH = "/operator/v1/dispatch";
+
+export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op", [
+  z
+    .object({
+      op: z.literal("list"),
+      schemaVersion: z.literal(1),
+      scope: OperatorConversationScopeSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("get"),
+      schemaVersion: z.literal(1),
+      conversationId: OperatorConversationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("create"),
+      schemaVersion: z.literal(1),
+      scope: OperatorConversationScopeSchema,
+      title: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TITLE_MAX),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("replay"),
+      schemaVersion: z.literal(1),
+      replay: ReplayOperatorConversationRequestSchema,
+    })
+    .strict(),
+  // `tail` shares the replay request/result shape (per-surface cursor + typed
+  // recovery). The transport long-polls it; the client exposes it as an async
+  // iterable via `OperatorConversationTailClient`.
+  z
+    .object({
+      op: z.literal("tail"),
+      schemaVersion: z.literal(1),
+      tail: ReplayOperatorConversationRequestSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("send"),
+      schemaVersion: z.literal(1),
+      turn: SubmitOperatorConversationTurnSchema,
+    })
+    .strict(),
+]);
+export type OperatorConversationServiceRequest = z.infer<typeof OperatorConversationServiceRequestSchema>;
+
+export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op", [
+  z
+    .object({
+      op: z.literal("list"),
+      schemaVersion: z.literal(1),
+      conversations: z.array(OperatorConversationSchema).max(OPERATOR_CONVERSATION_LIST_MAX),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("get"),
+      schemaVersion: z.literal(1),
+      conversation: OperatorConversationSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("create"),
+      schemaVersion: z.literal(1),
+      conversation: OperatorConversationSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("replay"),
+      schemaVersion: z.literal(1),
+      result: ReplayOperatorConversationResultSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("tail"),
+      schemaVersion: z.literal(1),
+      result: ReplayOperatorConversationResultSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("send"),
+      schemaVersion: z.literal(1),
+      result: SubmitOperatorConversationTurnResultSchema,
+    })
+    .strict(),
+]);
+export type OperatorConversationServiceResult = z.infer<typeof OperatorConversationServiceResultSchema>;
+
+/**
+ * Named per-op service results, composed from the discriminated union so RN/
+ * macOS/TUI import one coherent set of public names instead of inferring
+ * aliases from the union.
+ */
+export type OperatorConversationListResult = Extract<OperatorConversationServiceResult, { op: "list" }>;
+export type OperatorConversationGetResult = Extract<OperatorConversationServiceResult, { op: "get" }>;
+export type OperatorConversationCreateResult = Extract<OperatorConversationServiceResult, { op: "create" }>;
+export type OperatorConversationReplayResult = Extract<OperatorConversationServiceResult, { op: "replay" }>;
+export type OperatorConversationTailResult = Extract<OperatorConversationServiceResult, { op: "tail" }>;
+export type OperatorConversationSendResult = Extract<OperatorConversationServiceResult, { op: "send" }>;
+
+/**
+ * Transport-neutral dispatch of one service request to its result. RN/macOS
+ * supply an authenticated HTTP transport (VUH-864); tests and co-located
+ * surfaces supply an in-process dispatch to the captain-owned service handler.
+ */
+export type OperatorConversationServiceDispatch = (
+  request: OperatorConversationServiceRequest,
+) => Promise<OperatorConversationServiceResult>;
+
+/**
+ * One item yielded by the client `tail` iterable: either a durable event or a
+ * typed recovery outcome. The iterable STOPS after yielding a recovery item so
+ * the caller decides whether to reset — RN/TUI can distinguish cursor_invalid/
+ * expired/reset from an ordinary empty tail and never silently replay past a
+ * reset boundary.
+ */
+export type OperatorConversationTailItem =
+  | { readonly kind: "event"; readonly event: OperatorConversationStreamEvent }
+  | { readonly kind: "recovery"; readonly recovery: OperatorConversationRecovery };
+
+/**
+ * The named public client any RN/macOS/TUI surface uses. It depends only on
+ * `@clankie/protocol` types and an injected dispatch — never on Node-only
+ * captain-runtime internals — so every surface calls one identical contract.
+ */
+export interface OperatorConversationServiceClient {
+  list(scope?: OperatorConversationScope): Promise<readonly OperatorConversation[]>;
+  get(conversationId: string): Promise<OperatorConversation | undefined>;
+  create(input: {
+    readonly scope: OperatorConversationScope;
+    readonly title: string;
+  }): Promise<OperatorConversation>;
+  replay(request: ReplayOperatorConversationRequest): Promise<ReplayOperatorConversationResult>;
+  /**
+   * Yields durable events, then a single `recovery` item and STOPS if the server
+   * returns a typed recovery outcome. The caller inspects the recovery and, if it
+   * chooses, resumes `tail` from `recovery.resetCursor`. The client never
+   * auto-resyncs across a reset.
+   */
+  tail(
+    request: ReplayOperatorConversationRequest,
+    signal?: AbortSignal,
+  ): AsyncIterable<OperatorConversationTailItem>;
+  send(turn: SubmitOperatorConversationTurn): Promise<SubmitOperatorConversationTurnResult>;
+}
+
+export function createOperatorConversationServiceClient(
+  dispatch: OperatorConversationServiceDispatch,
+  options: { readonly tailIdleMs?: number } = {},
+): OperatorConversationServiceClient {
+  const tailIdleMs = options.tailIdleMs ?? 250;
+  const sleep = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, tailIdleMs));
+  return {
+    async list(scope) {
+      const result = await dispatch({
+        op: "list",
+        schemaVersion: 1,
+        ...(scope === undefined ? {} : { scope }),
+      });
+      if (result.op !== "list") throw new Error(`Unexpected ${result.op} result for list`);
+      return result.conversations;
+    },
+    async get(conversationId) {
+      const result = await dispatch({ op: "get", schemaVersion: 1, conversationId });
+      if (result.op !== "get") throw new Error(`Unexpected ${result.op} result for get`);
+      return result.conversation;
+    },
+    async create(input) {
+      const result = await dispatch({
+        op: "create",
+        schemaVersion: 1,
+        scope: input.scope,
+        title: input.title,
+      });
+      if (result.op !== "create") throw new Error(`Unexpected ${result.op} result for create`);
+      return result.conversation;
+    },
+    async replay(request) {
+      const result = await dispatch({ op: "replay", schemaVersion: 1, replay: request });
+      if (result.op !== "replay") throw new Error(`Unexpected ${result.op} result for replay`);
+      return result.result;
+    },
+    async *tail(request, signal) {
+      let cursor = request.cursor;
+      while (signal?.aborted !== true) {
+        const result = await dispatch({
+          op: "tail",
+          schemaVersion: 1,
+          tail: { ...request, ...(cursor === undefined ? {} : { cursor }) },
+        });
+        if (result.op !== "tail") throw new Error(`Unexpected ${result.op} result for tail`);
+        const page = result.result;
+        if (page.status === "recover") {
+          // Surface the typed recovery and stop; the caller decides whether to
+          // reset. Never silently resync past a reset boundary.
+          yield { kind: "recovery", recovery: page };
+          return;
+        }
+        for (const event of page.events) yield { kind: "event", event };
+        cursor = page.nextCursor;
+        if (page.events.length === 0) await sleep();
+      }
+    },
+    async send(turn) {
+      const result = await dispatch({ op: "send", schemaVersion: 1, turn });
+      if (result.op !== "send") throw new Error(`Unexpected ${result.op} result for send`);
+      return result.result;
+    },
+  };
+}
+
 export const CommandAuthoritySchema = z.object({
   principal: z.object({
     kind: z.enum(["captain", "human", "system"]),

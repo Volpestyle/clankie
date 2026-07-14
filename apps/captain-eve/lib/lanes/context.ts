@@ -1,5 +1,5 @@
-import { CaptainLaneSchema, type CaptainLane } from "@clankie/protocol";
-import type { CaptainLaneAddress } from "@clankie/captain-runtime";
+import { CaptainSessionLaneV2Schema, type CaptainSessionLaneV2 } from "@clankie/protocol";
+import type { CaptainSessionLaneV2Address } from "@clankie/captain-runtime";
 
 export interface EveChannelLaneContext {
   readonly kind?: string;
@@ -7,16 +7,26 @@ export interface EveChannelLaneContext {
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
-export function captainLaneAddress(channel: EveChannelLaneContext, characterId: string): CaptainLaneAddress {
+export function captainLaneAddress(
+  channel: EveChannelLaneContext,
+  characterId: string,
+): CaptainSessionLaneV2Address {
   const explicitLane = channel.metadata?.captainLane;
   const lane =
-    explicitLane === undefined ? laneFromKind(channel.kind) : CaptainLaneSchema.parse(explicitLane);
+    explicitLane === undefined
+      ? laneFromKind(channel.kind)
+      : CaptainSessionLaneV2Schema.parse(explicitLane === "tui" ? "operator" : explicitLane);
   const explicitTarget = channel.metadata?.captainTargetId;
   const targetId =
     typeof explicitTarget === "string" && explicitTarget.trim().length > 0
       ? explicitTarget.trim()
-      : lane === "tui"
-        ? "operator"
+      : lane === "operator"
+        ? // The unscoped/direct operator channel is always the default global
+          // conversation. Per-conversation targeting is carried by the authored
+          // operator channel's `state.conversationId` -> `metadata.captainTargetId`
+          // (see agent/channels/operator-conversations.ts), never a process-global
+          // env var — so simultaneous surfaces stay isolated.
+          "global-default"
         : undefined;
   if (targetId === undefined) {
     throw new Error(`${lane} Eve sessions require channel metadata.captainTargetId`);
@@ -26,8 +36,9 @@ export function captainLaneAddress(channel: EveChannelLaneContext, characterId: 
 
 export function captainLaneInstructions(channel: EveChannelLaneContext): string {
   const lane = captainLaneAddress(channel, "clankie").lane;
-  const responsibility: Readonly<Record<CaptainLane, string>> = {
-    tui: "This is the authenticated foreground operator lane. Prefer direct intent clarification and timely control responses.",
+  const responsibility: Readonly<Record<CaptainSessionLaneV2, string>> = {
+    operator:
+      "This is an authenticated operator conversation. Prefer direct intent clarification and timely control responses.",
     discord_voice:
       "This is an ambient Discord voice lane. Keep latency low and never treat speech as privileged approval.",
     discord_presence:
@@ -43,8 +54,8 @@ export function captainLaneInstructions(channel: EveChannelLaneContext): string 
   ].join("\n\n");
 }
 
-function laneFromKind(kind: string | undefined): CaptainLane {
-  if (kind === undefined || kind === "http") return "tui";
+function laneFromKind(kind: string | undefined): CaptainSessionLaneV2 {
+  if (kind === undefined || kind === "http") return "operator";
   if (kind.includes("discord")) return "discord_voice";
   if (kind === "schedule" || kind.includes("gameplay")) return "gameplay";
   throw new Error(`Eve channel kind ${kind} must declare metadata.captainLane`);

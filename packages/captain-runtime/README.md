@@ -1,12 +1,13 @@
 # @clankie/captain-runtime
 
-Deterministic session-lane ownership and provider-call admission for one
-Clankie identity. The package consumes the frozen `CaptainLane` contract but
+Deterministic conversation/session ownership and provider-call admission for one
+Clankie identity. The package dual-reads the frozen v1 `CaptainLane` contract and
+writes the conversation-scoped `CaptainSessionLaneV2` contract, but
 does not implement channels, character state, Minecraft, or model providers.
 
 ```mermaid
 flowchart LR
-  T[TUI lane] --> A[Provider admission]
+  T[Operator conversation] --> A[Provider admission]
   V[Discord voice lane] --> A
   G[Gameplay lane<br/>cancellable borrower] --> A
   R[(Private lane registry)] --> T
@@ -20,7 +21,7 @@ flowchart LR
 
 ## Invariants
 
-- A lane is uniquely keyed by character, frozen lane kind, and channel target.
+- An operator lane is uniquely keyed by its server-owned conversation ID.
 - The private SQLite registry stores each lane's Eve session and continuation
   token under mode-0700/mode-0600 paths. Redacted snapshots and runtime events
   cannot contain continuation tokens.
@@ -31,10 +32,9 @@ flowchart LR
 - One registry has one agent definition, soul, provider, and character identity.
 - Each lane has a FIFO burst queue. Different lanes can hold provider permits
   concurrently; there is no application-wide turn mutex.
-- TUI has the highest admission priority, voice has latency priority over
-  gameplay, and gameplay may only borrow foreground capacity while no
-  foreground request waits. A foreground arrival aborts the borrowed gameplay
-  call and admits next when it releases.
+- Every operator conversation has the highest admission priority, voice and
+  presence follow, and gameplay is the cancellable borrower. There is no TUI,
+  mobile, macOS, or per-device reserved capacity.
 - `doStream` model permits remain held until the response stream closes,
   errors, or is cancelled; a returned stream is not mistaken for a completed
   model call.

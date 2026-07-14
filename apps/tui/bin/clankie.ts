@@ -4,9 +4,20 @@
 import { resolve } from "node:path";
 import { ensureCaptainService } from "./captain-service.ts";
 import { isHeadlessCaptainCommand, runHeadlessCaptainCommand } from "./headless-captain.ts";
+import { parseDirectConversation } from "../src/session/operator-conversations.ts";
 
 const repoRoot = resolve(import.meta.dirname, "../../..");
-const args = process.argv.slice(2);
+let direct;
+try {
+  direct = parseDirectConversation(process.argv.slice(2));
+} catch (error) {
+  process.stderr.write(`clankie: ${error instanceof Error ? error.message : String(error)}\n`);
+  process.exit(1);
+}
+// `--chat` is validated here and stripped from the headless-command args; the
+// operator console (src/index.ts) re-parses argv and resolves/persists the
+// selection against the server, so no process-global env couples the lane.
+const args = direct.remaining;
 
 if (isHeadlessCaptainCommand(args[0])) {
   process.exitCode = await runHeadlessCaptainCommand(args, { repoRoot });

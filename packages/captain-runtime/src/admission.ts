@@ -1,9 +1,8 @@
-import type { CaptainLane } from "@clankie/protocol";
+import type { CaptainSessionLaneV2 } from "@clankie/protocol";
 import type { CaptainRuntimeEventSink } from "./types.ts";
 
 export interface CaptainAdmissionControllerOptions {
   readonly capacity: number;
-  readonly tuiReservation?: number;
   readonly maxQueuedPerLane?: number;
   readonly clock?: () => Date;
   readonly events?: CaptainRuntimeEventSink;
@@ -12,14 +11,14 @@ export interface CaptainAdmissionControllerOptions {
 export interface CaptainAdmissionRequest {
   readonly requestId: string;
   readonly laneKey: string;
-  readonly lane: CaptainLane;
+  readonly lane: CaptainSessionLaneV2;
   readonly signal?: AbortSignal;
 }
 
 export interface CaptainAdmissionLease {
   readonly requestId: string;
   readonly laneKey: string;
-  readonly lane: CaptainLane;
+  readonly lane: CaptainSessionLaneV2;
   readonly signal: AbortSignal;
   readonly borrowedForegroundCapacity: boolean;
   release(reason?: string): void;
@@ -40,8 +39,8 @@ interface ActiveAdmission {
   settled: boolean;
 }
 
-const PRIORITY: Readonly<Record<CaptainLane, number>> = {
-  tui: 300,
+const PRIORITY: Readonly<Record<CaptainSessionLaneV2, number>> = {
+  operator: 300,
   discord_voice: 200,
   discord_presence: 200,
   gameplay: 100,
@@ -70,7 +69,6 @@ export class CaptainProviderPressureError extends Error {
 
 export class CaptainAdmissionController {
   private readonly capacity: number;
-  private readonly tuiReservation: number;
   private readonly maxQueuedPerLane: number;
   private readonly clock: () => Date;
   private readonly eventSink: CaptainRuntimeEventSink;
@@ -81,11 +79,7 @@ export class CaptainAdmissionController {
 
   public constructor(options: CaptainAdmissionControllerOptions) {
     this.capacity = positiveInteger(options.capacity, "Provider capacity");
-    this.tuiReservation = nonnegativeInteger(options.tuiReservation ?? 1, "TUI reservation");
     this.maxQueuedPerLane = positiveInteger(options.maxQueuedPerLane ?? 8, "Per-lane queue limit");
-    if (this.tuiReservation > this.capacity) {
-      throw new Error("TUI reservation cannot exceed provider capacity");
-    }
     this.clock = options.clock ?? (() => new Date());
     this.eventSink = options.events ?? (() => undefined);
   }
@@ -150,17 +144,12 @@ export class CaptainAdmissionController {
 
   private schedule(): void {
     while (this.active.size < this.capacity) {
-      const foregroundWaiting = this.pending.some((request) => request.lane !== "gameplay");
-      const candidate = this.sortedPending().find(
-        (request) =>
-          !this.activeLanes.has(request.laneKey) && !(request.lane === "gameplay" && foregroundWaiting),
-      );
+      const candidate = this.sortedPending().find((request) => !this.activeLanes.has(request.laneKey));
       if (candidate === undefined) return;
       const index = this.pending.indexOf(candidate);
       if (index < 0) return;
       this.pending.splice(index, 1);
-      const borrowedForegroundCapacity =
-        candidate.lane === "gameplay" && this.active.size >= this.capacity - this.tuiReservation;
+      const borrowedForegroundCapacity = false;
       const active: ActiveAdmission = {
         request: candidate,
         controller: new AbortController(),
@@ -274,13 +263,6 @@ function validateRequest(request: CaptainAdmissionRequest): void {
 
 function positiveInteger(value: number, label: string): number {
   if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`${label} must be a positive integer`);
-  return value;
-}
-
-function nonnegativeInteger(value: number, label: string): number {
-  if (!Number.isSafeInteger(value) || value < 0) {
-    throw new Error(`${label} must be a non-negative integer`);
-  }
   return value;
 }
 

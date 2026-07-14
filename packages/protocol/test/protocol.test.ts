@@ -1,4 +1,23 @@
 import { describe, expect, it } from "vitest";
+import type {
+  CreateOperatorConversationRequest,
+  GetOperatorConversationRequest,
+  GetOperatorConversationResponse,
+  ListOperatorConversationsRequest,
+  ListOperatorConversationsResponse,
+  OperatorConversationCreateResult,
+  OperatorConversationGetResult,
+  OperatorConversationListResult,
+  OperatorConversationReplayResult,
+  OperatorConversationSendResult,
+  OperatorConversationServiceRequest,
+  OperatorConversationServiceResult,
+  OperatorConversationTailItem,
+  OperatorConversationTailResult,
+  ReplayOperatorConversationRequest,
+  ReplayOperatorConversationResult,
+  SubmitOperatorConversationTurnResult,
+} from "../src/index.ts";
 import {
   ApprovalDecisionInputSchema,
   ApprovalEventSchema,
@@ -7,6 +26,7 @@ import {
   CaptainPresenceEventSchema,
   CaptainPresenceReportSchema,
   CaptainLaneSchema,
+  CaptainSessionLaneV2Schema,
   CharacterSnapshotSchema,
   DISCORD_PRESENCE_ACTION_RISK_CLASS,
   DiscordPresenceActionSchema,
@@ -18,12 +38,274 @@ import {
   MissionPlanSchema,
   MissionTriggerEventSchema,
   MissionTriggerSchema,
+  createOperatorConversationServiceClient,
+  OPERATOR_CONVERSATION_REF_MAX,
+  OperatorConversationAttachmentSchema,
+  OperatorConversationInputResponseSchema,
+  OperatorConversationRecoverySchema,
+  OperatorConversationRevisionConflictSchema,
+  OperatorConversationSchema,
+  OperatorConversationServiceRequestSchema,
+  OperatorConversationServiceResultSchema,
+  OperatorConversationStreamEventSchema,
+  ReplayOperatorConversationResultSchema,
+  SubmitOperatorConversationTurnResultSchema,
+  SubmitOperatorConversationTurnSchema,
   TrackerNarrativeActionSchema,
   TrackerNarrativeWriteSchema,
   WorkerStatusEventSchema,
 } from "../src/index.ts";
 
 describe("protocol", () => {
+  it("exports provider-neutral operator conversation fixtures", () => {
+    expect(CaptainLaneSchema.options).toEqual(["tui", "discord_voice", "discord_presence", "gameplay"]);
+    expect(CaptainSessionLaneV2Schema.options).toEqual([
+      "operator",
+      "discord_voice",
+      "discord_presence",
+      "gameplay",
+    ]);
+    const conversation = OperatorConversationSchema.parse({
+      schemaVersion: 1,
+      conversationId: "conversation-global-default",
+      scope: { kind: "global" },
+      title: "Clankie",
+      isDefault: true,
+      createdAt: "2026-07-12T00:00:00.000Z",
+      updatedAt: "2026-07-12T00:00:00.000Z",
+      sessionState: "active",
+      revision: 7,
+    });
+    expect(
+      OperatorConversationAttachmentSchema.parse({
+        schemaVersion: 1,
+        conversationId: conversation.conversationId,
+        surfaceClientId: "mac-window-1",
+        cursor: "event:12",
+      }),
+    ).toMatchObject({ surfaceClientId: "mac-window-1", cursor: "event:12" });
+    expect(
+      SubmitOperatorConversationTurnSchema.parse({
+        schemaVersion: 1,
+        kind: "message",
+        conversationId: conversation.conversationId,
+        surfaceClientId: "rn-scene-1",
+        expectedRevision: 7,
+        message: "Continue the mission",
+      }),
+    ).toMatchObject({ kind: "message", expectedRevision: 7 });
+    expect(
+      OperatorConversationRevisionConflictSchema.parse({
+        schemaVersion: 1,
+        status: "revision_conflict",
+        conversationId: conversation.conversationId,
+        expectedRevision: 6,
+        currentRevision: 7,
+        safeCursor: "event:12",
+      }),
+    ).toMatchObject({ status: "revision_conflict", currentRevision: 7 });
+    expect(JSON.stringify(conversation)).not.toMatch(/provider|continuation|credential/iu);
+  });
+
+  it("rejects private-capability fields, unknown keys, and unbounded payloads at the public boundary", () => {
+    // The record is strict: private-capability fields are rejected, not stripped.
+    for (const hostile of [
+      { continuationToken: "secret-continuation" },
+      { provider: "openai-codex" },
+      { credential: "sk-live-DEADBEEF" },
+      { apiKey: "AKIA-XXXX" },
+    ]) {
+      expect(() =>
+        OperatorConversationSchema.parse({
+          schemaVersion: 1,
+          conversationId: "global-default",
+          scope: { kind: "global" },
+          title: "Clankie",
+          isDefault: true,
+          createdAt: "2026-07-12T00:00:00.000Z",
+          updatedAt: "2026-07-12T00:00:00.000Z",
+          sessionState: "active",
+          revision: 1,
+          ...hostile,
+        }),
+      ).toThrow();
+    }
+    // The event union rejects an opaque provider/credential/unbounded escape payload.
+    const base = {
+      schemaVersion: 1,
+      conversationId: "global-default",
+      cursor: "event:1",
+      revision: 1,
+      occurredAt: "2026-07-12T00:00:00.000Z",
+    };
+    expect(() =>
+      OperatorConversationStreamEventSchema.parse({
+        ...base,
+        type: "provider.private-capability",
+        data: { continuationToken: "secret", credential: "sk-live" },
+      }),
+    ).toThrow();
+    expect(() =>
+      OperatorConversationStreamEventSchema.parse({
+        ...base,
+        type: "message",
+        role: "captain",
+        text: "x".repeat(20_000),
+        streaming: false,
+      }),
+    ).toThrow();
+    expect(() =>
+      OperatorConversationStreamEventSchema.parse({
+        ...base,
+        type: "message",
+        role: "captain",
+        text: "ok",
+        streaming: false,
+        continuationToken: "secret",
+      }),
+    ).toThrow();
+    expect(() =>
+      OperatorConversationStreamEventSchema.parse({
+        ...base,
+        type: "worker_transcript",
+        workerRunId: "w".repeat(OPERATOR_CONVERSATION_REF_MAX + 1),
+        phase: "tail",
+        summary: "bounded summary",
+      }),
+    ).toThrow();
+    expect(() =>
+      SubmitOperatorConversationTurnSchema.parse({
+        schemaVersion: 1,
+        kind: "worker_steer",
+        conversationId: "global-default",
+        surfaceClientId: "rn",
+        expectedRevision: 1,
+        workerRunId: "w".repeat(OPERATOR_CONVERSATION_REF_MAX + 1),
+        intent: { type: "focus", target: "failing_test" },
+      }),
+    ).toThrow();
+    // A message event validates and carries no provider/credential surface.
+    expect(
+      OperatorConversationStreamEventSchema.parse({
+        ...base,
+        type: "message",
+        role: "captain",
+        text: "hello",
+        streaming: false,
+      }),
+    ).toMatchObject({ type: "message", role: "captain" });
+  });
+
+  it("never lets the conversation lane authorize an approval, and defers unwired submits", () => {
+    // The conversation lane cannot widen approval authority (ADR 0032): approval
+    // is not an accepted input response kind.
+    expect(() =>
+      OperatorConversationInputResponseSchema.parse({ inputKind: "approval", approve: true }),
+    ).toThrow();
+    expect(
+      OperatorConversationInputResponseSchema.parse({ inputKind: "text", text: "answer" }),
+    ).toMatchObject({
+      inputKind: "text",
+    });
+    // Typed input-response and worker-steer submits parse (shape is defined)…
+    expect(
+      SubmitOperatorConversationTurnSchema.parse({
+        schemaVersion: 1,
+        kind: "worker_steer",
+        conversationId: "global-default",
+        surfaceClientId: "rn",
+        expectedRevision: 3,
+        workerRunId: "worker-1",
+        intent: { type: "focus", target: "failing_test" },
+      }),
+    ).toMatchObject({ kind: "worker_steer" });
+    // …but an approval decision can never be encoded as a submit input response.
+    expect(() =>
+      SubmitOperatorConversationTurnSchema.parse({
+        schemaVersion: 1,
+        kind: "input_response",
+        conversationId: "global-default",
+        surfaceClientId: "rn",
+        expectedRevision: 3,
+        requestId: "req-1",
+        response: { inputKind: "approval", approve: true },
+      }),
+    ).toThrow();
+    // The accepted result carries a durable run identity; unsupported is a typed status.
+    expect(
+      SubmitOperatorConversationTurnResultSchema.parse({
+        schemaVersion: 1,
+        status: "accepted",
+        conversationId: "global-default",
+        runId: "run:1",
+        revision: 4,
+        safeCursor: "event:9",
+      }),
+    ).toMatchObject({ status: "accepted", runId: "run:1" });
+    expect(
+      SubmitOperatorConversationTurnResultSchema.parse({
+        schemaVersion: 1,
+        status: "unsupported",
+        conversationId: "global-default",
+        submitKind: "worker_steer",
+        reason: "Deferred until captain wiring lands.",
+      }),
+    ).toMatchObject({ status: "unsupported" });
+  });
+
+  it("models bounded replay recovery and the callable service envelope", () => {
+    expect(
+      ReplayOperatorConversationResultSchema.parse({
+        schemaVersion: 1,
+        status: "page",
+        conversationId: "global-default",
+        surfaceClientId: "rn",
+        events: [],
+        retainedFromCursor: "event:0",
+        nextCursor: "event:0",
+        safeCursor: "event:0",
+        hasMore: false,
+      }),
+    ).toMatchObject({ status: "page", hasMore: false });
+    for (const code of [
+      "cursor_invalid",
+      "cursor_expired",
+      "cursor_reset",
+      "run_conflict",
+      "unknown_conversation",
+    ]) {
+      expect(
+        OperatorConversationRecoverySchema.parse({
+          schemaVersion: 1,
+          status: "recover",
+          conversationId: "global-default",
+          code,
+          recoverable: code !== "unknown_conversation",
+          resetCursor: "event:0",
+          message: "reset and replay",
+        }),
+      ).toMatchObject({ status: "recover", code });
+    }
+    // The callable request/result envelope (list/get/create/replay/tail/send) is strict.
+    expect(
+      OperatorConversationServiceRequestSchema.parse({
+        op: "replay",
+        schemaVersion: 1,
+        replay: { schemaVersion: 1, conversationId: "global-default", surfaceClientId: "rn", limit: 50 },
+      }),
+    ).toMatchObject({ op: "replay" });
+    expect(() =>
+      OperatorConversationServiceRequestSchema.parse({
+        op: "replay",
+        schemaVersion: 1,
+        replay: { schemaVersion: 1, conversationId: "global-default", surfaceClientId: "rn" },
+        provider: "openai-codex",
+      }),
+    ).toThrow();
+    expect(OperatorConversationServiceResultSchema.options).toHaveLength(6);
+    expect(typeof createOperatorConversationServiceClient).toBe("function");
+  });
+
   it("validates additive mission trigger records and semantic events", () => {
     const trigger = MissionTriggerSchema.parse({
       schemaVersion: 1,
@@ -574,5 +856,69 @@ describe("protocol", () => {
         type: "captain.presence.offline",
       }),
     ).toThrow();
+  });
+
+  it("exposes a coherent named public type surface with typed get-not-found", () => {
+    // Compile fixture: every public request/result name resolves as a named type
+    // (RN never infers aliases from the union). A missing conversation is typed.
+    const getResult: OperatorConversationGetResult = { op: "get", schemaVersion: 1 };
+    expect(getResult.conversation).toBeUndefined();
+    const getResponse: GetOperatorConversationResponse = { schemaVersion: 1 };
+    expect(getResponse.conversation).toBeUndefined();
+    const names:
+      | [
+          ListOperatorConversationsRequest,
+          ListOperatorConversationsResponse,
+          GetOperatorConversationRequest,
+          CreateOperatorConversationRequest,
+          ReplayOperatorConversationRequest,
+          ReplayOperatorConversationResult,
+          SubmitOperatorConversationTurnResult,
+          OperatorConversationServiceRequest,
+          OperatorConversationServiceResult,
+          OperatorConversationListResult,
+          OperatorConversationCreateResult,
+          OperatorConversationReplayResult,
+          OperatorConversationTailResult,
+          OperatorConversationSendResult,
+        ]
+      | undefined = undefined;
+    expect(names).toBeUndefined();
+  });
+
+  it("surfaces typed tail recovery and stops instead of silently resyncing", async () => {
+    const dispatch = (
+      request: OperatorConversationServiceRequest,
+    ): Promise<OperatorConversationServiceResult> => {
+      if (request.op !== "tail") throw new Error(`unexpected op ${request.op}`);
+      return Promise.resolve({
+        op: "tail",
+        schemaVersion: 1,
+        result: {
+          schemaVersion: 1,
+          status: "recover",
+          conversationId: "c",
+          code: "cursor_invalid",
+          recoverable: true,
+          resetCursor: "event:0:abcdefghijkl",
+          message: "reset and replay",
+        },
+      });
+    };
+    const client = createOperatorConversationServiceClient(dispatch);
+    const items: OperatorConversationTailItem[] = [];
+    for await (const item of client.tail({
+      schemaVersion: 1,
+      conversationId: "c",
+      surfaceClientId: "rn",
+      cursor: "not-a-cursor",
+    })) {
+      items.push(item);
+      if (items.length > 5) break;
+    }
+    // Exactly one typed recovery item, then the iterable stops (no auto-resync).
+    expect(items).toHaveLength(1);
+    expect(items[0]?.kind).toBe("recovery");
+    if (items[0]?.kind === "recovery") expect(items[0].recovery.code).toBe("cursor_invalid");
   });
 });
