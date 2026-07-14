@@ -5,7 +5,6 @@
 import { join, resolve } from "node:path";
 import { ClankieApiClient } from "@clankie/api-client";
 import { loadConfig, resolveRole, type ClankieConfig } from "@clankie/model-provider";
-import { Client } from "eve/client";
 import { ClankieFaceShell } from "./shell/shell.ts";
 import { buildConsoleCommands } from "./commands.ts";
 import { buildProviderCommands, createProviderServices } from "./provider-commands.ts";
@@ -13,7 +12,7 @@ import { createInitialConsoleState } from "./session/state.ts";
 import { EveCaptainSession } from "./session/eve-captain.ts";
 import { CaptainSessionCursorStore } from "./session/session-cursor.ts";
 import {
-  createCaptainOperatorConversationClient,
+  createProductionOperatorConversationClient,
   OperatorConversationPromptSession,
   OperatorConversationSelection,
   OperatorConversationSelectionStore,
@@ -76,9 +75,12 @@ const services = createProviderServices({
 // dispatch route (Client.fetch). `--chat`/`/conversation` enumerate and select
 // the real server-owned registry; the selection persists (fail-closed) and
 // reloads across restart, confirmed against the server before attaching.
-const conversationClient = createCaptainOperatorConversationClient(
-  new Client({ host: process.env.CLANKIE_CAPTAIN_URL ?? "http://127.0.0.1:4321", redirect: "error" }),
-);
+const conversationClient = createProductionOperatorConversationClient({
+  host: process.env.CLANKIE_CAPTAIN_URL ?? "http://127.0.0.1:4321",
+  ...(process.env.CLANKIE_CAPTAIN_TOKEN === undefined
+    ? {}
+    : { captainToken: process.env.CLANKIE_CAPTAIN_TOKEN }),
+});
 const conversationSelectionStore = new OperatorConversationSelectionStore(
   join(repoRoot, ".data", "tui", "operator-conversation.json"),
 );

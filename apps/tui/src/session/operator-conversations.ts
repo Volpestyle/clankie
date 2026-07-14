@@ -15,6 +15,7 @@ import {
   type OperatorConversationServiceDispatch,
   type OperatorConversationStreamEvent,
 } from "@clankie/protocol";
+import { Client } from "eve/client";
 
 /**
  * The TUI's operator conversation client is the shared public
@@ -27,6 +28,26 @@ export type OperatorConversationClient = OperatorConversationServiceClient;
 /** Minimal authenticated fetch surface — satisfied by eve's `Client.fetch`. */
 export interface CaptainRouteFetcher {
   fetch(path: string, init?: RequestInit): Promise<Response>;
+}
+
+/**
+ * Connects the TUI to the captain route with the same optional bearer used by
+ * the captain server. An absent or blank token preserves local-dev loopback
+ * authentication; a configured token is attached by eve's Client to every
+ * route request.
+ */
+export function createProductionOperatorConversationClient(input: {
+  readonly host: string;
+  readonly captainToken?: string;
+}): OperatorConversationClient {
+  const captainToken = input.captainToken?.trim();
+  return createCaptainOperatorConversationClient(
+    new Client({
+      host: input.host,
+      redirect: "error",
+      ...(captainToken === undefined || captainToken.length === 0 ? {} : { auth: { bearer: captainToken } }),
+    }),
+  );
 }
 
 /**

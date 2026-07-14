@@ -1,4 +1,6 @@
 import { chmod, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -9,6 +11,7 @@ import type {
 } from "@clankie/protocol";
 import {
   createCaptainOperatorConversationClient,
+  createProductionOperatorConversationClient,
   OperatorConversationClientError,
   OperatorConversationPromptSession,
   OperatorConversationSelection,
@@ -214,6 +217,39 @@ describe("TUI operator conversation selection", () => {
     expect((await captain.list()).some((conversation) => conversation.isDefault)).toBe(true);
     expect((await captain.get("global-default"))?.conversationId).toBe("global-default");
   });
+
+  it.each([
+    { captainToken: " repair4-secret ", authorization: "Bearer repair4-secret" },
+    { captainToken: undefined, authorization: undefined },
+  ])(
+    "sends the configured captain bearer and preserves unconfigured loopback ($authorization)",
+    async ({ captainToken, authorization }) => {
+      const headers: Array<string | undefined> = [];
+      const server = createServer((request, response) => {
+        request.resume();
+        request.once("end", () => {
+          headers.push(request.headers.authorization);
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(JSON.stringify({ op: "list", schemaVersion: 1, conversations: [DEFAULT] }));
+        });
+      });
+      server.listen(0, "127.0.0.1");
+      await once(server, "listening");
+      try {
+        const address = server.address();
+        if (address === null || typeof address === "string") throw new Error("Missing server address");
+        const captain = createProductionOperatorConversationClient({
+          host: `http://127.0.0.1:${address.port}`,
+          ...(captainToken === undefined ? {} : { captainToken }),
+        });
+        expect(await captain.list()).toEqual([DEFAULT]);
+        expect(headers).toEqual([authorization]);
+      } finally {
+        server.close();
+        await once(server, "close");
+      }
+    },
+  );
 
   it("fails schema-invalid transport responses closed without leaking their payload", async () => {
     const captain = createCaptainOperatorConversationClient({

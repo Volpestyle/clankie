@@ -27,8 +27,9 @@ The captain exposes the registry through one authenticated route,
 `POST /operator/v1/dispatch` (`OPERATOR_CONVERSATION_DISPATCH_PATH`), authored as
 a stateful eve `defineChannel` in `apps/captain-eve/agent/channels/operator-conversations.ts`.
 Custom channel routes are not auto-authenticated, so the route calls
-`routeAuth(request, [captainBearer, localDev()])`: a shared `CLANKIE_CAPTAIN_TOKEN`
-bearer when configured, else loopback; anything else fails closed with `401`.
+`routeAuth(request, [captainBearer])` when the shared `CLANKIE_CAPTAIN_TOKEN` is
+configured, otherwise `routeAuth(request, [localDev()])` permits loopback-dev
+access. Anything else fails closed with `401`.
 
 The body is one `OperatorConversationServiceRequest` (`op`: `list`/`get`/`create`/
 `replay`/`tail`/`send`) validated at the edge; the reply is the matching
