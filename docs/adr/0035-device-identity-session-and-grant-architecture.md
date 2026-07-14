@@ -8,8 +8,8 @@ Pairing is the first-run moment for an iPhone/iPad supervision surface. Until pe
 permissions exist, every connected client is implicitly fully trusted. `clankie pair`
 (VUH-878) already mints a single-use offer and the app renders it, but nothing turns an
 offer into a durable device identity, records what a device may do, refreshes its access, or
-revokes it. VUH-870 enforces terminal scopes at the gateway and explicitly delegates *how a
-device receives and loses those scopes* to this work.
+revokes it. VUH-870 enforces terminal scopes at the gateway and explicitly delegates _how a
+device receives and loses those scopes_ to this work.
 
 The offer secret is short-lived display data, not a credential. A device needs a long-lived
 credential it can present on every request, the control plane needs to know each device's
@@ -25,7 +25,7 @@ mismatched control owner.
 A device redeems an offer, then completes after the operator-approved access review, matching
 the product ruling that grants are shown and confirmed before pairing finishes:
 
-- `POST /v1/pairing/redeem` — the offer secret (from the QR deep link) or the typed code *is*
+- `POST /v1/pairing/redeem` — the offer secret (from the QR deep link) or the typed code _is_
   the capability, so the route is unauthenticated. It consumes the single-use offer
   synchronously, creates a **pending** device, and returns the offered grants (the Supervise
   preset: chat + steer + terminal-observe) plus a short-lived single-use completion token.

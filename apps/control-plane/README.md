@@ -202,15 +202,15 @@ operator: GET  /v1/devices               → list devices
 operator: POST /v1/devices/:id/revoke    → revoke a device
 ```
 
-| Route | Auth | Success | Fail-closed |
-| --- | --- | --- | --- |
-| `POST /v1/pairing/offer` | operator | offer wire | 503 / 401 |
-| `POST /v1/pairing/redeem` | offer secret or code | redeem response | 400 malformed · 409 consumed · 410 expired |
-| `POST /v1/pairing/complete` | completion token | session token | 410 expired · 409 replay · 403 revoked · 403 `terminal_control_not_grantable` |
-| `POST /v1/devices/self/session/refresh` | device | new token | 503 / 401 |
-| `GET /v1/devices/self` | device | self view | 503 / 401 |
-| `GET /v1/devices` | operator | device list | 503 / 401 |
-| `POST /v1/devices/:id/revoke` | operator | device row | 503 / 401 / 404 |
+| Route                                   | Auth                 | Success         | Fail-closed                                                                   |
+| --------------------------------------- | -------------------- | --------------- | ----------------------------------------------------------------------------- |
+| `POST /v1/pairing/offer`                | operator             | offer wire      | 503 / 401                                                                     |
+| `POST /v1/pairing/redeem`               | offer secret or code | redeem response | 400 malformed · 409 consumed · 410 expired                                    |
+| `POST /v1/pairing/complete`             | completion token     | session token   | 410 expired · 409 replay · 403 revoked · 403 `terminal_control_not_grantable` |
+| `POST /v1/devices/self/session/refresh` | device               | new token       | 503 / 401                                                                     |
+| `GET /v1/devices/self`                  | device               | self view       | 503 / 401                                                                     |
+| `GET /v1/devices`                       | operator             | device list     | 503 / 401                                                                     |
+| `POST /v1/devices/:id/revoke`           | operator             | device row      | 503 / 401 / 404                                                               |
 
 Offers and completion tokens live in memory (5-minute and 10-minute TTLs); a
 restart drops in-flight pairings — fail closed. Device records are durable and
