@@ -180,6 +180,28 @@ describe("Discord presence control-plane runtime (ADR 0024)", () => {
       });
       expect(restartedRuntime.writes).toHaveLength(0);
 
+      const replayedLifecycle = await recordPhase(restarted, "connecting", 1, "process_start", "off");
+      expect(replayedLifecycle.status).toBe(200);
+      await expect(replayedLifecycle.json()).resolves.toMatchObject({
+        accepted: false,
+        session: { phase: "present", revision: 2 },
+      });
+      const replayAfterLifecycle = await post(
+        restarted,
+        "/v1/discord/presence-actions",
+        presenceWrite({
+          idempotencyKey: "presence-replayed-after-old-lifecycle",
+          action: "discord.presence.send_message",
+          payload: { kind: "send_message", channelId: "c1", content: "must remain fenced" },
+        }),
+      );
+      expect(replayAfterLifecycle.status).toBe(409);
+      await expect(replayAfterLifecycle.json()).resolves.toEqual({
+        error: "discord_presence_live_claim_stale",
+        claimedRevision: 2,
+      });
+      expect(restartedRuntime.writes).toHaveLength(0);
+
       blocking.releaseLossAppend();
       expect((await loss).status).toBe(200);
 

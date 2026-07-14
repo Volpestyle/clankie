@@ -1397,7 +1397,9 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
         if (session === undefined) {
           return context.json({ error: "discord_presence_event_id_conflict" }, 409);
         }
-        discordPresenceLiveSessions.set(sessionKey, session);
+        // An idempotent acknowledgement proves only that this event is
+        // durable, not that the bridge is live in this control-plane boot.
+        // Only a genuinely new validated event below may open the act fence.
         return context.json({ accepted: false, session });
       }
       try {
