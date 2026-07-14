@@ -430,6 +430,8 @@ describe("production terminal acceptance contract", () => {
     expect(frames.length).toBeLessThanOrEqual(18);
     expect(frames[0]?.type).toBe("snapshot");
     expect(frames.at(-1)?.type).toBe("closed");
+    expect(frames[0]?.sequence).toBeGreaterThan(0);
+    expect(sequences(frames)).toEqual(frames.map((_, offset) => (frames[0]?.sequence ?? 0) + offset));
     const finalResize = frames.findLast(
       (frame): frame is Extract<TerminalFrame, { type: "resized" }> => frame.type === "resized",
     );
