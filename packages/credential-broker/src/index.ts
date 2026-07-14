@@ -43,3 +43,17 @@ export {
   type DiscordBotGrantRequest,
   type DiscordPresenceCapability,
 } from "./discord-bot-provider.ts";
+export {
+  ensureOperatorCredential,
+  inspectOperatorCredential,
+  mintOperatorToken,
+  OPERATOR_CREDENTIAL_PROVIDER_ID,
+  OperatorCredentialError,
+  resolveOperatorCredential,
+  rotateOperatorCredential,
+  type OperatorCredentialConsistency,
+  type OperatorCredentialErrorCode,
+  type OperatorCredentialOptions,
+  type OperatorCredentialStatus,
+  type ResolvedOperatorCredential,
+} from "./operator-credential.ts";

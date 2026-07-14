@@ -1,8 +1,26 @@
 import { describe, expect, it } from "vitest";
+import type { CredentialStore, ProviderCredential, RedactedCredential } from "@clankie/credential-broker";
 import { runHeadlessCaptainCommand } from "../bin/headless-captain.ts";
 import type { DeviceListItem } from "../bin/devices.ts";
 
 const OPERATOR_ENV: NodeJS.ProcessEnv = { CLANKIE_OPERATOR_TOKEN: "operator-secret" };
+
+class MemoryCredentialStore implements CredentialStore {
+  private readonly credentials = new Map<string, ProviderCredential>();
+  public get(providerId: string): Promise<ProviderCredential | undefined> {
+    return Promise.resolve(this.credentials.get(providerId));
+  }
+  public set(providerId: string, credential: ProviderCredential): Promise<void> {
+    this.credentials.set(providerId, credential);
+    return Promise.resolve();
+  }
+  public delete(providerId: string): Promise<boolean> {
+    return Promise.resolve(this.credentials.delete(providerId));
+  }
+  public list(): Promise<Record<string, RedactedCredential>> {
+    return Promise.resolve({});
+  }
+}
 
 function outputBuffer(): { readonly stream: { write(chunk: string): void }; readonly text: () => string } {
   let output = "";
@@ -48,6 +66,7 @@ async function runDevices(
   overrides: {
     fetchImpl?: typeof fetch;
     env?: NodeJS.ProcessEnv;
+    operatorCredentialStore?: CredentialStore;
     stdout?: { write(chunk: string): void };
     stderr?: { write(chunk: string): void };
   } = {},
@@ -55,6 +74,9 @@ async function runDevices(
   return runHeadlessCaptainCommand(["devices", ...args], {
     repoRoot: "/unused",
     env: overrides.env ?? OPERATOR_ENV,
+    ...(overrides.operatorCredentialStore === undefined
+      ? {}
+      : { operatorCredentialStore: overrides.operatorCredentialStore }),
     ...(overrides.fetchImpl === undefined ? {} : { fetchImpl: overrides.fetchImpl }),
     ...(overrides.stdout === undefined ? {} : { stdout: overrides.stdout }),
     ...(overrides.stderr === undefined ? {} : { stderr: overrides.stderr }),
@@ -136,12 +158,13 @@ describe("clankie devices — fail closed", () => {
     const stderr = outputBuffer();
     const exit = await runDevices([], {
       env: {},
+      operatorCredentialStore: new MemoryCredentialStore(),
       fetchImpl: throwingFetch(new Error("must not be called"), calls),
       stderr: stderr.stream,
     });
     expect(exit).toBe(1);
     expect(calls.count).toBe(0);
-    expect(stderr.text()).toContain("Operator token required");
+    expect(stderr.text()).toContain("Operator credential unavailable");
   });
 
   it.each([

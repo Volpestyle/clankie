@@ -4,6 +4,7 @@
  */
 import { join, resolve } from "node:path";
 import { ClankieApiClient } from "@clankie/api-client";
+import { resolveOperatorCredential } from "@clankie/credential-broker";
 import { loadConfig, resolveRole, type ClankieConfig } from "@clankie/model-provider";
 import { ClankieFaceShell } from "./shell/shell.ts";
 import { buildConsoleCommands } from "./commands.ts";
@@ -49,10 +50,11 @@ try {
   // keeps any durable checkpoint visible in the meantime.
 }
 const state = createInitialConsoleState();
-const approvalClient = process.env.CLANKIE_OPERATOR_TOKEN
+const operatorCredential = await resolveOperatorCredential({ env: process.env });
+const approvalClient = operatorCredential
   ? new ClankieApiClient({
       baseUrl: process.env.CLANKIE_CONTROL_PLANE_URL ?? "http://127.0.0.1:4310",
-      operatorToken: process.env.CLANKIE_OPERATOR_TOKEN,
+      operatorToken: operatorCredential.token,
     })
   : undefined;
 let currentModelRef: string | undefined;

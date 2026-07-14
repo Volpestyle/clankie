@@ -169,8 +169,16 @@ A `require_approval` policy result appends `approval.requested` with the exact
 mission, worker, action, resource, policy rationale, correlation identity, and
 doctrine hash. `GET /v1/approvals?status=pending` and
 `POST /v1/approvals/:id/decision` require the dedicated operator authenticator
-configured by `CLANKIE_OPERATOR_TOKEN`; captain and worker credentials cannot
-grant approval authority.
+backed by the credential broker. On first start the service mints and persists
+the local `clankie_operator` credential when it is absent. The TUI and launcher
+load the same credential automatically. `CLANKIE_OPERATOR_TOKEN` remains an
+explicit override for CI/tests; captain and worker credentials cannot grant
+approval authority.
+
+Operator authentication resolves the current broker value for every request.
+`clankie operator-credential rotate` therefore invalidates the old server and
+CLI bearer in one step without a control-plane restart. Missing, invalid, or
+unreadable credentials fail closed, and no log or event contains token material.
 
 Approve and deny append `approval.decided` with the authenticated operator ID,
 time, and reason. A decision never invokes a connector. The original action

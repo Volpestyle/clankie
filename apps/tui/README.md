@@ -134,9 +134,17 @@ src/observation/  Read-only sequenced event source, durable observer cursor,
   `/mission prev`, and `/mission <id>` provide read-only selection/navigation.
 - `/approvals` loads pending requests from the control plane, shows the policy
   rationale plus plan/check/diff/artifact evidence, and records an approve or
-  deny reason. Set `CLANKIE_OPERATOR_TOKEN` on both the control plane and TUI;
+  deny reason. The launcher and TUI load the broker-owned local operator
+  credential automatically; first control-plane start creates it when absent.
+  `CLANKIE_OPERATOR_TOKEN` is an explicit CI/test override.
   `CLANKIE_CONTROL_PLANE_URL` defaults to `http://127.0.0.1:4310`. The console
   records decisions only—connector execution returns through the policy path.
+- `clankie health` reports operator-credential presence and env/store
+  consistency without fingerprints or secret content. A mismatch fails the
+  health command while the explicit env value remains the runtime override.
+- `clankie operator-credential rotate` replaces the stored credential and
+  invalidates existing operator requests immediately. Remove an active
+  `CLANKIE_OPERATOR_TOKEN` override before rotating.
 - `Ctrl+/` opens the fuzzy command workbench; `Ctrl+T` toggles transcript focus.
 - `!` on an empty input enters the inline shell escape (Esc exits; Ctrl+C kills the running command).
 - Esc detaches from an in-flight captain turn. Eve has no server-side cancel

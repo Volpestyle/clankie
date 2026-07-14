@@ -134,7 +134,7 @@ const commands: ClankieAutocompleteCommand[] = [
   {
     name: "setup",
     aliases: [],
-    description: "Initialize .env.local, mint Clankie-owned tokens, and choose first setup steps",
+    description: "Bootstrap broker credentials and choose first setup steps",
     argumentHint: "[status|bootstrap|model|auth|integrations]",
     takesArgument: true,
   },

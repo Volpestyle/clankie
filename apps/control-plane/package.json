@@ -12,6 +12,7 @@
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {
+    "@clankie/credential-broker": "workspace:*",
     "@clankie/doctrine": "workspace:*",
     "@clankie/event-store": "workspace:*",
     "@clankie/memory-store": "workspace:*",

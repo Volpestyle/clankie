@@ -3,7 +3,7 @@ import { DeviceListItemSchema, type DeviceListItem } from "@clankie/protocol";
 import { DEFAULT_CONTROL_PLANE_URL } from "./pairing-offer.ts";
 
 // Narrow operator client for device management (VUH-727): list paired devices
-// and revoke one. Authenticated as the operator (`CLANKIE_OPERATOR_TOKEN`) over
+// and revoke one. Authenticated with the locally resolved operator credential over
 // the same bearer path as `clankie pair`. Fails closed with content-free,
 // actionable messages; never surfaces a response body or token in an error.
 
@@ -30,7 +30,7 @@ export function devicesFailureMessage(status: DevicesCommandStatus): string {
     case "unavailable":
       return "Device service unavailable. Start the Clankie control plane and retry.";
     case "unauthorized":
-      return "Operator token required. Set CLANKIE_OPERATOR_TOKEN and retry.";
+      return "Operator credential unavailable. Start the control plane once, then retry.";
     case "not_found":
       return "No such device. Run `clankie devices` to list current devices.";
     case "malformed":

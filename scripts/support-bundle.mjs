@@ -3,6 +3,7 @@ import { cp, mkdir, writeFile } from "node:fs/promises";
 import { platform, release, arch } from "node:os";
 import { basename, resolve } from "node:path";
 import { promisify } from "node:util";
+import { configuredEnvironmentKeys } from "./support-bundle-environment.mjs";
 
 const execFileAsync = promisify(execFile);
 const root = resolve(import.meta.dirname, "..");
@@ -33,9 +34,7 @@ await writeFile(
       docker: await commandVersion("docker"),
       codex: await commandVersion("codex"),
       pi: await commandVersion("pi"),
-      configuredEnvironmentKeys: Object.keys(process.env)
-        .filter((key) => /^(CLANKIE_|OTEL_|SENTRY_|POSTHOG_|DISCORD_|OPENAI_|ANTHROPIC_)/.test(key))
-        .sort(),
+      configuredEnvironmentKeys: configuredEnvironmentKeys(process.env),
     },
     null,
     2,
