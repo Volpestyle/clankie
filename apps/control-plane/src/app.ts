@@ -61,6 +61,8 @@ import {
   WorkerResultSchema,
   WorkerStatusProvenanceSchema,
   WorkerStatusStateSchema,
+  WorkerTranscriptAuthFailureSchema,
+  WorkerTranscriptKeySchema,
   WorkerTurnSettledDataSchema,
   WorkerTurnStartedDataSchema,
   WorkerWaitingUserDataSchema,
@@ -84,6 +86,8 @@ import {
   type TaskSpec,
   type TrackerNarrativeWriteResult,
   type WorkerResult,
+  type WorkerTranscriptKey,
+  type WorkerTranscriptTailLine,
 } from "@clankie/protocol";
 import {
   TrackerAuthorityConflictError,
@@ -133,6 +137,7 @@ import {
   isProjectionEventStore,
   type WorkspaceBindingResolver,
 } from "./tracker-ceremony.ts";
+import type { WorkerTranscriptReadPort } from "./worker-transcripts.ts";
 
 const logger = createLogger({ service: "clankie-control-plane", version: "0.1.0" });
 const LINEAR_DELIVERY_RETENTION_MS = 7 * 60 * 60 * 1_000;
@@ -262,6 +267,8 @@ export interface ControlPlaneDependencies {
    * In-memory stores are test-only and must be injected explicitly.
    */
   attentionDeliveryStore?: AttentionDeliveryStore;
+  /** Injected runner-owned transcript reader. The control plane never persists transcript entries. */
+  workerTranscripts?: WorkerTranscriptReadPort;
 }
 
 export type WorkerSteerAuthorizer = (input: {
@@ -1157,6 +1164,52 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     if (denial.denied === "revoked") return context.json({ error: "revoked" }, 401);
     if (denial.denied === "expired") return context.json({ error: "expired" }, 401);
     return context.json({ error: "device_authentication_required" }, 401);
+  };
+
+  type TranscriptReadDenial =
+    | {
+        body: ReturnType<typeof WorkerTranscriptAuthFailureSchema.parse>;
+        status: 401 | 403;
+      }
+    | { body: { error: "worker_transcript_authentication_unavailable" }; status: 503 };
+
+  const transcriptReadDenial = async (context: Context): Promise<TranscriptReadDenial | undefined> => {
+    const identity = await authenticateDevice(context.req.raw);
+    if (identity === "unavailable") {
+      return { body: { error: "worker_transcript_authentication_unavailable" }, status: 503 };
+    }
+    if ("denied" in identity) {
+      const reason =
+        identity.denied === "expired"
+          ? "session_expired"
+          : identity.denied === "revoked"
+            ? "device_revoked"
+            : "authentication_required";
+      return {
+        body: WorkerTranscriptAuthFailureSchema.parse({
+          schemaVersion: 1,
+          outcome: "auth_failed",
+          reason,
+        }),
+        status: 401,
+      };
+    }
+    if (!identity.grants.chat) {
+      return {
+        body: WorkerTranscriptAuthFailureSchema.parse({
+          schemaVersion: 1,
+          outcome: "auth_failed",
+          reason: "permission_denied",
+        }),
+        status: 403,
+      };
+    }
+    return undefined;
+  };
+
+  const authorizeTranscriptRead = async (context: Context): Promise<Response | undefined> => {
+    const denial = await transcriptReadDenial(context);
+    return denial ? context.json(denial.body, denial.status) : undefined;
   };
 
   app.get("/health", (context) =>
@@ -3066,7 +3119,145 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     return context.json({ accepted: true, command: redactedSteerRecord(command) }, 202);
   });
 
+  app.get("/v1/workers/:id/transcript", async (context) => {
+    const authorization = await authorizeTranscriptRead(context);
+    if (authorization) return authorization;
+    const key = transcriptKeyFromRequest(context);
+    if (!key) return context.json({ error: "invalid_worker_transcript_key" }, 400);
+    if (!dependencies.workerTranscripts) {
+      return context.json({ error: "worker_transcript_unavailable" }, 503);
+    }
+    try {
+      const outcome = await dependencies.workerTranscripts.snapshot(key, context.req.raw.signal);
+      if (outcome.outcome === "snapshot") {
+        if (!sameTranscriptKey(outcome.key, key)) {
+          return context.json({ error: "worker_transcript_identity_mismatch" }, 502);
+        }
+        return context.json({
+          ...outcome,
+          entries: outcome.entries.filter((entry) => entry.visibility === "garden"),
+        });
+      }
+      if (
+        outcome.outcome === "run_replaced" &&
+        (outcome.replacementKey.missionId !== key.missionId || outcome.replacementKey.taskId !== key.taskId)
+      ) {
+        return context.json({ error: "worker_transcript_identity_mismatch" }, 502);
+      }
+      return context.json(outcome, outcome.outcome === "run_replaced" ? 409 : 404);
+    } catch {
+      return context.json({ error: "worker_transcript_upstream_failure" }, 502);
+    }
+  });
+
+  app.get("/v1/workers/:id/transcript/tail", async (context) => {
+    const authorization = await authorizeTranscriptRead(context);
+    if (authorization) return authorization;
+    const key = transcriptKeyFromRequest(context);
+    if (!key) return context.json({ error: "invalid_worker_transcript_key" }, 400);
+    const cursor = context.req.query("cursor");
+    if (!cursor || cursor.length > 2_048)
+      return context.json({ error: "worker_transcript_cursor_required" }, 400);
+    if (!dependencies.workerTranscripts) {
+      return context.json({ error: "worker_transcript_unavailable" }, 503);
+    }
+    const abort = new AbortController();
+    const requestAbort = () => abort.abort();
+    context.req.raw.signal.addEventListener("abort", requestAbort, { once: true });
+    let opened;
+    try {
+      opened = await dependencies.workerTranscripts.openTail(key, cursor, abort.signal);
+    } catch {
+      context.req.raw.signal.removeEventListener("abort", requestAbort);
+      return context.json({ error: "worker_transcript_upstream_failure" }, 502);
+    }
+    if (opened.outcome !== "tail") {
+      context.req.raw.signal.removeEventListener("abort", requestAbort);
+      if (
+        opened.outcome === "run_replaced" &&
+        (opened.replacementKey.missionId !== key.missionId || opened.replacementKey.taskId !== key.taskId)
+      )
+        return context.json({ error: "worker_transcript_identity_mismatch" }, 502);
+      return context.json(opened, opened.outcome === "not_found" ? 404 : 409);
+    }
+    const iterator = opened.stream[Symbol.asyncIterator]();
+    const body = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        try {
+          while (true) {
+            const next = await iterator.next();
+            if (next.done) {
+              controller.close();
+              return;
+            }
+            if (!validTranscriptTailLine(next.value, key)) {
+              abort.abort();
+              controller.error(new Error("worker_transcript_identity_mismatch"));
+              return;
+            }
+            if (next.value.entry.visibility !== "garden") continue;
+            const denial = await transcriptReadDenial(context);
+            if (denial) {
+              abort.abort();
+              await iterator.return?.();
+              if ("outcome" in denial.body) {
+                controller.enqueue(new TextEncoder().encode(`${JSON.stringify(denial.body)}\n`));
+                controller.close();
+              } else {
+                controller.error(new Error(denial.body.error));
+              }
+              return;
+            }
+            controller.enqueue(new TextEncoder().encode(`${JSON.stringify(next.value)}\n`));
+            return;
+          }
+        } catch (error) {
+          controller.error(error);
+        }
+      },
+      async cancel() {
+        abort.abort();
+        await iterator.return?.();
+      },
+    });
+    return new Response(body, {
+      status: 200,
+      headers: {
+        "content-type": "application/x-ndjson; charset=utf-8",
+        "cache-control": "no-store",
+      },
+    });
+  });
+
   return app;
+}
+
+function transcriptKeyFromRequest(context: Context): WorkerTranscriptKey | undefined {
+  const parsed = WorkerTranscriptKeySchema.safeParse({
+    missionId: context.req.query("missionId"),
+    taskId: context.req.query("taskId"),
+    workerRunId: context.req.param("id"),
+  });
+  return parsed.success ? parsed.data : undefined;
+}
+
+function sameTranscriptKey(left: WorkerTranscriptKey, right: WorkerTranscriptKey): boolean {
+  return (
+    left.missionId === right.missionId &&
+    left.taskId === right.taskId &&
+    left.workerRunId === right.workerRunId
+  );
+}
+
+function validTranscriptTailLine(line: WorkerTranscriptTailLine, key: WorkerTranscriptKey): boolean {
+  return sameTranscriptKey(
+    {
+      missionId: line.entry.missionId,
+      taskId: line.entry.taskId,
+      workerRunId: line.entry.workerRunId,
+    },
+    key,
+  );
 }
 
 function isRunnerStatusEvent(type: string): boolean {

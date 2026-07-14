@@ -77,7 +77,7 @@ Provider raw streams are optional diagnostic artifacts with shorter retention th
 
 ## Support bundle
 
-`pnpm support:bundle` creates a redacted archive containing versions, doctrine hashes, recent semantic logs, event-chain verification, and configuration shape. It excludes environment values, credentials, raw audio, full prompts, source files, and terminal history unless explicitly selected.
+`pnpm support:bundle` creates a redacted archive containing versions, doctrine hashes, recent semantic logs, event-chain verification, and configuration shape. It excludes environment values, credentials, raw audio, full prompts, source files, terminal history, and runner worker-transcript projections. Transcript entries remain excluded even though their runner-owned store is already redacted.
 
 ## Error reporting
 

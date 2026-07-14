@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import type {
   CreateOperatorConversationRequest,
@@ -53,6 +54,10 @@ import {
   SubmitOperatorConversationTurnSchema,
   TrackerNarrativeActionSchema,
   TrackerNarrativeWriteSchema,
+  WorkerTranscriptAuthFailureSchema,
+  WorkerTranscriptCursorExpiredSchema,
+  WorkerTranscriptSnapshotSchema,
+  WorkerTranscriptTailLineSchema,
   WorkerStatusEventSchema,
 } from "../src/index.ts";
 
@@ -304,6 +309,44 @@ describe("protocol", () => {
     ).toThrow();
     expect(OperatorConversationServiceResultSchema.options).toHaveLength(6);
     expect(typeof createOperatorConversationServiceClient).toBe("function");
+  });
+
+  it("validates the recorded garden worker transcript fixture and typed recovery envelopes", async () => {
+    const fixture = JSON.parse(
+      await readFile(new URL("./fixtures/garden-worker-transcript.json", import.meta.url), "utf8"),
+    );
+    const snapshot = WorkerTranscriptSnapshotSchema.parse(fixture);
+    expect(snapshot.entries.map((entry) => entry.kind)).toEqual([
+      "status",
+      "narrative",
+      "action",
+      "artifact",
+      "blocker",
+      "completion",
+    ]);
+    expect(
+      WorkerTranscriptTailLineSchema.parse({
+        schemaVersion: 1,
+        type: "worker_transcript.entry",
+        entry: snapshot.entries[0],
+        cursor: snapshot.nextCursor,
+      }).entry.sequence,
+    ).toBe(1);
+    expect(
+      WorkerTranscriptCursorExpiredSchema.parse({
+        schemaVersion: 1,
+        outcome: "cursor_expired",
+        retainedFromSequence: 4,
+        snapshotCursor: snapshot.nextCursor,
+      }).outcome,
+    ).toBe("cursor_expired");
+    expect(
+      WorkerTranscriptAuthFailureSchema.parse({
+        schemaVersion: 1,
+        outcome: "auth_failed",
+        reason: "permission_denied",
+      }).reason,
+    ).toBe("permission_denied");
   });
 
   it("validates additive mission trigger records and semantic events", () => {

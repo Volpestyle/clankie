@@ -16,6 +16,7 @@ import {
 import type { ProviderMetadata } from "./provider-factory.ts";
 import type { WorktreeLease, WorktreeManager } from "./worktrees.ts";
 import type { TerminalManager } from "./terminals.ts";
+import type { WorkerTranscriptProjection } from "./worker-transcript.ts";
 import {
   runVerificationChecks,
   type VerificationCheck,
@@ -69,6 +70,8 @@ export interface MissionWorkerOptions {
   steeringPollIntervalMs?: number;
   hasHumanControlLease?: (workerRunId: string) => boolean | Promise<boolean>;
   terminalManager?: Pick<TerminalManager, "bindNativeSession">;
+  /** Runner-owned redacted semantic transcript; raw provider/terminal output never enters it. */
+  transcriptProjection?: WorkerTranscriptProjection;
 }
 
 interface AttemptFacts {
@@ -244,6 +247,8 @@ export class MissionWorker {
             if (!RUNNER_EVENT_TYPES.has(event.type)) return;
             const data = normalizeRunnerEventData(event.type, event.data);
             if (!data) return;
+            const nextSequence = eventSequence + 1;
+            const eventId = `${assignment.workerRunId}:${assignment.attempt}:${nextSequence}`;
             if (event.type === "worker.native_session.bound" && typeof data.nativeSessionId === "string") {
               nativeSessionId = data.nativeSessionId;
               this.options.terminalManager?.bindNativeSession(
@@ -259,13 +264,20 @@ export class MissionWorker {
               blockedOnUser = true;
               abort.abort(new Error("noninteractive_worker_waiting_user"));
             }
-            eventSequence += 1;
+            eventSequence = nextSequence;
+            if (this.options.transcriptProjection) {
+              reports.push(
+                this.options.transcriptProjection.append(
+                  transcriptCandidateForRunnerEvent(assignment, eventId, event.type, data),
+                ),
+              );
+            }
             reports.push(
               retry(
                 () =>
                   this.options.client.recordWorkerEvent(assignment.workerRunId, {
                     attempt: assignment.attempt,
-                    eventId: `${assignment.workerRunId}:${assignment.attempt}:${eventSequence}`,
+                    eventId,
                     type: event.type,
                     data,
                   }),
@@ -276,6 +288,21 @@ export class MissionWorker {
             );
           },
         });
+        if (this.options.transcriptProjection) {
+          reports.push(
+            this.options.transcriptProjection.append({
+              key: transcriptKey(assignment),
+              occurredAt: new Date().toISOString(),
+              correlationId: assignment.workerRunId,
+              profileHash: assignment.profileHash,
+              sourceEventId: `${assignment.workerRunId}:${assignment.attempt}:summary`,
+              source: "worker_summary",
+              trust: "worker_authored",
+              kind: "narrative",
+              data: { summaryCode: `reported_${providerResult.status}` },
+            }),
+          );
+        }
         result = observedProviderResult(providerResult.status, assignment.worker.id);
       } catch {
         result = failedResult("Worker adapter failed before producing a trusted result.");
@@ -496,6 +523,31 @@ export class MissionWorker {
       },
       ...(facts.diagnosis ? { diagnosis: facts.diagnosis } : {}),
     };
+    if (this.options.transcriptProjection) {
+      const occurredAt = new Date().toISOString();
+      await this.options.transcriptProjection.append({
+        key: transcriptKey(assignment),
+        occurredAt,
+        correlationId: assignment.workerRunId,
+        profileHash: assignment.profileHash,
+        sourceEventId: `${assignment.workerRunId}:${assignment.attempt}:evidence`,
+        source: "runner_settlement",
+        trust: "runner_observed",
+        kind: "artifact",
+        data: { ref: stored.ref },
+      });
+      await this.options.transcriptProjection.append({
+        key: transcriptKey(assignment),
+        occurredAt,
+        correlationId: assignment.workerRunId,
+        profileHash: assignment.profileHash,
+        sourceEventId: `${assignment.workerRunId}:${assignment.attempt}:completion`,
+        source: "runner_settlement",
+        trust: "runner_observed",
+        kind: "completion",
+        data: { status: result.status, evidenceRefs: [stored.ref] },
+      });
+    }
     return retry(
       () => this.options.client.settleWorker(assignment.workerRunId, assignment.attempt, trustedResult),
       this.options.reportAttempts,
@@ -613,6 +665,63 @@ const RUNNER_EVENT_TYPES = new Set([
   "worker.plan.updated",
   "worker.diff.updated",
 ]);
+
+function transcriptKey(assignment: RunnerAssignment) {
+  return {
+    missionId: assignment.missionId,
+    taskId: assignment.task.id,
+    workerRunId: assignment.workerRunId,
+  };
+}
+
+function transcriptCandidateForRunnerEvent(
+  assignment: RunnerAssignment,
+  eventId: string,
+  type: string,
+  data: Record<string, unknown>,
+) {
+  const common = {
+    key: transcriptKey(assignment),
+    occurredAt: typeof data.observedAt === "string" ? data.observedAt : new Date().toISOString(),
+    correlationId: assignment.workerRunId,
+    profileHash: assignment.profileHash,
+    sourceEventId: eventId,
+    source: "runner_event" as const,
+    trust: "runner_observed" as const,
+  };
+  if (type === "worker.waiting_user") {
+    return { ...common, kind: "blocker" as const, data };
+  }
+  if (type === "worker.turn.started" || type === "worker.turn.settled" || type === "worker.status.signal") {
+    return { ...common, kind: "status" as const, data };
+  }
+  const action =
+    type === "worker.command.completed"
+      ? "command"
+      : type === "worker.file_change.completed"
+        ? "file_change"
+        : type === "worker.plan.updated"
+          ? "plan"
+          : type === "worker.diff.updated"
+            ? "diff"
+            : type === "worker.native_session.bound"
+              ? "session"
+              : "worker";
+  return {
+    ...common,
+    kind: "action" as const,
+    data: {
+      action,
+      result:
+        data.result === "passed"
+          ? "succeeded"
+          : type.endsWith(".updated") || type === "worker.native_session.bound"
+            ? "started"
+            : "failed",
+      fingerprint: data.commandFingerprint,
+    },
+  };
+}
 
 function observedProviderResult(status: WorkerResult["status"], workerId: string): WorkerResult {
   return {

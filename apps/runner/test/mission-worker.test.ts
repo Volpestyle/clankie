@@ -22,6 +22,7 @@ import {
   type VerificationSandbox,
 } from "../src/verification-checks.ts";
 import { WorktreeManager } from "../src/worktrees.ts";
+import { WorkerTranscriptProjection } from "../src/worker-transcript.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -660,6 +661,9 @@ describe("MissionWorker", () => {
     const control = new FakeControl([
       assignment("run-evidence-bundle", implementer, "implementation", ["src/**"]),
     ]);
+    const transcriptProjection = await WorkerTranscriptProjection.open(
+      join(fixture.artifacts, "worker-transcripts"),
+    );
     await new MissionWorker({
       client: control,
       adapters: [implementer],
@@ -668,6 +672,7 @@ describe("MissionWorker", () => {
       providerMetadata: new Map([
         ["codex-implementation", { provider: "codex" as const, version: "codex-1.2.3" }],
       ]),
+      transcriptProjection,
     }).runOnce();
 
     const path = join(fixture.artifacts, "attempts", "mission-1", "run-evidence-bundle-attempt-1.json");
@@ -687,6 +692,21 @@ describe("MissionWorker", () => {
     expect(bundle).toHaveProperty("assumptions");
     expect(serialized).not.toContain(secret);
     expect(JSON.stringify(control.settlements)).not.toContain(secret);
+    const transcript = transcriptProjection.snapshot({
+      missionId: "mission-1",
+      taskId: "implementation",
+      workerRunId: "run-evidence-bundle",
+    });
+    expect(transcript.outcome).toBe("snapshot");
+    if (transcript.outcome !== "snapshot") throw new Error("transcript snapshot expected");
+    expect(transcript.entries.map((entry) => entry.kind)).toEqual([
+      "action",
+      "action",
+      "narrative",
+      "artifact",
+      "completion",
+    ]);
+    expect(JSON.stringify(transcript)).not.toContain(secret);
   });
 
   it("blocks an unexpected waiting_user request in a noninteractive gate", async () => {

@@ -20,6 +20,11 @@ import {
   readDevHandoffConfig,
   startTerminalGatewayDevHandoff,
 } from "./terminal-gateway-dev-handoff.ts";
+import { WorkerTranscriptProjection } from "./worker-transcript.ts";
+import {
+  createWorkerTranscriptGateway,
+  WORKER_TRANSCRIPT_GATEWAY_PORT,
+} from "./worker-transcript-gateway.ts";
 
 if (process.argv.includes("--recovery-probe")) {
   const { runRecoveryProbeFromCli } = await import("./recovery-probe.ts");
@@ -72,7 +77,14 @@ if (repoPath) {
 }
 
 const runnerStateRoot = process.env.CLANKIE_RUNNER_STATE ?? join(homedir(), ".clankie", "runner");
+const runnerToken = process.env.CLANKIE_RUNNER_TOKEN;
 const terminalManager = new TerminalManager();
+const transcriptProjection = await WorkerTranscriptProjection.open(
+  process.env.CLANKIE_WORKER_TRANSCRIPT_ROOT ?? join(runnerStateRoot, "worker-transcripts"),
+  {
+    maxEntriesPerRun: Number(process.env.CLANKIE_WORKER_TRANSCRIPT_MAX_ENTRIES ?? 500),
+  },
+);
 const runnerEvents = new SqliteEventStore(join(runnerStateRoot, "runner-events.db"));
 try {
   const processLeases = new ProcessLeaseManager({
@@ -121,7 +133,25 @@ try {
   );
 }
 
-const runnerToken = process.env.CLANKIE_RUNNER_TOKEN;
+if (runnerToken) {
+  const transcriptGateway = await createWorkerTranscriptGateway({
+    projection: transcriptProjection,
+    token: runnerToken,
+    port: Number(process.env.CLANKIE_WORKER_TRANSCRIPT_PORT ?? WORKER_TRANSCRIPT_GATEWAY_PORT),
+  });
+  const closeTranscriptGateway = () => void transcriptGateway.close().catch(() => undefined);
+  process.once("SIGINT", closeTranscriptGateway);
+  process.once("SIGTERM", closeTranscriptGateway);
+  logger.info(
+    {
+      event: "worker_transcript.gateway.enabled",
+      host: transcriptGateway.address.host,
+      port: transcriptGateway.address.port,
+    },
+    "runner-owned worker transcript gateway enabled",
+  );
+}
+
 if (!repoPath) {
   logger.error("CLANKIE_REPO_PATH is required; mission execution is unavailable");
 } else if (!runnerToken) {
@@ -274,6 +304,7 @@ if (!repoPath) {
       waitingUserPolicy: process.env.CLANKIE_NONINTERACTIVE_WAITING_USER === "allow" ? "allow" : "block",
       hasHumanControlLease: (workerRunId) => terminalManager.hasHumanControl(workerRunId),
       terminalManager,
+      transcriptProjection,
       ...(process.env.CLANKIE_BASE_REF ? { baseRef: process.env.CLANKIE_BASE_REF } : {}),
     });
     logger.info(

@@ -1133,6 +1133,214 @@ export const WorkerStatusProvenanceSchema = z.object({
 });
 export type WorkerStatusProvenance = z.infer<typeof WorkerStatusProvenanceSchema>;
 
+// --- Runner-owned worker transcript projection (VUH-865) ---
+
+export const WORKER_TRANSCRIPT_SCHEMA_VERSION = 1 as const;
+
+export const WorkerTranscriptKeySchema = z
+  .object({
+    missionId: MissionIdSchema,
+    taskId: TaskIdSchema,
+    workerRunId: WorkerRunIdSchema,
+  })
+  .strict();
+export type WorkerTranscriptKey = z.infer<typeof WorkerTranscriptKeySchema>;
+
+export const WorkerTranscriptVisibilitySchema = z.enum(["garden", "operator"]);
+export type WorkerTranscriptVisibility = z.infer<typeof WorkerTranscriptVisibilitySchema>;
+
+export const WorkerTranscriptRedactionClassSchema = z.enum([
+  "authorization",
+  "token",
+  "credential",
+  "private_prompt",
+  "chain_of_thought",
+  "raw_audio",
+  "unbounded_output",
+]);
+export type WorkerTranscriptRedactionClass = z.infer<typeof WorkerTranscriptRedactionClassSchema>;
+
+export const WorkerTranscriptRedactionSchema = z
+  .object({
+    classification: z.enum(["none", "secrets_removed", "private_content_removed", "metadata_only"]),
+    classes: z.array(WorkerTranscriptRedactionClassSchema),
+  })
+  .strict();
+export type WorkerTranscriptRedaction = z.infer<typeof WorkerTranscriptRedactionSchema>;
+
+export const WorkerTranscriptProvenanceSchema = z
+  .object({
+    source: z.enum(["runner_event", "runner_settlement", "worker_summary"]),
+    sourceEventId: z.string().min(1).max(256),
+    trust: z.enum(["runner_observed", "worker_authored"]),
+  })
+  .strict();
+export type WorkerTranscriptProvenance = z.infer<typeof WorkerTranscriptProvenanceSchema>;
+
+const WorkerTranscriptEntryBase = {
+  schemaVersion: z.literal(WORKER_TRANSCRIPT_SCHEMA_VERSION),
+  entryId: z.string().min(1).max(512),
+  missionId: MissionIdSchema,
+  taskId: TaskIdSchema,
+  workerRunId: WorkerRunIdSchema,
+  sequence: z.number().int().positive(),
+  occurredAt: z.string().datetime(),
+  correlationId: z.string().min(1),
+  profileHash: z.string().min(1),
+  visibility: WorkerTranscriptVisibilitySchema,
+  redaction: WorkerTranscriptRedactionSchema,
+  provenance: WorkerTranscriptProvenanceSchema,
+};
+
+export const WorkerTranscriptEntrySchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      ...WorkerTranscriptEntryBase,
+      kind: z.literal("status"),
+      data: z
+        .object({
+          state: z.enum([
+            "unknown",
+            "working",
+            "idle",
+            "waiting_dependency",
+            "waiting_user",
+            "blocked",
+            "failed",
+            "completed",
+            "offline",
+          ]),
+          summary: z.string().trim().min(1).max(512),
+        })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...WorkerTranscriptEntryBase,
+      kind: z.literal("narrative"),
+      data: z.object({ summary: z.string().trim().min(1).max(512) }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...WorkerTranscriptEntryBase,
+      kind: z.literal("action"),
+      data: z
+        .object({
+          action: z.string().trim().min(1).max(200),
+          result: z.enum(["started", "succeeded", "failed"]),
+          fingerprint: z
+            .string()
+            .regex(/^[a-f0-9]{64}$/u)
+            .optional(),
+        })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...WorkerTranscriptEntryBase,
+      kind: z.literal("artifact"),
+      data: z
+        .object({
+          label: z.string().trim().min(1).max(200),
+          ref: z.string().trim().min(1).max(1_024),
+          summary: z.string().trim().min(1).max(512),
+        })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...WorkerTranscriptEntryBase,
+      kind: z.literal("blocker"),
+      data: z.object({ summary: z.string().trim().min(1).max(512) }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...WorkerTranscriptEntryBase,
+      kind: z.literal("completion"),
+      data: z
+        .object({
+          status: z.enum(["succeeded", "failed", "blocked", "cancelled"]),
+          summary: z.string().trim().min(1).max(512),
+          evidenceRefs: z.array(z.string().trim().min(1).max(1_024)).max(100),
+        })
+        .strict(),
+    })
+    .strict(),
+]);
+export type WorkerTranscriptEntry = z.infer<typeof WorkerTranscriptEntrySchema>;
+
+export const WorkerTranscriptSnapshotSchema = z
+  .object({
+    schemaVersion: z.literal(WORKER_TRANSCRIPT_SCHEMA_VERSION),
+    outcome: z.literal("snapshot"),
+    key: WorkerTranscriptKeySchema,
+    generation: z.string().min(1).max(256),
+    retainedFromSequence: z.number().int().positive(),
+    nextCursor: z.string().min(1).max(2_048),
+    entries: z.array(WorkerTranscriptEntrySchema),
+  })
+  .strict();
+export type WorkerTranscriptSnapshot = z.infer<typeof WorkerTranscriptSnapshotSchema>;
+
+export const WorkerTranscriptCursorExpiredSchema = z
+  .object({
+    schemaVersion: z.literal(WORKER_TRANSCRIPT_SCHEMA_VERSION),
+    outcome: z.literal("cursor_expired"),
+    retainedFromSequence: z.number().int().positive(),
+    snapshotCursor: z.string().min(1).max(2_048),
+  })
+  .strict();
+export type WorkerTranscriptCursorExpired = z.infer<typeof WorkerTranscriptCursorExpiredSchema>;
+
+export const WorkerTranscriptRunReplacedSchema = z
+  .object({
+    schemaVersion: z.literal(WORKER_TRANSCRIPT_SCHEMA_VERSION),
+    outcome: z.literal("run_replaced"),
+    replacementKey: WorkerTranscriptKeySchema,
+    snapshotCursor: z.string().min(1).max(2_048),
+  })
+  .strict();
+export type WorkerTranscriptRunReplaced = z.infer<typeof WorkerTranscriptRunReplacedSchema>;
+
+export const WorkerTranscriptNotFoundSchema = z
+  .object({
+    schemaVersion: z.literal(WORKER_TRANSCRIPT_SCHEMA_VERSION),
+    outcome: z.literal("not_found"),
+  })
+  .strict();
+export type WorkerTranscriptNotFound = z.infer<typeof WorkerTranscriptNotFoundSchema>;
+
+export const WorkerTranscriptReadOutcomeSchema = z.discriminatedUnion("outcome", [
+  WorkerTranscriptSnapshotSchema,
+  WorkerTranscriptRunReplacedSchema,
+  WorkerTranscriptNotFoundSchema,
+]);
+export type WorkerTranscriptReadOutcome = z.infer<typeof WorkerTranscriptReadOutcomeSchema>;
+
+export const WorkerTranscriptTailLineSchema = z
+  .object({
+    schemaVersion: z.literal(WORKER_TRANSCRIPT_SCHEMA_VERSION),
+    type: z.literal("worker_transcript.entry"),
+    entry: WorkerTranscriptEntrySchema,
+    cursor: z.string().min(1).max(2_048),
+  })
+  .strict();
+export type WorkerTranscriptTailLine = z.infer<typeof WorkerTranscriptTailLineSchema>;
+
+export const WorkerTranscriptAuthFailureSchema = z
+  .object({
+    schemaVersion: z.literal(WORKER_TRANSCRIPT_SCHEMA_VERSION),
+    outcome: z.literal("auth_failed"),
+    reason: z.enum(["authentication_required", "session_expired", "device_revoked", "permission_denied"]),
+  })
+  .strict();
+export type WorkerTranscriptAuthFailure = z.infer<typeof WorkerTranscriptAuthFailureSchema>;
+
 export const WorkerTurnStartedDataSchema = WorkerStatusProvenanceSchema.extend({
   state: z.literal("working"),
 });
