@@ -157,8 +157,65 @@ describe("Discord presence control-plane runtime (ADR 0024)", () => {
       });
       expect(runtime.writes).toHaveLength(1);
 
+      const restartedRuntime = new RecordingPresenceRuntime();
+      const restarted = await createControlPlane({
+        doctrine,
+        eventStore: durable,
+        discordPresenceRuntime: restartedRuntime,
+        authenticateCaptain: presenceCaptain,
+      });
+      const restartReplay = await post(
+        restarted,
+        "/v1/discord/presence-actions",
+        presenceWrite({
+          idempotencyKey: "presence-replayed-after-restart-before-loss-ack",
+          action: "discord.presence.send_message",
+          payload: { kind: "send_message", channelId: "c1", content: "must still not execute" },
+        }),
+      );
+      expect(restartReplay.status).toBe(409);
+      await expect(restartReplay.json()).resolves.toEqual({
+        error: "discord_presence_live_claim_stale",
+        claimedRevision: 2,
+      });
+      expect(restartedRuntime.writes).toHaveLength(0);
+
       blocking.releaseLossAppend();
       expect((await loss).status).toBe(200);
+
+      const recoveredRuntime = new RecordingPresenceRuntime();
+      const recovered = await createControlPlane({
+        doctrine,
+        eventStore: durable,
+        discordPresenceRuntime: recoveredRuntime,
+        authenticateCaptain: presenceCaptain,
+      });
+      const freshLossLifecycle = await recordPhase(
+        recovered,
+        "degraded",
+        3,
+        "gateway_disconnected",
+        "present",
+      );
+      expect(freshLossLifecycle.status).toBe(200);
+      await expect(freshLossLifecycle.json()).resolves.toMatchObject({
+        accepted: false,
+        session: { phase: "degraded", revision: 3 },
+      });
+      const ready = await recordPhase(recovered, "present", 4, "gateway_ready", "degraded");
+      expect(ready.status).toBe(200);
+      const afterFreshLifecycle = await post(
+        recovered,
+        "/v1/discord/presence-actions",
+        presenceWrite({
+          idempotencyKey: "presence-fresh-after-restart",
+          action: "discord.presence.send_message",
+          payload: { kind: "send_message", channelId: "c1", content: "allowed after freshness" },
+        }),
+        { sessionId: "discord:bot:fixture", phase: "present", revision: 4 },
+      );
+      expect(afterFreshLifecycle.status).toBe(200);
+      expect(recoveredRuntime.writes).toHaveLength(1);
     } finally {
       blocking.releaseLossAppend();
       durable.close();
@@ -726,15 +783,24 @@ function presenceWrite(
   };
 }
 
-async function post(app: Awaited<ReturnType<typeof createControlPlane>>, path: string, body: unknown) {
+async function post(
+  app: Awaited<ReturnType<typeof createControlPlane>>,
+  path: string,
+  body: unknown,
+  liveClaim: { sessionId: string; phase: string; revision: number } = {
+    sessionId: "discord:bot:fixture",
+    phase: "present",
+    revision: 2,
+  },
+) {
   return app.request(path, {
     method: "POST",
     headers: {
       authorization: "Bearer captain-secret",
       "content-type": "application/json",
-      "x-clankie-discord-presence-phase": "present",
-      "x-clankie-discord-presence-revision": "2",
-      "x-clankie-discord-presence-session": "discord:bot:fixture",
+      "x-clankie-discord-presence-phase": liveClaim.phase,
+      "x-clankie-discord-presence-revision": liveClaim.revision.toString(),
+      "x-clankie-discord-presence-session": liveClaim.sessionId,
     },
     body: JSON.stringify(body),
   });

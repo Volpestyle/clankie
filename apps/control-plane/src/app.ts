@@ -31,6 +31,7 @@ import {
   DiscordPresencePhaseEventSchema,
   isDiscordPresenceActionAvailable,
   resolveDiscordPresencePhaseToolExposure,
+  type DiscordPresenceSessionRecord,
 } from "@clankie/interactive-environment";
 import {
   MemoryFactSchema,
@@ -730,9 +731,11 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     logger.info({ missionCount: missions.size }, "mission records rebuilt from event store");
   }
   const discordPresenceSessions = new DiscordPresenceSessionProjection(storedEvents);
-  const discordPresenceLiveSessions = new Map(
-    discordPresenceSessions.list().map((session) => [discordPresenceBindingKey(session), session] as const),
-  );
+  // Durable replay restores status, but it cannot prove the bridge is still
+  // connected. Act gating therefore starts unvalidated after every process
+  // boot and remains fail-closed until an authenticated lifecycle delivery
+  // re-establishes the live watermark.
+  const discordPresenceLiveSessions = new Map<string, DiscordPresenceSessionRecord>();
 
   if (dependencies.trackerMirror) {
     for (const mission of missions.values()) {
@@ -1394,6 +1397,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
         if (session === undefined) {
           return context.json({ error: "discord_presence_event_id_conflict" }, 409);
         }
+        discordPresenceLiveSessions.set(sessionKey, session);
         return context.json({ accepted: false, session });
       }
       try {

@@ -83,3 +83,5 @@ action carries the live session id, phase, and monotonic revision. The control p
 claim to match its latest validated session record as well as the durable exposure. A loss-phase
 callback synchronously advances the live revision and fences the advertised tool catalog before
 durable publication can await I/O; bounded publication retries then reconcile the durable record.
+After a control-plane restart, act execution remains fail-closed until an authenticated lifecycle
+delivery revalidates the live watermark; durable session replay alone restores status only.

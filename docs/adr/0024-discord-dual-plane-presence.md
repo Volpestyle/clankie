@@ -89,7 +89,9 @@ presence session id, phase, and monotonic revision as a typed claim on each auth
 request. The control plane advances its latest validated live-session watermark before awaiting
 durable publication and requires the action claim to match that watermark exactly. Immediate loss
 therefore fences execution while durable publication is still in flight, and a pre-loss claim
-cannot be replayed through that window. Both the live claim and durable projection must permit the
+cannot be replayed through that window. After a control-plane restart, durable session replay
+restores status but leaves act gating unvalidated until a fresh authenticated lifecycle delivery
+re-establishes the live watermark. Both the live claim and durable projection must permit the
 action. Payload kinds never infer or widen phase.
 
 `degraded`, `failed`, and `off` remove act tools immediately. A disconnect, lease loss, or
