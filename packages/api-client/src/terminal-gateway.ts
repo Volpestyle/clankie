@@ -35,6 +35,7 @@ export interface TerminalGatewayCapabilities {
 /** A discovered terminal session, mapped from the wire discovery response. */
 export interface TerminalGatewaySession {
   terminalId: string;
+  workerRunId: string;
   label: string;
   source: "runner" | "herdr" | "mock";
   capabilities: TerminalGatewayCapabilities;
@@ -465,6 +466,7 @@ function mapSource(source: TerminalDiscoverySession["source"]): "runner" | "herd
 function mapSession(session: TerminalDiscoverySession): TerminalGatewaySession {
   return {
     terminalId: session.terminalId,
+    workerRunId: session.workerRunId,
     label: session.title,
     source: mapSource(session.source),
     capabilities: observeOnlyCapabilities(),

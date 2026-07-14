@@ -244,24 +244,28 @@ describe("TerminalGatewayClient.listSessions", () => {
     expect(sessions).toEqual([
       {
         terminalId: "t-runner",
+        workerRunId: "worker-1",
         label: "Runner PTY",
         source: "runner",
         capabilities: { observe: true, control: false, input: false, resize: false },
       },
       {
         terminalId: "t-tmux",
+        workerRunId: "worker-1",
         label: "Tmux",
         source: "runner",
         capabilities: { observe: true, control: false, input: false, resize: false },
       },
       {
         terminalId: "t-generic",
+        workerRunId: "worker-1",
         label: "Generic",
         source: "runner",
         capabilities: { observe: true, control: false, input: false, resize: false },
       },
       {
         terminalId: "t-herdr",
+        workerRunId: "worker-1",
         label: "Herdr",
         source: "herdr",
         capabilities: { observe: true, control: false, input: false, resize: false },
