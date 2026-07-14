@@ -207,6 +207,29 @@ describe("authenticated operator conversation relay", () => {
     for (const value of privateValues) expect(text).not.toContain(value);
   });
 
+  it("redacts credential-shaped values embedded in schema-allowed response strings", async () => {
+    const privateValues = ["eve-session-private", "continuation-private", "provider-key-private"];
+    const relay = await startRelay({
+      dispatch: async () => ({
+        op: "list",
+        schemaVersion: 1,
+        conversations: [
+          {
+            ...conversation,
+            title:
+              `sessionId=${privateValues[0]} continuationToken=${privateValues[1]} ` +
+              `providerCredential=${privateValues[2]}`,
+          },
+        ],
+      }),
+    });
+    const response = await post(relay.url, "/operator/v1/dispatch", { op: "list", schemaVersion: 1 });
+    const text = await response.text();
+    expect(response.status).toBe(200);
+    for (const value of privateValues) expect(text).not.toContain(value);
+    expect(text).toContain("[REDACTED]");
+  });
+
   it("has no approval completion route or callable operation", async () => {
     let dispatches = 0;
     const relay = await startRelay({
@@ -255,6 +278,27 @@ describe("authenticated operator conversation relay", () => {
     expect(logged).not.toContain(TOKEN);
     expect(logged).toContain("global-default");
     expect(logged).toContain("device-ios-1");
+  });
+
+  it("redacts authorization markers embedded in logged identifiers", async () => {
+    const records: unknown[] = [];
+    const logger: RelayConversationLogger = {
+      info: (fields, message) => records.push({ fields, message }),
+      warn: (fields, message) => records.push({ fields, message }),
+    };
+    const privateMarker = "logger-secret-token";
+    const conversationId = `authorization: Bearer ${privateMarker}`;
+    const relay = await startRelay({
+      logger,
+      dispatch: async () => ({ op: "get", schemaVersion: 1 }),
+    });
+    expect(
+      (await post(relay.url, "/operator/v1/dispatch", { op: "get", schemaVersion: 1, conversationId }))
+        .status,
+    ).toBe(200);
+    const logged = JSON.stringify(records);
+    expect(logged).not.toContain(privateMarker);
+    expect(logged).toContain("[REDACTED]");
   });
 });
 
@@ -324,7 +368,7 @@ describe("Eve NDJSON replay/tail", () => {
     expect(frames[0]).toMatchObject({ kind: "recovery", recovery: { code: "cursor_expired" } });
   });
 
-  it("rechecks device state while connected and stops before another upstream poll on revoke", async () => {
+  it("rechecks device state while connected and emits typed auth termination before another poll", async () => {
     let authCalls = 0;
     let dispatches = 0;
     const relay = await startRelay({
@@ -343,9 +387,49 @@ describe("Eve NDJSON replay/tail", () => {
         return emptyTailPage(request);
       },
     });
-    await expect(post(relay.url, OPERATOR_CONVERSATION_TAIL_PATH, tailRequest())).rejects.toThrow();
+    const response = await post(relay.url, OPERATOR_CONVERSATION_TAIL_PATH, tailRequest());
+    expect(parseNdjson(await response.text())).toEqual([
+      { kind: "auth_failure", failure: { schemaVersion: 1, outcome: "auth_failed", reason: "revoked" } },
+    ]);
     expect(authCalls).toBe(2);
     expect(dispatches).toBe(1);
+  });
+
+  it("reauthorizes after an in-flight upstream tail completes and before emitting its event", async () => {
+    let revoked = false;
+    let releaseDispatch!: () => void;
+    let markDispatchStarted!: () => void;
+    const dispatchStarted = new Promise<void>((resolve) => {
+      markDispatchStarted = resolve;
+    });
+    const dispatchReleased = new Promise<void>((resolve) => {
+      releaseDispatch = resolve;
+    });
+    const relay = await startRelay({
+      authorizeDevice: {
+        authorize: async () =>
+          revoked ? { authorized: false, denial: "revoked" } : { authorized: true, device: activeDevice },
+      },
+      dispatch: async (request) => {
+        if (request.op !== "tail") throw new Error("tail expected");
+        markDispatchStarted();
+        await dispatchReleased;
+        return {
+          ...emptyTailPage(request),
+          result: { ...emptyTailPage(request).result, events: [event(1)], nextCursor: event(1).cursor },
+        };
+      },
+    });
+    const pending = post(relay.url, OPERATOR_CONVERSATION_TAIL_PATH, tailRequest());
+    await dispatchStarted;
+    revoked = true;
+    releaseDispatch();
+    const response = await pending;
+    const text = await response.text();
+    expect(text).not.toContain("fixture response 1");
+    expect(parseNdjson(text)).toEqual([
+      { kind: "auth_failure", failure: { schemaVersion: 1, outcome: "auth_failed", reason: "revoked" } },
+    ]);
   });
 
   it("ships an RN-replayable recorded request/response and NDJSON fixture", async () => {
@@ -479,7 +563,16 @@ function emptyTailPage(request: Extract<OperatorConversationServiceRequest, { op
 
 type TailFrame =
   | { readonly kind: "event"; readonly event: OperatorConversationStreamEvent }
-  | { readonly kind: "recovery"; readonly recovery: OperatorConversationRecovery };
+  | { readonly kind: "recovery"; readonly recovery: OperatorConversationRecovery }
+  | {
+      readonly kind: "auth_failure";
+      readonly failure: {
+        readonly schemaVersion: 1;
+        readonly outcome: "auth_failed";
+        readonly reason: string;
+      };
+    };
+type TailAuthFailure = Extract<TailFrame, { kind: "auth_failure" }>["failure"];
 
 function parseNdjson(text: string): TailFrame[] {
   return text
@@ -491,12 +584,23 @@ function parseNdjson(text: string): TailFrame[] {
         readonly kind?: unknown;
         readonly event?: unknown;
         readonly recovery?: unknown;
+        readonly failure?: unknown;
       };
       if (frame.kind === "event") {
         return { kind: "event", event: OperatorConversationStreamEventSchema.parse(frame.event) };
       }
       if (frame.kind === "recovery") {
         return { kind: "recovery", recovery: OperatorConversationRecoverySchema.parse(frame.recovery) };
+      }
+      if (frame.kind === "auth_failure") {
+        const failure = frame.failure as TailAuthFailure | undefined;
+        if (
+          failure?.schemaVersion === 1 &&
+          failure.outcome === "auth_failed" &&
+          typeof failure.reason === "string"
+        ) {
+          return { kind: "auth_failure", failure };
+        }
       }
       throw new Error("unknown operator conversation tail frame");
     });

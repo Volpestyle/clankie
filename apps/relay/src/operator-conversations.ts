@@ -106,7 +106,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
               options.dispatch(serviceRequest),
             )
           : await options.dispatch(serviceRequest);
-      const publicResult = OperatorConversationServiceResultSchema.parse(result);
+      const publicResult = publicConversationResult(result);
       writeJson(response, 200, publicResult);
       logger.info(logFields(authorization, serviceRequest, 200, publicResult), "conversation relay request");
     } catch {
@@ -141,31 +141,31 @@ async function streamTail(input: StreamTailInput): Promise<void> {
       logger.warn(
         {
           route: "tail",
-          conversationId: request.tail.conversationId,
-          surfaceClientId: request.tail.surfaceClientId,
+          conversationId: redactSensitiveString(request.tail.conversationId),
+          surfaceClientId: redactSensitiveString(request.tail.surfaceClientId),
           denial: authorization.denial,
         },
         "conversation tail authorization revoked",
       );
-      response.destroy();
+      await writeTailAuthFailure(response, authorization.denial);
       return;
     }
     if (!authorization.device.grants.chat) {
       logger.warn(
         {
           route: "tail",
-          conversationId: request.tail.conversationId,
-          surfaceClientId: request.tail.surfaceClientId,
+          conversationId: redactSensitiveString(request.tail.conversationId),
+          surfaceClientId: redactSensitiveString(request.tail.surfaceClientId),
           denial: "chat_grant_required",
         },
         "conversation tail authorization revoked",
       );
-      response.destroy();
+      await writeTailAuthFailure(response, "chat_grant_required");
       return;
     }
     let result: OperatorConversationServiceResult;
     try {
-      result = OperatorConversationServiceResultSchema.parse(
+      result = publicConversationResult(
         await options.dispatch({
           ...request,
           tail: { ...request.tail, ...(cursor === undefined ? {} : { cursor }) },
@@ -175,9 +175,9 @@ async function streamTail(input: StreamTailInput): Promise<void> {
       logger.warn(
         {
           route: "tail",
-          deviceId: authorization.device.deviceId,
-          conversationId: request.tail.conversationId,
-          surfaceClientId: request.tail.surfaceClientId,
+          deviceId: redactSensitiveString(authorization.device.deviceId),
+          conversationId: redactSensitiveString(request.tail.conversationId),
+          surfaceClientId: redactSensitiveString(request.tail.surfaceClientId),
         },
         "conversation tail upstream failure",
       );
@@ -186,6 +186,21 @@ async function streamTail(input: StreamTailInput): Promise<void> {
     }
     if (result.op !== "tail") {
       response.destroy();
+      return;
+    }
+    authorization = await options.authorizeDevice.authorize(input.token);
+    const emissionDenial = tailAuthorizationDenial(authorization);
+    if (emissionDenial !== undefined) {
+      logger.warn(
+        {
+          route: "tail",
+          conversationId: redactSensitiveString(request.tail.conversationId),
+          surfaceClientId: redactSensitiveString(request.tail.surfaceClientId),
+          denial: emissionDenial,
+        },
+        "conversation tail authorization revoked",
+      );
+      await writeTailAuthFailure(response, emissionDenial);
       return;
     }
     const page = result.result;
@@ -284,16 +299,55 @@ function logFields(
     service: "clankie-relay",
     route: "operator_conversation",
     op: request.op,
-    deviceId: authorization.device.deviceId,
+    deviceId: redactSensitiveString(authorization.device.deviceId),
     statusCode,
     ...(subject === undefined || !("conversationId" in subject)
       ? {}
-      : { conversationId: subject.conversationId }),
+      : { conversationId: redactSensitiveString(subject.conversationId) }),
     ...(subject === undefined || !("surfaceClientId" in subject)
       ? {}
-      : { surfaceClientId: subject.surfaceClientId }),
+      : { surfaceClientId: redactSensitiveString(subject.surfaceClientId) }),
     ...(resultStatus === undefined ? {} : { resultStatus }),
   };
+}
+
+function tailAuthorizationDenial(authorization: RelayDeviceAuthorization): string | undefined {
+  if (!authorization.authorized) return authorization.denial;
+  return authorization.device.grants.chat ? undefined : "chat_grant_required";
+}
+
+async function writeTailAuthFailure(response: ServerResponse, reason: string): Promise<void> {
+  await writeNdjson(response, {
+    kind: "auth_failure",
+    failure: { schemaVersion: 1, outcome: "auth_failed", reason },
+  });
+  response.end();
+}
+
+function publicConversationResult(value: unknown): OperatorConversationServiceResult {
+  const parsed = OperatorConversationServiceResultSchema.parse(value);
+  return OperatorConversationServiceResultSchema.parse(redactPublicValue(parsed));
+}
+
+function redactPublicValue(value: unknown): unknown {
+  if (typeof value === "string") return redactSensitiveString(value);
+  if (Array.isArray(value)) return value.map(redactPublicValue);
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, entry]) => [key, redactPublicValue(entry)]),
+  );
+}
+
+/** Mirrors the runner transcript authorization/token/credential redaction classes at the relay boundary. */
+function redactSensitiveString(value: string): string {
+  return value
+    .replace(/\bauthorization\s*:\s*(?:bearer|basic)\s+[^\s,;]+/giu, "authorization: [REDACTED]")
+    .replace(/\bbearer\s+[A-Za-z0-9._~+/-]{8,}/giu, "Bearer [REDACTED]")
+    .replace(/\b(?:sk-|ghp_|github_pat_|xox[baprs]-)[_A-Za-z0-9-]{8,}/gu, "[REDACTED]")
+    .replace(
+      /\b(?:(?:eve[_ -]?)?session(?:[_ -]?(?:id|token))?|(?:access|refresh|continuation)[_ -]?token|api[_ -]?key|provider[_ -]?credential|password|passwd|secret|credential)\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/giu,
+      "[REDACTED]",
+    );
 }
 
 function bearerToken(request: IncomingMessage): string | undefined {
