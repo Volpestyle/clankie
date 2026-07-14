@@ -1,9 +1,12 @@
 import {
   DiscordPresencePhaseEventSchema,
+  DiscordPresenceSessionRecordSchema,
+  resolveDiscordPresenceToolExposure,
   type DiscordPresencePhaseEvent,
   type DiscordPresenceSessionRecord,
+  type DiscordPresenceToolExposure,
 } from "@clankie/interactive-environment";
-import type { DiscordPresenceChannelIdentity, DomainEvent } from "@clankie/protocol";
+import type { CaptainLane, DiscordPresenceChannelIdentity, DomainEvent } from "@clankie/protocol";
 
 export const DISCORD_PRESENCE_EVENT_STREAM_ID = "discord-presence" as const;
 
@@ -63,14 +66,21 @@ export class DiscordPresenceSessionProjection {
       }
       return structuredClone(previous);
     }
-    if (session.revision !== previous.revision + 1) {
-      throw new Error("discord_presence_session_revision_gap");
-    }
     if (parsed.data.previousPhase !== previous.phase) {
       throw new Error("discord_presence_session_previous_phase_conflict");
     }
-    if (commit) this.sessions.set(key, structuredClone(session));
-    return structuredClone(session);
+    // A bridge that lost an acknowledgement may be ahead of the durable
+    // projection. Rebase its authenticated target snapshot onto the next
+    // contiguous revision so both sides self-heal without a process restart.
+    const projected =
+      session.revision === previous.revision + 1
+        ? session
+        : DiscordPresenceSessionRecordSchema.parse({
+            ...session,
+            revision: previous.revision + 1,
+          });
+    if (commit) this.sessions.set(key, structuredClone(projected));
+    return structuredClone(projected);
   }
 
   public resolve(
@@ -82,6 +92,14 @@ export class DiscordPresenceSessionProjection {
 
   public list(): DiscordPresenceSessionRecord[] {
     return [...this.sessions.values()].map((session) => structuredClone(session));
+  }
+
+  public resolveToolExposure(
+    identity: Pick<DiscordPresenceChannelIdentity, "characterId" | "credentialRef" | "transportKind">,
+    lane: CaptainLane,
+  ): DiscordPresenceToolExposure | undefined {
+    const session = this.resolve(identity);
+    return session === undefined ? undefined : resolveDiscordPresenceToolExposure(session, lane);
   }
 }
 

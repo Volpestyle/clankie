@@ -1446,7 +1446,11 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       if (session === undefined) {
         return context.json({ error: "discord_presence_session_unavailable" }, 409);
       }
-      if (!isDiscordPresenceActionAvailable({ action: write.action, session })) {
+      const advertisedTools = discordPresenceSessions.resolveToolExposure(write.identity, "discord_presence");
+      if (
+        advertisedTools?.presenceTools.includes("discord_presence_act") !== true ||
+        !isDiscordPresenceActionAvailable({ action: write.action, session })
+      ) {
         return context.json({ error: "discord_presence_action_unavailable", phase: session.phase }, 409);
       }
       const request = ActionRequestSchema.parse({

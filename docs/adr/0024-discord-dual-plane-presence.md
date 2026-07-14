@@ -89,8 +89,10 @@ or widen phase.
 
 `degraded`, `failed`, and `off` remove act tools immediately. A disconnect, lease loss, or
 failure therefore makes subsequent actions unavailable without waiting for another model turn.
-Shared environment join/status projections map through
-`discordPresencePhaseFromEnvironment` and `environmentPhaseFromDiscordPresence`.
+`discordPresencePhaseFromEnvironment` and `environmentPhaseFromDiscordPresence` define the
+provider-neutral adapter for a shared environment join/status host. The current Discord bridge
+uses its dedicated presence lifecycle tools because no production shared join/status host exists;
+the adapter remains the required boundary when that host is introduced.
 
 ## Consequences
 

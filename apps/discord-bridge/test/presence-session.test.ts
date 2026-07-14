@@ -1,4 +1,5 @@
 import {
+  isDiscordPresenceActionAvailable,
   resolveDiscordPresenceToolExposure,
   type DiscordPresencePhaseEvent,
 } from "@clankie/interactive-environment";
@@ -77,6 +78,79 @@ describe("Discord presence gateway session", () => {
     expect(events.at(-1)).toMatchObject({
       data: { previousPhase: "present", phase: "degraded", reason: "lease_lost" },
     });
+  });
+
+  it("fences advertised act tools and retries a failed disconnect publication to durability", async () => {
+    let disconnectAttempts = 0;
+    const failures: string[] = [];
+    let durable: DiscordPresencePhaseEvent["data"]["session"] | undefined;
+    let id = 0;
+    let now = 0;
+    const session = new DiscordPresenceSession({
+      sessionId: "discord:bot:retry",
+      characterId: "clankie",
+      credentialRef: "discord_bot",
+      transportKind: "bot",
+      emit: (event) => {
+        if (event.data.reason === "gateway_disconnected" && disconnectAttempts++ === 0) {
+          throw new Error("transient_disconnect_publish_failure");
+        }
+        durable = event.data.session;
+        return durable;
+      },
+      retryDelayMs: 0,
+      onPublicationFailure: (error) => failures.push(error instanceof Error ? error.message : String(error)),
+      idFactory: () => `retry-phase-${String(++id)}`,
+      clock: () => new Date(Date.UTC(2026, 6, 14, 18, 0, now++)),
+    });
+    const advertised = session.toolCatalog("discord_presence");
+    await session.start();
+    await session.gatewayReady();
+    expect(advertised.current.presenceTools).toContain("discord_presence_act");
+
+    const disconnect = session.gatewayDisconnected();
+    // Synchronous revoke fence runs before publication's first await/retry.
+    expect(advertised.current.presenceTools).not.toContain("discord_presence_act");
+    await disconnect;
+
+    expect(failures).toEqual(["transient_disconnect_publish_failure"]);
+    expect(durable?.phase).toBe("degraded");
+    expect(
+      durable === undefined
+        ? true
+        : isDiscordPresenceActionAvailable({
+            action: "discord.presence.send_message",
+            session: durable,
+          }),
+    ).toBe(false);
+  });
+
+  it("retries the initial phase without advancing into a revision gap", async () => {
+    const attempts: number[] = [];
+    let failed = false;
+    const session = new DiscordPresenceSession({
+      sessionId: "discord:bot:initial-retry",
+      characterId: "clankie",
+      credentialRef: "discord_bot",
+      transportKind: "bot",
+      emit: (event) => {
+        attempts.push(event.data.session.revision);
+        if (!failed) {
+          failed = true;
+          throw new Error("transient_initial_publish_failure");
+        }
+        return event.data.session;
+      },
+      retryDelayMs: 0,
+      clock: () => new Date("2026-07-14T18:00:00.000Z"),
+      idFactory: () => "initial-retry-phase",
+    });
+
+    await session.start();
+    await session.gatewayReady();
+
+    expect(attempts).toEqual([1, 1, 2]);
+    expect(session.record).toMatchObject({ phase: "present", revision: 2 });
   });
 });
 

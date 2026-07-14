@@ -106,9 +106,11 @@ const presenceSession = new DiscordPresenceSession({
   credentialRef: "discord_bot",
   transportKind: "bot",
   emit: async (event) => {
-    await api.recordDiscordPresencePhase(event);
+    const result = await api.recordDiscordPresencePhase(event);
     console.info(event, "Discord presence phase event");
+    return result.session;
   },
+  onPublicationFailure: reportPresencePhaseFailure,
 });
 const projector = new MissionThreadProjector(
   registry,

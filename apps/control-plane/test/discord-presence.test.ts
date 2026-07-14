@@ -405,6 +405,59 @@ describe("Discord presence control-plane runtime (ADR 0024)", () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  it("rebases a forward revision gap and remains unavailable without a process restart", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-presence-gap-rebase-"));
+    const store = new SqliteEventStore(join(root, "events.db"));
+    const runtime = new RecordingPresenceRuntime();
+    const app = await createPresenceControlPlane({
+      doctrine,
+      eventStore: store,
+      discordPresenceRuntime: runtime,
+    });
+    const gap = await recordPhase(app, "degraded", 8, "gateway_disconnected", "present");
+    expect(gap.status).toBe(200);
+    await expect(gap.json()).resolves.toMatchObject({
+      accepted: true,
+      session: { phase: "degraded", revision: 3 },
+    });
+    const resumed = await recordPhase(app, "present", 4, "gateway_ready", "degraded");
+    expect(resumed.status).toBe(200);
+    const disconnected = await recordPhase(app, "degraded", 5, "gateway_disconnected", "present");
+    expect(disconnected.status).toBe(200);
+
+    const unavailable = await post(
+      app,
+      "/v1/discord/presence-actions",
+      presenceWrite({
+        idempotencyKey: "presence-after-gap-rebase",
+        action: "discord.presence.send_message",
+        payload: { kind: "send_message", channelId: "c1", content: "after gap" },
+      }),
+    );
+    expect(unavailable.status).toBe(409);
+    expect(runtime.writes).toHaveLength(0);
+
+    const restartedRuntime = new RecordingPresenceRuntime();
+    const restarted = await createControlPlane({
+      doctrine,
+      eventStore: store,
+      discordPresenceRuntime: restartedRuntime,
+    });
+    const afterReplay = await post(
+      restarted,
+      "/v1/discord/presence-actions",
+      presenceWrite({
+        idempotencyKey: "presence-after-gap-replay",
+        action: "discord.presence.send_message",
+        payload: { kind: "send_message", channelId: "c1", content: "after replay" },
+      }),
+    );
+    expect(afterReplay.status).toBe(409);
+    expect(restartedRuntime.writes).toHaveLength(0);
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  });
+
   it("returns 503 when the presence runtime is not configured", async () => {
     const app = await createControlPlane({ doctrine });
     const response = await post(
@@ -468,7 +521,7 @@ function recordPhase(
   phase: "connecting" | "present" | "degraded",
   revision: number,
   reason: "process_start" | "gateway_ready" | "gateway_disconnected",
-  previousPhase: "off" | "connecting" | "present",
+  previousPhase: "off" | "connecting" | "present" | "degraded",
 ) {
   return app.request("/v1/discord/presence-session-events", {
     method: "POST",

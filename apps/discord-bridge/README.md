@@ -78,4 +78,7 @@ resume/reconnect/disconnect, invalidation, and the bot's own voice-state updates
 phase transitions to the control plane over the authenticated captain channel. The control plane
 projects that stream before exposing or executing presence actions; `degraded`, `failed`, and
 `off` expose no act tools. Operator status therefore comes from semantic events rather than bot
-log text, and an action payload can never manufacture the phase it requires.
+log text, and an action payload can never manufacture the phase it requires. Phase publication is
+retried to an authenticated acknowledgement before the bridge commits its next revision. A
+loss-phase callback synchronously fences the live advertised tool catalog before that retry can
+await I/O.

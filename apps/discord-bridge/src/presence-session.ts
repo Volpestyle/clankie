@@ -1,11 +1,14 @@
 import {
   DiscordPresencePhaseEventSchema,
   DiscordPresenceSessionRecordSchema,
+  resolveDiscordPresenceToolExposure,
+  type DiscordPresenceToolExposure,
   type DiscordPresencePhaseEvent,
   type DiscordPresencePhaseTransitionReason,
   type DiscordPresenceSessionPhase,
   type DiscordPresenceSessionRecord,
 } from "@clankie/interactive-environment";
+import type { CaptainLane } from "@clankie/protocol";
 import { randomUUID } from "node:crypto";
 
 export interface DiscordPresenceSessionOptions {
@@ -13,9 +16,30 @@ export interface DiscordPresenceSessionOptions {
   characterId: string;
   credentialRef: string;
   transportKind: "bot" | "user_session";
-  emit: (event: DiscordPresencePhaseEvent) => void | Promise<void>;
+  emit: (
+    event: DiscordPresencePhaseEvent,
+  ) => DiscordPresenceSessionRecord | void | Promise<DiscordPresenceSessionRecord | void>;
   clock?: () => Date;
   idFactory?: () => string;
+  retryDelayMs?: number;
+  onPublicationFailure?: (error: unknown, event: DiscordPresencePhaseEvent) => void;
+}
+
+/** Live advertised catalog. Consumers retain this object while phase changes replace its snapshot. */
+export class DiscordPresenceAdvertisedToolCatalog {
+  private value: DiscordPresenceToolExposure;
+
+  public constructor(session: DiscordPresenceSessionRecord, lane: CaptainLane) {
+    this.value = resolveDiscordPresenceToolExposure(session, lane);
+  }
+
+  public get current(): DiscordPresenceToolExposure {
+    return structuredClone(this.value);
+  }
+
+  public update(session: DiscordPresenceSessionRecord): void {
+    this.value = resolveDiscordPresenceToolExposure(session, this.value.lane);
+  }
 }
 
 /**
@@ -26,7 +50,10 @@ export class DiscordPresenceSession {
   private readonly emitEvent: DiscordPresenceSessionOptions["emit"];
   private readonly clock: () => Date;
   private readonly idFactory: () => string;
+  private readonly retryDelayMs: number;
+  private readonly onPublicationFailure: NonNullable<DiscordPresenceSessionOptions["onPublicationFailure"]>;
   private readonly voiceGuildIds = new Set<string>();
+  private readonly toolCatalogs = new Map<CaptainLane, DiscordPresenceAdvertisedToolCatalog>();
   private recordValue: DiscordPresenceSessionRecord;
   private queue: Promise<unknown> = Promise.resolve();
 
@@ -34,6 +61,8 @@ export class DiscordPresenceSession {
     this.emitEvent = options.emit;
     this.clock = options.clock ?? (() => new Date());
     this.idFactory = options.idFactory ?? randomUUID;
+    this.retryDelayMs = options.retryDelayMs ?? 250;
+    this.onPublicationFailure = options.onPublicationFailure ?? (() => undefined);
     this.recordValue = DiscordPresenceSessionRecordSchema.parse({
       schemaVersion: 1,
       sessionId: options.sessionId,
@@ -46,10 +75,22 @@ export class DiscordPresenceSession {
       revision: 0,
       updatedAt: this.clock().toISOString(),
     });
+    this.toolCatalogs.set(
+      "discord_presence",
+      new DiscordPresenceAdvertisedToolCatalog(this.recordValue, "discord_presence"),
+    );
   }
 
   public get record(): DiscordPresenceSessionRecord {
     return structuredClone(this.recordValue);
+  }
+
+  public toolCatalog(lane: CaptainLane): DiscordPresenceAdvertisedToolCatalog {
+    const existing = this.toolCatalogs.get(lane);
+    if (existing !== undefined) return existing;
+    const catalog = new DiscordPresenceAdvertisedToolCatalog(this.recordValue, lane);
+    this.toolCatalogs.set(lane, catalog);
+    return catalog;
   }
 
   public start(): Promise<DiscordPresenceSessionRecord> {
@@ -106,10 +147,21 @@ export class DiscordPresenceSession {
     reason: DiscordPresencePhaseTransitionReason,
     gatewayConnected: boolean,
   ): Promise<DiscordPresenceSessionRecord> {
+    this.fenceAdvertisedToolLoss(phase, gatewayConnected);
     return this.enqueue(() => {
       if (!gatewayConnected) this.voiceGuildIds.clear();
       return this.applyTransition(phase, reason, gatewayConnected);
     });
+  }
+
+  private fenceAdvertisedToolLoss(phase: DiscordPresenceSessionPhase, gatewayConnected: boolean): void {
+    const preview = DiscordPresenceSessionRecordSchema.parse({
+      ...this.recordValue,
+      phase,
+      gatewayConnected,
+      voiceGuildIds: gatewayConnected ? [...this.voiceGuildIds].sort() : [],
+    });
+    if (this.revokesActCapability(preview)) this.updateToolCatalogs(preview);
   }
 
   private async applyTransition(
@@ -122,7 +174,7 @@ export class DiscordPresenceSession {
       return this.record;
     }
     const occurredAt = this.clock().toISOString();
-    this.recordValue = DiscordPresenceSessionRecordSchema.parse({
+    const candidate = DiscordPresenceSessionRecordSchema.parse({
       ...this.recordValue,
       phase,
       gatewayConnected,
@@ -136,17 +188,46 @@ export class DiscordPresenceSession {
       id: this.idFactory(),
       type: "discord.presence.session.phase_changed",
       occurredAt,
-      correlationId: this.recordValue.sessionId,
-      sessionId: this.recordValue.sessionId,
+      correlationId: candidate.sessionId,
+      sessionId: candidate.sessionId,
       data: {
         previousPhase,
         phase,
         reason,
-        session: this.recordValue,
+        session: candidate,
       },
     });
-    await this.emitEvent(event);
+    // Mirror the environment runtime's synchronous revoke fence: capability loss
+    // becomes visible before the first publication await, so a retained catalog
+    // cannot advertise act tools while durability is being retried.
+    if (this.revokesActCapability(candidate)) this.updateToolCatalogs(candidate);
+    this.recordValue = await this.publishUntilAccepted(event, candidate);
+    this.updateToolCatalogs(this.recordValue);
     return this.record;
+  }
+
+  private revokesActCapability(candidate: DiscordPresenceSessionRecord): boolean {
+    const current = this.toolCatalog("discord_presence").current.presenceTools;
+    const next = resolveDiscordPresenceToolExposure(candidate, "discord_presence").presenceTools;
+    return current.includes("discord_presence_act") && !next.includes("discord_presence_act");
+  }
+
+  private updateToolCatalogs(session: DiscordPresenceSessionRecord): void {
+    for (const catalog of this.toolCatalogs.values()) catalog.update(session);
+  }
+
+  private async publishUntilAccepted(
+    event: DiscordPresencePhaseEvent,
+    candidate: DiscordPresenceSessionRecord,
+  ): Promise<DiscordPresenceSessionRecord> {
+    for (;;) {
+      try {
+        return DiscordPresenceSessionRecordSchema.parse((await this.emitEvent(event)) ?? candidate);
+      } catch (error) {
+        this.onPublicationFailure(error, event);
+        await new Promise<void>((resolve) => setTimeout(resolve, this.retryDelayMs));
+      }
+    }
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
