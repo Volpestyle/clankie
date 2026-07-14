@@ -2,6 +2,7 @@ import { getVoiceConnection, joinVoiceChannel } from "@discordjs/voice";
 import { ClankieApiClient } from "@clankie/api-client";
 import { createDefaultCredentialStore, DISCORD_BOT_PROVIDER_ID } from "@clankie/credential-broker";
 import { homedir } from "node:os";
+import { randomUUID } from "node:crypto";
 import { isAbsolute, join, relative } from "node:path";
 import {
   Client,
@@ -23,6 +24,7 @@ import {
 import { commands } from "./commands.ts";
 import { projectBoundMissionRecord, renderMissionSummary, sanitizeDiscordText } from "./mission-state.ts";
 import { MissionThreadProjector } from "./projector.ts";
+import { DiscordPresenceSession } from "./presence-session.ts";
 import {
   issueMissionSteering,
   renderMissionSteeringReply,
@@ -59,6 +61,7 @@ if (!captainToken) {
 const authenticatedSurfaceUrl =
   process.env.CLANKIE_AUTHENTICATED_SURFACE_URL ?? "http://127.0.0.1:4311/approvals";
 const api = new ClankieApiClient({ baseUrl: apiUrl, captainToken });
+const characterId = process.env.CLANKIE_CHARACTER_ID ?? "clankie";
 const roleBindings: DiscordRoleBindings = {
   ambientRoleIds: parseRoleIds(process.env.DISCORD_AMBIENT_ROLE_IDS),
   approvalRoleIds: parseRoleIds(process.env.DISCORD_APPROVAL_ROLE_IDS),
@@ -69,7 +72,7 @@ const textIngress = textIngressEnabled
   ? new DiscordTextIngress(
       api,
       {
-        characterId: process.env.CLANKIE_CHARACTER_ID ?? "clankie",
+        characterId,
         credentialRef: "discord_bot",
         guildIds: parseDiscordIdSet(process.env.DISCORD_INGRESS_GUILD_IDS),
         channelIds: parseDiscordIdSet(process.env.DISCORD_INGRESS_CHANNEL_IDS),
@@ -97,6 +100,16 @@ const client = new Client({
   ],
   partials: textIngressEnabled ? [Partials.Channel] : [],
 });
+const presenceSession = new DiscordPresenceSession({
+  sessionId: `discord:bot:${applicationId}:${randomUUID()}`,
+  characterId,
+  credentialRef: "discord_bot",
+  transportKind: "bot",
+  emit: async (event) => {
+    await api.recordDiscordPresencePhase(event);
+    console.info(event, "Discord presence phase event");
+  },
+});
 const projector = new MissionThreadProjector(
   registry,
   api,
@@ -117,6 +130,7 @@ const projector = new MissionThreadProjector(
 );
 
 client.once("ready", async () => {
+  void presenceSession.gatewayReady().catch(reportPresencePhaseFailure);
   const rest = new REST({ version: "10" }).setToken(token);
   const guildId = process.env.DISCORD_GUILD_ID;
   const route = guildId
@@ -137,6 +151,33 @@ client.once("ready", async () => {
   console.log(
     `Discord bot ready as ${client.user?.tag ?? "unknown"}; registered ${commands.length} commands, restored ${registry.entries().length} mission thread(s), text ingress ${textIngressEnabled ? "enabled" : "disabled"}.`,
   );
+});
+
+client.on("shardReady", () => {
+  void presenceSession.gatewayReady().catch(reportPresencePhaseFailure);
+});
+
+client.on("shardResume", () => {
+  void presenceSession.gatewayResumed().catch(reportPresencePhaseFailure);
+});
+
+client.on("shardReconnecting", () => {
+  void presenceSession.gatewayReconnecting().catch(reportPresencePhaseFailure);
+});
+
+client.on("shardDisconnect", () => {
+  void presenceSession.gatewayDisconnected().catch(reportPresencePhaseFailure);
+});
+
+client.on("invalidated", () => {
+  void presenceSession.fail().catch(reportPresencePhaseFailure);
+});
+
+client.on("voiceStateUpdate", (previous, current) => {
+  if (current.id !== client.user?.id) return;
+  void presenceSession
+    .voiceStateChanged(current.guild.id, current.channelId !== null)
+    .catch(reportPresencePhaseFailure);
 });
 
 client.on("messageCreate", async (message) => {
@@ -469,4 +510,12 @@ function bridgeStatePath(): string {
   return join(stateHome, "clankie", "discord-bridge.json");
 }
 
+function reportPresencePhaseFailure(error: unknown): void {
+  console.error(
+    { error: error instanceof Error ? error.message : String(error) },
+    "Discord presence phase publication failed",
+  );
+}
+
+await presenceSession.start().catch(reportPresencePhaseFailure);
 await client.login(token);

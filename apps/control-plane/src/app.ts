@@ -24,6 +24,10 @@ import {
 } from "@clankie/mission-engine";
 import { createLogger } from "@clankie/observability";
 import {
+  DiscordPresencePhaseEventSchema,
+  isDiscordPresenceActionAvailable,
+} from "@clankie/interactive-environment";
+import {
   MemoryFactSchema,
   type ApplyProposalResult,
   type MemoryFact,
@@ -104,6 +108,7 @@ import {
   type WorkerSteerOutcome,
 } from "./worker-steering.ts";
 import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
+import { DiscordPresenceSessionProjection, discordPresenceDomainEvent } from "./discord-presence-session.ts";
 import type { CaptainChannelTurnPort } from "./eve-captain-turn.ts";
 import { applyMissionTriggerEvent, dueOccurrences, MissionTriggerInputSchema } from "./mission-triggers.ts";
 import { mintPairingOffer, pairingOfferWire, PairingOfferStore } from "./pairing.ts";
@@ -205,7 +210,7 @@ export interface ControlPlaneDependencies {
   /** Trusted Eve turn adapter. Model credentials remain inside the Eve service. */
   captainChannelTurns?: CaptainChannelTurnPort;
   /**
-   * Privileged Discord presence executor (bot transport for ADR 0024 P1).
+   * Privileged Discord presence executor gated by the bridge-owned gateway session (ADR 0024).
    * Bot credentials remain inside the trusted runtime module.
    */
   discordPresenceRuntime?: DiscordPresenceRuntimePort;
@@ -646,6 +651,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
   const missionLocks = new Map<string, Promise<unknown>>();
   const approvalLocks = new Map<string, Promise<unknown>>();
   const discordPresenceLocks = new Map<string, Promise<unknown>>();
+  const discordPresenceSessionLocks = new Map<string, Promise<unknown>>();
   const triggerEvaluationLocks = new Map<string, Promise<unknown>>();
   const claimMissions = new Map<string, string>();
   const approvalRequests = new Map<string, ApprovalRequestRecord>();
@@ -718,6 +724,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     }
     logger.info({ missionCount: missions.size }, "mission records rebuilt from event store");
   }
+  const discordPresenceSessions = new DiscordPresenceSessionProjection(storedEvents);
 
   if (dependencies.trackerMirror) {
     for (const mission of missions.values()) {
@@ -1357,6 +1364,55 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     }
   });
 
+  app.post("/v1/discord/presence-session-events", async (context) => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") return context.json({ error: "captain_execution_unavailable" }, 503);
+    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
+    if (captain.steerSourceLane !== "discord_text" && captain.steerSourceLane !== "discord_voice") {
+      return context.json({ error: "discord_channel_authority_required" }, 403);
+    }
+    const parsed = DiscordPresencePhaseEventSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_discord_presence_phase_event" }, 400);
+    const event = parsed.data;
+    const sessionKey = JSON.stringify([
+      event.data.session.transportKind,
+      event.data.session.characterId,
+      event.data.session.credentialRef,
+    ]);
+    return withSerializedLock(discordPresenceSessionLocks, sessionKey, async () => {
+      const domainEvent = discordPresenceDomainEvent(event, dependencies.doctrine.profileHash);
+      if (persistedEventIds.has(event.id)) {
+        const existing = storedEvents.find((candidate) => candidate.id === event.id);
+        if (existing === undefined || JSON.stringify(existing) !== JSON.stringify(domainEvent)) {
+          return context.json({ error: "discord_presence_event_id_conflict" }, 409);
+        }
+        const session = discordPresenceSessions.resolve(event.data.session);
+        if (session === undefined) {
+          return context.json({ error: "discord_presence_event_id_conflict" }, 409);
+        }
+        return context.json({ accepted: false, session });
+      }
+      try {
+        discordPresenceSessions.validate(event);
+        if (dependencies.eventStore) await dependencies.eventStore.append(domainEvent);
+        const session = discordPresenceSessions.apply(event);
+        storedEvents.push(domainEvent);
+        persistedEventIds.add(domainEvent.id);
+        return context.json({ accepted: true, session });
+      } catch (error) {
+        const code = error instanceof Error ? error.message : "discord_presence_session_conflict";
+        return context.json({ error: code }, 409);
+      }
+    });
+  });
+
+  app.get("/v1/discord/presence-sessions", async (context) => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") return context.json({ error: "captain_execution_unavailable" }, 503);
+    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
+    return context.json(discordPresenceSessions.list());
+  });
+
   app.post("/v1/discord/presence-actions", async (context) => {
     if (!dependencies.discordPresenceRuntime) {
       return context.json({ error: "discord_presence_runtime_unavailable" }, 503);
@@ -1385,6 +1441,13 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       const classification = classifyDiscordPresenceAction(write.action);
       if (classification === undefined) {
         return context.json({ error: "discord_presence_action_unclassified" }, 400);
+      }
+      const session = discordPresenceSessions.resolve(write.identity);
+      if (session === undefined) {
+        return context.json({ error: "discord_presence_session_unavailable" }, 409);
+      }
+      if (!isDiscordPresenceActionAvailable({ action: write.action, session })) {
+        return context.json({ error: "discord_presence_action_unavailable", phase: session.phase }, 409);
       }
       const request = ActionRequestSchema.parse({
         id: write.idempotencyKey,
@@ -1498,7 +1561,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       }
 
       try {
-        const result = await discordPresenceRuntime.execute(write);
+        const result = await discordPresenceRuntime.execute(write, session);
         discordPresenceResults.set(write.idempotencyKey, {
           fingerprint,
           result,

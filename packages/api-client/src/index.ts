@@ -27,6 +27,12 @@ import {
   type TrackerNarrativeWriteResult,
   type WorkerResult,
 } from "@clankie/protocol";
+import {
+  DiscordPresencePhaseEventSchema,
+  DiscordPresenceSessionRecordSchema,
+  type DiscordPresencePhaseEvent,
+  type DiscordPresenceSessionRecord,
+} from "@clankie/interactive-environment";
 
 export * from "./terminal-gateway.ts";
 
@@ -256,7 +262,7 @@ export class ClankieApiClient {
   }
 
   /**
-   * Requests a policy-evaluated Discord presence action (ADR 0024 P1 bot transport).
+   * Requests a policy-evaluated action gated by the bridge-owned Discord presence session.
    * Bot credentials stay behind the credential broker used by the trusted presence runtime module.
    */
   public async executeDiscordPresenceAction(
@@ -268,6 +274,32 @@ export class ClankieApiClient {
       body: JSON.stringify(write),
     });
     return DiscordPresenceWriteResultSchema.parse(result);
+  }
+
+  /** Publishes a bridge-owned gateway/voice phase transition to the semantic control plane. */
+  public async recordDiscordPresencePhase(
+    input: DiscordPresencePhaseEvent,
+  ): Promise<{ accepted: boolean; session: DiscordPresenceSessionRecord }> {
+    const event = DiscordPresencePhaseEventSchema.parse(input);
+    const result = await this.request<{
+      accepted: boolean;
+      session: unknown;
+    }>("/v1/discord/presence-session-events", {
+      method: "POST",
+      headers: this.captainHeaders(),
+      body: JSON.stringify(event),
+    });
+    return {
+      accepted: result.accepted,
+      session: DiscordPresenceSessionRecordSchema.parse(result.session),
+    };
+  }
+
+  public async listDiscordPresenceSessions(): Promise<DiscordPresenceSessionRecord[]> {
+    const result = await this.request<unknown>("/v1/discord/presence-sessions", {
+      headers: this.captainHeaders(),
+    });
+    return DiscordPresenceSessionRecordSchema.array().parse(result);
   }
 
   public async listApprovals(status: ApprovalRequestStatus = "pending"): Promise<ApprovalRequestRecord[]> {

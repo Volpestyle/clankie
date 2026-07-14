@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FileCredentialStore } from "@clankie/credential-broker";
+import { DiscordPresenceSessionRecordSchema } from "@clankie/interactive-environment";
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -37,20 +38,34 @@ describe("presence runtime credential loading", () => {
     const { createDiscordPresenceRuntime } = await import("../src/presence-runtime-module.ts");
     const runtime = createDiscordPresenceRuntime();
     await expect(
-      runtime.execute({
-        schemaVersion: 1,
-        idempotencyKey: "write-1",
-        action: "discord.presence.send_message",
-        identity: {
-          missionId: "mission-1",
-          correlationId: "corr-1",
-          profileHash: "profile-1",
+      runtime.execute(
+        {
+          schemaVersion: 1,
+          idempotencyKey: "write-1",
+          action: "discord.presence.send_message",
+          identity: {
+            missionId: "mission-1",
+            correlationId: "corr-1",
+            profileHash: "profile-1",
+            characterId: "character-1",
+            credentialRef: "discord_bot",
+            transportKind: "bot",
+          },
+          payload: { kind: "send_message", channelId: "channel-not-allowed", content: "hi" },
+        },
+        DiscordPresenceSessionRecordSchema.parse({
+          schemaVersion: 1,
+          sessionId: "discord:bot:fixture",
           characterId: "character-1",
           credentialRef: "discord_bot",
           transportKind: "bot",
-        },
-        payload: { kind: "send_message", channelId: "channel-not-allowed", content: "hi" },
-      }),
+          phase: "present",
+          gatewayConnected: true,
+          voiceGuildIds: [],
+          revision: 1,
+          updatedAt: "2026-07-14T18:00:00.000Z",
+        }),
+      ),
     ).rejects.toThrow(/channel_not_allowed/);
   });
 });

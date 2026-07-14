@@ -124,6 +124,30 @@ describe("MissionObserver", () => {
     expect((await stat(join(checkpointPath, ".."))).mode & 0o777).toBe(0o700);
   });
 
+  it("displays Discord presence phase from its semantic event without terminal output", async () => {
+    const source = new FakeEventSource([
+      event(1, "discord.presence.session.phase_changed", {
+        missionId: "discord-presence:discord:bot:fixture",
+        data: {
+          previousPhase: "present",
+          phase: "degraded",
+          reason: "gateway_disconnected",
+          session: { sessionId: "discord:bot:fixture" },
+        },
+      }),
+    ]);
+    const observer = new MissionObserver({
+      source,
+      checkpointPath: await temporaryPath("presence-observer.json"),
+    });
+    await observer.refresh();
+    expect(observer.dashboard).toMatchObject({
+      mission: "discord-presence:discord:bot:fixture · Discord presence · discord:bot:fixture",
+      missions: [{ id: "discord-presence:discord:bot:fixture", state: "degraded", selected: true }],
+      timeline: ["#1 discord presence present → degraded · gateway_disconnected"],
+    });
+  });
+
   it("restarts from the durable cursor and applies each missed event once", async () => {
     const source = new FakeEventSource(initialEvents());
     const checkpointPath = await temporaryPath("state/observer.json");

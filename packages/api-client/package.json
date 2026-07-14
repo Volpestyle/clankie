@@ -13,6 +13,7 @@
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {
+    "@clankie/interactive-environment": "workspace:*",
     "@clankie/protocol": "workspace:*",
     "@clankie/terminal-protocol": "workspace:*"
   },

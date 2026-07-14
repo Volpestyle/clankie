@@ -1,3 +1,4 @@
+import { DiscordPresenceSessionRecordSchema } from "@clankie/interactive-environment";
 import type { DiscordPresenceWrite } from "@clankie/protocol";
 import { ChannelType } from "discord.js";
 import { describe, expect, it, vi } from "vitest";
@@ -18,6 +19,7 @@ describe("DiscordBotPresenceRuntime", () => {
         content: "hi",
         payload: { kind: "reply", channelId: "ch-1", messageId: "msg-1", content: "hi" },
       }),
+      presentSession,
     );
     expect(reply).toMatchObject({
       action: "discord.presence.reply",
@@ -31,6 +33,7 @@ describe("DiscordBotPresenceRuntime", () => {
         action: "discord.presence.react",
         payload: { kind: "react", channelId: "ch-1", messageId: "msg-1", emoji: "👍" },
       }),
+      presentSession,
     );
     expect(put).toHaveBeenCalledOnce();
   });
@@ -46,6 +49,7 @@ describe("DiscordBotPresenceRuntime", () => {
         action: "discord.presence.create_thread",
         payload: { kind: "create_thread", channelId: "ch-1", name: "mission-thread" },
       }),
+      presentSession,
     );
     expect(post).toHaveBeenCalledWith(
       expect.stringContaining("ch-1"),
@@ -78,6 +82,7 @@ describe("DiscordBotPresenceRuntime", () => {
             filename: "shot.png",
           },
         }),
+        presentSession,
       ),
     ).resolves.toMatchObject({ messageId: "msg-attach" });
     expect(post).toHaveBeenCalledWith(
@@ -89,7 +94,7 @@ describe("DiscordBotPresenceRuntime", () => {
     expect(JSON.stringify(post.mock.calls)).not.toContain("passThroughBody");
   });
 
-  it("rejects Go Live on bot transport under pinned present phase", async () => {
+  it("rejects Go Live on bot transport under the projected present session", async () => {
     const runtime = new DiscordBotPresenceRuntime({
       botToken: "bot-token",
       rest: { post: vi.fn(), put: vi.fn(), delete: vi.fn(), patch: vi.fn() } as never,
@@ -100,6 +105,7 @@ describe("DiscordBotPresenceRuntime", () => {
           action: "discord.presence.go_live_start",
           payload: { kind: "go_live_start", guildId: "g1", channelId: "v1" },
         }),
+        presentSession,
       ),
     ).rejects.toThrow(/discord_presence_action_unavailable_for_bot/);
   });
@@ -142,3 +148,16 @@ function write(
     ...partial,
   };
 }
+
+const presentSession = DiscordPresenceSessionRecordSchema.parse({
+  schemaVersion: 1,
+  sessionId: "discord:bot:fixture",
+  characterId: "clankie",
+  credentialRef: "broker:discord_bot:lab",
+  transportKind: "bot",
+  phase: "present",
+  gatewayConnected: true,
+  voiceGuildIds: [],
+  revision: 1,
+  updatedAt: "2026-07-14T18:00:00.000Z",
+});

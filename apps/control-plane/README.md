@@ -202,15 +202,15 @@ operator: GET  /v1/devices               → list devices
 operator: POST /v1/devices/:id/revoke    → revoke a device
 ```
 
-| Route | Auth | Success | Fail-closed |
-| --- | --- | --- | --- |
-| `POST /v1/pairing/offer` | operator | offer wire | 503 / 401 |
-| `POST /v1/pairing/redeem` | offer secret or code | redeem response | 400 malformed · 409 consumed · 410 expired |
-| `POST /v1/pairing/complete` | completion token | session token | 410 expired · 409 replay · 403 revoked · 403 `terminal_control_not_grantable` |
-| `POST /v1/devices/self/session/refresh` | device | new token | 503 / 401 |
-| `GET /v1/devices/self` | device | self view | 503 / 401 |
-| `GET /v1/devices` | operator | device list | 503 / 401 |
-| `POST /v1/devices/:id/revoke` | operator | device row | 503 / 401 / 404 |
+| Route                                   | Auth                 | Success         | Fail-closed                                                                   |
+| --------------------------------------- | -------------------- | --------------- | ----------------------------------------------------------------------------- |
+| `POST /v1/pairing/offer`                | operator             | offer wire      | 503 / 401                                                                     |
+| `POST /v1/pairing/redeem`               | offer secret or code | redeem response | 400 malformed · 409 consumed · 410 expired                                    |
+| `POST /v1/pairing/complete`             | completion token     | session token   | 410 expired · 409 replay · 403 revoked · 403 `terminal_control_not_grantable` |
+| `POST /v1/devices/self/session/refresh` | device               | new token       | 503 / 401                                                                     |
+| `GET /v1/devices/self`                  | device               | self view       | 503 / 401                                                                     |
+| `GET /v1/devices`                       | operator             | device list     | 503 / 401                                                                     |
+| `POST /v1/devices/:id/revoke`           | operator             | device row      | 503 / 401 / 404                                                               |
 
 Offers and completion tokens live in memory (5-minute and 10-minute TTLs); a
 restart drops in-flight pairings — fail closed. Device records are durable and
@@ -244,7 +244,7 @@ credential-free `tracker.sync.failed` events.
 
 ## Narrative and captain channel seam
 
-`POST /v1/discord/presence-actions` accepts bot-transport Discord presence writes (ADR 0024 P1), evaluates narrative or risk-class policy (shared narrative rate ledger), and executes via `discordPresenceRuntime` loaded from `CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE`.
+`POST /v1/discord/presence-actions` accepts bot-transport Discord presence writes (ADR 0024), gates them on the bridge-owned gateway/voice session projection, evaluates narrative or risk-class policy (shared narrative rate ledger), and executes via `discordPresenceRuntime` loaded from `CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE`.
 
 `POST /v1/tracker/narratives` accepts only the five typed narrative actions (issue comment, thought, response, elicitation, and reaction) and evaluates exact content plus trusted correlation through one `createNarrativeWritePolicy()` instance retained for the compiled profile runtime. It then delegates to `LinearAgentRuntimePort`; non-narrative tracker mutations cannot enter this route.
 
@@ -258,7 +258,9 @@ The control-plane HTTP service binds to `127.0.0.1`. The narrative and captain-c
 
 ### Discord presence actions
 
-`POST /v1/discord/presence-actions` — ADR 0024 bot-transport presence catalog. Narrative actions use the shared rate ledger under either real mission attribution or a stable ambient presence-session attribution; non-narrative actions require a mission. Optional `content` is derived from the payload when omitted (emoji, typing sentinel, …). Attachments mint a bounded approval request carrying only the artifact reference and write hash. An authenticated operator decision resumes the exact idempotency key; denial and expiry remain terminal. The broker-backed runtime resolves `sha256:<digest>:<relative-path>` beneath `CLANKIE_DISCORD_ATTACHMENT_ROOT`, verifies the bytes inside the privileged Discord boundary, and never places bytes in control-plane events or logs. Runtime: `CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE` exporting `createDiscordPresenceRuntime()`.
+`POST /v1/discord/presence-session-events` accepts authenticated semantic phase transitions from the Discord bridge. The retained projection validates a clean process start, contiguous revisions, and the prior phase. A new bridge process may replace the prior generation for the same transport/character/credential binding only with its revision-one `off` → `connecting` transition. `GET /v1/discord/presence-sessions` returns the authenticated projection for status surfaces.
+
+`POST /v1/discord/presence-actions` — ADR 0024 bot-transport presence catalog. The current projected session controls catalog availability before policy evaluation or runtime execution, so disconnect, lease loss, and failure remove act capability immediately. Narrative actions use the shared rate ledger under either real mission attribution or a stable ambient presence-session attribution; non-narrative actions require a mission. Optional `content` is derived from the payload when omitted (emoji, typing sentinel, …). Attachments mint a bounded approval request carrying only the artifact reference and write hash. An authenticated operator decision resumes the exact idempotency key; denial and expiry remain terminal. The broker-backed runtime resolves `sha256:<digest>:<relative-path>` beneath `CLANKIE_DISCORD_ATTACHMENT_ROOT`, verifies the bytes inside the privileged Discord boundary, and never places bytes in control-plane events or logs. Runtime: `CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE` exporting `createDiscordPresenceRuntime()`.
 
 ## Tracker ceremony routes
 

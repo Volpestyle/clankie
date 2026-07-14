@@ -281,6 +281,7 @@ export const EnvironmentSemanticEventTypeSchema = z.enum([
   "minecraft.damage.taken",
   "minecraft.player.died",
   "minecraft.attention.raised",
+  "discord.presence.session.phase_changed",
   "captain.lane.started",
   "captain.lane.parked",
   "captain.lane.preempted",

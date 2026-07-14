@@ -1,4 +1,7 @@
-import { isDiscordPresenceActionAvailable } from "@clankie/interactive-environment";
+import {
+  isDiscordPresenceActionAvailable,
+  type DiscordPresenceSessionRecord,
+} from "@clankie/interactive-environment";
 import {
   DiscordPresenceWriteResultSchema,
   type DiscordPresenceWrite,
@@ -33,22 +36,14 @@ export class DiscordBotPresenceRuntime {
     this.resolveAttachment = options.resolveAttachment;
   }
 
-  public async execute(write: DiscordPresenceWrite): Promise<DiscordPresenceWriteResult> {
+  public async execute(
+    write: DiscordPresenceWrite,
+    session: DiscordPresenceSessionRecord,
+  ): Promise<DiscordPresenceWriteResult> {
     if (write.identity.transportKind !== "bot") {
       throw new Error("discord_presence_transport_unsupported");
     }
-    // P1: no real presence session state. Pin phase to `present` so the catalog
-    // gate is not self-fulfilled from the payload kind (voice/go_live would
-    // fabricate voice_active/go_live_active). P2+ must pass phase from the
-    // durable presence session projection.
-    const phase = "present" as const;
-    if (
-      !isDiscordPresenceActionAvailable({
-        action: write.action,
-        phase,
-        transportKind: "bot",
-      })
-    ) {
+    if (!isDiscordPresenceActionAvailable({ action: write.action, session })) {
       throw new Error("discord_presence_action_unavailable_for_bot");
     }
 
@@ -198,6 +193,6 @@ export function createDiscordBotPresenceRuntime(options: DiscordBotPresenceRunti
 } {
   const runtime = new DiscordBotPresenceRuntime(options);
   return {
-    execute: (write) => runtime.execute(write),
+    execute: (write, session) => runtime.execute(write, session),
   };
 }

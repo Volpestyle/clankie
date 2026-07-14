@@ -78,6 +78,9 @@ importers:
       '@clankie/event-store':
         specifier: workspace:*
         version: link:../../packages/event-store
+      '@clankie/interactive-environment':
+        specifier: workspace:*
+        version: link:../../packages/interactive-environment
       '@clankie/memory-store':
         specifier: workspace:*
         version: link:../../packages/memory-store
@@ -441,6 +444,9 @@ importers:
 
   packages/api-client:
     dependencies:
+      '@clankie/interactive-environment':
+        specifier: workspace:*
+        version: link:../interactive-environment
       '@clankie/protocol':
         specifier: workspace:*
         version: link:../protocol

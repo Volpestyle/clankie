@@ -1,7 +1,7 @@
 # ADR 0024: Dual Discord planes and transport-agnostic presence
 
 Status: accepted (James, 2026-07-11; Go Live/user-session scope confirmed 2026-07-12 in
-VUH-751). P1 outbound and P2 bounded text ingress are implemented.
+VUH-751). P1 outbound, P2 bounded text ingress, and the bot presence lifecycle are implemented.
 
 ## Context
 
@@ -77,18 +77,29 @@ user. Runtime binding + phase + doctrine select availability. Go Live requires
 
 Ambient turns without mission coupling carry a stable `presenceSessionId`. Narrative writes use that first-class scope for rate and correlation attribution; they do not fabricate mission events. Non-narrative writes continue to require real mission attribution.
 
-### Session phase (P1 pin)
+### Session phase
 
-P1 bot executor pins catalog phase to `present` and does not invent phase from the payload
-kind (which would self-fulfill voice/go_live gates). P2+ must supply phase from durable
-presence session state.
+The Discord bridge owns the bot presence session record. Discord gateway and bot voice-state
+callbacks drive `off → connecting → present → voice_active` and the `degraded` / `failed`
+loss states. Every transition is published as a typed
+`discord.presence.session.phase_changed` semantic event through the authenticated ambient
+captain channel. The control plane replays those events into a read-only projection and gates
+both catalog execution and tool exposure from the projected record. Payload kinds never infer
+or widen phase.
+
+`degraded`, `failed`, and `off` remove act tools immediately. A disconnect, lease loss, or
+failure therefore makes subsequent actions unavailable without waiting for another model turn.
+Shared environment join/status projections map through
+`discordPresencePhaseFromEnvironment` and `environmentPhaseFromDiscordPresence`.
 
 ## Consequences
 
-- P1: control plane classifies presence actions, narrative writes share the tracker rate
+- The control plane classifies presence actions, narrative writes share the tracker rate
   ledger (content may be omitted and derived for react/typing), publish-external stops at
   doctrine decision without approval minting (explicit debt), bot executor lives in
   `apps/discord-bridge` and loads via `CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE`.
+- The bridge-to-control-plane phase stream is the status authority. ANSI output and action
+  payloads are not lifecycle signals; the TUI renders phase directly from retained semantic events.
 - User-session credentials and Go Live media remain separately gated follow-ups rather than being folded into the bot executor.
 - P2 text ingress requests Message Content only under explicit configuration, fetches bounded context only after admission, keeps Discord text in Eve's ephemeral `clientContext` rather than durable session history, excludes raw message bodies from ingress evidence, and returns settled text through the existing bot presence policy path.
 - VUH-836 owns the secondary user-session process, credential isolation, explicit opt-in event,

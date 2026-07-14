@@ -14,6 +14,7 @@
   "dependencies": {
     "@clankie/doctrine": "workspace:*",
     "@clankie/event-store": "workspace:*",
+    "@clankie/interactive-environment": "workspace:*",
     "@clankie/memory-store": "workspace:*",
     "@clankie/mission-engine": "workspace:*",
     "@clankie/observability": "workspace:*",

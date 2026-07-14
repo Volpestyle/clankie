@@ -1,3 +1,4 @@
+import type { DiscordPresenceSessionRecord } from "@clankie/interactive-environment";
 import type { DiscordPresenceWrite, DiscordPresenceWriteResult } from "@clankie/protocol";
 
 /**
@@ -5,5 +6,8 @@ import type { DiscordPresenceWrite, DiscordPresenceWriteResult } from "@clankie/
  * runtime module; the control plane only passes policy-allowed writes (ADR 0024).
  */
 export interface DiscordPresenceRuntimePort {
-  execute(write: DiscordPresenceWrite): Promise<DiscordPresenceWriteResult>;
+  execute(
+    write: DiscordPresenceWrite,
+    session: DiscordPresenceSessionRecord,
+  ): Promise<DiscordPresenceWriteResult>;
 }
