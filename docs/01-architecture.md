@@ -85,6 +85,12 @@ the shared protocol contains only versioned provider-neutral schemas.
 
 ## Discord voice media plane
 
+The Discord bridge is the single writer for the official-bot presence session. Gateway and bot
+voice callbacks emit `discord.presence.session.phase_changed` semantic events to the control
+plane, whose replayed projection gates the transport-agnostic presence catalog. Disconnect,
+lease loss, and failure remove act capability immediately; operator views render the event data
+and never scrape gateway logs or infer lifecycle from action payloads.
+
 Discord voice separates official-bot gateway signaling from native media ownership. The bridge
 registers callbacks directly through `guild.voiceAdapterCreator`, sends gateway OP4 join/leave
 payloads through the returned adapter, and combines the bot's voice-server and voice-state updates

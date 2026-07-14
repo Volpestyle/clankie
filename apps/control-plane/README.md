@@ -244,7 +244,7 @@ credential-free `tracker.sync.failed` events.
 
 ## Narrative and captain channel seam
 
-`POST /v1/discord/presence-actions` accepts bot-transport Discord presence writes (ADR 0024 P1), evaluates narrative or risk-class policy (shared narrative rate ledger), and executes via `discordPresenceRuntime` loaded from `CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE`.
+`POST /v1/discord/presence-actions` accepts bot-transport Discord presence writes (ADR 0024), gates them on the bridge-owned gateway/voice session projection, evaluates narrative or risk-class policy (shared narrative rate ledger), and executes via `discordPresenceRuntime` loaded from `CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE`.
 
 `POST /v1/tracker/narratives` accepts only the five typed narrative actions (issue comment, thought, response, elicitation, and reaction) and evaluates exact content plus trusted correlation through one `createNarrativeWritePolicy()` instance retained for the compiled profile runtime. It then delegates to `LinearAgentRuntimePort`; non-narrative tracker mutations cannot enter this route.
 
@@ -258,7 +258,14 @@ The control-plane HTTP service binds to `127.0.0.1`. The narrative and captain-c
 
 ### Discord presence actions
 
-`POST /v1/discord/presence-actions` — ADR 0024 bot-transport presence catalog. Narrative actions use the shared rate ledger under either real mission attribution or a stable ambient presence-session attribution; non-narrative actions require a mission. Optional `content` is derived from the payload when omitted (emoji, typing sentinel, …). Attachments mint a bounded approval request carrying only the artifact reference and write hash. An authenticated operator decision resumes the exact idempotency key; denial and expiry remain terminal. The broker-backed runtime resolves `sha256:<digest>:<relative-path>` beneath `CLANKIE_DISCORD_ATTACHMENT_ROOT`, verifies the bytes inside the privileged Discord boundary, and never places bytes in control-plane events or logs. Runtime: `CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE` exporting `createDiscordPresenceRuntime()`.
+`POST /v1/discord/presence-session-events` accepts authenticated semantic phase transitions from the Discord bridge. The retained projection validates a clean process start, contiguous revisions, and the prior phase. A new bridge process may replace the prior generation for the same transport/character/credential binding only with its revision-one `off` → `connecting` transition. `GET /v1/discord/presence-sessions` returns the authenticated projection for status surfaces.
+
+If the bridge is ahead because an acknowledgement was lost, the projection rebases the
+authenticated target snapshot onto its next contiguous revision and returns that record to the
+bridge. Replay applies the same rebase deterministically. Phase loss also recomputes the
+advertised presence-lane tool catalog before any later action reaches policy or the runtime.
+
+`POST /v1/discord/presence-actions` — ADR 0024 bot-transport presence catalog. The current projected session controls catalog availability before policy evaluation or runtime execution, so disconnect, lease loss, and failure remove act capability immediately. Narrative actions use the shared rate ledger under either real mission attribution or a stable ambient presence-session attribution; non-narrative actions require a mission. Optional `content` is derived from the payload when omitted (emoji, typing sentinel, …). Attachments mint a bounded approval request carrying only the artifact reference and write hash. An authenticated operator decision resumes the exact idempotency key; denial and expiry remain terminal. The broker-backed runtime resolves `sha256:<digest>:<relative-path>` beneath `CLANKIE_DISCORD_ATTACHMENT_ROOT`, verifies the bytes inside the privileged Discord boundary, and never places bytes in control-plane events or logs. Runtime: `CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE` exporting `createDiscordPresenceRuntime()`.
 
 ## Tracker ceremony routes
 

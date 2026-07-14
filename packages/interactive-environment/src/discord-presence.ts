@@ -29,6 +29,114 @@ export const DiscordPresenceSessionPhaseSchema = z.enum([
 ]);
 export type DiscordPresenceSessionPhase = z.infer<typeof DiscordPresenceSessionPhaseSchema>;
 
+/** Authenticated bridge-to-control-plane fence carrying immediate gateway truth. */
+export const DISCORD_PRESENCE_LIVE_PHASE_HEADER = "x-clankie-discord-presence-phase" as const;
+export const DISCORD_PRESENCE_LIVE_SESSION_HEADER = "x-clankie-discord-presence-session" as const;
+export const DISCORD_PRESENCE_LIVE_REVISION_HEADER = "x-clankie-discord-presence-revision" as const;
+
+export const DiscordPresenceLiveClaimSchema = z
+  .object({
+    schemaVersion: z.literal(INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION),
+    sessionId: z.string().min(1),
+    phase: DiscordPresenceSessionPhaseSchema,
+    revision: z.number().int().nonnegative(),
+  })
+  .strict();
+export type DiscordPresenceLiveClaim = z.infer<typeof DiscordPresenceLiveClaimSchema>;
+
+export const DiscordPresenceSessionRecordSchema = z
+  .object({
+    schemaVersion: z.literal(INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION),
+    sessionId: z.string().min(1),
+    characterId: z.string().min(1),
+    credentialRef: z.string().min(1),
+    transportKind: z.enum(["bot", "user_session"]),
+    phase: DiscordPresenceSessionPhaseSchema,
+    gatewayConnected: z.boolean(),
+    voiceGuildIds: z.array(z.string().min(1)).max(64),
+    revision: z.number().int().nonnegative(),
+    updatedAt: z.string().datetime(),
+  })
+  .strict()
+  .superRefine((session, context) => {
+    const connectedPhase = ["present", "voice_active", "go_live_active"].includes(session.phase);
+    if (session.gatewayConnected !== connectedPhase) {
+      context.addIssue({
+        code: "custom",
+        path: ["gatewayConnected"],
+        message: `gatewayConnected does not match phase ${session.phase}`,
+      });
+    }
+    const voicePhase = session.phase === "voice_active" || session.phase === "go_live_active";
+    if (voicePhase !== session.voiceGuildIds.length > 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["voiceGuildIds"],
+        message: `voice guild state does not match phase ${session.phase}`,
+      });
+    }
+  });
+export type DiscordPresenceSessionRecord = z.infer<typeof DiscordPresenceSessionRecordSchema>;
+
+export const DiscordPresencePhaseTransitionReasonSchema = z.enum([
+  "process_start",
+  "gateway_ready",
+  "gateway_resumed",
+  "gateway_disconnected",
+  "gateway_reconnecting",
+  "voice_joined",
+  "voice_left",
+  "lease_lost",
+  "gateway_failed",
+  "publication_failed",
+  "process_stopped",
+]);
+export type DiscordPresencePhaseTransitionReason = z.infer<typeof DiscordPresencePhaseTransitionReasonSchema>;
+
+export const DiscordPresencePhaseEventSchema = z
+  .object({
+    schemaVersion: z.literal(INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION),
+    plane: z.literal("semantic"),
+    id: z.string().min(1),
+    type: z.literal("discord.presence.session.phase_changed"),
+    occurredAt: z.string().datetime(),
+    correlationId: z.string().min(1),
+    sessionId: z.string().min(1),
+    data: z
+      .object({
+        previousPhase: DiscordPresenceSessionPhaseSchema,
+        phase: DiscordPresenceSessionPhaseSchema,
+        reason: DiscordPresencePhaseTransitionReasonSchema,
+        session: DiscordPresenceSessionRecordSchema,
+      })
+      .strict(),
+  })
+  .strict()
+  .superRefine((event, context) => {
+    if (event.sessionId !== event.data.session.sessionId) {
+      context.addIssue({
+        code: "custom",
+        path: ["data", "session", "sessionId"],
+        message: "phase event session identity mismatch",
+      });
+    }
+    if (event.data.phase !== event.data.session.phase) {
+      context.addIssue({
+        code: "custom",
+        path: ["data", "session", "phase"],
+        message: "phase event projection mismatch",
+      });
+    }
+    if (event.occurredAt !== event.data.session.updatedAt) {
+      context.addIssue({
+        code: "custom",
+        path: ["data", "session", "updatedAt"],
+        message: "phase event timestamp mismatch",
+      });
+    }
+  });
+export type DiscordPresencePhaseEvent = z.infer<typeof DiscordPresencePhaseEventSchema>;
+
 /**
  * Runtime transport binding. Action schemas never mention bot vs user; only this
  * binding (plus doctrine) selects which credential-broker provider executes.
@@ -109,20 +217,19 @@ const PHASE_RANK: Readonly<Record<DiscordPresenceSessionPhase, number>> = {
   present: 2,
   voice_active: 3,
   go_live_active: 4,
-  degraded: 2,
+  degraded: 0,
   failed: 0,
 };
 
 export function isDiscordPresenceActionAvailable(input: {
   action: DiscordPresenceAction;
-  phase: DiscordPresenceSessionPhase;
-  transportKind: "bot" | "user_session";
+  session: DiscordPresenceSessionRecord;
 }): boolean {
   const entry = DISCORD_PRESENCE_CATALOG.find((candidate) => candidate.action === input.action);
   if (entry === undefined) return false;
-  if (entry.requiresUserSession && input.transportKind !== "user_session") return false;
-  if (PHASE_RANK[input.phase] < PHASE_RANK[entry.minPhase]) return false;
-  if (input.phase === "off" || input.phase === "failed") return false;
+  if (entry.requiresUserSession && input.session.transportKind !== "user_session") return false;
+  if (PHASE_RANK[input.session.phase] < PHASE_RANK[entry.minPhase]) return false;
+  if (["off", "degraded", "failed"].includes(input.session.phase)) return false;
   return true;
 }
 
@@ -163,6 +270,12 @@ function toolSetsFor(
       presenceTools: [],
     };
   }
+  if (phase === "degraded") {
+    return {
+      lifecycleTools: ["discord_presence_status", "discord_presence_disconnect"],
+      presenceTools: [],
+    };
+  }
   // Only the presence captain lane may act; other lanes keep supervision.
   if (lane === "discord_presence") {
     return { lifecycleTools: supervisionTools, presenceTools: presenceActTools };
@@ -198,6 +311,14 @@ export const DiscordPresenceToolExposureSchema = z
 export type DiscordPresenceToolExposure = z.infer<typeof DiscordPresenceToolExposureSchema>;
 
 export function resolveDiscordPresenceToolExposure(
+  session: DiscordPresenceSessionRecord,
+  lane: CaptainLane,
+): DiscordPresenceToolExposure {
+  return resolveDiscordPresencePhaseToolExposure(session.phase, lane);
+}
+
+/** Resolve advertised tools directly from live phase when durability is intentionally behind. */
+export function resolveDiscordPresencePhaseToolExposure(
   phase: DiscordPresenceSessionPhase,
   lane: CaptainLane,
 ): DiscordPresenceToolExposure {
@@ -224,6 +345,30 @@ export function discordPresencePhaseFromEnvironment(
       return "degraded";
     case "stopping":
       return "degraded";
+    case "failed":
+      return "failed";
+    default: {
+      const _exhaustive: never = phase;
+      return _exhaustive;
+    }
+  }
+}
+
+/** Project presence phases back into the shared environment lifecycle surface. */
+export function environmentPhaseFromDiscordPresence(
+  phase: DiscordPresenceSessionPhase,
+): EnvironmentSessionPhase {
+  switch (phase) {
+    case "off":
+      return "off";
+    case "connecting":
+      return "starting";
+    case "present":
+    case "voice_active":
+    case "go_live_active":
+      return "active";
+    case "degraded":
+      return "paused";
     case "failed":
       return "failed";
     default: {

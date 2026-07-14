@@ -72,3 +72,16 @@ The module loads `discord_bot` only through the credential broker. Both
 `DISCORD_BOT_TOKEN` and `DISCORD_USER_TOKEN` are hard startup errors; user-session
 transport and Go Live are not accepted on this path.
 See [`ADR 0024`](../../docs/adr/0024-discord-dual-plane-presence.md).
+
+The bridge owns one official-bot presence session keyed by application id. Gateway readiness,
+resume/reconnect/disconnect, invalidation, and the bot's own voice-state updates publish typed
+phase transitions to the control plane over the authenticated captain channel. The control plane
+projects that stream before exposing or executing presence actions; `degraded`, `failed`, and
+`off` expose no act tools. Operator status therefore comes from semantic events rather than bot
+log text, and an action payload can never manufacture the phase it requires. Each authenticated
+action carries the live session id, phase, and monotonic revision. The control plane requires that
+claim to match its latest validated session record as well as the durable exposure. A loss-phase
+callback synchronously advances the live revision and fences the advertised tool catalog before
+durable publication can await I/O; bounded publication retries then reconcile the durable record.
+After a control-plane restart, act execution remains fail-closed until an authenticated lifecycle
+delivery revalidates the live watermark; durable session replay alone restores status only.

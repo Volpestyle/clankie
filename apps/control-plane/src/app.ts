@@ -24,6 +24,16 @@ import {
 } from "@clankie/mission-engine";
 import { createLogger } from "@clankie/observability";
 import {
+  DISCORD_PRESENCE_LIVE_PHASE_HEADER,
+  DISCORD_PRESENCE_LIVE_REVISION_HEADER,
+  DISCORD_PRESENCE_LIVE_SESSION_HEADER,
+  DiscordPresenceLiveClaimSchema,
+  DiscordPresencePhaseEventSchema,
+  isDiscordPresenceActionAvailable,
+  resolveDiscordPresencePhaseToolExposure,
+  type DiscordPresenceSessionRecord,
+} from "@clankie/interactive-environment";
+import {
   MemoryFactSchema,
   type ApplyProposalResult,
   type MemoryFact,
@@ -104,6 +114,7 @@ import {
   type WorkerSteerOutcome,
 } from "./worker-steering.ts";
 import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
+import { DiscordPresenceSessionProjection, discordPresenceDomainEvent } from "./discord-presence-session.ts";
 import type { CaptainChannelTurnPort } from "./eve-captain-turn.ts";
 import { applyMissionTriggerEvent, dueOccurrences, MissionTriggerInputSchema } from "./mission-triggers.ts";
 import { mintPairingOffer, pairingOfferWire, PairingOfferStore } from "./pairing.ts";
@@ -205,7 +216,7 @@ export interface ControlPlaneDependencies {
   /** Trusted Eve turn adapter. Model credentials remain inside the Eve service. */
   captainChannelTurns?: CaptainChannelTurnPort;
   /**
-   * Privileged Discord presence executor (bot transport for ADR 0024 P1).
+   * Privileged Discord presence executor gated by the bridge-owned gateway session (ADR 0024).
    * Bot credentials remain inside the trusted runtime module.
    */
   discordPresenceRuntime?: DiscordPresenceRuntimePort;
@@ -646,6 +657,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
   const missionLocks = new Map<string, Promise<unknown>>();
   const approvalLocks = new Map<string, Promise<unknown>>();
   const discordPresenceLocks = new Map<string, Promise<unknown>>();
+  const discordPresenceSessionLocks = new Map<string, Promise<unknown>>();
   const triggerEvaluationLocks = new Map<string, Promise<unknown>>();
   const claimMissions = new Map<string, string>();
   const approvalRequests = new Map<string, ApprovalRequestRecord>();
@@ -718,6 +730,12 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     }
     logger.info({ missionCount: missions.size }, "mission records rebuilt from event store");
   }
+  const discordPresenceSessions = new DiscordPresenceSessionProjection(storedEvents);
+  // Durable replay restores status, but it cannot prove the bridge is still
+  // connected. Act gating therefore starts unvalidated after every process
+  // boot and remains fail-closed until an authenticated lifecycle delivery
+  // re-establishes the live watermark.
+  const discordPresenceLiveSessions = new Map<string, DiscordPresenceSessionRecord>();
 
   if (dependencies.trackerMirror) {
     for (const mission of missions.values()) {
@@ -1357,7 +1375,80 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     }
   });
 
+  app.post("/v1/discord/presence-session-events", async (context) => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") return context.json({ error: "captain_execution_unavailable" }, 503);
+    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
+    if (captain.steerSourceLane !== "discord_text" && captain.steerSourceLane !== "discord_voice") {
+      return context.json({ error: "discord_channel_authority_required" }, 403);
+    }
+    const parsed = DiscordPresencePhaseEventSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_discord_presence_phase_event" }, 400);
+    const event = parsed.data;
+    const sessionKey = discordPresenceBindingKey(event.data.session);
+    return withSerializedLock(discordPresenceSessionLocks, sessionKey, async () => {
+      const domainEvent = discordPresenceDomainEvent(event, dependencies.doctrine.profileHash);
+      if (persistedEventIds.has(event.id)) {
+        const existing = storedEvents.find((candidate) => candidate.id === event.id);
+        if (existing === undefined || JSON.stringify(existing) !== JSON.stringify(domainEvent)) {
+          return context.json({ error: "discord_presence_event_id_conflict" }, 409);
+        }
+        const session = discordPresenceSessions.resolve(event.data.session);
+        if (session === undefined) {
+          return context.json({ error: "discord_presence_event_id_conflict" }, 409);
+        }
+        // An idempotent acknowledgement proves only that this event is
+        // durable, not that the bridge is live in this control-plane boot.
+        // Only a genuinely new validated event below may open the act fence.
+        return context.json({ accepted: false, session });
+      }
+      try {
+        const durableBefore = discordPresenceSessions.resolve(event.data.session);
+        const observed = discordPresenceSessions.validate(event);
+        const advancesDurableRevision =
+          durableBefore === undefined || observed.revision > durableBefore.revision;
+        // The authenticated lifecycle event is live authority as soon as it
+        // validates and strictly advances durable state. Advance this
+        // watermark before durable append so a stale active claim cannot race
+        // a loss transition awaiting persistence. A novel event id at an
+        // already-durable revision is not evidence of liveness in this boot.
+        if (advancesDurableRevision) discordPresenceLiveSessions.set(sessionKey, observed);
+        if (dependencies.eventStore) await dependencies.eventStore.append(domainEvent);
+        const session = discordPresenceSessions.apply(event);
+        if (advancesDurableRevision) discordPresenceLiveSessions.set(sessionKey, session);
+        storedEvents.push(domainEvent);
+        persistedEventIds.add(domainEvent.id);
+        return context.json({ accepted: true, session });
+      } catch (error) {
+        const code = error instanceof Error ? error.message : "discord_presence_session_conflict";
+        return context.json({ error: code }, 409);
+      }
+    });
+  });
+
+  app.get("/v1/discord/presence-sessions", async (context) => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") return context.json({ error: "captain_execution_unavailable" }, 503);
+    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
+    return context.json(discordPresenceSessions.list());
+  });
+
   app.post("/v1/discord/presence-actions", async (context) => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") {
+      return context.json({ error: "captain_authentication_unavailable" }, 503);
+    }
+    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
+    const revisionHeader = context.req.header(DISCORD_PRESENCE_LIVE_REVISION_HEADER);
+    const liveClaim = DiscordPresenceLiveClaimSchema.safeParse({
+      schemaVersion: 1,
+      sessionId: context.req.header(DISCORD_PRESENCE_LIVE_SESSION_HEADER),
+      phase: context.req.header(DISCORD_PRESENCE_LIVE_PHASE_HEADER),
+      revision: revisionHeader === undefined ? undefined : Number(revisionHeader),
+    });
+    if (!liveClaim.success) {
+      return context.json({ error: "discord_presence_live_claim_required" }, 400);
+    }
     if (!dependencies.discordPresenceRuntime) {
       return context.json({ error: "discord_presence_runtime_unavailable" }, 503);
     }
@@ -1385,6 +1476,46 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       const classification = classifyDiscordPresenceAction(write.action);
       if (classification === undefined) {
         return context.json({ error: "discord_presence_action_unclassified" }, 400);
+      }
+      const session = discordPresenceSessions.resolve(write.identity);
+      if (session === undefined) {
+        return context.json({ error: "discord_presence_session_unavailable" }, 409);
+      }
+      const advertisedTools = discordPresenceSessions.resolveToolExposure(write.identity, "discord_presence");
+      if (
+        advertisedTools?.presenceTools.includes("discord_presence_act") !== true ||
+        !isDiscordPresenceActionAvailable({ action: write.action, session })
+      ) {
+        return context.json({ error: "discord_presence_action_unavailable", phase: session.phase }, 409);
+      }
+      const liveSession = discordPresenceLiveSessions.get(discordPresenceBindingKey(write.identity));
+      if (
+        liveSession === undefined ||
+        liveClaim.data.sessionId !== liveSession.sessionId ||
+        liveClaim.data.phase !== liveSession.phase ||
+        liveClaim.data.revision !== liveSession.revision
+      ) {
+        return context.json(
+          {
+            error: "discord_presence_live_claim_stale",
+            claimedRevision: liveClaim.data.revision,
+            ...(liveSession === undefined
+              ? {}
+              : { currentRevision: liveSession.revision, phase: liveSession.phase }),
+          },
+          409,
+        );
+      }
+      const liveExposure = resolveDiscordPresencePhaseToolExposure(liveClaim.data.phase, "discord_presence");
+      if (!liveExposure.presenceTools.includes("discord_presence_act")) {
+        return context.json(
+          {
+            error: "discord_presence_action_unavailable",
+            phase: liveClaim.data.phase,
+            source: "live_session",
+          },
+          409,
+        );
       }
       const request = ActionRequestSchema.parse({
         id: write.idempotencyKey,
@@ -1498,7 +1629,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       }
 
       try {
-        const result = await discordPresenceRuntime.execute(write);
+        const result = await discordPresenceRuntime.execute(write, session);
         discordPresenceResults.set(write.idempotencyKey, {
           fingerprint,
           result,
@@ -3650,6 +3781,14 @@ function applyMemoryEvent(
   if (event.type === "memory.proposal.committed") {
     committed.add(z.string().min(1).parse(event.data.proposalId));
   }
+}
+
+function discordPresenceBindingKey(identity: {
+  readonly transportKind: "bot" | "user_session";
+  readonly characterId: string;
+  readonly credentialRef: string;
+}): string {
+  return JSON.stringify([identity.transportKind, identity.characterId, identity.credentialRef]);
 }
 
 export async function loadDefaultDoctrine(): Promise<CompiledDoctrine> {

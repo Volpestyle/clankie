@@ -2,12 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   DISCORD_PRESENCE_CATALOG,
   DiscordPresenceActionRequestSchema,
+  DiscordPresenceSessionRecordSchema,
   DiscordPresenceToolExposureSchema,
   DiscordPresenceTransportBindingSchema,
   EnvironmentActionResultSchema,
   EnvironmentCommandSchema,
   EnvironmentEventSchema,
   EnvironmentLeaseSchema,
+  discordPresencePhaseFromEnvironment,
+  environmentPhaseFromDiscordPresence,
   isDiscordPresenceActionAvailable,
   MinecraftCommandSchema,
   MinecraftObservationSchema,
@@ -196,22 +199,31 @@ describe("Minecraft profile", () => {
     expect(
       isDiscordPresenceActionAvailable({
         action: "discord.presence.go_live_start",
-        phase: "voice_active",
-        transportKind: "user_session",
+        session: presenceSession("voice_active", "user_session"),
       }),
     ).toBe(true);
     expect(
       isDiscordPresenceActionAvailable({
         action: "discord.presence.go_live_start",
-        phase: "voice_active",
-        transportKind: "bot",
+        session: presenceSession("voice_active", "bot"),
       }),
     ).toBe(false);
     expect(DISCORD_PRESENCE_CATALOG.length).toBeGreaterThan(0);
-    expect(resolveDiscordPresenceToolExposure("present", "discord_presence").presenceTools).toContain(
-      "discord_presence_act",
-    );
-    expect(resolveDiscordPresenceToolExposure("present", "tui").presenceTools).toEqual([]);
+    expect(
+      resolveDiscordPresenceToolExposure(presenceSession("present"), "discord_presence").presenceTools,
+    ).toContain("discord_presence_act");
+    expect(resolveDiscordPresenceToolExposure(presenceSession("present"), "tui").presenceTools).toEqual([]);
+    expect(
+      resolveDiscordPresenceToolExposure(presenceSession("degraded"), "discord_presence").presenceTools,
+    ).toEqual([]);
+    expect(
+      isDiscordPresenceActionAvailable({
+        action: "discord.presence.reply",
+        session: presenceSession("degraded"),
+      }),
+    ).toBe(false);
+    expect(discordPresencePhaseFromEnvironment("active")).toBe("present");
+    expect(environmentPhaseFromDiscordPresence("voice_active")).toBe("active");
     expect(() =>
       DiscordPresenceToolExposureSchema.parse({
         schemaVersion: 1,
@@ -223,3 +235,21 @@ describe("Minecraft profile", () => {
     ).toThrow(/invalid presence tool exposure/);
   });
 });
+
+function presenceSession(
+  phase: Parameters<typeof environmentPhaseFromDiscordPresence>[0],
+  transportKind: "bot" | "user_session" = "bot",
+) {
+  return DiscordPresenceSessionRecordSchema.parse({
+    schemaVersion: 1,
+    sessionId: `discord:${transportKind}:fixture`,
+    characterId: "clankie",
+    credentialRef: transportKind === "bot" ? "discord_bot" : "discord_user_session",
+    transportKind,
+    phase,
+    gatewayConnected: !["off", "connecting", "degraded", "failed"].includes(phase),
+    voiceGuildIds: phase === "voice_active" ? ["guild-1"] : [],
+    revision: 1,
+    updatedAt: "2026-07-14T18:00:00.000Z",
+  });
+}

@@ -184,6 +184,7 @@ export class MissionObserver {
     mission.profileHash = sanitize(event.profileHash);
     mission.updatedSequence = entry.sequence;
     applyMissionLifecycle(mission, event);
+    applyDiscordPresenceLifecycle(mission, event);
     applyTaskLifecycle(mission, event);
     applyWorkerLifecycle(mission, event);
     mission.timeline.push(summarizeEvent(entry));
@@ -268,6 +269,15 @@ function applyMissionLifecycle(mission: MissionProjection, event: ObservedMissio
   else if (event.type === "mission.cancelled") mission.state = "cancelled";
 }
 
+function applyDiscordPresenceLifecycle(mission: MissionProjection, event: ObservedMissionEvent): void {
+  if (event.type !== "discord.presence.session.phase_changed") return;
+  const session = recordData(event.data, "session");
+  const sessionId = stringData(session, "sessionId");
+  const phase = stringData(event.data, "phase");
+  mission.goal = sessionId === undefined ? "Discord presence" : `Discord presence · ${sessionId}`;
+  if (phase !== undefined) mission.state = phase;
+}
+
 function applyTaskLifecycle(mission: MissionProjection, event: ObservedMissionEvent): void {
   if (event.taskId === undefined || !event.type.startsWith("task.")) return;
   const taskId = sanitize(event.taskId);
@@ -343,6 +353,12 @@ function taskState(type: string): string {
 
 function summarizeEvent(entry: SequencedMissionEvent): string {
   const { event, sequence } = entry;
+  if (event.type === "discord.presence.session.phase_changed") {
+    const previous = stringData(event.data, "previousPhase") ?? "unknown";
+    const phase = stringData(event.data, "phase") ?? "unknown";
+    const reason = stringData(event.data, "reason") ?? "unspecified";
+    return `#${sequence.toString()} discord presence ${previous} → ${phase} · ${reason}`;
+  }
   const scope = [event.taskId, event.workerRunId].filter(isDefined).map(sanitize).join(" · ");
   return `#${sequence.toString()} ${sanitize(event.type)}${scope.length === 0 ? "" : ` · ${scope}`}`;
 }
