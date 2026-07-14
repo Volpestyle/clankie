@@ -8,6 +8,8 @@ The production runner creates one `TerminalManager`. Generic interactive command
 
 The internal `TerminalSourceProvider` composes runner-owned PTYs and optional Herdr panes behind the same frozen terminal wire. Set `CLANKIE_HERDR_TERMINAL_SOURCE_ENABLED=1` and provide the runner-only `HERDR_SOCKET_PATH` to add the Herdr source to the development terminal gateway. The socket path, Herdr pane ID, session metadata, working directory, and credentials never enter discovery, logs, or wire messages. Herdr's stable `terminal_id` is the public terminal identity; its compact, session-local `pane_id` is resolved again after discovery and stays inside the adapter.
 
+Herdr titles are presentation-only. A title containing an absolute path, the private pane ID, or a Herdr pane/session/socket marker is replaced by the generic `Herdr pane` label before it enters the provider-neutral session summary.
+
 | Source                                   | Observe | Resume / VT restore | Control lease | Input | Resize |
 | ---------------------------------------- | ------- | ------------------- | ------------- | ----- | ------ |
 | Runner PTY                               | yes     | yes                 | yes           | yes   | yes    |

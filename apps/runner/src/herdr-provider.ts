@@ -110,7 +110,7 @@ export class HerdrSocketTransport implements HerdrTransport {
       if (seen.has(terminalId)) throw new HerdrTerminalError("protocol_error");
       seen.add(terminalId);
       const label = optionalString(value.label) ?? optionalString(value.title) ?? "Herdr pane";
-      return { paneId, terminalId, title: safeTitle(label) };
+      return { paneId, terminalId, title: safeTitle(label, paneId) };
     });
   }
 
@@ -429,7 +429,7 @@ export class HerdrTerminalProvider implements TerminalSourceProvider, TerminalPr
     const bridge = new HerdrBridgeTransport();
     const abort = new AbortController();
     const record: HerdrRecord = {
-      pane: { ...pane, title: safeTitle(pane.title) },
+      pane: { ...pane, title: safeTitle(pane.title, pane.paneId) },
       bridge,
       abort,
       control: this.canControl(pane),
@@ -439,7 +439,7 @@ export class HerdrTerminalProvider implements TerminalSourceProvider, TerminalPr
     this.manager.spawnTerminal({
       id: pane.terminalId,
       workerRunId: `herdr:${createHash("sha256").update(pane.terminalId).digest("hex").slice(0, 24)}`,
-      title: safeTitle(pane.title),
+      title: safeTitle(pane.title, pane.paneId),
       command: "herdr-pane",
       transport: bridge,
       provider: "herdr",
@@ -447,9 +447,14 @@ export class HerdrTerminalProvider implements TerminalSourceProvider, TerminalPr
       columns: this.columns,
       rows: this.rows,
     });
-    void this.runRecord(record).catch(() => {
+    void this.runRecord(record).catch((error: unknown) => {
       if (!record.closed && !record.abort.signal.aborted) {
-        this.closeRecord(record, "transport_lost");
+        this.closeRecord(
+          record,
+          error instanceof HerdrTerminalError && error.code === "sequence_discontinuity"
+            ? "sequence_discontinuity"
+            : "transport_lost",
+        );
       }
     });
   }
@@ -679,7 +684,7 @@ function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-function safeTitle(value: string): string {
+function safeTitle(value: string, privatePaneId?: string): string {
   const title = [...value]
     .map((character) => {
       const code = character.codePointAt(0)!;
@@ -689,6 +694,14 @@ function safeTitle(value: string): string {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 256);
+  if (
+    (privatePaneId !== undefined && title.includes(privatePaneId)) ||
+    /(?:^|\s)(?:~\/|\/[^\s])/u.test(title) ||
+    /\b(?:herdr|pane|session|socket|sock(?:et)?[_ -]?path)(?:[_ -]?id)?\s*[:=]/iu.test(title) ||
+    /\b(?:pane|session)[-_:][A-Za-z0-9._:-]+\b/iu.test(title)
+  ) {
+    return "Herdr pane";
+  }
   return title || "Herdr pane";
 }
 

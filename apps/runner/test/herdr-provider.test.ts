@@ -103,14 +103,22 @@ describe("Herdr terminal source adapter", () => {
     transport.panes = [
       { paneId: "compact-1", terminalId: "01JSTABLEA", title: "editor" },
       { paneId: "compact-2", terminalId: "01JSTABLEB", title: "logs" },
+      {
+        paneId: "compact-secret",
+        terminalId: "01JSTABLEC",
+        title: "socket=/tmp/herdr/private.sock pane_id=compact-secret session:private-session",
+      },
     ];
     const provider = new HerdrTerminalProvider({ transport, settleSeed: () => Promise.resolve() });
 
     const sessions = await provider.listSessions();
 
-    expect(sessions.map(({ id }) => id)).toEqual(["01JSTABLEA", "01JSTABLEB"]);
+    expect(sessions.map(({ id }) => id)).toEqual(["01JSTABLEA", "01JSTABLEB", "01JSTABLEC"]);
+    expect(sessions.map(({ title }) => title)).toEqual(["editor", "logs", "Herdr pane"]);
     expect(sessions.every(({ provider }) => provider === "herdr")).toBe(true);
     expect(JSON.stringify(sessions)).not.toContain("compact-");
+    expect(JSON.stringify(sessions)).not.toContain("/tmp/herdr");
+    expect(JSON.stringify(sessions)).not.toContain("private-session");
     expect(provider.capabilities("01JSTABLEA")).toEqual({
       observe: true,
       resume: true,
@@ -207,7 +215,7 @@ describe("Herdr terminal source adapter", () => {
       provider.observation("01JRESTART").lastSequence,
     );
     expect(closed.at(-1)).toMatchObject({ type: "closed" });
-    expect(provider.observation("01JRESTART").closure?.reason).toBe("transport_lost");
+    expect(provider.observation("01JRESTART").closure?.reason).toBe("sequence_discontinuity");
 
     transport.panes = [{ paneId: "new", terminalId: "01JRESTART", title: "worker" }];
     await provider.refresh();

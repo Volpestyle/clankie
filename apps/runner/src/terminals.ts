@@ -64,7 +64,7 @@ export interface TerminalManagerOptions {
 /** Authoritative closure identity retained independently of replay eviction. */
 export interface TerminalClosure {
   sequence: number;
-  reason: "exited" | "signaled" | "transport_lost" | "terminated";
+  reason: "exited" | "signaled" | "transport_lost" | "terminated" | "sequence_discontinuity";
   exitCode: number | null;
   signal: null;
   closedAt: string;

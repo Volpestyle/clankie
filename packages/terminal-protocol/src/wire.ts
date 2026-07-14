@@ -90,13 +90,22 @@ export const TerminalCapabilitiesSchema = z
   });
 export type TerminalCapabilities = z.infer<typeof TerminalCapabilitiesSchema>;
 
+export const TerminalClosureReasonSchema = z.enum([
+  "exited",
+  "signaled",
+  "transport_lost",
+  "terminated",
+  "sequence_discontinuity",
+]);
+export type TerminalClosureReason = z.infer<typeof TerminalClosureReasonSchema>;
+
 export const TerminalLifecycleSchema = z.discriminatedUnion("state", [
   z.object({ state: z.literal("open") }).strict(),
   z
     .object({
       state: z.literal("closed"),
       sequence: FrameSequenceSchema,
-      reason: z.enum(["exited", "signaled", "transport_lost", "terminated"]),
+      reason: TerminalClosureReasonSchema,
       exitCode: z.number().int().nullable(),
       signal: z.string().min(1).max(64).nullable(),
       closedAt: TimestampSchema,
@@ -116,7 +125,9 @@ export const TerminalLifecycleSchema = z.discriminatedUnion("state", [
         context.addIssue({ code: "custom", path: ["exitCode"], message: "signaled cannot carry exitCode" });
       }
       if (
-        (lifecycle.reason === "transport_lost" || lifecycle.reason === "terminated") &&
+        (lifecycle.reason === "transport_lost" ||
+          lifecycle.reason === "terminated" ||
+          lifecycle.reason === "sequence_discontinuity") &&
         (lifecycle.exitCode !== null || lifecycle.signal !== null)
       ) {
         context.addIssue({
@@ -362,7 +373,7 @@ export type TerminalGeometryMessage = z.infer<typeof TerminalGeometryMessageSche
 export const TerminalClosedMessageSchema = StreamMessageBaseSchema.extend({
   type: z.literal("terminal.closed"),
   sequence: FrameSequenceSchema,
-  reason: z.enum(["exited", "signaled", "transport_lost", "terminated"]),
+  reason: TerminalClosureReasonSchema,
   exitCode: z.number().int().nullable(),
   signal: z.string().min(1).max(64).nullable(),
   closedAt: TimestampSchema,
@@ -382,12 +393,14 @@ export const TerminalClosedMessageSchema = StreamMessageBaseSchema.extend({
       context.addIssue({ code: "custom", path: ["exitCode"], message: "signaled cannot carry exitCode" });
     }
     if (
-      (message.reason === "transport_lost" || message.reason === "terminated") &&
+      (message.reason === "transport_lost" ||
+        message.reason === "terminated" ||
+        message.reason === "sequence_discontinuity") &&
       (message.exitCode !== null || message.signal !== null)
     ) {
       context.addIssue({
         code: "custom",
-        message: "transport_lost and terminated cannot carry process exit details",
+        message: "non-process closure cannot carry process exit details",
       });
     }
   });

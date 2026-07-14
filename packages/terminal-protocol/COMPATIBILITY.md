@@ -39,7 +39,9 @@ Discovery, subscription acknowledgement, resync-required delivery, and every
 snapshot carry explicit `open` or `closed` lifecycle state. Closed state
 includes the original sequenced close identity and remains authoritative after
 that stream frame leaves replay retention. A closed snapshot's closure
-sequence is at or before its exact snapshot boundary.
+sequence is at or before its exact snapshot boundary. Provider-detected stream
+gaps use the typed `sequence_discontinuity` non-process closure reason rather
+than being collapsed into generic transport loss.
 
 After that baseline, `terminal.capabilities_changed` pushes the complete current
 capability set and its positive monotonic revision to each attached

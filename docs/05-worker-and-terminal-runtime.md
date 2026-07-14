@@ -212,7 +212,7 @@ specifies bounded briefs, goal arming, run receipts, harvest, resume, and cleanu
 
 ## Herdr boundary
 
-Herdr is an optional external pane host. The trusted runner uses `pane.list`, `pane.read`, `pane.attach`, and `pane.send_input` through `HerdrTerminalProvider`; clients see only the provider-neutral terminal contract. The stable Herdr `terminal_id` becomes `terminalId`. Compact `pane_id` values can change or be reused after a close, so they remain private request locators and never become client identity. Socket paths, Herdr session details, working directories, and credentials remain runner-private.
+Herdr is an optional external pane host. The trusted runner uses `pane.list`, `pane.read`, `pane.attach`, and `pane.send_input` through `HerdrTerminalProvider`; clients see only the provider-neutral terminal contract. The stable Herdr `terminal_id` becomes `terminalId`. Compact `pane_id` values can change or be reused after a close, so they remain private request locators and never become client identity. Socket paths, Herdr session details, working directories, and credentials remain runner-private. Presentation titles containing an absolute path, the private pane ID, or a pane/session/socket marker become the generic `Herdr pane` label before discovery.
 
 Visible-state seeding and raw attachment form one bounded seam:
 
