@@ -1,8 +1,32 @@
 import { describe, expect, it } from "vitest";
+import {
+  mintOperatorToken,
+  OPERATOR_CREDENTIAL_PROVIDER_ID,
+  type CredentialStore,
+  type ProviderCredential,
+  type RedactedCredential,
+} from "@clankie/credential-broker";
 import { isHeadlessCaptainCommand, runHeadlessCaptainCommand } from "../bin/headless-captain.ts";
 import type { PairingOffer } from "../bin/pairing-offer.ts";
 
 const OPERATOR_ENV: NodeJS.ProcessEnv = { CLANKIE_OPERATOR_TOKEN: "operator-secret" };
+
+class MemoryCredentialStore implements CredentialStore {
+  public readonly credentials = new Map<string, ProviderCredential>();
+  public get(providerId: string): Promise<ProviderCredential | undefined> {
+    return Promise.resolve(this.credentials.get(providerId));
+  }
+  public set(providerId: string, credential: ProviderCredential): Promise<void> {
+    this.credentials.set(providerId, credential);
+    return Promise.resolve();
+  }
+  public delete(providerId: string): Promise<boolean> {
+    return Promise.resolve(this.credentials.delete(providerId));
+  }
+  public list(): Promise<Record<string, RedactedCredential>> {
+    return Promise.resolve({});
+  }
+}
 
 function outputBuffer(): { readonly stream: { write(chunk: string): void }; readonly text: () => string } {
   let output = "";
@@ -56,6 +80,7 @@ async function runPair(
   overrides: {
     fetchImpl?: typeof fetch;
     env?: NodeJS.ProcessEnv;
+    operatorCredentialStore?: CredentialStore;
     stdout?: { write(chunk: string): void };
     stderr?: { write(chunk: string): void };
   } = {},
@@ -63,6 +88,9 @@ async function runPair(
   return await runHeadlessCaptainCommand(["pair", ...args], {
     repoRoot: "/unused",
     env: overrides.env ?? OPERATOR_ENV,
+    ...(overrides.operatorCredentialStore === undefined
+      ? {}
+      : { operatorCredentialStore: overrides.operatorCredentialStore }),
     ...(overrides.fetchImpl === undefined ? {} : { fetchImpl: overrides.fetchImpl }),
     ...(overrides.stdout === undefined ? {} : { stdout: overrides.stdout }),
     ...(overrides.stderr === undefined ? {} : { stderr: overrides.stderr }),
@@ -79,6 +107,26 @@ describe("clankie pair — recognition", () => {
 });
 
 describe("clankie pair — success", () => {
+  it("auto-loads the broker credential when no environment override is present", async () => {
+    const store = new MemoryCredentialStore();
+    const token = mintOperatorToken();
+    await store.set(OPERATOR_CREDENTIAL_PROVIDER_ID, { type: "api", key: token });
+    let authorization: string | null = null;
+
+    const exit = await runPair(["--json"], {
+      env: {},
+      operatorCredentialStore: store,
+      fetchImpl: (async (_input, init) => {
+        authorization = new Headers(init?.headers).get("authorization");
+        return Response.json(validOffer());
+      }) as typeof fetch,
+      stdout: outputBuffer().stream,
+    });
+
+    expect(exit).toBe(0);
+    expect(authorization).toBe(`Bearer ${token}`);
+  });
+
   it("renders a QR, the copyable code, and the deep link with expiry (human mode)", async () => {
     const offer = validOffer();
     const stdout = outputBuffer();
@@ -121,6 +169,7 @@ describe("clankie pair — fail closed", () => {
     const stderr = outputBuffer();
     const exit = await runPair([], {
       env: {},
+      operatorCredentialStore: new MemoryCredentialStore(),
       fetchImpl: throwingFetch(new Error("must not be called"), calls),
       stdout: stdout.stream,
       stderr: stderr.stream,
@@ -128,7 +177,7 @@ describe("clankie pair — fail closed", () => {
     expect(exit).toBe(1);
     expect(calls.count).toBe(0);
     expect(stdout.text()).toBe("");
-    expect(stderr.text()).toContain("Operator token required");
+    expect(stderr.text()).toContain("Operator credential unavailable");
   });
 
   it.each([

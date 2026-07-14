@@ -14,7 +14,7 @@ export async function runApprovalInbox(
   if (!client) {
     shell.insertCommandResult(
       "/approvals",
-      "Approval access is unavailable. Start the authenticated console with CLANKIE_OPERATOR_TOKEN.",
+      "Approval access is unavailable. Start the control plane once to bootstrap the local operator credential.",
       "error",
     );
     return;

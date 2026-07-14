@@ -51,7 +51,7 @@ export function pairingFailureMessage(status: PairingOfferStatus): string {
     case "unavailable":
       return "Pairing service unavailable. Start the Clankie control plane (VUH-727 pairing service) and retry.";
     case "unauthorized":
-      return "Operator token required to request a pairing offer. Set CLANKIE_OPERATOR_TOKEN and retry.";
+      return "Operator credential unavailable. Start the control plane once, then retry.";
     case "expired":
       return "Pairing offer expired before it could be shown. Run `clankie pair` again for a fresh offer.";
     case "consumed":

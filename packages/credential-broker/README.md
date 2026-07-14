@@ -20,6 +20,22 @@ capabilities, optional resources, policy obligations, and expiry.
 - Credential summaries pass through `redactCredential()` before entering a UI
   or structured log.
 
+## Local operator credential
+
+The broker owns the `clankie_operator` bearer used by trusted local operator
+surfaces. The first control-plane start and the fullscreen launcher mint 256
+bits of cryptographic entropy when the entry is absent. The control plane and
+TUI resolve that same entry automatically; `CLANKIE_OPERATOR_TOKEN` is an
+explicit CI/test override and is never persisted by bootstrap.
+
+`clankie health` reports only presence, selected source, and whether an env
+override matches the stored value. `clankie operator-credential rotate`
+atomically replaces the broker entry without printing it. The control plane
+resolves the entry at each authenticated operator request, so rotation rejects
+the old token immediately and the next CLI request loads the replacement.
+Rotation refuses to run while an env override is active because a stored
+replacement cannot invalidate an independently managed environment secret.
+
 The Keychain implementation invokes `/usr/bin/security` through `execFile`, not
 a shell. Secret JSON is passed as a single argv value because the CLI has no
 non-interactive stdin form; it is never placed in a worker environment or

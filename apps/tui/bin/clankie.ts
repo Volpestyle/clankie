@@ -2,6 +2,7 @@
 // The `clankie` command exposes non-interactive captain controls or attaches
 // the fullscreen face to one healthy shared captain service.
 import { resolve } from "node:path";
+import { ensureOperatorCredential } from "@clankie/credential-broker";
 import { ensureCaptainService } from "./captain-service.ts";
 import { isHeadlessCaptainCommand, runHeadlessCaptainCommand } from "./headless-captain.ts";
 import { parseDirectConversation } from "../src/session/operator-conversations.ts";
@@ -47,6 +48,7 @@ async function runOperatorConsole(): Promise<void> {
   };
   let captain;
   try {
+    await ensureOperatorCredential({ env: process.env });
     captain = await ensureCaptainService({ repoRoot, env: process.env, onStatus: updateStatus });
   } catch (error) {
     stopStatus();

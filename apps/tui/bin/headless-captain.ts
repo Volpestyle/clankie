@@ -1,6 +1,13 @@
 import { chmodSync, closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import {
+  inspectOperatorCredential,
+  resolveOperatorCredential,
+  rotateOperatorCredential,
+  type CredentialStore,
+  type OperatorCredentialStatus,
+} from "@clankie/credential-broker";
 import { Client, isCurrentTurnBoundaryEvent, type HandleMessageStreamEvent } from "eve/client";
 import QRCode from "qrcode";
 import {
@@ -64,6 +71,7 @@ export interface HeadlessCaptainCommandOptions {
   readonly host?: string;
   readonly herdrRunCommand?: HerdrCommandRunner;
   readonly maxTraceEvents?: number;
+  readonly operatorCredentialStore?: CredentialStore;
   readonly readStdin?: () => Promise<string>;
   readonly repoRoot: string;
   readonly restartImpl?: (options: RestartCaptainServiceOptions) => Promise<CaptainServiceHandle>;
@@ -161,6 +169,8 @@ function commandHelp(): string {
     "  devices [--json]         List paired devices",
     "  devices revoke <id> [--json]",
     "                           Revoke a device's access",
+    "  operator-credential rotate [--json]",
+    "                           Rotate the local operator credential",
     "",
     "With no command, clankie opens the fullscreen operator console and requires a TTY.",
   ].join("\n");
@@ -177,6 +187,7 @@ export function isHeadlessCaptainCommand(command: string | undefined): boolean {
     command === "trace" ||
     command === "pair" ||
     command === "devices" ||
+    command === "operator-credential" ||
     command === "help" ||
     command === "--help" ||
     command === "-h"
@@ -193,9 +204,27 @@ async function runInspection(options: HeadlessCaptainCommandOptions): Promise<nu
   const host = commandHost(options);
   const inspection = await inspectCaptain(host, options.fetchImpl ?? fetch);
   const record = readCaptainServiceRecord(captainServiceStatePath(env), host);
+  let operatorCredential:
+    | OperatorCredentialStatus
+    | { readonly present: false; readonly source: "none"; readonly consistency: "invalid" };
+  try {
+    operatorCredential = await inspectOperatorCredential({
+      env,
+      ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
+    });
+  } catch {
+    operatorCredential = { present: false, source: "none", consistency: "invalid" };
+  }
+  const operatorCredentialHealthy =
+    operatorCredential.present && operatorCredential.consistency !== "mismatch";
   outputJson(options.stdout ?? process.stdout, {
-    ok: inspection.state === "healthy",
-    status: inspection.state === "healthy" ? "ready" : inspection.state,
+    ok: inspection.state === "healthy" && operatorCredentialHealthy,
+    status:
+      inspection.state !== "healthy"
+        ? inspection.state
+        : operatorCredentialHealthy
+          ? "ready"
+          : `operator_credential_${operatorCredential.consistency}`,
     endpointState: inspection.state,
     host,
     healthPath: inspection.healthPath,
@@ -205,9 +234,10 @@ async function runInspection(options: HeadlessCaptainCommandOptions): Promise<nu
       ? {}
       : { generation: record?.generation ?? inspection.generation }),
     owned: record !== undefined,
+    operatorCredential,
     ...(record === undefined ? {} : { pid: record.pid }),
   });
-  return inspection.state === "healthy" ? 0 : 1;
+  return inspection.state === "healthy" && operatorCredentialHealthy ? 0 : 1;
 }
 
 async function runRestart(options: HeadlessCaptainCommandOptions): Promise<number> {
@@ -709,6 +739,10 @@ async function runPair(args: readonly string[], options: HeadlessCaptainCommandO
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
   const controlPlaneUrl = env.CLANKIE_CONTROL_PLANE_URL ?? DEFAULT_CONTROL_PLANE_URL;
+  const operatorCredential = await resolveOperatorCredential({
+    env,
+    ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
+  });
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -716,7 +750,7 @@ async function runPair(args: readonly string[], options: HeadlessCaptainCommandO
   try {
     offer = await requestPairingOffer({
       controlPlaneUrl,
-      operatorToken: env.CLANKIE_OPERATOR_TOKEN,
+      operatorToken: operatorCredential?.token,
       ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
       signal: controller.signal,
     });
@@ -788,12 +822,16 @@ async function runDevices(args: readonly string[], options: HeadlessCaptainComma
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
   const controlPlaneUrl = env.CLANKIE_CONTROL_PLANE_URL ?? DEFAULT_CONTROL_PLANE_URL;
+  const operatorCredential = await resolveOperatorCredential({
+    env,
+    ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
+  });
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DEFAULT_DEVICES_TIMEOUT_MS);
   const request = {
     controlPlaneUrl,
-    operatorToken: env.CLANKIE_OPERATOR_TOKEN,
+    operatorToken: operatorCredential?.token,
     ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
     signal: controller.signal,
   };
@@ -818,6 +856,27 @@ async function runDevices(args: readonly string[], options: HeadlessCaptainComma
   } finally {
     clearTimeout(timer);
   }
+}
+
+const OPERATOR_CREDENTIAL_USAGE = "Usage: clankie operator-credential rotate [--json]";
+
+async function runOperatorCredential(
+  args: readonly string[],
+  options: HeadlessCaptainCommandOptions,
+): Promise<number> {
+  const json = args.includes("--json");
+  if (args[0] !== "rotate" || args.some((arg) => arg !== "rotate" && arg !== "--json")) {
+    throw new Error(OPERATOR_CREDENTIAL_USAGE);
+  }
+  const env = options.env ?? process.env;
+  const credential = await rotateOperatorCredential({
+    env,
+    ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
+  });
+  const output = options.stdout ?? process.stdout;
+  if (json) outputJson(output, { ok: true, status: "rotated", source: credential.source });
+  else output.write("Operator credential rotated. Existing operator sessions are invalidated.\n");
+  return 0;
 }
 
 function formatDevicesTable(devices: readonly DeviceListItem[]): string {
@@ -856,6 +915,9 @@ export async function runHeadlessCaptainCommand(
     if (command === "trace") return await runTrace(args.slice(1), options);
     if (command === "pair") return await runPair(args.slice(1), options);
     if (command === "devices") return await runDevices(args.slice(1), options);
+    if (command === "operator-credential") {
+      return await runOperatorCredential(args.slice(1), options);
+    }
     if (command === "help" || command === "--help" || command === "-h") {
       (options.stdout ?? process.stdout).write(`${commandHelp()}\n`);
       return 0;

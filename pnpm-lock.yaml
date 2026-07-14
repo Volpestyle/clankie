@@ -72,6 +72,9 @@ importers:
 
   apps/control-plane:
     dependencies:
+      '@clankie/credential-broker':
+        specifier: workspace:*
+        version: link:../../packages/credential-broker
       '@clankie/doctrine':
         specifier: workspace:*
         version: link:../../packages/doctrine

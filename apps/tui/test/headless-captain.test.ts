@@ -4,6 +4,11 @@ import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
+import {
+  FileCredentialStore,
+  mintOperatorToken,
+  OPERATOR_CREDENTIAL_PROVIDER_ID,
+} from "@clankie/credential-broker";
 import type { Client, HandleMessageStreamEvent, SessionState } from "eve/client";
 import { afterEach, describe, expect, it } from "vitest";
 import { headlessCaptainCursorPath, runHeadlessCaptainCommand } from "../bin/headless-captain.ts";
@@ -103,7 +108,11 @@ function fakeClient(input: {
 async function stateEnv(): Promise<NodeJS.ProcessEnv> {
   const root = await mkdtemp(join(tmpdir(), "clankie-headless-test-"));
   tempDirs.push(root);
-  return { XDG_STATE_HOME: root };
+  return {
+    XDG_STATE_HOME: root,
+    CLANKIE_CREDENTIALS_FILE: join(root, "credentials.json"),
+    CLANKIE_OPERATOR_TOKEN: "operator-secret",
+  };
 }
 
 async function writeServiceRecord(env: NodeJS.ProcessEnv, host: string): Promise<void> {
@@ -146,7 +155,59 @@ describe("headless captain commands", () => {
       endpointState: "healthy",
       healthPath: "/eve/v1/health",
       infoPath: "/eve/v1/info",
+      operatorCredential: { present: true, source: "env", consistency: "env_only" },
     });
+  });
+
+  it("diagnoses an env/store mismatch without printing either credential", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-health-credential-"));
+    tempDirs.push(root);
+    const store = new FileCredentialStore(join(root, "credentials.json"));
+    const stored = mintOperatorToken();
+    const overridden = mintOperatorToken();
+    await store.set(OPERATOR_CREDENTIAL_PROVIDER_ID, { type: "api", key: stored });
+    const stdout = outputBuffer();
+
+    const exitCode = await runHeadlessCaptainCommand(["health"], {
+      repoRoot: "/unused",
+      env: { CLANKIE_OPERATOR_TOKEN: overridden },
+      fetchImpl: healthyFetch(),
+      operatorCredentialStore: store,
+      stdout: stdout.stream,
+    });
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stdout.text())).toMatchObject({
+      ok: false,
+      status: "operator_credential_mismatch",
+      operatorCredential: { present: true, source: "env", consistency: "mismatch" },
+    });
+    expect(stdout.text()).not.toContain(stored);
+    expect(stdout.text()).not.toContain(overridden);
+  });
+
+  it("rotates the stored operator credential without rendering the old or new secret", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-rotate-credential-"));
+    tempDirs.push(root);
+    const store = new FileCredentialStore(join(root, "credentials.json"));
+    const original = mintOperatorToken();
+    await store.set(OPERATOR_CREDENTIAL_PROVIDER_ID, { type: "api", key: original });
+    const stdout = outputBuffer();
+
+    const exitCode = await runHeadlessCaptainCommand(["operator-credential", "rotate", "--json"], {
+      repoRoot: "/unused",
+      env: {},
+      operatorCredentialStore: store,
+      stdout: stdout.stream,
+    });
+    const rotated = await store.get(OPERATOR_CREDENTIAL_PROVIDER_ID);
+
+    expect(exitCode).toBe(0);
+    expect(rotated?.type).toBe("api");
+    expect(rotated?.type === "api" ? rotated.key : undefined).not.toBe(original);
+    expect(JSON.parse(stdout.text())).toEqual({ ok: true, status: "rotated", source: "store" });
+    expect(stdout.text()).not.toContain(original);
+    if (rotated?.type === "api") expect(stdout.text()).not.toContain(rotated.key);
   });
 
   it("routes restart without initializing the TTY face", async () => {
@@ -401,6 +462,8 @@ describe("headless captain commands", () => {
           env: {
             ...process.env,
             CLANKIE_CAPTAIN_URL: `http://127.0.0.1:${address.port}`,
+            CLANKIE_CREDENTIALS_FILE: join(processStateRoot, "credentials.json"),
+            CLANKIE_OPERATOR_TOKEN: "operator-secret",
             XDG_STATE_HOME: processStateRoot,
           },
         },

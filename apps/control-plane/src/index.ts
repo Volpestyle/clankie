@@ -1,6 +1,7 @@
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { serve } from "@hono/node-server";
+import { createDefaultCredentialStore, ensureOperatorCredential } from "@clankie/credential-broker";
 import { compileDoctrine, loadDoctrineFile, projectCaptainCeremony } from "@clankie/doctrine";
 import { SqliteEventStore } from "@clankie/event-store";
 import { createLogger } from "@clankie/observability";
@@ -18,6 +19,7 @@ import {
 import { loadOrCreateDeviceSessionKey } from "./device-session.ts";
 import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
 import { EveCaptainChannelTurnPort } from "./eve-captain-turn.ts";
+import { createCredentialBackedOperatorAuthenticator } from "./operator-auth.ts";
 import { FileWorkerSteeringStore } from "./worker-steering.ts";
 
 const logger = createLogger({ service: "clankie-control-plane", version: "0.1.0" });
@@ -34,7 +36,8 @@ const memoryStore = new MemoryStore(memoryStorePath, {
 });
 const runnerToken = process.env.CLANKIE_RUNNER_TOKEN;
 const captainToken = process.env.CLANKIE_CAPTAIN_TOKEN;
-const operatorToken = process.env.CLANKIE_OPERATOR_TOKEN;
+const operatorCredentialStore = createDefaultCredentialStore();
+await ensureOperatorCredential({ env: process.env, store: operatorCredentialStore });
 const deviceSessionKeyPath = process.env.CLANKIE_DEVICE_SESSION_KEY_PATH
   ? resolve(process.env.CLANKIE_DEVICE_SESSION_KEY_PATH)
   : join(dirname(eventStorePath), "device-session.key");
@@ -104,14 +107,14 @@ const app = await createControlPlane({
         }),
       }
     : {}),
-  ...(operatorToken
-    ? {
-        authenticateOperator: createBearerAuthenticator(operatorToken, {
-          operatorId: process.env.CLANKIE_OPERATOR_ID ?? "local-operator",
-          steerSourceLane: "tui",
-        }),
-      }
-    : {}),
+  authenticateOperator: createCredentialBackedOperatorAuthenticator({
+    env: process.env,
+    store: operatorCredentialStore,
+    identity: {
+      operatorId: process.env.CLANKIE_OPERATOR_ID ?? "local-operator",
+      steerSourceLane: "tui",
+    },
+  }),
 });
 const port = Number(process.env.PORT ?? 4310);
 const hostname = "127.0.0.1";
