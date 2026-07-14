@@ -85,6 +85,54 @@ describe("ClankieApiClient runner surface", () => {
     ).resolves.toMatchObject({ state: "settled", response: "Hi there." });
   });
 
+  it("authenticates presence actions with the bridge's live phase fence", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe("http://127.0.0.1:4310/v1/discord/presence-actions");
+      expect(init?.headers).toMatchObject({
+        authorization: "Bearer captain-secret",
+        "x-clankie-discord-presence-phase": "present",
+      });
+      return Response.json({
+        id: "message-1:reply",
+        action: "discord.presence.reply",
+        transportKind: "bot",
+        channelId: "dm-1",
+        messageId: "reply-1",
+      });
+    });
+    const client = new ClankieApiClient({
+      baseUrl: "http://127.0.0.1:4310",
+      fetchImpl,
+      captainToken: "captain-secret",
+    });
+
+    await expect(
+      client.executeDiscordPresenceAction(
+        {
+          schemaVersion: 1,
+          idempotencyKey: "message-1:reply",
+          action: "discord.presence.reply",
+          identity: {
+            presenceSessionId: "discord:dm:dm-1",
+            correlationId: "discord-message:message-1",
+            profileHash: "profile-1",
+            characterId: "clankie",
+            credentialRef: "discord_bot",
+            transportKind: "bot",
+          },
+          content: "Hi there.",
+          payload: {
+            kind: "reply",
+            channelId: "dm-1",
+            messageId: "message-1",
+            content: "Hi there.",
+          },
+        },
+        "present",
+      ),
+    ).resolves.toMatchObject({ messageId: "reply-1" });
+  });
+
   it("carries issue comments through the credential-free narrative route", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
       expect(String(input)).toBe("http://127.0.0.1:4310/v1/tracker/narratives");

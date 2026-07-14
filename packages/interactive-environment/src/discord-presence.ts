@@ -29,6 +29,9 @@ export const DiscordPresenceSessionPhaseSchema = z.enum([
 ]);
 export type DiscordPresenceSessionPhase = z.infer<typeof DiscordPresenceSessionPhaseSchema>;
 
+/** Authenticated bridge-to-control-plane fence carrying immediate gateway truth. */
+export const DISCORD_PRESENCE_LIVE_PHASE_HEADER = "x-clankie-discord-presence-phase" as const;
+
 export const DiscordPresenceSessionRecordSchema = z
   .object({
     schemaVersion: z.literal(INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION),
@@ -73,6 +76,7 @@ export const DiscordPresencePhaseTransitionReasonSchema = z.enum([
   "voice_left",
   "lease_lost",
   "gateway_failed",
+  "publication_failed",
   "process_stopped",
 ]);
 export type DiscordPresencePhaseTransitionReason = z.infer<typeof DiscordPresencePhaseTransitionReasonSchema>;
@@ -298,11 +302,19 @@ export function resolveDiscordPresenceToolExposure(
   session: DiscordPresenceSessionRecord,
   lane: CaptainLane,
 ): DiscordPresenceToolExposure {
+  return resolveDiscordPresencePhaseToolExposure(session.phase, lane);
+}
+
+/** Resolve advertised tools directly from live phase when durability is intentionally behind. */
+export function resolveDiscordPresencePhaseToolExposure(
+  phase: DiscordPresenceSessionPhase,
+  lane: CaptainLane,
+): DiscordPresenceToolExposure {
   return DiscordPresenceToolExposureSchema.parse({
     schemaVersion: INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION,
-    phase: session.phase,
+    phase,
     lane,
-    ...toolSetsFor(session.phase, lane),
+    ...toolSetsFor(phase, lane),
   });
 }
 

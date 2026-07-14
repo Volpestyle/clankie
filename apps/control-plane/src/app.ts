@@ -24,8 +24,11 @@ import {
 } from "@clankie/mission-engine";
 import { createLogger } from "@clankie/observability";
 import {
+  DISCORD_PRESENCE_LIVE_PHASE_HEADER,
   DiscordPresencePhaseEventSchema,
+  DiscordPresenceSessionPhaseSchema,
   isDiscordPresenceActionAvailable,
+  resolveDiscordPresencePhaseToolExposure,
 } from "@clankie/interactive-environment";
 import {
   MemoryFactSchema,
@@ -1414,6 +1417,28 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
   });
 
   app.post("/v1/discord/presence-actions", async (context) => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") {
+      return context.json({ error: "captain_authentication_unavailable" }, 503);
+    }
+    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
+    const livePhase = DiscordPresenceSessionPhaseSchema.safeParse(
+      context.req.header(DISCORD_PRESENCE_LIVE_PHASE_HEADER),
+    );
+    if (!livePhase.success) {
+      return context.json({ error: "discord_presence_live_phase_required" }, 400);
+    }
+    const liveExposure = resolveDiscordPresencePhaseToolExposure(livePhase.data, "discord_presence");
+    if (!liveExposure.presenceTools.includes("discord_presence_act")) {
+      return context.json(
+        {
+          error: "discord_presence_action_unavailable",
+          phase: livePhase.data,
+          source: "live_session",
+        },
+        409,
+      );
+    }
     if (!dependencies.discordPresenceRuntime) {
       return context.json({ error: "discord_presence_runtime_unavailable" }, 503);
     }

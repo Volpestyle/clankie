@@ -23,6 +23,7 @@ import {
 } from "./authority.ts";
 import { commands } from "./commands.ts";
 import { projectBoundMissionRecord, renderMissionSummary, sanitizeDiscordText } from "./mission-state.ts";
+import { createAdvertisedDiscordPresencePort } from "./presence-action-advertiser.ts";
 import { MissionThreadProjector } from "./projector.ts";
 import { DiscordPresenceSession } from "./presence-session.ts";
 import {
@@ -62,6 +63,28 @@ const authenticatedSurfaceUrl =
   process.env.CLANKIE_AUTHENTICATED_SURFACE_URL ?? "http://127.0.0.1:4311/approvals";
 const api = new ClankieApiClient({ baseUrl: apiUrl, captainToken });
 const characterId = process.env.CLANKIE_CHARACTER_ID ?? "clankie";
+const presenceSession = new DiscordPresenceSession({
+  sessionId: `discord:bot:${applicationId}:${randomUUID()}`,
+  characterId,
+  credentialRef: "discord_bot",
+  transportKind: "bot",
+  emit: async (event) => {
+    const result = await api.recordDiscordPresencePhase(event);
+    console.info(event, "Discord presence phase event");
+    return result.session;
+  },
+  onPublicationFailure: reportPresencePhaseFailure,
+  onTerminalFailure: (error, event) => {
+    console.error(
+      {
+        disposition: error.disposition,
+        attempts: error.attempts,
+        event,
+      },
+      "Discord presence session entered terminal publication failure",
+    );
+  },
+});
 const roleBindings: DiscordRoleBindings = {
   ambientRoleIds: parseRoleIds(process.env.DISCORD_AMBIENT_ROLE_IDS),
   approvalRoleIds: parseRoleIds(process.env.DISCORD_APPROVAL_ROLE_IDS),
@@ -70,7 +93,7 @@ const textIngressEnabled = process.env.DISCORD_TEXT_INGRESS_ENABLED === "true";
 const textIngressContextLimit = parseContextMessageLimit(process.env.DISCORD_INGRESS_CONTEXT_MESSAGES);
 const textIngress = textIngressEnabled
   ? new DiscordTextIngress(
-      api,
+      createAdvertisedDiscordPresencePort(api, presenceSession),
       {
         characterId,
         credentialRef: "discord_bot",
@@ -99,18 +122,6 @@ const client = new Client({
       : []),
   ],
   partials: textIngressEnabled ? [Partials.Channel] : [],
-});
-const presenceSession = new DiscordPresenceSession({
-  sessionId: `discord:bot:${applicationId}:${randomUUID()}`,
-  characterId,
-  credentialRef: "discord_bot",
-  transportKind: "bot",
-  emit: async (event) => {
-    const result = await api.recordDiscordPresencePhase(event);
-    console.info(event, "Discord presence phase event");
-    return result.session;
-  },
-  onPublicationFailure: reportPresencePhaseFailure,
 });
 const projector = new MissionThreadProjector(
   registry,

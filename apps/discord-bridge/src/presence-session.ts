@@ -22,7 +22,46 @@ export interface DiscordPresenceSessionOptions {
   clock?: () => Date;
   idFactory?: () => string;
   retryDelayMs?: number;
+  maxPublicationAttempts?: number;
   onPublicationFailure?: (error: unknown, event: DiscordPresencePhaseEvent) => void;
+  onTerminalFailure?: (
+    error: DiscordPresencePublicationTerminalError,
+    event: DiscordPresencePhaseEvent,
+  ) => void;
+}
+
+export type DiscordPresencePublicationFailureDisposition = "transient" | "permanent";
+
+/** Typed transport rejection so retry policy never depends on log text. */
+export class DiscordPresencePublicationError extends Error {
+  public readonly disposition: DiscordPresencePublicationFailureDisposition;
+
+  public constructor(
+    disposition: DiscordPresencePublicationFailureDisposition,
+    message: string,
+    options: ErrorOptions = {},
+  ) {
+    super(message, options);
+    this.name = "DiscordPresencePublicationError";
+    this.disposition = disposition;
+  }
+}
+
+/** Terminal lifecycle outcome after a permanent rejection or exhausted transient retry budget. */
+export class DiscordPresencePublicationTerminalError extends Error {
+  public readonly attempts: number;
+  public readonly disposition: DiscordPresencePublicationFailureDisposition;
+
+  public constructor(
+    disposition: DiscordPresencePublicationFailureDisposition,
+    attempts: number,
+    options: ErrorOptions = {},
+  ) {
+    super(`Discord presence phase publication terminated after ${String(attempts)} attempt(s)`, options);
+    this.name = "DiscordPresencePublicationTerminalError";
+    this.disposition = disposition;
+    this.attempts = attempts;
+  }
 }
 
 /** Live advertised catalog. Consumers retain this object while phase changes replace its snapshot. */
@@ -51,10 +90,14 @@ export class DiscordPresenceSession {
   private readonly clock: () => Date;
   private readonly idFactory: () => string;
   private readonly retryDelayMs: number;
+  private readonly maxPublicationAttempts: number;
   private readonly onPublicationFailure: NonNullable<DiscordPresenceSessionOptions["onPublicationFailure"]>;
+  private readonly onTerminalFailure: NonNullable<DiscordPresenceSessionOptions["onTerminalFailure"]>;
   private readonly voiceGuildIds = new Set<string>();
   private readonly toolCatalogs = new Map<CaptainLane, DiscordPresenceAdvertisedToolCatalog>();
   private recordValue: DiscordPresenceSessionRecord;
+  private liveRecordValue: DiscordPresenceSessionRecord;
+  private terminalError: DiscordPresencePublicationTerminalError | undefined;
   private queue: Promise<unknown> = Promise.resolve();
 
   public constructor(options: DiscordPresenceSessionOptions) {
@@ -62,7 +105,12 @@ export class DiscordPresenceSession {
     this.clock = options.clock ?? (() => new Date());
     this.idFactory = options.idFactory ?? randomUUID;
     this.retryDelayMs = options.retryDelayMs ?? 250;
+    this.maxPublicationAttempts = options.maxPublicationAttempts ?? 5;
+    if (!Number.isInteger(this.maxPublicationAttempts) || this.maxPublicationAttempts < 1) {
+      throw new Error("Discord presence maxPublicationAttempts must be a positive integer");
+    }
     this.onPublicationFailure = options.onPublicationFailure ?? (() => undefined);
+    this.onTerminalFailure = options.onTerminalFailure ?? (() => undefined);
     this.recordValue = DiscordPresenceSessionRecordSchema.parse({
       schemaVersion: 1,
       sessionId: options.sessionId,
@@ -75,6 +123,7 @@ export class DiscordPresenceSession {
       revision: 0,
       updatedAt: this.clock().toISOString(),
     });
+    this.liveRecordValue = this.recordValue;
     this.toolCatalogs.set(
       "discord_presence",
       new DiscordPresenceAdvertisedToolCatalog(this.recordValue, "discord_presence"),
@@ -83,6 +132,11 @@ export class DiscordPresenceSession {
 
   public get record(): DiscordPresenceSessionRecord {
     return structuredClone(this.recordValue);
+  }
+
+  /** Immediate gateway truth used by the production action advertiser before durability catches up. */
+  public get liveRecord(): DiscordPresenceSessionRecord {
+    return structuredClone(this.liveRecordValue);
   }
 
   public toolCatalog(lane: CaptainLane): DiscordPresenceAdvertisedToolCatalog {
@@ -161,7 +215,10 @@ export class DiscordPresenceSession {
       gatewayConnected,
       voiceGuildIds: gatewayConnected ? [...this.voiceGuildIds].sort() : [],
     });
-    if (this.revokesActCapability(preview)) this.updateToolCatalogs(preview);
+    if (this.revokesActCapability(preview)) {
+      this.liveRecordValue = preview;
+      this.updateToolCatalogs(preview);
+    }
   }
 
   private async applyTransition(
@@ -201,9 +258,21 @@ export class DiscordPresenceSession {
     // becomes visible before the first publication await, so a retained catalog
     // cannot advertise act tools while durability is being retried.
     if (this.revokesActCapability(candidate)) this.updateToolCatalogs(candidate);
-    this.recordValue = await this.publishUntilAccepted(event, candidate);
-    this.updateToolCatalogs(this.recordValue);
-    return this.record;
+    try {
+      this.recordValue = await this.publishUntilAccepted(event, candidate);
+      this.liveRecordValue = this.recordValue;
+      this.updateToolCatalogs(this.recordValue);
+      return this.record;
+    } catch (error) {
+      if (!(error instanceof DiscordPresencePublicationTerminalError)) throw error;
+      const terminalEvent = this.terminalFailureEvent();
+      this.recordValue = terminalEvent.data.session;
+      this.liveRecordValue = this.recordValue;
+      this.updateToolCatalogs(this.recordValue);
+      this.terminalError = error;
+      this.onTerminalFailure(error, terminalEvent);
+      throw error;
+    }
   }
 
   private revokesActCapability(candidate: DiscordPresenceSessionRecord): boolean {
@@ -220,19 +289,67 @@ export class DiscordPresenceSession {
     event: DiscordPresencePhaseEvent,
     candidate: DiscordPresenceSessionRecord,
   ): Promise<DiscordPresenceSessionRecord> {
-    for (;;) {
+    for (let attempt = 1; attempt <= this.maxPublicationAttempts; attempt += 1) {
       try {
         return DiscordPresenceSessionRecordSchema.parse((await this.emitEvent(event)) ?? candidate);
       } catch (error) {
         this.onPublicationFailure(error, event);
-        await new Promise<void>((resolve) => setTimeout(resolve, this.retryDelayMs));
+        const disposition = publicationFailureDisposition(error);
+        if (disposition === "permanent" || attempt === this.maxPublicationAttempts) {
+          throw new DiscordPresencePublicationTerminalError(disposition, attempt, { cause: error });
+        }
+        const backoffMs = this.retryDelayMs * 2 ** (attempt - 1);
+        await new Promise<void>((resolve) => setTimeout(resolve, backoffMs));
       }
     }
+    throw new Error("unreachable Discord presence publication retry state");
+  }
+
+  private terminalFailureEvent(): DiscordPresencePhaseEvent {
+    const occurredAt = this.clock().toISOString();
+    const session = DiscordPresenceSessionRecordSchema.parse({
+      ...this.recordValue,
+      phase: "failed",
+      gatewayConnected: false,
+      voiceGuildIds: [],
+      revision: this.recordValue.revision + 1,
+      updatedAt: occurredAt,
+    });
+    return DiscordPresencePhaseEventSchema.parse({
+      schemaVersion: 1,
+      plane: "semantic",
+      id: this.idFactory(),
+      type: "discord.presence.session.phase_changed",
+      occurredAt,
+      correlationId: session.sessionId,
+      sessionId: session.sessionId,
+      data: {
+        previousPhase: this.recordValue.phase,
+        phase: "failed",
+        reason: "publication_failed",
+        session,
+      },
+    });
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.terminalError !== undefined) return Promise.reject(this.terminalError);
     const next = this.queue.then(operation);
     this.queue = next.catch(() => undefined);
     return next;
   }
+}
+
+function publicationFailureDisposition(error: unknown): DiscordPresencePublicationFailureDisposition {
+  if (error instanceof DiscordPresencePublicationError) return error.disposition;
+  if (error instanceof TypeError || (error instanceof Error && error.name === "AbortError"))
+    return "transient";
+  if (error instanceof Error) {
+    const status = /Clankie API (\d{3}):/u.exec(error.message)?.[1];
+    if (status !== undefined) {
+      const code = Number(status);
+      return code === 408 || code === 425 || code === 429 || code >= 500 ? "transient" : "permanent";
+    }
+  }
+  return "permanent";
 }

@@ -6,7 +6,15 @@ import {
 import type { DiscordPresenceWrite } from "@clankie/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { DiscordBotPresenceRuntime } from "../src/bot-presence-runtime.ts";
-import { DiscordPresenceSession } from "../src/presence-session.ts";
+import {
+  createAdvertisedDiscordPresencePort,
+  DiscordPresenceActToolUnavailableError,
+} from "../src/presence-action-advertiser.ts";
+import {
+  DiscordPresencePublicationError,
+  DiscordPresencePublicationTerminalError,
+  DiscordPresenceSession,
+} from "../src/presence-session.ts";
 
 describe("Discord presence gateway session", () => {
   it("removes act capability and emits degraded when the gateway disconnects mid-action", async () => {
@@ -93,7 +101,7 @@ describe("Discord presence gateway session", () => {
       transportKind: "bot",
       emit: (event) => {
         if (event.data.reason === "gateway_disconnected" && disconnectAttempts++ === 0) {
-          throw new Error("transient_disconnect_publish_failure");
+          throw new DiscordPresencePublicationError("transient", "transient_disconnect_publish_failure");
         }
         durable = event.data.session;
         return durable;
@@ -137,7 +145,7 @@ describe("Discord presence gateway session", () => {
         attempts.push(event.data.session.revision);
         if (!failed) {
           failed = true;
-          throw new Error("transient_initial_publish_failure");
+          throw new DiscordPresencePublicationError("transient", "transient_initial_publish_failure");
         }
         return event.data.session;
       },
@@ -151,6 +159,102 @@ describe("Discord presence gateway session", () => {
 
     expect(attempts).toEqual([1, 1, 2]);
     expect(session.record).toMatchObject({ phase: "present", revision: 2 });
+  });
+
+  it("terminates a permanent publication rejection in one attempt with a typed failed event", async () => {
+    let disconnectAttempts = 0;
+    const terminal: Array<{
+      error: DiscordPresencePublicationTerminalError;
+      event: DiscordPresencePhaseEvent;
+    }> = [];
+    const session = new DiscordPresenceSession({
+      sessionId: "discord:bot:permanent-rejection",
+      characterId: "clankie",
+      credentialRef: "discord_bot",
+      transportKind: "bot",
+      emit: (event) => {
+        if (event.data.reason === "gateway_disconnected") {
+          disconnectAttempts += 1;
+          throw new DiscordPresencePublicationError("permanent", "validation_rejected");
+        }
+        return event.data.session;
+      },
+      retryDelayMs: 0,
+      maxPublicationAttempts: 5,
+      onTerminalFailure: (error, event) => terminal.push({ error, event }),
+      clock: () => new Date("2026-07-14T18:00:00.000Z"),
+      idFactory: () => "permanent-rejection-phase",
+    });
+    await session.start();
+    await session.gatewayReady();
+
+    await expect(session.gatewayDisconnected()).rejects.toMatchObject({
+      name: "DiscordPresencePublicationTerminalError",
+      disposition: "permanent",
+      attempts: 1,
+    });
+
+    expect(disconnectAttempts).toBe(1);
+    expect(session.record).toMatchObject({ phase: "failed", gatewayConnected: false, revision: 3 });
+    expect(session.toolCatalog("discord_presence").current.presenceTools).toEqual([]);
+    expect(terminal).toHaveLength(1);
+    expect(terminal[0]?.event).toMatchObject({
+      type: "discord.presence.session.phase_changed",
+      data: { previousPhase: "present", phase: "failed", reason: "publication_failed" },
+    });
+    await expect(session.stop()).rejects.toBe(terminal[0]?.error);
+    expect(disconnectAttempts).toBe(1);
+  });
+
+  it("fences a production advertised action before delayed loss publication completes", async () => {
+    let releaseDisconnect: (() => void) | undefined;
+    const execute = vi.fn(() =>
+      Promise.resolve({
+        id: "window-action",
+        action: "discord.presence.send_message" as const,
+        transportKind: "bot" as const,
+        channelId: "channel-1",
+        messageId: "message-1",
+      }),
+    );
+    const session = new DiscordPresenceSession({
+      sessionId: "discord:bot:loss-window",
+      characterId: "clankie",
+      credentialRef: "discord_bot",
+      transportKind: "bot",
+      emit: async (event) => {
+        if (event.data.reason === "gateway_disconnected") {
+          await new Promise<void>((resolve) => {
+            releaseDisconnect = resolve;
+          });
+        }
+        return event.data.session;
+      },
+      clock: () => new Date("2026-07-14T18:00:00.000Z"),
+      idFactory: () => "loss-window-phase",
+    });
+    const advertisedPort = createAdvertisedDiscordPresencePort(
+      {
+        getHealth: () => Promise.resolve({ profileHash: "profile-hash" }),
+        submitDiscordCaptainChannelTurn: vi.fn(),
+        executeDiscordPresenceAction: execute,
+      },
+      session,
+    );
+    await session.start();
+    await session.gatewayReady();
+
+    const disconnect = session.gatewayDisconnected();
+    expect(session.record.phase).toBe("present");
+    expect(session.liveRecord.phase).toBe("degraded");
+    await expect(advertisedPort.executeDiscordPresenceAction(write("window"))).rejects.toBeInstanceOf(
+      DiscordPresenceActToolUnavailableError,
+    );
+    expect(execute).not.toHaveBeenCalled();
+
+    releaseDisconnect?.();
+    await disconnect;
+    expect(session.record.phase).toBe("degraded");
   });
 });
 

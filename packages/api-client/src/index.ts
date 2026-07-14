@@ -28,9 +28,12 @@ import {
   type WorkerResult,
 } from "@clankie/protocol";
 import {
+  DISCORD_PRESENCE_LIVE_PHASE_HEADER,
   DiscordPresencePhaseEventSchema,
+  DiscordPresenceSessionPhaseSchema,
   DiscordPresenceSessionRecordSchema,
   type DiscordPresencePhaseEvent,
+  type DiscordPresenceSessionPhase,
   type DiscordPresenceSessionRecord,
 } from "@clankie/interactive-environment";
 
@@ -267,10 +270,16 @@ export class ClankieApiClient {
    */
   public async executeDiscordPresenceAction(
     input: DiscordPresenceWrite,
+    livePhase: DiscordPresenceSessionPhase,
   ): Promise<DiscordPresenceWriteResult> {
     const write = DiscordPresenceWriteSchema.parse(input);
+    const phase = DiscordPresenceSessionPhaseSchema.parse(livePhase);
     const result = await this.request<unknown>("/v1/discord/presence-actions", {
       method: "POST",
+      headers: {
+        ...this.captainHeaders(),
+        [DISCORD_PRESENCE_LIVE_PHASE_HEADER]: phase,
+      },
       body: JSON.stringify(write),
     });
     return DiscordPresenceWriteResultSchema.parse(result);

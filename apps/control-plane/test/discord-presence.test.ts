@@ -83,6 +83,56 @@ describe("Discord presence control-plane runtime (ADR 0024)", () => {
     expect(runtime.writes).toHaveLength(1);
   });
 
+  it("rejects a live loss fence even while the durable projection remains present", async () => {
+    const runtime = new RecordingPresenceRuntime();
+    const app = await createPresenceControlPlane({ doctrine, discordPresenceRuntime: runtime });
+    const response = await app.request("/v1/discord/presence-actions", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer captain-secret",
+        "content-type": "application/json",
+        "x-clankie-discord-presence-phase": "degraded",
+      },
+      body: JSON.stringify(
+        presenceWrite({
+          idempotencyKey: "presence-live-loss-window",
+          action: "discord.presence.send_message",
+          payload: { kind: "send_message", channelId: "c1", content: "must not execute" },
+        }),
+      ),
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "discord_presence_action_unavailable",
+      phase: "degraded",
+      source: "live_session",
+    });
+    expect(runtime.writes).toHaveLength(0);
+  });
+
+  it("does not trust an unauthenticated live phase fence", async () => {
+    const runtime = new RecordingPresenceRuntime();
+    const app = await createPresenceControlPlane({ doctrine, discordPresenceRuntime: runtime });
+    const response = await app.request("/v1/discord/presence-actions", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-clankie-discord-presence-phase": "present",
+      },
+      body: JSON.stringify(
+        presenceWrite({
+          idempotencyKey: "presence-untrusted-live-phase",
+          action: "discord.presence.send_message",
+          payload: { kind: "send_message", channelId: "c1", content: "must not execute" },
+        }),
+      ),
+    });
+
+    expect(response.status).toBe(401);
+    expect(runtime.writes).toHaveLength(0);
+  });
+
   it("allows ambient narrative replies under presence-session attribution without a mission", async () => {
     const runtime = new RecordingPresenceRuntime();
     const app = await createPresenceControlPlane({ doctrine, discordPresenceRuntime: runtime });
@@ -389,6 +439,7 @@ describe("Discord presence control-plane runtime (ADR 0024)", () => {
       doctrine,
       eventStore: store,
       discordPresenceRuntime: restoredRuntime,
+      authenticateCaptain: presenceCaptain,
     });
     const afterRestart = await post(
       restoredApp,
@@ -442,6 +493,7 @@ describe("Discord presence control-plane runtime (ADR 0024)", () => {
       doctrine,
       eventStore: store,
       discordPresenceRuntime: restartedRuntime,
+      authenticateCaptain: presenceCaptain,
     });
     const afterReplay = await post(
       restarted,
@@ -497,12 +549,7 @@ class RecordingPresenceRuntime implements DiscordPresenceRuntimePort {
 async function createPresenceControlPlane(dependencies: ControlPlaneDependencies) {
   const app = await createControlPlane({
     ...dependencies,
-    authenticateCaptain: (request) =>
-      Promise.resolve(
-        request.headers.get("authorization") === "Bearer captain-secret"
-          ? { captainId: "discord-bridge", steerSourceLane: "discord_text" as const }
-          : undefined,
-      ),
+    authenticateCaptain: presenceCaptain,
   });
   for (const transition of [
     ["connecting", 1, "process_start", "off"],
@@ -514,6 +561,14 @@ async function createPresenceControlPlane(dependencies: ControlPlaneDependencies
     }
   }
   return app;
+}
+
+function presenceCaptain(request: Request) {
+  return Promise.resolve(
+    request.headers.get("authorization") === "Bearer captain-secret"
+      ? { captainId: "discord-bridge", steerSourceLane: "discord_text" as const }
+      : undefined,
+  );
 }
 
 function recordPhase(
@@ -576,7 +631,11 @@ function presenceWrite(
 async function post(app: Awaited<ReturnType<typeof createControlPlane>>, path: string, body: unknown) {
   return app.request(path, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      authorization: "Bearer captain-secret",
+      "content-type": "application/json",
+      "x-clankie-discord-presence-phase": "present",
+    },
     body: JSON.stringify(body),
   });
 }

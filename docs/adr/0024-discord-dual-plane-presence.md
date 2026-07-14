@@ -84,11 +84,18 @@ callbacks drive `off → connecting → present → voice_active` and the `degra
 loss states. Every transition is published as a typed
 `discord.presence.session.phase_changed` semantic event through the authenticated ambient
 captain channel. The control plane replays those events into a read-only projection and gates
-both catalog execution and tool exposure from the projected record. Payload kinds never infer
-or widen phase.
+catalog execution and tool exposure from the projected record. The bridge also carries the
+retained live advertised-catalog phase on its authenticated action request, so immediate loss
+fences execution while durable publication is still in flight. The control plane requires both
+the live fence and durable projection to permit the action. Payload kinds never infer or widen
+phase.
 
 `degraded`, `failed`, and `off` remove act tools immediately. A disconnect, lease loss, or
 failure therefore makes subsequent actions unavailable without waiting for another model turn.
+Phase publication retries transient transport failures with bounded backoff. Permanent rejection
+or an exhausted retry budget terminates the local session in `failed`, emits a typed local semantic
+failure event for status reporting, and logs the classified terminal outcome without wedging the
+lifecycle queue.
 `discordPresencePhaseFromEnvironment` and `environmentPhaseFromDiscordPresence` define the
 provider-neutral adapter for a shared environment join/status host. The current Discord bridge
 uses its dedicated presence lifecycle tools because no production shared join/status host exists;
