@@ -156,6 +156,7 @@ export class ShellWorkerAdapter implements WorkerAdapter {
       args: prepared.args,
       cwd: context.workspacePath,
       env: prepared.environment,
+      sweepDescendantsOnKill: true,
       context: {
         missionId: context.missionId,
         taskId: context.task.id,

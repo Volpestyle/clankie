@@ -44,6 +44,8 @@ export interface SpawnTerminalOptions {
   columns?: number;
   rows?: number;
   transport?: TerminalTransport;
+  /** Opt in only for runner-owned shell workers whose timeout must sweep descendants. */
+  sweepDescendantsOnKill?: boolean;
   provider?: TerminalSession["provider"];
   context?: Omit<TerminalAttemptContext, "workerRunId" | "source">;
 }
@@ -227,28 +229,32 @@ export class TerminalManager implements TerminalProvider {
         columns,
         rows,
         ...(options.env ? { env: options.env } : {}),
-        onProcessTreeSweep: (outcome) => {
-          const event: TerminalProcessTreeSweepEvent = {
-            type: "terminal.process_tree_sweep",
-            terminalId: id,
-            workerRunId: options.workerRunId,
-            ...outcome,
-          };
-          if (event.survivorCount > 0 || event.inspectionFailed)
-            logger.warn(
-              {
-                terminalId: event.terminalId,
-                workerRunId: event.workerRunId,
-                signal: event.signal,
-                descendantCount: event.descendantCount,
-                escapedGroupCount: event.escapedGroupCount,
-                survivorCount: event.survivorCount,
-                inspectionFailed: event.inspectionFailed,
+        ...(options.sweepDescendantsOnKill
+          ? {
+              onProcessTreeSweep: (outcome: ProcessTreeSweepOutcome) => {
+                const event: TerminalProcessTreeSweepEvent = {
+                  type: "terminal.process_tree_sweep",
+                  terminalId: id,
+                  workerRunId: options.workerRunId,
+                  ...outcome,
+                };
+                if (event.survivorCount > 0 || event.inspectionFailed)
+                  logger.warn(
+                    {
+                      terminalId: event.terminalId,
+                      workerRunId: event.workerRunId,
+                      signal: event.signal,
+                      descendantCount: event.descendantCount,
+                      escapedGroupCount: event.escapedGroupCount,
+                      survivorCount: event.survivorCount,
+                      inspectionFailed: event.inspectionFailed,
+                    },
+                    "terminal process-tree sweep left live descendants",
+                  );
+                this.onProcessTreeSweep?.(event);
               },
-              "terminal process-tree sweep left live descendants",
-            );
-          this.onProcessTreeSweep?.(event);
-        },
+            }
+          : {}),
       });
     const emulator = new Terminal({ cols: columns, rows, allowProposedApi: true });
     const serializer = new SerializeAddon();
@@ -755,7 +761,10 @@ export function spawnNativePtyTransport(
   return {
     write: (bytes) => pty.write(Buffer.from(bytes)),
     resize: (columns, rows) => pty.resize(columns, rows),
-    kill: (signal = "SIGKILL") => signalOwnedPtyProcessGroup(pty, signal, options.onProcessTreeSweep),
+    kill: (signal = "SIGKILL") => {
+      if (options.onProcessTreeSweep) signalOwnedPtyProcessTree(pty, signal, options.onProcessTreeSweep);
+      else pty.kill(signal);
+    },
     onData: (listener) => {
       pty.onData((data) => listener(Buffer.isBuffer(data) ? data : Buffer.from(data, "utf8")));
     },
@@ -783,7 +792,7 @@ interface ProcessTreeSweepOutcome {
 const PROCESS_TREE_SNAPSHOT_TIMEOUT_MS = 100;
 const PROCESS_TREE_SWEEP_ATTEMPTS = 3;
 
-function signalOwnedPtyProcessGroup(
+function signalOwnedPtyProcessTree(
   pty: IPty,
   signal: string,
   onSweep?: (outcome: ProcessTreeSweepOutcome) => void,
@@ -793,33 +802,30 @@ function signalOwnedPtyProcessGroup(
     const escapedDescendants = new Set<number>();
     const escapedGroups = new Set<number>();
     let inspectionFailed = !collectDescendants(pty.pid, knownDescendants, escapedDescendants, escapedGroups);
-    signalGroups(escapedGroups, signal);
-    try {
-      // forkpty(3) makes the PTY child a session and process-group leader.
-      // A descendant may call setsid(2) and leave that group, so the bounded
-      // process-table sweep also signals groups observed outside the PTY group.
-      process.kill(-pty.pid, signal as NodeJS.Signals);
-    } catch {
-      // The group may already be gone; retain node-pty's direct-child behavior.
-      pty.kill(signal);
-    }
+    // Preserve node-pty's process/session and close semantics for the PTY root.
+    // Descendants are signalled by observed PID, including processes that used
+    // setsid(2), without replacing pty.kill() with a negative-PGID signal.
+    signalProcesses(knownDescendants, signal);
+    pty.kill(signal);
     for (let attempt = 1; attempt < PROCESS_TREE_SWEEP_ATTEMPTS; attempt += 1) {
       inspectionFailed =
         !collectDescendants(pty.pid, knownDescendants, escapedDescendants, escapedGroups) || inspectionFailed;
-      signalGroups(escapedGroups, signal);
+      signalProcesses(knownDescendants, signal);
     }
-    if (escapedDescendants.size > 0 || inspectionFailed) {
+    if (knownDescendants.size > 0 || inspectionFailed) {
       const live = liveProcessIds();
       inspectionFailed = live === undefined || inspectionFailed;
-      onSweep?.({
-        signal,
-        descendantCount: knownDescendants.size,
-        escapedGroupCount: escapedGroups.size,
-        survivorCount: live
-          ? [...escapedDescendants].filter((pid) => live.has(pid)).length
-          : escapedDescendants.size,
-        inspectionFailed,
-      });
+      const survivorCount = live
+        ? [...knownDescendants].filter((pid) => live.has(pid)).length
+        : knownDescendants.size;
+      if (escapedGroups.size > 0 || survivorCount > 0 || inspectionFailed)
+        onSweep?.({
+          signal,
+          descendantCount: knownDescendants.size,
+          escapedGroupCount: escapedGroups.size,
+          survivorCount,
+          inspectionFailed,
+        });
     }
     return;
   }
@@ -852,12 +858,12 @@ function collectDescendants(
   return true;
 }
 
-function signalGroups(groups: ReadonlySet<number>, signal: string): void {
-  for (const pgid of groups) {
+function signalProcesses(pids: ReadonlySet<number>, signal: string): void {
+  for (const pid of pids) {
     try {
-      process.kill(-pgid, signal as NodeJS.Signals);
+      process.kill(pid, signal as NodeJS.Signals);
     } catch {
-      // A group disappearing between the bounded snapshot and signal is success.
+      // A descendant disappearing between the bounded snapshot and signal is success.
     }
   }
 }
