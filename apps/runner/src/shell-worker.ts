@@ -12,8 +12,6 @@ import {
 import type { TerminalManager } from "./terminals.ts";
 
 const execFileAsync = promisify(execFile);
-const DEFAULT_SHELL_WORKER_TIMEOUT_MS = 30 * 60_000;
-const DEFAULT_SHELL_WORKER_TERMINATION_GRACE_MS = 5_000;
 
 export interface ShellWorkerOptions {
   id: string;
@@ -22,7 +20,6 @@ export interface ShellWorkerOptions {
   sandboxForTask?: (context: WorkerRunContext) => SandboxEscalation;
   environmentForTask?: (context: WorkerRunContext) => NodeJS.ProcessEnv;
   timeoutMs?: number;
-  terminationGraceMs?: number;
   terminalManager?: TerminalManager;
 }
 
@@ -91,7 +88,7 @@ export class ShellWorkerAdapter implements WorkerAdapter {
       const result = await execFileAsync(prepared.command, prepared.args, {
         cwd: context.workspacePath,
         env: prepared.environment,
-        timeout: this.options.timeoutMs ?? DEFAULT_SHELL_WORKER_TIMEOUT_MS,
+        timeout: this.options.timeoutMs ?? 30 * 60_000,
         maxBuffer: 10 * 1024 * 1024,
         signal: context.signal,
       });
@@ -163,21 +160,9 @@ export class ShellWorkerAdapter implements WorkerAdapter {
         provider: this.descriptor.id,
       },
     });
-    let forceKill: ReturnType<typeof setTimeout> | undefined;
-    let timedOut = false;
-    const terminate = () => {
-      if (forceKill !== undefined) return;
-      manager.cancel(session.id);
-      forceKill = setTimeout(
-        () => manager.kill(session.id),
-        this.options.terminationGraceMs ?? DEFAULT_SHELL_WORKER_TERMINATION_GRACE_MS,
-      );
-    };
-    context.signal.addEventListener("abort", terminate, { once: true });
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      terminate();
-    }, this.options.timeoutMs ?? DEFAULT_SHELL_WORKER_TIMEOUT_MS);
+    const abort = () => manager.cancel(session.id);
+    context.signal.addEventListener("abort", abort, { once: true });
+    const timeout = setTimeout(abort, this.options.timeoutMs ?? 30 * 60_000);
     let exitCode: number | null = null;
     try {
       for await (const frame of manager.observe(session.id)) {
@@ -186,7 +171,7 @@ export class ShellWorkerAdapter implements WorkerAdapter {
       const denials = await prepared.collectDenials();
       if (denials.length > 0)
         return sandboxFailure(context, invocation, prepared.profile, denials, exitCode ?? undefined);
-      return exitCode === 0 && !timedOut
+      return exitCode === 0
         ? {
             status: "succeeded",
             summary: `${invocation.command} completed successfully in a native PTY.`,
@@ -204,14 +189,11 @@ export class ShellWorkerAdapter implements WorkerAdapter {
             summary: `${invocation.command} failed in a native PTY.`,
             evidence: [],
             outputs: { terminalId: session.id, exitCode },
-            diagnosis: timedOut
-              ? "Interactive command timed out."
-              : "Interactive command exited unsuccessfully.",
+            diagnosis: "Interactive command exited unsuccessfully.",
           };
     } finally {
       clearTimeout(timeout);
-      if (forceKill !== undefined) clearTimeout(forceKill);
-      context.signal.removeEventListener("abort", terminate);
+      context.signal.removeEventListener("abort", abort);
       await prepared.close();
     }
   }
