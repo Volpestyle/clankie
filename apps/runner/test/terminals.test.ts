@@ -251,4 +251,61 @@ describe("production terminal lifecycle", () => {
       provider: "generic-shell",
     });
   });
+
+  it("escalates a timed-out TERM-trapping shell worker to SIGKILL within the grace period", async () => {
+    const manager = new TerminalManager();
+    const cancel = vi.spyOn(manager, "cancel");
+    const kill = vi.spyOn(manager, "kill");
+    const timeoutMs = 500;
+    const terminationGraceMs = 100;
+    const adapter = new ShellWorkerAdapter({
+      id: "term-trapping-shell",
+      terminalManager: manager,
+      timeoutMs,
+      terminationGraceMs,
+      commandForTask: () => ({
+        command: "/bin/sh",
+        args: ["-c", "trap '' TERM; printf 'ready\\n'; while :; do sleep 1; done"],
+      }),
+    });
+    const context = {
+      missionId: "mission",
+      workerRunId: "term-trap",
+      attempt: 1,
+      workspacePath: process.cwd(),
+      profileHash: "profile",
+      task: {
+        id: "task",
+        title: "trap TERM",
+        objective: "prove timeout escalation",
+        kind: "debugging",
+        risk: "low",
+        writeScope: [],
+        successCriteria: [],
+      },
+      signal: new AbortController().signal,
+      emit: () => undefined,
+    } as unknown as WorkerRunContext;
+
+    const startedAt = Date.now();
+    const run = adapter.run(context);
+    const outcome = await Promise.race([
+      run.then((result) => ({ state: "settled" as const, result })),
+      new Promise<{ state: "hung" }>((resolve) =>
+        setTimeout(() => resolve({ state: "hung" }), timeoutMs + terminationGraceMs + 1_000),
+      ),
+    ]);
+    if (outcome.state === "hung") {
+      for (const session of await manager.listSessions()) manager.kill(session.id);
+      await run;
+    }
+
+    expect(outcome.state).toBe("settled");
+    if (outcome.state !== "settled") return;
+    expect(outcome.result.status).toBe("failed");
+    expect(Date.now() - startedAt).toBeLessThan(timeoutMs + terminationGraceMs + 1_000);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(kill).toHaveBeenCalledOnce();
+    expect(await manager.listSessions()).toEqual([]);
+  });
 });
