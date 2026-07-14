@@ -21,6 +21,7 @@ import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
 import { EveCaptainChannelTurnPort } from "./eve-captain-turn.ts";
 import { createCredentialBackedOperatorAuthenticator } from "./operator-auth.ts";
 import { FileWorkerSteeringStore } from "./worker-steering.ts";
+import { RunnerWorkerTranscriptClient } from "./worker-transcripts.ts";
 
 const logger = createLogger({ service: "clankie-control-plane", version: "0.1.0" });
 const defaultDoctrinePath = resolve(import.meta.dirname, "../../../doctrine/profiles/self-build-lab.yaml");
@@ -97,6 +98,10 @@ const app = await createControlPlane({
   ...(runnerToken
     ? {
         authenticateRunner: createBearerAuthenticator(runnerToken, { runnerId }),
+        workerTranscripts: new RunnerWorkerTranscriptClient({
+          baseUrl: process.env.CLANKIE_WORKER_TRANSCRIPT_URL ?? "http://127.0.0.1:4313",
+          token: runnerToken,
+        }),
       }
     : {}),
   ...(captainToken

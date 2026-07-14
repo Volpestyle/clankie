@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 1,
+  "outcome": "snapshot",
+  "key": {
+    "missionId": "mission-garden-fixture",
+    "taskId": "task-implement",
+    "workerRunId": "worker-run-codex-1"
+  },
+  "generation": "generation-garden-fixture-1",
+  "retainedFromSequence": 1,
+  "nextCursor": "eyJnIjoiZ2VuZXJhdGlvbi1nYXJkZW4tZml4dHVyZS0xIiwicyI6Nn0",
+  "entries": [
+    {
+      "schemaVersion": 1,
+      "entryId": "worker-run-codex-1:1",
+      "missionId": "mission-garden-fixture",
+      "taskId": "task-implement",
+      "workerRunId": "worker-run-codex-1",
+      "sequence": 1,
+      "occurredAt": "2026-07-12T18:00:00.000Z",
+      "correlationId": "corr-garden-fixture",
+      "profileHash": "profile-garden-fixture",
+      "visibility": "garden",
+      "redaction": { "classification": "metadata_only", "classes": [] },
+      "provenance": {
+        "source": "runner_event",
+        "sourceEventId": "event-turn-started",
+        "trust": "runner_observed"
+      },
+      "kind": "status",
+      "data": { "state": "working", "summary": "Worker started the implementation task." }
+    },
+    {
+      "schemaVersion": 1,
+      "entryId": "worker-run-codex-1:2",
+      "missionId": "mission-garden-fixture",
+      "taskId": "task-implement",
+      "workerRunId": "worker-run-codex-1",
+      "sequence": 2,
+      "occurredAt": "2026-07-12T18:01:00.000Z",
+      "correlationId": "corr-garden-fixture",
+      "profileHash": "profile-garden-fixture",
+      "visibility": "garden",
+      "redaction": { "classification": "none", "classes": [] },
+      "provenance": {
+        "source": "worker_summary",
+        "sourceEventId": "event-summary",
+        "trust": "worker_authored"
+      },
+      "kind": "narrative",
+      "data": { "summary": "Implemented the bounded transcript projection and moved to verification." }
+    },
+    {
+      "schemaVersion": 1,
+      "entryId": "worker-run-codex-1:3",
+      "missionId": "mission-garden-fixture",
+      "taskId": "task-implement",
+      "workerRunId": "worker-run-codex-1",
+      "sequence": 3,
+      "occurredAt": "2026-07-12T18:02:00.000Z",
+      "correlationId": "corr-garden-fixture",
+      "profileHash": "profile-garden-fixture",
+      "visibility": "garden",
+      "redaction": { "classification": "metadata_only", "classes": ["unbounded_output"] },
+      "provenance": {
+        "source": "runner_event",
+        "sourceEventId": "event-command",
+        "trust": "runner_observed"
+      },
+      "kind": "action",
+      "data": {
+        "action": "verification command",
+        "result": "succeeded",
+        "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "entryId": "worker-run-codex-1:4",
+      "missionId": "mission-garden-fixture",
+      "taskId": "task-implement",
+      "workerRunId": "worker-run-codex-1",
+      "sequence": 4,
+      "occurredAt": "2026-07-12T18:03:00.000Z",
+      "correlationId": "corr-garden-fixture",
+      "profileHash": "profile-garden-fixture",
+      "visibility": "garden",
+      "redaction": { "classification": "metadata_only", "classes": ["unbounded_output"] },
+      "provenance": {
+        "source": "runner_settlement",
+        "sourceEventId": "settlement-artifact",
+        "trust": "runner_observed"
+      },
+      "kind": "artifact",
+      "data": {
+        "label": "runner evidence",
+        "ref": "artifact://runner-evidence/mission-garden-fixture/worker-run-codex-1-1",
+        "summary": "Runner-authored verification evidence is available."
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "entryId": "worker-run-codex-1:5",
+      "missionId": "mission-garden-fixture",
+      "taskId": "task-implement",
+      "workerRunId": "worker-run-codex-1",
+      "sequence": 5,
+      "occurredAt": "2026-07-12T18:04:00.000Z",
+      "correlationId": "corr-garden-fixture",
+      "profileHash": "profile-garden-fixture",
+      "visibility": "garden",
+      "redaction": { "classification": "metadata_only", "classes": ["private_prompt"] },
+      "provenance": {
+        "source": "runner_event",
+        "sourceEventId": "event-blocker",
+        "trust": "runner_observed"
+      },
+      "kind": "blocker",
+      "data": { "summary": "Worker requires operator input." }
+    },
+    {
+      "schemaVersion": 1,
+      "entryId": "worker-run-codex-1:6",
+      "missionId": "mission-garden-fixture",
+      "taskId": "task-implement",
+      "workerRunId": "worker-run-codex-1",
+      "sequence": 6,
+      "occurredAt": "2026-07-12T18:05:00.000Z",
+      "correlationId": "corr-garden-fixture",
+      "profileHash": "profile-garden-fixture",
+      "visibility": "garden",
+      "redaction": { "classification": "metadata_only", "classes": [] },
+      "provenance": {
+        "source": "runner_settlement",
+        "sourceEventId": "settlement-complete",
+        "trust": "runner_observed"
+      },
+      "kind": "completion",
+      "data": {
+        "status": "succeeded",
+        "summary": "Runner observed successful completion.",
+        "evidenceRefs": ["artifact://runner-evidence/mission-garden-fixture/worker-run-codex-1-1"]
+      }
+    }
+  ]
+}

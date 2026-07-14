@@ -147,6 +147,40 @@ metadata such as terminal identity, geometry, sequence boundaries, capability
 flags, lease lifecycle, and typed error codes crosses the semantic/diagnostic
 boundary; artifacts use their separately authenticated retrieval plane.
 
+## Worker transcript projection
+
+Garden-facing worker activity comes from a runner-owned semantic projection,
+not terminal bytes, provider streams, Eve operator history, or reconstructed
+pane text. The projection is keyed by `missionId + taskId + workerRunId` and
+contains ordered status, bounded narrative, action, artifact, blocker, and
+completion entries. Every entry carries correlation/profile identity,
+visibility, redaction classification, and runner or worker-summary provenance.
+
+```mermaid
+flowchart LR
+  P[Provider structured events] --> R[Runner redaction and reduction]
+  R --> S[(Private retained NDJSON)]
+  S --> G[Loopback runner transcript gateway]
+  G --> C[Injected control-plane reader]
+  C -->|paired device + chat grant| A[Snapshot and NDJSON tail API]
+  T[PTY / model raw streams] -. never projected .-> X[Excluded]
+  S -. never bundled or analyzed .-> X
+```
+
+The runner reduces untrusted fields to a closed schema before the first disk
+write. Authorization headers, tokens, credentials, private prompts,
+chain-of-thought, raw audio, and unbounded output cannot be persisted as entry
+payloads. Worker-authored progress uses typed status templates; arbitrary
+provider prose is never accepted as a transcript summary.
+
+Each run retains the newest 500 entries by default. An opaque cursor binds a
+generation and sequence. Readers receive typed `cursor_expired` recovery when
+retention removes their replay floor and typed `run_replaced` recovery when a
+task has a newer worker run. The control plane only proxies the injected runner
+reader, filters to garden visibility, and fails closed unless the paired device
+currently holds the `chat` grant. Transcript files are excluded from support
+bundles, analytics, crash reports, and the mission event store.
+
 ## Control flow
 
 1. A channel normalizes user intent into a command.

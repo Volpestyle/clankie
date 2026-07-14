@@ -26,6 +26,27 @@ After a validated implementation-plus-read-only-verification plan is submitted, 
 
 The execution boundary is fail-closed: `CLANKIE_CAPTAIN_TOKEN` authenticates start separately from `CLANKIE_RUNNER_TOKEN`; missing configuration returns an unavailable error and invalid credentials return an authentication error. Production authenticators compare bearer credentials in constant time and bind the runner ID from server configuration, never a caller header. The control plane owns serialized scheduling and replay only. Codex, Git worktrees, provider processes, and credentials remain in the runner.
 
+## Worker transcript read and tail
+
+The control plane exposes paired-device reads at:
+
+- `GET /v1/workers/:workerRunId/transcript?missionId=…&taskId=…`
+- `GET /v1/workers/:workerRunId/transcript/tail?missionId=…&taskId=…&cursor=…`
+
+The snapshot route returns the current bounded projection. The tail route emits
+typed NDJSON entries after the opaque cursor and remains open for new entries.
+Both require a valid, non-revoked device session whose current host-authored
+grants include `chat`; missing auth, expired sessions, revoked devices, and
+permission denial return typed fail-closed outcomes. Cursor expiry and worker
+replacement return `409` with typed recovery data.
+
+`WorkerTranscriptReadPort` is injected. Production uses
+`RunnerWorkerTranscriptClient` against the exact loopback origin configured by
+`CLANKIE_WORKER_TRANSCRIPT_URL` (default `http://127.0.0.1:4313`) and authenticates
+with the runner credential. The control plane never owns, reconstructs, or
+persists transcript entries and rejects upstream mission/task/run identity
+mismatches before forwarding data.
+
 ## Worker steering command bus
 
 Authenticated captain steering is normalized into a versioned command bound to

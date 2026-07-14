@@ -4,6 +4,25 @@ The runner is the trust boundary that owns worktrees, worker processes, PTYs, pr
 
 The production runner creates one `TerminalManager`. Generic interactive commands run in a native `node-pty` terminal with runner-supplied environment only; Codex App Server JSON-RPC, Claude Agent SDK, and Pi RPC retain their protocol-native control transports and are never relabeled as PTYs. The manager owns ordered raw-byte replay, headless `@xterm/headless` state, `@xterm/addon-serialize` VT restore snapshots at parser-quiescent boundaries, live-attempt correlation, bounded observers, and the single renewable human-control lease. Closed terminals leave discovery deterministically; restart marks non-reattachable PTY records orphaned and closed. Do not put merge, deployment, or organization-wide connector tokens inside worker environments.
 
+## Worker transcript projection
+
+`WorkerTranscriptProjection` is the runner authority for garden-safe worker
+activity. It projects only structured semantic events and runner settlement
+facts into private mode-0600 NDJSON under
+`CLANKIE_WORKER_TRANSCRIPT_ROOT` (default:
+`$CLANKIE_RUNNER_STATE/worker-transcripts`). Redaction and closed-schema
+reduction happen before persistence; raw terminal/model output, arbitrary
+provider summaries, prompts, chain-of-thought, credentials, tokens, and audio
+never enter the store. `CLANKIE_WORKER_TRANSCRIPT_MAX_ENTRIES` defaults to 500
+entries per run.
+
+The loopback-only transcript gateway listens on
+`CLANKIE_WORKER_TRANSCRIPT_PORT` (default `4313`) and uses the configured runner
+bearer credential. It exposes internal snapshot and NDJSON-tail routes for the
+control-plane injected reader. Cursors survive restart and yield typed
+retention-expired or worker-run-replaced recovery instead of guessing a replay
+position.
+
 `pnpm --filter @clankie/runner terminal:lifecycle-evidence` runs the immutable interactive
 terminal contract and writes a reproducible evidence manifest under
 `artifacts/runner/terminal-lifecycle/`. The manifest contains only safe phase identifiers,

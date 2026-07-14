@@ -4,6 +4,7 @@
 
 - analytics is separate from operational/audit telemetry;
 - user content, source code, prompts, terminal output, voice audio, and secrets are excluded;
+- runner worker-transcript entries are operational projections and are excluded from analytics;
 - local-only installations work with analytics disabled;
 - events are documented, versioned, consent-gated, and deletion-aware;
 - measure outcomes and friction, not surveillance.
