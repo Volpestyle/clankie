@@ -1403,14 +1403,19 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
         return context.json({ accepted: false, session });
       }
       try {
+        const durableBefore = discordPresenceSessions.resolve(event.data.session);
         const observed = discordPresenceSessions.validate(event);
+        const advancesDurableRevision =
+          durableBefore === undefined || observed.revision > durableBefore.revision;
         // The authenticated lifecycle event is live authority as soon as it
-        // validates. Advance this watermark before durable append so a stale
-        // active claim cannot race a loss transition awaiting persistence.
-        discordPresenceLiveSessions.set(sessionKey, observed);
+        // validates and strictly advances durable state. Advance this
+        // watermark before durable append so a stale active claim cannot race
+        // a loss transition awaiting persistence. A novel event id at an
+        // already-durable revision is not evidence of liveness in this boot.
+        if (advancesDurableRevision) discordPresenceLiveSessions.set(sessionKey, observed);
         if (dependencies.eventStore) await dependencies.eventStore.append(domainEvent);
         const session = discordPresenceSessions.apply(event);
-        discordPresenceLiveSessions.set(sessionKey, session);
+        if (advancesDurableRevision) discordPresenceLiveSessions.set(sessionKey, session);
         storedEvents.push(domainEvent);
         persistedEventIds.add(domainEvent.id);
         return context.json({ accepted: true, session });

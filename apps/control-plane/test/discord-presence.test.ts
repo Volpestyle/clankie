@@ -202,6 +202,35 @@ describe("Discord presence control-plane runtime (ADR 0024)", () => {
       });
       expect(restartedRuntime.writes).toHaveLength(0);
 
+      const novelIdStaleRevision = await recordPhase(
+        restarted,
+        "present",
+        2,
+        "gateway_ready",
+        "connecting",
+        "presence-phase-2-novel-id",
+      );
+      expect(novelIdStaleRevision.status).toBe(200);
+      await expect(novelIdStaleRevision.json()).resolves.toMatchObject({
+        accepted: true,
+        session: { phase: "present", revision: 2 },
+      });
+      const replayAfterNovelId = await post(
+        restarted,
+        "/v1/discord/presence-actions",
+        presenceWrite({
+          idempotencyKey: "presence-replayed-after-novel-id-stale-revision",
+          action: "discord.presence.send_message",
+          payload: { kind: "send_message", channelId: "c1", content: "must remain fenced" },
+        }),
+      );
+      expect(replayAfterNovelId.status).toBe(409);
+      await expect(replayAfterNovelId.json()).resolves.toEqual({
+        error: "discord_presence_live_claim_stale",
+        claimedRevision: 2,
+      });
+      expect(restartedRuntime.writes).toHaveLength(0);
+
       blocking.releaseLossAppend();
       expect((await loss).status).toBe(200);
 
@@ -754,6 +783,7 @@ function recordPhase(
   revision: number,
   reason: "process_start" | "gateway_ready" | "gateway_disconnected",
   previousPhase: "off" | "connecting" | "present" | "degraded",
+  eventId = `presence-phase-${revision.toString()}`,
 ) {
   return app.request("/v1/discord/presence-session-events", {
     method: "POST",
@@ -761,7 +791,7 @@ function recordPhase(
     body: JSON.stringify({
       schemaVersion: 1,
       plane: "semantic",
-      id: `presence-phase-${revision.toString()}`,
+      id: eventId,
       type: "discord.presence.session.phase_changed",
       occurredAt: `2026-07-14T18:00:0${revision.toString()}.000Z`,
       correlationId: "discord:bot:fixture",
