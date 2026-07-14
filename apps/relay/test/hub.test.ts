@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { RelayEnvelopeSchema, RelayHelloSchema } from "../src/protocol.ts";
+import { isApprovalCompletionPayload, RelayEnvelopeSchema, RelayHelloSchema } from "../src/protocol.ts";
 
 describe("relay protocol", () => {
   it("separates terminal and semantic control planes", () => {
@@ -19,5 +19,19 @@ describe("relay protocol", () => {
     });
     expect(hello.workspaceId).toBe(envelope.workspaceId);
     expect(envelope.plane).toBe("terminal");
+  });
+
+  it("rejects approval completion markers before opaque control routing", () => {
+    expect(isApprovalCompletionPayload({ action: "approval.complete", approvalId: "approval-1" })).toBe(true);
+    expect(isApprovalCompletionPayload({ approvalId: "approval-1", decision: "approved" })).toBe(true);
+    expect(
+      isApprovalCompletionPayload({
+        nested: { more: { data: { approvalId: "approval-1", approved: false } } },
+      }),
+    ).toBe(true);
+    expect(
+      isApprovalCompletionPayload({ a: { b: { c: { d: { e: { f: { g: { h: { i: "too deep" } } } } } } } } }),
+    ).toBe(true);
+    expect(isApprovalCompletionPayload({ type: "approval.requested" })).toBe(false);
   });
 });

@@ -1,0 +1,54 @@
+{
+  "requests": [
+    {
+      "op": "send",
+      "schemaVersion": 1,
+      "turn": {
+        "schemaVersion": 1,
+        "conversationId": "global-default",
+        "surfaceClientId": "rn-ios-recording",
+        "expectedRevision": 4,
+        "kind": "message",
+        "message": "Show the current mission status."
+      }
+    },
+    {
+      "op": "tail",
+      "schemaVersion": 1,
+      "tail": {
+        "schemaVersion": 1,
+        "conversationId": "global-default",
+        "surfaceClientId": "rn-ios-recording",
+        "cursor": "rn-ios-recording:opaque:4",
+        "limit": 50
+      }
+    }
+  ],
+  "responses": [
+    {
+      "op": "send",
+      "schemaVersion": 1,
+      "result": {
+        "schemaVersion": 1,
+        "status": "accepted",
+        "conversationId": "global-default",
+        "runId": "run-fixture-5",
+        "revision": 5,
+        "safeCursor": "rn-ios-recording:opaque:5"
+      }
+    },
+    {
+      "op": "tail",
+      "schemaVersion": 1,
+      "result": {
+        "schemaVersion": 1,
+        "status": "recover",
+        "conversationId": "global-default",
+        "code": "cursor_expired",
+        "recoverable": true,
+        "resetCursor": "rn-ios-recording:opaque:2",
+        "message": "Replay from the retained boundary."
+      }
+    }
+  ]
+}
