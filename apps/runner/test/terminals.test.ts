@@ -1,4 +1,6 @@
 import { Terminal } from "@xterm/headless";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { TerminalManager, type TerminalTransport } from "../src/terminals.ts";
 import { ShellWorkerAdapter } from "../src/shell-worker.ts";
@@ -308,4 +310,117 @@ describe("production terminal lifecycle", () => {
     expect(kill).toHaveBeenCalledOnce();
     expect(await manager.listSessions()).toEqual([]);
   });
+
+  it("escalates a timed-out TERM-trapping shell worker process group", async () => {
+    const root = await mkdtemp(join(process.cwd(), ".clankie-shell-worker-tree-"));
+    const grandchildPidPath = join(root, "grandchild.pid");
+    let grandchildPid: number | undefined;
+    try {
+      const manager = new TerminalManager();
+      const timeoutMs = 500;
+      const terminationGraceMs = 100;
+      const adapter = new ShellWorkerAdapter({
+        id: "term-trapping-shell-tree",
+        terminalManager: manager,
+        timeoutMs,
+        terminationGraceMs,
+        commandForTask: () => ({
+          command: "/bin/sh",
+          args: [
+            "-c",
+            `trap '' TERM HUP; /bin/sh -c 'trap "" TERM HUP; while :; do sleep 1; done' & echo $! > ${JSON.stringify(grandchildPidPath)}; while :; do sleep 1; done`,
+          ],
+        }),
+      });
+      const context = {
+        missionId: "mission",
+        workerRunId: "term-trap-tree",
+        attempt: 1,
+        workspacePath: process.cwd(),
+        profileHash: "profile",
+        task: {
+          id: "task",
+          title: "trap TERM in process tree",
+          objective: "prove timeout escalation owns the process tree",
+          kind: "debugging",
+          risk: "low",
+          writeScope: [],
+          successCriteria: [],
+        },
+        signal: new AbortController().signal,
+        emit: () => undefined,
+      } as unknown as WorkerRunContext;
+
+      const result = await adapter.run(context);
+      grandchildPid = Number(await readFile(grandchildPidPath, "utf8"));
+
+      expect(result.status).toBe("failed");
+      await expect(waitForProcessExit(grandchildPid, terminationGraceMs + 1_000)).resolves.toBe(true);
+      expect(await manager.listSessions()).toEqual([]);
+    } finally {
+      if (grandchildPid !== undefined && processIsAlive(grandchildPid)) {
+        process.kill(grandchildPid, "SIGKILL");
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("lets a cooperative timed-out shell worker process group exit during the grace period", async () => {
+    const manager = new TerminalManager();
+    const cancel = vi.spyOn(manager, "cancel");
+    const kill = vi.spyOn(manager, "kill");
+    const adapter = new ShellWorkerAdapter({
+      id: "cooperative-shell-tree",
+      terminalManager: manager,
+      timeoutMs: 500,
+      terminationGraceMs: 500,
+      commandForTask: () => ({
+        command: "/bin/sh",
+        args: ["-c", `trap 'exit 0' TERM; /bin/sh -c 'trap "exit 0" TERM; while :; do sleep 1; done' & wait`],
+      }),
+    });
+    const context = {
+      missionId: "mission",
+      workerRunId: "cooperative-tree",
+      attempt: 1,
+      workspacePath: process.cwd(),
+      profileHash: "profile",
+      task: {
+        id: "task",
+        title: "cooperative process tree",
+        objective: "exit during the timeout grace period",
+        kind: "debugging",
+        risk: "low",
+        writeScope: [],
+        successCriteria: [],
+      },
+      signal: new AbortController().signal,
+      emit: () => undefined,
+    } as unknown as WorkerRunContext;
+
+    const result = await adapter.run(context);
+
+    expect(result.status).toBe("failed");
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(kill).not.toHaveBeenCalled();
+    expect(await manager.listSessions()).toEqual([]);
+  });
 });
+
+async function waitForProcessExit(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!processIsAlive(pid)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return !processIsAlive(pid);
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}

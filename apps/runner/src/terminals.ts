@@ -711,7 +711,7 @@ export function spawnNativePtyTransport(
   return {
     write: (bytes) => pty.write(Buffer.from(bytes)),
     resize: (columns, rows) => pty.resize(columns, rows),
-    kill: (signal = "SIGKILL") => pty.kill(signal),
+    kill: (signal = "SIGKILL") => signalOwnedPtyProcessGroup(pty, signal),
     onData: (listener) => {
       pty.onData((data) => listener(Buffer.isBuffer(data) ? data : Buffer.from(data, "utf8")));
     },
@@ -719,4 +719,18 @@ export function spawnNativePtyTransport(
       pty.onExit(({ exitCode, signal }) => listener(exitCode, signal ? String(signal) : undefined));
     },
   };
+}
+
+function signalOwnedPtyProcessGroup(pty: IPty, signal: string): void {
+  if (process.platform !== "win32") {
+    try {
+      // forkpty(3) makes the PTY child a session and process-group leader.
+      // Signal that owned group so descendants cannot outlive the worker.
+      process.kill(-pty.pid, signal as NodeJS.Signals);
+      return;
+    } catch {
+      // The group may already be gone; retain node-pty's direct-child behavior.
+    }
+  }
+  pty.kill(signal);
 }
