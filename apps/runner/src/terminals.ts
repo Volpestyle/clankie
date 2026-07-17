@@ -214,7 +214,7 @@ export class TerminalManager implements TerminalProvider {
   public constructor(options: TerminalManagerOptions = {}) {
     this.leases = options.leases ?? new ControlLeaseManager();
     this.maxBufferedBytes = options.maxBufferedBytes ?? 512 * 1024;
-    this.maxObserverQueueFrames = options.maxObserverQueueFrames ?? 1024;
+    this.maxObserverQueueFrames = Math.max(1, options.maxObserverQueueFrames ?? 1024);
     this.maxBufferedFrames = options.maxBufferedFrames ?? 8192;
     this.onHumanControlChanged = options.onHumanControlChanged;
     this.onProcessTreeSweep = options.onProcessTreeSweep;
