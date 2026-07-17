@@ -53,6 +53,13 @@ For pane-hosted fallback workers:
 
 Harvest reads the receipt, validates its claimed commands/artifacts against current state, and records the corresponding semantic outcome. Tier-0/1 events remain the status winner even when a sentinel or pane heuristic disagrees. Never wait on printed completion strings: a prompt echo can create a false match.
 
+Watch for completion on the sentinel FILES as the primary signal (a low-frequency
+existence poll of `DONE`/`BLOCKED` is cheap and durable), with pane-status waits as
+secondary. `herdr wait agent-status <pane> --status done` can return "timed out
+waiting for agent status change" long before its `--timeout`, and a goal-armed pane
+that flips status between watcher arm and delivery is missed entirely — the sentinel
+file is the receipt that cannot race.
+
 ## Resume
 
 After captain restart:
