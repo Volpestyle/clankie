@@ -6,6 +6,7 @@ import { mkdtemp } from "node:fs/promises";
 import { promisify } from "node:util";
 
 import { FROZEN_REAL_WORKER_FIXTURE_SHA256, realWorkersRepoRoot } from "./real-workers.ts";
+import { preTrustHarnesses, type PreTrustReceipt } from "./harness-trust.ts";
 import { createHash } from "node:crypto";
 
 const execFileAsync = promisify(execFile);
@@ -327,98 +328,114 @@ export async function runHerdrHarnessArm(): Promise<HerdrHarnessResult> {
     grok: await harnessVersion("grok"),
   };
   const { candidate, baseCommit } = await createFixtureCandidate();
-
-  const tab = await herdrJson([
-    "tab",
-    "create",
-    "--workspace",
-    workspaceId,
-    "--label",
-    `vuh-829 harness arm`,
-  ]);
-  const rootPane: string = tab.result.root_pane.pane_id;
-  const paneRight = (await herdrJson(["pane", "split", rootPane, "--direction", "right", "--no-focus"]))
-    .result.pane.pane_id;
-  const paneDownLeft = (await herdrJson(["pane", "split", rootPane, "--direction", "down", "--no-focus"]))
-    .result.pane.pane_id;
-  const paneDownRight = (await herdrJson(["pane", "split", paneRight, "--direction", "down", "--no-focus"]))
-    .result.pane.pane_id;
-  const paneOrder = [rootPane, paneRight, paneDownLeft, paneDownRight];
+  // Zero-assist requirement: seed each harness's own trust store for the fresh
+  // candidate directory so no first-launch folder-trust dialog ever renders.
+  // The nudge in waitForStageCompletion stays as defense in depth only.
+  const preTrust = await preTrustHarnesses(candidate);
+  let preTrustCleanup = "pending";
 
   const stages = buildStages();
   const records: StageRecord[] = [];
   let designedFailure: CheckResult | undefined;
   let aborted = false;
+  let paneOrder: string[] = [];
 
-  for (const [index, stage] of stages.entries()) {
-    const paneId = paneOrder[index];
-    const record: StageRecord = {
-      taskId: stage.taskId,
-      role: stage.role,
-      harness: stage.harness,
-      harnessVersion: versions[stage.harness],
-      paneId,
-      startedAt: new Date().toISOString(),
-      nudges: [],
-      scopeViolations: [],
-      revertedPaths: [],
-      filesChanged: [],
-      outcome: "failed",
-      notes: [],
-    };
-    records.push(record);
-    if (aborted) {
-      record.notes.push("skipped: run aborted by an earlier scenario violation");
-      continue;
+  // Everything from tab creation onward runs under the cleanup finally — a
+  // failure while creating panes must still revert the seeded trust stores.
+  try {
+    const tab = await herdrJson([
+      "tab",
+      "create",
+      "--workspace",
+      workspaceId,
+      "--label",
+      `vuh-829 harness arm`,
+    ]);
+    const rootPane: string = tab.result.root_pane.pane_id;
+    const paneRight = (await herdrJson(["pane", "split", rootPane, "--direction", "right", "--no-focus"]))
+      .result.pane.pane_id;
+    const paneDownLeft = (await herdrJson(["pane", "split", rootPane, "--direction", "down", "--no-focus"]))
+      .result.pane.pane_id;
+    const paneDownRight = (await herdrJson(["pane", "split", paneRight, "--direction", "down", "--no-focus"]))
+      .result.pane.pane_id;
+    paneOrder = [rootPane, paneRight, paneDownLeft, paneDownRight];
+
+    for (const [index, stage] of stages.entries()) {
+      const paneId = paneOrder[index];
+      if (paneId === undefined) throw new Error(`pane_missing_for_stage: ${stage.taskId}`);
+      const record: StageRecord = {
+        taskId: stage.taskId,
+        role: stage.role,
+        harness: stage.harness,
+        harnessVersion: versions[stage.harness],
+        paneId,
+        startedAt: new Date().toISOString(),
+        nudges: [],
+        scopeViolations: [],
+        revertedPaths: [],
+        filesChanged: [],
+        outcome: "failed",
+        notes: [],
+      };
+      records.push(record);
+      if (aborted) {
+        record.notes.push("skipped: run aborted by an earlier scenario violation");
+        continue;
+      }
+
+      const promptFile = join(outputDirectory, `${stage.taskId}.prompt.txt`);
+      await writeFile(promptFile, stage.prompt({ checkFailure: designedFailure }), "utf8");
+      await herdr(["pane", "run", paneId, `cd ${shellQuote(candidate)} && ${stage.launch(promptFile)}`]);
+      await waitForStageCompletion(paneId, record);
+      record.endedAt = new Date().toISOString();
+
+      const transcriptFile = join(outputDirectory, `${stage.taskId}.transcript.txt`);
+      await writeFile(transcriptFile, await readPane(paneId, 1000), "utf8");
+      record.transcriptFile = transcriptFile;
+
+      // Authoritative wrapper evidence — the harness's own words count for nothing here.
+      const writes = await stageWrites(candidate);
+      record.filesChanged = writes;
+      const violations = writes.filter((path) => !stage.writeScope.includes(path));
+      if (violations.length > 0) {
+        record.scopeViolations = violations;
+        // Revert ONLY the violating paths; in-scope work stays in the candidate.
+        await git(candidate, ["checkout", "--", ...violations]).catch(() => undefined);
+        await git(candidate, ["clean", "-f", "--", ...violations]).catch(() => undefined);
+        const kept = writes.filter((path) => stage.writeScope.includes(path));
+        record.revertedPaths = violations;
+        record.notes.push(
+          `reverted ${violations.length} out-of-scope path(s); kept in-scope: ${kept.join(", ") || "none"}`,
+        );
+      }
+      await git(candidate, ["add", "-A"]);
+      await git(candidate, ["commit", "--allow-empty", "-m", `stage: ${stage.taskId} (${stage.harness})`]);
+      const diffFile = join(outputDirectory, `${stage.taskId}.diff`);
+      await writeFile(diffFile, await git(candidate, ["show", "--stat", "--patch", "HEAD"]), "utf8");
+      record.diffFile = diffFile;
+
+      record.check = await runFrozenCheck(candidate);
+      const checkOk =
+        (stage.expectCheck === "fail" && record.check.result === "failed") ||
+        (stage.expectCheck === "pass" && record.check.result === "passed");
+      if (record.outcome === "succeeded" && !checkOk) {
+        record.outcome = "failed";
+        record.notes.push(
+          `frozen check expectation violated: expected ${stage.expectCheck}, observed ${record.check.result}`,
+        );
+        // A scenario-shape violation (defect not seeded, or repair failed) makes the
+        // remaining chain meaningless — fail closed.
+        aborted = true;
+      }
+      if (stage.taskId === "verify-seeded-retry" && record.check.result === "failed") {
+        designedFailure = record.check;
+      }
     }
-
-    const promptFile = join(outputDirectory, `${stage.taskId}.prompt.txt`);
-    await writeFile(promptFile, stage.prompt({ checkFailure: designedFailure }), "utf8");
-    await herdr(["pane", "run", paneId, `cd ${shellQuote(candidate)} && ${stage.launch(promptFile)}`]);
-    await waitForStageCompletion(paneId, record);
-    record.endedAt = new Date().toISOString();
-
-    const transcriptFile = join(outputDirectory, `${stage.taskId}.transcript.txt`);
-    await writeFile(transcriptFile, await readPane(paneId, 1000), "utf8");
-    record.transcriptFile = transcriptFile;
-
-    // Authoritative wrapper evidence — the harness's own words count for nothing here.
-    const writes = await stageWrites(candidate);
-    record.filesChanged = writes;
-    const violations = writes.filter((path) => !stage.writeScope.includes(path));
-    if (violations.length > 0) {
-      record.scopeViolations = violations;
-      // Revert ONLY the violating paths; in-scope work stays in the candidate.
-      await git(candidate, ["checkout", "--", ...violations]).catch(() => undefined);
-      await git(candidate, ["clean", "-f", "--", ...violations]).catch(() => undefined);
-      const kept = writes.filter((path) => stage.writeScope.includes(path));
-      record.revertedPaths = violations;
-      record.notes.push(
-        `reverted ${violations.length} out-of-scope path(s); kept in-scope: ${kept.join(", ") || "none"}`,
-      );
-    }
-    await git(candidate, ["add", "-A"]);
-    await git(candidate, ["commit", "--allow-empty", "-m", `stage: ${stage.taskId} (${stage.harness})`]);
-    const diffFile = join(outputDirectory, `${stage.taskId}.diff`);
-    await writeFile(diffFile, await git(candidate, ["show", "--stat", "--patch", "HEAD"]), "utf8");
-    record.diffFile = diffFile;
-
-    record.check = await runFrozenCheck(candidate);
-    const checkOk =
-      (stage.expectCheck === "fail" && record.check.result === "failed") ||
-      (stage.expectCheck === "pass" && record.check.result === "passed");
-    if (record.outcome === "succeeded" && !checkOk) {
-      record.outcome = "failed";
-      record.notes.push(
-        `frozen check expectation violated: expected ${stage.expectCheck}, observed ${record.check.result}`,
-      );
-      // A scenario-shape violation (defect not seeded, or repair failed) makes the
-      // remaining chain meaningless — fail closed.
-      aborted = true;
-    }
-    if (stage.taskId === "verify-seeded-retry" && record.check.result === "failed") {
-      designedFailure = record.check;
-    }
+  } finally {
+    preTrustCleanup = await preTrust
+      .cleanup()
+      .then(() => "reverted")
+      .catch((error: any) => `failed: ${error?.message ?? String(error)}`);
   }
 
   const pass =
@@ -436,6 +453,7 @@ export async function runHerdrHarnessArm(): Promise<HerdrHarnessResult> {
     candidateDirectory: candidate,
     herdr: { workspaceId, panes: paneOrder },
     harnessVersions: versions,
+    preTrust: { receipts: preTrust.receipts satisfies PreTrustReceipt[], cleanup: preTrustCleanup },
     summary: pass
       ? "Codex TUI seeded the defect, Claude Code detected it, Grok repaired it, and a fresh Claude Code session re-verified — all in visible Herdr panes with wrapper-computed evidence."
       : "The consumer-harness chain did not complete the frozen scenario cleanly; see stage records.",
@@ -443,6 +461,7 @@ export async function runHerdrHarnessArm(): Promise<HerdrHarnessResult> {
     remaining_risks: [
       "Pane transcripts are captured from recent scrollback (max 1000 lines) and may truncate long sessions.",
       "Consumer TUIs run with their own autonomous modes; isolation is the harness sandbox, not runner isolation.",
+      "Trust stores are shared with live operator sessions; a concurrent config rewrite during the brief seed/revert window could drop the seeded entry (dialog would reappear and be caught by the nudge fallback).",
     ],
     assumptions: [
       "Harness self-reports are untrusted; only wrapper-computed checks, diffs, and scope checks are evidence.",
