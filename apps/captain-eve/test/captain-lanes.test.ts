@@ -360,6 +360,54 @@ describe("Eve captain operator conversation execution", () => {
     registry.close();
   });
 
+  it("resolves the live operator-conversations hook kind with no authored metadata (VUH-769 live-turn residual)", async () => {
+    // Regression: eve's lifecycle-hook `ctx.channel` carries only { kind }, never
+    // the authored channel's projected metadata. The real runtime kind is
+    // `channel:operator-conversations`; before the laneFromKind fix this threw
+    // "must declare metadata.captainLane" at emitTurnPreamble and every captain
+    // turn failed after 3 retries (session.failed), hanging the TUI.
+    expect(captainLaneAddress({ kind: "channel:operator-conversations" }, "clankie")).toEqual({
+      characterId: "clankie",
+      lane: "operator",
+      targetId: "global-default",
+    });
+
+    const root = await mkdtemp(join(tmpdir(), "captain-live-hook-"));
+    roots.push(root);
+    let id = 0;
+    const registry = await openOperatorConversationRegistry(join(root, "captain.sqlite"), {
+      identity,
+      idFactory: () => `workspace-conversation-${++id}`,
+    });
+    const conversation = registry.create({ scope: { kind: "workspace", workspaceId: "w1" }, title: "W1" });
+    // The executor binds the session→conversation first; the lifecycle hook then
+    // fires with a metadata-LESS channel and must recover the conversation by its
+    // session identity rather than throwing.
+    registry.rebindSession({
+      conversationId: conversation.conversationId,
+      sessionId: "live-session",
+      state: "active",
+    });
+    await reconcileEveLaneSessionWithRuntime(
+      {
+        identity,
+        conversations: registry,
+        registry: { bindSession: () => Promise.resolve() } as never,
+      },
+      {
+        channel: { kind: "channel:operator-conversations" },
+        sessionId: "live-session",
+        continuationToken: "live-continuation",
+        state: "waiting",
+      },
+    );
+    expect(registry.privateSession(conversation.conversationId)).toEqual({
+      sessionId: "live-session",
+      continuationToken: "live-continuation",
+    });
+    registry.close();
+  });
+
   it("runs an accepted turn against the conversation session, publishing transcript and binding privately", async () => {
     const root = await mkdtemp(join(tmpdir(), "captain-exec-"));
     roots.push(root);
