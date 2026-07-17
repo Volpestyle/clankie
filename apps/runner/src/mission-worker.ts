@@ -353,6 +353,8 @@ export class MissionWorker {
             status: "failed",
             summary: "Trusted runner verification checks did not pass.",
             diagnosis: checks.failures.join("; "),
+            // Runner-authored structured failed-check only — never provider prose.
+            ...(checks.failedCheck ? { failedCheck: checks.failedCheck } : {}),
           };
           remainingRisks.push("One or more trusted runner checks failed or could not execute.");
         }
@@ -522,6 +524,9 @@ export class MissionWorker {
         evidenceSha256: stored.sha256,
       },
       ...(facts.diagnosis ? { diagnosis: facts.diagnosis } : {}),
+      // Preserve runner-authored failed-check facts across settlement; never
+      // invent them from provider output or free-form diagnosis text.
+      ...(result.failedCheck ? { failedCheck: result.failedCheck } : {}),
     };
     if (this.options.transcriptProjection) {
       const occurredAt = new Date().toISOString();
