@@ -230,12 +230,14 @@ describe("auth command", () => {
     const { credentials, services } = await testServices();
     credentials.set("openai", { type: "api", key: "sk-live-secret-value" });
     credentials.set("openai-codex", { ...oauthCredential, accountId: "account-safe-summary" });
+    credentials.set("anthropic", { ...oauthCredential, accountId: "claude-account-summary" });
     const view = testShell([]);
 
     await command(buildProviderCommands(services), "auth").run("status", view.shell);
 
     expect(rendered(view)).toContain("openai · api key sk-l…");
     expect(rendered(view)).toContain("openai-codex · oauth (account-safe-summary)");
+    expect(rendered(view)).toContain("anthropic · oauth (claude-account-summary)");
     expect(rendered(view)).not.toContain("sk-live-secret-value");
     expect(rendered(view)).not.toContain(oauthCredential.access);
     expect(rendered(view)).not.toContain(oauthCredential.refresh);
