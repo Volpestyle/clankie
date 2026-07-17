@@ -56,6 +56,13 @@ export function captainLaneInstructions(channel: EveChannelLaneContext): string 
 
 function laneFromKind(kind: string | undefined): CaptainSessionLaneV2 {
   if (kind === undefined || kind === "http") return "operator";
+  // The authored operator-conversations channel (VUH-769) declares
+  // `metadata.captainLane` for the agent context, but eve's lifecycle-hook
+  // `ctx.channel` does not carry that metadata — only the channel kind
+  // (`channel:operator-conversations`). The kind is itself authoritative that
+  // this is an operator lane, so resolve it here; the reconcile then recovers
+  // the exact conversation by session identity (`conversationForSession`).
+  if (kind.includes("operator")) return "operator";
   if (kind.includes("discord")) return "discord_voice";
   if (kind === "schedule" || kind.includes("gameplay")) return "gameplay";
   throw new Error(`Eve channel kind ${kind} must declare metadata.captainLane`);
