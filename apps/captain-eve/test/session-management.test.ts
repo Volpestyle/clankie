@@ -152,13 +152,15 @@ describe("captain session ledger", () => {
       usage: normalizeTokenUsage({ inputTokens: 100, outputTokens: 10 }),
     };
     await ledger.recordUsage(checkpoint);
-    await ledger.recordUsage(checkpoint);
+    await ledger.recordUsage({ ...checkpoint, occurredAt: "2026-07-11T12:00:01.000Z" });
     expect((await ledger.snapshot("session-replay"))?.usage).toEqual({
       input: 100,
       output: 10,
       reasoning: 0,
       cache: { read: 0, write: 0 },
     });
+    expect((await ledger.snapshot("session-replay"))?.updatedAt).toBe(NOW);
+    expect(await ledger.verify()).toEqual({ valid: true, count: 1 });
     await ledger.recordTurnStarted("session-replay", "turn:turn-2", "2026-07-11T12:01:00.000Z", "turn-2");
     expect((await ledger.snapshot("session-replay"))?.state).toBe("active");
     await expect(

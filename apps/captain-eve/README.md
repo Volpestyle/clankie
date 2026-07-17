@@ -48,7 +48,9 @@ to this projection.
 flowchart LR
   T[TUI cursor<br/>session · continuation · generation] --> E[Eve durable session]
   E --> H[Private history]
+  E --> P[Bounded recent<br/>tool exchanges]
   E --> C[Summarize + prune compaction]
+  P --> C
   E --> K[Redacted accounting hook]
   K --> S[(Hash-chained SQLite events<br/>root-commit project id)]
   R[Model registry<br/>context · max output] --> B[Usable-window policy]
@@ -68,63 +70,48 @@ An absent or zero output limit reserves 20,000 tokens instead of silently
 reserving nothing. Eve receives a one-token-lower compaction window because
 its threshold comparison is strict `>`; integer provider counts therefore
 trigger at `inputTokens >= usable`. Eve performs a dedicated summary call,
-preserves the recent conversational tail, and removes tool-result payloads from
-the compacted history. The
-accounting projection records compaction requested/completed checkpoints and
-idempotently totals `input`, `output`, `reasoning`, and
-`cache.{read,write}` across restart replay. Eve 0.22.4 does not expose
-reasoning tokens on its step event, so that axis remains zero unless a future
-additive event field supplies it; the captain does not guess.
+preserves the checkpoint and recent conversational tail, and removes tool calls
+and results from the compacted history. Captain action hooks retain a contiguous
+20,000-token tail of complete call/result pairs in Eve's private durable session
+state, always keeping the newest pair. The selected-model middleware restores
+only pairs missing from the provider prompt, so both the summary call and the
+following continuation see recent tool results without duplicating ordinary
+uncompacted history. Older tool exchanges prune at the same private boundary;
+raw tool data never enters the Clankie accounting projection.
+
+The accounting projection records compaction requested/completed checkpoints
+and idempotently totals `input`, `output`, `reasoning`, and
+`cache.{read,write}` across restart replay. Eve can replay an authored hook
+without exposing its original stream timestamp. In that case, the stable event
+key and payload identify the accounting fact and the ledger preserves the first
+committed timestamp; conflicting payload reuse remains an error. Eve's current
+step event does not expose reasoning tokens, so that axis remains zero unless a
+future additive event field supplies it; the captain does not guess.
 
 The operator status bar continues to compute live context percentage against
 the registry's full `limit.context`, not the smaller usable compaction window.
 The TUI cursor and build-generation compatibility behavior from ADR 0014 remain
 unchanged.
 
-## Restart queue check (VUH-796)
+## Restart continuity drill
 
-The production restart check uses a built captain, an ephemeral loopback port,
-and an isolated `XDG_STATE_HOME` so the durable Eve session survives only the
-captain process restart:
+The restart drill runs a built captain on an ephemeral loopback port with an
+isolated workflow world and `XDG_STATE_HOME`. A deterministic delayed model
+creates a real in-flight step; the drill sends `SIGKILL` to the process group,
+starts the same build over the same private state, replays from cursor zero, and
+submits a follow-up with the recovered continuation token. It also reopens the
+SQLite projection to require a valid hash chain and nonzero replay-safe usage.
 
 ```bash
-export XDG_STATE_HOME="$(mktemp -d /tmp/vuh-796-state.XXXXXX)"
-# Leave CLANKIE_CAPTAIN_PROJECT_ID unset: the captain derives a stable id from
-# the Git root-commit hash. A non-hash value is rejected by stableProjectId
-# ("CLANKIE_CAPTAIN_PROJECT_ID must be a Git root-commit hash") and the turn
-# never runs, so do not set it to a literal label.
-PORT=63809   # any free ephemeral loopback port; 4321 and 8082 are reserved
-pnpm --filter @clankie/captain-eve exec eve build
-pnpm --filter @clankie/captain-eve exec eve start --host 127.0.0.1 --port "$PORT"
+pnpm --filter @clankie/captain-eve drill:restart -- /tmp/captain-restart-drill.json
 ```
 
-Create a session and send one turn through the Eve client, stop that service,
-then start the same built output with the same state directory and port. With
-the session-accounting fix (VUH-822) the turn survives `session.started` and
-reaches the live model call. If the provider is available the turn completes and
-saves a continuation; if the provider is quota-limited the run parks for retry.
-Either way a durable active run remains in the session state, so on restart the
-local world reports `Re-enqueued 1 active run(s)` and retries the queue item
-`__wkf_workflow_workflow//eve//workflowEntry` with HTTP 400 `Unhandled queue` —
-this retry stream is the recorded check.
-
-The retries are an upstream Eve 0.22.4/0.22.5 namespace mismatch: the local-world
-re-enqueue path uses the unscoped prefix `__wkf_workflow_`, while the captain's
-production handler is registered under the agent-scoped prefix
-`__eve6361707461696e2d657665_wkf_workflow_` (`6361707461696e2d657665` decodes to
-`captain-eve`). No captain configuration or session-handling seam changes that
-upstream queue name, so the captain does not filter the retry logs or claim this
-check is fixed; the residual is upstream-owned and tracked in VUH-796.
-
-Validated on this branch rebased onto `main` after the VUH-822 accounting fix:
-one driven turn survived `session.started`, reached the Anthropic model call, and
-parked for retry on `CaptainProviderPressureError: The usage limit has been
-reached`; the restart then emitted `Re-enqueued 1 active run(s)` and six
-`Unhandled queue` retries of the unscoped queue, on an isolated ephemeral port
-and isolated `XDG_STATE_HOME`. The exactly-once continuation execution on resume
-is not re-exercised under this quota condition (the turn parks before
-completion); it is carried from the wave-3 restart-recovery evidence, not
-re-observed here.
+Eve's production inline-ownership lease is 860 seconds. The drill sets the same
+lease expiry path to one second so takeover is observable promptly; it does not
+bypass durable queue recovery. The evidence artifact contains event types,
+hashes, exit signals, and redacted accounting only. The temporary raw workflow
+state is removed after the run unless `CAPTAIN_RESTART_DRILL_KEEP_STATE=1` is
+set for local debugging.
 
 ## Captain presence
 

@@ -21,6 +21,7 @@ const PROJECT_ID = "a".repeat(40);
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 
 afterEach(async () => {
+  vi.useRealTimers();
   ledgerHolder.current?.close();
   ledgerHolder.current = undefined;
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
@@ -73,6 +74,30 @@ describe("session-accounting hook against un-timestamped stream events", () => {
     const snapshot = await ledgerHolder.current.snapshot("session-1");
     expect(snapshot).toMatchObject({ sessionId: "session-1", state: "active", lastTurnId: "turn-1" });
     expect(snapshot?.updatedAt).toMatch(ISO);
+    expect(await ledgerHolder.current.verify()).toEqual({ valid: true, count: 1 });
+  });
+
+  it("deduplicates a replayed un-timestamped event after the wall clock advances", async () => {
+    const root = await mkdtemp(join(tmpdir(), "captain-accounting-replay-"));
+    roots.push(root);
+    ledgerHolder.current = await openCaptainSessionLedger(PROJECT_ID, join(root, "captain.sqlite"));
+
+    const startedHandler = events["session.started"];
+    if (startedHandler === undefined) throw new Error("session.started handler missing");
+    type StartedEvent = Parameters<typeof startedHandler>[0];
+    type Ctx = Parameters<typeof startedHandler>[1];
+    const event = { type: "session.started" } as unknown as StartedEvent;
+    const ctx = { session: { id: "session-replay", turn: { id: "turn-1" } } } as unknown as Ctx;
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-11T09:09:09.000Z"));
+    await startedHandler(event, ctx);
+    vi.setSystemTime(new Date("2026-07-11T09:10:09.000Z"));
+    await expect(startedHandler(event, ctx)).resolves.toBeUndefined();
+
+    expect((await ledgerHolder.current.snapshot("session-replay"))?.updatedAt).toBe(
+      "2026-07-11T09:09:09.000Z",
+    );
     expect(await ledgerHolder.current.verify()).toEqual({ valid: true, count: 1 });
   });
 });

@@ -55,6 +55,7 @@ describe("captain Eve authored surface", () => {
     expect(manifest.config.compaction).toEqual({ thresholdPercent: 1 });
     expect(manifest.hooks.map((hook) => hook.slug)).toContain("captain-lanes");
     expect(manifest.hooks.map((hook) => hook.slug)).toContain("captain-presence");
+    expect(manifest.hooks.map((hook) => hook.slug)).toContain("recent-tool-results");
     expect(manifest.hooks.map((hook) => hook.slug)).toContain("session-accounting");
   });
 
