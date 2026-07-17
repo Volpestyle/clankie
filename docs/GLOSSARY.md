@@ -22,4 +22,4 @@
 - **Authenticated surface:** paired device or authenticated session with full command authority, including approvals.
 - **Biome:** stable spatial representation of a project/repository.
 - **Station:** workflow phase within a biome.
-- **Control lease:** exclusive authority to send input to a terminal session.
+- **Control lease:** the runner's single host-owned authority to serialize writes to a terminal session, acquired and released automatically by capable clients — invisible transport safety, not a user-facing mode ([ADR 0036](adr/0036-terminal-input-authority-invisible.md)).

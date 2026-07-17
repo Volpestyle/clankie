@@ -183,16 +183,25 @@ tier. Status events carry `{tier, source, confidence, observedAt}` and ride the
 control plane, never the terminal plane. "Done" is a projection concern
 (completed + unacknowledged), not a detected state.
 
-## Human takeover
+## Terminal input authority
 
-- observers may read only with an authenticated `observe` device scope;
-- exactly one renewable control lease exists per terminal;
-- acquiring a lease pauses automated input;
-- all lease, input, and resize operations are attributed to principal, device,
+Terminal input authority is invisible transport safety, not a user-facing mode
+([ADR 0036](adr/0036-terminal-input-authority-invisible.md)). The runner still
+serializes every write through one grant per terminal; capable clients acquire,
+renew, and release it automatically, so the operator just taps the terminal and
+types.
+
+- the runner owns exactly one renewable, revocable control grant per terminal,
+  so writes are single-writer by construction;
+- a client with input scope acquires the grant on foreground, auto-renews before
+  expiry, and releases on background; an `observe`-scope client never acquires it;
+- there is no explicit take-over action, owner pill, renew button, or hand-back
+  surface — a contention or transport failure appears only as input availability,
+  and the next terminal tap or send retries;
+- all grant, input, and resize operations are attributed to principal, device,
   and client instance;
-- lease expires or is explicitly released;
-- agent resumes only after handback and optional summary;
-- forced release requires higher authority and is audited.
+- a grant expires or is released, and a forced release requires higher authority
+  and is audited.
 
 ## Captain worker control (operator parity)
 
@@ -202,9 +211,11 @@ slash commands (`/goal`, `/model`, `/effort`, steering text) for pane-hosted
 harness workers, and the same vocabulary mapped onto protocol methods for
 adapter-hosted workers. There is no captain-only control API. Arming a
 harness's native `/goal` loop at delegation time is part of this surface.
-Captain input is automated input under the takeover rules above — a human
-control lease pauses it — and parity covers steering and configuration only;
-approvals stay on authenticated surfaces.
+Captain input and human input are both writers under the single grant above, so
+the host serializes them; steering itself is typed control-plane intent, not raw
+terminal bytes, and is not gated by who holds a terminal's write grant
+([ADR 0036](adr/0036-terminal-input-authority-invisible.md)). Parity covers
+steering and configuration only; approvals stay on authenticated surfaces.
 
 The canonical [`clankie-lead` skill](../.agents/skills/clankie-lead/SKILL.md)
 defines this captain path, and its [delegation protocol](../.agents/skills/clankie-lead/references/delegation-protocol.md)

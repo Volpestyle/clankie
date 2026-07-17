@@ -7,7 +7,7 @@
 - protocol and doctrine schemas versioned;
 - runner only binds locally by default;
 - privileged connector credentials absent from worker environments;
-- terminal takeover requires a lease;
+- terminal writes are single-writer through the host-owned control grant;
 - explicit warning that external adapters are experimental;
 - threat model and data-retention defaults published.
 

@@ -22,8 +22,8 @@ verification_failed
 recovery_succeeded
 approval_requested
 approval_decided
-terminal_takeover_started
-terminal_takeover_ended
+terminal_input_started
+terminal_input_ended
 doctrine_changed
 garden_command_used
 evaluation_completed
@@ -43,7 +43,7 @@ Guardrails:
 - recovery success;
 - time to attention/approval;
 - cost per accepted mission;
-- terminal takeover frequency and duration;
+- direct terminal input frequency and duration;
 - user-reported trust/satisfaction;
 - opt-out and deletion success.
 

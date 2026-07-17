@@ -46,7 +46,7 @@ Exit gate: treatment beats single-agent baseline on the initial scenario suite a
 - Build on `@earendil-works/pi-tui` components, overlays, key handling, and differential rendering.
 - Mission tree, worker roster, event timeline, doctrine editor, approval inbox, and artifact summaries.
 - Herdr adapter plus native PTY/tmux fallbacks.
-- Observe by default; explicit control lease for takeover.
+- Direct input by default on capable clients (tap to type); the host-owned write grant is invisible ([ADR 0036](adr/0036-terminal-input-authority-invisible.md)).
 - `Ctrl+G`/slash command navigation and debug overlay.
 
 Exit gate: an operator can complete the real-provider self-build mission without opening another UI.
@@ -58,14 +58,14 @@ Exit gate: an operator can complete the real-provider self-build mission without
 - Keyboard control groups, lasso selection, split views, and multiple windows.
 - Local direct runner connection and development relay fallback.
 
-Exit gate: garden operations cover assignment, steering, pause, retry, approval, and terminal takeover; raw terminal remains available.
+Exit gate: garden operations cover assignment, steering, pause, retry, approval, and direct terminal input (tap to type); raw terminal remains available.
 
 ## Milestone 5 — iOS supervision
 
 - Device pairing and per-device permissions.
 - Mission/attention snapshots, push notifications, approvals, steering, diff/check review.
 - Reconnect through sequence/snapshot protocol.
-- Emergency terminal takeover with explicit lease.
+- Direct terminal input from a paired device (tap to type); the write grant is acquired invisibly ([ADR 0036](adr/0036-terminal-input-authority-invisible.md)).
 
 Exit gate: suspend the app during active work, then resume with no state loss or duplicated command.
 

@@ -32,7 +32,7 @@ A user supplies an outcome. The lead:
 - **Runner:** trusted local execution and credential boundary.
 - **Garden:** spatial fleet control and attention management.
 - **Graph:** dependencies, delegation, artifacts, and conflicts.
-- **Terminal deck:** raw inspection and takeover.
+- **Terminal deck:** raw inspection and direct input (tap to type).
 - **Artifact room:** diffs, checks, screenshots, designs, and deployment evidence.
 - **Channels:** TUI, Discord bot/voice, web, iOS, and macOS.
 
