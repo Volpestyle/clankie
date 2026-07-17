@@ -41,7 +41,10 @@ and a planned debugging task depends on it, the engine binds the same failure
 evidence and strict debugger-contract metadata that `addDebuggerTask` would set.
 Settlement without exact reproduction plus before/after repair evidence fails.
 The bridge never parses diagnosis or evidence free-form text for command/exit
-code — only the structured failed-check carrier.
+code — only the structured failed-check carrier. `missionEngine.failureEvidence`
+and `missionEngine.debuggerContract` are engine-owned metadata: a static plan
+that supplies either key fails closed, and generic task admission rejects them.
+Replay trusts these fields only after a dedicated engine evidence-binding event.
 
 The package intentionally keeps these contracts in `TaskSpec.metadata` so the
 wire protocol stays additive. The runner continues to enforce the filesystem

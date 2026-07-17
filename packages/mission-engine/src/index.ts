@@ -55,6 +55,11 @@ export const FAILURE_EVIDENCE_METADATA_KEY = "missionEngine.failureEvidence";
 export const VERIFICATION_CONTRACT_METADATA_KEY = "missionEngine.verificationContract";
 export const DEBUGGER_CONTRACT_METADATA_KEY = "missionEngine.debuggerContract";
 
+const RESERVED_DEBUGGER_METADATA_KEYS = [
+  FAILURE_EVIDENCE_METADATA_KEY,
+  DEBUGGER_CONTRACT_METADATA_KEY,
+] as const;
+
 export interface TaskRuntime {
   spec: TaskSpec;
   state: TaskState;
@@ -183,6 +188,10 @@ export class MissionEngine {
   private readonly verificationStarveSignaled = new Set<string>();
   /** Debugging task ids whose runtime failure evidence has been bound (bridge, VUH-827). */
   private readonly runtimeEvidenceBound = new Set<string>();
+  /** Task ids whose debugger metadata was bound by an engine-owned evidence transition. */
+  private readonly trustedDebuggerMetadata = new Set<string>();
+  /** Initial-plan task ids that attempted to supply engine-owned debugger metadata. */
+  private readonly planAuthoredDebuggerMetadata = new Set<string>();
   /** Debugging task ids that have emitted an unacknowledged dependency-evidence-starve signal. */
   private readonly debuggerEvidenceStarveSignaled = new Set<string>();
   private readonly recoveryCommands = new Map<string, RecoveryCommandRecord>();
@@ -211,6 +220,9 @@ export class MissionEngine {
       this.idFactory();
     for (const task of plan.tasks) {
       this.tasks.set(task.id, { spec: task, state: "queued", attempts: 0, workerIds: [] });
+      if (this.reservedDebuggerMetadataKeys(task).length > 0) {
+        this.planAuthoredDebuggerMetadata.add(task.id);
+      }
     }
     const replayEvents = options.replayEvents?.filter((event) => event.missionId === plan.missionId) ?? [];
     if (replayEvents.length > 0) {
@@ -225,12 +237,16 @@ export class MissionEngine {
       // Rebuild the runtime failure-evidence bridge from the replayed settled
       // verification results so a rehydrated engine readies dependent debuggers
       // exactly as the live engine did — without re-emitting events (VUH-827).
+      this.rejectUntrustedDebuggerMetadata({ emit: false, planTasksOnly: true });
       this.reconcileFailedVerificationBridges({ emit: false });
+      this.rejectUntrustedDebuggerMetadata({ emit: false, planTasksOnly: false });
       this.recomputeState();
     } else {
       this.state = "running";
       this.emit("mission.created", { goal: plan.goal, taskCount: plan.tasks.length });
       this.emit("mission.started", { doctrine: doctrine.profile.id });
+      this.rejectUntrustedDebuggerMetadata({ emit: true, planTasksOnly: true });
+      this.recomputeState();
     }
   }
 
@@ -271,6 +287,11 @@ export class MissionEngine {
   }
 
   public addTask(spec: TaskSpec, causationId?: string): void {
+    this.assertNoReservedDebuggerMetadata(spec);
+    this.addTaskInternal(spec, causationId);
+  }
+
+  private addTaskInternal(spec: TaskSpec, causationId?: string): void {
     if (this.tasks.has(spec.id)) throw new Error(`Task ${spec.id} already exists`);
     const validation = assertValidMissionPlan({
       ...this.plan,
@@ -325,7 +346,8 @@ export class MissionEngine {
         [DEBUGGER_CONTRACT_METADATA_KEY]: true,
       },
     };
-    this.addTask(enriched, causationId ?? failure.sourceTaskId);
+    this.addTaskInternal(enriched, causationId ?? failure.sourceTaskId);
+    this.trustedDebuggerMetadata.add(spec.id);
     this.emit(
       "debugger.evidence.bound",
       {
@@ -342,6 +364,7 @@ export class MissionEngine {
   }
 
   public getFailureEvidence(taskId: string): FailureEvidence | undefined {
+    if (!this.trustedDebuggerMetadata.has(taskId)) return undefined;
     const task = this.tasks.get(taskId);
     const value = task?.spec.metadata[FAILURE_EVIDENCE_METADATA_KEY];
     return isFailureEvidence(value) ? structuredClone(value) : undefined;
@@ -355,6 +378,8 @@ export class MissionEngine {
 
   /** Add one trusted debugger + unchanged re-verifier pair after an observed verifier failure. */
   public addRecoveryPair(input: RecoveryPairInput): RecoveryPair {
+    this.assertNoReservedDebuggerMetadata(input.debugger);
+    this.assertNoReservedDebuggerMetadata(input.reverify);
     if (
       Object.hasOwn(input.debugger.metadata, "recovery") ||
       Object.hasOwn(input.reverify.metadata, "recovery")
@@ -957,6 +982,64 @@ export class MissionEngine {
     );
   }
 
+  private reservedDebuggerMetadataKeys(spec: TaskSpec): string[] {
+    return RESERVED_DEBUGGER_METADATA_KEYS.filter((key) => Object.hasOwn(spec.metadata, key));
+  }
+
+  private assertNoReservedDebuggerMetadata(spec: TaskSpec): void {
+    const keys = this.reservedDebuggerMetadataKeys(spec);
+    if (keys.length === 0) return;
+    throw new Error(
+      `Task ${spec.id} cannot supply reserved mission-engine debugger metadata (${keys.join(", ")}); use runner-authored failure evidence and the governed debugger APIs`,
+    );
+  }
+
+  /**
+   * Fail closed when an external plan or generic replay task supplies metadata
+   * that only engine-owned evidence transitions may bind. Initial-plan
+   * violations remain invalid even if replay contains events from an older
+   * engine that allowed the task to run.
+   */
+  private rejectUntrustedDebuggerMetadata(options: { emit: boolean; planTasksOnly: boolean }): void {
+    for (const runtime of this.tasks.values()) {
+      const keys = this.reservedDebuggerMetadataKeys(runtime.spec);
+      if (keys.length === 0) continue;
+      const planAuthored = this.planAuthoredDebuggerMetadata.has(runtime.spec.id);
+      const shouldReject = options.planTasksOnly
+        ? planAuthored
+        : !planAuthored && !this.trustedDebuggerMetadata.has(runtime.spec.id);
+      if (!shouldReject) continue;
+
+      const metadata = { ...runtime.spec.metadata };
+      for (const key of keys) delete metadata[key];
+      const summary = `Task ${runtime.spec.id} supplied reserved mission-engine debugger metadata without an engine-owned evidence binding.`;
+      runtime.spec = { ...runtime.spec, metadata };
+      runtime.state = "failed";
+      runtime.completedAt = this.clock().toISOString();
+      runtime.result = {
+        status: "failed",
+        summary,
+        diagnosis:
+          "Only runner-authored WorkerResult.failedCheck and governed debugger evidence transitions may bind debugger contracts.",
+        evidence: [],
+        outputs: {},
+      };
+      delete runtime.workerRunId;
+      delete runtime.workerId;
+      delete runtime.workerHarness;
+      delete runtime.runnerId;
+      delete runtime.leaseExpiresAt;
+      this.trustedDebuggerMetadata.delete(runtime.spec.id);
+      if (options.emit) {
+        this.emit(
+          "task.failed",
+          { summary, diagnosis: runtime.result.diagnosis, reservedMetadataKeys: keys },
+          runtime.spec.id,
+        );
+      }
+    }
+  }
+
   /**
    * Bridge for static frozen-scenario plans (VUH-827 / VUH-828). When a planned
    * verification task has failed and a planned debugging task depends on it, the
@@ -975,6 +1058,7 @@ export class MissionEngine {
       const dependents = [...this.tasks.values()].filter(
         (task) =>
           task.spec.kind === "debugging" &&
+          task.state === "queued" &&
           task.spec.dependsOn.includes(verification.spec.id) &&
           this.getFailureEvidence(task.spec.id) === undefined,
       );
@@ -993,6 +1077,7 @@ export class MissionEngine {
               [DEBUGGER_CONTRACT_METADATA_KEY]: true,
             },
           };
+          this.trustedDebuggerMetadata.add(debugging.spec.id);
           if (options.emit && !this.runtimeEvidenceBound.has(debugging.spec.id)) {
             this.runtimeEvidenceBound.add(debugging.spec.id);
             this.emit(
@@ -1122,6 +1207,39 @@ export class MissionEngine {
 
   private applyReplayEvent(event: DomainEvent): void {
     this.statusResolver.ingestDomainEvent(event);
+    if (
+      (event.type === "debugger.evidence.bound" || event.type === "debugger.failure_evidence.bound") &&
+      event.taskId
+    ) {
+      const runtime = this.tasks.get(event.taskId);
+      const eventEvidence = {
+        sourceTaskId: event.data.sourceTaskId,
+        sourceAttempt: event.data.sourceAttempt,
+        sourceWorkerRunId: event.data.sourceWorkerRunId,
+        command: event.data.command,
+        exitCode: event.data.exitCode,
+        outputArtifact: event.data.outputArtifact,
+      };
+      const existingEvidence = runtime?.spec.metadata[FAILURE_EVIDENCE_METADATA_KEY];
+      const evidence = isFailureEvidence(existingEvidence)
+        ? existingEvidence
+        : isFailureEvidence(eventEvidence)
+          ? eventEvidence
+          : undefined;
+      if (runtime && evidence) {
+        runtime.spec = {
+          ...runtime.spec,
+          metadata: {
+            ...runtime.spec.metadata,
+            [FAILURE_EVIDENCE_METADATA_KEY]: evidence,
+            [DEBUGGER_CONTRACT_METADATA_KEY]: true,
+          },
+        };
+        this.trustedDebuggerMetadata.add(event.taskId);
+        if (event.type === "debugger.failure_evidence.bound") this.runtimeEvidenceBound.add(event.taskId);
+      }
+      return;
+    }
     if (event.type === "task.added") {
       const parsed = TaskSpecSchema.safeParse(event.data.spec);
       if (parsed.success && !recoveryMetadata(parsed.data) && !this.tasks.has(parsed.data.id)) {
@@ -1590,15 +1708,21 @@ export class MissionEngine {
     if (!runtime.workerIds.includes(workerId)) runtime.workerIds.push(workerId);
   }
 
+  private hasTrustedDebuggerContract(runtime: TaskRuntime): boolean {
+    return (
+      runtime.spec.kind === "debugging" &&
+      this.trustedDebuggerMetadata.has(runtime.spec.id) &&
+      runtime.spec.metadata[DEBUGGER_CONTRACT_METADATA_KEY] === true
+    );
+  }
+
   private validateWorkerSemanticEvent(
     runtime: TaskRuntime,
     workerRunId: string,
     type: string,
     data: Record<string, unknown>,
   ): void {
-    if (runtime.spec.kind !== "debugging" || runtime.spec.metadata[DEBUGGER_CONTRACT_METADATA_KEY] !== true) {
-      return;
-    }
+    if (!this.hasTrustedDebuggerContract(runtime)) return;
     const failure = this.getFailureEvidence(runtime.spec.id);
     if (!failure) throw new Error(`Debugger task ${runtime.spec.id} has no structured failure evidence`);
     if (type === "debugger.reproduced") {
@@ -1634,8 +1758,7 @@ export class MissionEngine {
     workerRunId: string,
     result: WorkerResult,
   ): void {
-    if (runtime.spec.kind !== "debugging" || runtime.spec.metadata[DEBUGGER_CONTRACT_METADATA_KEY] !== true)
-      return;
+    if (!this.hasTrustedDebuggerContract(runtime)) return;
     const raw = result.outputs.debuggerRepair ?? result.outputs.repairEvidence;
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
     const repair = parseDebuggerRepairEvidence(raw);
@@ -1663,9 +1786,7 @@ export class MissionEngine {
   }
 
   private contractFailure(runtime: TaskRuntime, workerRunId: string): string | undefined {
-    if (runtime.spec.kind !== "debugging" || runtime.spec.metadata[DEBUGGER_CONTRACT_METADATA_KEY] !== true) {
-      return undefined;
-    }
+    if (!this.hasTrustedDebuggerContract(runtime)) return undefined;
     const evidence = this.debuggerEvidenceByRunId.get(workerRunId);
     if (!evidence?.reproduced || !evidence.repaired) {
       return "Debugger result is missing exact-check reproduction and before/after repair evidence.";

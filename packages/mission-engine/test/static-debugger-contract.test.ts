@@ -179,6 +179,40 @@ const implementer = () =>
   adapter("sim-implementer", ["implementation"], true, async (c) => succeed(c.task.id));
 
 describe("VUH-828 static-plan debugger contract + structured failed-check bridge", () => {
+  it("rejects plan-authored failure evidence as a substitute for the runner carrier", async () => {
+    const plan = frozenPlan();
+    const debuggerTask = plan.tasks.find((candidate) => candidate.id === "debug-retry");
+    if (!debuggerTask) throw new Error("Frozen plan is missing debug-retry");
+    debuggerTask.metadata[FAILURE_EVIDENCE_METADATA_KEY] = {
+      sourceTaskId: "verify-initial",
+      sourceAttempt: 1,
+      command: "prebound-check",
+      exitCode: 13,
+      outputArtifact: "artifact://untrusted-plan/prebound",
+    };
+
+    const engine = new MissionEngine(plan, doctrine(), { workspacePath: "/tmp" });
+    const lazyDebugger = adapter("sim-debugger", ["debugging"], true, async (context) =>
+      succeed(context.task.id),
+    );
+    const verifier = adapter("sim-verifier", ["verification"], false, async (context) =>
+      context.task.id === "verify-initial"
+        ? {
+            status: "failed",
+            summary: "failed",
+            diagnosis: "diagnosis-only exited 99",
+            evidence: [],
+            outputs: {},
+          }
+        : succeed(context.task.id),
+    );
+
+    await engine.runUntilIdle(new StaticWorkerRouter([planner(), implementer(), verifier, lazyDebugger]));
+
+    expect(engine.getTask("debug-retry").state).toBe("failed");
+    expect(engine.getFailureEvidence("debug-retry")).toBeUndefined();
+  });
+
   it("fails a static-plan debugger that settles without reproduced/repaired evidence", async () => {
     const engine = new MissionEngine(frozenPlan(), doctrine(), { workspacePath: "/tmp" });
     let sawDebuggerContract = false;
