@@ -660,10 +660,25 @@ export class OperatorConversationRegistry {
       .prepare("SELECT * FROM operator_conversations WHERE is_default = 1")
       .get() as ConversationRow | undefined;
     if (existingDefault !== undefined) {
-      if (row.session_id !== null && existingDefault.session_id !== row.session_id) {
-        throw new OperatorConversationMigrationError(
-          "Legacy TUI session conflicts with the default operator conversation",
-        );
+      // The default global conversation already exists and is authoritative.
+      // When it has no bound session yet, adopt the legacy TUI session so a
+      // pre-VUH-769 session's continuity is preserved; otherwise the default's
+      // own session wins and the legacy lane is superseded residue. Neither is
+      // fatal — a machine carrying pre-VUH-769 durable state must still boot the
+      // captain instead of failing every turn.
+      const defaultUnbound = existingDefault.session_id === null || existingDefault.session_id === undefined;
+      if (defaultUnbound && typeof row.session_id === "string" && row.session_id.length > 0) {
+        this.database
+          .prepare(
+            `UPDATE operator_conversations
+               SET session_id = ?, continuation_token = ?, session_state = ?
+             WHERE conversation_id = 'global-default'`,
+          )
+          .run(
+            row.session_id,
+            typeof row.continuation_token === "string" ? row.continuation_token : null,
+            typeof row.state === "string" ? row.state : "active",
+          );
       }
       return;
     }

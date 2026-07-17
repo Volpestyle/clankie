@@ -114,6 +114,56 @@ describe("conversation-scoped operator registry", () => {
     database.close();
   });
 
+  it("boots when a legacy TUI row lingers beside an already-bound default (VUH-769 durable-state conflict)", async () => {
+    // Reproduces the live durable-state conflict: the default global conversation
+    // is bound to its own (later) session while a pre-VUH-769 captain_lanes TUI
+    // row still carries the original session. The old migration fatal-threw here,
+    // failing every captain turn on startup.
+    const root = await mkdtemp(join(tmpdir(), "operator-legacy-residue-"));
+    roots.push(root);
+    const path = join(root, "captain.sqlite");
+    const legacy = await openCaptainLaneRegistry(path, { identity });
+    await legacy.bindSession(TUI, { sessionId: "legacy-session", continuationToken: "legacy-token" });
+    legacy.close();
+    // First open migrates the legacy TUI session into the default.
+    const first = await openOperatorConversationRegistry(path, { identity });
+    // A later turn rotates the default onto its own session; the lingering legacy
+    // captain_lanes row (still 'legacy-session') now differs from the default.
+    first.rebindSession({
+      conversationId: "global-default",
+      sessionId: "live-session",
+      continuationToken: "live-token",
+      state: "active",
+    });
+    first.close();
+    // Re-open must NOT throw: the bound default is authoritative; the legacy lane
+    // is superseded residue.
+    const second = await openOperatorConversationRegistry(path, { identity });
+    expect(second.privateSession("global-default")).toEqual({
+      sessionId: "live-session",
+      continuationToken: "live-token",
+    });
+    second.close();
+  });
+
+  it("adopts the legacy TUI session when the default global conversation is unbound", async () => {
+    const root = await mkdtemp(join(tmpdir(), "operator-legacy-adopt-"));
+    roots.push(root);
+    const path = join(root, "captain.sqlite");
+    // An unbound default exists first; a legacy TUI row appears afterward.
+    const first = await openOperatorConversationRegistry(path, { identity });
+    first.close();
+    const legacy = await openCaptainLaneRegistry(path, { identity });
+    await legacy.bindSession(TUI, { sessionId: "legacy-session", continuationToken: "legacy-token" });
+    legacy.close();
+    const second = await openOperatorConversationRegistry(path, { identity });
+    expect(second.privateSession("global-default")).toEqual({
+      sessionId: "legacy-session",
+      continuationToken: "legacy-token",
+    });
+    second.close();
+  });
+
   it("refuses to guess when v1 contains multiple TUI lane owners", async () => {
     const root = await mkdtemp(join(tmpdir(), "operator-ambiguous-migration-"));
     roots.push(root);
