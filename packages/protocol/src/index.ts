@@ -34,10 +34,7 @@ export type CaptainSessionLaneV2 = z.infer<typeof CaptainSessionLaneV2Schema>;
  * post-v1 discord_presence lane migrates to CaptainSessionLaneV2Schema.
  * Versioned records must use CaptainLaneSchema (v1) or CaptainSessionLaneV2Schema (v2), never this union.
  */
-export const CaptainLaneCompatibilitySchema = z.union([
-  CaptainLaneSchema,
-  z.literal("discord_presence"),
-]);
+export const CaptainLaneCompatibilitySchema = z.union([CaptainLaneSchema, z.literal("discord_presence")]);
 export type CaptainLane = z.infer<typeof CaptainLaneCompatibilitySchema>;
 
 // ---------------------------------------------------------------------------

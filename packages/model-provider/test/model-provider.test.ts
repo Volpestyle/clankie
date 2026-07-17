@@ -230,17 +230,20 @@ describe("updateGlobalConfig", () => {
       },
       pathPrefix: ["provider", "custom", "models", "model-a", "metadata"],
     },
-  ])("rejects access and refresh tokens in $location instead of serializing them", async ({ config, pathPrefix }) => {
-    const { env, globalPath } = await makeConfigEnv();
+  ])(
+    "rejects access and refresh tokens in $location instead of serializing them",
+    async ({ config, pathPrefix }) => {
+      const { env, globalPath } = await makeConfigEnv();
 
-    await expect(updateGlobalConfig(() => config, { env })).rejects.toMatchObject({
-      issues: expect.arrayContaining([
-        expect.objectContaining({ path: [...pathPrefix, "access_token"] }),
-        expect.objectContaining({ path: [...pathPrefix, "refresh_token"] }),
-      ]),
-    });
-    await expect(readFile(globalPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
-  });
+      await expect(updateGlobalConfig(() => config, { env })).rejects.toMatchObject({
+        issues: expect.arrayContaining([
+          expect.objectContaining({ path: [...pathPrefix, "access_token"] }),
+          expect.objectContaining({ path: [...pathPrefix, "refresh_token"] }),
+        ]),
+      });
+      await expect(readFile(globalPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    },
+  );
 
   it("rejects nested authorization headers instead of serializing them", async () => {
     const { env, globalPath } = await makeConfigEnv();

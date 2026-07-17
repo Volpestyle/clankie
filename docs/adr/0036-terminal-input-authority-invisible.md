@@ -74,7 +74,7 @@ without weakening the host boundary.
   clause is superseded here.
 - One residual runner coupling remains: `apps/runner/src/mission-worker.ts`
   (`hasHumanControlLease` → `human_control_active`) still pauses captain steering
-  while a human holds terminal control. Whether captain steering *should* pause
+  while a human holds terminal control. Whether captain steering _should_ pause
   while a human is hands-on the terminal is a behavior decision, not a naming one;
   it is tracked as follow-up rather than silently changed here.
 - Analytics `terminal_takeover_started` / `terminal_takeover_ended` describe an

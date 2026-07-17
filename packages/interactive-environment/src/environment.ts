@@ -377,7 +377,10 @@ export const EnvironmentSemanticEventDataSchema = z.union([
       scenarioId: SemanticReferenceSchema,
       scenarioVersion: z.number().int().positive(),
       fixtureSha256: z.string().regex(/^[a-f0-9]{64}$/u),
-      reportSha256: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
+      reportSha256: z
+        .string()
+        .regex(/^[a-f0-9]{64}$/u)
+        .optional(),
     })
     .strict(),
   z
@@ -452,7 +455,9 @@ export const EnvironmentSemanticEventDataSchema = z.union([
       source: z.string().min(1).max(256).optional(),
     })
     .strict(),
-  z.object({ reason: SemanticSummarySchema.optional(), position: SemanticPositionSchema.optional() }).strict(),
+  z
+    .object({ reason: SemanticSummarySchema.optional(), position: SemanticPositionSchema.optional() })
+    .strict(),
   z
     .object({
       severity: z.enum(["low", "medium", "high", "critical"]),

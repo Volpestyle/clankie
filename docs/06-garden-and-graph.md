@@ -65,7 +65,7 @@ Approve Reject Merge Deploy Cancel Archive
 
 Every gesture compiles to a typed command and receives a policy decision. Dragging a PR to Merge Gate is a request, not authority.
 
-Selecting a single worker is a read that opens its transcript; typing into its terminal is direct (tap to type) with no take-over step ([ADR 0036](adr/0036-terminal-input-authority-invisible.md)). *Take over* and *Hand back* act on a worker's run, not on terminal input, and belong to fleet/batch interactions rather than per-worker inspect.
+Selecting a single worker is a read that opens its transcript; typing into its terminal is direct (tap to type) with no take-over step ([ADR 0036](adr/0036-terminal-input-authority-invisible.md)). _Take over_ and _Hand back_ act on a worker's run, not on terminal input, and belong to fleet/batch interactions rather than per-worker inspect.
 
 ## Efficiency requirements
 
