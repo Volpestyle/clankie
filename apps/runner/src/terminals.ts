@@ -58,6 +58,7 @@ export interface TerminalManagerOptions {
   maxBufferedBytes?: number;
   /** Deprecated compatibility option; VT snapshots are complete and never byte-truncated. */
   maxSnapshotBytes?: number;
+  /** Any number is accepted; finite values are floored and clamped to at least 1, while non-finite values normalize to 1. */
   maxObserverQueueFrames?: number;
   maxBufferedFrames?: number;
   leases?: ControlLeaseManager;
@@ -214,7 +215,10 @@ export class TerminalManager implements TerminalProvider {
   public constructor(options: TerminalManagerOptions = {}) {
     this.leases = options.leases ?? new ControlLeaseManager();
     this.maxBufferedBytes = options.maxBufferedBytes ?? 512 * 1024;
-    this.maxObserverQueueFrames = options.maxObserverQueueFrames ?? 1024;
+    const maxObserverQueueFrames = options.maxObserverQueueFrames ?? 1024;
+    this.maxObserverQueueFrames = Number.isFinite(maxObserverQueueFrames)
+      ? Math.max(1, Math.floor(maxObserverQueueFrames))
+      : 1;
     this.maxBufferedFrames = options.maxBufferedFrames ?? 8192;
     this.onHumanControlChanged = options.onHumanControlChanged;
     this.onProcessTreeSweep = options.onProcessTreeSweep;

@@ -438,6 +438,33 @@ describe("production terminal acceptance contract", () => {
     expect(finalResize).toMatchObject({ columns: 84, rows: 25 });
   });
 
+  it.each([
+    ["zero", 0],
+    ["NaN", Number.NaN],
+    ["fractional", 0.5],
+    ["negative", -3],
+    ["maximum safe integer", Number.MAX_SAFE_INTEGER],
+  ])("normalizes a %s observer queue bound without losing replay or closure", async (_, bound) => {
+    const transport = scriptedTransport();
+    const manager = new TerminalManager({ maxObserverQueueFrames: bound });
+    const session = manager.spawnTerminal({
+      workerRunId: "accept-normalized-observer-queue-bound",
+      title: "normalized observer queue bound",
+      command: "unused",
+      transport,
+    });
+
+    transport.emit("retained output");
+    transport.finish();
+    await manager.whenIdle(session.id);
+
+    const frames = await collect(manager.observe(session.id, 0));
+    expect(frames.map((frame) => frame.type)).toEqual(["output", "closed"]);
+    expect(Buffer.concat(frames.filter((frame) => frame.type === "output").map(frameBytes))).toEqual(
+      Buffer.from("retained output"),
+    );
+  });
+
   it("never materializes a retained resize tail beyond the observer queue bound", async () => {
     const observerQueueBound = 2;
     const observedPeaks: Record<string, number> = {};
