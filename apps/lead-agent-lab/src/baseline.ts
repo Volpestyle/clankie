@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +13,7 @@ import { buggyImplementation, runFixtureTests, SELF_BUILD_SCENARIO, repoRoot } f
 export interface BaselineRunOptions {
   generatedAt?: string;
   keepWorkspace?: boolean;
+  seed?: string;
 }
 
 export interface BaselineRun {
@@ -21,6 +22,12 @@ export interface BaselineRun {
   workspacePath: string;
   groundTruthPassed: boolean;
   profileHash: string;
+  seed?: string;
+  implementationWorkerId?: string;
+}
+
+function seedToken(seed: string | undefined): string {
+  return seed ? createHash("sha256").update(seed).digest("hex").slice(0, 12) : randomUUID().slice(0, 8);
 }
 
 /**
@@ -39,6 +46,7 @@ export interface BaselineRun {
  * are derived mechanically from the actual run.
  */
 export async function runSingleAgentBaseline(options: BaselineRunOptions = {}): Promise<BaselineRun> {
+  const runToken = seedToken(options.seed);
   const workspacePath = await mkdtemp(join(tmpdir(), "clankie-baseline-"));
   await cp(join(repoRoot, SELF_BUILD_SCENARIO.fixture), workspacePath, { recursive: true });
   await mkdir(join(workspacePath, "src"), { recursive: true });
@@ -46,7 +54,7 @@ export async function runSingleAgentBaseline(options: BaselineRunOptions = {}): 
   const profile = await loadDoctrineFile(join(repoRoot, SELF_BUILD_SCENARIO.doctrineProfile));
   const doctrine = compileDoctrine([profile]);
   const plan = MissionPlanSchema.parse({
-    missionId: `baseline-${randomUUID().slice(0, 8)}`,
+    missionId: `baseline-${runToken}`,
     goal: "Add a correct retry utility to the self-build target.",
     rationale:
       "Arm A baseline: a single unconstrained agent with no lead, independent verifier, or recovery router.",
@@ -140,5 +148,7 @@ export async function runSingleAgentBaseline(options: BaselineRunOptions = {}): 
     workspacePath,
     groundTruthPassed: groundTruth.ok,
     profileHash: doctrine.profileHash,
+    ...(options.seed ? { seed: options.seed } : {}),
+    ...(implementationWorkerId ? { implementationWorkerId } : {}),
   };
 }

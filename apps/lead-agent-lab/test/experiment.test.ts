@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { evaluateLeadRun, type LeadRunFacts } from "@clankie/evals";
 import { MissionPlanSchema } from "@clankie/protocol";
 import { runSingleAgentBaseline } from "../src/baseline.ts";
-import { runExperiment } from "../src/experiment.ts";
+import { assertComparableDoctrineHashes, runExperiment } from "../src/experiment.ts";
 
 const GENERATED_AT = "2026-07-12T00:00:00.000Z";
 
@@ -90,7 +90,7 @@ describe("Arm A single-agent baseline", () => {
 });
 
 describe("experiment runner", () => {
-  it("runs arms A+C over the self-build scenario and reports treatment > baseline with pinned provenance", async () => {
+  it("keeps the single-run fields while executing arms A, B, C, and the verifier ablation", async () => {
     const run = await runExperiment({ generatedAt: GENERATED_AT });
     const report = run.report;
 
@@ -104,10 +104,26 @@ describe("experiment runner", () => {
       .filter((a) => a.executed)
       .map((a) => a.id)
       .sort();
-    expect(executed).toEqual(["heterogeneous-lead", "single-worker"]);
-    const skipped = report.arms.filter((a) => !a.executed);
-    expect(skipped.map((a) => a.id).sort()).toEqual(["homogeneous-lead", "no-independent-verifier"]);
-    expect(skipped.every((a) => typeof a.reason === "string" && a.reason.length > 0)).toBe(true);
+    expect(executed).toEqual([
+      "heterogeneous-lead",
+      "homogeneous-lead",
+      "no-independent-verifier",
+      "single-worker",
+    ]);
+    expect(report.arms.every((arm) => arm.report && arm.aggregate?.repetitions === 1)).toBe(true);
+
+    const homogeneous = report.arms.find((arm) => arm.id === "homogeneous-lead");
+    expect(homogeneous?.report?.passed).toBe(true);
+    expect(homogeneous?.repetitions?.[0]?.workerHarnesses).toEqual(["codex"]);
+    expect(homogeneous?.repetitions?.[0]?.verificationIndependent).toBe(true);
+
+    const ablation = report.arms.find((arm) => arm.id === "no-independent-verifier");
+    expect(ablation?.report?.passed).toBe(false);
+    expect(ablation?.report?.criticalFailures).toContain("independent-verification");
+    expect(ablation?.repetitions?.[0]?.verificationIndependent).toBe(false);
+    expect(ablation?.repetitions?.[0]?.implementationWorkerId).toBe(
+      ablation?.repetitions?.[0]?.verificationWorkerId,
+    );
 
     const c = report.comparison;
     expect(c.treatmentScore).toBeGreaterThan(c.baselineScore);
@@ -122,5 +138,49 @@ describe("experiment runner", () => {
     // Declared-but-unimplemented scenarios are surfaced, not silently dropped.
     expect(report.scenariosDeclaredButUnimplemented).toContain("write-scope-conflict");
     expect(report.seed.count).toBe(1);
+    expect(report.seed.values).toHaveLength(1);
   }, 60_000);
+
+  it("runs distinct recorded seeds and aggregates mean and spread per arm", async () => {
+    const seeds = ["survey-seed-1", "survey-seed-2", "survey-seed-3"];
+    const report = (await runExperiment({ generatedAt: GENERATED_AT, repetitions: 3, seeds })).report;
+
+    expect(report.seed).toMatchObject({ count: 3, values: seeds });
+    expect(new Set(report.seed.values).size).toBe(3);
+    for (const arm of report.arms) {
+      expect(arm.executed).toBe(true);
+      expect(arm.repetitions?.map((run) => run.seed)).toEqual(seeds);
+      expect(arm.aggregate).toMatchObject({
+        repetitions: 3,
+        score: {
+          mean: expect.any(Number),
+          spread: expect.any(Number),
+          standardDeviation: expect.any(Number),
+        },
+      });
+    }
+    expect(report.comparison.treatmentBeatsBaseline).toBe(true);
+  }, 60_000);
+
+  it("rejects duplicate repetition seeds", async () => {
+    await expect(
+      runExperiment({ generatedAt: GENERATED_AT, repetitions: 2, seeds: ["same", "same"] }),
+    ).rejects.toThrow(/distinct seeds/u);
+  });
+
+  it("refuses cross-arm comparisons with mixed doctrine hashes", () => {
+    expect(() =>
+      assertComparableDoctrineHashes([
+        { armId: "single-worker", seed: "seed-1", doctrineHash: "bd9f4184fbb68b80" },
+        { armId: "heterogeneous-lead", seed: "seed-1", doctrineHash: "ca068b809a88c8e3" },
+      ]),
+    ).toThrow(/Doctrine hash mismatch; cross-arm comparison refused/u);
+
+    expect(
+      assertComparableDoctrineHashes([
+        { armId: "single-worker", seed: "seed-1", doctrineHash: "same" },
+        { armId: "homogeneous-lead", seed: "seed-1", doctrineHash: "same" },
+      ]),
+    ).toBe("same");
+  });
 });
