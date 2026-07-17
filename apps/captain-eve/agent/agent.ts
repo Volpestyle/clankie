@@ -8,13 +8,26 @@ import {
   type ConfiguredLanguageModel,
 } from "@clankie/model-provider";
 import { defineAgent, defineDynamic, type AgentModelOptionsDefinition } from "eve";
+import { mockModel } from "eve/evals";
 import { admittedCaptainModel } from "../lib/lanes/runtime.ts";
 import { compactionContextWindow, contextBudget } from "../lib/session/context-budget.ts";
 import { rememberModelSelection } from "../lib/session/model-selection.ts";
+import { protectRecentToolResultModel, recentToolResultState } from "../lib/session/recent-tool-results.ts";
 
 const repoRoot = resolve(import.meta.dirname, "../../..");
 const testModelOverride =
   process.env.NODE_ENV === "test" ? process.env.CAPTAIN_TEST_MODEL?.trim() : undefined;
+const testModelDelayMs =
+  testModelOverride === undefined ? 0 : parseTestModelDelay(process.env.CAPTAIN_TEST_MODEL_DELAY_MS);
+const testModel =
+  testModelOverride === undefined
+    ? undefined
+    : testModelDelayMs === 0
+      ? testModelOverride
+      : mockModel(async () => {
+          await new Promise((resolveDelay) => setTimeout(resolveDelay, testModelDelayMs));
+          return "RESTART_DRILL_MODEL_REPLY";
+        });
 const configured = await loadConfig({ cwd: repoRoot });
 const configuredRef =
   configured.config.model === undefined ? undefined : parseModelRef(configured.config.model);
@@ -97,9 +110,18 @@ function stepIndex(event: unknown): number {
   throw new ConfiguredModelError("Eve step event did not include a step index");
 }
 
+function parseTestModelDelay(raw: string | undefined): number {
+  if (raw === undefined || raw.trim().length === 0) return 0;
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > 60_000) {
+    throw new ConfiguredModelError("CAPTAIN_TEST_MODEL_DELAY_MS must be an integer from 0 to 60000");
+  }
+  return parsed;
+}
+
 const model =
-  testModelOverride !== undefined && testModelOverride.length > 0
-    ? (testModelOverride as string)
+  testModel !== undefined
+    ? testModel
     : defineDynamic({
         fallback: failClosedModel as NonNullable<typeof failClosedModel>,
         events: {
@@ -115,14 +137,16 @@ const model =
               ref: selected.ref,
               ...(budget === undefined ? {} : { budget }),
             });
+            const protectedToolResults = recentToolResultState.get().protected;
+            const admitted = await admittedCaptainModel({
+              selected,
+              channel: ctx.channel,
+              sessionId: ctx.session.id,
+              turnId,
+              stepIndex: stepIndex(event),
+            });
             return {
-              model: await admittedCaptainModel({
-                selected,
-                channel: ctx.channel,
-                sessionId: ctx.session.id,
-                turnId,
-                stepIndex: stepIndex(event),
-              }),
+              model: protectRecentToolResultModel(admitted, protectedToolResults),
               ...(budget === undefined ? {} : { modelContextWindowTokens: compactionContextWindow(budget) }),
               ...(modelOptions === undefined ? {} : { modelOptions }),
             };
@@ -132,6 +156,7 @@ const model =
 
 export default defineAgent({
   model,
+  ...(testModelDelayMs === 0 ? {} : { modelContextWindowTokens: 128_000 }),
   // Dynamic model selections report the usable boundary (adjusted for Eve's
   // strict threshold comparison) instead of the provider's full window. The
   // operator UI independently keeps showing the registry's full context.

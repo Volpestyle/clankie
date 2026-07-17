@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "eve dev",
+    "drill:restart": "node scripts/restart-drill.mjs",
     "start": "eve dev",
     "build": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
@@ -18,6 +19,7 @@
     "@clankie/event-store": "workspace:*",
     "@clankie/model-provider": "workspace:*",
     "@clankie/protocol": "workspace:*",
+    "ai": "^7.0.19",
     "eve": "0.24.4",
     "zod": "4.4.3"
   },

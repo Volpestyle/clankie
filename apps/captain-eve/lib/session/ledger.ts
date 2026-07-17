@@ -7,6 +7,7 @@ import {
   type EventStore,
   type StoredEvent,
 } from "@clankie/event-store";
+import type { DomainEvent } from "@clankie/protocol";
 import type { CaptainContextBudget } from "./context-budget.ts";
 import {
   addTokenUsage,
@@ -207,8 +208,8 @@ export class CaptainSessionLedger {
     return `captain-project:${this.projectId}`;
   }
 
-  private record(event: LedgerEvent): Promise<StoredEvent> {
-    return this.store.append({
+  private async record(event: LedgerEvent): Promise<StoredEvent> {
+    const candidate: DomainEvent = {
       id: eventId(this.projectId, event),
       occurredAt: event.occurredAt,
       missionId: this.missionId,
@@ -224,7 +225,14 @@ export class CaptainSessionLedger {
         ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
         ...event.data,
       },
-    });
+    };
+    try {
+      return await this.store.append(candidate);
+    } catch (error) {
+      const existing = (await this.store.readAll()).find((entry) => entry.event.id === candidate.id);
+      if (existing !== undefined && sameReplayEvent(existing.event, candidate)) return existing;
+      throw error;
+    }
   }
 
   private reduce(snapshot: CaptainSessionSnapshot, entry: StoredEvent): CaptainSessionSnapshot {
@@ -282,6 +290,17 @@ export class CaptainSessionLedger {
         return common;
     }
   }
+}
+
+/**
+ * Eve replays authored hooks but does not always expose its durable stream
+ * timestamp to them. The stable event key and payload identify the accounting
+ * fact; the first committed timestamp remains authoritative on a replay.
+ */
+function sameReplayEvent(existing: DomainEvent, candidate: DomainEvent): boolean {
+  const { occurredAt: _existingOccurredAt, ...existingFact } = existing;
+  const { occurredAt: _candidateOccurredAt, ...candidateFact } = candidate;
+  return JSON.stringify(existingFact) === JSON.stringify(candidateFact);
 }
 
 export async function openCaptainSessionLedger(
