@@ -45,7 +45,11 @@ describe("preTrustClaude", () => {
   it("reports already-trusted without rewriting when the entry is trusted", async () => {
     await writeFile(
       claudeConfig,
-      JSON.stringify({ projects: { [candidate]: { hasTrustDialogAccepted: true } } }),
+      JSON.stringify({
+        projects: {
+          [candidate]: { hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: true },
+        },
+      }),
       "utf8",
     );
     const before = await readFile(claudeConfig, "utf8");
@@ -60,6 +64,43 @@ describe("preTrustClaude", () => {
     await writeFile(claudeConfig, JSON.stringify({ projects: {} }), "utf8");
     const { undo } = await preTrustClaude(candidate, claudeConfig);
     // Simulate a live session adding an unrelated project before cleanup runs.
+    const mid = JSON.parse(await readFile(claudeConfig, "utf8"));
+    mid.projects["/concurrent"] = { hasTrustDialogAccepted: true };
+    await writeFile(claudeConfig, JSON.stringify(mid), "utf8");
+    await undo();
+    const config = JSON.parse(await readFile(claudeConfig, "utf8"));
+    expect(config.projects[candidate]).toBeUndefined();
+    expect(config.projects["/concurrent"]).toEqual({ hasTrustDialogAccepted: true });
+  });
+
+  it("seeds when the trust dialog was accepted but onboarding is incomplete", async () => {
+    await writeFile(
+      claudeConfig,
+      JSON.stringify({
+        projects: {
+          [candidate]: { hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: false },
+        },
+      }),
+      "utf8",
+    );
+    const { receipt, undo } = await preTrustClaude(candidate, claudeConfig);
+    expect(receipt.action).toBe("seeded");
+    const config = JSON.parse(await readFile(claudeConfig, "utf8"));
+    expect(config.projects[candidate].hasCompletedProjectOnboarding).toBe(true);
+    await undo();
+    const restored = JSON.parse(await readFile(claudeConfig, "utf8"));
+    expect(restored.projects[candidate].hasTrustDialogAccepted).toBe(true);
+    expect(restored.projects[candidate].hasCompletedProjectOnboarding).toBe(false);
+  });
+
+  it("undo restores file absence when this run created the store", async () => {
+    const { undo } = await preTrustClaude(candidate, claudeConfig);
+    await undo();
+    await expect(readFile(claudeConfig, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("undo keeps a created store that has since gained foreign content", async () => {
+    const { undo } = await preTrustClaude(candidate, claudeConfig);
     const mid = JSON.parse(await readFile(claudeConfig, "utf8"));
     mid.projects["/concurrent"] = { hasTrustDialogAccepted: true };
     await writeFile(claudeConfig, JSON.stringify(mid), "utf8");
@@ -111,6 +152,51 @@ describe("preTrustCodex", () => {
     await undo();
     expect(await readFile(codexConfig, "utf8")).toBe(existing);
   });
+
+  it("upgrades an existing untrusted project section and undo restores it exactly", async () => {
+    const existing = `[projects."${candidate}"]\ntrust_level = "untrusted"\n\n[projects."/other"]\ntrust_level = "trusted"\n`;
+    await writeFile(codexConfig, existing, "utf8");
+    const { receipt, undo } = await preTrustCodex(candidate, codexConfig);
+    expect(receipt.action).toBe("seeded");
+    const seeded = await readFile(codexConfig, "utf8");
+    const section = seeded.slice(seeded.indexOf(`[projects."${candidate}"]`), seeded.indexOf("/other"));
+    expect(section).toContain(`trust_level = "trusted"`);
+    expect(section).not.toContain(`"untrusted"`);
+    expect(seeded).toContain(`[projects."/other"]`);
+    await undo();
+    expect(await readFile(codexConfig, "utf8")).toBe(existing);
+  });
+
+  it("seeds an existing project section that lacks a trust_level line", async () => {
+    const existing = `[projects."${candidate}"]\nsomething = 1\n`;
+    await writeFile(codexConfig, existing, "utf8");
+    const { receipt, undo } = await preTrustCodex(candidate, codexConfig);
+    expect(receipt.action).toBe("seeded");
+    const seeded = await readFile(codexConfig, "utf8");
+    expect(seeded).toContain("something = 1");
+    expect(seeded).toMatch(/trust_level = "trusted"/);
+    await undo();
+    expect(await readFile(codexConfig, "utf8")).toBe(existing);
+  });
+
+  it("escapes quotes and backslashes in candidate paths for valid TOML", async () => {
+    const trickyCandidate = String.raw`/tmp/a-"quoted"-\path`;
+    const { receipt } = await preTrustCodex(trickyCandidate, codexConfig);
+    expect(receipt.action).toBe("seeded");
+    const seeded = await readFile(codexConfig, "utf8");
+    expect(seeded).toContain(String.raw`[projects."/tmp/a-\"quoted\"-\\path"]`);
+    // No raw unescaped quote sequence that would close the TOML string early.
+    expect(seeded).not.toContain(`"${trickyCandidate}"`);
+    // Idempotence through the escaped form: a second call sees the entry as trusted.
+    const second = await preTrustCodex(trickyCandidate, codexConfig);
+    expect(second.receipt.action).toBe("already-trusted");
+  });
+
+  it("undo restores file absence when this run created the store", async () => {
+    const { undo } = await preTrustCodex(candidate, codexConfig);
+    await undo();
+    await expect(readFile(codexConfig, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
 });
 
 describe("preTrustHarnesses", () => {
@@ -125,8 +211,20 @@ describe("preTrustHarnesses", () => {
     expect(result.receipts[2]?.action).toBe("no-trust-surface");
 
     await result.cleanup();
+    const claude = await readFile(claudeConfig, "utf8").catch(() => null);
+    if (claude !== null) expect(JSON.parse(claude).projects?.[candidate]).toBeUndefined();
+    const codex = await readFile(codexConfig, "utf8").catch(() => null);
+    if (codex !== null) expect(codex).not.toContain(candidate);
+  });
+
+  it("rolls back the Claude seed when the Codex seed throws", async () => {
+    await writeFile(claudeConfig, JSON.stringify({ projects: {} }), "utf8");
+    // A directory at the config path makes every Codex read/write throw ENOTDIR/EISDIR.
+    await mkdir(codexConfig, { recursive: true });
+    await expect(
+      preTrustHarnesses(candidate, { claudeConfigPath: claudeConfig, codexConfigPath: codexConfig }),
+    ).rejects.toThrow();
     const claude = JSON.parse(await readFile(claudeConfig, "utf8"));
     expect(claude.projects[candidate]).toBeUndefined();
-    expect(await readFile(codexConfig, "utf8")).not.toContain(candidate);
   });
 });

@@ -332,33 +332,37 @@ export async function runHerdrHarnessArm(): Promise<HerdrHarnessResult> {
   // candidate directory so no first-launch folder-trust dialog ever renders.
   // The nudge in waitForStageCompletion stays as defense in depth only.
   const preTrust = await preTrustHarnesses(candidate);
-
-  const tab = await herdrJson([
-    "tab",
-    "create",
-    "--workspace",
-    workspaceId,
-    "--label",
-    `vuh-829 harness arm`,
-  ]);
-  const rootPane: string = tab.result.root_pane.pane_id;
-  const paneRight = (await herdrJson(["pane", "split", rootPane, "--direction", "right", "--no-focus"]))
-    .result.pane.pane_id;
-  const paneDownLeft = (await herdrJson(["pane", "split", rootPane, "--direction", "down", "--no-focus"]))
-    .result.pane.pane_id;
-  const paneDownRight = (await herdrJson(["pane", "split", paneRight, "--direction", "down", "--no-focus"]))
-    .result.pane.pane_id;
-  const paneOrder = [rootPane, paneRight, paneDownLeft, paneDownRight];
+  let preTrustCleanup = "pending";
 
   const stages = buildStages();
   const records: StageRecord[] = [];
   let designedFailure: CheckResult | undefined;
   let aborted = false;
-  let preTrustCleanup = "pending";
+  let paneOrder: string[] = [];
 
+  // Everything from tab creation onward runs under the cleanup finally — a
+  // failure while creating panes must still revert the seeded trust stores.
   try {
+    const tab = await herdrJson([
+      "tab",
+      "create",
+      "--workspace",
+      workspaceId,
+      "--label",
+      `vuh-829 harness arm`,
+    ]);
+    const rootPane: string = tab.result.root_pane.pane_id;
+    const paneRight = (await herdrJson(["pane", "split", rootPane, "--direction", "right", "--no-focus"]))
+      .result.pane.pane_id;
+    const paneDownLeft = (await herdrJson(["pane", "split", rootPane, "--direction", "down", "--no-focus"]))
+      .result.pane.pane_id;
+    const paneDownRight = (await herdrJson(["pane", "split", paneRight, "--direction", "down", "--no-focus"]))
+      .result.pane.pane_id;
+    paneOrder = [rootPane, paneRight, paneDownLeft, paneDownRight];
+
     for (const [index, stage] of stages.entries()) {
       const paneId = paneOrder[index];
+      if (paneId === undefined) throw new Error(`pane_missing_for_stage: ${stage.taskId}`);
       const record: StageRecord = {
         taskId: stage.taskId,
         role: stage.role,
