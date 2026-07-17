@@ -18,6 +18,11 @@ result/sentinel locations for pane-hosted workers
 
 Parallel writers must be path-disjoint. If one task consumes another task's output, encode the dependency and sequence them. Shared manifests, lockfiles, generated artifacts, and repo-wide gates have one declared owner.
 
+State the commit expectation explicitly in every implementation brief ("commit on
+your branch; do not merge/push"). A conservative worker treats an unmentioned commit
+as unauthorized and leaves the candidate uncommitted, which stalls verification on an
+unpinned sha until a follow-up steering round.
+
 ## Durable run receipt
 
 A pane-hosted run may keep transport receipts under `${CLANKIE_HERDR_RUN_ROOT:-$HOME/.clankie/herdr-runs}/<run-id>/`:
