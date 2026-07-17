@@ -7,6 +7,13 @@ import { JsonlEventStore } from "@clankie/event-store";
 import type { DomainEvent } from "@clankie/protocol";
 import { runSingleAgentBaseline } from "./baseline.ts";
 import { runSelfBuildLab, SELF_BUILD_SCENARIO, repoRoot, type SimulatedLeadArm } from "./lab.ts";
+import {
+  buildInjectedScenarioComparison,
+  runRuntimeScenarioSuite,
+  writeScenarioArtifacts,
+  type InjectedScenarioRepetitionInput,
+  type ScenarioComparisonReport,
+} from "./scenario-suite.ts";
 
 interface ExperimentSpec {
   id: string;
@@ -92,6 +99,7 @@ export interface ExperimentComparisonReport {
     treatmentCriticalFailures: string[];
     perCriterion: CriterionDelta[];
   };
+  scenarioReports: ScenarioComparisonReport[];
   scenariosDeclaredButUnimplemented: string[];
   promotion: Record<string, unknown> & { note: string };
 }
@@ -324,6 +332,31 @@ export async function runExperiment(options: RunExperimentOptions = {}): Promise
   const executedRuns: ExecutedArmRun[] = [];
   for (const seed of seeds) executedRuns.push(...(await runRepetition(seed, generatedAt)));
 
+  const injectedInputs: InjectedScenarioRepetitionInput[] = seeds.map((seed) => {
+    const baseline = executedRuns.find((run) => run.seed === seed && run.armId === "single-worker");
+    const treatment = executedRuns.find((run) => run.seed === seed && run.armId === "heterogeneous-lead");
+    if (!baseline || !treatment) throw new Error(`Injected scenario arm missing for seed ${seed}`);
+    return {
+      seed,
+      baseline: {
+        passed: baseline.report.passed,
+        criticalFailures: baseline.report.criticalFailures,
+        eventTypes: baseline.events.map((event) => event.type),
+        workerRunCount: baseline.events.filter((event) => event.type === "worker.started").length,
+      },
+      treatment: {
+        passed: treatment.report.passed,
+        criticalFailures: treatment.report.criticalFailures,
+        eventTypes: treatment.events.map((event) => event.type),
+        workerRunCount: treatment.events.filter((event) => event.type === "worker.started").length,
+      },
+    };
+  });
+  const scenarioReports = [
+    await buildInjectedScenarioComparison(injectedInputs),
+    ...(await runRuntimeScenarioSuite(seeds, generatedAt)),
+  ];
+
   const doctrineHash = assertComparableDoctrineHashes(executedRuns);
   const runsByArm = new Map<ExecutedArmId, ExecutedArmRun[]>();
   for (const run of executedRuns) {
@@ -404,8 +437,9 @@ export async function runExperiment(options: RunExperimentOptions = {}): Promise
       treatmentCriticalFailures,
       perCriterion,
     },
+    scenarioReports,
     scenariosDeclaredButUnimplemented: spec.scenarios.filter(
-      (scenario) => scenario !== SELF_BUILD_SCENARIO.scenarioId,
+      (scenario) => !scenarioReports.some((candidate) => candidate.scenario.id === scenario),
     ),
     promotion: {
       ...spec.promotion,
@@ -428,6 +462,7 @@ export async function runExperiment(options: RunExperimentOptions = {}): Promise
       comparisonToMarkdown(report),
       "utf8",
     );
+    await writeScenarioArtifacts(artifactDirectory, scenarioReports);
     for (const arm of arms.filter((candidate) => candidate.executed)) {
       const runs = runsByArm.get(arm.id as ExecutedArmId);
       if (!runs || !arm.aggregate) continue;
@@ -509,6 +544,12 @@ export function comparisonToMarkdown(report: ExperimentComparisonReport): string
       return `| ${arm.id} | ${arm.role} | ${mean}% (spread ${spread} pts; n=${arm.aggregate.repetitions}) | ${arm.aggregate.passedRate === 1 ? "PASS" : "FAIL"} |`;
     })
     .join("\n");
+  const scenarioRows = report.scenarioReports
+    .map(
+      (scenario) =>
+        `| ${scenario.scenario.id} | \`${scenario.scenario.fixtureSha256}\` | ${scenario.comparison.baselinePassed ? "PASS" : "FAIL"} | ${scenario.comparison.treatmentPassed ? "PASS" : "FAIL"} | ${scenario.comparison.designedFailureDetected ? "YES" : "NO"} |`,
+    )
+    .join("\n");
   return (
     `# Experiment comparison: ${report.experimentId}\n\n` +
     `**Scenario:** ${report.scenario.id} (fixture \`${report.scenario.fixture}\`)  \n` +
@@ -523,6 +564,7 @@ export function comparisonToMarkdown(report: ExperimentComparisonReport): string
     `Treatment critical failures: ${comparison.treatmentCriticalFailures.length ? comparison.treatmentCriticalFailures.join(", ") : "none"}.\n\n` +
     `## Arms\n\n| Arm | Role | Mean score | Result |\n|---|---|---:|---|\n${armRows}\n\n` +
     `## Per-criterion (baseline → treatment)\n\n| Criterion | Baseline pass rate | Treatment pass rate | Δ |\n|---|---:|---:|---|\n${criterionRows}\n\n` +
+    `## Scenario suite\n\n| Scenario | Fixture SHA-256 | Arm A | Arm C | Designed failure detected |\n|---|---|---|---|---|\n${scenarioRows}\n\n` +
     `## Not yet implemented\n\nScenarios declared but unimplemented: ${report.scenariosDeclaredButUnimplemented.join(", ") || "none"}.\n\n` +
     `${report.promotion.note}\n`
   );
