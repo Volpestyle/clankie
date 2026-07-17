@@ -9,8 +9,8 @@ forbids importing `@clankie/mission-engine`.
 
 The mission observer is read-only. It replays the control plane's authoritative
 local SQLite event log by global sequence, projects the mission list/task tree/
-worker roster/event tail, and saves a sanitized mode-0600 cursor checkpoint at
-`.data/tui/mission-observer.json`. The SQLite connection is opened with
+worker roster/event tail and captain presence for the status bar, and saves a
+sanitized mode-0600 cursor checkpoint at `.data/tui/mission-observer.json`. The SQLite connection is opened with
 `readOnly` and `PRAGMA query_only`; the observer exposes only mission selection
 and next/previous navigation. `CLANKIE_EVENT_STORE` overrides the default
 `artifacts/control-plane/events.db` path.

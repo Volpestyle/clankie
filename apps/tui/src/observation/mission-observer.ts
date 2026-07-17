@@ -1,5 +1,6 @@
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { CaptainPresenceEventSchema } from "@clankie/protocol";
 import type {
   DashboardAgent,
   DashboardMission,
@@ -27,7 +28,25 @@ type ObservationCheckpoint = {
   sourceId: string;
   lastSequence: number;
   selectedMissionId?: string;
+  captain?: CaptainPresenceProjection;
   missions: MissionProjection[];
+};
+
+export type CaptainPresenceState = "working" | "waiting_user" | "waiting_dependency" | "idle" | "offline";
+
+export interface CaptainPresenceSnapshot {
+  readonly state: CaptainPresenceState;
+  readonly summary: string;
+  readonly updatedAt: string;
+}
+
+type CaptainPresenceProjection = {
+  state: CaptainPresenceState;
+  summary: string;
+  updatedAt: string;
+  generationId: string;
+  tierZeroGeneration: string | undefined;
+  offlineGeneration: string | undefined;
 };
 
 export interface MissionObserverOptions {
@@ -42,6 +61,7 @@ export class MissionObserver {
   private readonly pollIntervalMs: number;
   private readonly missions = new Map<string, MissionProjection>();
   private selectedMissionId: string | undefined;
+  private captain: CaptainPresenceProjection | undefined;
   private lastSequence = 0;
   private connection = "waiting for event log";
   private lastError: string | undefined;
@@ -82,6 +102,16 @@ export class MissionObserver {
     };
   }
 
+  /** Latest authoritative captain state projected from control-plane events. */
+  public get captainPresence(): CaptainPresenceSnapshot | undefined {
+    if (this.captain === undefined) return undefined;
+    return {
+      state: this.captain.state,
+      summary: this.captain.summary,
+      updatedAt: this.captain.updatedAt,
+    };
+  }
+
   public async restore(): Promise<void> {
     let checkpoint: ObservationCheckpoint;
     try {
@@ -97,6 +127,7 @@ export class MissionObserver {
     }
     this.lastSequence = checkpoint.lastSequence;
     this.selectedMissionId = checkpoint.selectedMissionId;
+    this.captain = checkpoint.captain;
     for (const mission of checkpoint.missions) this.missions.set(mission.id, mission);
     this.connection = `restored at sequence ${this.lastSequence.toString()}`;
   }
@@ -180,6 +211,7 @@ export class MissionObserver {
 
   private apply(entry: SequencedMissionEvent): void {
     const event = entry.event;
+    this.applyCaptainPresence(event);
     const mission = this.missions.get(event.missionId) ?? createMission(event, entry.sequence);
     mission.profileHash = sanitize(event.profileHash);
     mission.updatedSequence = entry.sequence;
@@ -190,6 +222,57 @@ export class MissionObserver {
     mission.timeline.push(summarizeEvent(entry));
     mission.timeline.splice(0, Math.max(0, mission.timeline.length - EVENT_TAIL_LENGTH));
     this.missions.set(mission.id, mission);
+  }
+
+  private applyCaptainPresence(event: ObservedMissionEvent): void {
+    const parsed = CaptainPresenceEventSchema.safeParse(event);
+    if (!parsed.success) return;
+    const presence = parsed.data;
+    const generationId = presence.data.generationId;
+    const current = this.captain ?? {
+      state: "idle" as const,
+      summary: "Captain online",
+      updatedAt: presence.occurredAt,
+      generationId,
+      tierZeroGeneration: undefined,
+      offlineGeneration: undefined,
+    };
+    current.updatedAt = presence.occurredAt;
+    current.generationId = generationId;
+
+    if (presence.type === "captain.presence.online") {
+      current.tierZeroGeneration = undefined;
+      current.offlineGeneration = undefined;
+      current.state = "idle";
+      current.summary = "Captain online";
+    } else if (presence.type === "captain.presence.offline") {
+      current.tierZeroGeneration = undefined;
+      current.offlineGeneration = generationId;
+      current.state = "offline";
+      current.summary = "Captain offline";
+    } else if (presence.type === "captain.heartbeat") {
+      if (current.tierZeroGeneration !== generationId && current.offlineGeneration !== generationId) {
+        current.state = "idle";
+        current.summary = "Captain online";
+      }
+    } else {
+      current.tierZeroGeneration = generationId;
+      current.offlineGeneration = undefined;
+      if (presence.type === "captain.turn.started") {
+        current.state = "working";
+        current.summary = "Captain working";
+      } else if (presence.type === "captain.waiting_dependency") {
+        current.state = "waiting_dependency";
+        current.summary = sanitize(presence.data.summary);
+      } else if (presence.data.state === "waiting_user") {
+        current.state = "waiting_user";
+        current.summary = sanitize(presence.data.questionSummary);
+      } else {
+        current.state = "idle";
+        current.summary = "Captain idle";
+      }
+    }
+    this.captain = current;
   }
 
   private missionList(): DashboardMission[] {
@@ -223,6 +306,7 @@ export class MissionObserver {
       sourceId: this.source.identity,
       lastSequence: this.lastSequence,
       ...(this.selectedMissionId === undefined ? {} : { selectedMissionId: this.selectedMissionId }),
+      ...(this.captain === undefined ? {} : { captain: this.captain }),
       missions: [...this.missions.values()],
     };
     const directory = dirname(this.checkpointPath);
@@ -437,7 +521,34 @@ function parseCheckpoint(value: unknown): ObservationCheckpoint {
     sourceId: record.sourceId,
     lastSequence: Number(record.lastSequence),
     ...(selectedMissionId === undefined ? {} : { selectedMissionId }),
+    ...(record.captain === undefined ? {} : { captain: parseCheckpointCaptain(record.captain) }),
     missions: record.missions.map(parseCheckpointMission),
+  };
+}
+
+function parseCheckpointCaptain(value: unknown): CaptainPresenceProjection {
+  const record = checkpointRecord(value, "captain presence");
+  const state = checkpointString(record, "state");
+  if (!["working", "waiting_user", "waiting_dependency", "idle", "offline"].includes(state)) {
+    throw new Error("Invalid captain state in observation checkpoint");
+  }
+  const optionalGeneration = (key: "tierZeroGeneration" | "offlineGeneration"): string | undefined => {
+    const generation = record[key];
+    if (generation === undefined) return undefined;
+    if (typeof generation !== "string" || generation.length === 0) {
+      throw new Error(`Invalid ${key} in observation checkpoint`);
+    }
+    return sanitize(generation);
+  };
+  const tierZeroGeneration = optionalGeneration("tierZeroGeneration");
+  const offlineGeneration = optionalGeneration("offlineGeneration");
+  return {
+    state: state as CaptainPresenceState,
+    summary: checkpointString(record, "summary"),
+    updatedAt: checkpointString(record, "updatedAt"),
+    generationId: checkpointString(record, "generationId"),
+    tierZeroGeneration,
+    offlineGeneration,
   };
 }
 

@@ -26,6 +26,7 @@ import { runRecoveryProbe } from "./recovery-probe.ts";
 import { MissionDashboard } from "./components/mission-dashboard.ts";
 import { SqliteMissionEventSource } from "./observation/mission-events.ts";
 import { MissionObserver } from "./observation/mission-observer.ts";
+import { formatCaptainPresenceStatus } from "./shell/status-bar.ts";
 
 const repoRoot = resolve(import.meta.dirname, "..", "..", "..");
 
@@ -160,6 +161,7 @@ const shell = new ClankieFaceShell({
   historyPath: join(repoRoot, ".data", "tui", "prompt-history.jsonl"),
   statusExtras: () => [
     currentModelRef ?? "model unset — /provider then /model",
+    formatCaptainPresenceStatus(missionObserver.captainPresence),
     captain.connectionState,
     missionObserver.dashboard.connection,
     ...(captain.tokenStatus.length === 0 ? [] : [captain.tokenStatus]),
