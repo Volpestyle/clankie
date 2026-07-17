@@ -47,6 +47,13 @@ Wait until a pane-hosted harness is ready, apply supported `/model` and `/effort
 
 Arming may happen at the spawn seam or immediately afterward through the same pane command a human uses. Record whether the goal was armed, unsupported, or failed. Unsupported harnesses keep their normal task loop; never emulate `/goal` with a hidden captain-only API. Adapter-hosted workers receive the equivalent task lifecycle through their typed adapter.
 
+Verify EVERY send, not just the first arm. Re-arming a pane that already completed a
+goal can raise a "Replace current goal?" confirmation that silently swallows the new
+goal until someone presses Enter — read the pane a few seconds after each send and
+confirm the status shows the goal pursuing. A pane showing `Goal blocked` with a
+provider capacity error resumes with `/goal resume`; treat capacity blocks as
+transient and retry before switching models.
+
 ## Sentinels and harvest
 
 For pane-hosted fallback workers:
