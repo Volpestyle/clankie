@@ -24,14 +24,24 @@ import { FileWorkerSteeringStore } from "./worker-steering.ts";
 import { RunnerWorkerTranscriptClient } from "./worker-transcripts.ts";
 
 const logger = createLogger({ service: "clankie-control-plane", version: "0.1.0" });
-const defaultDoctrinePath = resolve(import.meta.dirname, "../../../doctrine/profiles/self-build-lab.yaml");
+// Anchor default store paths to the repo root, not process.cwd(): the TUI mission
+// observer resolves the same defaults against the repo root, so a cwd-relative
+// default here silently diverges (observer "unable to open database file") whenever
+// the control plane is launched from anywhere but the repo root. An explicit
+// CLANKIE_EVENT_STORE / CLANKIE_MEMORY_STORE still overrides.
+const repoRoot = resolve(import.meta.dirname, "../../..");
+const defaultDoctrinePath = join(repoRoot, "doctrine/profiles/self-build-lab.yaml");
 const doctrinePath = process.env.CLANKIE_DOCTRINE
   ? resolve(process.env.CLANKIE_DOCTRINE)
   : defaultDoctrinePath;
 const doctrine = compileDoctrine([await loadDoctrineFile(doctrinePath)]);
-const eventStorePath = resolve(process.env.CLANKIE_EVENT_STORE ?? "artifacts/control-plane/events.db");
+const eventStorePath = resolve(
+  process.env.CLANKIE_EVENT_STORE ?? join(repoRoot, "artifacts/control-plane/events.db"),
+);
 const eventStore = new SqliteEventStore(eventStorePath);
-const memoryStorePath = resolve(process.env.CLANKIE_MEMORY_STORE ?? "artifacts/control-plane/memory.db");
+const memoryStorePath = resolve(
+  process.env.CLANKIE_MEMORY_STORE ?? join(repoRoot, "artifacts/control-plane/memory.db"),
+);
 const memoryStore = new MemoryStore(memoryStorePath, {
   doctrine: doctrine.profile.memory,
 });
