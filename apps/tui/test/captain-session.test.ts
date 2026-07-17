@@ -148,7 +148,7 @@ function turnEvents(prompt: string, turn: number): HandleMessageStreamEvent[] {
       },
     },
     { type: "turn.completed", data: { sequence: sequence + 8, turnId } },
-    { type: "session.waiting", data: { wait: "next-user-message" } },
+    { type: "session.waiting", data: { continuationToken: `${turnId}-cont`, wait: "next-user-message" } },
   ];
 }
 

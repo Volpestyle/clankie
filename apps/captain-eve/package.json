@@ -18,7 +18,7 @@
     "@clankie/event-store": "workspace:*",
     "@clankie/model-provider": "workspace:*",
     "@clankie/protocol": "workspace:*",
-    "eve": "0.22.4",
+    "eve": "0.24.4",
     "zod": "4.4.3"
   },
   "devDependencies": {
