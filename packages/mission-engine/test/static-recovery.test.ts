@@ -129,6 +129,35 @@ const succeed = (id: string): WorkerResult => ({
   outputs: {},
 });
 
+const frozenFailedCheck = {
+  command: "retry-defect-check",
+  exitCode: 7,
+} as const;
+
+// Spread this runtime field so the approved fixture correction stands alone on
+// lenient main before commit 2 adds it to the shared WorkerResult schema/type.
+const frozenFailedCheckCarrier = {
+  failedCheck: frozenFailedCheck,
+} as const;
+
+function repairedWithEvidence(id: string): WorkerResult {
+  return {
+    status: "succeeded",
+    summary: `${id} done`,
+    evidence: [],
+    outputs: {
+      debuggerRepair: {
+        reproduction: {
+          ...frozenFailedCheck,
+          outputArtifact: "artifact://debug/frozen-static/reproduction",
+        },
+        before: ["artifact://candidate/frozen-static/before"],
+        after: ["artifact://candidate/frozen-static/after"],
+      },
+    },
+  };
+}
+
 /** A verifier that fails the initial verification with a reproducible runner check. */
 function checkingVerifier(options: { failInitial: boolean; failRepair?: boolean }): WorkerAdapter {
   return adapter("sim-verifier", ["verification"], false, async (context) => {
@@ -139,6 +168,7 @@ function checkingVerifier(options: { failInitial: boolean; failRepair?: boolean 
       status: "failed",
       summary: "Trusted runner verification checks did not pass.",
       diagnosis: "retry-defect-check exited 7",
+      ...frozenFailedCheckCarrier,
       evidence: [
         {
           kind: "diff",
@@ -155,7 +185,8 @@ function checkingVerifier(options: { failInitial: boolean; failRepair?: boolean 
 const planner = () => adapter("sim-planner", ["context"], false, async (c) => succeed(c.task.id));
 const implementer = () =>
   adapter("sim-implementer", ["implementation"], true, async (c) => succeed(c.task.id));
-const debuggerWorker = () => adapter("sim-debugger", ["debugging"], true, async (c) => succeed(c.task.id));
+const debuggerWorker = () =>
+  adapter("sim-debugger", ["debugging"], true, async (c) => repairedWithEvidence(c.task.id));
 
 describe("VUH-827 static frozen-graph recovery", () => {
   it("completes the Run-A stall shape autonomously with no pre-bound metadata", async () => {
@@ -246,7 +277,7 @@ describe("VUH-827 static frozen-graph recovery", () => {
 
   it("emits a dependency-starve event when the failure has no reproducible check", async () => {
     const engine = new MissionEngine(frozenPlan(), doctrine(), { workspacePath: "/tmp" });
-    // Verifier fails without an "exited <n>" signal -> no evidence can be synthesized.
+    // Verifier fails without a structured failedCheck -> no evidence can be bound.
     const unreproducibleVerifier = adapter("sim-verifier", ["verification"], false, async (context) =>
       context.task.id === "verify-initial"
         ? {
@@ -318,6 +349,7 @@ function drivePullPath(engine: MissionEngine): void {
             status: "failed",
             summary: "Trusted runner verification checks did not pass.",
             diagnosis: "retry-defect-check exited 7",
+            ...frozenFailedCheckCarrier,
             evidence: [
               {
                 kind: "diff",
@@ -328,7 +360,9 @@ function drivePullPath(engine: MissionEngine): void {
             ],
             outputs: {},
           }
-        : succeed(spec.id);
+        : spec.kind === "debugging"
+          ? repairedWithEvidence(spec.id)
+          : succeed(spec.id);
     engine.settleWorkerRun(assignment.workerRunId, assignment.attempt, result, "runner-1");
   }
 }
