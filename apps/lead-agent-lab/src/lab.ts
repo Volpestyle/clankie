@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -12,7 +12,7 @@ import { projectGarden, type GardenWorld } from "@clankie/garden-model";
 import { MissionEngine } from "@clankie/mission-engine";
 import { ActionRequestSchema, MissionPlanSchema, TaskSpecSchema, type DomainEvent } from "@clankie/protocol";
 import { StaticWorkerRouter } from "@clankie/worker-sdk";
-import { SimulatedWorkerAdapter } from "@clankie/worker-sim";
+import { SimulatedWorkerAdapter, type SimulatedTaskHandler } from "@clankie/worker-sim";
 
 const execFileAsync = promisify(execFile);
 const appDirectory = dirname(fileURLToPath(import.meta.url));
@@ -68,7 +68,11 @@ export interface RunSelfBuildOptions {
   outputDirectory?: string;
   keepWorkspace?: boolean;
   generatedAt?: string;
+  seed?: string;
+  arm?: SimulatedLeadArm;
 }
+
+export type SimulatedLeadArm = "heterogeneous-lead" | "homogeneous-lead" | "no-independent-verifier";
 
 export interface SelfBuildRun {
   report: LeadEvaluationReport;
@@ -76,6 +80,16 @@ export interface SelfBuildRun {
   workspacePath: string;
   events: DomainEvent[];
   artifactDirectory?: string;
+  profileHash: string;
+  armId: SimulatedLeadArm;
+  seed?: string;
+  implementationWorkerId?: string;
+  verificationWorkerId?: string;
+  workerHarnesses: string[];
+}
+
+function seedToken(seed: string | undefined): string {
+  return seed ? createHash("sha256").update(seed).digest("hex").slice(0, 12) : randomUUID().slice(0, 8);
 }
 
 /**
@@ -107,6 +121,20 @@ function evidence(
 }
 
 export async function runSelfBuildLab(options: RunSelfBuildOptions = {}): Promise<SelfBuildRun> {
+  const armId = options.arm ?? "heterogeneous-lead";
+  const selfVerificationAblation = armId === "no-independent-verifier";
+  const homogeneous = armId === "homogeneous-lead";
+  const runToken = seedToken(options.seed);
+  const missionArm =
+    armId === "heterogeneous-lead"
+      ? "heterogeneous"
+      : armId === "homogeneous-lead"
+        ? "homogeneous"
+        : "self-review";
+  const workerId = (heterogeneousId: string, homogeneousRole: string): string => {
+    const base = homogeneous ? `codex-${homogeneousRole}-1` : heterogeneousId;
+    return options.seed ? `${base}-${runToken}` : base;
+  };
   const fixture = join(repoRoot, "fixtures/self-build-target/template");
   const workspacePath = await mkdtemp(join(tmpdir(), "clankie-self-build-"));
   await cp(fixture, workspacePath, { recursive: true });
@@ -115,15 +143,20 @@ export async function runSelfBuildLab(options: RunSelfBuildOptions = {}): Promis
   const profile = await loadDoctrineFile(join(repoRoot, "doctrine/profiles/self-build-lab.yaml"));
   const doctrine = compileDoctrine([profile]);
   const plan = MissionPlanSchema.parse({
-    missionId: `self-build-${randomUUID().slice(0, 8)}`,
+    missionId: `self-build-${missionArm}-${runToken}`,
     goal: "Add a correct retry utility to the self-build target and prove recovery from a faulty worker change.",
-    rationale:
-      "The scenario tests decomposition, worker specialization, independent verification, defect recovery, approval policy, evidence, and semantic observability.",
+    rationale: selfVerificationAblation
+      ? "The ablation preserves lead decomposition, recovery, policy, evidence, and observability while deliberately replacing independent verification with implementer self-review."
+      : "The scenario tests decomposition, worker specialization, independent verification, defect recovery, approval policy, evidence, and semantic observability.",
     profileHash: doctrine.profileHash,
     successCriteria: [
       "The retry fixture passes.",
-      "The original implementation defect is detected by an independent verifier.",
-      "A debugger repairs the defect and the verifier reruns the tests.",
+      selfVerificationAblation
+        ? "The original implementation defect is detected by the implementation worker's self-review."
+        : "The original implementation defect is detected by an independent verifier.",
+      selfVerificationAblation
+        ? "A debugger repairs the defect and the implementation worker reruns the tests."
+        : "A debugger repairs the defect and the verifier reruns the tests.",
       "The merge action does not execute until a human approval record exists.",
       "The evaluation score meets the release threshold with no critical failure.",
     ],
@@ -153,10 +186,14 @@ export async function runSelfBuildLab(options: RunSelfBuildOptions = {}): Promis
       },
       {
         id: "verify-initial",
-        title: "Independently verify retry utility",
-        objective: "Run the fixture tests without modifying the implementation.",
-        kind: "verification",
-        role: "verifier",
+        title: selfVerificationAblation
+          ? "Implementer self-reviews retry utility"
+          : "Independently verify retry utility",
+        objective: selfVerificationAblation
+          ? "Have the implementation worker run the fixture tests against its own change without modifying it."
+          : "Run the fixture tests without modifying the implementation.",
+        kind: selfVerificationAblation ? "review" : "verification",
+        role: selfVerificationAblation ? "reviewer" : "verifier",
         dependsOn: ["implement-retry"],
         executionClass: "runner_visible",
         successCriteria: ["The test command is run and its complete result is reported."],
@@ -166,9 +203,9 @@ export async function runSelfBuildLab(options: RunSelfBuildOptions = {}): Promis
   });
 
   const contextWorker = new SimulatedWorkerAdapter({
-    id: "eve-context-1",
-    displayName: "Context analyst",
-    harness: "simulated",
+    id: workerId("eve-context-1", "context"),
+    displayName: homogeneous ? "Codex context analyst simulation" : "Context analyst",
+    harness: homogeneous ? "codex" : "simulated",
     kinds: ["context"],
     handlers: {
       context: async () => ({
@@ -187,11 +224,34 @@ export async function runSelfBuildLab(options: RunSelfBuildOptions = {}): Promis
     },
   });
 
+  const verificationHandler: SimulatedTaskHandler = async (context) => {
+    const result = await runFixtureTests(context.workspacePath);
+    const summary = result.ok
+      ? "Fixture tests passed."
+      : "Fixture tests failed and exposed retry attempt-count behavior.";
+    return {
+      status: result.ok ? "succeeded" : "failed",
+      summary,
+      evidence: [
+        evidence("command", "fixture-test-command", `${process.execPath} test/retry.test.mjs`),
+        evidence(
+          "test_report",
+          "fixture-test-result",
+          `${result.stdout}\n${result.stderr}`.trim() || summary,
+        ),
+      ],
+      outputs: { exitOk: result.ok, stdout: result.stdout, stderr: result.stderr },
+      ...(result.ok
+        ? {}
+        : { diagnosis: "The implementation stops before making the configured final attempt." }),
+    };
+  };
+
   const builder = new SimulatedWorkerAdapter({
-    id: "codex-builder-1",
+    id: workerId("codex-builder-1", "builder"),
     displayName: "Codex implementer simulation",
     harness: "codex",
-    kinds: ["implementation"],
+    kinds: selfVerificationAblation ? ["implementation", "review"] : ["implementation"],
     canWrite: true,
     handlers: {
       implementation: async (context) => {
@@ -205,44 +265,24 @@ export async function runSelfBuildLab(options: RunSelfBuildOptions = {}): Promis
           outputs: { changedFiles: ["src/retry.mjs"], injectedDefect: "off-by-one" },
         };
       },
+      ...(selfVerificationAblation ? { review: verificationHandler } : {}),
     },
   });
 
-  const verifier = new SimulatedWorkerAdapter({
-    id: "claude-verifier-1",
-    displayName: "Claude verifier simulation",
-    harness: "claude",
-    kinds: ["verification"],
-    handlers: {
-      verification: async (context) => {
-        const result = await runFixtureTests(context.workspacePath);
-        const summary = result.ok
-          ? "Fixture tests passed."
-          : "Fixture tests failed and exposed retry attempt-count behavior.";
-        return {
-          status: result.ok ? "succeeded" : "failed",
-          summary,
-          evidence: [
-            evidence("command", "fixture-test-command", `${process.execPath} test/retry.test.mjs`),
-            evidence(
-              "test_report",
-              "fixture-test-result",
-              `${result.stdout}\n${result.stderr}`.trim() || summary,
-            ),
-          ],
-          outputs: { exitOk: result.ok, stdout: result.stdout, stderr: result.stderr },
-          ...(result.ok
-            ? {}
-            : { diagnosis: "The implementation stops before making the configured final attempt." }),
-        };
-      },
-    },
-  });
+  const verifier = selfVerificationAblation
+    ? undefined
+    : new SimulatedWorkerAdapter({
+        id: workerId("claude-verifier-1", "verifier"),
+        displayName: homogeneous ? "Codex verifier simulation" : "Claude verifier simulation",
+        harness: homogeneous ? "codex" : "claude",
+        kinds: ["verification"],
+        handlers: { verification: verificationHandler },
+      });
 
   const debuggerWorker = new SimulatedWorkerAdapter({
-    id: "pi-debugger-1",
-    displayName: "Pi debugger simulation",
-    harness: "pi",
+    id: workerId("pi-debugger-1", "debugger"),
+    displayName: homogeneous ? "Codex debugger simulation" : "Pi debugger simulation",
+    harness: homogeneous ? "codex" : "pi",
     kinds: ["debugging"],
     canWrite: true,
     handlers: {
@@ -269,7 +309,12 @@ export async function runSelfBuildLab(options: RunSelfBuildOptions = {}): Promis
     },
   });
 
-  const router = new StaticWorkerRouter([contextWorker, builder, verifier, debuggerWorker]);
+  const router = new StaticWorkerRouter([
+    contextWorker,
+    builder,
+    ...(verifier ? [verifier] : []),
+    debuggerWorker,
+  ]);
   const engine = new MissionEngine(plan, doctrine, { workspacePath });
 
   await engine.runUntilIdle(router);
@@ -294,10 +339,14 @@ export async function runSelfBuildLab(options: RunSelfBuildOptions = {}): Promis
     engine.addTask(debugTask, firstVerification.result?.diagnosis);
     const reverifyTask = TaskSpecSchema.parse({
       id: "verify-repair",
-      title: "Re-verify repaired retry utility",
-      objective: "Rerun the unchanged fixture tests after the debugger repair.",
-      kind: "verification",
-      role: "verifier",
+      title: selfVerificationAblation
+        ? "Implementer self-reviews repaired retry utility"
+        : "Re-verify repaired retry utility",
+      objective: selfVerificationAblation
+        ? "Have the original implementation worker rerun the unchanged fixture tests after the debugger repair."
+        : "Rerun the unchanged fixture tests after the debugger repair.",
+      kind: selfVerificationAblation ? "review" : "verification",
+      role: selfVerificationAblation ? "reviewer" : "verifier",
       dependsOn: ["debug-retry"],
       executionClass: "runner_visible",
       successCriteria: ["The original unchanged fixture tests pass."],
@@ -311,12 +360,16 @@ export async function runSelfBuildLab(options: RunSelfBuildOptions = {}): Promis
   if (repairedVerification.state === "succeeded") {
     engine.recordEvent(
       "attention.resolved",
-      { reason: "The original verification failure was repaired and independently re-verified." },
+      {
+        reason: selfVerificationAblation
+          ? "The original self-review failure was repaired and rechecked by the implementation worker."
+          : "The original verification failure was repaired and independently re-verified.",
+      },
       "verify-initial",
     );
   }
   const actionRequest = ActionRequestSchema.parse({
-    id: `merge-${randomUUID().slice(0, 8)}`,
+    id: `merge-${runToken}`,
     principal: { kind: "captain", id: "captain-main", role: "lead" },
     action: "github.pr.merge",
     resource: { type: "pull_request", id: "self-build-fixture", repository: "clankie/self-build-target" },
@@ -369,6 +422,9 @@ export async function runSelfBuildLab(options: RunSelfBuildOptions = {}): Promis
   const evidenceCount = snapshot.tasks.reduce((sum, task) => sum + (task.result?.evidence.length ?? 0), 0);
   const implementationWorkerId = engine.getTask("implement-retry").workerId;
   const verificationWorkerId = repairedVerification.workerId;
+  const workerHarnesses = [
+    ...new Set(snapshot.tasks.map((task) => task.workerHarness).filter((value): value is string => !!value)),
+  ].sort();
   const report = evaluateLeadRun(
     {
       plan,
@@ -432,7 +488,19 @@ export async function runSelfBuildLab(options: RunSelfBuildOptions = {}): Promis
   }
 
   if (!options.keepWorkspace) await rm(workspacePath, { recursive: true, force: true });
-  return { report, garden, workspacePath, events, ...(artifactDirectory ? { artifactDirectory } : {}) };
+  return {
+    report,
+    garden,
+    workspacePath,
+    events,
+    ...(artifactDirectory ? { artifactDirectory } : {}),
+    profileHash: doctrine.profileHash,
+    armId,
+    ...(options.seed ? { seed: options.seed } : {}),
+    ...(implementationWorkerId ? { implementationWorkerId } : {}),
+    ...(verificationWorkerId ? { verificationWorkerId } : {}),
+    workerHarnesses,
+  };
 }
 
 export { repoRoot };
