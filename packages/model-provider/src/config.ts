@@ -12,7 +12,7 @@ import { z } from "zod";
 // ---------------------------------------------------------------------------
 
 /** Matches authorization, API-key, token, and secret fields in any casing/style. */
-function isSecretOptionKey(key: string): boolean {
+function isSecretConfigKey(key: string): boolean {
   const words = key
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .toLowerCase()
@@ -27,35 +27,33 @@ function isSecretOptionKey(key: string): boolean {
   );
 }
 
-function rejectSecretOptionKeys(
+function rejectSecretConfigKeys(
   value: unknown,
   ctx: z.RefinementCtx,
   path: Array<string | number> = [],
 ): void {
   if (Array.isArray(value)) {
-    value.forEach((entry, index) => rejectSecretOptionKeys(entry, ctx, [...path, index]));
+    value.forEach((entry, index) => rejectSecretConfigKeys(entry, ctx, [...path, index]));
     return;
   }
   if (typeof value !== "object" || value === null) return;
   for (const [key, entry] of Object.entries(value)) {
     const entryPath = [...path, key];
-    if (!isSecretOptionKey(key)) {
-      rejectSecretOptionKeys(entry, ctx, entryPath);
+    if (!isSecretConfigKey(key)) {
+      rejectSecretConfigKeys(entry, ctx, entryPath);
       continue;
     }
     ctx.addIssue({
       code: "custom",
       path: entryPath,
       message:
-        `Secrets never live in config files. Remove provider option "${key}" and run \`/auth\` ` +
+        `Secrets never live in config files. Remove config field "${key}" and run \`/auth\` ` +
         `to store the credential in the credential broker (@clankie/credential-broker) instead.`,
     });
   }
 }
 
-const ProviderOptionsSchema = z.record(z.string(), z.unknown()).superRefine((options, ctx) => {
-  rejectSecretOptionKeys(options, ctx);
-});
+const ProviderOptionsSchema = z.record(z.string(), z.unknown());
 
 export const ProviderConfigSchema = z.looseObject({
   /** Display name override for this provider. */
@@ -71,22 +69,26 @@ export const ProviderConfigSchema = z.looseObject({
 });
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 
-export const ClankieConfigSchema = z.looseObject({
-  /** Primary model as a "providerId/modelId" ref. */
-  model: z.string().optional(),
-  /** Cheap/fast model for auxiliary tasks, as a "providerId/modelId" ref. */
-  small_model: z.string().optional(),
-  /** Voice pipeline model, as a "providerId/modelId" ref. */
-  voice_model: z.string().optional(),
-  /** Selected variant per model ref, e.g. { "anthropic/claude-opus-4-5": "think-16k" }. */
-  variant: z.record(z.string(), z.string()).optional(),
-  /** When non-empty, ONLY these providers are enabled. */
-  enabled_providers: z.array(z.string()).optional(),
-  /** Providers to drop even when otherwise available. */
-  disabled_providers: z.array(z.string()).optional(),
-  /** Custom provider declarations and catalog overrides, keyed by provider id. */
-  provider: z.record(z.string(), ProviderConfigSchema).optional(),
-});
+export const ClankieConfigSchema = z
+  .looseObject({
+    /** Primary model as a "providerId/modelId" ref. */
+    model: z.string().optional(),
+    /** Cheap/fast model for auxiliary tasks, as a "providerId/modelId" ref. */
+    small_model: z.string().optional(),
+    /** Voice pipeline model, as a "providerId/modelId" ref. */
+    voice_model: z.string().optional(),
+    /** Selected variant per model ref, e.g. { "anthropic/claude-opus-4-5": "think-16k" }. */
+    variant: z.record(z.string(), z.string()).optional(),
+    /** When non-empty, ONLY these providers are enabled. */
+    enabled_providers: z.array(z.string()).optional(),
+    /** Providers to drop even when otherwise available. */
+    disabled_providers: z.array(z.string()).optional(),
+    /** Custom provider declarations and catalog overrides, keyed by provider id. */
+    provider: z.record(z.string(), ProviderConfigSchema).optional(),
+  })
+  .superRefine((config, ctx) => {
+    rejectSecretConfigKeys(config, ctx);
+  });
 export type ClankieConfig = z.infer<typeof ClankieConfigSchema>;
 
 // ---------------------------------------------------------------------------

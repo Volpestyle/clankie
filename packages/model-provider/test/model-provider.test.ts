@@ -187,6 +187,61 @@ describe("findRepoConfigPath", () => {
 });
 
 describe("updateGlobalConfig", () => {
+  it.each([
+    {
+      location: "loose top-level config",
+      config: { access_token: "top-access", refresh_token: "top-refresh" },
+      pathPrefix: [],
+    },
+    {
+      location: "provider options",
+      config: {
+        provider: {
+          custom: { options: { access_token: "options-access", refresh_token: "options-refresh" } },
+        },
+      },
+      pathPrefix: ["provider", "custom", "options"],
+    },
+    {
+      location: "model overlay",
+      config: {
+        provider: {
+          custom: {
+            models: {
+              "model-a": { access_token: "model-access", refresh_token: "model-refresh" },
+            },
+          },
+        },
+      },
+      pathPrefix: ["provider", "custom", "models", "model-a"],
+    },
+    {
+      location: "model-overlay metadata",
+      config: {
+        provider: {
+          custom: {
+            models: {
+              "model-a": {
+                metadata: { access_token: "metadata-access", refresh_token: "metadata-refresh" },
+              },
+            },
+          },
+        },
+      },
+      pathPrefix: ["provider", "custom", "models", "model-a", "metadata"],
+    },
+  ])("rejects access and refresh tokens in $location instead of serializing them", async ({ config, pathPrefix }) => {
+    const { env, globalPath } = await makeConfigEnv();
+
+    await expect(updateGlobalConfig(() => config, { env })).rejects.toMatchObject({
+      issues: expect.arrayContaining([
+        expect.objectContaining({ path: [...pathPrefix, "access_token"] }),
+        expect.objectContaining({ path: [...pathPrefix, "refresh_token"] }),
+      ]),
+    });
+    await expect(readFile(globalPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("rejects nested authorization headers instead of serializing them", async () => {
     const { env, globalPath } = await makeConfigEnv();
     const marker = "Bearer fake-test-marker";
