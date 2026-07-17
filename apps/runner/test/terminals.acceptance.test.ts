@@ -438,12 +438,18 @@ describe("production terminal acceptance contract", () => {
     expect(finalResize).toMatchObject({ columns: 84, rows: 25 });
   });
 
-  it("clamps a zero observer queue bound so replay is not silently truncated", async () => {
+  it.each([
+    ["zero", 0],
+    ["NaN", Number.NaN],
+    ["fractional", 0.5],
+    ["negative", -3],
+    ["maximum safe integer", Number.MAX_SAFE_INTEGER],
+  ])("normalizes a %s observer queue bound without losing replay or closure", async (_, bound) => {
     const transport = scriptedTransport();
-    const manager = new TerminalManager({ maxObserverQueueFrames: 0 });
+    const manager = new TerminalManager({ maxObserverQueueFrames: bound });
     const session = manager.spawnTerminal({
-      workerRunId: "accept-positive-observer-queue-bound",
-      title: "positive observer queue bound",
+      workerRunId: "accept-normalized-observer-queue-bound",
+      title: "normalized observer queue bound",
       command: "unused",
       transport,
     });
