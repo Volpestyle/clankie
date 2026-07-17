@@ -6,8 +6,13 @@
  * v1 (clankie snapshot 04734df9, scripts/clankie.ts).
  */
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component } from "@earendil-works/pi-tui";
+import type { CaptainPresenceSnapshot } from "../observation/mission-observer.ts";
 
 export const STATUS_BAR_MAX_ROWS = 6;
+
+export function formatCaptainPresenceStatus(presence: CaptainPresenceSnapshot | undefined): string {
+  return `captain: ${presence?.state ?? "unknown"}`;
+}
 
 export class ClankieStatusBarComponent implements Component {
   private text = "";

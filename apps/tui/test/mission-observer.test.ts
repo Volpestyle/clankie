@@ -99,6 +99,61 @@ function initialEvents(): SequencedMissionEvent[] {
   ];
 }
 
+function captainEvent(
+  sequence: number,
+  type:
+    | "captain.presence.online"
+    | "captain.presence.offline"
+    | "captain.heartbeat"
+    | "captain.turn.started"
+    | "captain.turn.settled"
+    | "captain.waiting_dependency",
+  state: "working" | "waiting_user" | "waiting_dependency" | "idle" | "offline",
+  options: { generationId?: string; summary?: string } = {},
+): SequencedMissionEvent {
+  const generationId = options.generationId ?? "generation-1";
+  const observedAt = new Date(sequence * 1_000).toISOString();
+  const lease = {
+    schemaVersion: 1,
+    subjectId: "captain",
+    captainId: "captain-1",
+    leaseId: `lease-${generationId}`,
+    generationId,
+  };
+  const tierOne = {
+    ...lease,
+    heartbeatAt: observedAt,
+    expiresAt: new Date((sequence + 60) * 1_000).toISOString(),
+    state,
+    tier: 1,
+    source: "control-plane.captain_lease",
+    confidence: 1,
+    observedAt,
+    ...(type === "captain.presence.offline" ? { reason: "lease_expired" } : {}),
+  };
+  const tierZero = {
+    ...lease,
+    sessionId: "session-1",
+    turnId: `turn-${sequence.toString()}`,
+    state,
+    tier: 0,
+    source: "eve.lifecycle",
+    confidence: 1,
+    observedAt,
+    ...(state === "waiting_user" ? { questionSummary: options.summary ?? "Choose a release target" } : {}),
+    ...(state === "waiting_dependency" ? { summary: options.summary ?? "Waiting for verifier" } : {}),
+  };
+  return event(sequence, type, {
+    missionId: "captain-presence",
+    data:
+      type === "captain.presence.online" ||
+      type === "captain.presence.offline" ||
+      type === "captain.heartbeat"
+        ? tierOne
+        : tierZero,
+  });
+}
+
 describe("MissionObserver", () => {
   it("projects missions, task dependencies, workers, and a sequenced event tail", async () => {
     const source = new FakeEventSource(initialEvents());
@@ -146,6 +201,83 @@ describe("MissionObserver", () => {
       missions: [{ id: "discord-presence:discord:bot:fixture", state: "degraded", selected: true }],
       timeline: ["#1 discord presence present → degraded · gateway_disconnected"],
     });
+  });
+
+  it("projects every captain state live from the authoritative semantic event stream", async () => {
+    const source = new FakeEventSource([]);
+    const observer = new MissionObserver({
+      source,
+      checkpointPath: await temporaryPath("captain-observer.json"),
+    });
+    const transitions = [
+      captainEvent(1, "captain.presence.online", "idle"),
+      captainEvent(2, "captain.turn.started", "working"),
+      captainEvent(3, "captain.turn.settled", "waiting_user"),
+      captainEvent(4, "captain.waiting_dependency", "waiting_dependency"),
+      captainEvent(5, "captain.turn.settled", "idle"),
+      captainEvent(6, "captain.presence.offline", "offline"),
+    ] as const;
+
+    for (const transition of transitions) {
+      source.events.push(transition);
+      await expect(observer.refresh()).resolves.toBe(true);
+      expect(observer.captainPresence?.state).toBe(transition.event.data.state);
+    }
+  });
+
+  it("applies offline presence only to its current captain generation", async () => {
+    const source = new FakeEventSource([
+      captainEvent(1, "captain.turn.started", "working", { generationId: "generation-2" }),
+      captainEvent(2, "captain.presence.offline", "offline", { generationId: "generation-1" }),
+    ]);
+    const observer = new MissionObserver({
+      source,
+      checkpointPath: await temporaryPath("captain-generation-observer.json"),
+    });
+
+    await observer.refresh();
+    expect(observer.captainPresence?.state).toBe("working");
+
+    source.events.push(
+      captainEvent(3, "captain.presence.offline", "offline", { generationId: "generation-2" }),
+    );
+    await observer.refresh();
+    expect(observer.captainPresence?.state).toBe("offline");
+
+    source.events.push(captainEvent(4, "captain.turn.started", "working", { generationId: "generation-3" }));
+    await observer.refresh();
+    expect(observer.captainPresence?.state).toBe("working");
+  });
+
+  it("preserves tier-zero and offline precedence across checkpoint restore", async () => {
+    const source = new FakeEventSource([
+      captainEvent(1, "captain.presence.online", "idle"),
+      captainEvent(2, "captain.turn.settled", "waiting_user"),
+    ]);
+    const checkpointPath = await temporaryPath("state/captain-observer.json");
+    const first = new MissionObserver({ source, checkpointPath });
+    await first.refresh();
+    expect(first.captainPresence?.state).toBe("waiting_user");
+
+    source.events.push(captainEvent(3, "captain.heartbeat", "idle"));
+    const restored = new MissionObserver({ source, checkpointPath });
+    await restored.restore();
+    await restored.refresh();
+    expect(restored.captainPresence?.state).toBe("waiting_user");
+
+    source.events.push(captainEvent(4, "captain.presence.online", "idle", { generationId: "generation-2" }));
+    await restored.refresh();
+    expect(restored.captainPresence?.state).toBe("idle");
+
+    source.events.push(
+      captainEvent(5, "captain.presence.offline", "offline", { generationId: "generation-2" }),
+    );
+    await restored.refresh();
+    const offlineRestored = new MissionObserver({ source, checkpointPath });
+    await offlineRestored.restore();
+    source.events.push(captainEvent(6, "captain.heartbeat", "idle", { generationId: "generation-2" }));
+    await offlineRestored.refresh();
+    expect(offlineRestored.captainPresence?.state).toBe("offline");
   });
 
   it("restarts from the durable cursor and applies each missed event once", async () => {
