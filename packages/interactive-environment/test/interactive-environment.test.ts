@@ -91,6 +91,24 @@ describe("interactive environment protocol", () => {
       EnvironmentEventSchema.parse({
         schemaVersion: 1,
         plane: "semantic",
+        id: "event-raw-payload",
+        type: "minecraft.action.completed",
+        occurredAt: "2026-07-11T12:00:02.000Z",
+        correlationId: "corr-minecraft-1",
+        sessionId: "minecraft-session-1",
+        data: {
+          ticks: [{ x: 1, y: 2, z: 3 }],
+          chunks: ["raw-chunk"],
+          packets: ["raw-packet"],
+          audio: "raw-audio",
+          video: "raw-video",
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      EnvironmentEventSchema.parse({
+        schemaVersion: 1,
+        plane: "semantic",
         id: "event-ticks",
         type: "minecraft.ticks",
         occurredAt: "2026-07-11T12:00:02.000Z",
@@ -144,7 +162,7 @@ describe("Minecraft profile", () => {
 
   it("exposes only lifecycle tools until Minecraft is actively playing", () => {
     for (const phase of ["off", "starting", "paused", "stopping", "failed"] as const) {
-      for (const lane of ["tui", "discord_voice", "discord_presence", "gameplay"] as const) {
+      for (const lane of ["tui", "discord_voice", "gameplay"] as const) {
         expect(resolveMinecraftToolExposure(phase, lane).gameplayTools).toEqual([]);
       }
     }
@@ -157,7 +175,6 @@ describe("Minecraft profile", () => {
   it("exposes gameplay tools only to the active gameplay lane", () => {
     expect(resolveMinecraftToolExposure("active", "tui").gameplayTools).toEqual([]);
     expect(resolveMinecraftToolExposure("active", "discord_voice").gameplayTools).toEqual([]);
-    expect(resolveMinecraftToolExposure("active", "discord_presence").gameplayTools).toEqual([]);
     expect(resolveMinecraftToolExposure("active", "gameplay").gameplayTools).toEqual([
       "minecraft_observe",
       "minecraft_start_action",
@@ -226,13 +243,25 @@ describe("Minecraft profile", () => {
     expect(environmentPhaseFromDiscordPresence("voice_active")).toBe("active");
     expect(() =>
       DiscordPresenceToolExposureSchema.parse({
-        schemaVersion: 1,
+        schemaVersion: 2,
         phase: "present",
-        lane: "tui",
+        lane: "operator",
         lifecycleTools: ["discord_presence_status", "discord_presence_disconnect"],
         presenceTools: ["discord_presence_act"],
       }),
     ).toThrow(/invalid presence tool exposure/);
+  });
+
+  it("single-writes v2 Discord presence lanes while dual-reading legacy TUI supervision", () => {
+    expect(resolveDiscordPresenceToolExposure(presenceSession("present"), "discord_presence")).toMatchObject({
+      schemaVersion: 2,
+      lane: "discord_presence",
+    });
+    expect(resolveDiscordPresenceToolExposure(presenceSession("present"), "tui")).toMatchObject({
+      schemaVersion: 2,
+      lane: "operator",
+      presenceTools: [],
+    });
   });
 });
 

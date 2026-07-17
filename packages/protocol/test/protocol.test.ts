@@ -63,7 +63,7 @@ import {
 
 describe("protocol", () => {
   it("exports provider-neutral operator conversation fixtures", () => {
-    expect(CaptainLaneSchema.options).toEqual(["tui", "discord_voice", "discord_presence", "gameplay"]);
+    expect(CaptainLaneSchema.options).toEqual(["tui", "discord_voice", "gameplay"]);
     expect(CaptainSessionLaneV2Schema.options).toEqual([
       "operator",
       "discord_voice",
@@ -643,7 +643,8 @@ describe("protocol", () => {
 
   it("rejects unknown captain lanes and intents without concurrency guards", () => {
     expect(() => CaptainLaneSchema.parse("global")).toThrow();
-    expect(CaptainLaneSchema.options).toEqual(["tui", "discord_voice", "discord_presence", "gameplay"]);
+    expect(CaptainLaneSchema.options).toEqual(["tui", "discord_voice", "gameplay"]);
+    expect(() => CaptainLaneSchema.parse("discord_presence")).toThrow();
     expect(() =>
       IntentCommandSchema.parse({
         schemaVersion: 1,
@@ -663,7 +664,9 @@ describe("protocol", () => {
     ).toThrow(/expectedGoalVersion/);
   });
 
-  it("requires ambient authority for discord_presence and freezes presence write bot transport", () => {
+  it("dual-reads discord_presence while freezing it out of v1 and freezes presence write bot transport", () => {
+    expect(CaptainSessionLaneV2Schema.parse("discord_presence")).toBe("discord_presence");
+    expect(() => CaptainLaneSchema.parse("discord_presence")).toThrow();
     expect(
       IntentContextSchema.parse({
         sourceLane: "discord_presence",

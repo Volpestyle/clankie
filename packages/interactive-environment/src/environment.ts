@@ -291,19 +291,199 @@ export const EnvironmentSemanticEventTypeSchema = z.enum([
 ]);
 export type EnvironmentSemanticEventType = z.infer<typeof EnvironmentSemanticEventTypeSchema>;
 
-export const EnvironmentSemanticEventSchema = z.object({
-  schemaVersion: z.literal(INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION),
-  plane: z.literal("semantic"),
-  id: z.string().min(1),
-  type: EnvironmentSemanticEventTypeSchema,
-  occurredAt: z.string().datetime(),
-  correlationId: z.string().min(1),
-  causationId: z.string().min(1).optional(),
-  sessionId: EnvironmentSessionIdSchema.optional(),
-  missionId: MissionIdSchema.optional(),
-  taskId: TaskIdSchema.optional(),
-  data: z.record(z.string(), z.unknown()),
-});
+const SemanticReferenceSchema = z.string().min(1).max(1_024);
+const SemanticSummarySchema = z.string().min(1).max(1_024);
+const SemanticGoalVersionSchema = z.number().int().nonnegative();
+const SemanticSourcePrioritySchema = z.enum([
+  "gameplay_autonomy",
+  "ambient_voice",
+  "authenticated_tui",
+  "safety",
+]);
+const SemanticGoalSchema = z
+  .object({ kind: z.string().min(1).max(128), summary: z.string().min(1).max(512) })
+  .strict();
+const SemanticCancellationIntentSchema = z
+  .object({
+    type: z.literal("cancel_action"),
+    actionId: ActionIdSchema,
+    acceptedGoalVersion: SemanticGoalVersionSchema,
+    replacementGoalVersion: SemanticGoalVersionSchema,
+    reason: z.string().min(1).max(512),
+  })
+  .strict();
+const SemanticPositionSchema = z
+  .object({
+    x: z.number(),
+    y: z.number(),
+    z: z.number(),
+    dimension: z.string().min(1).max(256),
+  })
+  .strict();
+const DiscordPresenceSemanticPhaseSchema = z.enum([
+  "off",
+  "connecting",
+  "present",
+  "voice_active",
+  "go_live_active",
+  "degraded",
+  "failed",
+]);
+const DiscordPresenceSemanticSessionSchema = z
+  .object({
+    schemaVersion: z.literal(INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION),
+    sessionId: EnvironmentSessionIdSchema,
+    characterId: CharacterIdSchema,
+    credentialRef: SemanticReferenceSchema,
+    transportKind: z.enum(["bot", "user_session"]),
+    phase: DiscordPresenceSemanticPhaseSchema,
+    gatewayConnected: z.boolean(),
+    voiceGuildIds: z.array(SemanticReferenceSchema).max(64),
+    revision: z.number().int().nonnegative(),
+    updatedAt: z.string().datetime(),
+  })
+  .strict();
+
+/**
+ * Closed, bounded semantic payload inventory. Raw ticks, chunks, packets,
+ * audio, and video have no shape here and must use EnvironmentTelemetryReferenceSchema.
+ */
+export const EnvironmentSemanticEventDataSchema = z.union([
+  z.object({}).strict(),
+  z.object({ characterId: CharacterIdSchema, worldId: WorldIdSchema }).strict(),
+  z.object({ reason: SemanticSummarySchema }).strict(),
+  z.object({ actionId: ActionIdSchema }).strict(),
+  z.object({ actionId: ActionIdSchema, kind: z.string().min(1).max(128) }).strict(),
+  z.object({ actionId: ActionIdSchema, errorCode: z.string().min(1).max(128) }).strict(),
+  z.object({ actionId: ActionIdSchema, reason: SemanticSummarySchema }).strict(),
+  z
+    .object({
+      actionId: ActionIdSchema,
+      progress: z.number().min(0).max(1),
+      summary: SemanticSummarySchema.optional(),
+    })
+    .strict(),
+  z.object({ goalVersion: SemanticGoalVersionSchema, goal: SemanticGoalSchema }).strict(),
+  z
+    .object({
+      previousGoalVersion: SemanticGoalVersionSchema,
+      nextGoalVersion: SemanticGoalVersionSchema,
+      supersededIntentId: SemanticReferenceSchema,
+      cancellationIntent: SemanticCancellationIntentSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      scenarioId: SemanticReferenceSchema,
+      scenarioVersion: z.number().int().positive(),
+      fixtureSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+      reportSha256: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      commandType: z.enum(["set_goal", "steer", "pause", "resume", "stop", "disconnect"]),
+      previousGoalVersion: SemanticGoalVersionSchema,
+      nextGoalVersion: SemanticGoalVersionSchema,
+      sourcePriority: SemanticSourcePrioritySchema,
+    })
+    .strict(),
+  z
+    .object({
+      expectedGoalVersion: SemanticGoalVersionSchema,
+      currentGoalVersion: SemanticGoalVersionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      currentGoalVersion: SemanticGoalVersionSchema,
+      currentSourcePriority: SemanticSourcePrioritySchema.optional(),
+      requestedSourcePriority: SemanticSourcePrioritySchema.optional(),
+      reason: z.string().min(1).max(128).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      invalidatedIntentId: SemanticReferenceSchema,
+      invalidatedByIntentId: SemanticReferenceSchema,
+      baseGoalVersion: SemanticGoalVersionSchema,
+      sourcePriority: SemanticSourcePrioritySchema,
+    })
+    .strict(),
+  z
+    .object({
+      previousPhase: DiscordPresenceSemanticPhaseSchema,
+      phase: DiscordPresenceSemanticPhaseSchema,
+      reason: z.enum([
+        "process_start",
+        "gateway_ready",
+        "gateway_resumed",
+        "gateway_disconnected",
+        "gateway_reconnecting",
+        "voice_joined",
+        "voice_left",
+        "lease_lost",
+        "gateway_failed",
+        "publication_failed",
+        "process_stopped",
+      ]),
+      session: DiscordPresenceSemanticSessionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      phase: EnvironmentSessionPhaseSchema,
+      characterId: CharacterIdSchema,
+      worldId: WorldIdSchema.optional(),
+      position: SemanticPositionSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      itemId: z.string().min(1).max(256),
+      count: z.number().int().nonnegative(),
+      delta: z.number().int().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      amount: z.number().positive(),
+      health: z.number().nonnegative(),
+      source: z.string().min(1).max(256).optional(),
+    })
+    .strict(),
+  z.object({ reason: SemanticSummarySchema.optional(), position: SemanticPositionSchema.optional() }).strict(),
+  z
+    .object({
+      severity: z.enum(["low", "medium", "high", "critical"]),
+      summary: SemanticSummarySchema,
+      artifactId: SemanticReferenceSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      lane: z.enum(["tui", "operator", "discord_voice", "discord_presence", "gameplay"]),
+      reason: SemanticSummarySchema.optional(),
+    })
+    .strict(),
+]);
+export type EnvironmentSemanticEventData = z.infer<typeof EnvironmentSemanticEventDataSchema>;
+
+export const EnvironmentSemanticEventSchema = z
+  .object({
+    schemaVersion: z.literal(INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION),
+    plane: z.literal("semantic"),
+    id: z.string().min(1),
+    type: EnvironmentSemanticEventTypeSchema,
+    occurredAt: z.string().datetime(),
+    correlationId: z.string().min(1),
+    causationId: z.string().min(1).optional(),
+    sessionId: EnvironmentSessionIdSchema.optional(),
+    missionId: MissionIdSchema.optional(),
+    taskId: TaskIdSchema.optional(),
+    data: EnvironmentSemanticEventDataSchema,
+  })
+  .strict();
 export type EnvironmentSemanticEvent = z.infer<typeof EnvironmentSemanticEventSchema>;
 
 export const EnvironmentTelemetryReferenceSchema = z.object({

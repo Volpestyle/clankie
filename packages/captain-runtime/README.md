@@ -4,6 +4,9 @@ Deterministic conversation/session ownership and provider-call admission for one
 Clankie identity. The package dual-reads the frozen v1 `CaptainLane` contract and
 writes the conversation-scoped `CaptainSessionLaneV2` contract, but
 does not implement channels, character state, Minecraft, or model providers.
+The transitional background-lane registry uses the named compatibility boundary
+so an existing v1 TUI row remains readable while `discord_presence` belongs only
+to the v2 wire enum.
 
 ```mermaid
 flowchart LR

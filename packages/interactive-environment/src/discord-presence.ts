@@ -1,9 +1,10 @@
 import {
-  CaptainLaneSchema,
+  CaptainSessionLaneV2Schema,
   DiscordPresenceActionRequestSchema,
   DiscordPresenceActionSchema,
   DISCORD_PRESENCE_ACTION_RISK_CLASS,
   type CaptainLane,
+  type CaptainSessionLaneV2,
   type DiscordPresenceAction,
   type DiscordPresenceActionRequest,
 } from "@clankie/protocol";
@@ -243,6 +244,12 @@ export const DiscordPresenceToolNameSchema = z.enum([
 ]);
 export type DiscordPresenceToolName = z.infer<typeof DiscordPresenceToolNameSchema>;
 
+type CaptainLaneInput = CaptainLane | CaptainSessionLaneV2;
+
+function currentCaptainLane(lane: CaptainLaneInput): CaptainSessionLaneV2 {
+  return CaptainSessionLaneV2Schema.parse(lane === "tui" ? "operator" : lane);
+}
+
 const supervisionTools: DiscordPresenceToolName[] = [
   "discord_presence_status",
   "discord_presence_disconnect",
@@ -256,7 +263,7 @@ const presenceActTools: DiscordPresenceToolName[] = [
 
 function toolSetsFor(
   phase: DiscordPresenceSessionPhase,
-  lane: CaptainLane,
+  lane: CaptainSessionLaneV2,
 ): { lifecycleTools: DiscordPresenceToolName[]; presenceTools: DiscordPresenceToolName[] } {
   if (phase === "off" || phase === "failed") {
     return {
@@ -285,9 +292,9 @@ function toolSetsFor(
 
 export const DiscordPresenceToolExposureSchema = z
   .object({
-    schemaVersion: z.literal(INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION),
+    schemaVersion: z.literal(2),
     phase: DiscordPresenceSessionPhaseSchema,
-    lane: CaptainLaneSchema,
+    lane: CaptainSessionLaneV2Schema,
     lifecycleTools: z.array(DiscordPresenceToolNameSchema),
     presenceTools: z.array(DiscordPresenceToolNameSchema),
   })
@@ -312,7 +319,7 @@ export type DiscordPresenceToolExposure = z.infer<typeof DiscordPresenceToolExpo
 
 export function resolveDiscordPresenceToolExposure(
   session: DiscordPresenceSessionRecord,
-  lane: CaptainLane,
+  lane: CaptainLaneInput,
 ): DiscordPresenceToolExposure {
   return resolveDiscordPresencePhaseToolExposure(session.phase, lane);
 }
@@ -320,13 +327,14 @@ export function resolveDiscordPresenceToolExposure(
 /** Resolve advertised tools directly from live phase when durability is intentionally behind. */
 export function resolveDiscordPresencePhaseToolExposure(
   phase: DiscordPresenceSessionPhase,
-  lane: CaptainLane,
+  lane: CaptainLaneInput,
 ): DiscordPresenceToolExposure {
+  const currentLane = currentCaptainLane(lane);
   return DiscordPresenceToolExposureSchema.parse({
-    schemaVersion: INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION,
+    schemaVersion: 2,
     phase,
-    lane,
-    ...toolSetsFor(phase, lane),
+    lane: currentLane,
+    ...toolSetsFor(phase, currentLane),
   });
 }
 
