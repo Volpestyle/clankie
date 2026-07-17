@@ -54,6 +54,29 @@ confirm the status shows the goal pursuing. A pane showing `Goal blocked` with a
 provider capacity error resumes with `/goal resume`; treat capacity blocks as
 transient and retry before switching models.
 
+## Match the harness to the task; a burned session stays burned
+
+Route adversarial or security-flavored verification — bypass hunting, injection
+scenarios, forgery/trust-boundary attacks, anything phrased as "try to break/smuggle/
+attack" — to a Claude worker, never Codex. OpenAI's cybersecurity filter refuses that
+framing even when it is defensive review of your own repo, and the refusal is STICKY:
+once a Codex session has processed a cyber-flagged request, it keeps refusing every
+later request in that session, including unrelated clean work. `/goal resume` cannot
+recover a burned session — clear the goal, park the pane, and move the work to a fresh
+agent (a Claude subagent is the reliable default for adversarial verification). When a
+brief is unavoidably security-shaped, state the defensive intent plainly ("confirm this
+fix closes the bypass in our own code") but still prefer Claude.
+
+## Watch `blocked`, not only `done`
+
+A pane that stalls (capacity, a content refusal, a swallowed confirmation) goes to
+`blocked`/`idle` status and produces NO sentinel, so a done-only watcher sits silent
+until its multi-hour timeout. Watch both edges: return the instant any armed pane flips
+to `blocked` OR all lanes reach a `DONE`/`BLOCKED` sentinel, so a stall surfaces in one
+poll interval instead of hours. `references/watch-lanes.sh` in this skill is that
+watcher (`watch-lanes.sh <pane>:<sentinel_dir> ...`); herdr exposes `blocked` as a
+first-class `agent_status`, so the lead never needs to guess from pane text.
+
 ## Sentinels and harvest
 
 For pane-hosted fallback workers:
