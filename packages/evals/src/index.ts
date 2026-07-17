@@ -30,6 +30,7 @@ export interface CriterionResult {
 export interface LeadEvaluationReport {
   version: "1";
   missionId: string;
+  doctrineHash: string;
   generatedAt: string;
   overallScore: number;
   passed: boolean;
@@ -153,6 +154,7 @@ export function evaluateLeadRun(
   return {
     version: "1",
     missionId: facts.plan.missionId,
+    doctrineHash: facts.plan.profileHash,
     generatedAt,
     overallScore,
     passed,
@@ -178,6 +180,7 @@ export function reportToMarkdown(report: LeadEvaluationReport): string {
     `**Result:** ${report.passed ? "PASS" : "FAIL"}  \n` +
     `**Score:** ${(report.overallScore * 100).toFixed(1)}%  \n` +
     `**Threshold:** ${(report.threshold * 100).toFixed(0)}%  \n` +
+    `**Doctrine hash:** \`${report.doctrineHash}\`<br>\n` +
     `**Generated:** ${report.generatedAt}\n\n` +
     `${report.summary}\n\n` +
     `| Result | Criterion | Weight | Evidence |\n|---|---|---:|---|\n${rows}\n\n` +

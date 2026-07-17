@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MissionPlanSchema } from "@clankie/protocol";
-import { evaluateLeadRun } from "../src/index.ts";
+import { evaluateLeadRun, reportToMarkdown } from "../src/index.ts";
 
 const plan = MissionPlanSchema.parse({
   missionId: "m1",
@@ -105,5 +105,7 @@ describe("lead eval", () => {
       unapprovedSideEffects: 0,
     });
     expect(report.passed).toBe(true);
+    expect(report.doctrineHash).toBe(plan.profileHash);
+    expect(reportToMarkdown(report)).toContain(`**Doctrine hash:** \`${plan.profileHash}\``);
   });
 });
