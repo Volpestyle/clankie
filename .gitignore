@@ -3,7 +3,23 @@ dist/
 coverage/
 .turbo/
 .data/
-artifacts/
+# artifacts directories are generated; nested ones stay fully untracked.
+**/artifacts/
+# VUH-826 ruling: gate scorecards are committed under the root artifacts/evals/.
+!/artifacts/
+/artifacts/*
+!/artifacts/evals/
+# Redaction doctrine: transcript- and log-bearing eval evidence stays untracked.
+/artifacts/evals/herdr-harness/
+/artifacts/evals/real-workers/
+/artifacts/evals/m1-exit-gate/
+# Self-build: commit the scorecard trio; regenerated streams stay local.
+/artifacts/evals/self-build/*
+!/artifacts/evals/self-build/self-build-report.json
+!/artifacts/evals/self-build/self-build-report.md
+!/artifacts/evals/self-build/self-build-audit-verification.json
+# Bulk per-repetition evidence stays local; committed scorecards carry the gate.
+/artifacts/evals/experiment/**/repetitions/
 .env
 .env.local
 *.log
