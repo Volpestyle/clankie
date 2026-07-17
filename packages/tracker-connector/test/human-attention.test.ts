@@ -3,7 +3,6 @@ import type { DomainEvent, HumanAttentionRequest } from "@clankie/protocol";
 import { describe, expect, it } from "vitest";
 import {
   actionIdempotencyToken,
-  authorityFromVerifiedEvent,
   correlateAgentSessionToAttention,
   correlateOutOfSessionIssueComment,
   deliverHumanAttention,
@@ -395,7 +394,7 @@ describe("deliverHumanAttention", () => {
     });
     const response = responseFromVerifiedEvent(event, pending, fallbackBinding);
     expect(response).toMatchObject({ actorRole: "reviewer", decision: "approve" });
-    expect(correlateAgentSessionToAttention({ pending, event, response: response! })).toEqual(response);
+    expect(correlateAgentSessionToAttention({ pending, event })).toEqual(response);
   });
 
   it("counterexample: same requestId with different request content conflicts on idempotency", async () => {
@@ -514,6 +513,7 @@ describe("attention correlation", () => {
     const event = sessionEvent({
       data: {
         organization: { id: "workspace-1" },
+        actor: { id: "principal-operator" },
         comment: { id: "cmt-leaf", rootId: "root-1" },
         session: { id: "session-1" },
         attentionResponse: {
@@ -530,9 +530,6 @@ describe("attention correlation", () => {
       },
     });
     expect(rootCommentIdFromAgentSessionEvent(event)).toBe("root-1");
-    const authority = authorityFromVerifiedEvent(event);
-    expect(authority).toMatchObject({ decision: "approve", actorRole: "operator" });
-
     const response = correlateAgentSessionToAttention({
       pending: {
         request: pendingRequest,
@@ -540,9 +537,10 @@ describe("attention correlation", () => {
         issueId: "issue-1",
         agentSessionId: "session-1",
         rootCommentId: "root-1",
+        authorizedResponderRole: "operator",
+        authorizedResponderPrincipalId: "principal-operator",
       },
       event,
-      response: authority!,
     });
     expect(response).toMatchObject({
       requestId: "attn-1",
@@ -553,19 +551,16 @@ describe("attention correlation", () => {
 
   it("counterexample: rejects when organization.id does not match pending.workspaceId", () => {
     const event = sessionEvent({ data: { organization: { id: "other-org" } } });
-    const authority = authorityFromVerifiedEvent(event)!;
     expect(
       correlateAgentSessionToAttention({
         pending: { request: request(), workspaceId: "workspace-1", issueId: "issue-1" },
         event,
-        response: authority,
       }),
     ).toBeUndefined();
   });
 
   it("counterexample: rejects events older than the pending request", () => {
     const event = sessionEvent({ occurredAt: "2026-07-12T11:59:59.000Z" });
-    const authority = authorityFromVerifiedEvent(event)!;
     expect(
       correlateAgentSessionToAttention({
         pending: {
@@ -574,7 +569,6 @@ describe("attention correlation", () => {
           issueId: "issue-1",
         },
         event,
-        response: authority,
       }),
     ).toBeUndefined();
   });
@@ -610,7 +604,18 @@ describe("attention correlation", () => {
         actor: { id: "human-1" },
       },
     } as unknown as DomainEvent;
-    expect(authorityFromVerifiedEvent(bare)).toBeUndefined();
+    expect(
+      responseFromVerifiedEvent(
+        bare,
+        {
+          request: request(),
+          workspaceId: "workspace-1",
+          authorizedResponderRole: "operator",
+          authorizedResponderPrincipalId: "principal-operator",
+        },
+        binding(),
+      ),
+    ).toBeUndefined();
   });
 
   it("parses only the exact response command from the bound provider principal", () => {
@@ -666,6 +671,70 @@ describe("attention correlation", () => {
     ).toBeUndefined();
   });
 
+  it("does not authorize a spoofed embedded role through a caller-correlated response", () => {
+    const pending = {
+      request: request(),
+      workspaceId: "workspace-1",
+      issueId: "issue-1",
+      authorizedResponderRole: "operator" as const,
+      authorizedResponderPrincipalId: "principal-operator",
+    };
+    const event = sessionEvent({
+      data: {
+        actor: { id: "principal-operator" },
+        attentionResponse: {
+          schemaVersion: 1,
+          responseId: "spoofed-role-response",
+          requestId: "attn-1",
+          correlationId: "corr-attn-1",
+          actorRole: "reviewer",
+          decision: "approve",
+          rationale: "The embedded role must not become response authority.",
+          trackerRef: { correlationId: "corr-attn-1", externalRef: "issue-1" },
+          createdAt: "2026-07-12T13:59:59.000Z",
+        },
+      },
+    });
+    expect(
+      correlateAgentSessionToAttention({
+        pending,
+        event,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("accepts the persisted effective fallback responder instead of a caller response role", () => {
+    const pending = {
+      request: request({ targetRole: "product_steward" }),
+      workspaceId: "workspace-1",
+      issueId: "issue-1",
+      authorizedResponderRole: "reviewer" as const,
+      authorizedResponderPrincipalId: "principal-reviewer",
+    };
+    const event = sessionEvent({
+      data: {
+        actor: { id: "principal-reviewer" },
+        attentionResponse: {
+          schemaVersion: 1,
+          responseId: "fallback-role-response",
+          requestId: "attn-1",
+          correlationId: "corr-attn-1",
+          actorRole: "reviewer",
+          decision: "approve",
+          rationale: "The delivered fallback reviewer approved.",
+          trackerRef: { correlationId: "corr-attn-1", externalRef: "issue-1" },
+          createdAt: "2026-07-12T13:59:59.000Z",
+        },
+      },
+    });
+    expect(
+      correlateAgentSessionToAttention({
+        pending,
+        event,
+      }),
+    ).toMatchObject({ actorRole: "reviewer", decision: "approve" });
+  });
+
   it("rejects an embedded actor role that differs from the authorized responder role", () => {
     const pending = {
       request: request(),
@@ -690,10 +759,8 @@ describe("attention correlation", () => {
         },
       },
     });
-    const authority = authorityFromVerifiedEvent(event)!;
-
     expect(responseFromVerifiedEvent(event, pending, binding())).toBeUndefined();
-    expect(correlateAgentSessionToAttention({ pending, event, response: authority })).toBeUndefined();
+    expect(correlateAgentSessionToAttention({ pending, event })).toBeUndefined();
   });
 });
 

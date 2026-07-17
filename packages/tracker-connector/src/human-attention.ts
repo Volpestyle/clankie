@@ -103,9 +103,9 @@ export interface PendingAttentionRecord {
   readonly request: HumanAttentionRequest;
   /** Must match verified agent-session event organization id (workspace). */
   readonly workspaceId: string;
-  /** Semantic role selected during delivery; absent on legacy stored records. */
+  /** Effective semantic responder role persisted at delivery; absent on legacy stored records. */
   readonly authorizedResponderRole?: HumanAttentionRequest["targetRole"];
-  /** Opaque provider principal selected during delivery; absent on legacy stored records. */
+  /** Effective opaque responder principal persisted at delivery; absent on legacy stored records. */
   readonly authorizedResponderPrincipalId?: string;
   readonly issueId?: string;
   readonly agentSessionId?: string;
@@ -496,7 +496,7 @@ export async function deliverHumanAttention(
  * Partial/root-level decision fields are deliberately rejected: request and
  * correlation identity must travel with the authoritative response.
  */
-export function authorityFromVerifiedEvent(event: DomainEvent): HumanAttentionResponse | undefined {
+function embeddedResponseFromVerifiedEvent(event: DomainEvent): HumanAttentionResponse | undefined {
   const data = event.data as Record<string, unknown>;
   const parsed = HumanAttentionResponseSchema.safeParse(data.attentionResponse);
   return parsed.success ? parsed.data : undefined;
@@ -518,12 +518,26 @@ export function responseFromVerifiedEvent(
   const authorizedResponderPrincipalId =
     pending.authorizedResponderPrincipalId ?? binding.roles[authorizedResponderRole]?.principalId;
   if (authorizedResponderPrincipalId === undefined) return undefined;
+  return responseFromEffectiveResponder(event, pending, {
+    role: authorizedResponderRole,
+    principalId: authorizedResponderPrincipalId,
+  });
+}
+
+function responseFromEffectiveResponder(
+  event: DomainEvent,
+  pending: PendingAttentionRecord,
+  responder: {
+    readonly role: HumanAttentionRequest["targetRole"];
+    readonly principalId: string;
+  },
+): HumanAttentionResponse | undefined {
   const data = event.data as Record<string, unknown>;
   const actor = data.actor as { id?: string } | undefined;
-  if (actor?.id !== authorizedResponderPrincipalId) return undefined;
-  const embedded = authorityFromVerifiedEvent(event);
+  if (actor?.id !== responder.principalId) return undefined;
+  const embedded = embeddedResponseFromVerifiedEvent(event);
   if (embedded !== undefined) {
-    return embedded.actorRole === authorizedResponderRole ? embedded : undefined;
+    return embedded.actorRole === responder.role ? embedded : undefined;
   }
   const activity = data.activity as { id?: string; body?: string } | undefined;
   if (typeof activity?.body !== "string") return undefined;
@@ -542,7 +556,7 @@ export function responseFromVerifiedEvent(
     responseId: activity.id ?? event.id,
     requestId: pending.request.requestId,
     correlationId: pending.request.correlationId,
-    actorRole: authorizedResponderRole,
+    actorRole: responder.role,
     decision: match[1].toLowerCase(),
     rationale: match[2].trim(),
     ...(pending.request.trackerRef === undefined ? {} : { trackerRef: pending.request.trackerRef }),
@@ -580,13 +594,16 @@ export function rootCommentIdFromAgentSessionEvent(event: DomainEvent): string |
  * - workspaceId must equal event.data.organization.id
  * - event.occurredAt must not be older than request.createdAt
  * - root comment uses event comment/root fields
- * - actorRole/decision/rationale come from the verified event (see authorityFromVerifiedEvent)
+ * - effective responder role/principal come only from the durable delivery record
+ * - actorRole/decision/rationale are re-derived from the verified event; the supplied
+ *   response is compatibility-only and never an authority input
  * Only `tracker.agent-session.created` / `prompted` may resolve.
  */
 export function correlateAgentSessionToAttention(input: {
   readonly pending: PendingAttentionRecord;
   readonly event: DomainEvent;
-  readonly response: HumanAttentionResponse;
+  /** @deprecated Correlation derives the response from event + persisted delivery authority. */
+  readonly response?: HumanAttentionResponse;
 }): HumanAttentionResponse | undefined {
   const type = input.event.type;
   if (type !== "tracker.agent-session.created" && type !== "tracker.agent-session.prompted") {
@@ -622,9 +639,16 @@ export function correlateAgentSessionToAttention(input: {
   if (actor?.id !== undefined && appActor?.id !== undefined && actor.id === appActor.id) {
     return undefined;
   }
-  const response = HumanAttentionResponseSchema.parse(input.response);
-  const authorizedResponderRole = input.pending.authorizedResponderRole ?? input.pending.request.targetRole;
-  if (response.actorRole !== authorizedResponderRole) return undefined;
+  const authorizedResponderRole = input.pending.authorizedResponderRole;
+  const authorizedResponderPrincipalId = input.pending.authorizedResponderPrincipalId;
+  if (authorizedResponderRole === undefined || authorizedResponderPrincipalId === undefined) {
+    return undefined;
+  }
+  const response = responseFromEffectiveResponder(input.event, input.pending, {
+    role: authorizedResponderRole,
+    principalId: authorizedResponderPrincipalId,
+  });
+  if (response === undefined) return undefined;
   if (response.requestId !== input.pending.request.requestId) return undefined;
   if (response.correlationId !== input.pending.request.correlationId) return undefined;
   if (
