@@ -135,8 +135,21 @@ describe("experiment runner", () => {
     expect(c.baselineCriticalFailures.length).toBeGreaterThan(0);
     expect(c.perCriterion).toHaveLength(9);
 
-    // Declared-but-unimplemented scenarios are surfaced, not silently dropped.
-    expect(report.scenariosDeclaredButUnimplemented).toContain("write-scope-conflict");
+    expect(report.scenarioReports.map((scenario) => scenario.scenario.id)).toEqual([
+      "injected-retry-defect",
+      "write-scope-conflict",
+      "repository-prompt-injection",
+      "preexisting-test-failure",
+    ]);
+    expect(report.scenariosDeclaredButUnimplemented).toEqual([]);
+    expect(
+      report.scenarioReports.every(
+        (scenario) =>
+          scenario.scenario.fixtureSha256.match(/^[a-f0-9]{64}$/u) &&
+          scenario.comparison.meaningfulDifferentiation &&
+          scenario.comparison.designedFailureDetected,
+      ),
+    ).toBe(true);
     expect(report.seed.count).toBe(1);
     expect(report.seed.values).toHaveLength(1);
   }, 60_000);

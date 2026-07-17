@@ -23,6 +23,9 @@ console.log(
 console.log(`Treatment beats baseline: ${c.treatmentBeatsBaseline ? "YES" : "NO"}`);
 console.log(`Doctrine hash: ${run.report.doctrineHash}`);
 console.log(`Repetitions: ${run.report.seed.count}`);
+console.log(
+  `Scenarios: ${run.report.scenarioReports.length} runnable · ${run.report.scenariosDeclaredButUnimplemented.length} unimplemented`,
+);
 if (run.artifactDirectory) console.log(`Artifacts: ${run.artifactDirectory}`);
 if (!c.treatmentBeatsBaseline) {
   console.error("Treatment did not beat the baseline; inspect the comparison report.");
