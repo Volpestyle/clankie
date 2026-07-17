@@ -13,8 +13,9 @@ export type WorldId = z.infer<typeof WorldIdSchema>;
 export type CharacterId = z.infer<typeof CharacterIdSchema>;
 export type ActionId = z.infer<typeof ActionIdSchema>;
 
-export const CaptainLaneSchema = z.enum(["tui", "discord_voice", "discord_presence", "gameplay"]);
-export type CaptainLane = z.infer<typeof CaptainLaneSchema>;
+/** Frozen ADR 0016 v1 wire lanes. New lanes belong to a versioned successor. */
+export const CaptainLaneSchema = z.enum(["tui", "discord_voice", "gameplay"]);
+export type CaptainLaneV1 = z.infer<typeof CaptainLaneSchema>;
 
 /**
  * Durable captain execution lanes v2. CaptainLaneSchema is the frozen v1 wire
@@ -27,6 +28,17 @@ export const CaptainSessionLaneV2Schema = z.enum([
   "gameplay",
 ]);
 export type CaptainSessionLaneV2 = z.infer<typeof CaptainSessionLaneV2Schema>;
+
+/**
+ * Transitional dual-read lane boundary. Legacy TUI remains readable while the
+ * post-v1 discord_presence lane migrates to CaptainSessionLaneV2Schema.
+ * Versioned records must use CaptainLaneSchema (v1) or CaptainSessionLaneV2Schema (v2), never this union.
+ */
+export const CaptainLaneCompatibilitySchema = z.union([
+  CaptainLaneSchema,
+  z.literal("discord_presence"),
+]);
+export type CaptainLane = z.infer<typeof CaptainLaneCompatibilitySchema>;
 
 // ---------------------------------------------------------------------------
 // Operator conversations (ADR 0032, VUH-769).
@@ -679,7 +691,7 @@ export type CommandAuthority = z.infer<typeof CommandAuthoritySchema>;
 
 export const IntentContextSchema = z
   .object({
-    sourceLane: CaptainLaneSchema,
+    sourceLane: CaptainLaneCompatibilitySchema,
     authority: CommandAuthoritySchema,
     correlationId: z.string().min(1),
     causationId: z.string().min(1).optional(),

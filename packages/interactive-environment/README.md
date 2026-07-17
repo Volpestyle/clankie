@@ -5,6 +5,12 @@ Discord presence (ADR 0024). The package defines session phases, leases, command
 action handles, observations, semantic events, bounded telemetry references,
 and deterministic lane-scoped tool exposure.
 
+Semantic event data is a closed, bounded union of state-transition payloads.
+Raw ticks, chunks, packets, audio, and video are rejected from the semantic
+plane and travel only as bounded `EnvironmentTelemetryReferenceSchema` artifact
+references. Discord presence tool exposure single-writes schema v2 lanes while
+dual-reading legacy `tui` supervision as the v2 `operator` lane.
+
 The control plane and runner remain authoritative. Models receive no
 credentials, cannot mint leases, and cannot expand the action catalog. A
 dormant Minecraft session exposes only lifecycle tools. Gameplay tools appear

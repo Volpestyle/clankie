@@ -1,5 +1,5 @@
 import {
-  CaptainLaneSchema,
+  CaptainLaneCompatibilitySchema,
   CaptainSessionLaneV2Schema,
   type CaptainLane,
   type CaptainSessionLaneV2,
@@ -72,7 +72,7 @@ export interface CaptainRuntimeEvent {
 export type CaptainRuntimeEventSink = (event: CaptainRuntimeEvent) => void | Promise<void>;
 
 export function captainLaneKey(address: CaptainLaneAddress): string {
-  const lane = CaptainLaneSchema.parse(address.lane);
+  const lane = CaptainLaneCompatibilitySchema.parse(address.lane);
   const characterId = boundedIdentifier(address.characterId, "Character id");
   const targetId = boundedIdentifier(address.targetId, "Lane target id");
   return JSON.stringify([characterId, lane, targetId]);
@@ -81,7 +81,7 @@ export function captainLaneKey(address: CaptainLaneAddress): string {
 export function parseCaptainLaneAddress(input: CaptainLaneAddress): CaptainLaneAddress {
   return {
     characterId: boundedIdentifier(input.characterId, "Character id"),
-    lane: CaptainLaneSchema.parse(input.lane),
+    lane: CaptainLaneCompatibilitySchema.parse(input.lane),
     targetId: boundedIdentifier(input.targetId, "Lane target id"),
   };
 }
