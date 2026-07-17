@@ -225,6 +225,30 @@ describe("MissionObserver", () => {
     }
   });
 
+  it("applies offline presence only to its current captain generation", async () => {
+    const source = new FakeEventSource([
+      captainEvent(1, "captain.turn.started", "working", { generationId: "generation-2" }),
+      captainEvent(2, "captain.presence.offline", "offline", { generationId: "generation-1" }),
+    ]);
+    const observer = new MissionObserver({
+      source,
+      checkpointPath: await temporaryPath("captain-generation-observer.json"),
+    });
+
+    await observer.refresh();
+    expect(observer.captainPresence?.state).toBe("working");
+
+    source.events.push(
+      captainEvent(3, "captain.presence.offline", "offline", { generationId: "generation-2" }),
+    );
+    await observer.refresh();
+    expect(observer.captainPresence?.state).toBe("offline");
+
+    source.events.push(captainEvent(4, "captain.turn.started", "working", { generationId: "generation-3" }));
+    await observer.refresh();
+    expect(observer.captainPresence?.state).toBe("working");
+  });
+
   it("preserves tier-zero and offline precedence across checkpoint restore", async () => {
     const source = new FakeEventSource([
       captainEvent(1, "captain.presence.online", "idle"),

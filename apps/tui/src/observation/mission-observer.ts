@@ -229,6 +229,13 @@ export class MissionObserver {
     if (!parsed.success) return;
     const presence = parsed.data;
     const generationId = presence.data.generationId;
+    if (
+      presence.type === "captain.presence.offline" &&
+      this.captain !== undefined &&
+      this.captain.generationId !== generationId
+    ) {
+      return;
+    }
     const current = this.captain ?? {
       state: "idle" as const,
       summary: "Captain online",
