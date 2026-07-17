@@ -1,9 +1,9 @@
-# Lead-agent evaluation: self-build-d9653732
+# Lead-agent evaluation: self-build-heterogeneous-09eea210
 
 **Result:** PASS  
 **Score:** 100.0%  
 **Threshold:** 85%  
-**Generated:** 2026-07-17T13:33:02.349Z
+**Generated:** 2026-07-17T15:19:03.606Z
 
 The run demonstrates the lead-agent thesis under the tested failure and governance conditions.
 
