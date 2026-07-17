@@ -143,8 +143,4 @@ export default defineAgent({
       "@clankie/model-registry",
     ],
   },
-  limits: {
-    maxSubagentDepth: 2,
-    maxSubagents: 12,
-  },
 });
