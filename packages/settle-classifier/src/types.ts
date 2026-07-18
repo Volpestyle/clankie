@@ -31,9 +31,18 @@ export interface LocalPaneClassifier {
   classify(request: LocalClassificationRequest): Promise<LocalClassificationResult>;
 }
 
-export type Tier2AgentState = "idle" | "waiting_user" | "failed";
+export type Tier2AgentState = "unknown" | "idle" | "waiting_user" | "failed";
 
-/** ADR 0015 Tier-2 event data consumed by the future VUH-787 resolver. */
+export interface SettleClassifierDegradation {
+  readonly code: "settle_classifier_unavailable";
+  /** Bounded message from the underlying adapter failure; never a stack or raw model response. */
+  readonly error: string;
+  readonly consecutiveFailures: number;
+  /** Present while inference is suppressed by the bounded backoff window. */
+  readonly retryAt?: string;
+}
+
+/** ADR 0015 Tier-2 event data consumed by @clankie/status-resolver. */
 export interface Tier2StatusSignal {
   readonly state: Tier2AgentState;
   readonly tier: 2;
@@ -42,6 +51,8 @@ export interface Tier2StatusSignal {
   readonly observedAt: string;
   /** Present for waiting_user only. */
   readonly questionSummary?: string;
+  /** Present when classification failed closed to unknown. */
+  readonly degradation?: SettleClassifierDegradation;
 }
 
 export interface ScreenProbe {
@@ -66,4 +77,14 @@ export interface SettleClassifierOptions {
   readonly workingToIdleHoldMs?: number;
   readonly startupGraceMs?: number;
   readonly tailLineLimit?: number;
+  /** Consecutive adapter failures required to open the backoff window. */
+  readonly failureThreshold?: number;
+  /** Bounded interval during which adapter calls are skipped after the threshold. */
+  readonly failureBackoffMs?: number;
+}
+
+/** Narrow projection of the layered clankie.json fields owned by this package. */
+export interface SettleClassifierFailureConfig {
+  readonly settle_classifier_failure_threshold?: number;
+  readonly settle_classifier_failure_backoff_ms?: number;
 }

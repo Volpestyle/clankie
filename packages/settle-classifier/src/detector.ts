@@ -4,6 +4,8 @@ import {
   SETTLE_CLASSIFICATIONS,
   type LocalClassificationResult,
   type ScreenProbe,
+  type SettleClassifierDegradation,
+  type SettleClassifierFailureConfig,
   type SettleClassifierOptions,
   type Tier2StatusSignal,
 } from "./types.ts";
@@ -14,6 +16,11 @@ export const QUIET_PROBE_INTERVAL_MS = 100;
 export const WORKING_TO_IDLE_HOLD_MS = 700;
 export const STARTUP_GRACE_MS = 3_000;
 export const TAIL_LINE_LIMIT = 60;
+/** Three consecutive adapter failures open a one-minute fail-closed backoff window. */
+export const CLASSIFIER_FAILURE_THRESHOLD = 3;
+export const CLASSIFIER_FAILURE_BACKOFF_MS = 60_000;
+export const CLASSIFIER_FAILURE_THRESHOLD_ENV = "CLANKIE_SETTLE_CLASSIFIER_FAILURE_THRESHOLD";
+export const CLASSIFIER_FAILURE_BACKOFF_MS_ENV = "CLANKIE_SETTLE_CLASSIFIER_FAILURE_BACKOFF_MS";
 
 export const LOCAL_CLASSIFIER_GUIDANCE = [
   "Classify a settled terminal tail into exactly one label:",
@@ -26,6 +33,48 @@ export const LOCAL_CLASSIFIER_GUIDANCE = [
 
 interface CachedSignal {
   readonly signal: Tier2StatusSignal;
+}
+
+interface SuccessfulClassification {
+  readonly kind: "success";
+  readonly classification: LocalClassificationResult;
+}
+
+interface DegradedClassification {
+  readonly kind: "degraded";
+  readonly degradation: SettleClassifierDegradation;
+}
+
+type ClassificationOutcome = SuccessfulClassification | DegradedClassification;
+
+export interface ResolvedSettleClassifierBackoffOptions {
+  readonly failureThreshold: number;
+  readonly failureBackoffMs: number;
+}
+
+/** Environment values override the same fields from layered clankie.json configuration. */
+export function resolveSettleClassifierBackoffOptions(
+  config: SettleClassifierFailureConfig = {},
+  env: NodeJS.ProcessEnv = process.env,
+): ResolvedSettleClassifierBackoffOptions {
+  return {
+    failureThreshold: positiveInteger(
+      numericOverride(
+        env[CLASSIFIER_FAILURE_THRESHOLD_ENV],
+        config.settle_classifier_failure_threshold ?? CLASSIFIER_FAILURE_THRESHOLD,
+        CLASSIFIER_FAILURE_THRESHOLD_ENV,
+      ),
+      "failureThreshold",
+    ),
+    failureBackoffMs: positiveInteger(
+      numericOverride(
+        env[CLASSIFIER_FAILURE_BACKOFF_MS_ENV],
+        config.settle_classifier_failure_backoff_ms ?? CLASSIFIER_FAILURE_BACKOFF_MS,
+        CLASSIFIER_FAILURE_BACKOFF_MS_ENV,
+      ),
+      "failureBackoffMs",
+    ),
+  };
 }
 
 /**
@@ -41,6 +90,8 @@ export class SettleThenClassifier {
   private readonly workingToIdleHoldMs: number;
   private readonly startupGraceMs: number;
   private readonly tailLineLimit: number;
+  private readonly failureThreshold: number;
+  private readonly failureBackoffMs: number;
 
   private lastSignature: string | undefined;
   private lastOutputSequence: number | undefined;
@@ -50,8 +101,15 @@ export class SettleThenClassifier {
   private quietProbes = 0;
   private generation = 0;
   private readonly attemptedSignatures = new Set<string>();
+  private readonly pendingSignatures = new Set<string>();
   private readonly cachedSignals = new Map<string, CachedSignal>();
   private readonly emittedSignatures = new Set<string>();
+  private readonly emittedDegradations = new Map<string, string>();
+  private classificationAttempts = 0;
+  private consecutiveClassifierFailures = 0;
+  private classifierBackoffUntilMs: number | undefined;
+  private lastClassifierError: string | undefined;
+  private classifierGate: Promise<void> = Promise.resolve();
 
   public constructor(options: SettleClassifierOptions) {
     if (options.classifier.locality !== "local") {
@@ -70,9 +128,17 @@ export class SettleThenClassifier {
     );
     this.startupGraceMs = nonnegativeFinite(options.startupGraceMs ?? STARTUP_GRACE_MS, "startupGraceMs");
     this.tailLineLimit = positiveInteger(options.tailLineLimit ?? TAIL_LINE_LIMIT, "tailLineLimit");
+    this.failureThreshold = positiveInteger(
+      options.failureThreshold ?? CLASSIFIER_FAILURE_THRESHOLD,
+      "failureThreshold",
+    );
+    this.failureBackoffMs = positiveInteger(
+      options.failureBackoffMs ?? CLASSIFIER_FAILURE_BACKOFF_MS,
+      "failureBackoffMs",
+    );
   }
 
-  /** Observe one mechanical probe and emit at most one Tier-2 signal for its screen signature. */
+  /** Observe one mechanical probe and emit a Tier-2 classification or degraded fallback. */
   public async observe(probe: ScreenProbe): Promise<Tier2StatusSignal | undefined> {
     validateProbe(probe, this.lastObservedAtMs, this.lastOutputSequence);
     const signature = screenSignature(probe.screenText);
@@ -119,24 +185,109 @@ export class SettleThenClassifier {
 
     const cached = this.cachedSignals.get(signature);
     if (cached !== undefined) return this.emitCached(signature, cached.signal, probe.observedAtMs);
-    if (this.attemptedSignatures.has(signature)) return undefined;
+    if (this.attemptedSignatures.has(signature) || this.pendingSignatures.has(signature)) return undefined;
 
-    this.attemptedSignatures.add(signature);
+    this.pendingSignatures.add(signature);
     const generation = this.generation;
     const { tail, lineCount } = screenTail(probe.screenText, this.tailLineLimit);
-    const classification = validateClassification(
-      await this.classifier.classify({ tail, lineCount, screenSignature: signature }),
-    );
-    const signal = signalFromClassification(classification, probe.observedAtMs);
-    this.cachedSignals.set(signature, { signal });
+    let outcome: ClassificationOutcome;
+    try {
+      outcome = await this.classifyWithBackoff(
+        { tail, lineCount, screenSignature: signature },
+        probe.observedAtMs,
+      );
+    } finally {
+      this.pendingSignatures.delete(signature);
+    }
 
     if (generation !== this.generation || signature !== this.lastSignature) return undefined;
+    if (outcome.kind === "degraded") {
+      return this.emitDegradation(signature, outcome.degradation, probe.observedAtMs);
+    }
+
+    const signal = signalFromClassification(outcome.classification, probe.observedAtMs);
+    this.cachedSignals.set(signature, { signal });
     return this.emitCached(signature, signal, probe.observedAtMs);
   }
 
-  /** Number of unique signatures for which semantic classification was attempted. */
+  /** Number of local semantic adapter calls, including calls that rejected. */
   public classificationAttemptCount(): number {
-    return this.attemptedSignatures.size;
+    return this.classificationAttempts;
+  }
+
+  private async classifyWithBackoff(
+    request: Parameters<SettleClassifierOptions["classifier"]["classify"]>[0],
+    observedAtMs: number,
+  ): Promise<ClassificationOutcome> {
+    const previous = this.classifierGate;
+    let release!: () => void;
+    this.classifierGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+
+    try {
+      if (this.classifierBackoffUntilMs !== undefined && observedAtMs < this.classifierBackoffUntilMs) {
+        return { kind: "degraded", degradation: this.currentDegradation() };
+      }
+      this.classifierBackoffUntilMs = undefined;
+      this.classificationAttempts += 1;
+
+      let rawClassification: LocalClassificationResult;
+      try {
+        rawClassification = await this.classifier.classify(request);
+      } catch (error) {
+        return { kind: "degraded", degradation: this.recordClassifierFailure(error, observedAtMs) };
+      }
+
+      // A resolved adapter response finalizes the signature even when local validation rejects it.
+      this.attemptedSignatures.add(request.screenSignature);
+      const classification = validateClassification(rawClassification);
+      this.consecutiveClassifierFailures = 0;
+      this.classifierBackoffUntilMs = undefined;
+      this.lastClassifierError = undefined;
+      return { kind: "success", classification };
+    } finally {
+      release();
+    }
+  }
+
+  private recordClassifierFailure(error: unknown, observedAtMs: number): SettleClassifierDegradation {
+    this.consecutiveClassifierFailures += 1;
+    this.lastClassifierError = boundedErrorMessage(error);
+    if (this.consecutiveClassifierFailures >= this.failureThreshold) {
+      this.classifierBackoffUntilMs = observedAtMs + this.failureBackoffMs;
+    }
+    return this.currentDegradation();
+  }
+
+  private currentDegradation(): SettleClassifierDegradation {
+    return {
+      code: "settle_classifier_unavailable",
+      error: this.lastClassifierError ?? "Local settle classifier is unavailable.",
+      consecutiveFailures: this.consecutiveClassifierFailures,
+      ...(this.classifierBackoffUntilMs === undefined
+        ? {}
+        : { retryAt: new Date(this.classifierBackoffUntilMs).toISOString() }),
+    };
+  }
+
+  private emitDegradation(
+    signature: string,
+    degradation: SettleClassifierDegradation,
+    observedAtMs: number,
+  ): Tier2StatusSignal | undefined {
+    const fingerprint = JSON.stringify(degradation);
+    if (this.emittedDegradations.get(signature) === fingerprint) return undefined;
+    this.emittedDegradations.set(signature, fingerprint);
+    return {
+      state: "unknown",
+      tier: 2,
+      source: "settle-classifier",
+      confidence: 0,
+      observedAt: new Date(observedAtMs).toISOString(),
+      degradation,
+    };
   }
 
   private emitPermissionSignal(signature: string, observedAtMs: number): Tier2StatusSignal | undefined {
@@ -246,4 +397,19 @@ function positiveInteger(value: number, name: string): number {
 function nonnegativeFinite(value: number, name: string): number {
   if (!Number.isFinite(value) || value < 0) throw new Error(`${name} must be nonnegative`);
   return value;
+}
+
+function numericOverride(value: string | undefined, fallback: number, name: string): number {
+  if (value === undefined) return fallback;
+  const normalized = value.trim();
+  if (normalized.length === 0) throw new Error(`${name} must be a number`);
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed)) throw new Error(`${name} must be a number`);
+  return parsed;
+}
+
+function boundedErrorMessage(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const normalized = raw.replace(/\s+/gu, " ").trim();
+  return (normalized.length > 0 ? normalized : "Unknown local settle classifier failure").slice(0, 512);
 }

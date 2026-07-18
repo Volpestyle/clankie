@@ -4,6 +4,7 @@ import {
   type LocalClassificationRequest,
   type LocalClassificationResult,
   type LocalPaneClassifier,
+  type SettleClassifierFailureConfig,
 } from "./types.ts";
 
 const DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
@@ -43,7 +44,7 @@ export interface OllamaLocalPaneClassifierOptions {
 }
 
 /** Narrow structural projection of @clankie/model-provider's non-secret config. */
-export interface SettleClassifierModelConfig {
+export interface SettleClassifierModelConfig extends SettleClassifierFailureConfig {
   readonly settle_classifier_model?: string;
   readonly provider?: Readonly<
     Record<
