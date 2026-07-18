@@ -28,31 +28,46 @@ limits.
 
 The task contract records:
 
-- an explicitly sanctioning tracker issue, structural intent, and acceptance
-  criteria;
+- a tracker issue whose sanction is authored or confirmed by the source bound
+  to `product_intent`, plus structural intent and acceptance criteria;
 - bounded write scope, affected boundaries, expected file count and
   changed-line range, and the reason a smaller slice is incoherent;
 - the exact unchanged test and verification commands that are green before the
-  edit and must remain green afterward; and
+  edit and must remain green afterward, plus why they meaningfully exercise
+  every affected boundary; and
 - an explicit claim that no observable behavior or semantic diff is intended.
 
-The class forbids combining the refactor with behavior changes. A failing
-baseline, changed verification command, or newly required behavior change stops
-the refactor until the conflicting work is separated into its own task.
+The class forbids combining the refactor with behavior changes or semantic test
+changes to assertions, fixture contents, or expectations. It permits mechanical
+test relocation and import-path updates only when the implementer reports them
+separately and the verifier confirms that the test diff preserves every
+assertion and fixture's contents. A failing baseline, changed verification
+command, semantic test diff, newly required behavior change, or verifier-found
+behavior counterexample fails the refactor until the conflicting work is
+separated into its own task.
 
 Independent verification remains mandatory. A distinct verifier reruns the
-unchanged commands and looks for behavior counterexamples. A reviewer signs off
-that the resulting structure matches the sanctioned intent before integration.
+unchanged commands, confirms the stated boundary-coverage rationale, and looks
+for behavior counterexamples. A reviewer confirms the same coverage claim and
+signs off that the resulting structure matches the sanctioned intent before
+integration. The class never ships a discovered semantic diff as an unintended
+change.
+
+The recorded size is an auditable contract expectation, not a claim of current
+deterministic runtime enforcement. Exceeding its file count or changed-line
+range requires a contract amendment or replan before integration; separately
+enforced profile constraints remain in force.
 
 ```mermaid
 flowchart LR
-  T[Tracker issue<br/>intent · AC · expected size] --> P[Bounded refactor task<br/>existing implementation kind]
-  P --> B[Green unchanged<br/>baseline checks]
-  B --> R[Structural edits<br/>no behavior change]
-  R --> V[Independent verifier<br/>same checks + counterexamples]
-  V --> S[Reviewer sign-off<br/>structural intent]
+  T[Product-intent sanction<br/>AC · expected size] --> P[Bounded refactor task<br/>existing implementation kind]
+  P --> B[Green unchanged checks<br/>boundary-coverage rationale]
+  B --> R[Structural edits<br/>assertion-preserving test moves]
+  R --> V[Independent verifier<br/>coverage · diff · counterexamples]
+  V --> S[Reviewer confirmation<br/>coverage · structural intent]
   B -. red .-> X[Stop and separate work]
   R -. semantic change needed .-> X
+  V -. behavior counterexample .-> X
 ```
 
 The doctrine document is the normative home. The
@@ -84,6 +99,7 @@ requirements.
   implementation tasks.
 - The current runtime schema does not deterministically validate this
   change-shape class; it remains a documented task-contract obligation until a
-  separately scoped enforcement change lands.
+  separately scoped enforcement change lands. Until then, the lead and reviewer
+  compare the actual diff with the recorded expectation before integration.
 - VUH-892 is the first planned execution under this class after owner approval.
   That execution and its before/after evidence are outside VUH-888.

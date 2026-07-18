@@ -30,26 +30,40 @@ exception.
 
 Before the task is leased, its contract must:
 
-1. reference a tracker issue that explicitly sanctions the refactor, states the
-   structural intent, and supplies acceptance criteria;
+1. reference a tracker issue whose sanction is authored or confirmed by the
+   source bound to `product_intent`, explicitly states the structural intent,
+   and supplies acceptance criteria;
 2. bound the write scope and record the affected structural boundaries,
    expected file count and changed-line range, and why a smaller slice would not
    be coherent;
 3. name the exact unchanged test and verification commands that must be green
-   immediately before and after the refactor; and
+   immediately before and after the refactor, and explain why those commands
+   meaningfully exercise every affected boundary; and
 4. state that no observable behavior or semantic diff is intended or claimed.
 
 The recorded size expectation replaces the smallest-change target only for that
-task. It does not waive a compiled profile's hard limit; an over-limit task
-requires the explicit exception or approval that the active profile demands.
+task. It is a contract obligation, not a claim that the current runtime
+deterministically enforces file-count or changed-line limits. If the actual diff
+exceeds either expectation, the contract must be amended or the task replanned
+before integration. Any separately enforced profile constraint still applies.
 
 The implementer records both green command outcomes and reports structural
-edits separately from generated or lockfile churn. A distinct verifier reruns
-the unchanged commands, checks for behavior counterexamples, and remains
-independently attributable. A reviewer signs off that the resulting boundaries
-match the tracker-sanctioned structural intent. A red baseline, a changed test,
-or a discovered need for behavior change blocks the class: the behavior change
-must move to a separate task with its own acceptance criteria and verification.
+edits separately from generated or lockfile churn. Semantic test changes,
+including changed assertions, fixture contents, or expectations, block the class.
+Mechanical test relocation and import-path updates are permitted when reported
+as mechanical test churn separate from the structural edits; the verifier must
+confirm that the test diff preserves every assertion and fixture's contents.
+
+A distinct verifier reruns the unchanged commands, explicitly confirms that
+they meaningfully cover the refactored boundaries, checks for behavior
+counterexamples, and remains independently attributable. The reviewer also
+confirms the coverage claim and signs off that the resulting boundaries match
+the tracker-sanctioned structural intent. A red baseline, a changed verification
+command, a semantic test diff, or a discovered need for behavior change blocks
+the class. A verifier-found behavior counterexample fails the task; a discovered
+semantic diff never ships from this class as an unintended change. Behavior
+changes must move to a separate task with their own acceptance criteria and
+verification.
 
 [ADR 0037](adr/0037-sanctioned-structural-refactor-task-class.md) records this
 change-shape decision and its runtime boundary.
@@ -185,6 +199,15 @@ recorded adjudication in the pull-request thread or authoritative tracker:
   made that decision; or
 - `false-positive-with-evidence` — cites the counterevidence that invalidates
   the finding.
+
+The implementer may supply a fix or counterevidence but never decides a waiver
+against their own change. Waivers are decided by the lead or integration owner.
+A blocking-severity finding is waivable only by the lead or human owner, never
+by the implementer; the human owner may always waive the finding. A
+`false-positive-with-evidence` closure requires recorded concurrence from the
+finding's author or a lead who did not implement the change. These separation
+rules apply when one principal occupies multiple roles. Adjudication does not
+grant an action, loosen the invariant floor, or replace any required approval.
 
 The lead or integration owner ensures every finding is identifiable and covered.
 One sentence per finding is sufficient, and multiple sentences may be posted
