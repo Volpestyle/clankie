@@ -30,6 +30,7 @@ budgets:
   maxMissionWallMinutes: 480
 authority:
   product_intent: { kind: connector, connector: product_intent }
+  priority: { kind: connector, connector: product_intent }
   acceptance_criteria: { kind: connector, connector: product_intent }
   implementation_state: { kind: connector, connector: implementation_state }
   test_state: { kind: connector, connector: test_state }

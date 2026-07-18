@@ -32,6 +32,7 @@ budgets:
   maxMissionWallMinutes: 30
 authority:
   product_intent: { kind: operator }
+  priority: { kind: operator }
   acceptance_criteria: { kind: operator }
   implementation_state: { kind: local, source: repository }
   test_state: { kind: local, source: command_results }

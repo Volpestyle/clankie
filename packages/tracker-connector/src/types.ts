@@ -1,7 +1,7 @@
 import type { DomainEvent, MissionPlan, TaskRole } from "@clankie/protocol";
 import { z } from "zod";
 
-export const TRACKER_AUTHORITY_ROLES = ["product_intent", "acceptance_criteria"] as const;
+export const TRACKER_AUTHORITY_ROLES = ["product_intent", "priority", "acceptance_criteria"] as const;
 
 export const TrackerIssueRefSchema = z.object({
   connector: z.string().min(1),

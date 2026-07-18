@@ -524,6 +524,19 @@ describe("doctrine", () => {
     expect(rawdog.profile.ceremony?.externalConnectors).toBe("none");
   });
 
+  it("compiles priority with the same source binding as product intent in every base profile", async () => {
+    for (const id of ["rawdog", "structured", "fine-control", "self-build-lab"]) {
+      const doctrine = compileDoctrine([await loadDoctrineFile(resolve(profileDirectory, `${id}.yaml`))]);
+      const productIntent = doctrine.profile.authority.product_intent;
+      const connectors =
+        productIntent?.kind === "connector" ? new Set([productIntent.connector]) : new Set<string>();
+
+      expect(resolveAuthorityBinding(doctrine, "priority", connectors)).toEqual(
+        resolveAuthorityBinding(doctrine, "product_intent", connectors),
+      );
+    }
+  });
+
   it("runs a rawdog mission end to end with zero external connectors", async () => {
     const rawdog = compileDoctrine([await loadDoctrineFile(resolve(profileDirectory, "rawdog.yaml"))]);
     const plan = MissionPlanSchema.parse({

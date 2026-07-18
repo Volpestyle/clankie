@@ -181,6 +181,7 @@ Authority is expressed as abstract roles first, then bound by the workspace or r
 | Role                     | Example binding, not a requirement      |
 | ------------------------ | --------------------------------------- |
 | `product_intent`         | operator or a work-tracking connector   |
+| `priority`               | operator or a work-tracking connector   |
 | `acceptance_criteria`    | operator or a work-tracking connector   |
 | `approved_design`        | repository asset or a design connector  |
 | `implementation_state`   | local VCS or a code-host connector      |
