@@ -25,6 +25,13 @@ export type AgentStatusBasis =
   | "worker_failed"
   | "worker_offline";
 
+export interface AgentStatusDegradation {
+  code: string;
+  error: string;
+  consecutiveFailures: number;
+  retryAt?: string;
+}
+
 export interface AgentStatusSignal {
   state: WorkerStatusState;
   tier: AgentStatusTier;
@@ -33,6 +40,7 @@ export interface AgentStatusSignal {
   observedAt: string;
   basis: AgentStatusBasis;
   questionSummary?: string;
+  degradation?: AgentStatusDegradation;
 }
 
 export type AgentStatusSignalInput = Omit<AgentStatusSignal, "basis"> & {
@@ -226,19 +234,19 @@ export function formatStatusExplain(status: ResolvedAgentStatus): string {
   const lines = [
     `Status explain: ${status.subjectId}`,
     `Current: ${status.state} (${status.basis})`,
-    `Winner: tier ${String(status.winner.tier)} · ${status.winner.source} · confidence ${status.winner.confidence.toFixed(2)} · ${status.winner.observedAt}`,
+    `Winner: tier ${String(status.winner.tier)} · ${status.winner.source} · confidence ${status.winner.confidence.toFixed(2)} · ${status.winner.observedAt}${formatDegradation(status.winner.degradation)}`,
     "Signal chain:",
   ];
   for (const signal of status.signalChain) {
     lines.push(
-      `- #${String(signal.sequence)} [${signal.disposition}] ${signal.state} (${signal.basis}) · tier ${String(signal.tier)} · ${signal.source} · confidence ${signal.confidence.toFixed(2)} · ${signal.observedAt}${signal.eventType ? ` · ${signal.eventType}` : ""}`,
+      `- #${String(signal.sequence)} [${signal.disposition}] ${signal.state} (${signal.basis}) · tier ${String(signal.tier)} · ${signal.source} · confidence ${signal.confidence.toFixed(2)} · ${signal.observedAt}${signal.eventType ? ` · ${signal.eventType}` : ""}${formatDegradation(signal.degradation)}`,
     );
   }
   if (status.attention.length > 0) {
     lines.push("Attention-only signals:");
     for (const signal of status.attention) {
       lines.push(
-        `- ${signal.state} · tier ${String(signal.tier)} · ${signal.source} · ${signal.observedAt}${signal.questionSummary ? ` · ${signal.questionSummary}` : ""}`,
+        `- ${signal.state} · tier ${String(signal.tier)} · ${signal.source} · ${signal.observedAt}${signal.questionSummary ? ` · ${signal.questionSummary}` : ""}${formatDegradation(signal.degradation)}`,
       );
     }
   }
@@ -388,11 +396,13 @@ function parseExternalSignal(data: Record<string, unknown>): AgentStatusSignal |
         ? "heuristic"
         : inferTierOneBasis(state.data);
   const questionSummary = normalizedQuestion(data.questionSummary);
+  const degradation = parseDegradation(data.degradation);
   return {
     state: state.data,
     basis,
     ...provenance.data,
     ...(questionSummary ? { questionSummary } : {}),
+    ...(degradation ? { degradation } : {}),
   };
 }
 
@@ -400,11 +410,13 @@ function parseSignal(input: AgentStatusSignalInput): AgentStatusSignal {
   const state = WorkerStatusStateSchema.parse(input.state);
   const provenance = WorkerStatusProvenanceSchema.parse(input);
   const questionSummary = normalizedQuestion(input.questionSummary);
+  const degradation = parseDegradation(input.degradation);
   return {
     state,
     ...provenance,
     basis: input.basis ?? (provenance.tier === 2 ? "heuristic" : "external_signal"),
     ...(questionSummary ? { questionSummary } : {}),
+    ...(degradation ? { degradation } : {}),
   };
 }
 
@@ -419,6 +431,44 @@ function normalizedQuestion(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const normalized = value.replace(/\s+/gu, " ").trim();
   return normalized.length > 0 ? normalized : undefined;
+}
+
+function parseDegradation(value: unknown): AgentStatusDegradation | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const candidate = value as Record<string, unknown>;
+  const code = normalizedText(candidate.code, 120);
+  const error = normalizedText(candidate.error, 512);
+  const consecutiveFailures = candidate.consecutiveFailures;
+  if (
+    code === undefined ||
+    error === undefined ||
+    !Number.isSafeInteger(consecutiveFailures) ||
+    (consecutiveFailures as number) <= 0
+  ) {
+    return undefined;
+  }
+  const retryAt = candidate.retryAt;
+  const validRetryAt =
+    typeof retryAt === "string" && Number.isFinite(Date.parse(retryAt))
+      ? new Date(retryAt).toISOString()
+      : undefined;
+  return {
+    code,
+    error,
+    consecutiveFailures: consecutiveFailures as number,
+    ...(validRetryAt ? { retryAt: validRetryAt } : {}),
+  };
+}
+
+function normalizedText(value: unknown, limit: number): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  return normalized.length > 0 ? normalized.slice(0, limit) : undefined;
+}
+
+function formatDegradation(degradation: AgentStatusDegradation | undefined): string {
+  if (degradation === undefined) return "";
+  return ` · degraded ${degradation.code}: ${degradation.error} · failures ${String(degradation.consecutiveFailures)}${degradation.retryAt ? ` · retry ${degradation.retryAt}` : ""}`;
 }
 
 function inferTierOneBasis(state: WorkerStatusState): AgentStatusBasis {

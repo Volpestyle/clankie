@@ -240,6 +240,42 @@ describe("AgentStatusResolver", () => {
     });
   });
 
+  it("retains classifier degradation through replay and status explanation", () => {
+    const degraded = event(
+      STATUS_SIGNAL_EVENT_TYPE,
+      {
+        state: "unknown",
+        tier: 2,
+        source: "settle-classifier",
+        confidence: 0,
+        observedAt: "2026-07-11T12:00:00.000Z",
+        degradation: {
+          code: "settle_classifier_unavailable",
+          error: "Local Ollama classification failed with HTTP 503",
+          consecutiveFailures: 3,
+          retryAt: "2026-07-11T12:01:00.000Z",
+        },
+      },
+      0,
+    );
+
+    const status = explainStatusFromEvents([degraded], "run-1");
+    expect(status).toMatchObject({
+      state: "unknown",
+      winner: {
+        degradation: {
+          code: "settle_classifier_unavailable",
+          error: "Local Ollama classification failed with HTTP 503",
+          consecutiveFailures: 3,
+          retryAt: "2026-07-11T12:01:00.000Z",
+        },
+      },
+    });
+    expect(formatStatusExplain(status as NonNullable<typeof status>)).toContain(
+      "degraded settle_classifier_unavailable: Local Ollama classification failed with HTTP 503",
+    );
+  });
+
   it("replays identical output and renders a complete status explanation", () => {
     const events = [
       event("worker.leased", { claimId: "claim-1" }, 0),

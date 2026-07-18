@@ -2,10 +2,13 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  CLASSIFIER_FAILURE_BACKOFF_MS,
+  CLASSIFIER_FAILURE_THRESHOLD,
   hasVisiblePermissionChrome,
   normalizeScreenText,
   QUIET_PROBE_COUNT,
   QUIET_PROBE_INTERVAL_MS,
+  resolveSettleClassifierBackoffOptions,
   screenSignature,
   screenTail,
   SettleThenClassifier,
@@ -62,6 +65,8 @@ function detector(
     workingToIdleHoldMs: number;
     startupGraceMs: number;
     tailLineLimit: number;
+    failureThreshold: number;
+    failureBackoffMs: number;
   }> = {},
 ): SettleThenClassifier {
   return new SettleThenClassifier({ classifier, startedAtMs: 0, startupGraceMs: 0, ...options });
@@ -110,6 +115,8 @@ describe("mechanical settle detection", () => {
     expect(WORKING_TO_IDLE_HOLD_MS).toBe(700);
     expect(STARTUP_GRACE_MS).toBe(3_000);
     expect(TAIL_LINE_LIMIT).toBe(60);
+    expect(CLASSIFIER_FAILURE_THRESHOLD).toBe(3);
+    expect(CLASSIFIER_FAILURE_BACKOFF_MS).toBe(60_000);
   });
 
   it("does not classify until startup grace and fresh quiet probes complete", async () => {
@@ -366,6 +373,147 @@ describe("classification, cache, and Tier-2 signal shape", () => {
     );
     expect(await subject.observe(probe("question", 1, 1, { promptVisible: true }))).toBeUndefined();
     expect(classifier.requests).toHaveLength(1);
+  });
+
+  it("bounds persistent adapter failures, emits the underlying error, and retries after expiry", async () => {
+    let unavailable = true;
+    let attempts = 0;
+    const classifier: LocalPaneClassifier = {
+      locality: "local",
+      async classify() {
+        attempts += 1;
+        if (unavailable) throw new Error("Ollama daemon unavailable");
+        return { classification: "finished", confidence: 0.92 };
+      },
+    };
+    const subject = detector(classifier, { failureThreshold: 3, failureBackoffMs: 1_000 });
+
+    const concurrent = await Promise.all(
+      Array.from({ length: 5 }, (_, index) =>
+        subject.observe(probe(`settled-${String(index)}`, index + 1, index, { promptVisible: true })),
+      ),
+    );
+
+    expect(attempts).toBe(3);
+    expect(subject.classificationAttemptCount()).toBe(3);
+    expect(concurrent.at(-1)).toEqual({
+      state: "unknown",
+      tier: 2,
+      source: "settle-classifier",
+      confidence: 0,
+      observedAt: "1970-01-01T00:00:00.004Z",
+      degradation: {
+        code: "settle_classifier_unavailable",
+        error: "Ollama daemon unavailable",
+        consecutiveFailures: 3,
+        retryAt: "1970-01-01T00:00:01.002Z",
+      },
+    });
+
+    unavailable = false;
+    expect(await subject.observe(probe("still backed off", 6, 1_001, { promptVisible: true }))).toMatchObject(
+      { state: "unknown", degradation: { error: "Ollama daemon unavailable" } },
+    );
+    expect(attempts).toBe(3);
+    expect(await subject.observe(probe("window expired", 7, 1_002, { promptVisible: true }))).toMatchObject({
+      state: "idle",
+      confidence: 0.92,
+    });
+    expect(attempts).toBe(4);
+  });
+
+  it("retries the same rejected signature after backoff without poisoning its result cache", async () => {
+    let unavailable = true;
+    let attempts = 0;
+    const classifier: LocalPaneClassifier = {
+      locality: "local",
+      async classify() {
+        attempts += 1;
+        if (unavailable) throw new Error("temporary adapter failure");
+        return { classification: "finished", confidence: 0.91 };
+      },
+    };
+    const subject = detector(classifier, { failureThreshold: 1, failureBackoffMs: 10 });
+    const stable = probe("unchanged settled screen", 1, 0, { promptVisible: true });
+
+    expect(await subject.observe(stable)).toMatchObject({
+      state: "unknown",
+      degradation: { retryAt: "1970-01-01T00:00:00.010Z" },
+    });
+    expect(await subject.observe({ ...stable, observedAtMs: 9 })).toBeUndefined();
+    expect(attempts).toBe(1);
+
+    unavailable = false;
+    expect(await subject.observe({ ...stable, observedAtMs: 10 })).toMatchObject({
+      state: "idle",
+      confidence: 0.91,
+    });
+    expect(attempts).toBe(2);
+  });
+
+  it("resets consecutive failures after a successful adapter result", async () => {
+    const outcomes = ["failure", "success", "failure", "failure", "success"] as const;
+    let attempts = 0;
+    const classifier: LocalPaneClassifier = {
+      locality: "local",
+      async classify() {
+        const outcome = outcomes[attempts];
+        attempts += 1;
+        if (outcome === "failure") throw new Error(`failure-${String(attempts)}`);
+        return { classification: "finished", confidence: 0.9 };
+      },
+    };
+    const subject = detector(classifier, { failureThreshold: 2, failureBackoffMs: 10 });
+
+    expect(await subject.observe(probe("first failure", 1, 0, { promptVisible: true }))).toMatchObject({
+      state: "unknown",
+      degradation: { consecutiveFailures: 1 },
+    });
+    expect(await subject.observe(probe("recovered", 2, 1, { promptVisible: true }))).toMatchObject({
+      state: "idle",
+    });
+    expect(await subject.observe(probe("failure after reset", 3, 2, { promptVisible: true }))).toMatchObject({
+      state: "unknown",
+      degradation: { consecutiveFailures: 1 },
+    });
+    expect(
+      await subject.observe(probe("threshold after reset", 4, 3, { promptVisible: true })),
+    ).toMatchObject({
+      state: "unknown",
+      degradation: { consecutiveFailures: 2, retryAt: "1970-01-01T00:00:00.013Z" },
+    });
+    expect(attempts).toBe(4);
+
+    expect(await subject.observe(probe("suppressed", 5, 12, { promptVisible: true }))).toMatchObject({
+      state: "unknown",
+    });
+    expect(attempts).toBe(4);
+    expect(await subject.observe(probe("second recovery", 6, 13, { promptVisible: true }))).toMatchObject({
+      state: "idle",
+    });
+    expect(attempts).toBe(5);
+  });
+
+  it("resolves documented config fields with environment overrides", () => {
+    expect(resolveSettleClassifierBackoffOptions({}, {})).toEqual({
+      failureThreshold: CLASSIFIER_FAILURE_THRESHOLD,
+      failureBackoffMs: CLASSIFIER_FAILURE_BACKOFF_MS,
+    });
+    expect(
+      resolveSettleClassifierBackoffOptions(
+        {
+          settle_classifier_failure_threshold: 4,
+          settle_classifier_failure_backoff_ms: 2_000,
+        },
+        {
+          CLANKIE_SETTLE_CLASSIFIER_FAILURE_THRESHOLD: "5",
+          CLANKIE_SETTLE_CLASSIFIER_FAILURE_BACKOFF_MS: "3000",
+        },
+      ),
+    ).toEqual({ failureThreshold: 5, failureBackoffMs: 3_000 });
+    expect(() =>
+      resolveSettleClassifierBackoffOptions({}, { CLANKIE_SETTLE_CLASSIFIER_FAILURE_THRESHOLD: "0" }),
+    ).toThrow("failureThreshold must be a positive integer");
   });
 
   it("rejects non-local classifiers and out-of-order timestamps or output sequences", async () => {

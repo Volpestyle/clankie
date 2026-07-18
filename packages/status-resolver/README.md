@@ -21,6 +21,11 @@ Turn and worker settlement are deliberately distinct:
 
 `AgentStatusResolver.replay(events)` rebuilds the same status and signal chain from ordered domain events after a crash. `formatStatusExplain` renders the winning signal, tier, source, confidence, timestamp, every suppressed or invalidated signal, and attention-only proposals.
 
+Tier-2 `unknown` signals may include bounded semantic `degradation` metadata (`code`, underlying
+`error`, consecutive failure count, and optional retry time). Replay and resolved-status event data
+retain that metadata, and status explain renders it without promoting the degraded heuristic into a
+classification.
+
 Captain presence uses a distinct trusted domain rather than a fake worker run.
 The resolver accepts typed `captain.turn.*` and
 `captain.waiting_dependency` Tier-0 events plus Tier-1
