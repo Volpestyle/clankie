@@ -11,6 +11,9 @@ MAX_GOAL_CHARS=4000
 STATUS_TIMEOUT_MS="${ARM_STATUS_TIMEOUT_MS:-15000}"
 VERIFY_DELAY_SECONDS="${ARM_VERIFY_DELAY_SECONDS:-3}"
 VERIFY_TAIL_LINES="${ARM_VERIFY_TAIL_LINES:-30}"
+READINESS_TIMEOUT_SECONDS="${ARM_READINESS_TIMEOUT_SECONDS:-90}"
+READINESS_POLL_SECONDS="${ARM_READINESS_POLL_SECONDS:-3}"
+SUBMIT_RETRIES="${ARM_SUBMIT_RETRIES:-3}"
 
 usage() {
   echo "usage: arm-goal.sh --receipt-dir DIR [--file CONDITION_FILE] <pane_id> [condition]" >&2
@@ -157,6 +160,24 @@ last_composer_line() {
   printf '%s' "$composer_line"
 }
 
+# Startup markers that mean the harness is not yet accepting submitted input.
+# "MCP startup incomplete" and "failed to start" are terminal warnings, not
+# in-progress markers, so they intentionally do not block readiness.
+harness_still_starting() {
+  local text="$1"
+  recent_text_contains "$text" "Starting MCP servers"
+}
+
+# Goal-armed confirmation vocabulary differs per harness:
+#   Codex shows "Pursuing goal"; Claude Code shows "/goal active" (also seen as
+#   "Goal active"). Accept the union — the pane's harness is not always known.
+confirmed_pursuing() {
+  local text="$1"
+  recent_text_contains "$text" "Pursuing goal" \
+    || recent_text_contains "$text" "/goal active" \
+    || recent_text_contains "$text" "Goal active"
+}
+
 if [[ -n "$condition_file" ]]; then
   if ((${#positionals[@]} != 1)); then
     echo "arm-goal: pass a condition with --file or as one quoted argument, not both" >&2
@@ -232,9 +253,27 @@ if [[ -n "$fatal_line" ]]; then
   fail_spawn "pane shows a fatal harness launch error" "$fatal_line"
 fi
 
-if [[ ! "$STATUS_TIMEOUT_MS" =~ ^[0-9]+$ || ! "$VERIFY_DELAY_SECONDS" =~ ^[0-9]+$ || ! "$VERIFY_TAIL_LINES" =~ ^[1-9][0-9]*$ ]]; then
-  fail_arm "ARM_STATUS_TIMEOUT_MS, ARM_VERIFY_DELAY_SECONDS, and ARM_VERIFY_TAIL_LINES must be non-negative integers (tail lines must be positive)"
+if [[ ! "$STATUS_TIMEOUT_MS" =~ ^[0-9]+$ || ! "$VERIFY_DELAY_SECONDS" =~ ^[0-9]+$ || ! "$VERIFY_TAIL_LINES" =~ ^[1-9][0-9]*$ \
+  || ! "$READINESS_TIMEOUT_SECONDS" =~ ^[0-9]+$ || ! "$READINESS_POLL_SECONDS" =~ ^[1-9][0-9]*$ || ! "$SUBMIT_RETRIES" =~ ^[0-9]+$ ]]; then
+  fail_arm "ARM_STATUS_TIMEOUT_MS, ARM_VERIFY_DELAY_SECONDS, ARM_VERIFY_TAIL_LINES, ARM_READINESS_TIMEOUT_SECONDS, ARM_READINESS_POLL_SECONDS, and ARM_SUBMIT_RETRIES must be non-negative integers (tail lines and poll seconds must be positive)"
 fi
+
+# Readiness gate: typing into a harness that is still starting (e.g. Codex
+# "Starting MCP servers (…)") gets the trailing Enter swallowed — the goal
+# text then sits unsubmitted in the composer while the worker idles.
+readiness_waited=0
+while harness_still_starting "$pane_text"; do
+  if ((readiness_waited >= READINESS_TIMEOUT_SECONDS)); then
+    fail_spawn "pane harness still starting after ${READINESS_TIMEOUT_SECONDS}s" "$(last_nonempty_line "$pane_text")"
+  fi
+  sleep "$READINESS_POLL_SECONDS"
+  readiness_waited=$((readiness_waited + READINESS_POLL_SECONDS))
+  pane_text="$(herdr pane read "$pane_id" --source recent-unwrapped --lines 80 --format text 2>&1)"
+  pane_read_exit=$?
+  if ((pane_read_exit != 0)); then
+    fail_spawn "pane text could not be read during readiness wait (exit ${pane_read_exit})" "$(last_nonempty_line "$pane_text")"
+  fi
+done
 
 # A stale composer can prefix the slash command and leave the combined text
 # unsubmitted. Move to the end and clear the complete composer before typing.
@@ -254,6 +293,27 @@ enter_exit=$?
 if ((enter_exit != 0)); then
   fail_arm "sending Enter after /goal failed with exit ${enter_exit}" "$(last_nonempty_line "$enter_output")"
 fi
+
+# Submission verification: if the composer still holds the /goal text the
+# Enter was swallowed (seen live when a harness finished startup between the
+# readiness read and the send). Re-press Enter a bounded number of times.
+submit_attempt=0
+while :; do
+  sleep 1
+  submit_text="$(herdr pane read "$pane_id" --source recent-unwrapped --lines 80 --format text 2>&1)" || submit_text=""
+  submit_composer="$(last_composer_line "$submit_text")"
+  [[ "$submit_composer" == *"/goal "* ]] || break
+  if ((submit_attempt >= SUBMIT_RETRIES)); then
+    fail_arm "the /goal command remains in the pane composer after ${SUBMIT_RETRIES} Enter retries" "$submit_composer"
+  fi
+  submit_attempt=$((submit_attempt + 1))
+  echo "arm-goal: /goal still in composer; re-pressing Enter (attempt ${submit_attempt}/${SUBMIT_RETRIES})" >&2
+  enter_output="$(herdr pane send-keys "$pane_id" Enter 2>&1)"
+  enter_exit=$?
+  if ((enter_exit != 0)); then
+    fail_arm "re-pressing Enter failed with exit ${enter_exit}" "$(last_nonempty_line "$enter_output")"
+  fi
+done
 
 working_output="$(herdr wait agent-status "$pane_id" --status working --timeout "$STATUS_TIMEOUT_MS" 2>&1)"
 working_exit=$?
@@ -288,7 +348,7 @@ if recent_text_contains "$verify_text" "Replace current goal?"; then
   fi
 fi
 
-if ! recent_text_contains "$verify_text" "Pursuing goal"; then
+if ! confirmed_pursuing "$verify_text"; then
   fail_arm "goal arm could not be confirmed as pursuing" "$(last_nonempty_line "$verify_text")"
 fi
 composer_line="$(last_composer_line "$verify_text")"
