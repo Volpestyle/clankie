@@ -29,30 +29,33 @@ A pane-hosted run may keep transport receipts under `${CLANKIE_HERDR_RUN_ROOT:-$
 
 ```text
 manifest.json
+preflight.json
 workers/<slug>/prompt.md
 workers/<slug>/result.md
 workers/<slug>/DONE
 workers/<slug>/BLOCKED
+workers/<slug>/SPAWN_FAILED
+workers/<slug>/ARM_FAILED
 ```
 
 `manifest.json` records what was spawned: durable worker name, task and worker-run identities, cwd, harness, command vocabulary, and timestamps. It does not replace the tracker DAG or event store. Store pane IDs only as diagnostic spawn-time metadata because they are session-local and may compact.
 
+Before the first implementation spawn, run `references/preflight-base.sh --receipt-dir <run-dir> <base-sha>`. It creates a clean detached worktree, installs, and records the required base gates in `preflight.json`. A red receipt stops the wave until the base is fixed or rebased; an exception must be explicit, justified, and recorded in `manifest.json`.
+
 ## Goal arming
 
-Wait until a pane-hosted harness is ready, apply supported `/model` and `/effort` configuration, then submit:
+For every pane-hosted worker the mandatory sequence is **spawn → preflight → arm → verify-arm**. Wait until the harness is ready, apply supported `/model` and `/effort` configuration, then run:
 
-```text
-/goal <bounded objective>; done when <success criteria and evidence>
+```bash
+references/arm-goal.sh --receipt-dir <worker-receipt-dir> <pane-id> \
+  "Read and complete <worker-receipt-dir>/prompt.md exactly as written. Done when <worker-receipt-dir>/result.md exists and either <worker-receipt-dir>/DONE or <worker-receipt-dir>/BLOCKED exists."
 ```
 
-Arming may happen at the spawn seam or immediately afterward through the same pane command a human uses. Record whether the goal was armed, unsupported, or failed. Unsupported harnesses keep their normal task loop; never emulate `/goal` with a hidden captain-only API. Adapter-hosted workers receive the equivalent task lifecycle through their typed adapter.
+The standard condition is one short line pointing to `prompt.md` and checking both `DONE` and `BLOCKED`; keep all criteria in the brief. The script rejects conditions over 4000 characters before any pane lookup or send and warns on a non-standard condition (`--file` reads the condition from a file). It preflights pane existence, a reporting interactive harness, and fatal launch text; clears the composer with `ctrl+e`, `ctrl+u`; sends `/goal` through `herdr pane send-text` plus Enter; waits for `working`; deliberately confirms `Replace current goal?`; and requires both no retained `/goal` text in the active composer and the `Pursuing goal` status. The pursuing-state check is authoritative for this seam because harness builds may not support every expected slash command.
 
-Verify EVERY send, not just the first arm. Re-arming a pane that already completed a
-goal can raise a "Replace current goal?" confirmation that silently swallows the new
-goal until someone presses Enter — read the pane a few seconds after each send and
-confirm the status shows the goal pursuing. A pane showing `Goal blocked` with a
-provider capacity error resumes with `/goal resume`; treat capacity blocks as
-transient and retry before switching models.
+Spawn failures write `SPAWN_FAILED` with the pane and observed error line. Lint, send, wait, confirmation, and verification failures write `ARM_FAILED`. Treat either as a loud lead-visible failure: reconcile it into the mission event stream immediately rather than leaving an idle lane. Arming may happen at the spawn seam or immediately afterward through the same pane command a human uses. Unsupported harnesses keep their normal task loop; never emulate `/goal` with a hidden captain-only API. Adapter-hosted workers receive the equivalent task lifecycle through their typed adapter.
+
+Verify EVERY send, not just the first arm. A pane showing `Goal blocked` with a provider capacity error resumes with `/goal resume`; treat capacity blocks as transient and retry before switching models.
 
 ## Match the harness to the task; a burned session stays burned
 

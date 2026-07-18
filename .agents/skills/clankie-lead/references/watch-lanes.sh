@@ -25,7 +25,9 @@ pane_status() {
 for ((t=0; t<MAX_TICKS; t++)); do
   done_count=0
   for pair in "${pairs[@]}"; do
-    pane="${pair%%:*}"; dir="${pair#*:}"
+    # Pane ids contain a colon (for example w2:p6), so the lane separator is
+    # the final colon rather than the first one.
+    pane="${pair%:*}"; dir="${pair##*:}"
     if [[ -e "$dir/DONE" || -e "$dir/BLOCKED" ]]; then
       done_count=$((done_count+1)); continue
     fi
