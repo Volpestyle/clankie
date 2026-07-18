@@ -1,10 +1,10 @@
-# Lead-agent evaluation: self-build-heterogeneous-36c8eb59
+# Lead-agent evaluation: self-build-heterogeneous-600c0a83
 
 **Result:** PASS  
 **Score:** 100.0%  
 **Threshold:** 85%  
-**Doctrine hash:** `ca068b809a88c8e3`<br>
-**Generated:** 2026-07-18T19:16:27.882Z
+**Doctrine hash:** `4835cb125d1c352d`<br>
+**Generated:** 2026-07-18T22:14:54.520Z
 
 The run demonstrates the lead-agent thesis under the tested failure and governance conditions.
 

@@ -1,8 +1,8 @@
 {
   "version": "1",
   "experimentId": "lead-vs-single-v1",
-  "generatedAt": "2026-07-17T16:53:16.819Z",
-  "doctrineHash": "ca068b809a88c8e3",
+  "generatedAt": "2026-07-18T22:14:51.630Z",
+  "doctrineHash": "4835cb125d1c352d",
   "scenario": {
     "id": "injected-retry-defect",
     "fixture": "fixtures/self-build-target/template"
@@ -27,8 +27,8 @@
       "report": {
         "version": "1",
         "missionId": "baseline-05ee39e601c9",
-        "doctrineHash": "ca068b809a88c8e3",
-        "generatedAt": "2026-07-17T16:53:16.819Z",
+        "doctrineHash": "4835cb125d1c352d",
+        "generatedAt": "2026-07-18T22:14:51.630Z",
         "overallScore": 0.12,
         "passed": false,
         "threshold": 0.85,
@@ -147,12 +147,12 @@
       "repetitions": [
         {
           "seed": "lead-vs-single-v1:injected-retry-defect:0001",
-          "doctrineHash": "ca068b809a88c8e3",
+          "doctrineHash": "4835cb125d1c352d",
           "report": {
             "version": "1",
             "missionId": "baseline-05ee39e601c9",
-            "doctrineHash": "ca068b809a88c8e3",
-            "generatedAt": "2026-07-17T16:53:16.819Z",
+            "doctrineHash": "4835cb125d1c352d",
+            "generatedAt": "2026-07-18T22:14:51.630Z",
             "overallScore": 0.12,
             "passed": false,
             "threshold": 0.85,
@@ -276,12 +276,12 @@
         },
         {
           "seed": "lead-vs-single-v1:injected-retry-defect:0002",
-          "doctrineHash": "ca068b809a88c8e3",
+          "doctrineHash": "4835cb125d1c352d",
           "report": {
             "version": "1",
             "missionId": "baseline-e4cfe5817fe1",
-            "doctrineHash": "ca068b809a88c8e3",
-            "generatedAt": "2026-07-17T16:53:16.819Z",
+            "doctrineHash": "4835cb125d1c352d",
+            "generatedAt": "2026-07-18T22:14:51.630Z",
             "overallScore": 0.12,
             "passed": false,
             "threshold": 0.85,
@@ -434,8 +434,8 @@
       "report": {
         "version": "1",
         "missionId": "self-build-homogeneous-05ee39e601c9",
-        "doctrineHash": "ca068b809a88c8e3",
-        "generatedAt": "2026-07-17T16:53:16.819Z",
+        "doctrineHash": "4835cb125d1c352d",
+        "generatedAt": "2026-07-18T22:14:51.630Z",
         "overallScore": 1,
         "passed": true,
         "threshold": 0.85,
@@ -530,12 +530,12 @@
       "repetitions": [
         {
           "seed": "lead-vs-single-v1:injected-retry-defect:0001",
-          "doctrineHash": "ca068b809a88c8e3",
+          "doctrineHash": "4835cb125d1c352d",
           "report": {
             "version": "1",
             "missionId": "self-build-homogeneous-05ee39e601c9",
-            "doctrineHash": "ca068b809a88c8e3",
-            "generatedAt": "2026-07-17T16:53:16.819Z",
+            "doctrineHash": "4835cb125d1c352d",
+            "generatedAt": "2026-07-18T22:14:51.630Z",
             "overallScore": 1,
             "passed": true,
             "threshold": 0.85,
@@ -636,12 +636,12 @@
         },
         {
           "seed": "lead-vs-single-v1:injected-retry-defect:0002",
-          "doctrineHash": "ca068b809a88c8e3",
+          "doctrineHash": "4835cb125d1c352d",
           "report": {
             "version": "1",
             "missionId": "self-build-homogeneous-e4cfe5817fe1",
-            "doctrineHash": "ca068b809a88c8e3",
-            "generatedAt": "2026-07-17T16:53:16.819Z",
+            "doctrineHash": "4835cb125d1c352d",
+            "generatedAt": "2026-07-18T22:14:51.630Z",
             "overallScore": 1,
             "passed": true,
             "threshold": 0.85,
@@ -764,8 +764,8 @@
       "report": {
         "version": "1",
         "missionId": "self-build-heterogeneous-05ee39e601c9",
-        "doctrineHash": "ca068b809a88c8e3",
-        "generatedAt": "2026-07-17T16:53:16.819Z",
+        "doctrineHash": "4835cb125d1c352d",
+        "generatedAt": "2026-07-18T22:14:51.630Z",
         "overallScore": 1,
         "passed": true,
         "threshold": 0.85,
@@ -860,12 +860,12 @@
       "repetitions": [
         {
           "seed": "lead-vs-single-v1:injected-retry-defect:0001",
-          "doctrineHash": "ca068b809a88c8e3",
+          "doctrineHash": "4835cb125d1c352d",
           "report": {
             "version": "1",
             "missionId": "self-build-heterogeneous-05ee39e601c9",
-            "doctrineHash": "ca068b809a88c8e3",
-            "generatedAt": "2026-07-17T16:53:16.819Z",
+            "doctrineHash": "4835cb125d1c352d",
+            "generatedAt": "2026-07-18T22:14:51.630Z",
             "overallScore": 1,
             "passed": true,
             "threshold": 0.85,
@@ -969,12 +969,12 @@
         },
         {
           "seed": "lead-vs-single-v1:injected-retry-defect:0002",
-          "doctrineHash": "ca068b809a88c8e3",
+          "doctrineHash": "4835cb125d1c352d",
           "report": {
             "version": "1",
             "missionId": "self-build-heterogeneous-e4cfe5817fe1",
-            "doctrineHash": "ca068b809a88c8e3",
-            "generatedAt": "2026-07-17T16:53:16.819Z",
+            "doctrineHash": "4835cb125d1c352d",
+            "generatedAt": "2026-07-18T22:14:51.630Z",
             "overallScore": 1,
             "passed": true,
             "threshold": 0.85,
@@ -1100,8 +1100,8 @@
       "report": {
         "version": "1",
         "missionId": "self-build-self-review-05ee39e601c9",
-        "doctrineHash": "ca068b809a88c8e3",
-        "generatedAt": "2026-07-17T16:53:16.819Z",
+        "doctrineHash": "4835cb125d1c352d",
+        "generatedAt": "2026-07-18T22:14:51.630Z",
         "overallScore": 0.8800000000000001,
         "passed": false,
         "threshold": 0.85,
@@ -1202,12 +1202,12 @@
       "repetitions": [
         {
           "seed": "lead-vs-single-v1:injected-retry-defect:0001",
-          "doctrineHash": "ca068b809a88c8e3",
+          "doctrineHash": "4835cb125d1c352d",
           "report": {
             "version": "1",
             "missionId": "self-build-self-review-05ee39e601c9",
-            "doctrineHash": "ca068b809a88c8e3",
-            "generatedAt": "2026-07-17T16:53:16.819Z",
+            "doctrineHash": "4835cb125d1c352d",
+            "generatedAt": "2026-07-18T22:14:51.630Z",
             "overallScore": 0.8800000000000001,
             "passed": false,
             "threshold": 0.85,
@@ -1316,12 +1316,12 @@
         },
         {
           "seed": "lead-vs-single-v1:injected-retry-defect:0002",
-          "doctrineHash": "ca068b809a88c8e3",
+          "doctrineHash": "4835cb125d1c352d",
           "report": {
             "version": "1",
             "missionId": "self-build-self-review-e4cfe5817fe1",
-            "doctrineHash": "ca068b809a88c8e3",
-            "generatedAt": "2026-07-17T16:53:16.819Z",
+            "doctrineHash": "4835cb125d1c352d",
+            "generatedAt": "2026-07-18T22:14:51.630Z",
             "overallScore": 0.8800000000000001,
             "passed": false,
             "threshold": 0.85,
