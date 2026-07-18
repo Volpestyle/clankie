@@ -194,7 +194,9 @@ if ((install_exit != 0)); then
 fi
 
 gate_failed=0
-for gate in typecheck test arch:check; do
+# fmt:check/lint/docs:check are cheap and CI's `pnpm check` runs them first —
+# a wave that skips them can land a CI-red main on formatting alone (seen 2026-07-18).
+for gate in fmt:check lint docs:check typecheck test arch:check; do
   echo "preflight-base: running pnpm $gate"
   (
     cd "$worktree" || exit 1
