@@ -2,6 +2,7 @@ import type { DomainEvent, MissionPlan } from "@clankie/protocol";
 import { describe, expect, it } from "vitest";
 import {
   LinearTrackerClient,
+  TRACKER_AUTHORITY_ROLES,
   TrackerAuthorityConflictError,
   TrackerMirror,
   TrackerPolicyError,
@@ -167,6 +168,25 @@ describe("tracker authority mirror", () => {
       TrackerAuthorityConflictError,
     );
     expect(() => mirror.validatePlan(plan(["Weakened criterion"]))).toThrow(/acceptance_criteria/u);
+  });
+
+  it("imports tracker-authoritative priority and reports priority-only drift", async () => {
+    expect(TRACKER_AUTHORITY_ROLES).toContain("priority");
+    const linear = new RecordedLinearClient();
+    const mirror = new TrackerMirror(new LinearTrackerClient(linear), new RecordedPolicy());
+
+    const contract = await mirror.importMission("mission-1", ref);
+    expect(contract.source.priority).toEqual({ value: 2, label: "High" });
+
+    linear.issue.priority = 1;
+    linear.issue.priorityLabel = "Urgent";
+    linear.issue.updatedAt = "2026-07-11T21:00:00.000Z";
+
+    expect(await mirror.reconcile("mission-1")).toMatchObject({
+      changedFields: ["priority"],
+      baseline: { priority: { value: 2, label: "High" } },
+      upstream: { priority: { value: 1, label: "Urgent" } },
+    });
   });
 
   it("reports mid-mission authoritative drift without replacing the baseline", async () => {

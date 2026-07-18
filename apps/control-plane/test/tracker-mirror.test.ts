@@ -228,6 +228,7 @@ async function trackerDoctrine() {
       authority: {
         ...base.authority,
         product_intent: { kind: "connector", connector: "linear" },
+        priority: { kind: "connector", connector: "linear" },
         acceptance_criteria: { kind: "connector", connector: "linear" },
       },
     },

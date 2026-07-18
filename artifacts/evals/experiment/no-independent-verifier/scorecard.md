@@ -3,8 +3,8 @@
 **Result:** FAIL  
 **Score:** 88.0%  
 **Threshold:** 85%  
-**Doctrine hash:** `ca068b809a88c8e3`<br>
-**Generated:** 2026-07-17T16:53:16.819Z
+**Doctrine hash:** `4835cb125d1c352d`<br>
+**Generated:** 2026-07-18T22:14:51.630Z
 
 The run does not yet demonstrate the lead-agent thesis; inspect critical failures before expanding scope.
 
