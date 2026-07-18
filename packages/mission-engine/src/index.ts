@@ -1220,12 +1220,11 @@ export class MissionEngine {
         exitCode: event.data.exitCode,
         outputArtifact: event.data.outputArtifact,
       };
-      const existingEvidence = runtime?.spec.metadata[FAILURE_EVIDENCE_METADATA_KEY];
-      const evidence = isFailureEvidence(existingEvidence)
-        ? existingEvidence
-        : isFailureEvidence(eventEvidence)
-          ? eventEvidence
-          : undefined;
+      // Evidence derives only from the binding event's own validated payload
+      // (VUH-897). Preferring pre-existing shape-valid metadata from a replayed
+      // task.added would let a malformed binding launder forged metadata into
+      // the trusted set that rejectUntrustedDebuggerMetadata skips.
+      const evidence = isFailureEvidence(eventEvidence) ? eventEvidence : undefined;
       if (runtime && evidence) {
         runtime.spec = {
           ...runtime.spec,
