@@ -1,6 +1,7 @@
 # Plan review checklist
 
 - Goal and success criteria are observable.
+- The base-health preflight gates every implementation wave, or the run manifest carries an explicit justified exception.
 - Every task has one operational role, at least one success criterion, and non-empty evidence requirements.
 - Dependencies exist and form no cycle.
 - Writer scopes do not overlap in parallel.

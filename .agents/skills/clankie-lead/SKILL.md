@@ -21,15 +21,16 @@ This protocol is adapted from the pinned v1 `clankie-lead` snapshot `04734df9`. 
 
 ## Dispatch through operator parity
 
-1. Create the worker assignment in the mission engine before starting a process or pane. Record the mission, task, worker-run, correlation, doctrine, and profile identities.
-2. Give the worker a bounded brief containing objective, authoritative context, role, dependencies, write/read scope, success criteria, evidence, verification commands, budget, and stop conditions. Point tracker-capable workers at the issue and full comment thread instead of copying stale product context.
-3. During scaffolding, pane-hosted workers run in Herdr. Spawn them with `herdr pane split` + `herdr pane run` (or the Clanky spawn surface when available), confirm identity with `herdr pane list`, and wait on completion with `clanky watch` / `herdr wait` rather than polling pane text. Never substitute a harness's built-in delegation backend (for example Codex cloud agents) for mission workers: those runs are invisible to the pane transport, mission accounting, and the harvest contracts in this protocol, and a lead waiting on them starves.
-4. For a pane-hosted harness, use the pane's normal operator commands:
+1. Before spawning an implementation wave, run `references/preflight-base.sh --receipt-dir <run-receipt-dir> <base-sha>`. It installs and runs `pnpm typecheck`, `pnpm test`, and `pnpm arch:check` in a clean detached worktree. A red base is fix-or-rebase first; dispatch only on green or when an explicit exception and its rationale are recorded in the run manifest.
+2. Create the worker assignment in the mission engine before starting a process or pane. Record the mission, task, worker-run, correlation, doctrine, and profile identities.
+3. Give the worker a bounded brief containing objective, authoritative context, role, dependencies, write/read scope, success criteria, evidence, verification commands, budget, and stop conditions. Point tracker-capable workers at the issue and full comment thread instead of copying stale product context.
+4. During scaffolding, pane-hosted workers run in Herdr. Spawn them with `herdr pane split` + `herdr pane run` (or the Clanky spawn surface when available), confirm identity with `herdr pane list`, and wait on completion with `clanky watch` / `herdr wait` rather than polling pane text. Never substitute a harness's built-in delegation backend (for example Codex cloud agents) for mission workers: those runs are invisible to the pane transport, mission accounting, and the harvest contracts in this protocol, and a lead waiting on them starves.
+5. For a pane-hosted harness, use the pane's normal operator commands:
    - `/model <model>` and `/effort <level>` for supported configuration;
    - plain steering text for bounded course corrections;
-   - `/goal <task and definition of done>` at spawn readiness or immediately after spawn to arm the native completion loop. Goal conditions are hard-capped at 4000 characters: keep the condition a short pointer (prompt path + DONE/BLOCKED sentinel check) with the full criteria in the worker's `prompt.md`. Verify the arm succeeded — a rejected arm leaves the worker silently idle with no completion signal, and every send (goal or steering) is delivered only when the pane's status flips to `working`.
-5. For an adapter-hosted worker, use the same vocabulary through its typed protocol mapping. The mission task lifecycle is its `/goal` equivalent; do not inject terminal commands into a protocol-native session.
-6. Attribute every captain input. A human control lease pauses automated captain input.
+   - `/goal <task and definition of done>` at spawn readiness or immediately after spawn to arm the native completion loop. Use `references/arm-goal.sh` so spawn preflight, the 4000-character compose-time lint, confirmation handling, and pursuing-state verification all fail loudly into the worker receipt directory.
+6. For an adapter-hosted worker, use the same vocabulary through its typed protocol mapping. The mission task lifecycle is its `/goal` equivalent; do not inject terminal commands into a protocol-native session.
+7. Attribute every captain input. A human control lease pauses automated captain input.
 
 Operator parity covers configuration and steering only. Never send approval answers, credentials, policy overrides, merge commands, deployment permission, or other privileged decisions into a worker pane. Request privileged action through policy and wait for an authenticated human approval surface.
 
