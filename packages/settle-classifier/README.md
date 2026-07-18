@@ -29,7 +29,22 @@ Any rendered change or raw output-sequence change resets settle detection, so er
 
 ## Local semantic boundary
 
-The injected `LocalPaneClassifier` must declare `locality: "local"` and run in-process or through a loopback-only local-model transport. This package has no network client and never sends pane content anywhere itself. It normalizes terminal control sequences and passes at most the last 60 lines to `classify`; the cache retains only SHA-256 signatures and status results, not pane text.
+The injected `LocalPaneClassifier` must declare `locality: "local"` and run in-process or through a loopback-only local-model transport. `OllamaLocalPaneClassifier` is the concrete transport: it accepts only credential-free `http://127.0.0.1` or `http://localhost` origins, rejects redirects and explicit Ollama cloud model tags, and sends the normalized tail to the local `/api/chat` endpoint with structured output, temperature `0`, and seed `0`. It passes at most the last 60 lines to `classify`; the cache retains only SHA-256 signatures and status results, not pane text.
+
+Model selection uses the existing layered `clankie.json` surface from `@clankie/model-provider` and needs no credential entry:
+
+```json
+{
+  "settle_classifier_model": "ollama/qwen3:8b",
+  "provider": {
+    "ollama": {
+      "options": { "baseURL": "http://127.0.0.1:11434/v1" }
+    }
+  }
+}
+```
+
+`createConfiguredOllamaPaneClassifier(config)` reads that narrow projection. The base URL defaults to `http://127.0.0.1:11434`; an existing OpenAI-compatible `/v1` suffix is accepted and normalized to Ollama's local API origin. Unit tests inject `fetch` at this boundary, so the standard test suite performs no network I/O.
 
 The classifier returns `finished`, `awaiting_input_required`, `finished_with_offer`, or `errored`. A closing offer is complete work and maps to `idle`; only a required answer maps to `waiting_user` and carries a one-line `questionSummary`. `errored` maps to a low-authority `failed` proposal.
 

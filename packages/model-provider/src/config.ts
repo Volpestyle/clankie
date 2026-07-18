@@ -77,6 +77,8 @@ export const ClankieConfigSchema = z
     small_model: z.string().optional(),
     /** Voice pipeline model, as a "providerId/modelId" ref. */
     voice_model: z.string().optional(),
+    /** Loopback-only local model used for settled terminal-tail classification. */
+    settle_classifier_model: z.string().optional(),
     /** Selected variant per model ref, e.g. { "anthropic/claude-opus-4-5": "think-16k" }. */
     variant: z.record(z.string(), z.string()).optional(),
     /** When non-empty, ONLY these providers are enabled. */

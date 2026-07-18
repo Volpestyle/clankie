@@ -99,7 +99,7 @@ export function resolveProviders(input: ResolveProvidersInput): ResolvedProvider
 // Role resolution — which concrete model a configured role points at.
 // ---------------------------------------------------------------------------
 
-export type ModelRole = "model" | "small_model" | "voice_model";
+export type ModelRole = "model" | "small_model" | "voice_model" | "settle_classifier_model";
 
 export interface ResolvedRole {
   providerId: string;
