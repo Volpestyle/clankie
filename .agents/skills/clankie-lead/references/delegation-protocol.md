@@ -111,3 +111,7 @@ After captain restart:
 ## Cleanup authority
 
 Cleanup is permitted only for workers created by the current captain or recorded in the run being harvested. A task completion does not automatically end a warm worker's lifecycle. Before retirement, confirm that evidence is harvested, verification and tracker reconciliation are complete, no question remains, and the ownership ledger has no next assignment. Preserve run receipts when doctrine or an unresolved failure requires later audit.
+
+## Cross-repo pnpm workspaces poison shared links (clankie-app ⇄ clankie-v2)
+
+The clankie-app workspace lists `../clankie-v2/packages/*` as members, so its globs only resolve from a checkout sitting directly beside `clankie-v2` — and **every `pnpm install` there re-points the shared monorepo packages' `node_modules` at the installing workspace** (last install wins). An install run inside a temporary clankie-app worktree that is later removed leaves those links dangling and breaks the monorepo (`clankie` CLI dies with `ERR_MODULE_NOT_FOUND: zod` from `packages/protocol`), and a plain or `--force` reinstall at the monorepo root fast-paths without repairing them. After removing any clankie-app worktree that ran an install, restore ownership explicitly: delete the shared packages' `node_modules` (`protocol`, `terminal-protocol`, `garden-model`, `interactive-environment`, `api-client`) and re-run `pnpm install` at the monorepo root.
