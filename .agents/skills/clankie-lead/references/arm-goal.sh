@@ -238,17 +238,24 @@ if ((pane_read_exit != 0)); then
   fail_spawn "pane text could not be read (exit ${pane_read_exit})" "$(last_nonempty_line "$pane_text")"
 fi
 
-fatal_line=""
-shopt -s nocasematch
-while IFS= read -r line; do
-  if [[ "$line" =~ the[[:space:]]+operator[[:space:]]+console[[:space:]]+requires[[:space:]]+a[[:space:]]+TTY ]] \
-    || [[ "$line" =~ command[[:space:]]+not[[:space:]]+found:[[:space:]]*(clankie|codex|claude|pi) ]] \
-    || [[ "$line" =~ (clankie|codex|claude|pi).*(stdin|terminal).*(not[[:space:]]+a[[:space:]]+tty|requires[[:space:]]+a[[:space:]]+tty) ]]; then
-    fatal_line="$line"
-    break
-  fi
-done <<<"$pane_text"
-shopt -u nocasematch
+fatal_launch_line() {
+  local text="$1"
+  local line
+  local found=""
+  shopt -s nocasematch
+  while IFS= read -r line; do
+    if [[ "$line" =~ the[[:space:]]+operator[[:space:]]+console[[:space:]]+requires[[:space:]]+a[[:space:]]+TTY ]] \
+      || [[ "$line" =~ command[[:space:]]+not[[:space:]]+found:[[:space:]]*(clankie|codex|claude|pi) ]] \
+      || [[ "$line" =~ (clankie|codex|claude|pi).*(stdin|terminal).*(not[[:space:]]+a[[:space:]]+tty|requires[[:space:]]+a[[:space:]]+tty) ]]; then
+      found="$line"
+      break
+    fi
+  done <<<"$text"
+  shopt -u nocasematch
+  printf '%s' "$found"
+}
+
+fatal_line="$(fatal_launch_line "$pane_text")"
 if [[ -n "$fatal_line" ]]; then
   fail_spawn "pane shows a fatal harness launch error" "$fatal_line"
 fi
@@ -272,6 +279,13 @@ while harness_still_starting "$pane_text"; do
   pane_read_exit=$?
   if ((pane_read_exit != 0)); then
     fail_spawn "pane text could not be read during readiness wait (exit ${pane_read_exit})" "$(last_nonempty_line "$pane_text")"
+  fi
+  # A harness can die mid-startup; every refreshed read passes through the
+  # same fatal-launch classifier as the initial read, or a dead pane would
+  # receive input and stale pursuing text could mint a false ARMED.
+  fatal_line="$(fatal_launch_line "$pane_text")"
+  if [[ -n "$fatal_line" ]]; then
+    fail_spawn "pane shows a fatal harness launch error" "$fatal_line"
   fi
 done
 
