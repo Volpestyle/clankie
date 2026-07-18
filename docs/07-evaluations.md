@@ -51,6 +51,24 @@ Credential-free CI runs the captain discovery test and lists the eval definition
 - scenario version and fixture hash are recorded in every report.
 - prompts, doctrine, and system versions are immutable within a comparison run.
 
+The holdout suite is a separate private repository whose root mirrors the public
+`evals/scenarios/`, `evals/hidden-checks/`, and `fixtures/` layout. Mount a local checkout without
+copying it into this repository:
+
+```bash
+scripts/holdout-mount.sh /Users/james/dev/clankie-evals-holdout
+```
+
+The same command accepts the private Git URL in CI and clones it into the ignored mount point. It
+refuses a tracked mount, validates at least two manifests and their referenced specs, fixtures, and
+hidden checks, and is safe to rerun against the same source.
+
+Run two repetitions against the mounted suite with
+`pnpm eval:experiment -- --scenario-root evals/holdout --repetitions=2`. The root-owned
+`aggregates.json` pins its scenario aggregates, and the explicitly holdout-marked local report lands
+at `artifacts/evals/holdout/lead-vs-single-report.json` without replacing committed visible-suite
+scorecards.
+
 ## Anti-gaming rules
 
 - implementer cannot edit evaluator or hidden test;

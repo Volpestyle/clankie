@@ -1,0 +1,6 @@
+Holdout execution is blocked because the experiment/scenario runner has no scenario-root or
+scenario-directory input and resolves manifests, fixtures, and hidden checks from a compile-time
+monorepo root. The smallest required seam is a path-contained `--scenario-root evals/holdout` input
+that reuses existing executor IDs and records the selected scenario version and computed fixture
+hash in the report. The private suite, safe mount, documentation, hashes, commits, and three required
+green gates are delivered; runner/evaluator code remains untouched per the hard write scope.

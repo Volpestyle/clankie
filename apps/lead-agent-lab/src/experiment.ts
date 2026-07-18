@@ -9,6 +9,7 @@ import { runSingleAgentBaseline } from "./baseline.ts";
 import { runSelfBuildLab, SELF_BUILD_SCENARIO, repoRoot, type SimulatedLeadArm } from "./lab.ts";
 import {
   buildInjectedScenarioComparison,
+  loadRuntimeScenarioSuiteRoot,
   runRuntimeScenarioSuite,
   writeScenarioArtifacts,
   type InjectedScenarioRepetitionInput,
@@ -100,6 +101,11 @@ export interface ExperimentComparisonReport {
     perCriterion: CriterionDelta[];
   };
   scenarioReports: ScenarioComparisonReport[];
+  scenarioSuite?: {
+    holdout: true;
+    scenarioRoot: string;
+    aggregatesManifest: { path: "aggregates.json"; sha256: string };
+  };
   scenariosDeclaredButUnimplemented: string[];
   promotion: Record<string, unknown> & { note: string };
 }
@@ -109,6 +115,7 @@ export interface RunExperimentOptions {
   generatedAt?: string;
   repetitions?: number;
   seeds?: string[];
+  scenarioRoot?: string;
 }
 
 export interface ExperimentRun {
@@ -327,6 +334,8 @@ function executedOutcome(id: ExecutedArmId, role: string, runs: readonly Execute
 export async function runExperiment(options: RunExperimentOptions = {}): Promise<ExperimentRun> {
   const specPath = join(repoRoot, "evals/experiments/lead-vs-single.yaml");
   const spec = parseYaml(await readFile(specPath, "utf8")) as ExperimentSpec;
+  const runtimeSuite =
+    options.scenarioRoot === undefined ? undefined : await loadRuntimeScenarioSuiteRoot(options.scenarioRoot);
   const generatedAt = options.generatedAt ?? new Date().toISOString();
   const seeds = resolveSeeds(spec, options);
   const executedRuns: ExecutedArmRun[] = [];
@@ -352,10 +361,12 @@ export async function runExperiment(options: RunExperimentOptions = {}): Promise
       },
     };
   });
-  const scenarioReports = [
-    await buildInjectedScenarioComparison(injectedInputs),
-    ...(await runRuntimeScenarioSuite(seeds, generatedAt)),
-  ];
+  const scenarioReports = runtimeSuite
+    ? await runRuntimeScenarioSuite(seeds, generatedAt, runtimeSuite)
+    : [
+        await buildInjectedScenarioComparison(injectedInputs),
+        ...(await runRuntimeScenarioSuite(seeds, generatedAt)),
+      ];
 
   const doctrineHash = assertComparableDoctrineHashes(executedRuns);
   const runsByArm = new Map<ExecutedArmId, ExecutedArmRun[]>();
@@ -420,6 +431,7 @@ export async function runExperiment(options: RunExperimentOptions = {}): Promise
           : `${seeds.length} distinct repetitions; spec declares repetitions=${spec.repetitions}.`,
     },
     evaluator: { digestSha256: await evaluatorDigest(), threshold: treatmentReports[0]!.threshold },
+    ...(runtimeSuite ? { scenarioSuite: runtimeSuite.report } : {}),
     arms,
     comparison: {
       baselineArm: "single-worker",
@@ -550,11 +562,15 @@ export function comparisonToMarkdown(report: ExperimentComparisonReport): string
         `| ${scenario.scenario.id} | \`${scenario.scenario.fixtureSha256}\` | ${scenario.comparison.baselinePassed ? "PASS" : "FAIL"} | ${scenario.comparison.treatmentPassed ? "PASS" : "FAIL"} | ${scenario.comparison.designedFailureDetected ? "YES" : "NO"} |`,
     )
     .join("\n");
+  const scenarioSuiteLine = report.scenarioSuite
+    ? `**Scenario suite:** holdout root \`${report.scenarioSuite.scenarioRoot}\` (aggregate manifest \`${report.scenarioSuite.aggregatesManifest.sha256}\`)  \n`
+    : "";
   return (
     `# Experiment comparison: ${report.experimentId}\n\n` +
     `**Scenario:** ${report.scenario.id} (fixture \`${report.scenario.fixture}\`)  \n` +
     `**Doctrine hash:** \`${report.doctrineHash}\`  \n` +
     `**Evaluator digest (sha256):** \`${report.evaluator.digestSha256}\` · threshold ${(report.evaluator.threshold * 100).toFixed(0)}%  \n` +
+    scenarioSuiteLine +
     `**Seeds (${report.seed.count}):** ${report.seed.values.map((seed) => `\`${seed}\``).join(", ")}  \n` +
     `**Generated:** ${report.generatedAt}\n\n` +
     `## Verdict\n\n` +

@@ -33,6 +33,11 @@ export interface ScenarioIdentity {
   forbiddenActions: string[];
   budget: { maxWorkerRuns: number; maxEvents: number; timeoutMs: number };
   rubric: Array<{ id: string; critical: boolean }>;
+  suite?: {
+    holdout: true;
+    scenarioRoot: string;
+    aggregatesManifest: { path: "aggregates.json"; sha256: string };
+  };
 }
 
 export interface ScenarioCheckResult {
@@ -148,6 +153,10 @@ export async function runHiddenCheck(
   identity: ScenarioIdentity,
   armId: ScenarioArmId,
   rawEvidence: Record<string, unknown>,
+  source: { root: string; hiddenCheckPath: string } = {
+    root: scenarioSuiteRepoRoot,
+    hiddenCheckPath: join(scenarioSuiteRepoRoot, identity.hiddenCheck.path),
+  },
 ): Promise<HiddenCheckResult> {
   const privateRoot = await mkdtemp(join(tmpdir(), `clankie-hidden-check-${identity.id}-`));
   const inputPath = join(privateRoot, "input.json");
@@ -156,15 +165,11 @@ export async function runHiddenCheck(
       encoding: "utf8",
       mode: 0o600,
     });
-    const result = await execFileAsync(
-      process.execPath,
-      [join(scenarioSuiteRepoRoot, identity.hiddenCheck.path), inputPath],
-      {
-        cwd: scenarioSuiteRepoRoot,
-        timeout: identity.budget.timeoutMs,
-        maxBuffer: 1024 * 1024,
-      },
-    );
+    const result = await execFileAsync(process.execPath, [source.hiddenCheckPath, inputPath], {
+      cwd: source.root,
+      timeout: identity.budget.timeoutMs,
+      maxBuffer: 1024 * 1024,
+    });
     const parsed = JSON.parse(result.stdout) as HiddenCheckResult;
     const expectedRubric = identity.rubric.map((entry) => entry.id).sort();
     const actualRubric = parsed.checks.map((entry) => entry.id).sort();
