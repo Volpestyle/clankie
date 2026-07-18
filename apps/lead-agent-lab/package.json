@@ -13,6 +13,7 @@
     "eval:experiment": "tsx src/experiment-cli.ts --write-artifacts",
     "eval:real-workers": "tsx src/real-workers-cli.ts",
     "eval:herdr-harness": "tsx src/herdr-harness-cli.ts",
+    "drill:approval-ceremony": "tsx scripts/approval-ceremony.mjs",
     "eval": "tsx src/index.ts --write-artifacts",
     "clean": "rm -rf dist coverage"
   },
