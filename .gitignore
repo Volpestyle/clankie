@@ -5,6 +5,7 @@ coverage/
 .data/
 # artifacts directories are generated; nested ones stay fully untracked.
 **/artifacts/
+/evals/holdout
 # VUH-826 ruling: gate scorecards are committed under the root artifacts/evals/.
 !/artifacts/
 /artifacts/*
