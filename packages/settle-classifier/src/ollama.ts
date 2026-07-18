@@ -96,6 +96,7 @@ export class OllamaLocalPaneClassifier implements LocalPaneClassifier {
           },
         ],
         stream: false,
+        think: false,
         format: OLLAMA_RESULT_SCHEMA,
         options: { temperature: 0, seed: DETERMINISTIC_SEED },
       }),

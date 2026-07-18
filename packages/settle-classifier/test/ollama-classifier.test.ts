@@ -104,6 +104,7 @@ describe("OllamaLocalPaneClassifier", () => {
       expect(call.body).toMatchObject({
         model: "local-fixture-model",
         stream: false,
+        think: false,
         options: { temperature: 0, seed: 0 },
         format: {
           properties: {
