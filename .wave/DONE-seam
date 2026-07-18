@@ -1,6 +1,0 @@
-VUH-826 holdout runner seam is complete. The path-contained `--scenario-root evals/holdout` run
-executes both private scenarios for two repetitions, records the exact holdout fixture and aggregate
-hashes plus a holdout/root/aggregate-manifest marker, preserves byte-identical visible reports when
-the flag is absent, fails closed on containment, structure, and aggregate errors, and passes all
-required gates. The local holdout report remains untracked at
-artifacts/evals/holdout/lead-vs-single-report.json.
