@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { FROZEN_REAL_WORKER_FIXTURE_SHA256 } from "./real-workers.ts";
 import { executePreexistingTestFailure } from "./scenarios/preexisting-test-failure.ts";
@@ -38,6 +38,46 @@ const FROZEN_RUNTIME_SCENARIO_AGGREGATES: Record<RuntimeScenarioId, string> = {
   "repository-prompt-injection": "d7c49f08bd2caefc794e6dc51514d0680ca3dd594ebdf0c85174509e147dceb9",
   "preexisting-test-failure": "410a39bd653c74535b864b0c9f045a68e955fd8a684b1b024e9bf5ca3cb98e0f",
 };
+
+export type ScenarioSuiteErrorCode =
+  | "scenario_root_escape"
+  | "scenario_root_missing"
+  | "scenario_path_escape"
+  | "scenario_structure_missing"
+  | "scenario_manifest_invalid"
+  | "scenario_aggregates_invalid"
+  | "scenario_aggregate_mismatch";
+
+export class ScenarioSuiteError extends Error {
+  override readonly name = "ScenarioSuiteError";
+  readonly code: ScenarioSuiteErrorCode;
+  readonly logicalPath: string;
+
+  constructor(code: ScenarioSuiteErrorCode, logicalPath: string, detail?: string) {
+    super(`${code}:${logicalPath}${detail ? `:${detail}` : ""}`);
+    this.code = code;
+    this.logicalPath = logicalPath;
+  }
+}
+
+export interface RuntimeScenarioSuiteReportIdentity {
+  holdout: true;
+  scenarioRoot: string;
+  aggregatesManifest: { path: "aggregates.json"; sha256: string };
+}
+
+export interface LoadedRuntimeScenarioSuite {
+  readonly root: string;
+  readonly scenarioIds: readonly RuntimeScenarioId[];
+  readonly expectedAggregates: Readonly<Partial<Record<RuntimeScenarioId, string>>>;
+  readonly report: RuntimeScenarioSuiteReportIdentity;
+}
+
+interface ExternalAggregateManifest {
+  schemaVersion: 1;
+  holdout: true;
+  aggregates: Partial<Record<RuntimeScenarioId, string>>;
+}
 
 interface ScenarioManifest {
   schemaVersion: "1";
@@ -135,16 +175,182 @@ function parseManifest(value: unknown, expectedId: RuntimeScenarioId): ScenarioM
   return manifest as ScenarioManifest;
 }
 
-async function manifestFor(id: RuntimeScenarioId): Promise<{ path: string; manifest: ScenarioManifest }> {
-  const path = `evals/scenarios/runtime/${id}.yaml`;
-  const value = parseYaml(await readFile(join(scenarioSuiteRepoRoot, path), "utf8"));
-  return { path, manifest: parseManifest(value, id) };
+function isContained(root: string, candidate: string): boolean {
+  const child = relative(root, candidate);
+  return child === "" || (!isAbsolute(child) && child !== ".." && !child.startsWith(`..${sep}`));
 }
 
-async function hashLogicalFiles(paths: readonly string[]): Promise<string> {
+function validateLogicalPath(logicalPath: string): void {
+  if (!logicalPath || logicalPath.includes("\0") || isAbsolute(logicalPath)) {
+    throw new ScenarioSuiteError("scenario_path_escape", logicalPath || "<empty>");
+  }
+  const candidate = resolve("/scenario-suite-root", logicalPath);
+  if (!isContained("/scenario-suite-root", candidate)) {
+    throw new ScenarioSuiteError("scenario_path_escape", logicalPath);
+  }
+}
+
+async function resolveContainedPath(
+  suite: LoadedRuntimeScenarioSuite,
+  logicalPath: string,
+  expectedType: "file" | "directory",
+): Promise<string> {
+  validateLogicalPath(logicalPath);
+  const lexicalPath = resolve(suite.root, logicalPath);
+  if (!isContained(suite.root, lexicalPath)) {
+    throw new ScenarioSuiteError("scenario_path_escape", logicalPath);
+  }
+
+  let canonicalPath: string;
+  try {
+    canonicalPath = await realpath(lexicalPath);
+  } catch {
+    throw new ScenarioSuiteError("scenario_structure_missing", logicalPath);
+  }
+  if (!isContained(suite.root, canonicalPath)) {
+    throw new ScenarioSuiteError("scenario_path_escape", logicalPath, "symlink_target");
+  }
+
+  const metadata = await stat(canonicalPath);
+  const matchesType = expectedType === "file" ? metadata.isFile() : metadata.isDirectory();
+  if (!matchesType) {
+    throw new ScenarioSuiteError("scenario_structure_missing", logicalPath, `expected_${expectedType}`);
+  }
+  return canonicalPath;
+}
+
+async function validateFixtureTree(
+  suite: LoadedRuntimeScenarioSuite,
+  fixtureLogicalPath: string,
+): Promise<void> {
+  const fixtureRoot = await resolveContainedPath(suite, fixtureLogicalPath, "directory");
+  const visit = async (directory: string): Promise<void> => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const absolutePath = join(directory, entry.name);
+      const logicalPath = relative(suite.root, absolutePath).split(sep).join("/");
+      if (entry.isSymbolicLink()) {
+        throw new ScenarioSuiteError("scenario_path_escape", logicalPath, "fixture_symlink");
+      }
+      if (entry.isDirectory()) {
+        await visit(absolutePath);
+      } else if (!entry.isFile()) {
+        throw new ScenarioSuiteError("scenario_structure_missing", logicalPath, "unsupported_file_type");
+      }
+    }
+  };
+  await visit(fixtureRoot);
+}
+
+async function readLogicalFile(logicalPath: string, suite?: LoadedRuntimeScenarioSuite): Promise<Buffer> {
+  if (!suite) return readFile(join(scenarioSuiteRepoRoot, logicalPath));
+  return readFile(await resolveContainedPath(suite, logicalPath, "file"));
+}
+
+function parseAggregateManifest(value: unknown): ExternalAggregateManifest {
+  if (!value || typeof value !== "object") {
+    throw new ScenarioSuiteError("scenario_aggregates_invalid", "aggregates.json");
+  }
+  const manifest = value as Partial<ExternalAggregateManifest>;
+  if (manifest.schemaVersion !== 1 || manifest.holdout !== true || !manifest.aggregates) {
+    throw new ScenarioSuiteError("scenario_aggregates_invalid", "aggregates.json");
+  }
+
+  const entries = Object.entries(manifest.aggregates);
+  if (entries.length === 0) {
+    throw new ScenarioSuiteError("scenario_aggregates_invalid", "aggregates.json", "empty");
+  }
+  for (const [id, aggregate] of entries) {
+    if (!RUNTIME_SCENARIO_IDS.includes(id as RuntimeScenarioId) || !/^[a-f0-9]{64}$/u.test(aggregate)) {
+      throw new ScenarioSuiteError("scenario_aggregates_invalid", "aggregates.json", id);
+    }
+  }
+  return manifest as ExternalAggregateManifest;
+}
+
+export async function loadRuntimeScenarioSuiteRoot(
+  scenarioRoot: string,
+): Promise<LoadedRuntimeScenarioSuite> {
+  const requestedRoot = scenarioRoot.trim();
+  if (!requestedRoot) throw new ScenarioSuiteError("scenario_root_missing", "<empty>");
+  const lexicalRoot = resolve(scenarioSuiteRepoRoot, requestedRoot);
+  if (!isContained(scenarioSuiteRepoRoot, lexicalRoot)) {
+    throw new ScenarioSuiteError("scenario_root_escape", requestedRoot);
+  }
+
+  let root: string;
+  try {
+    root = await realpath(lexicalRoot);
+  } catch {
+    throw new ScenarioSuiteError("scenario_root_missing", requestedRoot);
+  }
+  if (!(await stat(root)).isDirectory()) {
+    throw new ScenarioSuiteError("scenario_root_missing", requestedRoot, "expected_directory");
+  }
+
+  const scenarioRootForReport = relative(scenarioSuiteRepoRoot, lexicalRoot).split(sep).join("/") || ".";
+  const provisionalSuite: LoadedRuntimeScenarioSuite = {
+    root,
+    scenarioIds: [],
+    expectedAggregates: {},
+    report: {
+      holdout: true,
+      scenarioRoot: scenarioRootForReport,
+      aggregatesManifest: { path: "aggregates.json", sha256: "" },
+    },
+  };
+  const aggregatePath = await resolveContainedPath(provisionalSuite, "aggregates.json", "file");
+  const aggregateBytes = await readFile(aggregatePath);
+  let aggregateValue: unknown;
+  try {
+    aggregateValue = JSON.parse(aggregateBytes.toString("utf8"));
+  } catch {
+    throw new ScenarioSuiteError("scenario_aggregates_invalid", "aggregates.json", "invalid_json");
+  }
+  const aggregateManifest = parseAggregateManifest(aggregateValue);
+  const scenarioIds = RUNTIME_SCENARIO_IDS.filter((id) => aggregateManifest.aggregates[id] !== undefined);
+  return {
+    root,
+    scenarioIds,
+    expectedAggregates: Object.freeze({ ...aggregateManifest.aggregates }),
+    report: {
+      holdout: true,
+      scenarioRoot: scenarioRootForReport,
+      aggregatesManifest: {
+        path: "aggregates.json",
+        sha256: createHash("sha256").update(aggregateBytes).digest("hex"),
+      },
+    },
+  };
+}
+
+async function manifestFor(
+  id: RuntimeScenarioId,
+  suite?: LoadedRuntimeScenarioSuite,
+): Promise<{ path: string; manifest: ScenarioManifest }> {
+  const path = `evals/scenarios/runtime/${id}.yaml`;
+  let value: unknown;
+  try {
+    value = parseYaml((await readLogicalFile(path, suite)).toString("utf8"));
+  } catch (error) {
+    if (error instanceof ScenarioSuiteError) throw error;
+    if (suite) throw new ScenarioSuiteError("scenario_manifest_invalid", path);
+    throw error;
+  }
+  try {
+    return { path, manifest: parseManifest(value, id) };
+  } catch (error) {
+    if (suite) throw new ScenarioSuiteError("scenario_manifest_invalid", path);
+    throw error;
+  }
+}
+
+async function hashLogicalFiles(
+  paths: readonly string[],
+  suite?: LoadedRuntimeScenarioSuite,
+): Promise<string> {
   const hash = createHash("sha256");
   for (const path of paths) {
-    const bytes = await readFile(join(scenarioSuiteRepoRoot, path));
+    const bytes = await readLogicalFile(path, suite);
     hash.update(path);
     hash.update("\0");
     hash.update(String(bytes.length));
@@ -157,24 +363,48 @@ async function hashLogicalFiles(paths: readonly string[]): Promise<string> {
 export async function computeRuntimeScenarioIdentity(
   id: RuntimeScenarioId,
   verifyFrozen = true,
+  suite?: LoadedRuntimeScenarioSuite,
 ): Promise<ScenarioIdentity> {
-  const { path: manifestPath, manifest } = await manifestFor(id);
+  const { path: manifestPath, manifest } = await manifestFor(id, suite);
+  if (suite && suite.expectedAggregates[id] === undefined) {
+    throw new ScenarioSuiteError("scenario_structure_missing", manifestPath, "aggregate_not_declared");
+  }
+  if (suite) {
+    validateLogicalPath(manifest.spec);
+    validateLogicalPath(manifest.fixture);
+    validateLogicalPath(manifest.hiddenCheck);
+    await validateFixtureTree(suite, manifest.fixture);
+  }
+  for (const fixtureFile of manifest.fixtureFiles) {
+    if (typeof fixtureFile !== "string") {
+      if (suite) throw new ScenarioSuiteError("scenario_manifest_invalid", manifestPath, "fixtureFiles");
+      continue;
+    }
+    if (suite) validateLogicalPath(fixtureFile);
+  }
   const fixturePaths = manifest.fixtureFiles.map((path) => `${manifest.fixture}/${path}`);
   const aggregatePaths = [manifest.spec, manifestPath, manifest.hiddenCheck, ...fixturePaths];
-  const aggregateSha256 = await hashLogicalFiles(aggregatePaths);
-  if (verifyFrozen && aggregateSha256 !== FROZEN_RUNTIME_SCENARIO_AGGREGATES[id]) {
+  const aggregateSha256 = await hashLogicalFiles(aggregatePaths, suite);
+  const expectedAggregate = suite?.expectedAggregates[id] ?? FROZEN_RUNTIME_SCENARIO_AGGREGATES[id];
+  if (verifyFrozen && aggregateSha256 !== expectedAggregate) {
+    if (suite) {
+      throw new ScenarioSuiteError("scenario_aggregate_mismatch", id, aggregateSha256);
+    }
     throw new Error(`frozen_scenario_hash_mismatch:${id}:${aggregateSha256}`);
   }
+  const hiddenCheckPath = suite
+    ? await resolveContainedPath(suite, manifest.hiddenCheck, "file")
+    : join(scenarioSuiteRepoRoot, manifest.hiddenCheck);
   return {
     id,
     version: manifest.scenarioVersion,
     specPath: manifest.spec,
     fixturePath: manifest.fixture,
-    fixtureSha256: await hashLogicalFiles(fixturePaths),
+    fixtureSha256: await hashLogicalFiles(fixturePaths, suite),
     aggregateSha256,
     hiddenCheck: {
       path: manifest.hiddenCheck,
-      sha256: await sha256File(join(scenarioSuiteRepoRoot, manifest.hiddenCheck)),
+      sha256: await sha256File(hiddenCheckPath),
       protection: "outside-worker-workspace",
       outsideWorkerWorkspace: true,
     },
@@ -182,6 +412,7 @@ export async function computeRuntimeScenarioIdentity(
     forbiddenActions: [...manifest.forbiddenActions],
     budget: { ...manifest.budget },
     rubric: manifest.rubric.map((item) => ({ ...item })),
+    ...(suite ? { suite: suite.report } : {}),
   };
 }
 
@@ -230,12 +461,19 @@ async function runRuntimeScenarioArm(
   armId: ScenarioArmId,
   seed: string,
   generatedAt: string,
+  suite?: LoadedRuntimeScenarioSuite,
 ): Promise<{ identity: ScenarioIdentity; report: ScenarioArmRepetitionReport }> {
-  const identity = await computeRuntimeScenarioIdentity(id);
+  const identity = await computeRuntimeScenarioIdentity(id, true, suite);
   const workspacePath = await mkdtemp(join(tmpdir(), `clankie-scenario-${id}-${armId}-`));
   const startedAt = Date.now();
   try {
-    await cp(join(scenarioSuiteRepoRoot, identity.fixturePath), workspacePath, { recursive: true });
+    const fixturePath = suite
+      ? await resolveContainedPath(suite, identity.fixturePath, "directory")
+      : join(scenarioSuiteRepoRoot, identity.fixturePath);
+    const hiddenCheckPath = suite
+      ? await resolveContainedPath(suite, identity.hiddenCheck.path, "file")
+      : join(scenarioSuiteRepoRoot, identity.hiddenCheck.path);
+    await cp(fixturePath, workspacePath, { recursive: true });
     const before = await snapshotFiles(workspacePath);
     const execution =
       id === "write-scope-conflict"
@@ -245,11 +483,16 @@ async function runRuntimeScenarioArm(
           : await executePreexistingTestFailure(armId, seed, workspacePath);
     const after = await snapshotFiles(workspacePath);
     const changed = changedFiles(before, after);
-    const hidden = await runHiddenCheck(identity, armId, {
-      ...execution.raw,
-      workspacePath,
-      changedFiles: changed,
-    });
+    const hidden = await runHiddenCheck(
+      identity,
+      armId,
+      {
+        ...execution.raw,
+        workspacePath,
+        changedFiles: changed,
+      },
+      { root: suite?.root ?? scenarioSuiteRepoRoot, hiddenCheckPath },
+    );
     const elapsedMs = Date.now() - startedAt;
     const eventTypes = execution.events.map((event) => event.type);
     const eventCount = execution.events.length;
@@ -258,10 +501,13 @@ async function runRuntimeScenarioArm(
       eventCount <= identity.budget.maxEvents &&
       elapsedMs <= identity.budget.timeoutMs;
     const criticalFailures = [...hidden.criticalFailures, ...(withinBudget ? [] : ["scenario-budget"])];
-    const sourceAfter = await computeRuntimeScenarioIdentity(id, false);
+    const sourceAfter = await computeRuntimeScenarioIdentity(id, false, suite);
+    const suiteManifestSha256 = suite?.report.aggregatesManifest.sha256;
+    const suiteAfter = suite ? await loadRuntimeScenarioSuiteRoot(suite.report.scenarioRoot) : undefined;
     if (
       sourceAfter.aggregateSha256 !== identity.aggregateSha256 ||
-      sourceAfter.hiddenCheck.sha256 !== identity.hiddenCheck.sha256
+      sourceAfter.hiddenCheck.sha256 !== identity.hiddenCheck.sha256 ||
+      (suiteAfter && suiteAfter.report.aggregatesManifest.sha256 !== suiteManifestSha256)
     ) {
       throw new Error(`frozen_scenario_changed_during_run:${id}`);
     }
@@ -331,14 +577,15 @@ function comparison(
 export async function runRuntimeScenarioSuite(
   seeds: readonly string[],
   generatedAt: string,
+  suite?: LoadedRuntimeScenarioSuite,
 ): Promise<ScenarioComparisonReport[]> {
   const comparisons: ScenarioComparisonReport[] = [];
-  for (const id of RUNTIME_SCENARIO_IDS) {
+  for (const id of suite?.scenarioIds ?? RUNTIME_SCENARIO_IDS) {
     const reports: ScenarioArmRepetitionReport[] = [];
     let identity: ScenarioIdentity | undefined;
     for (const seed of seeds) {
       for (const armId of ["single-worker", "heterogeneous-lead"] as const) {
-        const result = await runRuntimeScenarioArm(id, armId, seed, generatedAt);
+        const result = await runRuntimeScenarioArm(id, armId, seed, generatedAt, suite);
         identity = result.identity;
         reports.push(result.report);
       }

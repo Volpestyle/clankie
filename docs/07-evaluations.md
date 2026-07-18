@@ -63,12 +63,11 @@ The same command accepts the private Git URL in CI and clones it into the ignore
 refuses a tracked mount, validates at least two manifests and their referenced specs, fixtures, and
 hidden checks, and is safe to rerun against the same source.
 
-The scenario lab currently resolves manifests and fixtures from its compile-time monorepo root; its
-CLI accepts repetitions and artifact output only. Therefore no holdout run command exists yet. The
-smallest required runner seam is a path-contained `--scenario-root evals/holdout` input that keeps
-the existing executor IDs, reads manifests, fixtures, and hidden checks from that root, and records
-the selected scenario version and computed fixture hash in the report. Until that seam exists,
-mount validation succeeds but holdout execution is blocked.
+Run two repetitions against the mounted suite with
+`pnpm eval:experiment -- --scenario-root evals/holdout --repetitions=2`. The root-owned
+`aggregates.json` pins its scenario aggregates, and the explicitly holdout-marked local report lands
+at `artifacts/evals/holdout/lead-vs-single-report.json` without replacing committed visible-suite
+scorecards.
 
 ## Anti-gaming rules
 
