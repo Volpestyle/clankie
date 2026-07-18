@@ -116,11 +116,11 @@ mission.created -> mission.drafted -> mission.planned -> mission.started
 Both approval events carry the audit envelope; the drill prints them verbatim
 after the decision:
 
-| Criterion | Where it is recorded |
-| --- | --- |
-| Approval identity | `approval.decided` → `data.approval.decidedBy` (the control plane's `CLANKIE_OPERATOR_ID`, default `local-operator`) |
-| Timestamp | `data.approval.decidedAt` and the event envelope `occurredAt` |
-| Doctrine hash | `profileHash` on both the event envelope and the approval record |
+| Criterion                         | Where it is recorded                                                                                                                                                                    |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Approval identity                 | `approval.decided` → `data.approval.decidedBy` (the control plane's `CLANKIE_OPERATOR_ID`, default `local-operator`)                                                                    |
+| Timestamp                         | `data.approval.decidedAt` and the event envelope `occurredAt`                                                                                                                           |
+| Doctrine hash                     | `profileHash` on both the event envelope and the approval record                                                                                                                        |
 | Rejection reason back to the lead | `data.approval.reason`, and the re-request decision `effect=deny`, `matchedPolicyIds=["operator-approval:denied"]`, `reason="The authenticated operator denied this request: <reason>"` |
 
 The chain is verified (`SqliteEventStore.verify()`) before the excerpt is

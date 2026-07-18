@@ -442,7 +442,9 @@ async function printAuditEvidence(eventStorePath, approvalId, profileHash) {
     console.log(`approval events for ${approvalId}: ${approvalEvents.length}`);
     for (const event of approvalEvents) {
       const approval = event.data.approval;
-      console.log(`\n  event type:      ${event.type} (sequence ${event.sequence}, chain hash ${event.hash.slice(0, 12)}…)`);
+      console.log(
+        `\n  event type:      ${event.type} (sequence ${event.sequence}, chain hash ${event.hash.slice(0, 12)}…)`,
+      );
       console.log(`  event id:        ${event.id}`);
       console.log(`  occurredAt:      ${event.occurredAt}  <- event timestamp`);
       console.log(`  missionId:       ${event.missionId}`);
@@ -493,7 +495,9 @@ async function main() {
   const processes = [];
 
   logSection("Approval ceremony drill (VUH-698)");
-  console.log(`mode: ${options.mode === "interactive" ? "interactive ceremony" : `auto-decide ${options.mode}`}`);
+  console.log(
+    `mode: ${options.mode === "interactive" ? "interactive ceremony" : `auto-decide ${options.mode}`}`,
+  );
   console.log(`runtime root: ${layout.root}`);
   console.log(`derived doctrine profile: ${doctrine.path}`);
   console.log(`doctrine profileHash: ${doctrine.profileHash}`);
@@ -608,7 +612,9 @@ async function main() {
     const pending = await client.listApprovals("pending");
     const approval = pending.find((candidate) => candidate.id === mergeRequest.id);
     if (!approval) throw new Error("the pending merge approval is not visible in the operator inbox");
-    console.log(`pending approval visible in operator inbox: ${approval.id} (requestedAt ${approval.requestedAt})`);
+    console.log(
+      `pending approval visible in operator inbox: ${approval.id} (requestedAt ${approval.requestedAt})`,
+    );
 
     const preApproval = await client.requestAction(mergeRequest);
     if (preApproval.effect !== "require_approval") {
@@ -623,11 +629,17 @@ async function main() {
       console.log(`  export CLANKIE_CONTROL_PLANE_URL=${baseUrl}`);
       console.log(`  export CLANKIE_OPERATOR_TOKEN=${operatorToken}`);
       console.log(`  export CLANKIE_EVENT_STORE=${layout.eventStore}`);
-      console.log("  pnpm --filter @clankie/tui dev    # or the `clankie` binary with the same environment\n");
-      console.log("Then open the /approvals inbox, review the plan/evidence/policy rationale, and approve or");
+      console.log(
+        "  pnpm --filter @clankie/tui dev    # or the `clankie` binary with the same environment\n",
+      );
+      console.log(
+        "Then open the /approvals inbox, review the plan/evidence/policy rationale, and approve or",
+      );
       console.log("reject with a reason. (The operator token above is ephemeral to this drill runtime.)");
       console.log("\nEvidence will be recorded as approval.requested / approval.decided events carrying");
-      console.log("decidedBy (identity), decidedAt + occurredAt (timestamps), and profileHash (doctrine hash).");
+      console.log(
+        "decidedBy (identity), decidedAt + occurredAt (timestamps), and profileHash (doctrine hash).",
+      );
       record = await waitForOperatorDecision(client, mergeRequest.id, processes);
     } else {
       const decision = options.mode === "approve" ? "approve" : "deny";
@@ -640,13 +652,17 @@ async function main() {
     }
 
     logSection("Decision outcome");
-    console.log(`approval ${record.id}: status=${record.status} decidedBy=${record.decidedBy} decidedAt=${record.decidedAt}`);
+    console.log(
+      `approval ${record.id}: status=${record.status} decidedBy=${record.decidedBy} decidedAt=${record.decidedAt}`,
+    );
     console.log(`operator reason: ${JSON.stringify(record.reason)}`);
 
     const postDecision = await client.requestAction(mergeRequest);
     if (record.status === "denied") {
       if (postDecision.effect !== "deny" || !postDecision.reason.includes(record.reason ?? "")) {
-        throw new Error(`the denial did not return to the lead with the reason: ${describeDecision(postDecision)}`);
+        throw new Error(
+          `the denial did not return to the lead with the reason: ${describeDecision(postDecision)}`,
+        );
       }
       console.log("\nRejection path: the merge task returns to the lead with the human's reason attached —");
       console.log(`  ${describeDecision(postDecision)}`);
@@ -655,9 +671,13 @@ async function main() {
       if (postDecision.effect !== "allow") {
         throw new Error(`approval did not release the merge connector: ${describeDecision(postDecision)}`);
       }
-      console.log("\nApproval path: the policy engine releases the merge only after the recorded human approval —");
+      console.log(
+        "\nApproval path: the policy engine releases the merge only after the recorded human approval —",
+      );
       console.log(`  ${describeDecision(postDecision)}`);
-      console.log("privileged connector: simulated merge executed for clankie/approval-ceremony-fixture (no real remote).");
+      console.log(
+        "privileged connector: simulated merge executed for clankie/approval-ceremony-fixture (no real remote).",
+      );
     }
 
     await cleanup();
