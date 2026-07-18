@@ -11,10 +11,10 @@ description: Use when implementing one assigned code, configuration, documentati
   [sanctioned structural refactor](../../../docs/04-doctrine.md#sanctioned-structural-refactor)
   class. Record the bounded size, structural intent, and why the exact unchanged checks cover
   every affected boundary. Keep behavior and semantic test changes in separate tasks; report
-  mechanical test relocation/import updates separately for assertion-preservation review. Amend
-  or replan before integrating a diff that exceeds the recorded size. Obtain verifier and reviewer
-  confirmation of check coverage plus reviewer sign-off on the structural intent. The doctrine
-  section is authoritative.
+  mechanical test relocation/import updates separately so the verifier can confirm that the test
+  diff contains only those updates. Request amendment or replan from the lead before integrating a
+  diff that exceeds the recorded size. Obtain verifier and reviewer confirmation of check coverage
+  plus reviewer sign-off on the structural intent. The doctrine section is authoritative.
 - Do not modify files outside scope; request scope expansion instead.
 - Do not weaken, delete, skip, or replace acceptance tests to make the change pass.
 - Run a narrow reproducer first, then required typecheck/lint/unit/integration checks.

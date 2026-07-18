@@ -40,11 +40,11 @@ The task contract records:
 The class forbids combining the refactor with behavior changes or semantic test
 changes to assertions, fixture contents, or expectations. It permits mechanical
 test relocation and import-path updates only when the implementer reports them
-separately and the verifier confirms that the test diff preserves every
-assertion and fixture's contents. A failing baseline, changed verification
-command, semantic test diff, newly required behavior change, or verifier-found
-behavior counterexample fails the refactor until the conflicting work is
-separated into its own task.
+separately and the verifier confirms that the test diff contains only relocation
+and import-path updates. A failing baseline, changed verification command,
+semantic test diff, newly required behavior change, or verifier-found behavior
+counterexample fails the refactor until the conflicting work is separated into
+its own task.
 
 Independent verification remains mandatory. A distinct verifier reruns the
 unchanged commands, confirms the stated boundary-coverage rationale, and looks

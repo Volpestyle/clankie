@@ -41,18 +41,23 @@ Before the task is leased, its contract must:
    meaningfully exercise every affected boundary; and
 4. state that no observable behavior or semantic diff is intended or claimed.
 
+Contracts should name boundary-stable, package-level commands rather than
+file-path-specific commands that relocation would invalidate.
+
 The recorded size expectation replaces the smallest-change target only for that
 task. It is a contract obligation, not a claim that the current runtime
 deterministically enforces file-count or changed-line limits. If the actual diff
-exceeds either expectation, the contract must be amended or the task replanned
-before integration. Any separately enforced profile constraint still applies.
+exceeds either expectation, the lead or integration owner must amend the
+contract or replan the task before integration and record the decision in the
+sanctioning tracker thread. Any separately enforced profile constraint still
+applies.
 
 The implementer records both green command outcomes and reports structural
 edits separately from generated or lockfile churn. Semantic test changes,
 including changed assertions, fixture contents, or expectations, block the class.
 Mechanical test relocation and import-path updates are permitted when reported
 as mechanical test churn separate from the structural edits; the verifier must
-confirm that the test diff preserves every assertion and fixture's contents.
+confirm that the test diff contains only relocation and import-path updates.
 
 A distinct verifier reruns the unchanged commands, explicitly confirms that
 they meaningfully cover the refactored boundaries, checks for behavior
