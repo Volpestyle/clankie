@@ -1,6 +1,6 @@
 # ADR 0037: Sanctioned structural refactor task class
 
-Status: proposed (VUH-888; owner approval required).
+Status: accepted (2026-07-18; approval exercised by the session lead under the owner's recorded 2026-07-18 delegation — see the VUH-888 thread and run `2026-07-18-close-wave`).
 
 Numbering: 0037 follows 0036, the highest ADR file present when this proposal is
 authored. VUH-890 separately investigates the reported numbering drift around 0034.
