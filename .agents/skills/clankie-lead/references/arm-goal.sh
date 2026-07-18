@@ -130,19 +130,19 @@ last_nonempty_line() {
 recent_text_contains() {
   local text="$1"
   local needle="$2"
-  local lines=()
-  local start=0
+  local recent_text=""
+  local line_count=0
   local line
 
-  mapfile -t lines <<<"$text"
-  if ((${#lines[@]} > VERIFY_TAIL_LINES)); then
-    start=$((${#lines[@]} - VERIFY_TAIL_LINES))
-  fi
-  for ((i=start; i<${#lines[@]}; i++)); do
-    line="${lines[$i]}"
-    [[ "$line" == *"$needle"* ]] && return 0
-  done
-  return 1
+  while IFS= read -r line; do
+    recent_text="${recent_text}${line}"$'\n'
+    line_count=$((line_count + 1))
+    if ((line_count > VERIFY_TAIL_LINES)); then
+      recent_text="${recent_text#*$'\n'}"
+      line_count=$VERIFY_TAIL_LINES
+    fi
+  done <<<"$text"
+  [[ "$recent_text" == *"$needle"* ]]
 }
 
 last_composer_line() {
