@@ -7,6 +7,11 @@ description: Use when implementing one assigned code, configuration, documentati
 - Confirm the base revision, task objective, write scope, dependencies, and acceptance criteria.
 - Inspect existing patterns and tests before editing.
 - Make the smallest coherent change that satisfies the contract.
+- Use a broader behavior-preserving scope only when the tracker and task contract invoke the
+  [sanctioned structural refactor](../../../docs/04-doctrine.md#sanctioned-structural-refactor)
+  class. Record the bounded size and structural intent up front, keep behavior changes in a
+  separate task, run the exact unchanged checks green before and after, and obtain independent
+  verification plus reviewer sign-off on the structural intent. The doctrine section is authoritative.
 - Do not modify files outside scope; request scope expansion instead.
 - Do not weaken, delete, skip, or replace acceptance tests to make the change pass.
 - Run a narrow reproducer first, then required typecheck/lint/unit/integration checks.

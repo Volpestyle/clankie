@@ -16,3 +16,9 @@ Review in this order:
 8. tests and rollback.
 
 Classify findings as blocking, important, or suggestion. Include file/location, consequence, reproducer, and smallest remediation. Do not approve merely because checks are green.
+
+Before recommending merge or integration, confirm that every reviewer and verifier finding has
+the one-sentence adjudication required by the authoritative
+[doctrine contract](../../../docs/04-doctrine.md#review-finding-adjudication): `fixed`,
+`waived-with-reason`, or `false-positive-with-evidence`, recorded in the pull-request thread or
+tracker. Findings never disappear through silence or a green check.
