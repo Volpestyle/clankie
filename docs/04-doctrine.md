@@ -14,6 +14,65 @@ User-facing doctrine starts from one of three integration-ceremony presets:
 
 Presets govern ceremony, not safety. `self-build-lab` is an internal evaluation fixture. High-assurance operation is an overlay layered over a preset, so assurance does not consume a fourth slot on the ceremony axis. An overlay may tighten planning, topology, verification, budgets, risk posture, actions, and memory, but it never replaces the base preset's identity, ceremony, or authority bindings.
 
+## Change-shape task classes
+
+The smallest coherent change remains the default. A task may use a broader
+change shape only through an explicit doctrine class whose entry conditions and
+evidence obligations are part of the task contract.
+
+### Sanctioned structural refactor
+
+A sanctioned structural refactor is tracker-authorized, behavior-preserving
+structural work whose coherent boundary is intentionally larger than the
+default change target. It is a planning and change-shape class applied to the
+existing `implementation` task kind, not a new routing kind or a general scope
+exception.
+
+Before the task is leased, its contract must:
+
+1. reference a tracker issue whose sanction is authored or confirmed by the
+   source bound to `product_intent`, explicitly states the structural intent,
+   and supplies acceptance criteria;
+2. bound the write scope and record the affected structural boundaries,
+   expected file count and changed-line range, and why a smaller slice would not
+   be coherent;
+3. name the exact unchanged test and verification commands that must be green
+   immediately before and after the refactor, and explain why those commands
+   meaningfully exercise every affected boundary; and
+4. state that no observable behavior or semantic diff is intended or claimed.
+
+Contracts should name boundary-stable, package-level commands rather than
+file-path-specific commands that relocation would invalidate.
+
+The recorded size expectation replaces the smallest-change target only for that
+task. It is a contract obligation, not a claim that the current runtime
+deterministically enforces file-count or changed-line limits. If the actual diff
+exceeds either expectation, the lead or integration owner must amend the
+contract or replan the task before integration and record the decision in the
+sanctioning tracker thread. Any separately enforced profile constraint still
+applies.
+
+The implementer records both green command outcomes and reports structural
+edits separately from generated or lockfile churn. Semantic test changes,
+including changed assertions, fixture contents, or expectations, block the class.
+Mechanical test relocation and import-path updates are permitted when reported
+as mechanical test churn separate from the structural edits; the verifier must
+confirm that the test diff contains only relocation and import-path updates.
+
+A distinct verifier reruns the unchanged commands, explicitly confirms that
+they meaningfully cover the refactored boundaries, checks for behavior
+counterexamples, and remains independently attributable. The reviewer also
+confirms the coverage claim and signs off that the resulting boundaries match
+the tracker-sanctioned structural intent. A red baseline, a changed verification
+command, a semantic test diff, or a discovered need for behavior change blocks
+the class. A verifier-found behavior counterexample fails the task; a discovered
+semantic diff never ships from this class as an unintended change. Behavior
+changes must move to a separate task with their own acceptance criteria and
+verification.
+
+[ADR 0037](adr/0037-sanctioned-structural-refactor-task-class.md) records this
+change-shape decision and its runtime boundary.
+
 ## Control categories
 
 - **Preference:** influences planner scoring; may be exceeded with explanation.
@@ -134,6 +193,32 @@ Bindings name the source that owns each field; they do not copy one source over 
 ## Invariant floor
 
 Every compiled profile keeps independent verification enabled and denies test-integrity weakening. Production deployment, `publish-external`, `destructive`, and tracker authority-mutation actions require human approval in every preset. A lower doctrine layer or vendor-specific override may become stricter, but never reduce this floor.
+
+## Review finding adjudication
+
+Before merge or integration, every reviewer or verifier finding has one
+recorded adjudication in the pull-request thread or authoritative tracker:
+
+- `fixed` — identifies the remediation and its evidence;
+- `waived-with-reason` — states why the finding is consciously accepted and who
+  made that decision; or
+- `false-positive-with-evidence` — cites the counterevidence that invalidates
+  the finding.
+
+The implementer may supply a fix or counterevidence but never decides a waiver
+against their own change. Waivers are decided by the lead or integration owner.
+A blocking-severity finding is waivable only by the lead or human owner, never
+by the implementer; the human owner may always waive the finding. A
+`false-positive-with-evidence` closure requires recorded concurrence from the
+finding's author or a lead who did not implement the change. These separation
+rules apply when one principal occupies multiple roles. Adjudication does not
+grant an action, loosen the invariant floor, or replace any required approval.
+
+The lead or integration owner ensures every finding is identifiable and covered.
+One sentence per finding is sufficient, and multiple sentences may be posted
+together. Green checks, reviewer silence, or an unmentioned merge do not
+adjudicate a finding. This section is the authoritative contract; review skills
+project it into reviewer workflow.
 
 ## Persona and channel authority
 
