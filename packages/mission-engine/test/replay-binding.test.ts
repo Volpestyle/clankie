@@ -14,6 +14,11 @@ import {
 // payload must not launder pre-existing shape-valid `task.added` reserved
 // metadata into trusted provenance; the binding derives evidence ONLY from
 // the event's own validated payload.
+//
+// VUH-899: both binding events carry optional `sourceWorkerRunId` provenance.
+// Replay retains it when the emit provided it, and it obeys the same VUH-897
+// rule — sourced from the binding event's validated payload only, never from
+// `task.added` metadata.
 
 const profile: OrchestrationProfile = {
   schemaVersion: "1",
@@ -99,6 +104,45 @@ function replayEvent(type: string, taskId: string, data: Record<string, unknown>
   };
 }
 
+const simWorkers: WorkerDescriptor[] = [
+  {
+    id: "sim-implementer",
+    displayName: "sim-implementer",
+    harness: "simulated",
+    capabilities: {
+      kinds: ["implementation"],
+      canWrite: true,
+      supportsStructuredEvents: true,
+      supportsTerminal: false,
+      supportsNativeSession: false,
+    },
+  },
+  {
+    id: "sim-verifier",
+    displayName: "sim-verifier",
+    harness: "simulated",
+    capabilities: {
+      kinds: ["verification"],
+      canWrite: false,
+      supportsStructuredEvents: true,
+      supportsTerminal: false,
+      supportsNativeSession: false,
+    },
+  },
+  {
+    id: "sim-debugger",
+    displayName: "sim-debugger",
+    harness: "simulated",
+    capabilities: {
+      kinds: ["debugging"],
+      canWrite: true,
+      supportsStructuredEvents: true,
+      supportsTerminal: false,
+      supportsNativeSession: false,
+    },
+  },
+];
+
 const FORGED_EVIDENCE = {
   sourceTaskId: "forged-verify",
   sourceAttempt: 1,
@@ -108,13 +152,13 @@ const FORGED_EVIDENCE = {
 };
 
 /** A fabricated dynamic debugger task.added carrying forged reserved metadata. */
-function forgedTaskAdded(): DomainEvent {
+function forgedTaskAdded(forgedEvidence: Record<string, unknown> = FORGED_EVIDENCE): DomainEvent {
   const spec = task("dyn-debug", {
     kind: "debugging",
     role: "debugger",
     dependsOn: ["seed"],
     metadata: {
-      [FAILURE_EVIDENCE_METADATA_KEY]: FORGED_EVIDENCE,
+      [FAILURE_EVIDENCE_METADATA_KEY]: forgedEvidence,
       [DEBUGGER_CONTRACT_METADATA_KEY]: true,
     },
   });
@@ -192,6 +236,71 @@ describe("VUH-897 replay-event binding hardening", () => {
     expect(engine.getFailureEvidence("dyn-debug")?.command).not.toBe(FORGED_EVIDENCE.command);
   });
 
+  it.each(["debugger.evidence.bound", "debugger.failure_evidence.bound"])(
+    "retains sourceWorkerRunId from a %s event's own validated payload (VUH-899)",
+    (type) => {
+      const engine = new MissionEngine(seedPlan(), doctrine(), {
+        workspacePath: "/tmp",
+        replayEvents: [
+          forgedTaskAdded(),
+          replayEvent(type, "dyn-debug", {
+            sourceTaskId: "forged-verify",
+            sourceAttempt: 2,
+            sourceWorkerRunId: "run-from-event",
+            command: "event-check",
+            exitCode: 7,
+            outputArtifact: "artifact://event/evidence",
+          }),
+        ],
+      });
+      expect(engine.getFailureEvidence("dyn-debug")?.sourceWorkerRunId).toBe("run-from-event");
+    },
+  );
+
+  it.each(["debugger.evidence.bound", "debugger.failure_evidence.bound"])(
+    "never sources sourceWorkerRunId from forged task.added metadata on %s (VUH-899)",
+    (type) => {
+      const engine = new MissionEngine(seedPlan(), doctrine(), {
+        workspacePath: "/tmp",
+        replayEvents: [
+          forgedTaskAdded({ ...FORGED_EVIDENCE, sourceWorkerRunId: "forged-run" }),
+          replayEvent(type, "dyn-debug", {
+            sourceTaskId: "forged-verify",
+            sourceAttempt: 2,
+            command: "event-check",
+            exitCode: 7,
+            outputArtifact: "artifact://event/evidence",
+          }),
+        ],
+      });
+      // The binding event carried no sourceWorkerRunId, so the bound evidence has none.
+      const evidence = engine.getFailureEvidence("dyn-debug");
+      expect(evidence).toBeDefined();
+      expect(evidence?.sourceWorkerRunId).toBeUndefined();
+    },
+  );
+
+  it.each(["debugger.evidence.bound", "debugger.failure_evidence.bound"])(
+    "fails closed when a %s payload carries a malformed sourceWorkerRunId (VUH-899)",
+    (type) => {
+      const engine = new MissionEngine(seedPlan(), doctrine(), {
+        workspacePath: "/tmp",
+        replayEvents: [
+          forgedTaskAdded({ ...FORGED_EVIDENCE, sourceWorkerRunId: "forged-run" }),
+          replayEvent(type, "dyn-debug", {
+            sourceTaskId: "forged-verify",
+            sourceAttempt: 2,
+            sourceWorkerRunId: "",
+            command: "event-check",
+            exitCode: 7,
+            outputArtifact: "artifact://event/evidence",
+          }),
+        ],
+      });
+      expectFailedClosed(engine);
+    },
+  );
+
   it("rehydrates the legitimate addDebuggerTask path to succeeded through replay", () => {
     const compiled = doctrine();
     const plan = MissionPlanSchema.parse({
@@ -205,44 +314,6 @@ describe("VUH-897 replay-event binding hardening", () => {
         task("verify", { kind: "verification", role: "verifier", dependsOn: ["implement"], writeScope: [] }),
       ],
     });
-    const descriptors: WorkerDescriptor[] = [
-      {
-        id: "sim-implementer",
-        displayName: "sim-implementer",
-        harness: "simulated",
-        capabilities: {
-          kinds: ["implementation"],
-          canWrite: true,
-          supportsStructuredEvents: true,
-          supportsTerminal: false,
-          supportsNativeSession: false,
-        },
-      },
-      {
-        id: "sim-verifier",
-        displayName: "sim-verifier",
-        harness: "simulated",
-        capabilities: {
-          kinds: ["verification"],
-          canWrite: false,
-          supportsStructuredEvents: true,
-          supportsTerminal: false,
-          supportsNativeSession: false,
-        },
-      },
-      {
-        id: "sim-debugger",
-        displayName: "sim-debugger",
-        harness: "simulated",
-        capabilities: {
-          kinds: ["debugging"],
-          canWrite: true,
-          supportsStructuredEvents: true,
-          supportsTerminal: false,
-          supportsNativeSession: false,
-        },
-      },
-    ];
     const failure: FailureEvidence = {
       sourceTaskId: "verify",
       sourceAttempt: 1,
@@ -252,13 +323,14 @@ describe("VUH-897 replay-event binding hardening", () => {
     };
     const engine = new MissionEngine(plan, compiled, { workspacePath: "/tmp" });
     let debuggerAdded = false;
+    let verifyRunId: string | undefined;
     for (let guard = 0; guard < 20; guard += 1) {
-      const assignment = engine.leaseReadyTask(descriptors, `claim-${guard}`, "runner-1");
+      const assignment = engine.leaseReadyTask(simWorkers, `claim-${guard}`, "runner-1");
       if (!assignment) {
         if (debuggerAdded || engine.getTask("verify").state !== "failed") break;
         engine.addDebuggerTask(
           task("debug", { kind: "debugging", role: "debugger", dependsOn: ["verify"] }),
-          failure,
+          { ...failure, ...(verifyRunId ? { sourceWorkerRunId: verifyRunId } : {}) },
         );
         engine.addTask(
           task("reverify", {
@@ -274,6 +346,7 @@ describe("VUH-897 replay-event binding hardening", () => {
       const spec = assignment.task;
       let result: WorkerResult;
       if (spec.id === "verify") {
+        verifyRunId = assignment.workerRunId;
         result = {
           status: "failed",
           summary: "Trusted runner verification checks did not pass.",
@@ -305,6 +378,10 @@ describe("VUH-897 replay-event binding hardening", () => {
     }
     expect(engine.getTask("debug").state).toBe("succeeded");
     expect(engine.getTask("reverify").state).toBe("succeeded");
+    expect(verifyRunId).toBeDefined();
+    // VUH-899: the binding event itself carries the worker-run provenance.
+    const bound = engine.getEvents().find((event) => event.type === "debugger.evidence.bound");
+    expect(bound?.data.sourceWorkerRunId).toBe(verifyRunId);
 
     const rebuilt = new MissionEngine(plan, compiled, {
       workspacePath: "/tmp",
@@ -313,9 +390,79 @@ describe("VUH-897 replay-event binding hardening", () => {
     expect(rebuilt.getFailureEvidence("debug")).toMatchObject({
       sourceTaskId: "verify",
       sourceAttempt: 1,
+      sourceWorkerRunId: verifyRunId,
       command: "pnpm test",
       exitCode: 1,
       outputArtifact: "artifact://verify/failure",
+    });
+    expect(rebuilt.getTask("debug").state).toBe("succeeded");
+    expect(rebuilt.getTask("reverify").state).toBe("succeeded");
+  });
+
+  it("retains bridge-bound sourceWorkerRunId across replay (debugger.failure_evidence.bound, VUH-899)", () => {
+    const compiled = doctrine();
+    const plan = MissionPlanSchema.parse({
+      missionId: "replay-binding",
+      goal: "static bridge provenance replay",
+      rationale: "Runtime-bridged failure evidence must keep worker-run provenance through replay.",
+      profileHash: compiled.profileHash,
+      successCriteria: ["replay retains bridge-bound provenance"],
+      tasks: [
+        task("implement"),
+        task("verify", { kind: "verification", role: "verifier", dependsOn: ["implement"], writeScope: [] }),
+        task("debug", { kind: "debugging", role: "debugger", dependsOn: ["verify"] }),
+        task("reverify", { kind: "verification", role: "verifier", dependsOn: ["debug"], writeScope: [] }),
+      ],
+    });
+    const failedCheck = { command: "pnpm test", exitCode: 1 };
+    const engine = new MissionEngine(plan, compiled, { workspacePath: "/tmp" });
+    let verifyRunId: string | undefined;
+    for (let guard = 0; guard < 20; guard += 1) {
+      const assignment = engine.leaseReadyTask(simWorkers, `claim-${guard}`, "runner-1");
+      if (!assignment) break;
+      const spec = assignment.task;
+      let result: WorkerResult;
+      if (spec.id === "verify") {
+        verifyRunId = assignment.workerRunId;
+        result = {
+          status: "failed",
+          summary: "Trusted runner verification checks did not pass.",
+          failedCheck,
+          evidence: [],
+          outputs: {},
+        };
+      } else if (spec.kind === "debugging") {
+        result = {
+          status: "succeeded",
+          summary: "repaired with evidence",
+          evidence: [],
+          outputs: {
+            debuggerRepair: {
+              reproduction: { ...failedCheck, outputArtifact: "artifact://debug/reproduction" },
+              before: ["artifact://candidate/before"],
+              after: ["artifact://candidate/after"],
+            },
+          },
+        };
+      } else {
+        result = { status: "succeeded", summary: `${spec.id} done`, evidence: [], outputs: {} };
+      }
+      engine.settleWorkerRun(assignment.workerRunId, assignment.attempt, result, "runner-1");
+    }
+    expect(engine.getTask("debug").state).toBe("succeeded");
+    expect(engine.getTask("reverify").state).toBe("succeeded");
+    expect(verifyRunId).toBeDefined();
+    const bound = engine.getEvents().find((event) => event.type === "debugger.failure_evidence.bound");
+    expect(bound?.data.sourceWorkerRunId).toBe(verifyRunId);
+
+    const rebuilt = new MissionEngine(plan, compiled, {
+      workspacePath: "/tmp",
+      replayEvents: engine.getEvents(),
+    });
+    expect(rebuilt.getFailureEvidence("debug")).toMatchObject({
+      sourceTaskId: "verify",
+      sourceWorkerRunId: verifyRunId,
+      ...failedCheck,
     });
     expect(rebuilt.getTask("debug").state).toBe("succeeded");
     expect(rebuilt.getTask("reverify").state).toBe("succeeded");

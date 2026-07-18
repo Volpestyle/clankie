@@ -353,6 +353,7 @@ export class MissionEngine {
       {
         sourceTaskId: failure.sourceTaskId,
         sourceAttempt: failure.sourceAttempt,
+        ...(failure.sourceWorkerRunId ? { sourceWorkerRunId: failure.sourceWorkerRunId } : {}),
         command: failure.command,
         exitCode: failure.exitCode,
         outputArtifact: failure.outputArtifact,
@@ -1085,6 +1086,7 @@ export class MissionEngine {
               {
                 sourceTaskId: evidence.sourceTaskId,
                 sourceAttempt: evidence.sourceAttempt,
+                ...(evidence.sourceWorkerRunId ? { sourceWorkerRunId: evidence.sourceWorkerRunId } : {}),
                 command: evidence.command,
                 exitCode: evidence.exitCode,
                 outputArtifact: evidence.outputArtifact,
@@ -1215,7 +1217,9 @@ export class MissionEngine {
       const eventEvidence = {
         sourceTaskId: event.data.sourceTaskId,
         sourceAttempt: event.data.sourceAttempt,
-        sourceWorkerRunId: event.data.sourceWorkerRunId,
+        ...(event.data.sourceWorkerRunId !== undefined
+          ? { sourceWorkerRunId: event.data.sourceWorkerRunId }
+          : {}),
         command: event.data.command,
         exitCode: event.data.exitCode,
         outputArtifact: event.data.outputArtifact,
