@@ -95,6 +95,7 @@ describe("loadConfig", () => {
     await writeJson(globalPath, {
       model: "anthropic/claude-test",
       small_model: "openai/gpt-test",
+      settle_classifier_model: "ollama/qwen3:8b",
       disabled_providers: ["xai", "google"],
       provider: { ollama: { name: "Ollama Global", options: { baseURL: "http://global:11434/v1" } } },
     });
@@ -113,6 +114,7 @@ describe("loadConfig", () => {
     expect(result.issues).toEqual([]);
     expect(result.config.model).toBe("openai/gpt-test");
     expect(result.config.small_model).toBe("openai/gpt-test");
+    expect(result.config.settle_classifier_model).toBe("ollama/qwen3:8b");
     expect(result.config.disabled_providers).toEqual(["zed"]);
     const ollama = must(result.config.provider?.["ollama"], "ollama provider config");
     expect(ollama.name).toBe("Ollama Global");
@@ -422,6 +424,25 @@ describe("resolveRole", () => {
     expect(resolved.modelId).toBe("claude-test");
     expect(must(resolved.model).name).toBe("Claude Test");
     expect(resolved.variantId).toBe("think-16k");
+  });
+
+  it("resolves the dedicated settle-classifier role without borrowing another model slot", () => {
+    const resolved = must(
+      resolveRole("settle_classifier_model", {
+        config: {
+          settle_classifier_model: "ollama/qwen3:8b",
+          provider: {
+            ollama: {
+              models: { "qwen3:8b": { name: "Qwen3 8B" } },
+            },
+          },
+        },
+        catalog: fakeCatalog,
+      }),
+    );
+    expect(resolved.providerId).toBe("ollama");
+    expect(resolved.modelId).toBe("qwen3:8b");
+    expect(must(resolved.model).name).toBe("Qwen3 8B");
   });
 
   it("returns undefined for unset roles and keeps unknown models as undefined", () => {
