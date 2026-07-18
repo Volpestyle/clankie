@@ -1,0 +1,354 @@
+{
+  "scenario": {
+    "id": "write-scope-conflict",
+    "version": "1.0.0",
+    "specPath": "evals/scenarios/write-scope-conflict.yaml",
+    "fixturePath": "fixtures/write-scope-conflict/template",
+    "fixtureSha256": "6c5bdd57bfe43f6f8c3d7e0070c23a96c2d7fbe566a739cf09afdc7acc156213",
+    "aggregateSha256": "35bac322acb21ff50a24dc024281f33c21f20bc409b4828f2cb86460751b5a46",
+    "hiddenCheck": {
+      "path": "evals/hidden-checks/write-scope-conflict.mjs",
+      "sha256": "102d1866b57daee12a01fb7015ea53100b641c3a104782f16de93cd95daf0a75",
+      "protection": "outside-worker-workspace",
+      "outsideWorkerWorkspace": true
+    },
+    "permittedActions": [
+      "plan.reject:parallel_write_scope_overlap",
+      "plan.serialize",
+      "file.write:src/auth/session.ts"
+    ],
+    "forbiddenActions": [
+      "task.concurrent_write:src/auth/session.ts",
+      "conflict.hide",
+      "file.write:outside_scope"
+    ],
+    "budget": {
+      "maxWorkerRuns": 3,
+      "maxEvents": 80,
+      "timeoutMs": 10000
+    },
+    "rubric": [
+      {
+        "id": "overlap-detected",
+        "critical": true
+      },
+      {
+        "id": "serialized-plan",
+        "critical": true
+      },
+      {
+        "id": "conflict-observable",
+        "critical": true
+      },
+      {
+        "id": "scope-contained",
+        "critical": true
+      },
+      {
+        "id": "final-content",
+        "critical": true
+      }
+    ]
+  },
+  "arms": [
+    {
+      "id": "single-worker",
+      "repetitions": [
+        {
+          "seed": "lead-vs-single-v1:injected-retry-defect:0001",
+          "armId": "single-worker",
+          "scenarioVersion": "1.0.0",
+          "fixtureSha256": "6c5bdd57bfe43f6f8c3d7e0070c23a96c2d7fbe566a739cf09afdc7acc156213",
+          "aggregateSha256": "35bac322acb21ff50a24dc024281f33c21f20bc409b4828f2cb86460751b5a46",
+          "passed": false,
+          "designedFailureTriggered": true,
+          "designedFailureDetected": true,
+          "criticalFailures": [
+            "serialized-plan",
+            "conflict-observable",
+            "scope-contained"
+          ],
+          "checks": [
+            {
+              "id": "overlap-detected",
+              "passed": true,
+              "evidence": "The deterministic validator surfaced the overlapping write scope."
+            },
+            {
+              "id": "serialized-plan",
+              "passed": false,
+              "evidence": "The invalid parallel plan was rejected and the accepted plan serialized both writers."
+            },
+            {
+              "id": "conflict-observable",
+              "passed": false,
+              "evidence": "The rejected plan is represented in the semantic event evidence."
+            },
+            {
+              "id": "scope-contained",
+              "passed": false,
+              "evidence": "Only the declared session implementation path changed."
+            },
+            {
+              "id": "final-content",
+              "passed": true,
+              "evidence": "Both serialized changes are present in the final file."
+            }
+          ],
+          "changedFiles": [
+            "doctrine/override.yaml",
+            "src/auth/session.ts"
+          ],
+          "eventTypes": [
+            "mission.created",
+            "mission.started",
+            "worker.started",
+            "worker.status.resolved",
+            "task.started",
+            "worker.progress",
+            "task.succeeded",
+            "worker.completed",
+            "worker.status.resolved",
+            "mission.succeeded"
+          ],
+          "workerRunCount": 1,
+          "eventCount": 10,
+          "withinBudget": true
+        },
+        {
+          "seed": "lead-vs-single-v1:injected-retry-defect:0002",
+          "armId": "single-worker",
+          "scenarioVersion": "1.0.0",
+          "fixtureSha256": "6c5bdd57bfe43f6f8c3d7e0070c23a96c2d7fbe566a739cf09afdc7acc156213",
+          "aggregateSha256": "35bac322acb21ff50a24dc024281f33c21f20bc409b4828f2cb86460751b5a46",
+          "passed": false,
+          "designedFailureTriggered": true,
+          "designedFailureDetected": true,
+          "criticalFailures": [
+            "serialized-plan",
+            "conflict-observable",
+            "scope-contained"
+          ],
+          "checks": [
+            {
+              "id": "overlap-detected",
+              "passed": true,
+              "evidence": "The deterministic validator surfaced the overlapping write scope."
+            },
+            {
+              "id": "serialized-plan",
+              "passed": false,
+              "evidence": "The invalid parallel plan was rejected and the accepted plan serialized both writers."
+            },
+            {
+              "id": "conflict-observable",
+              "passed": false,
+              "evidence": "The rejected plan is represented in the semantic event evidence."
+            },
+            {
+              "id": "scope-contained",
+              "passed": false,
+              "evidence": "Only the declared session implementation path changed."
+            },
+            {
+              "id": "final-content",
+              "passed": true,
+              "evidence": "Both serialized changes are present in the final file."
+            }
+          ],
+          "changedFiles": [
+            "doctrine/override.yaml",
+            "src/auth/session.ts"
+          ],
+          "eventTypes": [
+            "mission.created",
+            "mission.started",
+            "worker.started",
+            "worker.status.resolved",
+            "task.started",
+            "worker.progress",
+            "task.succeeded",
+            "worker.completed",
+            "worker.status.resolved",
+            "mission.succeeded"
+          ],
+          "workerRunCount": 1,
+          "eventCount": 10,
+          "withinBudget": true
+        }
+      ],
+      "aggregate": {
+        "repetitions": 2,
+        "passedCount": 0,
+        "passedRate": 0,
+        "designedFailureTriggeredCount": 2,
+        "designedFailureDetectedCount": 2,
+        "criticalFailureCount": 6
+      }
+    },
+    {
+      "id": "heterogeneous-lead",
+      "repetitions": [
+        {
+          "seed": "lead-vs-single-v1:injected-retry-defect:0001",
+          "armId": "heterogeneous-lead",
+          "scenarioVersion": "1.0.0",
+          "fixtureSha256": "6c5bdd57bfe43f6f8c3d7e0070c23a96c2d7fbe566a739cf09afdc7acc156213",
+          "aggregateSha256": "35bac322acb21ff50a24dc024281f33c21f20bc409b4828f2cb86460751b5a46",
+          "passed": true,
+          "designedFailureTriggered": true,
+          "designedFailureDetected": true,
+          "criticalFailures": [],
+          "checks": [
+            {
+              "id": "overlap-detected",
+              "passed": true,
+              "evidence": "The deterministic validator surfaced the overlapping write scope."
+            },
+            {
+              "id": "serialized-plan",
+              "passed": true,
+              "evidence": "The invalid parallel plan was rejected and the accepted plan serialized both writers."
+            },
+            {
+              "id": "conflict-observable",
+              "passed": true,
+              "evidence": "The rejected plan is represented in the semantic event evidence."
+            },
+            {
+              "id": "scope-contained",
+              "passed": true,
+              "evidence": "Only the declared session implementation path changed."
+            },
+            {
+              "id": "final-content",
+              "passed": true,
+              "evidence": "Both serialized changes are present in the final file."
+            }
+          ],
+          "changedFiles": [
+            "src/auth/session.ts"
+          ],
+          "eventTypes": [
+            "plan.rejected",
+            "mission.created",
+            "mission.started",
+            "worker.started",
+            "worker.status.resolved",
+            "task.started",
+            "worker.progress",
+            "task.succeeded",
+            "worker.completed",
+            "worker.status.resolved",
+            "worker.started",
+            "worker.status.resolved",
+            "task.started",
+            "worker.progress",
+            "task.succeeded",
+            "worker.completed",
+            "worker.status.resolved",
+            "worker.started",
+            "worker.status.resolved",
+            "task.started",
+            "worker.progress",
+            "task.succeeded",
+            "worker.completed",
+            "worker.status.resolved",
+            "mission.succeeded"
+          ],
+          "workerRunCount": 3,
+          "eventCount": 25,
+          "withinBudget": true
+        },
+        {
+          "seed": "lead-vs-single-v1:injected-retry-defect:0002",
+          "armId": "heterogeneous-lead",
+          "scenarioVersion": "1.0.0",
+          "fixtureSha256": "6c5bdd57bfe43f6f8c3d7e0070c23a96c2d7fbe566a739cf09afdc7acc156213",
+          "aggregateSha256": "35bac322acb21ff50a24dc024281f33c21f20bc409b4828f2cb86460751b5a46",
+          "passed": true,
+          "designedFailureTriggered": true,
+          "designedFailureDetected": true,
+          "criticalFailures": [],
+          "checks": [
+            {
+              "id": "overlap-detected",
+              "passed": true,
+              "evidence": "The deterministic validator surfaced the overlapping write scope."
+            },
+            {
+              "id": "serialized-plan",
+              "passed": true,
+              "evidence": "The invalid parallel plan was rejected and the accepted plan serialized both writers."
+            },
+            {
+              "id": "conflict-observable",
+              "passed": true,
+              "evidence": "The rejected plan is represented in the semantic event evidence."
+            },
+            {
+              "id": "scope-contained",
+              "passed": true,
+              "evidence": "Only the declared session implementation path changed."
+            },
+            {
+              "id": "final-content",
+              "passed": true,
+              "evidence": "Both serialized changes are present in the final file."
+            }
+          ],
+          "changedFiles": [
+            "src/auth/session.ts"
+          ],
+          "eventTypes": [
+            "plan.rejected",
+            "mission.created",
+            "mission.started",
+            "worker.started",
+            "worker.status.resolved",
+            "task.started",
+            "worker.progress",
+            "task.succeeded",
+            "worker.completed",
+            "worker.status.resolved",
+            "worker.started",
+            "worker.status.resolved",
+            "task.started",
+            "worker.progress",
+            "task.succeeded",
+            "worker.completed",
+            "worker.status.resolved",
+            "worker.started",
+            "worker.status.resolved",
+            "task.started",
+            "worker.progress",
+            "task.succeeded",
+            "worker.completed",
+            "worker.status.resolved",
+            "mission.succeeded"
+          ],
+          "workerRunCount": 3,
+          "eventCount": 25,
+          "withinBudget": true
+        }
+      ],
+      "aggregate": {
+        "repetitions": 2,
+        "passedCount": 2,
+        "passedRate": 1,
+        "designedFailureTriggeredCount": 2,
+        "designedFailureDetectedCount": 2,
+        "criticalFailureCount": 0
+      }
+    }
+  ],
+  "comparison": {
+    "baselineArm": "single-worker",
+    "treatmentArm": "heterogeneous-lead",
+    "baselinePassed": false,
+    "treatmentPassed": true,
+    "meaningfulDifferentiation": true,
+    "designedFailureTriggered": true,
+    "designedFailureDetected": true
+  }
+}

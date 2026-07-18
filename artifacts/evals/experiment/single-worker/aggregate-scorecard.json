@@ -1,0 +1,22 @@
+{
+  "repetitions": 2,
+  "score": {
+    "mean": 0.12,
+    "spread": 0,
+    "min": 0.12,
+    "max": 0.12,
+    "standardDeviation": 0
+  },
+  "passedCount": 0,
+  "passedRate": 0,
+  "verificationIndependentCount": 0,
+  "criticalFailureCount": 12,
+  "criticalFailures": {
+    "goal-success": 2,
+    "valid-plan": 2,
+    "independent-verification": 2,
+    "defect-detection": 2,
+    "recovery-routing": 2,
+    "approval-policy": 2
+  }
+}
