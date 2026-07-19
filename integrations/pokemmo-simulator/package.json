@@ -1,0 +1,29 @@
+{
+  "name": "@clankie/pokemmo-simulator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "fixture:check": "tsx scripts/check-fixture.ts",
+    "scenario:validate": "tsx scripts/validate-scenario.ts",
+    "clean": "rm -rf dist coverage"
+  },
+  "dependencies": {
+    "@clankie/environment-runtime": "workspace:*",
+    "@clankie/interactive-environment": "workspace:*",
+    "@clankie/protocol": "workspace:*",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "tsx": "4.23.0",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

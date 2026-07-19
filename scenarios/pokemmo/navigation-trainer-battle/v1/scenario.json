@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "navigation-trainer-battle",
+  "scenarioVersion": 1,
+  "simulatorId": "pokemmo-rules-lab-v1",
+  "worldId": "pokemmo-sim-world-v1",
+  "maxEvidenceEvents": 32,
+  "map": {
+    "mapId": "lab-route",
+    "width": 8,
+    "height": 6,
+    "blocked": [
+      { "x": 2, "y": 2 },
+      { "x": 2, "y": 3 }
+    ]
+  },
+  "player": {
+    "characterId": "clankie",
+    "start": { "mapId": "lab-route", "x": 0, "y": 1 },
+    "party": [
+      {
+        "slot": 0,
+        "creatureId": "partner-embercub",
+        "speciesId": "embercub",
+        "level": 8,
+        "maxHp": 20,
+        "moves": [{ "moveId": "quick-strike", "power": 5 }]
+      },
+      {
+        "slot": 1,
+        "creatureId": "partner-leafling",
+        "speciesId": "leafling",
+        "level": 7,
+        "maxHp": 18,
+        "moves": [{ "moveId": "vine-tap", "power": 4 }]
+      }
+    ],
+    "inventory": [{ "itemId": "potion", "count": 1, "healAmount": 8 }]
+  },
+  "trainer": {
+    "trainerId": "trainer-sage",
+    "position": { "mapId": "lab-route", "x": 4, "y": 1 },
+    "interactionDistance": 1,
+    "dialog": ["A deterministic battle begins."],
+    "opponent": {
+      "creatureId": "trainer-sproutlet",
+      "speciesId": "sproutlet",
+      "level": 6,
+      "maxHp": 12,
+      "retaliationDamage": 2
+    }
+  },
+  "targetLocation": { "mapId": "lab-route", "x": 3, "y": 1 },
+  "expected": {
+    "trainerId": "trainer-sage",
+    "battleResult": "won",
+    "minimumLegalMoveSelections": 3
+  }
+}

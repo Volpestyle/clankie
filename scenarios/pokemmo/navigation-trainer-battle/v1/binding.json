@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "environment": {
+    "schemaVersion": 1,
+    "environmentKind": "pokemmo_simulator",
+    "characterId": "clankie",
+    "worldId": "pokemmo-sim-world-v1",
+    "lane": "gameplay"
+  },
+  "scenarioId": "navigation-trainer-battle",
+  "scenarioVersion": 1,
+  "fixtureSha256": "8f35400f9278e23b89186940ac6330eaa1ea4a971c70b2c19e2edb31188a276d"
+}

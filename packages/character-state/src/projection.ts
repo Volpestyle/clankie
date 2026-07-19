@@ -3,11 +3,13 @@ import { z } from "zod";
 import {
   ArbiterDecisionSchema,
   CharacterStateSchema,
+  EnvironmentPresenceSchema,
   MinecraftPresenceSchema,
   SharedFactSchema,
   SharedReferenceSchema,
   emptyCharacterState,
   MAX_ACTIVE_INTENTS,
+  MAX_ENVIRONMENT_PRESENCES,
   MAX_SHARED_FACTS,
   MAX_SHARED_REFERENCES,
   type CharacterState,
@@ -16,6 +18,7 @@ import {
 export const CharacterEventTypeSchema = z.enum([
   "character.intent.decided",
   "character.presence.recorded",
+  "character.environment_presence.recorded",
   "character.fact.recorded",
   "character.reference.recorded",
 ]);
@@ -98,6 +101,28 @@ export function applyCharacterEvent(state: CharacterState, input: DomainEvent): 
       throw new Error("Minecraft presence uses a stale goal version");
     }
     return CharacterStateSchema.parse({ ...common, minecraft: presence });
+  }
+  if (type === "character.environment_presence.recorded") {
+    const presence = EnvironmentPresenceSchema.parse(event.data.presence);
+    if (presence.characterId !== state.characterId) throw new Error("Presence character mismatch");
+    const current = state.environments.find(
+      (candidate) => candidate.environmentKind === presence.environmentKind,
+    );
+    if (presence.revision !== (current?.revision ?? 0) + 1) {
+      throw new Error("Environment presence revision is not monotonic");
+    }
+    if (presence.goalVersion !== state.goalVersion) {
+      throw new Error("Environment presence uses a stale goal version");
+    }
+    return CharacterStateSchema.parse({
+      ...common,
+      environments: replaceBounded(
+        state.environments,
+        presence,
+        "environmentKind",
+        MAX_ENVIRONMENT_PRESENCES,
+      ),
+    });
   }
   if (type === "character.fact.recorded") {
     const fact = SharedFactSchema.parse(event.data.fact);

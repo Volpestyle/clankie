@@ -2,6 +2,7 @@ import {
   EnvironmentSemanticEventSchema,
   EnvironmentSessionPhaseSchema,
   MinecraftPositionSchema,
+  PokeMMOMapPositionSchema,
   type EnvironmentSemanticEvent,
 } from "@clankie/interactive-environment";
 import {
@@ -21,6 +22,7 @@ export const CHARACTER_STATE_SCHEMA_VERSION = 1 as const;
 export const MAX_SHARED_FACTS = 64;
 export const MAX_SHARED_REFERENCES = 64;
 export const MAX_ACTIVE_INTENTS = 64;
+export const MAX_ENVIRONMENT_PRESENCES = 8;
 
 export const CharacterSourcePrioritySchema = z.enum([
   "gameplay_autonomy",
@@ -163,6 +165,62 @@ export const MinecraftPresenceSchema = z
   });
 export type MinecraftPresence = z.infer<typeof MinecraftPresenceSchema>;
 
+export const EnvironmentPresencePositionSchema = z.discriminatedUnion("profile", [
+  z
+    .object({
+      profile: z.literal("minecraft_java"),
+      value: MinecraftPositionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      profile: z.literal("pokemmo_simulator"),
+      value: PokeMMOMapPositionSchema,
+    })
+    .strict(),
+]);
+export type EnvironmentPresencePosition = z.infer<typeof EnvironmentPresencePositionSchema>;
+
+export const EnvironmentPresenceSchema = z
+  .object({
+    schemaVersion: z.literal(CHARACTER_STATE_SCHEMA_VERSION),
+    revision: z.number().int().nonnegative(),
+    environmentKind: z.enum(["minecraft_java", "pokemmo_simulator"]),
+    characterId: CharacterIdSchema,
+    phase: EnvironmentSessionPhaseSchema,
+    goalVersion: z.number().int().nonnegative(),
+    observedAt: z.string().datetime(),
+    sessionId: EnvironmentSessionIdSchema.optional(),
+    worldId: WorldIdSchema.optional(),
+    position: EnvironmentPresencePositionSchema.optional(),
+    activeActionId: ActionIdSchema.optional(),
+  })
+  .strict()
+  .superRefine((presence, context) => {
+    if (presence.phase === "active" && (presence.sessionId === undefined || presence.worldId === undefined)) {
+      context.addIssue({
+        code: "custom",
+        path: ["sessionId"],
+        message: "active environment presence requires session and world identity",
+      });
+    }
+    if (presence.activeActionId !== undefined && presence.phase !== "active") {
+      context.addIssue({
+        code: "custom",
+        path: ["activeActionId"],
+        message: "only active environment presence may own an action",
+      });
+    }
+    if (presence.position !== undefined && presence.position.profile !== presence.environmentKind) {
+      context.addIssue({
+        code: "custom",
+        path: ["position", "profile"],
+        message: "presence position profile does not match environment kind",
+      });
+    }
+  });
+export type EnvironmentPresence = z.infer<typeof EnvironmentPresenceSchema>;
+
 export const ActiveCharacterGoalSchema = z
   .object({
     goalVersion: z.number().int().positive(),
@@ -245,6 +303,7 @@ export const CharacterStateSchema = z
     activeGoal: ActiveCharacterGoalSchema.optional(),
     activeIntents: z.array(ActiveCharacterIntentSchema).max(MAX_ACTIVE_INTENTS).default([]),
     minecraft: MinecraftPresenceSchema,
+    environments: z.array(EnvironmentPresenceSchema).max(MAX_ENVIRONMENT_PRESENCES).default([]),
     sharedFacts: z.array(SharedFactSchema).max(MAX_SHARED_FACTS),
     sharedReferences: z.array(SharedReferenceSchema).max(MAX_SHARED_REFERENCES),
     lastDecision: ArbiterDecisionSchema.optional(),
@@ -267,6 +326,7 @@ export function emptyCharacterState(characterId: string): CharacterState {
       goalVersion: 0,
       observedAt: "1970-01-01T00:00:00.000Z",
     },
+    environments: [],
     sharedFacts: [],
     sharedReferences: [],
     activeIntents: [],
@@ -275,7 +335,7 @@ export function emptyCharacterState(characterId: string): CharacterState {
 }
 
 export function toCharacterSnapshot(state: CharacterState): CharacterSnapshot {
-  const presence = state.minecraft;
+  const presence = activeEnvironmentPresence(state) ?? state.minecraft;
   return CharacterSnapshotSchema.parse({
     schemaVersion: CHARACTER_STATE_SCHEMA_VERSION,
     characterId: state.characterId,
@@ -290,6 +350,12 @@ export function toCharacterSnapshot(state: CharacterState): CharacterSnapshot {
     ],
     updatedAt: state.updatedAt,
   });
+}
+
+export function activeEnvironmentPresence(state: CharacterState): EnvironmentPresence | undefined {
+  return [...state.environments]
+    .filter((presence) => presence.phase === "active" || presence.phase === "paused")
+    .sort((left, right) => right.observedAt.localeCompare(left.observedAt))[0];
 }
 
 export type { EnvironmentSemanticEvent };

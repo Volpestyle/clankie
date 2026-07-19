@@ -253,6 +253,40 @@ session but cannot approve remote joins, public chat, player combat, server
 commands, or capability expansion. Emergency pause and disconnect bypass model
 scheduling while still producing audited semantic events.
 
+### PokeMMO policy boundary
+
+The PokeMMO profile is simulator-only for autonomous action. The simulator has
+no account, network, or live-client connector and rejects connection material.
+Its action catalog is closed to bounded navigation, interaction, menu choice,
+battle move, party switch, item use, and wait inside a frozen local fixture.
+
+PokeMMO's published
+[macroing policy](https://support.pokemmo.com/knowledgebase/article/macroing-faq)
+forbids automatic client inputs and input multiplication. Its
+[penalty policy](https://support.pokemmo.com/knowledgebase/article/penalty-policy)
+treats automated control, tampering, restriction bypass, concealment, and
+reverse engineering as cheating, and its
+[Terms of Service](https://pokemmo.com/en/tos/) govern use of the account and
+client. Doctrine therefore applies this fixed boundary:
+
+| Surface                                  | Projected capabilities                                | Denied capabilities                                                                                                                                                                    |
+| ---------------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Deterministic simulator, active gameplay | observe, bounded simulator action start/status/cancel | fixture mutation, credentials, external connection                                                                                                                                     |
+| Deterministic simulator, TUI/voice       | status, steer, pause, resume, disconnect              | observation and simulator actions                                                                                                                                                      |
+| Future live read-only surface            | observe, coach                                        | every input, login, remote connection, tampering, packet/memory/process inspection, reverse engineering, anti-cheat interaction, human-timing imitation, CAPTCHA, social/economy write |
+
+No disabled or hidden live action adapter is registered. Model text, observed
+game content, a repository change, or a lower doctrine layer cannot add one.
+Automated live-client input requires a separate product decision, a new
+versioned capability contract, explicit human approval, and explicit written
+PokeMMO authorization. Public chat, trades, mail, marketplace operations,
+purchases, releases, and player battles remain denied even on a future
+read-only/coaching surface.
+
+Raw frames remain artifact-plane data. Semantic events admit only bounded
+summaries and opaque `artifact://` references, and credentials are invalid in
+PokeMMO fixtures, resource bounds, commands, events, and evidence reports.
+
 ## Policy tests
 
 Each profile needs executable examples:

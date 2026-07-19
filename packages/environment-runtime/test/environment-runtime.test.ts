@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { EnvironmentSessionSpec } from "@clankie/interactive-environment";
+import type { EnvironmentSessionSpec, EnvironmentSessionSpecV2 } from "@clankie/interactive-environment";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   EnvironmentRuntime,
@@ -50,13 +50,13 @@ class FakeAdapter implements EnvironmentAdapter {
   readonly sessions = new Map<string, FakeSession>();
   starts = 0;
   attaches = 0;
-  start(spec: EnvironmentSessionSpec): Promise<EnvironmentAdapterSession> {
+  start(spec: EnvironmentSessionSpecV2): Promise<EnvironmentAdapterSession> {
     this.starts += 1;
     const session = new FakeSession(`adapter-${spec.sessionId}`);
     this.sessions.set(session.adapterSessionId, session);
     return Promise.resolve(session);
   }
-  attach(_spec: EnvironmentSessionSpec, id: string): Promise<EnvironmentAdapterSession | undefined> {
+  attach(_spec: EnvironmentSessionSpecV2, id: string): Promise<EnvironmentAdapterSession | undefined> {
     this.attaches += 1;
     return Promise.resolve(this.sessions.get(id));
   }
@@ -116,6 +116,32 @@ async function harness() {
 }
 
 describe("EnvironmentRuntime fake-adapter contract", () => {
+  it("dual-reads legacy v1 sessions and single-writes canonical v2 records", async () => {
+    const { make, rootDir } = await harness();
+    const grant = await make().start({
+      spec: baseSpec("legacy-v1-session"),
+      holderId: "runner",
+      correlationId: "legacy-migration",
+    });
+    expect(grant.session).toMatchObject({
+      spec: { schemaVersion: 2, resourceBounds: { profile: "legacy_v1", legacyEnvironmentKind: "fake" } },
+      lease: { schemaVersion: 2, resourceBounds: { profile: "legacy_v1" } },
+    });
+    const file = (await readdir(join(rootDir, "environment-sessions"))).find((name) =>
+      name.endsWith(".json"),
+    )!;
+    const stored = JSON.parse(await readFile(join(rootDir, "environment-sessions", file), "utf8")) as {
+      schemaVersion: number;
+      spec: { schemaVersion: number };
+      lease: { schemaVersion: number };
+    };
+    expect(stored).toMatchObject({
+      schemaVersion: 2,
+      spec: { schemaVersion: 2 },
+      lease: { schemaVersion: 2 },
+    });
+  });
+
   it("enforces one writer and rejects expired or invalid capabilities immediately", async () => {
     const { adapter, make, now } = await harness();
     const runtime = make();
