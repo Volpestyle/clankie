@@ -141,11 +141,18 @@ cancellable wait; observations cover overworld, menu, party, battle, dialog,
 danger, action state, and bounded `artifact://` framebuffer/RAM references.
 A state-derived driver proves the frozen
 `scenarios/emulator/verdant-path-trainer-battle/v1` scenario with byte-identical
-report, evidence trace, and decision traces across runs. This slice drives a
-clearly-labeled deterministic core test double at the adapter boundary; the
-libmgba-backed real core replaces it behind the same seam per
-[ADR 0039](adr/0039-gba-emulator-embodiment-and-deterministic-core-boundary.md).
-ROM, BIOS, and savestate bytes never enter fixtures, events, or reports.
+report, evidence trace, and decision traces across runs. Two cores implement
+the adapter-facing seam
+([ADR 0039](adr/0039-gba-emulator-embodiment-and-deterministic-core-boundary.md)):
+the clearly-labeled deterministic core test double that keeps CI ROM-free, and
+the real headless mGBA WASM core
+([ADR 0040](adr/0040-real-mgba-core-behind-the-emulator-seam.md)) that runs an
+operator-supplied Pokémon FireRed ROM in-process — version- and
+content-pinned, frame-stepped from a pinned savestate, decoding empirically
+verified EWRAM fields, with a ROM-gated route scenario whose two-run
+byte-identical evidence and no-network tripwire are captured locally while CI
+stays green without a ROM. ROM, BIOS, and savestate bytes never enter the
+repository, fixtures, events, or reports — only SHA-256 identity digests.
 
 ## Discord voice media plane
 

@@ -18,6 +18,7 @@
     "@clankie/environment-runtime": "workspace:*",
     "@clankie/interactive-environment": "workspace:*",
     "@clankie/protocol": "workspace:*",
+    "romdev-platform-gba": "0.11.0",
     "zod": "4.4.3"
   },
   "devDependencies": {

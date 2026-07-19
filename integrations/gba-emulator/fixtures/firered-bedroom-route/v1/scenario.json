@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "firered-bedroom-route",
+  "scenarioVersion": 1,
+  "coreId": "mgba-libretro/romdev-platform-gba@0.11.0",
+  "savestateId": "firered-a-bedroom-v1",
+  "savestateSha256": "95af3638ddf24ff9f7d6b837d5d8128358a605280c32514d3395db9e86b1f6dd",
+  "romSha256": "3d0c79f1627022e18765766f6cb5ea067f6b5bf7dca115552189ad65a5c3a8ac",
+  "coreWasmSha256": "b7ba8b1233886e869a5166cd3c427de46c79504f8e5561849206d41764acabb7",
+  "rngSeed": 0,
+  "worldId": "firered-vanilla-v1",
+  "player": { "characterId": "clankie" },
+  "maxEvidenceEvents": 64,
+  "maxDecisions": 32,
+  "holdFramesPerStep": 16,
+  "map": {
+    "mapId": "pallet-town/players-house-2f",
+    "bounds": { "minX": 8, "maxX": 18, "minY": 9, "maxY": 15 },
+    "blocked": [
+      { "x": 8, "y": 9 },
+      { "x": 9, "y": 9 },
+      { "x": 15, "y": 9 },
+      { "x": 16, "y": 9 },
+      { "x": 17, "y": 9 },
+      { "x": 18, "y": 9 },
+      { "x": 8, "y": 10 },
+      { "x": 9, "y": 10 },
+      { "x": 15, "y": 10 },
+      { "x": 16, "y": 10 },
+      { "x": 17, "y": 10 },
+      { "x": 18, "y": 10 },
+      { "x": 8, "y": 11 },
+      { "x": 13, "y": 11 },
+      { "x": 18, "y": 11 },
+      { "x": 13, "y": 12 },
+      { "x": 9, "y": 13 }
+    ]
+  },
+  "start": { "mapId": "pallet-town/players-house-2f", "x": 13, "y": 13 },
+  "target": { "mapId": "pallet-town/players-house-2f", "x": 9, "y": 11 },
+  "expected": { "minimumDecisions": 7 }
+}
