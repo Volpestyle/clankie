@@ -125,9 +125,14 @@ overrides, and control characters never enter the payload store. Duplicate
 command IDs are idempotent only when their worker run and rendered content hash
 match.
 
-Steering authorization is required and fail-closed. The authenticated principal
-supplies the trusted source lane; request bodies may only assert the same lane
-and cannot elevate a captain to the TUI. Production binds the captain lane with
+Steering authorization is required and fail-closed. Captain credentials take
+precedence over operator credentials, which take precedence over a paired-device
+session. A paired device is verified through the durable device projection on
+every request and must currently hold the `steer` grant; its command is
+attributed to `{kind: "device", id: deviceId}` on the `api` lane. The
+authenticated principal supplies the trusted source lane; request bodies may
+only assert the same lane and cannot elevate a captain or device to the TUI.
+Production binds the captain lane with
 `CLANKIE_CAPTAIN_STEER_SOURCE_LANE=api|discord_text|discord_voice`; operator
 steering is bound to `tui`. Runner settlement diagnostics are hash/length-only
 audit metadata, while the durable outcome message is derived from its typed code.

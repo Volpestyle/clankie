@@ -231,7 +231,9 @@ function isStoredWorkerSteerCommand(value: unknown): value is StoredWorkerSteerC
     (command.status === "pending" || command.status === "delivering" || command.status === "settled") &&
     typeof command.deliveryCount === "number" &&
     !!command.principal &&
-    (command.principal.kind === "captain" || command.principal.kind === "operator") &&
+    (command.principal.kind === "captain" ||
+      command.principal.kind === "operator" ||
+      command.principal.kind === "device") &&
     typeof command.principal.id === "string" &&
     isWorkerSteerIntent(command.intent) &&
     (command.sourceLane === "tui" ||

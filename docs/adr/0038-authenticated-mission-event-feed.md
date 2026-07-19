@@ -34,6 +34,14 @@ worker result fields remain private. Provider names, model names, plan bodies,
 runner claims, raw output, credentials, terminal bytes, private prompts, and
 chain-of-thought are unrepresentable in the public schemas.
 
+`@clankie/garden-model` owns the semantic interpretation of every visible
+worker variant. It accepts leased identity, sanitized summaries, resolved
+state and attention, and every finite settlement result directly. The app
+adapter performs only the envelope rename from `eventId` to the Garden
+projection's `id`; it does not recreate internal event shapes or carry a
+second state mapping. Terminal failed, blocked, and offline outcomes therefore
+replace working state deterministically.
+
 The feed serializes store-returned append hints with reads of the complete
 authoritative log. A contiguous hint advances only when its envelope hash and
 previous-hash link extend the reconciled chain. A hint beyond the next global
@@ -151,6 +159,8 @@ sequenceDiagram
   than stale success.
 - Adding a visible event requires a protocol-versioned closed projection and an
   information-boundary review; an internal event is private by default.
+- Garden state semantics live in `@clankie/garden-model`; app adapters translate
+  only the feed envelope and cannot select which terminal states to understand.
 - Very large missions can produce an explicitly compacted snapshot. Tail replay
   remains bounded independently, and a client never silently advances across an
   expired floor.

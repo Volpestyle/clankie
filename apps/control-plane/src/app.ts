@@ -109,6 +109,7 @@ import type {
   WorkerDescriptor,
   WorkerSteerCommand,
   WorkerSteerIntent,
+  WorkerSteerPrincipal,
   WorkerSteerSourceLane,
 } from "@clankie/worker-sdk";
 import { Hono, type Context } from "hono";
@@ -288,7 +289,7 @@ export interface ControlPlaneDependencies {
 }
 
 export type WorkerSteerAuthorizer = (input: {
-  principal: { kind: "captain" | "operator"; id: string };
+  principal: WorkerSteerPrincipal;
   sourceLane: WorkerSteerSourceLane;
   intent: WorkerSteerIntent;
   commandId: string;
@@ -3193,9 +3194,37 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
 
   app.post("/v1/workers/:id/steer", async (context) => {
     const workerRunId = context.req.param("id");
-    const authority = await authenticateSteerPrincipal(context.req.raw, dependencies);
-    if (authority === "unavailable") return context.json({ error: "steer_control_unavailable" }, 503);
-    if (!authority) return context.json({ error: "steer_control_authority_required" }, 401);
+    const higherAuthority = await authenticateSteerPrincipal(context.req.raw, dependencies);
+    let authority: { principal: WorkerSteerPrincipal; sourceLane: WorkerSteerSourceLane };
+    if (higherAuthority && higherAuthority !== "unavailable") {
+      authority = higherAuthority;
+    } else {
+      // Device tokens carry identity only. Authentication re-reads the durable
+      // device projection so revocation and grant changes take effect now,
+      // before request parsing, policy evaluation, or command persistence.
+      const device = await authenticateDevice(context.req.raw);
+      if (device === "unavailable") {
+        return higherAuthority === "unavailable"
+          ? context.json({ error: "steer_control_unavailable" }, 503)
+          : context.json({ error: "steer_control_authority_required" }, 401);
+      }
+      if ("denied" in device) {
+        const error =
+          device.denied === "expired"
+            ? "steer_device_session_expired"
+            : device.denied === "revoked"
+              ? "steer_device_revoked"
+              : "steer_device_session_invalid";
+        return context.json({ error }, 401);
+      }
+      if (!device.grants.steer) {
+        return context.json({ error: "steer_device_grant_required" }, 403);
+      }
+      authority = {
+        principal: { kind: "device", id: device.deviceId },
+        sourceLane: "api",
+      };
+    }
     const parsed = WorkerSteerRequestSchema.safeParse(await readJson(context.req.raw));
     if (!parsed.success) return context.json({ error: "invalid_steer_request" }, 400);
     const normalized = normalizeWorkerSteerIntent(parsed.data);
@@ -3526,7 +3555,7 @@ async function authenticateSteerPrincipal(
   dependencies: ControlPlaneDependencies,
 ): Promise<
   | {
-      principal: { kind: "captain" | "operator"; id: string };
+      principal: WorkerSteerPrincipal;
       sourceLane: WorkerSteerSourceLane;
     }
   | "unavailable"

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { DomainEvent } from "@clankie/protocol";
+import { MissionFeedEventSchema, type DomainEvent, type MissionFeedEvent } from "@clankie/protocol";
 import { projectGarden, type GardenLocation } from "../src/index.ts";
 
 const gardenLocations: Record<GardenLocation, true> = {
@@ -44,15 +44,187 @@ function captainEvent(type: string, data: Record<string, unknown>, index: number
   };
 }
 
+function projectFeed(events: Array<Record<string, unknown>>) {
+  const feedEvents = events.map((event, index) =>
+    MissionFeedEventSchema.parse({
+      schemaVersion: 1,
+      eventId: `feed-${String(index + 1)}`,
+      sourceSequence: index + 1,
+      previousSourceSequence: index,
+      occurredAt: new Date(Date.UTC(2026, 6, 19, 18, 0, index)).toISOString(),
+      missionId: "feed-mission",
+      correlationId: "feed-correlation",
+      profileHash: "feed-profile",
+      ...event,
+    }),
+  );
+  // The app boundary performs this envelope-only translation. All semantic
+  // handling remains inside projectGarden.
+  const domainEvents: DomainEvent[] = feedEvents.map((event: MissionFeedEvent) => {
+    const { eventId, ...envelope } = event;
+    return { ...envelope, id: eventId };
+  });
+  return projectGarden(domainEvents);
+}
+
+const leasedFeedEvent = {
+  type: "worker.leased",
+  taskId: "feed-task",
+  workerRunId: "feed-run",
+  data: {
+    workerId: "feed-worker",
+    harness: "codex",
+    taskKind: "implementation",
+    attempt: 1,
+  },
+};
+
 describe("garden projection", () => {
   it("includes the archive tree in the exhaustive location contract", () => {
     expect(Object.keys(gardenLocations)).toContain("archive_tree");
   });
 
+  it("projects closed-feed leased identity and sanitized summary variants", () => {
+    expect(projectFeed([leasedFeedEvent]).agents).toEqual([
+      expect.objectContaining({
+        workerRunId: "feed-run",
+        workerId: "feed-worker",
+        harness: "codex",
+        taskId: "feed-task",
+        taskKind: "implementation",
+        location: "build_grove",
+        state: "working",
+      }),
+    ]);
+
+    expect(
+      projectFeed([
+        leasedFeedEvent,
+        {
+          type: "worker.progress",
+          taskId: "feed-task",
+          workerRunId: "feed-run",
+          data: { summary: "Working" },
+        },
+      ]).agents[0],
+    ).toMatchObject({ state: "working", summary: "Working" });
+
+    expect(
+      projectFeed([
+        leasedFeedEvent,
+        {
+          type: "worker.waiting_dependency",
+          taskId: "feed-task",
+          workerRunId: "feed-run",
+          data: { summary: "Waiting for a dependency" },
+        },
+      ]).agents[0],
+    ).toMatchObject({ state: "waiting_dependency", summary: "Waiting for a dependency" });
+
+    const waitingUser = projectFeed([
+      leasedFeedEvent,
+      {
+        type: "worker.waiting_user",
+        taskId: "feed-task",
+        workerRunId: "feed-run",
+        data: { summary: "User input required" },
+      },
+    ]);
+    expect(waitingUser.agents[0]).toMatchObject({
+      state: "waiting_user",
+      attention: "action_required",
+      summary: "User input required",
+    });
+    expect(waitingUser.attentionQueue).toEqual([
+      expect.objectContaining({ workerRunId: "feed-run", label: "User input required" }),
+    ]);
+  });
+
   it.each([
-    ["task.succeeded", { summary: "Implementation verified" }],
-    ["worker.completed", { result: "succeeded" }],
-  ])("moves completed workers to the archive tree for %s", (type, data) => {
+    ["unknown", "idle", "none", "Status unknown", "build_grove"],
+    ["working", "working", "none", "Working", "build_grove"],
+    ["idle", "idle", "none", "Idle", "build_grove"],
+    ["waiting_dependency", "waiting_dependency", "none", "Waiting for a dependency", "build_grove"],
+    ["waiting_user", "waiting_user", "action_required", "User input required", "build_grove"],
+    ["blocked", "blocked", "action_required", "Task blocked", "build_grove"],
+    ["failed", "failed", "urgent", "Task failed", "recovery_shed"],
+    ["completed", "completed", "none", "Task completed", "archive_tree"],
+    ["offline", "offline", "urgent", "Worker offline", "build_grove"],
+  ] as const)(
+    "projects closed-feed resolved status %s without retaining stale working state",
+    (status, state, attention, summary, location) => {
+      const world = projectFeed([
+        leasedFeedEvent,
+        {
+          type: "worker.status.resolved",
+          taskId: "feed-task",
+          workerRunId: "feed-run",
+          data: {
+            state: status,
+            tier: 1,
+            confidence: 1,
+            observedAt: "2026-07-19T18:00:00.000Z",
+            attentionRaised: false,
+          },
+        },
+      ]);
+      expect(world.agents[0]).toMatchObject({ state, attention, summary, location });
+      expect(world.attentionQueue).toHaveLength(attention === "none" ? 0 : 1);
+    },
+  );
+
+  it("projects closed-feed attentionRaised even when the resolved state is working", () => {
+    const world = projectFeed([
+      leasedFeedEvent,
+      {
+        type: "worker.status.resolved",
+        taskId: "feed-task",
+        workerRunId: "feed-run",
+        data: {
+          state: "working",
+          tier: 1,
+          confidence: 1,
+          observedAt: "2026-07-19T18:00:00.000Z",
+          attentionRaised: true,
+        },
+      },
+    ]);
+    expect(world.agents[0]).toMatchObject({ state: "working", attention: "action_required" });
+    expect(world.attentionQueue).toEqual([
+      {
+        workerRunId: "feed-run",
+        taskId: "feed-task",
+        label: "Worker status requires attention",
+        urgency: "action_required",
+      },
+    ]);
+  });
+
+  it.each([
+    ["succeeded", "completed", "none", "Task completed", "archive_tree"],
+    ["failed", "failed", "urgent", "Task failed", "recovery_shed"],
+    ["blocked", "blocked", "action_required", "Task blocked", "build_grove"],
+  ] as const)(
+    "projects every closed-feed worker.settled result: %s",
+    (result, state, attention, summary, location) => {
+      const world = projectFeed([
+        leasedFeedEvent,
+        {
+          type: "worker.settled",
+          taskId: "feed-task",
+          workerRunId: "feed-run",
+          data: { result, artifactIds: [] },
+        },
+      ]);
+      expect(world.agents[0]).toMatchObject({ state, attention, summary, location });
+      expect(world.attentionQueue).toHaveLength(attention === "none" ? 0 : 1);
+    },
+  );
+
+  it.each([
+    ["task.succeeded", { summary: "Implementation verified" }, "Implementation verified"],
+    ["worker.completed", { result: "succeeded" }, "Completed"],
+  ])("moves completed workers to the archive tree for %s", (type, data, summary) => {
     const events: DomainEvent[] = [
       {
         ...base,
@@ -76,6 +248,7 @@ describe("garden projection", () => {
       location: "archive_tree",
       state: "completed",
       attention: "none",
+      summary,
     });
   });
 

@@ -56,6 +56,16 @@ The signing key is a 32-byte mode-0600 file, auto-minted on first run next to th
 unreadable or wrong-mode key makes device authentication return unavailable (503) rather than
 trusting an unverifiable key. Deleting or rotating the key revokes every device at once.
 
+### The steer grant authorizes only finite worker intents
+
+The existing worker-steering route accepts a paired-device session after captain and operator
+credentials have had precedence. It verifies the identity-only token through the same session
+verifier, re-reads the durable device projection, and requires the active device's current
+`steer` grant before parsing or persisting a command. The resulting command carries
+`{kind: "device", id: deviceId}` on the server-selected `api` source lane. The grant is never
+accepted from token claims, request bodies, or a stored command, and it does not introduce
+free-form input, terminal control, approvals, or a generalized capability system.
+
 ### Durable device lifecycle is event-sourced and fail-closed on replay
 
 Device records project from the `device:${deviceId}` stream through `device.pairing.redeemed`,
@@ -85,6 +95,9 @@ authority.
   plus a projection check give per-device revocation with no stored secrets.
 - **Put grants in the token** — rejected because it makes "refresh cannot widen" and "revocation
   is immediate" enforcement obligations rather than structural facts.
+- **Present a device session as an operator credential** — rejected because it invents false
+  authority, bypasses the current device projection, and makes revocation or grant reduction
+  invisible to the steering boundary.
 
 ## Consequences
 
@@ -94,5 +107,5 @@ authority.
   `GET /v1/devices/self` on launch, so a grant reduction or revocation on the host takes effect on
   the device's next request or refresh.
 - Relay-path device authentication, runner control-lease enforcement, and biometric re-lock remain
-  out of scope here (VUH-870/730 and a later slice); this ADR governs identity, session, and grant
-  issuance/revocation.
+  out of scope here (VUH-870/730 and a later slice); this ADR governs identity, session, grant
+  issuance/revocation, and current-grant authorization for finite worker steering.

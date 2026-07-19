@@ -54,6 +54,22 @@ describe("FileWorkerSteeringStore", () => {
     });
   });
 
+  it("restores an honestly attributed paired-device command", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-steering-"));
+    const path = join(root, "commands.json");
+    const first = new FileWorkerSteeringStore(path);
+    await first.put(command({ kind: "device", id: "device-1" }));
+
+    const restarted = new FileWorkerSteeringStore(path);
+    await expect(
+      restarted.claim({ runnerId: "runner-1", workerRunId: "run-1", attempt: 1 }),
+    ).resolves.toMatchObject({
+      commandId: "command-1",
+      sourceLane: "api",
+      principal: { kind: "device", id: "device-1" },
+    });
+  });
+
   it("fails closed on malformed persisted commands", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-steering-"));
     const path = join(root, "commands.json");
@@ -64,7 +80,9 @@ describe("FileWorkerSteeringStore", () => {
   });
 });
 
-function command(): StoredWorkerSteerCommand {
+function command(
+  principal: StoredWorkerSteerCommand["principal"] = { kind: "captain", id: "captain-1" },
+): StoredWorkerSteerCommand {
   return {
     schemaVersion: 1,
     commandId: "command-1",
@@ -72,7 +90,7 @@ function command(): StoredWorkerSteerCommand {
     attempt: 1,
     sourceLane: "api",
     intent: { type: "focus", target: "failing_test" },
-    principal: { kind: "captain", id: "captain-1" },
+    principal,
     correlationId: "correlation-1",
     missionId: "mission-1",
     taskId: "task-1",

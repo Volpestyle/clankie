@@ -57,7 +57,7 @@ export interface ClankieApiClientOptions {
   runnerId?: string;
   captainToken?: string;
   operatorToken?: string;
-  /** Paired-device session token used by Garden event and transcript reads. */
+  /** Paired-device session token used by Garden reads and finite worker steering. */
   deviceToken?: string;
 }
 
@@ -88,6 +88,11 @@ export interface RunnerAssignment {
 
 export type WorkerSteerSourceLane = "tui" | "discord_text" | "discord_voice" | "api";
 
+export type WorkerSteerPrincipal = {
+  kind: "captain" | "operator" | "device";
+  id: string;
+};
+
 export type WorkerSteerIntent =
   | {
       type: "focus";
@@ -111,7 +116,7 @@ export interface WorkerSteerCommand {
   attempt: number;
   sourceLane: WorkerSteerSourceLane;
   intent: WorkerSteerIntent;
-  principal: { kind: "captain" | "operator"; id: string };
+  principal: WorkerSteerPrincipal;
   correlationId: string;
   missionId: string;
   taskId: string;
@@ -613,8 +618,10 @@ export class ClankieApiClient {
   }
 
   private steerHeaders(): Record<string, string> {
-    const token = this.captainToken ?? this.operatorToken;
-    if (!token) throw new Error("A captain or operator token is required for worker steering");
+    const token = this.captainToken ?? this.operatorToken ?? this.deviceToken;
+    if (!token) {
+      throw new Error("A captain, operator, or paired-device token is required for worker steering");
+    }
     return { authorization: `Bearer ${token}` };
   }
 

@@ -270,6 +270,15 @@ not become app input. Retention expiry, invalid cursors, and mission replacement
 are explicit recovery states. `GardenWorld` remains the only spatial/state
 projection; the feed is ordered evidence, not a second world model.
 
+`@clankie/garden-model` directly interprets the closed feed vocabulary. It
+creates worker identity from `worker.started` or `worker.leased`, consumes only
+the sanitized summaries, applies resolved state and `attentionRaised`, and
+maps every settlement result to completed, failed, or blocked presentation.
+The app adapter changes only the envelope key from `eventId` to `id`; it does
+not own semantic mappings. Failed, blocked, and offline workers therefore
+cannot remain visually working because a client omitted an internal-event
+translation.
+
 Ordinary appends and optimistic `appendExpected` writers share the same global
 hash chain. The feed serializes low-latency append hints with authoritative
 store reconciliation: every discovery, snapshot, and tail open rereads and
@@ -278,6 +287,17 @@ before advancing. This classifies every global sequence, including private and
 future out-of-band event types, without exposing filtered payloads. Missing,
 forked, corrupt, regressed, or unreadable authority fails the read explicitly
 instead of returning a stale process-local projection.
+
+## Paired-device worker steering
+
+A paired device may submit only the existing finite `WorkerSteerIntent` set.
+The API client prefers captain and then operator credentials before using its
+device session. The control plane verifies that identity-only session against
+the durable device projection and its current `steer` grant before request
+parsing, policy evaluation, or command persistence. Accepted device commands
+carry the honest principal `{kind: "device", id: deviceId}` and the
+server-selected `api` lane; token claims, request bodies, and persisted command
+records never supply grants.
 
 ## Control flow
 

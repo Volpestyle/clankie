@@ -29,6 +29,12 @@ export interface WorkerRunContext {
 
 export type WorkerSteerSourceLane = "tui" | "discord_text" | "discord_voice" | "api";
 
+/** Server-authenticated authority that requested a finite worker steer intent. */
+export type WorkerSteerPrincipal = {
+  kind: "captain" | "operator" | "device";
+  id: string;
+};
+
 export type WorkerSteerIntent =
   | {
       type: "focus";
@@ -45,7 +51,7 @@ export interface WorkerSteerCommand {
   attempt: number;
   sourceLane: WorkerSteerSourceLane;
   intent: WorkerSteerIntent;
-  principal: { kind: "captain" | "operator"; id: string };
+  principal: WorkerSteerPrincipal;
   correlationId: string;
   missionId: string;
   taskId: string;

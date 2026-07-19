@@ -401,4 +401,31 @@ describe("ClankieApiClient runner surface", () => {
     );
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
+
+  it("uses paired-device steering only after captain and operator credentials", async () => {
+    const credentials: string[] = [];
+    const fetchImpl = vi.fn<typeof fetch>(async (_input, init) => {
+      const headers = init?.headers as Record<string, string> | undefined;
+      credentials.push(headers?.authorization ?? "");
+      return Response.json({ accepted: true, command: { status: "pending" } }, { status: 202 });
+    });
+    const options = { baseUrl: "http://127.0.0.1:4310", fetchImpl };
+
+    await new ClankieApiClient({
+      ...options,
+      captainToken: "captain-secret",
+      operatorToken: "operator-secret",
+      deviceToken: "device-secret",
+    }).steerWorker("run-1", { type: "continue" });
+    await new ClankieApiClient({
+      ...options,
+      operatorToken: "operator-secret",
+      deviceToken: "device-secret",
+    }).steerWorker("run-1", { type: "continue" });
+    await new ClankieApiClient({ ...options, deviceToken: "device-secret" }).steerWorker("run-1", {
+      type: "continue",
+    });
+
+    expect(credentials).toEqual(["Bearer captain-secret", "Bearer operator-secret", "Bearer device-secret"]);
+  });
 });

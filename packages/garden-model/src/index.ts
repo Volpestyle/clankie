@@ -1,4 +1,10 @@
-import { CaptainPresenceEventSchema, type DomainEvent, type Harness, type TaskKind } from "@clankie/protocol";
+import {
+  CaptainPresenceEventSchema,
+  type DomainEvent,
+  type Harness,
+  type TaskKind,
+  type WorkerStatusState,
+} from "@clankie/protocol";
 
 export type GardenLocation =
   | "observatory"
@@ -173,7 +179,7 @@ export function projectGarden(events: DomainEvent[]): GardenWorld {
       continue;
     }
 
-    if (event.type === "worker.started" && event.workerRunId) {
+    if ((event.type === "worker.started" || event.type === "worker.leased") && event.workerRunId) {
       const taskKind = kind(event.data.taskKind);
       agents.set(event.workerRunId, {
         id: `agent:${event.workerRunId}`,
@@ -208,7 +214,7 @@ export function projectGarden(events: DomainEvent[]): GardenWorld {
       } else if (event.type === "worker.waiting_user") {
         agent.state = "waiting_user";
         agent.attention = "action_required";
-        agent.summary = String(event.data.questionSummary ?? "User input required");
+        agent.summary = String(event.data.summary ?? event.data.questionSummary ?? "User input required");
         attention.set(`worker:${agent.workerRunId}`, {
           workerRunId: agent.workerRunId,
           ...(event.taskId ? { taskId: event.taskId } : {}),
@@ -220,36 +226,54 @@ export function projectGarden(events: DomainEvent[]): GardenWorld {
         agent.attention = "none";
         agent.summary = String(event.data.summary ?? "Waiting for a dependency");
       } else if (event.type === "worker.progress") {
-        agent.summary = String(event.data.message ?? "Working");
+        agent.summary = String(event.data.summary ?? event.data.message ?? "Working");
+      } else if (event.type === "worker.status.resolved") {
+        const state = workerStatusState(event.data.state);
+        if (state) {
+          applyResolvedStatus(agent, state, event.data.attentionRaised === true, event.taskId, attention);
+        }
       } else if (event.type === "task.failed" || event.type === "worker.crashed") {
-        agent.state = "failed";
-        agent.location = "recovery_shed";
-        agent.attention = "urgent";
-        agent.summary = String(event.data.summary ?? event.data.diagnosis ?? "Task failed");
-        attention.set(`worker:${agent.workerRunId}`, {
-          workerRunId: agent.workerRunId,
-          ...(event.taskId ? { taskId: event.taskId } : {}),
-          label: agent.summary,
-          urgency: "urgent",
-        });
+        applyTerminalResult(
+          agent,
+          "failed",
+          String(event.data.summary ?? event.data.diagnosis ?? "Task failed"),
+          event.taskId,
+          attention,
+        );
       } else if (event.type === "task.blocked") {
-        agent.state = "blocked";
-        agent.attention = "action_required";
-        agent.summary = String(event.data.reason ?? "Blocked");
-        attention.set(`worker:${agent.workerRunId}`, {
-          workerRunId: agent.workerRunId,
-          ...(event.taskId ? { taskId: event.taskId } : {}),
-          label: agent.summary,
-          urgency: "action_required",
-        });
-      } else if (
-        event.type === "task.succeeded" ||
-        (event.type === "worker.completed" && event.data.result === "succeeded")
-      ) {
-        agent.state = "completed";
-        agent.location = "archive_tree";
-        agent.attention = "none";
-        agent.summary = String(event.data.summary ?? "Completed");
+        applyTerminalResult(
+          agent,
+          "blocked",
+          String(event.data.summary ?? event.data.reason ?? "Blocked"),
+          event.taskId,
+          attention,
+        );
+      } else if (event.type === "task.succeeded") {
+        applyTerminalResult(
+          agent,
+          "succeeded",
+          String(event.data.summary ?? "Completed"),
+          event.taskId,
+          attention,
+        );
+      } else if (event.type === "worker.settled") {
+        const result = settlementResult(event.data.result);
+        applyTerminalResult(
+          agent,
+          result,
+          settlementSummary(event.data.result, result),
+          event.taskId,
+          attention,
+        );
+      } else if (event.type === "worker.completed") {
+        const result = settlementResult(event.data.result);
+        applyTerminalResult(
+          agent,
+          result,
+          legacyCompletionSummary(event.data.result, result),
+          event.taskId,
+          attention,
+        );
       } else if (event.type === "human.takeover.started") {
         agent.state = "human_controlled";
         agent.attention = "info";
@@ -293,4 +317,122 @@ export function projectGarden(events: DomainEvent[]): GardenWorld {
     agents: [...agents.values()].sort((a, b) => a.workerRunId.localeCompare(b.workerRunId)),
     attentionQueue: [...attention.values()],
   };
+}
+
+type SettlementResult = "succeeded" | "failed" | "blocked";
+
+function settlementResult(value: unknown): SettlementResult {
+  const candidate =
+    typeof value === "string"
+      ? value
+      : value && typeof value === "object"
+        ? (value as Record<string, unknown>).status
+        : undefined;
+  return candidate === "succeeded" || candidate === "blocked" ? candidate : "failed";
+}
+
+function settlementSummary(value: unknown, result: SettlementResult): string {
+  if (value && typeof value === "object") {
+    const summary = (value as Record<string, unknown>).summary;
+    if (typeof summary === "string" && summary.length > 0) return summary;
+  }
+  return result === "succeeded" ? "Task completed" : result === "blocked" ? "Task blocked" : "Task failed";
+}
+
+function legacyCompletionSummary(value: unknown, result: SettlementResult): string {
+  if (value && typeof value === "object") {
+    const summary = (value as Record<string, unknown>).summary;
+    if (typeof summary === "string" && summary.length > 0) return summary;
+  }
+  return result === "succeeded" ? "Completed" : result === "blocked" ? "Task blocked" : "Task failed";
+}
+
+function applyTerminalResult(
+  agent: GardenAgent,
+  result: SettlementResult,
+  summary: string,
+  taskId: string | undefined,
+  attention: Map<string, GardenWorld["attentionQueue"][number]>,
+): void {
+  const key = `worker:${agent.workerRunId}`;
+  agent.summary = summary;
+  attention.delete(key);
+  if (result === "succeeded") {
+    agent.state = "completed";
+    agent.location = "archive_tree";
+    agent.attention = "none";
+    return;
+  }
+  agent.state = result;
+  agent.attention = result === "failed" ? "urgent" : "action_required";
+  if (result === "failed") agent.location = "recovery_shed";
+  attention.set(key, {
+    workerRunId: agent.workerRunId,
+    ...(taskId ? { taskId } : {}),
+    label: summary,
+    urgency: agent.attention,
+  });
+}
+
+function workerStatusState(value: unknown): WorkerStatusState | undefined {
+  return [
+    "unknown",
+    "working",
+    "idle",
+    "waiting_dependency",
+    "waiting_user",
+    "blocked",
+    "failed",
+    "completed",
+    "offline",
+  ].includes(String(value))
+    ? (value as WorkerStatusState)
+    : undefined;
+}
+
+function applyResolvedStatus(
+  agent: GardenAgent,
+  state: WorkerStatusState,
+  attentionRaised: boolean,
+  taskId: string | undefined,
+  attention: Map<string, GardenWorld["attentionQueue"][number]>,
+): void {
+  const summaries: Record<WorkerStatusState, string> = {
+    unknown: "Status unknown",
+    working: "Working",
+    idle: "Idle",
+    waiting_dependency: "Waiting for a dependency",
+    waiting_user: "User input required",
+    blocked: "Task blocked",
+    failed: "Task failed",
+    completed: "Task completed",
+    offline: "Worker offline",
+  };
+  const key = `worker:${agent.workerRunId}`;
+  // AgentVisualState deliberately has no unknown pose. Rendering it as idle
+  // with an explicit summary avoids retaining a stale working state.
+  agent.state = state === "unknown" ? "idle" : state;
+  agent.summary = summaries[state];
+  if (state === "failed") agent.location = "recovery_shed";
+  if (state === "completed") agent.location = "archive_tree";
+
+  const stateUrgency =
+    state === "failed" || state === "offline"
+      ? "urgent"
+      : state === "blocked" || state === "waiting_user"
+        ? "action_required"
+        : undefined;
+  const urgency = stateUrgency ?? (attentionRaised ? "action_required" : undefined);
+  attention.delete(key);
+  if (!urgency) {
+    agent.attention = "none";
+    return;
+  }
+  agent.attention = urgency;
+  attention.set(key, {
+    workerRunId: agent.workerRunId,
+    ...(taskId ? { taskId } : {}),
+    label: stateUrgency ? agent.summary : "Worker status requires attention",
+    urgency,
+  });
 }
