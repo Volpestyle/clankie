@@ -10,7 +10,8 @@ export type GardenLocation =
   | "merge_gate"
   | "release_harbor"
   | "recovery_shed"
-  | "commons";
+  | "commons"
+  | "archive_tree";
 
 export type AgentVisualState =
   | "idle"
@@ -246,6 +247,7 @@ export function projectGarden(events: DomainEvent[]): GardenWorld {
         (event.type === "worker.completed" && event.data.result === "succeeded")
       ) {
         agent.state = "completed";
+        agent.location = "archive_tree";
         agent.attention = "none";
         agent.summary = String(event.data.summary ?? "Completed");
       } else if (event.type === "human.takeover.started") {
