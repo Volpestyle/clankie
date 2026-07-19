@@ -425,6 +425,9 @@ importers:
       '@clankie/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      romdev-platform-gba:
+        specifier: 0.11.0
+        version: 0.11.0
       zod:
         specifier: 4.4.3
         version: 4.4.3
@@ -3250,6 +3253,10 @@ packages:
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
 
+  romdev-platform-gba@0.11.0:
+    resolution: {integrity: sha512-3dkFlQdYV2stLnAxqnTGc7Ph7KCFmN+XL7OAxqy7nlSRJdtlIXp1IEJd7JKYI+HdQLxaJspFDSDPI6Myzsdt6Q==}
+    engines: {node: '>=24'}
+
   rou3@0.8.1:
     resolution: {integrity: sha512-ePa+XGk00/3HuCqrEnK3LxJW7I0SdNg6EFzKUJG73hMAdDcOUC/i/aSz7LSDwLrGr33kal/rqOGydzwl6U7zBA==}
 
@@ -5717,6 +5724,8 @@ snapshots:
       '@rolldown/binding-wasm32-wasi': 1.1.5
       '@rolldown/binding-win32-arm64-msvc': 1.1.5
       '@rolldown/binding-win32-x64-msvc': 1.1.5
+
+  romdev-platform-gba@0.11.0: {}
 
   rou3@0.8.1: {}
 

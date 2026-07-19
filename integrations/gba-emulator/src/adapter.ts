@@ -25,6 +25,7 @@ import {
   type GbaEmulatorTrace,
 } from "./contracts.ts";
 import { DeterministicGbaCoreDouble, canonicalJson, sha256 } from "./core-double.ts";
+import type { GbaAdapterScenario, GbaCoreFactory, GbaCoreSeam } from "./core-seam.ts";
 
 const GENESIS_HASH = "0".repeat(64);
 
@@ -47,18 +48,32 @@ export interface GbaEmulatorSnapshot {
  * dispatches every action into `startAction`, and this adapter's only job is
  * to validate the strict emulator contract, enforce leases' resource bounds,
  * drive the pinned deterministic core, and record hash-chained evidence.
- * The core behind the boundary is the deterministic test double this slice
- * ships; a libmgba-backed core replaces it behind the same seam (ADR 0039).
+ * The core behind the boundary is whatever `GbaCoreSeam` the factory yields:
+ * the deterministic CI test double by default, or the real headless mGBA
+ * core for ROM-gated runs (ADR 0039 / ADR 0040). The seam is the only thing
+ * that swaps; the governed surface does not change.
  */
 export class GbaEmulatorAdapter implements EnvironmentAdapter {
-  private readonly scenario: FrozenGbaScenario;
+  private readonly scenario: GbaAdapterScenario;
   private readonly fixtureSha256: string;
+  private readonly coreFactory: GbaCoreFactory;
   private readonly sessions = new Map<string, GbaEmulatorSession>();
 
-  public constructor(scenarioInput: FrozenGbaScenario, fixtureSha256: string) {
+  public constructor(scenarioInput: FrozenGbaScenario, fixtureSha256: string);
+  public constructor(scenarioInput: GbaAdapterScenario, fixtureSha256: string, coreFactory: GbaCoreFactory);
+  public constructor(
+    scenarioInput: GbaAdapterScenario,
+    fixtureSha256: string,
+    coreFactory?: GbaCoreFactory,
+  ) {
     this.scenario = scenarioInput;
     if (!/^[a-f0-9]{64}$/u.test(fixtureSha256)) throw new Error("Fixture SHA-256 is invalid");
     this.fixtureSha256 = fixtureSha256;
+    // The default factory is the CI test double; its constructor validates the
+    // frozen-scenario savestate identity, so a scenario that is not a frozen
+    // double scenario fails closed here instead of running with wrong state.
+    this.coreFactory =
+      coreFactory ?? ((scenario) => new DeterministicGbaCoreDouble(scenario as FrozenGbaScenario));
   }
 
   public start(
@@ -71,7 +86,13 @@ export class GbaEmulatorAdapter implements EnvironmentAdapter {
     const spec = GbaEmulatorSessionSpecSchema.parse(specInput);
     validateScenarioBinding(spec, this.scenario);
     const adapterSessionId = `gba-emulator:${spec.sessionId}`;
-    const session = new GbaEmulatorSession(adapterSessionId, spec, this.scenario, this.fixtureSha256);
+    const session = new GbaEmulatorSession(
+      adapterSessionId,
+      spec,
+      this.scenario,
+      this.fixtureSha256,
+      this.coreFactory(this.scenario),
+    );
     this.sessions.set(adapterSessionId, session);
     return Promise.resolve(session);
   }
@@ -96,9 +117,9 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
   public readonly adapterSessionId: string;
   public readonly sessionId: string;
   private readonly spec: GbaEmulatorSessionSpec;
-  private readonly scenario: FrozenGbaScenario;
+  private readonly scenario: GbaAdapterScenario;
   private readonly fixtureSha256: string;
-  private readonly core: DeterministicGbaCoreDouble;
+  private readonly core: GbaCoreSeam;
   private readonly completed = new Map<string, EnvironmentAdapterActionCompletion>();
   private readonly pendingWaits = new Set<string>();
   private readonly evidence: GbaEmulatorEvidenceEvent[] = [];
@@ -111,15 +132,16 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
   public constructor(
     adapterSessionId: string,
     spec: GbaEmulatorSessionSpec,
-    scenario: FrozenGbaScenario,
+    scenario: GbaAdapterScenario,
     fixtureSha256: string,
+    core: GbaCoreSeam,
   ) {
     this.adapterSessionId = adapterSessionId;
     this.sessionId = spec.sessionId;
     this.spec = spec;
     this.scenario = scenario;
     this.fixtureSha256 = fixtureSha256;
-    this.core = new DeterministicGbaCoreDouble(scenario);
+    this.core = core;
   }
 
   public pause(): Promise<void> {
@@ -215,8 +237,11 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
       capturedAt: logicalTimestamp(this.observationCount),
       frame: state.frame,
     };
-    const activeMember = state.party.find((member) => member.slot === state.activePartySlot);
-    if (!activeMember) throw closed("party_state_corrupt");
+    const requireActiveMember = () => {
+      const activeMember = state.party.find((member) => member.slot === state.activePartySlot);
+      if (!activeMember) throw closed("party_state_corrupt");
+      return activeMember;
+    };
     const observation = (() => {
       switch (kind) {
         case "overworld":
@@ -238,7 +263,7 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
             data: {
               menuId: "battle-move-menu",
               cursor: battle.moveCursor,
-              entries: activeMember.moves.map((move) => ({ id: move.moveId, label: move.moveId })),
+              entries: requireActiveMember().moves.map((move) => ({ id: move.moveId, label: move.moveId })),
               untrusted: true as const,
             },
           };
@@ -254,7 +279,9 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
           };
         case "battle": {
           const battle = state.battle;
-          if (!battle) throw closed("battle_not_active");
+          const trainer = this.scenario.trainer;
+          if (!battle || !trainer) throw closed("battle_not_active");
+          const activeMember = requireActiveMember();
           return {
             ...base,
             kind,
@@ -272,10 +299,10 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
                           throw closed("battle_not_active");
                         })(),
               opponent: {
-                speciesId: this.scenario.trainer.opponent.speciesId,
-                level: this.scenario.trainer.opponent.level,
+                speciesId: trainer.opponent.speciesId,
+                level: trainer.opponent.level,
                 currentHp: battle.opponentHp,
-                maxHp: this.scenario.trainer.opponent.maxHp,
+                maxHp: trainer.opponent.maxHp,
               },
               activePartySlot: state.activePartySlot,
               moveCursor: battle.moveCursor,
@@ -284,18 +311,20 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
             },
           };
         }
-        case "dialog":
-          if (state.mode !== "dialog") throw closed("dialog_not_open");
+        case "dialog": {
+          const trainer = this.scenario.trainer;
+          if (state.mode !== "dialog" || !trainer) throw closed("dialog_not_open");
           return {
             ...base,
             kind,
             data: {
-              speaker: this.scenario.trainer.trainerId,
-              lines: this.scenario.trainer.dialog,
-              lineIndex: Math.min(state.dialogLineIndex, this.scenario.trainer.dialog.length - 1),
+              speaker: trainer.trainerId,
+              lines: [...trainer.dialog],
+              lineIndex: Math.min(state.dialogLineIndex, trainer.dialog.length - 1),
               untrusted: true as const,
             },
           };
+        }
         case "frame_reference":
           return {
             ...base,
@@ -349,7 +378,6 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
   public snapshot(): GbaEmulatorSnapshot {
     const state = this.core.gameState();
     const active = state.party.find((member) => member.slot === state.activePartySlot);
-    if (!active) throw new Error("Emulator active party slot is corrupt");
     return {
       position: structuredClone(state.position),
       battleId: state.battle?.battleId ?? null,
@@ -363,8 +391,8 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
               : "not_started",
       turn: state.battle?.turn ?? 0,
       activePartySlot: state.activePartySlot,
-      activePartyHp: active.currentHp,
-      opponentHp: state.battle?.opponentHp ?? this.scenario.trainer.opponent.maxHp,
+      activePartyHp: active?.currentHp ?? 0,
+      opponentHp: state.battle?.opponentHp ?? this.scenario.trainer?.opponent.maxHp ?? 0,
       frame: state.frame,
       inputCount: state.inputCount,
       stateCertain: this.certain,
@@ -472,7 +500,7 @@ export function validateGbaEmulatorTrace(input: unknown): GbaEmulatorTrace {
   return trace;
 }
 
-function validateScenarioBinding(spec: GbaEmulatorSessionSpec, scenario: FrozenGbaScenario): void {
+function validateScenarioBinding(spec: GbaEmulatorSessionSpec, scenario: GbaAdapterScenario): void {
   if (spec.worldId !== scenario.worldId) throw new Error("Emulator world does not match the frozen scenario");
   if (spec.characterId !== scenario.player.characterId) {
     throw new Error("Emulator character does not match the frozen scenario");
