@@ -14,6 +14,7 @@ VERIFY_TAIL_LINES="${ARM_VERIFY_TAIL_LINES:-30}"
 READINESS_TIMEOUT_SECONDS="${ARM_READINESS_TIMEOUT_SECONDS:-90}"
 READINESS_POLL_SECONDS="${ARM_READINESS_POLL_SECONDS:-3}"
 SUBMIT_RETRIES="${ARM_SUBMIT_RETRIES:-3}"
+SUBMIT_GRACE_SECONDS="${ARM_SUBMIT_GRACE_SECONDS:-10}"
 
 usage() {
   echo "usage: arm-goal.sh --receipt-dir DIR [--file CONDITION_FILE] <pane_id> [condition]" >&2
@@ -178,6 +179,16 @@ confirmed_pursuing() {
     || recent_text_contains "$text" "Goal active"
 }
 
+pane_agent_status() {
+  local list_output
+  list_output="$(herdr pane list 2>/dev/null)" || {
+    printf 'unknown'
+    return
+  }
+  printf '%s' "$list_output" \
+    | jq -r --arg pane_id "$pane_id" 'first(.result.panes[] | select(.pane_id == $pane_id) | .agent_status) // "unknown"'
+}
+
 if [[ -n "$condition_file" ]]; then
   if ((${#positionals[@]} != 1)); then
     echo "arm-goal: pass a condition with --file or as one quoted argument, not both" >&2
@@ -261,8 +272,9 @@ if [[ -n "$fatal_line" ]]; then
 fi
 
 if [[ ! "$STATUS_TIMEOUT_MS" =~ ^[0-9]+$ || ! "$VERIFY_DELAY_SECONDS" =~ ^[0-9]+$ || ! "$VERIFY_TAIL_LINES" =~ ^[1-9][0-9]*$ \
-  || ! "$READINESS_TIMEOUT_SECONDS" =~ ^[0-9]+$ || ! "$READINESS_POLL_SECONDS" =~ ^[1-9][0-9]*$ || ! "$SUBMIT_RETRIES" =~ ^[0-9]+$ ]]; then
-  fail_arm "ARM_STATUS_TIMEOUT_MS, ARM_VERIFY_DELAY_SECONDS, ARM_VERIFY_TAIL_LINES, ARM_READINESS_TIMEOUT_SECONDS, ARM_READINESS_POLL_SECONDS, and ARM_SUBMIT_RETRIES must be non-negative integers (tail lines and poll seconds must be positive)"
+  || ! "$READINESS_TIMEOUT_SECONDS" =~ ^[0-9]+$ || ! "$READINESS_POLL_SECONDS" =~ ^[1-9][0-9]*$ || ! "$SUBMIT_RETRIES" =~ ^[0-9]+$ \
+  || ! "$SUBMIT_GRACE_SECONDS" =~ ^[0-9]+$ ]]; then
+  fail_arm "ARM_STATUS_TIMEOUT_MS, ARM_VERIFY_DELAY_SECONDS, ARM_VERIFY_TAIL_LINES, ARM_READINESS_TIMEOUT_SECONDS, ARM_READINESS_POLL_SECONDS, ARM_SUBMIT_RETRIES, and ARM_SUBMIT_GRACE_SECONDS must be non-negative integers (tail lines and poll seconds must be positive)"
 fi
 
 # Readiness gate: typing into a harness that is still starting (e.g. Codex
@@ -312,11 +324,30 @@ fi
 # Enter was swallowed (seen live when a harness finished startup between the
 # readiness read and the send). Re-press Enter a bounded number of times.
 submit_attempt=0
+submit_waited=0
 while :; do
   sleep 1
+  submit_waited=$((submit_waited + 1))
   submit_text="$(herdr pane read "$pane_id" --source recent-unwrapped --lines 80 --format text 2>&1)" || submit_text=""
+  # A submitted prompt remains in recent history with the same leading `›` as
+  # the live composer. Once a fresh lane reports working or the harness prints
+  # its pursuing marker, Enter was accepted; pressing it again queues the same
+  # /goal and can surface a delayed "Replace current goal?" prompt minutes into
+  # real work. Existing working lanes still use the composer check because this
+  # invocation may be deliberately replacing their current goal.
+  submit_status="$(pane_agent_status)"
+  if confirmed_pursuing "$submit_text" \
+    || [[ "$agent_status" != "working" && "$submit_status" == "working" ]]; then
+    break
+  fi
   submit_composer="$(last_composer_line "$submit_text")"
   [[ "$submit_composer" == *"/goal "* ]] || break
+  # Give the harness a bounded opportunity to report working/pursuing before
+  # treating the visually retained prompt as a swallowed Enter. Codex can keep
+  # accepted text visible for a few seconds while it activates the goal.
+  if ((submit_waited < SUBMIT_GRACE_SECONDS)); then
+    continue
+  fi
   if ((submit_attempt >= SUBMIT_RETRIES)); then
     fail_arm "the /goal command remains in the pane composer after ${SUBMIT_RETRIES} Enter retries" "$submit_composer"
   fi
@@ -327,6 +358,7 @@ while :; do
   if ((enter_exit != 0)); then
     fail_arm "re-pressing Enter failed with exit ${enter_exit}" "$(last_nonempty_line "$enter_output")"
   fi
+  submit_waited=0
 done
 
 working_output="$(herdr wait agent-status "$pane_id" --status working --timeout "$STATUS_TIMEOUT_MS" 2>&1)"
