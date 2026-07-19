@@ -1,6 +1,20 @@
 import { describe, expect, it } from "vitest";
 import type { DomainEvent } from "@clankie/protocol";
-import { projectGarden } from "../src/index.ts";
+import { projectGarden, type GardenLocation } from "../src/index.ts";
+
+const gardenLocations: Record<GardenLocation, true> = {
+  observatory: true,
+  seed_library: true,
+  design_pond: true,
+  build_grove: true,
+  test_greenhouse: true,
+  review_pavilion: true,
+  merge_gate: true,
+  release_harbor: true,
+  recovery_shed: true,
+  commons: true,
+  archive_tree: true,
+};
 
 const base = {
   occurredAt: new Date().toISOString(),
@@ -31,6 +45,40 @@ function captainEvent(type: string, data: Record<string, unknown>, index: number
 }
 
 describe("garden projection", () => {
+  it("includes the archive tree in the exhaustive location contract", () => {
+    expect(Object.keys(gardenLocations)).toContain("archive_tree");
+  });
+
+  it.each([
+    ["task.succeeded", { summary: "Implementation verified" }],
+    ["worker.completed", { result: "succeeded" }],
+  ])("moves completed workers to the archive tree for %s", (type, data) => {
+    const events: DomainEvent[] = [
+      {
+        ...base,
+        id: "1",
+        type: "worker.started",
+        taskId: "implement",
+        workerRunId: "run1",
+        data: { workerId: "codex-1", harness: "codex", taskKind: "implementation" },
+      },
+      {
+        ...base,
+        id: "2",
+        type,
+        taskId: "implement",
+        workerRunId: "run1",
+        data,
+      },
+    ];
+
+    expect(projectGarden(events).agents[0]).toMatchObject({
+      location: "archive_tree",
+      state: "completed",
+      attention: "none",
+    });
+  });
+
   it("moves a failed implementation worker to the recovery shed", () => {
     const events: DomainEvent[] = [
       {
