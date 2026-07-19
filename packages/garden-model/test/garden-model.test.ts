@@ -282,7 +282,54 @@ describe("garden projection", () => {
     const world = projectGarden(events);
     expect(world.agents[0]?.location).toBe("recovery_shed");
     expect(world.agents[0]?.state).toBe("failed");
+    expect(world.agents[0]?.summary).toBe("Tests failed");
     expect(world.attentionQueue).toHaveLength(1);
+    expect(world.attentionQueue[0]?.label).toBe("Tests failed");
+  });
+
+  it("preserves detailed internal terminal summaries through generic completion and status follow-ups", () => {
+    const events: DomainEvent[] = [
+      {
+        ...base,
+        id: "1",
+        type: "worker.started",
+        taskId: "implement",
+        workerRunId: "run1",
+        data: { workerId: "codex-1", harness: "codex", taskKind: "implementation" },
+      },
+      {
+        ...base,
+        id: "2",
+        type: "task.blocked",
+        taskId: "implement",
+        workerRunId: "run1",
+        data: { reason: "Waiting for the signed fixture" },
+      },
+      {
+        ...base,
+        id: "3",
+        type: "worker.completed",
+        taskId: "implement",
+        workerRunId: "run1",
+        data: { result: "blocked" },
+      },
+      {
+        ...base,
+        id: "4",
+        type: "worker.status.resolved",
+        taskId: "implement",
+        workerRunId: "run1",
+        data: { state: "blocked", attentionRaised: true },
+      },
+    ];
+
+    const world = projectGarden(events);
+    expect(world.agents[0]).toMatchObject({
+      state: "blocked",
+      attention: "action_required",
+      summary: "Waiting for the signed fixture",
+    });
+    expect(world.attentionQueue[0]?.label).toBe("Waiting for the signed fixture");
   });
 
   it("removes resolved failures and completed approvals from live attention", () => {

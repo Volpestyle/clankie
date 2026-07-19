@@ -66,6 +66,12 @@ verifier, re-reads the durable device projection, and requires the active device
 accepted from token claims, request bodies, or a stored command, and it does not introduce
 free-form input, terminal control, approvals, or a generalized capability system.
 
+The final projection re-read and command persistence share the device authority lock with
+revocation. Either the command commits before revocation returns, or it observes the revoked or
+reduced device and fails closed. Command-id compare/insert is serialized separately, so
+simultaneous identical requests resolve to the same accepted command while conflicting envelopes
+remain rejected.
+
 ### Durable device lifecycle is event-sourced and fail-closed on replay
 
 Device records project from the `device:${deviceId}` stream through `device.pairing.redeemed`,

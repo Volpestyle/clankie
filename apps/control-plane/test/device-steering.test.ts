@@ -171,6 +171,60 @@ describe("paired-device worker steering", () => {
       false,
     );
   });
+
+  it("linearizes simultaneous exact duplicates into one command and two accepted responses", async () => {
+    const fixture = await makeFixture();
+    const device = await pairDevice(fixture.app, SUPERVISE_GRANTS);
+    const request = steerRequest("simultaneous-device-steer", "simultaneous-correlation");
+
+    const responses = await Promise.all([
+      steer(fixture, device.token, request),
+      steer(fixture, device.token, request),
+    ]);
+
+    expect(responses.map((response) => response.status)).toEqual([202, 202]);
+    const steerEvents = (await fixture.store.readAll()).filter(
+      ({ event }) => event.type === "worker.steer.requested",
+    );
+    expect(steerEvents).toHaveLength(1);
+  });
+
+  it("revalidates device authority after policy and before persistence", async () => {
+    let enteredPolicy!: () => void;
+    let releasePolicy!: () => void;
+    const policyEntered = new Promise<void>((resolve) => {
+      enteredPolicy = resolve;
+    });
+    const policyRelease = new Promise<void>((resolve) => {
+      releasePolicy = resolve;
+    });
+    const fixture = await makeFixture(async (input) => {
+      enteredPolicy();
+      await policyRelease;
+      return createDeterministicWorkerSteerAuthorizer()(input);
+    });
+    const device = await pairDevice(fixture.app, SUPERVISE_GRANTS);
+
+    const pendingSteer = steer(
+      fixture,
+      device.token,
+      steerRequest("revoke-during-policy", "revoke-during-policy-correlation"),
+    );
+    await policyEntered;
+    const revoked = await fixture.app.request(`/v1/devices/${device.deviceId}/revoke`, {
+      method: "POST",
+      headers: OPERATOR_HEADERS,
+    });
+    expect(revoked.status).toBe(200);
+    releasePolicy();
+
+    const response = await pendingSteer;
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({ error: "steer_device_revoked" });
+    expect((await fixture.store.readAll()).some(({ event }) => event.type === "worker.steer.requested")).toBe(
+      false,
+    );
+  });
 });
 
 async function makeFixture(authorizeWorkerSteer?: WorkerSteerAuthorizer) {

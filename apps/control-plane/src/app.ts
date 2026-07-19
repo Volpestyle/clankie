@@ -688,6 +688,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
   const pairingOffers = new PairingOfferStore();
   const devices: DeviceRegistry = new Map<string, DeviceRecord>();
   const deviceLocks = new Map<string, Promise<unknown>>();
+  const workerSteerCommandLocks = new Map<string, Promise<unknown>>();
   const completionTokens = new Map<string, PendingCompletion>();
   const deviceSessionSigner =
     dependencies.deviceSessionKey === undefined
@@ -3243,6 +3244,9 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     if (Date.parse(active.runtime.leaseExpiresAt) <= clock().getTime()) {
       return context.json({ outcome: steerOutcome("lease_expired") }, 409);
     }
+    const runnerId = active.runtime.runnerId;
+    const leaseExpiresAt = active.runtime.leaseExpiresAt;
+    const attempt = active.runtime.attempts;
     const inputSha256 = createHash("sha256").update(normalized.input).digest("hex");
     const authorization = await dependencies.authorizeWorkerSteer({
       principal: authority.principal,
@@ -3259,70 +3263,100 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       inputSha256,
       inputLength: normalized.input.length,
     });
-    const previous = await steeringStore.get(parsed.data.commandId);
-    if (previous) {
-      if (
-        !authorization.allowed ||
-        !sameWorkerSteerEnvelope(previous, {
-          workerRunId,
-          attempt: active.runtime.attempts,
-          runnerId: active.runtime.runnerId,
-          sourceLane: authority.sourceLane,
-          principal: authority.principal,
-          correlationId: parsed.data.correlationId,
-          missionId: active.missionId,
-          taskId: active.runtime.spec.id,
-          profileHash: dependencies.doctrine.profileHash,
-          inputSha256,
-        })
-      ) {
-        return context.json({ error: "duplicate_command_id" }, 409);
+    const decideAndPersist = async () => {
+      // Device revocation and the final authority check share the same lock.
+      // Therefore either this command commits before revoke returns, or the
+      // re-read observes the revoked/reduced projection and fails closed.
+      if (authority.principal.kind === "device") {
+        const currentDevice = await authenticateDevice(context.req.raw);
+        if (currentDevice === "unavailable") {
+          return context.json({ error: "steer_control_unavailable" }, 503);
+        }
+        if ("denied" in currentDevice || currentDevice.deviceId !== authority.principal.id) {
+          const error =
+            "denied" in currentDevice && currentDevice.denied === "expired"
+              ? "steer_device_session_expired"
+              : "denied" in currentDevice && currentDevice.denied === "revoked"
+                ? "steer_device_revoked"
+                : "steer_device_session_invalid";
+          return context.json({ error }, 401);
+        }
+        if (!currentDevice.grants.steer) {
+          return context.json({ error: "steer_device_grant_required" }, 403);
+        }
       }
-      return context.json({ accepted: true, command: redactedSteerRecord(previous) }, 202);
-    }
-    if (!authorization.allowed) {
-      return context.json({ error: "steer_policy_denied", reason: authorization.reason }, 403);
-    }
-    const requestedAt = clock().toISOString();
-    const command: StoredWorkerSteerCommand = {
-      schemaVersion: 1,
-      commandId: parsed.data.commandId,
-      workerRunId,
-      attempt: active.runtime.attempts,
-      sourceLane: authority.sourceLane,
-      intent: normalized.intent,
-      principal: authority.principal,
-      correlationId: parsed.data.correlationId,
-      missionId: active.missionId,
-      taskId: active.runtime.spec.id,
-      profileHash: dependencies.doctrine.profileHash,
-      input: normalized.input,
-      runnerId: active.runtime.runnerId,
-      leaseExpiresAt: active.runtime.leaseExpiresAt,
-      inputSha256,
-      inputLength: normalized.input.length,
-      requestedAt,
-      status: "pending",
-      deliveryCount: 0,
-    };
-    await steeringStore.put(command);
-    await recordEvent(
-      "worker.steer.requested",
-      active.missionId,
-      requestedAt,
-      { ...redactedSteerData(command), policyReason: authorization.reason },
-      {
-        taskId: command.taskId,
+
+      const previous = await steeringStore.get(parsed.data.commandId);
+      if (previous) {
+        if (
+          !authorization.allowed ||
+          !sameWorkerSteerEnvelope(previous, {
+            workerRunId,
+            attempt,
+            runnerId,
+            sourceLane: authority.sourceLane,
+            principal: authority.principal,
+            correlationId: parsed.data.correlationId,
+            missionId: active.missionId,
+            taskId: active.runtime.spec.id,
+            profileHash: dependencies.doctrine.profileHash,
+            inputSha256,
+          })
+        ) {
+          return context.json({ error: "duplicate_command_id" }, 409);
+        }
+        return context.json({ accepted: true, command: redactedSteerRecord(previous) }, 202);
+      }
+      if (!authorization.allowed) {
+        return context.json({ error: "steer_policy_denied", reason: authorization.reason }, 403);
+      }
+      const requestedAt = clock().toISOString();
+      const command: StoredWorkerSteerCommand = {
+        schemaVersion: 1,
+        commandId: parsed.data.commandId,
         workerRunId,
-        correlationId: command.correlationId,
-        profileHash: command.profileHash,
-      },
-    );
-    logger.info(
-      { workerRunId, commandId: command.commandId, inputLength: command.inputLength, inputSha256 },
-      "worker steering queued",
-    );
-    return context.json({ accepted: true, command: redactedSteerRecord(command) }, 202);
+        attempt,
+        sourceLane: authority.sourceLane,
+        intent: normalized.intent,
+        principal: authority.principal,
+        correlationId: parsed.data.correlationId,
+        missionId: active.missionId,
+        taskId: active.runtime.spec.id,
+        profileHash: dependencies.doctrine.profileHash,
+        input: normalized.input,
+        runnerId,
+        leaseExpiresAt,
+        inputSha256,
+        inputLength: normalized.input.length,
+        requestedAt,
+        status: "pending",
+        deliveryCount: 0,
+      };
+      await steeringStore.put(command);
+      await recordEvent(
+        "worker.steer.requested",
+        active.missionId,
+        requestedAt,
+        { ...redactedSteerData(command), policyReason: authorization.reason },
+        {
+          taskId: command.taskId,
+          workerRunId,
+          correlationId: command.correlationId,
+          profileHash: command.profileHash,
+        },
+      );
+      logger.info(
+        { workerRunId, commandId: command.commandId, inputLength: command.inputLength, inputSha256 },
+        "worker steering queued",
+      );
+      return context.json({ accepted: true, command: redactedSteerRecord(command) }, 202);
+    };
+
+    const serializeCommand = () =>
+      withSerializedLock(workerSteerCommandLocks, parsed.data.commandId, decideAndPersist);
+    return authority.principal.kind === "device"
+      ? withSerializedLock(deviceLocks, authority.principal.id, serializeCommand)
+      : serializeCommand();
   });
 
   app.get("/v1/workers/:id/transcript", async (context) => {

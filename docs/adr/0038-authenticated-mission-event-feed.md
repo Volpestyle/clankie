@@ -42,6 +42,10 @@ projection's `id`; it does not recreate internal event shapes or carry a
 second state mapping. Terminal failed, blocked, and offline outcomes therefore
 replace working state deterministically.
 
+The same reducer also accepts richer internal events. A later generic completion or resolved-status
+fact may confirm terminal state and attention, but it does not downgrade an already-recorded
+detailed internal failure or blocker summary to the public feed's sanitized label.
+
 The feed serializes store-returned append hints with reads of the complete
 authoritative log. A contiguous hint advances only when its envelope hash and
 previous-hash link extend the reconciled chain. A hint beyond the next global

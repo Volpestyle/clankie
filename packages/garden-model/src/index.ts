@@ -270,7 +270,7 @@ export function projectGarden(events: DomainEvent[]): GardenWorld {
         applyTerminalResult(
           agent,
           result,
-          legacyCompletionSummary(event.data.result, result),
+          legacyCompletionSummary(agent, event.data.result, result),
           event.taskId,
           attention,
         );
@@ -339,11 +339,13 @@ function settlementSummary(value: unknown, result: SettlementResult): string {
   return result === "succeeded" ? "Task completed" : result === "blocked" ? "Task blocked" : "Task failed";
 }
 
-function legacyCompletionSummary(value: unknown, result: SettlementResult): string {
+function legacyCompletionSummary(agent: GardenAgent, value: unknown, result: SettlementResult): string {
   if (value && typeof value === "object") {
     const summary = (value as Record<string, unknown>).summary;
     if (typeof summary === "string" && summary.length > 0) return summary;
   }
+  const terminalState = result === "succeeded" ? "completed" : result;
+  if (agent.state === terminalState && agent.summary.length > 0) return agent.summary;
   return result === "succeeded" ? "Completed" : result === "blocked" ? "Task blocked" : "Task failed";
 }
 
@@ -411,8 +413,13 @@ function applyResolvedStatus(
   const key = `worker:${agent.workerRunId}`;
   // AgentVisualState deliberately has no unknown pose. Rendering it as idle
   // with an explicit summary avoids retaining a stale working state.
-  agent.state = state === "unknown" ? "idle" : state;
-  agent.summary = summaries[state];
+  const nextState = state === "unknown" ? "idle" : state;
+  const preservesDetailedTerminalSummary =
+    (state === "blocked" || state === "failed" || state === "completed") &&
+    agent.state === nextState &&
+    agent.summary.length > 0;
+  agent.state = nextState;
+  if (!preservesDetailedTerminalSummary) agent.summary = summaries[state];
   if (state === "failed") agent.location = "recovery_shed";
   if (state === "completed") agent.location = "archive_tree";
 
