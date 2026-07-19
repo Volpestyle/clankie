@@ -3,39 +3,63 @@ import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
   EnvironmentSemanticEventSchema,
-  EnvironmentSessionSpecSchema,
   EnvironmentStartActionCommandSchema,
   EnvironmentTelemetryReferenceSchema,
+  MinecraftStartActionCommandSchema,
+  PokeMMOStartActionCommandSchema,
+  normalizeEnvironmentLease,
+  normalizeEnvironmentSessionSpec,
   type EnvironmentActionResult,
   type EnvironmentCommand,
   type EnvironmentEvent,
-  type EnvironmentLease,
+  type EnvironmentLeaseV2,
   type EnvironmentSemanticEventType,
   type EnvironmentSessionPhase,
   type EnvironmentSessionSpec,
+  type EnvironmentSessionSpecV2,
   type EnvironmentTelemetryReference,
+  type PokeMMOStartActionCommand,
 } from "@clankie/interactive-environment";
 
 export const MAX_ENVIRONMENT_LEASE_MS = 5 * 60_000;
 const EMERGENCY_ADAPTER_TIMEOUT_MS = 1_000;
-export type EnvironmentStartActionCommand = Extract<EnvironmentCommand, { type: "start_action" }>;
+export type EnvironmentStartActionCommand =
+  | Extract<EnvironmentCommand, { type: "start_action" }>
+  | PokeMMOStartActionCommand;
+
+export interface EnvironmentAdapterActionCompletion {
+  status: "completed";
+  outcome: Record<string, unknown>;
+}
+
+export class EnvironmentAdapterActionError extends Error {
+  public readonly errorCode: string;
+  public readonly retryable: boolean;
+
+  public constructor(errorCode: string, message: string, retryable = false) {
+    super(message);
+    this.name = "EnvironmentAdapterActionError";
+    this.errorCode = errorCode;
+    this.retryable = retryable;
+  }
+}
 
 export interface EnvironmentAdapterSession {
   readonly adapterSessionId: string;
   pause(reason: string): Promise<void>;
   resume(): Promise<void>;
-  startAction(command: EnvironmentStartActionCommand): Promise<void>;
+  startAction(command: EnvironmentStartActionCommand): Promise<EnvironmentAdapterActionCompletion | void>;
   cancelAction(actionId: string, reason: string): Promise<void>;
   stop(reason: string): Promise<void>;
 }
 
 export interface EnvironmentAdapter {
   start(
-    spec: EnvironmentSessionSpec,
+    spec: EnvironmentSessionSpecV2,
     connection: Readonly<Record<string, string>>,
   ): Promise<EnvironmentAdapterSession>;
   attach(
-    spec: EnvironmentSessionSpec,
+    spec: EnvironmentSessionSpecV2,
     adapterSessionId: string,
   ): Promise<EnvironmentAdapterSession | undefined>;
 }
@@ -56,8 +80,8 @@ export interface StartEnvironmentInput {
 }
 
 export interface EnvironmentSessionSnapshot {
-  spec: EnvironmentSessionSpec;
-  lease: EnvironmentLease;
+  spec: EnvironmentSessionSpecV2;
+  lease: EnvironmentLeaseV2;
   phase: EnvironmentSessionPhase;
   actions: Record<string, EnvironmentActionResult>;
 }
@@ -81,9 +105,9 @@ interface StoredAction {
 }
 
 interface StoredSession {
-  schemaVersion: 1;
-  spec: EnvironmentSessionSpec;
-  lease: EnvironmentLease;
+  schemaVersion: 2;
+  spec: EnvironmentSessionSpecV2;
+  lease: EnvironmentLeaseV2;
   leaseDurationMs: number;
   tokenHash: string;
   phase: EnvironmentSessionPhase;
@@ -126,7 +150,7 @@ export class EnvironmentRuntime {
     return this.enqueue(async () => {
       await this.ensureLoaded();
       await this.sweepRecords();
-      const spec = EnvironmentSessionSpecSchema.parse(input.spec);
+      const spec = normalizeEnvironmentSessionSpec(input.spec);
       const leaseDurationMs = input.leaseDurationMs ?? 30_000;
       if (
         !Number.isInteger(leaseDurationMs) ||
@@ -147,10 +171,10 @@ export class EnvironmentRuntime {
       const sensitive = new Set([token, ...Object.values(input.connection ?? {})]);
       const now = this.clock();
       const record: StoredSession = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         spec,
         lease: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           leaseId: randomUUID(),
           sessionId: spec.sessionId,
           holderId: input.holderId,
@@ -230,9 +254,15 @@ export class EnvironmentRuntime {
   }
 
   public startAction(token: string, raw: EnvironmentStartActionCommand): Promise<EnvironmentActionResult> {
-    const command = EnvironmentStartActionCommandSchema.parse(raw);
+    const parsedCommand = EnvironmentStartActionCommandSchema.parse(raw);
     return this.enqueue(async () => {
-      const record = await this.authorize(token, command.sessionId);
+      const record = await this.authorize(token, parsedCommand.sessionId);
+      const command =
+        record.spec.resourceBounds.profile === "pokemmo_simulator"
+          ? PokeMMOStartActionCommandSchema.parse(raw)
+          : record.spec.resourceBounds.profile === "minecraft_java"
+            ? MinecraftStartActionCommandSchema.parse(raw)
+            : parsedCommand;
       const prior = record.actions[command.actionId];
       if (prior) return structuredClone(prior.result);
       if (record.phase !== "active") throw new Error(`Session ${command.sessionId} is not active`);
@@ -267,11 +297,25 @@ export class EnvironmentRuntime {
         kind: command.action.kind,
       });
       try {
-        await this.session(command.sessionId).startAction(command);
+        const dispatch = await this.session(command.sessionId).startAction(command);
         if (record.revokedAt !== null || !ownsBody(record)) {
           // The body was fenced (e.g. emergency stop) while this dispatch was in flight; do not
           // overwrite the terminal result the fence recorded.
           return structuredClone(record.actions[command.actionId]!.result);
+        }
+        if (dispatch?.status === "completed") {
+          const completed: EnvironmentActionResult = {
+            ...queued,
+            status: "completed",
+            outcome: sanitize(dispatch.outcome, this.secretSet(command.sessionId)) as Record<string, unknown>,
+            updatedAt: this.clock().toISOString(),
+          };
+          record.actions[command.actionId]!.result = completed;
+          await this.persist(record);
+          await this.emit("environment.action.completed", record, command.context.correlationId, {
+            actionId: command.actionId,
+          });
+          return completed;
         }
         const running: EnvironmentActionResult = {
           ...queued,
@@ -284,23 +328,31 @@ export class EnvironmentRuntime {
           actionId: command.actionId,
         });
         return running;
-      } catch {
+      } catch (error) {
+        const adapterError =
+          error instanceof EnvironmentAdapterActionError
+            ? error
+            : new EnvironmentAdapterActionError(
+                "adapter_error",
+                "Environment adapter rejected the action",
+                true,
+              );
         const failed: EnvironmentActionResult = {
           schemaVersion: 1,
           actionId: command.actionId,
           sessionId: command.sessionId,
           status: "failed",
           acceptedGoalVersion: record.spec.initialGoalVersion,
-          errorCode: "adapter_error",
-          message: "Environment adapter rejected the action",
-          retryable: true,
+          errorCode: adapterError.errorCode,
+          message: this.safeText(record, adapterError.message),
+          retryable: adapterError.retryable,
           updatedAt: this.clock().toISOString(),
         };
         record.actions[command.actionId]!.result = failed;
         await this.persist(record);
         await this.emit("environment.action.failed", record, command.context.correlationId, {
           actionId: command.actionId,
-          errorCode: "adapter_error",
+          errorCode: adapterError.errorCode,
         });
         return failed;
       }
@@ -638,9 +690,18 @@ export class EnvironmentRuntime {
     for (const file of (await readdir(this.recordsDir())).filter((name) => name.endsWith(".json"))) {
       const path = join(this.recordsDir(), file);
       try {
-        const parsed = JSON.parse(await readFile(path, "utf8")) as StoredSession;
-        if (parsed.schemaVersion !== 1 || parsed.spec.sessionId.length === 0) throw new Error();
-        this.records.set(parsed.spec.sessionId, parsed);
+        const parsed = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+        if (parsed.schemaVersion !== 1 && parsed.schemaVersion !== 2) throw new Error();
+        const spec = normalizeEnvironmentSessionSpec(parsed.spec);
+        const lease = normalizeEnvironmentLease(parsed.lease, spec);
+        const current = {
+          ...parsed,
+          schemaVersion: 2,
+          spec,
+          lease,
+        } as StoredSession;
+        if (current.spec.sessionId.length === 0) throw new Error();
+        this.records.set(current.spec.sessionId, current);
       } catch {
         throw new Error(`Corrupt environment session record ${path}`);
       }

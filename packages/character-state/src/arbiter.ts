@@ -7,6 +7,7 @@ import {
   ArbiterDecisionSchema,
   BoundedIntentCommandSchema,
   CharacterGoalSchema,
+  activeEnvironmentPresence,
   type ArbiterDecision,
   type CharacterSourcePriority,
   type CharacterState,
@@ -73,6 +74,8 @@ export function decideIntent(
     throw new Error("Intent character does not match the projected character");
   }
   const priority = sourcePriority(command.context);
+  const environmentPresence = activeEnvironmentPresence(state);
+  const sessionId = environmentPresence?.sessionId ?? state.minecraft.sessionId;
   const base = {
     schemaVersion: 1 as const,
     intentId: command.intentId,
@@ -104,7 +107,7 @@ export function decideIntent(
             requestedSourcePriority: priority,
             reason: "untrusted_system_principal",
           },
-          state.minecraft.sessionId,
+          sessionId,
         ),
       ],
     });
@@ -125,7 +128,7 @@ export function decideIntent(
             expectedGoalVersion: command.context.expectedGoalVersion,
             currentGoalVersion: state.goalVersion,
           },
-          state.minecraft.sessionId,
+          sessionId,
         ),
       ],
     });
@@ -150,7 +153,7 @@ export function decideIntent(
             currentSourcePriority,
             requestedSourcePriority: priority,
           },
-          state.minecraft.sessionId,
+          sessionId,
         ),
       ],
     });
@@ -165,12 +168,13 @@ export function decideIntent(
     )
     .map((intent) => intent.intentId);
   const nextGoalVersion = goal === undefined ? state.goalVersion : state.goalVersion + 1;
+  const activeActionId = environmentPresence?.activeActionId ?? state.minecraft.activeActionId;
   const cancellationIntent =
-    state.minecraft.activeActionId === undefined || goal === undefined
+    activeActionId === undefined || goal === undefined
       ? undefined
       : {
           type: "cancel_action" as const,
-          actionId: state.minecraft.activeActionId,
+          actionId: activeActionId,
           acceptedGoalVersion: state.goalVersion,
           replacementGoalVersion: nextGoalVersion,
           reason: `superseded by ${priority} intent ${command.intentId}`,
@@ -186,24 +190,24 @@ export function decideIntent(
         nextGoalVersion,
         sourcePriority: priority,
       },
-      state.minecraft.sessionId,
+      sessionId,
     ),
   ];
   if (goal !== undefined) {
     events.push(
       semanticEvent(
         command,
-        "minecraft.goal.changed",
+        goalEventType(environmentPresence?.environmentKind, "changed"),
         "goal-changed",
         { goalVersion: nextGoalVersion, goal },
-        state.minecraft.sessionId,
+        sessionId,
       ),
     );
     if (active !== undefined) {
       events.push(
         semanticEvent(
           command,
-          "minecraft.goal.superseded",
+          goalEventType(environmentPresence?.environmentKind, "superseded"),
           "goal-superseded",
           {
             previousGoalVersion: state.goalVersion,
@@ -211,7 +215,7 @@ export function decideIntent(
             supersededIntentId: active.intentId,
             ...(cancellationIntent === undefined ? {} : { cancellationIntent }),
           },
-          state.minecraft.sessionId,
+          sessionId,
         ),
       );
     }
@@ -228,7 +232,7 @@ export function decideIntent(
           baseGoalVersion: state.goalVersion,
           sourcePriority: priority,
         },
-        state.minecraft.sessionId,
+        sessionId,
       ),
     );
   }
@@ -244,6 +248,17 @@ export function decideIntent(
     ...(invalidatedIntentIds.length === 0 ? {} : { invalidatedIntentIds }),
     semanticEvents: events,
   });
+}
+
+function goalEventType(
+  environmentKind: "minecraft_java" | "pokemmo_simulator" | undefined,
+  transition: "changed" | "superseded",
+): EnvironmentSemanticEvent["type"] {
+  if (environmentKind === "pokemmo_simulator") return `pokemmo.goal.${transition}`;
+  if (environmentKind === "minecraft_java" || environmentKind === undefined) {
+    return `minecraft.goal.${transition}`;
+  }
+  return `environment.goal.${transition}`;
 }
 
 function highestActivePriority(state: CharacterState): CharacterSourcePriority | undefined {

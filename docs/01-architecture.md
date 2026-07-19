@@ -83,6 +83,51 @@ correlation identity, and expected goal version. Long-running work returns an
 action handle immediately. Mineflayer and Paper types remain behind adapters;
 the shared protocol contains only versioned provider-neutral schemas.
 
+Session and lease contracts use strict provider-profiled v2 resource bounds.
+The compatibility boundary dual-reads the frozen Minecraft-shaped v1 contract,
+normalizes it, and single-writes v2 runtime records. Minecraft retains server,
+dimension, distance, and block bounds; the PokeMMO simulator uses simulator,
+allowed-map, navigation, menu, battle-turn, duration, and typed capability
+bounds. A provider never reuses another provider's field under a new meaning.
+
+### PokeMMO simulator and live boundary
+
+The executable PokeMMO profile is a deterministic simulator adapter under
+`integrations/pokemmo-simulator`. It runs through `EnvironmentRuntime`, so the
+same runner-owned lease, stale-goal, idempotency, cancellation, timeout,
+restart, and emergency-stop invariants apply. The frozen
+`scenarios/pokemmo/navigation-trainer-battle/v1` fixture pins exact bytes and
+produces a bounded hash-chained trace plus a simulator-authoritative final-state
+report.
+
+```mermaid
+flowchart LR
+  G[Gameplay lane] --> R[EnvironmentRuntime]
+  R --> S[Deterministic PokeMMO simulator]
+  F[Frozen fixture + SHA-256] --> S
+  S --> O[Strict bounded observations]
+  S --> E[Trace + authoritative report]
+  L[Live PokeMMO client] -. no adapter or action capability .-> X[Denied]
+```
+
+PokeMMO observations cover overworld, menu, party, inventory, battle, dialog,
+danger, and action state. Simulator actions cover bounded navigation,
+interaction, menu choice, battle move, party switch, item use, and wait; shared
+action status and cancellation retain the environment lifecycle. Dormant
+simulator sessions expose join/status only, active gameplay receives
+observe/start/status/cancel, and TUI or voice receives supervision only.
+
+The live PokeMMO boundary contains only read-only observation and coaching
+capability names. No live adapter or client action path exists. Keyboard, mouse,
+controller, accessibility, packet, memory, process, login, remote connection,
+tampering, reverse-engineering, anti-cheat, human-timing imitation, CAPTCHA,
+social, and economy capabilities fail closed. This boundary follows PokeMMO's
+[macroing policy](https://support.pokemmo.com/knowledgebase/article/macroing-faq),
+[penalty policy](https://support.pokemmo.com/knowledgebase/article/penalty-policy),
+and [Terms of Service](https://pokemmo.com/en/tos/). Raw frames and credentials
+never enter semantic events; visual evidence uses bounded opaque artifact
+references.
+
 ## Discord voice media plane
 
 The Discord bridge is the single writer for the official-bot presence session. Gateway and bot

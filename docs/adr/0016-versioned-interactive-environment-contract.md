@@ -1,6 +1,7 @@
 # ADR 0016: Versioned interactive-environment contract and lane-scoped tools
 
-Status: accepted.
+Status: accepted. The frozen v1 lifecycle remains supported; ADR 0038 owns the
+current provider-profiled v2 session and lease shape.
 
 ## Context
 

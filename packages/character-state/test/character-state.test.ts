@@ -307,6 +307,67 @@ describe("character intent arbitration", () => {
 });
 
 describe("character event-store discipline", () => {
+  it("projects PokeMMO through generic environment presence without rewriting Minecraft v1 state", async () => {
+    const store = await temporaryStore();
+    const repository = new CharacterStateRepository(store);
+    const recorded = await repository.recordEnvironmentPresence(
+      {
+        schemaVersion: 1,
+        revision: 1,
+        environmentKind: "pokemmo_simulator",
+        characterId: CHARACTER_ID,
+        phase: "active",
+        goalVersion: 0,
+        observedAt: "2026-07-19T00:00:00.000Z",
+        sessionId: "pokemmo-session-1",
+        worldId: "pokemmo-sim-world-v1",
+        position: {
+          profile: "pokemmo_simulator",
+          value: { mapId: "lab-route", x: 3, y: 1 },
+        },
+        activeActionId: "pokemmo-action-1",
+      },
+      0,
+      "pokemmo-presence-1",
+    );
+    expect(recorded.state).toMatchObject({
+      minecraft: { phase: "off", revision: 0 },
+      environments: [{ environmentKind: "pokemmo_simulator", phase: "active" }],
+    });
+    expect(toCharacterSnapshot(recorded.state)).toMatchObject({
+      activeWorldId: "pokemmo-sim-world-v1",
+      activeEnvironmentSessionId: "pokemmo-session-1",
+      activeActionId: "pokemmo-action-1",
+    });
+
+    const next = await repository.submitIntent(intent("pokemmo-tui-goal", "authenticated_tui", 0), 1);
+    expect(next.decision).toMatchObject({
+      status: "accepted",
+      cancellationIntent: { actionId: "pokemmo-action-1", replacementGoalVersion: 1 },
+      semanticEvents: [
+        expect.objectContaining({ type: "captain.intent.accepted", sessionId: "pokemmo-session-1" }),
+        expect.objectContaining({ type: "pokemmo.goal.changed", sessionId: "pokemmo-session-1" }),
+      ],
+    });
+    await expect(
+      repository.recordEnvironmentPresence(
+        {
+          ...recorded.state.environments[0],
+          revision: 2,
+          goalVersion: 1,
+          position: {
+            profile: "minecraft_java",
+            value: { x: 0, y: 64, z: 0, dimension: "overworld" },
+          },
+          observedAt: "2026-07-19T00:00:01.000Z",
+        },
+        2,
+        "forged-position-profile",
+      ),
+    ).rejects.toThrow(/position profile/);
+    store.close();
+  });
+
   it("makes retries idempotent and rejects reuse with a changed payload", async () => {
     const store = await temporaryStore();
     const repository = new CharacterStateRepository(store);

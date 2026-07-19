@@ -87,6 +87,14 @@ The operating rule:
 > The lead owns intent. Deterministic code owns scheduling and policy. Workers
 > own bounded execution. Humans retain authority.
 
+Embodied environments use strict provider profiles behind the same runner-owned
+lifecycle. Minecraft retains its server-authoritative laboratory, while the
+PokeMMO profile autonomously plays only a deterministic local simulator with a
+frozen navigation-and-trainer-battle proof. The live PokeMMO boundary is
+read-only observation/coaching by contract and has no adapter or action
+capability; automated client input, tampering, reverse engineering, account
+login, social/economy writes, and anti-cheat interaction are absent.
+
 Social channels are **membership**. Garden, graph, and terminal are
 **oversight**. One mission stream feeds both.
 

@@ -20,6 +20,7 @@ import {
   EnvironmentStatusCommandSchema,
   EnvironmentSteerCommandSchema,
   INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION,
+  normalizeEnvironmentSessionSpec,
   type EnvironmentSessionPhase,
 } from "./environment.ts";
 import type { CaptainLane } from "@clankie/protocol";
@@ -80,8 +81,19 @@ export const MinecraftStartActionCommandSchema = EnvironmentStartActionCommandSc
 });
 export type MinecraftStartActionCommand = z.infer<typeof MinecraftStartActionCommandSchema>;
 
+export const MinecraftJoinCommandSchema = EnvironmentJoinCommandSchema.superRefine((command, context) => {
+  const session = normalizeEnvironmentSessionSpec(command.session);
+  if (session.environmentKind !== "minecraft_java" || session.resourceBounds.profile !== "minecraft_java") {
+    context.addIssue({
+      code: "custom",
+      path: ["session", "environmentKind"],
+      message: "Minecraft join requires the minecraft_java resource profile",
+    });
+  }
+});
+
 export const MinecraftCommandSchema = z.discriminatedUnion("type", [
-  EnvironmentJoinCommandSchema,
+  MinecraftJoinCommandSchema,
   EnvironmentStatusCommandSchema,
   EnvironmentCancelJoinCommandSchema,
   MinecraftStartActionCommandSchema,

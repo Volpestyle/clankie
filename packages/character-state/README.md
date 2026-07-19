@@ -1,8 +1,9 @@
 # @clankie/character-state
 
 Authoritative, replayable cross-lane state for one Clankie identity. This
-package accepts frozen v1 intent and environment contracts, but it neither
-executes Minecraft actions nor connects an Eve channel.
+package accepts frozen v1 intent contracts and bounded provider-profiled
+environment presence, but it neither executes environment actions nor connects
+an Eve channel.
 
 ```mermaid
 flowchart LR
@@ -15,7 +16,7 @@ flowchart LR
   P --> T
   P --> V
   P --> G
-  P --> C[Cancellation intent]
+  P --> C[Provider-neutral cancellation intent]
 ```
 
 ## Invariants
@@ -34,7 +35,7 @@ flowchart LR
 - One accepted `set_goal` decision is one event and increments
   `goalVersion` once. Replaying the same idempotency key returns that event.
 - A replacement goal emits accepted/changed/superseded semantic events and, if
-  a Minecraft action is active, a cancellation intent for the runner boundary.
+  an environment action is active, a cancellation intent for the runner boundary.
 - Accepted non-goal intents remain projected until a higher-authority intent
   invalidates them. The winning decision records their ids and emits
   `captain.lane.preempted`, so a lower-priority physical write cannot remain
@@ -42,8 +43,10 @@ flowchart LR
 - Shared memory is capped at 64 strict factual records and 64 strict bounded
   references. Private transcript/reasoning markers and token-scheme URIs are
   rejected case-insensitively in every stored fact/reference string.
-- `CharacterState` and `MinecraftPresence` carry schema and monotonic
-  revisions. Projection is a pure fold over the ordered stream.
+- `CharacterState`, frozen `MinecraftPresence`, and generic
+  `EnvironmentPresence` carry schema and monotonic revisions. New Minecraft and
+  PokeMMO state uses the bounded generic projection; frozen Minecraft v1 history
+  remains readable. Projection is a pure fold over the ordered stream.
 
 The package stores one atomic decision event rather than separate
 accept/supersede/cancel mutations, so a crash cannot expose a partially applied

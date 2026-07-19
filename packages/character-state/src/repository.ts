@@ -10,11 +10,13 @@ import { characterStreamId, projectCharacterState } from "./projection.ts";
 import {
   ArbiterDecisionSchema,
   BoundedIntentCommandSchema,
+  EnvironmentPresenceSchema,
   MinecraftPresenceSchema,
   SharedFactSchema,
   SharedReferenceSchema,
   type ArbiterDecision,
   type CharacterState,
+  type EnvironmentPresence,
   type MinecraftPresence,
   type SharedFact,
   type SharedReference,
@@ -141,6 +143,47 @@ export class CharacterStateRepository {
       idempotencyKey,
       undefined,
       "character.presence.recorded",
+      payloadHash,
+      { presence },
+    );
+    return { stored, state: await this.load(presence.characterId) };
+  }
+
+  public async recordEnvironmentPresence(
+    presenceInput: unknown,
+    expectedRevision: number,
+    idempotencyKey: string,
+  ): Promise<CharacterWriteResult> {
+    const presence = EnvironmentPresenceSchema.parse(presenceInput);
+    const payloadHash = fingerprint(presence);
+    const existing = await this.findExisting(
+      presence.characterId,
+      `environment-presence:${presence.environmentKind}`,
+      idempotencyKey,
+      payloadHash,
+    );
+    if (existing !== undefined) {
+      return { stored: existing, state: await this.load(presence.characterId) };
+    }
+    const current = await this.load(presence.characterId);
+    const projected = current.environments.find(
+      (candidate) => candidate.environmentKind === presence.environmentKind,
+    );
+    if (presence.revision !== (projected?.revision ?? 0) + 1) {
+      throw new Error("Environment presence revision is not the next version");
+    }
+    if (presence.goalVersion !== current.goalVersion) {
+      throw new Error("Environment presence uses a stale goal version");
+    }
+    const stored = await this.append(
+      presence.characterId,
+      expectedRevision,
+      `environment-presence:${presence.environmentKind}`,
+      idempotencyKey,
+      presence.observedAt,
+      idempotencyKey,
+      undefined,
+      "character.environment_presence.recorded",
       payloadHash,
       { presence },
     );
@@ -281,4 +324,4 @@ function fingerprint(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
-export type { MinecraftPresence, SharedFact, SharedReference };
+export type { EnvironmentPresence, MinecraftPresence, SharedFact, SharedReference };

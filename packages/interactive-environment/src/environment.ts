@@ -11,6 +11,7 @@ import {
 import { z } from "zod";
 
 export const INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION = 1 as const;
+export const ENVIRONMENT_SESSION_SCHEMA_VERSION = 2 as const;
 
 export const EnvironmentSessionPhaseSchema = z.enum([
   "off",
@@ -22,7 +23,8 @@ export const EnvironmentSessionPhaseSchema = z.enum([
 ]);
 export type EnvironmentSessionPhase = z.infer<typeof EnvironmentSessionPhaseSchema>;
 
-export const EnvironmentResourceBoundsSchema = z
+/** Frozen v1 shape. It is Minecraft-shaped and remains readable only through the v2 migration seam. */
+export const EnvironmentResourceBoundsV1Schema = z
   .object({
     serverId: z.string().min(1),
     worldId: WorldIdSchema,
@@ -34,9 +36,60 @@ export const EnvironmentResourceBoundsSchema = z
     capabilities: z.array(z.string().min(1)),
   })
   .strict();
-export type EnvironmentResourceBounds = z.infer<typeof EnvironmentResourceBoundsSchema>;
+export type EnvironmentResourceBoundsV1 = z.infer<typeof EnvironmentResourceBoundsV1Schema>;
 
-export const EnvironmentSessionSpecSchema = z
+export const MinecraftResourceBoundsSchema = EnvironmentResourceBoundsV1Schema.extend({
+  profile: z.literal("minecraft_java"),
+}).strict();
+export type MinecraftResourceBounds = z.infer<typeof MinecraftResourceBoundsSchema>;
+
+export const LegacyEnvironmentResourceBoundsSchema = EnvironmentResourceBoundsV1Schema.extend({
+  profile: z.literal("legacy_v1"),
+  legacyEnvironmentKind: z.string().min(1),
+}).strict();
+export type LegacyEnvironmentResourceBounds = z.infer<typeof LegacyEnvironmentResourceBoundsSchema>;
+
+export const PokeMMOSimulatorCapabilitySchema = z.enum([
+  "pokemmo.simulator.observe",
+  "pokemmo.simulator.navigate",
+  "pokemmo.simulator.interact",
+  "pokemmo.simulator.menu",
+  "pokemmo.simulator.battle",
+  "pokemmo.simulator.party",
+  "pokemmo.simulator.inventory",
+  "pokemmo.simulator.wait",
+]);
+export type PokeMMOSimulatorCapability = z.infer<typeof PokeMMOSimulatorCapabilitySchema>;
+
+export const PokeMMOSimulatorResourceBoundsSchema = z
+  .object({
+    profile: z.literal("pokemmo_simulator"),
+    simulatorId: z.string().min(1).max(128),
+    worldId: WorldIdSchema,
+    characterId: CharacterIdSchema,
+    allowedMapIds: z.array(z.string().min(1).max(128)).min(1).max(64),
+    maxNavigationStepsPerAction: z.number().int().positive().max(1_024),
+    maxMenuChoicesPerAction: z.number().int().positive().max(64),
+    maxBattleTurnsPerAction: z.number().int().positive().max(64),
+    maxActionDurationMs: z.number().int().positive(),
+    capabilities: z.array(PokeMMOSimulatorCapabilitySchema).min(1).max(8),
+  })
+  .strict();
+export type PokeMMOSimulatorResourceBounds = z.infer<typeof PokeMMOSimulatorResourceBoundsSchema>;
+
+export const EnvironmentResourceBoundsV2Schema = z.discriminatedUnion("profile", [
+  MinecraftResourceBoundsSchema,
+  LegacyEnvironmentResourceBoundsSchema,
+  PokeMMOSimulatorResourceBoundsSchema,
+]);
+export type EnvironmentResourceBoundsV2 = z.infer<typeof EnvironmentResourceBoundsV2Schema>;
+
+/** @deprecated Use EnvironmentResourceBoundsV2Schema for new sessions. */
+export const EnvironmentResourceBoundsSchema = EnvironmentResourceBoundsV1Schema;
+/** @deprecated Frozen v1 type retained for source compatibility. */
+export type EnvironmentResourceBounds = EnvironmentResourceBoundsV1;
+
+export const EnvironmentSessionSpecV1Schema = z
   .object({
     schemaVersion: z.literal(INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION),
     sessionId: EnvironmentSessionIdSchema,
@@ -45,7 +98,7 @@ export const EnvironmentSessionSpecSchema = z
     worldId: WorldIdSchema,
     requestedBy: CommandAuthoritySchema,
     initialGoalVersion: z.number().int().nonnegative(),
-    resourceBounds: EnvironmentResourceBoundsSchema,
+    resourceBounds: EnvironmentResourceBoundsV1Schema,
   })
   .strict()
   .superRefine((session, context) => {
@@ -64,9 +117,78 @@ export const EnvironmentSessionSpecSchema = z
       });
     }
   });
+export type EnvironmentSessionSpecV1 = z.infer<typeof EnvironmentSessionSpecV1Schema>;
+
+export const EnvironmentSessionSpecV2Schema = z
+  .object({
+    schemaVersion: z.literal(ENVIRONMENT_SESSION_SCHEMA_VERSION),
+    sessionId: EnvironmentSessionIdSchema,
+    environmentKind: z.string().min(1),
+    characterId: CharacterIdSchema,
+    worldId: WorldIdSchema,
+    requestedBy: CommandAuthoritySchema,
+    initialGoalVersion: z.number().int().nonnegative(),
+    resourceBounds: EnvironmentResourceBoundsV2Schema,
+  })
+  .strict()
+  .superRefine((session, context) => {
+    if (session.worldId !== session.resourceBounds.worldId) {
+      context.addIssue({
+        code: "custom",
+        path: ["resourceBounds", "worldId"],
+        message: "world binding mismatch",
+      });
+    }
+    if (session.characterId !== session.resourceBounds.characterId) {
+      context.addIssue({
+        code: "custom",
+        path: ["resourceBounds", "characterId"],
+        message: "character binding mismatch",
+      });
+    }
+    const profile = session.resourceBounds.profile;
+    if (profile !== "legacy_v1" && session.environmentKind !== profile) {
+      context.addIssue({
+        code: "custom",
+        path: ["environmentKind"],
+        message: "environment kind does not match the resource profile",
+      });
+    }
+    if (profile === "legacy_v1" && session.environmentKind !== session.resourceBounds.legacyEnvironmentKind) {
+      context.addIssue({
+        code: "custom",
+        path: ["environmentKind"],
+        message: "environment kind does not match the legacy v1 binding",
+      });
+    }
+  });
+export type EnvironmentSessionSpecV2 = z.infer<typeof EnvironmentSessionSpecV2Schema>;
+
+export const EnvironmentSessionSpecSchema = z.union([
+  EnvironmentSessionSpecV2Schema,
+  EnvironmentSessionSpecV1Schema,
+]);
 export type EnvironmentSessionSpec = z.infer<typeof EnvironmentSessionSpecSchema>;
 
-export const EnvironmentLeaseSchema = z
+export function normalizeEnvironmentSessionSpec(input: unknown): EnvironmentSessionSpecV2 {
+  const parsed = EnvironmentSessionSpecSchema.parse(input);
+  if (parsed.schemaVersion === ENVIRONMENT_SESSION_SCHEMA_VERSION) return parsed;
+  const profile = parsed.environmentKind === "minecraft_java" ? "minecraft_java" : "legacy_v1";
+  return EnvironmentSessionSpecV2Schema.parse({
+    ...parsed,
+    schemaVersion: ENVIRONMENT_SESSION_SCHEMA_VERSION,
+    resourceBounds:
+      profile === "minecraft_java"
+        ? { profile, ...parsed.resourceBounds }
+        : {
+            profile,
+            legacyEnvironmentKind: parsed.environmentKind,
+            ...parsed.resourceBounds,
+          },
+  });
+}
+
+export const EnvironmentLeaseV1Schema = z
   .object({
     schemaVersion: z.literal(INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION),
     leaseId: z.string().min(1),
@@ -77,7 +199,7 @@ export const EnvironmentLeaseSchema = z
     issuedAt: z.string().datetime(),
     heartbeatAt: z.string().datetime(),
     expiresAt: z.string().datetime(),
-    resourceBounds: EnvironmentResourceBoundsSchema,
+    resourceBounds: EnvironmentResourceBoundsV1Schema,
   })
   .strict()
   .superRefine((lease, context) => {
@@ -88,7 +210,53 @@ export const EnvironmentLeaseSchema = z
       context.addIssue({ code: "custom", path: ["expiresAt"], message: "lease timestamps are out of order" });
     }
   });
+export type EnvironmentLeaseV1 = z.infer<typeof EnvironmentLeaseV1Schema>;
+
+export const EnvironmentLeaseV2Schema = z
+  .object({
+    schemaVersion: z.literal(ENVIRONMENT_SESSION_SCHEMA_VERSION),
+    leaseId: z.string().min(1),
+    sessionId: EnvironmentSessionIdSchema,
+    holderId: z.string().min(1),
+    missionId: MissionIdSchema.optional(),
+    taskId: TaskIdSchema.optional(),
+    issuedAt: z.string().datetime(),
+    heartbeatAt: z.string().datetime(),
+    expiresAt: z.string().datetime(),
+    resourceBounds: EnvironmentResourceBoundsV2Schema,
+  })
+  .strict()
+  .superRefine((lease, context) => {
+    const issuedAt = Date.parse(lease.issuedAt);
+    const heartbeatAt = Date.parse(lease.heartbeatAt);
+    const expiresAt = Date.parse(lease.expiresAt);
+    if (heartbeatAt < issuedAt || expiresAt <= heartbeatAt) {
+      context.addIssue({ code: "custom", path: ["expiresAt"], message: "lease timestamps are out of order" });
+    }
+  });
+export type EnvironmentLeaseV2 = z.infer<typeof EnvironmentLeaseV2Schema>;
+
+export const EnvironmentLeaseSchema = z.union([EnvironmentLeaseV2Schema, EnvironmentLeaseV1Schema]);
 export type EnvironmentLease = z.infer<typeof EnvironmentLeaseSchema>;
+
+export function normalizeEnvironmentLease(
+  input: unknown,
+  session: EnvironmentSessionSpecV2,
+): EnvironmentLeaseV2 {
+  const parsed = EnvironmentLeaseSchema.parse(input);
+  if (parsed.sessionId !== session.sessionId) throw new Error("lease session binding mismatch");
+  if (parsed.schemaVersion === ENVIRONMENT_SESSION_SCHEMA_VERSION) {
+    if (JSON.stringify(parsed.resourceBounds) !== JSON.stringify(session.resourceBounds)) {
+      throw new Error("lease resource profile mismatch");
+    }
+    return parsed;
+  }
+  return EnvironmentLeaseV2Schema.parse({
+    ...parsed,
+    schemaVersion: ENVIRONMENT_SESSION_SCHEMA_VERSION,
+    resourceBounds: session.resourceBounds,
+  });
+}
 
 export const EnvironmentActionStatusSchema = z.enum([
   "queued",
@@ -281,6 +449,19 @@ export const EnvironmentSemanticEventTypeSchema = z.enum([
   "minecraft.damage.taken",
   "minecraft.player.died",
   "minecraft.attention.raised",
+  "pokemmo.session.started",
+  "pokemmo.session.stopped",
+  "pokemmo.session.disconnected",
+  "pokemmo.goal.changed",
+  "pokemmo.goal.superseded",
+  "pokemmo.goal.verified",
+  "pokemmo.goal.failed",
+  "pokemmo.action.requested",
+  "pokemmo.action.started",
+  "pokemmo.action.completed",
+  "pokemmo.action.cancelled",
+  "pokemmo.action.failed",
+  "pokemmo.attention.raised",
   "discord.presence.session.phase_changed",
   "captain.lane.started",
   "captain.lane.parked",
@@ -495,7 +676,7 @@ export const EnvironmentTelemetryReferenceSchema = z.object({
   schemaVersion: z.literal(INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION),
   plane: z.literal("artifact_reference"),
   id: z.string().min(1),
-  telemetryKind: z.enum(["ticks", "chunks", "packets", "audio", "video"]),
+  telemetryKind: z.enum(["ticks", "chunks", "packets", "audio", "video", "frame"]),
   sessionId: EnvironmentSessionIdSchema,
   correlationId: z.string().min(1),
   artifactId: z.string().min(1),
