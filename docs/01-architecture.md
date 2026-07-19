@@ -199,6 +199,15 @@ not become app input. Retention expiry, invalid cursors, and mission replacement
 are explicit recovery states. `GardenWorld` remains the only spatial/state
 projection; the feed is ordered evidence, not a second world model.
 
+Ordinary appends and optimistic `appendExpected` writers share the same global
+hash chain. The feed serializes low-latency append hints with authoritative
+store reconciliation: every discovery, snapshot, and tail open rereads and
+verifies the canonical log, while a live hint behind a sequence gap reconciles
+before advancing. This classifies every global sequence, including private and
+future out-of-band event types, without exposing filtered payloads. Missing,
+forked, corrupt, regressed, or unreadable authority fails the read explicitly
+instead of returning a stale process-local projection.
+
 ## Control flow
 
 1. A channel normalizes user intent into a command.

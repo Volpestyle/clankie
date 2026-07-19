@@ -67,7 +67,10 @@ authority.
 
 ```mermaid
 flowchart LR
-  E[(Canonical event store)] --> P[Strict safe projection]
+  W[Ordinary and compare-and-append writers] --> E[(Canonical event store)]
+  E --> C[Serialized authority reconciliation]
+  H[Store-returned append hints] --> C
+  C --> P[Strict safe projection]
   P --> S[Bounded current snapshot]
   P --> R[Retained replay window]
   D[Paired device + chat grant] --> A[Authenticated feed routes]
@@ -77,6 +80,14 @@ flowchart LR
   C -->|ordered events once| G[GardenWorld]
   X[Terminal bytes / provider output / private prompts] -. excluded .-> P
 ```
+
+The feed serializes store-returned append hints with authoritative log reads.
+Every discovery, snapshot, and tail open reconciles the complete verified hash
+chain before answering. A live append hint that arrives after an unpublished
+global sequence also forces reconciliation before the feed advances or wakes a
+tail. Missing, corrupt, regressed, or unreadable authority returns an explicit
+unavailable response; the feed never guesses across a sequence or serves the
+last process-local projection as current.
 
 Projected events keep canonical mission, task, worker-run, correlation,
 causation, profile, event, and event-store sequence identity. Their payloads are

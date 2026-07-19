@@ -34,6 +34,18 @@ worker result fields remain private. Provider names, model names, plan bodies,
 runner claims, raw output, credentials, terminal bytes, private prompts, and
 chain-of-thought are unrepresentable in the public schemas.
 
+The feed serializes store-returned append hints with reads of the complete
+authoritative log. A contiguous hint advances only when its envelope hash and
+previous-hash link extend the reconciled chain. A hint beyond the next global
+sequence forces an authoritative read; the feed never skips or classifies the
+gap from event names. Discovery, snapshot, and tail-open reads also reconcile
+before answering, so an `appendExpected` writer or any future out-of-band writer
+cannot leave those surfaces silently stale. Reconciliation verifies the full
+hash chain and exact event-id/sequence bindings. Missing, forked, corrupt,
+regressed, or unreadable authority fails explicitly with an unavailable feed.
+Filtered events still advance the reconciled global watermark without becoming
+public records.
+
 The latest canonical `mission.execution.started` event selects the current
 mission. The event id is that mission execution's generation. A newer start
 replaces the selection; terminal mission events remain visible until that
@@ -80,16 +92,26 @@ sequenceDiagram
     participant C as API client
     participant P as Control plane
     participant E as Event store
+    participant O as Out-of-band writer
+    O->>E: appendExpected
     G->>C: observe selected mission
     C->>P: authenticated active mission + snapshot
-    P->>E: canonical stored-event projection
+    P->>E: reconcile and verify canonical hash chain
     P-->>C: bounded safe events + signed cursor
     C-->>G: apply snapshot to GardenWorld
     loop replay and live tail
+      P->>E: ordinary append
+      E-->>P: stored-envelope hint
+      alt hint follows an unpublished global sequence
+        P->>E: reread and classify every intervening sequence
+      end
       C->>P: tail(cursor)
       P-->>C: next visible event + next cursor
       C->>C: dedupe and verify previousSourceSequence
       C-->>G: apply canonical semantic event once
+    end
+    alt authority missing, corrupt, regressed, or unreadable
+      P-->>C: explicit feed unavailable
     end
     alt retention expires or mission is replaced
       P-->>C: explicit recovery outcome
@@ -107,6 +129,11 @@ sequenceDiagram
 - **Use raw global sequence contiguity** — rejected because filtered private
   events legitimately create global sequence jumps. Linking consecutive visible
   source sequences detects delivery gaps without revealing filtered events.
+- **Require every writer to call a feed publication helper** — rejected as the
+  sole correctness mechanism because existing optimistic writers and future
+  out-of-band append paths can bypass a process-local helper after durably
+  consuming a global sequence. Store reconciliation remains the backstop;
+  append hints are only a low-latency optimization.
 - **Use unsigned offsets or process-random cursors** — rejected because offsets
   can be forged to skip state and process-random cursors cannot resume after a
   restart.
@@ -119,6 +146,9 @@ sequenceDiagram
   data to inhabit real workers without parsing terminal or provider output.
 - Cursor recovery is explicit and deterministic across reconnect, restart,
   retention expiry, and mission replacement.
+- Out-of-band canonical writers cannot strand the live projection behind a
+  missing global sequence; authority failures surface as unavailable rather
+  than stale success.
 - Adding a visible event requires a protocol-versioned closed projection and an
   information-boundary review; an internal event is private by default.
 - Very large missions can produce an explicitly compacted snapshot. Tail replay

@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import type { StoredEvent } from "@clankie/event-store";
+import { GENESIS_HASH, seal, verifyChain, type StoredEvent } from "@clankie/event-store";
 import {
   ActiveMissionDescriptorSchema,
   ActiveMissionSelectionSchema,
@@ -56,9 +56,20 @@ export type MissionEventFeedTailRead =
 
 export interface MissionEventFeedOptions {
   readonly cursorKey: Uint8Array;
+  /** Read the complete canonical log from the durable event-store authority. */
+  readonly readCanonicalEvents: () => Promise<readonly StoredEvent[]>;
   readonly initialEvents?: readonly StoredEvent[];
   readonly retentionLimit?: number;
   readonly snapshotLimit?: number;
+}
+
+export class MissionEventFeedAuthorityError extends Error {
+  public readonly code = "mission_event_feed_authority_failure" as const;
+
+  public constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "MissionEventFeedAuthorityError";
+  }
 }
 
 /**
@@ -71,22 +82,26 @@ export interface MissionEventFeedOptions {
  */
 export class MissionEventFeed {
   private readonly cursorKey: Uint8Array;
+  private readonly readCanonicalEvents: () => Promise<readonly StoredEvent[]>;
   private readonly retentionLimit: number;
   private readonly snapshotLimit: number;
   private readonly buffers = new Map<string, MissionBuffer>();
-  private readonly publishedEventIds = new Map<string, number>();
+  private readonly publishedEventIds = new Map<string, { sequence: number; hash: string }>();
   private readonly queuedEvents = new Map<number, StoredEvent>();
-  private readonly queuedEventIds = new Map<string, number>();
+  private readonly queuedEventIds = new Map<string, { sequence: number; hash: string }>();
   private readonly listeners = new Set<() => void>();
   private activeMission: ActiveMissionDescriptor | undefined;
   private activeStartedSequence = 0;
   private latestSourceSequence = 0;
+  private latestSourceHash = GENESIS_HASH;
   private revision = 0;
+  private reconciliation: Promise<void> = Promise.resolve();
 
   public constructor(options: MissionEventFeedOptions) {
     if (options.cursorKey.byteLength < 32)
       throw new Error("mission event cursor key must be at least 32 bytes");
     this.cursorKey = Uint8Array.from(options.cursorKey);
+    this.readCanonicalEvents = options.readCanonicalEvents;
     this.retentionLimit = boundedLimit(
       options.retentionLimit ?? MISSION_EVENT_FEED_RETENTION_MAX,
       MISSION_EVENT_FEED_RETENTION_MAX,
@@ -97,21 +112,19 @@ export class MissionEventFeed {
       MISSION_EVENT_FEED_SNAPSHOT_MAX,
       "snapshot",
     );
-    for (const stored of [...(options.initialEvents ?? [])].sort(
-      (left, right) => left.sequence - right.sequence,
-    )) {
-      this.publish(stored, false);
-    }
+    this.applyAuthoritativeRead(options.initialEvents ?? [], false);
   }
 
-  public selection(): ActiveMissionSelection {
+  public async selection(): Promise<ActiveMissionSelection> {
+    await this.reconcile();
     return ActiveMissionSelectionSchema.parse({
       schemaVersion: MISSION_EVENT_FEED_SCHEMA_VERSION,
       activeMission: this.activeMission ?? null,
     });
   }
 
-  public snapshot(missionId: string): MissionEventFeedSnapshotRead {
+  public async snapshot(missionId: string): Promise<MissionEventFeedSnapshotRead> {
+    await this.reconcile();
     const replacement = this.replacementFor(missionId);
     if (replacement) return replacement;
     const buffer = this.buffers.get(missionId);
@@ -133,7 +146,12 @@ export class MissionEventFeed {
     });
   }
 
-  public openTail(missionId: string, cursor: string, signal: AbortSignal): MissionEventFeedTailRead {
+  public async openTail(
+    missionId: string,
+    cursor: string,
+    signal: AbortSignal,
+  ): Promise<MissionEventFeedTailRead> {
+    await this.reconcile();
     const replacement = this.replacementFor(missionId);
     if (replacement) return replacement;
     const buffer = this.buffers.get(missionId);
@@ -171,24 +189,53 @@ export class MissionEventFeed {
     };
   }
 
-  /** Publish one canonical envelope in event-store order. Exact retries are idempotent. */
-  public publish(stored: StoredEvent, notify = true): void {
+  /**
+   * Offer a store-returned append as a low-latency publication hint. Gaps are
+   * resolved only by rereading the canonical store; exact retries are
+   * idempotent and never invent a skipped sequence.
+   */
+  public publish(stored: StoredEvent): Promise<void> {
+    return this.serialize(async () => {
+      this.acceptCanonical(stored, true);
+      if (this.queuedEvents.size > 0) await this.reconcileUnlocked(true);
+    });
+  }
+
+  /** Reconcile all unseen global sequences from the durable authority. */
+  public reconcile(): Promise<void> {
+    return this.serialize(() => this.reconcileUnlocked(true));
+  }
+
+  private acceptCanonical(stored: StoredEvent, notify: boolean): void {
+    this.assertEnvelope(stored);
     const previous = this.publishedEventIds.get(stored.event.id) ?? this.queuedEventIds.get(stored.event.id);
     if (previous !== undefined) {
-      if (previous !== stored.sequence) throw new Error("mission event id was rebound to another sequence");
+      if (previous.sequence !== stored.sequence || previous.hash !== stored.hash) {
+        throw new MissionEventFeedAuthorityError("mission event id was rebound to another envelope");
+      }
       return;
     }
     if (stored.sequence <= this.latestSourceSequence) {
-      throw new Error("mission events must be published in canonical event-store order");
+      throw new MissionEventFeedAuthorityError(
+        "mission event sequence conflicts with the already reconciled canonical log",
+      );
     }
     const queued = this.queuedEvents.get(stored.sequence);
     if (queued) {
-      throw new Error("mission event sequence was assigned to another event");
+      if (queued.event.id !== stored.event.id || queued.hash !== stored.hash) {
+        throw new MissionEventFeedAuthorityError("mission event sequence was assigned to another envelope");
+      }
+      return;
     }
     this.queuedEvents.set(stored.sequence, stored);
-    this.queuedEventIds.set(stored.event.id, stored.sequence);
+    this.queuedEventIds.set(stored.event.id, { sequence: stored.sequence, hash: stored.hash });
     let next = this.queuedEvents.get(this.latestSourceSequence + 1);
     while (next) {
+      if (next.previousHash !== this.latestSourceHash) {
+        throw new MissionEventFeedAuthorityError(
+          `mission event hash link failed at sequence ${String(next.sequence)}`,
+        );
+      }
       this.queuedEvents.delete(next.sequence);
       this.queuedEventIds.delete(next.event.id);
       this.applyCanonical(next, notify);
@@ -196,9 +243,89 @@ export class MissionEventFeed {
     }
   }
 
+  private async reconcileUnlocked(notify: boolean): Promise<void> {
+    let entries: readonly StoredEvent[];
+    try {
+      entries = await this.readCanonicalEvents();
+    } catch (error) {
+      throw new MissionEventFeedAuthorityError("mission event authority could not be read", {
+        cause: error,
+      });
+    }
+    this.applyAuthoritativeRead(entries, notify);
+  }
+
+  private applyAuthoritativeRead(entries: readonly StoredEvent[], notify: boolean): void {
+    let verification;
+    try {
+      verification = verifyChain(entries);
+    } catch (error) {
+      throw new MissionEventFeedAuthorityError("mission event authority contains an unreadable envelope", {
+        cause: error,
+      });
+    }
+    if (!verification.valid) {
+      throw new MissionEventFeedAuthorityError(
+        verification.error ?? "mission event authority failed hash-chain verification",
+      );
+    }
+    if (entries.length < this.latestSourceSequence) {
+      throw new MissionEventFeedAuthorityError(
+        `mission event authority regressed from sequence ${String(this.latestSourceSequence)} to ${String(entries.length)}`,
+      );
+    }
+    for (const queued of this.queuedEvents.values()) {
+      const authoritative = entries[queued.sequence - 1];
+      if (
+        authoritative === undefined ||
+        authoritative.event.id !== queued.event.id ||
+        authoritative.hash !== queued.hash
+      ) {
+        throw new MissionEventFeedAuthorityError(
+          `mission event publication hint conflicts with authority at sequence ${String(queued.sequence)}`,
+        );
+      }
+    }
+    for (const stored of entries) this.acceptCanonical(stored, notify);
+    if (this.latestSourceSequence !== entries.length || this.queuedEvents.size > 0) {
+      throw new MissionEventFeedAuthorityError(
+        `mission event authority has an unresolved gap after sequence ${String(this.latestSourceSequence)}`,
+      );
+    }
+  }
+
+  private assertEnvelope(stored: StoredEvent): void {
+    if (!Number.isSafeInteger(stored.sequence) || stored.sequence < 1) {
+      throw new MissionEventFeedAuthorityError("mission event sequence must be a positive safe integer");
+    }
+    let expected: StoredEvent;
+    try {
+      expected = seal(stored.event, stored.sequence, stored.previousHash);
+    } catch (error) {
+      throw new MissionEventFeedAuthorityError("mission event envelope contains an unreadable event", {
+        cause: error,
+      });
+    }
+    if (expected.hash !== stored.hash) {
+      throw new MissionEventFeedAuthorityError(
+        `mission event envelope hash failed at sequence ${String(stored.sequence)}`,
+      );
+    }
+  }
+
+  private serialize<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.reconciliation.then(operation, operation);
+    this.reconciliation = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
   private applyCanonical(stored: StoredEvent, notify: boolean): void {
     this.latestSourceSequence = stored.sequence;
-    this.publishedEventIds.set(stored.event.id, stored.sequence);
+    this.latestSourceHash = stored.hash;
+    this.publishedEventIds.set(stored.event.id, { sequence: stored.sequence, hash: stored.hash });
 
     const buffer = this.buffer(stored.event.missionId);
     this.captureTaskKinds(buffer, stored.event);

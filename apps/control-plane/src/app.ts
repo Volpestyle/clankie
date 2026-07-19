@@ -141,10 +141,20 @@ import {
   type WorkspaceBindingResolver,
 } from "./tracker-ceremony.ts";
 import type { WorkerTranscriptReadPort } from "./worker-transcripts.ts";
-import { MissionEventFeed } from "./mission-event-feed.ts";
+import { MissionEventFeed, type MissionEventFeedTailRead } from "./mission-event-feed.ts";
 
 const logger = createLogger({ service: "clankie-control-plane", version: "0.1.0" });
 const LINEAR_DELIVERY_RETENTION_MS = 7 * 60 * 60 * 1_000;
+
+function logMissionEventFeedAuthorityFailure(error: unknown, missionId?: string): void {
+  logger.error(
+    {
+      error: error instanceof Error ? error.message : String(error),
+      ...(missionId === undefined ? {} : { missionId }),
+    },
+    "mission event feed reconciliation failed closed",
+  );
+}
 
 interface MissionRecord {
   id: string;
@@ -749,6 +759,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     dependencies.eventStore && dependencies.deviceSessionKey
       ? new MissionEventFeed({
           cursorKey: dependencies.deviceSessionKey,
+          readCanonicalEvents: () => dependencies.eventStore!.readAll(),
           initialEvents: initialStoredEvents,
         })
       : undefined;
@@ -791,7 +802,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     };
     const stored = dependencies.eventStore ? await dependencies.eventStore.append(event) : undefined;
     storedEvents.push(event);
-    if (stored) missionEventFeed?.publish(stored);
+    if (stored) await missionEventFeed?.publish(stored);
     persistedEventIds.add(event.id);
     await syncTrackerEvent(event);
     return event;
@@ -950,7 +961,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       const stored = dependencies.eventStore ? await dependencies.eventStore.append(event) : undefined;
       persistedEventIds.add(event.id);
       storedEvents.push(event);
-      if (stored) missionEventFeed?.publish(stored);
+      if (stored) await missionEventFeed?.publish(stored);
       await syncTrackerEvent(event);
     }
   };
@@ -963,7 +974,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       const failure = trackerFailureEvent(event, error, dependencies.doctrine.profileHash, idFactory, clock);
       const stored = dependencies.eventStore ? await dependencies.eventStore.append(failure) : undefined;
       storedEvents.push(failure);
-      if (stored) missionEventFeed?.publish(stored);
+      if (stored) await missionEventFeed?.publish(stored);
       persistedEventIds.add(failure.id);
       logger.warn(
         { missionId: event.missionId, taskId: event.taskId, sourceEventId: event.id },
@@ -986,7 +997,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       if (persistedEventIds.has(event.id)) return;
       const stored = dependencies.eventStore ? await dependencies.eventStore.append(event) : undefined;
       storedEvents.push(event);
-      if (stored) missionEventFeed?.publish(stored);
+      if (stored) await missionEventFeed?.publish(stored);
       persistedEventIds.add(event.id);
     },
     onBackgroundError: (error) => {
@@ -1533,7 +1544,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
         const session = discordPresenceSessions.apply(event);
         if (advancesDurableRevision) discordPresenceLiveSessions.set(sessionKey, session);
         storedEvents.push(domainEvent);
-        if (stored) missionEventFeed?.publish(stored);
+        if (stored) await missionEventFeed?.publish(stored);
         persistedEventIds.add(domainEvent.id);
         return context.json({ accepted: true, session });
       } catch (error) {
@@ -2268,17 +2279,31 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     const authorization = await authorizeMissionEventRead(context);
     if (authorization) return authorization;
     if (!missionEventFeed) return context.json({ error: "mission_event_feed_unavailable" }, 503);
-    return context.json(missionEventFeed.selection(), 200, { "cache-control": "no-store" });
+    try {
+      return context.json(await missionEventFeed.selection(), 200, { "cache-control": "no-store" });
+    } catch (error) {
+      logMissionEventFeedAuthorityFailure(error);
+      return context.json({ error: "mission_event_feed_reconciliation_failed" }, 503, {
+        "cache-control": "no-store",
+      });
+    }
   });
 
   app.get("/v1/missions/:id/events", async (context) => {
     const authorization = await authorizeMissionEventRead(context);
     if (authorization) return authorization;
     if (!missionEventFeed) return context.json({ error: "mission_event_feed_unavailable" }, 503);
-    const outcome = missionEventFeed.snapshot(context.req.param("id"));
-    return context.json(outcome, outcome.outcome === "snapshot" ? 200 : 409, {
-      "cache-control": "no-store",
-    });
+    try {
+      const outcome = await missionEventFeed.snapshot(context.req.param("id"));
+      return context.json(outcome, outcome.outcome === "snapshot" ? 200 : 409, {
+        "cache-control": "no-store",
+      });
+    } catch (error) {
+      logMissionEventFeedAuthorityFailure(error, context.req.param("id"));
+      return context.json({ error: "mission_event_feed_reconciliation_failed" }, 503, {
+        "cache-control": "no-store",
+      });
+    }
   });
 
   app.get("/v1/missions/:id/events/tail", async (context) => {
@@ -2290,7 +2315,16 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     const abort = new AbortController();
     const requestAbort = () => abort.abort();
     context.req.raw.signal.addEventListener("abort", requestAbort, { once: true });
-    const opened = missionEventFeed.openTail(context.req.param("id"), cursor, abort.signal);
+    let opened: MissionEventFeedTailRead;
+    try {
+      opened = await missionEventFeed.openTail(context.req.param("id"), cursor, abort.signal);
+    } catch (error) {
+      context.req.raw.signal.removeEventListener("abort", requestAbort);
+      logMissionEventFeedAuthorityFailure(error, context.req.param("id"));
+      return context.json({ error: "mission_event_feed_reconciliation_failed" }, 503, {
+        "cache-control": "no-store",
+      });
+    }
     if (opened.outcome !== "tail") {
       context.req.raw.signal.removeEventListener("abort", requestAbort);
       return context.json(opened, 409, { "cache-control": "no-store" });
