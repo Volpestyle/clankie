@@ -178,6 +178,16 @@ confirmed_pursuing() {
     || recent_text_contains "$text" "Goal active"
 }
 
+pane_agent_status() {
+  local list_output
+  list_output="$(herdr pane list 2>/dev/null)" || {
+    printf 'unknown'
+    return
+  }
+  printf '%s' "$list_output" \
+    | jq -r --arg pane_id "$pane_id" 'first(.result.panes[] | select(.pane_id == $pane_id) | .agent_status) // "unknown"'
+}
+
 if [[ -n "$condition_file" ]]; then
   if ((${#positionals[@]} != 1)); then
     echo "arm-goal: pass a condition with --file or as one quoted argument, not both" >&2
@@ -315,6 +325,17 @@ submit_attempt=0
 while :; do
   sleep 1
   submit_text="$(herdr pane read "$pane_id" --source recent-unwrapped --lines 80 --format text 2>&1)" || submit_text=""
+  # A submitted prompt remains in recent history with the same leading `›` as
+  # the live composer. Once a fresh lane reports working or the harness prints
+  # its pursuing marker, Enter was accepted; pressing it again queues the same
+  # /goal and can surface a delayed "Replace current goal?" prompt minutes into
+  # real work. Existing working lanes still use the composer check because this
+  # invocation may be deliberately replacing their current goal.
+  submit_status="$(pane_agent_status)"
+  if confirmed_pursuing "$submit_text" \
+    || [[ "$agent_status" != "working" && "$submit_status" == "working" ]]; then
+    break
+  fi
   submit_composer="$(last_composer_line "$submit_text")"
   [[ "$submit_composer" == *"/goal "* ]] || break
   if ((submit_attempt >= SUBMIT_RETRIES)); then
