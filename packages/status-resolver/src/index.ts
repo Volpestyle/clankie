@@ -32,6 +32,13 @@ export interface AgentStatusDegradation {
   retryAt?: string;
 }
 
+export interface AgentStatusSourceProvenance {
+  kind: "herdr_pane";
+  workspaceId: string;
+  paneId: string;
+  agent?: string;
+}
+
 export interface AgentStatusSignal {
   state: WorkerStatusState;
   tier: AgentStatusTier;
@@ -41,6 +48,7 @@ export interface AgentStatusSignal {
   basis: AgentStatusBasis;
   questionSummary?: string;
   degradation?: AgentStatusDegradation;
+  provenance?: AgentStatusSourceProvenance;
 }
 
 export type AgentStatusSignalInput = Omit<AgentStatusSignal, "basis"> & {
@@ -69,6 +77,7 @@ export interface ResolvedAgentStatus {
   source: string;
   confidence: number;
   observedAt: string;
+  provenance?: AgentStatusSourceProvenance;
   winner: StatusSignalTrace;
   signalChain: StatusSignalTrace[];
   attention: StatusSignalTrace[];
@@ -82,6 +91,7 @@ export interface ResolvedStatusEventData {
   source: string;
   confidence: number;
   observedAt: string;
+  provenance?: AgentStatusSourceProvenance;
   winner: StatusSignalTrace;
   observedSignal: StatusSignalTrace;
   attention: StatusSignalTrace[];
@@ -215,6 +225,7 @@ export function toResolvedStatusEventData(status: ResolvedAgentStatus): Resolved
     source: status.source,
     confidence: status.confidence,
     observedAt: status.observedAt,
+    ...(status.provenance ? { provenance: structuredClone(status.provenance) } : {}),
     winner: structuredClone(status.winner),
     observedSignal: structuredClone(observedSignal),
     attention: structuredClone(status.attention),
@@ -297,6 +308,7 @@ function resolveHistory(subjectId: string, history: readonly StoredSignal[]): Re
     source: winnerTrace.source,
     confidence: winnerTrace.confidence,
     observedAt: winnerTrace.observedAt,
+    ...(winnerTrace.provenance ? { provenance: structuredClone(winnerTrace.provenance) } : {}),
     winner: structuredClone(winnerTrace),
     signalChain: chain,
     attention: chain.filter((signal) => signal.disposition === "attention_only"),
@@ -397,12 +409,14 @@ function parseExternalSignal(data: Record<string, unknown>): AgentStatusSignal |
         : inferTierOneBasis(state.data);
   const questionSummary = normalizedQuestion(data.questionSummary);
   const degradation = parseDegradation(data.degradation);
+  const sourceProvenance = parseSourceProvenance(data.provenance);
   return {
     state: state.data,
     basis,
     ...provenance.data,
     ...(questionSummary ? { questionSummary } : {}),
     ...(degradation ? { degradation } : {}),
+    ...(sourceProvenance ? { provenance: sourceProvenance } : {}),
   };
 }
 
@@ -411,12 +425,14 @@ function parseSignal(input: AgentStatusSignalInput): AgentStatusSignal {
   const provenance = WorkerStatusProvenanceSchema.parse(input);
   const questionSummary = normalizedQuestion(input.questionSummary);
   const degradation = parseDegradation(input.degradation);
+  const sourceProvenance = parseSourceProvenance(input.provenance);
   return {
     state,
     ...provenance,
     basis: input.basis ?? (provenance.tier === 2 ? "heuristic" : "external_signal"),
     ...(questionSummary ? { questionSummary } : {}),
     ...(degradation ? { degradation } : {}),
+    ...(sourceProvenance ? { provenance: sourceProvenance } : {}),
   };
 }
 
@@ -457,6 +473,22 @@ function parseDegradation(value: unknown): AgentStatusDegradation | undefined {
     error,
     consecutiveFailures: consecutiveFailures as number,
     ...(validRetryAt ? { retryAt: validRetryAt } : {}),
+  };
+}
+
+function parseSourceProvenance(value: unknown): AgentStatusSourceProvenance | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (candidate.kind !== "herdr_pane") return undefined;
+  const workspaceId = normalizedText(candidate.workspaceId, 512);
+  const paneId = normalizedText(candidate.paneId, 512);
+  if (!workspaceId || !paneId) return undefined;
+  const agent = normalizedText(candidate.agent, 256);
+  return {
+    kind: "herdr_pane",
+    workspaceId,
+    paneId,
+    ...(agent ? { agent } : {}),
   };
 }
 
@@ -519,3 +551,5 @@ function isStatusBasis(value: string): value is AgentStatusBasis {
     "worker_offline",
   ].includes(value);
 }
+
+export * from "./herdr.ts";

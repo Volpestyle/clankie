@@ -5,6 +5,8 @@ import {
   STATUS_SIGNAL_EVENT_TYPE,
   explainStatusFromEvents,
   formatStatusExplain,
+  herdrAgentStatusSignalFromEvent,
+  registerHerdrStatusIngest,
   type AgentStatusSignalInput,
 } from "../src/index.ts";
 
@@ -126,6 +128,155 @@ describe("AgentStatusResolver", () => {
 
     const cleared = resolver.ingest("run", signal("idle", 2, "2026-07-11T12:00:04.000Z"));
     expect(cleared).toMatchObject({ state: "working", winner: { tier: 0 }, attention: [] });
+  });
+
+  it.each([
+    ["working", "working"],
+    ["blocked", "blocked"],
+    ["idle", "idle"],
+    ["done", "completed"],
+    ["unknown", "unknown"],
+  ] as const)("maps Herdr %s to Tier-2 %s with pane provenance", (agentStatus, state) => {
+    const mapped = herdrAgentStatusSignalFromEvent(
+      {
+        event: "pane.agent_status_changed",
+        data: {
+          pane_id: "wS:p1D",
+          workspace_id: "wS",
+          agent_status: agentStatus,
+          agent: "codex",
+        },
+      },
+      "2026-07-11T12:00:00.000Z",
+    );
+
+    expect(mapped).toEqual({
+      identity: { workspaceId: "wS", paneId: "wS:p1D", agent: "codex" },
+      signal: {
+        state,
+        tier: 2,
+        source: "herdr",
+        confidence: 1,
+        observedAt: "2026-07-11T12:00:00.000Z",
+        basis: "heuristic",
+        provenance: {
+          kind: "herdr_pane",
+          workspaceId: "wS",
+          paneId: "wS:p1D",
+          agent: "codex",
+        },
+      },
+    });
+  });
+
+  it("registers Herdr as optional Tier 2 without overriding Tier 0", () => {
+    const resolver = new AgentStatusResolver();
+    resolver.ingest("run", signal("working", 0));
+    let listener: ((event: unknown) => void) | undefined;
+
+    const registration = registerHerdrStatusIngest({
+      env: { HERDR_ENV: "1" },
+      register: (registered) => {
+        listener = registered;
+      },
+      resolveSubjectId: ({ paneId }) => (paneId === "wS:p1D" ? "run" : undefined),
+      ingest: (subjectId, input) => resolver.ingest(subjectId, input),
+      clock: () => new Date("2026-07-11T12:00:01.000Z"),
+    });
+
+    expect(registration).toBeDefined();
+    expect(listener).toBeDefined();
+    listener?.({
+      event: "pane.agent_status_changed",
+      data: {
+        pane_id: "wS:p1D",
+        workspace_id: "wS",
+        agent_status: "blocked",
+        agent: "codex",
+      },
+    });
+
+    const resolved = resolver.explain("run");
+    expect(resolved).toMatchObject({
+      state: "working",
+      winner: { tier: 0 },
+      attention: [
+        {
+          state: "blocked",
+          tier: 2,
+          source: "herdr",
+          disposition: "attention_only",
+          provenance: {
+            kind: "herdr_pane",
+            workspaceId: "wS",
+            paneId: "wS:p1D",
+            agent: "codex",
+          },
+        },
+      ],
+    });
+  });
+
+  it("lets Herdr fill unknown and carries pane provenance on resolved status", () => {
+    const resolver = new AgentStatusResolver();
+    resolver.ingest("run", signal("unknown", 1));
+    const mapped = herdrAgentStatusSignalFromEvent(
+      {
+        event: "pane.agent_status_changed",
+        data: {
+          pane_id: "wS:p1D",
+          workspace_id: "wS",
+          agent_status: "idle",
+        },
+      },
+      "2026-07-11T12:00:01.000Z",
+    );
+    if (!mapped) throw new Error("expected a mapped Herdr status signal");
+
+    expect(resolver.ingest("run", mapped.signal)).toMatchObject({
+      state: "idle",
+      tier: 2,
+      source: "herdr",
+      provenance: {
+        kind: "herdr_pane",
+        workspaceId: "wS",
+        paneId: "wS:p1D",
+      },
+      winner: {
+        disposition: "winner",
+        provenance: {
+          kind: "herdr_pane",
+          workspaceId: "wS",
+          paneId: "wS:p1D",
+        },
+      },
+    });
+  });
+
+  it("is inert without HERDR_ENV while the mapper remains pure", () => {
+    let registerCount = 0;
+    const registration = registerHerdrStatusIngest({
+      env: {},
+      register: () => {
+        registerCount += 1;
+      },
+      resolveSubjectId: () => "run",
+      ingest: () => undefined,
+    });
+    const event = {
+      event: "pane.agent_status_changed",
+      data: {
+        pane_id: "wS:p1D",
+        workspace_id: "wS",
+        agent_status: "idle",
+      },
+    };
+
+    expect(registration).toBeUndefined();
+    expect(registerCount).toBe(0);
+    expect(herdrAgentStatusSignalFromEvent(event, "2026-07-11T12:00:00.000Z")).toEqual(
+      herdrAgentStatusSignalFromEvent(event, "2026-07-11T12:00:00.000Z"),
+    );
   });
 
   it("distinguishes a settled turn from a terminal settled worker", () => {

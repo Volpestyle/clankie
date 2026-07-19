@@ -26,6 +26,21 @@ Tier-2 `unknown` signals may include bounded semantic `degradation` metadata (`c
 retain that metadata, and status explain renders it without promoting the degraded heuristic into a
 classification.
 
+## Herdr Tier-2 ingestion
+
+`herdrAgentStatusSignalFromEvent` is the pure boundary for parsed
+`pane.agent_status_changed` socket events. It maps Herdr's
+`working | blocked | idle | done | unknown` vocabulary into Tier-2 resolver
+signals with source `herdr`, the host receive timestamp, and bounded
+workspace/pane/agent provenance. Herdr `done` maps to resolver `completed`;
+"done" remains a presentation label rather than a resolver state.
+
+`registerHerdrStatusIngest` is the optional runtime seam. It does not call its
+registrar unless `HERDR_ENV=1`. The runtime supplies the event registrar, a
+canonical status-subject lookup, and the ingest callback. That lookup is
+required because Herdr pane ids are session-local request locators and are not
+durable worker identities.
+
 Captain presence uses a distinct trusted domain rather than a fake worker run.
 The resolver accepts typed `captain.turn.*` and
 `captain.waiting_dependency` Tier-0 events plus Tier-1
