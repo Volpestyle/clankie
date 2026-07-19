@@ -181,6 +181,24 @@ reader, filters to garden visibility, and fails closed unless the paired device
 currently holds the `chat` grant. Transcript files are excluded from support
 bundles, analytics, crash reports, and the mission event store.
 
+## Garden mission-event feed
+
+Garden mission state comes from an authenticated schema-v1 read projection of
+the canonical control-plane event store ([ADR 0038](adr/0038-authenticated-mission-event-feed.md)).
+The latest `mission.execution.started` event selects the current mission. A
+paired device with the existing `chat` grant discovers that selection, reads a
+bounded current snapshot, and resumes an ordered NDJSON replay/tail with an
+opaque cursor bound to the mission execution generation.
+
+The projection preserves canonical mission, task, worker-run, correlation,
+causation, profile, event, and event-store sequence identities but reconstructs
+each visible payload through a closed public schema. Additive internal event
+data is private by default. Provider/model details, worker prose, plan bodies,
+credentials, private prompts, chain-of-thought, and terminal bytes therefore do
+not become app input. Retention expiry, invalid cursors, and mission replacement
+are explicit recovery states. `GardenWorld` remains the only spatial/state
+projection; the feed is ordered evidence, not a second world model.
+
 ## Control flow
 
 1. A channel normalizes user intent into a command.

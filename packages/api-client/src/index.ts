@@ -7,10 +7,16 @@ import {
   DiscordPresenceWriteResultSchema,
   DiscordPresenceWriteSchema,
   LinearChannelTurnRequestSchema,
+  ActiveMissionSelectionSchema,
+  MissionEventAuthFailureSchema,
+  MissionEventRecoverySchema,
+  MissionEventSnapshotSchema,
+  MissionEventTailLineSchema,
   MissionPlanSchema,
   TrackerNarrativeWriteResultSchema,
   TrackerNarrativeWriteSchema,
   type ActionRequest,
+  type ActiveMissionSelection,
   type ApprovalDecisionInput,
   type ApprovalRequestRecord,
   type ApprovalRequestStatus,
@@ -22,6 +28,9 @@ import {
   type DiscordPresenceChannelTurnRequest,
   type LinearChannelTurnRequest,
   type MissionPlan,
+  type MissionEventRecovery,
+  type MissionEventSnapshot,
+  type MissionFeedEvent,
   type TaskSpec,
   type TrackerNarrativeWrite,
   type TrackerNarrativeWriteResult,
@@ -48,6 +57,8 @@ export interface ClankieApiClientOptions {
   runnerId?: string;
   captainToken?: string;
   operatorToken?: string;
+  /** Paired-device session token used by Garden event and transcript reads. */
+  deviceToken?: string;
 }
 
 export interface RunnerWorkerDescriptor {
@@ -142,6 +153,48 @@ export interface ControlPlaneHealth {
   profileHash: string;
 }
 
+export interface MissionEventResumeState {
+  cursor: string;
+  afterSourceSequence: number;
+  lastEventId?: string;
+}
+
+export interface ObserveMissionEventsOptions {
+  signal?: AbortSignal;
+  reconnectDelayMs?: number;
+  /** Resume an already-applied Garden projection without requesting another snapshot. */
+  resume?: MissionEventResumeState;
+}
+
+export type MissionEventObservation =
+  | { type: "snapshot"; snapshot: MissionEventSnapshot }
+  | {
+      type: "event";
+      phase: "tail";
+      event: MissionFeedEvent;
+      resume: MissionEventResumeState;
+    }
+  | { type: "recovery"; recovery: MissionEventRecovery };
+
+export type MissionEventFeedClientErrorCode =
+  | "authentication_failed"
+  | "feed_unavailable"
+  | "identity_mismatch"
+  | "duplicate_conflict"
+  | "out_of_order"
+  | "sequence_gap"
+  | "tail_truncated";
+
+export class MissionEventFeedClientError extends Error {
+  public readonly code: MissionEventFeedClientErrorCode;
+
+  public constructor(code: MissionEventFeedClientErrorCode) {
+    super(MISSION_EVENT_CLIENT_MESSAGES[code]);
+    this.name = "MissionEventFeedClientError";
+    this.code = code;
+  }
+}
+
 export class ClankieApiClient {
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
@@ -149,6 +202,7 @@ export class ClankieApiClient {
   private readonly runnerId: string;
   private readonly captainToken: string | undefined;
   private readonly operatorToken: string | undefined;
+  private readonly deviceToken: string | undefined;
 
   public constructor(options: string | ClankieApiClientOptions) {
     this.baseUrl = typeof options === "string" ? options : options.baseUrl;
@@ -157,6 +211,7 @@ export class ClankieApiClient {
     this.runnerId = typeof options === "string" ? "local" : (options.runnerId ?? "local");
     this.captainToken = typeof options === "string" ? undefined : options.captainToken;
     this.operatorToken = typeof options === "string" ? undefined : options.operatorToken;
+    this.deviceToken = typeof options === "string" ? undefined : options.deviceToken;
   }
 
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -219,6 +274,116 @@ export class ClankieApiClient {
 
   public async getMission(missionId: string): Promise<Record<string, unknown>> {
     return this.request(`/v1/missions/${missionId}`);
+  }
+
+  /** Discover the single event-store-selected mission currently presented by Garden. */
+  public async discoverActiveMission(): Promise<ActiveMissionSelection> {
+    const response = await this.fetchDevice("/v1/missions/active");
+    await this.requireMissionEventSuccess(response);
+    return ActiveMissionSelectionSchema.parse(await response.json());
+  }
+
+  /** Read the bounded current semantic snapshot or an explicit replacement outcome. */
+  public async getMissionEventSnapshot(
+    missionId: string,
+  ): Promise<MissionEventSnapshot | MissionEventRecovery> {
+    const response = await this.fetchDevice(`/v1/missions/${encodeURIComponent(missionId)}/events`);
+    if (response.status === 409) return MissionEventRecoverySchema.parse(await response.json());
+    await this.requireMissionEventSuccess(response);
+    return MissionEventSnapshotSchema.parse(await response.json());
+  }
+
+  /**
+   * Yield one bounded snapshot, then replay/tail from its opaque cursor. Normal
+   * transport EOF reconnects from the last accepted cursor. Duplicate events
+   * are suppressed; conflicting duplicates, regressions, and sequence gaps
+   * fail closed before the Garden projection sees them.
+   */
+  public async *observeMissionEvents(
+    missionId: string,
+    options: ObserveMissionEventsOptions = {},
+  ): AsyncIterable<MissionEventObservation> {
+    const reconnectDelayMs = options.reconnectDelayMs ?? 250;
+    if (!Number.isInteger(reconnectDelayMs) || reconnectDelayMs < 0 || reconnectDelayMs > 60_000) {
+      throw new Error("Mission event reconnect delay must be between 0 and 60000 milliseconds");
+    }
+    let cursor: string;
+    let lastSequence: number;
+    let lastEventId: string | undefined;
+    const seen = new Map<number, string>();
+    if (options.resume) {
+      cursor = options.resume.cursor;
+      lastSequence = options.resume.afterSourceSequence;
+      lastEventId = options.resume.lastEventId;
+      if (lastEventId) seen.set(lastSequence, lastEventId);
+    } else {
+      const snapshot = await this.getMissionEventSnapshot(missionId);
+      if (snapshot.outcome !== "snapshot") {
+        yield { type: "recovery", recovery: snapshot };
+        return;
+      }
+      validateMissionSnapshot(missionId, snapshot);
+      cursor = snapshot.nextCursor;
+      lastSequence = snapshot.resumeAfterSourceSequence;
+      lastEventId = snapshot.events.at(-1)?.eventId;
+      for (const event of snapshot.events) seen.set(event.sourceSequence, event.eventId);
+      yield { type: "snapshot", snapshot };
+    }
+
+    while (!options.signal?.aborted) {
+      let response: Response;
+      try {
+        response = await this.fetchDevice(
+          `/v1/missions/${encodeURIComponent(missionId)}/events/tail?cursor=${encodeURIComponent(cursor)}`,
+          options.signal ? { signal: options.signal } : undefined,
+        );
+      } catch (error) {
+        if (options.signal?.aborted) return;
+        throw error;
+      }
+      if (response.status === 409) {
+        yield { type: "recovery", recovery: MissionEventRecoverySchema.parse(await response.json()) };
+        return;
+      }
+      await this.requireMissionEventSuccess(response);
+      if (!response.body) throw new MissionEventFeedClientError("tail_truncated");
+      for await (const line of parseMissionEventNdjson(response.body)) {
+        if (line.type === "mission_event.recovery") {
+          yield { type: "recovery", recovery: line.recovery };
+          return;
+        }
+        if (line.type === "mission_event.auth_failed") {
+          throw new MissionEventFeedClientError("authentication_failed");
+        }
+        const event = line.event;
+        if (event.missionId !== missionId) throw new MissionEventFeedClientError("identity_mismatch");
+        if (event.sourceSequence <= lastSequence) {
+          if (seen.get(event.sourceSequence) === event.eventId) {
+            cursor = line.cursor;
+            continue;
+          }
+          throw new MissionEventFeedClientError(
+            seen.has(event.sourceSequence) ? "duplicate_conflict" : "out_of_order",
+          );
+        }
+        if (event.previousSourceSequence !== lastSequence) {
+          throw new MissionEventFeedClientError("sequence_gap");
+        }
+        lastSequence = event.sourceSequence;
+        lastEventId = event.eventId;
+        cursor = line.cursor;
+        seen.set(lastSequence, lastEventId);
+        pruneSeenSequences(seen, 1_024);
+        yield {
+          type: "event",
+          phase: "tail",
+          event,
+          resume: { cursor, afterSourceSequence: lastSequence, lastEventId },
+        };
+      }
+      if (options.signal?.aborted) return;
+      await waitForReconnect(reconnectDelayMs, options.signal);
+    }
   }
 
   public async getHealth(): Promise<ControlPlaneHealth> {
@@ -459,6 +624,106 @@ export class ClankieApiClient {
     }
     return { authorization: `Bearer ${this.operatorToken}` };
   }
+
+  private deviceHeaders(): Record<string, string> {
+    if (!this.deviceToken) {
+      throw new Error("A paired device session token is required for mission event reads");
+    }
+    return { authorization: `Bearer ${this.deviceToken}` };
+  }
+
+  private fetchDevice(path: string, init?: RequestInit): Promise<Response> {
+    return this.fetchImpl(new URL(path, this.baseUrl), {
+      ...init,
+      headers: {
+        ...this.deviceHeaders(),
+        accept: "application/json, application/x-ndjson",
+        ...init?.headers,
+      },
+    });
+  }
+
+  private async requireMissionEventSuccess(response: Response): Promise<void> {
+    if (response.ok) return;
+    if (response.status === 401 || response.status === 403) {
+      MissionEventAuthFailureSchema.parse(await response.json());
+      throw new MissionEventFeedClientError("authentication_failed");
+    }
+    throw new MissionEventFeedClientError("feed_unavailable");
+  }
+}
+
+const MISSION_EVENT_CLIENT_MESSAGES: Record<MissionEventFeedClientErrorCode, string> = {
+  authentication_failed: "Mission event authentication failed",
+  feed_unavailable: "Mission event feed is unavailable",
+  identity_mismatch: "Mission event identity does not match the selected mission",
+  duplicate_conflict: "Mission event sequence was reused for different content",
+  out_of_order: "Mission event delivery regressed out of canonical order",
+  sequence_gap: "Mission event delivery contains a sequence gap",
+  tail_truncated: "Mission event tail ended without a readable stream",
+};
+
+function validateMissionSnapshot(missionId: string, snapshot: MissionEventSnapshot): void {
+  if (snapshot.mission.missionId !== missionId) throw new MissionEventFeedClientError("identity_mismatch");
+  let previous = -1;
+  const eventIds = new Set<string>();
+  for (const event of snapshot.events) {
+    if (event.missionId !== missionId) throw new MissionEventFeedClientError("identity_mismatch");
+    if (event.sourceSequence <= previous) throw new MissionEventFeedClientError("out_of_order");
+    if (eventIds.has(event.eventId)) throw new MissionEventFeedClientError("duplicate_conflict");
+    eventIds.add(event.eventId);
+    previous = event.sourceSequence;
+  }
+  const last = snapshot.events.at(-1)?.sourceSequence;
+  if (last !== undefined && last !== snapshot.resumeAfterSourceSequence) {
+    throw new MissionEventFeedClientError("sequence_gap");
+  }
+}
+
+async function* parseMissionEventNdjson(
+  body: ReadableStream<Uint8Array>,
+): AsyncIterable<ReturnType<typeof MissionEventTailLineSchema.parse>> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = "";
+  try {
+    while (true) {
+      const next = await reader.read();
+      buffered += decoder.decode(next.value, { stream: !next.done });
+      let boundary = buffered.indexOf("\n");
+      while (boundary >= 0) {
+        const line = buffered.slice(0, boundary);
+        buffered = buffered.slice(boundary + 1);
+        if (line) yield MissionEventTailLineSchema.parse(JSON.parse(line));
+        boundary = buffered.indexOf("\n");
+      }
+      if (next.done) break;
+    }
+    if (buffered.trim()) throw new MissionEventFeedClientError("tail_truncated");
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function pruneSeenSequences(seen: Map<number, string>, limit: number): void {
+  while (seen.size > limit) {
+    const oldest = seen.keys().next().value as number | undefined;
+    if (oldest === undefined) return;
+    seen.delete(oldest);
+  }
+}
+
+function waitForReconnect(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (delayMs === 0 || signal?.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(settle, delayMs);
+    function settle() {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", settle);
+      resolve();
+    }
+    signal?.addEventListener("abort", settle, { once: true });
+  });
 }
 
 /**

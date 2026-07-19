@@ -13,7 +13,7 @@ import {
   type ActionClassification,
   type CompiledDoctrine,
 } from "@clankie/doctrine";
-import type { EventStore } from "@clankie/event-store";
+import type { EventStore, StoredEvent } from "@clankie/event-store";
 import {
   assertValidMissionPlan,
   MissionEngine,
@@ -51,6 +51,8 @@ import {
   DiscordPresenceWriteSchema,
   resolveDiscordPresenceLedgerContent,
   LinearChannelTurnRequestSchema,
+  MissionEventAuthFailureSchema,
+  MissionEventTailAuthLineSchema,
   MissionPlanSchema,
   MissionTriggerSchema,
   PairingCompleteRequestSchema,
@@ -80,6 +82,7 @@ import {
   type PairingCompleteResponse,
   type PairingRedeemResponse,
   type DomainEvent,
+  type MissionEventAuthFailure,
   type MissionPlan,
   type MissionTrigger,
   type Risk,
@@ -138,6 +141,7 @@ import {
   type WorkspaceBindingResolver,
 } from "./tracker-ceremony.ts";
 import type { WorkerTranscriptReadPort } from "./worker-transcripts.ts";
+import { MissionEventFeed } from "./mission-event-feed.ts";
 
 const logger = createLogger({ service: "clankie-control-plane", version: "0.1.0" });
 const LINEAR_DELIVERY_RETENTION_MS = 7 * 60 * 60 * 1_000;
@@ -232,9 +236,11 @@ export interface ControlPlaneDependencies {
   /** Authenticates a human on an approval-capable operator surface. */
   authenticateOperator?: OperatorAuthenticator;
   /**
-   * HMAC key (≥32 bytes) that signs device session tokens (VUH-727). When
-   * omitted, device authentication and pairing redemption fail closed (503).
-   * Production loads it from a mode-0600 key file; tests inject bytes directly.
+   * HMAC key (≥32 bytes) that signs device session tokens and, under a separate
+   * domain, opaque mission-event cursors (VUH-727/VUH-909). When omitted,
+   * device authentication, pairing redemption, and mission-event reads fail
+   * closed (503). Production loads it from a mode-0600 key file; tests inject
+   * bytes directly.
    */
   deviceSessionKey?: Uint8Array;
   /** Host name shown on a device's access-review screen. Defaults to the OS hostname. */
@@ -696,6 +702,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
   });
   const consumedApprovalIds = new Set<string>();
   const storedEvents: DomainEvent[] = [];
+  const initialStoredEvents: StoredEvent[] = [];
   const steeringStore = dependencies.workerSteeringStore ?? new InMemoryWorkerSteeringStore();
   // Durable single-flight requires ProjectionEventStore (appendExpected/readStream).
   // Plain EventStore or missing store → deliver fails closed (503), never silent
@@ -725,6 +732,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
         });
   if (dependencies.eventStore) {
     for (const stored of await dependencies.eventStore.readAll()) {
+      initialStoredEvents.push(stored);
       storedEvents.push(stored.event);
       applyMissionEvent(missions, stored.event);
       applyMissionTriggerEvent(missionTriggers, stored.event);
@@ -737,6 +745,13 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     }
     logger.info({ missionCount: missions.size }, "mission records rebuilt from event store");
   }
+  const missionEventFeed =
+    dependencies.eventStore && dependencies.deviceSessionKey
+      ? new MissionEventFeed({
+          cursorKey: dependencies.deviceSessionKey,
+          initialEvents: initialStoredEvents,
+        })
+      : undefined;
   const discordPresenceSessions = new DiscordPresenceSessionProjection(storedEvents);
   // Durable replay restores status, but it cannot prove the bridge is still
   // connected. Act gating therefore starts unvalidated after every process
@@ -774,8 +789,9 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       ...(envelope.taskId ? { taskId: envelope.taskId } : {}),
       ...(envelope.workerRunId ? { workerRunId: envelope.workerRunId } : {}),
     };
-    if (dependencies.eventStore) await dependencies.eventStore.append(event);
+    const stored = dependencies.eventStore ? await dependencies.eventStore.append(event) : undefined;
     storedEvents.push(event);
+    if (stored) missionEventFeed?.publish(stored);
     persistedEventIds.add(event.id);
     await syncTrackerEvent(event);
     return event;
@@ -931,9 +947,10 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
   const flushEngine = async (engine: MissionEngine): Promise<void> => {
     for (const event of engine.getEvents()) {
       if (persistedEventIds.has(event.id)) continue;
-      if (dependencies.eventStore) await dependencies.eventStore.append(event);
+      const stored = dependencies.eventStore ? await dependencies.eventStore.append(event) : undefined;
       persistedEventIds.add(event.id);
       storedEvents.push(event);
+      if (stored) missionEventFeed?.publish(stored);
       await syncTrackerEvent(event);
     }
   };
@@ -944,8 +961,9 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       await dependencies.trackerMirror.publish(event, trackerAttribution(event, missions, storedEvents));
     } catch (error) {
       const failure = trackerFailureEvent(event, error, dependencies.doctrine.profileHash, idFactory, clock);
-      if (dependencies.eventStore) await dependencies.eventStore.append(failure);
+      const stored = dependencies.eventStore ? await dependencies.eventStore.append(failure) : undefined;
       storedEvents.push(failure);
+      if (stored) missionEventFeed?.publish(stored);
       persistedEventIds.add(failure.id);
       logger.warn(
         { missionId: event.missionId, taskId: event.taskId, sourceEventId: event.id },
@@ -966,8 +984,9 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       : { recordedHeartbeatIntervalMs: dependencies.captainHeartbeatRecordIntervalMs }),
     emit: async ({ event }) => {
       if (persistedEventIds.has(event.id)) return;
-      if (dependencies.eventStore) await dependencies.eventStore.append(event);
+      const stored = dependencies.eventStore ? await dependencies.eventStore.append(event) : undefined;
       storedEvents.push(event);
+      if (stored) missionEventFeed?.publish(stored);
       persistedEventIds.add(event.id);
     },
     onBackgroundError: (error) => {
@@ -1209,6 +1228,48 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
 
   const authorizeTranscriptRead = async (context: Context): Promise<Response | undefined> => {
     const denial = await transcriptReadDenial(context);
+    return denial ? context.json(denial.body, denial.status) : undefined;
+  };
+
+  type MissionEventReadDenial =
+    | { body: MissionEventAuthFailure; status: 401 | 403 }
+    | { body: { error: "mission_event_authentication_unavailable" }; status: 503 };
+
+  const missionEventReadDenial = async (context: Context): Promise<MissionEventReadDenial | undefined> => {
+    const identity = await authenticateDevice(context.req.raw);
+    if (identity === "unavailable") {
+      return { body: { error: "mission_event_authentication_unavailable" }, status: 503 };
+    }
+    if ("denied" in identity) {
+      return {
+        body: MissionEventAuthFailureSchema.parse({
+          schemaVersion: 1,
+          outcome: "auth_failed",
+          reason:
+            identity.denied === "expired"
+              ? "session_expired"
+              : identity.denied === "revoked"
+                ? "device_revoked"
+                : "authentication_required",
+        }),
+        status: 401,
+      };
+    }
+    if (!identity.grants.chat) {
+      return {
+        body: MissionEventAuthFailureSchema.parse({
+          schemaVersion: 1,
+          outcome: "auth_failed",
+          reason: "permission_denied",
+        }),
+        status: 403,
+      };
+    }
+    return undefined;
+  };
+
+  const authorizeMissionEventRead = async (context: Context): Promise<Response | undefined> => {
+    const denial = await missionEventReadDenial(context);
     return denial ? context.json(denial.body, denial.status) : undefined;
   };
 
@@ -1466,10 +1527,13 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
         // a loss transition awaiting persistence. A novel event id at an
         // already-durable revision is not evidence of liveness in this boot.
         if (advancesDurableRevision) discordPresenceLiveSessions.set(sessionKey, observed);
-        if (dependencies.eventStore) await dependencies.eventStore.append(domainEvent);
+        const stored = dependencies.eventStore
+          ? await dependencies.eventStore.append(domainEvent)
+          : undefined;
         const session = discordPresenceSessions.apply(event);
         if (advancesDurableRevision) discordPresenceLiveSessions.set(sessionKey, session);
         storedEvents.push(domainEvent);
+        if (stored) missionEventFeed?.publish(stored);
         persistedEventIds.add(domainEvent.id);
         return context.json({ accepted: true, session });
       } catch (error) {
@@ -2198,6 +2262,85 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       }
       throw error;
     }
+  });
+
+  app.get("/v1/missions/active", async (context) => {
+    const authorization = await authorizeMissionEventRead(context);
+    if (authorization) return authorization;
+    if (!missionEventFeed) return context.json({ error: "mission_event_feed_unavailable" }, 503);
+    return context.json(missionEventFeed.selection(), 200, { "cache-control": "no-store" });
+  });
+
+  app.get("/v1/missions/:id/events", async (context) => {
+    const authorization = await authorizeMissionEventRead(context);
+    if (authorization) return authorization;
+    if (!missionEventFeed) return context.json({ error: "mission_event_feed_unavailable" }, 503);
+    const outcome = missionEventFeed.snapshot(context.req.param("id"));
+    return context.json(outcome, outcome.outcome === "snapshot" ? 200 : 409, {
+      "cache-control": "no-store",
+    });
+  });
+
+  app.get("/v1/missions/:id/events/tail", async (context) => {
+    const authorization = await authorizeMissionEventRead(context);
+    if (authorization) return authorization;
+    if (!missionEventFeed) return context.json({ error: "mission_event_feed_unavailable" }, 503);
+    const cursor = context.req.query("cursor");
+    if (!cursor) return context.json({ error: "mission_event_cursor_required" }, 400);
+    const abort = new AbortController();
+    const requestAbort = () => abort.abort();
+    context.req.raw.signal.addEventListener("abort", requestAbort, { once: true });
+    const opened = missionEventFeed.openTail(context.req.param("id"), cursor, abort.signal);
+    if (opened.outcome !== "tail") {
+      context.req.raw.signal.removeEventListener("abort", requestAbort);
+      return context.json(opened, 409, { "cache-control": "no-store" });
+    }
+    const iterator = opened.stream[Symbol.asyncIterator]();
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        try {
+          const next = await iterator.next();
+          if (next.done) {
+            context.req.raw.signal.removeEventListener("abort", requestAbort);
+            controller.close();
+            return;
+          }
+          const denial = await missionEventReadDenial(context);
+          if (denial) {
+            abort.abort();
+            await iterator.return?.();
+            if ("outcome" in denial.body) {
+              const line = MissionEventTailAuthLineSchema.parse({
+                schemaVersion: 1,
+                type: "mission_event.auth_failed",
+                failure: denial.body,
+              });
+              controller.enqueue(encoder.encode(`${JSON.stringify(line)}\n`));
+              controller.close();
+            } else {
+              controller.error(new Error(denial.body.error));
+            }
+            return;
+          }
+          controller.enqueue(encoder.encode(`${JSON.stringify(next.value)}\n`));
+        } catch (error) {
+          controller.error(error);
+        }
+      },
+      async cancel() {
+        context.req.raw.signal.removeEventListener("abort", requestAbort);
+        abort.abort();
+        await iterator.return?.();
+      },
+    });
+    return new Response(body, {
+      status: 200,
+      headers: {
+        "content-type": "application/x-ndjson; charset=utf-8",
+        "cache-control": "no-store",
+      },
+    });
   });
 
   app.get("/v1/missions/:id", (context) => {
