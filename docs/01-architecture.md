@@ -128,6 +128,25 @@ and [Terms of Service](https://pokemmo.com/en/tos/). Raw frames and credentials
 never enter semantic events; visual evidence uses bounded opaque artifact
 references.
 
+### GBA emulator embodiment
+
+The `gba_emulator` profile is the rules-clean home for real input control: a
+locally-run Game Boy Advance game driven through an emulator core, touching no
+networked service. `integrations/gba-emulator` implements the adapter behind
+`EnvironmentRuntime`, so the same lease, stale-goal, idempotency, cancellation,
+and emergency-stop invariants govern every button press. Emulator bounds carry
+core identity, savestate identity digest, RNG seed, and per-action input/frame
+quotas; actions cover bounded press-for-frames button input, frame advance, and
+cancellable wait; observations cover overworld, menu, party, battle, dialog,
+danger, action state, and bounded `artifact://` framebuffer/RAM references.
+A state-derived driver proves the frozen
+`scenarios/emulator/verdant-path-trainer-battle/v1` scenario with byte-identical
+report, evidence trace, and decision traces across runs. This slice drives a
+clearly-labeled deterministic core test double at the adapter boundary; the
+libmgba-backed real core replaces it behind the same seam per
+[ADR 0039](adr/0039-gba-emulator-embodiment-and-deterministic-core-boundary.md).
+ROM, BIOS, and savestate bytes never enter fixtures, events, or reports.
+
 ## Discord voice media plane
 
 The Discord bridge is the single writer for the official-bot presence session. Gateway and bot

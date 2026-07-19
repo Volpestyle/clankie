@@ -77,10 +77,37 @@ export const PokeMMOSimulatorResourceBoundsSchema = z
   .strict();
 export type PokeMMOSimulatorResourceBounds = z.infer<typeof PokeMMOSimulatorResourceBoundsSchema>;
 
+export const GbaEmulatorCapabilitySchema = z.enum([
+  "emulator.gba.observe",
+  "emulator.gba.input",
+  "emulator.gba.frame_advance",
+  "emulator.gba.wait",
+]);
+export type GbaEmulatorCapability = z.infer<typeof GbaEmulatorCapabilitySchema>;
+
+export const GbaEmulatorResourceBoundsSchema = z
+  .object({
+    profile: z.literal("gba_emulator"),
+    coreId: z.string().min(1).max(128),
+    /** Identity of the pinned savestate. Never the savestate bytes themselves. */
+    savestateId: z.string().min(1).max(128),
+    savestateSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+    rngSeed: z.number().int().nonnegative().max(4_294_967_295),
+    worldId: WorldIdSchema,
+    characterId: CharacterIdSchema,
+    maxInputsPerAction: z.number().int().positive().max(64),
+    maxFramesPerAction: z.number().int().positive().max(3_600),
+    maxActionDurationMs: z.number().int().positive(),
+    capabilities: z.array(GbaEmulatorCapabilitySchema).min(1).max(4),
+  })
+  .strict();
+export type GbaEmulatorResourceBounds = z.infer<typeof GbaEmulatorResourceBoundsSchema>;
+
 export const EnvironmentResourceBoundsV2Schema = z.discriminatedUnion("profile", [
   MinecraftResourceBoundsSchema,
   LegacyEnvironmentResourceBoundsSchema,
   PokeMMOSimulatorResourceBoundsSchema,
+  GbaEmulatorResourceBoundsSchema,
 ]);
 export type EnvironmentResourceBoundsV2 = z.infer<typeof EnvironmentResourceBoundsV2Schema>;
 
