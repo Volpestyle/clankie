@@ -1053,6 +1053,336 @@ export const DomainEventSchema = EventBaseSchema.extend({
 });
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
 
+// ---------------------------------------------------------------------------
+// Authenticated mission-event feed (VUH-909).
+//
+// DomainEvent is the internal append-only authority and intentionally supports
+// additive event data. It is not safe as an app wire contract. The schemas
+// below are a closed, bounded read projection that preserves canonical event
+// identity and event-store sequence metadata while making raw/provider/private
+// payload fields unrepresentable.
+// ---------------------------------------------------------------------------
+
+export const MISSION_EVENT_FEED_SCHEMA_VERSION = 1 as const;
+export const MISSION_EVENT_FEED_RETENTION_MAX = 1_024;
+export const MISSION_EVENT_FEED_SNAPSHOT_MAX = 512;
+export const MISSION_EVENT_FEED_CURSOR_MAX = 2_048;
+export const MISSION_EVENT_FEED_ID_MAX = 512;
+
+const MissionEventFeedIdSchema = z.string().trim().min(1).max(MISSION_EVENT_FEED_ID_MAX);
+export const MissionEventFeedCursorSchema = z.string().trim().min(1).max(MISSION_EVENT_FEED_CURSOR_MAX);
+export type MissionEventFeedCursor = z.infer<typeof MissionEventFeedCursorSchema>;
+
+const MissionFeedEventEnvelope = {
+  schemaVersion: z.literal(MISSION_EVENT_FEED_SCHEMA_VERSION),
+  eventId: MissionEventFeedIdSchema,
+  sourceSequence: z.number().int().positive(),
+  previousSourceSequence: z.number().int().nonnegative(),
+  occurredAt: z.string().datetime(),
+  missionId: MissionEventFeedIdSchema,
+  taskId: MissionEventFeedIdSchema.optional(),
+  workerRunId: MissionEventFeedIdSchema.optional(),
+  correlationId: MissionEventFeedIdSchema,
+  causationId: MissionEventFeedIdSchema.optional(),
+  profileHash: MissionEventFeedIdSchema,
+};
+
+const MissionFeedWorkerIdentityDataSchema = z
+  .object({
+    workerId: MissionEventFeedIdSchema,
+    harness: HarnessSchema,
+    taskKind: TaskKindSchema,
+    attempt: z.number().int().positive(),
+  })
+  .strict();
+
+const MissionFeedSummaryDataSchema = z
+  .object({ summary: z.enum(["Working", "Waiting for a dependency", "User input required"]) })
+  .strict();
+
+const MissionFeedArtifactIdSchema = z.string().regex(/^artifact:\/\/[A-Za-z0-9._~:/-]{1,1000}$/u);
+
+/** Closed canonical event variants consumed by the Garden mission projection. */
+export const MissionFeedEventSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      ...MissionFeedEventEnvelope,
+      type: z.literal("mission.execution.started"),
+      data: z.object({}).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...MissionFeedEventEnvelope,
+      type: z.literal("worker.started"),
+      taskId: MissionEventFeedIdSchema,
+      workerRunId: MissionEventFeedIdSchema,
+      data: MissionFeedWorkerIdentityDataSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...MissionFeedEventEnvelope,
+      type: z.literal("worker.leased"),
+      taskId: MissionEventFeedIdSchema,
+      workerRunId: MissionEventFeedIdSchema,
+      data: MissionFeedWorkerIdentityDataSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...MissionFeedEventEnvelope,
+      type: z.literal("worker.turn.started"),
+      taskId: MissionEventFeedIdSchema,
+      workerRunId: MissionEventFeedIdSchema,
+      data: z.object({ state: z.literal("working") }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...MissionFeedEventEnvelope,
+      type: z.literal("worker.turn.settled"),
+      taskId: MissionEventFeedIdSchema,
+      workerRunId: MissionEventFeedIdSchema,
+      data: z.object({ state: z.literal("idle") }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...MissionFeedEventEnvelope,
+      type: z.literal("worker.waiting_user"),
+      taskId: MissionEventFeedIdSchema,
+      workerRunId: MissionEventFeedIdSchema,
+      data: MissionFeedSummaryDataSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...MissionFeedEventEnvelope,
+      type: z.enum(["worker.waiting_dependency", "task.waiting_dependency"]),
+      taskId: MissionEventFeedIdSchema,
+      workerRunId: MissionEventFeedIdSchema,
+      data: MissionFeedSummaryDataSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...MissionFeedEventEnvelope,
+      type: z.literal("worker.progress"),
+      taskId: MissionEventFeedIdSchema,
+      workerRunId: MissionEventFeedIdSchema,
+      data: z.object({ summary: z.literal("Working") }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...MissionFeedEventEnvelope,
+      type: z.literal("worker.status.resolved"),
+      taskId: MissionEventFeedIdSchema,
+      workerRunId: MissionEventFeedIdSchema,
+      data: z
+        .object({
+          state: z.enum([
+            "unknown",
+            "working",
+            "idle",
+            "waiting_dependency",
+            "waiting_user",
+            "blocked",
+            "failed",
+            "completed",
+            "offline",
+          ]),
+          tier: z.union([z.literal(0), z.literal(1), z.literal(2)]),
+          confidence: z.number().min(0).max(1),
+          observedAt: z.string().datetime(),
+          attentionRaised: z.boolean(),
+        })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...MissionFeedEventEnvelope,
+      type: z.enum(["task.failed", "worker.crashed"]),
+      taskId: MissionEventFeedIdSchema,
+      workerRunId: MissionEventFeedIdSchema,
+      data: z.object({ summary: z.literal("Task failed") }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...MissionFeedEventEnvelope,
+      type: z.literal("task.blocked"),
+      taskId: MissionEventFeedIdSchema,
+      workerRunId: MissionEventFeedIdSchema,
+      data: z.object({ summary: z.literal("Task blocked") }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...MissionFeedEventEnvelope,
+      type: z.literal("task.succeeded"),
+      taskId: MissionEventFeedIdSchema,
+      workerRunId: MissionEventFeedIdSchema,
+      data: z.object({ summary: z.literal("Task completed") }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...MissionFeedEventEnvelope,
+      type: z.literal("worker.settled"),
+      taskId: MissionEventFeedIdSchema,
+      workerRunId: MissionEventFeedIdSchema,
+      data: z
+        .object({
+          result: z.enum(["succeeded", "failed", "blocked"]),
+          artifactIds: z.array(MissionFeedArtifactIdSchema).max(100),
+        })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...MissionFeedEventEnvelope,
+      type: z.literal("worker.completed"),
+      taskId: MissionEventFeedIdSchema,
+      workerRunId: MissionEventFeedIdSchema,
+      data: z.object({ result: z.enum(["succeeded", "failed", "blocked"]) }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...MissionFeedEventEnvelope,
+      type: z.literal("mission.succeeded"),
+      data: z.object({ summary: z.literal("Mission completed") }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...MissionFeedEventEnvelope,
+      type: z.literal("mission.failed"),
+      data: z.object({ summary: z.literal("Mission failed") }).strict(),
+    })
+    .strict(),
+]);
+export type MissionFeedEvent = z.infer<typeof MissionFeedEventSchema>;
+
+export const ActiveMissionDescriptorSchema = z
+  .object({
+    schemaVersion: z.literal(MISSION_EVENT_FEED_SCHEMA_VERSION),
+    missionId: MissionEventFeedIdSchema,
+    generation: MissionEventFeedIdSchema,
+    startedAt: z.string().datetime(),
+    profileHash: MissionEventFeedIdSchema,
+  })
+  .strict();
+export type ActiveMissionDescriptor = z.infer<typeof ActiveMissionDescriptorSchema>;
+
+export const ActiveMissionSelectionSchema = z
+  .object({
+    schemaVersion: z.literal(MISSION_EVENT_FEED_SCHEMA_VERSION),
+    activeMission: ActiveMissionDescriptorSchema.nullable(),
+  })
+  .strict();
+export type ActiveMissionSelection = z.infer<typeof ActiveMissionSelectionSchema>;
+
+export const MissionEventSnapshotSchema = z
+  .object({
+    schemaVersion: z.literal(MISSION_EVENT_FEED_SCHEMA_VERSION),
+    outcome: z.literal("snapshot"),
+    mission: ActiveMissionDescriptorSchema,
+    replayAfterSourceSequenceFloor: z.number().int().nonnegative(),
+    resumeAfterSourceSequence: z.number().int().nonnegative(),
+    nextCursor: MissionEventFeedCursorSchema,
+    compacted: z.boolean(),
+    omittedEventCount: z.number().int().nonnegative(),
+    events: z.array(MissionFeedEventSchema).max(MISSION_EVENT_FEED_SNAPSHOT_MAX),
+  })
+  .strict();
+export type MissionEventSnapshot = z.infer<typeof MissionEventSnapshotSchema>;
+
+export const MissionEventCursorExpiredSchema = z
+  .object({
+    schemaVersion: z.literal(MISSION_EVENT_FEED_SCHEMA_VERSION),
+    outcome: z.literal("cursor_expired"),
+    mission: ActiveMissionDescriptorSchema,
+    replayAfterSourceSequenceFloor: z.number().int().nonnegative(),
+    snapshotCursor: MissionEventFeedCursorSchema,
+  })
+  .strict();
+export type MissionEventCursorExpired = z.infer<typeof MissionEventCursorExpiredSchema>;
+
+export const MissionEventCursorInvalidSchema = z
+  .object({
+    schemaVersion: z.literal(MISSION_EVENT_FEED_SCHEMA_VERSION),
+    outcome: z.literal("cursor_invalid"),
+    missionId: MissionEventFeedIdSchema,
+  })
+  .strict();
+export type MissionEventCursorInvalid = z.infer<typeof MissionEventCursorInvalidSchema>;
+
+export const MissionEventMissionReplacedSchema = z
+  .object({
+    schemaVersion: z.literal(MISSION_EVENT_FEED_SCHEMA_VERSION),
+    outcome: z.literal("mission_replaced"),
+    requestedMissionId: MissionEventFeedIdSchema,
+    replacementMission: ActiveMissionDescriptorSchema.nullable(),
+  })
+  .strict();
+export type MissionEventMissionReplaced = z.infer<typeof MissionEventMissionReplacedSchema>;
+
+export const MissionEventRecoverySchema = z.discriminatedUnion("outcome", [
+  MissionEventCursorExpiredSchema,
+  MissionEventCursorInvalidSchema,
+  MissionEventMissionReplacedSchema,
+]);
+export type MissionEventRecovery = z.infer<typeof MissionEventRecoverySchema>;
+
+export const MissionEventAuthFailureSchema = z
+  .object({
+    schemaVersion: z.literal(MISSION_EVENT_FEED_SCHEMA_VERSION),
+    outcome: z.literal("auth_failed"),
+    reason: z.enum(["authentication_required", "session_expired", "device_revoked", "permission_denied"]),
+  })
+  .strict();
+export type MissionEventAuthFailure = z.infer<typeof MissionEventAuthFailureSchema>;
+
+export const MissionEventTailEventLineSchema = z
+  .object({
+    schemaVersion: z.literal(MISSION_EVENT_FEED_SCHEMA_VERSION),
+    type: z.literal("mission_event.event"),
+    event: MissionFeedEventSchema,
+    cursor: MissionEventFeedCursorSchema,
+  })
+  .strict();
+export type MissionEventTailEventLine = z.infer<typeof MissionEventTailEventLineSchema>;
+
+export const MissionEventTailRecoveryLineSchema = z
+  .object({
+    schemaVersion: z.literal(MISSION_EVENT_FEED_SCHEMA_VERSION),
+    type: z.literal("mission_event.recovery"),
+    recovery: MissionEventRecoverySchema,
+  })
+  .strict();
+export type MissionEventTailRecoveryLine = z.infer<typeof MissionEventTailRecoveryLineSchema>;
+
+export const MissionEventTailAuthLineSchema = z
+  .object({
+    schemaVersion: z.literal(MISSION_EVENT_FEED_SCHEMA_VERSION),
+    type: z.literal("mission_event.auth_failed"),
+    failure: MissionEventAuthFailureSchema,
+  })
+  .strict();
+export type MissionEventTailAuthLine = z.infer<typeof MissionEventTailAuthLineSchema>;
+
+export const MissionEventTailLineSchema = z.discriminatedUnion("type", [
+  MissionEventTailEventLineSchema,
+  MissionEventTailRecoveryLineSchema,
+  MissionEventTailAuthLineSchema,
+]);
+export type MissionEventTailLine = z.infer<typeof MissionEventTailLineSchema>;
+
 export const MissionTriggerScheduleSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("cron"), expression: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("once"), at: z.string().datetime() }).strict(),

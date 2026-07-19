@@ -47,6 +47,63 @@ with the runner credential. The control plane never owns, reconstructs, or
 persists transcript entries and rejects upstream mission/task/run identity
 mismatches before forwarding data.
 
+## Authenticated mission-event feed
+
+The control plane projects the durable hash-chained event store into a strict,
+bounded schema-v1 Garden feed:
+
+- `GET /v1/missions/active` discovers the mission selected by the latest
+  `mission.execution.started` event;
+- `GET /v1/missions/:missionId/events` returns its bounded current semantic
+  snapshot and opaque resume cursor;
+- `GET /v1/missions/:missionId/events/tail?cursor=…` replays retained events and
+  remains open as an NDJSON tail.
+
+These routes require a valid paired-device session whose current grants include
+`chat`. Authorization is checked again while a tail is open. A durable event
+store and the durable device-session signing key are mandatory; their absence
+returns an unavailable response instead of constructing process-local
+authority.
+
+```mermaid
+flowchart LR
+  W[Ordinary and compare-and-append writers] --> E[(Canonical event store)]
+  E --> C[Serialized authority reconciliation]
+  H[Store-returned append hints] --> C
+  C --> P[Strict safe projection]
+  P --> S[Bounded current snapshot]
+  P --> R[Retained replay window]
+  D[Paired device + chat grant] --> A[Authenticated feed routes]
+  S --> A
+  R --> A
+  A --> C[ClankieApiClient]
+  C -->|ordered events once| G[GardenWorld]
+  X[Terminal bytes / provider output / private prompts] -. excluded .-> P
+```
+
+The feed serializes store-returned append hints with authoritative log reads.
+Every discovery, snapshot, and tail open reconciles the complete verified hash
+chain before answering. A live append hint that arrives after an unpublished
+global sequence also forces reconciliation before the feed advances or wakes a
+tail. Missing, corrupt, regressed, or unreadable authority returns an explicit
+unavailable response; the feed never guesses across a sequence or serves the
+last process-local projection as current.
+
+Projected events keep canonical mission, task, worker-run, correlation,
+causation, profile, event, and event-store sequence identity. Their payloads are
+closed reconstructions rather than copies of additive `DomainEvent.data`, so
+raw terminal bytes, credentials, provider/model details, worker prose, private
+prompts, and chain-of-thought cannot cross this boundary. Each event links the
+previous visible source sequence; filtered private events therefore remain
+private without weakening client gap detection.
+
+The delivery window retains 1,024 visible events. The current snapshot retains
+up to 512 events and preferentially keeps the mission start plus worker identity
+and latest state. Compaction is explicit. A signed cursor binds mission,
+execution generation, and source sequence. Retention expiry, cursor invalidity,
+and mission replacement are typed recovery outcomes; none silently advances a
+client. See [ADR 0038](../../docs/adr/0038-authenticated-mission-event-feed.md).
+
 ## Worker steering command bus
 
 Authenticated captain steering is normalized into a versioned command bound to

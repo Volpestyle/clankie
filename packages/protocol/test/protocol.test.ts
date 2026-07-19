@@ -37,6 +37,10 @@ import {
   IntentCommandSchema,
   IntentContextSchema,
   MissionPlanSchema,
+  MissionEventAuthFailureSchema,
+  MissionEventRecoverySchema,
+  MissionEventSnapshotSchema,
+  MissionFeedEventSchema,
   MissionTriggerEventSchema,
   MissionTriggerSchema,
   createOperatorConversationServiceClient,
@@ -62,6 +66,84 @@ import {
 } from "../src/index.ts";
 
 describe("protocol", () => {
+  it("keeps the v1 mission feed strict, bounded, and provider-neutral", () => {
+    const event = MissionFeedEventSchema.parse({
+      schemaVersion: 1,
+      eventId: "event-12",
+      sourceSequence: 12,
+      previousSourceSequence: 8,
+      occurredAt: "2026-07-19T20:00:12.000Z",
+      missionId: "mission-1",
+      taskId: "implement",
+      workerRunId: "run-1",
+      correlationId: "correlation-1",
+      profileHash: "profile-1",
+      type: "worker.leased",
+      data: {
+        workerId: "codex-1",
+        harness: "codex",
+        taskKind: "implementation",
+        attempt: 1,
+      },
+    });
+    expect(event).toMatchObject({ sourceSequence: 12, previousSourceSequence: 8 });
+    expect(() =>
+      MissionFeedEventSchema.parse({
+        ...event,
+        data: { ...event.data, rawTerminalBytes: "secret", privatePrompt: "hidden" },
+      }),
+    ).toThrow();
+    expect(() => MissionFeedEventSchema.parse({ ...event, provider: "codex" })).toThrow();
+    expect(
+      MissionFeedEventSchema.parse({
+        ...event,
+        type: "worker.settled",
+        data: { result: "succeeded", artifactIds: ["artifact://runner-evidence/evidence-1"] },
+      }),
+    ).toMatchObject({ data: { artifactIds: ["artifact://runner-evidence/evidence-1"] } });
+    expect(() =>
+      MissionFeedEventSchema.parse({
+        ...event,
+        type: "worker.settled",
+        data: { result: "succeeded", artifactIds: ["https://example.test/private"] },
+      }),
+    ).toThrow();
+
+    const snapshot = MissionEventSnapshotSchema.parse({
+      schemaVersion: 1,
+      outcome: "snapshot",
+      mission: {
+        schemaVersion: 1,
+        missionId: "mission-1",
+        generation: "event-start",
+        startedAt: "2026-07-19T20:00:00.000Z",
+        profileHash: "profile-1",
+      },
+      replayAfterSourceSequenceFloor: 0,
+      resumeAfterSourceSequence: 12,
+      nextCursor: "opaque.signed-cursor",
+      compacted: false,
+      omittedEventCount: 0,
+      events: [event],
+    });
+    expect(snapshot.events).toHaveLength(1);
+    expect(
+      MissionEventRecoverySchema.parse({
+        schemaVersion: 1,
+        outcome: "mission_replaced",
+        requestedMissionId: "mission-1",
+        replacementMission: snapshot.mission,
+      }),
+    ).toMatchObject({ outcome: "mission_replaced" });
+    expect(
+      MissionEventAuthFailureSchema.parse({
+        schemaVersion: 1,
+        outcome: "auth_failed",
+        reason: "permission_denied",
+      }),
+    ).toMatchObject({ reason: "permission_denied" });
+  });
+
   it("exports provider-neutral operator conversation fixtures", () => {
     expect(CaptainLaneSchema.options).toEqual(["tui", "discord_voice", "gameplay"]);
     expect(CaptainSessionLaneV2Schema.options).toEqual([
