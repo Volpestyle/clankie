@@ -170,6 +170,7 @@ harness_still_starting() {
   local line_number=0
   local latest_launch_line=0
   local latest_startup_line=0
+  local latest_terminal_startup_line=0
 
   while IFS= read -r line; do
     line_number=$((line_number + 1))
@@ -183,9 +184,13 @@ harness_still_starting() {
     if [[ "$line" == *"Starting MCP servers"* ]]; then
       latest_startup_line=$line_number
     fi
+    if [[ "$line" == *"MCP startup incomplete"* \
+      || ("$line" == *"MCP client for"* && "$line" == *"failed to start"*) ]]; then
+      latest_terminal_startup_line=$line_number
+    fi
   done <<<"$text"
 
-  ((latest_startup_line > latest_launch_line))
+  ((latest_startup_line > latest_launch_line && latest_startup_line > latest_terminal_startup_line))
 }
 
 # Goal-armed confirmation vocabulary differs per harness:
