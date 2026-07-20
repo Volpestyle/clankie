@@ -166,7 +166,26 @@ last_composer_line() {
 # in-progress markers, so they intentionally do not block readiness.
 harness_still_starting() {
   local text="$1"
-  recent_text_contains "$text" "Starting MCP servers"
+  local line
+  local line_number=0
+  local latest_launch_line=0
+  local latest_startup_line=0
+
+  while IFS= read -r line; do
+    line_number=$((line_number + 1))
+    # A pane can host more than one harness over its lifetime. Anchor startup
+    # text to the newest launch banner so an old `Starting MCP servers` line
+    # from a prior Codex process cannot hold a replacement process in the
+    # readiness loop until timeout.
+    if [[ "$line" == *"OpenAI Codex ("* || "$line" == *"Claude Code"* ]]; then
+      latest_launch_line=$line_number
+    fi
+    if [[ "$line" == *"Starting MCP servers"* ]]; then
+      latest_startup_line=$line_number
+    fi
+  done <<<"$text"
+
+  ((latest_startup_line > latest_launch_line))
 }
 
 # Goal-armed confirmation vocabulary differs per harness:
