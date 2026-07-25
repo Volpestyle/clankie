@@ -20,6 +20,7 @@ const FreePlayWireDecisionSchema = z
   .object({
     monologue: z.string(),
     intent: z.string(),
+    notes: z.string().nullable(),
     actionKind: z.enum(["button_press", "frame_advance", "wait"]),
     button: z.enum(["up", "down", "left", "right", "a", "b", "start", "select", "l", "r"]).nullable(),
     holdFrames: z.number().int().nullable(),
@@ -29,6 +30,17 @@ const FreePlayWireDecisionSchema = z
   })
   .strict();
 
+/**
+ * A press long enough to commit a step rather than only turn.
+ *
+ * Supplied when the model leaves `holdFrames` null. This is not choosing his
+ * move — the button and the direction are entirely his — it is interpreting an
+ * underspecified press, and the alternative is discarding an otherwise valid
+ * decision. Left unhandled it cost 15 of 20 turns once the flat wire schema
+ * grew enough fields for the model to start omitting this one.
+ */
+const DEFAULT_HOLD_FRAMES = 16;
+
 /** Reassemble the catalogued action. Returns the raw shape; the driver validates. */
 function toDecision(wire: z.infer<typeof FreePlayWireDecisionSchema>): unknown {
   const action =
@@ -36,13 +48,13 @@ function toDecision(wire: z.infer<typeof FreePlayWireDecisionSchema>): unknown {
       ? {
           kind: "button_press",
           button: wire.button,
-          holdFrames: wire.holdFrames,
+          holdFrames: wire.holdFrames ?? DEFAULT_HOLD_FRAMES,
           ...(wire.repeat === null || wire.repeat === 1 ? {} : { repeat: wire.repeat }),
         }
       : wire.actionKind === "frame_advance"
         ? { kind: "frame_advance", frames: wire.frames }
         : { kind: "wait", durationMs: wire.durationMs };
-  return { monologue: wire.monologue, intent: wire.intent, action };
+  return { monologue: wire.monologue, intent: wire.intent, notes: wire.notes, action };
 }
 
 /**
@@ -68,12 +80,18 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   "Each turn return three things:",
   "- monologue: your honest thinking about this moment, in your own voice.",
   "- intent: what you plan to do next, in a few words.",
+  "- notes: your own running notes, carried to every later turn. Keep what will",
+  "  still matter — the room layout you have worked out, what you already tried,",
+  "  where you are heading. Rewrite them freely; return null to leave them as",
+  "  they are. Nothing else writes this, and nothing else remembers for you.",
   "- action: exactly one of",
   '    {"kind":"button_press","button":"up|down|left|right|a|b|start|select|l|r","holdFrames":N,"repeat":N}',
   '    {"kind":"frame_advance","frames":N}',
   '    {"kind":"wait","durationMs":N}',
   "",
-  "repeat presses the same button that many times in ONE action (max 16), which",
+  "Always give holdFrames on a button press — 16 is a reliable step; a short",
+  "hold only turns you. repeat presses the same button that many times in ONE",
+  "action (max 16), which",
   "is how you cross a corridor without spending a decision per tile. A short tap",
   "only turns you; a step needs a longer hold or a repeat.",
   "",
@@ -168,6 +186,9 @@ export function renderView(view: FreePlayView): string {
   }
   for (const observation of view.observations) {
     lines.push(`  ${observation.kind}: ${JSON.stringify(stripEnvelope(observation))}`);
+  }
+  if (view.notes !== null && view.notes.length > 0) {
+    lines.push("", "Your notes:", `  ${view.notes}`);
   }
   if (view.refusedHere.length > 0) {
     // What he already learned the hard way from this exact tile.

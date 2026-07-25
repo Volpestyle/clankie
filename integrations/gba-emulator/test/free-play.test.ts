@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { GbaDriverIo } from "../src/driver.ts";
 import {
   FREE_PLAY_MONOLOGUE_MAX,
+  FREE_PLAY_NOTES_MAX,
   intentMatchesAction,
   runFreePlay,
   type FreePlayMind,
@@ -82,9 +83,10 @@ function mind(decisions: unknown[]): FreePlayMind {
   };
 }
 
-const press = (button: string, intent: string) => ({
+const press = (button: string, intent: string, notes: string | null = null) => ({
   monologue: `I want to head ${intent}.`,
   intent: `move ${intent}`,
+  notes,
   action: { kind: "button_press", button, holdFrames: 4 },
 });
 
@@ -292,5 +294,39 @@ describe("burst actions", () => {
     });
     expect(result.turns[0]?.action).toMatchObject({ kind: "button_press", button: "up" });
     expect((result.turns[0]?.action as { repeat?: number }).repeat).toBeUndefined();
+  });
+});
+
+describe("persistent notes", () => {
+  it("carries his notes forward and lets him rewrite them", async () => {
+    const seen: (string | null)[] = [];
+    const recordingMind: FreePlayMind = {
+      decide: (view) => {
+        seen.push(view.notes);
+        const step = seen.length;
+        return Promise.resolve(press("up", "up", step === 1 ? "stairs are upper-right" : null));
+      },
+    };
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: recordingMind,
+      turns: 3,
+    });
+
+    // Nothing on the first turn, then his own note handed back verbatim.
+    expect(seen[0]).toBeNull();
+    expect(seen[1]).toBe("stairs are upper-right");
+    // Returning null leaves them standing rather than erasing them.
+    expect(seen[2]).toBe("stairs are upper-right");
+    expect(result.turns.at(-1)?.notes).toBe("stairs are upper-right");
+  });
+
+  it("rejects notes beyond the bound instead of growing the prompt forever", async () => {
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: mind([press("up", "up", "x".repeat(FREE_PLAY_NOTES_MAX + 1))]),
+      turns: 1,
+    });
+    expect(result.turns[0]?.outcome).toBe("invalid_decision");
   });
 });

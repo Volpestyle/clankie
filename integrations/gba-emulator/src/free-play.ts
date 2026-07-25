@@ -33,6 +33,14 @@ import {
 /** Model text is untrusted and reaches operator surfaces, so it stays bounded. */
 export const FREE_PLAY_MONOLOGUE_MAX = 600;
 export const FREE_PLAY_INTENT_MAX = 200;
+/**
+ * His own running notes, carried across turns.
+ *
+ * Bounded like every other model text field, and bounded for a second reason:
+ * an unbounded scratchpad becomes an ever-growing prompt, which is the cost
+ * problem this loop already has. A cap forces him to keep what matters.
+ */
+export const FREE_PLAY_NOTES_MAX = 800;
 
 export const FreePlayDecisionSchema = z
   .object({
@@ -40,6 +48,14 @@ export const FreePlayDecisionSchema = z
     monologue: z.string().min(1).max(FREE_PLAY_MONOLOGUE_MAX),
     /** What he plans to do next — scored against the action he then takes. */
     intent: z.string().min(1).max(FREE_PLAY_INTENT_MAX),
+    /**
+     * His notes, rewritten by him each turn. Nothing else writes this: it is
+     * memory he chose to keep, not a summary the harness imposed.
+     */
+    // Nullish, not required: a model that omits the field means "leave my notes
+    // alone", and losing an entire turn over a missing optional field would be a
+    // harsh reading of a decision that is otherwise valid.
+    notes: z.string().max(FREE_PLAY_NOTES_MAX).nullish(),
     action: GbaEmulatorActionSchema,
   })
   .strict();
@@ -64,6 +80,8 @@ export interface FreePlayView {
    * never a suggested route — the model still chooses.
    */
   refusedHere: readonly string[];
+  /** The notes he wrote on the previous turn, verbatim. */
+  notes: string | null;
   /** Prior turns, most recent last, so the model has continuity. */
   history: readonly { intent: string; action: GbaEmulatorAction; outcome: string; effect: string }[];
 }
@@ -88,6 +106,7 @@ export const FreePlayTurnSchema = z
       .nullable(),
     monologue: z.string().max(FREE_PLAY_MONOLOGUE_MAX).nullable(),
     intent: z.string().max(FREE_PLAY_INTENT_MAX).nullable(),
+    notes: z.string().max(FREE_PLAY_NOTES_MAX).nullable(),
     action: GbaEmulatorActionSchema.nullable(),
     outcome: z.enum(["accepted", "rejected_by_adapter", "invalid_decision", "mind_failed"]),
     /** Bounded reason when the turn did not produce an accepted action. */
@@ -133,6 +152,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
   const historyLimit = input.historyLimit ?? 8;
   const turns: FreePlayTurn[] = [];
   const history: { intent: string; action: GbaEmulatorAction; outcome: string; effect: string }[] = [];
+  let notes: string | null = null;
   const progress = new FreePlayProgressTracker();
   progress.seed(positionOf(observe(input.io)));
 
@@ -148,6 +168,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
       outcome: "mind_failed",
       detail: null,
       effect: null,
+      notes,
     };
 
     let raw: unknown;
@@ -157,6 +178,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
         observations,
         framePng: input.framePng?.() ?? null,
         refusedHere: progress.refusedFrom(positionOf(observations)),
+        notes,
         history: [...history],
       });
     } catch (error) {
@@ -177,6 +199,9 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
 
     record.monologue = parsed.data.monologue;
     record.intent = parsed.data.intent;
+    // He keeps his notes unless he rewrites them, so silence is not amnesia.
+    if (parsed.data.notes !== null && parsed.data.notes !== undefined) notes = parsed.data.notes;
+    record.notes = notes;
     record.action = parsed.data.action;
 
     let accepted = false;

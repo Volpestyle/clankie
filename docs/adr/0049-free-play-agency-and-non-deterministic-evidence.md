@@ -155,6 +155,35 @@ burst of five immediately meets a wall. The capability is kept because it is
 already used correctly and its payoff is outdoors; the honest reading is that
 this scenario cannot demonstrate the win, not that the win is absent.
 
+### He keeps his own notes
+
+A bounded scratchpad is carried across turns and rewritten only by him. Omitting
+the field leaves the previous notes standing, so silence is not amnesia, and
+nothing else ever writes it — it is memory he chose to keep, not a summary the
+harness imposed.
+
+It is capped for two reasons: model text is untrusted, and an unbounded
+scratchpad becomes the ever-growing prompt this loop is already paying for.
+
+The content is the evidence it works. After twenty turns he had written: "North
+from around (13,13) was blocked by furniture/TV, so I moved left around it. The
+staircase is visually toward the upper-right; plan is go up along the left side
+of the room, then right across the upper path to the stairs." That is a map, a
+refusal history, and a plan, none of which the harness supplied.
+
+**It did not measurably improve efficiency in a twenty-turn run**, and the honest
+reason is that run-to-run variance (2.8, 2.9, 3.3 actions per new tile across
+comparable runs) exceeds the effect being looked for. A single short run cannot
+separate these changes; the notes are kept on the strength of what they contain
+and their value over longer horizons, and that is stated rather than dressed up
+as a measured win.
+
+Adding the field also surfaced a failure mode worth recording: with more fields
+to fill, the model began omitting `holdFrames`, and a strict read discarded 15 of
+20 turns as invalid. A hold duration is a mechanical detail rather than a game
+decision, so an omitted one now defaults to a value that commits a step. The
+button and the direction remain entirely his.
+
 ### Failure is a turn outcome, not an exception
 
 A playthrough must survive its own participants. Four outcomes are recorded and
