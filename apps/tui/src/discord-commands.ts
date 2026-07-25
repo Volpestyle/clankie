@@ -5,12 +5,15 @@ import {
   type ClankieSettings,
   type DiscordSettings,
 } from "@clankie/settings";
+import type { RedactedCredential } from "@clankie/credential-broker";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 
 export interface DiscordCommandServices {
   settings: SettingsStore;
-  /** Provider ids already present in the credential broker. */
-  listCredentials: () => Promise<Record<string, unknown>>;
+  /** Redacted view of what the credential broker already holds. */
+  listCredentials: () => Promise<Record<string, RedactedCredential>>;
+  /** Removes a stored secret. */
+  removeCredential: (providerId: string) => Promise<unknown>;
   /**
    * Stores a secret in the credential broker. Tokens never touch the settings
    * file: `/discord` is only a friendlier entry point to the same broker `/auth`
@@ -121,6 +124,20 @@ function guildListPlaceholder(existing: readonly string[], commandGuildId: strin
   return commandGuildId ?? "server id, or several separated by commas";
 }
 
+/**
+ * Render a stored credential without ever revealing it. The broker redacts an
+ * API key to its first four characters, which is enough to tell two tokens
+ * apart when checking whether the right one is installed.
+ */
+export function describeRedactedCredential(redacted: RedactedCredential): string {
+  if (redacted.type === "api") return `api key ${redacted.key}`;
+  if (redacted.type === "oauth") {
+    const account = redacted.accountId === undefined ? "" : ` (${redacted.accountId})`;
+    return `oauth${account}`;
+  }
+  return "wellknown";
+}
+
 /** Typed input wins; blank keeps what was already configured. */
 export function resolveIdList(typed: string, existing: readonly string[]): string[] {
   return typed.trim().length > 0 ? splitList(typed) : [...existing];
@@ -158,9 +175,18 @@ async function showDiscordStatus(shell: ClankieFaceShell, services: DiscordComma
   const lines: string[] = [];
 
   lines.push(`settings file: ${services.settings.path}`);
-  lines.push(
-    `bot token: ${"discord_bot" in credentials ? "stored in credential broker" : "MISSING — run /auth, provider id discord_bot"}`,
-  );
+  lines.push("");
+  lines.push("credentials (credential broker):");
+  for (const credential of DISCORD_CREDENTIALS) {
+    const redacted = credentials[credential.id];
+    const state =
+      redacted === undefined
+        ? credential.id === "discord_bot"
+          ? "MISSING — /discord → Tokens"
+          : "not set"
+        : describeRedactedCredential(redacted);
+    lines.push(`  ${credential.id}: ${state}`);
+  }
   lines.push("");
   lines.push(...describeSettings(resolved.settings));
 
@@ -291,6 +317,31 @@ async function editCredentials(shell: ClankieFaceShell, services: DiscordCommand
   });
   const providerId = picked?.[0];
   if (providerId === undefined) return;
+
+  // Show what is already there before offering to overwrite it. Re-prompting
+  // blindly invites an accidental clobber of a working credential, and gives an
+  // operator no way to answer "is the token even set?" without replacing it.
+  const existing = stored[providerId];
+  if (existing !== undefined) {
+    const decision = await flow.readSelect({
+      kind: "single",
+      message: `${providerId} is already stored — ${describeRedactedCredential(existing)}`,
+      options: [
+        { value: "keep", label: "Keep it", hint: "no change" },
+        { value: "replace", label: "Replace it", hint: "enter a new token" },
+        { value: "remove", label: "Remove it", hint: "delete from the broker" },
+      ],
+      required: true,
+      allowBack: true,
+    });
+    const choice = decision?.[0];
+    if (choice === undefined || choice === "keep") return;
+    if (choice === "remove") {
+      await services.removeCredential(providerId);
+      flow.renderLine(`Removed ${providerId} from the credential broker.`, "success");
+      return;
+    }
+  }
 
   // readSecret keeps the value off the rendered transcript; the broker redacts
   // it thereafter. It is never written to settings.json.

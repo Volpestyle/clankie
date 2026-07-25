@@ -1,5 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { describeEmptyAllowlist, resolveGuildList, resolveIdList } from "../src/discord-commands.ts";
+import {
+  describeEmptyAllowlist,
+  describeRedactedCredential,
+  resolveGuildList,
+  resolveIdList,
+} from "../src/discord-commands.ts";
+
+describe("stored credential display", () => {
+  it("shows enough of a stored key to identify it, and never the whole thing", () => {
+    // The broker hands back only the first four characters; the point is to
+    // answer "is the right token installed?" without revealing it.
+    const shown = describeRedactedCredential({ type: "api", key: "MTIz…" });
+    expect(shown).toBe("api key MTIz…");
+    expect(shown).toContain("…");
+  });
+
+  it("describes oauth and wellknown credentials without inventing key material", () => {
+    expect(describeRedactedCredential({ type: "oauth", accountId: "james", expires: 0 })).toBe(
+      "oauth (james)",
+    );
+    expect(describeRedactedCredential({ type: "oauth", expires: 0 })).toBe("oauth");
+    expect(describeRedactedCredential({ type: "wellknown" })).toBe("wellknown");
+  });
+});
 
 describe("empty allowlist guard", () => {
   const guilds = ["111111111111111111"];

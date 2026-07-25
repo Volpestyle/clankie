@@ -136,6 +136,7 @@ const commands = [
     settings: new SettingsStore(),
     listCredentials: () => services.store.list(),
     setCredential: (providerId, key) => services.store.set(providerId, { type: "api", key }),
+    removeCredential: (providerId) => services.store.delete(providerId),
   }),
 ];
 
