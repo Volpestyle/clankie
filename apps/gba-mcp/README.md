@@ -1,5 +1,8 @@
 # Clankie's GBA body, as an MCP server
 
+Architecture record: [ADR 0053](../../docs/adr/0053-mcp-possession-of-clankies-body.md).
+This file is the operating guide; the decisions and their reasoning live there.
+
 Publishes the emulator surface over MCP so any harness — Claude Code, Codex,
 anything that speaks the protocol — can play Clankie's FireRed.
 
@@ -190,6 +193,12 @@ possessor speaking in the channel reads as **Clankie's account carrying the
 possessor's voice**. That is accepted, not overlooked: if a run should sound like
 him, that is a reason to let his own loop drive rather than a reason to bolt a
 persona onto the possessor.
+
+**Possession is not announced in the channel** (owner decision, ADR 0053). It is
+visible operator-side — every lease transition is logged — and the room is not
+told a guest is driving. That trade rests on the deployment being private and
+its participants known to the owner, and ADR 0053 records the trigger for
+revisiting it.
 
 ## Not yet
 
