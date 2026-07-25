@@ -22,7 +22,6 @@ import {
 } from "@earendil-works/pi-tui";
 import { ClankieBannerComponent, type BannerFields } from "../face/clankie-banner.ts";
 import {
-  AGENT_SPINNER_CYCLE_NAME,
   DEFAULT_AGENT_SPINNER_CYCLE_DWELL_MS,
   resolveAgentSpinner,
   type AgentSpinnerSelection,
@@ -530,7 +529,8 @@ export class ClankieFaceShell {
   }
 
   setSpinner(selection: AgentSpinnerSelection | undefined): void {
-    this.agentSpinner = resolveAgentSpinner(selection ?? AGENT_SPINNER_CYCLE_NAME, {
+    // `resolveAgentSpinner(undefined)` applies the unicode-aware default.
+    this.agentSpinner = resolveAgentSpinner(selection, {
       cycleDwellMs: this.agentSpinnerCycleRateMs,
       unicode: this.theme.capabilities.unicode,
     });

@@ -449,7 +449,12 @@ export const AGENT_SPINNER_CYCLE_NAMES = [
   "diagswipe",
 ] as const satisfies readonly AgentSpinnerName[];
 export const AGENT_SPINNER_CYCLE_NAME = "cycle";
-export const DEFAULT_AGENT_SPINNER_NAME = AGENT_SPINNER_CYCLE_NAME;
+/**
+ * One consistent spinner by default. Cycling through styles is an opt-in
+ * setting: `/layout spinner cycle` (or a preset/custom selection), or
+ * `CLANKIE_TUI_SPINNER=cycle`.
+ */
+export const DEFAULT_AGENT_SPINNER_NAME = "dots" satisfies AgentSpinnerName;
 export const ASCII_AGENT_SPINNER_NAME = "rolling-line" satisfies AgentSpinnerName;
 export const AGENT_SPINNER_CYCLE_INTERVAL_MS = 100;
 export const DEFAULT_AGENT_SPINNER_CYCLE_DWELL_MS = 800;

@@ -6,9 +6,11 @@ import { join, resolve } from "node:path";
 import { ClankieApiClient } from "@clankie/api-client";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
 import { loadConfig, resolveRole, type ClankieConfig } from "@clankie/model-provider";
+import { SettingsStore } from "@clankie/settings";
 import { ClankieFaceShell } from "./shell/shell.ts";
 import { buildConsoleCommands } from "./commands.ts";
 import { buildProviderCommands, createProviderServices } from "./provider-commands.ts";
+import { buildDiscordCommands } from "./discord-commands.ts";
 import { createInitialConsoleState } from "./session/state.ts";
 import { EveCaptainSession } from "./session/eve-captain.ts";
 import { CaptainSessionCursorStore } from "./session/session-cursor.ts";
@@ -130,6 +132,10 @@ const commands = [
     ...(approvalClient ? { approvalClient } : {}),
   }),
   ...buildProviderCommands(services),
+  ...buildDiscordCommands({
+    settings: new SettingsStore(),
+    listCredentials: () => services.store.list(),
+  }),
 ];
 
 function stageFromEnv(): { label?: string; value?: string } {
@@ -169,7 +175,11 @@ const shell = new ClankieFaceShell({
   // The selected server-owned conversation is the only production prompt
   // path. Never fall back to EveCaptainSession's process-global/default session.
   onPrompt: (prompt, activeShell, signal) =>
-    conversationPrompt.prompt(prompt, createOperatorConversationShellSink(activeShell), signal),
+    conversationPrompt.prompt(
+      prompt,
+      createOperatorConversationShellSink(activeShell, { localEchoText: prompt }),
+      signal,
+    ),
   interruptMode: "detach",
   onExit: () => {
     missionObserver.stop();

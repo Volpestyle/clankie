@@ -51,9 +51,15 @@ describe("agent spinner catalog", () => {
 });
 
 describe("cycle spinner", () => {
-  const cycle = resolveAgentSpinner(undefined, { unicode: true });
+  const cycle = resolveAgentSpinner("cycle", { unicode: true });
 
-  it("cycles through spinner styles by default on unicode terminals", () => {
+  it("defaults to the single consistent dots spinner on unicode terminals", () => {
+    const resolved = resolveAgentSpinner(undefined, { unicode: true });
+    expect(resolved.name).toBe("dots");
+    expect(resolved.frames).toEqual([...AGENT_SPINNERS.dots.frames]);
+  });
+
+  it("cycles through spinner styles only when cycling is selected", () => {
     expect(cycle.name).toBe("cycle");
     expect(cycle.intervalMs).toBe(100);
   });

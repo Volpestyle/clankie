@@ -24,8 +24,11 @@ import {
   type OperatorConversationClient,
 } from "../src/session/operator-conversations.ts";
 import {
+  createOperatorConversationShellSink,
+  operatorConversationBlockOptions,
   renderOperatorConversationEvent,
   renderOperatorConversationRecovery,
+  type OperatorConversationBlockOptions,
 } from "../src/session/operator-conversation-renderer.ts";
 
 const DEFAULT: OperatorConversation = {
@@ -427,7 +430,7 @@ describe("TUI selected-conversation prompt path", () => {
     expect(renderOperatorConversationRecovery(recovery)).not.toContain(recovery.message);
   });
 
-  it("renders every strict event variant without accepting a raw payload escape hatch", () => {
+  it("renders conversation content and failures; healthy lifecycle events stay off the transcript", () => {
     const base = {
       schemaVersion: 1 as const,
       conversationId: "global-default",
@@ -437,6 +440,7 @@ describe("TUI selected-conversation prompt path", () => {
     };
     const events: OperatorConversationStreamEvent[] = [
       { ...base, type: "message", role: "captain", text: "hello", streaming: false },
+      { ...base, type: "message", role: "operator", text: "typed elsewhere", streaming: false },
       { ...base, type: "reasoning", text: "bounded thought", streaming: false },
       { ...base, type: "tool", toolCallId: "call", name: "tracker", phase: "started" },
       {
@@ -449,15 +453,153 @@ describe("TUI selected-conversation prompt path", () => {
       },
       { ...base, type: "input_resolved", requestId: "req", outcome: "submitted" },
       { ...base, type: "auth", phase: "required", summary: "GitHub" },
-      { ...base, type: "session", phase: "waiting" },
-      { ...base, type: "turn", runId: "run", phase: "completed" },
       { ...base, type: "worker_transcript", workerRunId: "worker", phase: "tail", summary: "done" },
       { ...base, type: "unsupported", kind: "future", summary: "Update required" },
     ];
     const rendered = events.map(renderOperatorConversationEvent).join("\n");
     expect(rendered).toContain("Captain");
+    expect(rendered).toContain("**You**\n\ntyped elsewhere");
     expect(rendered).toContain("Reasoning");
     expect(rendered).toContain("Worker tail");
     expect(rendered).not.toContain("privatePayload");
+    expect(rendered).not.toContain("undefined");
+
+    // Healthy lifecycle plumbing belongs on the status line, not the transcript.
+    for (const phase of ["started", "waiting", "completed"] as const) {
+      expect(renderOperatorConversationEvent({ ...base, type: "session", phase })).toBeUndefined();
+    }
+    for (const phase of ["accepted", "completed"] as const) {
+      expect(renderOperatorConversationEvent({ ...base, type: "turn", runId: "run", phase })).toBeUndefined();
+    }
+    // Failures carry information the operator must see.
+    expect(renderOperatorConversationEvent({ ...base, type: "session", phase: "failed" })).toContain(
+      "failed",
+    );
+    expect(
+      renderOperatorConversationEvent({
+        ...base,
+        type: "turn",
+        runId: "run",
+        phase: "failed",
+        reasonCode: "execution_failed",
+      }),
+    ).toContain("failed · execution_failed");
+  });
+
+  it("suppresses exactly one durable echo of the locally echoed prompt", () => {
+    const base = {
+      schemaVersion: 1 as const,
+      conversationId: "global-default",
+      cursor: "global-default:event",
+      revision: 1,
+      occurredAt: "2026-07-12T00:00:00.000Z",
+    };
+    const inserted: string[] = [];
+    const statuses: string[] = [];
+    const sink = createOperatorConversationShellSink(
+      {
+        insertMarkdown: (markdown: string) => inserted.push(markdown),
+        refreshStatus: (label: string) => statuses.push(label),
+      },
+      { localEchoText: "  hi  " },
+    );
+    const operatorMessage = (text: string): OperatorConversationStreamEvent => ({
+      ...base,
+      type: "message",
+      role: "operator",
+      text,
+      streaming: false,
+    });
+    // Another surface's different message before ours still renders.
+    sink.event(operatorMessage("from the phone"));
+    // The durable echo of the locally echoed prompt is suppressed once…
+    sink.event(operatorMessage("hi"));
+    // …but a repeated identical prompt later is a real message again.
+    sink.event(operatorMessage("hi"));
+    sink.event({ ...base, type: "turn", runId: "run", phase: "accepted" });
+    sink.event({ ...base, type: "message", role: "captain", text: "hello", streaming: false });
+    expect(inserted).toEqual(["**You**\n\nfrom the phone", "**You**\n\nhi", "**Captain**\n\nhello"]);
+    // Turn lifecycle still drives the status line even when not rendered.
+    expect(statuses).toEqual(["conversation turn accepted"]);
+  });
+
+  it("renders operator history as You when no local echo is pending (restore path)", () => {
+    const inserted: string[] = [];
+    const sink = createOperatorConversationShellSink({
+      insertMarkdown: (markdown: string) => inserted.push(markdown),
+      refreshStatus: () => undefined,
+    });
+    sink.event({
+      schemaVersion: 1,
+      conversationId: "global-default",
+      cursor: "global-default:event",
+      revision: 1,
+      occurredAt: "2026-07-12T00:00:00.000Z",
+      type: "message",
+      role: "operator",
+      text: "hi",
+      streaming: false,
+    });
+    expect(inserted).toEqual(["**You**\n\nhi"]);
+  });
+
+  it("marks detail blocks click-toggleable, collapsing only bodies with hidden detail", () => {
+    const base = {
+      schemaVersion: 1 as const,
+      conversationId: "global-default",
+      cursor: "global-default:event",
+      revision: 1,
+      occurredAt: "2026-07-12T00:00:00.000Z",
+    };
+    const optionsFor = (
+      event: OperatorConversationStreamEvent,
+    ): OperatorConversationBlockOptions | undefined => {
+      const markdown = renderOperatorConversationEvent(event);
+      expect(markdown).toBeDefined();
+      return operatorConversationBlockOptions(event, markdown ?? "");
+    };
+    const shortTool: OperatorConversationStreamEvent = {
+      ...base,
+      type: "tool",
+      toolCallId: "call-1",
+      name: "read_file",
+      phase: "completed",
+      summary: "docs/16-operator-conversations.md",
+    };
+    // A short body fits in place; collapsing it would hide the whole payload.
+    expect(optionsFor(shortTool)).toEqual({ clickToggle: true, collapsed: false });
+    expect(optionsFor({ ...shortTool, summary: `exit 0\n${"stdout line\n".repeat(6)}` })).toEqual({
+      clickToggle: true,
+      collapsed: true,
+    });
+    expect(optionsFor({ ...shortTool, summary: "x".repeat(400) })).toEqual({
+      clickToggle: true,
+      collapsed: true,
+    });
+    expect(
+      optionsFor({
+        ...base,
+        type: "worker_transcript",
+        workerRunId: "worker-1",
+        phase: "tail",
+        summary: "line one\nline two\nline three",
+      }),
+    ).toEqual({ clickToggle: true, collapsed: true });
+    // Conversation content always renders expanded and inert.
+    expect(
+      optionsFor({ ...base, type: "message", role: "captain", text: "hello", streaming: false }),
+    ).toBeUndefined();
+
+    // The sink forwards the options so the face can arm click-to-toggle.
+    const inserted: [string, OperatorConversationBlockOptions | undefined][] = [];
+    const sink = createOperatorConversationShellSink({
+      insertMarkdown: (markdown: string, options?: OperatorConversationBlockOptions) =>
+        inserted.push([markdown, options]),
+      refreshStatus: () => undefined,
+    });
+    sink.event({ ...shortTool, summary: "a\nb" });
+    expect(inserted).toEqual([
+      ["**Tool completed**\n\nread_file · a\nb", { clickToggle: true, collapsed: true }],
+    ]);
   });
 });
