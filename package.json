@@ -17,6 +17,7 @@
     "eval:real-workers:receipt": "pnpm --filter @clankie/lead-agent-lab eval:real-workers:receipt",
     "eval:real-workers:readiness": "node scripts/real-provider-readiness.mjs",
     "eval:capabilities": "pnpm --filter @clankie/lead-agent-lab eval:capabilities",
+    "models:codex-probe": "pnpm --filter @clankie/model-provider codex-probe",
     "gba:free-play": "pnpm --filter @clankie/gba-emulator free-play",
     "discord:readiness": "pnpm --filter @clankie/discord-bridge readiness",
     "discord:live-proof": "pnpm --filter @clankie/discord-bridge live-proof",

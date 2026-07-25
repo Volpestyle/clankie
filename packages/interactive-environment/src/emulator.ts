@@ -352,6 +352,28 @@ export const GbaEmulatorObservationSchema = z.discriminatedUnion("kind", [
 export type GbaEmulatorObservation = z.infer<typeof GbaEmulatorObservationSchema>;
 export type GbaEmulatorObservationKind = GbaEmulatorObservation["kind"];
 
+/**
+ * The observation kinds as a runtime schema, so a consumer that must validate a
+ * caller-supplied kind — an MCP tool argument, say — uses this one surface
+ * rather than declaring its own list.
+ */
+export const GbaEmulatorObservationKindSchema = z.enum([
+  "overworld",
+  "menu",
+  "party",
+  "inventory",
+  "battle",
+  "dialog",
+  "frame_reference",
+  "danger",
+  "action",
+]);
+// Compile-time guard: the enum and the union cannot drift apart silently.
+const _observationKindsMatch: GbaEmulatorObservationKind = "overworld" as z.infer<
+  typeof GbaEmulatorObservationKindSchema
+>;
+void _observationKindsMatch;
+
 export const GbaEmulatorToolNameSchema = z.enum([
   "gba_emulator_join",
   "gba_emulator_status",

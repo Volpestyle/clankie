@@ -20,6 +20,7 @@ import { encodeFramebufferPng } from "../src/framebuffer-png.ts";
 import type { GbaCoreFactory } from "../src/core-seam.ts";
 import { sha256 } from "../src/core-double.ts";
 import { createModelFreePlayMind } from "../src/free-play-mind.ts";
+import { SettingsStore, personaInstructions } from "@clankie/settings";
 import { runFreePlay, type FreePlayTurn } from "../src/free-play.ts";
 import { createFreePlaySession } from "../src/free-play-session.ts";
 
@@ -96,10 +97,17 @@ mkdirSync(path.dirname(tracePath), { recursive: true });
 // spans two different runs.
 writeFileSync(tracePath, "", { encoding: "utf8", mode: 0o600 });
 
+// One character across every surface (ADR 0051). Free play reads the same
+// owner-authored persona the Discord and operator lanes do, in its `gameplay`
+// register — so the Clankie an audience watches play is the Clankie they talk
+// to, not a second one defined by this script's prompt.
+const freePlayCharacter = personaInstructions((await new SettingsStore().load()).persona, "gameplay");
+
 const result = await runFreePlay({
   io,
   mind: createModelFreePlayMind({
     model: configured.model,
+    character: freePlayCharacter,
     providerOptions: configured.modelOptions?.providerOptions ?? {},
   }),
   turns,

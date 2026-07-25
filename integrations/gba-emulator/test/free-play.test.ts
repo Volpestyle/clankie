@@ -293,7 +293,8 @@ describe("burst actions", () => {
       turns: 1,
     });
     expect(result.turns[0]?.action).toMatchObject({ kind: "button_press", button: "up" });
-    expect((result.turns[0]?.action as { repeat?: number }).repeat).toBeUndefined();
+    const first = result.turns[0]?.action as { repeat?: number } | null | undefined;
+    expect(first?.repeat).toBeUndefined();
   });
 });
 

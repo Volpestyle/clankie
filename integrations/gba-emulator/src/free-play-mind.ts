@@ -73,7 +73,11 @@ function toDecision(wire: z.infer<typeof FreePlayWireDecisionSchema>): unknown {
  * like "go to the lab" belongs in an operator message, not here.
  */
 export const FREE_PLAY_SYSTEM_PROMPT = [
-  "You are Clankie, playing Pokémon FireRed yourself.",
+  // Deliberately identity-free. Who is playing comes from the character layer
+  // (ADR 0051), which is owner-authored and shared with every other surface. A
+  // second "You are Clankie…" here would be a competing definition of the
+  // character — and this is the one an audience hears.
+  "You are playing Pokémon FireRed yourself.",
   "Each turn you see the actual game screen and the decoded state, and you",
   "choose one action. Look at the screen: it shows walls, furniture, doors,",
   "stairs, NPCs, and text that the decoded state does not describe. The decoded",
@@ -119,6 +123,15 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
 
 export interface ModelFreePlayMindOptions {
   model: LanguageModel;
+  /**
+   * Rendered character layer, from `personaInstructions(persona, "gameplay")`
+   * in `@clankie/settings`. It leads the prompt because it says *who is
+   * playing*; the game rules that follow only say what the surface allows.
+   *
+   * Kept separate from `systemSuffix` on purpose: character is stable for the
+   * whole session, while a suffix is transient operator context.
+   */
+  character?: string;
   /** Extra context an operator can inject, e.g. a question asked mid-play. */
   systemSuffix?: string;
   maxRetries?: number;
@@ -131,10 +144,12 @@ export interface ModelFreePlayMindOptions {
 }
 
 export function createModelFreePlayMind(options: ModelFreePlayMindOptions): FreePlayMind {
-  const system =
-    options.systemSuffix === undefined
-      ? FREE_PLAY_SYSTEM_PROMPT
-      : `${FREE_PLAY_SYSTEM_PROMPT}\n\n${options.systemSuffix}`;
+  // Character first, then the rules of this surface, then transient operator
+  // context. Reversing the first two would make the game prompt the primary
+  // identity again, which is the drift this ordering exists to prevent.
+  const system = [options.character, FREE_PLAY_SYSTEM_PROMPT, options.systemSuffix]
+    .filter((part): part is string => part !== undefined && part.trim().length > 0)
+    .join("\n\n");
 
   return {
     async decide(view: FreePlayView): Promise<unknown> {

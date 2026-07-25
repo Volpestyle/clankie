@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
   },
   "scripts": {
     "build": "tsc --noEmit -p tsconfig.json",
@@ -23,6 +24,7 @@
     "@clankie/interactive-environment": "workspace:*",
     "@clankie/model-provider": "workspace:*",
     "@clankie/protocol": "workspace:*",
+    "@clankie/settings": "workspace:*",
     "ai": "^7.0.19",
     "romdev-platform-gba": "0.11.0",
     "zod": "4.4.3"

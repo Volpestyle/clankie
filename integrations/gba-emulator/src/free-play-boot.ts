@@ -1,0 +1,98 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { FrozenGbaScenarioSchema } from "./contracts.ts";
+import { sha256 } from "./core-double.ts";
+import type { GbaAdapterScenario, GbaCoreFactory } from "./core-seam.ts";
+import { MgbaFireRedCore } from "./firered-core.ts";
+import { encodeFramebufferPng } from "./framebuffer-png.ts";
+import { RealGbaRouteScenarioSchema } from "./real-scenario.ts";
+
+/**
+ * Resolve which game Clankie is looking at.
+ *
+ * Shared by the free-play CLI and the MCP server so there is exactly one path
+ * to the core. A second loader would be a second place for ROM digests to be
+ * checked — or not checked.
+ *
+ * ROM-gated: with a ROM and savestate configured this is the real game behind
+ * the pinned mGBA core, which fails closed unless every digest matches. Without
+ * them it is the clearly-labeled deterministic double, so the surface is usable
+ * without copyrighted bytes.
+ */
+export interface BootedGbaGame {
+  scenario: GbaAdapterScenario;
+  fixtureSha256: string;
+  /** Undefined when running the deterministic double. */
+  coreFactory: GbaCoreFactory | undefined;
+  /** Latest rendered screen, upscaled, or null when nothing has rendered. */
+  framePng: (scale?: number) => Uint8Array | null;
+  framebufferSha256: () => string | null;
+  real: boolean;
+}
+
+export interface BootGbaGameOptions {
+  env?: NodeJS.ProcessEnv;
+  /** Directory holding the ROM-gated fixtures, i.e. the package's own. */
+  fixturesDir: string;
+  /** Fallback frozen double scenario when no ROM is configured. */
+  doubleScenarioPath: string;
+}
+
+export async function bootGbaGame(options: BootGbaGameOptions): Promise<BootedGbaGame> {
+  const env = options.env ?? process.env;
+  const romPath = env["CLANKIE_GBA_ROM_PATH"];
+  const savestatePath = env["CLANKIE_GBA_SAVESTATE_PATH"];
+  const real = romPath !== undefined && savestatePath !== undefined;
+
+  const scenarioPath =
+    env["CLANKIE_GBA_SCENARIO_PATH"] ??
+    (real
+      ? path.join(options.fixturesDir, "firered-bedroom-route/v1/scenario.json")
+      : options.doubleScenarioPath);
+  const fixtureBytes = readFileSync(scenarioPath);
+  const parsed: unknown = JSON.parse(fixtureBytes.toString("utf8"));
+
+  if (!real) {
+    return {
+      scenario: FrozenGbaScenarioSchema.parse(parsed) as GbaAdapterScenario,
+      fixtureSha256: sha256(fixtureBytes),
+      coreFactory: undefined,
+      framePng: () => null,
+      framebufferSha256: () => null,
+      real: false,
+    };
+  }
+
+  const routeScenario = RealGbaRouteScenarioSchema.parse(parsed);
+  const core = await MgbaFireRedCore.create({
+    coreId: routeScenario.coreId,
+    romBytes: readFileSync(romPath),
+    savestateBytes: readFileSync(savestatePath),
+    romSha256: routeScenario.romSha256,
+    savestateSha256: routeScenario.savestateSha256,
+    coreWasmSha256: routeScenario.coreWasmSha256,
+    mapId: routeScenario.map.mapId,
+  });
+
+  return {
+    scenario: routeScenario as GbaAdapterScenario,
+    fixtureSha256: sha256(fixtureBytes),
+    coreFactory: () => core,
+    framePng: (scale = 3) => {
+      try {
+        return encodeFramebufferPng(core.framebufferSnapshot(), scale);
+      } catch {
+        // Nothing rendered yet.
+        return null;
+      }
+    },
+    framebufferSha256: () => {
+      try {
+        return core.framebufferSha256();
+      } catch {
+        return null;
+      }
+    },
+    real: true,
+  };
+}

@@ -15,3 +15,4 @@ export * from "./frame-stream.ts";
 export * from "./free-play.ts";
 export * from "./free-play-mind.ts";
 export * from "./free-play-session.ts";
+export * from "./free-play-boot.ts";
