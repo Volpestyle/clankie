@@ -40,8 +40,15 @@ flowchart LR
 
 ### Consent and privacy
 
-- `DISCORD_VOICE_ENABLED=true` and explicit guild/channel allowlists enable the
+- `DISCORD_VOICE_ENABLED=true` and an explicit **guild** allowlist enable the
   capability. It is off by default.
+- `DISCORD_VOICE_CHANNEL_IDS` is optional refinement, not a second gate. Empty
+  admits every voice channel inside an allowlisted guild; listing channels
+  narrows it further. The guild allowlist is never skipped, so voice reach is
+  always bounded to servers the owner chose, and joining still requires the
+  ambient role check on `/captain-join` plus per-participant consent. Text
+  ingress does not share this default: an empty channel list there admits
+  nothing, because ingress has no equivalent per-turn gate.
 - `/captain-join` is role-gated, joins the invoker's allowlisted channel,
   discloses DAVE, OpenAI transcription, AI-generated speech, and raw-audio
   handling, and opts in only the invoker.

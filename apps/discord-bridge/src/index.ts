@@ -171,10 +171,12 @@ const textIngress = textIngressEnabled
   : undefined;
 const voiceGuildIds = parseDiscordIdSet(process.env.DISCORD_VOICE_GUILD_IDS);
 const voiceChannelIds = parseDiscordIdSet(process.env.DISCORD_VOICE_CHANNEL_IDS);
-if (voiceEnabled && (voiceGuildIds.size === 0 || voiceChannelIds.size === 0)) {
-  throw new Error(
-    "Discord voice is enabled but DISCORD_VOICE_GUILD_IDS or DISCORD_VOICE_CHANNEL_IDS is empty.",
-  );
+// The guild allowlist stays required: it is what bounds voice to servers the
+// owner chose. The channel allowlist is optional refinement — empty admits any
+// voice channel *within* those guilds, which is still gated by the ambient role
+// check on /captain-join and by per-participant consent (ADR 0045).
+if (voiceEnabled && voiceGuildIds.size === 0) {
+  throw new Error("Discord voice is enabled but DISCORD_VOICE_GUILD_IDS is empty.");
 }
 const openAiCredential = voiceEnabled ? await credentialStore.get("openai") : undefined;
 if (voiceEnabled && openAiCredential?.type !== "api") {
@@ -741,7 +743,11 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
         });
         return;
       }
-      if (!voiceGuildIds.has(interaction.guild.id) || !voiceChannelIds.has(channel.id)) {
+      // An empty channel allowlist admits every voice channel in an allowlisted
+      // guild. The guild check is never skipped, so this widens reach within
+      // chosen servers rather than opening voice everywhere.
+      const channelAllowed = voiceChannelIds.size === 0 || voiceChannelIds.has(channel.id);
+      if (!voiceGuildIds.has(interaction.guild.id) || !channelAllowed) {
         await interaction.reply({
           content: "This guild voice channel is outside Clankie's configured voice allowlist.",
           ephemeral: true,

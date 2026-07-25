@@ -162,17 +162,20 @@ export async function inspectDiscordTextReadiness(
         : "broker entry openai is missing or is not an API credential",
     "Use /auth to store the existing OpenAI API key under provider openai.",
   );
-  const voiceAllowlistReady =
-    !voiceEnabled || (guildId !== undefined && voiceGuilds.has(guildId) && voiceChannels.size > 0);
+  // The channel allowlist is optional refinement: empty admits every voice
+  // channel inside an allowlisted guild. Only the guild allowlist is required.
+  const voiceAllowlistReady = !voiceEnabled || (guildId !== undefined && voiceGuilds.has(guildId));
   add(
     "voice allowlist",
     voiceAllowlistReady,
     !voiceEnabled
       ? "voice is disabled"
       : voiceAllowlistReady
-        ? `${voiceChannels.size.toString()} voice channel(s) admitted in the target guild`
-        : "target voice guild or channel allowlist is incomplete",
-    "Include DISCORD_GUILD_ID in DISCORD_VOICE_GUILD_IDS and configure DISCORD_VOICE_CHANNEL_IDS.",
+        ? voiceChannels.size === 0
+          ? "every voice channel in the target guild is admitted"
+          : `${voiceChannels.size.toString()} voice channel(s) admitted in the target guild`
+        : "target voice guild allowlist is incomplete",
+    "Include DISCORD_GUILD_ID in DISCORD_VOICE_GUILD_IDS.",
   );
   add(
     "text ingress enabled",

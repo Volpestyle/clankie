@@ -60,7 +60,7 @@ DISCORD_INGRESS_CONTEXT_MESSAGES=10  # transient preceding messages, 0-50
 # Optional official-bot group voice
 DISCORD_VOICE_ENABLED=true
 DISCORD_VOICE_GUILD_IDS=...          # deny-by-default guild allowlist
-DISCORD_VOICE_CHANNEL_IDS=...        # deny-by-default voice-channel allowlist
+DISCORD_VOICE_CHANNEL_IDS=...        # optional; empty admits every voice channel in the allowlisted guilds
 DISCORD_VOICE_CHANNEL_ID=...         # one private channel used by readiness/live proof
 CLANKIE_VOICE_STT_MODEL=gpt-4o-mini-transcribe # optional
 CLANKIE_VOICE_TTS_MODEL=gpt-4o-mini-tts        # optional

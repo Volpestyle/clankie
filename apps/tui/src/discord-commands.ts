@@ -138,11 +138,15 @@ export function describeEmptyAllowlist(
   guildIds: readonly string[],
   channelIds: readonly string[],
 ): string | undefined {
+  // The server allowlist is what bounds a plane to servers the owner chose, so
+  // it is required for both.
   if (guildIds.length === 0) return `Cannot enable ${plane} with no server allowlisted.`;
-  if (channelIds.length === 0) {
-    return plane === "voice"
-      ? "Cannot enable voice with no channel allowlisted — the bridge refuses to start."
-      : "Cannot enable text ingress with no channel allowlisted — Clankie would ignore every message.";
+  // Voice treats an empty channel list as "every voice channel in those
+  // servers" — joining is still gated by the ambient role check and by
+  // per-participant consent. Text ingress has no such gate: an empty list there
+  // would silently drop every message, so it stays required.
+  if (plane === "text ingress" && channelIds.length === 0) {
+    return "Cannot enable text ingress with no channel allowlisted — Clankie would ignore every message.";
   }
   return undefined;
 }
@@ -452,8 +456,8 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
   if (guilds === undefined) return;
 
   const channels = await flow.readText({
-    message: "Voice channel ids (comma separated, across all those servers)",
-    placeholder: current.voiceChannelIds.join(",") || "voice channel id",
+    message: "Voice channel ids (comma separated) — blank admits every voice channel in those servers",
+    placeholder: current.voiceChannelIds.join(",") || "blank = all voice channels",
     validate: validateSnowflakeList,
   });
   if (channels === undefined) return;
@@ -476,7 +480,8 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
     ...(guildIds.length === 0 ? {} : { voiceGuildIds: guildIds }),
   }));
   flow.renderLine(
-    `Saved voice across ${String(guildIds.length)} server${guildIds.length === 1 ? "" : "s"}.`,
+    `Saved voice across ${String(guildIds.length)} server${guildIds.length === 1 ? "" : "s"}` +
+      (channelIds.length === 0 ? ", admitting every voice channel in them." : "."),
     "success",
   );
 }

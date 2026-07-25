@@ -78,18 +78,21 @@ export async function inspectDiscordVoiceReadiness(
     guildId === undefined ? "missing or invalid" : "configured",
     "Set DISCORD_GUILD_ID to the private live-proof guild.",
   );
+  // An empty channel allowlist admits every voice channel in an allowlisted
+  // guild, so the live-proof target only has to sit inside such a guild.
+  const channelAdmitted =
+    voiceChannelIds.size === 0 || (channelId !== undefined && voiceChannelIds.has(channelId));
   add(
     "target voice channel",
-    channelId !== undefined &&
-      guildId !== undefined &&
-      voiceGuildIds.has(guildId) &&
-      voiceChannelIds.has(channelId),
+    channelId !== undefined && guildId !== undefined && voiceGuildIds.has(guildId) && channelAdmitted,
     channelId === undefined
       ? "missing or invalid"
-      : voiceGuildIds.has(guildId ?? "") && voiceChannelIds.has(channelId)
-        ? "configured and allowlisted"
+      : voiceGuildIds.has(guildId ?? "") && channelAdmitted
+        ? voiceChannelIds.size === 0
+          ? "admitted (every channel in the guild is allowlisted)"
+          : "configured and allowlisted"
         : "live-proof target is outside the configured voice allowlist",
-    "Set DISCORD_VOICE_CHANNEL_ID and include the target in DISCORD_VOICE_GUILD_IDS and DISCORD_VOICE_CHANNEL_IDS.",
+    "Set DISCORD_VOICE_CHANNEL_ID and include its guild in DISCORD_VOICE_GUILD_IDS.",
   );
 
   const botCredential = await options.store.get(DISCORD_BOT_PROVIDER_ID);
