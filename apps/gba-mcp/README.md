@@ -144,6 +144,24 @@ Clankie was already permitted to hear under
 possessor grants no additional access — and **raw audio never crosses**:
 transcripts only, bounded by the voice plane and capped again here.
 
+## A possessor is itself, not Clankie
+
+**Owner decision (James, 2026-07-25): a harness possessing Clankie does not
+inherit his personality, and does not need to.**
+
+Possession means another mind is driving. The body is Clankie's, the account is
+Clankie's, the bounds are Clankie's — but the decisions are the possessor's, and
+pretending a Codex session _is_ Clankie would be the confusing story, not the
+honest one. This also removes a coupling: the MCP server needs no persona
+plumbing, and the persona work stays scoped to Clankie's own free-play loop.
+
+One consequence worth knowing rather than discovering. Gameplay is unaffected —
+a button press has no voice. But `clankie_say` is visible to third parties, so a
+possessor speaking in the channel reads as **Clankie's account carrying the
+possessor's voice**. That is accepted, not overlooked: if a run should sound like
+him, that is a reason to let his own loop drive rather than a reason to bolt a
+persona onto the possessor.
+
 ## Not yet
 
 Cross-process arbitration. The lease is in-process, so it protects a co-hosted
