@@ -8,7 +8,7 @@ import {
   type FreePlayMind,
 } from "../src/free-play.ts";
 
-function overworld(frame: number): GbaEmulatorObservation {
+function overworld(frame: number, x = 5): GbaEmulatorObservation {
   return {
     schemaVersion: 1,
     kind: "overworld",
@@ -20,7 +20,7 @@ function overworld(frame: number): GbaEmulatorObservation {
     capturedAt: "2026-07-25T18:00:00.000Z",
     frame,
     data: {
-      position: { mapId: "PALLET_TOWN", x: 5, y: 6 },
+      position: { mapId: "PALLET_TOWN", x, y: 6 },
       facing: "south",
       ramStateSha256: "b".repeat(64),
     },
@@ -55,13 +55,16 @@ function failed(errorCode: string): EnvironmentActionResult {
 
 function io(act: () => Promise<EnvironmentActionResult>): GbaDriverIo {
   let frame = 100;
+  let x = 5;
   return {
     observe: (kind) => {
       // Only the overworld view exists here; other kinds throw exactly as the
       // adapter does when a view is meaningless in the current state.
       if (kind !== "overworld") throw new Error(`no ${kind} view`);
       frame += 1;
-      return overworld(frame);
+      // Position advances, so actions read as real moves and plans survive.
+      x += 1;
+      return overworld(frame, x);
     },
     act,
     pause: () => Promise.resolve(),
@@ -165,8 +168,42 @@ describe("free play", () => {
     expect(result.accepted).toBe(0);
   });
 
+  it("does not count a revised plan as incoherence when the world refused him", async () => {
+    // Blocked, then he changes direction. Revising is the correct response, so
+    // the transition is excluded rather than scored as a broken promise.
+    const blockingIo: GbaDriverIo = {
+      observe: (kind) => {
+        if (kind !== "overworld") throw new Error(`no ${kind} view`);
+        return overworld(100);
+      },
+      act: () => Promise.resolve(completed()),
+      pause: () => Promise.resolve(),
+    };
+    const result = await runFreePlay({
+      io: blockingIo,
+      mind: mind([
+        {
+          monologue: "west",
+          intent: "go left",
+          action: { kind: "button_press", button: "left", holdFrames: 4 },
+        },
+        {
+          monologue: "that wall again",
+          intent: "try up instead",
+          action: { kind: "button_press", button: "up", holdFrames: 4 },
+        },
+      ]),
+      turns: 2,
+    });
+    // The position never changes, so every turn is a refusal: nothing scoreable.
+    expect(result.turns[0]?.effect).toContain("position unchanged");
+    expect(result.coherence).toBeNull();
+  });
+
   it("scores coherence as a reported lower bound, never a gate", async () => {
     const result = await runFreePlay({
+      // This io advances position every observation, so plans survive and the
+      // transitions are scoreable.
       io: io(() => Promise.resolve(completed())),
       mind: mind([
         {

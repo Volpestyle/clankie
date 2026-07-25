@@ -49,7 +49,7 @@ evidence. It is replaced, not abandoned:
 | **Legality**       | Every action passed the adapter's catalogue and bounds, or was recorded as `rejected_by_adapter`                |
 | **Causal linkage** | Each turn records the observation digest the decision was made from, the monologue, the action, and the outcome |
 | **Bounds**         | Model text is length-capped; frames and inputs are capped by the session's resource bounds                      |
-| **Coherence**      | Fraction of turns where the previous turn's stated intent referenced the action actually taken                  |
+| **Progress**       | Distinct tiles, maps entered, turns since a new tile, and accepted actions per new tile                         |
 
 **The deterministic scenarios are untouched and still pass.** Determinism was not
 weakened to accommodate free play; a second, differently-evidenced mode was added
@@ -80,16 +80,56 @@ The frame is reused from the existing pipeline: `MgbaFireRedCore.framebuffer()`
 through `encodeFramebufferPng`, the same bytes the activity plane streams. The
 trace records only its digest.
 
-### Coherence is reported, never gated
+### Progress is the metric that means something; coherence is not yet
 
-Coherence separates reasoning from post-hoc narration: a model that decides and
-then describes will follow through; one that narrates plausibly after the fact
-will drift. It is a **keyword heuristic over free text and a deliberate lower
-bound** — a coherent turn phrased unusually scores as a miss.
+Coherence was intended to separate reasoning from post-hoc narration. Measured
+against real play it does not yet do that, and the reason is worth recording
+rather than tuning away.
 
-It is therefore reported and never gated. Gating would optimise the metric before
-anyone knows what a healthy value looks like, and would reward a model that
-restates the button name over one that thinks.
+Two separate problems were found, in order:
+
+1. **It punished correct adaptation.** Every turn was scored, including turns
+   where the emulator refused the move. Revising a plan after walking into a
+   desk is the right response, so transitions whose previous action was blocked,
+   turned-only, or inert are now excluded.
+2. **Intent is objective-shaped.** Even after that fix it reads ~9%, and an
+   audit of the scored transitions shows why: the model states goals — "move
+   north toward the stairs" — and then takes a step _right_ to route around
+   furniture while still heading for the stairs. The metric compares an
+   objective to one button press. It is measuring a category mismatch, not
+   dishonesty.
+
+Follow-through therefore cannot be measured until the objective and the
+next-action are separate fields, each scored against the thing it actually
+claims. Until then coherence is reported as a floor and read as noise.
+
+**Progress is the metric that answers "is he playing well"**: distinct tiles,
+maps entered, turns since a new tile, and accepted actions per new tile. Those
+moved measurably when the feedback improved — 6.0 actions per new tile before,
+2.8 after — which is what a real optimisation looks like.
+
+Neither is ever gated. Gating would optimise a number before anyone knows what a
+healthy value is, and would reward a model that restates the button name over
+one that thinks.
+
+### `accepted` never meant anything happened
+
+The loop reported `accepted` for every dispatched action, which means the
+adapter took the button — not that the character moved. A model walking into a
+desk was told `accepted` and had to re-derive from coordinates that it was
+stuck, so it walked into the desk again.
+
+Each action is now diffed against the state before it: moved, entered a map,
+blocked, dialog or menu changed, or nothing visible. Directions the emulator
+refused accumulate per tile and are shown back. **That is memory of what he
+tried, not a route** — the model still chooses, and no ranking or suggestion
+reaches it.
+
+One subtlety proved load-bearing. A short directional tap _turns_ the character
+without stepping, so "position unchanged" is not evidence of a wall. Reporting
+it as blocked invented obstacles and poisoned the refusal memory, and the model
+correctly protested that it could see open floor. A turn is now reported as a
+turn, and only a refusal while already facing that way records a block.
 
 ### Failure is a turn outcome, not an exception
 

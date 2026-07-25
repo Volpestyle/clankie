@@ -8,6 +8,12 @@ import {
 import { z } from "zod";
 import { canonicalJson, sha256 } from "./core-double.ts";
 import type { GbaDriverIo } from "./driver.ts";
+import {
+  FreePlayProgressTracker,
+  observeEffect,
+  positionOf,
+  type FreePlayProgress,
+} from "./free-play-progress.ts";
 
 /**
  * Free play: the model chooses, not an algorithm.
@@ -53,8 +59,13 @@ export interface FreePlayView {
   observations: GbaEmulatorObservation[];
   /** The current screen as PNG bytes, when a core renders one. */
   framePng: Uint8Array | null;
+  /**
+   * Directions already refused from exactly this tile. Memory of what he tried,
+   * never a suggested route — the model still chooses.
+   */
+  refusedHere: readonly string[];
   /** Prior turns, most recent last, so the model has continuity. */
-  history: readonly { intent: string; action: GbaEmulatorAction; outcome: string }[];
+  history: readonly { intent: string; action: GbaEmulatorAction; outcome: string; effect: string }[];
 }
 
 /**
@@ -81,12 +92,18 @@ export const FreePlayTurnSchema = z
     outcome: z.enum(["accepted", "rejected_by_adapter", "invalid_decision", "mind_failed"]),
     /** Bounded reason when the turn did not produce an accepted action. */
     detail: z.string().max(400).nullable(),
+    /**
+     * What actually changed. `accepted` only means the adapter took the button;
+     * this says whether he moved, was blocked, or changed nothing.
+     */
+    effect: z.string().max(200).nullable(),
   })
   .strict();
 export type FreePlayTurn = z.infer<typeof FreePlayTurnSchema>;
 
 export interface FreePlayResult {
   turns: FreePlayTurn[];
+  progress: FreePlayProgress;
   /** Turns whose action the adapter accepted. */
   accepted: number;
   /**
@@ -115,7 +132,9 @@ export interface RunFreePlayInput {
 export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResult> {
   const historyLimit = input.historyLimit ?? 8;
   const turns: FreePlayTurn[] = [];
-  const history: { intent: string; action: GbaEmulatorAction; outcome: string }[] = [];
+  const history: { intent: string; action: GbaEmulatorAction; outcome: string; effect: string }[] = [];
+  const progress = new FreePlayProgressTracker();
+  progress.seed(positionOf(observe(input.io)));
 
   for (let turn = 0; turn < input.turns; turn += 1) {
     const observations = observe(input.io);
@@ -128,6 +147,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
       action: null,
       outcome: "mind_failed",
       detail: null,
+      effect: null,
     };
 
     let raw: unknown;
@@ -136,6 +156,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
         turn,
         observations,
         framePng: input.framePng?.() ?? null,
+        refusedHere: progress.refusedFrom(positionOf(observations)),
         history: [...history],
       });
     } catch (error) {
@@ -158,6 +179,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     record.intent = parsed.data.intent;
     record.action = parsed.data.action;
 
+    let accepted = false;
     try {
       const result = await input.io.act(parsed.data.action);
       // A rejection arrives as a status, not only as a throw: the adapter fails
@@ -166,6 +188,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
       // rather than crashes, so both keep the playthrough running.
       if (result.status === "completed") {
         record.outcome = "accepted";
+        accepted = true;
         record.detail = bounded(JSON.stringify(result.outcome));
       } else {
         record.outcome = "rejected_by_adapter";
@@ -176,16 +199,32 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
       record.detail = bounded(error);
     }
 
+    // Re-observe and diff, so the turn records what changed rather than only
+    // that the adapter took the button.
+    const effect = observeEffect({
+      before: observations,
+      after: observe(input.io),
+      action: parsed.data.action,
+    });
+    progress.record(effect, accepted);
+    record.effect = effect.summary.slice(0, 200);
+
     history.push({
       intent: parsed.data.intent,
       action: parsed.data.action,
       outcome: record.outcome,
+      effect: effect.summary,
     });
     if (history.length > historyLimit) history.shift();
     turns.push(finalize(record, input.onTurn));
   }
 
-  return { turns, accepted: turns.filter((t) => t.outcome === "accepted").length, ...coherence(turns) };
+  return {
+    turns,
+    accepted: turns.filter((t) => t.outcome === "accepted").length,
+    progress: progress.snapshot(),
+    ...coherence(turns),
+  };
 }
 
 function observe(io: GbaDriverIo): GbaEmulatorObservation[] {
@@ -232,6 +271,23 @@ function bounded(value: unknown): string {
   return String(value).slice(0, 400);
 }
 
+/**
+ * Did the world let the previous plan stand?
+ *
+ * A turn that was blocked, or that only turned the character, is a turn where
+ * revising the plan is the *correct* response. Scoring those as incoherence
+ * punishes exactly the adaptation good feedback is meant to produce.
+ */
+function planSurvived(effect: string | null): boolean {
+  if (effect === null) return false;
+  return !(
+    effect.includes("blocked") ||
+    effect.includes("turned to face") ||
+    effect.includes("no visible change") ||
+    effect.includes("position unchanged")
+  );
+}
+
 function coherence(turns: readonly FreePlayTurn[]): { coherence: number | null } {
   let scoreable = 0;
   let matched = 0;
@@ -239,6 +295,10 @@ function coherence(turns: readonly FreePlayTurn[]): { coherence: number | null }
     const previous = turns[index - 1];
     const current = turns[index];
     if (previous?.intent == null || current?.action == null) continue;
+    // Only score turns where nothing stopped him. Otherwise this measures plan
+    // stability — which correctly drops when he routes around furniture — rather
+    // than whether he does what he says.
+    if (!planSurvived(previous.effect)) continue;
     scoreable += 1;
     if (intentMatchesAction(previous.intent, current.action)) matched += 1;
   }

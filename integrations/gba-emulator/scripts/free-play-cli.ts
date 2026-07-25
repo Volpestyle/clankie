@@ -121,10 +121,19 @@ const result = await runFreePlay({
 });
 
 console.log(`\n${result.accepted}/${result.turns.length} actions accepted`);
+const p = result.progress;
+console.log(
+  `progress: ${String(p.distinctTiles)} distinct tiles · maps ${p.maps.join(" → ")} · ` +
+    `${String(p.turnsSinceNewTile)} turns since a new tile` +
+    (p.actionsPerNewTile === null ? "" : ` · ${p.actionsPerNewTile.toFixed(1)} actions per new tile`),
+);
 console.log(
   result.coherence === null
-    ? "coherence: not scoreable"
-    : `coherence: ${(result.coherence * 100).toFixed(0)}% of stated intents were followed through`,
+    ? "follow-through: not scoreable"
+    : // Reads low because intent is objective-shaped and this compares it to one
+      // button press. Noise until objective and next-action are separate fields
+      // (ADR 0049); progress above is the metric that means something.
+      `follow-through: ${(result.coherence * 100).toFixed(0)}% (floor — see ADR 0049)`,
 );
 console.log(`trace: ${tracePath}`);
 
@@ -142,5 +151,6 @@ function print(turn: FreePlayTurn): void {
   const marker = turn.outcome === "accepted" ? "→" : "✗";
   const detail = turn.outcome === "accepted" ? "" : `  [${turn.outcome}: ${turn.detail ?? ""}]`;
   console.log(`          ${marker} ${action}${detail}`);
+  if (turn.effect !== null) console.log(`          ${turn.effect}`);
   if (turn.intent !== null) console.log(`          next: ${turn.intent}\n`);
 }

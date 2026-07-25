@@ -67,6 +67,10 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   '    {"kind":"frame_advance","frames":N}',
   '    {"kind":"wait","durationMs":N}',
   "",
+  "After each action you are told what actually changed — whether you moved,",
+  "or the direction was blocked. Directions already refused from your current",
+  "tile are listed too. Use that instead of pressing into the same wall.",
+  "",
   "The emulator has no clock and waits for you, so think before you press.",
   "Say what you actually intend — your stated intent is compared against what",
   "you do next, so narrating something you are not going to do is worse than",
@@ -155,10 +159,15 @@ export function renderView(view: FreePlayView): string {
   for (const observation of view.observations) {
     lines.push(`  ${observation.kind}: ${JSON.stringify(stripEnvelope(observation))}`);
   }
+  if (view.refusedHere.length > 0) {
+    // What he already learned the hard way from this exact tile.
+    lines.push("", `Already blocked from this tile: ${view.refusedHere.join(", ")}.`);
+  }
   if (view.history.length > 0) {
     lines.push("", "Recently:");
     for (const entry of view.history) {
-      lines.push(`  intended "${entry.intent}" → ${describeAction(entry.action)} (${entry.outcome})`);
+      // The effect, not just "accepted" — accepted only meant the button was taken.
+      lines.push(`  intended "${entry.intent}" → ${describeAction(entry.action)} → ${entry.effect}`);
     }
   }
   lines.push("", "Choose your next action.");
