@@ -544,9 +544,15 @@ importers:
       '@clankie/interactive-environment':
         specifier: workspace:*
         version: link:../../packages/interactive-environment
+      '@clankie/model-provider':
+        specifier: workspace:*
+        version: link:../../packages/model-provider
       '@clankie/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      ai:
+        specifier: ^7.0.19
+        version: 7.0.19(zod@4.4.3)
       romdev-platform-gba:
         specifier: 0.11.0
         version: 0.11.0

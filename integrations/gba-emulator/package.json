@@ -15,12 +15,15 @@
     "probe:firered": "tsx scripts/probe-fire-red.ts",
     "gameplay:live-proof": "tsx scripts/run-real-scenario.ts",
     "gameplay:evaluate-receipt": "tsx scripts/evaluate-live-receipt.ts",
-    "clean": "rm -rf dist coverage"
+    "clean": "rm -rf dist coverage",
+    "free-play": "tsx scripts/free-play-cli.ts"
   },
   "dependencies": {
     "@clankie/environment-runtime": "workspace:*",
     "@clankie/interactive-environment": "workspace:*",
+    "@clankie/model-provider": "workspace:*",
     "@clankie/protocol": "workspace:*",
+    "ai": "^7.0.19",
     "romdev-platform-gba": "0.11.0",
     "zod": "4.4.3"
   },

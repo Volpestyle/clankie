@@ -98,3 +98,30 @@ semantic-event, and screenshot hashes before accepting existing evidence.
 - `pnpm --filter @clankie/gba-emulator test`
 - `pnpm --filter @clankie/gba-emulator fixture:check`
 - `pnpm --filter @clankie/gba-emulator scenario:validate [outputDir]`
+
+## Free play (ADR 0049)
+
+`pnpm gba:free-play` runs a **model**, not an algorithm. The scenario drivers
+above compute every action — `nextRealRouteStep` is BFS, move selection is an
+`argmax` — and stay deterministic. Free play hands the decision to Clankie.
+
+```bash
+CLANKIE_FREE_PLAY_TURNS=20 pnpm gba:free-play
+```
+
+Each turn he receives the decoded state, returns a bounded `monologue` and
+`intent` alongside one catalogued action, and the CLI prints the playthrough as
+readable text. Actions dispatch through `EnvironmentRuntime` exactly as scripted
+ones do, so an illegal choice is refused by the same machinery.
+
+Failure is a turn outcome, never an exception: `rejected_by_adapter`,
+`invalid_decision`, and `mind_failed` are all recorded and the run continues.
+
+The run reports **coherence** — how often the previous turn's stated intent
+referenced the action actually taken. It separates reasoning from post-hoc
+narration and is a keyword heuristic over free text, so it is reported and never
+gated.
+
+Runs against the core double with no ROM. The trace is written under
+`artifacts/` and stays untracked because it carries model monologue; a six-turn
+format sample lives in `fixtures/free-play/sample-trace.jsonl`.
