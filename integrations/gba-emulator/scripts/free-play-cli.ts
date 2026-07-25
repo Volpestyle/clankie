@@ -28,6 +28,13 @@ if (!Number.isSafeInteger(turns) || turns <= 0) {
   console.error("CLANKIE_FREE_PLAY_TURNS must be a positive integer");
   process.exit(2);
 }
+// O5 experiment: nearest-neighbour upscale before the frame reaches him.
+const frameScale = Number.parseInt(process.env["CLANKIE_FREE_PLAY_FRAME_SCALE"] ?? "3", 10);
+if (!Number.isSafeInteger(frameScale) || frameScale < 1 || frameScale > 8) {
+  console.error("CLANKIE_FREE_PLAY_FRAME_SCALE must be 1-8");
+  process.exit(2);
+}
+
 const tracePath =
   process.env["CLANKIE_FREE_PLAY_TRACE"] ??
   path.resolve(process.cwd(), "artifacts/gba-free-play/trace.jsonl");
@@ -108,7 +115,7 @@ const result = await runFreePlay({
   framePng: () => {
     try {
       const snapshot = liveCore?.framebufferSnapshot();
-      return snapshot === undefined ? null : encodeFramebufferPng(snapshot);
+      return snapshot === undefined ? null : encodeFramebufferPng(snapshot, frameScale);
     } catch {
       // Before the first rendered frame there is nothing to show.
       return null;

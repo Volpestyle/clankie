@@ -9,17 +9,26 @@ import type { MgbaFramebuffer } from "./mgba-core.ts";
  * sufficient transport for the activity plane ([ADR 0047](../../../docs/adr/0047-discord-activity-presence-plane.md))
  * without pulling in a video encoder.
  */
-export function encodeFramebufferPng(frame: MgbaFramebuffer): Buffer {
+export function encodeFramebufferPng(frame: MgbaFramebuffer, scale = 1): Buffer {
+  if (!Number.isSafeInteger(scale) || scale < 1 || scale > 8) {
+    throw new Error("gba_framebuffer_scale_invalid");
+  }
   const { width, height, bytes } = frame;
   if (width <= 0 || height <= 0) throw new Error("gba_framebuffer_dimensions_invalid");
   if (bytes.length < width * height * 2) throw new Error("gba_framebuffer_truncated");
 
-  const raw = Buffer.alloc(height * (1 + width * 3));
-  for (let y = 0; y < height; y += 1) {
-    const row = y * (1 + width * 3);
+  // Nearest-neighbour upscale. 240x160 is small enough that a vision model can
+  // struggle to read tiles; duplicating pixels costs almost nothing, adds no
+  // information, and invents none — the picture is identical, just larger.
+  const outWidth = width * scale;
+  const outHeight = height * scale;
+  const raw = Buffer.alloc(outHeight * (1 + outWidth * 3));
+  for (let y = 0; y < outHeight; y += 1) {
+    const row = y * (1 + outWidth * 3);
     raw[row] = 0; // filter: none
-    for (let x = 0; x < width; x += 1) {
-      const i = y * width + x;
+    const sourceY = Math.floor(y / scale);
+    for (let x = 0; x < outWidth; x += 1) {
+      const i = sourceY * width + Math.floor(x / scale);
       const low = bytes[i * 2] ?? 0;
       const high = bytes[i * 2 + 1] ?? 0;
       const value = low | (high << 8);
@@ -30,8 +39,8 @@ export function encodeFramebufferPng(frame: MgbaFramebuffer): Buffer {
   }
 
   const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(width, 0);
-  ihdr.writeUInt32BE(height, 4);
+  ihdr.writeUInt32BE(outWidth, 0);
+  ihdr.writeUInt32BE(outHeight, 4);
   ihdr[8] = 8; // bit depth
   ihdr[9] = 2; // truecolor
 

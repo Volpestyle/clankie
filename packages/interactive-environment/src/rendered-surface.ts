@@ -51,10 +51,18 @@ export const RenderedSurfaceFrameSchema = z
 export type RenderedSurfaceFrame = z.infer<typeof RenderedSurfaceFrameSchema>;
 
 /**
- * Decoded-state sidecar rendered beside the canvas. This is what an activity
- * can show that a flat video stream cannot: why Clankie did what he did.
+ * The sidecar rendered beside the canvas. This is what an activity can show
+ * that a flat video stream cannot: why Clankie did what he did.
  *
- * Bounded strings only — no free-form model output crosses this seam.
+ * **Bounded model text may cross this seam**, and that is the point — his
+ * monologue is the payload ([ADR 0049](../../../docs/adr/0049-free-play-agency-and-non-deterministic-evidence.md)).
+ * An earlier revision of this comment said no model output crossed at all,
+ * which contradicted ADR 0049 and would have made the overlay useless for the
+ * thing it exists to do.
+ *
+ * What holds instead: every line is length-capped and count-capped here, the
+ * text stays untrusted, and it reaches a viewer only through this schema — never
+ * as raw model output posted straight to a channel.
  */
 export const RenderedSurfaceOverlaySchema = z
   .object({

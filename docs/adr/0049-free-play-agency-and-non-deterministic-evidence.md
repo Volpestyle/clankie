@@ -209,6 +209,34 @@ into the staircase opening" rather than "reach the stairs" — which is the
 category error the coherence section predicted, fixed at the source rather than
 by a better matcher.
 
+### Two cheap experiments, reported as measured
+
+**Frame upscale — kept, but not on the strength of the numbers.** The frame is
+nearest-neighbour upscaled before it reaches him; duplicating pixels adds no
+information and invents none. Across three 20-turn runs the metrics did not
+separate: native gave 13 tiles / 1.7 actions per new tile, 3x gave 14 / 1.5 and
+11 / 2.0. **Run-to-run variance exceeds the effect.** The one consistent
+difference is that both 3x runs changed map and the native run did not, which is
+suggestive at n=3 and no more than that. It is kept because it is free and
+weakly positive, and this is stated rather than presented as a win.
+
+**Model choice dominates everything else here.** Same savestate, same prompt,
+same twenty turns:
+
+| model           | left the bedroom | tiles | actions per new tile |
+| --------------- | ---------------- | ----- | -------------------- |
+| `gpt-5.5`       | 1 run of 3       | 11-14 | 1.5-2.0              |
+| `gpt-5.6-terra` | **2 runs of 2**  | 14-16 | **1.5**              |
+
+In one terra run he was downstairs by turn 2 and spent the remainder working out
+the front door — "the front-door mat is visibly down-left of me, not directly
+below" — which is further than any other configuration reached. Follow-through
+read _lower_ for terra (13-24%), which is consistent with that metric being
+noise rather than with worse play.
+
+The practical conclusion for anyone tuning this: measure the model before
+tuning the harness.
+
 ### Failure is a turn outcome, not an exception
 
 A playthrough must survive its own participants. Four outcomes are recorded and
@@ -224,6 +252,13 @@ public surfaces. They are length-bounded at the schema, and reach a viewer only
 through the bounded overlay contract in
 [ADR 0047](0047-discord-activity-presence-plane.md). Raw frames never enter the
 trace; it carries digests.
+
+That overlay schema previously documented itself as carrying "no free-form model
+output", which directly contradicted this decision. **Bounded model text may
+cross** — the monologue is the whole reason the overlay exists — and the comment
+has been corrected rather than the rule bent. What holds is the bound, not an
+absence: capped length, capped line count, still untrusted, and never posted to
+a channel as raw model output.
 
 ## Options weighed
 

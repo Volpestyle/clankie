@@ -160,3 +160,19 @@ describe("progress tracker", () => {
     expect(tracker.snapshot().actionsPerNewTile).toBeNull();
   });
 });
+
+describe("frame upscale", () => {
+  it("scales the picture without inventing information", async () => {
+    const { encodeFramebufferPng } = await import("../src/framebuffer-png.ts");
+    const frame = { width: 4, height: 2, bytes: new Uint8Array(4 * 2 * 2) };
+    const one = encodeFramebufferPng(frame, 1);
+    const three = encodeFramebufferPng(frame, 3);
+    // Same PNG signature, larger canvas — nearest-neighbour adds no detail.
+    expect(three.subarray(0, 8)).toEqual(one.subarray(0, 8));
+    expect(three.readUInt32BE(16)).toBe(12);
+    expect(three.readUInt32BE(20)).toBe(6);
+    expect(one.readUInt32BE(16)).toBe(4);
+    expect(() => encodeFramebufferPng(frame, 0)).toThrow(/scale_invalid/);
+    expect(() => encodeFramebufferPng(frame, 99)).toThrow(/scale_invalid/);
+  });
+});
