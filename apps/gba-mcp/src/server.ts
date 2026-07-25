@@ -3,6 +3,7 @@ import { GbaEmulatorObservationKindSchema } from "@clankie/interactive-environme
 import { z } from "zod";
 import { ActArgumentsSchema, actTool, observeTool, pauseTool, type GbaToolContext } from "./tools.ts";
 import type { PossessionLease } from "./possession.ts";
+import { CLANKIE_SPEECH_MAX, deniedSpeechPort, type ClankieSpeechPort } from "./speech.ts";
 
 /**
  * Clankie's body, published for any harness to drive.
@@ -13,8 +14,43 @@ import type { PossessionLease } from "./possession.ts";
  * seam, so a possessor is bounded by the same lease, idempotency, and
  * fail-closed limits a script is.
  */
-export function createGbaMcpServer(context: GbaToolContext, possession?: PossessionLease): McpServer {
+export interface GbaMcpServerOptions {
+  possession?: PossessionLease;
+  /** Defaults to refusing; a possessor cannot speak without a wired port. */
+  speech?: ClankieSpeechPort;
+}
+
+export function createGbaMcpServer(context: GbaToolContext, options: GbaMcpServerOptions = {}): McpServer {
+  const { possession } = options;
+  const speech = options.speech ?? deniedSpeechPort;
   const server = new McpServer({ name: "clankie-gba", version: "0.1.0" });
+
+  server.registerTool(
+    "clankie_say",
+    {
+      title: "Say something as Clankie",
+      description:
+        "Speak in the channel Clankie is present in. Requires the possession lease: talking as him " +
+        "is driving him. You cannot choose the audience — a possessor drives the character, it does " +
+        "not pick new rooms. Ambient authority: this can never approve privileged work.",
+      inputSchema: {
+        text: z.string().min(1).max(CLANKIE_SPEECH_MAX),
+        possessionToken: z.string().optional(),
+      },
+    },
+    async (args) => {
+      try {
+        context.assertMayAct?.(args.possessionToken);
+        await speech.say(args.text);
+        return { content: [{ type: "text" as const, text: "said" }] };
+      } catch (error) {
+        return {
+          content: [{ type: "text" as const, text: error instanceof Error ? error.message : "refused" }],
+          isError: true,
+        };
+      }
+    },
+  );
 
   if (possession !== undefined) {
     server.registerTool(

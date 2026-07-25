@@ -100,6 +100,32 @@ unnamed holder:         possession_holder_not_allowed
 act after release:      possession_lease_not_held
 ```
 
+## Speaking as Clankie
+
+`clankie_say` speaks in the channel Clankie is present in, and requires the
+possession lease — talking as him is driving him. The caller cannot choose the
+audience: a possessor drives the character, it does not pick new rooms.
+
+**A possessor cannot speak directly, and that is a fence rather than an
+oversight.** The control plane's presence action requires a _live presence
+claim_ — the session id, phase, and monotonic revision the Discord bridge
+publishes while it holds the gateway ([ADR 0024](../../docs/adr/0024-discord-dual-plane-presence.md)).
+Only the bridge can mint one, which is exactly what stops an action reaching a
+session that is not live. A possessor holds no gateway, so it holds no claim.
+
+So speech goes through a port: the possessor asks the process that owns the body
+in Discord to speak for it. That also keeps the invariant intact — possession
+changes who is deciding, never which account is present. Clankie stays the bot in
+the channel.
+
+`ClankieSpeechPort` is that seam, and it is **denied by default** with a reason:
+
+```
+clankie_speech_unavailable: no speech port is wired. A possessor cannot speak
+directly — the control plane's presence action requires a live claim only the
+Discord bridge can mint.
+```
+
 ## Not yet
 
 Cross-process arbitration. The lease is in-process, so it protects a co-hosted

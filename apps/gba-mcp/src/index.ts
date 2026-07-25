@@ -10,6 +10,7 @@ import { createGbaMcpServer } from "./server.ts";
 export { createGbaMcpServer } from "./server.ts";
 export * from "./tools.ts";
 export * from "./possession.ts";
+export * from "./speech.ts";
 
 /**
  * stdio entrypoint, which is what a coding harness attaches to.
@@ -60,7 +61,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         possession.assertMayAct(token);
       },
     },
-    possession,
+    { possession },
   );
   // stdout is the transport, so anything printed there corrupts the protocol.
   process.stderr.write(`clankie gba mcp ready (${game.real ? "real ROM" : "deterministic core double"})\n`);
