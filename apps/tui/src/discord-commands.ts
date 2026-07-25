@@ -98,6 +98,29 @@ function splitList(value: string): string[] {
     .filter((item) => item.length > 0);
 }
 
+/**
+ * Resolve a per-plane server allowlist.
+ *
+ * Clankie can live in many servers: the operating allowlists are arrays, and
+ * only the command-registration guild is singular. Typed input wins; blank
+ * keeps whatever was already configured; and a first-time blank falls back to
+ * the command server so the common single-server setup stays one keystroke.
+ */
+export function resolveGuildList(
+  typed: string,
+  existing: readonly string[],
+  commandGuildId: string | undefined,
+): string[] {
+  if (typed.trim().length > 0) return splitList(typed);
+  if (existing.length > 0) return [...existing];
+  return commandGuildId === undefined ? [] : [commandGuildId];
+}
+
+function guildListPlaceholder(existing: readonly string[], commandGuildId: string | undefined): string {
+  if (existing.length > 0) return existing.join(",");
+  return commandGuildId ?? "server id, or several separated by commas";
+}
+
 async function showDiscordStatus(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
   const stored = await services.settings.load();
   const resolved = resolveDiscordSettings(stored.discord);
@@ -127,7 +150,8 @@ function describeSettings(settings: DiscordSettings): string[] {
     `${label}: ${values.length === 0 ? "—" : values.join(", ")}`;
   return [
     show("application id", settings.applicationId),
-    show("guild id", settings.guildId),
+    // Singular on purpose: only slash-command registration is one-server.
+    `command server: ${settings.guildId ?? "— (commands register globally)"}`,
     showList("ambient roles", settings.ambientRoleIds),
     showList("approval roles", settings.approvalRoleIds),
     show("owner user id", settings.ownerUserId),
@@ -272,9 +296,12 @@ async function editCore(shell: ClankieFaceShell, services: DiscordCommandService
   });
   if (applicationId === undefined) return;
 
+  // Singular by design: this is only where slash commands register. Left blank
+  // they register globally, i.e. in every server the bot is installed in.
+  // Where Clankie may *operate* is the separate per-plane allowlist below.
   const guildId = await flow.readText({
-    message: "Server (guild) id",
-    placeholder: current.guildId ?? "right-click your server with Developer Mode on",
+    message: "Command-registration server id — blank registers commands globally",
+    placeholder: current.guildId ?? "blank = all servers the bot is in",
     validate: validateSnowflake(true),
   });
   if (guildId === undefined) return;
@@ -311,8 +338,15 @@ async function editIngress(shell: ClankieFaceShell, services: DiscordCommandServ
   const enabledChoice = enabled?.[0];
   if (enabledChoice === undefined) return;
 
+  const guilds = await flow.readText({
+    message: "Server ids Clankie may read in (comma separated) — blank uses the command server",
+    placeholder: guildListPlaceholder(current.ingressGuildIds, current.guildId),
+    validate: validateSnowflakeList,
+  });
+  if (guilds === undefined) return;
+
   const channels = await flow.readText({
-    message: "Channel ids Clankie may read (comma separated)",
+    message: "Channel ids Clankie may read (comma separated, across all those servers)",
     placeholder: current.ingressChannelIds.join(",") || "channel id",
     validate: validateSnowflakeList,
   });
@@ -342,7 +376,7 @@ async function editIngress(shell: ClankieFaceShell, services: DiscordCommandServ
     if (owner.trim()) ownerUserId = owner.trim();
   }
 
-  const guildIds = (await services.settings.load()).discord.guildId;
+  const guildIds = resolveGuildList(guilds, current.ingressGuildIds, current.guildId);
   await apply(services, (discord) => ({
     ...discord,
     textIngressEnabled: enabledChoice === "true",
@@ -351,10 +385,13 @@ async function editIngress(shell: ClankieFaceShell, services: DiscordCommandServ
     ...(ownerUserId === undefined ? {} : { ownerUserId }),
     // Readiness requires the ingress and presence allowlists to line up, so the
     // wizard mirrors them rather than letting an operator half-configure it.
-    ...(guildIds === undefined ? {} : { ingressGuildIds: [guildIds], presenceGuildIds: [guildIds] }),
+    ...(guildIds.length === 0 ? {} : { ingressGuildIds: guildIds, presenceGuildIds: guildIds }),
     ...(channels.trim() ? { presenceChannelIds: splitList(channels) } : {}),
   }));
-  flow.renderLine("Saved text ingress, and mirrored the presence allowlist to match.", "success");
+  flow.renderLine(
+    `Saved text ingress across ${String(guildIds.length)} server${guildIds.length === 1 ? "" : "s"}, and mirrored the presence allowlist to match.`,
+    "success",
+  );
 }
 
 async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
@@ -373,23 +410,33 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
   const enabledChoice = enabled?.[0];
   if (enabledChoice === undefined) return;
 
+  const guilds = await flow.readText({
+    message: "Server ids for voice (comma separated) — blank uses the command server",
+    placeholder: guildListPlaceholder(current.voiceGuildIds, current.guildId),
+    validate: validateSnowflakeList,
+  });
+  if (guilds === undefined) return;
+
   const channels = await flow.readText({
-    message: "Voice channel ids (comma separated)",
+    message: "Voice channel ids (comma separated, across all those servers)",
     placeholder: current.voiceChannelIds.join(",") || "voice channel id",
     validate: validateSnowflakeList,
   });
   if (channels === undefined) return;
 
-  const guildId = (await services.settings.load()).discord.guildId;
+  const guildIds = resolveGuildList(guilds, current.voiceGuildIds, current.guildId);
   await apply(services, (discord) => ({
     ...discord,
     voiceEnabled: enabledChoice === "true",
     ...(channels.trim()
       ? { voiceChannelIds: splitList(channels), voiceChannelId: splitList(channels)[0] }
       : {}),
-    ...(guildId === undefined ? {} : { voiceGuildIds: [guildId] }),
+    ...(guildIds.length === 0 ? {} : { voiceGuildIds: guildIds }),
   }));
-  flow.renderLine("Saved voice configuration.", "success");
+  flow.renderLine(
+    `Saved voice across ${String(guildIds.length)} server${guildIds.length === 1 ? "" : "s"}.`,
+    "success",
+  );
 }
 
 async function editActivity(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
