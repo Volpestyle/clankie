@@ -135,6 +135,7 @@ const commands = [
   ...buildDiscordCommands({
     settings: new SettingsStore(),
     listCredentials: () => services.store.list(),
+    setCredential: (providerId, key) => services.store.set(providerId, { type: "api", key }),
   }),
 ];
 

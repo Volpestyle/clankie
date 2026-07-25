@@ -47,6 +47,9 @@ enable a plane.
 
 ## Editing
 
-Use `/discord` in the Clankie TUI. `/discord status` prints the effective
-configuration, whether the `discord_bot` credential is present in the broker, and
-any environment overrides in effect.
+Use `/discord` in the Clankie TUI. It writes to **both stores**: its **Tokens**
+step stores secrets in the credential broker (same destination as `/auth`), and
+every other step writes here.
+
+`/discord status` prints the effective configuration, whether `discord_bot` is
+present in the broker, and any environment overrides in effect.

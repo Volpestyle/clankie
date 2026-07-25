@@ -11,15 +11,48 @@ export interface DiscordCommandServices {
   settings: SettingsStore;
   /** Provider ids already present in the credential broker. */
   listCredentials: () => Promise<Record<string, unknown>>;
+  /**
+   * Stores a secret in the credential broker. Tokens never touch the settings
+   * file: `/discord` is only a friendlier entry point to the same broker `/auth`
+   * writes to, because `discord_bot` is not a featured provider and would
+   * otherwise require typing the provider id by hand.
+   */
+  setCredential: (providerId: string, key: string) => Promise<void>;
 }
 
+/** Discord secrets, all broker-owned. Never stored in settings.json. */
+const DISCORD_CREDENTIALS = [
+  {
+    id: "discord_bot",
+    label: "Bot token",
+    hint: "required",
+    description: "Official application bot token from the Discord developer portal.",
+  },
+  {
+    id: "discord_user_session",
+    label: "User token (personal-lab only)",
+    hint: "Go Live / user body",
+    description:
+      "Automating a normal account violates Discord's terms and risks the account. Lab profile only.",
+  },
+  {
+    id: "openai",
+    label: "OpenAI key",
+    hint: "voice STT/TTS",
+    description: "Reused by group voice for transcription and speech.",
+  },
+] as const;
+
 /**
- * `/discord` edits **non-secret** Discord configuration.
+ * `/discord` is one place to set up Discord, writing to **two stores**.
  *
- * The bot token deliberately does not appear here: secrets belong to the
- * credential broker via `/auth`, which redacts them and can use the OS
- * keychain. Everything this command writes is a public identifier an operator
- * wants to read back plainly, which is why it lives in `settings.json` instead.
+ * Tokens go to the credential broker, which redacts them and can use the OS
+ * keychain — identical to `/auth`, just without making an operator type
+ * `discord_bot` by hand into the "Other…" provider prompt.
+ *
+ * Everything else is a public identifier an operator wants to read back
+ * plainly, so it goes to `settings.json`. No secret is ever written there, and
+ * the settings write path rejects token-shaped values outright.
  */
 export function buildDiscordCommands(services: DiscordCommandServices): FaceShellCommand[] {
   return [
@@ -126,6 +159,12 @@ async function runDiscordWizard(shell: ClankieFaceShell, services: DiscordComman
         message: "Discord configuration",
         options: [
           {
+            value: "credentials",
+            label: "Tokens",
+            hint: "stored in the credential broker",
+            description: "Bot token, optional user token, and the OpenAI key used by voice.",
+          },
+          {
             value: "core",
             label: "Server, application, and roles",
             hint: "required",
@@ -160,7 +199,8 @@ async function runDiscordWizard(shell: ClankieFaceShell, services: DiscordComman
         await showEnvironmentExport(shell, services);
         continue;
       }
-      if (choice === "core") await editCore(shell, services);
+      if (choice === "credentials") await editCredentials(shell, services);
+      else if (choice === "core") await editCore(shell, services);
       else if (choice === "ingress") await editIngress(shell, services);
       else if (choice === "voice") await editVoice(shell, services);
       else if (choice === "activity") await editActivity(shell, services);
@@ -178,6 +218,47 @@ async function apply(services: DiscordCommandServices, patch: Patch): Promise<Cl
     ...current,
     discord: patch(current.discord),
   }));
+}
+
+async function editCredentials(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
+  const flow = shell.setupFlow;
+  const stored = await services.listCredentials();
+  const picked = await flow.readSelect({
+    kind: "single",
+    message: "Which token?",
+    options: DISCORD_CREDENTIALS.map((credential) => ({
+      value: credential.id,
+      label: credential.label,
+      hint: credential.id in stored ? "configured" : credential.hint,
+      description: credential.description,
+    })),
+    required: true,
+    allowBack: true,
+  });
+  const providerId = picked?.[0];
+  if (providerId === undefined) return;
+
+  // readSecret keeps the value off the rendered transcript; the broker redacts
+  // it thereafter. It is never written to settings.json.
+  const key = await flow.readSecret({
+    message: `Token for ${providerId}`,
+    validate: (value: string) => {
+      const trimmed = value.trim();
+      if (trimmed.length === 0) return "Required.";
+      if (/\s/u.test(trimmed)) return "A token contains no whitespace — check for a stray paste.";
+      return undefined;
+    },
+  });
+  if (key === undefined) return;
+
+  await services.setCredential(providerId, key.trim());
+  flow.renderLine(`Stored ${providerId} in the credential broker (redacted).`, "success");
+  if (providerId === "discord_user_session") {
+    flow.renderLine(
+      "Reminder: the user-session body is personal-lab only and denied by the high-assurance and team profiles.",
+      "warning",
+    );
+  }
 }
 
 async function editCore(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
