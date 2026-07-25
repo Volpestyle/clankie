@@ -8,6 +8,7 @@ import {
   CLANKIE_SPEECH_MAX,
   deniedHearingPort,
   deniedSpeechPort,
+  PossessorHearing,
   type ClankieHearingPort,
   type ClankieSpeechPort,
 } from "./speech.ts";
@@ -32,7 +33,7 @@ export interface GbaMcpServerOptions {
 export function createGbaMcpServer(context: GbaToolContext, options: GbaMcpServerOptions = {}): McpServer {
   const { possession } = options;
   const speech = options.speech ?? deniedSpeechPort;
-  const hearing = options.hearing ?? deniedHearingPort;
+  const hearing = new PossessorHearing(options.hearing ?? deniedHearingPort);
   const server = new McpServer({ name: "clankie-gba", version: "0.1.0" });
 
   server.registerTool(
@@ -52,7 +53,10 @@ export function createGbaMcpServer(context: GbaToolContext, options: GbaMcpServe
     async (args) => {
       try {
         context.assertMayAct?.(args.possessionToken);
-        const lines = await hearing.recent(args.limit ?? 10);
+        // Subscribing lazily means a possessor that never listens causes no
+        // capture at all.
+        hearing.start();
+        const lines = hearing.recent(args.limit ?? 10);
         return { content: [{ type: "text" as const, text: lines.join("\n") }] };
       } catch (error) {
         return {
@@ -133,6 +137,8 @@ export function createGbaMcpServer(context: GbaToolContext, options: GbaMcpServe
       },
       (args) => {
         possession.release(args.token);
+        // What was heard does not outlive the possession that heard it.
+        hearing.stop();
         return { content: [{ type: "text" as const, text: "possession released" }] };
       },
     );

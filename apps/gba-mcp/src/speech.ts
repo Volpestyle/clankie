@@ -64,19 +64,70 @@ export const deniedSpeechPort: ClankieSpeechPort = {
  * seam — transcripts only, already bounded by the voice plane.
  */
 export interface ClankieHearingPort {
-  /** Recent transcript lines, oldest first, already consent-filtered. */
-  recent(limit: number): Promise<string[]>;
+  /**
+   * Subscribe to utterances as they happen. Returns an unsubscribe.
+   *
+   * **Push, not pull, and that is a privacy constraint rather than a style
+   * choice.** Asking the bridge for "the last N lines" would require it to
+   * retain transcripts, and it deliberately retains none — raw and generated
+   * PCM are zeroed after use and the bot does not persist channel transcripts.
+   * A pull-shaped port would have quietly forced whoever implemented it to
+   * break that invariant.
+   *
+   * Handing each utterance to a live subscriber keeps the bridge's retention at
+   * zero. What the possessor then holds is its own, lives only while it holds
+   * the lease, and dies with it.
+   */
+  subscribe(listener: (utterance: string) => void): () => void;
 }
 
 export const CLANKIE_HEARING_MAX_LINES = 50;
 
 /** Denied by default, with the same explanation as speech. */
 export const deniedHearingPort: ClankieHearingPort = {
-  recent: () =>
-    Promise.reject(
-      new Error(
-        "clankie_hearing_unavailable: no hearing port is wired. A possessor cannot subscribe to " +
-          "voice directly — only the Discord bridge holds the gateway and the consent registry.",
-      ),
-    ),
+  subscribe: () => {
+    throw new Error(
+      "clankie_hearing_unavailable: no hearing port is wired. A possessor cannot subscribe to " +
+        "voice directly — only the Discord bridge holds the gateway and the consent registry.",
+    );
+  },
 };
+
+/**
+ * What a possessor heard while holding the body.
+ *
+ * Retention lives here rather than in the bridge: bounded, in memory, and
+ * discarded on release. The possessor is a participant in the conversation for
+ * as long as it is driving, and stops being one the moment it is not.
+ */
+export class PossessorHearing {
+  private readonly lines: string[] = [];
+  private unsubscribe: (() => void) | null = null;
+
+  private readonly port: ClankieHearingPort;
+  private readonly max: number;
+
+  public constructor(port: ClankieHearingPort, max = CLANKIE_HEARING_MAX_LINES) {
+    this.port = port;
+    this.max = max;
+  }
+
+  public start(): void {
+    if (this.unsubscribe !== null) return;
+    this.unsubscribe = this.port.subscribe((utterance) => {
+      this.lines.push(utterance);
+      if (this.lines.length > this.max) this.lines.shift();
+    });
+  }
+
+  /** Called on release: what was heard does not outlive the possession. */
+  public stop(): void {
+    this.unsubscribe?.();
+    this.unsubscribe = null;
+    this.lines.length = 0;
+  }
+
+  public recent(limit: number): string[] {
+    return this.lines.slice(-limit);
+  }
+}

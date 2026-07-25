@@ -142,7 +142,36 @@ Consent is not re-litigated at this boundary. A possessor hears exactly what
 Clankie was already permitted to hear under
 [ADR 0045](../../docs/adr/0045-official-bot-dave-group-voice.md) — asking as a
 possessor grants no additional access — and **raw audio never crosses**:
-transcripts only, bounded by the voice plane and capped again here.
+transcripts only.
+
+**Hearing is push, not pull, and that is a privacy constraint.** The obvious
+shape — "give me the last N lines" — would require the bridge to retain
+transcripts, and it deliberately retains none: PCM buffers are zeroed after use
+and the bot does not persist channel transcripts. A pull-shaped port would have
+quietly forced whoever implemented it to break that.
+
+So the bridge pushes each utterance to a live subscriber and keeps nothing.
+`PossessorHearing` holds a small bounded window on the _possessor's_ side, and
+`gba_emulator_release` clears it: what was heard does not outlive the possession
+that heard it. Subscription is lazy, so a possessor that never calls
+`clankie_listen` causes no capture at all.
+
+## How the ports actually reach Discord
+
+Claude Code never talks to Discord. The bridge already holds the gateway — it is
+the Discord-facing process — so the ports are a **local control channel between
+two Clankie processes**, not a new inbound integration:
+
+```
+harness → MCP server → (loopback, token-gated) → bridge → Discord
+```
+
+The direction matters: the MCP server dials _out_ to the bridge, so the process
+holding Discord credentials opens no port for anything else to connect into.
+That is the same shape as the activity plane's frame producer in
+[`apps/discord-activity`](../discord-activity/README.md) — loopback listener,
+broker-minted bearer, deny-by-default — and reusing it means one pattern rather
+than a second bespoke transport.
 
 ## A possessor is itself, not Clankie
 
