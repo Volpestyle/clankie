@@ -1,5 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { resolveGuildList } from "../src/discord-commands.ts";
+import { describeEmptyAllowlist, resolveGuildList, resolveIdList } from "../src/discord-commands.ts";
+
+describe("empty allowlist guard", () => {
+  const guilds = ["111111111111111111"];
+  const channels = ["222222222222222222"];
+
+  it("refuses to enable a plane with nothing allowlisted", () => {
+    // An empty allowlist denies everything — it never means "allow all".
+    expect(describeEmptyAllowlist("voice", [], channels)).toMatch(/no server allowlisted/);
+    expect(describeEmptyAllowlist("voice", guilds, [])).toMatch(/refuses to start/);
+    expect(describeEmptyAllowlist("text ingress", guilds, [])).toMatch(/ignore every message/);
+  });
+
+  it("allows a fully specified plane", () => {
+    expect(describeEmptyAllowlist("voice", guilds, channels)).toBeUndefined();
+    expect(describeEmptyAllowlist("text ingress", guilds, channels)).toBeUndefined();
+  });
+
+  it("keeps configured channels when the operator presses enter", () => {
+    expect(resolveIdList("", channels)).toEqual(channels);
+    expect(resolveIdList("333333333333333333", channels)).toEqual(["333333333333333333"]);
+  });
+});
 
 describe("Discord server allowlist resolution", () => {
   it("keeps Clankie multi-server instead of collapsing to the command server", () => {

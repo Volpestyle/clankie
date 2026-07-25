@@ -121,6 +121,32 @@ function guildListPlaceholder(existing: readonly string[], commandGuildId: strin
   return commandGuildId ?? "server id, or several separated by commas";
 }
 
+/** Typed input wins; blank keeps what was already configured. */
+export function resolveIdList(typed: string, existing: readonly string[]): string[] {
+  return typed.trim().length > 0 ? splitList(typed) : [...existing];
+}
+
+/**
+ * An empty allowlist denies everything — it never means "allow all". Enabling a
+ * plane with nothing allowlisted is therefore always a mistake, and one the
+ * operator would otherwise discover much later: voice refuses to start the
+ * bridge at all, while text ingress starts fine and then silently ignores every
+ * message. Catching it here turns both into an answer at configuration time.
+ */
+export function describeEmptyAllowlist(
+  plane: "voice" | "text ingress",
+  guildIds: readonly string[],
+  channelIds: readonly string[],
+): string | undefined {
+  if (guildIds.length === 0) return `Cannot enable ${plane} with no server allowlisted.`;
+  if (channelIds.length === 0) {
+    return plane === "voice"
+      ? "Cannot enable voice with no channel allowlisted — the bridge refuses to start."
+      : "Cannot enable text ingress with no channel allowlisted — Clankie would ignore every message.";
+  }
+  return undefined;
+}
+
 async function showDiscordStatus(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
   const stored = await services.settings.load();
   const resolved = resolveDiscordSettings(stored.discord);
@@ -377,6 +403,14 @@ async function editIngress(shell: ClankieFaceShell, services: DiscordCommandServ
   }
 
   const guildIds = resolveGuildList(guilds, current.ingressGuildIds, current.guildId);
+  const channelIds = resolveIdList(channels, current.ingressChannelIds);
+  if (enabledChoice === "true") {
+    const problem = describeEmptyAllowlist("text ingress", guildIds, channelIds);
+    if (problem !== undefined) {
+      flow.renderLine(problem, "error");
+      return;
+    }
+  }
   await apply(services, (discord) => ({
     ...discord,
     textIngressEnabled: enabledChoice === "true",
@@ -425,6 +459,14 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
   if (channels === undefined) return;
 
   const guildIds = resolveGuildList(guilds, current.voiceGuildIds, current.guildId);
+  const channelIds = resolveIdList(channels, current.voiceChannelIds);
+  if (enabledChoice === "true") {
+    const problem = describeEmptyAllowlist("voice", guildIds, channelIds);
+    if (problem !== undefined) {
+      flow.renderLine(problem, "error");
+      return;
+    }
+  }
   await apply(services, (discord) => ({
     ...discord,
     voiceEnabled: enabledChoice === "true",
