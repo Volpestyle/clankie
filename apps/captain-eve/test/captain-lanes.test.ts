@@ -15,6 +15,7 @@ import type { SendFn, Session } from "eve/channels";
 import { captainLaneAddress, captainLaneInstructions } from "../lib/lanes/context.ts";
 import { redactEveStreamEvent } from "../lib/lanes/transcript.ts";
 import {
+  eveSessionEvents,
   reconcileEveLaneSessionWithRuntime,
   runCaptainConversationTurn,
   type CaptainConversationClient,
@@ -501,6 +502,58 @@ describe("Eve captain operator conversation execution", () => {
     const textB = publishedB.flatMap((b) => (b.type === "message" ? [b.text] : []));
     expect(textA).toEqual(["alpha"]);
     expect(textB).toEqual(["beta"]);
+    registry.close();
+  });
+
+  it("ends the turn at a session.waiting boundary on a stream that never closes, rebinding the fresh resume token", async () => {
+    // Regression (stuck "Thinking..."): eve's durable session run stream stays
+    // OPEN while the session parks waiting for its next message. Draining to
+    // stream end never returned, so the conversation's admission lease was held
+    // forever and every later turn on the lane queued behind it. The turn must
+    // end at the boundary event, and must rebind the waiting event's fresh
+    // channel-local continuation token — the session handle only echoes the
+    // caller's own token back, which cannot resume the parked session.
+    const root = await mkdtemp(join(tmpdir(), "captain-open-stream-"));
+    roots.push(root);
+    const registry = await openOperatorConversationRegistry(join(root, "captain.sqlite"), { identity });
+    const waiting = {
+      type: "session.waiting",
+      data: { continuationToken: "cont-fresh", wait: "next-user-message" },
+    } as HandleMessageStreamEvent;
+    const client: CaptainConversationClient = {
+      send: () =>
+        Promise.resolve({
+          sessionId: "sess-open",
+          continuationToken: "cont-stale",
+          events: () =>
+            eveSessionEvents(
+              Promise.resolve(
+                new ReadableStream<HandleMessageStreamEvent>({
+                  start(controller) {
+                    controller.enqueue(message("hello"));
+                    controller.enqueue(waiting);
+                    // Deliberately never closed: the durable run outlives the turn.
+                  },
+                }),
+              ),
+            ),
+        }),
+    };
+    const published: OperatorConversationEventBody[] = [];
+    await runCaptainConversationTurn({
+      registry,
+      client,
+      conversationId: "global-default",
+      message: "hi",
+      publish: (body) => published.push(body),
+    });
+    expect(published.map((body) => body.type)).toEqual(["message", "session"]);
+    expect(registry.get("global-default")?.sessionState).toBe("waiting");
+    expect(registry.privateSession("global-default")).toEqual({
+      sessionId: "sess-open",
+      continuationToken: "cont-fresh",
+    });
+    expect(registry.eveStreamIndex("global-default")).toBe(2);
     registry.close();
   });
 

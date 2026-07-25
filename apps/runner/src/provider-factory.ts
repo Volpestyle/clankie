@@ -7,6 +7,7 @@ import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "no
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import type { CompiledDoctrine } from "@clankie/doctrine";
+import type { CredentialStore } from "@clankie/credential-broker";
 import {
   projectBrowserToolGrant,
   projectMcpToolGrants,
@@ -83,6 +84,8 @@ export interface ProviderFactoryOptions {
   environment: NodeJS.ProcessEnv;
   workerEnvironment: NodeJS.ProcessEnv;
   runnerStateRoot: string;
+  /** Runner-owned broker access; only the selected provider receives the resolved secret. */
+  credentialStore?: Pick<CredentialStore, "get">;
   /** Compiled doctrine profile; required for MCP and web-tool projection. */
   doctrine?: CompiledDoctrine;
   /** Operator-authored MCP connector registry; projected through doctrine before any worker sees a tool. */
@@ -378,9 +381,14 @@ async function prepareClaude(
   const toolHome = providerToolHome(options, "claude");
   const configDirectory = options.environment.CLAUDE_CONFIG_DIR?.trim() || join(stateRoot, "config");
   await Promise.all([preparePrivateDirectory(toolHome), preparePrivateDirectory(configDirectory)]);
+  const claudeSourceEnvironment: NodeJS.ProcessEnv = { ...options.environment };
+  if (!claudeSourceEnvironment.ANTHROPIC_API_KEY && options.credentialStore !== undefined) {
+    const credential = await options.credentialStore.get("anthropic").catch(() => undefined);
+    if (credential?.type === "api") claudeSourceEnvironment.ANTHROPIC_API_KEY = credential.key;
+  }
   const claudeEnvironment = buildClaudeEnvironment(
     buildToolEnvironment(options.workerEnvironment, toolHome),
-    options.environment,
+    claudeSourceEnvironment,
     configDirectory,
   );
   if (!(await (options.probes?.claudeAuth ?? defaultClaudeAuth)(claudeEnvironment, configDirectory))) {

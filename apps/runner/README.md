@@ -50,18 +50,38 @@ exit state, and hashes; terminal bytes, input, credentials, and lease tokens are
 `createRunnerEnvironmentLifecycle()` composes a concrete environment adapter
 with `@clankie/environment-runtime`. The runtime owns the durable single-body
 lease, capability expiry, action idempotency, cancellation, emergency stop, and
-restart attachment boundary. Concrete Minecraft protocol and account handling
-remain outside the runner until their dedicated tasks land.
+restart attachment boundary.
+
+`createRunnerMinecraftEnvironmentLifecycle()` is the production Minecraft
+composition. The trusted runner owns the durable lifecycle and the
+`MineflayerMinecraftAdapter`; the real motor and runner-private account
+configuration remain inside `integrations/minecraft-mineflayer`. An adapter
+disconnect cannot reattach after process loss, so recovery fails the stale
+session and requires a fresh governed join.
 
 ## Mission pull worker
 
 Set `CLANKIE_REPO_PATH`, `CLANKIE_RUNNER_TOKEN`, and `CLANKIE_VERIFICATION_CHECKS` to enable outbound mission execution. Verification checks are a JSON array of trusted `{id, command, args, dependencyRoots?}` records and run without a shell. Dependency roots are exact, runner-declared read-only inputs; broad or runner-private roots fail closed. Verification gets a synthetic worktree-local home and temporary directory, can read only the candidate, declared dependencies, and required system/toolchain runtime paths, and has no network access. Check output is represented by byte counts and SHA-256 fingerprints rather than copied into mission evidence.
 
-Coding providers are opt-in and fail closed. Enable/configure `CLANKIE_CODEX_*`, `CLANKIE_CLAUDE_*`, and `CLANKIE_PI_*` independently. Only providers that pass executable, authentication configuration, model, tool-boundary, and isolation readiness are advertised. These startup checks do not claim that a remote token/model request has succeeded. Codex requires a private, owner-controlled, structurally valid file-backed `CODEX_HOME/auth.json`, followed by a bounded `login status` forced to the file credential store. The file is opened with no-follow semantics, validated through that handle, and validated again after the probe with the same device, inode, and content digest; ambient Keychain state, symlink swaps, and atomic file replacement cannot make an empty or substituted file ready. Current ChatGPT auth may use managed tokens or a complete registered agent-identity record. Claude accepts only an Anthropic API key or complete Bedrock/Vertex environment configuration; consumer OAuth/Max and partial cloud variables remain unavailable. The heterogeneous descriptors are `codex-implementation`, read-only `claude-verification`, and `pi-debugging`. Pi additionally requires an exact `CLANKIE_PI_OLLAMA_URL` localhost origin, a locally available pinned `CLANKIE_PI_MODEL`, successful sandboxed Ollama tags, and pinned RPC state/model initialization with a nonempty session ID and a session file canonically confined beneath the configured runner session root. Readiness does not invoke model inference.
+`CLANKIE_RUNNER_MAX_CONCURRENCY` sets the local pull-lane ceiling (default
+`4`, range `1..32`). Control-plane doctrine remains the global ceiling. Every
+attempt runs in a task-scoped worktree; roots start at the configured immutable
+base, one-parent tasks start at that parent's sealed output commit, and
+multi-parent tasks merge sealed dependency commits in stable task-id order
+before provider execution. Successful writer state becomes a runner-authored
+snapshot commit. Read-only tasks publish only an unchanged input commit, and
+ignored-file changes never enter a dependency snapshot. See
+[ADR 0041](../../docs/adr/0041-task-scoped-runner-candidates.md).
+
+Coding providers are opt-in and fail closed. Enable/configure `CLANKIE_CODEX_*`, `CLANKIE_CLAUDE_*`, and `CLANKIE_PI_*` independently. Only providers that pass executable, authentication configuration, model, tool-boundary, and isolation readiness are advertised. These startup checks do not claim that a remote token/model request has succeeded. Codex requires a private, owner-controlled, structurally valid file-backed `CODEX_HOME/auth.json`, followed by a bounded `login status` forced to the file credential store. The file is opened with no-follow semantics, validated through that handle, and validated again after the probe with the same device, inode, and content digest; ambient Keychain state, symlink swaps, and atomic file replacement cannot make an empty or substituted file ready. Current ChatGPT auth may use managed tokens or a complete registered agent-identity record. Claude accepts only an Anthropic API key, including the brokered `anthropic` API credential resolved inside the runner, or complete Bedrock/Vertex environment configuration; consumer OAuth/Max and partial cloud variables remain unavailable. A brokered key is injected only into the Claude provider process, is included in the live-evaluation redaction set, and never enters readiness output, another provider, a worker prompt, or evidence. The heterogeneous descriptors are `codex-implementation`, read-only `claude-verification`, and `pi-debugging`. Pi additionally requires an exact `CLANKIE_PI_OLLAMA_URL` localhost origin, a locally available pinned `CLANKIE_PI_MODEL`, successful sandboxed Ollama tags, and pinned RPC state/model initialization with a nonempty session ID and a session file canonically confined beneath the configured runner session root. Readiness does not invoke model inference.
 
 Setting `CLANKIE_SIM_WORKERS=1` replaces the readiness-gated provider fleet with simulated `sim-planner`, `sim-implementer`, `sim-verifier`, and `sim-debugger` descriptors so the full task graph can dry-run under runner isolation on an isolated port with zero provider credentials; sim behavior is declared per task in `task.metadata.sim` (`{files?, status?, summary?, diagnosis?}`), scripted writes land inside the candidate only, and each sim run binds a synthetic `sim:<workerRunId>` native session.
 
-The runner creates one worktree from an immutable base for the first writing task, atomically manifests it, retains it across process-lease reclamation, and gives dependent verification the same path read-only.
+The runner creates one isolated worktree per attempt and atomically records
+each safe task output. Dependent verification receives a different worktree at
+the exact same candidate commit, so sibling branches cannot leak into its
+view. Failed or unsafe attempts remain preserved for inspection but are never
+published as dependency inputs.
 
 For every attempt the runner collects Git changes since the base across commits, HEAD, index identity, working tree, untracked and ignored files, and renames. It normalizes and validates paths against `TaskSpec.writeScope`, atomically writes a private `0600` SHA-256 diff artifact behind an opaque reference, and rejects provider success when scope or read-only state is violated. Ignored content is hashed for change detection but never written to the diff artifact. Settlement exclusively publishes a private validated runner-authored evidence bundle with Git/check/session/correlation facts, syncs it durably, treats identical retries as idempotent, rejects concurrent conflicts, and attaches only its opaque reference and hash.
 

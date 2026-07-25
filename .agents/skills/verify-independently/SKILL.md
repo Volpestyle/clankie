@@ -1,4 +1,5 @@
 ---
+name: verify-independently
 description: Use when independently verifying a worker change, mission result, pull request, or repaired failure against frozen acceptance criteria.
 ---
 

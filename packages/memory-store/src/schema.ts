@@ -1,4 +1,31 @@
 import { z } from "zod";
+import {
+  ApprovedDiscordPersonMemoryProposalSchema,
+  DiscordPersonIdentitySchema,
+  DiscordPersonMemoryFactSchema,
+  DiscordPersonMemoryKindSchema,
+  DiscordPersonMemoryVisibilitySchema,
+  type ApprovedDiscordPersonMemoryProposal,
+  type DiscordPersonIdentity,
+  type DiscordPersonMemoryFact,
+  type DiscordPersonMemoryKind,
+  type DiscordPersonMemoryVisibility,
+} from "@clankie/protocol";
+
+export {
+  ApprovedDiscordPersonMemoryProposalSchema,
+  DiscordPersonIdentitySchema,
+  DiscordPersonMemoryFactSchema,
+  DiscordPersonMemoryKindSchema,
+  DiscordPersonMemoryVisibilitySchema,
+};
+export type {
+  ApprovedDiscordPersonMemoryProposal,
+  DiscordPersonIdentity,
+  DiscordPersonMemoryFact,
+  DiscordPersonMemoryKind,
+  DiscordPersonMemoryVisibility,
+};
 
 export const MEMORY_FACT_SCHEMA_VERSION = 1 as const;
 export const MemoryCategorySchema = z.enum([

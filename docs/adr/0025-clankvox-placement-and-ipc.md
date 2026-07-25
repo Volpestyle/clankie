@@ -1,6 +1,8 @@
 # ADR 0025: ClankVox is an in-repo voice sidecar behind versioned bridge IPC
 
-Status: accepted (James, 2026-07-11; VUH-804).
+Status: superseded for official-bot voice by
+[ADR 0045](0045-official-bot-dave-group-voice.md) (2026-07-25). The versioned
+IPC parser remains an inactive compatibility artifact.
 
 ## Context
 
@@ -202,16 +204,13 @@ second version word to the v1 header. `user_audio_end` closes the current per-sp
 - **Carry v1 music/player commands** — rejected because they contain brain/product policy and are
   not required for the governed outbound PCM boundary.
 
-## Consequences and follow-up gates
+## Consequences
 
-- The TypeScript contract and golden fixtures can be reviewed before Rust is imported.
-- Rust/CMake enter the monorepo toolchain and CI in VUH-805.
-- VUH-805 cannot vendor source until licensing disposition is recorded.
-- VUH-806 replaces the bridge's temporary `joinVoiceChannel()` voice path with the direct adapter,
-  credential collector, child lifecycle, and contract implementation.
-- VUH-807 supplies the first live official-bot/DAVE proof.
-- VUH-808 and VUH-810 share this media boundary without coupling the voice brain to Discord
-  transport.
-- VUH-836 supplies the isolated, opt-in user-session transport. VUH-840 and VUH-841 own receive
-  and publish media respectively; each requires an ADR extension and preserves the single-owner
-  invariant. VUH-246 remains historical v1 evidence, not executable v2 work.
+- The TypeScript schema-1 parser and golden fixtures remain reviewable
+  compatibility evidence, but no Rust source or executable is imported.
+- The official-bot media session uses the maintained `@discordjs/voice` path in
+  ADR 0045 and does not instantiate this direct-adapter design.
+- Importing the AGPL source remains prohibited without a recorded licensing
+  disposition.
+- The isolated, opt-in user-session transport and Go Live receive/publish work
+  remain under ADR 0024 and preserve the single-owner invariant.

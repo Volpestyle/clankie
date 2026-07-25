@@ -66,7 +66,17 @@ describe("captain Eve authored surface", () => {
       .map((entry) => entry.name)
       .sort();
 
-    expect(skillNames).toHaveLength(10);
+    expect(skillNames).toEqual([
+      "clankie-lead",
+      "debug-failure",
+      "evaluate-lead-run",
+      "garden-control-design",
+      "implement-bounded-task",
+      "plan-mission",
+      "review-change",
+      "security-incident",
+      "verify-independently",
+    ]);
     for (const name of skillNames) {
       const skillRoot = resolve(skillsRoot, name);
       const skillFile = resolve(skillRoot, "SKILL.md");

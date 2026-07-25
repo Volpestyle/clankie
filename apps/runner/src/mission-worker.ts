@@ -72,6 +72,17 @@ export interface MissionWorkerOptions {
   terminalManager?: Pick<TerminalManager, "bindNativeSession">;
   /** Runner-owned redacted semantic transcript; raw provider/terminal output never enters it. */
   transcriptProjection?: WorkerTranscriptProjection;
+  /** Local pull lanes. Control-plane doctrine remains the global concurrency ceiling. */
+  maxConcurrency?: number;
+}
+
+export function parseMissionWorkerConcurrency(value: string | undefined): number {
+  if (value === undefined || value.trim() === "") return 4;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 32) {
+    throw new Error("CLANKIE_RUNNER_MAX_CONCURRENCY must be an integer between 1 and 32");
+  }
+  return parsed;
 }
 
 interface AttemptFacts {
@@ -84,11 +95,10 @@ interface AttemptFacts {
   diagnosis?: string;
 }
 
-/** Pulls one assignment at a time and retains each mission candidate for dependent verification. */
+/** Pulls assignments into task-scoped candidates and seals exact dependency snapshots. */
 export class MissionWorker {
   private readonly options: MissionWorkerOptions;
   private readonly adapters = new Map<string, WorkerAdapter>();
-  private readonly candidates = new Map<string, WorktreeLease>();
   private readonly claimIdFactory: () => string;
   private readonly evidenceStore: AttemptEvidenceStore;
   private readonly deliveredSteerCommandIds = new Set<string>();
@@ -102,6 +112,12 @@ export class MissionWorker {
       this.adapters.set(adapter.descriptor.id, adapter);
     }
     if (this.adapters.size === 0) throw new Error("MissionWorker requires at least one adapter");
+    if (
+      options.maxConcurrency !== undefined &&
+      (!Number.isInteger(options.maxConcurrency) || options.maxConcurrency < 1 || options.maxConcurrency > 32)
+    ) {
+      throw new Error("MissionWorker maxConcurrency must be an integer between 1 and 32");
+    }
     this.claimIdFactory = options.claimIdFactory ?? randomUUID;
     this.evidenceStore =
       options.evidenceStore ?? new AttemptEvidenceStore(`${options.artifactRoot}/attempts`);
@@ -123,6 +139,13 @@ export class MissionWorker {
   }
 
   public async runForever(signal: AbortSignal, pollIntervalMs = 1_000): Promise<void> {
+    const lanes = Array.from({ length: this.options.maxConcurrency ?? 1 }, () =>
+      this.runLane(signal, pollIntervalMs),
+    );
+    await Promise.all(lanes);
+  }
+
+  private async runLane(signal: AbortSignal, pollIntervalMs: number): Promise<void> {
     let consecutiveFailures = 0;
     while (!signal.aborted) {
       try {
@@ -373,16 +396,16 @@ export class MissionWorker {
         runnerEvidence.push(after.evidence);
         const readOnlyTask = assignment.task.writeScope.length === 0;
         const changedDuringRun = pathsChangedBetween(before, after);
+        const candidateChangedPaths = [...new Set([...after.changedPaths, ...after.ignoredPaths])].sort();
         const contentViolations = readOnlyTask
           ? changedDuringRun
-          : pathsOutsideWriteScope(changedDuringRun, assignment.task.writeScope);
-        const structuralViolations =
-          assignment.task.kind === "verification"
-            ? [
-                ...(before.headCommit === after.headCommit ? [] : ["<verification changed HEAD>"]),
-                ...(before.indexTree === after.indexTree ? [] : ["<verification changed index>"]),
-              ]
-            : [];
+          : pathsOutsideWriteScope(candidateChangedPaths, assignment.task.writeScope);
+        const structuralViolations = readOnlyTask
+          ? [
+              ...(before.headCommit === after.headCommit ? [] : ["<read-only task changed HEAD>"]),
+              ...(before.indexTree === after.indexTree ? [] : ["<read-only task changed index>"]),
+            ]
+          : [];
         const violations = [...contentViolations, ...structuralViolations];
         if (violations.length > 0) {
           result = {
@@ -400,6 +423,30 @@ export class MissionWorker {
           };
         }
         finalGit = after;
+        const mayPublishFailedVerification =
+          assignment.task.kind === "verification" && result.status === "failed";
+        if (violations.length === 0 && (result.status === "succeeded" || mayPublishFailedVerification)) {
+          try {
+            const output = await this.options.worktrees.sealTaskOutput(lease, {
+              attempt: assignment.attempt,
+              dependencyTaskIds: assignment.task.dependsOn,
+              writer: !readOnlyTask,
+            });
+            result = {
+              ...result,
+              outputs: {
+                ...result.outputs,
+                candidateInputCommit: output.inputCommit,
+                candidateOutputCommit: output.outputCommit,
+              },
+            };
+          } catch {
+            result = failedResult("Runner could not seal the task dependency snapshot.");
+            remainingRisks.push(
+              "The task candidate was retained, but no downstream dependency may consume it.",
+            );
+          }
+        }
       } catch {
         result = failedResult("Runner could not collect authoritative Git evidence.");
         remainingRisks.push("Authoritative Git evidence could not be collected.");
@@ -428,38 +475,15 @@ export class MissionWorker {
   }
 
   private async candidateFor(assignment: RunnerAssignment): Promise<WorktreeLease> {
-    const cached = this.candidates.get(assignment.missionId);
-    if (cached) return cached;
-    const retained = (await this.options.worktrees.listLeases()).find(
-      (lease) => lease.missionId === assignment.missionId,
-    );
-    if (retained) {
-      this.candidates.set(assignment.missionId, retained);
-      return retained;
-    }
-    try {
-      const recovered = await this.options.worktrees.recoverCandidate(assignment.missionId, {
-        missionId: assignment.missionId,
-        taskId: assignment.task.id,
-        workerRunId: assignment.workerRunId,
-      });
-      this.candidates.set(assignment.missionId, recovered);
-      return recovered;
-    } catch (error) {
-      if (assignment.task.kind === "verification" || assignment.task.kind === "review") throw error;
-      if (!String(error).includes("candidate_manifest_missing:")) throw error;
-    }
-    const created = await this.options.worktrees.create(
+    return this.options.worktrees.createTaskCandidate(
       {
         missionId: assignment.missionId,
         taskId: assignment.task.id,
         workerRunId: assignment.workerRunId,
       },
+      assignment.task.dependsOn,
       this.options.baseRef ?? "HEAD",
     );
-    await this.options.worktrees.persistCandidate(created);
-    this.candidates.set(assignment.missionId, created);
-    return created;
   }
 
   private async settle(

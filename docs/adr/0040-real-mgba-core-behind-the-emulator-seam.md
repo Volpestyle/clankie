@@ -19,8 +19,8 @@ rules broken. The governed surface must not change; only the core does.
 The real core is `romdev-platform-gba@0.11.0` (MPL-2.0), which ships a
 prebuilt `mgba_libretro.wasm` + emscripten glue. `MgbaLibretroCore` drives the
 libretro ABI directly in-process: `retro_load_game` from ROM bytes,
-`retro_run()` per frame, keypad via the input-state callback bitmask, EWRAM
-via `retro_get_memory_data(RETRO_MEMORY_SYSTEM_RAM)`, framebuffer (240×160
+`retro_run()` per frame, keypad via the input-state callback bitmask,
+EWRAM/IWRAM via `RETRO_ENVIRONMENT_SET_MEMORY_MAPS`, framebuffer (240×160
 RGB565) captured in the video-refresh callback, and
 `retro_serialize/unserialize` savestates. Single-threaded, frame-stepped, no
 timers, no audio device, no sockets — the no-network boundary stays trivially
@@ -39,7 +39,7 @@ flowchart LR
   S --> T[Deterministic core double - CI]
   S --> M[MgbaFireRedCore - ROM-gated]
   M --> W[mgba_libretro.wasm pinned sha256]
-  M --> E[EWRAM decode: verified RAM map]
+  M --> E[EWRAM and IWRAM: verified memory maps]
   F[Frozen fixture: rom / savestate / wasm sha256 pins] --> A
   F --> M
   A --> V[Hash-chained evidence + artifact refs]
@@ -60,7 +60,7 @@ savestate itself (the fixture's `rngSeed` is a schema anchor, pinned 0);
 determinism is proven by running the scenario twice on fresh cores and
 requiring byte-identical report, decision trace, and evidence trace.
 
-### RAM map: empirically verified EWRAM fields only
+### RAM map: empirically verified fields over published memory maps
 
 Observed fields are decoded from fixed EWRAM addresses verified by input
 differencing against the running ROM (press input → step frames → diff the
@@ -70,29 +70,31 @@ at EWRAM+0x36E58 (1=south, 2=north, 3=west, 4=east). Decoding fails closed on
 implausible values. The scenario's tile map itself is empirical: a flood probe
 moved the player onto every tile marked walkable; unprobed tiles are blocked.
 
-**EWRAM/IWRAM limitation:** the libretro memory API exposes only EWRAM.
-IWRAM (0x03000000) — where FireRed keeps the DMA-protected `gSaveBlock1/2`
-pointers — is unreachable, so save-block fields (money, badges, party box
-data reached via pointer chase) cannot be decoded through this seam. This
-slice therefore observes only fixed-address EWRAM fields, which the bounded
-route scenario needs. The path to full address space, in preference order:
-patch/rebuild the core to widen `retro_get_memory_data` (mGBA is MPL-2.0 and
-the vendor path below already implies rebuildability), or map additional
-fixed-address EWRAM mirrors of the needed fields as later scenarios require
-them. Party/battle decoding is a later slice on the same seam.
+The legacy `retro_get_memory_data(RETRO_MEMORY_SYSTEM_RAM)` accessor is not
+the complete address-space surface. During game load, mGBA publishes its
+memory descriptors through `RETRO_ENVIRONMENT_SET_MEMORY_MAPS`, including
+EWRAM (0x02000000, 256 KB) and IWRAM (0x03000000, 32 KB).
+`MgbaLibretroCore` copies the transient wasm32 descriptor table during the
+environment callback, validates pointer bounds, and snapshots either region
+from the WASM heap. The legacy accessor remains only as an EWRAM compatibility
+fallback for cores that do not publish descriptors. IWRAM makes FireRed's
+pointer-bearing state reachable without a custom emulator build. The
+version-pinned gameplay decoder and its fail-closed field rules are defined in
+[ADR 0043](0043-version-pinned-firered-gameplay-profile.md).
 
 ### State-derived routing that adapts to observed collision
 
 The route driver derives every step by BFS from the currently observed
 position over the fixture's verified tile map — no input transcript. The
 verify-after-act step distinguishes three outcomes: landed on the intended
-tile (continue); emulator refused the transition — position unchanged and
-facing turned to the pressed direction (record the directed edge as observed
-collision and re-plan around it); anything else — frame freeze or unexpected
-tile (desync: pause and fail closed). The FireRed bedroom exhibits a real
-directed collision (the bed-side approach to the target tile), so the frozen
-scenario exercises the re-plan path on every run, and a CI stub reproduces
-the same behavior without a ROM.
+tile (continue); a first press that changes facing without moving (turn, retry
+the same edge); or an already-facing press that remains on the same tile
+(record the directed edge as observed collision and re-plan around it).
+Anything else — frame freeze or unexpected tile — is a desync and pauses
+fail-closed. The FireRed bedroom exhibits a real directed collision (the
+bed-side approach to the target tile), so the frozen scenario exercises the
+re-plan path on every run, and a CI stub reproduces turning and collision
+without a ROM.
 
 ### ROM gating and evidence
 
@@ -143,5 +145,6 @@ and carry it as a repository- or operator-pinned artifact behind the same
   the default and CI stays ROM-free and green.
 - Real-run evidence is deterministic, independently re-hashable, and gated on
   operator-supplied paths; the live-capability boundary remains empty.
-- Observed fields are limited to fixed-address EWRAM until the core's memory
-  access is widened; the limitation and the rebuild path are recorded here.
+- The core exposes EWRAM and IWRAM through the standard libretro memory-map
+  callback; the FireRed gameplay decoder accepts only the pinned ROM profile
+  and rejects unsupported field values rather than inferring game state.

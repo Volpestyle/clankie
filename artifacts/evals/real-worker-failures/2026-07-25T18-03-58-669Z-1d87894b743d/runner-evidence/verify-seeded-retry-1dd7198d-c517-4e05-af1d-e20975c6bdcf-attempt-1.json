@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "missionId": "mission-af2d97c4-d38",
+  "taskId": "verify-seeded-retry",
+  "workerRunId": "1dd7198d-c517-4e05-af1d-e20975c6bdcf",
+  "attempt": 1,
+  "correlationId": "1dd7198d-c517-4e05-af1d-e20975c6bdcf",
+  "provider": "claude",
+  "providerVersion": "0.3.206+2.1.220-Claude-Code-",
+  "nativeSessionId": "b6bb747c-b072-4aa9-846b-7beb925133d4",
+  "summary": "Runner observed a failed provider outcome and recorded authoritative attempt facts.",
+  "files_changed": [],
+  "commands_run": [],
+  "checks": [
+    {
+      "command": "runner-check:retry-fixture:sha256:e9baf1d8a9e5997ecbed5197c72fb12209c61acfb4ca87744962b9e378ce1a29",
+      "exit_code": 1,
+      "result": "failed"
+    }
+  ],
+  "artifacts": [
+    {
+      "ref": "artifact://runner-diff/mission-af2d97c4-d38/1dd7198d-c517-4e05-af1d-e20975c6bdcf-1",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "remaining_risks": [
+    "One or more trusted runner checks failed or could not execute."
+  ],
+  "assumptions": [
+    "Provider prose, raw output, and self-reported evidence are not authoritative runner evidence."
+  ]
+}

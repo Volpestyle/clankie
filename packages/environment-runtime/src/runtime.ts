@@ -32,6 +32,15 @@ export interface EnvironmentAdapterActionCompletion {
   outcome: Record<string, unknown>;
 }
 
+export interface EnvironmentAdapterActionRunning {
+  status: "running";
+  /**
+   * Adapter-owned work settles out of band so the runtime queue remains
+   * available for pause, cancel, lease expiry, and emergency fencing.
+   */
+  completion: Promise<EnvironmentAdapterActionCompletion>;
+}
+
 export class EnvironmentAdapterActionError extends Error {
   public readonly errorCode: string;
   public readonly retryable: boolean;
@@ -48,7 +57,9 @@ export interface EnvironmentAdapterSession {
   readonly adapterSessionId: string;
   pause(reason: string): Promise<void>;
   resume(): Promise<void>;
-  startAction(command: EnvironmentStartActionCommand): Promise<EnvironmentAdapterActionCompletion | void>;
+  startAction(
+    command: EnvironmentStartActionCommand,
+  ): Promise<EnvironmentAdapterActionCompletion | EnvironmentAdapterActionRunning | void>;
   cancelAction(actionId: string, reason: string): Promise<void>;
   stop(reason: string): Promise<void>;
 }
@@ -317,6 +328,14 @@ export class EnvironmentRuntime {
           });
           return completed;
         }
+        if (dispatch?.status === "running") {
+          this.watchAdapterCompletion(
+            record,
+            command.actionId,
+            command.context.correlationId,
+            dispatch.completion,
+          );
+        }
         const running: EnvironmentActionResult = {
           ...queued,
           status: "running",
@@ -357,6 +376,60 @@ export class EnvironmentRuntime {
         return failed;
       }
     });
+  }
+
+  private watchAdapterCompletion(
+    record: StoredSession,
+    actionId: string,
+    correlationId: string,
+    completion: Promise<EnvironmentAdapterActionCompletion>,
+  ): void {
+    void completion.then(
+      (result) =>
+        this.enqueue(async () => {
+          const current = record.actions[actionId];
+          if (!current || terminal(current.result) || record.revokedAt !== null || !ownsBody(record)) return;
+          current.result = {
+            schemaVersion: 1,
+            actionId,
+            sessionId: record.spec.sessionId,
+            status: "completed",
+            acceptedGoalVersion: record.spec.initialGoalVersion,
+            outcome: sanitize(result.outcome, this.secretSet(record.spec.sessionId)) as Record<
+              string,
+              unknown
+            >,
+            updatedAt: this.clock().toISOString(),
+          };
+          await this.persist(record);
+          await this.emit("environment.action.completed", record, correlationId, { actionId });
+        }),
+      (error: unknown) =>
+        this.enqueue(async () => {
+          const current = record.actions[actionId];
+          if (!current || terminal(current.result) || record.revokedAt !== null || !ownsBody(record)) return;
+          const adapterError =
+            error instanceof EnvironmentAdapterActionError
+              ? error
+              : new EnvironmentAdapterActionError("adapter_error", "Environment adapter action failed", true);
+          current.result = {
+            schemaVersion: 1,
+            actionId,
+            sessionId: record.spec.sessionId,
+            status: "failed",
+            acceptedGoalVersion: record.spec.initialGoalVersion,
+            errorCode: adapterError.errorCode,
+            message: this.safeText(record, adapterError.message),
+            retryable: adapterError.retryable,
+            updatedAt: this.clock().toISOString(),
+          };
+          await this.persist(record);
+          await this.emit("environment.action.failed", record, correlationId, {
+            actionId,
+            errorCode: adapterError.errorCode,
+          });
+        }),
+    );
   }
 
   public finishAction(

@@ -7,6 +7,10 @@ checked hash so the private seed/network policy cannot drift. The acting gamepla
 receives the console-only verifier lifecycle command or a filesystem capability
 that can rewrite the fixture, plugin, or result.
 
+The frozen `scenario.yml` is excluded from repository-wide formatting. Its
+exact bytes, not merely its parsed YAML values, are part of the accepted
+scenario identity.
+
 The matching `server.properties` pins a private loopback, offline, whitelisted,
 flat Paper world. Offline mode is laboratory-only; real account/server setup is
 owned by VUH-779 and is not implied by this fixture.

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { SerializeAddon } from "@xterm/addon-serialize";
-import { Terminal } from "@xterm/headless";
+import XtermHeadless from "@xterm/headless";
 import { createLogger } from "@clankie/observability";
 import {
   encodeTerminalBytes,
@@ -13,6 +13,12 @@ import {
 } from "@clankie/terminal-protocol";
 import { spawn, type IPty } from "node-pty";
 import { ControlLeaseManager } from "./control-leases.ts";
+
+// @xterm/headless 6 publishes CommonJS at runtime even though its declarations
+// expose named exports. Node 26 enforces that boundary and rejects a named ESM
+// import, so resolve Terminal from the package's default CommonJS namespace.
+const { Terminal } = XtermHeadless;
+type HeadlessTerminal = InstanceType<typeof Terminal>;
 
 const logger = createLogger({ service: "clankie-runner-terminals", version: "0.1.0" });
 
@@ -128,7 +134,7 @@ interface TerminalRecord {
   session: TerminalSession;
   context: TerminalAttemptContext;
   transport: TerminalTransport;
-  emulator: Terminal;
+  emulator: HeadlessTerminal;
   serializer: SerializeAddon;
   frames: BufferedFrame[];
   bufferedBytes: number;

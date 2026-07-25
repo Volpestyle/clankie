@@ -65,7 +65,7 @@ flowchart LR
   C --> V
   C --> G
   I --> L[Runner-owned environment lease]
-  L --> M[Minecraft MCP adapter]
+  L --> M[Mineflayer environment adapter]
   M --> B[Mineflayer motor loop]
   B --> E[Semantic events]
   E --> C
@@ -80,8 +80,10 @@ gameplay surface without waiting for a model turn.
 
 All environment commands carry source lane, principal and authority tier,
 correlation identity, and expected goal version. Long-running work returns an
-action handle immediately. Mineflayer and Paper types remain behind adapters;
-the shared protocol contains only versioned provider-neutral schemas.
+action handle immediately; adapter work settles out of band so control
+operations do not wait behind pathfinding. Mineflayer and Paper types remain
+behind adapters; the shared protocol contains only versioned provider-neutral
+schemas.
 
 Session and lease contracts use strict provider-profiled v2 resource bounds.
 The compatibility boundary dual-reads the frozen Minecraft-shaped v1 contract,
@@ -89,6 +91,17 @@ normalizes it, and single-writes v2 runtime records. Minecraft retains server,
 dimension, distance, and block bounds; the PokeMMO simulator uses simulator,
 allowed-map, navigation, menu, battle-turn, duration, and typed capability
 bounds. A provider never reuses another provider's field under a new meaning.
+
+The production Minecraft composition lives in
+`integrations/minecraft-mineflayer` and the runner composition seam
+([ADR 0044](adr/0044-runner-owned-mineflayer-private-paper-gameplay.md)).
+It accepts literal loopback Paper destinations only, keeps offline-lab and
+Microsoft profile-cache auth runner-private, and advertises no public-server,
+combat, command, or verifier-control capability. The frozen collect/craft/place
+controller uses ordinary survival actions; only the console-owned Paper
+verifier can declare the goal result. Disconnect requires a fresh governed
+session, while cancellation and emergency stop clear path goals, controls, and
+digging immediately.
 
 ### PokeMMO simulator and live boundary
 
@@ -137,8 +150,9 @@ networked service. `integrations/gba-emulator` implements the adapter behind
 and emergency-stop invariants govern every button press. Emulator bounds carry
 core identity, savestate identity digest, RNG seed, and per-action input/frame
 quotas; actions cover bounded press-for-frames button input, frame advance, and
-cancellable wait; observations cover overworld, menu, party, battle, dialog,
-danger, action state, and bounded `artifact://` framebuffer/RAM references.
+cancellable wait; observations cover overworld, menu, party, inventory, battle,
+dialog, danger, action state, and bounded `artifact://` framebuffer/RAM
+references.
 A state-derived driver proves the frozen
 `scenarios/emulator/verdant-path-trainer-battle/v1` scenario with byte-identical
 report, evidence trace, and decision traces across runs. Two cores implement
@@ -148,11 +162,17 @@ the clearly-labeled deterministic core test double that keeps CI ROM-free, and
 the real headless mGBA WASM core
 ([ADR 0040](adr/0040-real-mgba-core-behind-the-emulator-seam.md)) that runs an
 operator-supplied Pokémon FireRed ROM in-process — version- and
-content-pinned, frame-stepped from a pinned savestate, decoding empirically
-verified EWRAM fields, with a ROM-gated route scenario whose two-run
-byte-identical evidence and no-network tripwire are captured locally while CI
-stays green without a ROM. ROM, BIOS, and savestate bytes never enter the
-repository, fixtures, events, or reports — only SHA-256 identity digests.
+content-pinned, frame-stepped from a pinned savestate. The FireRed US v1.0
+gameplay profile
+([ADR 0043](adr/0043-version-pinned-firered-gameplay-profile.md)) decodes
+overworld, encrypted party and inventory records, dialog, start/party/bag
+menus, and trainer battle state from EWRAM, IWRAM, and the pinned ROM. Its
+state-derived controller proves the complete decision loop in ROM-free CI and
+the `firered-oaks-lab-rival` fixture proves it against two fresh real cores:
+party and bag observation, lab navigation, dialog, move selection, and decoded
+victory all pass with byte-identical evidence and zero network attempts. ROM,
+BIOS, and savestate bytes never enter the repository, fixtures, events, or
+reports — only SHA-256 identity digests.
 
 ## Discord voice media plane
 
@@ -162,30 +182,56 @@ plane, whose replayed projection gates the transport-agnostic presence catalog. 
 lease loss, and failure remove act capability immediately; operator views render the event data
 and never scrape gateway logs or infer lifecycle from action payloads.
 
-Discord voice separates official-bot gateway signaling from native media ownership. The bridge
-registers callbacks directly through `guild.voiceAdapterCreator`, sends gateway OP4 join/leave
-payloads through the returned adapter, and combines the bot's voice-server and voice-state updates
-into a typed ClankVox `session_open`. It does not start `@discordjs/voice` networking for a
-ClankVox-backed session; ClankVox alone owns the Discord voice WebSocket, UDP, RTP/Opus, transport
-AEAD, DAVE, PCM conversion, mixing, and 20 ms send cadence.
+`@discordjs/voice` is the single official-bot media owner
+([ADR 0045](adr/0045-official-bot-dave-group-voice.md)). It owns the voice
+WebSocket, UDP, RTP/Opus, transport encryption, and DAVE; a positive negotiated
+DAVE protocol is required before the session accepts audio. The bridge
+subscribes only to explicitly consented Discord user ids, caps each utterance,
+and zeroes raw PCM after the memory-only brokered speech request.
 
-The bridge owns the schema-1 process boundary in
-[`apps/discord-bridge/src/clankvox-ipc.ts`](../apps/discord-bridge/src/clankvox-ipc.ts). Commands
-are capped NDJSON; sidecar output is a capped lane-plus-u32-little-endian frame. Discord media is
-48 kHz Opus. The governed voice brain sends and receives model-facing 24 kHz mono s16le PCM by
-default; the sidecar owns conversion in both directions. Raw audio remains outside mission and
-captain semantic event streams.
+Speaker-attributed text enters a continuing `discord_voice` Eve lane. The
+control plane adds only approved guild/user person-memory projection; the
+request cannot manufacture trusted memory. Spoken responses return as
+memory-only 24 kHz mono PCM, are converted to Discord's 48 kHz stereo stream,
+and disclose an AI-generated voice. Overlap and barge-in are explicit: another
+speaker can interrupt a stale synthesized response, while response playback is
+serialized. Receipts contain ids, counts, DAVE version, duration, and typed
+outcomes, never audio or text.
 
-The accepted placement is `apps/clankvox/`. VUH-805 creates the complete Cargo crate and pnpm
-package facade atomically after the upstream AGPL-3.0-or-later versus repository Apache-2.0
-licensing disposition is recorded. This schema-1, official-bot boundary deliberately excludes
-Go Live/video, user-session paths, v1 Realtime orchestration, and v1 music/YouTube/player-control
-IPC. Go Live watch and publish remain in v2 as isolated, explicitly enabled personal-lab
-capabilities: VUH-836 owns the separate user-session transport, VUH-840 owns bounded stream
-observation, and VUH-841 owns governed publishing. Those paths require a new versioned media
-boundary and may not make the bot and user-session transports co-own a voice/media session. See
-[`ADR 0024`](adr/0024-discord-dual-plane-presence.md) and
-[`ADR 0025`](adr/0025-clankvox-placement-and-ipc.md).
+The ClankVox schema-1 parser and golden fixtures remain inactive compatibility
+artifacts. No AGPL ClankVox source is imported.
+
+Clankie has two Discord bodies and one character. The official bot lives in
+`apps/discord-bridge`; the isolated personal-lab user session lives in
+`apps/discord-user-session` ([ADR 0048](adr/0048-discord-user-session-transport.md)).
+Both consume `@clankie/discord-presence-core`, and both derive their Eve lane
+address from the channel rather than the transport, so a conversation continues
+across a body swap instead of forking into two streams of consciousness. The
+user session is off by default, denied by high-assurance and team profiles, and
+gated behind a durable operator opt-in bound to the doctrine profile hash. Its
+transport is proven by which broker-owned bearer authenticated, never by a
+request body. The two transports never co-own a voice or media session. Go Live
+watch and publish remain isolated, explicitly enabled personal-lab capabilities
+under [ADR 0024](adr/0024-discord-dual-plane-presence.md).
+
+The current supported Discord surfaces do not expose Go Live watch/publish to
+a bot or the Social SDK, and normal-user automation remains forbidden. The
+versioned capability evaluator therefore reports screen media as an explicit
+API/policy blocker rather than advertising the transport stubs as working.
+
+## Discord person-memory projection
+
+Long-term social memory is separate from mission memory. The durable key is the
+stable Discord `(guildId, userId)` identity; display names are presentation
+only. Text and voice may submit an explicit bounded proposal whose provenance
+asserts `rawTranscript: false`, but `memory.profile.write` and an authenticated
+operator approval remain the only commit path.
+
+Guild, channel, and operator-private visibility are evaluated at read time.
+Expiry maintenance, approved correction, operator export, and hard deletion
+have explicit store/control-plane boundaries and semantic receipts. A user id
+never carries facts across guilds. See
+[`ADR 0042`](adr/0042-discord-person-memory-projection.md).
 
 ## Terminal data plane
 
@@ -312,6 +358,22 @@ records never supply grants.
 9. Independent verification and review decide whether success criteria are met.
 10. Privileged actions pass through `ActionRequest → ActionDecision → Approval → Connector`.
 11. The evaluator scores the mission and records recommendations.
+
+## Unified live capability evaluation
+
+The lead-agent lab runs the strict nine-row manifest under
+`evals/capabilities/v1/manifest.yaml`
+([ADR 0046](adr/0046-versioned-unified-capability-evaluation.md)). Readiness
+gates run before live work, deterministic checks remain visible when an
+external service is unavailable, and missing human/operator input is distinct
+from implementation failure. The overall result is non-averagable: every row
+must pass.
+
+Command output is bounded and discarded after hashing. The durable report
+contains only gate ids, typed status/issue codes, exit status, durations, and
+output hashes. Existing FireRed evidence is verified from its operator-local
+receipt by recomputing every artifact hash; copyrighted bytes are not reopened
+or copied into the report.
 
 ## Package dependency direction
 

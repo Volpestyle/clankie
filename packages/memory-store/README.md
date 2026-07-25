@@ -36,3 +36,17 @@ flowchart LR
 
 SQLite uses WAL journaling and `synchronous=FULL`. Schema changes append a new
 migration; shipped migrations are immutable.
+
+## Discord person memory
+
+Long-term Discord relationship memory uses a separate projection keyed by the
+stable `(guildId, userId)` pair ([ADR 0042](../../docs/adr/0042-discord-person-memory-projection.md)).
+It does not reuse mission-memory categories or global normalized
+deduplication. An approved fact records guild/channel/operator-private
+visibility, confidence, optional expiry, correction lineage, and content-free
+text/voice/operator provenance with `rawTranscript: false`.
+
+`applyApprovedDiscordPersonProposal` is the sole person-memory write boundary.
+Guild/channel recall excludes operator-private and expired facts. Export and
+hard deletion are separate operator-only control-plane operations; deletion
+returns the removed fact ids for a semantic receipt.

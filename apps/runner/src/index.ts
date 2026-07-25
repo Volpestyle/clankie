@@ -1,11 +1,12 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { ClankieApiClient } from "@clankie/api-client";
+import { createDefaultCredentialStore } from "@clankie/credential-broker";
 import { compileDoctrine, loadDoctrineFile, type CompiledDoctrine } from "@clankie/doctrine";
 import { SqliteEventStore } from "@clankie/event-store";
 import { loadMcpRegistryFile, type McpRegistry } from "@clankie/mcp-registry";
 import { createLogger } from "@clankie/observability";
-import { MissionWorker } from "./mission-worker.ts";
+import { MissionWorker, parseMissionWorkerConcurrency } from "./mission-worker.ts";
 import { ProcessLeaseManager } from "./process-leases.ts";
 import { createReadyProviderFleet } from "./provider-factory.ts";
 import { publishProviderReadinessSignal } from "./provider-readiness-signal.ts";
@@ -27,6 +28,11 @@ import {
   createWorkerTranscriptGateway,
   WORKER_TRANSCRIPT_GATEWAY_PORT,
 } from "./worker-transcript-gateway.ts";
+
+export {
+  createRunnerEnvironmentLifecycle,
+  createRunnerMinecraftEnvironmentLifecycle,
+} from "./environment-lifecycle.ts";
 
 if (process.argv.includes("--recovery-probe")) {
   const { runRecoveryProbeFromCli } = await import("./recovery-probe.ts");
@@ -228,6 +234,7 @@ if (!repoPath) {
         environment: process.env,
         workerEnvironment,
         runnerStateRoot,
+        credentialStore: createDefaultCredentialStore(),
         ...(doctrine ? { doctrine } : {}),
         ...(mcpRegistry ? { mcpRegistry } : {}),
         sandbox: providerSandbox,
@@ -318,12 +325,14 @@ if (!repoPath) {
       hasHumanControlLease: (workerRunId) => terminalManager.hasHumanControl(workerRunId),
       terminalManager,
       transcriptProjection,
+      maxConcurrency: parseMissionWorkerConcurrency(process.env.CLANKIE_RUNNER_MAX_CONCURRENCY),
       ...(process.env.CLANKIE_BASE_REF ? { baseRef: process.env.CLANKIE_BASE_REF } : {}),
     });
     logger.info(
       {
         workerIds: fleet.adapters.map((adapter) => adapter.descriptor.id),
         simWorkers: simWorkersEnabled(process.env),
+        maxConcurrency: parseMissionWorkerConcurrency(process.env.CLANKIE_RUNNER_MAX_CONCURRENCY),
       },
       "runner pull worker started",
     );

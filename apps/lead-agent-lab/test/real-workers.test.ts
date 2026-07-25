@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, chmod, mkdir, mkdtemp, readFile, stat, symlink, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -7,6 +7,7 @@ import type { MissionPlan } from "@clankie/protocol";
 import { describe, expect, it } from "vitest";
 import {
   FROZEN_REAL_WORKER_FIXTURE_SHA256,
+  assertExpectedBundleFiles,
   buildProductionProcessSpecs,
   collectFileBackedSecretValues,
   commitRealWorkerRun,
@@ -23,6 +24,18 @@ import {
 const execFileAsync = promisify(execFile);
 
 describe("real-provider worker gate", () => {
+  it("requires writers to change only the implementation and verifiers to remain read-only", () => {
+    const writer = { spec: { id: "debug-retry", kind: "debugging" } };
+    const verifier = { spec: { id: "reverify-retry", kind: "verification" } };
+
+    expect(() => assertExpectedBundleFiles(writer, ["src/retry.mjs"])).not.toThrow();
+    expect(() => assertExpectedBundleFiles(verifier, [])).not.toThrow();
+    expect(() => assertExpectedBundleFiles(verifier, ["src/retry.mjs"])).toThrow(
+      "unexpected_bundle_files:reverify-retry",
+    );
+    expect(() => assertExpectedBundleFiles(writer, [])).toThrow("unexpected_bundle_files:debug-retry");
+  });
+
   it("freezes the aggregate scenario and fixture bytes", async () => {
     expect(await computeFrozenFixtureAggregate(realWorkersRepoRoot)).toBe(FROZEN_REAL_WORKER_FIXTURE_SHA256);
   });
@@ -71,6 +84,7 @@ describe("real-provider worker gate", () => {
         CLANKIE_PI_ENABLED: "true",
         CLANKIE_RUNNER_READINESS_PATH: "/runtime/runner-readiness.json",
         CLANKIE_RUNNER_READINESS_NONCE: "a".repeat(64),
+        CLANKIE_WORKER_TRANSCRIPT_PORT: "0",
       },
     });
     expect(JSON.parse(runner.environment.CLANKIE_VERIFICATION_CHECKS as string)).toEqual([
@@ -104,6 +118,8 @@ describe("real-provider worker gate", () => {
         return Promise.resolve({ accepted: true });
       },
       addRecovery: (_missionId, recovery) => {
+        expect(recovery.debugger.dependsOn).toEqual(["implement-seeded-retry"]);
+        expect(recovery.reverify.dependsOn).toEqual(["debug-retry"]);
         calls.push(
           `recovery:${recovery.failedTaskId}:${recovery.debugger.preferredHarness}:${recovery.reverify.preferredHarness}`,
         );
@@ -146,23 +162,29 @@ describe("real-provider worker gate", () => {
   });
 
   it("does not accept an ambient AWS profile as Claude provider authentication", async () => {
-    await expect(
-      execFileAsync(process.execPath, [join(realWorkersRepoRoot, "scripts/real-provider-readiness.mjs")], {
-        cwd: realWorkersRepoRoot,
-        env: {
-          PATH: process.env.PATH,
-          HOME: process.env.HOME,
-          CLANKIE_CLAUDE_EXECUTABLE: process.execPath,
-          CLANKIE_CLAUDE_MODEL: "claude-verifier",
-          CLAUDE_CODE_USE_BEDROCK: "true",
-          AWS_PROFILE: "ambient-profile-must-not-pass",
-          AWS_REGION: "us-east-1",
-        },
-      }),
-    ).rejects.toMatchObject({
-      code: 1,
-      stdout: expect.stringContaining('"provider":"claude","ready":false'),
-    });
+    const root = await mkdtemp(join(tmpdir(), "clankie-empty-credentials-"));
+    try {
+      await expect(
+        execFileAsync(process.execPath, [join(realWorkersRepoRoot, "scripts/real-provider-readiness.mjs")], {
+          cwd: realWorkersRepoRoot,
+          env: {
+            PATH: process.env.PATH,
+            HOME: process.env.HOME,
+            CLANKIE_CREDENTIALS_FILE: join(root, "credentials.json"),
+            CLANKIE_CLAUDE_EXECUTABLE: process.execPath,
+            CLANKIE_CLAUDE_MODEL: "claude-verifier",
+            CLAUDE_CODE_USE_BEDROCK: "true",
+            AWS_PROFILE: "ambient-profile-must-not-pass",
+            AWS_REGION: "us-east-1",
+          },
+        }),
+      ).rejects.toMatchObject({
+        code: 1,
+        stdout: expect.stringContaining('"provider":"claude","ready":false'),
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("aborts from the production runner signal before mission creation when boundaries are unavailable", async () => {

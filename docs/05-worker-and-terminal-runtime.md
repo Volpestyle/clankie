@@ -56,21 +56,31 @@ Git state, trusted check exits, normalized completed events, runner configuratio
 ## Worktree lifecycle
 
 1. resolve immutable base commit;
-2. create mission/task branch and worktree;
+2. materialize a task-scoped branch/worktree from the exact dependency output
+   commits, merging multiple parents in stable task-id order;
 3. seed task contract and minimal context;
 4. acquire path locks/write-scope lease;
 5. start worker with bounded credentials and network profile;
 6. collect events, terminal stream, diff, tests, and artifacts;
-7. freeze result and release process lease;
-8. verifier operates read-only or in a separate worktree;
-9. integration task reconciles accepted branches;
+7. seal scope-valid, non-ignored writer state as a runner-authored output
+   commit and atomically publish its task-output manifest;
+8. verifier operates read-only in a separate worktree at that exact output
+   commit;
+9. integration task receives only its declared, runner-sealed parent branches;
 10. clean up only after retention/approval policy permits.
 
 The recurring control-plane heartbeat starts before candidate acquisition and initial evidence collection. Claim, event, heartbeat, and settlement calls retry with bounded backoff. An exhausted transient polling operation delays and continues instead of terminating the runner loop. A noninteractive run treats an unexpected `waiting_user` event as a blocked settlement and aborts the provider by default.
 
 Worker processes run under durable leases (`ProcessLeaseManager` in `apps/runner/src/process-leases.ts`): liveness is pid + process start time (a recycled pid can never masquerade as a live worker), heartbeats extend the lease, an expired heartbeat transitions the run to a recoverable `expired` state in the event log, cancellation is cooperative-then-hard (SIGTERM, grace, SIGKILL) and idempotent, and on restart the runner re-adopts still-live processes or fails them explicitly. `MissionEngine.expireWorkerLease` requeues the task while attempts remain and fails it explicitly otherwise.
 
-Steps 1, 2, 4, and 10 are implemented by `WorktreeManager` in `apps/runner/src/worktrees.ts`: write leases are exclusive-create records keyed by the canonical (symlink-resolved) path hash, orphaned leases are reclaimed on runner startup, and released worktrees are removed when unchanged or preserved with evidence when they hold uncommitted or unmerged work.
+Steps 1, 2, 4, 7, and 10 are implemented by `WorktreeManager` in
+`apps/runner/src/worktrees.ts`: write leases are exclusive-create records keyed
+by the canonical (symlink-resolved) path hash, task outputs are private atomic
+manifests bound to exact input/output commits, orphaned leases are reclaimed on
+runner startup, and released worktrees are removed when unchanged or preserved
+with evidence when they hold uncommitted or unmerged work. Ignored-file changes
+remain hash-only evidence and cannot enter an output commit. See
+[ADR 0041](adr/0041-task-scoped-runner-candidates.md).
 
 ## Terminal protocol
 

@@ -749,6 +749,18 @@ export function decideAction(
     };
   }
 
+  // Transport lifecycle changes which Discord identity Clankie wears, so it
+  // fails closed on the same terms as presence writes rather than inheriting a
+  // permissive risk-class default by omission (ADR 0048).
+  if (request.action.startsWith("discord.transport.") && classification === undefined) {
+    return {
+      effect: "deny",
+      reason: `Discord transport action ${request.action} is not explicitly classified by doctrine.`,
+      matchedPolicyIds: ["discord-transport:implicit-deny"],
+      obligations: [],
+    };
+  }
+
   if (classification) {
     const classPolicy = doctrine.profile.riskClasses?.[classification.riskClass];
     if (classPolicy) {

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "missionId": "mission-5d316383-6f6",
+  "taskId": "reverify-retry",
+  "workerRunId": "1182777a-a959-419d-9080-7e2b09366727",
+  "attempt": 1,
+  "correlationId": "1182777a-a959-419d-9080-7e2b09366727",
+  "provider": "claude",
+  "providerVersion": "0.3.206+2.1.220-Claude-Code-",
+  "nativeSessionId": "f5929cc1-5393-4a8a-b09b-13c9a50d7cd8",
+  "summary": "Runner observed a succeeded provider outcome and recorded authoritative attempt facts.",
+  "files_changed": [],
+  "commands_run": [],
+  "checks": [
+    {
+      "command": "runner-check:retry-fixture:sha256:e9baf1d8a9e5997ecbed5197c72fb12209c61acfb4ca87744962b9e378ce1a29",
+      "exit_code": 0,
+      "result": "passed"
+    }
+  ],
+  "artifacts": [
+    {
+      "ref": "artifact://runner-diff/mission-5d316383-6f6/1182777a-a959-419d-9080-7e2b09366727-1",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "remaining_risks": [],
+  "assumptions": [
+    "Provider prose, raw output, and self-reported evidence are not authoritative runner evidence."
+  ]
+}

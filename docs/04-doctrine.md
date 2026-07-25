@@ -138,6 +138,14 @@ The high-assurance overlay denies every `discord.presence.*` action at the
 profile layer. Presence endpoints return 403 without invoking a transport while
 that overlay is active.
 
+Discord transport lifecycle is a separate action family. `discord.transport.*`
+fails closed when unclassified, exactly like `discord.presence.*`, and the
+high-assurance overlay denies `discord.transport.user_session_connect`. That
+decision is evaluated when the owner records the user-session opt-in
+([ADR 0048](adr/0048-discord-user-session-transport.md)), so a denying profile
+means the opt-in cannot be recorded and the personal-lab body can never start —
+rather than being refused action by action after it is already connected.
+
 ## Connector-neutral policy
 
 Connectors are an open, MCP-first ecosystem. Doctrine never requires a vendor noun. Each connector action declares one risk class:

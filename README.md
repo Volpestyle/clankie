@@ -112,22 +112,33 @@ Clankie is built to **join the places you and/or your team already works**, Disc
 - **Speaks when it matters, and when he feels like it.** Status, blocks, and harvest results surface in
   the mission thread when attention is required. But Clankie also can bring things to your attention if he feels like you'll be interested.
 
-A day in the life: after showing clankie some memes in discord livestream, you `@clankie` in `#eng` to cut a release branch for ur developing app, Uber, for cycle enthusiasts.
+A day in the life: after chatting with Clankie in Discord, you `@clankie` in
+`#eng` to cut a release branch for your developing app, Uber, for cycle
+enthusiasts.
 It opens a mission thread, spawns workers you can still inspect in the garden or terminal,
 posts when review is ready, and only hands off to an authenticated surface when
 something irreversible needs a human.
 
 | Surface                      | Role                                                           | Authority                                                     |
 | ---------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------- |
-| **Discord** (shipped bridge) | Ambient teammate: missions, status, steer, optional voice join | Create / steer / query; never complete privileged approvals   |
+| **Discord** (shipped bridge) | Ambient teammate: text, missions, steer, consented group voice | Create / steer / query; never complete privileged approvals   |
 | **Slack & peers**            | Same ambient contract                                          | Protocol-shaped; adapters as they land                        |
 | **TUI · garden · phone**     | High-trust operator views                                      | Inspect fleet, take over terminals, drive authenticated flows |
 | **Authenticated surface**    | Approvals and irreversible actions                             | Merge, deploy, doctrine, recorded human authority             |
 
-The Discord bridge is the first ambient channel (`apps/discord-bridge`): official
-bot only, role-bound ambient vs approval handoff, mission threads as
-presentation over control-plane state. See
-[`docs/04-doctrine.md`](docs/04-doctrine.md) for persona and channel authority.
+The Discord bridge is the first ambient channel (`apps/discord-bridge`):
+official bot, role-bound ambient vs approval handoff, bounded text,
+explicitly consented DAVE group voice, and mission threads as presentation
+over control-plane state.
+
+Clankie has two Discord bodies and one character. Alongside the official bot,
+`apps/discord-user-session` is an isolated personal-lab user session that shares
+the same Eve lane, character, and person memory — a conversation continues
+across a body swap rather than forking. It is off by default, denied by
+high-assurance and team profiles, and requires a durable owner opt-in that
+records acceptance of Discord ToS and account risk. See
+[`docs/adr/0048-discord-user-session-transport.md`](docs/adr/0048-discord-user-session-transport.md)
+and [`docs/04-doctrine.md`](docs/04-doctrine.md) for persona and channel authority.
 
 ## Get started
 
@@ -209,15 +220,16 @@ evidentiary gate.
 
 ## Main applications
 
-| App                   | Responsibility                                                                                                   |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `apps/captain-eve`    | Eve-based captain: personality, conversation, planning, critique, synthesis                                      |
-| `apps/control-plane`  | Mission API, doctrine compilation, scheduling, policy, approvals                                                 |
-| `apps/runner`         | Worktrees, processes, PTYs, credentials, provider sessions, control leases                                       |
-| `apps/tui`            | Operator console (`@earendil-works/pi-tui`)                                                                      |
-| `apps/discord-bridge` | Ambient teammate surface (official bot): mission threads, steer, voice join/leave; approvals never complete here |
-| `apps/relay`          | Dev remote relay (semantic control vs terminal data planes)                                                      |
-| `apps/lead-agent-lab` | Deterministic self-build and lead-agent evaluation laboratory                                                    |
+| App                         | Responsibility                                                                                                                           |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/captain-eve`          | Eve-based captain: personality, conversation, planning, critique, synthesis                                                              |
+| `apps/control-plane`        | Mission API, doctrine compilation, scheduling, policy, approvals                                                                         |
+| `apps/runner`               | Worktrees, processes, PTYs, credentials, provider sessions, control leases                                                               |
+| `apps/tui`                  | Operator console (`@earendil-works/pi-tui`)                                                                                              |
+| `apps/discord-bridge`       | Ambient teammate surface (official bot): bounded text, mission threads, steer, consented DAVE group voice; approvals never complete here |
+| `apps/discord-user-session` | Isolated personal-lab user-session Discord body; off by default behind a durable owner opt-in                                            |
+| `apps/relay`                | Dev remote relay (semantic control vs terminal data planes)                                                                              |
+| `apps/lead-agent-lab`       | Deterministic self-build and lead-agent evaluation laboratory                                                                            |
 
 The free graphical command center (iOS / Android / macOS) is a **separate private product repo** (`clankie-app`). This monorepo is the agent OS and public protocols.
 
@@ -269,9 +281,12 @@ agent.
 - [`docs/10-security-threat-model.md`](docs/10-security-threat-model.md)
 - [`docs/11-development.md`](docs/11-development.md)
 - [`docs/12-release-criteria.md`](docs/12-release-criteria.md)
+- [`docs/17-capability-completion-contract.md`](docs/17-capability-completion-contract.md) — end-to-end live gates
 - [`docs/testing/`](docs/testing/) — dated, re-runnable verification archives
 - [`docs/adr/`](docs/adr/) — architecture decisions
 - [`apps/discord-bridge/README.md`](apps/discord-bridge/README.md) — ambient Discord surface
+- [`apps/discord-user-session/README.md`](apps/discord-user-session/README.md) — personal-lab user-session body
+- [`packages/discord-presence-core/README.md`](packages/discord-presence-core/README.md) — transport-neutral Discord participation
 - [`branding/`](branding/) — official mark, banner, regenerate recipes
 
 ## Open-core boundary

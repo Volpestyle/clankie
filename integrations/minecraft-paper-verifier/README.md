@@ -46,8 +46,9 @@ integrations/minecraft-paper-verifier/scripts/capture-evidence.sh
 ```
 
 `scripts/run-lab.sh` starts a disposable local server only when the operator
-supplies a trusted Paper 1.21.11 JAR and explicitly acknowledges the Minecraft
-EULA. `scripts/reset-lab.sh` deletes only this package's `.lab` directory.
+supplies a Paper 1.21.11 JAR, pins its exact bytes with
+`PAPER_JAR_SHA256`, and explicitly acknowledges the Minecraft EULA.
+`scripts/reset-lab.sh` deletes only this package's `.lab` directory.
 
 Server-console lifecycle:
 

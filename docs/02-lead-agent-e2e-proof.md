@@ -147,7 +147,7 @@ The system may build itself; it may not certify itself alone.
 
 `pnpm eval:self-build` validates the mechanics offline. It intentionally injects an off-by-one bug and requires a distinct verifier and debugger. Its scorecard treats critical failures as non-averagable: a high cosmetic score cannot hide an unapproved side effect or missed defect.
 
-## Next real-provider gate
+## Real-provider gate
 
 `pnpm eval:real-workers` runs the frozen injected-retry-defect fixture through the production
 control-plane HTTP API and the production pull runner. It is opt-in and is not part of
@@ -157,7 +157,9 @@ The command first runs the fail-closed preflight also exposed as
 `pnpm eval:real-workers:readiness`. Readiness fails nonzero unless all of the following are true:
 
 - Codex has an explicit model, executable, authenticated `CODEX_HOME`, and successful CLI login status;
-- Claude has an explicit model and executable plus an Anthropic API key or complete Bedrock/Vertex credentials;
+- Claude has an explicit model and executable plus a brokered or
+  environment-provided Anthropic API key, or complete Bedrock/Vertex
+  credentials;
 - the repository-pinned Pi 0.80.6 RPC entry, macOS Seatbelt, and an exact localhost Ollama origin/model are available.
 
 That lightweight preflight provides early operator feedback. The production runner's provider factory is
@@ -179,15 +181,19 @@ The live driver:
 4. routes the seeded implementation to Codex and read-only verification to Claude;
 5. requires the exact unchanged fixture check to fail before authenticated recovery is accepted;
 6. routes the debugger to Pi and a fresh unchanged re-verification to Claude;
-7. requires mission success, distinct native session IDs/events, runner-authored evidence bundles, and unchanged scenario/test hashes.
+7. requires mission success, distinct native session IDs/events,
+   runner-authored evidence bundles, exact task-output manifest/branch/commit
+   lineage, one final implementation-only diff, and unchanged scenario/test
+   hashes.
 
 The final AGENTS-shaped report, redacted process logs, copied evidence bundles, and hash-chained
 event/log manifest are staged privately, synced, and atomically published under
 `artifacts/evals/real-workers/`. A run counts as PASS only when that final directory contains a valid
 `COMMITTED.json` whose hashes bind the report, manifest, and every other artifact. Only that root marker is
 excluded from the artifact tree digest; a nested file named `COMMITTED.json` remains covered. Before readiness
-or provider spawn, recognized Codex `auth.json` and enabled Vertex ADC secret leaves are loaded only into the
-in-memory redactor. Provider output is redacted before it becomes retained process output and again before
+or provider spawn, recognized Codex `auth.json`, brokered Anthropic API keys,
+and enabled Vertex ADC secret leaves are loaded only into the in-memory
+redactor. Provider output is redacted before it becomes retained process output and again before
 private log persistence; file contents and the secret set never become artifacts. A report in a staging
 directory is not a result.
 The report records all

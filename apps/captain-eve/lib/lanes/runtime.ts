@@ -18,7 +18,7 @@ import {
   parseModelRef,
   type ConfiguredLanguageModel,
 } from "@clankie/model-provider";
-import type { HandleMessageStreamEvent } from "eve/client";
+import { isCurrentTurnBoundaryEvent, type HandleMessageStreamEvent } from "eve/client";
 import { captainLaneAddress, type EveChannelLaneContext } from "./context.ts";
 import { redactEveStreamEvent } from "./transcript.ts";
 import { captainLaneDatabasePath, stableProjectId } from "../session/project-identity.ts";
@@ -150,8 +150,9 @@ function reportProjectionError(conversationId: string, eventType: string, error:
  * cross-conversation fail-closed), consumes the session event stream from the
  * private per-conversation stream index (so a re-driven turn never re-projects
  * the transcript), redacts and publishes each event directly into the durable
- * log/tail (no hook target race), advances the stream index, and derives the
- * terminal completed/waiting/failed state. The caller's lifetime is irrelevant.
+ * log/tail (no hook target race), advances the stream index, and stops at the
+ * turn's boundary event to derive the terminal completed/waiting/failed state.
+ * The caller's lifetime is irrelevant.
  */
 export async function runCaptainConversationTurn(input: {
   readonly registry: OperatorConversationRegistry;
@@ -166,19 +167,23 @@ export async function runCaptainConversationTurn(input: {
     message: input.message,
     ...(priv.continuationToken === undefined ? {} : { continuationToken: priv.continuationToken }),
   });
-  const rebind = (state: "active" | "waiting" | "completed" | "failed"): void => {
+  const rebind = (state: "active" | "waiting" | "completed" | "failed", continuationToken?: string): void => {
     input.registry.rebindSession({
       conversationId: input.conversationId,
       sessionId: turn.sessionId,
-      ...(turn.continuationToken === undefined ? {} : { continuationToken: turn.continuationToken }),
+      ...(continuationToken === undefined ? {} : { continuationToken }),
       state,
     });
   };
   // Bind early (self-rotation-aware) so the reconcile hook resolves this session
   // to THIS conversation and rotation resets the stream index before we resume.
-  rebind("active");
+  rebind("active", turn.continuationToken);
   let index = input.registry.eveStreamIndex(input.conversationId);
   let status: "completed" | "waiting" | "failed" = "failed";
+  // The channel `send` echoes the caller's own token back on the session handle;
+  // the resume handle for the NEXT turn arrives only on the `session.waiting`
+  // boundary event (channel-local, re-namespaced by the next `send`).
+  let resumeToken = turn.continuationToken;
   for await (const event of turn.events(index)) {
     for (const body of redactEveStreamEvent(event)) {
       try {
@@ -189,11 +194,22 @@ export async function runCaptainConversationTurn(input: {
     }
     index += 1;
     input.registry.advanceEveStreamIndex(input.conversationId, index);
-    if (event.type === "session.completed") status = "completed";
-    else if (event.type === "session.waiting") status = "waiting";
-    else if (event.type === "session.failed") status = "failed";
+    if (event.type === "session.waiting") resumeToken = event.data.continuationToken;
+    if (isCurrentTurnBoundaryEvent(event)) {
+      // A durable session's run stream stays OPEN while the session parks
+      // waiting for its next message, so the turn must end at its boundary
+      // event — draining to stream end never returns and would hold this
+      // conversation's admission lease forever, starving every later turn.
+      status =
+        event.type === "session.completed"
+          ? "completed"
+          : event.type === "session.waiting"
+            ? "waiting"
+            : "failed";
+      break;
+    }
   }
-  rebind(status);
+  rebind(status, resumeToken);
   if (status === "failed") throw new Error(`Captain turn failed for conversation ${input.conversationId}`);
 }
 
@@ -218,7 +234,12 @@ export async function buildOperatorConversationService(
   );
 }
 
-/** Adapts an eve channel `Session` event stream into an `AsyncIterable`. */
+/**
+ * Adapts an eve channel `Session` event stream into an `AsyncIterable`. The
+ * consumer stops at the turn boundary while the underlying durable run stream
+ * stays open, so early exit must cancel the reader — not just release the lock —
+ * or every turn leaks a live attachment to the session's run stream.
+ */
 export async function* eveSessionEvents(
   stream: Promise<ReadableStream<HandleMessageStreamEvent>>,
 ): AsyncIterable<HandleMessageStreamEvent> {
@@ -230,6 +251,7 @@ export async function* eveSessionEvents(
       yield value;
     }
   } finally {
+    await reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }
 }

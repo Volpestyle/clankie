@@ -31,3 +31,21 @@ pnpm --filter @clankie/lead-agent-lab eval:experiment -- --write-artifacts
 ```
 
 Scenario artifacts are written under `artifacts/evals/experiment/scenarios/<scenario-id>/`. They contain hashes, check outcomes, event types, and bounded metadata; prompt-injection canaries and private raw evidence are never retained.
+
+## Unified capability gate
+
+`pnpm eval:capabilities` runs the versioned nine-row manifest at
+`evals/capabilities/v1/manifest.yaml`. It combines readiness, deterministic,
+and live-proof commands without a shell and exits nonzero unless every
+capability passes. Missing operator inputs and policy/API blockers are typed
+separately from implementation failures.
+
+The report is written atomically to `artifacts/evals/capabilities/`. Raw command
+output is never retained; receipts contain only normalized issue codes, exit
+status, duration, and output hashes. See
+[ADR 0046](../../docs/adr/0046-versioned-unified-capability-evaluation.md).
+
+`pnpm eval:real-workers:receipt` validates the last atomically committed
+real-provider proof without starting another provider mission. It verifies the
+committed tree, frozen fixture identity, exact Codex → Claude → Pi → Claude
+lineage, and distinct worker/native session identities.

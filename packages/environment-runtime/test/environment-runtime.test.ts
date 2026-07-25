@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   EnvironmentRuntime,
   type EnvironmentAdapter,
+  type EnvironmentAdapterActionRunning,
   type EnvironmentAdapterSession,
   type EnvironmentEventSink,
   type EnvironmentStartActionCommand,
@@ -21,6 +22,13 @@ class FakeSession implements EnvironmentAdapterSession {
   stops = 0;
   hangStartAction = false;
   hangCancelAction = false;
+  background = false;
+  private backgroundCompletion:
+    | {
+        resolve: (value: { status: "completed"; outcome: Record<string, unknown> }) => void;
+        reject: (reason: unknown) => void;
+      }
+    | undefined;
   constructor(adapterSessionId: string) {
     this.adapterSessionId = adapterSessionId;
   }
@@ -30,10 +38,21 @@ class FakeSession implements EnvironmentAdapterSession {
   resume(): Promise<void> {
     return Promise.resolve();
   }
-  startAction(command: EnvironmentStartActionCommand): Promise<void> {
+  startAction(command: EnvironmentStartActionCommand): Promise<void | EnvironmentAdapterActionRunning> {
     if (this.hangStartAction) return new Promise<void>(() => {});
     this.started.push(command.actionId);
+    if (this.background) {
+      const completion = new Promise<{ status: "completed"; outcome: Record<string, unknown> }>(
+        (resolve, reject) => {
+          this.backgroundCompletion = { resolve, reject };
+        },
+      );
+      return Promise.resolve({ status: "running", completion });
+    }
     return Promise.resolve();
+  }
+  finishBackground(outcome: Record<string, unknown>): void {
+    this.backgroundCompletion?.resolve({ status: "completed", outcome });
   }
   cancelAction(actionId: string): Promise<void> {
     if (this.hangCancelAction) return new Promise<void>(() => {});
@@ -186,6 +205,32 @@ describe("EnvironmentRuntime fake-adapter contract", () => {
     expect(adapter.sessions.get("adapter-s1")?.cancelled).toEqual(["a1", "a2", "a3"]);
     await expect(runtime.startAction(token, command("s1", "a4"))).rejects.toThrow(/revoked/);
     await expect(runtime.emergencyStop("s1", "again")).resolves.toMatchObject({ phase: "off" });
+  });
+
+  it("settles adapter-owned background work without blocking pause and cancellation", async () => {
+    const { adapter, make } = await harness();
+    const runtime = make();
+    const { token } = await runtime.start({
+      spec: baseSpec("background"),
+      holderId: "runner",
+      correlationId: "background",
+    });
+    const session = adapter.sessions.get("adapter-background")!;
+    session.background = true;
+
+    await expect(runtime.startAction(token, command("background", "long-action"))).resolves.toMatchObject({
+      status: "running",
+    });
+    await expect(runtime.pause(token, "background", "operator pause")).resolves.toMatchObject({
+      phase: "paused",
+    });
+    expect(session.cancelled).toEqual(["long-action"]);
+
+    session.finishBackground({ ignored: true });
+    await Promise.resolve();
+    await expect(runtime.actionStatus(token, "background", "long-action")).resolves.toMatchObject({
+      status: "cancelled",
+    });
   });
 
   it("reattaches exactly once after restart and never repeats completed actions", async () => {

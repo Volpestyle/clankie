@@ -1,4 +1,4 @@
-import { Terminal } from "@xterm/headless";
+import XtermHeadless from "@xterm/headless";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -9,6 +9,8 @@ import {
 } from "../src/terminals.ts";
 import { ShellWorkerAdapter } from "../src/shell-worker.ts";
 import type { WorkerRunContext } from "@clankie/worker-sdk";
+
+const { Terminal } = XtermHeadless;
 
 function scriptedTransport() {
   let data: ((chunk: Buffer) => void) | undefined;

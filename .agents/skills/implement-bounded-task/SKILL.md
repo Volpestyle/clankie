@@ -1,4 +1,5 @@
 ---
+name: implement-bounded-task
 description: Use when implementing one assigned code, configuration, documentation, or design task inside an explicit write scope.
 ---
 

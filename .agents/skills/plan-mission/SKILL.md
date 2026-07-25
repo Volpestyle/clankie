@@ -1,4 +1,5 @@
 ---
+name: plan-mission
 description: Use when turning a product goal, issue, incident, or self-improvement idea into a governed mission plan and task dependency graph.
 ---
 
@@ -8,7 +9,11 @@ Use `MissionPlanSchema` in `packages/protocol` as the field-level contract.
 
 1. Identify the authoritative source for goal, acceptance criteria, implementation state, design, and current execution.
 2. Restate the outcome and list unresolved conflicts or assumptions.
-3. Add a base-health preflight dependency before every implementation wave: the target commit must pass `pnpm typecheck`, `pnpm test`, and `pnpm arch:check` in a clean detached worktree (use `../clankie-lead/references/preflight-base.sh`). Red base means fix-or-rebase first; only an explicit exception with rationale in the run manifest may waive the gate.
+3. Add a base-health preflight dependency before every implementation wave: the target commit
+   must pass the repository-owned `preflight` script, falling back to `check`, in an isolated
+   detached workspace (use `../clankie-lead/references/preflight-base.sh`). The script records
+   the selected gate in its receipt. Red base means fix-or-rebase first; only an explicit exception
+   with rationale in the run manifest may waive the gate.
 4. Decompose into tasks that each have one operational role, bounded objective, dependencies, write scope, risk, success criteria, and non-empty evidence requirements.
 5. Route context/research/critique to lightweight subagents; route stateful write work to isolated runner workers.
 6. Avoid concurrent overlapping write scopes.

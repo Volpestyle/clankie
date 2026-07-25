@@ -1,0 +1,17 @@
+{
+  "repetitions": 1,
+  "score": {
+    "mean": 0.8800000000000001,
+    "spread": 0,
+    "min": 0.8800000000000001,
+    "max": 0.8800000000000001,
+    "standardDeviation": 0
+  },
+  "passedCount": 0,
+  "passedRate": 0,
+  "verificationIndependentCount": 0,
+  "criticalFailureCount": 1,
+  "criticalFailures": {
+    "independent-verification": 1
+  }
+}

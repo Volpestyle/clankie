@@ -1,12 +1,20 @@
-# ADR 0019: Runner pull execution retains one mission candidate through verification
+# ADR 0019: Runner pull execution retains candidate state through verification
 
-Status: accepted (James, 2026-07-11).
+Status: accepted (James, 2026-07-11); the mission-wide mutable worktree is
+superseded by task-scoped snapshots in
+[ADR 0041](0041-task-scoped-runner-candidates.md). The outbound pull,
+authentication, lease, evidence, and independent-verification decisions remain
+current.
 
 ## Decision
 
 The local runner connects outbound and pulls dependency-ready assignments from the control plane. The control plane owns mission plans, deterministic scheduling state, attempt identity, and semantic event replay; it never imports a provider client or owns a provider process. The runner authenticates, advertises concrete worker descriptors, and reports events and settlement against the exact `workerRunId + attempt` lease.
 
-One mission uses one runner-owned candidate worktree created from an immutable Git commit. Implementation writes into that candidate. A dependent verifier uses the same retained candidate read-only, so it inspects the actual implementation rather than a clean replacement. Dirty candidates and diff artifacts remain available after failure.
+The runner creates candidate state from an immutable Git commit. Implementation
+writes into an isolated task candidate. A dependent verifier uses a separate
+read-only worktree at the runner-sealed output commit, so it inspects the exact
+implementation tree rather than a clean replacement or an unrelated sibling
+branch. Dirty candidates and diff artifacts remain available after failure.
 
 ```mermaid
 sequenceDiagram
@@ -14,19 +22,19 @@ sequenceDiagram
     participant C as Control plane
     participant R as Local runner
     participant P as Provider adapter
-    participant G as Retained Git candidate
+    participant G as Task-scoped Git candidates
 
     E->>C: submit plan + start mission
     R->>C: authenticated claim + worker descriptors
     C-->>R: task + workerRunId + attempt
-    R->>G: create from immutable base
+    R->>G: materialize exact dependency snapshot
     R->>P: run bounded task in candidate
     P-->>R: provider events + claimed result
-    R->>G: collect real diff + validate write scope
+    R->>G: collect real diff + validate scope + seal output
     R->>C: semantic events + authoritative evidence + settle
     R->>C: claim verifier
     C-->>R: independently attributed verification task
-    R->>P: run read-only against same candidate
+    R->>P: run read-only at sealed candidate commit
     R->>C: verification evidence + settle
 ```
 

@@ -89,7 +89,14 @@ privately (self-rotation allowed via `rebindSession`, cross-conversation and
 cross-token reuse fail closed), consumes `Session.getEventStream(startIndex)` from
 a private per-conversation Eve stream index (reset on rotation) so a re-driven
 turn never re-projects the transcript, and redacts each event into the durable
-log through `redactEveStreamEvent`. eve's `SendFn` accepts no `AbortSignal`, so
+log through `redactEveStreamEvent`. Consumption ends at the turn's boundary event
+(`session.completed`/`waiting`/`failed`, cancelling the reader): the durable run
+stream stays open while the session parks waiting for its next message, so
+draining to stream end would hold the conversation's admission lease forever and
+starve every later turn on the lane. On `session.waiting` the executor rebinds
+the event's fresh channel-local continuation token — the session handle only
+echoes the caller's token back — so the next turn resumes the parked session
+instead of starting a new one. eve's `SendFn` accepts no `AbortSignal`, so
 caller-detachment is preserved and provider-preemption (which settles the
 admission lease) is the only cancellation. Transcript projection errors are
 logged as a bounded, safe structured line (error name/code only, never the raw
@@ -138,7 +145,19 @@ Every ordinary prompt snapshots that selected id, catches up unread history,
 sends a revision-fenced `message`, then renders only strict
 `OperatorConversationStreamEvent` items from the typed tail until the accepted
 run reaches a terminal event. It never falls back to the direct/default Eve
-session. A private `OperatorConversationTailStore` persists one stable TUI
+session. The transcript projection is deliberately narrower than the durable
+log: operator messages render as "You" (suppressing exactly one durable echo of
+the prompt this surface just echoed locally, so multi-surface and repeated
+identical messages still render), healthy `turn`/`session` lifecycle events
+drive only the status line, and lifecycle failures (`turn`
+failed·cancelled with reason code, `session` failed) render as transcript
+blocks. The log itself keeps the full lifecycle for replay and other surfaces.
+Detail-heavy machinery blocks (`tool`, `reasoning`, `worker_transcript`) are
+click-to-toggle: a click expands the full details and another click collapses
+them again. They start collapsed only when the body actually hides detail
+(multi-line or longer than a couple of wrapped rows); conversation content
+(You/Captain messages, input and auth prompts, failures) always renders
+expanded. A private `OperatorConversationTailStore` persists one stable TUI
 surface id and an opaque cursor per conversation, so restart and A-to-B switching
 resume the exact durable boundaries. Typed recovery is rendered once and stops
 the stream before the reset boundary; the TUI never auto-resyncs. Transport

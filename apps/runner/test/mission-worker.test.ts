@@ -12,7 +12,11 @@ import type {
 import type { WorkerResult } from "@clankie/protocol";
 import type { WorkerAdapter } from "@clankie/worker-sdk";
 import { describe, expect, it } from "vitest";
-import { MissionWorker, type MissionControlClient } from "../src/mission-worker.ts";
+import {
+  MissionWorker,
+  parseMissionWorkerConcurrency,
+  type MissionControlClient,
+} from "../src/mission-worker.ts";
 import { collectGitEvidence } from "../src/worker-evidence.ts";
 import { buildWorkerEnvironment } from "../src/worker-environment.ts";
 import {
@@ -105,6 +109,14 @@ class FakeControl implements MissionControlClient {
 }
 
 describe("MissionWorker", () => {
+  it("parses a bounded local pull-lane ceiling", () => {
+    expect(parseMissionWorkerConcurrency(undefined)).toBe(4);
+    expect(parseMissionWorkerConcurrency(" 3 ")).toBe(3);
+    for (const invalid of ["0", "33", "1.5", "many"]) {
+      expect(() => parseMissionWorkerConcurrency(invalid)).toThrow(/integer between 1 and 32/u);
+    }
+  });
+
   it("constructs an explicit child environment without runner, captain, connector, or sentinel secrets", () => {
     expect(
       buildWorkerEnvironment({
@@ -380,7 +392,7 @@ describe("MissionWorker", () => {
     expect((await stat(evidence.artifactPath)).mode & 0o777).toBe(0o600);
   });
 
-  it("retains one real Git candidate for implementation and read-only verification", async () => {
+  it("gives verification an isolated worktree at the implementation's sealed output commit", async () => {
     const fixture = await gitFixture();
     const worktrees = new WorktreeManager({ repoPath: fixture.repo, rootDir: fixture.worktrees });
     const implementer = adapter("codex-implementer", "implementation", async (workspacePath) => {
@@ -411,7 +423,7 @@ describe("MissionWorker", () => {
       },
     };
     const verifier = adapter("codex-verifier", "verification", async (workspacePath) => {
-      expect(workspacePath).toBe(implementationWorkspace);
+      expect(workspacePath).not.toBe(implementationWorkspace);
       await expect(readFile(join(workspacePath, "src", "candidate.ts"), "utf8")).resolves.toContain(
         "answer = 42",
       );
@@ -441,8 +453,14 @@ describe("MissionWorker", () => {
     );
     expect(control.eventTypes).toContain("worker.status.signal");
     const leases = await worktrees.listLeases();
-    expect(leases).toHaveLength(1);
-    expect(leases[0]).toMatchObject({ missionId: "mission-1", baseCommit: fixture.baseCommit });
+    expect(leases).toHaveLength(2);
+    const implementationOutput = await worktrees.taskOutput("mission-1", "implementation");
+    const verificationOutput = await worktrees.taskOutput("mission-1", "verification");
+    expect(implementationOutput.outputCommit).not.toBe(fixture.baseCommit);
+    expect(verificationOutput).toMatchObject({
+      inputCommit: implementationOutput.outputCommit,
+      outputCommit: implementationOutput.outputCommit,
+    });
   });
 
   it("turns provider success into failure for an out-of-scope untracked change and preserves it", async () => {
@@ -558,7 +576,7 @@ describe("MissionWorker", () => {
     expect(control.eventTypes).not.toContain("task.succeeded");
     expect(control.settlements[1]?.result).toMatchObject({
       status: "failed",
-      diagnosis: "Out-of-scope changes: <verification changed HEAD>",
+      diagnosis: "Out-of-scope changes: <read-only task changed HEAD>",
     });
   });
 
@@ -777,6 +795,54 @@ describe("MissionWorker", () => {
     abort.abort();
     await running;
     expect(control.settlements[0]?.result.status).toBe("succeeded");
+  });
+
+  it("runs independent assignments concurrently in separate pull lanes", async () => {
+    const fixture = await gitFixture();
+    const worktrees = new WorktreeManager({ repoPath: fixture.repo, rootDir: fixture.worktrees });
+    let active = 0;
+    let maximumActive = 0;
+    let release!: () => void;
+    const barrier = new Promise<void>((resolvePromise) => {
+      release = resolvePromise;
+    });
+    const implementer = adapter("codex-implementation", "implementation", async (workspacePath) => {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      if (active === 2) release();
+      await barrier;
+      await mkdir(join(workspacePath, "src"), { recursive: true });
+      await writeFile(join(workspacePath, "src", "candidate.ts"), `${workspacePath}\n`);
+      active -= 1;
+    });
+    const control = new FakeControl([
+      assignment("run-parallel-a", implementer, "implementation", ["src/**"], {
+        taskId: "implementation-a",
+      }),
+      assignment("run-parallel-b", implementer, "implementation", ["src/**"], {
+        taskId: "implementation-b",
+      }),
+    ]);
+    const worker = new MissionWorker({
+      client: control,
+      adapters: [implementer],
+      worktrees,
+      artifactRoot: fixture.artifacts,
+      maxConcurrency: 2,
+    });
+    const abort = new AbortController();
+    const running = worker.runForever(abort.signal, 1);
+    await waitUntil(() => control.settlements.length === 2);
+    abort.abort();
+    await running;
+
+    expect(maximumActive).toBe(2);
+    const leases = await worktrees.listLeases();
+    expect(new Set(leases.map((lease) => lease.path)).size).toBe(2);
+    expect(control.settlements.map((settlement) => settlement.result.status)).toEqual([
+      "succeeded",
+      "succeeded",
+    ]);
   });
 
   it("heartbeats an active provider run using its exact assignment", async () => {
@@ -1046,7 +1112,9 @@ function assignment(
   worker: WorkerAdapter,
   kind: "implementation" | "verification",
   writeScope: string[],
+  overrides: { taskId?: string; dependsOn?: string[] } = {},
 ): RunnerAssignment {
+  const taskId = overrides.taskId ?? kind;
   return {
     missionId: "mission-1",
     profileHash: "profile-1",
@@ -1056,12 +1124,12 @@ function assignment(
     runnerId: "runner-test",
     leaseExpiresAt: new Date(Date.now() + 30_000).toISOString(),
     task: {
-      id: kind,
+      id: taskId,
       title: kind,
       objective: `${kind} candidate`,
       kind,
       role: kind === "implementation" ? "implementer" : "verifier",
-      dependsOn: kind === "verification" ? ["implementation"] : [],
+      dependsOn: overrides.dependsOn ?? (kind === "verification" ? ["implementation"] : []),
       executionClass: "runner_visible",
       risk: "low",
       writeScope,

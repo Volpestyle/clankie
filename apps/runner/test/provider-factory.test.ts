@@ -470,6 +470,34 @@ describe("provider readiness factory", () => {
     }
   });
 
+  it("resolves an Anthropic API key from the runner-owned broker without reporting it", async () => {
+    const secret = "SECRET_BROKERED_ANTHROPIC_KEY";
+    const fleet = await createReadyProviderFleet({
+      environment: {
+        CLANKIE_CLAUDE_ENABLED: "true",
+        CLANKIE_CLAUDE_MODEL: "claude-verifier",
+        CLANKIE_CLAUDE_EXECUTABLE: "/provider/claude",
+      },
+      workerEnvironment: { PATH: process.env.PATH, HOME: "/synthetic/home" },
+      runnerStateRoot: await mkdtemp(join(tmpdir(), "clankie-claude-brokered-")),
+      credentialStore: {
+        get: (providerId) =>
+          Promise.resolve(providerId === "anthropic" ? { type: "api" as const, key: secret } : undefined),
+      },
+      probes: {
+        executable: () => Promise.resolve("claude-test"),
+        isolation: () => Promise.resolve(true),
+      },
+    });
+
+    expect(fleet.reports.find((entry) => entry.provider === "claude")).toMatchObject({
+      status: "ready",
+      issues: [],
+    });
+    expect(fleet.adapters.map((adapter) => adapter.descriptor.id)).toContain("claude-verification");
+    expect(JSON.stringify(fleet.reports)).not.toContain(secret);
+  });
+
   it("does not advertise an enabled provider when readiness fails and reports no credential content", async () => {
     const secret = "SECRET_SENTINEL_provider_auth";
     const fleet = await createReadyProviderFleet({

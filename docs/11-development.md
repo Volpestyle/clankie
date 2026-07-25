@@ -180,5 +180,10 @@ symlinks, so they cannot drift — see [ADR 0008](adr/0008-symlinked-provider-sk
 
 - author or edit the skill under `.agents/skills/<name>`;
 - run `pnpm skills:sync` to wire the mirrors and prune stale links;
-- `pnpm check` runs `pnpm skills:check`, which fails if any mirror is not the
-  correct symlink — never edit a provider copy directly.
+- include `name` and `description` frontmatter; `name` matches the skill
+  directory;
+- keep local Markdown references resolvable and reference shell scripts
+  executable and valid under `bash -n`;
+- `pnpm check` runs `pnpm skills:check`, which validates those canonical
+  contents and fails if any mirror is not the correct symlink — never edit a
+  provider copy directly.

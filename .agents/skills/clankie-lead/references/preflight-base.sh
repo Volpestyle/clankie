@@ -63,6 +63,11 @@ temporary_root_is_safe=0
 worktree=""
 worktree_added=0
 repo_root=""
+core_root=""
+core_ref="${CLANKIE_PREFLIGHT_CORE_REF:-HEAD}"
+core_sha=""
+core_worktree=""
+core_worktree_added=0
 
 record_command() {
   local command="$1"
@@ -83,8 +88,23 @@ write_receipt() {
     --arg timestamp_source "git" \
     --arg timestamp_command "git show -s --format=%cI $resolved_sha" \
     --arg verdict "$verdict" \
+    --arg core_ref "$core_ref" \
+    --arg core_sha "$core_sha" \
     --argjson commands "$commands_json" \
-    '{sha: $sha, commands: $commands, timestamp: $timestamp, timestamp_source: $timestamp_source, timestamp_command: $timestamp_command, verdict: $verdict}' \
+    '{
+      sha: $sha,
+      commands: $commands,
+      timestamp: $timestamp,
+      timestamp_source: $timestamp_source,
+      timestamp_command: $timestamp_command,
+      verdict: $verdict
+    } + if $core_sha == "" then {} else {
+      external_workspace: {
+        kind: "clankie-v2",
+        ref: $core_ref,
+        sha: $core_sha
+      }
+    } end' \
     >"$temporary_receipt"; then
     rm -f "$temporary_receipt"
     return 1
@@ -95,6 +115,9 @@ write_receipt() {
 cleanup() {
   if ((worktree_added == 1)); then
     git -C "$repo_root" worktree remove --force "$worktree" >/dev/null 2>&1 || true
+  fi
+  if ((core_worktree_added == 1)); then
+    git -C "$core_root" worktree remove --force "$core_worktree" >/dev/null 2>&1 || true
   fi
   if ((temporary_root_is_safe == 1)) && [[ -d "$temporary_root" ]]; then
     rm -rf -- "$temporary_root"
@@ -180,6 +203,49 @@ if ((clean_exit != 0)); then
   exit 1
 fi
 
+# clankie-app declares agent-OS packages as literal ../clankie-v2 workspace
+# members. Give that detached app worktree its own detached core sibling so
+# pnpm cannot rewrite package-local node_modules links in the live core checkout.
+if [[ -f "$worktree/pnpm-workspace.yaml" ]] \
+  && grep -Eq '\.\./clankie-v2/packages/' "$worktree/pnpm-workspace.yaml"; then
+  core_candidate="${CLANKIE_PREFLIGHT_CORE_ROOT:-$repo_root/../clankie-v2}"
+  core_root_output="$(git -C "$core_candidate" rev-parse --show-toplevel 2>&1)"
+  core_root_exit=$?
+  record_command "git -C <core-root> rev-parse --show-toplevel" "$core_root_exit"
+  if ((core_root_exit != 0)); then
+    echo "preflight-base: clankie-app requires a sibling agent-OS checkout; set CLANKIE_PREFLIGHT_CORE_ROOT" >&2
+    write_receipt || true
+    exit 1
+  fi
+  core_root="$core_root_output"
+  if [[ "$core_root" == "$repo_root" ]]; then
+    echo "preflight-base: external agent-OS checkout resolves to the target repository" >&2
+    write_receipt || true
+    exit 1
+  fi
+
+  core_sha_output="$(git -C "$core_root" rev-parse --verify "${core_ref}^{commit}" 2>&1)"
+  core_sha_exit=$?
+  record_command "git -C <core-root> rev-parse --verify ${core_ref}^{commit}" "$core_sha_exit"
+  if ((core_sha_exit != 0)); then
+    echo "preflight-base: agent-OS ref does not resolve to a commit: $core_ref" >&2
+    write_receipt || true
+    exit 1
+  fi
+  core_sha="$core_sha_output"
+  core_worktree="$temporary_root/clankie-v2"
+  core_add_command="git -C <core-root> worktree add --detach \"$core_worktree\" $core_sha"
+  git -C "$core_root" worktree add --detach "$core_worktree" "$core_sha"
+  core_add_exit=$?
+  record_command "$core_add_command" "$core_add_exit"
+  if ((core_add_exit != 0)); then
+    echo "preflight-base: isolated agent-OS worktree creation failed" >&2
+    write_receipt || true
+    exit 1
+  fi
+  core_worktree_added=1
+fi
+
 echo "preflight-base: installing dependencies at $resolved_sha"
 (
   cd "$worktree" || exit 1
@@ -193,23 +259,29 @@ if ((install_exit != 0)); then
   exit 1
 fi
 
-gate_failed=0
-# fmt:check/lint/docs:check are cheap and CI's `pnpm check` runs them first —
-# a wave that skips them can land a CI-red main on formatting alone (seen 2026-07-18).
-for gate in fmt:check lint docs:check typecheck test arch:check; do
-  echo "preflight-base: running pnpm $gate"
-  (
-    cd "$worktree" || exit 1
-    pnpm "$gate"
-  )
-  gate_exit=$?
-  record_command "pnpm $gate" "$gate_exit"
-  if ((gate_exit != 0)); then
-    gate_failed=1
-  fi
-done
+gate_script="$(jq -r '
+  if (.scripts.preflight | type) == "string" then "preflight"
+  elif (.scripts.check | type) == "string" then "check"
+  else ""
+  end
+' "$worktree/package.json" 2>/dev/null)"
+gate_script_exit=$?
+record_command "resolve package.json scripts.preflight || scripts.check" "$gate_script_exit"
+if ((gate_script_exit != 0)) || [[ -z "$gate_script" ]]; then
+  echo "preflight-base: package.json must define a preflight or check script" >&2
+  write_receipt || true
+  exit 1
+fi
 
-if ((gate_failed == 0)); then
+echo "preflight-base: running repository gate pnpm $gate_script"
+(
+  cd "$worktree" || exit 1
+  pnpm "$gate_script"
+)
+gate_exit=$?
+record_command "pnpm $gate_script" "$gate_exit"
+
+if ((gate_exit == 0)); then
   verdict="green"
 fi
 write_receipt

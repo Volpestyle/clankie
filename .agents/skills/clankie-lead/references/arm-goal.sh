@@ -385,7 +385,7 @@ while :; do
   submit_waited=0
 done
 
-working_output="$(herdr wait agent-status "$pane_id" --status working --timeout "$STATUS_TIMEOUT_MS" 2>&1)"
+working_output="$(herdr agent wait "$pane_id" --until working --timeout "$STATUS_TIMEOUT_MS" 2>&1)"
 working_exit=$?
 if ((working_exit != 0)); then
   fail_arm "pane did not report working after /goal (exit ${working_exit})" "$(last_nonempty_line "$working_output")"
@@ -405,7 +405,7 @@ if recent_text_contains "$verify_text" "Replace current goal?"; then
   if ((confirm_exit != 0)); then
     fail_arm "answering Replace current goal? failed with exit ${confirm_exit}" "$(last_nonempty_line "$confirm_output")"
   fi
-  working_output="$(herdr wait agent-status "$pane_id" --status working --timeout "$STATUS_TIMEOUT_MS" 2>&1)"
+  working_output="$(herdr agent wait "$pane_id" --until working --timeout "$STATUS_TIMEOUT_MS" 2>&1)"
   working_exit=$?
   if ((working_exit != 0)); then
     fail_arm "pane did not report working after goal replacement (exit ${working_exit})" "$(last_nonempty_line "$working_output")"

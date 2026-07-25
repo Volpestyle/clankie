@@ -40,7 +40,7 @@ workers/<slug>/ARM_FAILED
 
 `manifest.json` records what was spawned: durable worker name, task and worker-run identities, cwd, harness, command vocabulary, and timestamps. It does not replace the tracker DAG or event store. Store pane IDs only as diagnostic spawn-time metadata because they are session-local and may compact.
 
-Before the first implementation spawn, run `references/preflight-base.sh --receipt-dir <run-dir> <base-sha>`. It creates a clean detached worktree, installs, and records the required base gates in `preflight.json`. A red receipt stops the wave until the base is fixed or rebased; an exception must be explicit, justified, and recorded in `manifest.json`.
+Before the first implementation spawn, run `references/preflight-base.sh --receipt-dir <run-dir> <base-sha>`. It creates an isolated detached workspace, installs, and runs the repository-owned `preflight` script, falling back to `check`; `preflight.json` records the selected gate. For the `clankie-app` external workspace layout it also creates an isolated sibling agent-OS worktree and records that revision. A red receipt stops the wave until the base is fixed or rebased; an exception must be explicit, justified, and recorded in `manifest.json`.
 
 ## Goal arming
 
@@ -100,13 +100,21 @@ moving:
 
 ## Watch `blocked`, not only `done`
 
-A pane that stalls (capacity, a content refusal, a swallowed confirmation) goes to
-`blocked`/`idle` status and produces NO sentinel, so a done-only watcher sits silent
-until its multi-hour timeout. Watch both edges: return the instant any armed pane flips
-to `blocked` OR all lanes reach a `DONE`/`BLOCKED` sentinel, so a stall surfaces in one
-poll interval instead of hours. `references/watch-lanes.sh` in this skill is that
-watcher (`watch-lanes.sh <pane>:<sentinel_dir> ...`); herdr exposes `blocked` as a
-first-class `agent_status`, so the lead never needs to guess from pane text.
+A pane that stalls because of capacity, refusal, or a swallowed confirmation can reach
+`blocked` without writing a sentinel. Arm one event-driven watcher per live worker and
+match both `done` and `blocked`:
+
+- inside a Clanky orchestration environment, use its registered `clanky watch` or
+  `herdr_watch` integration so the watch is visible in the orchestration graph;
+- outside that environment, use
+  `herdr agent wait <pane> --until done --until blocked`;
+- use `herdr pane wait-output` only for a specific intermediate milestone, never as the
+  worker-completion signal.
+
+When a watcher wakes, re-resolve the live pane if necessary, read
+`herdr pane read <pane> --source recent --lines 120`, and inspect the durable receipt.
+Do not poll pane text or a directory in a long-running loop. `clankie watch` is a
+different command: it watches the active captain turn.
 
 ## Sentinels and harvest
 
@@ -117,14 +125,7 @@ For pane-hosted fallback workers:
 - both files at once are an invalid receipt that requires diagnosis.
 - no sentinel plus a settled pane is not completion; inspect and request the missing receipt or classify the run from semantic events.
 
-Harvest reads the receipt, validates its claimed commands/artifacts against current state, and records the corresponding semantic outcome. Tier-0/1 events remain the status winner even when a sentinel or pane heuristic disagrees. Never wait on printed completion strings: a prompt echo can create a false match.
-
-Watch for completion on the sentinel FILES as the primary signal (a low-frequency
-existence poll of `DONE`/`BLOCKED` is cheap and durable), with pane-status waits as
-secondary. `herdr wait agent-status <pane> --status done` can return "timed out
-waiting for agent status change" long before its `--timeout`, and a goal-armed pane
-that flips status between watcher arm and delivery is missed entirely — the sentinel
-file is the receipt that cannot race.
+Harvest reads the receipt, validates its claimed commands/artifacts against current state, and records the corresponding semantic outcome. Tier-0/1 events remain the status winner even when a sentinel or pane heuristic disagrees. The event-driven status watcher supplies the wake; the sentinel supplies the durable transport receipt. Never wait on printed completion strings: a prompt echo can create a false match.
 
 ## Resume
 
@@ -140,6 +141,21 @@ After captain restart:
 
 Cleanup is permitted only for workers created by the current captain or recorded in the run being harvested. A task completion does not automatically end a warm worker's lifecycle. Before retirement, confirm that evidence is harvested, verification and tracker reconciliation are complete, no question remains, and the ownership ledger has no next assignment. Preserve run receipts when doctrine or an unresolved failure requires later audit.
 
-## Cross-repo pnpm workspaces poison shared links (clankie-app ⇄ clankie-v2)
+## Isolated cross-repo pnpm workspaces
 
-The clankie-app workspace lists `../clankie-v2/packages/*` as members, so its globs only resolve from a checkout sitting directly beside `clankie-v2` — and **every `pnpm install` there re-points the shared monorepo packages' `node_modules` at the installing workspace** (last install wins). An install run inside a temporary clankie-app worktree that is later removed leaves those links dangling and breaks the monorepo (`clankie` CLI dies with `ERR_MODULE_NOT_FOUND: zod` from `packages/protocol`), and a plain or `--force` reinstall at the monorepo root fast-paths without repairing them. After removing any clankie-app worktree that ran an install, restore ownership explicitly: delete the shared packages' `node_modules` (`protocol`, `terminal-protocol`, `garden-model`, `interactive-environment`, `api-client`) and re-run `pnpm install` at the monorepo root.
+The `clankie-app` workspace includes literal `../clankie-v2/packages/*` members. Its
+preflight therefore needs a sibling agent-OS checkout, but dependency installation must
+not use the live checkout: pnpm writes package-local `node_modules` links into those
+external workspace members.
+
+`preflight-base.sh` detects that layout and creates two detached worktrees under the same
+temporary root: the requested app base and a sibling `clankie-v2` at the current agent-OS
+`HEAD`. Installation and all gates run only against those isolated paths, and cleanup
+removes both. Set `CLANKIE_PREFLIGHT_CORE_ROOT` when the live agent-OS checkout is not the
+app repository's `../clankie-v2` sibling; set `CLANKIE_PREFLIGHT_CORE_REF` when the run
+contract pins a different agent-OS revision. The selected revision is recorded in
+`preflight.json`.
+
+Do not run `pnpm install` in an ad hoc temporary `clankie-app` worktree whose
+`../clankie-v2` resolves to the live agent-OS checkout. Use the preflight script or build
+the same isolated sibling layout.

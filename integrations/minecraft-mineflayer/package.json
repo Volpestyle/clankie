@@ -1,0 +1,35 @@
+{
+  "name": "@clankie/minecraft-mineflayer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "paper:bootstrap": "tsx scripts/bootstrap-paper.ts",
+    "readiness": "tsx scripts/readiness.ts",
+    "live-proof": "tsx scripts/live-proof.ts",
+    "clean": "rm -rf coverage dist"
+  },
+  "dependencies": {
+    "@clankie/environment-runtime": "workspace:*",
+    "@clankie/interactive-environment": "workspace:*",
+    "@clankie/minecraft-paper-verifier": "workspace:*",
+    "@clankie/protocol": "workspace:*",
+    "mineflayer": "4.37.1",
+    "mineflayer-pathfinder": "2.4.5",
+    "vec3": "0.2.0",
+    "yaml": "2.9.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "tsx": "4.23.0",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

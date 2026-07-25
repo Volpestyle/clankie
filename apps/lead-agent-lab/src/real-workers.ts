@@ -21,6 +21,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { ClankieApiClient, type RecoveryPairRequest } from "@clankie/api-client";
+import { createDefaultCredentialStore } from "@clankie/credential-broker";
 import { compileDoctrine, loadDoctrineFile } from "@clankie/doctrine";
 import { SqliteEventStore, type StoredEvent } from "@clankie/event-store";
 import { MissionPlanSchema, type MissionPlan, type WorkerResult } from "@clankie/protocol";
@@ -120,6 +121,18 @@ interface FixtureIdentity {
   testSha256: string;
 }
 
+interface TaskOutputManifest {
+  schemaVersion: 1;
+  missionId: string;
+  taskId: string;
+  workerRunId: string;
+  attempt: number;
+  branch: string;
+  inputCommit: string;
+  outputCommit: string;
+  dependencyTaskIds: string[];
+}
+
 interface ManagedProcess {
   spec: ProcessSpec;
   process: ChildProcess;
@@ -163,7 +176,9 @@ export interface RealWorkerRun {
 /** Runs the opt-in, production-process heterogeneous worker proof. */
 export async function runRealWorkerEvaluation(): Promise<RealWorkerRun> {
   const fileBackedSecrets = await collectFileBackedSecretValues(process.env);
-  await runReadinessPreflight(fileBackedSecrets);
+  const brokeredSecrets = await collectBrokeredSecretValues();
+  const configuredSecrets = mergeSecretValues([...fileBackedSecrets, ...brokeredSecrets]);
+  await runReadinessPreflight(configuredSecrets);
   const sourceAggregate = await computeFrozenFixtureAggregate(realWorkersRepoRoot);
   assertFrozenAggregate(sourceAggregate);
 
@@ -186,7 +201,7 @@ export async function runRealWorkerEvaluation(): Promise<RealWorkerRun> {
     captainToken,
     readinessNonce,
   });
-  const secrets = mergeSecretValues([...secretValues(processSpecs), ...fileBackedSecrets]);
+  const secrets = mergeSecretValues([...secretValues(processSpecs), ...configuredSecrets]);
   const processes: ManagedProcess[] = [];
   let coordinated: CoordinatedMission | undefined;
   let failure: unknown;
@@ -222,13 +237,14 @@ export async function runRealWorkerEvaluation(): Promise<RealWorkerRun> {
 
   const logs = await persistRedactedLogs(stagingDirectory, processes, secrets);
   if (failure || !coordinated) {
-    await rm(stagingDirectory, { recursive: true, force: true });
+    const failureMessage = redact(
+      failure instanceof Error ? failure.message : String(failure ?? "coordination_missing"),
+      secrets,
+    );
+    const failureDirectory = await persistFailedRealWorkerRun(stagingDirectory, failureMessage, runtime.root);
     await cleanupRuntime(runtime.root);
     throw new Error(
-      `real_worker_evaluation_failed: ${redact(
-        failure instanceof Error ? failure.message : String(failure),
-        secrets,
-      )}`,
+      `real_worker_evaluation_failed: ${failureMessage}; evidence=${relative(realWorkersRepoRoot, failureDirectory)}`,
     );
   }
 
@@ -253,6 +269,12 @@ export async function runRealWorkerEvaluation(): Promise<RealWorkerRun> {
       reportPath: join(outputDirectory, "real-workers-report.json"),
       manifestPath: join(outputDirectory, "real-workers-manifest.jsonl"),
     };
+  } catch (error) {
+    const failureMessage = redact(error instanceof Error ? error.message : String(error), secrets);
+    const failureDirectory = await persistFailedRealWorkerRun(stagingDirectory, failureMessage, runtime.root);
+    throw new Error(
+      `real_worker_evaluation_failed: ${failureMessage}; evidence=${relative(realWorkersRepoRoot, failureDirectory)}`,
+    );
   } finally {
     await rm(stagingDirectory, { recursive: true, force: true });
     await cleanupRuntime(runtime.root);
@@ -388,6 +410,7 @@ export function buildProductionProcessSpecs(input: {
       CLANKIE_RUNNER_ID: "real-workers-runner",
       CLANKIE_RUNNER_READINESS_PATH: input.runtime.runnerReadiness,
       CLANKIE_RUNNER_READINESS_NONCE: input.readinessNonce,
+      CLANKIE_WORKER_TRANSCRIPT_PORT: "0",
       CLANKIE_CODEX_ENABLED: "true",
       CLANKIE_CLAUDE_ENABLED: "true",
       CLANKIE_PI_ENABLED: "true",
@@ -857,29 +880,62 @@ async function collectAndValidateResult(input: {
   if (new Set(sessionIds).size !== sessionIds.length) throw new Error("native_session_ids_not_distinct");
   validateNativeSessionEvents(storedEvents, bundles);
 
-  const manifestName = (await readdir(join(input.runtime.worktreeRoot, "candidates"))).find((name) =>
-    name.endsWith(".json"),
-  );
-  if (!manifestName) throw new Error("candidate_manifest_missing");
-  const candidateManifest = JSON.parse(
-    await readFile(join(input.runtime.worktreeRoot, "candidates", manifestName), "utf8"),
-  ) as { missionId?: unknown; path?: unknown; baseCommit?: unknown };
-  if (
-    candidateManifest.missionId !== input.coordinated.missionId ||
-    typeof candidateManifest.path !== "string" ||
-    candidateManifest.baseCommit !== input.fixture.baseCommit
-  ) {
-    throw new Error("candidate_manifest_invalid");
+  const dependencyLineage = new Map<string, readonly string[]>([
+    ["implement-seeded-retry", []],
+    [INITIAL_VERIFICATION_TASK_ID, ["implement-seeded-retry"]],
+    [DEBUGGER_TASK_ID, ["implement-seeded-retry"]],
+    [REVERIFY_TASK_ID, [DEBUGGER_TASK_ID]],
+  ]);
+  const outputManifests = new Map<string, TaskOutputManifest>();
+  for (const taskId of EXPECTED_TASKS) {
+    outputManifests.set(
+      taskId,
+      await loadAndValidateTaskOutputManifest({
+        worktreeRoot: input.runtime.worktreeRoot,
+        repository: input.runtime.fixtureRepo,
+        missionId: input.coordinated.missionId,
+        task: requiredTask(final, taskId),
+        dependencyTaskIds: dependencyLineage.get(taskId) ?? [],
+      }),
+    );
   }
-  const candidateAggregate = await computeCandidateAggregate(candidateManifest.path);
+  const finalOutput = outputManifests.get(REVERIFY_TASK_ID);
+  if (!finalOutput) throw new Error("final_task_output_manifest_missing");
+  const mergeBase = (
+    await git(input.runtime.fixtureRepo, ["merge-base", input.fixture.baseCommit, finalOutput.outputCommit])
+  ).trim();
+  if (mergeBase !== input.fixture.baseCommit) throw new Error("final_output_not_descended_from_fixture");
+  const changedPaths = splitLines(
+    await git(input.runtime.fixtureRepo, [
+      "diff",
+      "--name-only",
+      input.fixture.baseCommit,
+      finalOutput.outputCommit,
+    ]),
+  );
+  if (changedPaths.length !== 1 || changedPaths[0] !== "src/retry.mjs") {
+    throw new Error("final_output_scope_invalid");
+  }
+  const candidateAggregate = await computeCommitAggregate(
+    input.runtime.fixtureRepo,
+    finalOutput.outputCommit,
+  );
   const sourceAfter = await computeFrozenFixtureAggregate(realWorkersRepoRoot);
   const fixtureRepoAfter = await computeCandidateAggregate(input.runtime.fixtureRepo);
   for (const aggregate of [candidateAggregate, sourceAfter, fixtureRepoAfter])
     assertFrozenAggregate(aggregate);
-  const scenarioAfter = await sha256File(
-    join(candidateManifest.path, "evals/scenarios/injected-retry-defect.yaml"),
-  );
-  const testAfter = await sha256File(join(candidateManifest.path, "test/retry.test.mjs"));
+  const scenarioAfter = createHash("sha256")
+    .update(
+      await gitBlob(
+        input.runtime.fixtureRepo,
+        finalOutput.outputCommit,
+        "evals/scenarios/injected-retry-defect.yaml",
+      ),
+    )
+    .digest("hex");
+  const testAfter = createHash("sha256")
+    .update(await gitBlob(input.runtime.fixtureRepo, finalOutput.outputCommit, "test/retry.test.mjs"))
+    .digest("hex");
   if (scenarioAfter !== input.fixture.scenarioSha256 || testAfter !== input.fixture.testSha256) {
     throw new Error("frozen_test_or_scenario_modified");
   }
@@ -1033,9 +1089,7 @@ async function validateAndCopyBundle(
     `native_session_missing:${taskView.spec.id}`,
   );
   const changedFiles = stringArray(bundle.files_changed);
-  if (changedFiles.length !== 1 || changedFiles[0] !== "src/retry.mjs") {
-    throw new Error(`unexpected_bundle_files:${taskView.spec.id}`);
-  }
+  assertExpectedBundleFiles(taskView, changedFiles);
   const artifacts = array(bundle.artifacts);
   if (artifacts.length === 0) throw new Error(`bundle_artifact_missing:${taskView.spec.id}`);
   const diffArtifact = artifacts.find(
@@ -1084,6 +1138,116 @@ async function validateAndCopyBundle(
     copiedPath,
     bundle,
   };
+}
+
+/** Enforces the frozen scenario's writer/verifier role boundary on runner-authored evidence. */
+export function assertExpectedBundleFiles(
+  taskView: Pick<MissionTaskView, "spec">,
+  changedFiles: readonly string[],
+): void {
+  const expected = taskView.spec.kind === "verification" ? [] : ["src/retry.mjs"];
+  if (
+    changedFiles.length !== expected.length ||
+    changedFiles.some((path, index) => path !== expected[index])
+  ) {
+    throw new Error(`unexpected_bundle_files:${taskView.spec.id}`);
+  }
+}
+
+async function loadAndValidateTaskOutputManifest(input: {
+  worktreeRoot: string;
+  repository: string;
+  missionId: string;
+  task: MissionTaskView;
+  dependencyTaskIds: readonly string[];
+}): Promise<TaskOutputManifest> {
+  const key = createHash("sha256")
+    .update(JSON.stringify([input.missionId, input.task.spec.id]))
+    .digest("hex");
+  const path = join(input.worktreeRoot, "task-outputs", `${key}.json`);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(path, "utf8"));
+  } catch {
+    throw new Error(`task_output_manifest_missing_or_invalid:${input.task.spec.id}`);
+  }
+  if (!isRecord(parsed)) throw new Error(`task_output_manifest_invalid:${input.task.spec.id}`);
+  const dependencies = stringArray(parsed.dependencyTaskIds);
+  const manifest: TaskOutputManifest = {
+    schemaVersion: 1,
+    missionId: input.missionId,
+    taskId: input.task.spec.id,
+    workerRunId: requiredString(input.task.workerRunId, `worker_run_missing:${input.task.spec.id}`),
+    attempt: input.task.attempts,
+    branch: requiredString(parsed.branch, `task_output_branch_missing:${input.task.spec.id}`),
+    inputCommit: requiredString(parsed.inputCommit, `task_output_input_commit_missing:${input.task.spec.id}`),
+    outputCommit: requiredString(
+      parsed.outputCommit,
+      `task_output_output_commit_missing:${input.task.spec.id}`,
+    ),
+    dependencyTaskIds: dependencies,
+  };
+  if (
+    parsed.schemaVersion !== 1 ||
+    parsed.missionId !== manifest.missionId ||
+    parsed.taskId !== manifest.taskId ||
+    parsed.workerRunId !== manifest.workerRunId ||
+    parsed.attempt !== manifest.attempt ||
+    !manifest.branch.startsWith("clankie/") ||
+    !/^[0-9a-f]{40,64}$/u.test(manifest.inputCommit) ||
+    !/^[0-9a-f]{40,64}$/u.test(manifest.outputCommit) ||
+    dependencies.length !== input.dependencyTaskIds.length ||
+    dependencies.some((taskId, index) => taskId !== input.dependencyTaskIds[index])
+  ) {
+    throw new Error(`task_output_manifest_invalid:${input.task.spec.id}`);
+  }
+  const [inputCommit, outputCommit, branchCommit] = await Promise.all([
+    git(input.repository, ["rev-parse", "--verify", `${manifest.inputCommit}^{commit}`]),
+    git(input.repository, ["rev-parse", "--verify", `${manifest.outputCommit}^{commit}`]),
+    git(input.repository, ["rev-parse", "--verify", `refs/heads/${manifest.branch}^{commit}`]),
+  ]);
+  if (
+    inputCommit.trim() !== manifest.inputCommit ||
+    outputCommit.trim() !== manifest.outputCommit ||
+    branchCommit.trim() !== manifest.outputCommit
+  ) {
+    throw new Error(`task_output_manifest_git_identity_invalid:${input.task.spec.id}`);
+  }
+  const readOnly = input.task.spec.kind === "verification";
+  if (
+    (readOnly && manifest.inputCommit !== manifest.outputCommit) ||
+    (!readOnly && manifest.inputCommit === manifest.outputCommit)
+  ) {
+    throw new Error(`task_output_manifest_role_boundary_invalid:${input.task.spec.id}`);
+  }
+  return manifest;
+}
+
+async function computeCommitAggregate(repository: string, commit: string): Promise<string> {
+  const paths: Array<[string, string]> = [
+    [LOGICAL_FIXTURE_FILES[0], "evals/scenarios/injected-retry-defect.yaml"],
+    [LOGICAL_FIXTURE_FILES[1], "README.md"],
+    [LOGICAL_FIXTURE_FILES[2], "test/retry.test.mjs"],
+  ];
+  const hash = createHash("sha256");
+  for (const [logicalPath, path] of paths) {
+    const bytes = await gitBlob(repository, commit, path);
+    hash.update(logicalPath);
+    hash.update("\0");
+    hash.update(String(bytes.length));
+    hash.update("\0");
+    hash.update(bytes);
+  }
+  return hash.digest("hex");
+}
+
+async function gitBlob(repository: string, commit: string, path: string): Promise<Buffer> {
+  const result = await execFileAsync("git", ["show", `${commit}:${path}`], {
+    cwd: repository,
+    encoding: "buffer",
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  return Buffer.from(result.stdout);
 }
 
 export async function commitRealWorkerRun(input: {
@@ -1214,6 +1378,38 @@ async function createStagingDirectory(outputDirectory: string): Promise<string> 
   const staging = await mkdtemp(join(parent, ".real-workers-staging-"));
   await chmod(staging, 0o700);
   return staging;
+}
+
+async function persistFailedRealWorkerRun(
+  stagingDirectory: string,
+  reason: string,
+  runtimeRoot: string,
+): Promise<string> {
+  const failuresRoot = join(realWorkersRepoRoot, "artifacts/evals/real-worker-failures");
+  await makePrivateDirectory(failuresRoot);
+  const failureDirectory = join(
+    failuresRoot,
+    `${new Date().toISOString().replaceAll(/[:.]/gu, "-")}-${randomBytes(6).toString("hex")}`,
+  );
+  await writeFile(
+    join(stagingDirectory, "failure.json"),
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        failedAt: new Date().toISOString(),
+        reason,
+        runtimeRetained: process.env.CLANKIE_REAL_WORKERS_KEEP_RUNTIME === "true",
+        ...(process.env.CLANKIE_REAL_WORKERS_KEEP_RUNTIME === "true" ? { runtimeRoot } : {}),
+      },
+      null,
+      2,
+    )}\n`,
+    { mode: 0o600 },
+  );
+  await syncTree(stagingDirectory);
+  await rename(stagingDirectory, failureDirectory);
+  await syncDirectory(failuresRoot);
+  return failureDirectory;
 }
 
 async function makePrivateDirectory(path: string): Promise<void> {
@@ -1410,6 +1606,14 @@ export async function collectFileBackedSecretValues(environment: NodeJS.ProcessE
   return normalizeSecretValues(values);
 }
 
+/** Resolves only provider secrets used by this proof, solely for in-memory redaction. */
+async function collectBrokeredSecretValues(): Promise<string[]> {
+  const credential = await createDefaultCredentialStore()
+    .get("anthropic")
+    .catch(() => undefined);
+  return credential?.type === "api" ? normalizeSecretValues([credential.key]) : [];
+}
+
 async function readCredentialJson(path: string, source: string): Promise<unknown> {
   try {
     const handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
@@ -1524,6 +1728,13 @@ function array(value: unknown): unknown[] {
 
 function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+}
+
+function splitLines(value: string): string[] {
+  return value
+    .split(/\r?\n/gu)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
 }
 
 function isStringArray(value: unknown): value is string[] {

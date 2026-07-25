@@ -1,0 +1,13 @@
+diff --git a/src/retry.mjs b/src/retry.mjs
+index 6d13edb..2f202c5 100644
+--- a/src/retry.mjs
++++ b/src/retry.mjs
+@@ -9,7 +9,7 @@ export async function retry(operation, { maxAttempts } = {}) {
+ 
+   let lastError;
+ 
+-  for (let attempt = 1; attempt < maxAttempts; attempt += 1) {
++  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+     try {
+       return await operation();
+     } catch (error) {

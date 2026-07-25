@@ -1,4 +1,5 @@
 ---
+name: evaluate-lead-run
 description: Use when scoring a completed or failed mission, comparing lead orchestration with a baseline, or deciding whether a self-improvement candidate may be promoted.
 ---
 

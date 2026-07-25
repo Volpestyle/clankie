@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "missionId": "mission-af2d97c4-d38",
+  "taskId": "implement-seeded-retry",
+  "workerRunId": "16d2b484-588a-40a2-acda-2601b830962c",
+  "attempt": 1,
+  "correlationId": "16d2b484-588a-40a2-acda-2601b830962c",
+  "provider": "codex",
+  "providerVersion": "codex-cli-0.145.0",
+  "nativeSessionId": "019f9a6c-9f07-7a60-9903-705fd4818cfa",
+  "summary": "Runner observed a succeeded provider outcome and recorded authoritative attempt facts.",
+  "files_changed": [
+    "src/retry.mjs"
+  ],
+  "commands_run": [
+    "provider:codex:sha256:1354bb2164c36d450dca25fe6e6dc4f1411eeedad01671007836d3498acc062f",
+    "provider:codex:sha256:22d7d3c1864df4087132bfc0c29d3b9039cdd7718e5c763ac64f7df4956ae62d",
+    "provider:codex:sha256:262c44c9b32089ccfd8d56c1cb121a18388f60a945071f92e798e77a5691cf5b",
+    "provider:codex:sha256:2b85e09c185844cd6f8d45a8caa0c83d50eeaeaeace643087826599d8b4f58f6",
+    "provider:codex:sha256:38956a9e9248f7abe4e925f4641a68a3673056bbe7ea4cfb9ca087a99b1c22e6",
+    "provider:codex:sha256:422498db9c65ff12764af7f38fdef7d29d73a072667f049d8f2eea79979c2eef",
+    "provider:codex:sha256:4911b9b5e4eca899aaa6fb69f63c4c9da49281f17520b9addc806eee5585dec9",
+    "provider:codex:sha256:4cbb8974c32dd7337553b5a6ed40cbfecba5f9f78097b83cd062ab560d065bef",
+    "provider:codex:sha256:4d7f2ad06badcf9f96946c457ca4c9f1299f0ae4e8facc60fba0c0830f88fd61",
+    "provider:codex:sha256:4fbd70b01a9ec57907158893cbedfa9dcde129987332e9f68b4d9a8a6b8cdc59",
+    "provider:codex:sha256:56afbd9568f7b6203e37e1206e20395345dc2abab384ebc28a65af250790423a",
+    "provider:codex:sha256:59f5d73b368a12dec7b2b3284c48d113692c23ec1e43e4a73221944020809d02",
+    "provider:codex:sha256:6053d86028b39d165061e6ffaa267d2623da340579e1cee4791557a7847a2787",
+    "provider:codex:sha256:605bc73e75ccbc4f12f9fcdff1c3f18c981c362688fb964cfba51dca777a7223",
+    "provider:codex:sha256:671e9af2581c099cdb4c48d308f3ae78c1c3b309fc312568e79f42bdcc19ab86",
+    "provider:codex:sha256:711293ef1447e1c775af46a08c5decbcc28ed89c091bf28b3e6092d364e7d848",
+    "provider:codex:sha256:71e71cf05312e5d7e5cbc3ede16aa5c0b988159106503acea475fc3885fac3bf",
+    "provider:codex:sha256:75600753e49e3f2e0b3e90e1621954a4f9f76f21e76460e7b978f10cf3040a43",
+    "provider:codex:sha256:7bb263f61e2e6914278fb1f3abce5b4aa07a89e4c4df8ce7b08b12b7c17716fd",
+    "provider:codex:sha256:7fe4ad30f0dbd0f33f52bb4c1be33f8a309ce0ec9851311eeb117412b8f503b0",
+    "provider:codex:sha256:80b3cf356f1b575e3d69f6c60089f1b585e5f09298fee432cd6479d27a7a9596",
+    "provider:codex:sha256:81ed227acc40ac9f75083e91b6867bd3ef70a924505e2e45f36e2414f3c560e0",
+    "provider:codex:sha256:a9868d9fc1b525da1e72000a86fdb86e5b434639c8580c0c0a3ba7bbe1498394",
+    "provider:codex:sha256:aaac90ba508c6f475a9871cf7a7b88c178c7cf273039a8e1ecf04bafec9fb84c",
+    "provider:codex:sha256:b10c7a1b85b05477d5a2952f31d6d046dc4fc944039e05900dc62f86e7470042",
+    "provider:codex:sha256:bdd19c6c12a307a0b1ae917dd55cea18f897a1556ccbc25eb3af9a4dcd7fed27",
+    "provider:codex:sha256:c382f4d93c24fc7a298f763c484baa593d4cba28135d28336124f425bd93edbd",
+    "provider:codex:sha256:c5fd71c1d469f6710bb82eef0d7a53f3f2a8303c3c9207476e89bc1aee8f00cd",
+    "provider:codex:sha256:c8c589716d710efeea2cc6d976952a6e034f9e4d7574ef80199d5cd44713d896",
+    "provider:codex:sha256:cd64aa90d8f8f484fde4bb15af7b37b82313e57507f37a83b2566f31d87519ce",
+    "provider:codex:sha256:d799eca1d347a51c9f4af031be22c72376db2b154f2168ee5856645fc145bf6b",
+    "provider:codex:sha256:e32c401529d20d3dd86ebbb2603922615a323e029755fee4cc47430b47bad03b",
+    "provider:codex:sha256:f72784701a1bb364e27df0b330a59286b645105fd161f21716d05564a73b7e3c"
+  ],
+  "checks": [],
+  "artifacts": [
+    {
+      "ref": "artifact://runner-diff/mission-af2d97c4-d38/16d2b484-588a-40a2-acda-2601b830962c-1",
+      "sha256": "5766ecb13587b87e10e57c590cd301bef68f010774db57f0e65416fff57e6541"
+    }
+  ],
+  "remaining_risks": [],
+  "assumptions": [
+    "Provider prose, raw output, and self-reported evidence are not authoritative runner evidence."
+  ]
+}

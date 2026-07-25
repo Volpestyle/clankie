@@ -21,9 +21,8 @@ const REPAIRED_RETRY = "export const retry = () => { /* repaired: makes every at
  * The full frozen-scenario task graph (docs/02-lead-agent-e2e-proof.md):
  * context -> implementation (injects a defect) -> verification (must fail) ->
  * debugging (repairs) -> verification re-run (must pass). The control endpoint
- * below stands in for the lead/control plane: the landed control-plane plan
- * gate still accepts only implementation+verification, so this dry run drives
- * the runner boundary directly over a real isolated HTTP port.
+ * below stands in for the lead/control plane and preserves exact dependency
+ * lineage on every assignment.
  */
 const GRAPH: Array<{ workerRunId: string; task: TaskSpec }> = [
   {
@@ -32,23 +31,37 @@ const GRAPH: Array<{ workerRunId: string; task: TaskSpec }> = [
   },
   {
     workerRunId: "run-implement",
-    task: task("implement-retry", "implementation", "implementer", ["src/**"], {
-      sim: { files: { "src/retry.mjs": DEFECTIVE_RETRY } },
-    }),
+    task: task(
+      "implement-retry",
+      "implementation",
+      "implementer",
+      ["src/**"],
+      {
+        sim: { files: { "src/retry.mjs": DEFECTIVE_RETRY } },
+      },
+      ["inspect-context"],
+    ),
   },
   {
     workerRunId: "run-verify-initial",
-    task: task("verify-initial", "verification", "verifier", [], {}),
+    task: task("verify-initial", "verification", "verifier", [], {}, ["implement-retry"]),
   },
   {
     workerRunId: "run-debug",
-    task: task("debug-retry", "debugging", "debugger", ["src/**"], {
-      sim: { files: { "src/retry.mjs": REPAIRED_RETRY } },
-    }),
+    task: task(
+      "debug-retry",
+      "debugging",
+      "debugger",
+      ["src/**"],
+      {
+        sim: { files: { "src/retry.mjs": REPAIRED_RETRY } },
+      },
+      ["verify-initial"],
+    ),
   },
   {
     workerRunId: "run-verify-repair",
-    task: task("verify-repair", "verification", "verifier", [], {}),
+    task: task("verify-repair", "verification", "verifier", [], {}, ["debug-retry"]),
   },
 ];
 
@@ -269,6 +282,7 @@ function task(
   role: TaskSpec["role"],
   writeScope: string[],
   metadata: Record<string, unknown>,
+  dependsOn: string[] = [],
 ): TaskSpec {
   return {
     id,
@@ -276,7 +290,7 @@ function task(
     objective: `${id} objective`,
     kind,
     role,
-    dependsOn: [],
+    dependsOn,
     executionClass: "runner_visible",
     risk: "low",
     writeScope,

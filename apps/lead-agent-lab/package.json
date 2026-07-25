@@ -12,6 +12,8 @@
     "eval:self-build": "tsx src/index.ts --write-artifacts",
     "eval:experiment": "tsx src/experiment-cli.ts --write-artifacts",
     "eval:real-workers": "tsx src/real-workers-cli.ts",
+    "eval:real-workers:receipt": "tsx src/real-workers-receipt-cli.ts",
+    "eval:capabilities": "tsx src/capability-eval-cli.ts",
     "eval:herdr-harness": "tsx src/herdr-harness-cli.ts",
     "drill:approval-ceremony": "tsx scripts/approval-ceremony.mjs",
     "eval": "tsx src/index.ts --write-artifacts",
@@ -19,6 +21,7 @@
   },
   "dependencies": {
     "@clankie/api-client": "workspace:*",
+    "@clankie/credential-broker": "workspace:*",
     "@clankie/doctrine": "workspace:*",
     "@clankie/evals": "workspace:*",
     "@clankie/event-store": "workspace:*",
@@ -27,7 +30,8 @@
     "@clankie/protocol": "workspace:*",
     "@clankie/worker-sdk": "workspace:*",
     "@clankie/worker-sim": "workspace:*",
-    "yaml": "2.9.0"
+    "yaml": "2.9.0",
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@types/node": "24.12.4",

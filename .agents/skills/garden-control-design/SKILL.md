@@ -1,4 +1,5 @@
 ---
+name: garden-control-design
 description: Use when designing or implementing the garden, graph, terminal deck, artifact room, clankie characters, biomes, or fleet-control interactions.
 ---
 

@@ -123,6 +123,71 @@ describe("WorktreeManager", () => {
     );
   });
 
+  it("isolates sibling outputs and deterministically materializes their integration", async () => {
+    const { manager } = await makeManager();
+    const left = await manager.createTaskCandidate(
+      { missionId: "graph", taskId: "left", workerRunId: "run-left" },
+      [],
+    );
+    await writeFile(join(left.path, "left.ts"), "export const left = true;\n", "utf8");
+    const leftOutput = await manager.sealTaskOutput(left, {
+      attempt: 1,
+      dependencyTaskIds: [],
+      writer: true,
+    });
+
+    const right = await manager.createTaskCandidate(
+      { missionId: "graph", taskId: "right", workerRunId: "run-right" },
+      [],
+    );
+    await writeFile(join(right.path, "right.ts"), "export const right = true;\n", "utf8");
+    const rightOutput = await manager.sealTaskOutput(right, {
+      attempt: 1,
+      dependencyTaskIds: [],
+      writer: true,
+    });
+
+    const leftVerifier = await manager.createTaskCandidate(
+      { missionId: "graph", taskId: "verify-left", workerRunId: "run-verify-left" },
+      ["left"],
+    );
+    await expect(readFile(join(leftVerifier.path, "left.ts"), "utf8")).resolves.toContain("left = true");
+    await expect(readFile(join(leftVerifier.path, "right.ts"), "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    expect(leftVerifier.baseCommit).toBe(leftOutput.outputCommit);
+
+    const integration = await manager.createTaskCandidate(
+      { missionId: "graph", taskId: "integrate", workerRunId: "run-integrate" },
+      ["right", "left"],
+    );
+    await expect(readFile(join(integration.path, "left.ts"), "utf8")).resolves.toContain("left = true");
+    await expect(readFile(join(integration.path, "right.ts"), "utf8")).resolves.toContain("right = true");
+    expect(integration.baseCommit).not.toBe(leftOutput.outputCommit);
+    expect(integration.baseCommit).not.toBe(rightOutput.outputCommit);
+  });
+
+  it("never seals ignored task output into a dependency commit", async () => {
+    const { manager, repoPath } = await makeManager();
+    await writeFile(join(repoPath, ".gitignore"), ".env\n", "utf8");
+    await git(repoPath, ["add", ".gitignore"]);
+    await git(repoPath, ["commit", "-m", "ignore env"]);
+    const candidate = await manager.createTaskCandidate(
+      { missionId: "ignored", taskId: "writer", workerRunId: "run-ignored" },
+      [],
+    );
+    await writeFile(join(candidate.path, ".env"), "SECRET_SENTINEL=never-commit\n", "utf8");
+
+    await expect(
+      manager.sealTaskOutput(candidate, {
+        attempt: 1,
+        dependencyTaskIds: [],
+        writer: true,
+      }),
+    ).rejects.toThrow("Ignored path changes cannot enter a dependency snapshot: .env");
+    await expect(manager.taskOutput("ignored", "writer")).rejects.toThrow("task_output_manifest_missing");
+  });
+
   it.each([
     { state: "clean", ignoredPath: undefined },
     { state: "ignored-only", ignoredPath: ".env" },

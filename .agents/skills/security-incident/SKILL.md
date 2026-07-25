@@ -1,4 +1,5 @@
 ---
+name: security-incident
 description: Use when a worker, skill, connector, terminal, relay, memory boundary, credential, or policy enforcement point may be compromised.
 ---
 

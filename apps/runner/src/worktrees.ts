@@ -34,6 +34,18 @@ export interface MissionCandidateManifest {
   baseCommit: string;
 }
 
+export interface TaskCandidateOutputManifest {
+  schemaVersion: 1;
+  missionId: string;
+  taskId: string;
+  workerRunId: string;
+  attempt: number;
+  branch: string;
+  inputCommit: string;
+  outputCommit: string;
+  dependencyTaskIds: string[];
+}
+
 export interface ReleaseResult {
   leaseId: string;
   path: string;
@@ -95,26 +107,138 @@ export class WorktreeManager {
 
   /** Create a mission/task branch + worktree from an immutable base commit and lease it. */
   public create(holder: WorktreeHolder, baseRef = "HEAD"): Promise<WorktreeLease> {
+    return this.enqueue(() => this.createUnlocked(holder, baseRef));
+  }
+
+  /**
+   * Create one attempt-local candidate from the exact direct dependency outputs.
+   *
+   * Multiple outputs are merged in stable task-id order before the provider
+   * starts. The merge result, rather than the first dependency, becomes the
+   * immutable evidence base for this attempt.
+   */
+  public createTaskCandidate(
+    holder: WorktreeHolder,
+    dependencyTaskIds: readonly string[],
+    baseRef = "HEAD",
+  ): Promise<WorktreeLease> {
     return this.enqueue(async () => {
-      const baseCommit = (await this.git(this.repoPath, ["rev-parse", "--verify", baseRef])).trim();
-      const id = randomUUID();
-      const slug = `${sanitizeRef(holder.missionId)}-${sanitizeRef(holder.taskId)}-${id.slice(0, 8)}`;
-      const path = join(this.rootDir, "trees", slug);
-      const branch = `clankie/${sanitizeRef(holder.missionId)}/${sanitizeRef(holder.taskId)}/${id.slice(0, 8)}`;
-      await mkdir(join(this.rootDir, "trees"), { recursive: true });
-      const lease = await this.writeLease({ id, path, branch, baseCommit, holder });
+      const sortedDependencies = [...new Set(dependencyTaskIds)].sort();
+      const outputs = await Promise.all(
+        sortedDependencies.map((taskId) => this.readTaskOutputManifest(holder.missionId, taskId)),
+      );
+      const startRef = outputs[0]?.outputCommit ?? baseRef;
+      const lease = await this.createUnlocked(holder, startRef);
       try {
-        await this.git(this.repoPath, ["worktree", "add", "-b", branch, lease.path, baseCommit]);
+        for (const output of outputs.slice(1)) {
+          await this.git(lease.path, runnerGitArgs(["merge", "--no-edit", "--no-ff", output.outputCommit]));
+        }
+        const inputCommit = (await this.git(lease.path, ["rev-parse", "--verify", "HEAD^{commit}"])).trim();
+        const updated = { ...lease, baseCommit: inputCommit };
+        await this.replaceLease(updated);
+        logger.info(
+          {
+            missionId: holder.missionId,
+            taskId: holder.taskId,
+            workerRunId: holder.workerRunId,
+            dependencyTaskIds: sortedDependencies,
+            inputCommit,
+          },
+          "task candidate materialized",
+        );
+        return updated;
       } catch (error) {
-        await unlink(this.leaseFile(lease.path)).catch(() => undefined);
+        logger.error(
+          {
+            missionId: holder.missionId,
+            taskId: holder.taskId,
+            workerRunId: holder.workerRunId,
+            dependencyTaskIds: sortedDependencies,
+          },
+          "task candidate dependency merge failed",
+        );
         throw error;
       }
-      logger.info(
-        { ...holder, leaseId: id, path: lease.path, branch, baseCommit },
-        "worktree created and leased",
-      );
-      return lease;
     });
+  }
+
+  /**
+   * Seal a scope-validated attempt as the dependency snapshot for this task.
+   * Ignored files are never copied into Git objects.
+   */
+  public sealTaskOutput(
+    lease: WorktreeLease,
+    input: {
+      attempt: number;
+      dependencyTaskIds: readonly string[];
+      writer: boolean;
+    },
+  ): Promise<TaskCandidateOutputManifest> {
+    return this.enqueue(async () => {
+      if (!lease.branch || !lease.baseCommit) {
+        throw new Error(`Worktree lease ${lease.id} is not a branch candidate`);
+      }
+      const active = (await this.readLeases()).find((candidate) => candidate.id === lease.id);
+      if (!active || active.path !== lease.path || active.workerRunId !== lease.workerRunId) {
+        throw new Error(`Worktree lease ${lease.id} is not the active task candidate`);
+      }
+      const ignored = splitNull(
+        await this.git(lease.path, ["ls-files", "--others", "--ignored", "--exclude-standard", "-z"]),
+      );
+      if (ignored.length > 0) {
+        throw new Error(
+          `Ignored path changes cannot enter a dependency snapshot: ${ignored.map(normalizeGitPath).sort().join(", ")}`,
+        );
+      }
+      const status = await this.git(lease.path, ["status", "--porcelain"]);
+      if (status.trim().length > 0) {
+        await this.git(lease.path, ["add", "-A", "--", "."]);
+      }
+      if (input.writer) {
+        await this.git(
+          lease.path,
+          runnerGitArgs([
+            "commit",
+            "--allow-empty",
+            "--no-gpg-sign",
+            "--no-verify",
+            "-m",
+            `clankie: seal ${sanitizeRef(lease.taskId)} attempt ${String(input.attempt)}`,
+          ]),
+        );
+      } else if (status.trim().length > 0) {
+        throw new Error(`Read-only task ${lease.taskId} changed its candidate before sealing`);
+      }
+      const outputCommit = (await this.git(lease.path, ["rev-parse", "--verify", "HEAD^{commit}"])).trim();
+      const manifest: TaskCandidateOutputManifest = {
+        schemaVersion: 1,
+        missionId: lease.missionId,
+        taskId: lease.taskId,
+        workerRunId: lease.workerRunId,
+        attempt: input.attempt,
+        branch: lease.branch,
+        inputCommit: lease.baseCommit,
+        outputCommit,
+        dependencyTaskIds: [...new Set(input.dependencyTaskIds)].sort(),
+      };
+      await this.writeTaskOutputManifest(manifest);
+      logger.info(
+        {
+          missionId: manifest.missionId,
+          taskId: manifest.taskId,
+          workerRunId: manifest.workerRunId,
+          attempt: manifest.attempt,
+          inputCommit: manifest.inputCommit,
+          outputCommit: manifest.outputCommit,
+        },
+        "task candidate output sealed",
+      );
+      return structuredClone(manifest);
+    });
+  }
+
+  public taskOutput(missionId: string, taskId: string): Promise<TaskCandidateOutputManifest> {
+    return this.enqueue(() => this.readTaskOutputManifest(missionId, taskId));
   }
 
   /** Lease an existing path for writing without creating a worktree. */
@@ -293,6 +417,77 @@ export class WorktreeManager {
     return parseCandidateManifest(parsed, missionId);
   }
 
+  private async createUnlocked(holder: WorktreeHolder, baseRef: string): Promise<WorktreeLease> {
+    const baseCommit = (await this.git(this.repoPath, ["rev-parse", "--verify", baseRef])).trim();
+    const id = randomUUID();
+    const slug = `${sanitizeRef(holder.missionId)}-${sanitizeRef(holder.taskId)}-${id.slice(0, 8)}`;
+    const path = join(this.rootDir, "trees", slug);
+    const branch = `clankie/${sanitizeRef(holder.missionId)}/${sanitizeRef(holder.taskId)}/${id.slice(0, 8)}`;
+    await mkdir(join(this.rootDir, "trees"), { recursive: true });
+    const lease = await this.writeLease({ id, path, branch, baseCommit, holder });
+    try {
+      await this.git(this.repoPath, ["worktree", "add", "-b", branch, lease.path, baseCommit]);
+    } catch (error) {
+      await unlink(this.leaseFile(lease.path)).catch(() => undefined);
+      throw error;
+    }
+    logger.info(
+      { ...holder, leaseId: id, path: lease.path, branch, baseCommit },
+      "worktree created and leased",
+    );
+    return lease;
+  }
+
+  private async writeTaskOutputManifest(manifest: TaskCandidateOutputManifest): Promise<void> {
+    const directory = join(this.rootDir, "task-outputs");
+    await mkdir(directory, { recursive: true });
+    const destination = this.taskOutputFile(manifest.missionId, manifest.taskId);
+    const temporary = `${destination}.${randomUUID()}.tmp`;
+    await writeFile(temporary, `${JSON.stringify(manifest, null, 2)}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    });
+    await rename(temporary, destination);
+  }
+
+  private async readTaskOutputManifest(
+    missionId: string,
+    taskId: string,
+  ): Promise<TaskCandidateOutputManifest> {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await readFile(this.taskOutputFile(missionId, taskId), "utf8"));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new Error(`task_output_manifest_missing:${missionId}:${taskId}`);
+      }
+      throw new Error(
+        `Task output manifest for ${missionId}/${taskId} is corrupt: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    const manifest = parseTaskOutputManifest(parsed, missionId, taskId);
+    const inputCommit = (
+      await this.git(this.repoPath, ["rev-parse", "--verify", `${manifest.inputCommit}^{commit}`])
+    ).trim();
+    const outputCommit = (
+      await this.git(this.repoPath, ["rev-parse", "--verify", `${manifest.outputCommit}^{commit}`])
+    ).trim();
+    const branchCommit = (
+      await this.git(this.repoPath, ["rev-parse", "--verify", `refs/heads/${manifest.branch}^{commit}`])
+    ).trim();
+    if (
+      inputCommit !== manifest.inputCommit ||
+      outputCommit !== manifest.outputCommit ||
+      branchCommit !== manifest.outputCommit
+    ) {
+      throw new Error(`Task output manifest for ${missionId}/${taskId} does not match its Git branch`);
+    }
+    return manifest;
+  }
+
   private async settle(lease: WorktreeLease): Promise<ReleaseResult> {
     const state = await this.inspect(lease);
     if (state.kind === "missing") {
@@ -394,6 +589,16 @@ export class WorktreeManager {
     return lease;
   }
 
+  private async replaceLease(lease: WorktreeLease): Promise<void> {
+    const destination = this.leaseFile(lease.path);
+    const temporary = `${destination}.${randomUUID()}.tmp`;
+    await writeFile(temporary, `${JSON.stringify(lease, null, 2)}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+    });
+    await rename(temporary, destination);
+  }
+
   private async readLeases(): Promise<WorktreeLease[]> {
     const entries = await this.readLeaseEntries();
     return entries.flatMap((entry) => (entry.lease ? [entry.lease] : []));
@@ -455,6 +660,13 @@ export class WorktreeManager {
     return join(this.rootDir, "candidates", `${key}.json`);
   }
 
+  private taskOutputFile(missionId: string, taskId: string): string {
+    const key = createHash("sha256")
+      .update(JSON.stringify([missionId, taskId]))
+      .digest("hex");
+    return join(this.rootDir, "task-outputs", `${key}.json`);
+  }
+
   private async git(cwd: string, args: string[]): Promise<string> {
     const result = await execFileAsync("git", args, { cwd, maxBuffer: 10 * 1024 * 1024 });
     return result.stdout;
@@ -488,12 +700,74 @@ function parseCandidateManifest(value: unknown, missionId: string): MissionCandi
   };
 }
 
+function parseTaskOutputManifest(
+  value: unknown,
+  missionId: string,
+  taskId: string,
+): TaskCandidateOutputManifest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Task output manifest for ${missionId}/${taskId} is invalid`);
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    record.schemaVersion !== 1 ||
+    record.missionId !== missionId ||
+    record.taskId !== taskId ||
+    typeof record.workerRunId !== "string" ||
+    !Number.isInteger(record.attempt) ||
+    Number(record.attempt) < 1 ||
+    typeof record.branch !== "string" ||
+    !record.branch.startsWith("clankie/") ||
+    typeof record.inputCommit !== "string" ||
+    !/^[0-9a-f]{40,64}$/u.test(record.inputCommit) ||
+    typeof record.outputCommit !== "string" ||
+    !/^[0-9a-f]{40,64}$/u.test(record.outputCommit) ||
+    !Array.isArray(record.dependencyTaskIds) ||
+    record.dependencyTaskIds.some((dependency) => typeof dependency !== "string")
+  ) {
+    throw new Error(`Task output manifest for ${missionId}/${taskId} has mismatched fields`);
+  }
+  return {
+    schemaVersion: 1,
+    missionId,
+    taskId,
+    workerRunId: record.workerRunId,
+    attempt: Number(record.attempt),
+    branch: record.branch,
+    inputCommit: record.inputCommit,
+    outputCommit: record.outputCommit,
+    dependencyTaskIds: [...new Set(record.dependencyTaskIds as string[])].sort(),
+  };
+}
+
 export function defaultWorktreeRoot(repoPath: string, home: string): string {
   return join(home, ".clankie", "worktrees", basename(resolve(repoPath)));
 }
 
 function sanitizeRef(value: string): string {
   return value.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[.-]+|[.-]+$/g, "") || "unnamed";
+}
+
+function runnerGitArgs(args: string[]): string[] {
+  return [
+    "-c",
+    "user.name=Clankie Runner",
+    "-c",
+    "user.email=runner@clankie.local",
+    "-c",
+    "commit.gpgsign=false",
+    "-c",
+    "core.hooksPath=/dev/null",
+    ...args,
+  ];
+}
+
+function splitNull(value: string): string[] {
+  return value.split("\0").filter((field) => field.length > 0);
+}
+
+function normalizeGitPath(path: string): string {
+  return path.replaceAll("\\", "/").replace(/^\.\//u, "");
 }
 
 function defaultIsProcessAlive(pid: number): boolean {

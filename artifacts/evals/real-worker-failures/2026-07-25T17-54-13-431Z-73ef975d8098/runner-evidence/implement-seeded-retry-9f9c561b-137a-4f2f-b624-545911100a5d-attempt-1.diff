@@ -1,0 +1,27 @@
+diff --git a/src/retry.mjs b/src/retry.mjs
+new file mode 100644
+index 0000000..6d13edb
+--- /dev/null
++++ b/src/retry.mjs
+@@ -0,0 +1,21 @@
++export async function retry(operation, { maxAttempts } = {}) {
++  if (typeof operation !== "function") {
++    throw new TypeError("operation must be a function");
++  }
++
++  if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
++    throw new RangeError("maxAttempts must be a positive integer");
++  }
++
++  let lastError;
++
++  for (let attempt = 1; attempt < maxAttempts; attempt += 1) {
++    try {
++      return await operation();
++    } catch (error) {
++      lastError = error;
++    }
++  }
++
++  throw lastError;
++}

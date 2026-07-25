@@ -1,0 +1,279 @@
+{
+  "schemaVersion": 1,
+  "evaluationId": "clankie-capabilities",
+  "evaluationVersion": "1",
+  "checkedAt": "2026-07-25T18:11:22.343Z",
+  "manifest": {
+    "path": "evals/capabilities/v1/manifest.yaml",
+    "sha256": "5ac481c5a6eeb3672227325300dff13d014ccb9e042679c1e2e8955c886eaaad"
+  },
+  "passed": false,
+  "counts": {
+    "passed": 3,
+    "missing_input": 5,
+    "blocked": 1,
+    "failed": 0
+  },
+  "capabilities": [
+    {
+      "id": "discord_text",
+      "label": "Discord bot and text chat",
+      "status": "missing_input",
+      "gates": [
+        {
+          "id": "readiness",
+          "kind": "command",
+          "phase": "readiness",
+          "durationMs": 695,
+          "exitCode": 1,
+          "stdoutSha256": "69b9d459af1d3de02552ea23865d899eaea165657e3dafacf3284763eacf60a6",
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "status": "missing_input",
+          "issueCodes": [
+            "ambient_roles",
+            "application_id",
+            "control_plane_composition",
+            "discord_application_identity",
+            "discord_guild_membership",
+            "ingress_allowlist",
+            "message_content_intent",
+            "official_bot_credential",
+            "presence_allowlist",
+            "target_guild",
+            "text_ingress_enabled"
+          ]
+        },
+        {
+          "id": "live_round_trip",
+          "kind": "command",
+          "phase": "live",
+          "status": "skipped",
+          "issueCodes": [
+            "readiness_not_passed"
+          ],
+          "durationMs": 0
+        }
+      ]
+    },
+    {
+      "id": "discord_voice",
+      "label": "Multi-person Discord voice",
+      "status": "missing_input",
+      "gates": [
+        {
+          "id": "readiness",
+          "kind": "command",
+          "phase": "readiness",
+          "durationMs": 694,
+          "exitCode": 1,
+          "stdoutSha256": "36458e057a5f1441f8bbd34d6f2546272a50ccca67103f62031fcddbb669a5bf",
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "status": "missing_input",
+          "issueCodes": [
+            "application_id",
+            "control_plane_composition",
+            "discord_application_identity",
+            "discord_guild_membership",
+            "official_bot_credential",
+            "target_guild",
+            "target_voice_channel",
+            "voice_enabled"
+          ]
+        },
+        {
+          "id": "three_speaker_live_round_trip",
+          "kind": "command",
+          "phase": "live",
+          "status": "skipped",
+          "issueCodes": [
+            "readiness_not_passed"
+          ],
+          "durationMs": 0
+        }
+      ]
+    },
+    {
+      "id": "discord_screen",
+      "label": "Discord screen watch and publish",
+      "status": "blocked",
+      "gates": [
+        {
+          "id": "official_transport",
+          "kind": "blocker",
+          "status": "blocked",
+          "issueCodes": [
+            "discord_screen_official_transport_unavailable"
+          ],
+          "durationMs": 0
+        }
+      ]
+    },
+    {
+      "id": "firered",
+      "label": "Pokémon FireRed",
+      "status": "passed",
+      "gates": [
+        {
+          "id": "real_gameplay",
+          "kind": "command",
+          "phase": "live",
+          "durationMs": 385,
+          "exitCode": 0,
+          "stdoutSha256": "414e93f5a997674cbe93fefc59000e65357d431a3a3424e9c78a9136816bafef",
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "status": "passed",
+          "issueCodes": []
+        }
+      ]
+    },
+    {
+      "id": "minecraft",
+      "label": "Minecraft",
+      "status": "missing_input",
+      "gates": [
+        {
+          "id": "readiness",
+          "kind": "command",
+          "phase": "readiness",
+          "durationMs": 450,
+          "exitCode": 2,
+          "stdoutSha256": "42299a4d9992ecdbf5ce276fe025166df11291956015c5c0ee61d4769a0f570e",
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "status": "missing_input",
+          "issueCodes": [
+            "minecraft_eula_acknowledgement"
+          ]
+        },
+        {
+          "id": "private_paper_live_gameplay",
+          "kind": "command",
+          "phase": "live",
+          "status": "skipped",
+          "issueCodes": [
+            "readiness_not_passed"
+          ],
+          "durationMs": 0
+        }
+      ]
+    },
+    {
+      "id": "people_memory",
+      "label": "Long-term Discord people memory",
+      "status": "missing_input",
+      "gates": [
+        {
+          "id": "deterministic_boundaries",
+          "kind": "command",
+          "phase": "deterministic",
+          "durationMs": 900,
+          "exitCode": 0,
+          "stdoutSha256": "192b70b7aef343b55bbc5ef47c07b27a086940cb23567199528f08c92a99957a",
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "status": "passed",
+          "issueCodes": []
+        },
+        {
+          "id": "live_recall_after_restart",
+          "kind": "command",
+          "phase": "live",
+          "durationMs": 405,
+          "exitCode": 1,
+          "stdoutSha256": "7690e4b5d035b84291d4b5d388539d3f45e62d150ec6d45eb6401ca1de743e90",
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "status": "missing_input",
+          "issueCodes": [
+            "approved_fact_recalled",
+            "control_plane_restart_durability",
+            "reviewed_proposal_delivered"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "coding_workers",
+      "label": "Command-started coding workers",
+      "status": "passed",
+      "gates": [
+        {
+          "id": "provider_readiness",
+          "kind": "command",
+          "phase": "readiness",
+          "durationMs": 177,
+          "exitCode": 0,
+          "stdoutSha256": "0be8e96eeaae1a244ce587e9245cdf848b1836d61fef6d438b7135ab1b31dc71",
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "status": "passed",
+          "issueCodes": []
+        },
+        {
+          "id": "real_provider_mission",
+          "kind": "command",
+          "phase": "live",
+          "durationMs": 679,
+          "exitCode": 0,
+          "stdoutSha256": "f33c2de6e51fdf7d811dda86fe38e51ea6308a1c2e3aa82fe6884f8da14b23d1",
+          "stderrSha256": "509b6f91aa8771234edb5567ec61f87eb773e7b5164ce968b1b0b520be68507d",
+          "status": "passed",
+          "issueCodes": []
+        }
+      ]
+    },
+    {
+      "id": "tui",
+      "label": "Live operator TUI",
+      "status": "passed",
+      "gates": [
+        {
+          "id": "captain_health",
+          "kind": "command",
+          "phase": "readiness",
+          "durationMs": 509,
+          "exitCode": 0,
+          "stdoutSha256": "d53714e2dcedaf4b7d5a5d43fd06824d3252b29385b16d8bde195afbd298cf52",
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "status": "passed",
+          "issueCodes": []
+        },
+        {
+          "id": "restart_cursor_and_interaction",
+          "kind": "command",
+          "phase": "deterministic",
+          "durationMs": 1096,
+          "exitCode": 0,
+          "stdoutSha256": "657a0563c5a492bf649bfb492da2936dfd0ba939fcd43ce39db0f51129623877",
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "status": "passed",
+          "issueCodes": []
+        }
+      ]
+    },
+    {
+      "id": "discord_workers_in_tui",
+      "label": "Discord-origin workers in the TUI",
+      "status": "missing_input",
+      "gates": [
+        {
+          "id": "canonical_projection",
+          "kind": "command",
+          "phase": "deterministic",
+          "durationMs": 735,
+          "exitCode": 0,
+          "stdoutSha256": "bf78bd0fd824a922cecf70b148c0b59857e9bcbcd88c3a2aca1bf48b844312f9",
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "status": "passed",
+          "issueCodes": []
+        },
+        {
+          "id": "live_cross_surface_receipt",
+          "kind": "command",
+          "phase": "live",
+          "status": "missing_input",
+          "issueCodes": [
+            "discord_tui_live_receipt_path"
+          ],
+          "durationMs": 0
+        }
+      ]
+    }
+  ]
+}

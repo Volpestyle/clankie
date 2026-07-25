@@ -9,6 +9,9 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const EXPECTED_PI_VERSION = "0.80.6";
+const { createDefaultCredentialStore } = await import("../packages/credential-broker/src/index.ts");
+const credentialStore = createDefaultCredentialStore();
+const anthropicCredential = await credentialStore.get("anthropic").catch(() => undefined);
 const probeEnvironment = pickEnvironment(process.env, [
   "PATH",
   "HOME",
@@ -234,7 +237,7 @@ async function checkClaude() {
   required(process.env.CLANKIE_CLAUDE_MODEL, "model_not_configured", issues);
   if (command) await executable(command, "executable_unavailable", issues, probeEnvironment);
 
-  const direct = Boolean(process.env.ANTHROPIC_API_KEY);
+  const direct = Boolean(process.env.ANTHROPIC_API_KEY) || anthropicCredential?.type === "api";
   const bedrock =
     enabled(process.env.CLAUDE_CODE_USE_BEDROCK) &&
     Boolean(process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION) &&

@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "missionId": "mission-efdd4092-0b1",
+  "taskId": "debug-retry",
+  "workerRunId": "ca80a29a-bdca-4a41-a4b3-0f34589c3340",
+  "attempt": 1,
+  "correlationId": "ca80a29a-bdca-4a41-a4b3-0f34589c3340",
+  "provider": "pi",
+  "providerVersion": "0.80.6",
+  "nativeSessionId": "019f9a68-9327-74d4-baa3-f04b81cc0847",
+  "summary": "Runner observed a succeeded provider outcome and recorded authoritative attempt facts.",
+  "files_changed": [
+    "src/retry.mjs"
+  ],
+  "commands_run": [
+    "provider:pi:sha256:d01e225bc84e5f387e9293196871e9bfd13a04286ce87a469a043a50de205f37"
+  ],
+  "checks": [],
+  "artifacts": [
+    {
+      "ref": "artifact://runner-diff/mission-efdd4092-0b1/ca80a29a-bdca-4a41-a4b3-0f34589c3340-1",
+      "sha256": "01f6842d7712f687a5c8a94995eade0e0479d9ad102bed2ecbbaaf88fe683f53"
+    }
+  ],
+  "remaining_risks": [],
+  "assumptions": [
+    "Provider prose, raw output, and self-reported evidence are not authoritative runner evidence."
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "missionId": "mission-efdd4092-0b1",
+  "taskId": "implement-seeded-retry",
+  "workerRunId": "9f9c561b-137a-4f2f-b624-545911100a5d",
+  "attempt": 1,
+  "correlationId": "9f9c561b-137a-4f2f-b624-545911100a5d",
+  "provider": "codex",
+  "providerVersion": "codex-cli-0.145.0",
+  "nativeSessionId": "019f9a64-4940-7e50-9802-a3e12f077677",
+  "summary": "Runner observed a succeeded provider outcome and recorded authoritative attempt facts.",
+  "files_changed": [
+    "src/retry.mjs"
+  ],
+  "commands_run": [
+    "provider:codex:sha256:0bdd115f3b49c61f01652bc6705bfe7068f79c98a77a83d120216f06de452f5a",
+    "provider:codex:sha256:10026d8d6a93cb7815b8bbba7d7a6fbb3732a9adc422e33366d8f754bf449387",
+    "provider:codex:sha256:17f6bb35b1aecc022526b193a54d2f49b38a8a84b08fa0e477aab6d739445872",
+    "provider:codex:sha256:22d7d3c1864df4087132bfc0c29d3b9039cdd7718e5c763ac64f7df4956ae62d",
+    "provider:codex:sha256:2b85e09c185844cd6f8d45a8caa0c83d50eeaeaeace643087826599d8b4f58f6",
+    "provider:codex:sha256:326584b2ad13488630f599c76bee53a71f199ba41c3bf344cf9aa985b0e7a690",
+    "provider:codex:sha256:398479c20392567b9f5eaa4f16c4906066148a02ef0e2011efd27570a331d44c",
+    "provider:codex:sha256:464ad71be406a5c5196d22df9f63430b268618d004296102a87cd2ee1e0b673b",
+    "provider:codex:sha256:4fbd70b01a9ec57907158893cbedfa9dcde129987332e9f68b4d9a8a6b8cdc59",
+    "provider:codex:sha256:601695ee8904d79e342223573e439f52a8f9b14176d9f35d31134afd224763b3",
+    "provider:codex:sha256:605bc73e75ccbc4f12f9fcdff1c3f18c981c362688fb964cfba51dca777a7223",
+    "provider:codex:sha256:67e4967e9a4c786d31f78449a093746c24b05636791128ee332e0d38f0ea77f1",
+    "provider:codex:sha256:711293ef1447e1c775af46a08c5decbcc28ed89c091bf28b3e6092d364e7d848",
+    "provider:codex:sha256:75600753e49e3f2e0b3e90e1621954a4f9f76f21e76460e7b978f10cf3040a43",
+    "provider:codex:sha256:7669bc634d7622db589cdb2f57db6ffb554ff83ba396ed2fa980cbefb06b56d6",
+    "provider:codex:sha256:80b3cf356f1b575e3d69f6c60089f1b585e5f09298fee432cd6479d27a7a9596",
+    "provider:codex:sha256:81b881ceddea8d58901682821f7c03e2d267c27f3b9845e360644af4d4bd51d4",
+    "provider:codex:sha256:9c5346872d52ab17bcca3e01542eb00d08d3d1b8ddcee2abe7cdb05f1367a466",
+    "provider:codex:sha256:a9868d9fc1b525da1e72000a86fdb86e5b434639c8580c0c0a3ba7bbe1498394",
+    "provider:codex:sha256:c382f4d93c24fc7a298f763c484baa593d4cba28135d28336124f425bd93edbd",
+    "provider:codex:sha256:c56798e8d0614fb62b0de4c33a118e2b7a022e89a1bd4ca6c9742e48bc34b872",
+    "provider:codex:sha256:cd64aa90d8f8f484fde4bb15af7b37b82313e57507f37a83b2566f31d87519ce",
+    "provider:codex:sha256:cef6c1bccb00c183723a040c090cce667247478763d1d43fa53cc7f447269af2",
+    "provider:codex:sha256:d6145e9dc12d4211975662d9568abdd7662cbce8d2ef874ecfc4a1d29feb8b2e",
+    "provider:codex:sha256:de5f935b5e41dbc0bc5f9c2e1380528e7c8fc9ae6d3a7422fcea36671e7db4e8",
+    "provider:codex:sha256:f71a89fee7a7a80c0f7bdcf2dd467dcdc95151e613978c91bbd7934ade2f9d41",
+    "provider:codex:sha256:f72784701a1bb364e27df0b330a59286b645105fd161f21716d05564a73b7e3c"
+  ],
+  "checks": [],
+  "artifacts": [
+    {
+      "ref": "artifact://runner-diff/mission-efdd4092-0b1/9f9c561b-137a-4f2f-b624-545911100a5d-1",
+      "sha256": "3ebfcfdff763d0dc5db2516403e7713bc8dd51e87a61a6813622d5cd029f6db1"
+    }
+  ],
+  "remaining_risks": [],
+  "assumptions": [
+    "Provider prose, raw output, and self-reported evidence are not authoritative runner evidence."
+  ]
+}
