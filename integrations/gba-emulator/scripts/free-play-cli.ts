@@ -144,7 +144,7 @@ function print(turn: FreePlayTurn): void {
     turn.action === null
       ? "(no action)"
       : turn.action.kind === "button_press"
-        ? `press ${turn.action.button}`
+        ? `press ${turn.action.button}${turn.action.repeat === undefined || turn.action.repeat === 1 ? "" : ` x${String(turn.action.repeat)}`}`
         : turn.action.kind === "frame_advance"
           ? `advance ${String(turn.action.frames)}`
           : `wait ${String(turn.action.durationMs)}ms`;

@@ -131,6 +131,30 @@ it as blocked invented obstacles and poisoned the refusal memory, and the model
 correctly protested that it could see open floor. A turn is now reported as a
 turn, and only a refusal while already facing that way records a block.
 
+### Bursts are coarser granularity, not a wider budget
+
+One model call per button press is the wrong unit: a corridor cost a decision
+per tile, and because a short tap only turns the character, even a single step
+often cost two calls.
+
+`button_press` therefore takes an optional bounded `repeat`. Every repeat counts
+against the session's `maxInputs` and the total hold against `maxFrames`, so a
+burst draws from exactly the budget a single press draws from — it buys fewer
+decisions, not more input. `repeat` is optional rather than defaulted so
+`GbaEmulatorAction` stays backward compatible and the deterministic drivers
+needed no edit at all.
+
+Measured on the real ROM at equal turn count, actions per new tile moved 3.3 →
+2.9, and the model used bursts unprompted in 4 of 20 turns — one `repeat: 4`
+crossed four tiles in a single decision. It also raised its own `holdFrames` to
+12-16 after learning that short taps only turn.
+
+The aggregate gain is modest **and the measurement location is the reason**: a
+7x7 bedroom full of furniture is the worst case for crossing distance, and a
+burst of five immediately meets a wall. The capability is kept because it is
+already used correctly and its payoff is outdoors; the honest reading is that
+this scenario cannot demonstrate the win, not that the win is absent.
+
 ### Failure is a turn outcome, not an exception
 
 A playthrough must survive its own participants. Four outcomes are recorded and

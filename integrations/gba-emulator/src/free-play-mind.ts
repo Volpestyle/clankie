@@ -23,6 +23,7 @@ const FreePlayWireDecisionSchema = z
     actionKind: z.enum(["button_press", "frame_advance", "wait"]),
     button: z.enum(["up", "down", "left", "right", "a", "b", "start", "select", "l", "r"]).nullable(),
     holdFrames: z.number().int().nullable(),
+    repeat: z.number().int().nullable(),
     frames: z.number().int().nullable(),
     durationMs: z.number().int().nullable(),
   })
@@ -32,7 +33,12 @@ const FreePlayWireDecisionSchema = z
 function toDecision(wire: z.infer<typeof FreePlayWireDecisionSchema>): unknown {
   const action =
     wire.actionKind === "button_press"
-      ? { kind: "button_press", button: wire.button, holdFrames: wire.holdFrames }
+      ? {
+          kind: "button_press",
+          button: wire.button,
+          holdFrames: wire.holdFrames,
+          ...(wire.repeat === null || wire.repeat === 1 ? {} : { repeat: wire.repeat }),
+        }
       : wire.actionKind === "frame_advance"
         ? { kind: "frame_advance", frames: wire.frames }
         : { kind: "wait", durationMs: wire.durationMs };
@@ -63,9 +69,13 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   "- monologue: your honest thinking about this moment, in your own voice.",
   "- intent: what you plan to do next, in a few words.",
   "- action: exactly one of",
-  '    {"kind":"button_press","button":"up|down|left|right|a|b|start|select|l|r","holdFrames":N}',
+  '    {"kind":"button_press","button":"up|down|left|right|a|b|start|select|l|r","holdFrames":N,"repeat":N}',
   '    {"kind":"frame_advance","frames":N}',
   '    {"kind":"wait","durationMs":N}',
+  "",
+  "repeat presses the same button that many times in ONE action (max 16), which",
+  "is how you cross a corridor without spending a decision per tile. A short tap",
+  "only turns you; a step needs a longer hold or a repeat.",
   "",
   "After each action you are told what actually changed — whether you moved,",
   "or the direction was blocked. Directions already refused from your current",
@@ -185,7 +195,10 @@ function stripEnvelope(observation: FreePlayView["observations"][number]): unkno
 }
 
 function describeAction(action: FreePlayView["history"][number]["action"]): string {
-  if (action.kind === "button_press") return `pressed ${action.button}`;
+  if (action.kind === "button_press") {
+    const repeat = action.repeat ?? 1;
+    return repeat === 1 ? `pressed ${action.button}` : `pressed ${action.button} x${String(repeat)}`;
+  }
   if (action.kind === "frame_advance") return `advanced ${String(action.frames)} frames`;
   return `waited ${String(action.durationMs)}ms`;
 }

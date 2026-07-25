@@ -435,18 +435,27 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
     }
     switch (action.kind) {
       case "button_press": {
-        if (action.holdFrames > limits.maxFrames) throw closed("frame_bound_exceeded");
+        // Every repeat is an input and every hold is frames, so a burst is
+        // bounded by the same budget a single press draws from.
+        const repeat = action.repeat ?? 1;
+        if (action.holdFrames * repeat > limits.maxFrames) throw closed("frame_bound_exceeded");
+        if (repeat > limits.maxInputs) throw closed("input_bound_exceeded");
         if (limits.maxInputs < 1) throw closed("input_bound_exceeded");
-        this.core.pressButton(action.button, action.holdFrames);
+        for (let press = 0; press < repeat; press += 1) {
+          this.core.pressButton(action.button, action.holdFrames);
+        }
         const state = this.core.gameState();
         this.record(
           actionId,
           "button_press",
-          `Pressed ${action.button} for ${String(action.holdFrames)} frames`,
+          repeat === 1
+            ? `Pressed ${action.button} for ${String(action.holdFrames)} frames`
+            : `Pressed ${action.button} ${String(repeat)}x for ${String(action.holdFrames)} frames`,
         );
         return {
           button: action.button,
           holdFrames: action.holdFrames,
+          repeat,
           frame: state.frame,
           mode: state.mode,
           ramStateSha256: this.core.ramStateSha256(),

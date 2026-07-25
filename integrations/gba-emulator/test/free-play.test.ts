@@ -250,3 +250,47 @@ describe("free play", () => {
     expect(result.coherence).toBeNull();
   });
 });
+
+describe("burst actions", () => {
+  it("accepts a bounded repeat and reports it in the trace", async () => {
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: mind([
+        {
+          monologue: "long corridor",
+          intent: "cross the corridor",
+          action: { kind: "button_press", button: "left", holdFrames: 16, repeat: 5 },
+        },
+      ]),
+      turns: 1,
+    });
+    expect(result.turns[0]?.outcome).toBe("accepted");
+    expect(result.turns[0]?.action).toMatchObject({ button: "left", repeat: 5 });
+  });
+
+  it("rejects a repeat beyond the catalogued bound", async () => {
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: mind([
+        {
+          monologue: "mash",
+          intent: "mash",
+          // A burst is coarser granularity, not an unbounded budget.
+          action: { kind: "button_press", button: "left", holdFrames: 4, repeat: 99 },
+        },
+      ]),
+      turns: 1,
+    });
+    expect(result.turns[0]?.outcome).toBe("invalid_decision");
+  });
+
+  it("treats an omitted repeat as a single press, so frozen actions are unchanged", async () => {
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: mind([press("up", "up")]),
+      turns: 1,
+    });
+    expect(result.turns[0]?.action).toMatchObject({ kind: "button_press", button: "up" });
+    expect((result.turns[0]?.action as { repeat?: number }).repeat).toBeUndefined();
+  });
+});

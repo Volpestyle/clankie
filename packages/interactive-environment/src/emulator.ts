@@ -35,9 +35,29 @@ const HoldFramesSchema = z.number().int().positive().max(240);
 const FrameCountSchema = z.number().int().positive().max(3_600);
 const EmulatorFrameSchema = z.number().int().nonnegative().max(100_000_000);
 
+/**
+ * Repeats of a single press within one action.
+ *
+ * A corridor should cost one decision, not one per tile — and in FireRed a
+ * short tap turns the character without stepping, so even a single step often
+ * needs two presses. Repeats are bounded and each one counts against the
+ * session's `maxInputs`, so this is coarser granularity, not a wider budget.
+ */
+const RepeatSchema = z.number().int().positive().max(16);
+
 export const GbaEmulatorActionSchema = z.discriminatedUnion("kind", [
   z
-    .object({ kind: z.literal("button_press"), button: GbaButtonSchema, holdFrames: HoldFramesSchema })
+    .object({
+      kind: z.literal("button_press"),
+      button: GbaButtonSchema,
+      holdFrames: HoldFramesSchema,
+      /**
+       * Omitted means a single press. Optional rather than defaulted so the
+       * action type stays backward compatible and the deterministic drivers
+       * need no edit at all.
+       */
+      repeat: RepeatSchema.optional(),
+    })
     .strict(),
   z.object({ kind: z.literal("frame_advance"), frames: FrameCountSchema }).strict(),
   z.object({ kind: z.literal("wait"), durationMs: z.number().int().positive().max(30_000) }).strict(),
