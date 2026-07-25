@@ -100,7 +100,13 @@ unnamed holder:         possession_holder_not_allowed
 act after release:      possession_lease_not_held
 ```
 
-## Speaking as Clankie
+## Discord reach: speaking and listening
+
+`clankie_say` and `clankie_listen` extend possession into the channel. Both
+require the lease — talking and eavesdropping as him are driving him — and both
+go through a **port**, because the same fence blocks them.
+
+### Speaking as Clankie
 
 `clankie_say` speaks in the channel Clankie is present in, and requires the
 possession lease — talking as him is driving him. The caller cannot choose the
@@ -125,6 +131,18 @@ clankie_speech_unavailable: no speech port is wired. A possessor cannot speak
 directly — the control plane's presence action requires a live claim only the
 Discord bridge can mint.
 ```
+
+### Listening
+
+`ClankieHearingPort` is symmetric and blocked by the same fence: the bridge holds
+the gateway _and_ the consent registry, so a possessor cannot subscribe to voice
+itself.
+
+Consent is not re-litigated at this boundary. A possessor hears exactly what
+Clankie was already permitted to hear under
+[ADR 0045](../../docs/adr/0045-official-bot-dave-group-voice.md) — asking as a
+possessor grants no additional access — and **raw audio never crosses**:
+transcripts only, bounded by the voice plane and capped again here.
 
 ## Not yet
 

@@ -3,7 +3,14 @@ import { GbaEmulatorObservationKindSchema } from "@clankie/interactive-environme
 import { z } from "zod";
 import { ActArgumentsSchema, actTool, observeTool, pauseTool, type GbaToolContext } from "./tools.ts";
 import type { PossessionLease } from "./possession.ts";
-import { CLANKIE_SPEECH_MAX, deniedSpeechPort, type ClankieSpeechPort } from "./speech.ts";
+import {
+  CLANKIE_HEARING_MAX_LINES,
+  CLANKIE_SPEECH_MAX,
+  deniedHearingPort,
+  deniedSpeechPort,
+  type ClankieHearingPort,
+  type ClankieSpeechPort,
+} from "./speech.ts";
 
 /**
  * Clankie's body, published for any harness to drive.
@@ -18,12 +25,43 @@ export interface GbaMcpServerOptions {
   possession?: PossessionLease;
   /** Defaults to refusing; a possessor cannot speak without a wired port. */
   speech?: ClankieSpeechPort;
+  /** Defaults to refusing; hearing is blocked by the same gateway fence. */
+  hearing?: ClankieHearingPort;
 }
 
 export function createGbaMcpServer(context: GbaToolContext, options: GbaMcpServerOptions = {}): McpServer {
   const { possession } = options;
   const speech = options.speech ?? deniedSpeechPort;
+  const hearing = options.hearing ?? deniedHearingPort;
   const server = new McpServer({ name: "clankie-gba", version: "0.1.0" });
+
+  server.registerTool(
+    "clankie_listen",
+    {
+      title: "Hear what was said near Clankie",
+      description:
+        "Read recent transcript lines from the voice channel Clankie is in. Requires the possession " +
+        "lease. You hear exactly what Clankie was already permitted to hear under the existing " +
+        "consent rules — asking as a possessor grants no additional access, and raw audio never " +
+        "crosses this boundary.",
+      inputSchema: {
+        limit: z.number().int().min(1).max(CLANKIE_HEARING_MAX_LINES).optional(),
+        possessionToken: z.string().optional(),
+      },
+    },
+    async (args) => {
+      try {
+        context.assertMayAct?.(args.possessionToken);
+        const lines = await hearing.recent(args.limit ?? 10);
+        return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      } catch (error) {
+        return {
+          content: [{ type: "text" as const, text: error instanceof Error ? error.message : "refused" }],
+          isError: true,
+        };
+      }
+    },
+  );
 
   server.registerTool(
     "clankie_say",

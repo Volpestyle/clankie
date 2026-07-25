@@ -49,3 +49,34 @@ export const deniedSpeechPort: ClankieSpeechPort = {
       ),
     ),
 };
+
+/**
+ * Hearing: what was said near Clankie recently.
+ *
+ * Symmetric to {@link ClankieSpeechPort} and blocked by the same fence — a
+ * possessor holds no gateway, so it cannot subscribe to voice itself. The
+ * process that owns the body in Discord supplies what it already captured
+ * under the existing consent rules ([ADR 0045](../../../docs/adr/0045-official-bot-dave-group-voice.md)).
+ *
+ * Consent is not re-litigated here: a possessor hears exactly what Clankie was
+ * already permitted to hear, and nothing that only consented speakers produced
+ * becomes available because a possessor asked. Raw audio never crosses this
+ * seam — transcripts only, already bounded by the voice plane.
+ */
+export interface ClankieHearingPort {
+  /** Recent transcript lines, oldest first, already consent-filtered. */
+  recent(limit: number): Promise<string[]>;
+}
+
+export const CLANKIE_HEARING_MAX_LINES = 50;
+
+/** Denied by default, with the same explanation as speech. */
+export const deniedHearingPort: ClankieHearingPort = {
+  recent: () =>
+    Promise.reject(
+      new Error(
+        "clankie_hearing_unavailable: no hearing port is wired. A possessor cannot subscribe to " +
+          "voice directly — only the Discord bridge holds the gateway and the consent registry.",
+      ),
+    ),
+};
