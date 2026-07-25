@@ -39,6 +39,7 @@ export interface GbaEmulatorSnapshot {
   opponentHp: number;
   frame: number;
   inputCount: number;
+  inputReady: boolean;
   stateCertain: boolean;
   ramStateSha256: string;
 }
@@ -61,11 +62,7 @@ export class GbaEmulatorAdapter implements EnvironmentAdapter {
 
   public constructor(scenarioInput: FrozenGbaScenario, fixtureSha256: string);
   public constructor(scenarioInput: GbaAdapterScenario, fixtureSha256: string, coreFactory: GbaCoreFactory);
-  public constructor(
-    scenarioInput: GbaAdapterScenario,
-    fixtureSha256: string,
-    coreFactory?: GbaCoreFactory,
-  ) {
+  public constructor(scenarioInput: GbaAdapterScenario, fixtureSha256: string, coreFactory?: GbaCoreFactory) {
     this.scenario = scenarioInput;
     if (!/^[a-f0-9]{64}$/u.test(fixtureSha256)) throw new Error("Fixture SHA-256 is invalid");
     this.fixtureSha256 = fixtureSha256;
@@ -255,15 +252,15 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
             },
           };
         case "menu": {
-          const battle = state.battle;
-          if (state.mode !== "battle" || !battle) throw closed("menu_not_open");
+          const menu = state.menu;
+          if (!menu) throw closed("menu_not_open");
           return {
             ...base,
             kind,
             data: {
-              menuId: "battle-move-menu",
-              cursor: battle.moveCursor,
-              entries: requireActiveMember().moves.map((move) => ({ id: move.moveId, label: move.moveId })),
+              menuId: menu.menuId,
+              cursor: menu.cursor,
+              entries: menu.entries,
               untrusted: true as const,
             },
           };
@@ -277,10 +274,18 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
               members: state.party.map(({ moves: _moves, ...member }) => member),
             },
           };
+        case "inventory":
+          return {
+            ...base,
+            kind,
+            data: { items: state.inventory ?? [] },
+          };
         case "battle": {
           const battle = state.battle;
           const trainer = this.scenario.trainer;
-          if (!battle || !trainer) throw closed("battle_not_active");
+          if (!battle) throw closed("battle_not_active");
+          const opponent = battle.opponent ?? trainer?.opponent;
+          if (!opponent) throw closed("battle_state_corrupt");
           const activeMember = requireActiveMember();
           return {
             ...base,
@@ -290,7 +295,9 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
               turn: battle.turn,
               phase:
                 state.mode === "battle"
-                  ? ("awaiting_input" as const)
+                  ? battle.inputMode === "resolving"
+                    ? ("resolving" as const)
+                    : ("awaiting_input" as const)
                   : state.mode === "battle_won"
                     ? ("won" as const)
                     : state.mode === "battle_lost"
@@ -299,10 +306,10 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
                           throw closed("battle_not_active");
                         })(),
               opponent: {
-                speciesId: trainer.opponent.speciesId,
-                level: trainer.opponent.level,
+                speciesId: opponent.speciesId,
+                level: opponent.level,
                 currentHp: battle.opponentHp,
-                maxHp: trainer.opponent.maxHp,
+                maxHp: opponent.maxHp,
               },
               activePartySlot: state.activePartySlot,
               moveCursor: battle.moveCursor,
@@ -313,14 +320,16 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
         }
         case "dialog": {
           const trainer = this.scenario.trainer;
-          if (state.mode !== "dialog" || !trainer) throw closed("dialog_not_open");
+          if (state.mode !== "dialog") throw closed("dialog_not_open");
+          const lines = state.dialogLines?.length ? state.dialogLines : trainer?.dialog;
+          if (!lines?.length) throw closed("dialog_state_corrupt");
           return {
             ...base,
             kind,
             data: {
-              speaker: trainer.trainerId,
-              lines: [...trainer.dialog],
-              lineIndex: Math.min(state.dialogLineIndex, trainer.dialog.length - 1),
+              speaker: trainer?.trainerId ?? "firered",
+              lines: [...lines],
+              lineIndex: Math.min(state.dialogLineIndex, lines.length - 1),
               untrusted: true as const,
             },
           };
@@ -395,6 +404,7 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
       opponentHp: state.battle?.opponentHp ?? this.scenario.trainer?.opponent.maxHp ?? 0,
       frame: state.frame,
       inputCount: state.inputCount,
+      inputReady: state.inputReady ?? true,
       stateCertain: this.certain,
       ramStateSha256: this.core.ramStateSha256(),
     };

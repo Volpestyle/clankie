@@ -9,8 +9,8 @@ import { sha256 } from "./core-double.ts";
  * In-process, single-threaded libretro driver for the pinned mGBA WASM core
  * (`romdev-platform-gba@0.11.0`). No frontend, no timers, no audio output,
  * and no network path: the caller pumps frames one `retro_run()` at a time,
- * injects keypad state through the input-state callback, and reads system
- * RAM (GBA EWRAM) and the raw framebuffer straight out of the WASM heap.
+ * injects keypad state through the input-state callback, and reads mapped GBA
+ * memory plus the raw framebuffer straight out of the WASM heap.
  * Determinism comes from frame-stepped execution: identical ROM, savestate,
  * and input schedule produce byte-identical RAM and framebuffers.
  *
@@ -20,6 +20,10 @@ import { sha256 } from "./core-double.ts";
 const RETRO_DEVICE_JOYPAD = 1;
 /** RETRO_MEMORY_SYSTEM_RAM: the GBA's 256 KB EWRAM (bus address 0x02000000). */
 const RETRO_MEMORY_SYSTEM_RAM = 2;
+export const GBA_EWRAM_BUS_ADDRESS = 0x02000000;
+export const GBA_EWRAM_BYTE_LENGTH = 0x40000;
+export const GBA_IWRAM_BUS_ADDRESS = 0x03000000;
+export const GBA_IWRAM_BYTE_LENGTH = 0x8000;
 
 /** libretro joypad button ids, indexed by the strict contract button names. */
 const JOYPAD_ID: Record<GbaButton, number> = {
@@ -41,6 +45,89 @@ const ENV_SET_PIXEL_FORMAT = 10;
 const ENV_GET_VARIABLE = 15;
 const ENV_GET_VARIABLE_UPDATE = 17;
 const ENV_GET_SAVE_DIRECTORY = 31;
+/** RETRO_ENVIRONMENT_SET_MEMORY_MAPS includes RETRO_ENVIRONMENT_EXPERIMENTAL. */
+const ENV_SET_MEMORY_MAPS = 36 | 0x10000;
+
+/**
+ * wasm32 layout of libretro's `retro_memory_descriptor`.
+ *
+ * `uint64_t flags` gives the struct 8-byte alignment, so the eight 32-bit
+ * pointer/size fields occupy offsets 8..35 and the descriptor is padded to a
+ * 40-byte stride. mGBA passes a stack-allocated descriptor array to the
+ * environment callback; callers must copy values during the callback.
+ */
+const RETRO_MEMORY_DESCRIPTOR_STRIDE = 40;
+const MAX_MEMORY_DESCRIPTORS = 64;
+
+export interface LibretroMemoryDescriptor {
+  flags: bigint;
+  heapPointer: number;
+  offset: number;
+  busAddress: number;
+  select: number;
+  disconnect: number;
+  byteLength: number;
+}
+
+const requireHeapRange = (heap: Uint8Array, pointer: number, byteLength: number, label: string): void => {
+  if (
+    !Number.isSafeInteger(pointer) ||
+    !Number.isSafeInteger(byteLength) ||
+    pointer < 0 ||
+    byteLength < 0 ||
+    pointer + byteLength > heap.byteLength
+  ) {
+    throw new Error(`${label} is outside the mGBA WASM heap`);
+  }
+};
+
+/**
+ * Copy a libretro memory map out of the transient callback payload.
+ *
+ * Exported for an ABI-level synthetic-heap test. The returned descriptors do
+ * not retain a view of the callback's stack memory.
+ */
+export function decodeLibretroMemoryMap(
+  heap: Uint8Array,
+  memoryMapPointer: number,
+): LibretroMemoryDescriptor[] {
+  requireHeapRange(heap, memoryMapPointer, 8, "libretro memory map");
+  const view = new DataView(heap.buffer, heap.byteOffset, heap.byteLength);
+  const descriptorsPointer = view.getUint32(memoryMapPointer, true);
+  const descriptorCount = view.getUint32(memoryMapPointer + 4, true);
+  if (descriptorCount === 0 || descriptorCount > MAX_MEMORY_DESCRIPTORS) {
+    throw new Error(`libretro memory map has invalid descriptor count ${String(descriptorCount)}`);
+  }
+  requireHeapRange(
+    heap,
+    descriptorsPointer,
+    descriptorCount * RETRO_MEMORY_DESCRIPTOR_STRIDE,
+    "libretro memory descriptors",
+  );
+
+  return Array.from({ length: descriptorCount }, (_, index) => {
+    const base = descriptorsPointer + index * RETRO_MEMORY_DESCRIPTOR_STRIDE;
+    const flags = view.getBigUint64(base, true);
+    const heapPointer = view.getUint32(base + 8, true);
+    const offset = view.getUint32(base + 12, true);
+    const busAddress = view.getUint32(base + 16, true);
+    const select = view.getUint32(base + 20, true);
+    const disconnect = view.getUint32(base + 24, true);
+    const byteLength = view.getUint32(base + 28, true);
+    if (heapPointer !== 0) {
+      requireHeapRange(heap, heapPointer + offset, byteLength, "libretro mapped memory");
+    }
+    return {
+      flags,
+      heapPointer,
+      offset,
+      busAddress,
+      select,
+      disconnect,
+      byteLength,
+    };
+  });
+}
 
 export interface MgbaFramebuffer {
   width: number;
@@ -69,6 +156,7 @@ export class MgbaLibretroCore {
   private module: EmscriptenModule | null = null;
   private pixelFormat = 2; // RGB565, mGBA's default
   private frame: MgbaFramebuffer | null = null;
+  private memoryDescriptors: LibretroMemoryDescriptor[] = [];
   private keymask = 0;
   private retroRun: () => number = () => 0;
   private retroLoadGame: (infoPtr: number) => number = () => 0;
@@ -124,6 +212,9 @@ export class MgbaLibretroCore {
         case ENV_GET_VARIABLE_UPDATE:
           module.setValue(data, 0, "i8");
           return 1;
+        case ENV_SET_MEMORY_MAPS:
+          this.memoryDescriptors = decodeLibretroMemoryMap(module.HEAPU8, data);
+          return 1;
         default:
           return 0; // unhandled -> false; the core copes
       }
@@ -132,7 +223,8 @@ export class MgbaLibretroCore {
     const videoRefreshCallback = (data: number, width: number, height: number, pitch: number): void => {
       this.frameCount += 1;
       if (data === 0) return; // duplicated frame; keep the previous one
-      if (this.pixelFormat !== 2) throw new Error(`Unsupported libretro pixel format ${String(this.pixelFormat)}`);
+      if (this.pixelFormat !== 2)
+        throw new Error(`Unsupported libretro pixel format ${String(this.pixelFormat)}`);
       const rowBytes = width * 2;
       const out = new Uint8Array(rowBytes * height);
       for (let y = 0; y < height; y += 1) {
@@ -208,13 +300,38 @@ export class MgbaLibretroCore {
     for (let i = 0; i < frames; i += 1) this.retroRun();
   }
 
+  private readMappedMemory(busAddress: number, byteLength: number, label: string): Uint8Array {
+    const module = this.requireModule();
+    const descriptor = this.memoryDescriptors.find(
+      (candidate) =>
+        candidate.busAddress === busAddress &&
+        candidate.byteLength === byteLength &&
+        candidate.heapPointer !== 0,
+    );
+    if (!descriptor) throw new Error(`${label} is absent from the libretro memory map`);
+    const pointer = descriptor.heapPointer + descriptor.offset;
+    requireHeapRange(module.HEAPU8, pointer, byteLength, label);
+    return module.HEAPU8.slice(pointer, pointer + byteLength);
+  }
+
   /** Copy of the GBA's 256 KB EWRAM (snapshot; the heap mutates on growth). */
   public readEwram(): Uint8Array {
+    if (this.memoryDescriptors.length > 0) {
+      return this.readMappedMemory(GBA_EWRAM_BUS_ADDRESS, GBA_EWRAM_BYTE_LENGTH, "EWRAM");
+    }
+    // Compatibility path for a libretro build that implements the legacy
+    // system-RAM accessor but does not publish RETRO_ENVIRONMENT_SET_MEMORY_MAPS.
     const module = this.requireModule();
     const ptr = this.retroGetMemoryData(RETRO_MEMORY_SYSTEM_RAM);
     const size = this.retroGetMemorySize(RETRO_MEMORY_SYSTEM_RAM);
-    if (ptr === 0 || size === 0) throw new Error("EWRAM is not available");
+    if (ptr === 0 || size !== GBA_EWRAM_BYTE_LENGTH) throw new Error("EWRAM is not available");
+    requireHeapRange(module.HEAPU8, ptr, size, "EWRAM");
     return module.HEAPU8.slice(ptr, ptr + size);
+  }
+
+  /** Copy of the GBA's 32 KB IWRAM from mGBA's published memory map. */
+  public readIwram(): Uint8Array {
+    return this.readMappedMemory(GBA_IWRAM_BUS_ADDRESS, GBA_IWRAM_BYTE_LENGTH, "IWRAM");
   }
 
   /** Latest rendered framebuffer, or null before the first rendered frame. */

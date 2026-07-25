@@ -1,31 +1,26 @@
 {
-  "name": "@clankie/gba-emulator",
+  "name": "@clankie/discord-activity",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": {
-    ".": "./src/index.ts"
-  },
   "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
     "build": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "fixture:check": "tsx scripts/check-fixture.ts",
-    "scenario:validate": "tsx scripts/validate-scenario.ts",
-    "probe:firered": "tsx scripts/probe-fire-red.ts",
-    "gameplay:live-proof": "tsx scripts/run-real-scenario.ts",
-    "gameplay:evaluate-receipt": "tsx scripts/evaluate-live-receipt.ts",
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {
-    "@clankie/environment-runtime": "workspace:*",
+    "@clankie/credential-broker": "workspace:*",
     "@clankie/interactive-environment": "workspace:*",
     "@clankie/protocol": "workspace:*",
-    "romdev-platform-gba": "0.11.0",
+    "ws": "8.21.0",
     "zod": "4.4.3"
   },
   "devDependencies": {
     "@types/node": "24.12.4",
+    "@types/ws": "8.18.1",
     "tsx": "4.23.0",
     "typescript": "5.9.3",
     "vitest": "4.1.10"

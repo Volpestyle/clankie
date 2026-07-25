@@ -105,9 +105,15 @@ for (const segment of SCHEDULE) {
 const savestate = core.saveState();
 mkdirSync(path.dirname(savestatePath), { recursive: true });
 writeFileSync(savestatePath, savestate);
-console.log(JSON.stringify({
-  romSha256: sha256(romBytes),
-  savestatePath,
-  savestateSha256: sha256(savestate),
-  framesRun: core.frameCount,
-}, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      romSha256: sha256(romBytes),
+      savestatePath,
+      savestateSha256: sha256(savestate),
+      framesRun: core.frameCount,
+    },
+    null,
+    2,
+  ),
+);

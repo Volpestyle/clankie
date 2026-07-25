@@ -5,10 +5,11 @@ import {
   type EnvironmentEvent,
   type EnvironmentSemanticEvent,
   type GbaEmulatorAction,
+  type GbaButton,
   type GbaEmulatorObservation,
   type GbaEmulatorStartActionCommand,
 } from "@clankie/interactive-environment";
-import { EnvironmentRuntime } from "@clankie/environment-runtime";
+import { EnvironmentAdapterActionError, EnvironmentRuntime } from "@clankie/environment-runtime";
 import { z } from "zod";
 import { GbaEmulatorAdapter } from "./adapter.ts";
 import { Sha256Schema, type GbaEmulatorTrace } from "./contracts.ts";
@@ -74,6 +75,19 @@ export const RealGbaRouteScenarioSchema = z
       .strict(),
     start: GbaMapPositionSchema,
     target: GbaMapPositionSchema,
+    goal: z
+      .discriminatedUnion("kind", [
+        z.object({ kind: z.literal("reach_target") }).strict(),
+        z
+          .object({
+            kind: z.literal("trainer_battle_won"),
+            interactionFacing: z.enum(["north", "east", "south", "west"]),
+            provePartyMenu: z.boolean().default(true),
+            proveInventoryMenu: z.boolean().default(true),
+          })
+          .strict(),
+      ])
+      .default({ kind: "reach_target" }),
     expected: z.object({ minimumDecisions: z.number().int().positive().max(256) }).strict(),
   })
   .strict()
@@ -105,7 +119,23 @@ export type RealGbaRouteScenario = z.infer<typeof RealGbaRouteScenarioSchema>;
 
 export const RealGbaReasonCodeSchema = z.enum([
   "route_step_toward_target",
+  "open_start_menu",
+  "move_start_menu_cursor",
+  "select_start_menu_entry",
+  "observe_and_close_party_menu",
+  "observe_and_close_inventory_menu",
+  "wait_field_transition",
+  "close_incidental_menu",
+  "turn_toward_trainer",
+  "engage_trainer",
+  "advance_dialog",
+  "wait_battle_resolution",
+  "move_action_cursor_to_fight",
+  "select_fight",
+  "move_cursor_to_best_move",
+  "select_best_move",
   "halt_target_reached",
+  "halt_battle_won",
   "halt_uncertain_state",
   "halt_action_failed",
   "halt_route_unreachable",
@@ -123,12 +153,21 @@ export const RealGbaDecisionSchema = z
     observedRamStateSha256: Sha256Schema,
     reasonCode: RealGbaReasonCodeSchema,
     action: z
-      .object({
-        kind: z.literal("button_press"),
-        button: z.enum(["up", "down", "left", "right"]),
-        holdFrames: z.number().int().positive().max(240),
-      })
-      .strict()
+      .discriminatedUnion("kind", [
+        z
+          .object({
+            kind: z.literal("button_press"),
+            button: z.enum(["a", "b", "start", "select", "up", "down", "left", "right", "l", "r"]),
+            holdFrames: z.number().int().positive().max(240),
+          })
+          .strict(),
+        z
+          .object({
+            kind: z.literal("frame_advance"),
+            frames: z.number().int().positive().max(3_600),
+          })
+          .strict(),
+      ])
       .optional(),
   })
   .strict()
@@ -195,6 +234,7 @@ export const RealGbaScenarioReportSchema = z
     result: z.enum(["passed", "failed"]),
     halt: z.enum([
       "target_reached",
+      "battle_won",
       "uncertain_state",
       "action_failed",
       "route_unreachable",
@@ -204,6 +244,9 @@ export const RealGbaScenarioReportSchema = z
       .object({
         identityVerified: z.boolean(),
         targetLocationReached: z.boolean(),
+        partyMenuObserved: z.boolean(),
+        inventoryMenuObserved: z.boolean(),
+        trainerBattleWon: z.boolean(),
         decisionsStateDerived: z.boolean(),
         authoritativeStateCertain: z.boolean(),
         evidenceBounded: z.boolean(),
@@ -216,6 +259,7 @@ export const RealGbaScenarioReportSchema = z
         facing: z.enum(["north", "east", "south", "west"]),
         frame: z.number().int().nonnegative().max(100_000_000),
         inputCount: z.number().int().nonnegative().max(16_384),
+        battleResult: z.enum(["not_started", "active", "won", "lost"]),
       })
       .strict(),
     evidence: z
@@ -240,8 +284,12 @@ export const RealGbaScenarioReportSchema = z
         message: "result disagrees with emulator-authoritative checks",
       });
     }
-    if (report.result === "passed" && report.halt !== "target_reached") {
-      context.addIssue({ code: "custom", path: ["halt"], message: "a passing run must halt at the target" });
+    if (report.result === "passed" && report.halt !== "target_reached" && report.halt !== "battle_won") {
+      context.addIssue({
+        code: "custom",
+        path: ["halt"],
+        message: "a passing run must halt at the target or a won battle",
+      });
     }
   });
 export type RealGbaScenarioReport = z.infer<typeof RealGbaScenarioReportSchema>;
@@ -402,6 +450,19 @@ export async function runRealGbaScenario(input: RunRealGbaScenarioInput): Promis
     if (observation.kind !== "danger") throw new Error("Expected a danger observation");
     return observation;
   };
+  const observeOptional = (
+    kind: "menu" | "battle" | "dialog",
+    absentCode: "menu_not_open" | "battle_not_active" | "dialog_not_open",
+  ): GbaEmulatorObservation | null => {
+    try {
+      return session.observe(kind);
+    } catch (error) {
+      if (error instanceof EnvironmentAdapterActionError && error.errorCode === absentCode) {
+        return null;
+      }
+      throw error;
+    }
+  };
 
   // ── State-derived route loop: observe → decide → act once → verify. ────────
   // The driver carries no input transcript. Its only memory is the set of
@@ -412,10 +473,27 @@ export async function runRealGbaScenario(input: RunRealGbaScenarioInput): Promis
   const decisions: RealGbaDecision[] = [];
   const observedBlockedEdges = new Set<string>();
   let halt: RealGbaScenarioReport["halt"] = "decision_budget_exhausted";
+  let partyMenuObserved = scenario.goal.kind === "reach_target" || !scenario.goal.provePartyMenu;
+  let inventoryMenuObserved = scenario.goal.kind === "reach_target" || !scenario.goal.proveInventoryMenu;
   const facingOf = { up: "north", down: "south", left: "west", right: "east" } as const;
+  const directionForFacing = {
+    north: "up",
+    south: "down",
+    west: "left",
+    east: "right",
+  } as const;
+  const press = (button: GbaButton, holdFrames = 12) =>
+    ({ kind: "button_press", button, holdFrames }) as const;
+  const gridDirection = (cursor: number, target: number): "up" | "down" | "left" | "right" => {
+    if ((cursor & 2) !== (target & 2)) return target & 2 ? "down" : "up";
+    return target & 1 ? "right" : "left";
+  };
   for (let sequence = 1; sequence <= scenario.maxDecisions; sequence += 1) {
     const danger = observeDanger();
     const overworld = observeOverworld();
+    const battle = observeOptional("battle", "battle_not_active");
+    const dialog = battle ? null : observeOptional("dialog", "dialog_not_open");
+    const menu = observeOptional("menu", "menu_not_open");
     const observed = {
       schemaVersion: REAL_GBA_SCENARIO_SCHEMA_VERSION,
       sequence,
@@ -431,24 +509,125 @@ export async function runRealGbaScenario(input: RunRealGbaScenarioInput): Promis
       break;
     }
     const position = overworld.data.position;
-    if (position.x === scenario.target.x && position.y === scenario.target.y) {
+    if (
+      scenario.goal.kind === "reach_target" &&
+      position.x === scenario.target.x &&
+      position.y === scenario.target.y
+    ) {
       decisions.push({ ...observed, reasonCode: "halt_target_reached" });
       halt = "target_reached";
       break;
     }
-    const button = nextRealRouteStep(scenario, position, observedBlockedEdges);
-    if (button === null) {
-      decisions.push({ ...observed, reasonCode: "halt_route_unreachable" });
-      await runtime.pause(grant.token, sessionId, "no route to the target over observed collisions");
-      halt = "route_unreachable";
-      break;
+
+    let reasonCode: RealGbaReasonCode;
+    let action: Exclude<GbaEmulatorAction, { kind: "wait" }>;
+    if (battle?.kind === "battle") {
+      if (battle.data.phase === "won") {
+        decisions.push({ ...observed, reasonCode: "halt_battle_won" });
+        halt = "battle_won";
+        break;
+      }
+      if (battle.data.phase === "lost") {
+        decisions.push({ ...observed, reasonCode: "halt_uncertain_state" });
+        await runtime.pause(grant.token, sessionId, "trainer battle was lost");
+        halt = "uncertain_state";
+        break;
+      }
+      if (battle.data.phase === "resolving") {
+        reasonCode = "wait_battle_resolution";
+        action = press("a");
+      } else if (menu?.kind === "menu" && menu.data.menuId === "battle-action-menu") {
+        if (menu.data.cursor === 0) {
+          reasonCode = "select_fight";
+          action = press("a");
+        } else {
+          reasonCode = "move_action_cursor_to_fight";
+          action = press(menu.data.cursor & 2 ? "up" : "left");
+        }
+      } else if (menu?.kind === "menu" && menu.data.menuId === "battle-move-menu") {
+        let bestMove = 0;
+        for (const [index, move] of battle.data.legalMoves.entries()) {
+          if (move.power > battle.data.legalMoves[bestMove]!.power) bestMove = index;
+        }
+        if (battle.data.moveCursor === bestMove) {
+          reasonCode = "select_best_move";
+          action = press("a");
+        } else {
+          reasonCode = "move_cursor_to_best_move";
+          action = press(gridDirection(battle.data.moveCursor, bestMove));
+        }
+      } else {
+        decisions.push({ ...observed, reasonCode: "halt_uncertain_state" });
+        await runtime.pause(grant.token, sessionId, "battle awaited input without a decoded menu");
+        halt = "uncertain_state";
+        break;
+      }
+    } else if (dialog?.kind === "dialog") {
+      reasonCode = "advance_dialog";
+      action = press("a");
+    } else if (menu?.kind === "menu") {
+      if (menu.data.menuId === "party-menu") {
+        const party = session.observe("party");
+        partyMenuObserved = party.kind === "party" && party.data.members.length > 0;
+        reasonCode = "observe_and_close_party_menu";
+        action = press("b");
+      } else if (menu.data.menuId.startsWith("bag-")) {
+        const inventory = session.observe("inventory");
+        inventoryMenuObserved = inventory.kind === "inventory";
+        reasonCode = "observe_and_close_inventory_menu";
+        action = press("b");
+      } else if (menu.data.menuId === "start-menu") {
+        if (partyMenuObserved && inventoryMenuObserved) {
+          reasonCode = "close_incidental_menu";
+          action = press("b");
+        } else {
+          const targetId = !partyMenuObserved ? "start-menu-1" : "start-menu-2";
+          const targetCursor = menu.data.entries.findIndex((entry) => entry.id === targetId);
+          if (targetCursor < 0) {
+            decisions.push({ ...observed, reasonCode: "halt_uncertain_state" });
+            await runtime.pause(grant.token, sessionId, `required ${targetId} entry is unavailable`);
+            halt = "uncertain_state";
+            break;
+          }
+          if (menu.data.cursor === targetCursor) {
+            reasonCode = "select_start_menu_entry";
+            action = press("a");
+          } else {
+            reasonCode = "move_start_menu_cursor";
+            action = press(menu.data.cursor < targetCursor ? "down" : "up");
+          }
+        }
+      } else {
+        reasonCode = "close_incidental_menu";
+        action = press("b");
+      }
+    } else if (!session.snapshot().inputReady) {
+      reasonCode = "wait_field_transition";
+      action = { kind: "frame_advance", frames: 32 };
+    } else if (!partyMenuObserved || !inventoryMenuObserved) {
+      reasonCode = "open_start_menu";
+      action = press("start");
+    } else if (position.x !== scenario.target.x || position.y !== scenario.target.y) {
+      const button = nextRealRouteStep(scenario, position, observedBlockedEdges);
+      if (button === null) {
+        decisions.push({ ...observed, reasonCode: "halt_route_unreachable" });
+        await runtime.pause(grant.token, sessionId, "no route to the target over observed collisions");
+        halt = "route_unreachable";
+        break;
+      }
+      reasonCode = "route_step_toward_target";
+      action = press(button, scenario.holdFramesPerStep);
+    } else if (
+      scenario.goal.kind === "trainer_battle_won" &&
+      overworld.data.facing !== scenario.goal.interactionFacing
+    ) {
+      reasonCode = "turn_toward_trainer";
+      action = press(directionForFacing[scenario.goal.interactionFacing], 3);
+    } else {
+      reasonCode = "engage_trainer";
+      action = press("a");
     }
-    const action = {
-      kind: "button_press",
-      button,
-      holdFrames: scenario.holdFramesPerStep,
-    } as const;
-    decisions.push({ ...observed, reasonCode: "route_step_toward_target", action });
+    decisions.push({ ...observed, reasonCode, action });
     const result = await act(action);
     if (result.status !== "completed") {
       await runtime.pause(grant.token, sessionId, `emulator action ended ${result.status}: failing closed`);
@@ -457,26 +636,44 @@ export async function runRealGbaScenario(input: RunRealGbaScenarioInput): Promis
     }
     // Verify against the emulator before deciding again.
     const verify = observeOverworld();
-    const intended = {
-      up: { x: position.x, y: position.y - 1 },
-      down: { x: position.x, y: position.y + 1 },
-      left: { x: position.x - 1, y: position.y },
-      right: { x: position.x + 1, y: position.y },
-    }[button];
-    const landed = verify.data.position.x === intended.x && verify.data.position.y === intended.y;
-    const refused =
-      verify.data.position.x === position.x &&
-      verify.data.position.y === position.y &&
-      verify.data.facing === facingOf[button];
-    if (verify.frame <= overworld.frame || (!landed && !refused)) {
-      await runtime.pause(grant.token, sessionId, "input did not land on the intended tile: failing closed");
+    if (verify.frame <= overworld.frame) {
+      await runtime.pause(grant.token, sessionId, "emulator frame did not advance: failing closed");
       halt = "uncertain_state";
       break;
     }
-    if (refused) {
-      observedBlockedEdges.add(
-        `${String(position.x)},${String(position.y)}>${String(intended.x)},${String(intended.y)}`,
-      );
+    if (reasonCode === "route_step_toward_target" && action.kind === "button_press") {
+      const button = action.button as Direction;
+      const intended = {
+        up: { x: position.x, y: position.y - 1 },
+        down: { x: position.x, y: position.y + 1 },
+        left: { x: position.x - 1, y: position.y },
+        right: { x: position.x + 1, y: position.y },
+      }[button];
+      const landed = verify.data.position.x === intended.x && verify.data.position.y === intended.y;
+      const turnedTowardStep =
+        overworld.data.facing !== facingOf[button] &&
+        verify.data.position.x === position.x &&
+        verify.data.position.y === position.y &&
+        verify.data.facing === facingOf[button];
+      const refused =
+        overworld.data.facing === facingOf[button] &&
+        verify.data.position.x === position.x &&
+        verify.data.position.y === position.y &&
+        verify.data.facing === facingOf[button];
+      if (!landed && !turnedTowardStep && !refused) {
+        await runtime.pause(
+          grant.token,
+          sessionId,
+          "input did not land on the intended tile: failing closed",
+        );
+        halt = "uncertain_state";
+        break;
+      }
+      if (refused) {
+        observedBlockedEdges.add(
+          `${String(position.x)},${String(position.y)}>${String(intended.x)},${String(intended.y)}`,
+        );
+      }
     }
   }
 
@@ -503,8 +700,14 @@ export async function runRealGbaScenario(input: RunRealGbaScenarioInput): Promis
       index === 0 || decision.observedRamStateSha256 !== decisions[index - 1]?.observedRamStateSha256,
   );
   const distinctButtons = new Set(
-    decisions.map((decision) => decision.action?.button).filter((button) => button !== undefined),
+    decisions
+      .map((decision) => (decision.action?.kind === "button_press" ? decision.action.button : undefined))
+      .filter((button) => button !== undefined),
   );
+  const targetLocationReached =
+    final.position.mapId === scenario.target.mapId &&
+    final.position.x === scenario.target.x &&
+    final.position.y === scenario.target.y;
   const checks = {
     identityVerified:
       input.coreIdentity !== undefined &&
@@ -512,10 +715,12 @@ export async function runRealGbaScenario(input: RunRealGbaScenarioInput): Promis
       input.coreIdentity.savestateSha256 === scenario.savestateSha256 &&
       input.coreIdentity.coreWasmSha256 === scenario.coreWasmSha256,
     targetLocationReached:
-      halt === "target_reached" &&
-      final.position.mapId === scenario.target.mapId &&
-      final.position.x === scenario.target.x &&
-      final.position.y === scenario.target.y,
+      targetLocationReached &&
+      (halt === "target_reached" || (scenario.goal.kind === "trainer_battle_won" && halt === "battle_won")),
+    partyMenuObserved,
+    inventoryMenuObserved,
+    trainerBattleWon:
+      scenario.goal.kind === "reach_target" || (halt === "battle_won" && final.battleResult === "won"),
     decisionsStateDerived:
       decisions.length >= scenario.expected.minimumDecisions &&
       framesStrictlyIncrease &&
@@ -542,6 +747,7 @@ export async function runRealGbaScenario(input: RunRealGbaScenarioInput): Promis
       facing: finalOverworld.data.facing,
       frame: final.frame,
       inputCount: final.inputCount,
+      battleResult: final.battleResult,
     },
     evidence: {
       eventCount: trace.events.length,

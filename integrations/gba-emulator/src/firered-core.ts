@@ -2,20 +2,19 @@ import type { GbaButton } from "@clankie/interactive-environment";
 import { sha256 } from "./core-double.ts";
 import type { GbaCoreState } from "./core-double.ts";
 import type { GbaCoreSeam } from "./core-seam.ts";
-import { decodeFireRedOverworld } from "./firered-ram-map.ts";
+import { decodeFireRedState, FIRERED_US_V10_ROM_SHA256 } from "./firered-state.ts";
 import { MgbaLibretroCore, mgbaCoreWasmSha256, type MgbaFramebuffer } from "./mgba-core.ts";
 
 /**
  * Real GBA core behind the adapter seam: the pinned headless mGBA WASM core
  * running an operator-supplied FireRed ROM, decoded through the verified
- * EWRAM map. ROM and savestate bytes stay in-process; only their SHA-256
+ * EWRAM/IWRAM map. ROM and savestate bytes stay in-process; only their SHA-256
  * identity digests are carried in contracts and evidence.
  *
- * This slice decodes overworld state only (position + facing). The state view
- * therefore always reports `mode: "overworld"` with an empty party and no
- * battle; dialog/battle/menu observations fail closed at the adapter until a
- * later slice verifies those RAM fields. Facing values map to the observation
- * vocabulary as south/north/west/east.
+ * The version-pinned state view decodes overworld position/facing, encrypted
+ * party records, active battle participants, HP, outcome, and move cursor.
+ * Dialog and field-menu observations remain closed until their own RAM
+ * profiles are live-verified.
  *
  * Determinism: frame-stepped execution from the pinned savestate. Every input
  * runs `holdFrames` held frames plus a fixed 32-frame settle so a walk step
@@ -50,14 +49,28 @@ export interface MgbaFireRedCoreIdentity {
 export class MgbaFireRedCore implements GbaCoreSeam {
   public readonly coreId: string;
   private readonly core: MgbaLibretroCore;
+  private readonly romBytes: Uint8Array;
   private readonly mapId: string;
   private readonly verifiedIdentity: MgbaFireRedCoreIdentity;
   private frame = 0;
   private inputCount = 0;
+  private battleSequence = 0;
+  private battleTurn = 1;
+  private priorBattleHp: string | null = null;
+  private retainedBattle: GbaCoreState["battle"] = null;
+  private retainedBattleMode: GbaCoreState["mode"] = "overworld";
+  private retainedActivePartySlot = 0;
 
-  private constructor(coreId: string, core: MgbaLibretroCore, mapId: string, identity: MgbaFireRedCoreIdentity) {
+  private constructor(
+    coreId: string,
+    core: MgbaLibretroCore,
+    romBytes: Uint8Array,
+    mapId: string,
+    identity: MgbaFireRedCoreIdentity,
+  ) {
     this.coreId = coreId;
     this.core = core;
+    this.romBytes = romBytes;
     this.mapId = mapId;
     this.verifiedIdentity = identity;
   }
@@ -66,6 +79,9 @@ export class MgbaFireRedCore implements GbaCoreSeam {
     const romSha256 = sha256(init.romBytes);
     if (romSha256 !== init.romSha256) {
       throw new Error("ROM bytes do not match the pinned ROM identity digest");
+    }
+    if (romSha256 !== FIRERED_US_V10_ROM_SHA256) {
+      throw new Error("ROM identity has no supported FireRed RAM profile");
     }
     const savestateSha256 = sha256(init.savestateBytes);
     if (savestateSha256 !== init.savestateSha256) {
@@ -84,7 +100,7 @@ export class MgbaFireRedCore implements GbaCoreSeam {
     core.runFrames(1);
     core.loadState(init.savestateBytes);
     core.runFrames(WARMUP_FRAMES_AFTER_RESTORE);
-    return new MgbaFireRedCore(init.coreId, core, init.mapId, {
+    return new MgbaFireRedCore(init.coreId, core, init.romBytes.slice(), init.mapId, {
       romSha256,
       savestateSha256,
       coreWasmSha256,
@@ -97,6 +113,12 @@ export class MgbaFireRedCore implements GbaCoreSeam {
   }
 
   public pressButton(button: GbaButton, holdFrames: number): void {
+    if (this.retainedBattleMode === "battle_won" || this.retainedBattleMode === "battle_lost") {
+      this.priorBattleHp = null;
+      this.retainedBattle = null;
+      this.retainedBattleMode = "overworld";
+      this.retainedActivePartySlot = 0;
+    }
     this.core.setHeldButtons([button]);
     this.core.runFrames(holdFrames);
     this.core.setHeldButtons([]);
@@ -112,22 +134,98 @@ export class MgbaFireRedCore implements GbaCoreSeam {
   }
 
   public gameState(): GbaCoreState {
-    const overworld = decodeFireRedOverworld(this.core.readEwram());
+    const decoded = decodeFireRedState(
+      {
+        ewram: this.core.readEwram(),
+        iwram: this.core.readIwram(),
+      },
+      this.romBytes,
+    );
+    let mode: GbaCoreState["mode"] = "overworld";
+    let battle: GbaCoreState["battle"] = null;
+    let activePartySlot = 0;
+    if (decoded.battle) {
+      if (this.priorBattleHp === null) {
+        this.battleSequence += 1;
+        this.battleTurn = 1;
+      }
+      const hpKey = `${String(decoded.battle.opponent.currentHp)}:${decoded.party
+        .map((member) => member.currentHp)
+        .join(",")}`;
+      if (this.priorBattleHp !== null && hpKey !== this.priorBattleHp) this.battleTurn += 1;
+      this.priorBattleHp = hpKey;
+      switch (decoded.battle.outcome) {
+        case 0:
+          mode = "battle";
+          break;
+        case 1:
+          mode = "battle_won";
+          break;
+        case 2:
+        case 9:
+          mode = "battle_lost";
+          break;
+        default:
+          throw new Error(
+            `Unsupported FireRed battle outcome ${String(decoded.battle.outcome)}; refusing to infer victory`,
+          );
+      }
+      activePartySlot = decoded.battle.activePartySlot;
+      battle = {
+        battleId: `firered-${this.verifiedIdentity.romSha256.slice(0, 12)}-${String(this.battleSequence)}`,
+        turn: this.battleTurn,
+        opponentHp: decoded.battle.opponent.currentHp,
+        moveCursor: decoded.battle.moveCursor,
+        inputMode: decoded.battle.inputMode,
+        actionCursor: decoded.battle.actionCursor,
+        opponent: {
+          speciesId: decoded.battle.opponent.speciesId,
+          level: decoded.battle.opponent.level,
+          maxHp: decoded.battle.opponent.maxHp,
+        },
+      };
+      this.retainedBattle = structuredClone(battle);
+      this.retainedBattleMode = mode;
+      this.retainedActivePartySlot = activePartySlot;
+    } else if (
+      this.priorBattleHp !== null &&
+      (this.retainedBattleMode === "battle_won" || this.retainedBattleMode === "battle_lost")
+    ) {
+      // Preserve the terminal state across repeated observations after the
+      // engine clears `gMain.inBattle`; the next battle replaces it.
+      mode = this.retainedBattleMode;
+      battle = structuredClone(this.retainedBattle);
+      activePartySlot = this.retainedActivePartySlot;
+    } else {
+      this.priorBattleHp = null;
+      this.retainedBattle = null;
+      this.retainedBattleMode = "overworld";
+      this.retainedActivePartySlot = 0;
+      if (decoded.dialogLines.length > 0) mode = "dialog";
+    }
     return {
-      mode: "overworld",
-      position: { mapId: this.mapId, x: overworld.x, y: overworld.y },
-      facing: overworld.facing,
+      mode,
+      inputReady: decoded.fieldInputReady,
+      position: {
+        mapId: decoded.mapIdentity?.mapId ?? this.mapId,
+        x: decoded.overworld.x,
+        y: decoded.overworld.y,
+      },
+      facing: decoded.overworld.facing,
       dialogLineIndex: 0,
-      party: [],
-      activePartySlot: 0,
-      battle: null,
+      dialogLines: decoded.dialogLines,
+      menu: decoded.menu,
+      inventory: decoded.inventory,
+      party: decoded.party,
+      activePartySlot,
+      battle,
       frame: this.frame,
       inputCount: this.inputCount,
     };
   }
 
   public ramStateSha256(): string {
-    return sha256(this.core.readEwram());
+    return sha256(Buffer.concat([this.core.readEwram(), this.core.readIwram()]));
   }
 
   public framebufferSha256(): string {

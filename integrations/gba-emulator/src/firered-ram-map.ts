@@ -9,12 +9,10 @@
  * `gObjectEvents` layout (base 0x02036E38, 0x24-byte entries; entry 0 is the
  * player), which corroborates but does not replace the empirical check.
  *
- * Reachability limitation (ADR 0040): the libretro memory API exposes only
- * EWRAM (`RETRO_MEMORY_SYSTEM_RAM`). IWRAM (0x03000000) — where FireRed keeps
- * the DMA-shifted `gSaveBlock1/2` pointers — is not reachable, so any field
- * that must be found through those pointers cannot be decoded through this
- * seam. The fields below live at fixed EWRAM addresses and need no pointer
- * chase.
+ * mGBA publishes both EWRAM and IWRAM through libretro's memory-map callback
+ * (ADR 0040). The fields below live at fixed EWRAM addresses and need no
+ * pointer chase; version-pinned IWRAM/save-block decoding is layered on this
+ * same memory surface.
  */
 
 /** EWRAM offset of the player object's current tile coords (two s16 LE: x, y). */

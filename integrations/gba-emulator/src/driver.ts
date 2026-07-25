@@ -34,6 +34,7 @@ export interface GbaDriverView {
   overworld: Extract<GbaEmulatorObservation, { kind: "overworld" }>;
   battle: Extract<GbaEmulatorObservation, { kind: "battle" }> | null;
   dialog: Extract<GbaEmulatorObservation, { kind: "dialog" }> | null;
+  menu?: Extract<GbaEmulatorObservation, { kind: "menu" }> | null;
 }
 
 export interface GbaDriverChoice {
@@ -52,19 +53,41 @@ export function decideNextGbaAction(view: GbaDriverView, scenario: FrozenGbaScen
   if (view.battle) {
     if (view.battle.data.phase === "won") return { reasonCode: "halt_battle_won" };
     if (view.battle.data.phase === "lost") return { reasonCode: "halt_uncertain_state" };
+    if (view.battle.data.phase === "resolving") {
+      return {
+        reasonCode: "wait_battle_resolution",
+        action: { ...PRESS, button: "a" },
+      };
+    }
+    if (view.menu?.data.menuId === "battle-action-menu") {
+      const cursor = view.menu.data.cursor;
+      if (cursor !== 0) {
+        return {
+          reasonCode: "move_action_cursor_to_fight",
+          action: { ...PRESS, button: cursor & 2 ? "up" : "left" },
+        };
+      }
+      return { reasonCode: "select_fight", action: { ...PRESS, button: "a" } };
+    }
     const moves = view.battle.data.legalMoves;
     let bestIndex = 0;
     for (const [index, move] of moves.entries()) {
       if (move.power > moves[bestIndex]!.power) bestIndex = index;
     }
     const cursor = view.battle.data.moveCursor;
-    if (cursor < bestIndex)
-      return { reasonCode: "move_cursor_to_best_move", action: { ...PRESS, button: "down" } };
-    if (cursor > bestIndex)
-      return { reasonCode: "move_cursor_to_best_move", action: { ...PRESS, button: "up" } };
+    if (cursor !== bestIndex) {
+      const button =
+        view.menu?.data.menuId === "battle-move-menu"
+          ? gridDirection(cursor, bestIndex)
+          : cursor < bestIndex
+            ? "down"
+            : "up";
+      return { reasonCode: "move_cursor_to_best_move", action: { ...PRESS, button } };
+    }
     return { reasonCode: "select_best_move", action: { ...PRESS, button: "a" } };
   }
   if (view.dialog) return { reasonCode: "advance_dialog", action: { ...PRESS, button: "a" } };
+  if (view.menu) return { reasonCode: "close_incidental_menu", action: { ...PRESS, button: "b" } };
   const position = view.overworld.data.position;
   const target = scenario.targetLocation;
   if (position.x === target.x && position.y === target.y) {
@@ -142,11 +165,13 @@ function observeView(io: GbaDriverIo): GbaDriverView {
   const overworld = narrow(io.observe("overworld"), "overworld");
   const battle = tryObserve(io, "battle");
   const dialog = battle ? null : tryObserve(io, "dialog");
+  const menu = tryObserveMenu(io);
   return {
     danger,
     overworld,
     battle: battle ? narrow(battle, "battle") : null,
     dialog: dialog ? narrow(dialog, "dialog") : null,
+    menu: menu ? narrow(menu, "menu") : null,
   };
 }
 
@@ -162,6 +187,22 @@ function tryObserve(io: GbaDriverIo, kind: "battle" | "dialog"): GbaEmulatorObse
     }
     throw error;
   }
+}
+
+function tryObserveMenu(io: GbaDriverIo): GbaEmulatorObservation | null {
+  try {
+    return io.observe("menu");
+  } catch (error) {
+    if (error instanceof EnvironmentAdapterActionError && error.errorCode === "menu_not_open") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function gridDirection(cursor: number, target: number): "up" | "down" | "left" | "right" {
+  if ((cursor & 2) !== (target & 2)) return target & 2 ? "down" : "up";
+  return target & 1 ? "right" : "left";
 }
 
 function narrow<Kind extends GbaEmulatorObservationKind>(

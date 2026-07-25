@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Clankie plays</title>
+    <style>
+      :root {
+        --slate: #242a2e;
+        --edge: #333c42;
+        --text: #e8eef0;
+        --muted: #8fa3ab;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--slate);
+        color: var(--text);
+        font:
+          14px/1.45 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+      }
+      #app {
+        display: flex;
+        flex-direction: row;
+        height: 100%;
+        gap: 12px;
+        padding: 12px;
+      }
+      #stage {
+        flex: 1 1 auto;
+        display: grid;
+        place-items: center;
+        min-width: 0;
+      }
+      canvas {
+        /* GBA output is 240x160 pixel art: never smooth it. */
+        image-rendering: pixelated;
+        width: 100%;
+        height: auto;
+        max-height: 100%;
+        border: 1px solid var(--edge);
+        border-radius: 4px;
+        background: #000;
+      }
+      #side {
+        flex: 0 0 260px;
+        overflow-y: auto;
+        border-left: 1px solid var(--edge);
+        padding-left: 12px;
+      }
+      #side h2 {
+        margin: 0 0 8px;
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      #lines li {
+        margin-bottom: 6px;
+        list-style: none;
+      }
+      #lines {
+        margin: 0;
+        padding: 0;
+      }
+      #status {
+        margin-top: 12px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      /* Discord renders activities narrow on phones; stack rather than squeeze. */
+      @media (max-width: 640px) {
+        #app {
+          flex-direction: column;
+        }
+        #side {
+          flex: 0 0 auto;
+          border-left: none;
+          border-top: 1px solid var(--edge);
+          padding: 12px 0 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="stage"><canvas id="screen" width="240" height="160"></canvas></div>
+      <aside id="side">
+        <h2>What Clankie sees</h2>
+        <ul id="lines"></ul>
+        <div id="status">connecting…</div>
+      </aside>
+    </div>
+    <script type="module">
+      const canvas = document.getElementById("screen");
+      const context = canvas.getContext("2d");
+      const status = document.getElementById("status");
+      const lines = document.getElementById("lines");
+      context.imageSmoothingEnabled = false;
+
+      let lastSequence = 0;
+
+      function render(frame) {
+        // Out-of-order frames are stale by definition on a live surface.
+        if (frame.sequence <= lastSequence) return;
+        lastSequence = frame.sequence;
+        if (canvas.width !== frame.width || canvas.height !== frame.height) {
+          canvas.width = frame.width;
+          canvas.height = frame.height;
+          context.imageSmoothingEnabled = false;
+        }
+        const image = new Image();
+        image.addEventListener("load", () => {
+          context.drawImage(image, 0, 0);
+          URL.revokeObjectURL(image.src);
+        });
+        image.src = `data:image/png;base64,${frame.data}`;
+      }
+
+      function renderOverlay(overlay) {
+        lines.replaceChildren(
+          ...overlay.lines.map((line) => {
+            const item = document.createElement("li");
+            item.textContent = line;
+            return item;
+          }),
+        );
+      }
+
+      function connect() {
+        // All activity traffic is proxied through discordsays.com; the /.proxy
+        // prefix is required or the request is refused as blocked:csp.
+        const scheme = location.protocol === "https:" ? "wss" : "ws";
+        const socket = new WebSocket(`${scheme}://${location.host}/.proxy/frames`);
+
+        socket.addEventListener("open", () => {
+          status.textContent = "live";
+        });
+        socket.addEventListener("message", (event) => {
+          const message = JSON.parse(event.data);
+          if (message.kind === "frame") render(message.frame);
+          else if (message.kind === "overlay") renderOverlay(message.overlay);
+          else if (message.kind === "stopped") status.textContent = `stopped (${message.reason})`;
+        });
+        socket.addEventListener("close", () => {
+          status.textContent = "reconnecting…";
+          setTimeout(connect, 1_000);
+        });
+        socket.addEventListener("error", () => socket.close());
+      }
+
+      connect();
+    </script>
+  </body>
+</html>

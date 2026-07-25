@@ -8,12 +8,17 @@ import { writeFramebufferPng } from "./png-writer.ts";
 
 /**
  * ROM-gated real-core scenario run with captured evidence. Executes the
- * frozen firered-bedroom-route scenario TWICE against two freshly
+ * selected FireRed scenario TWICE against two freshly
  * instantiated cores and requires byte-identical report, decision trace, and
  * event trace. A runtime no-network tripwire wraps the entire run: any
  * fetch/socket/dns attempt fails the run. Artifacts (report, traces, semantic
  * events, screenshot PNG, receipt) are written to the receipt directory —
  * never into the repository, and never containing ROM or savestate bytes.
+ *
+ * By default this selects the repository's frozen bedroom route. Set
+ * `CLANKIE_GBA_SCENARIO_PATH` to an operator-local, schema-valid scenario
+ * whose goal is `trainer_battle_won` to prove party/bag menus, dialog, and a
+ * state-derived trainer battle without storing ROM or savestate bytes.
  *
  * Usage:
  *   CLANKIE_GBA_ROM_PATH=… CLANKIE_GBA_SAVESTATE_PATH=… CLANKIE_GBA_RECEIPT_DIR=… \
@@ -37,14 +42,16 @@ const dns = (await import("node:dns")).default;
 const romPath = process.env["CLANKIE_GBA_ROM_PATH"];
 const savestatePath = process.env["CLANKIE_GBA_SAVESTATE_PATH"];
 const receiptDir = process.env["CLANKIE_GBA_RECEIPT_DIR"];
+const scenarioPath =
+  process.env["CLANKIE_GBA_SCENARIO_PATH"] ??
+  path.resolve(import.meta.dirname, "../fixtures/firered-bedroom-route/v1/scenario.json");
 if (!romPath || !savestatePath || !receiptDir) {
   console.error("Set CLANKIE_GBA_ROM_PATH, CLANKIE_GBA_SAVESTATE_PATH, and CLANKIE_GBA_RECEIPT_DIR");
   process.exit(2);
 }
 mkdirSync(receiptDir, { recursive: true });
 
-const fixturePath = path.resolve(import.meta.dirname, "../fixtures/firered-bedroom-route/v1/scenario.json");
-const fixtureBytes = readFileSync(fixturePath);
+const fixtureBytes = readFileSync(scenarioPath);
 const fixtureSha256 = sha256(fixtureBytes);
 const scenario = RealGbaRouteScenarioSchema.parse(JSON.parse(fixtureBytes.toString("utf8")));
 const romBytes = readFileSync(romPath);
@@ -96,8 +103,6 @@ const receipt = {
   scenarioVersion: scenario.scenarioVersion,
   fixtureSha256,
   identity: first.core.identity(),
-  romPath,
-  savestatePath,
   result: first.result.report.result,
   halt: first.result.report.halt,
   checks: first.result.report.checks,
