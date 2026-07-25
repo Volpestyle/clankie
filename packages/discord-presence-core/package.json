@@ -1,0 +1,28 @@
+{
+  "name": "@clankie/discord-presence-core",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "clean": "rm -rf dist coverage"
+  },
+  "dependencies": {
+    "@clankie/interactive-environment": "workspace:*",
+    "@clankie/protocol": "workspace:*",
+    "@discordjs/opus": "0.10.0",
+    "@discordjs/voice": "0.19.2",
+    "prism-media": "1.3.5",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

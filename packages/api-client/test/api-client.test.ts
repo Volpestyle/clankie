@@ -23,6 +23,7 @@ describe("ClankieApiClient runner surface", () => {
       phase: "present" as const,
       gatewayConnected: true,
       voiceGuildIds: [],
+      activityInstances: [],
       revision: 2,
       updatedAt: "2026-07-14T18:00:02.000Z",
     };

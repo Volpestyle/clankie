@@ -4,7 +4,6 @@ import { CapabilityTokenIssuer } from "./capability-token.ts";
 import type { CredentialStore } from "./credential-store.ts";
 
 export const DISCORD_BOT_PROVIDER_ID = "discord_bot";
-export const DISCORD_USER_SESSION_PROVIDER_ID = "discord_user_session";
 export const DISCORD_PRESENCE_CAPABILITIES = ["discord.presence.act", "discord.presence.read"] as const;
 export type DiscordPresenceCapability = (typeof DISCORD_PRESENCE_CAPABILITIES)[number];
 

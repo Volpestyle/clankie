@@ -193,6 +193,7 @@ function config(): DiscordTextIngressConfig {
   return {
     characterId: "clankie",
     credentialRef: "discord_bot",
+    transportKind: "bot",
     guildIds: new Set(["guild-1"]),
     channelIds: new Set(["channel-1"]),
     dmPolicy: "owner_only",

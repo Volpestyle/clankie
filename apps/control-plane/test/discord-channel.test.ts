@@ -126,6 +126,111 @@ describe("Discord channel control-plane runtime", () => {
     expect(requests[2]).toMatchObject({ url: "http://127.0.0.1:4321/eve/v1/session" });
     expect(requests[2]?.body).not.toHaveProperty("continuationToken");
   });
+
+  it("admits voice only from a Discord voice/text bridge identity and preserves text authority", async () => {
+    const submitted: DiscordPresenceChannelTurnRequest[] = [];
+    const app = await createControlPlane({
+      doctrine,
+      authenticateCaptain: () =>
+        Promise.resolve({ captainId: "discord-voice-bridge", steerSourceLane: "discord_voice" }),
+      captainChannelTurns: {
+        submit(input) {
+          submitted.push(input.request as DiscordPresenceChannelTurnRequest);
+          return Promise.resolve({
+            state: "settled" as const,
+            captainSessionId: "captain-session",
+            turnId: "turn-voice",
+            response: "Voice reply.",
+          });
+        },
+      },
+    });
+
+    const voice = await post(app, voiceTurnRequest(), "Bearer voice");
+    const text = await post(app, turnRequest(), "Bearer voice");
+    expect(voice.status).toBe(200);
+    expect(text.status).toBe(403);
+    expect(submitted).toHaveLength(1);
+    expect(submitted[0]?.trigger).toMatchObject({ kind: "voice_event", actorId: "user-1" });
+  });
+
+  it("opens a continuing discord_voice lane and injects only control-plane-approved person memory", async () => {
+    const requests: Array<{ url: string; body?: unknown }> = [];
+    const recalled: unknown[] = [];
+    let turn = 0;
+    const port = new EveCaptainChannelTurnPort({
+      baseUrl: "http://127.0.0.1:4321",
+      recallDiscordPerson(identity, options) {
+        recalled.push({ identity, options });
+        return "## Discord person memory\n- preference: likes Bulbasaur";
+      },
+      fetchImpl: async (input, init) => {
+        requests.push({
+          url: String(input),
+          ...(init?.body === undefined ? {} : { body: JSON.parse(String(init.body)) }),
+        });
+        if (init?.method === "POST") {
+          turn += 1;
+          return Response.json(
+            { sessionId: "eve-voice", continuationToken: `voice-token-${String(turn)}` },
+            { status: 202 },
+          );
+        }
+        return ndjson([
+          { type: "turn.started", data: { turnId: `voice-turn-${String(turn)}` } },
+          {
+            type: "message.completed",
+            data: {
+              turnId: `voice-turn-${String(turn)}`,
+              finishReason: "stop",
+              message: "Voice response.",
+            },
+          },
+          { type: "session.waiting", data: { turnId: `voice-turn-${String(turn)}` } },
+        ]);
+      },
+    });
+
+    await port.submit({ request: voiceTurnRequest() });
+    await port.submit({ request: { ...voiceTurnRequest(), deliveryId: "utterance-2" } });
+
+    expect(requests[0]).toMatchObject({
+      url: "http://127.0.0.1:4321/eve/v1/session",
+      body: {
+        clientContext: {
+          channel: {
+            kind: "discord-voice",
+            metadata: {
+              captainLane: "discord_voice",
+              captainTargetId: "guild-1:voice-1",
+            },
+          },
+          thread: {
+            source: "discord_voice",
+            approvedPersonMemory: {
+              trust: "approved_projection",
+              subject: { guildId: "guild-1", userId: "user-1" },
+              body: "## Discord person memory\n- preference: likes Bulbasaur",
+            },
+          },
+        },
+      },
+    });
+    expect(requests[2]).toMatchObject({
+      url: "http://127.0.0.1:4321/eve/v1/session/eve-voice",
+      body: { continuationToken: "voice-token-1" },
+    });
+    expect(recalled).toEqual([
+      {
+        identity: { guildId: "guild-1", userId: "user-1" },
+        options: { channelId: "voice-1", query: "hello group" },
+      },
+      {
+        identity: { guildId: "guild-1", userId: "user-1" },
+        options: { channelId: "voice-1", query: "hello group" },
+      },
+    ]);
+  });
 });
 
 function turnRequest(): DiscordPresenceChannelTurnRequest {
@@ -156,6 +261,30 @@ function turnRequest(): DiscordPresenceChannelTurnRequest {
         createdAt: "2026-07-12T20:00:00.000Z",
       },
     ],
+  };
+}
+
+function voiceTurnRequest(): DiscordPresenceChannelTurnRequest {
+  return {
+    schemaVersion: 1,
+    deliveryId: "utterance-1",
+    identity: {
+      presenceSessionId: "discord:voice:guild-1:voice-1",
+      correlationId: "discord-voice:utterance-1",
+      profileHash: doctrine.profileHash,
+      characterId: "clankie",
+      credentialRef: "discord_bot",
+      transportKind: "bot",
+    },
+    trigger: {
+      kind: "voice_event",
+      id: "utterance-1",
+      guildId: "guild-1",
+      channelId: "voice-1",
+      actorId: "user-1",
+      body: "hello group",
+    },
+    contextMessages: [],
   };
 }
 

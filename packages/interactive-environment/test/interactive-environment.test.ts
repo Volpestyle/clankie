@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { DISCORD_PRESENCE_ACTION_RISK_CLASS } from "@clankie/protocol";
 import {
+  DISCORD_ACTIVITY_INSTANCE_MAX,
   DISCORD_PRESENCE_CATALOG,
+  DiscordActivityInstanceSchema,
   DiscordPresenceActionRequestSchema,
   DiscordPresenceSessionRecordSchema,
   DiscordPresenceToolExposureSchema,
@@ -196,6 +199,66 @@ describe("Minecraft profile", () => {
     ).toThrow(/invalid gameplay tool exposure/);
   });
 
+  it("runs the activity plane on bot transport and gates it by facet, not by the phase ladder", () => {
+    const voiceBot = presenceSession("voice_active", "bot");
+
+    // ADR 0047: the activity plane needs no user session, unlike Go Live.
+    expect(
+      isDiscordPresenceActionAvailable({ action: "discord.presence.activity_start", session: voiceBot }),
+    ).toBe(true);
+    // ...but the surface still belongs to a voice channel.
+    expect(
+      isDiscordPresenceActionAvailable({
+        action: "discord.presence.activity_start",
+        session: presenceSession("present", "bot"),
+      }),
+    ).toBe(false);
+
+    // Stop is gated by a running instance, not by a higher phase rung.
+    expect(
+      isDiscordPresenceActionAvailable({ action: "discord.presence.activity_stop", session: voiceBot }),
+    ).toBe(false);
+    const running = presenceSession("voice_active", "bot", [activityInstance()]);
+    expect(
+      isDiscordPresenceActionAvailable({ action: "discord.presence.activity_stop", session: running }),
+    ).toBe(true);
+
+    // Activity and Go Live stay orthogonal: a running activity confers no Go Live.
+    expect(
+      isDiscordPresenceActionAvailable({ action: "discord.presence.go_live_start", session: running }),
+    ).toBe(false);
+
+    // Publishing a rendered surface carries the same risk class as an attachment.
+    expect(DISCORD_PRESENCE_ACTION_RISK_CLASS["discord.presence.activity_start"]).toBe("publish-external");
+    expect(DISCORD_PRESENCE_ACTION_RISK_CLASS["discord.presence.activity_stop"]).toBe("publish-external");
+
+    // A surface outside the frozen catalog fails closed.
+    expect(() =>
+      DiscordActivityInstanceSchema.parse({ ...activityInstance(), surface: "arbitrary_application" }),
+    ).toThrow();
+
+    // Instances cannot outlive the gateway connection.
+    expect(() =>
+      DiscordPresenceSessionRecordSchema.parse({
+        ...voiceBot,
+        phase: "failed",
+        gatewayConnected: false,
+        voiceGuildIds: [],
+        activityInstances: [activityInstance()],
+      }),
+    ).toThrow(/activity instances cannot outlive/);
+
+    // Capacity is bounded rather than unbounded fan-out.
+    const saturated = presenceSession(
+      "voice_active",
+      "bot",
+      Array.from({ length: DISCORD_ACTIVITY_INSTANCE_MAX }, () => activityInstance()),
+    );
+    expect(
+      isDiscordPresenceActionAvailable({ action: "discord.presence.activity_start", session: saturated }),
+    ).toBe(false);
+  });
+
   it("keeps Discord presence actions transport-agnostic and gates Go Live to user_session", () => {
     expect(
       DiscordPresenceActionRequestSchema.parse({
@@ -241,6 +304,7 @@ describe("Minecraft profile", () => {
     ).toBe(false);
     expect(discordPresencePhaseFromEnvironment("active")).toBe("present");
     expect(environmentPhaseFromDiscordPresence("voice_active")).toBe("active");
+    expect(DISCORD_PRESENCE_ACTION_RISK_CLASS["discord.presence.go_live_start"]).toBe("publish-external");
     expect(() =>
       DiscordPresenceToolExposureSchema.parse({
         schemaVersion: 2,
@@ -268,6 +332,7 @@ describe("Minecraft profile", () => {
 function presenceSession(
   phase: Parameters<typeof environmentPhaseFromDiscordPresence>[0],
   transportKind: "bot" | "user_session" = "bot",
+  activityInstances: unknown[] = [],
 ) {
   return DiscordPresenceSessionRecordSchema.parse({
     schemaVersion: 1,
@@ -278,7 +343,18 @@ function presenceSession(
     phase,
     gatewayConnected: !["off", "connecting", "degraded", "failed"].includes(phase),
     voiceGuildIds: phase === "voice_active" ? ["guild-1"] : [],
+    activityInstances,
     revision: 1,
     updatedAt: "2026-07-14T18:00:00.000Z",
   });
+}
+
+function activityInstance() {
+  return {
+    schemaVersion: 1,
+    guildId: "guild-1",
+    channelId: "voice-1",
+    surface: "gba_emulator",
+    startedAt: "2026-07-25T18:00:00.000Z",
+  };
 }

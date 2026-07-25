@@ -6,8 +6,13 @@ describe("Discord commands", () => {
   it("requires explicit join and leave commands", () => {
     const names = commands.map((command) => command.name);
     expect(names).toContain("captain-join");
+    expect(names).toContain("captain-voice-consent");
     expect(names).toContain("captain-leave");
     expect(names).not.toContain("listen-always");
+    const consent = commands.find((command) => command.name === "captain-voice-consent");
+    const action = consent?.options?.find((option) => option.name === "action");
+    const choices = action && "choices" in action ? action.choices : undefined;
+    expect(choices?.map((choice) => choice.value)).toEqual(["opt-in", "opt-out"]);
   });
 
   it("offers only the three user-facing ceremony presets", () => {
@@ -23,6 +28,17 @@ describe("Discord commands", () => {
     expect(names).toContain("captain-steer");
     expect(names).toContain("captain-approval");
     expect(names).toContain("captain-memory");
+    expect(names).toContain("captain-person-memory");
+  });
+
+  it("keeps person-memory mutation proposal-only and excludes ambient export/delete", () => {
+    const memory = commands.find((command) => command.name === "captain-person-memory");
+    const action = memory?.options?.find((option) => option.name === "action");
+    const choices = action && "choices" in action ? action.choices : undefined;
+
+    expect(choices?.map((choice) => choice.value)).toEqual(["propose", "recall"]);
+    expect(choices?.map((choice) => choice.value)).not.toContain("delete");
+    expect(choices?.map((choice) => choice.value)).not.toContain("export");
   });
 
   it("makes arbitrary steering text impossible in the registered command schema", () => {

@@ -6,6 +6,7 @@ import {
   DiscordPresenceChannelTurnRequestSchema,
   DiscordPresenceWriteResultSchema,
   DiscordPresenceWriteSchema,
+  DiscordUserSessionOptInSchema,
   LinearChannelTurnRequestSchema,
   ActiveMissionSelectionSchema,
   MissionEventAuthFailureSchema,
@@ -26,6 +27,13 @@ import {
   type DiscordPresenceWrite,
   type DiscordPresenceWriteResult,
   type DiscordPresenceChannelTurnRequest,
+  type DiscordPersonIdentity,
+  type DiscordPersonMemoryDeleteResult,
+  type DiscordPersonMemoryExport,
+  type DiscordPersonMemoryFact,
+  type DiscordPersonMemoryProjection,
+  type DiscordPersonMemoryProposal,
+  type DiscordUserSessionOptIn,
   type LinearChannelTurnRequest,
   type MissionPlan,
   type MissionEventRecovery,
@@ -198,6 +206,20 @@ export class MissionEventFeedClientError extends Error {
     this.name = "MissionEventFeedClientError";
     this.code = code;
   }
+}
+
+export interface DiscordControlPlaneReadiness {
+  readonly schemaVersion: 1;
+  readonly ready: boolean;
+  readonly service: "clankie-control-plane";
+  /** Changes every time the control-plane process starts; safe for restart evidence. */
+  readonly instanceId: string;
+  readonly profileHash: string;
+  readonly checks: {
+    readonly captainChannelTurns: boolean;
+    readonly discordPresenceRuntime: boolean;
+    readonly eventStore: boolean;
+  };
 }
 
 export class ClankieApiClient {
@@ -478,11 +500,71 @@ export class ClankieApiClient {
     };
   }
 
+  /**
+   * Reads the durable owner opt-in for the user-session transport (ADR 0048).
+   *
+   * The user-session bridge calls this *before* connecting, so a missing or
+   * revoked record keeps the process from ever opening a gateway with a normal
+   * user credential. `undefined` means no opt-in exists for this doctrine.
+   */
+  public async inspectDiscordUserSessionOptIn(): Promise<DiscordUserSessionOptIn | undefined> {
+    const result = await this.request<{ optIn: unknown | null }>("/v1/discord/user-session/opt-in", {
+      headers: this.captainHeaders(),
+    });
+    return result.optIn === null || result.optIn === undefined
+      ? undefined
+      : DiscordUserSessionOptInSchema.parse(result.optIn);
+  }
+
   public async listDiscordPresenceSessions(): Promise<DiscordPresenceSessionRecord[]> {
     const result = await this.request<unknown>("/v1/discord/presence-sessions", {
       headers: this.captainHeaders(),
     });
     return DiscordPresenceSessionRecordSchema.array().parse(result);
+  }
+
+  public inspectDiscordReadiness(): Promise<DiscordControlPlaneReadiness> {
+    return this.request("/v1/discord/readiness", {
+      headers: this.captainHeaders(),
+    });
+  }
+
+  public proposeDiscordPersonMemory(input: DiscordPersonMemoryProposal): Promise<Record<string, unknown>> {
+    return this.request("/v1/memory/discord-people/proposals", {
+      method: "POST",
+      headers: this.captainHeaders(),
+      body: JSON.stringify(input),
+    });
+  }
+
+  public recallDiscordPersonMemory(
+    identity: DiscordPersonIdentity,
+    options: { readonly channelId?: string; readonly query?: string } = {},
+  ): Promise<DiscordPersonMemoryProjection> {
+    const query = new URLSearchParams();
+    if (options.channelId !== undefined) query.set("channelId", options.channelId);
+    if (options.query !== undefined) query.set("query", options.query);
+    const suffix = query.size === 0 ? "" : `?${query.toString()}`;
+    return this.request(
+      `/v1/memory/discord-people/${encodeURIComponent(identity.guildId)}/${encodeURIComponent(identity.userId)}${suffix}`,
+      { headers: this.captainHeaders() },
+    );
+  }
+
+  public exportDiscordPersonMemory(identity: DiscordPersonIdentity): Promise<DiscordPersonMemoryExport> {
+    return this.request(
+      `/v1/memory/discord-people/${encodeURIComponent(identity.guildId)}/${encodeURIComponent(identity.userId)}/export`,
+      { headers: this.operatorHeaders() },
+    );
+  }
+
+  public deleteDiscordPersonMemory(
+    identity: DiscordPersonIdentity,
+  ): Promise<DiscordPersonMemoryDeleteResult> {
+    return this.request(
+      `/v1/memory/discord-people/${encodeURIComponent(identity.guildId)}/${encodeURIComponent(identity.userId)}`,
+      { method: "DELETE", headers: this.operatorHeaders() },
+    );
   }
 
   public async listApprovals(status: ApprovalRequestStatus = "pending"): Promise<ApprovalRequestRecord[]> {

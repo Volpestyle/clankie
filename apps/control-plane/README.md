@@ -20,9 +20,27 @@ An authenticated operator decision remains authoritative in the approval project
 
 At plan time, bounded keyword recall is combined with the doctrine planner card in `captainMissionContext`. Runner assignments receive a smaller task-query recall excerpt in task metadata. Both projections are untrusted context, not authority or instructions. Retention pruning runs when the loaded doctrine retention differs from the last recorded run and on a daily maintenance cadence; every run emits `memory.retention.pruned` with bounded fact ids and no fact bodies.
 
+Discord person memory is a separate guild/user projection
+([ADR 0042](../../docs/adr/0042-discord-person-memory-projection.md)). An
+authenticated Discord text or voice captain may submit an explicit bounded
+proposal and recall only facts visible in the current guild/channel scope.
+Commit still requires an authenticated operator approval. Export and deletion
+are operator-only routes, and deletion emits the removed fact ids. Display
+names and raw transcripts never enter this projection.
+
 ## Runner pull execution
 
-After a validated implementation-plus-read-only-verification plan is submitted, an authenticated captain starts it with `POST /v1/missions/:id/start`. An authenticated runner pulls work from `POST /v1/runner/claims`, heartbeats the server-owned attempt lease, reports allowlisted idempotent semantic events, and settles the exact attempt. `GET /v1/missions/:id` includes the live task snapshot and results.
+After a validated task graph is submitted, an authenticated captain starts it
+with `POST /v1/missions/:id/start`. Every writing task must have a downstream
+independent verification task; cycles, unknown dependencies, unordered
+overlapping write scopes, self-verification, and malformed debugger lineage
+fail admission. Task-scoped runner candidates and dependency snapshots support
+arbitrary graph length without the former two/five-task shape gate
+([ADR 0041](../../docs/adr/0041-task-scoped-runner-candidates.md)). An
+authenticated runner pulls work from `POST /v1/runner/claims`, heartbeats the
+server-owned attempt lease, reports allowlisted idempotent semantic events, and
+settles the exact attempt. `GET /v1/missions/:id` includes the live task
+snapshot and results.
 
 The execution boundary is fail-closed: `CLANKIE_CAPTAIN_TOKEN` authenticates start separately from `CLANKIE_RUNNER_TOKEN`; missing configuration returns an unavailable error and invalid credentials return an authentication error. Production authenticators compare bearer credentials in constant time and bind the runner ID from server configuration, never a caller header. The control plane owns serialized scheduling and replay only. Codex, Git worktrees, provider processes, and credentials remain in the runner.
 

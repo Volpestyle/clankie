@@ -2070,6 +2070,30 @@ export const TrackerNarrativeWriteResultSchema = z
   .strict();
 export type TrackerNarrativeWriteResult = z.infer<typeof TrackerNarrativeWriteResultSchema>;
 
+/**
+ * Which Discord connection carries an action (ADR 0024, ADR 0048).
+ *
+ * This is the *only* place bot-versus-user is named. Action schemas stay
+ * transport-agnostic so one catalog, one character, and one memory projection
+ * serve both planes; the runtime binding plus doctrine decide availability.
+ */
+export const DiscordTransportKindSchema = z.enum(["bot", "user_session"]);
+export type DiscordTransportKind = z.infer<typeof DiscordTransportKindSchema>;
+
+/**
+ * Transport lifecycle actions, kept out of the presence write catalog because
+ * they change *which body Clankie is wearing* rather than writing anything to a
+ * channel. Doctrine gates the user-session connect exactly (ADR 0048).
+ */
+export const DiscordTransportActionSchema = z.enum(["discord.transport.user_session_connect"]);
+export type DiscordTransportAction = z.infer<typeof DiscordTransportActionSchema>;
+
+export const DISCORD_TRANSPORT_ACTION_RISK_CLASS: Readonly<
+  Record<DiscordTransportAction, "publish-external">
+> = {
+  "discord.transport.user_session_connect": "publish-external",
+};
+
 /** Transport-agnostic Discord presence action names (ADR 0024). No bot/user token fields. */
 export const DiscordPresenceActionSchema = z.enum([
   "discord.presence.reply",
@@ -2086,8 +2110,18 @@ export const DiscordPresenceActionSchema = z.enum([
   "discord.presence.voice_leave",
   "discord.presence.go_live_start",
   "discord.presence.go_live_stop",
+  "discord.presence.activity_start",
+  "discord.presence.activity_stop",
 ]);
 export type DiscordPresenceAction = z.infer<typeof DiscordPresenceActionSchema>;
+
+/**
+ * Rendered surfaces the activity plane may publish (ADR 0047). Frozen lab
+ * catalog: the executor maps a surface to its configured Discord application id
+ * so a model can never name an arbitrary application to launch.
+ */
+export const DiscordActivitySurfaceSchema = z.enum(["gba_emulator"]);
+export type DiscordActivitySurface = z.infer<typeof DiscordActivitySurfaceSchema>;
 
 export const DiscordPresenceActionRiskClassSchema = z.enum([
   "narrative-write",
@@ -2114,6 +2148,8 @@ export const DISCORD_PRESENCE_ACTION_RISK_CLASS: Readonly<
   "discord.presence.voice_leave": "reversible-write",
   "discord.presence.go_live_start": "publish-external",
   "discord.presence.go_live_stop": "publish-external",
+  "discord.presence.activity_start": "publish-external",
+  "discord.presence.activity_stop": "publish-external",
 };
 
 export const DiscordPresenceChannelIdentitySchema = z
@@ -2127,7 +2163,7 @@ export const DiscordPresenceChannelIdentitySchema = z
     profileHash: z.string().min(1),
     characterId: CharacterIdSchema,
     credentialRef: z.string().min(1),
-    transportKind: z.enum(["bot", "user_session"]),
+    transportKind: DiscordTransportKindSchema,
   })
   .strict();
 export type DiscordPresenceChannelIdentity = z.infer<typeof DiscordPresenceChannelIdentitySchema>;
@@ -2252,6 +2288,21 @@ export const DiscordPresenceActionRequestSchema = z.discriminatedUnion("kind", [
     .object({ kind: z.literal("go_live_start"), guildId: z.string().min(1), channelId: z.string().min(1) })
     .strict(),
   z.object({ kind: z.literal("go_live_stop"), guildId: z.string().min(1) }).strict(),
+  z
+    .object({
+      kind: z.literal("activity_start"),
+      guildId: z.string().min(1),
+      channelId: z.string().min(1),
+      surface: DiscordActivitySurfaceSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("activity_stop"),
+      guildId: z.string().min(1),
+      channelId: z.string().min(1),
+    })
+    .strict(),
 ]);
 export type DiscordPresenceActionRequest = z.infer<typeof DiscordPresenceActionRequestSchema>;
 
@@ -2272,6 +2323,8 @@ export const DISCORD_PRESENCE_ACTION_PAYLOAD_KIND: Readonly<
   "discord.presence.voice_leave": "voice_leave",
   "discord.presence.go_live_start": "go_live_start",
   "discord.presence.go_live_stop": "go_live_stop",
+  "discord.presence.activity_start": "activity_start",
+  "discord.presence.activity_stop": "activity_stop",
 };
 
 export const DiscordPresenceWriteSchema = z
@@ -2279,7 +2332,7 @@ export const DiscordPresenceWriteSchema = z
     schemaVersion: z.literal(1),
     idempotencyKey: z.string().min(1),
     action: DiscordPresenceActionSchema,
-    identity: DiscordPresenceChannelIdentitySchema.extend({ transportKind: z.literal("bot") }).strict(),
+    identity: DiscordPresenceChannelIdentitySchema,
     /**
      * Optional ledger attribution. When omitted, `resolveDiscordPresenceLedgerContent`
      * derives a non-empty string from the payload (emoji, filename, typing sentinel, …).
@@ -2349,7 +2402,10 @@ export function resolveDiscordPresenceLedgerContent(
     case "voice_leave":
     case "go_live_start":
     case "go_live_stop":
+    case "activity_stop":
       return payload.kind;
+    case "activity_start":
+      return `${payload.kind}:${payload.surface}`;
     default: {
       const _exhaustive: never = payload;
       return String(_exhaustive);
@@ -2361,12 +2417,52 @@ export const DiscordPresenceWriteResultSchema = z
   .object({
     id: z.string().min(1),
     action: DiscordPresenceActionSchema,
-    transportKind: z.literal("bot"),
+    transportKind: DiscordTransportKindSchema,
     channelId: z.string().min(1).optional(),
     messageId: z.string().min(1).optional(),
   })
   .strict();
 export type DiscordPresenceWriteResult = z.infer<typeof DiscordPresenceWriteResultSchema>;
+
+/**
+ * Durable owner opt-in for the user-session transport (ADR 0048).
+ *
+ * Discord forbids automating normal user accounts, so the capability cannot be
+ * reached by configuration alone: an operator-authenticated record must exist,
+ * bound to the doctrine profile that was in force when the risk was accepted.
+ * Re-compiling doctrine therefore invalidates the opt-in rather than silently
+ * carrying an acceptance across a policy change.
+ */
+export const DiscordUserSessionOptInSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    optInId: z.string().min(1),
+    characterId: CharacterIdSchema,
+    /** Broker credential reference. Token material is never carried here. */
+    credentialRef: z.string().min(1),
+    profileHash: z.string().min(1),
+    /** Free-form acknowledgement the operator typed; retained for audit. */
+    acknowledgement: z.string().min(1).max(2_048),
+    guildIds: z.array(z.string().min(1)).min(1).max(64),
+    channelIds: z.array(z.string().min(1)).min(1).max(256),
+    dmPolicy: z.enum(["deny", "owner_only", "allowlist"]),
+    recordedAt: z.string().datetime(),
+    revokedAt: z.string().datetime().optional(),
+  })
+  .strict();
+export type DiscordUserSessionOptIn = z.infer<typeof DiscordUserSessionOptInSchema>;
+
+/** Operator request body that mints a {@link DiscordUserSessionOptIn}. */
+export const DiscordUserSessionOptInRequestSchema = DiscordUserSessionOptInSchema.pick({
+  characterId: true,
+  acknowledgement: true,
+  guildIds: true,
+  channelIds: true,
+  dmPolicy: true,
+})
+  .extend({ schemaVersion: z.literal(1) })
+  .strict();
+export type DiscordUserSessionOptInRequest = z.infer<typeof DiscordUserSessionOptInRequestSchema>;
 
 // ---------------------------------------------------------------------------
 
@@ -2790,3 +2886,127 @@ export const HumanAttentionResponseSchema = z
     refineCorrelationConflict(response.correlationId, response.trackerRef, context);
   });
 export type HumanAttentionResponse = z.infer<typeof HumanAttentionResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// Discord person memory (ADR 0042).
+//
+// This is the one public wire contract shared by Discord ingress, the control
+// plane, API clients, and storage. It deliberately carries stable Discord ids
+// and bounded approved facts, never display names or raw transcript content.
+// ---------------------------------------------------------------------------
+
+export const DiscordPersonIdentitySchema = z
+  .object({
+    guildId: z.string().trim().min(1).max(64),
+    userId: z.string().trim().min(1).max(64),
+  })
+  .strict();
+export type DiscordPersonIdentity = z.infer<typeof DiscordPersonIdentitySchema>;
+
+export const DiscordPersonMemoryKindSchema = z.enum(["person-fact", "preference", "relationship-note"]);
+export type DiscordPersonMemoryKind = z.infer<typeof DiscordPersonMemoryKindSchema>;
+
+export const DiscordPersonMemoryVisibilitySchema = z.discriminatedUnion("scope", [
+  z.object({ scope: z.literal("guild") }).strict(),
+  z.object({ scope: z.literal("channel"), channelId: z.string().trim().min(1).max(64) }).strict(),
+  z.object({ scope: z.literal("operator_private") }).strict(),
+]);
+export type DiscordPersonMemoryVisibility = z.infer<typeof DiscordPersonMemoryVisibilitySchema>;
+
+export const DiscordPersonMemoryFactSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    factId: z.string().trim().min(1).max(256),
+    subject: DiscordPersonIdentitySchema,
+    kind: DiscordPersonMemoryKindSchema,
+    body: z.string().trim().min(1).max(2_048),
+    visibility: DiscordPersonMemoryVisibilitySchema,
+    provenance: z
+      .object({
+        correlationId: z.string().trim().min(1).max(256),
+        sourceEventId: z.string().trim().min(1).max(256),
+        sourceSurface: z.enum(["discord_text", "discord_voice", "operator"]),
+        rawTranscript: z.literal(false),
+      })
+      .strict(),
+    confidence: z.number().min(0).max(1),
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+    expiresAt: z.string().datetime().optional(),
+    supersedesFactId: z.string().trim().min(1).max(256).optional(),
+  })
+  .strict()
+  .superRefine((fact, context) => {
+    if (fact.updatedAt < fact.createdAt) {
+      context.addIssue({
+        code: "custom",
+        path: ["updatedAt"],
+        message: "updatedAt must not precede createdAt",
+      });
+    }
+    if (fact.expiresAt !== undefined && fact.expiresAt <= fact.updatedAt) {
+      context.addIssue({
+        code: "custom",
+        path: ["expiresAt"],
+        message: "expiresAt must follow updatedAt",
+      });
+    }
+    if (fact.supersedesFactId === fact.factId) {
+      context.addIssue({
+        code: "custom",
+        path: ["supersedesFactId"],
+        message: "a person-memory fact cannot supersede itself",
+      });
+    }
+  });
+export type DiscordPersonMemoryFact = z.infer<typeof DiscordPersonMemoryFactSchema>;
+
+export const DiscordPersonMemoryProposalSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    proposalId: z.string().trim().min(1).max(256),
+    fact: DiscordPersonMemoryFactSchema,
+  })
+  .strict();
+export type DiscordPersonMemoryProposal = z.infer<typeof DiscordPersonMemoryProposalSchema>;
+
+export const ApprovedDiscordPersonMemoryProposalSchema = DiscordPersonMemoryProposalSchema.extend({
+  approval: z
+    .object({
+      approvalId: z.string().trim().min(1).max(256),
+      status: z.literal("approved"),
+      approvedAt: z.string().datetime(),
+      approvedBy: z.string().trim().min(1).max(256),
+    })
+    .strict(),
+}).strict();
+export type ApprovedDiscordPersonMemoryProposal = z.infer<typeof ApprovedDiscordPersonMemoryProposalSchema>;
+
+export const DiscordPersonMemoryProjectionSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    subject: DiscordPersonIdentitySchema,
+    facts: z.array(DiscordPersonMemoryFactSchema).max(128),
+    recallCard: z.string().max(4_096).optional(),
+  })
+  .strict();
+export type DiscordPersonMemoryProjection = z.infer<typeof DiscordPersonMemoryProjectionSchema>;
+
+export const DiscordPersonMemoryExportSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    subject: DiscordPersonIdentitySchema,
+    exportedAt: z.string().datetime(),
+    facts: z.array(DiscordPersonMemoryFactSchema).max(128),
+  })
+  .strict();
+export type DiscordPersonMemoryExport = z.infer<typeof DiscordPersonMemoryExportSchema>;
+
+export const DiscordPersonMemoryDeleteResultSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    subject: DiscordPersonIdentitySchema,
+    deletedFactIds: z.array(z.string().trim().min(1).max(256)).max(128),
+  })
+  .strict();
+export type DiscordPersonMemoryDeleteResult = z.infer<typeof DiscordPersonMemoryDeleteResultSchema>;

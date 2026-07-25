@@ -199,6 +199,21 @@ describe("GBA emulator contract", () => {
         },
       }),
     ).toThrow(/HP exceeds max/);
+    expect(
+      GbaEmulatorObservationSchema.parse({
+        ...base,
+        kind: "inventory",
+        data: {
+          items: [
+            {
+              pocket: "poke-balls",
+              itemId: "firered-item-4",
+              count: 12,
+            },
+          ],
+        },
+      }),
+    ).toMatchObject({ kind: "inventory" });
     expect(() =>
       GbaEmulatorObservationSchema.parse({
         ...base,

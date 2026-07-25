@@ -57,8 +57,72 @@ export const commands = [
         ),
     ),
   new SlashCommandBuilder()
+    .setName("captain-person-memory")
+    .setDescription("Propose or recall governed long-term memory for one Discord member.")
+    .addStringOption((option) =>
+      option
+        .setName("action")
+        .setDescription("Propose a reviewed fact or recall visible approved facts.")
+        .setRequired(true)
+        .addChoices({ name: "Propose fact", value: "propose" }, { name: "Recall facts", value: "recall" }),
+    )
+    .addUserOption((option) =>
+      option.setName("person").setDescription("The stable Discord member identity.").setRequired(true),
+    )
+    .addStringOption((option) =>
+      option
+        .setName("fact")
+        .setDescription("A concise fact proposal; required only for propose.")
+        .setMaxLength(2_048),
+    )
+    .addStringOption((option) =>
+      option
+        .setName("kind")
+        .setDescription("Fact category.")
+        .addChoices(
+          { name: "Person fact", value: "person-fact" },
+          { name: "Preference", value: "preference" },
+          { name: "Relationship note", value: "relationship-note" },
+        ),
+    )
+    .addStringOption((option) =>
+      option
+        .setName("visibility")
+        .setDescription("Where the approved fact may be recalled.")
+        .addChoices({ name: "This guild", value: "guild" }, { name: "This channel", value: "channel" }),
+    )
+    .addIntegerOption((option) =>
+      option
+        .setName("expires-days")
+        .setDescription("Optional retention expiry in days.")
+        .setMinValue(1)
+        .setMaxValue(365),
+    )
+    .addStringOption((option) =>
+      option
+        .setName("supersedes-fact-id")
+        .setDescription("Optional approved fact id corrected by this proposal.")
+        .setMaxLength(256),
+    )
+    .addStringOption((option) =>
+      option.setName("query").setDescription("Optional bounded recall query.").setMaxLength(512),
+    ),
+  new SlashCommandBuilder()
     .setName("captain-join")
-    .setDescription("Join your current voice channel after explicit consent."),
+    .setDescription("Join your current voice channel and consent to speaker-attributed speech."),
+  new SlashCommandBuilder()
+    .setName("captain-voice-consent")
+    .setDescription("Opt in or out of Clankie's current speaker-attributed voice session.")
+    .addStringOption((option) =>
+      option
+        .setName("action")
+        .setDescription("Explicitly enable or revoke capture for only your Discord user id.")
+        .setRequired(true)
+        .addChoices({ name: "Opt in", value: "opt-in" }, { name: "Opt out", value: "opt-out" }),
+    ),
+  new SlashCommandBuilder()
+    .setName("captain-voice-status")
+    .setDescription("Show the consent-safe state of Clankie's current voice session."),
   new SlashCommandBuilder()
     .setName("captain-leave")
     .setDescription("Leave the current guild voice connection."),

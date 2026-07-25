@@ -1,8 +1,82 @@
-import { DiscordPresenceSessionRecordSchema } from "@clankie/interactive-environment";
+import { DiscordPresenceSession } from "@clankie/discord-presence-core";
+import {
+  DiscordPresenceSessionRecordSchema,
+  resolveDiscordPresenceToolExposure,
+  type DiscordPresencePhaseEvent,
+} from "@clankie/interactive-environment";
 import type { DiscordPresenceWrite } from "@clankie/protocol";
 import { ChannelType } from "discord.js";
 import { describe, expect, it, vi } from "vitest";
 import { DiscordBotPresenceRuntime, encodeReactionEmoji } from "../src/bot-presence-runtime.ts";
+
+describe("Discord presence gateway session on bot transport", () => {
+  it("removes act capability and emits degraded when the gateway disconnects mid-action", async () => {
+    const events: DiscordPresencePhaseEvent[] = [];
+    let finishAction: ((value: { id: string }) => void) | undefined;
+    const post = vi.fn(
+      () =>
+        new Promise<{ id: string }>((resolve) => {
+          finishAction = resolve;
+        }),
+    );
+    const session = fixtureSession(events);
+    await session.start();
+    await session.gatewayReady();
+    const runtime = new DiscordBotPresenceRuntime({
+      botToken: "bot-token",
+      rest: { post, put: vi.fn(), delete: vi.fn(), patch: vi.fn() } as never,
+    });
+
+    const inFlight = runtime.execute(sessionWrite("first"), session.record);
+    await vi.waitFor(() => expect(post).toHaveBeenCalledOnce());
+    await session.gatewayDisconnected();
+    expect(session.record.phase).toBe("degraded");
+    expect(resolveDiscordPresenceToolExposure(session.record, "discord_presence").presenceTools).toEqual([]);
+    finishAction?.({ id: "message-first" });
+    await expect(inFlight).resolves.toMatchObject({ messageId: "message-first" });
+    await expect(runtime.execute(sessionWrite("second"), session.record)).rejects.toThrow(
+      /discord_presence_action_unavailable_for_bot/,
+    );
+    expect(post).toHaveBeenCalledOnce();
+    expect(events.at(-1)).toMatchObject({
+      type: "discord.presence.session.phase_changed",
+      data: { previousPhase: "present", phase: "degraded", reason: "gateway_disconnected" },
+    });
+  });
+});
+
+function fixtureSession(events: DiscordPresencePhaseEvent[]) {
+  let id = 0;
+  let now = 0;
+  return new DiscordPresenceSession({
+    sessionId: "discord:bot:fixture",
+    characterId: "clankie",
+    credentialRef: "discord_bot",
+    transportKind: "bot",
+    emit: (event) => {
+      events.push(event);
+    },
+    idFactory: () => `phase-${String(++id)}`,
+    clock: () => new Date(Date.UTC(2026, 6, 14, 18, 0, now++)),
+  });
+}
+
+function sessionWrite(suffix: string): DiscordPresenceWrite {
+  return {
+    schemaVersion: 1,
+    idempotencyKey: `write-${suffix}`,
+    action: "discord.presence.send_message",
+    identity: {
+      missionId: "mission-1",
+      correlationId: `correlation-${suffix}`,
+      profileHash: "profile-1",
+      characterId: "clankie",
+      credentialRef: "discord_bot",
+      transportKind: "bot",
+    },
+    payload: { kind: "send_message", channelId: "channel-1", content: suffix },
+  };
+}
 
 describe("DiscordBotPresenceRuntime", () => {
   it("posts replies and reactions through the bot REST client", async () => {
@@ -36,6 +110,95 @@ describe("DiscordBotPresenceRuntime", () => {
       presentSession,
     );
     expect(put).toHaveBeenCalledOnce();
+  });
+
+  it("launches an activity via an EMBEDDED_APPLICATION invite and never a user token", async () => {
+    const post = vi.fn(async (route: string) =>
+      route.includes("invites") ? { code: "abc123" } : { id: "msg-launch" },
+    );
+    const del = vi.fn(async () => undefined);
+    // Stop reads live invites rather than trusting in-process state, because the
+    // presence runtime is constructed fresh for every action.
+    const get = vi.fn(async () => [
+      { code: "abc123", target_type: 2, target_application: { id: "app-123" } },
+      { code: "unrelated", target_type: 0 },
+      { code: "other-app", target_type: 2, target_application: { id: "app-999" } },
+    ]);
+    const runtime = new DiscordBotPresenceRuntime({
+      botToken: "bot-token",
+      rest: { post, put: vi.fn(), delete: del, patch: vi.fn(), get } as never,
+      activityApplicationIds: { gba_emulator: "app-123" },
+    });
+
+    const started = await runtime.execute(
+      write({
+        action: "discord.presence.activity_start",
+        payload: {
+          kind: "activity_start",
+          guildId: "guild-1",
+          channelId: "voice-1",
+          surface: "gba_emulator",
+        },
+      }),
+      voiceSession,
+    );
+
+    // target_type 2 is the documented embedded-application invite; no selfbot transport.
+    expect(post).toHaveBeenCalledWith(
+      expect.stringContaining("voice-1"),
+      expect.objectContaining({
+        body: expect.objectContaining({ target_type: 2, target_application_id: "app-123" }),
+      }),
+    );
+    expect(started).toMatchObject({ action: "discord.presence.activity_start", transportKind: "bot" });
+    // Starting must not revoke the link it just minted.
+    expect(del).not.toHaveBeenCalledWith(expect.stringContaining("abc123"));
+
+    // Stopping revokes the invite so the surface is no longer launchable.
+    await runtime.execute(
+      write({
+        action: "discord.presence.activity_stop",
+        payload: { kind: "activity_stop", guildId: "guild-1", channelId: "voice-1" },
+      }),
+      DiscordPresenceSessionRecordSchema.parse({
+        ...voiceSession,
+        activityInstances: [
+          {
+            schemaVersion: 1,
+            guildId: "guild-1",
+            channelId: "voice-1",
+            surface: "gba_emulator",
+            startedAt: "2026-07-25T18:00:00.000Z",
+          },
+        ],
+      }),
+    );
+    expect(del).toHaveBeenCalledWith(expect.stringContaining("abc123"));
+    // Only our configured surface is revoked — never someone else's invite.
+    expect(del).not.toHaveBeenCalledWith(expect.stringContaining("unrelated"));
+    expect(del).not.toHaveBeenCalledWith(expect.stringContaining("other-app"));
+  });
+
+  it("refuses to launch a surface that is not configured", async () => {
+    const runtime = new DiscordBotPresenceRuntime({
+      botToken: "bot-token",
+      rest: { post: vi.fn(), put: vi.fn(), delete: vi.fn(), patch: vi.fn() } as never,
+      // Deny-by-default: no surface configured at all.
+    });
+    await expect(
+      runtime.execute(
+        write({
+          action: "discord.presence.activity_start",
+          payload: {
+            kind: "activity_start",
+            guildId: "guild-1",
+            channelId: "voice-1",
+            surface: "gba_emulator",
+          },
+        }),
+        voiceSession,
+      ),
+    ).rejects.toThrow(/activity_surface_not_configured/);
   });
 
   it("starts a public thread without messageId using type PublicThread", async () => {
@@ -129,6 +292,19 @@ describe("encodeReactionEmoji", () => {
     expect(() => encodeReactionEmoji("<:bad>")).toThrow(/discord_presence_invalid_emoji/);
     expect(() => encodeReactionEmoji("not:a:valid:emoji")).toThrow(/discord_presence_invalid_emoji/);
   });
+});
+
+const voiceSession = DiscordPresenceSessionRecordSchema.parse({
+  schemaVersion: 1,
+  sessionId: "discord:bot:fixture",
+  characterId: "clankie",
+  credentialRef: "broker:discord_bot:lab",
+  transportKind: "bot",
+  phase: "voice_active",
+  gatewayConnected: true,
+  voiceGuildIds: ["guild-1"],
+  revision: 1,
+  updatedAt: "2026-07-14T18:00:00.000Z",
 });
 
 function write(

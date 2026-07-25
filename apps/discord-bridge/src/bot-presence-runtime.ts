@@ -4,10 +4,23 @@ import {
 } from "@clankie/interactive-environment";
 import {
   DiscordPresenceWriteResultSchema,
+  type DiscordActivitySurface,
   type DiscordPresenceWrite,
   type DiscordPresenceWriteResult,
 } from "@clankie/protocol";
 import { ChannelType, REST, Routes } from "discord.js";
+
+/** Discord invite target type for launching an embedded application (activity). */
+const INVITE_TARGET_TYPE_EMBEDDED_APPLICATION = 2;
+
+/** The subset of the invite object this executor reads back. */
+interface ChannelInvite {
+  code?: string;
+  target_type?: number;
+  target_application?: { id?: string };
+}
+/** Activity invites are short-lived; a stale link must not keep a surface launchable. */
+const ACTIVITY_INVITE_MAX_AGE_SECONDS = 6 * 60 * 60;
 
 export interface DiscordBotPresenceRuntimeOptions {
   /** Official bot token only. Never a user token. */
@@ -16,6 +29,12 @@ export interface DiscordBotPresenceRuntimeOptions {
   rest?: REST;
   /** Optional artifact resolver for send_attachment (bytes stay outside the control plane). */
   resolveAttachment?: (artifactRef: string) => Promise<{ data: Buffer; contentType?: string }>;
+  /**
+   * Deny-by-default surface → embedded application id map (ADR 0047). A surface
+   * absent from this map cannot be launched, so a model can never name an
+   * arbitrary Discord application to open in a channel.
+   */
+  activityApplicationIds?: Readonly<Partial<Record<DiscordActivitySurface, string>>>;
 }
 
 /**
@@ -27,6 +46,7 @@ export class DiscordBotPresenceRuntime {
   private readonly resolveAttachment:
     | ((artifactRef: string) => Promise<{ data: Buffer; contentType?: string }>)
     | undefined;
+  private readonly activityApplicationIds: Readonly<Partial<Record<DiscordActivitySurface, string>>>;
 
   public constructor(options: DiscordBotPresenceRuntimeOptions) {
     if (!options.botToken.trim()) {
@@ -34,6 +54,7 @@ export class DiscordBotPresenceRuntime {
     }
     this.rest = options.rest ?? new REST({ version: "10" }).setToken(options.botToken);
     this.resolveAttachment = options.resolveAttachment;
+    this.activityApplicationIds = options.activityApplicationIds ?? {};
   }
 
   public async execute(
@@ -152,9 +173,78 @@ export class DiscordBotPresenceRuntime {
       case "go_live_start":
       case "go_live_stop":
         throw new Error("discord_presence_go_live_requires_user_session");
+      case "activity_start": {
+        const applicationId = this.activityApplicationIds[payload.surface];
+        if (applicationId === undefined) {
+          throw new Error("discord_presence_activity_surface_not_configured");
+        }
+        const invite = (await this.rest.post(Routes.channelInvites(payload.channelId), {
+          body: {
+            max_age: ACTIVITY_INVITE_MAX_AGE_SECONDS,
+            max_uses: 0,
+            temporary: false,
+            unique: true,
+            target_type: INVITE_TARGET_TYPE_EMBEDDED_APPLICATION,
+            target_application_id: applicationId,
+          },
+        })) as { code?: string };
+        if (invite.code === undefined || invite.code.length === 0) {
+          throw new Error("discord_presence_activity_invite_missing_code");
+        }
+        // Replace rather than accumulate: prior launch links stop working.
+        await this.revokeActivityInvites(payload.channelId, invite.code);
+        const message = (await this.rest.post(Routes.channelMessages(payload.channelId), {
+          body: {
+            content: `Launch: https://discord.gg/${invite.code}`,
+            allowed_mentions: { parse: [] },
+          },
+        })) as { id?: string };
+        return result(write, payload.channelId, message.id);
+      }
+      case "activity_stop": {
+        await this.revokeActivityInvites(payload.channelId);
+        return result(write, payload.channelId);
+      }
       default: {
         const _exhaustive: never = payload;
         throw new Error(`discord_presence_unknown_payload:${JSON.stringify(_exhaustive)}`);
+      }
+    }
+  }
+
+  /**
+   * Revoke this channel's activity invites for surfaces we configure, optionally
+   * sparing a code we just minted.
+   *
+   * Deliberately stateless: the presence runtime is constructed per action, so
+   * an in-process invite map would not survive between start and stop, and
+   * would forget everything on restart. Reading live invites is also the only
+   * view that stays correct if a link was created by a previous process.
+   *
+   * Stopping is best-effort by design — Discord cannot evict viewers already
+   * inside an activity instance, so stop means "no further launches" and the
+   * frame stream is what actually goes dark.
+   */
+  private async revokeActivityInvites(channelId: string, keepCode?: string): Promise<void> {
+    const configured = new Set(Object.values(this.activityApplicationIds));
+    if (configured.size === 0) return;
+    let invites: ChannelInvite[];
+    try {
+      invites = (await this.rest.get(Routes.channelInvites(channelId))) as ChannelInvite[];
+    } catch {
+      // Losing the ability to list invites must not fail the stop.
+      return;
+    }
+    if (!Array.isArray(invites)) return;
+    for (const invite of invites) {
+      if (invite.target_type !== INVITE_TARGET_TYPE_EMBEDDED_APPLICATION) continue;
+      if (invite.target_application?.id === undefined) continue;
+      if (!configured.has(invite.target_application.id)) continue;
+      if (invite.code === undefined || invite.code === keepCode) continue;
+      try {
+        await this.rest.delete(Routes.invite(invite.code));
+      } catch {
+        // An already-expired or already-deleted invite is a successful stop.
       }
     }
   }

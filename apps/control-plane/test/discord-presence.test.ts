@@ -6,6 +6,7 @@ import { compileDoctrine, loadDoctrineFile, loadDoctrineLayerFile } from "@clank
 import { FileCredentialStore } from "../../../packages/credential-broker/src/index.ts";
 import { SqliteEventStore, type EventStore, type StoredEvent } from "@clankie/event-store";
 import type { DiscordPresenceSessionRecord } from "@clankie/interactive-environment";
+import { DiscordPresenceActionSchema } from "@clankie/protocol";
 import type { DiscordPresenceWrite, DiscordPresenceWriteResult, DomainEvent } from "@clankie/protocol";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { createDiscordPresenceRuntime } from "../../discord-bridge/src/presence-runtime-module.ts";
@@ -25,6 +26,58 @@ beforeAll(async () => {
 });
 
 describe("Discord presence control-plane runtime (ADR 0024)", () => {
+  it("reports authenticated Discord composition readiness without exposing credentials", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-discord-readiness-"));
+    try {
+      const app = await createControlPlane({
+        doctrine,
+        eventStore: new SqliteEventStore(join(root, "events.db")),
+        captainChannelTurns: {
+          submit: () => Promise.reject(new Error("not invoked by readiness")),
+        },
+        discordPresenceRuntime: new RecordingPresenceRuntime(),
+        authenticateCaptain: presenceCaptain,
+      });
+
+      const ready = await app.request("/v1/discord/readiness", {
+        headers: { authorization: "Bearer captain-secret" },
+      });
+      expect(ready.status).toBe(200);
+      await expect(ready.json()).resolves.toEqual({
+        schemaVersion: 1,
+        ready: true,
+        service: "clankie-control-plane",
+        instanceId: expect.any(String),
+        profileHash: doctrine.profileHash,
+        checks: {
+          captainChannelTurns: true,
+          discordPresenceRuntime: true,
+          eventStore: true,
+        },
+      });
+
+      const missingAuth = await app.request("/v1/discord/readiness");
+      expect(missingAuth.status).toBe(401);
+
+      const voiceApp = await createControlPlane({
+        doctrine,
+        eventStore: new SqliteEventStore(join(root, "voice-events.db")),
+        captainChannelTurns: {
+          submit: () => Promise.reject(new Error("not invoked by readiness")),
+        },
+        discordPresenceRuntime: new RecordingPresenceRuntime(),
+        authenticateCaptain: () =>
+          Promise.resolve({ captainId: "discord-voice-bridge", steerSourceLane: "discord_voice" }),
+      });
+      const voiceReady = await voiceApp.request("/v1/discord/readiness", {
+        headers: { authorization: "Bearer voice-secret" },
+      });
+      expect(voiceReady.status).toBe(200);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("returns 403 without executing when the profile denies Discord presence", async () => {
     const runtime = new RecordingPresenceRuntime();
     const highAssurance = compileDoctrine([
@@ -49,6 +102,33 @@ describe("Discord presence control-plane runtime (ADR 0024)", () => {
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({ decision: { effect: "deny" } });
     expect(runtime.writes).toHaveLength(0);
+  });
+
+  it("classifies every catalogued presence action so none 400s as unclassified", async () => {
+    // Regression guard for a real drift: the ADR 0047 activity actions reached
+    // the bot executor but 400'd here, because the non-narrative classifier was
+    // a hand-maintained list and unit tests called the executor directly.
+    // Classification is now derived from the protocol's frozen risk-class map;
+    // this asserts the property rather than re-listing the actions.
+    const app = await createPresenceControlPlane({
+      doctrine,
+      discordPresenceRuntime: new RecordingPresenceRuntime(),
+    });
+
+    for (const action of DiscordPresenceActionSchema.options) {
+      // The payload must be *valid* for the action: the write schema rejects a
+      // kind mismatch before classification runs, which would make this test
+      // vacuous. (It was, until the sabotage check caught it.)
+      const response = await post(app, "/v1/discord/presence-actions", {
+        ...presenceWrite({
+          idempotencyKey: `classify-${action}`,
+          action,
+          payload: payloadFor(action),
+        }),
+      });
+      const body = (await response.json()) as { error?: string };
+      expect(body.error, `${action} must be classifiable`).not.toBe("discord_presence_action_unclassified");
+    }
   });
 
   it("allows bot narrative actions through the retained narrative policy and executor", async () => {
@@ -890,4 +970,47 @@ function attachmentWrite(idempotencyKey: string): DiscordPresenceWrite {
       filename: "fixture.png",
     },
   });
+}
+
+/** Minimal schema-valid payload for every catalogued presence action. */
+function payloadFor(action: string): DiscordPresenceWrite["payload"] {
+  const channelId = "channel-1";
+  const guildId = "guild-1";
+  const messageId = "message-1";
+  switch (action) {
+    case "discord.presence.reply":
+      return { kind: "reply", channelId, messageId, content: "x" };
+    case "discord.presence.react":
+      return { kind: "react", channelId, messageId, emoji: "👍" };
+    case "discord.presence.unreact":
+      return { kind: "unreact", channelId, messageId, emoji: "👍" };
+    case "discord.presence.send_message":
+      return { kind: "send_message", channelId, content: "x" };
+    case "discord.presence.edit_own_message":
+      return { kind: "edit_own_message", channelId, messageId, content: "x" };
+    case "discord.presence.delete_own_message":
+      return { kind: "delete_own_message", channelId, messageId };
+    case "discord.presence.send_attachment":
+      return { kind: "send_attachment", channelId, artifactRef: "sha256:x:y", filename: "f.png" };
+    case "discord.presence.typing_start":
+      return { kind: "typing_start", channelId };
+    case "discord.presence.create_thread":
+      return { kind: "create_thread", channelId, name: "thread" };
+    case "discord.presence.join_thread":
+      return { kind: "join_thread", channelId };
+    case "discord.presence.voice_join":
+      return { kind: "voice_join", guildId, channelId };
+    case "discord.presence.voice_leave":
+      return { kind: "voice_leave", guildId };
+    case "discord.presence.go_live_start":
+      return { kind: "go_live_start", guildId, channelId };
+    case "discord.presence.go_live_stop":
+      return { kind: "go_live_stop", guildId };
+    case "discord.presence.activity_start":
+      return { kind: "activity_start", guildId, channelId, surface: "gba_emulator" };
+    case "discord.presence.activity_stop":
+      return { kind: "activity_stop", guildId, channelId };
+    default:
+      throw new Error(`payloadFor is missing a case for ${action}`);
+  }
 }

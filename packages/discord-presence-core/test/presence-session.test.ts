@@ -5,7 +5,6 @@ import {
 } from "@clankie/interactive-environment";
 import type { DiscordPresenceWrite } from "@clankie/protocol";
 import { describe, expect, it, vi } from "vitest";
-import { DiscordBotPresenceRuntime } from "../src/bot-presence-runtime.ts";
 import {
   createAdvertisedDiscordPresencePort,
   DiscordPresenceActToolUnavailableError,
@@ -17,40 +16,6 @@ import {
 } from "../src/presence-session.ts";
 
 describe("Discord presence gateway session", () => {
-  it("removes act capability and emits degraded when the gateway disconnects mid-action", async () => {
-    const events: DiscordPresencePhaseEvent[] = [];
-    let finishAction: ((value: { id: string }) => void) | undefined;
-    const post = vi.fn(
-      () =>
-        new Promise<{ id: string }>((resolve) => {
-          finishAction = resolve;
-        }),
-    );
-    const session = fixtureSession(events);
-    await session.start();
-    await session.gatewayReady();
-    const runtime = new DiscordBotPresenceRuntime({
-      botToken: "bot-token",
-      rest: { post, put: vi.fn(), delete: vi.fn(), patch: vi.fn() } as never,
-    });
-
-    const inFlight = runtime.execute(write("first"), session.record);
-    await vi.waitFor(() => expect(post).toHaveBeenCalledOnce());
-    await session.gatewayDisconnected();
-    expect(session.record.phase).toBe("degraded");
-    expect(resolveDiscordPresenceToolExposure(session.record, "discord_presence").presenceTools).toEqual([]);
-    finishAction?.({ id: "message-first" });
-    await expect(inFlight).resolves.toMatchObject({ messageId: "message-first" });
-    await expect(runtime.execute(write("second"), session.record)).rejects.toThrow(
-      /discord_presence_action_unavailable_for_bot/,
-    );
-    expect(post).toHaveBeenCalledOnce();
-    expect(events.at(-1)).toMatchObject({
-      type: "discord.presence.session.phase_changed",
-      data: { previousPhase: "present", phase: "degraded", reason: "gateway_disconnected" },
-    });
-  });
-
   it("derives voice_active, present, failed, and off from gateway and voice lifecycle", async () => {
     const events: DiscordPresencePhaseEvent[] = [];
     const session = fixtureSession(events);

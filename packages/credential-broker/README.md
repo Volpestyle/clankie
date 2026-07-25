@@ -51,9 +51,36 @@ outside its configured allowlists and resolves connection material only after a
 matching grant is verified. The token is never placed in a worker, captain,
 control-plane, or bridge process environment.
 
-`discord_user_session` is a reserved provider identifier only. It has no
-implementation or credential-loading path; user-session transport remains a
-separate gated follow-up (VUH-751 / VUH-836).
+`clankie_discord_bridge` is a separate, broker-owned local bearer. The control
+plane creates it on first start and authenticates it only as the
+`discord-bridge` captain on the `discord_text` lane. The bridge resolves it
+directly from the broker after the control plane starts. It is never supplied
+through `CLANKIE_CAPTAIN_TOKEN`, so Discord cannot inherit another captain's
+identity or source lane.
+
+`clankie_discord_voice_bridge` is a second broker-owned local bearer with a
+distinct `discord_voice` control-plane identity. Official-bot voice ingress
+cannot reuse the text bridge bearer, and the text bridge cannot submit a
+`voice_event`. The bridge resolves both internal credentials directly from the
+store after control-plane startup; neither enters an environment variable.
+OpenAI transcription and speech reuse the brokered `openai` API credential
+inside the voice process and never expose it to Eve or a worker.
+
+`discord_user_session` holds the personal-lab normal-user credential
+([ADR 0048](../../docs/adr/0048-discord-user-session-transport.md)).
+`DiscordUserSessionCredentialProvider` mirrors the bot provider — expiring,
+resource-scoped grants exchanged only by the trusted transport adapter — and
+adds one gate the bot plane does not need: a durable owner opt-in bound to the
+doctrine profile hash, re-checked at redemption so a revocation stops the very
+next action instead of waiting for grant expiry. A `DISCORD_USER_TOKEN`
+environment variable is a startup error in every process that could reach it.
+
+`clankie_discord_user_bridge` and `clankie_discord_user_voice_bridge` are the
+user plane's local bearers, distinct from the bot plane's pair. The control
+plane derives `transportKind` from which bearer authenticated, so a request body
+cannot claim a transport it does not hold. All four bearer patterns are mutually
+exclusive: `clankie_discord_` prefixes every one of them, and an unanchored
+match would let a user-plane bearer authenticate as the bot bridge.
 
 ## Capability boundary
 

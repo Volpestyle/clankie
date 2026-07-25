@@ -1,7 +1,14 @@
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { serve } from "@hono/node-server";
-import { createDefaultCredentialStore, ensureOperatorCredential } from "@clankie/credential-broker";
+import {
+  createDefaultCredentialStore,
+  ensureDiscordBridgeCredential,
+  ensureDiscordUserBridgeCredential,
+  ensureDiscordUserVoiceBridgeCredential,
+  ensureDiscordVoiceBridgeCredential,
+  ensureOperatorCredential,
+} from "@clankie/credential-broker";
 import { compileDoctrine, loadDoctrineFile, projectCaptainCeremony } from "@clankie/doctrine";
 import { SqliteEventStore } from "@clankie/event-store";
 import { createLogger } from "@clankie/observability";
@@ -47,8 +54,56 @@ const memoryStore = new MemoryStore(memoryStorePath, {
 });
 const runnerToken = process.env.CLANKIE_RUNNER_TOKEN;
 const captainToken = process.env.CLANKIE_CAPTAIN_TOKEN;
+const captainSteerSourceLane = parseCaptainSteerSourceLane(
+  process.env.CLANKIE_CAPTAIN_STEER_SOURCE_LANE ?? "api",
+);
 const operatorCredentialStore = createDefaultCredentialStore();
 await ensureOperatorCredential({ env: process.env, store: operatorCredentialStore });
+const discordBridgeToken = await ensureDiscordBridgeCredential({
+  env: process.env,
+  store: operatorCredentialStore,
+});
+const discordVoiceBridgeToken = await ensureDiscordVoiceBridgeCredential({
+  env: process.env,
+  store: operatorCredentialStore,
+});
+const authenticateDiscordBridge = createBearerAuthenticator(discordBridgeToken, {
+  captainId: "discord-bridge",
+  steerSourceLane: "discord_text" as const,
+  discordTransportKind: "bot" as const,
+});
+const authenticateDiscordVoiceBridge = createBearerAuthenticator(discordVoiceBridgeToken, {
+  captainId: "discord-voice-bridge",
+  steerSourceLane: "discord_voice" as const,
+  discordTransportKind: "bot" as const,
+});
+// The user-session plane holds its own bearers so `transportKind` is proven by
+// authentication rather than asserted in a request body (ADR 0048).
+const discordUserBridgeToken = await ensureDiscordUserBridgeCredential({
+  env: process.env,
+  store: operatorCredentialStore,
+});
+const discordUserVoiceBridgeToken = await ensureDiscordUserVoiceBridgeCredential({
+  env: process.env,
+  store: operatorCredentialStore,
+});
+const authenticateDiscordUserBridge = createBearerAuthenticator(discordUserBridgeToken, {
+  captainId: "discord-user-bridge",
+  steerSourceLane: "discord_text" as const,
+  discordTransportKind: "user_session" as const,
+});
+const authenticateDiscordUserVoiceBridge = createBearerAuthenticator(discordUserVoiceBridgeToken, {
+  captainId: "discord-user-voice-bridge",
+  steerSourceLane: "discord_voice" as const,
+  discordTransportKind: "user_session" as const,
+});
+const authenticateConfiguredCaptain =
+  captainToken === undefined
+    ? undefined
+    : createBearerAuthenticator(captainToken, {
+        captainId: "captain-eve",
+        steerSourceLane: captainSteerSourceLane,
+      });
 const deviceSessionKeyPath = process.env.CLANKIE_DEVICE_SESSION_KEY_PATH
   ? resolve(process.env.CLANKIE_DEVICE_SESSION_KEY_PATH)
   : join(dirname(eventStorePath), "device-session.key");
@@ -60,9 +115,6 @@ if (deviceSessionKey === undefined) {
   );
 }
 const runnerId = process.env.CLANKIE_RUNNER_ID ?? "local";
-const captainSteerSourceLane = parseCaptainSteerSourceLane(
-  process.env.CLANKIE_CAPTAIN_STEER_SOURCE_LANE ?? "api",
-);
 const linearAgentRuntime = await loadLinearAgentRuntime(process.env.CLANKIE_LINEAR_AGENT_RUNTIME_MODULE);
 const linearAttentionRuntime = await loadLinearAttentionRuntime(
   process.env.CLANKIE_LINEAR_ATTENTION_RUNTIME_MODULE,
@@ -78,11 +130,23 @@ if (
 }
 const discordPresenceRuntime = await loadDiscordPresenceRuntime(
   process.env.CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE,
+  "createDiscordPresenceRuntime",
+  "CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE",
+);
+const discordUserPresenceRuntime = await loadDiscordPresenceRuntime(
+  process.env.CLANKIE_DISCORD_USER_PRESENCE_RUNTIME_MODULE,
+  "createDiscordUserPresenceRuntime",
+  "CLANKIE_DISCORD_USER_PRESENCE_RUNTIME_MODULE",
 );
 const captainChannelTurns = new EveCaptainChannelTurnPort({
   baseUrl: process.env.CLANKIE_CAPTAIN_URL ?? "http://127.0.0.1:4321",
   ceremonyProjection: projectCaptainCeremony(doctrine),
   ...(captainToken === undefined ? {} : { captainToken }),
+  recallDiscordPerson: (identity, options) =>
+    memoryStore.recallDiscordPersonCard(identity, {
+      ...options,
+      now: new Date(),
+    }),
 });
 const app = await createControlPlane({
   doctrine,
@@ -104,6 +168,7 @@ const app = await createControlPlane({
         attentionDeliveryAdapter: linearAttentionRuntime.adapter,
       }),
   ...(discordPresenceRuntime === undefined ? {} : { discordPresenceRuntime }),
+  ...(discordUserPresenceRuntime === undefined ? {} : { discordUserPresenceRuntime }),
   ...(process.env.CLANKIE_REPO_PATH ? { workspacePath: process.env.CLANKIE_REPO_PATH } : {}),
   ...(runnerToken
     ? {
@@ -114,14 +179,12 @@ const app = await createControlPlane({
         }),
       }
     : {}),
-  ...(captainToken
-    ? {
-        authenticateCaptain: createBearerAuthenticator(captainToken, {
-          captainId: "captain-eve",
-          steerSourceLane: captainSteerSourceLane,
-        }),
-      }
-    : {}),
+  authenticateCaptain: async (request) =>
+    (await authenticateDiscordBridge(request)) ??
+    (await authenticateDiscordVoiceBridge(request)) ??
+    (await authenticateDiscordUserBridge(request)) ??
+    (await authenticateDiscordUserVoiceBridge(request)) ??
+    (authenticateConfiguredCaptain === undefined ? undefined : await authenticateConfiguredCaptain(request)),
   authenticateOperator: createCredentialBackedOperatorAuthenticator({
     env: process.env,
     store: operatorCredentialStore,
@@ -163,17 +226,24 @@ async function loadLinearAgentRuntime(
   return runtime as unknown as LinearAgentRuntimePort;
 }
 
+/**
+ * Loads a privileged Discord presence executor. Both transports use the same
+ * module contract and differ only in factory name and environment variable, so
+ * the user-session plane inherits the bot plane's isolation properties.
+ */
 async function loadDiscordPresenceRuntime(
   modulePath: string | undefined,
+  factoryName: string,
+  environmentVariable: string,
 ): Promise<DiscordPresenceRuntimePort | undefined> {
   if (modulePath === undefined) return undefined;
   const loaded: unknown = await import(pathToFileURL(resolve(modulePath)).href);
-  if (!isRecord(loaded) || typeof loaded.createDiscordPresenceRuntime !== "function") {
-    throw new Error("CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE must export createDiscordPresenceRuntime()");
+  if (!isRecord(loaded) || typeof loaded[factoryName] !== "function") {
+    throw new Error(`${environmentVariable} must export ${factoryName}()`);
   }
-  const runtime: unknown = await loaded.createDiscordPresenceRuntime();
+  const runtime: unknown = await (loaded[factoryName] as () => unknown)();
   if (!isRecord(runtime) || typeof runtime.execute !== "function") {
-    throw new Error("createDiscordPresenceRuntime() returned an invalid runtime port");
+    throw new Error(`${factoryName}() returned an invalid runtime port`);
   }
   return runtime as unknown as DiscordPresenceRuntimePort;
 }

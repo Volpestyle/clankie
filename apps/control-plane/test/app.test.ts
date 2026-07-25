@@ -734,7 +734,7 @@ describe("control plane", () => {
     expect(wrongRole.status).toBe(400);
     await expect(wrongRole.json()).resolves.toMatchObject({
       error: "unsupported_mission_plan",
-      message: expect.stringContaining("implementer role"),
+      message: expect.stringContaining("independent worker routing"),
     });
   });
 
@@ -766,7 +766,40 @@ describe("control plane", () => {
     expect(accepted.status).toBe(200);
   });
 
-  it("rejects invalid frozen-scenario shapes before persistence", async () => {
+  it("accepts an arbitrary-length verified DAG with disjoint writer branches", async () => {
+    const created = await app.request("/v1/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ goal: "general verified graph" }),
+    });
+    const { missionId } = (await created.json()) as { missionId: string };
+    const accepted = await putPlan(missionId, [
+      pullTask("inspect-context", "context", "planner"),
+      pullTask("implement-api", "implementation", "implementer", {
+        dependsOn: ["inspect-context"],
+        writeScope: ["src/api/**"],
+      }),
+      pullTask("implement-docs", "implementation", "implementer", {
+        dependsOn: ["inspect-context"],
+        writeScope: ["docs/**"],
+      }),
+      pullTask("verify-api", "verification", "verifier", { dependsOn: ["implement-api"] }),
+      pullTask("verify-docs", "verification", "verifier", { dependsOn: ["implement-docs"] }),
+      pullTask("integrate", "integration", "implementer", {
+        dependsOn: ["verify-api", "verify-docs"],
+        writeScope: ["src/integration/**"],
+      }),
+      pullTask("verify-integration", "verification", "verifier", { dependsOn: ["integrate"] }),
+    ]);
+
+    expect(accepted.status).toBe(200);
+    await expect((await app.request(`/v1/missions/${missionId}`)).json()).resolves.toMatchObject({
+      state: "planned",
+      plan: { tasks: expect.arrayContaining([expect.objectContaining({ id: "verify-integration" })]) },
+    });
+  });
+
+  it("rejects invalid general mission graphs before persistence", async () => {
     const created = await app.request("/v1/missions", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -795,10 +828,10 @@ describe("control plane", () => {
     expect(orphanResponse.status).toBe(400);
     await expect(orphanResponse.json()).resolves.toMatchObject({
       error: "unsupported_mission_plan",
-      message: expect.stringContaining("failure evidence"),
+      message: expect.stringContaining("directly depend on the verification failure"),
     });
 
-    // A plan that exceeds the frozen shape with an extra implementation task.
+    // A writing task without downstream independent verification.
     const oversized = [
       ...frozenScenarioTasks(),
       pullTask("implement-extra", "implementation", "implementer", {
@@ -808,7 +841,10 @@ describe("control plane", () => {
     ];
     const oversizedResponse = await putPlan(missionId, oversized);
     expect(oversizedResponse.status).toBe(400);
-    await expect(oversizedResponse.json()).resolves.toMatchObject({ error: "unsupported_mission_plan" });
+    await expect(oversizedResponse.json()).resolves.toMatchObject({
+      error: "unsupported_mission_plan",
+      message: expect.stringContaining("downstream independent verification"),
+    });
 
     // None of the rejected plans were persisted.
     await expect((await app.request(`/v1/missions/${missionId}`)).json()).resolves.toMatchObject({

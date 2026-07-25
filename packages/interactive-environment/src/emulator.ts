@@ -210,7 +210,7 @@ const GbaPartyMemberSchema = z
   .refine((member) => member.currentHp <= member.maxHp, { path: ["currentHp"], message: "HP exceeds max" });
 
 const GbaMoveSchema = z
-  .object({ moveId: z.string().min(1).max(128), power: z.number().int().positive().max(999) })
+  .object({ moveId: z.string().min(1).max(128), power: z.number().int().nonnegative().max(999) })
   .strict();
 
 export const GbaEmulatorObservationSchema = z.discriminatedUnion("kind", [
@@ -229,11 +229,11 @@ export const GbaEmulatorObservationSchema = z.discriminatedUnion("kind", [
     data: z
       .object({
         menuId: z.string().min(1).max(128),
-        cursor: z.number().int().nonnegative().max(31),
+        cursor: z.number().int().nonnegative().max(63),
         entries: z
           .array(z.object({ id: z.string().min(1).max(128), label: z.string().min(1).max(256) }).strict())
           .min(1)
-          .max(8),
+          .max(16),
         untrusted: z.literal(true),
       })
       .strict(),
@@ -242,6 +242,24 @@ export const GbaEmulatorObservationSchema = z.discriminatedUnion("kind", [
     kind: z.literal("party"),
     data: z
       .object({ activeSlot: z.number().int().min(0).max(5), members: z.array(GbaPartyMemberSchema).max(6) })
+      .strict(),
+  }).strict(),
+  GbaEmulatorObservationBaseSchema.extend({
+    kind: z.literal("inventory"),
+    data: z
+      .object({
+        items: z
+          .array(
+            z
+              .object({
+                pocket: z.enum(["items", "key-items", "poke-balls", "tm-hm", "berries"]),
+                itemId: z.string().min(1).max(128),
+                count: z.number().int().positive().max(999),
+              })
+              .strict(),
+          )
+          .max(186),
+      })
       .strict(),
   }).strict(),
   GbaEmulatorObservationBaseSchema.extend({

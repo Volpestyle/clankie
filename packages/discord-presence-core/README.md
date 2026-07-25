@@ -1,0 +1,37 @@
+# @clankie/discord-presence-core
+
+Transport-neutral Discord participation. Everything here is blind to whether
+Clankie is wearing the official bot or the personal-lab user session, which is
+what lets both bodies be one character
+([ADR 0024](../../docs/adr/0024-discord-dual-plane-presence.md),
+[ADR 0048](../../docs/adr/0048-discord-user-session-transport.md)).
+
+| Module                         | Responsibility                                                           |
+| ------------------------------ | ------------------------------------------------------------------------ |
+| `presence-session`             | Gateway/voice phase lifecycle, typed phase events, act-tool revoke fence |
+| `presence-action-advertiser`   | Retains the live catalogue and forwards phase as an execution fence      |
+| `text-ingress`                 | Normalises gateway messages into bounded, policy-gated Eve turns         |
+| `voice-ingress`                | Routes one speaker-attributed transcript to the voice captain lane       |
+| `voice-session`                | Consent, per-speaker capture, barge-in, playback via `@discordjs/voice`  |
+| `voice-consent`                | Ephemeral, session-bound consent — never inferred from presence          |
+| `voice-audio` / `voice-speech` | Memory-only PCM conversion and brokered OpenAI STT/TTS                   |
+| `receipt-store`                | Append-only, content-free receipts for both planes                       |
+
+## Rules
+
+- **Never import `discord.js`.** A bot-shaped client is a transport detail and
+  belongs in the app that owns that transport. The bot bridge uses `discord.js`;
+  the user-session bridge uses a bounded raw gateway plus `fetch`.
+- **Derive the lane address from `discordPresenceLaneAddress`.** It is keyed by
+  where the conversation happens (`discord:<guildId|dm>:<channelId>`), never by
+  which transport observed it. A transport-local identifier would fork one
+  conversation into two Eve lanes and split the character in half.
+- **`transportKind` is configuration, not inference.** Both ingress paths take
+  it from their host process; neither guesses.
+
+## Consumers
+
+- `apps/discord-bridge` — official bot: slash commands, mission threads, the
+  activity plane.
+- `apps/discord-user-session` — personal-lab user session, gated by
+  [ADR 0048](../../docs/adr/0048-discord-user-session-transport.md).

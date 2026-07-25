@@ -34,8 +34,16 @@ import {
   type DiscordPresenceSessionRecord,
 } from "@clankie/interactive-environment";
 import {
+  DiscordPersonIdentitySchema,
+  DiscordPersonMemoryFactSchema,
   MemoryFactSchema,
+  type ApplyDiscordPersonProposalResult,
   type ApplyProposalResult,
+  type DiscordPersonIdentity,
+  type DiscordPersonMemoryExport,
+  type DiscordPersonMemoryFact,
+  type DiscordPersonMemoryReadOptions,
+  type DiscordPersonRecallOptions,
   type MemoryFact,
   type RecallCardOptions,
 } from "@clankie/memory-store";
@@ -49,6 +57,9 @@ import {
   CaptainPresenceReportSchema,
   DiscordPresenceChannelTurnRequestSchema,
   DiscordPresenceWriteSchema,
+  DISCORD_TRANSPORT_ACTION_RISK_CLASS,
+  DiscordUserSessionOptInRequestSchema,
+  DiscordUserSessionOptInSchema,
   resolveDiscordPresenceLedgerContent,
   LinearChannelTurnRequestSchema,
   MissionEventAuthFailureSchema,
@@ -79,6 +90,7 @@ import {
   type DeviceSelfResponse,
   type DeviceSessionRefreshResponse,
   type DiscordPresenceWriteResult,
+  type DiscordTransportKind,
   type PairingCompleteResponse,
   type PairingRedeemResponse,
   type DomainEvent,
@@ -91,6 +103,8 @@ import {
   type WorkerResult,
   type WorkerTranscriptKey,
   type WorkerTranscriptTailLine,
+  DISCORD_PRESENCE_ACTION_RISK_CLASS,
+  DiscordPresenceActionSchema,
 } from "@clankie/protocol";
 import {
   TrackerAuthorityConflictError,
@@ -123,6 +137,12 @@ import {
 } from "./worker-steering.ts";
 import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
 import { DiscordPresenceSessionProjection, discordPresenceDomainEvent } from "./discord-presence-session.ts";
+import {
+  DISCORD_USER_SESSION_OPT_IN_MISSION_ID,
+  DISCORD_USER_SESSION_OPT_IN_RECORDED,
+  DISCORD_USER_SESSION_OPT_IN_REVOKED,
+  DiscordUserSessionOptInProjection,
+} from "./discord-user-session-opt-in.ts";
 import type { CaptainChannelTurnPort } from "./eve-captain-turn.ts";
 import { applyMissionTriggerEvent, dueOccurrences, MissionTriggerInputSchema } from "./mission-triggers.ts";
 import { mintPairingOffer, pairingOfferWire, PairingOfferStore } from "./pairing.ts";
@@ -205,8 +225,25 @@ interface StoredMemoryProposal {
   readonly principal: { kind: "captain" | "worker"; id: string };
 }
 
+interface StoredDiscordPersonMemoryProposal {
+  readonly proposalId: string;
+  readonly approvalRequestId: string;
+  readonly fact: DiscordPersonMemoryFact;
+  readonly submittedAt: string;
+  readonly eventMissionId: string;
+  readonly principal: { kind: "captain"; id: string };
+}
+
 export interface MemoryStorePort {
   applyApprovedProposal(input: unknown): ApplyProposalResult;
+  applyApprovedDiscordPersonProposal(input: unknown): ApplyDiscordPersonProposalResult;
+  deleteDiscordPerson(identity: DiscordPersonIdentity): readonly string[];
+  exportDiscordPerson(identity: DiscordPersonIdentity, now?: Date): DiscordPersonMemoryExport;
+  listDiscordPerson(
+    identity: DiscordPersonIdentity,
+    options?: DiscordPersonMemoryReadOptions,
+  ): readonly DiscordPersonMemoryFact[];
+  recallDiscordPersonCard(identity: DiscordPersonIdentity, options: DiscordPersonRecallOptions): string;
   recallCard(options: RecallCardOptions): string;
   pruneRetention(now?: Date): readonly string[];
 }
@@ -240,6 +277,12 @@ export interface ControlPlaneDependencies {
    * Bot credentials remain inside the trusted runtime module.
    */
   discordPresenceRuntime?: DiscordPresenceRuntimePort;
+  /**
+   * Privileged executor for the personal-lab user-session transport (ADR 0048).
+   * Separate from the bot runtime so a deployment that never configures it
+   * cannot execute a user-session write even if one is somehow authenticated.
+   */
+  discordUserPresenceRuntime?: DiscordPresenceRuntimePort;
   /** Authenticates the outbound local runner. Missing configuration leaves execution unavailable. */
   authenticateRunner?: RunnerAuthenticator;
   /** Authenticates the captain/operator starting an already validated plan. */
@@ -314,7 +357,24 @@ export interface TrustedCaptainIdentity {
   captainId: string;
   /** Server-authenticated origin for steering; request bodies cannot elevate it. */
   steerSourceLane?: Exclude<WorkerSteerSourceLane, "tui">;
+  /**
+   * Which Discord body this bearer speaks for (ADR 0048). Absent for non-Discord
+   * captains. Defaults to `bot` at the gate so an older bearer keeps working.
+   */
+  discordTransportKind?: DiscordTransportKind;
 }
+
+/** Transport a captain bearer is entitled to, never read from a request body. */
+function captainTransportKind(captain: TrustedCaptainIdentity): DiscordTransportKind {
+  return captain.discordTransportKind ?? "bot";
+}
+
+/**
+ * Broker provider id the opt-in binds to. Kept as a literal so the control
+ * plane never imports the credential broker just to name a reference.
+ */
+const DISCORD_USER_SESSION_CREDENTIAL_REF = "discord_user_session";
+const DISCORD_TRANSPORT_USER_SESSION_CONNECT = "discord.transport.user_session_connect" as const;
 
 export type CaptainAuthenticator = (request: Request) => Promise<TrustedCaptainIdentity | undefined>;
 
@@ -571,6 +631,21 @@ const MemoryProposalRequestSchema = z
   })
   .strict();
 
+const DiscordPersonMemoryProposalRequestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    proposalId: z.string().min(1).max(256),
+    fact: DiscordPersonMemoryFactSchema,
+  })
+  .strict();
+
+const DiscordPersonMemoryReadQuerySchema = z
+  .object({
+    channelId: z.string().min(1).max(64).optional(),
+    query: z.string().trim().min(1).max(512).optional(),
+  })
+  .strict();
+
 const ApprovalStatusQuerySchema = z.object({
   status: ApprovalRequestStatusSchema.default("pending"),
 });
@@ -632,17 +707,35 @@ const DISCORD_PRESENCE_NARRATIVE_ACTION_METADATA = [
   },
 ] as const;
 
-const DISCORD_PRESENCE_NON_NARRATIVE_ACTION_METADATA = [
-  { action: "discord.presence.edit_own_message", riskClass: "reversible-write" as const },
-  { action: "discord.presence.delete_own_message", riskClass: "reversible-write" as const },
-  { action: "discord.presence.create_thread", riskClass: "reversible-write" as const },
-  { action: "discord.presence.join_thread", riskClass: "reversible-write" as const },
-  { action: "discord.presence.voice_join", riskClass: "reversible-write" as const },
-  { action: "discord.presence.voice_leave", riskClass: "reversible-write" as const },
-  { action: "discord.presence.send_attachment", riskClass: "publish-external" as const },
-  { action: "discord.presence.go_live_start", riskClass: "publish-external" as const },
-  { action: "discord.presence.go_live_stop", riskClass: "publish-external" as const },
-] as const;
+const DISCORD_PRESENCE_NARRATIVE_ACTIONS = new Set<string>(
+  DISCORD_PRESENCE_NARRATIVE_ACTION_METADATA.map((entry) => entry.action),
+);
+
+/**
+ * Derived, not hand-listed.
+ *
+ * Every presence action that is not narrative is classified straight from the
+ * protocol's frozen risk-class map, so an action added to
+ * `DiscordPresenceActionSchema` is classifiable the moment it exists. The
+ * previous hand-maintained list silently drifted: the ADR 0047 activity actions
+ * reached the executor but 400'd at the route as `unclassified`, because unit
+ * tests called the executor directly and never crossed this boundary.
+ *
+ * Narrative entries stay explicit because they carry a `narrativeKind` that the
+ * risk-class map does not model.
+ */
+const DISCORD_PRESENCE_NON_NARRATIVE_ACTION_METADATA = DiscordPresenceActionSchema.options
+  .filter((action) => !DISCORD_PRESENCE_NARRATIVE_ACTIONS.has(action))
+  .map((action) => {
+    const riskClass = DISCORD_PRESENCE_ACTION_RISK_CLASS[action];
+    if (riskClass === "narrative-write") {
+      // A narrative-classed action must be listed above, because the ledger
+      // needs the `narrativeKind` the risk-class map cannot supply. Failing at
+      // module load beats classifying it without that attribution.
+      throw new Error(`discord_presence_narrative_action_missing_metadata:${action}`);
+    }
+    return { action, riskClass };
+  });
 
 const classifyNarrativeAction = createConnectorActionClassifier([
   ...TRACKER_NARRATIVE_ACTION_METADATA,
@@ -656,6 +749,19 @@ const classifyDiscordPresenceAction = createConnectorActionClassifier([
 
 const classifyBuiltInTriggerAction = createConnectorActionClassifier([
   { action: "mission.trigger.write", riskClass: "reversible-write" },
+]);
+
+/**
+ * Transport lifecycle classifier (ADR 0048). Separate from the presence
+ * classifier because connecting a body is not a write to any channel; sharing
+ * one classifier would put a lifecycle action into the narrative ledger's
+ * vocabulary.
+ */
+const classifyDiscordTransportAction = createConnectorActionClassifier([
+  {
+    action: DISCORD_TRANSPORT_USER_SESSION_CONNECT,
+    riskClass: DISCORD_TRANSPORT_ACTION_RISK_CLASS[DISCORD_TRANSPORT_USER_SESSION_CONNECT],
+  },
 ]);
 
 const ALLOWED_RUNNER_EVENT_TYPES = new Set([
@@ -673,10 +779,13 @@ const ALLOWED_RUNNER_EVENT_TYPES = new Set([
 export async function createControlPlane(dependencies: ControlPlaneDependencies): Promise<Hono> {
   const clock = dependencies.clock ?? (() => new Date());
   const idFactory = dependencies.idFactory ?? randomUUID;
+  const instanceId = randomUUID();
   const missions = new Map<string, MissionRecord>();
   const missionTriggers = new Map<string, MissionTrigger>();
   const memoryProposals = new Map<string, StoredMemoryProposal>();
   const committedMemoryProposals = new Set<string>();
+  const discordPersonMemoryProposals = new Map<string, StoredDiscordPersonMemoryProposal>();
+  const committedDiscordPersonMemoryProposals = new Set<string>();
   const engines = new Map<string, MissionEngine>();
   const missionLocks = new Map<string, Promise<unknown>>();
   const approvalLocks = new Map<string, Promise<unknown>>();
@@ -749,6 +858,11 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       applyMissionEvent(missions, stored.event);
       applyMissionTriggerEvent(missionTriggers, stored.event);
       applyMemoryEvent(memoryProposals, committedMemoryProposals, stored.event);
+      applyDiscordPersonMemoryEvent(
+        discordPersonMemoryProposals,
+        committedDiscordPersonMemoryProposals,
+        stored.event,
+      );
       applyApprovalEvent(approvalRequests, consumedApprovalIds, stored.event);
       applyDeviceEvent(devices, stored.event);
       if (stored.event.type === "worker.leased" && typeof stored.event.data.claimId === "string") {
@@ -766,6 +880,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
         })
       : undefined;
   const discordPresenceSessions = new DiscordPresenceSessionProjection(storedEvents);
+  const discordUserSessionOptIns = new DiscordUserSessionOptInProjection(storedEvents);
   // Durable replay restores status, but it cannot prove the bridge is still
   // connected. Act gating therefore starts unvalidated after every process
   // boot and remains fail-closed until an authenticated lifecycle delivery
@@ -854,6 +969,56 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     return result;
   };
 
+  const commitApprovedDiscordPersonMemoryProposal = async (
+    proposal: StoredDiscordPersonMemoryProposal,
+    approval: ApprovalRequestRecord,
+  ): Promise<ApplyDiscordPersonProposalResult | undefined> => {
+    if (!dependencies.memoryStore || committedDiscordPersonMemoryProposals.has(proposal.proposalId)) {
+      return undefined;
+    }
+    if (
+      approval.id !== proposal.approvalRequestId ||
+      approval.action !== "memory.profile.write" ||
+      approval.resource.type !== "discord-person-memory-proposal" ||
+      approval.status !== "approved" ||
+      approval.missionId !== proposal.eventMissionId ||
+      approval.profileHash !== dependencies.doctrine.profileHash ||
+      approval.decidedAt === undefined ||
+      approval.decidedBy === undefined
+    ) {
+      throw new Error(
+        "Discord person-memory proposal approval does not match the authenticated approval projection",
+      );
+    }
+    const result = dependencies.memoryStore.applyApprovedDiscordPersonProposal({
+      schemaVersion: 1,
+      proposalId: proposal.proposalId,
+      approval: {
+        approvalId: approval.id,
+        status: "approved",
+        approvedAt: approval.decidedAt,
+        approvedBy: approval.decidedBy,
+      },
+      fact: proposal.fact,
+    });
+    await recordEvent(
+      "discord.person-memory.proposal.committed",
+      proposal.eventMissionId,
+      clock().toISOString(),
+      {
+        proposalId: proposal.proposalId,
+        approvalRequestId: proposal.approvalRequestId,
+        factId: result.fact.factId,
+        merged: result.merged,
+        evictedFactIds: [...result.evictedFactIds],
+        ...(result.supersededFactId === undefined ? {} : { supersededFactId: result.supersededFactId }),
+      },
+      { correlationId: proposal.fact.provenance.correlationId },
+    );
+    committedDiscordPersonMemoryProposals.add(proposal.proposalId);
+    return result;
+  };
+
   const pruneMemory = async (reason: "doctrine_loaded" | "maintenance"): Promise<readonly string[]> => {
     if (!dependencies.memoryStore) return [];
     const prunedFactIds = dependencies.memoryStore.pruneRetention(clock());
@@ -935,6 +1100,15 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       const approval = approvalRequests.get(proposal.approvalRequestId);
       if (approval?.status === "approved" && !committedMemoryProposals.has(proposal.proposalId)) {
         await commitApprovedMemoryProposal(proposal, approval);
+      }
+    }
+    for (const proposal of discordPersonMemoryProposals.values()) {
+      const approval = approvalRequests.get(proposal.approvalRequestId);
+      if (
+        approval?.status === "approved" &&
+        !committedDiscordPersonMemoryProposals.has(proposal.proposalId)
+      ) {
+        await commitApprovedDiscordPersonMemoryProposal(proposal, approval);
       }
     }
     const previousRetention = [...storedEvents]
@@ -1295,6 +1469,34 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     }),
   );
 
+  app.get("/v1/discord/readiness", async (context) => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") {
+      return context.json({ error: "captain_authentication_unavailable" }, 503);
+    }
+    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
+    if (captain.steerSourceLane !== "discord_text" && captain.steerSourceLane !== "discord_voice") {
+      return context.json({ error: "discord_channel_authority_required" }, 403);
+    }
+    const checks = {
+      captainChannelTurns: dependencies.captainChannelTurns !== undefined,
+      discordPresenceRuntime: dependencies.discordPresenceRuntime !== undefined,
+      eventStore: dependencies.eventStore !== undefined,
+    };
+    const ready = Object.values(checks).every(Boolean);
+    return context.json(
+      {
+        schemaVersion: 1 as const,
+        ready,
+        service: "clankie-control-plane" as const,
+        instanceId,
+        profileHash: dependencies.doctrine.profileHash,
+        checks,
+      },
+      ready ? 200 : 503,
+    );
+  });
+
   app.post("/v1/tracker/narratives", async (context) => {
     if (!dependencies.linearAgentRuntime) {
       return context.json({ error: "linear_agent_runtime_unavailable" }, 503);
@@ -1563,6 +1765,103 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     return context.json(discordPresenceSessions.list());
   });
 
+  /**
+   * Records the owner's acceptance of user-session transport risk (ADR 0048).
+   *
+   * Operator-authenticated on purpose: this is the one gate that cannot be an
+   * ambient or captain decision, because it is the human accepting Discord ToS
+   * and account risk on their own account. Binding it to the current doctrine
+   * hash means a later policy change forces a fresh, informed acceptance.
+   */
+  app.post("/v1/discord/user-session/opt-in", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable") {
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    }
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (!dependencies.eventStore) return context.json({ error: "event_store_unavailable" }, 503);
+    const parsed = DiscordUserSessionOptInRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_discord_user_session_opt_in" }, 400);
+    const recordedAt = clock().toISOString();
+    // Doctrine decides whether this deployment may wear a human account at all.
+    // Evaluating it here, at the moment of acceptance, is what makes a
+    // high-assurance profile's denial real: the opt-in never exists, so the
+    // plane can never start rather than being refused action-by-action later.
+    const connectRequest = ActionRequestSchema.parse({
+      id: `discord-user-session-connect:${dependencies.doctrine.profileHash}`,
+      principal: { kind: "human", id: operator.operatorId, role: "discord-user-session-owner" },
+      action: DISCORD_TRANSPORT_USER_SESSION_CONNECT,
+      resource: { type: "discord-transport", id: DISCORD_USER_SESSION_CREDENTIAL_REF },
+      context: {
+        missionId: DISCORD_USER_SESSION_OPT_IN_MISSION_ID,
+        risk: "high",
+        humanApprovals: 1,
+        profileHash: dependencies.doctrine.profileHash,
+      },
+    });
+    const connectDecision = decideAction(
+      dependencies.doctrine,
+      connectRequest,
+      classifyDiscordTransportAction(DISCORD_TRANSPORT_USER_SESSION_CONNECT),
+    );
+    if (connectDecision.effect === "deny") {
+      return context.json(
+        { error: "discord_user_session_denied_by_doctrine", decision: connectDecision },
+        403,
+      );
+    }
+    const optIn = DiscordUserSessionOptInSchema.parse({
+      schemaVersion: 1,
+      optInId: `discord-user-session-opt-in-${idFactory()}`,
+      characterId: parsed.data.characterId,
+      credentialRef: DISCORD_USER_SESSION_CREDENTIAL_REF,
+      profileHash: dependencies.doctrine.profileHash,
+      acknowledgement: parsed.data.acknowledgement,
+      guildIds: parsed.data.guildIds,
+      channelIds: parsed.data.channelIds,
+      dmPolicy: parsed.data.dmPolicy,
+      recordedAt,
+    });
+    const event = await recordEvent(
+      DISCORD_USER_SESSION_OPT_IN_RECORDED,
+      DISCORD_USER_SESSION_OPT_IN_MISSION_ID,
+      recordedAt,
+      { optIn, operatorId: operator.operatorId },
+    );
+    discordUserSessionOptIns.apply(event);
+    return context.json({ schemaVersion: 1, optIn }, 201);
+  });
+
+  app.delete("/v1/discord/user-session/opt-in", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable") {
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    }
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (!dependencies.eventStore) return context.json({ error: "event_store_unavailable" }, 503);
+    const existing = discordUserSessionOptIns.resolve();
+    if (existing === undefined || existing.revokedAt !== undefined) {
+      return context.json({ error: "discord_user_session_opt_in_not_active" }, 409);
+    }
+    const revokedAt = clock().toISOString();
+    const event = await recordEvent(
+      DISCORD_USER_SESSION_OPT_IN_REVOKED,
+      DISCORD_USER_SESSION_OPT_IN_MISSION_ID,
+      revokedAt,
+      { optInId: existing.optInId, revokedAt, operatorId: operator.operatorId },
+    );
+    discordUserSessionOptIns.apply(event);
+    return context.json({ schemaVersion: 1, optIn: discordUserSessionOptIns.resolve() });
+  });
+
+  /** Read by the user-session bridge before it opens a gateway. */
+  app.get("/v1/discord/user-session/opt-in", async (context) => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") return context.json({ error: "captain_execution_unavailable" }, 503);
+    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
+    return context.json({ schemaVersion: 1, optIn: discordUserSessionOptIns.resolve() ?? null });
+  });
+
   app.post("/v1/discord/presence-actions", async (context) => {
     const captain = await authenticateCaptain(context.req.raw, dependencies);
     if (captain === "unavailable") {
@@ -1579,18 +1878,33 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     if (!liveClaim.success) {
       return context.json({ error: "discord_presence_live_claim_required" }, 400);
     }
-    if (!dependencies.discordPresenceRuntime) {
-      return context.json({ error: "discord_presence_runtime_unavailable" }, 503);
-    }
-    const discordPresenceRuntime = dependencies.discordPresenceRuntime;
     const parsed = DiscordPresenceWriteSchema.safeParse(await readJson(context.req.raw));
     if (!parsed.success) return context.json({ error: "invalid_discord_presence_write" }, 400);
     const write = parsed.data;
     if (write.identity.profileHash !== dependencies.doctrine.profileHash) {
       return context.json({ error: "doctrine_hash_mismatch" }, 409);
     }
-    if (write.identity.transportKind !== "bot") {
-      return context.json({ error: "discord_presence_transport_unsupported" }, 400);
+    // Transport is bound to *authentication*, never to the request body: the
+    // planes hold different broker bearers, so a compromised or confused bot
+    // bridge cannot claim the user session's capabilities (or vice versa).
+    if (write.identity.transportKind !== captainTransportKind(captain)) {
+      return context.json({ error: "discord_presence_transport_not_authenticated" }, 403);
+    }
+    if (write.identity.transportKind === "user_session") {
+      const optIn = discordUserSessionOptIns.resolveActive(dependencies.doctrine.profileHash);
+      if (optIn === undefined) {
+        return context.json({ error: "discord_user_session_opt_in_required" }, 403);
+      }
+      if (optIn.characterId !== write.identity.characterId) {
+        return context.json({ error: "discord_user_session_opt_in_character_mismatch" }, 403);
+      }
+    }
+    const discordPresenceRuntime =
+      write.identity.transportKind === "user_session"
+        ? dependencies.discordUserPresenceRuntime
+        : dependencies.discordPresenceRuntime;
+    if (!discordPresenceRuntime) {
+      return context.json({ error: "discord_presence_runtime_unavailable" }, 503);
     }
     const fingerprint = createHash("sha256").update(JSON.stringify(write)).digest("hex");
     return withSerializedLock(discordPresenceLocks, write.idempotencyKey, async () => {
@@ -1813,7 +2127,9 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       const captain = await authenticateCaptain(context.req.raw, dependencies);
       if (captain === "unavailable") return context.json({ error: "captain_execution_unavailable" }, 503);
       if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
-      if (captain.steerSourceLane !== "discord_text") {
+      const expectedLane =
+        parsedTurn.request.trigger.kind === "voice_event" ? "discord_voice" : "discord_text";
+      if (captain.steerSourceLane !== expectedLane) {
         return context.json({ error: "discord_channel_authority_required" }, 403);
       }
     }
@@ -2122,6 +2438,180 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     }
     const approval = await persistApprovalRequest(request, decision, proposal.fact.provenance.correlationId);
     return context.json({ proposal, approval }, 202);
+  });
+
+  app.post("/v1/memory/discord-people/proposals", async (context) => {
+    if (!dependencies.memoryStore || !dependencies.eventStore) {
+      return context.json({ error: "memory_store_unavailable" }, 503);
+    }
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") {
+      return context.json({ error: "memory_proposal_authentication_unavailable" }, 503);
+    }
+    if (!captain) return context.json({ error: "memory_proposal_authentication_required" }, 401);
+    if (captain.steerSourceLane !== "discord_text" && captain.steerSourceLane !== "discord_voice") {
+      return context.json({ error: "discord_channel_authority_required" }, 403);
+    }
+    const parsed = DiscordPersonMemoryProposalRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_discord_person_memory_proposal" }, 400);
+    const proposalInput = parsed.data;
+    const eventMissionId = discordPersonMemoryEventMissionId(proposalInput.fact.subject);
+    const approvalRequestId = `memory:discord-person:${proposalInput.proposalId}`;
+    const proposal: StoredDiscordPersonMemoryProposal = {
+      proposalId: proposalInput.proposalId,
+      approvalRequestId,
+      fact: proposalInput.fact,
+      submittedAt: clock().toISOString(),
+      eventMissionId,
+      principal: { kind: "captain", id: captain.captainId },
+    };
+    const existing = discordPersonMemoryProposals.get(proposal.proposalId);
+    if (existing) {
+      if (
+        JSON.stringify({ fact: existing.fact, principal: existing.principal }) !==
+        JSON.stringify({ fact: proposal.fact, principal: proposal.principal })
+      ) {
+        return context.json({ error: "memory_proposal_idempotency_conflict" }, 409);
+      }
+      return context.json({
+        proposal: existing,
+        approval: approvalRequests.get(existing.approvalRequestId),
+      });
+    }
+    const request = ActionRequestSchema.parse({
+      id: approvalRequestId,
+      principal: proposal.principal,
+      action: "memory.profile.write",
+      resource: { type: "discord-person-memory-proposal", id: proposal.proposalId },
+      context: {
+        missionId: eventMissionId,
+        risk: "low",
+        humanApprovals: 0,
+        profileHash: dependencies.doctrine.profileHash,
+      },
+    });
+    const decision = decideAction(dependencies.doctrine, request);
+    await recordEvent(
+      "discord.person-memory.proposal.submitted",
+      eventMissionId,
+      proposal.submittedAt,
+      { proposal },
+      { correlationId: proposal.fact.provenance.correlationId },
+    );
+    discordPersonMemoryProposals.set(proposal.proposalId, proposal);
+    if (decision.effect === "deny") {
+      await recordEvent(
+        "discord.person-memory.proposal.denied",
+        eventMissionId,
+        clock().toISOString(),
+        { proposalId: proposal.proposalId, reason: decision.reason, source: "doctrine" },
+        { correlationId: proposal.fact.provenance.correlationId },
+      );
+      return context.json({ error: "memory_proposal_denied", decision }, 403);
+    }
+    if (decision.effect !== "require_approval") {
+      return context.json({ error: "memory_proposal_approval_required" }, 409);
+    }
+    const approval = await persistApprovalRequest(request, decision, proposal.fact.provenance.correlationId);
+    return context.json({ proposal, approval }, 202);
+  });
+
+  app.get("/v1/memory/discord-people/:guildId/:userId/export", async (context) => {
+    if (!dependencies.memoryStore || !dependencies.eventStore) {
+      return context.json({ error: "memory_store_unavailable" }, 503);
+    }
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable") {
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    }
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const identity = DiscordPersonIdentitySchema.safeParse({
+      guildId: context.req.param("guildId"),
+      userId: context.req.param("userId"),
+    });
+    if (!identity.success) return context.json({ error: "invalid_discord_person_identity" }, 400);
+    const exported = dependencies.memoryStore.exportDiscordPerson(identity.data, clock());
+    await recordEvent(
+      "discord.person-memory.exported",
+      discordPersonMemoryEventMissionId(identity.data),
+      clock().toISOString(),
+      { factCount: exported.facts.length, operatorId: operator.operatorId },
+    );
+    return context.json(exported);
+  });
+
+  app.delete("/v1/memory/discord-people/:guildId/:userId", async (context) => {
+    if (!dependencies.memoryStore || !dependencies.eventStore) {
+      return context.json({ error: "memory_store_unavailable" }, 503);
+    }
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable") {
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    }
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const identity = DiscordPersonIdentitySchema.safeParse({
+      guildId: context.req.param("guildId"),
+      userId: context.req.param("userId"),
+    });
+    if (!identity.success) return context.json({ error: "invalid_discord_person_identity" }, 400);
+    const deletedFactIds = dependencies.memoryStore.deleteDiscordPerson(identity.data);
+    await recordEvent(
+      "discord.person-memory.deleted",
+      discordPersonMemoryEventMissionId(identity.data),
+      clock().toISOString(),
+      { deletedFactIds, operatorId: operator.operatorId },
+    );
+    return context.json({ schemaVersion: 1, subject: identity.data, deletedFactIds });
+  });
+
+  app.get("/v1/memory/discord-people/:guildId/:userId", async (context) => {
+    if (!dependencies.memoryStore || !dependencies.eventStore) {
+      return context.json({ error: "memory_store_unavailable" }, 503);
+    }
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") {
+      return context.json({ error: "memory_recall_authentication_unavailable" }, 503);
+    }
+    if (!captain) return context.json({ error: "memory_recall_authentication_required" }, 401);
+    if (captain.steerSourceLane !== "discord_text" && captain.steerSourceLane !== "discord_voice") {
+      return context.json({ error: "discord_channel_authority_required" }, 403);
+    }
+    const identity = DiscordPersonIdentitySchema.safeParse({
+      guildId: context.req.param("guildId"),
+      userId: context.req.param("userId"),
+    });
+    const query = DiscordPersonMemoryReadQuerySchema.safeParse(context.req.query());
+    if (!identity.success || !query.success) {
+      return context.json({ error: "invalid_discord_person_memory_recall" }, 400);
+    }
+    const options = {
+      ...(query.data.channelId === undefined ? {} : { channelId: query.data.channelId }),
+      now: clock(),
+    };
+    const facts = dependencies.memoryStore.listDiscordPerson(identity.data, options);
+    const recallCard =
+      query.data.query === undefined
+        ? undefined
+        : dependencies.memoryStore.recallDiscordPersonCard(identity.data, {
+            ...options,
+            query: query.data.query,
+          });
+    await recordEvent(
+      "discord.person-memory.recalled",
+      discordPersonMemoryEventMissionId(identity.data),
+      clock().toISOString(),
+      {
+        factCount: facts.length,
+        querySupplied: query.data.query !== undefined,
+      },
+      { correlationId: `discord-person-memory:recall:${idFactory()}` },
+    );
+    return context.json({
+      schemaVersion: 1,
+      subject: identity.data,
+      facts,
+      ...(recallCard === undefined ? {} : { recallCard }),
+    });
   });
 
   app.put("/v1/missions/:id/plan", async (context) => {
@@ -2510,12 +3000,13 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
           entry.engine.resolveFailedVerification(recovery.failedTaskId, task.spec.id);
         }
         if (
-          task.spec.kind === "verification" &&
           task.state === "succeeded" &&
           entry.engine.getSnapshot().state !== "succeeded" &&
           entry.engine.isReadyForCompletion()
         ) {
-          entry.engine.completeMission("Implementation and deterministic verification succeeded.");
+          entry.engine.completeMission(
+            "Every planned task and required deterministic verification succeeded.",
+          );
         }
         await flushEngine(entry.engine);
         return context.json({ accepted: true, task, snapshot: entry.engine.getSnapshot() });
@@ -2675,23 +3166,49 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       );
       approvalRequests.set(approval.id, approval);
       if (approval.action === "memory.profile.write") {
-        const proposal = [...memoryProposals.values()].find(
-          (candidate) => candidate.approvalRequestId === approval.id,
-        );
-        if (!proposal) throw new Error(`Memory approval ${approval.id} has no durable proposal`);
-        await recordEvent(
-          status === "approved" ? "memory.proposal.approved" : "memory.proposal.denied",
-          proposal.fact.provenance.missionId,
-          decidedAt,
-          {
-            proposalId: proposal.proposalId,
-            approvalRequestId: approval.id,
-            reason: approval.reason,
-            source: "operator",
-          },
-          { correlationId: proposal.fact.provenance.correlationId },
-        );
-        if (status === "approved") await commitApprovedMemoryProposal(proposal, approval);
+        if (approval.resource.type === "discord-person-memory-proposal") {
+          const proposal = [...discordPersonMemoryProposals.values()].find(
+            (candidate) => candidate.approvalRequestId === approval.id,
+          );
+          if (!proposal) {
+            throw new Error(`Discord person-memory approval ${approval.id} has no durable proposal`);
+          }
+          await recordEvent(
+            status === "approved"
+              ? "discord.person-memory.proposal.approved"
+              : "discord.person-memory.proposal.denied",
+            proposal.eventMissionId,
+            decidedAt,
+            {
+              proposalId: proposal.proposalId,
+              approvalRequestId: approval.id,
+              reason: approval.reason,
+              source: "operator",
+            },
+            { correlationId: proposal.fact.provenance.correlationId },
+          );
+          if (status === "approved") {
+            await commitApprovedDiscordPersonMemoryProposal(proposal, approval);
+          }
+        } else {
+          const proposal = [...memoryProposals.values()].find(
+            (candidate) => candidate.approvalRequestId === approval.id,
+          );
+          if (!proposal) throw new Error(`Memory approval ${approval.id} has no durable proposal`);
+          await recordEvent(
+            status === "approved" ? "memory.proposal.approved" : "memory.proposal.denied",
+            proposal.fact.provenance.missionId,
+            decidedAt,
+            {
+              proposalId: proposal.proposalId,
+              approvalRequestId: approval.id,
+              reason: approval.reason,
+              source: "operator",
+            },
+            { correlationId: proposal.fact.provenance.correlationId },
+          );
+          if (status === "approved") await commitApprovedMemoryProposal(proposal, approval);
+        }
       }
       logger.info(
         { missionId: approval.missionId, approvalId: approval.id, status, operatorId: operator.operatorId },
@@ -4042,107 +4559,62 @@ function liveMissionRecord(mission: MissionRecord, snapshot: MissionSnapshot): R
 }
 
 /**
- * Admit only the retained-candidate shapes the runner pull executor supports
- * (ADR 0019). Two shapes are accepted:
- *
- *   1. the implementation + verification slice, and
- *   2. the full frozen-scenario graph
- *      (context -> implementation -> verification -> debugging -> re-verification).
- *
- * Verifier independence, read-only verification, acyclicity, role coupling, and
- * parallel write-scope isolation are enforced once, by the mission-engine plan
- * validator (VUH-697); this gate adds only the structural pull-executor shape.
+ * Admit general task graphs whose writing work is covered by downstream
+ * verification. Task-scoped candidates and deterministic dependency merges
+ * make graph shape a scheduler concern rather than a frozen executor special
+ * case (ADR 0041).
  */
 function assertSupportedPullPlan(plan: MissionPlan): void {
-  const isFrozenScenarioShape =
-    plan.tasks.some((task) => task.kind === "context" || task.kind === "debugging") ||
-    plan.tasks.filter((task) => task.kind === "verification").length > 1;
-  if (isFrozenScenarioShape) {
-    assertFrozenScenarioGraph(plan);
-  } else {
-    assertImplementationVerificationSlice(plan);
-  }
   assertValidMissionPlan(plan);
+  const taskById = new Map(plan.tasks.map((task) => [task.id, task]));
+  for (const task of plan.tasks) {
+    if ((task.kind === "implementation" || task.kind === "integration") && task.role !== "implementer") {
+      throw new Error(`Task "${task.id}" must use the implementer role for ${task.kind} work`);
+    }
+    if (
+      task.kind === "debugging" &&
+      !task.dependsOn.some((dependencyId) => taskById.get(dependencyId)?.kind === "verification")
+    ) {
+      throw new Error(
+        `Debugging task "${task.id}" must directly depend on the verification failure it repairs`,
+      );
+    }
+    if (!pullTaskWritesCandidate(task)) continue;
+    const pending = plan.tasks
+      .filter((candidate) => candidate.dependsOn.includes(task.id))
+      .map((candidate) => candidate.id);
+    const visited = new Set<string>();
+    let covered = false;
+    while (pending.length > 0) {
+      const descendantId = pending.pop();
+      if (!descendantId || visited.has(descendantId)) continue;
+      visited.add(descendantId);
+      const descendant = taskById.get(descendantId);
+      if (descendant?.kind === "verification") {
+        covered = true;
+        break;
+      }
+      pending.push(
+        ...plan.tasks
+          .filter((candidate) => candidate.dependsOn.includes(descendantId))
+          .map((candidate) => candidate.id),
+      );
+    }
+    if (!covered) {
+      throw new Error(`Writing task "${task.id}" must have a downstream independent verification task`);
+    }
+  }
 }
 
-function assertImplementationVerificationSlice(plan: MissionPlan): void {
-  if (plan.tasks.length !== 2) {
-    throw new Error("Runner pull execution currently requires exactly implementation + verification tasks");
-  }
-  const implementation = plan.tasks.find((task) => task.kind === "implementation");
-  const verification = plan.tasks.find((task) => task.kind === "verification");
-  if (!implementation || !verification) {
-    throw new Error("Runner pull execution requires one implementation and one verification task");
-  }
-  assertRootImplementation(implementation);
-  if (
-    verification.writeScope.length !== 0 ||
-    verification.dependsOn.length !== 1 ||
-    verification.dependsOn[0] !== implementation.id
-  ) {
-    throw new Error("The read-only verifier must depend only on the implementation candidate");
-  }
-}
-
-function assertFrozenScenarioGraph(plan: MissionPlan): void {
-  const context = plan.tasks.filter((task) => task.kind === "context");
-  const implementations = plan.tasks.filter((task) => task.kind === "implementation");
-  const verifications = plan.tasks.filter((task) => task.kind === "verification");
-  const debuggings = plan.tasks.filter((task) => task.kind === "debugging");
-  if (
-    plan.tasks.length !== 5 ||
-    context.length !== 1 ||
-    implementations.length !== 1 ||
-    verifications.length !== 2 ||
-    debuggings.length !== 1
-  ) {
-    throw new Error(
-      "The frozen scenario graph requires exactly one context, one implementation, two verification, and one debugging task",
-    );
-  }
-  const contextTask = context[0]!;
-  const implementation = implementations[0]!;
-  const debugging = debuggings[0]!;
-  if (contextTask.dependsOn.length !== 0 || contextTask.writeScope.length !== 0) {
-    throw new Error("The context task must be the read-only root of the frozen scenario graph");
-  }
-  if (implementation.dependsOn.length !== 1 || implementation.dependsOn[0] !== contextTask.id) {
-    throw new Error("The implementation task must depend only on the context task");
-  }
-  assertRootImplementation(implementation, { requireRoot: false });
-  const initialVerification = verifications.find(
-    (task) => task.dependsOn.length === 1 && task.dependsOn[0] === implementation.id,
+function pullTaskWritesCandidate(task: TaskSpec): boolean {
+  return (
+    task.writeScope.length > 0 ||
+    task.role === "implementer" ||
+    task.role === "debugger" ||
+    task.kind === "implementation" ||
+    task.kind === "debugging" ||
+    task.kind === "integration"
   );
-  if (!initialVerification) {
-    throw new Error("The initial verifier must depend only on the implementation candidate");
-  }
-  if (debugging.role !== "debugger" || debugging.writeScope.length === 0) {
-    throw new Error("The debugging task must use the debugger role and declare a non-empty write scope");
-  }
-  if (!debugging.dependsOn.includes(initialVerification.id)) {
-    throw new Error(
-      "The debugging task must depend on the verification task whose failure evidence it repairs",
-    );
-  }
-  const repairVerification = verifications.find((task) => task.id !== initialVerification.id)!;
-  if (repairVerification.dependsOn.length !== 1 || repairVerification.dependsOn[0] !== debugging.id) {
-    throw new Error("The re-verification task must depend only on the debugging repair");
-  }
-}
-
-function assertRootImplementation(implementation: TaskSpec, options: { requireRoot?: boolean } = {}): void {
-  const requireRoot = options.requireRoot ?? true;
-  if (
-    implementation.role !== "implementer" ||
-    (requireRoot && implementation.dependsOn.length !== 0) ||
-    implementation.writeScope.length === 0
-  ) {
-    throw new Error(
-      requireRoot
-        ? "The implementation task must use the implementer role, be the root, and declare a non-empty write scope"
-        : "The implementation task must use the implementer role and declare a non-empty write scope",
-    );
-  }
 }
 
 export function createBearerAuthenticator<T>(
@@ -4212,6 +4684,35 @@ function applyMemoryEvent(
   if (event.type === "memory.proposal.committed") {
     committed.add(z.string().min(1).parse(event.data.proposalId));
   }
+}
+
+function applyDiscordPersonMemoryEvent(
+  proposals: Map<string, StoredDiscordPersonMemoryProposal>,
+  committed: Set<string>,
+  event: DomainEvent,
+): void {
+  if (event.type === "discord.person-memory.proposal.submitted") {
+    const proposal = z
+      .object({
+        proposalId: z.string().min(1),
+        approvalRequestId: z.string().min(1),
+        fact: DiscordPersonMemoryFactSchema,
+        submittedAt: z.string().datetime(),
+        eventMissionId: z.string().min(1),
+        principal: z.object({ kind: z.literal("captain"), id: z.string().min(1) }),
+      })
+      .parse(event.data.proposal);
+    proposals.set(proposal.proposalId, proposal);
+    return;
+  }
+  if (event.type === "discord.person-memory.proposal.committed") {
+    committed.add(z.string().min(1).parse(event.data.proposalId));
+  }
+}
+
+function discordPersonMemoryEventMissionId(identity: DiscordPersonIdentity): string {
+  const subject = DiscordPersonIdentitySchema.parse(identity);
+  return `discord-person:${subject.guildId}:${subject.userId}`;
 }
 
 function discordPresenceBindingKey(identity: {

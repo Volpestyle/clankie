@@ -1,12 +1,15 @@
 import {
   CaptainSessionLaneV2Schema,
+  DiscordActivitySurfaceSchema,
   DiscordPresenceActionRequestSchema,
   DiscordPresenceActionSchema,
+  DiscordTransportKindSchema,
   DISCORD_PRESENCE_ACTION_RISK_CLASS,
   type CaptainLane,
   type CaptainSessionLaneV2,
   type DiscordPresenceAction,
   type DiscordPresenceActionRequest,
+  type DiscordTransportKind,
 } from "@clankie/protocol";
 import { z } from "zod";
 import { INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION, type EnvironmentSessionPhase } from "./environment.ts";
@@ -45,16 +48,40 @@ export const DiscordPresenceLiveClaimSchema = z
   .strict();
 export type DiscordPresenceLiveClaim = z.infer<typeof DiscordPresenceLiveClaimSchema>;
 
+/**
+ * A rendered surface currently published into a voice channel (ADR 0047).
+ *
+ * Activity instances are a session *facet*, not a rung on
+ * {@link DiscordPresenceSessionPhaseSchema}. A running activity and a running
+ * Go Live stream are orthogonal — either, both, or neither may hold while the
+ * session sits at `voice_active` — so ranking them against each other would
+ * make "is an activity running" unanswerable whenever Go Live is also active.
+ */
+export const DiscordActivityInstanceSchema = z
+  .object({
+    schemaVersion: z.literal(INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION),
+    guildId: z.string().min(1),
+    channelId: z.string().min(1),
+    surface: DiscordActivitySurfaceSchema,
+    startedAt: z.string().datetime(),
+  })
+  .strict();
+export type DiscordActivityInstance = z.infer<typeof DiscordActivityInstanceSchema>;
+
+export const DISCORD_ACTIVITY_INSTANCE_MAX = 8;
+
 export const DiscordPresenceSessionRecordSchema = z
   .object({
     schemaVersion: z.literal(INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION),
     sessionId: z.string().min(1),
     characterId: z.string().min(1),
     credentialRef: z.string().min(1),
-    transportKind: z.enum(["bot", "user_session"]),
+    transportKind: DiscordTransportKindSchema,
     phase: DiscordPresenceSessionPhaseSchema,
     gatewayConnected: z.boolean(),
     voiceGuildIds: z.array(z.string().min(1)).max(64),
+    /** Rendered surfaces currently published by this session. */
+    activityInstances: z.array(DiscordActivityInstanceSchema).max(DISCORD_ACTIVITY_INSTANCE_MAX).default([]),
     revision: z.number().int().nonnegative(),
     updatedAt: z.string().datetime(),
   })
@@ -66,6 +93,13 @@ export const DiscordPresenceSessionRecordSchema = z
         code: "custom",
         path: ["gatewayConnected"],
         message: `gatewayConnected does not match phase ${session.phase}`,
+      });
+    }
+    if (session.activityInstances.length > 0 && !connectedPhase) {
+      context.addIssue({
+        code: "custom",
+        path: ["activityInstances"],
+        message: `activity instances cannot outlive phase ${session.phase}`,
       });
     }
     const voicePhase = session.phase === "voice_active" || session.phase === "go_live_active";
@@ -146,7 +180,7 @@ export type DiscordPresencePhaseEvent = z.infer<typeof DiscordPresencePhaseEvent
 export const DiscordPresenceTransportBindingSchema = z
   .object({
     schemaVersion: z.literal(INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION),
-    kind: z.enum(["bot", "user_session"]),
+    kind: DiscordTransportKindSchema,
     /** Opaque broker credential reference — never a raw token. */
     credentialRef: z.string().min(1),
     resourceScope: z
@@ -165,8 +199,13 @@ export const DiscordPresenceCatalogEntrySchema = z
   .object({
     action: DiscordPresenceActionSchema,
     riskClass: z.enum(["narrative-write", "reversible-write", "publish-external", "destructive"]),
-    /** User-session only capabilities (e.g. Go Live). */
-    requiresUserSession: z.boolean(),
+    /**
+     * Transports that can carry this action, as one list rather than a pair of
+     * booleans. Availability is a single question — "which bodies can do this?"
+     * — so a single slot answers it and no two flags can contradict each other
+     * as the plane set grows.
+     */
+    transports: z.array(DiscordTransportKindSchema).min(1),
     /** Minimum presence phase required. */
     minPhase: DiscordPresenceSessionPhaseSchema,
   })
@@ -179,38 +218,72 @@ export const DiscordPresenceCatalogEntrySchema = z
         message: `risk class for ${entry.action} must be ${DISCORD_PRESENCE_ACTION_RISK_CLASS[entry.action]}`,
       });
     }
+    if (new Set(entry.transports).size !== entry.transports.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["transports"],
+        message: `duplicate transport binding for ${entry.action}`,
+      });
+    }
   });
 export type DiscordPresenceCatalogEntry = z.infer<typeof DiscordPresenceCatalogEntrySchema>;
 
+/** Both planes carry the ordinary social catalog; that is what makes it one character. */
+const ANY_TRANSPORT: readonly DiscordTransportKind[] = ["bot", "user_session"];
+
 const catalogEntry = (
   action: DiscordPresenceAction,
-  requiresUserSession: boolean,
+  transports: readonly DiscordTransportKind[],
   minPhase: DiscordPresenceSessionPhase,
 ): DiscordPresenceCatalogEntry =>
   DiscordPresenceCatalogEntrySchema.parse({
     action,
     riskClass: DISCORD_PRESENCE_ACTION_RISK_CLASS[action],
-    requiresUserSession,
+    transports: [...transports],
     minPhase,
   });
 
 /** Frozen educational/lab catalog. Unlisted Discord methods fail closed. */
 export const DISCORD_PRESENCE_CATALOG: readonly DiscordPresenceCatalogEntry[] = [
-  catalogEntry("discord.presence.reply", false, "present"),
-  catalogEntry("discord.presence.react", false, "present"),
-  catalogEntry("discord.presence.unreact", false, "present"),
-  catalogEntry("discord.presence.send_message", false, "present"),
-  catalogEntry("discord.presence.edit_own_message", false, "present"),
-  catalogEntry("discord.presence.delete_own_message", false, "present"),
-  catalogEntry("discord.presence.send_attachment", false, "present"),
-  catalogEntry("discord.presence.typing_start", false, "present"),
-  catalogEntry("discord.presence.create_thread", false, "present"),
-  catalogEntry("discord.presence.join_thread", false, "present"),
-  catalogEntry("discord.presence.voice_join", false, "present"),
-  catalogEntry("discord.presence.voice_leave", false, "voice_active"),
-  catalogEntry("discord.presence.go_live_start", true, "voice_active"),
-  catalogEntry("discord.presence.go_live_stop", true, "go_live_active"),
+  catalogEntry("discord.presence.reply", ANY_TRANSPORT, "present"),
+  catalogEntry("discord.presence.react", ANY_TRANSPORT, "present"),
+  catalogEntry("discord.presence.unreact", ANY_TRANSPORT, "present"),
+  catalogEntry("discord.presence.send_message", ANY_TRANSPORT, "present"),
+  catalogEntry("discord.presence.edit_own_message", ANY_TRANSPORT, "present"),
+  catalogEntry("discord.presence.delete_own_message", ANY_TRANSPORT, "present"),
+  catalogEntry("discord.presence.send_attachment", ANY_TRANSPORT, "present"),
+  catalogEntry("discord.presence.typing_start", ANY_TRANSPORT, "present"),
+  catalogEntry("discord.presence.create_thread", ANY_TRANSPORT, "present"),
+  catalogEntry("discord.presence.join_thread", ANY_TRANSPORT, "present"),
+  catalogEntry("discord.presence.voice_join", ANY_TRANSPORT, "present"),
+  catalogEntry("discord.presence.voice_leave", ANY_TRANSPORT, "voice_active"),
+  // Discord exposes Go Live only to a user session; a bot cannot publish one.
+  catalogEntry("discord.presence.go_live_start", ["user_session"], "voice_active"),
+  catalogEntry("discord.presence.go_live_stop", ["user_session"], "go_live_active"),
+  // Activity plane (ADR 0047): embedded applications are launched by the owning
+  // bot application, so this pair is bot-only rather than merely bot-first.
+  catalogEntry("discord.presence.activity_start", ["bot"], "voice_active"),
+  catalogEntry("discord.presence.activity_stop", ["bot"], "voice_active"),
 ];
+
+/**
+ * Canonical bounded-turn scope for an ambient Discord conversation.
+ *
+ * Deliberately keyed by *where the conversation happens*, never by which
+ * transport observed it. A channel Clankie was speaking in as the bot is the
+ * same lane he continues in as the user session, so switching bodies mid-thread
+ * keeps one continuing Eve lane, one character, and one person-memory
+ * projection instead of forking a second stream of consciousness (ADR 0048).
+ *
+ * Both bridge processes must derive their `presenceSessionId` here; a
+ * transport-local string would silently split the conversation.
+ */
+export function discordPresenceLaneAddress(scope: {
+  readonly guildId?: string | undefined;
+  readonly channelId: string;
+}): string {
+  return `discord:${scope.guildId ?? "dm"}:${scope.channelId}`;
+}
 
 const PHASE_RANK: Readonly<Record<DiscordPresenceSessionPhase, number>> = {
   off: 0,
@@ -228,9 +301,19 @@ export function isDiscordPresenceActionAvailable(input: {
 }): boolean {
   const entry = DISCORD_PRESENCE_CATALOG.find((candidate) => candidate.action === input.action);
   if (entry === undefined) return false;
-  if (entry.requiresUserSession && input.session.transportKind !== "user_session") return false;
+  if (!entry.transports.includes(input.session.transportKind)) return false;
   if (PHASE_RANK[input.session.phase] < PHASE_RANK[entry.minPhase]) return false;
   if (["off", "degraded", "failed"].includes(input.session.phase)) return false;
+  // The activity facet gates stop, because activity state is not on the phase ladder.
+  if (input.action === "discord.presence.activity_stop" && input.session.activityInstances.length === 0) {
+    return false;
+  }
+  if (
+    input.action === "discord.presence.activity_start" &&
+    input.session.activityInstances.length >= DISCORD_ACTIVITY_INSTANCE_MAX
+  ) {
+    return false;
+  }
   return true;
 }
 

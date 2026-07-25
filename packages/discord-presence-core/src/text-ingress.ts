@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { discordPresenceLaneAddress } from "@clankie/interactive-environment";
 import {
   DISCORD_PRESENCE_CONTEXT_MESSAGES_MAX,
   DISCORD_PRESENCE_TRIGGER_BODY_MAX,
@@ -8,6 +9,7 @@ import {
   type DiscordPresenceChannelTurnRequest,
   type DiscordPresenceWrite,
   type DiscordPresenceWriteResult,
+  type DiscordTransportKind,
 } from "@clankie/protocol";
 
 export type DiscordDmPolicy = "deny" | "owner_only" | "allowlist";
@@ -15,6 +17,8 @@ export type DiscordDmPolicy = "deny" | "owner_only" | "allowlist";
 export interface DiscordTextIngressConfig {
   readonly characterId: string;
   readonly credentialRef: string;
+  /** Which body observed the message. Never widens what the turn may do. */
+  readonly transportKind: DiscordTransportKind;
   readonly guildIds: ReadonlySet<string>;
   readonly channelIds: ReadonlySet<string>;
   readonly dmPolicy: DiscordDmPolicy;
@@ -201,7 +205,7 @@ export class DiscordTextIngress {
       profileHash: health.profileHash,
       characterId: this.config.characterId,
       credentialRef: this.config.credentialRef,
-      transportKind: "bot" as const,
+      transportKind: this.config.transportKind,
     };
     const request = DiscordPresenceChannelTurnRequestSchema.parse({
       schemaVersion: 1,
@@ -299,7 +303,8 @@ export function parseDiscordIdSet(value: string | undefined): ReadonlySet<string
 }
 
 function presenceSessionIdFor(message: DiscordInboundMessage): string {
-  return `discord:${message.guildId ?? "dm"}:${message.channelId}`;
+  // Channel-scoped, not transport-scoped: see discordPresenceLaneAddress.
+  return discordPresenceLaneAddress(message);
 }
 
 function boundedContext(
