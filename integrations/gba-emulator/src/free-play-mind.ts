@@ -49,7 +49,10 @@ function toDecision(wire: z.infer<typeof FreePlayWireDecisionSchema>): unknown {
  */
 export const FREE_PLAY_SYSTEM_PROMPT = [
   "You are Clankie, playing Pokémon FireRed yourself.",
-  "You are given the decoded game state each turn and you choose one action.",
+  "Each turn you see the actual game screen and the decoded state, and you",
+  "choose one action. Look at the screen: it shows walls, furniture, doors,",
+  "stairs, NPCs, and text that the decoded state does not describe. The decoded",
+  "state is for exact values — position, HP, PP, legal moves.",
   "",
   "Play the way you actually want to play. You are not following a script and",
   "nobody has given you a route. Form your own goals, change your mind, be",
@@ -100,7 +103,26 @@ export function createModelFreePlayMind(options: ModelFreePlayMindOptions): Free
         model: options.model,
         schema: FreePlayWireDecisionSchema,
         system,
-        prompt: renderView(view),
+        // The screen goes in as an image alongside the decoded state. Looking at
+        // the room is how he learns where the furniture is; the decoded state is
+        // for the values a screenshot reads badly.
+        messages: [
+          {
+            role: "user",
+            content:
+              view.framePng === null
+                ? [{ type: "text" as const, text: renderView(view) }]
+                : [
+                    { type: "text" as const, text: renderView(view) },
+                    // A `file` part, not the deprecated `image` part.
+                    {
+                      type: "file" as const,
+                      mediaType: "image/png",
+                      data: view.framePng,
+                    },
+                  ],
+          },
+        ],
         maxRetries: options.maxRetries ?? 1,
         providerOptions: options.providerOptions ?? {},
       });

@@ -6,7 +6,7 @@ import {
 } from "@clankie/interactive-environment";
 import { EnvironmentRuntime } from "@clankie/environment-runtime";
 import { GbaEmulatorAdapter } from "./adapter.ts";
-import type { FrozenGbaScenario } from "./contracts.ts";
+import type { GbaAdapterScenario, GbaCoreFactory } from "./core-seam.ts";
 import type { GbaDriverIo } from "./driver.ts";
 
 /**
@@ -29,10 +29,15 @@ const ALL_EMULATOR_CAPABILITIES = [
 
 export interface FreePlaySessionInput {
   rootDir: string;
-  scenario: FrozenGbaScenario;
+  /** A frozen double scenario, or a real ROM-gated route scenario. */
+  scenario: GbaAdapterScenario;
   fixtureSha256: string;
-  /** Defaults to the clearly-labeled deterministic core double. */
-  adapter?: GbaEmulatorAdapter;
+  /**
+   * Supply the real pinned mGBA core to play an actual ROM. Omitted, the
+   * adapter falls back to its clearly-labeled deterministic double, so the loop
+   * is runnable without copyrighted bytes.
+   */
+  coreFactory?: GbaCoreFactory;
   clock?: () => Date;
 }
 
@@ -43,7 +48,10 @@ export interface FreePlaySession {
 }
 
 export async function createFreePlaySession(input: FreePlaySessionInput): Promise<FreePlaySession> {
-  const adapter = input.adapter ?? new GbaEmulatorAdapter(input.scenario, input.fixtureSha256);
+  const adapter =
+    input.coreFactory === undefined
+      ? new GbaEmulatorAdapter(input.scenario as never, input.fixtureSha256)
+      : new GbaEmulatorAdapter(input.scenario, input.fixtureSha256, input.coreFactory);
   const sessionId = `gba-free-play:${input.scenario.scenarioId}:v${String(input.scenario.scenarioVersion)}`;
   const spec = GbaEmulatorSessionSpecSchema.parse({
     schemaVersion: 2,

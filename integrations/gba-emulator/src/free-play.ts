@@ -39,10 +39,20 @@ export const FreePlayDecisionSchema = z
   .strict();
 export type FreePlayDecision = z.infer<typeof FreePlayDecisionSchema>;
 
-/** What the model sees. Bounded, decoded state — never raw frames. */
+/**
+ * What the model sees.
+ *
+ * Decoded state alone is a privileged, partial view: it carries position and
+ * facing but not what is *in* the room, so a model reading only RAM discovers
+ * furniture by walking into it. The rendered frame is what a human would look
+ * at, so both are supplied — the frame for what is on screen, the decoded state
+ * for the exact values a screenshot reads badly (HP, PP, legal moves).
+ */
 export interface FreePlayView {
   turn: number;
   observations: GbaEmulatorObservation[];
+  /** The current screen as PNG bytes, when a core renders one. */
+  framePng: Uint8Array | null;
   /** Prior turns, most recent last, so the model has continuity. */
   history: readonly { intent: string; action: GbaEmulatorAction; outcome: string }[];
 }
@@ -97,6 +107,8 @@ export interface RunFreePlayInput {
   onTurn?: (turn: FreePlayTurn) => void;
   /** Latest framebuffer digest, when a core exposes one. */
   framebufferSha256?: () => string | null;
+  /** Latest rendered screen as PNG bytes, when a core exposes one. */
+  framePng?: () => Uint8Array | null;
   historyLimit?: number;
 }
 
@@ -120,7 +132,12 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
 
     let raw: unknown;
     try {
-      raw = await input.mind.decide({ turn, observations, history: [...history] });
+      raw = await input.mind.decide({
+        turn,
+        observations,
+        framePng: input.framePng?.() ?? null,
+        history: [...history],
+      });
     } catch (error) {
       // A model that errors must not end the playthrough; the turn is lost and
       // the loop continues so a long run survives a transient failure.

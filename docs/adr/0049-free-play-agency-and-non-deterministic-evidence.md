@@ -55,6 +55,31 @@ evidence. It is replaced, not abandoned:
 weakened to accommodate free play; a second, differently-evidenced mode was added
 next to it.
 
+### He looks at the screen, not only at RAM
+
+The decoded observation is a **privileged and partial** view. It carries
+position and facing but nothing about what is _in_ the room, so a model reading
+only RAM discovers furniture by walking into it. That is exactly what the first
+real-ROM run showed: six turns of "I may be bumping into something", inferring
+obstacles by collision.
+
+Each turn therefore carries the rendered frame as a PNG image part alongside the
+decoded state. The same run with vision produced "I can see the stairs in the
+upper-right", "I'm a bit too close to the desk furniture", "move east around the
+desk" — naming stairs, desk, chair, PC, TV, and rug, **none of which the RAM
+decoder exposes**.
+
+Both inputs are kept because they answer different questions. The frame shows
+what is on screen: walls, doors, NPCs, text. The decoded state carries the exact
+values a screenshot reads badly: HP, PP, legal moves, map coordinates. It also
+means Clankie sees what a viewer sees, so his commentary can be about the same
+picture — which matters once the activity plane is showing that frame to people
+([ADR 0047](0047-discord-activity-presence-plane.md)).
+
+The frame is reused from the existing pipeline: `MgbaFireRedCore.framebuffer()`
+through `encodeFramebufferPng`, the same bytes the activity plane streams. The
+trace records only its digest.
+
 ### Coherence is reported, never gated
 
 Coherence separates reasoning from post-hoc narration: a model that decides and

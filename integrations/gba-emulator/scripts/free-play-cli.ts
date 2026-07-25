@@ -14,6 +14,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { resolveConfiguredLanguageModel } from "@clankie/model-provider";
 import { FrozenGbaScenarioSchema } from "../src/contracts.ts";
+import { RealGbaRouteScenarioSchema } from "../src/real-scenario.ts";
+import { MgbaFireRedCore } from "../src/firered-core.ts";
+import { encodeFramebufferPng } from "../src/framebuffer-png.ts";
+import type { GbaCoreFactory } from "../src/core-seam.ts";
 import { sha256 } from "../src/core-double.ts";
 import { createModelFreePlayMind } from "../src/free-play-mind.ts";
 import { runFreePlay, type FreePlayTurn } from "../src/free-play.ts";
@@ -28,20 +32,53 @@ const tracePath =
   process.env["CLANKIE_FREE_PLAY_TRACE"] ??
   path.resolve(process.cwd(), "artifacts/gba-free-play/trace.jsonl");
 
+// ROM-gated: with a ROM and savestate configured Clankie plays the real game
+// behind the pinned core; without them he plays the clearly-labeled
+// deterministic double. Either way the decisions are his.
+const romPath = process.env["CLANKIE_GBA_ROM_PATH"];
+const savestatePath = process.env["CLANKIE_GBA_SAVESTATE_PATH"];
+const real = romPath !== undefined && savestatePath !== undefined;
+
 const scenarioPath =
   process.env["CLANKIE_GBA_SCENARIO_PATH"] ??
   path.resolve(
     import.meta.dirname,
-    "../../../scenarios/emulator/verdant-path-trainer-battle/v1/scenario.json",
+    real
+      ? "../fixtures/firered-bedroom-route/v1/scenario.json"
+      : "../../../scenarios/emulator/verdant-path-trainer-battle/v1/scenario.json",
   );
 const fixtureBytes = readFileSync(scenarioPath);
-const scenario = FrozenGbaScenarioSchema.parse(JSON.parse(fixtureBytes.toString("utf8")));
+const parsedScenario: unknown = JSON.parse(fixtureBytes.toString("utf8"));
+const scenario = real
+  ? RealGbaRouteScenarioSchema.parse(parsedScenario)
+  : FrozenGbaScenarioSchema.parse(parsedScenario);
+
+let coreFactory: GbaCoreFactory | undefined;
+let liveCore: MgbaFireRedCore | undefined;
+if (real) {
+  const routeScenario = RealGbaRouteScenarioSchema.parse(parsedScenario);
+  // Fails closed unless the ROM, savestate, and core wasm match the pinned
+  // digests, so a wrong dump cannot silently produce a plausible playthrough.
+  const core = await MgbaFireRedCore.create({
+    coreId: routeScenario.coreId,
+    romBytes: readFileSync(romPath),
+    savestateBytes: readFileSync(savestatePath),
+    romSha256: routeScenario.romSha256,
+    savestateSha256: routeScenario.savestateSha256,
+    coreWasmSha256: routeScenario.coreWasmSha256,
+    mapId: routeScenario.map.mapId,
+  });
+  coreFactory = () => core;
+  liveCore = core;
+}
 
 const { io } = await createFreePlaySession({
   rootDir: mkdtempSync(path.join(tmpdir(), "gba-free-play-")),
   scenario,
   fixtureSha256: sha256(fixtureBytes),
+  ...(coreFactory === undefined ? {} : { coreFactory }),
 });
+console.log(real ? `playing the real ROM: ${scenario.scenarioId}` : "playing the core double");
 
 const configured = await resolveConfiguredLanguageModel({ cwd: process.cwd(), env: process.env });
 console.log(`clankie is playing with ${configured.ref}\n`);
@@ -59,7 +96,24 @@ const result = await runFreePlay({
     providerOptions: configured.modelOptions?.providerOptions ?? {},
   }),
   turns,
-  framebufferSha256: () => null,
+  // The real core renders; the double does not. Both the digest and the image
+  // come from the same snapshot so the trace and the model agree on the frame.
+  framebufferSha256: () => {
+    try {
+      return liveCore?.framebufferSha256() ?? null;
+    } catch {
+      return null;
+    }
+  },
+  framePng: () => {
+    try {
+      const snapshot = liveCore?.framebufferSnapshot();
+      return snapshot === undefined ? null : encodeFramebufferPng(snapshot);
+    } catch {
+      // Before the first rendered frame there is nothing to show.
+      return null;
+    }
+  },
   onTurn: (turn) => {
     appendFileSync(tracePath, `${JSON.stringify(turn)}\n`, { encoding: "utf8", mode: 0o600 });
     print(turn);
