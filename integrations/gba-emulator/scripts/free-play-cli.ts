@@ -140,6 +140,7 @@ console.log(`trace: ${tracePath}`);
 function print(turn: FreePlayTurn): void {
   const header = `turn ${String(turn.turn).padStart(3, " ")}`;
   if (turn.monologue !== null) console.log(`${header}  ${turn.monologue}`);
+  if (turn.objective !== null) console.log(`          goal: ${turn.objective}`);
   const action =
     turn.action === null
       ? "(no action)"

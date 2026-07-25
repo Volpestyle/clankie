@@ -184,6 +184,31 @@ to fill, the model began omitting `holdFrames`, and a strict read discarded 15 o
 decision, so an omitted one now defaults to a value that commits a step. The
 button and the direction remain entirely his.
 
+### The objective outlives the turn; the intent does not
+
+Asking "what next" every turn made the goal churn, and it was also what broke
+follow-through: the model answered with objectives ("move north toward the
+stairs") while the metric compared them to one button press.
+
+They are now separate fields. `objective` is a standing goal carried forward
+until he changes it; `intent` is the single concrete thing he will do next turn,
+and it is what follow-through scores. An omitted objective means unchanged, the
+same rule as notes.
+
+This was the largest measured improvement of the set, on the real ROM at equal
+turn count:
+
+|                               | before (O2/O3) | after   |
+| ----------------------------- | -------------- | ------- |
+| distinct tiles in 20 turns    | 7-8            | **12**  |
+| accepted actions per new tile | 2.9-3.3        | **1.8** |
+| follow-through                | 42-44%         | **50%** |
+
+The intents also changed shape without being asked to — "step right from (13,10)
+into the staircase opening" rather than "reach the stairs" — which is the
+category error the coherence section predicted, fixed at the source rather than
+by a better matcher.
+
 ### Failure is a turn outcome, not an exception
 
 A playthrough must survive its own participants. Four outcomes are recorded and

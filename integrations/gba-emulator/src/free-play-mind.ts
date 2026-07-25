@@ -21,6 +21,7 @@ const FreePlayWireDecisionSchema = z
     monologue: z.string(),
     intent: z.string(),
     notes: z.string().nullable(),
+    objective: z.string().nullable(),
     actionKind: z.enum(["button_press", "frame_advance", "wait"]),
     button: z.enum(["up", "down", "left", "right", "a", "b", "start", "select", "l", "r"]).nullable(),
     holdFrames: z.number().int().nullable(),
@@ -54,7 +55,13 @@ function toDecision(wire: z.infer<typeof FreePlayWireDecisionSchema>): unknown {
       : wire.actionKind === "frame_advance"
         ? { kind: "frame_advance", frames: wire.frames }
         : { kind: "wait", durationMs: wire.durationMs };
-  return { monologue: wire.monologue, intent: wire.intent, notes: wire.notes, action };
+  return {
+    monologue: wire.monologue,
+    intent: wire.intent,
+    notes: wire.notes,
+    objective: wire.objective,
+    action,
+  };
 }
 
 /**
@@ -79,7 +86,12 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   "",
   "Each turn return three things:",
   "- monologue: your honest thinking about this moment, in your own voice.",
-  "- intent: what you plan to do next, in a few words.",
+  '- objective: the goal you are pursuing, e.g. "get downstairs and outside".',
+  "  It is carried to later turns; return null to keep the current one, and",
+  "  change it only when you achieve it or decide to abandon it.",
+  "- intent: the single concrete thing you will do NEXT TURN — a step or a",
+  '  press, not the objective. "step left around the desk", not "reach the',
+  '  stairs". You are scored on whether you then do it.',
   "- notes: your own running notes, carried to every later turn. Keep what will",
   "  still matter — the room layout you have worked out, what you already tried,",
   "  where you are heading. Rewrite them freely; return null to leave them as",
@@ -186,6 +198,9 @@ export function renderView(view: FreePlayView): string {
   }
   for (const observation of view.observations) {
     lines.push(`  ${observation.kind}: ${JSON.stringify(stripEnvelope(observation))}`);
+  }
+  if (view.objective !== null && view.objective.length > 0) {
+    lines.push("", `Your objective: ${view.objective}`);
   }
   if (view.notes !== null && view.notes.length > 0) {
     lines.push("", "Your notes:", `  ${view.notes}`);

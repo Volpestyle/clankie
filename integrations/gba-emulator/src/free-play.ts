@@ -41,12 +41,23 @@ export const FREE_PLAY_INTENT_MAX = 200;
  * problem this loop already has. A cap forces him to keep what matters.
  */
 export const FREE_PLAY_NOTES_MAX = 800;
+/** A standing objective, e.g. "get downstairs and out of the house". */
+export const FREE_PLAY_OBJECTIVE_MAX = 160;
 
 export const FreePlayDecisionSchema = z
   .object({
     /** Why this action, in Clankie's own voice. */
     monologue: z.string().min(1).max(FREE_PLAY_MONOLOGUE_MAX),
-    /** What he plans to do next — scored against the action he then takes. */
+    /**
+     * A standing goal that outlives the turn. Carried forward until he changes
+     * it, so plans stop churning every turn.
+     */
+    objective: z.string().max(FREE_PLAY_OBJECTIVE_MAX).nullish(),
+    /**
+     * What he will do on the NEXT turn — a concrete action, not the objective.
+     * This is the field follow-through is scored against, which is only
+     * meaningful now that the goal lives somewhere else.
+     */
     intent: z.string().min(1).max(FREE_PLAY_INTENT_MAX),
     /**
      * His notes, rewritten by him each turn. Nothing else writes this: it is
@@ -82,6 +93,8 @@ export interface FreePlayView {
   refusedHere: readonly string[];
   /** The notes he wrote on the previous turn, verbatim. */
   notes: string | null;
+  /** His standing objective, carried until he changes it. */
+  objective: string | null;
   /** Prior turns, most recent last, so the model has continuity. */
   history: readonly { intent: string; action: GbaEmulatorAction; outcome: string; effect: string }[];
 }
@@ -107,6 +120,7 @@ export const FreePlayTurnSchema = z
     monologue: z.string().max(FREE_PLAY_MONOLOGUE_MAX).nullable(),
     intent: z.string().max(FREE_PLAY_INTENT_MAX).nullable(),
     notes: z.string().max(FREE_PLAY_NOTES_MAX).nullable(),
+    objective: z.string().max(FREE_PLAY_OBJECTIVE_MAX).nullable(),
     action: GbaEmulatorActionSchema.nullable(),
     outcome: z.enum(["accepted", "rejected_by_adapter", "invalid_decision", "mind_failed"]),
     /** Bounded reason when the turn did not produce an accepted action. */
@@ -153,6 +167,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
   const turns: FreePlayTurn[] = [];
   const history: { intent: string; action: GbaEmulatorAction; outcome: string; effect: string }[] = [];
   let notes: string | null = null;
+  let objective: string | null = null;
   const progress = new FreePlayProgressTracker();
   progress.seed(positionOf(observe(input.io)));
 
@@ -169,6 +184,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
       detail: null,
       effect: null,
       notes,
+      objective,
     };
 
     let raw: unknown;
@@ -179,6 +195,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
         framePng: input.framePng?.() ?? null,
         refusedHere: progress.refusedFrom(positionOf(observations)),
         notes,
+        objective,
         history: [...history],
       });
     } catch (error) {
@@ -202,6 +219,11 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     // He keeps his notes unless he rewrites them, so silence is not amnesia.
     if (parsed.data.notes !== null && parsed.data.notes !== undefined) notes = parsed.data.notes;
     record.notes = notes;
+    // Same rule as notes: an omitted objective is "unchanged", not "abandoned".
+    if (parsed.data.objective !== null && parsed.data.objective !== undefined) {
+      objective = parsed.data.objective;
+    }
+    record.objective = objective;
     record.action = parsed.data.action;
 
     let accepted = false;
