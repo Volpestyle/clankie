@@ -43,6 +43,10 @@ export const FREE_PLAY_INTENT_MAX = 200;
 export const FREE_PLAY_NOTES_MAX = 800;
 /** A standing objective, e.g. "get downstairs and out of the house". */
 export const FREE_PLAY_OBJECTIVE_MAX = 160;
+/** What someone said to him. Bounded like every other untrusted string. */
+export const FREE_PLAY_INTERJECTION_MAX = 500;
+/** What he says back. Discord's own message limit. */
+export const FREE_PLAY_REPLY_MAX = 2_000;
 
 export const FreePlayDecisionSchema = z
   .object({
@@ -59,6 +63,14 @@ export const FreePlayDecisionSchema = z
      * meaningful now that the goal lives somewhere else.
      */
     intent: z.string().min(1).max(FREE_PLAY_INTENT_MAX),
+    /**
+     * What he says back to whoever spoke to him this turn.
+     *
+     * Separate from `monologue`: monologue is thinking and goes to the trace and
+     * the overlay, this is speech and goes to a person. Null when nobody asked
+     * anything, which is most turns.
+     */
+    reply: z.string().max(FREE_PLAY_REPLY_MAX).nullish(),
     /**
      * His notes, rewritten by him each turn. Nothing else writes this: it is
      * memory he chose to keep, not a summary the harness imposed.
@@ -95,6 +107,15 @@ export interface FreePlayView {
   notes: string | null;
   /** His standing objective, carried until he changes it. */
   objective: string | null;
+  /**
+   * What someone said to him since the last turn, if anything.
+   *
+   * Deliberately *not* privileged: an interjection is something a person said,
+   * not an instruction that outranks his own judgement. Treating it as a command
+   * would rebuild the scripted driver ADR 0049 removed — the difference between
+   * "how's it going?" and being steered.
+   */
+  interjection: string | null;
   /** Prior turns, most recent last, so the model has continuity. */
   history: readonly { intent: string; action: GbaEmulatorAction; outcome: string; effect: string }[];
 }
@@ -121,6 +142,9 @@ export const FreePlayTurnSchema = z
     intent: z.string().max(FREE_PLAY_INTENT_MAX).nullable(),
     notes: z.string().max(FREE_PLAY_NOTES_MAX).nullable(),
     objective: z.string().max(FREE_PLAY_OBJECTIVE_MAX).nullable(),
+    /** Recorded so an interjection's influence on the run stays auditable. */
+    interjection: z.string().max(FREE_PLAY_INTERJECTION_MAX).nullable(),
+    reply: z.string().max(FREE_PLAY_REPLY_MAX).nullable(),
     action: GbaEmulatorActionSchema.nullable(),
     outcome: z.enum(["accepted", "rejected_by_adapter", "invalid_decision", "mind_failed"]),
     /** Bounded reason when the turn did not produce an accepted action. */
@@ -149,6 +173,31 @@ export interface FreePlayResult {
 
 const OBSERVED_KINDS: GbaEmulatorObservationKind[] = ["danger", "overworld", "battle", "dialog", "menu"];
 
+/**
+ * Somewhere for a person's message to wait until the next turn reads it.
+ *
+ * Injection is asynchronous — a question arrives while he is mid-decision — but
+ * it is consumed at a turn boundary so it cannot interrupt an action already in
+ * flight. Only the most recent message survives: a backlog of stale questions
+ * answered several turns late reads worse than the newest one answered now.
+ */
+export class InterjectionQueue {
+  private pending: string | null = null;
+
+  /** Called from outside the loop, whenever someone says something. */
+  public offer(message: string): void {
+    const trimmed = message.trim().slice(0, FREE_PLAY_INTERJECTION_MAX);
+    if (trimmed.length > 0) this.pending = trimmed;
+  }
+
+  /** Taken once, at a turn boundary. */
+  public take(): string | null {
+    const message = this.pending;
+    this.pending = null;
+    return message;
+  }
+}
+
 export interface RunFreePlayInput {
   io: GbaDriverIo;
   mind: FreePlayMind;
@@ -160,6 +209,8 @@ export interface RunFreePlayInput {
   /** Latest rendered screen as PNG bytes, when a core exposes one. */
   framePng?: () => Uint8Array | null;
   historyLimit?: number;
+  /** Where mid-play questions land. Absent means nobody can talk to him. */
+  interjections?: InterjectionQueue;
 }
 
 export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResult> {
@@ -185,7 +236,14 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
       effect: null,
       notes,
       objective,
+      interjection: null,
+      reply: null,
     };
+
+    // Taken at the boundary, before he decides, so a question reaches the turn
+    // it was asked during rather than interrupting one already dispatched.
+    const interjection = input.interjections?.take() ?? null;
+    record.interjection = interjection;
 
     let raw: unknown;
     try {
@@ -196,6 +254,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
         refusedHere: progress.refusedFrom(positionOf(observations)),
         notes,
         objective,
+        interjection,
         history: [...history],
       });
     } catch (error) {
@@ -224,6 +283,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
       objective = parsed.data.objective;
     }
     record.objective = objective;
+    record.reply = parsed.data.reply ?? null;
     record.action = parsed.data.action;
 
     let accepted = false;

@@ -21,7 +21,7 @@ import type { GbaCoreFactory } from "../src/core-seam.ts";
 import { sha256 } from "../src/core-double.ts";
 import { createModelFreePlayMind } from "../src/free-play-mind.ts";
 import { SettingsStore, personaInstructions } from "@clankie/settings";
-import { runFreePlay, type FreePlayTurn } from "../src/free-play.ts";
+import { InterjectionQueue, runFreePlay, type FreePlayTurn } from "../src/free-play.ts";
 import { createFreePlaySession } from "../src/free-play-session.ts";
 
 const turns = Number.parseInt(process.env["CLANKIE_FREE_PLAY_TURNS"] ?? "20", 10);
@@ -103,6 +103,23 @@ writeFileSync(tracePath, "", { encoding: "utf8", mode: 0o600 });
 // to, not a second one defined by this script's prompt.
 const freePlayCharacter = personaInstructions((await new SettingsStore().load()).persona, "gameplay");
 
+// Talk to him while he plays: anything typed on stdin reaches the next turn.
+// stdin is deliberately not a command channel — it is a person speaking.
+const interjections = new InterjectionQueue();
+// Listen on stdin whether or not it is a terminal. Gating on isTTY meant piped
+// input was silently ignored — which is exactly how a script, a harness, or the
+// Discord bridge would ever speak to him.
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk: string) => {
+  for (const line of chunk.split("\n")) {
+    if (line.trim().length > 0) interjections.offer(line);
+  }
+});
+process.stdin.unref();
+if (process.stdin.isTTY === true) {
+  console.log("(type anything and press enter to say it to him)\n");
+}
+
 const result = await runFreePlay({
   io,
   mind: createModelFreePlayMind({
@@ -111,6 +128,7 @@ const result = await runFreePlay({
     providerOptions: configured.modelOptions?.providerOptions ?? {},
   }),
   turns,
+  interjections,
   // The real core renders; the double does not. Both the digest and the image
   // come from the same snapshot so the trace and the model agree on the frame.
   framebufferSha256: () => {
@@ -167,6 +185,8 @@ function print(turn: FreePlayTurn): void {
   const marker = turn.outcome === "accepted" ? "→" : "✗";
   const detail = turn.outcome === "accepted" ? "" : `  [${turn.outcome}: ${turn.detail ?? ""}]`;
   console.log(`          ${marker} ${action}${detail}`);
+  if (turn.interjection !== null) console.log(`   you: ${turn.interjection}`);
+  if (turn.reply !== null) console.log(`   clankie: ${turn.reply}`);
   if (turn.effect !== null) console.log(`          ${turn.effect}`);
   if (turn.intent !== null) console.log(`          next: ${turn.intent}\n`);
 }

@@ -2,8 +2,11 @@ import type { EnvironmentActionResult, GbaEmulatorObservation } from "@clankie/i
 import { describe, expect, it, vi } from "vitest";
 import type { GbaDriverIo } from "../src/driver.ts";
 import {
+  FREE_PLAY_INTERJECTION_MAX,
   FREE_PLAY_MONOLOGUE_MAX,
   FREE_PLAY_NOTES_MAX,
+  FREE_PLAY_REPLY_MAX,
+  InterjectionQueue,
   intentMatchesAction,
   runFreePlay,
   type FreePlayMind,
@@ -326,6 +329,65 @@ describe("persistent notes", () => {
     const result = await runFreePlay({
       io: io(() => Promise.resolve(completed())),
       mind: mind([press("up", "up", "x".repeat(FREE_PLAY_NOTES_MAX + 1))]),
+      turns: 1,
+    });
+    expect(result.turns[0]?.outcome).toBe("invalid_decision");
+  });
+});
+
+describe("interjection", () => {
+  it("reaches the next turn and is answered without losing turn state", async () => {
+    const seen: (string | null)[] = [];
+    const queue = new InterjectionQueue();
+    queue.offer("how's it going?");
+    const listening: FreePlayMind = {
+      decide: (view) => {
+        seen.push(view.interjection);
+        return Promise.resolve({
+          ...press("up", "up"),
+          reply: view.interjection === null ? null : "slow, this desk keeps blocking me",
+        });
+      },
+    };
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: listening,
+      turns: 2,
+      interjections: queue,
+    });
+
+    expect(seen[0]).toBe("how's it going?");
+    // Consumed once: a question is not re-asked every turn afterwards.
+    expect(seen[1]).toBeNull();
+    expect(result.turns[0]?.reply).toContain("desk");
+    expect(result.turns[1]?.reply).toBeNull();
+    // Play continued either way.
+    expect(result.accepted).toBe(2);
+    // Recorded, so an interjection's influence stays auditable.
+    expect(result.turns[0]?.interjection).toBe("how's it going?");
+  });
+
+  it("keeps only the newest message rather than a stale backlog", () => {
+    const queue = new InterjectionQueue();
+    queue.offer("first");
+    queue.offer("second");
+    // Answering an old question several turns late reads worse than the newest.
+    expect(queue.take()).toBe("second");
+    expect(queue.take()).toBeNull();
+  });
+
+  it("ignores empty chatter and bounds what one person can say", () => {
+    const queue = new InterjectionQueue();
+    queue.offer("   ");
+    expect(queue.take()).toBeNull();
+    queue.offer("x".repeat(FREE_PLAY_INTERJECTION_MAX + 100));
+    expect(queue.take()?.length).toBe(FREE_PLAY_INTERJECTION_MAX);
+  });
+
+  it("rejects a reply longer than a person could be sent", async () => {
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: mind([{ ...press("up", "up"), reply: "x".repeat(FREE_PLAY_REPLY_MAX + 1) }]),
       turns: 1,
     });
     expect(result.turns[0]?.outcome).toBe("invalid_decision");
