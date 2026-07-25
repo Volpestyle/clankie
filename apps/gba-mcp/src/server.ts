@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { GbaEmulatorObservationKindSchema } from "@clankie/interactive-environment";
 import { z } from "zod";
 import { ActArgumentsSchema, actTool, observeTool, pauseTool, type GbaToolContext } from "./tools.ts";
+import type { PossessionLease } from "./possession.ts";
 
 /**
  * Clankie's body, published for any harness to drive.
@@ -12,8 +13,56 @@ import { ActArgumentsSchema, actTool, observeTool, pauseTool, type GbaToolContex
  * seam, so a possessor is bounded by the same lease, idempotency, and
  * fail-closed limits a script is.
  */
-export function createGbaMcpServer(context: GbaToolContext): McpServer {
+export function createGbaMcpServer(context: GbaToolContext, possession?: PossessionLease): McpServer {
   const server = new McpServer({ name: "clankie-gba", version: "0.1.0" });
+
+  if (possession !== undefined) {
+    server.registerTool(
+      "gba_emulator_possess",
+      {
+        title: "Take control of the body",
+        description:
+          "Acquire the possession lease before acting. One holder drives at a time; another " +
+          "holder's live lease is only taken with force, which is logged. Observation needs no " +
+          "lease — look before deciding to take the body.",
+        inputSchema: {
+          holderId: z.string().min(1).max(128),
+          force: z.boolean().optional().describe("Take the body from a live holder. Logged."),
+        },
+      },
+      (args) => {
+        try {
+          const grant = possession.acquire(args.holderId, { force: args.force ?? false });
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `possession granted to ${grant.holderId}; pass this token to act: ${grant.token}`,
+              },
+            ],
+          };
+        } catch (error) {
+          return {
+            content: [{ type: "text" as const, text: error instanceof Error ? error.message : "refused" }],
+            isError: true,
+          };
+        }
+      },
+    );
+
+    server.registerTool(
+      "gba_emulator_release",
+      {
+        title: "Give the body back",
+        description: "Release the possession lease so the resident loop resumes.",
+        inputSchema: { token: z.string().min(1) },
+      },
+      (args) => {
+        possession.release(args.token);
+        return { content: [{ type: "text" as const, text: "possession released" }] };
+      },
+    );
+  }
 
   server.registerTool(
     "gba_emulator_observe",
@@ -37,9 +86,9 @@ export function createGbaMcpServer(context: GbaToolContext): McpServer {
         "Take one catalogued action. A short directional tap only turns the character — hold 16 " +
         "frames to commit a step, or use repeat to cross several tiles in one action. Illegal " +
         "buttons, exceeded frame bounds and missing capabilities are refused with the reason.",
-      inputSchema: ActArgumentsSchema.shape,
+      inputSchema: { ...ActArgumentsSchema.shape, possessionToken: z.string().optional() },
     },
-    (args) => actTool(context, args),
+    (args) => actTool({ ...context, possessionToken: args.possessionToken }, args),
   );
 
   server.registerTool(

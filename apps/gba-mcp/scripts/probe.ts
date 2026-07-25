@@ -57,6 +57,41 @@ console.log(
   }`,
 );
 
+// Possession flow: acting is refused without the lease, works with it, and the
+// body is handed back on release.
+const holder = process.env["CLANKIE_GBA_PROBE_HOLDER"];
+if (holder !== undefined) {
+  const taken = await client.callTool({
+    name: "gba_emulator_possess",
+    arguments: { holderId: holder },
+  });
+  const token = /token to act: (\S+)/u.exec(describe(taken))?.[1];
+  console.log(`possess: ${taken.isError === true ? describe(taken) : `granted (${String(token)})`}`);
+
+  const possessed = await client.callTool({
+    name: "gba_emulator_start_action",
+    arguments: { actionKind: "button_press", button: "up", holdFrames: 16, possessionToken: token },
+  });
+  console.log(`act while possessing: ${possessed.isError === true ? describe(possessed) : "accepted"}`);
+
+  const stranger = await client.callTool({
+    name: "gba_emulator_possess",
+    arguments: { holderId: "not-configured-agent" },
+  });
+  console.log(
+    `unnamed holder: ${stranger.isError === true ? describe(stranger) : "ALLOWED — deny-by-default broken"}`,
+  );
+
+  await client.callTool({ name: "gba_emulator_release", arguments: { token } });
+  const afterRelease = await client.callTool({
+    name: "gba_emulator_start_action",
+    arguments: { actionKind: "button_press", button: "up", holdFrames: 16 },
+  });
+  console.log(
+    `act after release: ${afterRelease.isError === true ? describe(afterRelease) : "STILL ALLOWED — lease not enforced"}`,
+  );
+}
+
 await client.close();
 
 function describe(result: unknown): string {

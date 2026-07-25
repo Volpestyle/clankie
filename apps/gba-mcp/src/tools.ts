@@ -74,8 +74,9 @@ export type McpToolResult = CallToolResult;
 export interface GbaToolContext {
   io: GbaDriverIo;
   framePng: () => Uint8Array | null;
-  /** Refuses gameplay when another holder owns the body (P2). */
-  assertMayAct?: () => void;
+  /** Refuses gameplay unless this caller holds the possession lease. */
+  assertMayAct?: (token: string | undefined) => void;
+  possessionToken?: string | undefined;
 }
 
 /** Read the decoded state, and return the screen alongside it. */
@@ -107,7 +108,7 @@ export function observeTool(
 /** Dispatch one catalogued action through the environment runtime. */
 export async function actTool(context: GbaToolContext, args: ActArguments): Promise<McpToolResult> {
   try {
-    context.assertMayAct?.();
+    context.assertMayAct?.(context.possessionToken);
   } catch (error) {
     return errorResult(error);
   }

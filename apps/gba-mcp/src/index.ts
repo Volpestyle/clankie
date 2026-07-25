@@ -1,5 +1,6 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { bootGbaGame, createFreePlaySession } from "@clankie/gba-emulator";
+import { PossessionLease, parsePossessionHolders } from "./possession.ts";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -8,6 +9,7 @@ import { createGbaMcpServer } from "./server.ts";
 
 export { createGbaMcpServer } from "./server.ts";
 export * from "./tools.ts";
+export * from "./possession.ts";
 
 /**
  * stdio entrypoint, which is what a coding harness attaches to.
@@ -37,7 +39,29 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     ...(game.coreFactory === undefined ? {} : { coreFactory: game.coreFactory }),
   });
 
-  const server = createGbaMcpServer({ io: session.io, framePng: () => game.framePng() });
+  // Deny-by-default: unset means possession is unavailable and only observation
+  // works. A possessor is its own principal class, never the ambient or voice
+  // tier (ADR 0050's precedent for adding a tier).
+  const holders = parsePossessionHolders(process.env["CLANKIE_GBA_POSSESSION_HOLDERS"]);
+  const possession = new PossessionLease({
+    allowedHolders: holders,
+    onEvent: (event) => {
+      process.stderr.write(
+        `possession ${event.type}: ${event.holderId}${event.reason === undefined ? "" : ` (${event.reason})`}\n`,
+      );
+    },
+  });
+
+  const server = createGbaMcpServer(
+    {
+      io: session.io,
+      framePng: () => game.framePng(),
+      assertMayAct: (token) => {
+        possession.assertMayAct(token);
+      },
+    },
+    possession,
+  );
   // stdout is the transport, so anything printed there corrupts the protocol.
   process.stderr.write(`clankie gba mcp ready (${game.real ? "real ROM" : "deterministic core double"})\n`);
   await server.connect(new StdioServerTransport());

@@ -63,9 +63,47 @@ emulator refusal: invalid_action: frames                        (catalogue bound
 An uncatalogued button never reaches the core, and a frame count past the
 session bound is refused with its reason rather than clamped.
 
+## Possession
+
+One mind drives the body at a time. An external harness is a **holder of a
+revocable lease**, not a second concurrent driver — letting both it and the
+free-play loop dispatch would produce a character twitching between two intents.
+
+```bash
+CLANKIE_GBA_POSSESSION_HOLDERS=codex-lab,claude-lab   # unset means possession is OFF
+```
+
+- **Observation needs no lease.** Looking is not driving, and a harness should be
+  able to see the game before deciding to take it.
+- **Acting requires the lease**, passed as `possessionToken`.
+- **Stealing a live lease requires `force`**, so it is an explicit act rather
+  than the outcome of a race. Every transition is logged to stderr.
+- **Leases expire**, so a crashed holder does not keep the body forever.
+- `onHeldChange` suspends and resumes a co-hosted loop on take and release —
+  suspension rather than arbitration after the fact, because arbitrating later
+  would still have let two intents reach the core.
+
+The possessor is a **new principal class** (`mcp_possessor`), deliberately not
+the ambient tier and not the voice tier: possessing the body has a different
+consequence from summoning Clankie into a call, and
+[ADR 0050](../../docs/adr/0050-voice-presence-authority-tier.md) set the
+precedent that a different consequence gets its own named, deny-by-default
+binding.
+
+Verified end to end against a live server:
+
+```
+act:                    ERROR possession_lease_not_held     (deny-by-default)
+possess:                granted (…)
+act while possessing:   accepted
+unnamed holder:         possession_holder_not_allowed
+act after release:      possession_lease_not_held
+```
+
 ## Not yet
 
-Possession is not implemented. `GbaToolContext.assertMayAct` is the hook: when a
-lease exists, gameplay tools will refuse without it while observation stays open.
-Until then the server assumes it is the only driver — do not run it against a
-session the free-play loop is also driving.
+Cross-process arbitration. The lease is in-process, so it protects a co-hosted
+loop but does not stop a _separate_ free-play process from driving the same
+session. The environment lease in `EnvironmentRuntime` is the mechanism for that
+and is not yet wired to possession — until it is, do not run this server and the
+free-play CLI against one session.
