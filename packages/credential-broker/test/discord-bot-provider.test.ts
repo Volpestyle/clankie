@@ -96,3 +96,105 @@ describe("DiscordBotCredentialProvider", () => {
     expect(listed.discord_bot).toEqual({ type: "api", key: "disc…" });
   });
 });
+
+describe("blank channel allowlist means every channel in an allowed guild", () => {
+  it("admits a channel the list does not name, when its guild is allowed", async () => {
+    // Matches what a blank ingress allowlist already means. Previously blank
+    // denied everything, so Clankie could be addressed in channels he could
+    // never answer in — and the refusal surfaced nowhere in Discord.
+    const provider = new DiscordBotCredentialProvider({
+      store: new MemoryStore({ type: "api", key: "discord-secret-token" }),
+      allowedGuildIds: ["guild-1"],
+      allowedChannelIds: [],
+    });
+
+    await expect(
+      provider.issueGrant({
+        principalId: "p",
+        missionId: "m",
+        profileHash: "h",
+        capability: "discord.presence.act",
+        guildIds: ["guild-1"],
+        channelIds: ["any-channel"],
+      }),
+    ).resolves.toEqual(expect.any(String));
+  });
+
+  it("still refuses a channel whose guild is not allowed", async () => {
+    const provider = new DiscordBotCredentialProvider({
+      store: new MemoryStore({ type: "api", key: "discord-secret-token" }),
+      allowedGuildIds: ["guild-1"],
+      allowedChannelIds: [],
+    });
+
+    await expect(
+      provider.issueGrant({
+        principalId: "p",
+        missionId: "m",
+        profileHash: "h",
+        capability: "discord.presence.act",
+        guildIds: ["guild-2"],
+        channelIds: ["any-channel"],
+      }),
+    ).rejects.toThrow(/guild_not_allowed/);
+  });
+
+  it("admits a guildless channel, because a reply carries no guild at all", async () => {
+    // The `reply` payload is channelId + messageId + content, with no guildId,
+    // so requiring a guild here denied every reply Clankie ever tried to send.
+    const provider = new DiscordBotCredentialProvider({
+      store: new MemoryStore({ type: "api", key: "discord-secret-token" }),
+      allowedGuildIds: ["guild-1"],
+      allowedChannelIds: [],
+    });
+
+    await expect(
+      provider.issueGrant({
+        principalId: "p",
+        missionId: "m",
+        profileHash: "h",
+        capability: "discord.presence.act",
+        channelIds: ["reply-channel"],
+      }),
+    ).resolves.toEqual(expect.any(String));
+  });
+
+  it("grants nothing at all when the provider is wholly unconfigured", async () => {
+    // Blank must not mean "open" on a deployment that configured neither guilds
+    // nor channels; that is an absent config, not a permissive one.
+    const provider = new DiscordBotCredentialProvider({
+      store: new MemoryStore({ type: "api", key: "discord-secret-token" }),
+      allowedGuildIds: [],
+      allowedChannelIds: [],
+    });
+
+    await expect(
+      provider.issueGrant({
+        principalId: "p",
+        missionId: "m",
+        profileHash: "h",
+        capability: "discord.presence.act",
+        channelIds: ["any-channel"],
+      }),
+    ).rejects.toThrow(/channel_not_allowed/);
+  });
+
+  it("keeps narrowing when the list does name channels", async () => {
+    const provider = new DiscordBotCredentialProvider({
+      store: new MemoryStore({ type: "api", key: "discord-secret-token" }),
+      allowedGuildIds: ["guild-1"],
+      allowedChannelIds: ["channel-1"],
+    });
+
+    await expect(
+      provider.issueGrant({
+        principalId: "p",
+        missionId: "m",
+        profileHash: "h",
+        capability: "discord.presence.act",
+        guildIds: ["guild-1"],
+        channelIds: ["channel-2"],
+      }),
+    ).rejects.toThrow(/channel_not_allowed/);
+  });
+});

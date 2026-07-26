@@ -98,11 +98,41 @@ export class DiscordBotCredentialProvider {
     return this.requireBotToken();
   }
 
+  /**
+   * An empty channel allowlist admits any channel inside an allowed guild,
+   * matching what an empty ingress allowlist already means.
+   *
+   * The two lists previously read the same value in opposite directions: blank
+   * ingress channels admitted every channel in the allowed guilds, blank
+   * presence channels admitted none. Clankie could therefore be addressed in far
+   * more places than he could answer — he heard the message, composed a reply,
+   * and was refused at the last step with nothing surfaced in Discord. Silent,
+   * and indistinguishable from him ignoring you.
+   *
+   * The guild allowlist stays the fence. Widening happens only *within* guilds
+   * already approved, and a provider with no guilds configured still grants
+   * nothing, so an unconfigured deployment remains closed rather than becoming
+   * open by omission.
+   */
   private assertAllowed(guildIds: readonly string[], channelIds: readonly string[]): void {
     if (guildIds.some((id) => !this.allowedGuildIds.has(id))) {
       throw new Error("discord_bot_guild_not_allowed");
     }
-    if (channelIds.some((id) => !this.allowedChannelIds.has(id))) {
+    if (this.allowedChannelIds.size === 0) {
+      // Nothing narrows channels, so this provider admits any of them — but only
+      // once it is configured at all. A provider with no guilds and no channels
+      // is an unconfigured deployment and still grants nothing, rather than
+      // becoming wide open by omission.
+      //
+      // The remaining fence for channel-scoped actions is upstream: the ingress
+      // allowlists decide which channels Clankie can be addressed in, and this
+      // is what makes his speech reach exactly as far as his hearing. It cannot
+      // be the guild allowlist, because the actions that matter most here are
+      // channel-scoped by construction — a `reply` payload carries a channelId
+      // and a messageId and no guild at all, so requiring one denied every reply
+      // ever sent.
+      if (this.allowedGuildIds.size === 0) throw new Error("discord_bot_channel_not_allowed");
+    } else if (channelIds.some((id) => !this.allowedChannelIds.has(id))) {
       throw new Error("discord_bot_channel_not_allowed");
     }
     if (guildIds.length === 0 && channelIds.length === 0) {
