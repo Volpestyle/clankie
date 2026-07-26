@@ -1,5 +1,5 @@
 {
-  "name": "@clankie/gba-mcp",
+  "name": "@clankie/rendered-surface-client",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -7,23 +7,19 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "start": "tsx src/index.ts",
     "build": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "clean": "rm -rf dist coverage",
-    "probe": "tsx scripts/probe.ts"
+    "clean": "rm -rf dist coverage"
   },
   "dependencies": {
-    "@clankie/gba-emulator": "workspace:*",
+    "@clankie/credential-broker": "workspace:*",
     "@clankie/interactive-environment": "workspace:*",
-    "@modelcontextprotocol/sdk": "1.29.0",
-    "zod": "4.4.3",
-    "@clankie/rendered-surface-client": "workspace:*"
+    "ws": "8.21.0"
   },
   "devDependencies": {
     "@types/node": "24.12.4",
-    "tsx": "4.23.0",
+    "@types/ws": "8.18.1",
     "typescript": "5.9.3",
     "vitest": "4.1.10"
   }

@@ -25,7 +25,7 @@ import { RenderedSurfaceOverlaySchema } from "@clankie/interactive-environment";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { createBrokeredActivityFrameSink } from "../src/activity-frame-sink.ts";
+import { createBrokeredActivityFrameSink } from "@clankie/rendered-surface-client";
 
 const require = createRequire(import.meta.url);
 const emulatorPackage = path.dirname(require.resolve("@clankie/gba-emulator/package.json"));

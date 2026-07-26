@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "terminal:lifecycle-evidence": "vitest run test/terminal-lifecycle-evidence.test.ts",
-    "clean": "rm -rf dist coverage"
+    "clean": "rm -rf dist coverage",
+    "free-play-live": "tsx scripts/free-play-live.ts"
   },
   "dependencies": {
     "@clankie/api-client": "workspace:*",
@@ -22,6 +23,7 @@
     "@clankie/interactive-environment": "workspace:*",
     "@clankie/mcp-registry": "workspace:*",
     "@clankie/minecraft-mineflayer": "workspace:*",
+    "@clankie/model-provider": "workspace:*",
     "@clankie/observability": "workspace:*",
     "@clankie/protocol": "workspace:*",
     "@clankie/terminal-protocol": "workspace:*",
@@ -33,7 +35,8 @@
     "@xterm/addon-serialize": "0.14.0",
     "@xterm/headless": "6.0.0",
     "node-pty": "1.2.0-beta.14",
-    "ws": "8.21.0"
+    "ws": "8.21.0",
+    "@clankie/rendered-surface-client": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "24.12.4",

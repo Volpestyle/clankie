@@ -55,7 +55,7 @@ only ever resolves, which avoids two processes minting different tokens. A
 runner with no resolvable credential publishes nothing rather than falling back
 to an unauthenticated connection.
 
-The runner dials **out** to this endpoint (`apps/runner/src/activity-frame-sink.ts`)
+The runner dials **out** to this endpoint (`@clankie/rendered-surface-client`)
 rather than accepting an inbound connection, so the trusted runner opens no port
 for an internet-facing surface to connect into.
 

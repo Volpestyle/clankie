@@ -103,6 +103,24 @@ unnamed holder:         possession_holder_not_allowed
 act after release:      possession_lease_not_held
 ```
 
+## Watching an agent play
+
+`gba_emulator_observe` returns the frame to its *caller*, which means an
+agent-driven session is otherwise visible only to the agent. The server also
+publishes frames to the activity surface, so a person can watch:
+
+```bash
+pnpm --filter @clankie/discord-activity start   # viewer on 127.0.0.1:4320
+```
+
+Then open `http://127.0.0.1:4320`, or launch it as a Discord activity in the
+voice channel Clankie is in ([ADR 0047](../../docs/adr/0047-discord-activity-presence-plane.md)) —
+it is the same app either way.
+
+Publishing is optional and best-effort: with no activity server running there is
+no producer credential, the server says so on stderr, and play continues
+unwatched rather than failing.
+
 ## Discord reach: speaking and listening
 
 `clankie_say` and `clankie_listen` extend possession into the channel. Both

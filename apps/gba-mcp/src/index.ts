@@ -2,6 +2,8 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { bootGbaGame, defaultGbaBodyRootDir, createFreePlaySession } from "@clankie/gba-emulator";
 import { PossessionLease, parsePossessionHolders } from "./possession.ts";
 import { acquireBodyLock, type BodyLock } from "@clankie/gba-emulator";
+import { createBrokeredActivityFrameSink } from "@clankie/rendered-surface-client";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { createGbaMcpServer } from "./server.ts";
@@ -74,12 +76,51 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     },
   });
 
+  // So a person can watch an agent play. Without this the only viewer of an
+  // MCP-driven session is the agent itself, because `gba_emulator_observe`
+  // returns the frame to the caller and nowhere else. Optional and best-effort:
+  // no activity server running means no sink, and play continues unwatched
+  // rather than failing.
+  const sink = await createBrokeredActivityFrameSink({
+    url: process.env["CLANKIE_ACTIVITY_PRODUCER_URL"] ?? "ws://127.0.0.1:4322/producer",
+  });
+  if (sink === undefined) {
+    process.stderr.write("no activity producer credential; nobody can watch this session\n");
+  }
+  let sequence = 0;
+  const publish = (): void => {
+    if (sink === undefined) return;
+    const png = game.framePng();
+    if (png === null) return;
+    sequence += 1;
+    const bytes = Buffer.from(png);
+    sink.publishFrame({
+      schemaVersion: 1,
+      surface: "gba_emulator",
+      sequence,
+      frame: sequence,
+      width: 240 * 3,
+      height: 160 * 3,
+      encoding: "png",
+      data: bytes.toString("base64"),
+      byteLength: bytes.byteLength,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      capturedAt: new Date().toISOString(),
+    });
+  };
+
   const server = createGbaMcpServer(
     {
       io: session.io,
-      framePng: () => game.framePng(),
+      framePng: () => {
+        // Every observation is also a chance to refresh what a watcher sees.
+        publish();
+        return game.framePng();
+      },
       assertMayAct: (token) => {
         possession.assertMayAct(token);
+        // Publish after the action lands, so the viewer shows the result.
+        queueMicrotask(publish);
       },
     },
     { possession },
@@ -90,6 +131,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const release = (): void => {
     bodyLock?.release();
     bodyLock = null;
+    sink?.close();
     session.close();
   };
   process.once("exit", release);
