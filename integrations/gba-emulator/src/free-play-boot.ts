@@ -27,6 +27,15 @@ export interface BootedGbaGame {
   coreFactory: GbaCoreFactory | undefined;
   /** Latest rendered screen, upscaled, or null when nothing has rendered. */
   framePng: (scale?: number) => Uint8Array | null;
+  /**
+   * Watch the screen during an action rather than only after it.
+   *
+   * One action otherwise yields one frame, because the core advances only when
+   * driven — a watcher sees a teleport, not a step. `pace` additionally runs the
+   * action at hardware speed so it reads as gameplay instead of a burst.
+   * No-op on the deterministic double, which renders nothing.
+   */
+  observeFrames: (observer: (() => void) | null, options?: { pace?: boolean }) => void;
   framebufferSha256: () => string | null;
   real: boolean;
 }
@@ -59,6 +68,7 @@ export async function bootGbaGame(options: BootGbaGameOptions): Promise<BootedGb
       fixtureSha256: sha256(fixtureBytes),
       coreFactory: undefined,
       framePng: () => null,
+      observeFrames: () => undefined,
       framebufferSha256: () => null,
       real: false,
     };
@@ -93,6 +103,9 @@ export async function bootGbaGame(options: BootGbaGameOptions): Promise<BootedGb
       } catch {
         return null;
       }
+    },
+    observeFrames: (observer, options) => {
+      core.observeFrames(observer, options ?? {});
     },
     real: true,
   };

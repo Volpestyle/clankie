@@ -88,6 +88,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     process.stderr.write("no activity producer credential; nobody can watch this session\n");
   }
   let sequence = 0;
+  // Watch the action as it happens, at hardware speed. Publishing only after an
+  // action made the character teleport a tile; pacing keeps the emulator from
+  // finishing the whole step in a few milliseconds and then freezing.
+  const smooth = process.env["CLANKIE_GBA_SMOOTH"] !== "0";
   const publish = (): void => {
     if (sink === undefined) return;
     const png = game.framePng();
@@ -108,6 +112,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       capturedAt: new Date().toISOString(),
     });
   };
+
+  if (sink !== undefined && smooth) {
+    game.observeFrames(() => {
+      publish();
+    }, { pace: true });
+  }
 
   const server = createGbaMcpServer(
     {

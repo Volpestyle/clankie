@@ -491,3 +491,44 @@ describe.skipIf(!romAvailable)("real mGBA core (ROM-gated)", () => {
     expect(mgbaCoreWasmSha256()).toEqual(scenario.coreWasmSha256);
   });
 });
+
+describe.skipIf(!romAvailable)("watching an action (ROM-gated)", () => {
+  async function core(): Promise<MgbaFireRedCore> {
+    const scenario = RealGbaRouteScenarioSchema.parse(
+      JSON.parse(readFileSync(resolve(import.meta.dirname, "../fixtures/firered-bedroom-route/v1/scenario.json"), "utf8")),
+    );
+    return MgbaFireRedCore.create({
+      coreId: scenario.coreId,
+      romBytes: readFileSync(romPath as string),
+      savestateBytes: readFileSync(savestatePath as string),
+      romSha256: scenario.romSha256,
+      savestateSha256: scenario.savestateSha256,
+      coreWasmSha256: scenario.coreWasmSha256,
+      mapId: scenario.map.mapId,
+    });
+  }
+
+  it("advances the same total frames whether or not anyone is watching", async () => {
+    // Deterministic scenarios must be unaffected: chunking a run is only
+    // emulation-equivalent if the frame count is identical.
+    const quiet = await core();
+    quiet.pressButton("up", 16);
+    const quietFrame = quiet.gameState().frame;
+
+    const watched = await core();
+    watched.observeFrames(() => undefined);
+    watched.pressButton("up", 16);
+    expect(watched.gameState().frame).toBe(quietFrame);
+  });
+
+  it("surfaces intermediate frames during one action", async () => {
+    const c = await core();
+    let observed = 0;
+    c.observeFrames(() => {
+      observed += 1;
+    });
+    c.pressButton("up", 16);
+    // One action used to yield exactly one observable frame.
+    expect(observed).toBeGreaterThan(10);
+  });
+});

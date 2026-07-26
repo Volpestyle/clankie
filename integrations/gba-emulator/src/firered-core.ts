@@ -26,6 +26,32 @@ export const POST_INPUT_SETTLE_FRAMES = 32;
 /** Frames rendered after restoring the savestate so a framebuffer exists. */
 const WARMUP_FRAMES_AFTER_RESTORE = 2;
 
+/**
+ * Emulated frames between observations while an action runs.
+ *
+ * A GBA renders at ~59.7fps, so a chunk of 3 yields ~20 observations per second
+ * — the rate the frame stream already publishes at. Smaller chunks cost more
+ * encodes for frames the stream would drop as duplicates.
+ */
+const OBSERVE_CHUNK_FRAMES = 3;
+
+/** Wall-clock milliseconds one emulated frame represents. */
+const FRAME_INTERVAL_MS = 1_000 / 59.7275;
+
+/**
+ * Sleep synchronously.
+ *
+ * The core seam is synchronous, and making it async to add pacing would ripple
+ * through the adapter, the runtime, and every scenario. `Atomics.wait` blocks
+ * this thread precisely and without spinning a CPU, which is what a frame
+ * pacer needs.
+ */
+function sleepSync(ms: number): void {
+  if (ms <= 0) return;
+  const shared = new Int32Array(new SharedArrayBuffer(4));
+  Atomics.wait(shared, 0, 0, ms);
+}
+
 export interface MgbaFireRedCoreInit {
   coreId: string;
   /** ROM bytes read by the caller from the operator-supplied path. */
@@ -112,6 +138,48 @@ export class MgbaFireRedCore implements GbaCoreSeam {
     return { ...this.verifiedIdentity };
   }
 
+  /**
+   * Watch the screen *during* an action, and optionally play it at the speed
+   * real hardware would.
+   *
+   * Without this, one action produces exactly one observable frame: the core
+   * only advances when told to, so a watcher sees the character teleport a tile
+   * rather than walk it. Chunking the run is what makes the motion visible;
+   * pacing is what makes it look like gameplay instead of a burst of frames
+   * delivered in a few milliseconds followed by a freeze.
+   *
+   * Both are opt-in and off by default, so deterministic scenarios keep running
+   * at full speed with unchanged behaviour. Splitting `runFrames(n)` into chunks
+   * is emulation-equivalent — the held buttons do not change across the split.
+   */
+  public observeFrames(observer: (() => void) | null, options: { pace?: boolean } = {}): void {
+    this.frameObserver = observer;
+    this.paceToWallClock = options.pace ?? false;
+  }
+
+  private frameObserver: (() => void) | null = null;
+  private paceToWallClock = false;
+
+  /** Run frames, surfacing intermediate ones when someone is watching. */
+  private runFramesObserved(frames: number): void {
+    const observer = this.frameObserver;
+    if (observer === null && !this.paceToWallClock) {
+      this.core.runFrames(frames);
+      return;
+    }
+    let remaining = frames;
+    while (remaining > 0) {
+      const chunk = Math.min(OBSERVE_CHUNK_FRAMES, remaining);
+      const startedAt = performance.now();
+      this.core.runFrames(chunk);
+      remaining -= chunk;
+      observer?.();
+      if (this.paceToWallClock) {
+        sleepSync(chunk * FRAME_INTERVAL_MS - (performance.now() - startedAt));
+      }
+    }
+  }
+
   public pressButton(button: GbaButton, holdFrames: number): void {
     if (this.retainedBattleMode === "battle_won" || this.retainedBattleMode === "battle_lost") {
       this.priorBattleHp = null;
@@ -120,16 +188,16 @@ export class MgbaFireRedCore implements GbaCoreSeam {
       this.retainedActivePartySlot = 0;
     }
     this.core.setHeldButtons([button]);
-    this.core.runFrames(holdFrames);
+    this.runFramesObserved(holdFrames);
     this.core.setHeldButtons([]);
-    this.core.runFrames(POST_INPUT_SETTLE_FRAMES);
+    this.runFramesObserved(POST_INPUT_SETTLE_FRAMES);
     this.frame += holdFrames + POST_INPUT_SETTLE_FRAMES;
     this.inputCount += 1;
   }
 
   public advanceFrames(frames: number): void {
     this.core.setHeldButtons([]);
-    this.core.runFrames(frames);
+    this.runFramesObserved(frames);
     this.frame += frames;
   }
 

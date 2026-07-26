@@ -70,6 +70,26 @@ process.stdin.on("data", (chunk: string) => {
 if (typeof process.stdin.unref === "function") process.stdin.unref();
 
 let sequence = 0;
+// Same reason as the MCP path: one publish per action shows a teleport, not a
+// step. Paced so the motion reads as gameplay.
+game.observeFrames(() => {
+  const png = game.framePng();
+  if (png === null) return;
+  const bytes = Buffer.from(png);
+  sink.publishFrame({
+    schemaVersion: 1,
+    surface: "gba_emulator",
+    sequence: (sequence += 1),
+    frame: sequence,
+    width: 240 * 3,
+    height: 160 * 3,
+    encoding: "png",
+    data: bytes.toString("base64"),
+    byteLength: bytes.byteLength,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+    capturedAt: new Date().toISOString(),
+  });
+}, { pace: true });
 const result = await runFreePlay({
   io: session.io,
   mind: createModelFreePlayMind({
