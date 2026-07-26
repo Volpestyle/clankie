@@ -27,6 +27,8 @@ import {
   type DiscordPresenceWrite,
   type DiscordPresenceWriteResult,
   type DiscordPresenceChannelTurnRequest,
+  type CaptainEpisode,
+  type CaptainSessionLaneV2,
   type DiscordPersonIdentity,
   type DiscordPersonMemoryDeleteResult,
   type DiscordPersonMemoryExport,
@@ -549,6 +551,25 @@ export class ClankieApiClient {
       `/v1/memory/discord-people/${encodeURIComponent(identity.guildId)}/${encodeURIComponent(identity.userId)}${suffix}`,
       { headers: this.captainHeaders() },
     );
+  }
+
+  public recordCaptainEpisode(episode: CaptainEpisode): Promise<{ episodeId: string }> {
+    return this.request("/v1/memory/captain-episodes", {
+      method: "POST",
+      headers: this.captainHeaders(),
+      body: JSON.stringify(episode),
+    });
+  }
+
+  /**
+   * The lane is the recall scope, so it must come from the eve channel the
+   * control plane stamped — never from anything the model chose. There is
+   * deliberately no tool wrapping this call.
+   */
+  public recallCaptainEpisodes(lane: CaptainSessionLaneV2): Promise<{ recallCard: string }> {
+    return this.request(`/v1/memory/captain-episodes?lane=${encodeURIComponent(lane)}`, {
+      headers: this.captainHeaders(),
+    });
   }
 
   public exportDiscordPersonMemory(identity: DiscordPersonIdentity): Promise<DiscordPersonMemoryExport> {

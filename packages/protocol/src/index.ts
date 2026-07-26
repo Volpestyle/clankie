@@ -3010,3 +3010,47 @@ export const DiscordPersonMemoryDeleteResultSchema = z
   })
   .strict();
 export type DiscordPersonMemoryDeleteResult = z.infer<typeof DiscordPersonMemoryDeleteResultSchema>;
+
+// ---------------------------------------------------------------------------
+// Captain episodes (ADR 0054).
+//
+// The second memory trust class. A `MemoryFact` is a claim about the world and
+// enters memory only through an approval envelope; an episode is Clankie's own
+// note about his own activity, so it is written without one. Keeping them in
+// separate shapes is what lets the world-fact fences stay closed while he still
+// remembers having been somewhere.
+// ---------------------------------------------------------------------------
+
+/** Where an episode may resurface. There is no "public only" scope: a room he was in already knows. */
+export const CaptainEpisodeVisibilitySchema = z.enum(["shareable", "operator_private"]);
+export type CaptainEpisodeVisibility = z.infer<typeof CaptainEpisodeVisibilitySchema>;
+
+export const CAPTAIN_EPISODE_SUMMARY_MAX = 512;
+
+export const CaptainEpisodeSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    episodeId: z.string().trim().min(1).max(256),
+    /** The room it happened in, so recall can say where without holding its transcript. */
+    lane: CaptainSessionLaneV2Schema,
+    targetId: z.string().trim().min(1).max(512),
+    summary: z.string().trim().min(1).max(CAPTAIN_EPISODE_SUMMARY_MAX),
+    visibility: CaptainEpisodeVisibilitySchema,
+    provenance: z
+      .object({
+        characterId: z.string().trim().min(1).max(512),
+        sessionId: z.string().trim().min(1).max(512),
+        /**
+         * Structural assertions, not descriptions. An episode is Clankie
+         * summarizing himself; anything asserting a fact about the world belongs
+         * in `MemoryFactSchema` behind its approval gate, and raw untrusted text
+         * never becomes durable memory in either shape.
+         */
+        selfAuthored: z.literal(true),
+        rawTranscript: z.literal(false),
+      })
+      .strict(),
+    occurredAt: z.string().datetime(),
+  })
+  .strict();
+export type CaptainEpisode = z.infer<typeof CaptainEpisodeSchema>;

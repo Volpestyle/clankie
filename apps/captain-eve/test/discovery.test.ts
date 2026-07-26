@@ -42,6 +42,7 @@ describe("captain Eve authored surface", () => {
       "decide_action",
       "get_mission",
       "get_self_state",
+      "remember_episode",
       "start_mission",
       "steer_worker",
       "submit_plan",
@@ -54,6 +55,7 @@ describe("captain Eve authored surface", () => {
       hooks: { slug: string }[];
     };
     expect(manifest.config.compaction).toEqual({ thresholdPercent: 1 });
+    expect(manifest.hooks.map((hook) => hook.slug)).toContain("captain-episodes");
     expect(manifest.hooks.map((hook) => hook.slug)).toContain("captain-lanes");
     expect(manifest.hooks.map((hook) => hook.slug)).toContain("captain-presence");
     expect(manifest.hooks.map((hook) => hook.slug)).toContain("recent-tool-results");

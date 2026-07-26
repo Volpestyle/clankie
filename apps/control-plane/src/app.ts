@@ -39,7 +39,9 @@ import {
   MemoryFactSchema,
   type ApplyDiscordPersonProposalResult,
   type ApplyProposalResult,
+  type CaptainEpisode,
   type DiscordPersonIdentity,
+  type EpisodeRecallOptions,
   type DiscordPersonMemoryExport,
   type DiscordPersonMemoryFact,
   type DiscordPersonMemoryReadOptions,
@@ -54,7 +56,9 @@ import {
   ActionResourceSchema,
   ActionRequestSchema,
   CaptainChannelTurnResultSchema,
+  CaptainEpisodeSchema,
   CaptainPresenceReportSchema,
+  CaptainSessionLaneV2Schema,
   DiscordPresenceChannelTurnRequestSchema,
   DiscordPresenceWriteSchema,
   DISCORD_TRANSPORT_ACTION_RISK_CLASS,
@@ -245,6 +249,8 @@ export interface MemoryStorePort {
   ): readonly DiscordPersonMemoryFact[];
   recallDiscordPersonCard(identity: DiscordPersonIdentity, options: DiscordPersonRecallOptions): string;
   recallCard(options: RecallCardOptions): string;
+  recordEpisode(input: unknown): CaptainEpisode;
+  episodeRecallCard(options: EpisodeRecallOptions): string;
   pruneRetention(now?: Date): readonly string[];
 }
 
@@ -1766,6 +1772,35 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
   });
 
   /**
+   * Operator-readable presence status for `clankie status`.
+   *
+   * ADR 0024 requires operator status to come from the semantic phase stream
+   * rather than bot log text, but the full session records above are captain
+   * scoped — they carry the identity an action must claim. So this projects only
+   * the fields an operator needs to answer "is the bridge actually present?":
+   * phase, gateway flag, and counts. No session id, credential ref, character
+   * id, or revision, so reading status can never supply what acting requires.
+   */
+  app.get("/v1/discord/presence-status", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable") {
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    }
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    return context.json({
+      schemaVersion: 1 as const,
+      sessions: discordPresenceSessions.list().map((session) => ({
+        phase: session.phase,
+        gatewayConnected: session.gatewayConnected,
+        transportKind: session.transportKind,
+        voiceGuildCount: session.voiceGuildIds.length,
+        activityCount: session.activityInstances.length,
+        updatedAt: session.updatedAt,
+      })),
+    });
+  });
+
+  /**
    * Records the owner's acceptance of user-session transport risk (ADR 0048).
    *
    * Operator-authenticated on purpose: this is the one gate that cannot be an
@@ -2611,6 +2646,68 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       subject: identity.data,
       facts,
       ...(recallCard === undefined ? {} : { recallCard }),
+    });
+  });
+
+  app.post("/v1/memory/captain-episodes", async (context) => {
+    if (!dependencies.memoryStore || !dependencies.eventStore) {
+      return context.json({ error: "memory_store_unavailable" }, 503);
+    }
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") {
+      return context.json({ error: "episode_authentication_unavailable" }, 503);
+    }
+    if (!captain) return context.json({ error: "episode_authentication_required" }, 401);
+    const episode = CaptainEpisodeSchema.safeParse(await readJson(context.req.raw));
+    if (!episode.success) return context.json({ error: "invalid_captain_episode" }, 400);
+    const recorded = dependencies.memoryStore.recordEpisode(episode.data);
+    await recordEvent(
+      "captain.episode.recorded",
+      CAPTAIN_EPISODE_MISSION_ID,
+      clock().toISOString(),
+      {
+        lane: recorded.lane,
+        visibility: recorded.visibility,
+        // The summary itself is deliberately absent: the event log is a
+        // different retention regime than the bounded episode ring.
+        summaryLength: recorded.summary.length,
+      },
+      { correlationId: `captain-episode:record:${idFactory()}` },
+    );
+    return context.json({ schemaVersion: 1, episodeId: recorded.episodeId });
+  });
+
+  /**
+   * Recall is scoped by the lane the *caller declares*, and that is deliberate:
+   * inside captain-eve a Discord turn and an operator turn authenticate with the
+   * same process credential, so the server cannot derive the lane from the
+   * bearer. The fence that matters is upstream — the lane is read from the eve
+   * channel the control plane itself stamped, in an instruction hook the model
+   * cannot reach, and never from a tool the model could aim at `operator`.
+   */
+  app.get("/v1/memory/captain-episodes", async (context) => {
+    if (!dependencies.memoryStore) {
+      return context.json({ error: "memory_store_unavailable" }, 503);
+    }
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") {
+      return context.json({ error: "episode_authentication_unavailable" }, 503);
+    }
+    if (!captain) return context.json({ error: "episode_authentication_required" }, 401);
+    const lane = CaptainSessionLaneV2Schema.safeParse(context.req.query("lane"));
+    if (!lane.success) return context.json({ error: "invalid_captain_episode_lane" }, 400);
+    // A Discord-scoped bearer can never be in the operator lane, whatever it
+    // asks for. This does not cover the in-process case above, but it does stop
+    // a compromised bridge credential from reading operator-private episodes.
+    const discordBearer =
+      captain.steerSourceLane === "discord_text" || captain.steerSourceLane === "discord_voice";
+    if (discordBearer && lane.data === "operator") {
+      return context.json({ error: "operator_lane_recall_forbidden" }, 403);
+    }
+    return context.json({
+      schemaVersion: 1,
+      lane: lane.data,
+      recallCard: dependencies.memoryStore.episodeRecallCard({ lane: lane.data }),
     });
   });
 
@@ -4709,6 +4806,9 @@ function applyDiscordPersonMemoryEvent(
     committed.add(z.string().min(1).parse(event.data.proposalId));
   }
 }
+
+/** Episodes are the captain's own, not any one mission's, so they share one stream. */
+const CAPTAIN_EPISODE_MISSION_ID = "captain:episodes";
 
 function discordPersonMemoryEventMissionId(identity: DiscordPersonIdentity): string {
   const subject = DiscordPersonIdentitySchema.parse(identity);

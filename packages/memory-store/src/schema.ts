@@ -1,11 +1,17 @@
 import { z } from "zod";
 import {
   ApprovedDiscordPersonMemoryProposalSchema,
+  CaptainEpisodeSchema,
+  CaptainEpisodeVisibilitySchema,
+  CaptainSessionLaneV2Schema,
   DiscordPersonIdentitySchema,
   DiscordPersonMemoryFactSchema,
   DiscordPersonMemoryKindSchema,
   DiscordPersonMemoryVisibilitySchema,
   type ApprovedDiscordPersonMemoryProposal,
+  type CaptainEpisode,
+  type CaptainEpisodeVisibility,
+  type CaptainSessionLaneV2,
   type DiscordPersonIdentity,
   type DiscordPersonMemoryFact,
   type DiscordPersonMemoryKind,
@@ -14,6 +20,9 @@ import {
 
 export {
   ApprovedDiscordPersonMemoryProposalSchema,
+  CaptainEpisodeSchema,
+  CaptainEpisodeVisibilitySchema,
+  CaptainSessionLaneV2Schema,
   DiscordPersonIdentitySchema,
   DiscordPersonMemoryFactSchema,
   DiscordPersonMemoryKindSchema,
@@ -21,6 +30,9 @@ export {
 };
 export type {
   ApprovedDiscordPersonMemoryProposal,
+  CaptainEpisode,
+  CaptainEpisodeVisibility,
+  CaptainSessionLaneV2,
   DiscordPersonIdentity,
   DiscordPersonMemoryFact,
   DiscordPersonMemoryKind,
