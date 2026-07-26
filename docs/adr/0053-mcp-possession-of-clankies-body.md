@@ -139,7 +139,11 @@ be revisited rather than inherited.
   could each hold what they believed was the only body. `acquireBodyLock` makes
   that a refusal naming the holding process, verified across two real processes.
   It expires by liveness (`kill(pid, 0)`) rather than by time, so a crash cannot
-  brick the body and a long playthrough cannot be evicted mid-turn. Consequently
+  brick the body and a long playthrough cannot be evicted mid-turn. The MCP
+  server takes it **on possession, not at startup**: clients launch stdio servers
+  freely, so locking at process start made the first server win and every later
+  one fail to connect at all. Looking is not driving, and the lock follows
+  driving. Consequently
   the body is a **single-machine** resource; `CLANKIE_GBA_BODY_ROOT` is the
   documented way to run a second, separate body.
 - Both Discord ports refuse by default with errors naming what is missing.

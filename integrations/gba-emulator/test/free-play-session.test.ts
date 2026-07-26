@@ -40,3 +40,31 @@ describe("shared body root", () => {
     expect(defaultGbaBodyRootDir({ CLANKIE_GBA_BODY_ROOT: override } as NodeJS.ProcessEnv)).toBe(override);
   });
 });
+
+describe("observe-only sessions", () => {
+  it("lets several coexist on one body", async () => {
+    // An MCP client starts stdio servers freely — `claude mcp list`, every
+    // session, every retry. Locking at construction made the first server win
+    // and every later one fail to connect at all, which is contention over
+    // existing rather than over the body. Observation is not driving.
+    const rootDir = mkdtempSync(path.join(tmpdir(), "observe-only-"));
+    const first = await createFreePlaySession({ rootDir, scenario, fixtureSha256, acquireBody: false });
+    const second = await createFreePlaySession({ rootDir, scenario, fixtureSha256, acquireBody: false });
+    expect(second.sessionId).toBe(first.sessionId);
+    first.close();
+    second.close();
+  });
+
+  it("still refuses a driver while an observer is up", async () => {
+    const rootDir = mkdtempSync(path.join(tmpdir(), "observe-then-drive-"));
+    const observer = await createFreePlaySession({ rootDir, scenario, fixtureSha256, acquireBody: false });
+    const driver = await createFreePlaySession({ rootDir, scenario, fixtureSha256 });
+    // The observer took nothing, so the driver gets the body; a second driver
+    // does not.
+    await expect(createFreePlaySession({ rootDir, scenario, fixtureSha256 })).rejects.toThrow(
+      /body is already held/i,
+    );
+    driver.close();
+    observer.close();
+  });
+});

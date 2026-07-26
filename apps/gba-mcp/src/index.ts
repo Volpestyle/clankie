@@ -1,6 +1,7 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { bootGbaGame, defaultGbaBodyRootDir, createFreePlaySession } from "@clankie/gba-emulator";
 import { PossessionLease, parsePossessionHolders } from "./possession.ts";
+import { acquireBodyLock, type BodyLock } from "@clankie/gba-emulator";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { createGbaMcpServer } from "./server.ts";
@@ -31,11 +32,17 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     ),
   });
 
+  const bodyRoot = defaultGbaBodyRootDir();
   const session = await createFreePlaySession({
-    rootDir: defaultGbaBodyRootDir(),
-  holderId: "gba-mcp",
+    rootDir: bodyRoot,
+    holderId: "gba-mcp",
     scenario: game.scenario,
     fixtureSha256: game.fixtureSha256,
+    // Starting this server is not driving the body. Clients launch stdio
+    // servers freely — `claude mcp list`, every session, every retry — so
+    // locking at startup means the first one wins and the rest fail to
+    // connect at all. The lock is taken when someone possesses him, below.
+    acquireBody: false,
     ...(game.coreFactory === undefined ? {} : { coreFactory: game.coreFactory }),
   });
 
@@ -43,12 +50,27 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   // works. A possessor is its own principal class, never the ambient or voice
   // tier (ADR 0050's precedent for adding a tier).
   const holders = parsePossessionHolders(process.env["CLANKIE_GBA_POSSESSION_HOLDERS"]);
+  // Possession is what takes the body, so possession is what takes the lock.
+  // Observation needs neither (ADR 0053), which is what lets several servers
+  // coexist while only one of them can ever drive.
+  let bodyLock: BodyLock | null = null;
   const possession = new PossessionLease({
     allowedHolders: holders,
     onEvent: (event) => {
       process.stderr.write(
         `possession ${event.type}: ${event.holderId}${event.reason === undefined ? "" : ` (${event.reason})`}\n`,
       );
+    },
+    onHeldChange: (held) => {
+      if (held && bodyLock === null) {
+        // Throws BodyBusyError if another process is driving. Refusing here is
+        // right: it refuses the possession, not the server's existence.
+        const holderId = possession.current()?.holderId ?? "unknown";
+        bodyLock = acquireBodyLock({ rootDir: bodyRoot, holderId: `gba-mcp:${holderId}` });
+      } else if (!held && bodyLock !== null) {
+        bodyLock.release();
+        bodyLock = null;
+      }
     },
   });
 
@@ -66,6 +88,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   // but releasing on a clean exit means the next process starts immediately
   // instead of waiting for a stale-holder check.
   const release = (): void => {
+    bodyLock?.release();
+    bodyLock = null;
     session.close();
   };
   process.once("exit", release);

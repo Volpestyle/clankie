@@ -207,8 +207,17 @@ lockfile decides which *process* owns the body at all, because the two questions
 have different answers: the lease is in-memory and a second process has its own
 memory.
 
-Every entrypoint — this server, `pnpm gba:free-play`, `pnpm gba:free-play-live` —
-resolves the same body root and takes `body.lock` there before touching the core.
+Every entrypoint resolves the same body root, but they take `body.lock` at
+different moments. A loop that starts driving immediately takes it at startup.
+**This server does not** — it takes the lock when someone *possesses* him, and
+releases it on release.
+
+That distinction is load-bearing. An MCP client starts stdio servers freely:
+`claude mcp list`, every session, every retry. Locking at process start meant the
+first server won the body and every later one died with `BodyBusyError` before it
+could serve a single tool call — contention over *existing*, not over the body.
+Observation is not driving, so several servers can now coexist and look, while
+only one of them can ever act.
 A second one is refused with the holder's name and pid:
 
 ```text

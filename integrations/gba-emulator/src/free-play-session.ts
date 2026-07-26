@@ -46,6 +46,18 @@ export interface FreePlaySessionInput {
    * refusal tells you which process to stop.
    */
   holderId?: string;
+  /**
+   * Take the exclusive body lock at construction. True for a loop that starts
+   * driving immediately; **false** for a server that only observes until
+   * someone possesses it.
+   *
+   * An MCP server must pass false. Clients start stdio servers freely — `claude
+   * mcp list`, every session, every retry — so a lock taken at process start
+   * means the first server wins and every later one dies with `BodyBusyError`.
+   * That is not contention over the body, it is contention over *existing*, and
+   * observation is not driving (ADR 0053).
+   */
+  acquireBody?: boolean;
 }
 
 export interface FreePlaySession {
@@ -101,11 +113,14 @@ export async function createFreePlaySession(input: FreePlaySessionInput): Promis
     },
     clock,
   });
-  // Before anything touches the core: one writer per body, across processes.
-  const lock: BodyLock = acquireBodyLock({
-    rootDir: input.rootDir,
-    holderId: input.holderId ?? `gba-free-play:${input.scenario.scenarioId}`,
-  });
+  // Before anything drives the core: one writer per body, across processes.
+  const lock: BodyLock | null =
+    input.acquireBody === false
+      ? null
+      : acquireBodyLock({
+          rootDir: input.rootDir,
+          holderId: input.holderId ?? `gba-free-play:${input.scenario.scenarioId}`,
+        });
 
   let grant;
   try {
@@ -118,7 +133,7 @@ export async function createFreePlaySession(input: FreePlaySessionInput): Promis
       leaseDurationMs: 300_000,
     });
   } catch (error) {
-    lock.release();
+    lock?.release();
     throw error;
   }
 
@@ -153,5 +168,12 @@ export async function createFreePlaySession(input: FreePlaySessionInput): Promis
     },
   };
 
-  return { io, sessionId, events, close: () => lock.release() };
+  return {
+    io,
+    sessionId,
+    events,
+    close: () => {
+      lock?.release();
+    },
+  };
 }
