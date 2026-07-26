@@ -41,6 +41,7 @@ describe("captain Eve authored surface", () => {
       "create_mission",
       "decide_action",
       "get_mission",
+      "get_self_state",
       "start_mission",
       "steer_worker",
       "submit_plan",
