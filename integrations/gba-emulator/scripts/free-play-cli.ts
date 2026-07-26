@@ -115,7 +115,9 @@ process.stdin.on("data", (chunk: string) => {
     if (line.trim().length > 0) interjections.offer(line);
   }
 });
-process.stdin.unref();
+// unref only exists on some stdin kinds; without the guard the CLI crashes
+// outright when stdin is a file or already closed.
+if (typeof process.stdin.unref === "function") process.stdin.unref();
 if (process.stdin.isTTY === true) {
   console.log("(type anything and press enter to say it to him)\n");
 }
@@ -129,6 +131,8 @@ const result = await runFreePlay({
   }),
   turns,
   interjections,
+  // Honest by default: someone is running this and reading the output.
+  audience: process.env["CLANKIE_FREE_PLAY_AUDIENCE"] ?? "one person, watching this run in a terminal",
   // The real core renders; the double does not. Both the digest and the image
   // come from the same snapshot so the trace and the model agree on the frame.
   framebufferSha256: () => {
@@ -160,6 +164,11 @@ console.log(
     `${String(p.turnsSinceNewTile)} turns since a new tile` +
     (p.actionsPerNewTile === null ? "" : ` · ${p.actionsPerNewTile.toFixed(1)} actions per new tile`),
 );
+const v = result.volition;
+console.log(
+  `volition: spoke ${String(v.taken)} of ${String(v.offered)} turns` +
+    (v.suppressed === 0 ? "" : ` · ${String(v.suppressed)} held by the cooldown`),
+);
 console.log(
   result.coherence === null
     ? "follow-through: not scoreable"
@@ -187,6 +196,7 @@ function print(turn: FreePlayTurn): void {
   console.log(`          ${marker} ${action}${detail}`);
   if (turn.interjection !== null) console.log(`   you: ${turn.interjection}`);
   if (turn.reply !== null) console.log(`   clankie: ${turn.reply}`);
+  if (turn.speak !== null) console.log(`   clankie (unprompted): ${turn.speak}`);
   if (turn.effect !== null) console.log(`          ${turn.effect}`);
   if (turn.intent !== null) console.log(`          next: ${turn.intent}\n`);
 }

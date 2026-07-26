@@ -47,6 +47,17 @@ export const FREE_PLAY_OBJECTIVE_MAX = 160;
 export const FREE_PLAY_INTERJECTION_MAX = 500;
 /** What he says back. Discord's own message limit. */
 export const FREE_PLAY_REPLY_MAX = 2_000;
+/** Something he chose to say unprompted. */
+export const FREE_PLAY_SPEAK_MAX = 400;
+/**
+ * Minimum turns between unprompted remarks.
+ *
+ * A rate gate, deliberately not a content rule. Nothing here decides *what* is
+ * worth saying — no "speak on a new map", no "speak after a battle" — because a
+ * rule per trigger produces a narrator hitting marks. He reads the situation and
+ * decides; this only stops him talking over himself.
+ */
+export const FREE_PLAY_SPEAK_COOLDOWN_TURNS = 4;
 
 export const FreePlayDecisionSchema = z
   .object({
@@ -71,6 +82,13 @@ export const FreePlayDecisionSchema = z
      * anything, which is most turns.
      */
     reply: z.string().max(FREE_PLAY_REPLY_MAX).nullish(),
+    /**
+     * Something he says because he wants to, with nobody having asked.
+     *
+     * Null on most turns and that is correct — silence is the default. This is
+     * the difference between a character and a narrator.
+     */
+    speak: z.string().max(FREE_PLAY_SPEAK_MAX).nullish(),
     /**
      * His notes, rewritten by him each turn. Nothing else writes this: it is
      * memory he chose to keep, not a summary the harness imposed.
@@ -107,6 +125,16 @@ export interface FreePlayView {
   notes: string | null;
   /** His standing objective, carried until he changes it. */
   objective: string | null;
+  /** Turns since he last said something unprompted; null if he never has. */
+  turnsSinceSpoke: number | null;
+  /**
+   * Who, if anyone, is around to hear him.
+   *
+   * Volition needs an audience. Told nothing, he correctly says nothing — a
+   * character does not make asides to an empty room, and the first measured run
+   * spoke on 0 of 12 turns for exactly that reason.
+   */
+  audience: string | null;
   /**
    * What someone said to him since the last turn, if anything.
    *
@@ -145,6 +173,10 @@ export const FreePlayTurnSchema = z
     /** Recorded so an interjection's influence on the run stays auditable. */
     interjection: z.string().max(FREE_PLAY_INTERJECTION_MAX).nullable(),
     reply: z.string().max(FREE_PLAY_REPLY_MAX).nullable(),
+    /** What he chose to say unprompted, after the rate gate. */
+    speak: z.string().max(FREE_PLAY_SPEAK_MAX).nullable(),
+    /** He wanted to speak but the gate held him. Measures whether it binds. */
+    speakSuppressed: z.boolean(),
     action: GbaEmulatorActionSchema.nullable(),
     outcome: z.enum(["accepted", "rejected_by_adapter", "invalid_decision", "mind_failed"]),
     /** Bounded reason when the turn did not produce an accepted action. */
@@ -158,9 +190,19 @@ export const FreePlayTurnSchema = z
   .strict();
 export type FreePlayTurn = z.infer<typeof FreePlayTurnSchema>;
 
+export interface FreePlayVolition {
+  /** Turns where he could have spoken — every turn. */
+  offered: number;
+  /** Turns he chose to. */
+  taken: number;
+  /** Turns he chose to but the gate held him. */
+  suppressed: number;
+}
+
 export interface FreePlayResult {
   turns: FreePlayTurn[];
   progress: FreePlayProgress;
+  volition: FreePlayVolition;
   /** Turns whose action the adapter accepted. */
   accepted: number;
   /**
@@ -211,6 +253,10 @@ export interface RunFreePlayInput {
   historyLimit?: number;
   /** Where mid-play questions land. Absent means nobody can talk to him. */
   interjections?: InterjectionQueue;
+  /** Minimum turns between unprompted remarks. */
+  speakCooldownTurns?: number;
+  /** Who is listening. Absent means he is alone and will reasonably stay quiet. */
+  audience?: string;
 }
 
 export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResult> {
@@ -219,6 +265,9 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
   const history: { intent: string; action: GbaEmulatorAction; outcome: string; effect: string }[] = [];
   let notes: string | null = null;
   let objective: string | null = null;
+  let lastSpokeTurn: number | null = null;
+  const volition: FreePlayVolition = { offered: 0, taken: 0, suppressed: 0 };
+  const cooldown = input.speakCooldownTurns ?? FREE_PLAY_SPEAK_COOLDOWN_TURNS;
   const progress = new FreePlayProgressTracker();
   progress.seed(positionOf(observe(input.io)));
 
@@ -238,6 +287,8 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
       objective,
       interjection: null,
       reply: null,
+      speak: null,
+      speakSuppressed: false,
     };
 
     // Taken at the boundary, before he decides, so a question reaches the turn
@@ -255,6 +306,8 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
         notes,
         objective,
         interjection,
+        turnsSinceSpoke: lastSpokeTurn === null ? null : turn - lastSpokeTurn,
+        audience: input.audience ?? null,
         history: [...history],
       });
     } catch (error) {
@@ -284,6 +337,23 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     }
     record.objective = objective;
     record.reply = parsed.data.reply ?? null;
+
+    // Every turn is an opportunity; the gate only limits how often he takes it.
+    volition.offered += 1;
+    const wants = parsed.data.speak ?? null;
+    if (wants !== null && wants.trim().length > 0) {
+      const ready = lastSpokeTurn === null || turn - lastSpokeTurn >= cooldown;
+      if (ready) {
+        record.speak = wants;
+        lastSpokeTurn = turn;
+        volition.taken += 1;
+      } else {
+        // Held, not dropped silently: a gate that never binds is a gate nobody
+        // needs, and one that always binds is a muzzle. Both show up here.
+        record.speakSuppressed = true;
+        volition.suppressed += 1;
+      }
+    }
     record.action = parsed.data.action;
 
     let accepted = false;
@@ -330,6 +400,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     turns,
     accepted: turns.filter((t) => t.outcome === "accepted").length,
     progress: progress.snapshot(),
+    volition,
     ...coherence(turns),
   };
 }

@@ -237,6 +237,45 @@ noise rather than with worse play.
 The practical conclusion for anyone tuning this: measure the model before
 tuning the harness.
 
+### Volition is built and he does not use it
+
+He can say something unprompted: `speak` is a field he may return null for, gated
+only by a rate cooldown. The gate is deliberately **not** a content rule — no
+"speak on a new map", no "speak after a battle" — because a rule per trigger
+produces a narrator hitting marks. He reads the situation and decides; the gate
+only stops him talking over himself.
+
+Measured across four tuned attempts on the real ROM, **he spoke on 0 of 12 turns
+every time**. The mechanism is not broken: unit tests confirm the loop records a
+remark, counts it, enforces the cooldown, and reports offered-versus-taken. He is
+choosing silence.
+
+What was tried, in order, and what it tells us:
+
+| Attempt                                                      | Result                                      |
+| ------------------------------------------------------------ | ------------------------------------------- |
+| Prompt framing: silence is normal                            | 0/12 — over-corrected, he took it literally |
+| Split channels: monologue is reasoning, `speak` is the aside | 0/12                                        |
+| Give him an audience to speak to                             | 0/12                                        |
+| Schema field descriptions, then a concrete example           | 0/12                                        |
+
+The likely cause is visible in the transcripts rather than the numbers: **all the
+character is already going into `monologue`** — "I bonked the help sign.
+Thrilling literature, truly", "no need to tour the rug like it owes me money".
+The impulse to remark is being satisfied by a required field that nobody hears,
+so the optional one stays empty.
+
+Two readings remain open and one run cannot separate them. Either the split is
+wrong — the aside and the reasoning are one act for him, and the honest design is
+to _route_ monologue outward rather than ask for a second voice — or volition
+genuinely needs a real audience, and a terminal is not one. He replies readily
+when a person actually speaks to him (V1), which is weak evidence for the second.
+
+**This is recorded as an unresolved result rather than tuned until the number
+moves.** Forcing the rate with a stronger instruction would produce exactly the
+narrator the feature exists to avoid, and the next honest test is putting him in
+front of people rather than adding a fifth prompt revision.
+
 ### Failure is a turn outcome, not an exception
 
 A playthrough must survive its own participants. Four outcomes are recorded and

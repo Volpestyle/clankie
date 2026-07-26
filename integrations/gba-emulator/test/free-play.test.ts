@@ -393,3 +393,48 @@ describe("interjection", () => {
     expect(result.turns[0]?.outcome).toBe("invalid_decision");
   });
 });
+
+describe("volition", () => {
+  it("records an unprompted remark and counts it", async () => {
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: mind([{ ...press("up", "up"), speak: "this desk has beaten me four times now" }]),
+      turns: 1,
+    });
+    expect(result.turns[0]?.speak).toContain("desk");
+    expect(result.volition).toMatchObject({ offered: 1, taken: 1, suppressed: 0 });
+  });
+
+  it("holds a second remark inside the cooldown rather than dropping it silently", async () => {
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: mind([{ ...press("up", "up"), speak: "chatty" }]),
+      turns: 3,
+      speakCooldownTurns: 5,
+    });
+    // Spoke once, then wanted to twice more and was held.
+    expect(result.volition).toMatchObject({ offered: 3, taken: 1, suppressed: 2 });
+    expect(result.turns[1]?.speakSuppressed).toBe(true);
+    expect(result.turns[1]?.speak).toBeNull();
+  });
+
+  it("lets him speak again once the cooldown has passed", async () => {
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: mind([{ ...press("up", "up"), speak: "again" }]),
+      turns: 4,
+      speakCooldownTurns: 2,
+    });
+    expect(result.volition.taken).toBe(2);
+  });
+
+  it("treats silence as normal, not as a failure", async () => {
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: mind([press("up", "up")]),
+      turns: 3,
+    });
+    expect(result.volition).toMatchObject({ offered: 3, taken: 0, suppressed: 0 });
+    expect(result.accepted).toBe(3);
+  });
+});
