@@ -85,6 +85,16 @@ export {
   type DiscordBridgeCredentialOptions,
 } from "./discord-bridge-credential.ts";
 export {
+  CAPTAIN_CREDENTIAL_PROVIDER_ID,
+  CaptainCredentialError,
+  ensureCaptainCredential,
+  mintCaptainToken,
+  resolveCaptainCredential,
+  type CaptainCredentialErrorCode,
+  type CaptainCredentialOptions,
+  type ResolvedCaptainCredential,
+} from "./captain-credential.ts";
+export {
   ensureOperatorCredential,
   inspectOperatorCredential,
   mintOperatorToken,
