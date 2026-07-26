@@ -12,6 +12,7 @@
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {
+    "@clankie/captain-runtime": "workspace:*",
     "@clankie/credential-broker": "workspace:*",
     "@clankie/doctrine": "workspace:*",
     "@clankie/event-store": "workspace:*",
@@ -20,6 +21,7 @@
     "@clankie/mission-engine": "workspace:*",
     "@clankie/observability": "workspace:*",
     "@clankie/protocol": "workspace:*",
+    "@clankie/settings": "workspace:*",
     "@clankie/tracker-connector": "workspace:*",
     "@clankie/worker-sdk": "workspace:*",
     "@hono/node-server": "2.0.8",

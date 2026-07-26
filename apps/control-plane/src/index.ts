@@ -13,6 +13,7 @@ import { compileDoctrine, loadDoctrineFile, projectCaptainCeremony } from "@clan
 import { SqliteEventStore } from "@clankie/event-store";
 import { createLogger } from "@clankie/observability";
 import { MemoryStore } from "@clankie/memory-store";
+import { applyDiscordSettingsToEnvironment, SettingsStore } from "@clankie/settings";
 import type {
   AttentionDeliveryAdapter,
   LinearAgentRuntimePort,
@@ -31,6 +32,27 @@ import { FileWorkerSteeringStore } from "./worker-steering.ts";
 import { RunnerWorkerTranscriptClient } from "./worker-transcripts.ts";
 
 const logger = createLogger({ service: "clankie-control-plane", version: "0.1.0" });
+
+/**
+ * Fills the Discord environment from settings.json before anything reads it.
+ *
+ * The control plane, not the bridge, hosts the presence runtime module and so
+ * owns the guild and channel allowlists it enforces. That module reads
+ * `DISCORD_PRESENCE_*` straight from the environment, and only the bridge and
+ * the user-session app were filling those from settings — each for itself. The
+ * control plane therefore built its allowlists from an empty environment and
+ * denied every channel, so a Discord message was accepted by the bridge,
+ * answered by the captain, and then refused at the last step with
+ * `discord_bot_channel_not_allowed` while settings.json plainly listed the
+ * channel. Clankie simply never replied.
+ *
+ * Applied before the runtime module import below, since that reads the values at
+ * load time. Existing environment entries win, so a deliberate override still
+ * overrides.
+ */
+const settingsFilledDiscordNames = applyDiscordSettingsToEnvironment(
+  (await new SettingsStore().load()).discord,
+);
 // Anchor default store paths to the repo root, not process.cwd(): the TUI mission
 // observer resolves the same defaults against the repo root, so a cwd-relative
 // default here silently diverges (observer "unable to open database file") whenever
@@ -198,7 +220,16 @@ const port = Number(process.env.PORT ?? 4310);
 const hostname = "127.0.0.1";
 serve({ fetch: app.fetch, port, hostname });
 logger.info(
-  { hostname, port, profileHash: doctrine.profileHash, eventStorePath, memoryStorePath },
+  {
+    hostname,
+    port,
+    profileHash: doctrine.profileHash,
+    eventStorePath,
+    memoryStorePath,
+    // Names only, never values: which allowlists came from settings.json rather
+    // than the shell is exactly what was invisible when every channel was denied.
+    settingsFilledDiscordNames,
+  },
   "control plane listening",
 );
 
