@@ -200,10 +200,24 @@ told a guest is driving. That trade rests on the deployment being private and
 its participants known to the owner, and ADR 0053 records the trigger for
 revisiting it.
 
-## Not yet
+## One body, one process
 
-Cross-process arbitration. The lease is in-process, so it protects a co-hosted
-loop but does not stop a _separate_ free-play process from driving the same
-session. The environment lease in `EnvironmentRuntime` is the mechanism for that
-and is not yet wired to possession — until it is, do not run this server and the
-free-play CLI against one session.
+The possession lease decides which harness drives a running loop. A separate
+lockfile decides which *process* owns the body at all, because the two questions
+have different answers: the lease is in-memory and a second process has its own
+memory.
+
+Every entrypoint — this server, `pnpm gba:free-play`, `pnpm gba:free-play-live` —
+resolves the same body root and takes `body.lock` there before touching the core.
+A second one is refused with the holder's name and pid:
+
+```text
+Clankie's body is already held by free-play-live (pid 47221, since …).
+Stop that process, or set CLANKIE_GBA_BODY_ROOT to drive a separate body.
+```
+
+The lock expires by **liveness**, not by time: a holder whose process is gone is
+reclaimed, so a crash cannot brick the body, and a long playthrough is never
+evicted mid-turn by a timeout. `kill(pid, 0)` is a single-machine check, which is
+the same boundary the emulator already has. `CLANKIE_GBA_BODY_ROOT` points a
+process at a different body when you genuinely want two.

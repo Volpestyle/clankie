@@ -1,8 +1,6 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { bootGbaGame, createFreePlaySession } from "@clankie/gba-emulator";
+import { bootGbaGame, defaultGbaBodyRootDir, createFreePlaySession } from "@clankie/gba-emulator";
 import { PossessionLease, parsePossessionHolders } from "./possession.ts";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { createGbaMcpServer } from "./server.ts";
@@ -34,7 +32,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   });
 
   const session = await createFreePlaySession({
-    rootDir: mkdtempSync(path.join(tmpdir(), "gba-mcp-")),
+    rootDir: defaultGbaBodyRootDir(),
+  holderId: "gba-mcp",
     scenario: game.scenario,
     fixtureSha256: game.fixtureSha256,
     ...(game.coreFactory === undefined ? {} : { coreFactory: game.coreFactory }),
@@ -63,6 +62,20 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     },
     { possession },
   );
+  // The body lock is reclaimed on liveness, so a crash cannot brick the body —
+  // but releasing on a clean exit means the next process starts immediately
+  // instead of waiting for a stale-holder check.
+  const release = (): void => {
+    session.close();
+  };
+  process.once("exit", release);
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.once(signal, () => {
+      release();
+      process.exit(0);
+    });
+  }
+
   // stdout is the transport, so anything printed there corrupts the protocol.
   process.stderr.write(`clankie gba mcp ready (${game.real ? "real ROM" : "deterministic core double"})\n`);
   await server.connect(new StdioServerTransport());

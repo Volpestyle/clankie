@@ -9,8 +9,7 @@
  * decisions come from a real model either way — the core double changes what he
  * is looking at, not who is choosing.
  */
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { resolveConfiguredLanguageModel } from "@clankie/model-provider";
 import { FrozenGbaScenarioSchema } from "../src/contracts.ts";
@@ -19,6 +18,7 @@ import { MgbaFireRedCore } from "../src/firered-core.ts";
 import { encodeFramebufferPng } from "../src/framebuffer-png.ts";
 import type { GbaCoreFactory } from "../src/core-seam.ts";
 import { sha256 } from "../src/core-double.ts";
+import { defaultGbaBodyRootDir } from "../src/free-play-boot.ts";
 import { createModelFreePlayMind } from "../src/free-play-mind.ts";
 import { SettingsStore, personaInstructions } from "@clankie/settings";
 import { InterjectionQueue, runFreePlay, type FreePlayTurn } from "../src/free-play.ts";
@@ -80,8 +80,9 @@ if (real) {
   liveCore = core;
 }
 
-const { io } = await createFreePlaySession({
-  rootDir: mkdtempSync(path.join(tmpdir(), "gba-free-play-")),
+const { io, close: releaseBody } = await createFreePlaySession({
+  rootDir: defaultGbaBodyRootDir(),
+  holderId: "free-play-cli",
   scenario,
   fixtureSha256: sha256(fixtureBytes),
   ...(coreFactory === undefined ? {} : { coreFactory }),
@@ -200,3 +201,5 @@ function print(turn: FreePlayTurn): void {
   if (turn.effect !== null) console.log(`          ${turn.effect}`);
   if (turn.intent !== null) console.log(`          next: ${turn.intent}\n`);
 }
+
+releaseBody();

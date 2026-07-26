@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { FrozenGbaScenarioSchema } from "./contracts.ts";
 import { sha256 } from "./core-double.ts";
@@ -95,4 +96,32 @@ export async function bootGbaGame(options: BootGbaGameOptions): Promise<BootedGb
     },
     real: true,
   };
+}
+
+/**
+ * Where the emulator body's environment lease lives.
+ *
+ * Every entrypoint that drives the body must use the *same* directory, because
+ * that is what makes `EnvironmentRuntime`'s existing one-writer rule apply
+ * across processes: it already refuses a second writer with "Body already has
+ * writer session", but only for sessions it can see.
+ *
+ * Previously each entrypoint made its own temp directory, so the free-play CLI
+ * and the MCP server were invisible to one another and could drive the same
+ * game at once — the footgun ADR 0053 recorded. A stable path turns that from a
+ * documented warning into a refusal.
+ */
+export function defaultGbaBodyRootDir(env: NodeJS.ProcessEnv = process.env): string {
+  const override = env["CLANKIE_GBA_BODY_ROOT"];
+  if (override !== undefined && override.length > 0) {
+    mkdirSync(override, { recursive: true });
+    return override;
+  }
+  const stateHome =
+    env["XDG_STATE_HOME"] !== undefined && env["XDG_STATE_HOME"].length > 0
+      ? env["XDG_STATE_HOME"]
+      : path.join(homedir(), ".local", "state");
+  const root = path.join(stateHome, "clankie", "gba-body");
+  mkdirSync(root, { recursive: true });
+  return root;
 }

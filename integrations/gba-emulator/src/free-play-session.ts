@@ -6,6 +6,7 @@ import {
 } from "@clankie/interactive-environment";
 import { EnvironmentRuntime } from "@clankie/environment-runtime";
 import { GbaEmulatorAdapter } from "./adapter.ts";
+import { acquireBodyLock, type BodyLock } from "./body-lock.ts";
 import type { GbaAdapterScenario, GbaCoreFactory } from "./core-seam.ts";
 import type { GbaDriverIo } from "./driver.ts";
 
@@ -39,10 +40,18 @@ export interface FreePlaySessionInput {
    */
   coreFactory?: GbaCoreFactory;
   clock?: () => Date;
+  /**
+   * Names the process in a contended-body error. Defaults to the scenario, but
+   * an entrypoint should say what it is ("gba-mcp", "free-play-live") so the
+   * refusal tells you which process to stop.
+   */
+  holderId?: string;
 }
 
 export interface FreePlaySession {
   io: GbaDriverIo;
+  /** Releases the cross-process body lock. Always call it. */
+  close: () => void;
   sessionId: string;
   events: EnvironmentEvent[];
 }
@@ -92,14 +101,26 @@ export async function createFreePlaySession(input: FreePlaySessionInput): Promis
     },
     clock,
   });
-  const grant = await runtime.start({
-    spec,
-    holderId: "gba-free-play",
-    correlationId: `free-play:${input.scenario.scenarioId}`,
-    // The runtime caps a lease at 5 minutes. A long playthrough outliving it is
-    // a real constraint for M2/M4, not something to paper over here.
-    leaseDurationMs: 300_000,
+  // Before anything touches the core: one writer per body, across processes.
+  const lock: BodyLock = acquireBodyLock({
+    rootDir: input.rootDir,
+    holderId: input.holderId ?? `gba-free-play:${input.scenario.scenarioId}`,
   });
+
+  let grant;
+  try {
+    grant = await runtime.start({
+      spec,
+      holderId: "gba-free-play",
+      correlationId: `free-play:${input.scenario.scenarioId}`,
+      // The runtime caps a lease at 5 minutes. A long playthrough outliving it
+      // is a real constraint for M2/M4, not something to paper over here.
+      leaseDurationMs: 300_000,
+    });
+  } catch (error) {
+    lock.release();
+    throw error;
+  }
 
   const session = adapter.session(sessionId);
   let sequence = 0;
@@ -132,5 +153,5 @@ export async function createFreePlaySession(input: FreePlaySessionInput): Promis
     },
   };
 
-  return { io, sessionId, events };
+  return { io, sessionId, events, close: () => lock.release() };
 }

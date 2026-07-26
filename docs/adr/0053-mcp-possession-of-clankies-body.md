@@ -131,11 +131,17 @@ be revisited rather than inherited.
 
 ## Consequences
 
-- **The lease is in-process.** It protects a co-hosted loop but does **not** stop
-  a separate free-play process driving the same session. `EnvironmentRuntime`'s
-  environment lease is the real mechanism for that and is not yet wired to
-  possession. Until it is, do not run the MCP server and the free-play CLI
-  against one session — this is a live footgun, not a theoretical one.
+- **Two locks, two jobs.** The possession lease decides which harness drives a
+  running loop; a lockfile in the shared body root decides which *process* owns
+  the body at all. `EnvironmentRuntime`'s one-writer rule turned out not to close
+  the second gap: every entrypoint constructs its own runtime, so the rule was
+  in-memory and invisible across processes — the MCP server and the free-play CLI
+  could each hold what they believed was the only body. `acquireBodyLock` makes
+  that a refusal naming the holding process, verified across two real processes.
+  It expires by liveness (`kill(pid, 0)`) rather than by time, so a crash cannot
+  brick the body and a long playthrough cannot be evicted mid-turn. Consequently
+  the body is a **single-machine** resource; `CLANKIE_GBA_BODY_ROOT` is the
+  documented way to run a second, separate body.
 - Both Discord ports refuse by default with errors naming what is missing.
   Implementing them is a change in `apps/discord-bridge`, the process holding the
   live claim and the consent registry.

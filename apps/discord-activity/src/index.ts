@@ -24,7 +24,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   // The bearer never comes from the environment.
   const token = await ensureActivityProducerCredential();
   const producerPort = positiveInt(
-    process.env.CLANKIE_ACTIVITY_PRODUCER_PORT ?? "4321",
+    // 4321 is the captain's default port; colliding defaults meant the
+    // activity server refused to start on a machine running the captain.
+    process.env.CLANKIE_ACTIVITY_PRODUCER_PORT ?? "4322",
     "CLANKIE_ACTIVITY_PRODUCER_PORT",
   );
   const producer = createFrameProducerServer({ hub, token });

@@ -9,7 +9,8 @@
     "build": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "clean": "rm -rf dist coverage"
+    "clean": "rm -rf dist coverage",
+    "viewer-probe": "tsx scripts/viewer-probe.ts"
   },
   "dependencies": {
     "@clankie/credential-broker": "workspace:*",

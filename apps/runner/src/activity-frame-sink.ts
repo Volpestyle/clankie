@@ -1,5 +1,5 @@
 import { resolveActivityProducerCredential } from "@clankie/credential-broker";
-import type { RenderedSurfaceFrame } from "@clankie/interactive-environment";
+import type { RenderedSurfaceFrame, RenderedSurfaceOverlay } from "@clankie/interactive-environment";
 import { WebSocket } from "ws";
 
 /**
@@ -39,6 +39,12 @@ export interface ActivityFrameSocket {
 
 export interface ActivityFrameSink {
   publishFrame(frame: RenderedSurfaceFrame): void;
+  /**
+   * The decoded-state sidecar shown beside the canvas. Bounded model text may
+   * cross here (ADR 0049); it is what an activity can show that a flat video
+   * stream cannot.
+   */
+  publishOverlay(overlay: RenderedSurfaceOverlay): void;
   /** Frames dropped because the producer socket was not open. Never silent. */
   readonly droppedFrameCount: number;
   readonly connected: boolean;
@@ -82,17 +88,24 @@ export function createActivityFrameSink(options: ActivityFrameSinkOptions): Acti
   };
   open();
 
+  const send = (message: unknown): void => {
+    if (socket === null || socket.readyState !== OPEN) {
+      dropped += 1;
+      return;
+    }
+    try {
+      socket.send(JSON.stringify(message));
+    } catch {
+      dropped += 1;
+    }
+  };
+
   return {
     publishFrame(frame) {
-      if (socket === null || socket.readyState !== OPEN) {
-        dropped += 1;
-        return;
-      }
-      try {
-        socket.send(JSON.stringify({ kind: "frame", frame }));
-      } catch {
-        dropped += 1;
-      }
+      send({ kind: "frame", frame });
+    },
+    publishOverlay(overlay) {
+      send({ kind: "overlay", overlay });
     },
     get droppedFrameCount() {
       return dropped;

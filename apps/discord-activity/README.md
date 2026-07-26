@@ -22,7 +22,7 @@ flowchart LR
 
 ```bash
 CLANKIE_ACTIVITY_PORT=4320 \
-CLANKIE_ACTIVITY_PRODUCER_PORT=4321 \
+CLANKIE_ACTIVITY_PRODUCER_PORT=4322 \
 pnpm --filter @clankie/discord-activity start
 ```
 
