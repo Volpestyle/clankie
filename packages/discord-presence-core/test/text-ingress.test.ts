@@ -4,9 +4,10 @@ import type {
   DiscordPresenceWrite,
   DiscordPresenceWriteResult,
 } from "@clankie/protocol";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   DiscordTextIngress,
+  TYPING_REFRESH_MS,
   type DiscordTextIngressConfig,
   type DiscordTextIngressEvidence,
   type DiscordTextIngressPort,
@@ -47,12 +48,12 @@ describe("DiscordTextIngress", () => {
         { id: "c3", body: "latest" },
       ],
     });
-    expect(port.writes[0]).toMatchObject({
+    expect(port.replies[0]).toMatchObject({
       action: "discord.presence.reply",
       identity: { presenceSessionId: "discord:dm:dm-1" },
       payload: { kind: "reply", channelId: "dm-1", messageId: "message-1" },
     });
-    expect(port.writes[0]?.identity.missionId).toBeUndefined();
+    expect(port.replies[0]?.identity.missionId).toBeUndefined();
     expect(JSON.stringify(evidence)).not.toContain("secret user text");
     expect(evidence.map((event) => event.outcome)).toEqual(["accepted", "settled"]);
   });
@@ -226,7 +227,9 @@ describe("DiscordTextIngress", () => {
     expect(first).toEqual(duplicate);
     expect(conflict).toEqual({ state: "dropped", reason: "delivery_id_conflict" });
     expect(port.turns).toHaveLength(1);
-    expect(port.writes).toHaveLength(1);
+    expect(port.replies).toHaveLength(1);
+    // The deduplicated retry and the refused conflict never re-signal typing.
+    expect(port.typing).toHaveLength(1);
     expect(evidence.map((event) => event.outcome)).toContain("deduplicated");
     expect(JSON.stringify(evidence)).not.toContain("first body");
     expect(JSON.stringify(evidence)).not.toContain("drifted body");
@@ -260,6 +263,8 @@ class RecordingPort implements DiscordTextIngressPort {
   public readonly writes: DiscordPresenceWrite[] = [];
   /** When set, any turn the ingress allowed to decline comes back silent. */
   public silent = false;
+  /** When set, typing posts reject; the cosmetic indicator path is down. */
+  public failTyping = false;
   private readonly turn: (request: DiscordPresenceChannelTurnRequest) => Promise<CaptainChannelTurnResult>;
 
   public constructor(
@@ -289,13 +294,25 @@ class RecordingPort implements DiscordTextIngressPort {
 
   public executeDiscordPresenceAction(write: DiscordPresenceWrite): Promise<DiscordPresenceWriteResult> {
     this.writes.push(write);
+    if (write.payload.kind === "typing_start" && this.failTyping) {
+      return Promise.reject(new Error("typing_unavailable"));
+    }
     return Promise.resolve({
       id: write.idempotencyKey,
       action: write.action,
       transportKind: "bot",
       channelId: "channelId" in write.payload ? write.payload.channelId : undefined,
-      messageId: `reply-${String(this.writes.length)}`,
+      // Only a posted message has an id; typing does not, matching the runtime.
+      messageId: write.payload.kind === "reply" ? `reply-${String(this.replies.length)}` : undefined,
     });
+  }
+
+  public get replies(): DiscordPresenceWrite[] {
+    return this.writes.filter((write) => write.payload.kind === "reply");
+  }
+
+  public get typing(): DiscordPresenceWrite[] {
+    return this.writes.filter((write) => write.payload.kind === "typing_start");
   }
 }
 
@@ -456,5 +473,100 @@ describe("reading live, then checking in", () => {
     await expect(ingress.handle(say("m2", "clankie you there?"))).resolves.toMatchObject({
       state: "settled",
     });
+  });
+});
+
+describe("typing while he composes", () => {
+  it("shows him typing while an addressed turn is in flight and stops once it settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = new Map<string, (result: CaptainChannelTurnResult) => void>();
+      const port = new RecordingPort(
+        (request) =>
+          new Promise((resolve) => {
+            pending.set(request.deliveryId, resolve);
+          }),
+      );
+      const ingress = new DiscordTextIngress(port, config());
+
+      const outcome = ingress.handle(guildMessage("message-typing"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(port.typing).toHaveLength(1);
+      expect(port.typing[0]).toMatchObject({
+        action: "discord.presence.typing_start",
+        idempotencyKey: "message-typing:typing:0",
+        identity: {
+          presenceSessionId: "discord:guild-1:channel-1",
+          correlationId: "discord-message:message-typing",
+        },
+        payload: { kind: "typing_start", channelId: "channel-1" },
+      });
+
+      // Discord's indicator outlives one post by ~10s; a longer turn re-posts.
+      await vi.advanceTimersByTimeAsync(TYPING_REFRESH_MS);
+      expect(port.typing).toHaveLength(2);
+
+      pending.get("message-typing")?.(settled("message-typing"));
+      await expect(outcome).resolves.toMatchObject({ state: "settled" });
+      await vi.advanceTimersByTimeAsync(TYPING_REFRESH_MS * 4);
+      expect(port.typing).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("never shows him typing over a message that merely passed him by", async () => {
+    const port = new RecordingPort();
+    const ingress = new DiscordTextIngress(port, {
+      ...config(),
+      channelIds: new Set(),
+      replyPolicy: "addressed",
+      characterNames: ["clankie"],
+    });
+    await ingress.handle({
+      ...guildMessage("message-asked"),
+      channelId: "channel-live",
+      mentionsBot: false,
+      body: "clankie how did the run go?",
+    });
+    expect(port.typing).toHaveLength(1);
+
+    // Reading the room is not composing: an unprompted turn he may well
+    // decline must not broadcast that he might speak.
+    port.silent = true;
+    await expect(
+      ingress.handle({
+        ...guildMessage("message-overheard"),
+        channelId: "channel-live",
+        mentionsBot: false,
+        body: "did it though?",
+      }),
+    ).resolves.toMatchObject({ state: "declined" });
+    expect(port.typing).toHaveLength(1);
+  });
+
+  it("stops refreshing after a failed typing post without failing the turn", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = new Map<string, (result: CaptainChannelTurnResult) => void>();
+      const port = new RecordingPort(
+        (request) =>
+          new Promise((resolve) => {
+            pending.set(request.deliveryId, resolve);
+          }),
+      );
+      port.failTyping = true;
+      const ingress = new DiscordTextIngress(port, config());
+
+      const outcome = ingress.handle(guildMessage("message-typing-down"));
+      await vi.advanceTimersByTimeAsync(TYPING_REFRESH_MS * 3);
+      // The first failed post stops the refresh; the indicator is cosmetic.
+      expect(port.typing).toHaveLength(1);
+
+      pending.get("message-typing-down")?.(settled("message-typing-down"));
+      await expect(outcome).resolves.toMatchObject({ state: "settled" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

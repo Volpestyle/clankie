@@ -156,6 +156,8 @@ interface RetainedDelivery {
 
 const DEFAULT_DELIVERY_RETENTION_MS = 7 * 60 * 60 * 1_000;
 const DEFAULT_MAX_RETAINED_DELIVERIES = 50_000;
+/** Discord shows "typing…" for about ten seconds per post; a turn that thinks longer re-posts to stay visible. */
+export const TYPING_REFRESH_MS = 8_000;
 /** Roughly how long a conversation stays "the one you are in" before you drift off. */
 const DEFAULT_LIVE_MESSAGE_WINDOW = 5;
 const DEFAULT_MAX_PENDING_PER_CHANNEL = 20;
@@ -342,7 +344,15 @@ export class DiscordTextIngress {
       contextMessages: boundedContext(contextMessages, this.config.contextMessageLimit),
     });
     event("accepted");
-    const result = await this.port.submitDiscordCaptainChannelTurn(request);
+    const stopTyping = this.showTyping(message, identity);
+    let result: CaptainChannelTurnResult;
+    try {
+      result = await this.port.submitDiscordCaptainChannelTurn(request);
+    } finally {
+      // The reply that follows clears the indicator on its own; stopping here
+      // just keeps a settled-but-silent turn from showing him typing forever.
+      stopTyping();
+    }
     if (result.state === "failed") {
       event("failed", {
         reason: result.code,
@@ -389,6 +399,44 @@ export class DiscordTextIngress {
       turnId: result.turnId,
       responseMessageId: reply.messageId,
     };
+  }
+
+  /**
+   * He is composing an answer to someone who actually asked him, so the
+   * channel shows him typing while the turn is in flight — the reply itself
+   * then clears the indicator, exactly as it does for a person.
+   *
+   * Only an addressed message (a DM, a mention, or one of his names) earns
+   * this. An unprompted turn is him reading, and a room where he visibly
+   * started typing after every message he read — usually followed by silence —
+   * would advertise attention he mostly declines to use.
+   *
+   * The indicator is cosmetic, so it must never delay or fail the turn: posts
+   * are fire-and-forget, and the first failure stops the refresh instead of
+   * re-hitting a path that is already refusing. Successful posts land in the
+   * control plane's narrative ledger like every other presence write.
+   */
+  private showTyping(message: DiscordInboundMessage, identity: DiscordPresenceWrite["identity"]): () => void {
+    if (message.guildId !== undefined && this.unprompted(message)) return () => undefined;
+    let sequence = 0;
+    const stop = (): void => {
+      clearInterval(timer);
+    };
+    const post = (): void => {
+      const write = DiscordPresenceWriteSchema.parse({
+        schemaVersion: 1,
+        idempotencyKey: `${message.id}:typing:${String(sequence)}`,
+        action: "discord.presence.typing_start",
+        identity,
+        payload: { kind: "typing_start", channelId: message.channelId },
+      });
+      sequence += 1;
+      void this.port.executeDiscordPresenceAction(write).catch(stop);
+    };
+    const timer = setInterval(post, TYPING_REFRESH_MS);
+    timer.unref?.();
+    post();
+    return stop;
   }
 
   private refusalReason(message: DiscordInboundMessage): string | undefined {
