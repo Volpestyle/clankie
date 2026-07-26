@@ -1,7 +1,18 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { bootGbaGame, defaultGbaBodyRootDir, createFreePlaySession } from "@clankie/gba-emulator";
+import { RenderedSurfaceOverlaySchema } from "@clankie/interactive-environment";
+import {
+  bootGbaGame,
+  defaultGbaBodyRootDir,
+  defaultGbaCheckpointDir,
+  createFreePlaySession,
+  listGbaCheckpoints,
+  readGbaCheckpoint,
+  writeGbaCheckpoint,
+  type GbaCheckpointReceipt,
+} from "@clankie/gba-emulator";
 import { PossessionLease, parsePossessionHolders } from "./possession.ts";
 import { acquireBodyLock, type BodyLock } from "@clankie/gba-emulator";
+import type { GbaCheckpointSummary } from "./tools.ts";
 import { createBrokeredActivityFrameSink } from "@clankie/rendered-surface-client";
 import { createHash } from "node:crypto";
 import path from "node:path";
@@ -119,6 +130,43 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     }, { pace: true });
   }
 
+  // The sidebar beside the canvas. Same shared sequence as the frames, same
+  // bounded-text rules as the resident mind's turns (ADR 0049).
+  const publishThought = (monologue: string): void => {
+    if (sink === undefined) return;
+    sequence += 1;
+    sink.publishOverlay(
+      RenderedSurfaceOverlaySchema.parse({
+        schemaVersion: 1,
+        surface: "gba_emulator",
+        sequence,
+        lines: [monologue.slice(0, 256)],
+        updatedAt: new Date().toISOString(),
+      }),
+    );
+  };
+
+  // Progress that outlives this process: minted checkpoints, never a mutation
+  // of the pinned identity (ADR 0060). Absent on the deterministic double.
+  const checkpoints = game.checkpoints;
+  const checkpointDir = defaultGbaCheckpointDir();
+  const currentPosition = (): { mapId: string; x: number; y: number } | null => {
+    try {
+      const observed = session.io.observe("overworld") as {
+        data?: { position?: { mapId: string; x: number; y: number } };
+      };
+      return observed.data?.position ?? null;
+    } catch {
+      return null;
+    }
+  };
+  const summarize = (receipt: GbaCheckpointReceipt): GbaCheckpointSummary => ({
+    checkpointId: receipt.checkpointId,
+    label: receipt.label,
+    capturedAt: receipt.capturedAt,
+    position: receipt.position,
+  });
+
   const server = createGbaMcpServer(
     {
       io: session.io,
@@ -132,6 +180,32 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         // Publish after the action lands, so the viewer shows the result.
         queueMicrotask(publish);
       },
+      publishThought,
+      ...(checkpoints === undefined
+        ? {}
+        : {
+            saveCheckpoint: (label: string | undefined) =>
+              summarize(
+                writeGbaCheckpoint({
+                  rootDir: checkpointDir,
+                  capability: checkpoints,
+                  position: currentPosition(),
+                  label,
+                }).receipt,
+              ),
+            loadCheckpoint: (checkpointId: string) => {
+              const read = readGbaCheckpoint({
+                rootDir: checkpointDir,
+                checkpointId,
+                identity: checkpoints.identity,
+              });
+              checkpoints.loadState(read.savestateBytes);
+              // The screen changed out from under every watcher too.
+              queueMicrotask(publish);
+              return summarize(read.receipt);
+            },
+            listCheckpoints: () => listGbaCheckpoints(checkpointDir).map(summarize),
+          }),
     },
     { possession },
   );

@@ -44,15 +44,37 @@ without them it is the clearly-labeled deterministic double.
 
 ## Tools
 
-| Tool                        | What it does                                                            |
-| --------------------------- | ----------------------------------------------------------------------- |
-| `gba_emulator_observe`      | Decoded state **and the rendered screen as an image**                   |
-| `gba_emulator_start_action` | One catalogued action; a short tap only turns, 16 frames commits a step |
-| `gba_emulator_pause`        | Stop for a stated reason when the state looks uncertain                 |
+| Tool                        | What it does                                                             |
+| --------------------------- | ------------------------------------------------------------------------ |
+| `gba_emulator_observe`      | Decoded state **and the rendered screen as an image**                    |
+| `gba_emulator_start_action` | One catalogued action: a button press, or `walk_to` a tile               |
+| `gba_emulator_pause`        | Stop for a stated reason when the state looks uncertain                  |
+| `gba_emulator_resume`       | Undo a pause. Pausing is safe from anyone; resuming is driving, so it needs the lease |
 
 Observation returns the frame because the decoded state is a privileged, partial
-view: it carries position and facing but not what is _in_ the room. A caller that
-reads only RAM discovers furniture by walking into it.
+view: it carries position and facing but not what is _in_ the room.
+
+It also carries `surroundings` — whether each neighbouring tile and the tile
+being faced is passable, read from the map's own collision
+([ADR 0058](../../docs/adr/0058-read-collision-from-the-live-map-buffer.md)).
+Without that a caller does tile arithmetic on the PNG to guess what is solid, and
+discovers furniture by walking into it.
+
+### Moving
+
+A short directional tap only turns; 16 frames commits a step. For anything
+further than one tile, prefer `walk_to` with a target `x`/`y`: it plans around
+walls using real collision, re-checks every step because collision does not
+include NPCs, and reports `blockedAt` if the route stops being true.
+
+`walk_to` moves **within** a map. Doors and staircases carry blocking collision
+and transport anyway, so no collision-planned route can step onto one — walk to
+the tile beside the stairs, then press into them.
+
+Every action result carries the state it produced — `position`, `facing`,
+`moved`, `turned`, and `surroundings` — so a move needs no follow-up observe.
+`moved` is the one that matters: a press into a wall completes, and changes the
+RAM digest, because the bump animation is itself a state change.
 
 ## Fail-closed, at two layers
 
@@ -82,9 +104,21 @@ CLANKIE_GBA_POSSESSION_HOLDERS=codex-lab,claude-lab   # unset means possession i
 - **Stealing a live lease requires `force`**, so it is an explicit act rather
   than the outcome of a race. Every transition is logged to stderr.
 - **Leases expire**, so a crashed holder does not keep the body forever.
+- **Acting renews the lease**, so expiry bounds how long an *idle* possessor
+  keeps the body from the resident loop — never how long a session of play may
+  last.
 - `onHeldChange` suspends and resumes a co-hosted loop on take and release —
   suspension rather than arbitration after the fact, because arbitrating later
   would still have let two intents reach the core.
+
+A lapse is recoverable, and that is a design property rather than luck
+([ADR 0059](../../docs/adr/0059-lease-expiry-pauses-the-body.md)). A possessor
+thinks between moves — that is the normal shape of harness-driven play — and
+when thinking outlives the environment lease, the runtime pauses the body in
+place instead of destroying the session. The next action renews the claim and
+continues from the same tile; possess again if the possession lease lapsed too.
+Only revocation is final: an emergency stop or explicit stop is never
+resurrected by renewal.
 
 The possessor is a **new principal class** (`mcp_possessor`), deliberately not
 the ambient tier and not the voice tier: possessing the body has a different
@@ -120,6 +154,32 @@ it is the same app either way.
 Publishing is optional and best-effort: with no activity server running there is
 no producer credential, the server says so on stderr, and play continues
 unwatched rather than failing.
+
+The frames alone show what happened, never why. A possessor can carry one short
+`monologue` line on `gba_emulator_start_action` and it appears in the watch
+page's sidebar, exactly where the resident free-play mind's turns land. It rides
+the action call instead of being its own tool so a thought never costs an extra
+round-trip, and it is gated by the same lease as the action carrying it — only
+the holder puts words on the surface, under the overlay schema's length and
+count caps (ADR 0049's bounded-model-text rule).
+
+## Saving and loading progress
+
+Progress outlives the process as **minted checkpoints**
+([ADR 0060](../../docs/adr/0060-progress-as-minted-checkpoints.md)), never a
+mutation of the pinned identity. `gba_emulator_save_state` captures the full
+game state into an operator-local directory (`CLANKIE_GBA_CHECKPOINT_DIR`, or
+`~/.local/state/clankie/gba-checkpoints`) with a receipt and a companion
+scenario pinning the new digest. `gba_emulator_load_state` restores one into
+the running game after verifying every digest, and lists what exists when
+called without an id. Both require the possession lease: saving captures more
+than observation exposes, and loading rewrites the body's whole world.
+
+To boot a later session from a checkpoint instead of the bedroom, point
+`CLANKIE_GBA_SAVESTATE_PATH` at its `savestate.ss1` and
+`CLANKIE_GBA_SCENARIO_PATH` at its `scenario.json` — the same fail-closed
+loader, aimed at the minted identity. Checkpoints are unavailable on the
+deterministic core double, whose determinism is its identity.
 
 ## Discord reach: speaking and listening
 

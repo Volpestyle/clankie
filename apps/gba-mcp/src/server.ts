@@ -1,7 +1,16 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { GbaEmulatorObservationKindSchema } from "@clankie/interactive-environment";
 import { z } from "zod";
-import { ActArgumentsSchema, actTool, observeTool, pauseTool, type GbaToolContext } from "./tools.ts";
+import {
+  ActArgumentsSchema,
+  actTool,
+  loadStateTool,
+  observeTool,
+  pauseTool,
+  resumeTool,
+  saveStateTool,
+  type GbaToolContext,
+} from "./tools.ts";
 import type { PossessionLease } from "./possession.ts";
 import {
   CLANKIE_HEARING_MAX_LINES,
@@ -161,14 +170,55 @@ export function createGbaMcpServer(context: GbaToolContext, options: GbaMcpServe
   server.registerTool(
     "gba_emulator_start_action",
     {
-      title: "Press a button",
+      title: "Press a button, or walk to a tile",
       description:
         "Take one catalogued action. A short directional tap only turns the character — hold 16 " +
-        "frames to commit a step, or use repeat to cross several tiles in one action. Illegal " +
-        "buttons, exceeded frame bounds and missing capabilities are refused with the reason.",
+        "frames to commit a step, or use repeat to cross several tiles in one action. Prefer " +
+        "walk_to with a target x/y for anything further than a step: it routes around walls using " +
+        "the map's own collision and reports where it stopped. The result carries the resulting " +
+        "position, facing, whether the press actually moved, and what is now adjacent, so a move " +
+        "needs no follow-up observe. Illegal buttons, exceeded frame bounds, unreachable targets " +
+        "and missing capabilities are refused with the reason.",
       inputSchema: { ...ActArgumentsSchema.shape, possessionToken: z.string().optional() },
     },
     (args) => actTool({ ...context, possessionToken: args.possessionToken }, args),
+  );
+
+  server.registerTool(
+    "gba_emulator_save_state",
+    {
+      title: "Save progress as a checkpoint",
+      description:
+        "Capture the full game state as a named operator-local checkpoint, with a companion " +
+        "scenario so a later boot can start from it. Requires the possession lease. Unavailable " +
+        "on the deterministic core double.",
+      inputSchema: {
+        label: z
+          .string()
+          .regex(/^[a-z0-9][a-z0-9-]{0,39}$/u)
+          .optional()
+          .describe("Short slug naming the moment, e.g. before-rival."),
+        possessionToken: z.string().optional(),
+      },
+    },
+    (args) => saveStateTool({ ...context, possessionToken: args.possessionToken }, args.label),
+  );
+
+  server.registerTool(
+    "gba_emulator_load_state",
+    {
+      title: "Restore a saved checkpoint",
+      description:
+        "Load a checkpoint into the running game, replacing the current state, and return the " +
+        "restored view. Omit checkpointId to list what exists. Requires the possession lease: " +
+        "rewriting the body's state is driving it. Digests are verified before anything loads; a " +
+        "checkpoint from another ROM or core build is refused.",
+      inputSchema: {
+        checkpointId: z.string().min(1).max(160).optional(),
+        possessionToken: z.string().optional(),
+      },
+    },
+    (args) => loadStateTool({ ...context, possessionToken: args.possessionToken }, args.checkpointId),
   );
 
   server.registerTool(
@@ -179,6 +229,18 @@ export function createGbaMcpServer(context: GbaToolContext, options: GbaMcpServe
       inputSchema: { reason: z.string().min(1).max(512) },
     },
     (args) => pauseTool(context, args.reason),
+  );
+
+  server.registerTool(
+    "gba_emulator_resume",
+    {
+      title: "Resume the session",
+      description:
+        "Undo a pause and let actions dispatch again. Requires the possession lease: pausing is " +
+        "safe from anyone, resuming is driving.",
+      inputSchema: { possessionToken: z.string().optional() },
+    },
+    (args) => resumeTool({ ...context, possessionToken: args.possessionToken }),
   );
 
   return server;
