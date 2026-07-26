@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CaptainEpisodeSchema } from "@clankie/protocol";
-import { buildCaptainEpisode } from "../lib/episodes.ts";
+import { buildCaptainEpisode, captainEpisodeInstructions } from "../lib/episodes.ts";
 
 const OCCURRED_AT = "2026-07-25T19:00:00.000Z";
 
@@ -78,4 +78,44 @@ describe("captain episode stamping", () => {
       rawTranscript: false,
     });
   });
+});
+
+describe("captain episode recall resilience", () => {
+  it("gives up on a control plane that connects and never answers", async () => {
+    // A refused connection fails fast and is caught; a hang raises nothing, so
+    // without a bound this would wedge every turn's instruction hook.
+    // `captainHeaders()` throws before it ever reaches the transport when this
+    // is unset, which is a real deployment failure mode but not the one under
+    // test here.
+    const priorToken = process.env.CLANKIE_CAPTAIN_TOKEN;
+    process.env.CLANKIE_CAPTAIN_TOKEN = "test-captain-token";
+    let calls = 0;
+    let sawSignal = false;
+    const started = Date.now();
+    const result = await captainEpisodeInstructions(
+      { metadata: { captainLane: "operator", captainTargetId: "global-default" } },
+      {
+        fetchImpl: (_input, init) => {
+          calls += 1;
+          sawSignal = init?.signal !== undefined && init.signal !== null;
+          return new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              reject(new Error("aborted"));
+            });
+          });
+        },
+      },
+    );
+    const elapsed = Date.now() - started;
+    if (priorToken === undefined) delete process.env.CLANKIE_CAPTAIN_TOKEN;
+    else process.env.CLANKIE_CAPTAIN_TOKEN = priorToken;
+
+    // Guard against passing vacuously: the transport must actually have been
+    // reached, handed a signal, and left hanging until that signal fired.
+    expect(calls).toBe(1);
+    expect(sawSignal).toBe(true);
+    expect(elapsed).toBeGreaterThanOrEqual(1_500);
+    expect(elapsed).toBeLessThan(4_000);
+    expect(result).toBe("");
+  }, 10_000);
 });

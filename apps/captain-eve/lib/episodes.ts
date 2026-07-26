@@ -1,8 +1,37 @@
 import { randomUUID } from "node:crypto";
+import { ClankieApiClient } from "@clankie/api-client";
 import type { CaptainEpisode, CaptainEpisodeVisibility, CaptainSessionLaneV2 } from "@clankie/protocol";
 import { captainLaneKind, type EveChannelLaneContext } from "./lanes/context.ts";
 import { captainLaneRuntime } from "./lanes/runtime.ts";
-import { controlPlaneClient } from "./client.ts";
+
+/**
+ * Recall runs on every turn, so a control plane that accepts the connection and
+ * then never answers must not be able to wedge the conversation. `ClankieApiClient`
+ * applies no timeout of its own — deliberately, since `observeMissionEvents` is a
+ * long-lived stream — so the bound belongs here, on these two calls.
+ *
+ * Catching errors is not sufficient on its own: a hang raises nothing to catch,
+ * and an instruction hook that never resolves is indistinguishable from a captain
+ * that has stopped answering.
+ */
+const RECALL_TIMEOUT_MS = 2_000;
+const RECORD_TIMEOUT_MS = 5_000;
+
+export interface EpisodeTransportOptions {
+  readonly fetchImpl?: typeof fetch;
+}
+
+function boundedControlPlaneClient(
+  timeoutMs: number,
+  options: EpisodeTransportOptions = {},
+): ClankieApiClient {
+  const transport = options.fetchImpl ?? fetch;
+  return new ClankieApiClient({
+    baseUrl: process.env.CLANKIE_CONTROL_PLANE_URL ?? "http://127.0.0.1:4310",
+    ...(process.env.CLANKIE_CAPTAIN_TOKEN ? { captainToken: process.env.CLANKIE_CAPTAIN_TOKEN } : {}),
+    fetchImpl: (input, init) => transport(input, { ...init, signal: AbortSignal.timeout(timeoutMs) }),
+  });
+}
 
 /**
  * The default scope for a note, by the room it was written in.
@@ -79,7 +108,7 @@ export async function recordCaptainEpisode(input: {
     episodeId: randomUUID(),
   });
   try {
-    await controlPlaneClient().recordCaptainEpisode(episode);
+    await boundedControlPlaneClient(RECORD_TIMEOUT_MS).recordCaptainEpisode(episode);
     return episode;
   } catch (error) {
     // Losing a note must never take down the turn that wrote it.
@@ -95,10 +124,16 @@ export async function recordCaptainEpisode(input: {
  * takes the whole turn down, and a missing memory is a far smaller failure than
  * a dead conversation.
  */
-export async function captainEpisodeInstructions(channel: EveChannelLaneContext): Promise<string> {
+export async function captainEpisodeInstructions(
+  channel: EveChannelLaneContext,
+  options: EpisodeTransportOptions = {},
+): Promise<string> {
   try {
     const lane = captainLaneKind(channel);
-    const { recallCard } = await controlPlaneClient().recallCaptainEpisodes(lane);
+    const { recallCard } = await boundedControlPlaneClient(
+      RECALL_TIMEOUT_MS,
+      options,
+    ).recallCaptainEpisodes(lane);
     return recallCard;
   } catch (error) {
     reportEpisodeError("recall", error);
