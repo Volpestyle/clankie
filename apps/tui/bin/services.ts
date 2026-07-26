@@ -48,6 +48,9 @@ const TARGET_ALIASES: Readonly<Record<string, ServiceTarget>> = {
   controlplane: "control-plane",
   cp: "control-plane",
   discord: "discord-bridge",
+  activity: "activity",
+  watch: "activity",
+  viewer: "activity",
   "discord-bridge": "discord-bridge",
   bridge: "discord-bridge",
 };
@@ -237,10 +240,40 @@ const DISCORD_BRIDGE: ManagedService = {
   },
 };
 
+/**
+ * The rendering surface for anything Clankie is playing.
+ *
+ * It holds no credentials, no gateway, and no mission authority — it draws
+ * frames a producer sends it — so it depends on nothing and nothing depends on
+ * it. It is in the registry because starting it by hand was the last thing an
+ * operator had to remember, and because it is the same app Discord embeds as
+ * the activity ([ADR 0047](../../../docs/adr/0047-discord-activity-presence-plane.md)):
+ * one thing to start whether you are watching locally or in a voice channel.
+ */
+const ACTIVITY: ManagedService = {
+  id: "activity",
+  label: "Activity surface",
+  dependsOn: [],
+  spawnArgs: ["--filter", "@clankie/discord-activity", "start"],
+  commandMatches: (command) => command.includes("@clankie/discord-activity"),
+  probe: async ({ env, fetchImpl }) => {
+    const port = env["CLANKIE_ACTIVITY_PORT"] ?? "4320";
+    try {
+      const response = await fetchImpl(`http://127.0.0.1:${port}/`);
+      return response.ok
+        ? { state: "healthy", detail: `viewer on 127.0.0.1:${port}` }
+        : { state: "unhealthy" };
+    } catch {
+      return { state: "unreachable" };
+    }
+  },
+};
+
 const SERVICES: Readonly<Record<ServiceId, ManagedService>> = {
   "captain-eve": CAPTAIN_EVE,
   "control-plane": CONTROL_PLANE,
   "discord-bridge": DISCORD_BRIDGE,
+  activity: ACTIVITY,
 };
 
 export function managedService(id: ServiceId): ManagedService {

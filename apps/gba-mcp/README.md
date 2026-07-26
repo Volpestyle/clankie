@@ -110,7 +110,7 @@ agent-driven session is otherwise visible only to the agent. The server also
 publishes frames to the activity surface, so a person can watch:
 
 ```bash
-pnpm --filter @clankie/discord-activity start   # viewer on 127.0.0.1:4320
+clankie restart activity      # or `clankie restart` for everything
 ```
 
 Then open `http://127.0.0.1:4320`, or launch it as a Discord activity in the

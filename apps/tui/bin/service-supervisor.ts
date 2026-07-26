@@ -26,10 +26,10 @@ import { setTimeout as sleep } from "node:timers/promises";
  * - a health probe gate, so "restarted" means "answered healthy", not "spawned".
  */
 
-export type ServiceId = "captain-eve" | "control-plane" | "discord-bridge";
+export type ServiceId = "captain-eve" | "control-plane" | "discord-bridge" | "activity";
 
 /** Ordered by dependency: each service may only depend on those before it. */
-export const SERVICE_ORDER: readonly ServiceId[] = ["captain-eve", "control-plane", "discord-bridge"];
+export const SERVICE_ORDER: readonly ServiceId[] = ["captain-eve", "control-plane", "discord-bridge", "activity"];
 
 export type ServiceState = "healthy" | "unhealthy" | "unreachable";
 
