@@ -21,8 +21,11 @@ import {
 } from "discord.js";
 import {
   authorizeAmbientCommand,
+  authorizeVoicePresenceCommand,
+  parseDiscordVoiceJoinPolicy,
   parseRoleIds,
   refuseAmbientApproval,
+  type DiscordCommandPrincipal,
   type DiscordRoleBindings,
 } from "./authority.ts";
 import {
@@ -39,8 +42,8 @@ import {
   type DiscordInboundContextMessage,
   type DiscordVoiceEvidence,
 } from "@clankie/discord-presence-core";
-import { applyDiscordSettingsToEnvironment, SettingsStore } from "@clankie/settings";
-import { commands } from "./commands.ts";
+import { applyDiscordSettingsToEnvironment, characterNames, SettingsStore } from "@clankie/settings";
+import { commands, DISCORD_COMMAND_NAME, DISCORD_SUBCOMMANDS } from "./commands.ts";
 import { projectBoundMissionRecord, renderMissionSummary, sanitizeDiscordText } from "./mission-state.ts";
 import { MissionThreadProjector } from "./projector.ts";
 import {
@@ -130,8 +133,10 @@ const presenceSession = new DiscordPresenceSession({
 });
 const roleBindings: DiscordRoleBindings = {
   ambientRoleIds: parseRoleIds(process.env.DISCORD_AMBIENT_ROLE_IDS),
+  ambientUserIds: parseRoleIds(process.env.DISCORD_AMBIENT_USER_IDS),
   approvalRoleIds: parseRoleIds(process.env.DISCORD_APPROVAL_ROLE_IDS),
 };
+const voiceJoinPolicy = parseDiscordVoiceJoinPolicy(process.env.DISCORD_VOICE_JOIN_POLICY);
 const receipts = new DiscordBridgeReceiptStore({
   path: bridgeReceiptPath(),
 });
@@ -153,6 +158,11 @@ const textIngress = textIngressEnabled
         dmUserIds: parseDiscordIdSet(process.env.DISCORD_INGRESS_DM_USER_IDS),
         contextMessageLimit: textIngressContextLimit,
         authenticatedSurfaceUrl,
+        // Persona owns who he is and when he speaks; the bridge only carries it.
+        replyPolicy: storedSettings.persona.replyPolicy,
+        characterNames: characterNames(storedSettings.persona),
+        conversationWindowMs: storedSettings.persona.conversationWindowSeconds * 1_000,
+        conversationRecallMs: storedSettings.persona.conversationRecallSeconds * 1_000,
       },
       (event) => {
         console.info(event, "Discord text ingress event");
@@ -174,7 +184,7 @@ const voiceChannelIds = parseDiscordIdSet(process.env.DISCORD_VOICE_CHANNEL_IDS)
 // The guild allowlist stays required: it is what bounds voice to servers the
 // owner chose. The channel allowlist is optional refinement — empty admits any
 // voice channel *within* those guilds, which is still gated by the ambient role
-// check on /captain-join and by per-participant consent (ADR 0045).
+// check on /clankie join and by per-participant consent (ADR 0045).
 if (voiceEnabled && voiceGuildIds.size === 0) {
   throw new Error("Discord voice is enabled but DISCORD_VOICE_GUILD_IDS is empty.");
 }
@@ -191,6 +201,9 @@ const voiceSpeech =
         ...(process.env.CLANKIE_VOICE_STT_MODEL === undefined
           ? {}
           : { sttModel: process.env.CLANKIE_VOICE_STT_MODEL }),
+        ...(process.env.CLANKIE_VOICE_STT_LANGUAGE === undefined
+          ? {}
+          : { sttLanguage: process.env.CLANKIE_VOICE_STT_LANGUAGE }),
         ...(process.env.CLANKIE_VOICE_TTS_MODEL === undefined
           ? {}
           : { ttsModel: process.env.CLANKIE_VOICE_TTS_MODEL }),
@@ -276,7 +289,9 @@ client.once("ready", async () => {
   }
   projector.start();
   await recordReceipt("discord.bridge.ready", {
-    commandCount: commands.length,
+    // The registered command count is always 1 now; the useful number for an
+    // operator checking what landed is how many subcommands it carries.
+    commandCount: DISCORD_SUBCOMMANDS.length,
     restoredMissionCount: registry.entries().length,
     textIngressEnabled,
     voiceEnabled,
@@ -288,7 +303,7 @@ client.once("ready", async () => {
     console.info({ names: settingsFilledNames }, "Discord configuration filled from operator settings");
   }
   console.log(
-    `Discord bot ready as ${client.user?.tag ?? "unknown"}; registered ${commands.length} commands, restored ${registry.entries().length} mission thread(s), text ingress ${textIngressEnabled ? "enabled" : "disabled"}, voice ${voiceEnabled ? "enabled" : "disabled"}.`,
+    `Discord bot ready as ${client.user?.tag ?? "unknown"}; registered /${DISCORD_COMMAND_NAME} with ${DISCORD_SUBCOMMANDS.length} subcommands, restored ${registry.entries().length} mission thread(s), text ingress ${textIngressEnabled ? "enabled" : "disabled"}, voice ${voiceEnabled ? "enabled" : "disabled"}.`,
   );
 });
 
@@ -392,8 +407,15 @@ client.on("interactionCreate", async (interaction) => {
 });
 
 async function handleCommand(interaction: ChatInputCommandInteraction): Promise<void> {
-  switch (interaction.commandName) {
-    case "captain-status": {
+  // Everything lives under one `/clankie` namespace, so the dispatch key is the
+  // subcommand. Guarding the top-level name first keeps an unrelated command
+  // from ever reaching a case that assumes our option shape.
+  if (interaction.commandName !== DISCORD_COMMAND_NAME) {
+    await interaction.reply({ content: "Unknown command.", ephemeral: true });
+    return;
+  }
+  switch (interaction.options.getSubcommand()) {
+    case "status": {
       const missionId = missionIdForInteraction(interaction);
       if (missionId) {
         await interaction.deferReply();
@@ -413,8 +435,8 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
       });
       return;
     }
-    case "captain-mission": {
-      const authority = authorizeAmbientCommand(memberRoleIds(interaction), roleBindings);
+    case "mission": {
+      const authority = authorizeAmbientCommand(commandPrincipal(interaction), roleBindings);
       if (!authority.allowed) {
         await interaction.reply(authority.message);
         return;
@@ -503,7 +525,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
       await projector.refresh(thread.id, missionId);
       return;
     }
-    case "captain-steer": {
+    case "steer": {
       const missionId = missionIdForInteraction(interaction);
       if (!missionId) {
         await interaction.reply(
@@ -511,7 +533,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
         );
         return;
       }
-      const authority = authorizeAmbientCommand(memberRoleIds(interaction), roleBindings);
+      const authority = authorizeAmbientCommand(commandPrincipal(interaction), roleBindings);
       if (!authority.allowed) {
         await interaction.reply(authority.message);
         return;
@@ -534,7 +556,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
       await interaction.editReply(renderMissionSteeringReply(result));
       return;
     }
-    case "captain-approval": {
+    case "approval": {
       const approvalId = interaction.options.getString("approval-id", true);
       const decision = interaction.options.getString("decision", true);
       const refusal = refuseAmbientApproval(
@@ -553,7 +575,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
       );
       return;
     }
-    case "captain-memory": {
+    case "memory": {
       const action = interaction.options.getString("action") ?? "status";
       if (action === "status") {
         await interaction.reply(
@@ -572,7 +594,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
         );
         return;
       }
-      const authority = authorizeAmbientCommand(memberRoleIds(interaction), roleBindings);
+      const authority = authorizeAmbientCommand(commandPrincipal(interaction), roleBindings);
       if (!authority.allowed) {
         await interaction.reply(authority.message);
         return;
@@ -587,7 +609,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
       await thread.setArchived(true, "Bridge mission correlation forgotten by explicit command");
       return;
     }
-    case "captain-person-memory": {
+    case "person-memory": {
       if (!interaction.guildId) {
         await interaction.reply({
           content: "Discord person memory is guild-scoped and is unavailable in DMs.",
@@ -595,7 +617,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
         });
         return;
       }
-      const authority = authorizeAmbientCommand(memberRoleIds(interaction), roleBindings);
+      const authority = authorizeAmbientCommand(commandPrincipal(interaction), roleBindings);
       if (!authority.allowed) {
         await interaction.reply(authority.message);
         return;
@@ -721,8 +743,12 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
       });
       return;
     }
-    case "captain-join": {
-      const authority = authorizeAmbientCommand(memberRoleIds(interaction), roleBindings);
+    case "join": {
+      const authority = authorizeVoicePresenceCommand(
+        commandPrincipal(interaction),
+        roleBindings,
+        voiceJoinPolicy,
+      );
       if (!authority.allowed) {
         await interaction.reply(authority.message);
         return;
@@ -767,12 +793,12 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
           `Only you are opted in: I send only explicitly consented, bounded utterances to OpenAI for transcription, ` +
           `discard raw audio after each turn, and never treat speech as privileged approval. ` +
           `My spoken responses use an AI-generated OpenAI voice. ` +
-          `Other participants can use **/captain-voice-consent opt-in** and revoke at any time.`,
+          `Other participants can use **/clankie voice-consent opt-in** and revoke at any time.`,
         allowedMentions: { parse: [] },
       });
       return;
     }
-    case "captain-voice-consent": {
+    case "voice-consent": {
       if (voiceSession === undefined) {
         await interaction.reply({
           content: "Discord voice participation is disabled or brokered speech is not ready.",
@@ -812,7 +838,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
       });
       return;
     }
-    case "captain-voice-status": {
+    case "voice-status": {
       const status = voiceSession?.status();
       await interaction.reply({
         content:
@@ -824,10 +850,26 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
       });
       return;
     }
-    case "captain-leave": {
-      const authority = authorizeAmbientCommand(memberRoleIds(interaction), roleBindings);
+    case "leave": {
+      const authority = authorizeVoicePresenceCommand(
+        commandPrincipal(interaction),
+        roleBindings,
+        voiceJoinPolicy,
+      );
       if (!authority.allowed) {
         await interaction.reply(authority.message);
+        return;
+      }
+      // An open join policy must not let a member of one allowlisted guild hang
+      // up a call happening in another. Under the ambient policy the role
+      // binding is already guild-scoped, so this bound only ever matters for
+      // `guild_members` — but stating it here keeps the rule in one place.
+      const active = voiceSession?.status();
+      if (active?.active === true && active.guildId !== interaction.guildId) {
+        await interaction.reply({
+          content: "Clankie's active voice session is in another server.",
+          ephemeral: true,
+        });
         return;
       }
       await voiceSession?.leave();
@@ -843,6 +885,10 @@ function memberRoleIds(interaction: ChatInputCommandInteraction): ReadonlySet<st
   if (interaction.member instanceof GuildMember) return new Set(interaction.member.roles.cache.keys());
   const roles = interaction.member?.roles;
   return new Set(Array.isArray(roles) ? roles : []);
+}
+
+function commandPrincipal(interaction: ChatInputCommandInteraction): DiscordCommandPrincipal {
+  return { userId: interaction.user.id, roleIds: memberRoleIds(interaction) };
 }
 
 function approvalIdFromPersonMemoryProposal(result: Record<string, unknown>): string {
@@ -971,9 +1017,19 @@ async function recordVoiceEvidence(evidence: DiscordVoiceEvidence): Promise<void
     case "utterance":
       await recordReceipt("discord.voice.utterance", evidence);
       return;
-    case "response":
+    case "response": {
+      // Printed as well as recorded: "it felt slow" is only actionable next to
+      // the per-stage split, and an operator should see it without opening the
+      // receipt file.
+      console.info(
+        `voice turn: ${String(evidence.toFirstAudioMs)}ms to first audio ` +
+          `(silence hold ${String(evidence.silenceHoldMs)} + stt ${String(evidence.transcribeMs)} + ` +
+          `captain ${String(evidence.captainMs)} + tts ${String(evidence.synthesizeMs)}), ` +
+          `then ${String(evidence.playbackMs)}ms speaking`,
+      );
       await recordReceipt("discord.voice.response", evidence);
       return;
+    }
     case "overlap":
       await recordReceipt("discord.voice.overlap", evidence);
       return;

@@ -24,6 +24,14 @@ import type { DiscordVoiceIngress } from "./voice-ingress.ts";
 import type { VoiceSpeechRuntime } from "./voice-speech.ts";
 
 const MIN_UTTERANCE_MS = 350;
+/** Silence proving the speaker finished. Paid on every turn before work starts. */
+const SPEAKING_END_SILENCE_MS = 800;
+/**
+ * Audio required before a consented speaker is treated as talking over him.
+ * Deliberately the same bar as {@link MIN_UTTERANCE_MS}: if it is not enough to
+ * become an utterance, it is not enough to cut him off.
+ */
+const BARGE_IN_PCM_BYTES = Math.round(48_000 * 2 * 2 * (MIN_UTTERANCE_MS / 1_000));
 const MAX_UTTERANCE_MS = 30_000;
 const MAX_DISCORD_PCM_BYTES = 48_000 * 2 * 2 * (MAX_UTTERANCE_MS / 1_000);
 const VOICE_READY_TIMEOUT_MS = 20_000;
@@ -60,6 +68,27 @@ export type DiscordVoiceEvidence =
       readonly deliveryId: string;
       readonly turnId: string;
       readonly state: "settled" | "waiting_user";
+      /**
+       * Per-stage latency, content-free and flat.
+       *
+       * "It feels slow" is not actionable, and the stages have very different
+       * fixes — transcription and synthesis are provider round trips, the
+       * captain turn is model and prompt size, and `silenceHoldMs` is a fixed
+       * local cost paid before any of it starts. Without the split every
+       * investigation begins by guessing which one to attack.
+       *
+       * Flat rather than nested because receipts accept scalars only; that
+       * constraint is what keeps content out of evidence and is not worth
+       * widening for tidier shape.
+       */
+      /** Fixed wait proving the speaker stopped, before the turn can begin. */
+      readonly silenceHoldMs: number;
+      readonly transcribeMs: number;
+      readonly captainMs: number;
+      readonly synthesizeMs: number;
+      /** Wall clock from end of capture to the first audio frame going out. */
+      readonly toFirstAudioMs: number;
+      readonly playbackMs: number;
     }
   | {
       readonly type: "overlap";
@@ -105,6 +134,8 @@ export interface DiscordVoiceSessionOptions {
   readonly speech: VoiceSpeechRuntime;
   readonly presenceSessionId: () => string;
   readonly emit: (evidence: DiscordVoiceEvidence) => Promise<void>;
+  /** Monotonic milliseconds; defaults to `performance.now`. Injected by tests. */
+  readonly clock?: () => number;
 }
 
 /**
@@ -114,6 +145,8 @@ export interface DiscordVoiceSessionOptions {
  */
 export class DiscordVoiceSession {
   private readonly options: DiscordVoiceSessionOptions;
+  /** Injectable so latency assertions are deterministic in tests. */
+  private readonly clock: () => number;
   private readonly consent = new DiscordVoiceConsentRegistry();
   private readonly player: AudioPlayer;
   private connection: VoiceConnection | undefined;
@@ -137,6 +170,23 @@ export class DiscordVoiceSession {
         activeCaptureCount: this.captures.size + 1,
       });
     }
+    // Capture always starts on the first packet — nothing said while he is
+    // talking should be lost. Whether it *interrupts* him is decided later, once
+    // there is enough audio to tell speech from noise.
+    //
+    // Discord raises `speaking` on any RTP frame, so an open mic reports a
+    // breath, a keystroke, or a cough identically to a word. Cutting playback
+    // here meant he was chopped off mid-sentence by ambient room noise, with the
+    // speaker having said nothing at all.
+    void this.capture(userId, () => this.interruptPlayback(userId));
+  };
+
+  /**
+   * Stop playback because a consented speaker is genuinely talking over him.
+   * Called once a capture has accumulated real speech, not on the first frame.
+   */
+  private interruptPlayback(userId: string): void {
+    if (this.guildId === undefined || this.channelId === undefined) return;
     const phase =
       this.player.state.status === AudioPlayerStatus.Playing
         ? "playing"
@@ -154,11 +204,11 @@ export class DiscordVoiceSession {
         phase,
       });
     }
-    void this.capture(userId);
-  };
+  }
 
   public constructor(options: DiscordVoiceSessionOptions) {
     this.options = options;
+    this.clock = options.clock ?? (() => performance.now());
     this.player = createAudioPlayer({
       behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
     });
@@ -265,7 +315,7 @@ export class DiscordVoiceSession {
     };
   }
 
-  private async capture(userId: string): Promise<void> {
+  private async capture(userId: string, onSustainedSpeech?: () => void): Promise<void> {
     const connection = this.connection;
     const guildId = this.guildId;
     const channelId = this.channelId;
@@ -278,13 +328,14 @@ export class DiscordVoiceSession {
       return;
     }
     const stream = connection.receiver.subscribe(userId, {
-      end: { behavior: EndBehaviorType.AfterSilence, duration: 800 },
+      end: { behavior: EndBehaviorType.AfterSilence, duration: SPEAKING_END_SILENCE_MS },
     });
     this.captures.set(userId, stream);
     const decoder = new opus.Decoder({ rate: 48_000, channels: 2, frameSize: 960 });
     const chunks: Buffer[] = [];
     let bytes = 0;
     let capped = false;
+    let interrupted = false;
     decoder.on("data", (chunk: Buffer) => {
       if (capped) return;
       bytes += chunk.byteLength;
@@ -294,6 +345,14 @@ export class DiscordVoiceSession {
         return;
       }
       chunks.push(Buffer.from(chunk));
+      // Interrupt only once this is as much audio as it takes to count as an
+      // utterance at all. Anything shorter is discarded downstream anyway, so
+      // letting it stop playback would cut him off for a sound that never
+      // produces a turn.
+      if (!interrupted && onSustainedSpeech !== undefined && bytes >= BARGE_IN_PCM_BYTES) {
+        interrupted = true;
+        onSustainedSpeech();
+      }
     });
     try {
       await pipeline(stream, decoder);
@@ -370,9 +429,20 @@ export class DiscordVoiceSession {
       input.speechPcm.fill(0);
       return;
     }
+    // Stage clocks. Started here rather than at capture so the numbers describe
+    // work this turn actually did, with the fixed silence hold reported beside
+    // them rather than folded in.
+    const turnStartedMs = this.clock();
+    let transcribeMs = 0;
+    let captainMs = 0;
+    let synthesizeMs = 0;
+    let toFirstAudioMs = 0;
+    let playbackMs = 0;
     let transcript: string | undefined;
     try {
+      const startedMs = this.clock();
       transcript = await this.options.speech.transcribe(input.speechPcm);
+      transcribeMs = this.clock() - startedMs;
     } catch {
       await this.options.emit({
         type: "failed",
@@ -397,6 +467,7 @@ export class DiscordVoiceSession {
     });
     if (!this.turnStillPermitted(input)) return;
     let turn: Awaited<ReturnType<DiscordVoiceIngress["handle"]>>;
+    const captainStartedMs = this.clock();
     try {
       turn = await this.options.ingress.handle({
         deliveryId,
@@ -416,6 +487,7 @@ export class DiscordVoiceSession {
       });
       return;
     } finally {
+      captainMs = this.clock() - captainStartedMs;
       transcript = undefined;
     }
     if (!this.turnStillPermitted(input)) return;
@@ -429,10 +501,15 @@ export class DiscordVoiceSession {
       });
       return;
     }
+    // Nothing to synthesize, and nothing to say. Returning before the speech
+    // path also means a declined turn costs no TTS.
+    if (turn.state === "declined") return;
     if (input.responseGeneration !== this.playbackGeneration) return;
     try {
       this.synthesizing = true;
+      const synthesizeStartedMs = this.clock();
       const audio = await this.options.speech.synthesize(turn.response);
+      synthesizeMs = this.clock() - synthesizeStartedMs;
       this.synthesizing = false;
       try {
         if (!this.turnStillPermitted(input) || input.responseGeneration !== this.playbackGeneration) {
@@ -442,8 +519,11 @@ export class DiscordVoiceSession {
         const discordPcm = openAiPcmToDiscordPcm(audio.pcm24KhzMono);
         audio.pcm24KhzMono.fill(0);
         try {
+          toFirstAudioMs = this.clock() - turnStartedMs;
+          const playbackStartedMs = this.clock();
           this.player.play(createAudioResource(Readable.from([discordPcm]), { inputType: StreamType.Raw }));
           await entersState(this.player, AudioPlayerStatus.Idle, PLAYBACK_TIMEOUT_MS);
+          playbackMs = this.clock() - playbackStartedMs;
         } finally {
           if (this.player.state.status !== AudioPlayerStatus.Idle) this.player.stop(true);
           discordPcm.fill(0);
@@ -461,6 +541,12 @@ export class DiscordVoiceSession {
         deliveryId,
         turnId: turn.turnId,
         state: turn.state,
+        silenceHoldMs: SPEAKING_END_SILENCE_MS,
+        transcribeMs: Math.round(transcribeMs),
+        captainMs: Math.round(captainMs),
+        synthesizeMs: Math.round(synthesizeMs),
+        toFirstAudioMs: Math.round(toFirstAudioMs),
+        playbackMs: Math.round(playbackMs),
       });
     } catch {
       this.synthesizing = false;

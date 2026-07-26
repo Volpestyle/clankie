@@ -1992,6 +1992,21 @@ export const LinearAgentThreadContextSchema = z
   .strict();
 export type LinearAgentThreadContext = z.infer<typeof LinearAgentThreadContextSchema>;
 
+/**
+ * What he replies with to say nothing at all.
+ *
+ * A turn used to be structurally obliged to speak: the only successful result
+ * carried a non-empty `response`, so silence was never something he could
+ * choose, only something a gate could impose before the turn ran. That forced
+ * every "should he answer this?" decision to be a rule evaluated without him —
+ * and a rule cannot tell a late reply in a real conversation from noise.
+ *
+ * A sentinel rather than a structured field because a Discord turn is
+ * free-form conversational text, and making it structured to carry one nullable
+ * flag would reshape every captain turn for the sake of this one.
+ */
+export const CAPTAIN_SILENT_REPLY_SENTINEL = "[[stay-silent]]";
+
 export const CaptainChannelTurnResultSchema = z.discriminatedUnion("state", [
   z
     .object({
@@ -1999,6 +2014,14 @@ export const CaptainChannelTurnResultSchema = z.discriminatedUnion("state", [
       captainSessionId: z.string().min(1),
       turnId: z.string().min(1),
       response: z.string().trim().min(1).max(16_384),
+    })
+    .strict(),
+  /** He read it and chose not to answer. Nothing is written to the channel. */
+  z
+    .object({
+      state: z.literal("silent"),
+      captainSessionId: z.string().min(1),
+      turnId: z.string().min(1),
     })
     .strict(),
   z
@@ -2185,6 +2208,13 @@ export const DiscordPresenceChannelTurnRequestSchema = z
         messageId: z.string().min(1).optional(),
         actorId: z.string().min(1),
         body: z.string().min(1).max(DISCORD_PRESENCE_TRIGGER_BODY_MAX).optional(),
+        /**
+         * Nobody asked him to speak here: this arrived outside the reflexive
+         * reply window, from someone he had been talking to. He is expected to
+         * read it and decide, and staying quiet is a real option rather than a
+         * failure. Absent means the ordinary case, where a reply is expected.
+         */
+        mayDecline: z.boolean().optional(),
       })
       .strict(),
     contextMessages: z
@@ -3080,3 +3110,192 @@ export const CaptainEpisodeSchema = z
   })
   .strict();
 export type CaptainEpisode = z.infer<typeof CaptainEpisodeSchema>;
+
+// ---------------------------------------------------------------------------
+// Discord voice evidence (ADR 0057).
+//
+// Receipt-visible evidence for the two-tier realtime voice architecture: a
+// dormant transcription listener, an engaged realtime session, and a captain
+// reached only through `ask_clankie`. Every field is a content-free scalar —
+// bounded whitespace-free ids, enums, booleans, finite numbers — so no field
+// can carry free text by construction and the receipt store's forbidden-key
+// fence never has to trust the emitter. Speaker attribution comes from the
+// Discord gateway's authenticated ids, never from the audio.
+//
+// The cascade timings this replaces (`silenceHoldMs`, `transcribeMs`,
+// `captainMs`, `synthesizeMs`) are deliberately unrepresentable: the stages
+// they measured no longer exist. What the realtime shape must keep visible
+// instead (ADR 0057 consequences): waking versus continuing first-audio
+// latency via the `wake` discriminator, captain handoff latency via
+// `handoffMs`, whether a turn took the fast path, and the volition gate's
+// offered/taken/suppressed counters — so "he talks too much" and "he never
+// speaks up" are both falsifiable against numbers.
+// ---------------------------------------------------------------------------
+
+/** Gateway-issued Discord ids (snowflakes). Bounded and whitespace-free: an id slot cannot hold prose. */
+const DiscordVoiceGatewayIdSchema = z.string().min(1).max(64).regex(/^\S+$/u);
+/** Locally-minted correlation ids (delivery/turn). Same construction, sized for UUIDs and prefixed ids. */
+const DiscordVoiceLocalIdSchema = z.string().min(1).max(128).regex(/^\S+$/u);
+/** Wall-clock milliseconds; a scalar measurement, never a payload. */
+const DiscordVoiceDurationMsSchema = z.number().finite().nonnegative();
+/** Monotonic non-negative integer counter. */
+const DiscordVoiceCounterSchema = z.number().int().nonnegative();
+
+const discordVoiceChannelScope = {
+  guildId: DiscordVoiceGatewayIdSchema,
+  channelId: DiscordVoiceGatewayIdSchema,
+} as const;
+
+/** Whether Clankie holds the floor (engaged realtime session) or only listens (dormant transcription). */
+export const DiscordVoiceFloorStateSchema = z.enum(["engaged", "dormant"]);
+export type DiscordVoiceFloorState = z.infer<typeof DiscordVoiceFloorStateSchema>;
+
+/**
+ * Why the floor moved. A dropped wake means he ignores someone who addressed
+ * him — the transition is the new failure surface, so both directions are
+ * receipt-visible for the live gate rather than inferred from silence.
+ */
+export const DiscordVoiceFloorReasonSchema = z.enum(["addressed", "volition", "decay", "released"]);
+export type DiscordVoiceFloorReason = z.infer<typeof DiscordVoiceFloorReasonSchema>;
+
+/**
+ * Whether this response paid the wake. The first response after being
+ * addressed carries session setup; later turns in the exchange do not.
+ * Reported separately, or the wake cost is invisible (ADR 0057).
+ */
+export const DiscordVoiceWakeSchema = z.enum(["waking", "continuing"]);
+export type DiscordVoiceWake = z.infer<typeof DiscordVoiceWakeSchema>;
+
+export const DiscordVoiceResponseStateSchema = z.enum(["settled", "waiting_user"]);
+export type DiscordVoiceResponseState = z.infer<typeof DiscordVoiceResponseStateSchema>;
+
+/** The realtime pipeline's failure stages. The cascade stages left with the cascade. */
+export const DiscordVoiceFailureStageSchema = z.enum([
+  "capture",
+  "transcription_session",
+  "conversation_session",
+  "captain_handoff",
+  "playback",
+]);
+export type DiscordVoiceFailureStage = z.infer<typeof DiscordVoiceFailureStageSchema>;
+
+/** A machine token, never a message: lowercase snake_case, bounded. */
+export const DiscordVoiceFailureCodeSchema = z.string().regex(/^[a-z0-9_]{1,64}$/u);
+export type DiscordVoiceFailureCode = z.infer<typeof DiscordVoiceFailureCodeSchema>;
+
+export const DiscordVoiceEvidenceSchema = z
+  .discriminatedUnion("type", [
+    z
+      .object({
+        type: z.literal("joined"),
+        ...discordVoiceChannelScope,
+        daveProtocolVersion: z.number().int().nonnegative(),
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("consent"),
+        ...discordVoiceChannelScope,
+        userId: DiscordVoiceGatewayIdSchema,
+        consented: z.boolean(),
+        participantCount: DiscordVoiceCounterSchema,
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("utterance"),
+        ...discordVoiceChannelScope,
+        /** Attribution is the gateway's speaking transition for this authenticated id, never the audio. */
+        userId: DiscordVoiceGatewayIdSchema,
+        deliveryId: DiscordVoiceLocalIdSchema,
+        durationMs: DiscordVoiceDurationMsSchema,
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("floor"),
+        ...discordVoiceChannelScope,
+        state: DiscordVoiceFloorStateSchema,
+        reason: DiscordVoiceFloorReasonSchema,
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("response"),
+        ...discordVoiceChannelScope,
+        deliveryId: DiscordVoiceLocalIdSchema,
+        /** Captain turn id — only the `ask_clankie` path has one. */
+        turnId: DiscordVoiceLocalIdSchema.optional(),
+        state: DiscordVoiceResponseStateSchema,
+        /** True when the realtime session answered directly, without `ask_clankie`. */
+        fastPath: z.boolean(),
+        wake: DiscordVoiceWakeSchema,
+        toFirstAudioMs: DiscordVoiceDurationMsSchema,
+        /** Captain round trip inside `ask_clankie`; 0 on the fast path. */
+        handoffMs: DiscordVoiceDurationMsSchema,
+        playbackMs: DiscordVoiceDurationMsSchema,
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("volition"),
+        ...discordVoiceChannelScope,
+        /** Monotonic per-session counters, reported the way ADR 0056 reports free play. */
+        offered: DiscordVoiceCounterSchema,
+        taken: DiscordVoiceCounterSchema,
+        suppressed: DiscordVoiceCounterSchema,
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("overlap"),
+        ...discordVoiceChannelScope,
+        userId: DiscordVoiceGatewayIdSchema,
+        activeCaptureCount: DiscordVoiceCounterSchema,
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("interrupted"),
+        ...discordVoiceChannelScope,
+        userId: DiscordVoiceGatewayIdSchema,
+        /** Deliberate truncation while playing; streamed audio has no synthesizing phase to cut. */
+        phase: z.literal("playing"),
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("failed"),
+        ...discordVoiceChannelScope,
+        stage: DiscordVoiceFailureStageSchema,
+        code: DiscordVoiceFailureCodeSchema,
+      })
+      .strict(),
+    z.object({ type: z.literal("left"), ...discordVoiceChannelScope }).strict(),
+  ])
+  .superRefine((evidence, context) => {
+    if (evidence.type !== "response") return;
+    if (evidence.fastPath) {
+      if (evidence.turnId !== undefined) {
+        context.addIssue({
+          code: "custom",
+          path: ["turnId"],
+          message: "Fast-path responses have no captain turn to attribute",
+        });
+      }
+      if (evidence.handoffMs !== 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["handoffMs"],
+          message: "Fast-path responses pay no captain handoff",
+        });
+      }
+    } else if (evidence.turnId === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["turnId"],
+        message: "ask_clankie responses carry the captain turn id",
+      });
+    }
+  });
+export type DiscordVoiceEvidence = z.infer<typeof DiscordVoiceEvidenceSchema>;

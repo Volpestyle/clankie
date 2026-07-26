@@ -37,7 +37,11 @@ export interface LinearChannelAdapterOptions {
 }
 
 export type LinearChannelOutcome =
-  | { readonly status: "handled"; readonly disposition: "approval_refused" | "elicitation" | "response" }
+  | {
+      readonly status: "handled";
+      /** `silent`: he chose not to write anything into the thread. */
+      readonly disposition: "approval_refused" | "elicitation" | "response" | "silent";
+    }
   | { readonly status: "ignored"; readonly reason: LinearChannelIgnoreReason };
 
 export type LinearChannelIgnoreReason =
@@ -193,6 +197,15 @@ export class LinearChannelAdapter {
       if (result.state === "failed") {
         await acknowledgement;
         throw new Error(`Captain channel turn failed: ${result.code}`);
+      }
+      if (result.state === "silent") {
+        // Only text ingress offers the decline path (`mayDecline`), so a tracker
+        // turn arriving silent means he used the sentinel unprompted. A Linear
+        // thread is a work record rather than a room he may drift out of, so it
+        // gets an explicit no-op rather than a narrative saying nothing.
+        await acknowledgement;
+        this.emit("handled", event, request.issue.id, "silent");
+        return { status: "handled", disposition: "silent" };
       }
       if (result.state === "waiting_user" && (result.approvalRequired || isApprovalShaped(result.prompt))) {
         disposition = "approval_refused";

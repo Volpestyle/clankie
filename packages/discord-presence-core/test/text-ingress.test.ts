@@ -105,6 +105,77 @@ describe("DiscordTextIngress", () => {
     expect(evidence.every((event) => event.outcome === "dropped")).toBe(true);
   });
 
+  it("admits every channel in an allowlisted guild when no channel list is configured", async () => {
+    const port = new RecordingPort();
+    // `replyPolicy: "all"` isolates channel admission from the addressed gate.
+    const ingress = new DiscordTextIngress(
+      port,
+      { ...config(), channelIds: new Set(), replyPolicy: "all" },
+      () => {},
+    );
+
+    await expect(
+      ingress.handle({
+        id: "message-open",
+        guildId: "guild-1",
+        channelId: "some-channel-never-listed",
+        authorId: "friend",
+        authorIsBot: false,
+        mentionsBot: false,
+        body: "hey clankie",
+        loadContextMessages: () => Promise.resolve([]),
+      }),
+    ).resolves.toMatchObject({ state: "settled" });
+  });
+
+  it("never lets an empty channel list widen ingress past the guild allowlist", async () => {
+    const port = new RecordingPort();
+    const ingress = new DiscordTextIngress(port, { ...config(), channelIds: new Set() }, () => {});
+
+    await expect(
+      ingress.handle({
+        id: "message-foreign",
+        guildId: "guild-not-allowlisted",
+        channelId: "any-channel",
+        authorId: "friend",
+        authorIsBot: false,
+        mentionsBot: false,
+        body: "hey clankie",
+        loadContextMessages: () => Promise.resolve([]),
+      }),
+    ).resolves.toEqual({ state: "dropped", reason: "guild_not_allowlisted" });
+    expect(port.turns).toHaveLength(0);
+  });
+
+  it("stays quiet in an admitted channel until it is actually addressed", async () => {
+    const port = new RecordingPort();
+    const ingress = new DiscordTextIngress(
+      port,
+      { ...config(), channelIds: new Set(), replyPolicy: "addressed", characterNames: ["clankie"] },
+      () => {},
+    );
+
+    await expect(
+      ingress.handle({
+        ...guildMessage("message-chatter"),
+        channelId: "any-channel",
+        body: "anyway that dinner looked incredible",
+        mentionsBot: false,
+      }),
+    ).resolves.toEqual({ state: "dropped", reason: "not_addressed" });
+    // The point of gating before the turn: staying quiet must be free.
+    expect(port.turns).toHaveLength(0);
+
+    await expect(
+      ingress.handle({
+        ...guildMessage("message-hey"),
+        channelId: "any-channel",
+        body: "hey clankie what do you think",
+        mentionsBot: false,
+      }),
+    ).resolves.toMatchObject({ state: "settled" });
+  });
+
   it("deduplicates retries and rejects delivery-id drift without retaining message bodies", async () => {
     const port = new RecordingPort();
     const evidence: DiscordTextIngressEvidence[] = [];
@@ -157,6 +228,8 @@ describe("DiscordTextIngress", () => {
 class RecordingPort implements DiscordTextIngressPort {
   public readonly turns: DiscordPresenceChannelTurnRequest[] = [];
   public readonly writes: DiscordPresenceWrite[] = [];
+  /** When set, any turn the ingress allowed to decline comes back silent. */
+  public silent = false;
   private readonly turn: (request: DiscordPresenceChannelTurnRequest) => Promise<CaptainChannelTurnResult>;
 
   public constructor(
@@ -174,6 +247,13 @@ class RecordingPort implements DiscordTextIngressPort {
     request: DiscordPresenceChannelTurnRequest,
   ): Promise<CaptainChannelTurnResult> {
     this.turns.push(request);
+    if (this.silent && request.trigger.mayDecline === true) {
+      return Promise.resolve({
+        state: "silent",
+        captainSessionId: "session-1",
+        turnId: `turn-${request.deliveryId}`,
+      });
+    }
     return this.turn(request);
   }
 
@@ -224,3 +304,156 @@ function settled(deliveryId: string): CaptainChannelTurnResult {
     response: `reply to ${deliveryId}`,
   };
 }
+
+describe("conversation window", () => {
+  function conversational(windowMs?: number): DiscordTextIngressConfig {
+    return {
+      ...config(),
+      replyPolicy: "addressed",
+      characterNames: ["clankie"],
+      ...(windowMs === undefined ? {} : { conversationWindowMs: windowMs }),
+    };
+  }
+
+  function say(id: string, body: string, authorId = "james") {
+    return {
+      id,
+      guildId: "guild-1",
+      channelId: "channel-1",
+      authorId,
+      authorIsBot: false,
+      mentionsBot: false,
+      body,
+    };
+  }
+
+  it("keeps answering a follow-up that does not repeat his name", async () => {
+    const ingress = new DiscordTextIngress(new RecordingPort(), conversational(), () => undefined);
+
+    await expect(ingress.handle(say("m1", "clankie how did the run go?"))).resolves.toMatchObject({
+      state: "settled",
+    });
+    // Nobody says a name every sentence once a conversation is running.
+    await expect(ingress.handle(say("m2", "did it pass?"))).resolves.toMatchObject({ state: "settled" });
+  });
+
+  it("stays out of a conversation he was never part of", async () => {
+    const ingress = new DiscordTextIngress(new RecordingPort(), conversational(), () => undefined);
+
+    await expect(ingress.handle(say("m1", "did it pass?"))).resolves.toEqual({
+      state: "dropped",
+      reason: "not_addressed",
+    });
+  });
+
+  it("gives the grace only to the person he answered", async () => {
+    const ingress = new DiscordTextIngress(new RecordingPort(), conversational(), () => undefined);
+    await ingress.handle(say("m1", "clankie how did the run go?"));
+
+    // Two people in a channel: answering James must not pull him into whatever
+    // someone else is saying.
+    await expect(ingress.handle(say("m2", "did it pass?", "friend"))).resolves.toEqual({
+      state: "dropped",
+      reason: "not_addressed",
+    });
+  });
+
+  it("shows him a late reply instead of dropping it, and lets him answer", async () => {
+    // Someone goes quiet for an hour and then answers your question. No cutoff
+    // can tell that from noise, so he is shown it and decides.
+    let now = 1_000;
+    const port = new RecordingPort();
+    const ingress = new DiscordTextIngress(
+      port,
+      { ...conversational(60_000), conversationRecallMs: 6 * 60 * 60 * 1_000 },
+      () => undefined,
+      () => now,
+    );
+    await ingress.handle(say("m1", "clankie how did the run go?"));
+
+    now += 60 * 60 * 1_000;
+    await expect(ingress.handle(say("m2", "sorry — was in a meeting. did it pass?"))).resolves.toMatchObject(
+      { state: "settled" },
+    );
+    expect(port.turns.at(-1)?.trigger.mayDecline).toBe(true);
+  });
+
+  it("does not mark a message that actually addressed him as declinable", async () => {
+    const port = new RecordingPort();
+    const ingress = new DiscordTextIngress(port, conversational(), () => undefined);
+
+    await ingress.handle(say("m1", "clankie how did the run go?"));
+    expect(port.turns.at(-1)?.trigger.mayDecline).toBeUndefined();
+  });
+
+  it("writes nothing when he reads a late message and chooses silence", async () => {
+    let now = 1_000;
+    const port = new RecordingPort();
+    port.silent = true;
+    const evidence: DiscordTextIngressEvidence[] = [];
+    const ingress = new DiscordTextIngress(
+      port,
+      { ...conversational(60_000), conversationRecallMs: 6 * 60 * 60 * 1_000 },
+      (event) => evidence.push(event),
+      () => now,
+    );
+    await ingress.handle(say("m1", "clankie how did the run go?"));
+    const writesAfterReply = port.writes.length;
+
+    now += 60 * 60 * 1_000;
+    await expect(ingress.handle(say("m2", "never mind, found it"))).resolves.toMatchObject({
+      state: "declined",
+    });
+    expect(port.writes).toHaveLength(writesAfterReply);
+    expect(evidence.at(-1)?.outcome).toBe("declined");
+  });
+
+  it("goes quiet for good once even the recall horizon passes", async () => {
+    let now = 1_000;
+    const ingress = new DiscordTextIngress(
+      new RecordingPort(),
+      { ...conversational(60_000), conversationRecallMs: 60 * 60 * 1_000 },
+      () => undefined,
+      () => now,
+    );
+    await ingress.handle(say("m1", "clankie how did the run go?"));
+
+    now += 2 * 60 * 60 * 1_000;
+    await expect(ingress.handle(say("m2", "did it pass?"))).resolves.toEqual({
+      state: "dropped",
+      reason: "not_addressed",
+    });
+  });
+
+  it("extends the window on each reply, so a long exchange stays live", async () => {
+    let now = 1_000;
+    const ingress = new DiscordTextIngress(
+      new RecordingPort(),
+      conversational(60_000),
+      () => undefined,
+      () => now,
+    );
+    await ingress.handle(say("m1", "clankie how did the run go?"));
+
+    now += 40_000;
+    await expect(ingress.handle(say("m2", "did it pass?"))).resolves.toMatchObject({ state: "settled" });
+    now += 40_000; // past the original expiry, inside the extended one
+    await expect(ingress.handle(say("m3", "and the flaky one?"))).resolves.toMatchObject({
+      state: "settled",
+    });
+  });
+
+  it("can be switched off entirely", async () => {
+    const ingress = new DiscordTextIngress(
+      new RecordingPort(),
+      { ...conversational(0), conversationRecallMs: 0 },
+      () => undefined,
+    );
+    await ingress.handle(say("m1", "clankie how did the run go?"));
+
+    await expect(ingress.handle(say("m2", "did it pass?"))).resolves.toEqual({
+      state: "dropped",
+      reason: "not_addressed",
+    });
+  });
+});

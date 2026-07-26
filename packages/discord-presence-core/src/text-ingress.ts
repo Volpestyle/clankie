@@ -26,8 +26,85 @@ export interface DiscordTextIngressConfig {
   readonly dmUserIds: ReadonlySet<string>;
   readonly contextMessageLimit: number;
   readonly authenticatedSurfaceUrl: string;
+  /**
+   * What earns a reply in an admitted channel. `addressed` (the default)
+   * answers a mention or a message that uses one of his names; `all` answers
+   * every admitted message.
+   *
+   * This is evaluated *before* the captain turn on purpose. Deciding to stay
+   * quiet must not cost a model call, or an open channel allowlist bills for
+   * every message in the server.
+   */
+  readonly replyPolicy?: DiscordReplyPolicy;
+  /** Lowercased names he answers to. Only consulted by the `addressed` policy. */
+  readonly characterNames?: readonly string[];
+  /**
+   * How long an answered person keeps his attention in that channel without
+   * saying his name again. `0` disables it and restores name-every-message.
+   *
+   * Under the bare `addressed` policy he answered "clankie, how's the run?" and
+   * then ignored "did it pass?" — correct by the rule and wrong as behaviour,
+   * because nobody repeats a name every sentence once a conversation is running.
+   * The alternative on offer was the `all` policy, which is worse in a shared
+   * channel: it answers people talking to each other.
+   *
+   * Scoped to one person in one channel, and extended by each reply, so a live
+   * exchange stays live while a third party's unrelated message still needs his
+   * name. Deciding to stay quiet remains free — this is a map lookup, not a
+   * model call.
+   */
+  readonly conversationWindowMs?: number;
+  /**
+   * How long a finished conversation stays worth *considering*, after the
+   * reflexive window has closed.
+   *
+   * Inside the window he answers without thinking about it. Between the window
+   * and this horizon he does not answer reflexively and is not dropped either:
+   * the turn runs with `mayDecline`, he reads the message, and he chooses. A
+   * person who goes quiet for two hours and then answers your question is still
+   * talking to you, and no cutoff can tell that from noise — only he can.
+   *
+   * This is the one place the text plane spends a model call on a message
+   * nobody addressed to him, which is why it is bounded to people he actually
+   * replied to, in the channel they were talking in. `0` disables it and
+   * restores the hard cutoff.
+   */
+  readonly conversationRecallMs?: number;
   readonly deliveryRetentionMs?: number;
   readonly maxRetainedDeliveries?: number;
+}
+
+export type DiscordReplyPolicy = "addressed" | "all";
+
+/** Unknown values fall back to the quiet policy, never the noisy one. */
+export function parseDiscordReplyPolicy(value: string | undefined): DiscordReplyPolicy {
+  return value?.trim() === "all" ? "all" : "addressed";
+}
+
+/**
+ * Was he actually spoken to? A bare name match is intentionally generous —
+ * humans write "hey clanky", "clankie?", "@Clankie" — but it must not fire on
+ * a name embedded in a longer word, or every message mentioning "clankiest"
+ * would summon him.
+ */
+export function addressesCharacter(body: string, names: readonly string[]): boolean {
+  if (names.length === 0) return false;
+  const haystack = body.toLowerCase();
+  return names.some((name) => {
+    let from = 0;
+    for (;;) {
+      const at = haystack.indexOf(name, from);
+      if (at < 0) return false;
+      const before = at === 0 ? "" : haystack[at - 1];
+      const after = haystack[at + name.length] ?? "";
+      if (!isWordCharacter(before) && !isWordCharacter(after)) return true;
+      from = at + 1;
+    }
+  });
+}
+
+function isWordCharacter(value: string | undefined): boolean {
+  return value !== undefined && /[a-z0-9]/u.test(value);
 }
 
 export interface DiscordInboundContextMessage {
@@ -52,12 +129,14 @@ export interface DiscordInboundMessage {
 export type DiscordTextIngressOutcome =
   | { state: "dropped"; reason: string }
   | { state: "settled"; turnId: string; responseMessageId: string }
+  /** He read an unprompted message and chose silence. Nothing was written. */
+  | { state: "declined"; turnId: string }
   | { state: "waiting_user"; turnId: string; responseMessageId: string }
   | { state: "failed"; code: string };
 
 export interface DiscordTextIngressEvidence {
   readonly service: "discord-text-ingress";
-  readonly outcome: "dropped" | "accepted" | "deduplicated" | "settled" | "failed";
+  readonly outcome: "dropped" | "accepted" | "deduplicated" | "settled" | "declined" | "failed";
   readonly deliveryId: string;
   readonly correlationId: string;
   readonly presenceSessionId: string;
@@ -84,10 +163,20 @@ interface RetainedDelivery {
 
 const DEFAULT_DELIVERY_RETENTION_MS = 7 * 60 * 60 * 1_000;
 const DEFAULT_MAX_RETAINED_DELIVERIES = 50_000;
+/** Long enough to think and type a follow-up, short enough that a room he left goes quiet. */
+const DEFAULT_CONVERSATION_WINDOW_MS = 4 * 60 * 1_000;
+/** Long enough to cover "sorry, was in a meeting", short enough that yesterday is over. */
+const DEFAULT_CONVERSATION_RECALL_MS = 6 * 60 * 60 * 1_000;
+/** A conversation is one person in one channel; a third party still has to use his name. */
+function conversationKey(channelId: string, authorId: string): string {
+  return `${channelId}:${authorId}`;
+}
 
 /** Normalizes Discord gateway messages into bounded, policy-gated Eve turns. */
 export class DiscordTextIngress {
   private readonly deliveries = new Map<string, RetainedDelivery>();
+  /** `channel:author` -> when he last replied to them there. */
+  private readonly conversations = new Map<string, number>();
   private readonly port: DiscordTextIngressPort;
   private readonly config: DiscordTextIngressConfig;
   private readonly evidence: (event: DiscordTextIngressEvidence) => void;
@@ -219,6 +308,7 @@ export class DiscordTextIngress {
         messageId: message.id,
         actorId: message.authorId,
         body,
+        ...(this.mayDecline(message) ? { mayDecline: true } : {}),
       },
       contextMessages: boundedContext(contextMessages, this.config.contextMessageLimit),
     });
@@ -230,6 +320,15 @@ export class DiscordTextIngress {
         ...(result.turnId === undefined ? {} : { turnId: result.turnId }),
       });
       return { state: "failed", code: result.code };
+    }
+
+    if (result.state === "silent") {
+      // He read it and chose not to answer. Nothing reaches the channel, and
+      // the exchange is *not* refreshed: staying quiet is not engagement, so a
+      // conversation he has stopped answering ages out instead of holding his
+      // attention forever on the strength of declining to use it.
+      event("declined", { turnId: result.turnId });
+      return { state: "declined", turnId: result.turnId };
     }
 
     const content = boundedReply(
@@ -254,6 +353,7 @@ export class DiscordTextIngress {
     });
     const reply = await this.port.executeDiscordPresenceAction(write);
     if (!reply.messageId) throw new Error("discord_presence_reply_message_missing");
+    this.rememberConversation(message);
     event("settled", { turnId: result.turnId });
     return {
       state: result.state,
@@ -275,14 +375,72 @@ export class DiscordTextIngress {
       return undefined;
     }
     if (!this.config.guildIds.has(message.guildId)) return "guild_not_allowlisted";
-    if (!this.config.channelIds.has(message.channelId)) return "channel_not_allowlisted";
+    // The guild allowlist is what bounds ingress to servers the owner chose and
+    // is never skipped. The channel list is optional refinement below it: empty
+    // admits every channel inside those guilds, matching the voice allowlist so
+    // one mental model covers both planes.
+    if (this.config.channelIds.size > 0 && !this.config.channelIds.has(message.channelId)) {
+      return "channel_not_allowlisted";
+    }
+    // A DM is already addressed to him by construction; a guild channel is not.
+    if ((this.config.replyPolicy ?? "addressed") === "addressed") {
+      const addressed =
+        message.mentionsBot || addressesCharacter(message.body, this.config.characterNames ?? []);
+      // `consider` deliberately does not refuse here: the turn runs and he
+      // decides, which is the whole point of the recall horizon.
+      if (!addressed && this.attentionFor(message) === "none") return "not_addressed";
+    }
     return undefined;
+  }
+
+  /** True when he is being shown this rather than asked to answer it. */
+  private mayDecline(message: DiscordInboundMessage): boolean {
+    if (message.mentionsBot || addressesCharacter(message.body, this.config.characterNames ?? [])) {
+      return false;
+    }
+    return this.attentionFor(message) === "consider";
+  }
+
+  /**
+   * How much of his attention this person still holds in this channel.
+   *
+   * `reflex` answers without deliberating, `consider` runs the turn and lets him
+   * decide, `none` is a stranger who has to use his name.
+   */
+  private attentionFor(message: DiscordInboundMessage): "reflex" | "consider" | "none" {
+    const repliedAt = this.conversations.get(conversationKey(message.channelId, message.authorId));
+    if (repliedAt === undefined) return "none";
+    const since = this.clock() - repliedAt;
+    // Strictly less than, so a horizon of `0` disables that tier outright rather
+    // than matching the same millisecond he replied in.
+    if (since < (this.config.conversationWindowMs ?? DEFAULT_CONVERSATION_WINDOW_MS)) return "reflex";
+    return since < (this.config.conversationRecallMs ?? DEFAULT_CONVERSATION_RECALL_MS)
+      ? "consider"
+      : "none";
+  }
+
+  /**
+   * Called once he has actually replied to someone, so attention is earned by a
+   * real exchange rather than by merely having been spoken to — a turn that
+   * failed or was refused leaves him no more engaged than before.
+   */
+  private rememberConversation(message: DiscordInboundMessage): void {
+    this.conversations.set(conversationKey(message.channelId, message.authorId), this.clock());
   }
 
   private pruneDeliveries(): void {
     const now = this.clock();
     for (const [deliveryId, delivery] of this.deliveries) {
       if (delivery.expiresAtMs <= now) this.deliveries.delete(deliveryId);
+    }
+    // Past the recall horizon there is nothing left to consider, so the entry
+    // can go. Pruned against the wider of the two horizons, never the window.
+    const horizonMs = Math.max(
+      this.config.conversationWindowMs ?? DEFAULT_CONVERSATION_WINDOW_MS,
+      this.config.conversationRecallMs ?? DEFAULT_CONVERSATION_RECALL_MS,
+    );
+    for (const [key, repliedAt] of this.conversations) {
+      if (now - repliedAt > horizonMs) this.conversations.delete(key);
     }
   }
 }

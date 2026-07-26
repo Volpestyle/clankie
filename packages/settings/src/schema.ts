@@ -23,6 +23,8 @@ export const DiscordSettingsSchema = z
     applicationId: SnowflakeSchema.optional(),
     guildId: SnowflakeSchema.optional(),
     ambientRoleIds: SnowflakeListSchema,
+    /** Individual operators holding the ambient tier without a mapped role. */
+    ambientUserIds: SnowflakeListSchema,
     approvalRoleIds: SnowflakeListSchema,
     ownerUserId: SnowflakeSchema.optional(),
 
@@ -40,6 +42,12 @@ export const DiscordSettingsSchema = z
     voiceGuildIds: SnowflakeListSchema,
     voiceChannelIds: SnowflakeListSchema,
     voiceChannelId: SnowflakeSchema.optional(),
+    /**
+     * Who may summon Clankie into a call inside an allowlisted voice guild.
+     * Defaults to the closed policy: voice stays on the ambient binding unless
+     * an operator deliberately opens it.
+     */
+    voiceJoinPolicy: z.enum(["ambient", "guild_members"]).default("ambient"),
 
     /** Activity plane (ADR 0047): surface → embedded application id. */
     activityApplicationIdGba: SnowflakeSchema.optional(),
@@ -47,12 +55,61 @@ export const DiscordSettingsSchema = z
   .strict();
 export type DiscordSettings = z.infer<typeof DiscordSettingsSchema>;
 
+/**
+ * Who Clankie is, as distinct from what he is allowed to do.
+ *
+ * Identity is layered deliberately. **Character** (this schema) is stable
+ * across every surface; the **operating contract** in the captain's authored
+ * instructions is also stable; only **register** — how he speaks in the room he
+ * is currently in — varies by lane. One person, different rooms.
+ *
+ * Nothing here grants authority. Register is presentation only: a warmer voice
+ * must never widen what the ambient tier may approve, or an agreeable persona
+ * becomes a social-engineering surface ([ADR 0051](../../../docs/adr/0051-layered-character-register-and-reply-policy.md)).
+ */
+export const PersonaSettingsSchema = z
+  .object({
+    displayName: z.string().min(1).max(64).default("Clankie"),
+    /** Extra names he answers to. Humans misspell, shorten, and nickname. */
+    aliases: z.array(z.string().min(1).max(64)).max(16).default([]),
+    /**
+     * Free-text character authored by the owner. This is the taste layer, and
+     * it belongs to a human — the code carries it, it does not invent it.
+     */
+    characterNotes: z.string().max(4_000).default(""),
+    /** How readily he speaks, and how much room he takes when he does. */
+    chattiness: z.enum(["quiet", "balanced", "chatty"]).default("balanced"),
+    /**
+     * What earns a reply in an admitted text channel. `addressed` is the
+     * default because an open channel allowlist otherwise means replying to
+     * every message in the server.
+     */
+    replyPolicy: z.enum(["addressed", "all"]).default("addressed"),
+    /**
+     * Seconds someone keeps his attention in a channel after he answers them,
+     * without having to say his name again. `0` requires the name every time.
+     *
+     * Sits under `addressed` rather than replacing it: the opening move still
+     * has to name him, and only the person he answered gets the grace.
+     */
+    conversationWindowSeconds: z.number().int().min(0).max(3_600).default(240),
+    /**
+     * Seconds a finished conversation stays worth considering after the window
+     * closes. Inside this he is shown a late message and decides for himself
+     * whether it still wants an answer; `0` restores the hard cutoff.
+     */
+    conversationRecallSeconds: z.number().int().min(0).max(86_400).default(21_600),
+  })
+  .strict();
+export type PersonaSettings = z.infer<typeof PersonaSettingsSchema>;
+
 export const ClankieSettingsSchema = z
   .object({
     schemaVersion: z.literal(SETTINGS_SCHEMA_VERSION),
     // Defaulted lazily: the parsed output carries every field's own default,
     // which a bare `{}` literal does not satisfy.
     discord: DiscordSettingsSchema.default(() => DiscordSettingsSchema.parse({})),
+    persona: PersonaSettingsSchema.default(() => PersonaSettingsSchema.parse({})),
   })
   .strict();
 export type ClankieSettings = z.infer<typeof ClankieSettingsSchema>;

@@ -23,6 +23,8 @@ export interface DiscordVoiceTurn {
 
 export type DiscordVoiceTurnOutcome =
   | { readonly state: "settled"; readonly turnId: string; readonly response: string }
+  /** The captain chose silence. Nothing is spoken. */
+  | { readonly state: "declined"; readonly turnId: string }
   | {
       readonly state: "waiting_user";
       readonly turnId: string;
@@ -90,6 +92,12 @@ export class DiscordVoiceIngress {
           ? "I need you to continue that request on the authenticated operator surface."
           : result.prompt,
       };
+    }
+    if (result.state === "silent") {
+      // Voice does not offer the decline path today — `mayDecline` is only set
+      // by text ingress — so reaching here means the captain used the sentinel
+      // unprompted. Say nothing rather than read the marker aloud.
+      return { state: "declined", turnId: result.turnId };
     }
     return { state: "settled", turnId: result.turnId, response: result.response };
   }
