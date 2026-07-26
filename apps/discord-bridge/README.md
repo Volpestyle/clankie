@@ -85,6 +85,10 @@ CLANKIE_VOICE_VOLITION_MODEL=gpt-4o-mini            # optional; the volition gat
 
 # Optional activity plane (ADR 0047) — rendered surfaces in a voice channel
 DISCORD_ACTIVITY_APPLICATION_ID_GBA=...        # embedded application id for the gba_emulator surface
+
+# Optional possessor voice seam (ADR 0064) — a harness driving the body, commentating
+CLANKIE_POSSESSOR_VOICE_ENABLED=true           # off by default; needs a live voice session
+CLANKIE_POSSESSOR_VOICE_PORT=4323              # optional; loopback listener port
 ```
 
 ## Activity plane
@@ -240,6 +244,35 @@ clean leave, and a DAVE leave/rejoin recovery.
 The reviewed inactive ClankVox schema-1 compatibility parser remains in
 [`src/clankvox-ipc.ts`](src/clankvox-ipc.ts); no AGPL ClankVox source is
 imported or executed.
+
+## Possessor voice seam (ADR 0064)
+
+When `CLANKIE_POSSESSOR_VOICE_ENABLED=true` and a realtime voice session exists,
+the bridge binds a loopback listener on `127.0.0.1:4323/possessor`. A harness
+possessing Clankie's GBA body ([`apps/gba-mcp`](../gba-mcp/README.md)) holds no
+gateway and therefore no live presence claim, so it cannot speak for itself. It
+reports what the body just did; the bridge — which does hold the gateway —
+seeds that report into the live conversation session and lets the persona
+compose the words.
+
+```mermaid
+flowchart LR
+  P["possessor<br/>gba-mcp"] -->|"narrate"| L["loopback listener<br/>brokered bearer"]
+  L --> V["DiscordVoiceSession.narrate()<br/>seed + rate-limited response"]
+  T["attributed transcript line"] -->|push| L
+  L -->|"utterance"| P
+```
+
+The bearer is minted into the credential broker on first start under provider id
+`clankie_possessor_voice`, exactly like the other internal Clankie bearers;
+`CLANKIE_POSSESSOR_VOICE_TOKEN` is a **hard startup error**. The listener binds
+loopback only and is never tunnelled.
+
+Two things this seam deliberately cannot do: a possessor cannot choose an
+audience or reach any other presence action (the wire carries `narrate` and
+`utterance` and nothing else), and it cannot make him say a specific sentence —
+narration is context, never a script. Hearing is push-only, so the bridge's
+transcript retention stays at zero.
 
 ## Presence actions (ADR 0024 P1)
 

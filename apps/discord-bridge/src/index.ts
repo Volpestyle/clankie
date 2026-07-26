@@ -2,9 +2,15 @@ import { ClankieApiClient } from "@clankie/api-client";
 import {
   createDefaultCredentialStore,
   DISCORD_BOT_PROVIDER_ID,
+  ensurePossessorVoiceCredential,
   resolveDiscordBridgeCredential,
   resolveDiscordVoiceBridgeCredential,
 } from "@clankie/credential-broker";
+import {
+  createPossessorVoiceListener,
+  POSSESSOR_VOICE_DEFAULT_PORT,
+  POSSESSOR_VOICE_PATH,
+} from "@clankie/possessor-voice";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { isAbsolute, join, relative } from "node:path";
@@ -262,6 +268,32 @@ const voiceIdleAutoLeave =
           );
         },
       });
+// The possessor voice seam (ADR 0064): a harness driving Clankie's GBA body
+// reports what it just did, and he commentates it in his own voice. Off by
+// default and composed only when he actually has a voice — with no realtime
+// session there is nothing for a report to reach, so the listener never binds
+// and a possessor's `clankie_say` refuses with a reason.
+const possessorVoiceListener =
+  process.env["CLANKIE_POSSESSOR_VOICE_ENABLED"] === "true" && voiceSession !== undefined
+    ? createPossessorVoiceListener({
+        // The bridge owns the listener, so the bridge owns the mint; a
+        // possessor only ever resolves.
+        token: await ensurePossessorVoiceCredential(),
+        narrate: (text) => voiceSession.narrate(text),
+      })
+    : undefined;
+if (possessorVoiceListener !== undefined && voiceSession !== undefined) {
+  const port = await possessorVoiceListener.listen(
+    Number(process.env["CLANKIE_POSSESSOR_VOICE_PORT"] ?? POSSESSOR_VOICE_DEFAULT_PORT),
+  );
+  // Hearing is push-only, so the bridge starts retaining nothing new: lines
+  // that already passed the consent boundary are handed on as they happen.
+  voiceSession.subscribeTranscript((line) => possessorVoiceListener.publishUtterance(line));
+  console.info(
+    { port, path: POSSESSOR_VOICE_PATH },
+    "Discord bridge possessor voice seam listening on loopback",
+  );
+}
 // Asked voice presence (ADR 0062): "clankie hop in vc" in an admitted text
 // channel moves him under exactly the slash tier, executed here at the ingress
 // boundary before the same message's captain turn. Composed only when both
@@ -1117,6 +1149,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   shutdownPromise = (async () => {
     projector.stop();
     voiceIdleAutoLeave?.stop();
+    await possessorVoiceListener?.close();
     await voiceSession?.leave();
     client.destroy();
     await presenceSession.stop().catch(reportPresencePhaseFailure);

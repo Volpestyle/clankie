@@ -65,6 +65,13 @@ import type { DiscordVoiceIngress, DiscordVoiceTurnOutcome } from "./voice-ingre
 /** Shorter than this is noise, not an utterance; it earns no receipt. */
 const MIN_UTTERANCE_MS = 350;
 /**
+ * How rarely a possessor's narration may make him speak (ADR 0064). A play loop
+ * reports constantly — every step, every bump — and answering each one would
+ * turn a voice channel into a monologue nobody can talk over. Seeding is
+ * unbounded; only the spoken response waits.
+ */
+export const DEFAULT_NARRATION_MIN_INTERVAL_MS = 12_000;
+/**
  * Silence that closes a capture. Unlike the cascade this no longer gates a
  * response — transcription streams while the speaker is still talking — it
  * only bounds the gateway speaking span used for attribution and the
@@ -223,6 +230,12 @@ export interface DiscordVoiceSessionOptions {
    * accounted, so the counters stay honest. Errors count as suppressed.
    */
   readonly volitionDecider?: (roomText: string) => Promise<boolean>;
+  /**
+   * Floor for how often a possessor's narration may trigger a spoken response.
+   * Seeding is never rate-limited; only speaking is. Defaults to
+   * {@link DEFAULT_NARRATION_MIN_INTERVAL_MS}.
+   */
+  readonly narrationMinIntervalMs?: number;
   readonly presenceSessionId: () => string;
   readonly emit: (evidence: DiscordVoiceEvidence) => Promise<void>;
   /** Monotonic milliseconds; defaults to `performance.now`. Injected by tests. */
@@ -303,6 +316,11 @@ export class DiscordVoiceSession {
   private speakingSpans: SpeakingSpan[] = [];
   /** Lines stored as buffers so {@link leave} can zero the bytes, not merely drop references. */
   private transcriptRing: Buffer[] = [];
+  /** Possessors listening to the room; see {@link subscribeTranscript}. Never retains. */
+  private readonly transcriptListeners = new Set<(line: string) => void>();
+  /** Rate-limits possessor narration responses so play does not become a monologue. */
+  private lastNarrationResponseAtMs = Number.NEGATIVE_INFINITY;
+  private readonly narrationMinIntervalMs: number;
   private pendingResponses: PendingVoiceResponse[] = [];
   /** The job whose stream still receives deltas. */
   private openPlayback: PlaybackJob | undefined;
@@ -336,6 +354,7 @@ export class DiscordVoiceSession {
     this.clock = options.clock ?? (() => performance.now());
     this.timers = options.timers ?? defaultTimers;
     this.floor = new VoiceFloor(options.floor);
+    this.narrationMinIntervalMs = options.narrationMinIntervalMs ?? DEFAULT_NARRATION_MIN_INTERVAL_MS;
     this.player = createAudioPlayer({
       behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
     });
@@ -469,6 +488,86 @@ export class DiscordVoiceSession {
     if (guildId !== undefined && channelId !== undefined) {
       await this.emitSafely({ type: "left", guildId, channelId });
     }
+  }
+
+  /**
+   * A possessor's report of what just happened in the body (ADR 0064).
+   *
+   * The text is seeded as a conversation item and **never spoken verbatim**.
+   * What Clankie says about walking into a wall is his to compose, in the voice
+   * the briefing already gave him, folded in with whatever the room is saying —
+   * the possessor supplies the event, the persona supplies the words. This is
+   * ADR 0047's fence restated for speech: possession changes who decides what
+   * the body does, never who is present or how he sounds.
+   *
+   * Rejects when he is not in a voice channel, so a possessor learns that
+   * nobody heard it rather than believing it spoke.
+   */
+  public async narrate(text: string): Promise<void> {
+    const trimmed = text.trim();
+    if (trimmed.length === 0) throw new Error("voice_narration_empty");
+    const guildId = this.guildId;
+    const channelId = this.channelId;
+    if (guildId === undefined || channelId === undefined) {
+      throw new Error("voice_narration_not_in_channel");
+    }
+    const generation = this.sessionGeneration;
+    this.cancelHold();
+    const queued = this.conversationOps.then(async () => {
+      if (generation !== this.sessionGeneration) return;
+      let wake: DiscordVoiceWake = "continuing";
+      if (this.conversation === undefined) {
+        wake = "waking";
+        await this.openConversationNow(guildId, channelId);
+        if (generation !== this.sessionGeneration || this.conversation === undefined) return;
+      }
+      const conversation = this.conversation;
+      if (!conversation.isOpen) return;
+      try {
+        conversation.createTextItem(`While playing, Clankie just: ${trimmed}`);
+      } catch {
+        // Closed between frames; the close handler owns cleanup.
+        return;
+      }
+      // Decided here rather than at call time, and deliberately: a play loop
+      // fires narrations without awaiting them, so a decision made before the
+      // queue would let every report in a burst independently conclude it was
+      // the one allowed to speak.
+      const respond =
+        !this.isPlaying() && this.clock() - this.lastNarrationResponseAtMs >= this.narrationMinIntervalMs;
+      if (!respond) return;
+      this.armTick();
+      this.lastNarrationResponseAtMs = this.clock();
+      this.pendingResponses.push({
+        deliveryId: randomUUID(),
+        wake,
+        fastPath: false,
+        state: "settled",
+        handoffMs: 0,
+        decidedAtMs: this.clock(),
+        done: false,
+      });
+      try {
+        conversation.createResponse();
+      } catch {
+        this.pendingResponses.pop();
+      }
+    });
+    this.conversationOps = queued.catch(() => undefined);
+    await queued;
+  }
+
+  /**
+   * Push-only access to the attributed transcript, for a possessor that is
+   * driving the body and should hear the room it is playing in front of.
+   *
+   * Push rather than pull is a retention constraint: nothing new is stored to
+   * serve this, so the bridge keeps retaining no transcripts. A subscriber sees
+   * only lines that already passed the consent boundary and the ring.
+   */
+  public subscribeTranscript(listener: (line: string) => void): () => void {
+    this.transcriptListeners.add(listener);
+    return () => this.transcriptListeners.delete(listener);
   }
 
   public status(): DiscordVoiceSessionStatus {
@@ -655,7 +754,15 @@ export class DiscordVoiceSession {
   }
 
   private pushTranscriptLine(speakerId: string, text: string): void {
-    this.transcriptRing.push(Buffer.from(`${speakerId}: ${text}`, "utf8"));
+    const line = `${speakerId}: ${text}`;
+    this.transcriptRing.push(Buffer.from(line, "utf8"));
+    for (const listener of this.transcriptListeners) {
+      try {
+        listener(line);
+      } catch {
+        // A possessor that throws on hearing must not break the room.
+      }
+    }
     let totalBytes = 0;
     for (const line of this.transcriptRing) totalBytes += line.byteLength;
     while (

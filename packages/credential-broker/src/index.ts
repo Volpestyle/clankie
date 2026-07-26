@@ -64,6 +64,17 @@ export {
   type ActivityProducerCredentialOptions,
 } from "./activity-producer-credential.ts";
 export {
+  POSSESSOR_VOICE_CREDENTIAL_PROVIDER_ID,
+  POSSESSOR_VOICE_FORBIDDEN_ENV,
+  PossessorVoiceCredentialError,
+  assertNoEnvironmentPossessorVoiceToken,
+  ensurePossessorVoiceCredential,
+  mintPossessorVoiceToken,
+  resolvePossessorVoiceCredential,
+  type PossessorVoiceCredentialErrorCode,
+  type PossessorVoiceCredentialOptions,
+} from "./possessor-voice-credential.ts";
+export {
   DISCORD_BRIDGE_CREDENTIAL_PROVIDER_ID,
   DISCORD_USER_BRIDGE_CREDENTIAL_PROVIDER_ID,
   DISCORD_USER_VOICE_BRIDGE_CREDENTIAL_PROVIDER_ID,

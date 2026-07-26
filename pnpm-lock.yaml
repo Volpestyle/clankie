@@ -213,6 +213,9 @@ importers:
       '@clankie/interactive-environment':
         specifier: workspace:*
         version: link:../../packages/interactive-environment
+      '@clankie/possessor-voice':
+        specifier: workspace:*
+        version: link:../../packages/possessor-voice
       '@clankie/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -311,6 +314,9 @@ importers:
       '@clankie/interactive-environment':
         specifier: workspace:*
         version: link:../../packages/interactive-environment
+      '@clankie/possessor-voice':
+        specifier: workspace:*
+        version: link:../../packages/possessor-voice
       '@clankie/rendered-surface-client':
         specifier: workspace:*
         version: link:../../packages/rendered-surface-client
@@ -1116,6 +1122,31 @@ importers:
       '@types/node':
         specifier: 24.12.4
         version: 24.12.4
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.10
+        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@24.12.4)(vite@8.1.3(@types/node@24.12.4)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.49.0)(tsx@4.23.0)(yaml@2.9.0))
+
+  packages/possessor-voice:
+    dependencies:
+      '@clankie/credential-broker':
+        specifier: workspace:*
+        version: link:../credential-broker
+      ws:
+        specifier: 8.21.0
+        version: 8.21.0
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: 24.12.4
+        version: 24.12.4
+      '@types/ws':
+        specifier: 8.18.1
+        version: 8.18.1
       typescript:
         specifier: 5.9.3
         version: 5.9.3

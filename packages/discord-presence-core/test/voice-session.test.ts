@@ -342,6 +342,7 @@ const settledResult = (turnId: string, response: string): CaptainChannelTurnResu
   ({ state: "settled", captainSessionId: "session-1", turnId, response }) as CaptainChannelTurnResult;
 
 interface HarnessOptions {
+  readonly narrationMinIntervalMs?: number;
   readonly volitionDecider?: (roomText: string) => Promise<boolean>;
   readonly floorOverrides?: Partial<VoiceFloorOptions>;
   readonly captain?: (request: DiscordPresenceChannelTurnRequest) => Promise<CaptainChannelTurnResult>;
@@ -401,6 +402,9 @@ function buildHarness(options: HarnessOptions = {}) {
       ...options.floorOverrides,
     },
     ...(options.volitionDecider === undefined ? {} : { volitionDecider: options.volitionDecider }),
+    ...(options.narrationMinIntervalMs === undefined
+      ? {}
+      : { narrationMinIntervalMs: options.narrationMinIntervalMs }),
     presenceSessionId: () => "presence-1",
     emit: (event) => {
       // Every emission must be protocol-valid, including the fastPath/turnId
@@ -1210,5 +1214,113 @@ describe("transcript ring", () => {
     expect(seed).toContain("line-34");
     expect(seed).not.toContain("line-0 ");
     expect(seed.split("\n")).toHaveLength(31);
+  });
+});
+
+describe("possessor narration and hearing (ADR 0064)", () => {
+  it("refuses to narrate when he is not in a voice channel", async () => {
+    const harness = buildHarness();
+    await expect(harness.session.narrate("walked into a wall")).rejects.toThrow(
+      /voice_narration_not_in_channel/u,
+    );
+  });
+
+  it("refuses an empty report rather than seeding nothing", async () => {
+    const harness = await joinedHarness();
+    await expect(harness.session.narrate("   ")).rejects.toThrow(/voice_narration_empty/u);
+  });
+
+  it("seeds the report as context and lets the persona compose the words", async () => {
+    const harness = await joinedHarness();
+    await harness.session.narrate("walked into a wall by the lab");
+    await flush();
+
+    const conversation = harness.conversation();
+    // The possessor's text is seeded, never queued as speech to synthesize.
+    const seeded = conversation.textItems.filter((item) => item.includes("walked into a wall by the lab"));
+    expect(seeded).toHaveLength(1);
+    expect(at(seeded, 0)).toBe("While playing, Clankie just: walked into a wall by the lab");
+    // A response was requested; what he actually says is the model's.
+    expect(conversation.responseCreates).toBe(1);
+  });
+
+  it("keeps seeding but stops responding inside the narration interval", async () => {
+    const harness = await joinedHarness({ narrationMinIntervalMs: 10_000 });
+    await harness.session.narrate("left the lab");
+    await flush();
+    expect(harness.conversation().responseCreates).toBe(1);
+
+    harness.clock.now += 1_000;
+    await harness.session.narrate("took one step north");
+    await harness.session.narrate("took another step north");
+    await flush();
+
+    const conversation = harness.conversation();
+    // Every step is still seeded — he must not narrate a past he never saw.
+    expect(conversation.textItems.filter((item) => item.startsWith("While playing,"))).toHaveLength(3);
+    // But the room is not monologued at.
+    expect(conversation.responseCreates).toBe(1);
+
+    harness.clock.now += 10_000;
+    await harness.session.narrate("found a pokeball");
+    await flush();
+    expect(harness.conversation().responseCreates).toBe(2);
+  });
+
+  it("pushes attributed room lines to a subscribed possessor", async () => {
+    const harness = await joinedHarness({ floorOverrides: { volition: { maxPerHour: 0 } } });
+    await harness.consent(ALICE);
+    const heard: string[] = [];
+    const unsubscribe = harness.session.subscribeTranscript((line) => heard.push(line));
+
+    await harness.say(ALICE, "go left instead");
+    expect(heard).toEqual([`${ALICE}: go left instead`]);
+
+    unsubscribe();
+    await harness.say(ALICE, "no seriously go left");
+    expect(heard).toHaveLength(1);
+  });
+
+  it("never pushes what an unconsented participant said", async () => {
+    const harness = await joinedHarness({ floorOverrides: { volition: { maxPerHour: 0 } } });
+    const heard: string[] = [];
+    harness.session.subscribeTranscript((line) => heard.push(line));
+
+    // Mallory never consented, so no capture opens and no transcript exists.
+    harness.connection().receiver.speaking.emit("start", MALLORY);
+    await flush();
+    expect(harness.connection().captures.some((capture) => capture.userId === MALLORY)).toBe(false);
+    expect(heard).toEqual([]);
+  });
+
+  it("survives a subscriber that throws", async () => {
+    const harness = await joinedHarness({ floorOverrides: { volition: { maxPerHour: 0 } } });
+    await harness.consent(ALICE);
+    const heard: string[] = [];
+    harness.session.subscribeTranscript(() => {
+      throw new Error("possessor died mid-line");
+    });
+    harness.session.subscribeTranscript((line) => heard.push(line));
+
+    await harness.say(ALICE, "still listening");
+    expect(heard).toEqual([`${ALICE}: still listening`]);
+  });
+});
+
+describe("possessor narration bursts (ADR 0064)", () => {
+  it("lets only one un-awaited report in a burst reach a response", async () => {
+    const harness = await joinedHarness({ narrationMinIntervalMs: 10_000 });
+    // A play loop fires and forgets; nothing awaits between these.
+    const reports = [
+      harness.session.narrate("stepped north"),
+      harness.session.narrate("stepped north again"),
+      harness.session.narrate("bumped the fence"),
+    ];
+    await Promise.all(reports);
+    await flush();
+
+    const conversation = harness.conversation();
+    expect(conversation.textItems.filter((item) => item.startsWith("While playing,"))).toHaveLength(3);
+    expect(conversation.responseCreates).toBe(1);
   });
 });

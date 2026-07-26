@@ -14,6 +14,7 @@ import { PossessionLease, parsePossessionHolders } from "./possession.ts";
 import { acquireBodyLock, type BodyLock } from "@clankie/gba-emulator";
 import type { GbaCheckpointSummary } from "./tools.ts";
 import { createBrokeredActivityFrameSink } from "@clankie/rendered-surface-client";
+import { createBrokeredPossessorVoiceClient } from "@clankie/possessor-voice";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -98,6 +99,17 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   if (sink === undefined) {
     process.stderr.write("no activity producer credential; nobody can watch this session\n");
   }
+
+  // So a possessor can commentate what it is playing. Optional and best-effort
+  // for the same reason the sink is: no bridge, no voice, and the tools refuse
+  // with a reason rather than the server failing to start.
+  const possessorVoiceUrl = process.env["CLANKIE_POSSESSOR_VOICE_URL"];
+  const voice = await createBrokeredPossessorVoiceClient(
+    possessorVoiceUrl === undefined ? {} : { url: possessorVoiceUrl },
+  );
+  if (voice === undefined) {
+    process.stderr.write("no possessor voice credential; he plays without commentating\n");
+  }
   let sequence = 0;
   // Watch the action as it happens, at hardware speed. Publishing only after an
   // action made the character teleport a tile; pacing keeps the emulator from
@@ -125,9 +137,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   };
 
   if (sink !== undefined && smooth) {
-    game.observeFrames(() => {
-      publish();
-    }, { pace: true });
+    game.observeFrames(
+      () => {
+        publish();
+      },
+      { pace: true },
+    );
   }
 
   // The sidebar beside the canvas. Same shared sequence as the frames, same
@@ -207,7 +222,14 @@ if (import.meta.url === `file://${process.argv[1]}`) {
             listCheckpoints: () => listGbaCheckpoints(checkpointDir).map(summarize),
           }),
     },
-    { possession },
+    {
+      possession,
+      // Speaking and hearing are the bridge's to grant (ADR 0064): a possessor
+      // holds no gateway, so it reports to the process that does and lets the
+      // persona compose the words. Absent credential or absent bridge means
+      // both stay denied with a reason, and play continues in silence.
+      ...(voice === undefined ? {} : { speech: voice, hearing: voice }),
+    },
   );
   // The body lock is reclaimed on liveness, so a crash cannot brick the body —
   // but releasing on a clean exit means the next process starts immediately
@@ -216,6 +238,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     bodyLock?.release();
     bodyLock = null;
     sink?.close();
+    voice?.close();
     session.close();
   };
   process.once("exit", release);

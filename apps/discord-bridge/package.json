@@ -21,6 +21,7 @@
     "@clankie/credential-broker": "workspace:*",
     "@clankie/discord-presence-core": "workspace:*",
     "@clankie/interactive-environment": "workspace:*",
+    "@clankie/possessor-voice": "workspace:*",
     "@clankie/protocol": "workspace:*",
     "@clankie/settings": "workspace:*",
     "@discordjs/opus": "0.10.0",

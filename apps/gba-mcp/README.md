@@ -44,11 +44,11 @@ without them it is the clearly-labeled deterministic double.
 
 ## Tools
 
-| Tool                        | What it does                                                             |
-| --------------------------- | ------------------------------------------------------------------------ |
-| `gba_emulator_observe`      | Decoded state **and the rendered screen as an image**                    |
-| `gba_emulator_start_action` | One catalogued action: a button press, or `walk_to` a tile               |
-| `gba_emulator_pause`        | Stop for a stated reason when the state looks uncertain                  |
+| Tool                        | What it does                                                                          |
+| --------------------------- | ------------------------------------------------------------------------------------- |
+| `gba_emulator_observe`      | Decoded state **and the rendered screen as an image**                                 |
+| `gba_emulator_start_action` | One catalogued action: a button press, or `walk_to` a tile                            |
+| `gba_emulator_pause`        | Stop for a stated reason when the state looks uncertain                               |
 | `gba_emulator_resume`       | Undo a pause. Pausing is safe from anyone; resuming is driving, so it needs the lease |
 
 Observation returns the frame because the decoded state is a privileged, partial
@@ -104,7 +104,7 @@ CLANKIE_GBA_POSSESSION_HOLDERS=codex-lab,claude-lab   # unset means possession i
 - **Stealing a live lease requires `force`**, so it is an explicit act rather
   than the outcome of a race. Every transition is logged to stderr.
 - **Leases expire**, so a crashed holder does not keep the body forever.
-- **Acting renews the lease**, so expiry bounds how long an *idle* possessor
+- **Acting renews the lease**, so expiry bounds how long an _idle_ possessor
   keeps the body from the resident loop — never how long a session of play may
   last.
 - `onHeldChange` suspends and resumes a co-hosted loop on take and release —
@@ -139,7 +139,7 @@ act after release:      possession_lease_not_held
 
 ## Watching an agent play
 
-`gba_emulator_observe` returns the frame to its *caller*, which means an
+`gba_emulator_observe` returns the frame to its _caller_, which means an
 agent-driven session is otherwise visible only to the agent. The server also
 publishes frames to the activity surface, so a person can watch:
 
@@ -213,6 +213,19 @@ directly — the control plane's presence action requires a live claim only the
 Discord bridge can mint.
 ```
 
+`@clankie/possessor-voice` is the implementation that satisfies it
+([ADR 0064](../../docs/adr/0064-possessor-voice-seam.md)). It resolves the
+broker-minted `clankie_possessor_voice` bearer and dials the bridge's loopback
+listener; with no credential, no bridge, or no live voice session, the refusal
+above stands and play simply continues in silence.
+
+**What you say is an event, not a script.** The text is seeded into his live
+realtime session as context and never spoken verbatim — report what the body
+just did (`"walked into a wall by the lab"`) and he composes the line himself,
+in his own voice, folded in with whatever the room is saying. Responses are
+rate-limited (12 s by default) while seeding is not, so a play loop that reports
+every step keeps him informed without turning the channel into a monologue.
+
 ### Listening
 
 `ClankieHearingPort` is symmetric and blocked by the same fence: the bridge holds
@@ -265,12 +278,18 @@ pretending a Codex session _is_ Clankie would be the confusing story, not the
 honest one. This also removes a coupling: the MCP server needs no persona
 plumbing, and the persona work stays scoped to Clankie's own free-play loop.
 
-One consequence worth knowing rather than discovering. Gameplay is unaffected —
-a button press has no voice. But `clankie_say` is visible to third parties, so a
-possessor speaking in the channel reads as **Clankie's account carrying the
-possessor's voice**. That is accepted, not overlooked: if a run should sound like
-him, that is a reason to let his own loop drive rather than a reason to bolt a
-persona onto the possessor.
+Gameplay is unaffected — a button press has no voice. Speech is where the
+distinction needed a decision, and
+[ADR 0064](../../docs/adr/0064-possessor-voice-seam.md) makes it: the possessor
+supplies the **event**, the persona supplies the **words**. A report crosses the
+seam as context for his live voice session, so what third parties hear is
+Clankie's account carrying _Clankie's_ voice, describing what a guest driver
+just did. The possessor still needs no persona plumbing — it never composes a
+line — and a run that should sound like him now does, without one.
+
+The trade this accepts is the mirror image: a possessor **cannot** make him say
+a specific sentence. Anything needing verbatim output belongs on the
+presence-action path with a live claim, not here.
 
 **Possession is not announced in the channel** (owner decision, ADR 0053). It is
 visible operator-side — every lease transition is logged — and the room is not
@@ -281,19 +300,19 @@ revisiting it.
 ## One body, one process
 
 The possession lease decides which harness drives a running loop. A separate
-lockfile decides which *process* owns the body at all, because the two questions
+lockfile decides which _process_ owns the body at all, because the two questions
 have different answers: the lease is in-memory and a second process has its own
 memory.
 
 Every entrypoint resolves the same body root, but they take `body.lock` at
 different moments. A loop that starts driving immediately takes it at startup.
-**This server does not** — it takes the lock when someone *possesses* him, and
+**This server does not** — it takes the lock when someone _possesses_ him, and
 releases it on release.
 
 That distinction is load-bearing. An MCP client starts stdio servers freely:
 `claude mcp list`, every session, every retry. Locking at process start meant the
 first server won the body and every later one died with `BodyBusyError` before it
-could serve a single tool call — contention over *existing*, not over the body.
+could serve a single tool call — contention over _existing_, not over the body.
 Observation is not driving, so several servers can now coexist and look, while
 only one of them can ever act.
 A second one is refused with the holder's name and pid:
