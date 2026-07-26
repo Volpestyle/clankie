@@ -86,19 +86,13 @@ export const PersonaSettingsSchema = z
      */
     replyPolicy: z.enum(["addressed", "all"]).default("addressed"),
     /**
-     * Seconds someone keeps his attention in a channel after he answers them,
-     * without having to say his name again. `0` requires the name every time.
+     * Seconds someone he has replied to keeps his attention in that channel
+     * without using his name again. `0` requires the name every time.
      *
-     * Sits under `addressed` rather than replacing it: the opening move still
-     * has to name him, and only the person he answered gets the grace.
+     * This decides what he *sees*, never what he must say: he may stay silent
+     * on any turn, including one that named him directly.
      */
-    conversationWindowSeconds: z.number().int().min(0).max(3_600).default(240),
-    /**
-     * Seconds a finished conversation stays worth considering after the window
-     * closes. Inside this he is shown a late message and decides for himself
-     * whether it still wants an answer; `0` restores the hard cutoff.
-     */
-    conversationRecallSeconds: z.number().int().min(0).max(86_400).default(21_600),
+    conversationAttentionSeconds: z.number().int().min(0).max(86_400).default(21_600),
   })
   .strict();
 export type PersonaSettings = z.infer<typeof PersonaSettingsSchema>;

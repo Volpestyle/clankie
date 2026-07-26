@@ -2001,6 +2001,9 @@ export type LinearAgentThreadContext = z.infer<typeof LinearAgentThreadContextSc
  * every "should he answer this?" decision to be a rule evaluated without him —
  * and a rule cannot tell a late reply in a real conversation from noise.
  *
+ * Available on every turn, including one that named him. A gate decides what
+ * reaches him; nothing decides that he must speak.
+ *
  * A sentinel rather than a structured field because a Discord turn is
  * free-form conversational text, and making it structured to carry one nullable
  * flag would reshape every captain turn for the sake of this one.
@@ -2209,12 +2212,11 @@ export const DiscordPresenceChannelTurnRequestSchema = z
         actorId: z.string().min(1),
         body: z.string().min(1).max(DISCORD_PRESENCE_TRIGGER_BODY_MAX).optional(),
         /**
-         * Nobody asked him to speak here: this arrived outside the reflexive
-         * reply window, from someone he had been talking to. He is expected to
-         * read it and decide, and staying quiet is a real option rather than a
-         * failure. Absent means the ordinary case, where a reply is expected.
+         * Nobody addressed him: this reached him because he had been talking to
+         * this person, not because they used his name. Framing only — he may
+         * stay silent on any turn — but he should know whether he was asked.
          */
-        mayDecline: z.boolean().optional(),
+        unprompted: z.boolean().optional(),
       })
       .strict(),
     contextMessages: z

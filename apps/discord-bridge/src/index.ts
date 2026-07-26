@@ -161,8 +161,7 @@ const textIngress = textIngressEnabled
         // Persona owns who he is and when he speaks; the bridge only carries it.
         replyPolicy: storedSettings.persona.replyPolicy,
         characterNames: characterNames(storedSettings.persona),
-        conversationWindowMs: storedSettings.persona.conversationWindowSeconds * 1_000,
-        conversationRecallMs: storedSettings.persona.conversationRecallSeconds * 1_000,
+        conversationAttentionMs: storedSettings.persona.conversationAttentionSeconds * 1_000,
       },
       (event) => {
         console.info(event, "Discord text ingress event");

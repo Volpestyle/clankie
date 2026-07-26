@@ -247,7 +247,7 @@ class RecordingPort implements DiscordTextIngressPort {
     request: DiscordPresenceChannelTurnRequest,
   ): Promise<CaptainChannelTurnResult> {
     this.turns.push(request);
-    if (this.silent && request.trigger.mayDecline === true) {
+    if (this.silent && request.trigger.unprompted === true) {
       return Promise.resolve({
         state: "silent",
         captainSessionId: "session-1",
@@ -306,12 +306,12 @@ function settled(deliveryId: string): CaptainChannelTurnResult {
 }
 
 describe("conversation window", () => {
-  function conversational(windowMs?: number): DiscordTextIngressConfig {
+  function conversational(attentionMs?: number): DiscordTextIngressConfig {
     return {
       ...config(),
       replyPolicy: "addressed",
       characterNames: ["clankie"],
-      ...(windowMs === undefined ? {} : { conversationWindowMs: windowMs }),
+      ...(attentionMs === undefined ? {} : { conversationAttentionMs: attentionMs }),
     };
   }
 
@@ -365,7 +365,7 @@ describe("conversation window", () => {
     const port = new RecordingPort();
     const ingress = new DiscordTextIngress(
       port,
-      { ...conversational(60_000), conversationRecallMs: 6 * 60 * 60 * 1_000 },
+      conversational(6 * 60 * 60 * 1_000),
       () => undefined,
       () => now,
     );
@@ -375,15 +375,15 @@ describe("conversation window", () => {
     await expect(ingress.handle(say("m2", "sorry — was in a meeting. did it pass?"))).resolves.toMatchObject(
       { state: "settled" },
     );
-    expect(port.turns.at(-1)?.trigger.mayDecline).toBe(true);
+    expect(port.turns.at(-1)?.trigger.unprompted).toBe(true);
   });
 
-  it("does not mark a message that actually addressed him as declinable", async () => {
+  it("does not mark a message that actually addressed him as unprompted", async () => {
     const port = new RecordingPort();
     const ingress = new DiscordTextIngress(port, conversational(), () => undefined);
 
     await ingress.handle(say("m1", "clankie how did the run go?"));
-    expect(port.turns.at(-1)?.trigger.mayDecline).toBeUndefined();
+    expect(port.turns.at(-1)?.trigger.unprompted).toBeUndefined();
   });
 
   it("writes nothing when he reads a late message and chooses silence", async () => {
@@ -393,7 +393,7 @@ describe("conversation window", () => {
     const evidence: DiscordTextIngressEvidence[] = [];
     const ingress = new DiscordTextIngress(
       port,
-      { ...conversational(60_000), conversationRecallMs: 6 * 60 * 60 * 1_000 },
+      conversational(6 * 60 * 60 * 1_000),
       (event) => evidence.push(event),
       () => now,
     );
@@ -408,11 +408,11 @@ describe("conversation window", () => {
     expect(evidence.at(-1)?.outcome).toBe("declined");
   });
 
-  it("goes quiet for good once even the recall horizon passes", async () => {
+  it("goes quiet for good once his attention has lapsed", async () => {
     let now = 1_000;
     const ingress = new DiscordTextIngress(
       new RecordingPort(),
-      { ...conversational(60_000), conversationRecallMs: 60 * 60 * 1_000 },
+      conversational(60 * 60 * 1_000),
       () => undefined,
       () => now,
     );
@@ -425,7 +425,7 @@ describe("conversation window", () => {
     });
   });
 
-  it("extends the window on each reply, so a long exchange stays live", async () => {
+  it("extends attention on each reply, so a long exchange stays live", async () => {
     let now = 1_000;
     const ingress = new DiscordTextIngress(
       new RecordingPort(),
@@ -446,7 +446,7 @@ describe("conversation window", () => {
   it("can be switched off entirely", async () => {
     const ingress = new DiscordTextIngress(
       new RecordingPort(),
-      { ...conversational(0), conversationRecallMs: 0 },
+      conversational(0),
       () => undefined,
     );
     await ingress.handle(say("m1", "clankie how did the run go?"));

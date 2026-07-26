@@ -39,37 +39,15 @@ export interface DiscordTextIngressConfig {
   /** Lowercased names he answers to. Only consulted by the `addressed` policy. */
   readonly characterNames?: readonly string[];
   /**
-   * How long an answered person keeps his attention in that channel without
-   * saying his name again. `0` disables it and restores name-every-message.
+   * How long someone he has replied to keeps his attention in that channel
+   * without using his name again. `0` requires the name every time.
    *
-   * Under the bare `addressed` policy he answered "clankie, how's the run?" and
-   * then ignored "did it pass?" — correct by the rule and wrong as behaviour,
-   * because nobody repeats a name every sentence once a conversation is running.
-   * The alternative on offer was the `all` policy, which is worse in a shared
-   * channel: it answers people talking to each other.
-   *
-   * Scoped to one person in one channel, and extended by each reply, so a live
-   * exchange stays live while a third party's unrelated message still needs his
-   * name. Deciding to stay quiet remains free — this is a map lookup, not a
-   * model call.
+   * There used to be a shorter "reflex" window inside this one, where a reply
+   * was compulsory. It bought nothing: both tiers ran the same turn at the same
+   * cost, and the only difference was that the inner one took away his choice.
+   * A gate decides what reaches him; whether to speak is his on every turn.
    */
-  readonly conversationWindowMs?: number;
-  /**
-   * How long a finished conversation stays worth *considering*, after the
-   * reflexive window has closed.
-   *
-   * Inside the window he answers without thinking about it. Between the window
-   * and this horizon he does not answer reflexively and is not dropped either:
-   * the turn runs with `mayDecline`, he reads the message, and he chooses. A
-   * person who goes quiet for two hours and then answers your question is still
-   * talking to you, and no cutoff can tell that from noise — only he can.
-   *
-   * This is the one place the text plane spends a model call on a message
-   * nobody addressed to him, which is why it is bounded to people he actually
-   * replied to, in the channel they were talking in. `0` disables it and
-   * restores the hard cutoff.
-   */
-  readonly conversationRecallMs?: number;
+  readonly conversationAttentionMs?: number;
   readonly deliveryRetentionMs?: number;
   readonly maxRetainedDeliveries?: number;
 }
@@ -163,10 +141,8 @@ interface RetainedDelivery {
 
 const DEFAULT_DELIVERY_RETENTION_MS = 7 * 60 * 60 * 1_000;
 const DEFAULT_MAX_RETAINED_DELIVERIES = 50_000;
-/** Long enough to think and type a follow-up, short enough that a room he left goes quiet. */
-const DEFAULT_CONVERSATION_WINDOW_MS = 4 * 60 * 1_000;
 /** Long enough to cover "sorry, was in a meeting", short enough that yesterday is over. */
-const DEFAULT_CONVERSATION_RECALL_MS = 6 * 60 * 60 * 1_000;
+const DEFAULT_CONVERSATION_ATTENTION_MS = 6 * 60 * 60 * 1_000;
 /** A conversation is one person in one channel; a third party still has to use his name. */
 function conversationKey(channelId: string, authorId: string): string {
   return `${channelId}:${authorId}`;
@@ -308,7 +284,7 @@ export class DiscordTextIngress {
         messageId: message.id,
         actorId: message.authorId,
         body,
-        ...(this.mayDecline(message) ? { mayDecline: true } : {}),
+        ...(this.unprompted(message) ? { unprompted: true } : {}),
       },
       contextMessages: boundedContext(contextMessages, this.config.contextMessageLimit),
     });
@@ -386,37 +362,27 @@ export class DiscordTextIngress {
     if ((this.config.replyPolicy ?? "addressed") === "addressed") {
       const addressed =
         message.mentionsBot || addressesCharacter(message.body, this.config.characterNames ?? []);
-      // `consider` deliberately does not refuse here: the turn runs and he
-      // decides, which is the whole point of the recall horizon.
-      if (!addressed && this.attentionFor(message) === "none") return "not_addressed";
+      // Reaching him and answering him are different questions. This one only
+      // decides whether he sees it; he decides the rest, on every turn.
+      if (!addressed && !this.holdsAttention(message)) return "not_addressed";
     }
     return undefined;
   }
 
   /** True when he is being shown this rather than asked to answer it. */
-  private mayDecline(message: DiscordInboundMessage): boolean {
-    if (message.mentionsBot || addressesCharacter(message.body, this.config.characterNames ?? [])) {
-      return false;
-    }
-    return this.attentionFor(message) === "consider";
+  private unprompted(message: DiscordInboundMessage): boolean {
+    return !message.mentionsBot && !addressesCharacter(message.body, this.config.characterNames ?? []);
   }
 
-  /**
-   * How much of his attention this person still holds in this channel.
-   *
-   * `reflex` answers without deliberating, `consider` runs the turn and lets him
-   * decide, `none` is a stranger who has to use his name.
-   */
-  private attentionFor(message: DiscordInboundMessage): "reflex" | "consider" | "none" {
+  /** Whether this person still holds his attention in this channel. */
+  private holdsAttention(message: DiscordInboundMessage): boolean {
     const repliedAt = this.conversations.get(conversationKey(message.channelId, message.authorId));
-    if (repliedAt === undefined) return "none";
-    const since = this.clock() - repliedAt;
-    // Strictly less than, so a horizon of `0` disables that tier outright rather
-    // than matching the same millisecond he replied in.
-    if (since < (this.config.conversationWindowMs ?? DEFAULT_CONVERSATION_WINDOW_MS)) return "reflex";
-    return since < (this.config.conversationRecallMs ?? DEFAULT_CONVERSATION_RECALL_MS)
-      ? "consider"
-      : "none";
+    if (repliedAt === undefined) return false;
+    // Strictly less than, so an attention span of `0` disables this outright
+    // rather than matching the same millisecond he replied in.
+    return (
+      this.clock() - repliedAt < (this.config.conversationAttentionMs ?? DEFAULT_CONVERSATION_ATTENTION_MS)
+    );
   }
 
   /**
@@ -433,14 +399,9 @@ export class DiscordTextIngress {
     for (const [deliveryId, delivery] of this.deliveries) {
       if (delivery.expiresAtMs <= now) this.deliveries.delete(deliveryId);
     }
-    // Past the recall horizon there is nothing left to consider, so the entry
-    // can go. Pruned against the wider of the two horizons, never the window.
-    const horizonMs = Math.max(
-      this.config.conversationWindowMs ?? DEFAULT_CONVERSATION_WINDOW_MS,
-      this.config.conversationRecallMs ?? DEFAULT_CONVERSATION_RECALL_MS,
-    );
+    const attentionMs = this.config.conversationAttentionMs ?? DEFAULT_CONVERSATION_ATTENTION_MS;
     for (const [key, repliedAt] of this.conversations) {
-      if (now - repliedAt > horizonMs) this.conversations.delete(key);
+      if (now - repliedAt > attentionMs) this.conversations.delete(key);
     }
   }
 }
