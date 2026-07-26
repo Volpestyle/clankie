@@ -139,6 +139,9 @@ describe("headless captain commands", () => {
       repoRoot: "/unused",
       env: await stateEnv(),
       fetchImpl: healthyFetch(calls),
+      // Otherwise the bridge probe reads the real process table, and a developer
+      // with a live bridge sees "healthy" where CI sees "unreachable".
+      listProcessCommandsImpl: () => [],
       ensureImpl: async () => {
         ensureCalled = true;
         throw new Error("health must not start the captain");
@@ -148,7 +151,14 @@ describe("headless captain commands", () => {
 
     expect(exitCode).toBe(0);
     expect(ensureCalled).toBe(false);
-    expect(calls.map((url) => new URL(url).pathname)).toEqual(["/eve/v1/health", "/eve/v1/info"]);
+    // The captain is probed exactly once through its two canonical endpoints.
+    // Status also reports the other local services, so it legitimately probes
+    // their health too; what must not regress is a duplicate captain round trip.
+    const captainPaths = calls
+      .map((url) => new URL(url))
+      .filter((url) => url.port === "4321")
+      .map((url) => url.pathname);
+    expect(captainPaths).toEqual(["/eve/v1/health", "/eve/v1/info"]);
     expect(JSON.parse(stdout.text())).toMatchObject({
       ok: true,
       status: "ready",
@@ -157,6 +167,16 @@ describe("headless captain commands", () => {
       infoPath: "/eve/v1/info",
       operatorCredential: { present: true, source: "env", consistency: "env_only" },
     });
+    // Status reports every supervised service in dependency order. Only the
+    // captain is reachable in this fixture, and nothing here is launcher-owned.
+    const { services } = JSON.parse(stdout.text()) as {
+      services: readonly { id: string; state: string; owned: boolean }[];
+    };
+    expect(services.map((service) => [service.id, service.state, service.owned])).toEqual([
+      ["captain-eve", "healthy", false],
+      ["control-plane", "unhealthy", false],
+      ["discord-bridge", "unreachable", false],
+    ]);
   });
 
   it("diagnoses an env/store mismatch without printing either credential", async () => {
@@ -210,12 +230,13 @@ describe("headless captain commands", () => {
     if (rotated?.type === "api") expect(stdout.text()).not.toContain(rotated.key);
   });
 
-  it("routes restart without initializing the TTY face", async () => {
+  it("routes a captain-scoped restart without initializing the TTY face", async () => {
     const stdout = outputBuffer();
+    const stderr = outputBuffer();
     const host = "http://127.0.0.1:4321";
     let restarted = false;
 
-    const exitCode = await runHeadlessCaptainCommand(["restart"], {
+    const exitCode = await runHeadlessCaptainCommand(["restart", "captain"], {
       repoRoot: "/repo",
       env: await stateEnv(),
       host,
@@ -224,11 +245,42 @@ describe("headless captain commands", () => {
         return { ...captainHandle(host), owned: true };
       },
       stdout: stdout.stream,
+      stderr: stderr.stream,
     });
 
     expect(exitCode).toBe(0);
     expect(restarted).toBe(true);
-    expect(JSON.parse(stdout.text())).toMatchObject({ ok: true, status: "ready", owned: true });
+    expect(JSON.parse(stdout.text())).toMatchObject({
+      ok: true,
+      status: "ready",
+      owned: true,
+      target: "captain-eve",
+      services: [{ id: "captain-eve", ok: true }],
+    });
+    // Progress narration must stay off stdout so it remains a JSON document.
+    expect(stderr.text()).toContain("Captain Eve");
+  });
+
+  it("rejects an unknown restart target without signalling anything", async () => {
+    const stdout = outputBuffer();
+    const stderr = outputBuffer();
+    let restarted = false;
+
+    const exitCode = await runHeadlessCaptainCommand(["restart", "not-a-service"], {
+      repoRoot: "/repo",
+      env: await stateEnv(),
+      restartImpl: async () => {
+        restarted = true;
+        throw new Error("must not restart on an unknown target");
+      },
+      stdout: stdout.stream,
+      stderr: stderr.stream,
+    });
+
+    expect(exitCode).toBe(1);
+    expect(restarted).toBe(false);
+    expect(stdout.text()).toBe("");
+    expect(stderr.text()).toContain('Unknown service "not-a-service"');
   });
 
   it("submits a message without echoing it and writes a private isolated cursor", async () => {

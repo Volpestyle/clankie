@@ -18,6 +18,7 @@ import {
   managedService,
   parseServiceTarget,
   resolveTargets,
+  resolveRestartTargets,
   restartTarget,
   stopTarget,
 } from "../bin/services.ts";
@@ -386,8 +387,13 @@ describe("service targets", () => {
   });
 
   it("restarts forwards and stops backwards along the dependency chain", () => {
-    expect(resolveTargets("all")).toEqual(["captain-eve", "control-plane", "discord-bridge"]);
-    expect([...resolveTargets("all")].reverse()).toEqual(["discord-bridge", "control-plane", "captain-eve"]);
+    expect(resolveTargets("all")).toEqual(["captain-eve", "control-plane", "discord-bridge", "activity"]);
+    expect([...resolveTargets("all")].reverse()).toEqual([
+      "activity",
+      "discord-bridge",
+      "control-plane",
+      "captain-eve",
+    ]);
   });
 
   it("stops the fan-out at the first failure so downstream errors cannot mask it", async () => {
@@ -421,7 +427,12 @@ describe("service targets", () => {
       listProcessCommandsImpl: noProcesses,
     });
 
-    expect(outcomes.map((outcome) => outcome.id)).toEqual(["discord-bridge", "control-plane", "captain-eve"]);
+    expect(outcomes.map((outcome) => outcome.id)).toEqual([
+      "activity",
+      "discord-bridge",
+      "control-plane",
+      "captain-eve",
+    ]);
     expect(outcomes.every((outcome) => outcome.ok)).toBe(true);
   });
 
@@ -446,10 +457,139 @@ describe("service targets", () => {
     });
 
     expect(outcomes.map((outcome) => [outcome.id, outcome.ok])).toEqual([
+      ["activity", true],
       ["discord-bridge", true],
       ["control-plane", false],
       ["captain-eve", true],
     ]);
-    expect(outcomes[1]?.error).toMatch(/not started by the clankie launcher/u);
+    expect(outcomes.find((outcome) => outcome.id === "control-plane")?.error).toMatch(
+      /not started by the clankie launcher/u,
+    );
+  });
+});
+
+describe("captain credential injection", () => {
+  /**
+   * Captures the env a service is spawned with.
+   *
+   * `startService` returns early when the service already probes healthy, so a
+   * service under test has to look down until it is spawned and up afterwards —
+   * otherwise nothing is ever launched and the assertion passes vacuously on an
+   * env that was never captured.
+   */
+  function capturingSpawn(): {
+    readonly spawnImpl: typeof spawn;
+    readonly started: () => boolean;
+    readonly envFor: () => NodeJS.ProcessEnv | undefined;
+  } {
+    let captured: NodeJS.ProcessEnv | undefined;
+    let launched = false;
+    const spawnImpl = ((_command: string, _args: string[], options: { env?: NodeJS.ProcessEnv }) => {
+      captured = options.env;
+      launched = true;
+      return runningChild(9_700);
+    }) as unknown as typeof spawn;
+    return { spawnImpl, started: () => launched, envFor: () => captured };
+  }
+
+  /** Control-plane health that reports down until the process has been spawned. */
+  function healthAfterStart(started: () => boolean): typeof fetch {
+    return (async () => {
+      if (!started()) throw new Error("connection refused");
+      return Response.json({ ok: true, service: "clankie-control-plane" });
+    }) as unknown as typeof fetch;
+  }
+
+  it("gives the control plane the shared captain secret", async () => {
+    const env = await stateEnv();
+    const { spawnImpl, started, envFor } = capturingSpawn();
+
+    await startService(managedService("control-plane"), {
+      repoRoot: "/repo",
+      env,
+      spawnImpl,
+      captainToken: "clankie_cap_test",
+      processIsAliveImpl: () => true,
+      listProcessCommandsImpl: noProcesses,
+      fetchImpl: healthAfterStart(started),
+    });
+
+    expect(started()).toBe(true);
+    expect(envFor()?.CLANKIE_CAPTAIN_TOKEN).toBe("clankie_cap_test");
+  });
+
+  it("omits the variable entirely when no credential could be brokered", async () => {
+    const env = await stateEnv();
+    const { spawnImpl, started, envFor } = capturingSpawn();
+
+    await startService(managedService("control-plane"), {
+      repoRoot: "/repo",
+      env,
+      spawnImpl,
+      processIsAliveImpl: () => true,
+      listProcessCommandsImpl: noProcesses,
+      fetchImpl: healthAfterStart(started),
+    });
+
+    expect(started()).toBe(true);
+    expect(envFor()).not.toHaveProperty("CLANKIE_CAPTAIN_TOKEN");
+  });
+
+  it("never lets the Discord bridge see the captain token", async () => {
+    // The bridge throws on startup if this variable exists at all: its identity
+    // is brokered separately as clankie_discord_bridge, and the captain's bearer
+    // would hand a Discord-facing process the captain's own authority. The env
+    // here already carries one, standing in for an operator who exported it.
+    const env = await stateEnv();
+    const { spawnImpl, started, envFor } = capturingSpawn();
+
+    await startService(managedService("discord-bridge"), {
+      repoRoot: "/repo",
+      env: { ...env, CLANKIE_CAPTAIN_TOKEN: "leaked-from-the-operator-shell" },
+      spawnImpl,
+      captainToken: "clankie_cap_test",
+      processIsAliveImpl: () => true,
+      operatorToken: "operator-secret",
+      // No bridge until one is spawned, then one that is running.
+      listProcessCommandsImpl: () =>
+        started() ? [[9_700, "node @clankie/discord-bridge start"] as const] : [],
+      fetchImpl: (async () =>
+        Response.json({
+          schemaVersion: 1,
+          sessions: [{ phase: "present", gatewayConnected: true, voiceGuildCount: 0, activityCount: 0 }],
+        })) as unknown as typeof fetch,
+    });
+
+    expect(started()).toBe(true);
+    expect(envFor()).toBeDefined();
+    expect(envFor()).not.toHaveProperty("CLANKIE_CAPTAIN_TOKEN");
+  });
+});
+
+describe("restart carries dependents", () => {
+  it("restarts the bridge when the control plane it claims against restarts", () => {
+    // The failure this prevents: the control plane rebuilds presence from the
+    // event store, the still-running bridge keeps a claim for the old revision,
+    // and every reply it posts is rejected `discord_presence_live_claim_stale`.
+    expect(resolveRestartTargets("control-plane")).toEqual(["control-plane", "discord-bridge"]);
+  });
+
+  it("leaves a captain restart targeted, because nothing downstream caches it", () => {
+    // `dependsOn` would have widened this to the whole stack. Restarting the
+    // captain invalidates no dependent's state, and an operator asking for the
+    // captain should get the captain.
+    expect(resolveRestartTargets("captain-eve")).toEqual(["captain-eve"]);
+  });
+
+  it("leaves a leaf service on its own", () => {
+    expect(resolveRestartTargets("discord-bridge")).toEqual(["discord-bridge"]);
+  });
+
+  it("keeps the full order for an explicit all", () => {
+    expect(resolveRestartTargets("all")).toEqual(resolveTargets("all"));
+  });
+
+  it("does not widen a stop, which names exactly what it means", () => {
+    expect(resolveTargets("control-plane")).toEqual(["control-plane"]);
   });
 });

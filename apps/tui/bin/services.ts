@@ -70,6 +70,33 @@ export function resolveTargets(target: ServiceTarget): readonly ServiceId[] {
   return target === "all" ? SERVICE_ORDER : [target];
 }
 
+/**
+ * A service plus the services whose cached state its restart invalidates, in
+ * dependency order.
+ *
+ * Restarting the control plane alone leaves the still-running Discord bridge
+ * holding a live claim — session id, phase, revision — for presence state the
+ * control plane has just rebuilt from the event store. Every reply the bridge
+ * then posts comes back `discord_presence_live_claim_stale`; it stays healthy
+ * and Clankie simply goes quiet, which is exactly how this was found.
+ *
+ * Driven by `restartsWith` rather than `dependsOn`, because the two are not the
+ * same relationship. `dependsOn` orders startup and says who calls whom, and
+ * closing over it would turn `clankie restart captain` into a full-stack restart
+ * the operator did not ask for. Stopping is deliberately untouched: naming one
+ * service to stop is an instruction to stop that service.
+ */
+export function resolveRestartTargets(target: ServiceTarget): readonly ServiceId[] {
+  if (target === "all") return SERVICE_ORDER;
+  const affected = new Set<ServiceId>([target]);
+  // SERVICE_ORDER is dependency-ordered, so one forward pass also closes over a
+  // service invalidated by something itself invalidated earlier in the chain.
+  for (const id of SERVICE_ORDER) {
+    if (managedService(id).restartsWith?.some((dependency) => affected.has(dependency))) affected.add(id);
+  }
+  return SERVICE_ORDER.filter((id) => affected.has(id));
+}
+
 function controlPlaneUrl(env: NodeJS.ProcessEnv): string {
   return env.CLANKIE_CONTROL_PLANE_URL ?? DEFAULT_CONTROL_PLANE_URL;
 }
@@ -185,11 +212,15 @@ const CONTROL_PLANE: ManagedService = {
    * prefix. Guild and channel allowlists are deliberately absent: settings.json
    * is their source of truth and `@clankie/settings` fills the unset env.
    */
-  serviceEnv: ({ env, repoRoot }) => ({
+  serviceEnv: ({ env, repoRoot, captainToken }) => ({
     ...env,
     CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE:
       env.CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE ??
       join(repoRoot, "apps", "discord-bridge", "src", "presence-runtime-module.ts"),
+    // Half of the shared captain secret. Without it the control plane builds no
+    // captain authenticator at all and answers every captain call 401 — which
+    // silently disabled the captain's entire mission toolset, not just memory.
+    ...(captainToken === undefined ? {} : { CLANKIE_CAPTAIN_TOKEN: captainToken }),
   }),
   probe: async ({ env, fetchImpl }) => {
     try {
@@ -213,6 +244,24 @@ const DISCORD_BRIDGE: ManagedService = {
   dependsOn: ["control-plane"],
   spawnArgs: ["--filter", "@clankie/discord-bridge", "start"],
   commandMatches: (command) => command.includes("@clankie/discord-bridge"),
+  // Its live presence claim is only valid against the control plane instance
+  // that issued it, so a control-plane restart requires a bridge restart.
+  restartsWith: ["control-plane"],
+  /**
+   * Strips the captain bearer rather than passing one.
+   *
+   * The bridge refuses to start at all if `CLANKIE_CAPTAIN_TOKEN` is present —
+   * its identity is brokered separately as `clankie_discord_bridge`, and sharing
+   * the captain's would hand a Discord-facing process the captain's authority.
+   * The launcher now injects that variable for two of the three services, so
+   * removing it here is what keeps the third startable; it also fixes the
+   * pre-existing footgun where an operator who exported it in their own shell
+   * could not start a bridge.
+   */
+  serviceEnv: ({ env }) => {
+    const { CLANKIE_CAPTAIN_TOKEN: _removed, ...withoutCaptainToken } = env;
+    return withoutCaptainToken;
+  },
   /**
    * The bridge serves no HTTP surface, so process liveness is the only signal it
    * owns. Its *semantic* phase is published to the control plane, which is the
@@ -293,7 +342,15 @@ export interface ServiceRegistryOptions extends ServiceCommandOptions {
  * generic supervisor. The registry just routes to it.
  */
 async function restartCaptain(options: ServiceRegistryOptions): Promise<ServiceStatus> {
-  const env = options.env ?? process.env;
+  const baseEnv = options.env ?? process.env;
+  // The captain boots through `captain-service.ts` rather than the generic
+  // supervisor, so it never sees `serviceEnv`. Its half of the shared captain
+  // secret has to be merged here or the control plane would be the only side
+  // holding one.
+  const env =
+    options.captainToken === undefined
+      ? baseEnv
+      : { ...baseEnv, CLANKIE_CAPTAIN_TOKEN: options.captainToken };
   const handle = await (options.restartCaptainImpl ?? restartCaptainService)({
     repoRoot: options.repoRoot,
     host: captainUrl(env),
@@ -366,7 +423,7 @@ export async function restartTarget(
   options: ServiceRegistryOptions,
 ): Promise<readonly ServiceOutcome[]> {
   const outcomes: ServiceOutcome[] = [];
-  for (const id of resolveTargets(target)) {
+  for (const id of resolveRestartTargets(target)) {
     try {
       outcomes.push(outcomeFrom(await restartOne(id, options)));
     } catch (error) {

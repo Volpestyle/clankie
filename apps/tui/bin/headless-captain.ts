@@ -2,6 +2,7 @@ import { chmodSync, closeSync, mkdirSync, openSync, readFileSync, unlinkSync, wr
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
+  ensureCaptainCredential,
   inspectOperatorCredential,
   resolveOperatorCredential,
   rotateOperatorCredential,
@@ -17,11 +18,19 @@ import {
   ensureCaptainService,
   inspectCaptain,
   readCaptainServiceRecord,
-  restartCaptainService,
   type CaptainServiceHandle,
   type EnsureCaptainServiceOptions,
   type RestartCaptainServiceOptions,
 } from "./captain-service.ts";
+import {
+  inspectServices,
+  parseServiceTarget,
+  restartTarget,
+  stopTarget,
+  type ServiceOutcome,
+  type ServiceRegistryOptions,
+} from "./services.ts";
+import type { ServiceStatus } from "./service-supervisor.ts";
 import { assertCaptainEndpoint, captainInfoGeneration } from "../src/session/captain-identity.ts";
 import {
   reportHerdrAgent,
@@ -72,6 +81,14 @@ export interface HeadlessCaptainCommandOptions {
   readonly herdrRunCommand?: HerdrCommandRunner;
   readonly maxTraceEvents?: number;
   readonly operatorCredentialStore?: CredentialStore;
+  /** Test seam for the brokered captain bearer the launcher injects. */
+  readonly captainCredentialStore?: CredentialStore;
+  /**
+   * Test seam for the process-table scan. Without it a service probe reads the
+   * real machine, so a developer with a live bridge running sees a different
+   * status than CI does.
+   */
+  readonly listProcessCommandsImpl?: () => readonly (readonly [number, string])[];
   readonly readStdin?: () => Promise<string>;
   readonly repoRoot: string;
   readonly restartImpl?: (options: RestartCaptainServiceOptions) => Promise<CaptainServiceHandle>;
@@ -157,8 +174,9 @@ function commandHelp(): string {
     "Usage: clankie <command>",
     "",
     "Headless captain commands:",
-    "  health | status          Probe /eve/v1/health and /eve/v1/info",
-    "  restart                  Restart a launcher-owned captain service",
+    "  health | status          Probe the captain and report every local service",
+    "  restart [service]        Restart launcher-owned services in dependency order",
+    "  down [service]           Stop launcher-owned services in reverse order",
     "  msg [--new] <message>    Send without opening the TTY face; omit message to read stdin",
     "  watch [--timeout SEC]    Stream JSONL events until the active turn settles",
     "  wait [--timeout SEC]     Wait silently and print the final boundary",
@@ -172,6 +190,9 @@ function commandHelp(): string {
     "  operator-credential rotate [--json]",
     "                           Rotate the local operator credential",
     "",
+    "Services for restart/down: all (default), captain, control-plane, discord",
+    "Aliases: eve, cp, bridge",
+    "",
     "With no command, clankie opens the fullscreen operator console and requires a TTY.",
   ].join("\n");
 }
@@ -181,6 +202,7 @@ export function isHeadlessCaptainCommand(command: string | undefined): boolean {
     command === "health" ||
     command === "status" ||
     command === "restart" ||
+    command === "down" ||
     command === "msg" ||
     command === "watch" ||
     command === "wait" ||
@@ -217,6 +239,22 @@ async function runInspection(options: HeadlessCaptainCommandOptions): Promise<nu
   }
   const operatorCredentialHealthy =
     operatorCredential.present && operatorCredential.consistency !== "mismatch";
+  // The captain was just probed above; synthesize its row rather than paying for
+  // a second round trip to the same two endpoints.
+  const captainStatus: ServiceStatus = {
+    id: "captain-eve",
+    label: "Captain Eve",
+    state: inspection.state,
+    owned: record !== undefined,
+    ...(inspection.generation === undefined
+      ? {}
+      : { detail: `generation ${inspection.generation.slice(0, 8)}` }),
+    ...(record === undefined ? {} : { pid: record.pid }),
+  };
+  const services = [
+    captainStatus,
+    ...(await inspectServices(["control-plane", "discord-bridge"], await serviceOptions(options))),
+  ];
   outputJson(options.stdout ?? process.stdout, {
     ok: inspection.state === "healthy" && operatorCredentialHealthy,
     status:
@@ -236,26 +274,104 @@ async function runInspection(options: HeadlessCaptainCommandOptions): Promise<nu
     owned: record !== undefined,
     operatorCredential,
     ...(record === undefined ? {} : { pid: record.pid }),
+    services,
   });
   return inspection.state === "healthy" && operatorCredentialHealthy ? 0 : 1;
 }
 
-async function runRestart(options: HeadlessCaptainCommandOptions): Promise<number> {
-  const host = commandHost(options);
-  const handle = await (options.restartImpl ?? restartCaptainService)({
+/**
+ * Shared plumbing for the service commands. The operator credential is optional
+ * and only enriches the bridge's presence detail, so a missing one degrades the
+ * report rather than failing the restart.
+ *
+ * The captain credential is different in kind: it is one shared secret that
+ * captain-eve presents and the control plane authenticates, so it is minted on
+ * first run rather than merely read. It is returned separately instead of being
+ * merged into `env` because the Discord bridge refuses to start when it can see
+ * that variable.
+ */
+async function serviceOptions(options: HeadlessCaptainCommandOptions): Promise<ServiceRegistryOptions> {
+  const env = options.env ?? process.env;
+  let operatorToken: string | undefined;
+  try {
+    const credential = await resolveOperatorCredential({
+      env,
+      ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
+    });
+    operatorToken = credential?.token;
+  } catch {
+    operatorToken = undefined;
+  }
+  let captainToken: string | undefined;
+  try {
+    const credential = await ensureCaptainCredential({
+      env,
+      ...(options.captainCredentialStore === undefined ? {} : { store: options.captainCredentialStore }),
+    });
+    captainToken = credential.token;
+  } catch {
+    // A stack whose captain cannot authenticate is degraded, not dead: presence,
+    // health, and every operator-authenticated surface still work. Failing the
+    // restart outright would be a worse trade than starting without it.
+    captainToken = undefined;
+  }
+  const stderr = options.stderr ?? process.stderr;
+  return {
     repoRoot: options.repoRoot,
-    host,
-    env: options.env ?? process.env,
+    env,
     fetchImpl: options.fetchImpl ?? fetch,
-  });
+    operatorToken,
+    captainToken,
+    ...(options.listProcessCommandsImpl === undefined
+      ? {}
+      : { listProcessCommandsImpl: options.listProcessCommandsImpl }),
+    // Progress narration goes to stderr so stdout stays a clean JSON document.
+    onStatus: (status: string) => stderr.write(`${status}\n`),
+    ...(options.restartImpl === undefined ? {} : { restartCaptainImpl: options.restartImpl }),
+  };
+}
+
+function describeOutcomes(outcomes: readonly ServiceOutcome[]): string {
+  return outcomes
+    .map((outcome) =>
+      outcome.ok
+        ? `✓ ${outcome.label}${outcome.detail === undefined ? "" : ` (${outcome.detail})`}`
+        : `✗ ${outcome.label}: ${outcome.error ?? outcome.state ?? "failed"}`,
+    )
+    .join("\n");
+}
+
+async function runRestart(args: readonly string[], options: HeadlessCaptainCommandOptions): Promise<number> {
+  const target = parseServiceTarget(args[0]);
+  const registryOptions = await serviceOptions(options);
+  const outcomes = await restartTarget(target, registryOptions);
+  const captain = outcomes.find((outcome) => outcome.id === "captain-eve");
+  const ok = outcomes.length > 0 && outcomes.every((outcome) => outcome.ok);
+  (options.stderr ?? process.stderr).write(`${describeOutcomes(outcomes)}\n`);
   outputJson(options.stdout ?? process.stdout, {
-    ok: true,
-    status: "ready",
-    host: handle.host,
-    owned: handle.owned,
-    ...(handle.generation === undefined ? {} : { generation: handle.generation }),
+    ok,
+    status: ok ? "ready" : "failed",
+    target,
+    // Retained for callers that predate multi-service restart.
+    host: commandHost(options),
+    ...(captain === undefined ? {} : { owned: captain.ok }),
+    services: outcomes,
   });
-  return 0;
+  return ok ? 0 : 1;
+}
+
+async function runDown(args: readonly string[], options: HeadlessCaptainCommandOptions): Promise<number> {
+  const target = parseServiceTarget(args[0]);
+  const outcomes = await stopTarget(target, await serviceOptions(options));
+  const ok = outcomes.every((outcome) => outcome.ok);
+  (options.stderr ?? process.stderr).write(`${describeOutcomes(outcomes)}\n`);
+  outputJson(options.stdout ?? process.stdout, {
+    ok,
+    status: ok ? "stopped" : "failed",
+    target,
+    services: outcomes,
+  });
+  return ok ? 0 : 1;
 }
 
 async function readMessage(
@@ -908,7 +1024,8 @@ export async function runHeadlessCaptainCommand(
   const command = args[0];
   try {
     if (command === "health" || command === "status") return await runInspection(options);
-    if (command === "restart") return await runRestart(options);
+    if (command === "restart") return await runRestart(args.slice(1), options);
+    if (command === "down") return await runDown(args.slice(1), options);
     if (command === "msg") return await runMessage(args.slice(1), options);
     if (command === "watch") return await runWatch(args.slice(1), options, false);
     if (command === "wait") return await runWatch(args.slice(1), options, true);

@@ -69,10 +69,31 @@ export interface ManagedService {
   readonly spawnArgs: readonly string[];
   /** Guards signalling: must recognise the live `ps` command of an owned pid. */
   readonly commandMatches: (command: string) => boolean;
+  /**
+   * Dependencies whose restart invalidates state this service is holding, so it
+   * has to restart alongside them.
+   *
+   * Narrower than {@link ManagedService.dependsOn} on purpose. `dependsOn`
+   * describes who calls whom and orders startup; it does not mean a dependency's
+   * restart breaks the dependent. The Discord bridge is the case that does: it
+   * stamps every write with a live claim the control plane matches against, and
+   * a control plane that restarts rebuilds presence from the event store, so the
+   * bridge's claim silently becomes unusable. Restarting the captain, by
+   * contrast, breaks nothing downstream and should stay the targeted operation
+   * the operator asked for.
+   */
+  readonly restartsWith?: readonly ServiceId[];
   /** Extra environment the service needs, merged over the caller's env. */
   readonly serviceEnv?: (input: {
     readonly env: NodeJS.ProcessEnv;
     readonly repoRoot: string;
+    /**
+     * The brokered captain bearer, when one is available. Deliberately handed to
+     * each service rather than merged into the shared env: captain-eve and the
+     * control plane are the two halves of this shared secret, and the Discord
+     * bridge refuses to start if it sees the variable at all.
+     */
+    readonly captainToken?: string | undefined;
   }) => NodeJS.ProcessEnv;
   /** Overrides the default record location/format (the captain has its own). */
   readonly readRecord?: (
@@ -89,6 +110,8 @@ export interface ServiceCommandOptions {
   readonly killImpl?: (pid: number, signal: NodeJS.Signals) => void;
   readonly onStatus?: (status: string) => void;
   readonly operatorToken?: string | undefined;
+  /** Brokered captain bearer, passed to the services that share it. */
+  readonly captainToken?: string | undefined;
   readonly processIsAliveImpl?: (pid: number) => boolean;
   readonly readProcessCommandImpl?: (pid: number) => string;
   /** Test seam for the process-table scan behind `matchingPids`. */
@@ -389,7 +412,8 @@ export async function startService(
   let child: ChildProcess | undefined;
   try {
     options.onStatus?.(`Starting ${service.label}…`);
-    const serviceEnv = service.serviceEnv?.({ env, repoRoot: options.repoRoot }) ?? env;
+    const serviceEnv =
+      service.serviceEnv?.({ env, repoRoot: options.repoRoot, captainToken: options.captainToken }) ?? env;
     child = (options.spawnImpl ?? spawn)("pnpm", [...service.spawnArgs], {
       cwd: options.repoRoot,
       detached: true,
