@@ -64,6 +64,20 @@ describe("possession lease", () => {
     expect(() => lease.assertMayAct(grant.token)).toThrow(/not_held/);
   });
 
+  it("slides expiry while the holder is driving, so only idleness lapses", () => {
+    let now = 1_000;
+    const lease = new PossessionLease({ allowedHolders: holders, ttlMs: 500, now: () => now });
+    const grant = lease.acquire("codex-lab");
+    // Each act renews: three windows of steady play outlive the raw TTL.
+    for (const step of [400, 400, 400]) {
+      now += step;
+      lease.assertMayAct(grant.token);
+    }
+    expect(lease.current()?.holderId).toBe("codex-lab");
+    now += 501;
+    expect(() => lease.assertMayAct(grant.token)).toThrow(/not_held/);
+  });
+
   it("ignores a release that does not hold the lease", () => {
     const lease = new PossessionLease({ allowedHolders: holders });
     const grant = lease.acquire("codex-lab");

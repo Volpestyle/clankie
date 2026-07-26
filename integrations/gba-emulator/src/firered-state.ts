@@ -2,8 +2,11 @@ import type { GbaCoreInventoryEntry, GbaCoreMenuState, GbaCoreState } from "./co
 import {
   GBA_EWRAM_BASE,
   GBA_EWRAM_SIZE,
+  decodeFireRedMapGrid,
   decodeFireRedOverworld,
+  fireRedSurroundings,
   type FireRedOverworldFields,
+  type FireRedSurroundings,
 } from "./firered-ram-map.ts";
 import { GBA_IWRAM_BUS_ADDRESS, GBA_IWRAM_BYTE_LENGTH } from "./mgba-core.ts";
 
@@ -157,6 +160,13 @@ export interface FireRedDecodedBattle {
 
 export interface FireRedDecodedState {
   overworld: FireRedOverworldFields;
+  /**
+   * Collision around the player, or null when no map grid is loaded — during a
+   * battle or a map transition there is genuinely nothing to report, and a
+   * fabricated "all open" would be worse than an absent field.
+   */
+  surroundings: FireRedSurroundings | null;
+  mapSize: { width: number; height: number } | null;
   mapIdentity: { mapGroup: number; mapNum: number; mapId: string } | null;
   party: GbaCoreState["party"];
   inventory: GbaCoreInventoryEntry[];
@@ -728,8 +738,23 @@ export function decodeFireRedState(
     active.status = active.currentHp === 0 ? "fainted" : "healthy";
     active.moves = battleContext.playerBattleMon.moves;
   }
+  const overworld = decodeFireRedOverworld(snapshot.ewram);
+  // A missing grid is a normal state (battle, mid-warp), not a decode failure,
+  // so this reports absence rather than propagating the throw.
+  let surroundings: FireRedSurroundings | null = null;
+  let mapSize: { width: number; height: number } | null = null;
+  try {
+    const grid = decodeFireRedMapGrid(snapshot.iwram, snapshot.ewram);
+    surroundings = fireRedSurroundings(grid, overworld.x, overworld.y, overworld.facing);
+    mapSize = { width: grid.mapWidth, height: grid.mapHeight };
+  } catch {
+    surroundings = null;
+    mapSize = null;
+  }
   return {
-    overworld: decodeFireRedOverworld(snapshot.ewram),
+    overworld,
+    surroundings,
+    mapSize,
     mapIdentity,
     party,
     inventory,

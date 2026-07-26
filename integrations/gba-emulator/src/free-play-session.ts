@@ -4,7 +4,7 @@ import {
   type GbaEmulatorAction,
   type GbaEmulatorStartActionCommand,
 } from "@clankie/interactive-environment";
-import { EnvironmentRuntime } from "@clankie/environment-runtime";
+import { EnvironmentLeaseExpiredError, EnvironmentRuntime } from "@clankie/environment-runtime";
 import { GbaEmulatorAdapter } from "./adapter.ts";
 import { acquireBodyLock, type BodyLock } from "./body-lock.ts";
 import type { GbaAdapterScenario, GbaCoreFactory } from "./core-seam.ts";
@@ -128,14 +128,30 @@ export async function createFreePlaySession(input: FreePlaySessionInput): Promis
       spec,
       holderId: "gba-free-play",
       correlationId: `free-play:${input.scenario.scenarioId}`,
-      // The runtime caps a lease at 5 minutes. A long playthrough outliving it
-      // is a real constraint for M2/M4, not something to paper over here.
+      // Five minutes is the runtime's cap, and every dispatched action renews
+      // it — the lease bounds how long an *idle* holder keeps the claim, never
+      // playthrough length. A lapse pauses the body and `withLease` below
+      // re-acquires it, so thinking between moves is survivable.
       leaseDurationMs: 300_000,
     });
   } catch (error) {
     lock?.release();
     throw error;
   }
+
+  // A mind thinks between moves, and thinking can outlive the lease. A lapse
+  // only paused the body, so re-acquire the claim and retry once. `renew` is
+  // fail-closed where it matters: it refuses when the session was revoked or
+  // another writer took the body, so this can never resurrect a fenced session.
+  const withLease = async <T>(dispatch: () => Promise<T>): Promise<T> => {
+    try {
+      return await dispatch();
+    } catch (error) {
+      if (!(error instanceof EnvironmentLeaseExpiredError)) throw error;
+      await runtime.renew(grant.token, sessionId);
+      return dispatch();
+    }
+  };
 
   const session = adapter.session(sessionId);
   let sequence = 0;
@@ -161,10 +177,13 @@ export async function createFreePlaySession(input: FreePlaySessionInput): Promis
         actionId: `free-play-action-${String(sequence)}`,
         action: { kind: "gba_emulator_action", action, limits: ACTION_LIMITS },
       };
-      return runtime.startAction(grant.token, command);
+      return withLease(() => runtime.startAction(grant.token, command));
     },
     pause: async (reason: string) => {
-      await runtime.pause(grant.token, sessionId, reason);
+      await withLease(() => runtime.pause(grant.token, sessionId, reason));
+    },
+    resume: async () => {
+      await withLease(() => runtime.resume(grant.token, sessionId));
     },
   };
 

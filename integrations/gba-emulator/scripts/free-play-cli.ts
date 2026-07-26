@@ -199,7 +199,9 @@ function print(turn: FreePlayTurn): void {
         ? `press ${turn.action.button}${turn.action.repeat === undefined || turn.action.repeat === 1 ? "" : ` x${String(turn.action.repeat)}`}`
         : turn.action.kind === "frame_advance"
           ? `advance ${String(turn.action.frames)}`
-          : `wait ${String(turn.action.durationMs)}ms`;
+          : turn.action.kind === "walk_to"
+            ? `walk to (${String(turn.action.x)}, ${String(turn.action.y)})`
+            : `wait ${String(turn.action.durationMs)}ms`;
   const marker = turn.outcome === "accepted" ? "→" : "✗";
   const detail = turn.outcome === "accepted" ? "" : `  [${turn.outcome}: ${turn.detail ?? ""}]`;
   console.log(`          ${marker} ${action}${detail}`);

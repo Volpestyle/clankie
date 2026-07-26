@@ -41,6 +41,53 @@ describe("shared body root", () => {
   });
 });
 
+describe("lease lapse recovery", () => {
+  it("self-heals an act when thinking between moves outlives the lease", async () => {
+    const rootDir = mkdtempSync(path.join(tmpdir(), "lease-lapse-"));
+    const now = { value: new Date("2026-07-19T00:00:00.000Z") };
+    const session = await createFreePlaySession({
+      rootDir,
+      scenario,
+      fixtureSha256,
+      clock: () => now.value,
+    });
+    const first = await session.io.act({ kind: "button_press", button: "a", holdFrames: 4 });
+    expect(first.status).toBe("completed");
+    // Six minutes of deliberation outlives the five-minute lease. The lapse
+    // paused the body in place, so the next act renews and continues — the
+    // session is not bricked and the world is not reset.
+    now.value = new Date("2026-07-19T00:06:00.000Z");
+    const second = await session.io.act({ kind: "button_press", button: "a", holdFrames: 4 });
+    expect(second.status).toBe("completed");
+    const types = session.events.map((event) => ("type" in event ? event.type : ""));
+    expect(types).toContain("environment.session.lease_expired");
+    expect(types).toContain("environment.session.lease_renewed");
+    session.close();
+  });
+
+  it("recovers pause and resume across a lapse without undoing a deliberate pause", async () => {
+    const rootDir = mkdtempSync(path.join(tmpdir(), "lease-lapse-pause-"));
+    const now = { value: new Date("2026-07-19T00:00:00.000Z") };
+    const session = await createFreePlaySession({
+      rootDir,
+      scenario,
+      fixtureSha256,
+      clock: () => now.value,
+    });
+    await session.io.pause("state looks uncertain");
+    now.value = new Date("2026-07-19T00:06:00.000Z");
+    // The lapse must not silently undo the safety pause: acting still requires
+    // an explicit resume from the mind that judged the state safe again.
+    await expect(session.io.act({ kind: "button_press", button: "a", holdFrames: 4 })).rejects.toThrow(
+      /not active/,
+    );
+    await session.io.resume();
+    const result = await session.io.act({ kind: "button_press", button: "a", holdFrames: 4 });
+    expect(result.status).toBe("completed");
+    session.close();
+  });
+});
+
 describe("observe-only sessions", () => {
   it("lets several coexist on one body", async () => {
     // An MCP client starts stdio servers freely — `claude mcp list`, every

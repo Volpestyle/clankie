@@ -72,6 +72,7 @@ function io(act: () => Promise<EnvironmentActionResult>): GbaDriverIo {
     },
     act,
     pause: () => Promise.resolve(),
+    resume: () => Promise.resolve(),
   };
 }
 
@@ -183,6 +184,7 @@ describe("free play", () => {
       },
       act: () => Promise.resolve(completed()),
       pause: () => Promise.resolve(),
+      resume: () => Promise.resolve(),
     };
     const result = await runFreePlay({
       io: blockingIo,

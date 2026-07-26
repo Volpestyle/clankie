@@ -61,6 +61,22 @@ export const GbaEmulatorActionSchema = z.discriminatedUnion("kind", [
     .strict(),
   z.object({ kind: z.literal("frame_advance"), frames: FrameCountSchema }).strict(),
   z.object({ kind: z.literal("wait"), durationMs: z.number().int().positive().max(30_000) }).strict(),
+  /**
+   * Walk to a tile on the current map, routing around walls.
+   *
+   * A catalogued action rather than a caller-side loop, because the route must
+   * be planned against the core's own collision and re-checked every step: tile
+   * collision does not include NPCs, so a plan can stop being true while it is
+   * being walked. It is still bounded by the same input and frame budget a
+   * burst of presses draws from.
+   */
+  z
+    .object({
+      kind: z.literal("walk_to"),
+      x: z.number().int().nonnegative().max(1_023),
+      y: z.number().int().nonnegative().max(1_023),
+    })
+    .strict(),
 ]);
 export type GbaEmulatorAction = z.infer<typeof GbaEmulatorActionSchema>;
 
@@ -233,6 +249,32 @@ const GbaMoveSchema = z
   .object({ moveId: z.string().min(1).max(128), power: z.number().int().nonnegative().max(999) })
   .strict();
 
+/**
+ * One tile's walkability. `passable` is the collision bit and nothing more: it
+ * does not model ledges, water, or elevation changes, so an open tile means
+ * "not a wall" rather than "reachable on foot".
+ */
+const GbaTileViewSchema = z
+  .object({
+    x: z.number().int().min(-1).max(1_024),
+    y: z.number().int().min(-1).max(1_024),
+    passable: z.boolean(),
+    elevation: z.number().int().min(0).max(15).nullable(),
+    metatileId: z.number().int().min(0).max(1_023).nullable(),
+  })
+  .strict();
+
+const GbaSurroundingsSchema = z
+  .object({
+    north: GbaTileViewSchema,
+    east: GbaTileViewSchema,
+    south: GbaTileViewSchema,
+    west: GbaTileViewSchema,
+    /** The tile being faced — what an A press would interact with. */
+    ahead: GbaTileViewSchema,
+  })
+  .strict();
+
 export const GbaEmulatorObservationSchema = z.discriminatedUnion("kind", [
   GbaEmulatorObservationBaseSchema.extend({
     kind: z.literal("overworld"),
@@ -240,6 +282,18 @@ export const GbaEmulatorObservationSchema = z.discriminatedUnion("kind", [
       .object({
         position: GbaMapPositionSchema,
         facing: z.enum(["north", "east", "south", "west"]),
+        /**
+         * Collision around the player. Absent when no map grid is loaded, which
+         * is a real state (battle, mid-warp) rather than a decode failure.
+         */
+        surroundings: GbaSurroundingsSchema.nullish(),
+        mapSize: z
+          .object({
+            width: z.number().int().positive().max(1_024),
+            height: z.number().int().positive().max(1_024),
+          })
+          .strict()
+          .nullish(),
         ramStateSha256: Sha256Schema,
       })
       .strict(),

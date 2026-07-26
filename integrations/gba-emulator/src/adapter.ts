@@ -25,7 +25,7 @@ import {
   type GbaEmulatorTrace,
 } from "./contracts.ts";
 import { DeterministicGbaCoreDouble, canonicalJson, sha256 } from "./core-double.ts";
-import type { GbaAdapterScenario, GbaCoreFactory, GbaCoreSeam } from "./core-seam.ts";
+import type { GbaAdapterScenario, GbaCoreFactory, GbaCoreMapGrid, GbaCoreSeam } from "./core-seam.ts";
 
 const GENESIS_HASH = "0".repeat(64);
 
@@ -248,6 +248,8 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
             data: {
               position: state.position,
               facing: state.facing,
+              surroundings: state.surroundings ?? null,
+              mapSize: state.mapSize ?? null,
               ramStateSha256: this.core.ramStateSha256(),
             },
           };
@@ -441,6 +443,11 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
         if (action.holdFrames * repeat > limits.maxFrames) throw closed("frame_bound_exceeded");
         if (repeat > limits.maxInputs) throw closed("input_bound_exceeded");
         if (limits.maxInputs < 1) throw closed("input_bound_exceeded");
+        // Captured before the press so the outcome can say whether the press
+        // actually went anywhere. A bump and a step are otherwise identical to
+        // a caller: both complete, and both change the RAM digest, because the
+        // bump animation is itself a state change.
+        const before = this.core.gameState();
         for (let press = 0; press < repeat; press += 1) {
           this.core.pressButton(action.button, action.holdFrames);
         }
@@ -458,6 +465,73 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
           repeat,
           frame: state.frame,
           mode: state.mode,
+          // The resulting state, so reading it back does not cost a second
+          // round trip per move.
+          position: state.position,
+          facing: state.facing,
+          /** False when the press changed no tile: a wall, or a turn in place. */
+          moved:
+            before.position.mapId !== state.position.mapId ||
+            before.position.x !== state.position.x ||
+            before.position.y !== state.position.y,
+          /** True when the press only changed which way the player looks. */
+          turned: before.facing !== state.facing,
+          surroundings: state.surroundings ?? null,
+          ramStateSha256: this.core.ramStateSha256(),
+        };
+      }
+      case "walk_to": {
+        const grid = this.core.mapGrid?.() ?? null;
+        if (grid === null) throw closed("map_grid_unavailable");
+        const start = this.core.gameState();
+        if (start.mode !== "overworld") throw closed("walk_requires_overworld");
+        const path = planWalk(grid, start.position, { x: action.x, y: action.y });
+        if (path === null) throw closed("no_path_to_target");
+        // A route is a burst of presses, so it draws on the same budget one.
+        if (path.length > limits.maxInputs) throw closed("input_bound_exceeded");
+        if (path.length * WALK_HOLD_FRAMES > limits.maxFrames) throw closed("frame_bound_exceeded");
+
+        let taken = 0;
+        let blockedAt: { x: number; y: number } | null = null;
+        let warped = false;
+        for (const step of path) {
+          const before = this.core.gameState();
+          this.core.pressButton(step.button, WALK_HOLD_FRAMES);
+          const after = this.core.gameState();
+          if (after.position.mapId !== before.position.mapId) {
+            // A warp tile ends the route: the plan was made against a map that
+            // is no longer loaded, so continuing would walk a stale path.
+            warped = true;
+            taken += 1;
+            break;
+          }
+          if (after.position.x === before.position.x && after.position.y === before.position.y) {
+            // Tile collision does not include NPCs, so a planned tile can be
+            // occupied. Stop and say where, rather than mashing a dead route.
+            blockedAt = { x: step.x, y: step.y };
+            break;
+          }
+          taken += 1;
+        }
+
+        const state = this.core.gameState();
+        this.record(
+          actionId,
+          "walk_to",
+          `Walked ${String(taken)}/${String(path.length)} steps toward (${String(action.x)}, ${String(action.y)})`,
+        );
+        return {
+          target: { x: action.x, y: action.y },
+          plannedSteps: path.length,
+          steps: taken,
+          arrived: !warped && blockedAt === null && state.position.x === action.x && state.position.y === action.y,
+          blockedAt,
+          warped,
+          frame: state.frame,
+          mode: state.mode,
+          position: state.position,
+          facing: state.facing,
+          surroundings: state.surroundings ?? null,
           ramStateSha256: this.core.ramStateSha256(),
         };
       }
@@ -466,7 +540,14 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
         this.core.advanceFrames(action.frames);
         const state = this.core.gameState();
         this.record(actionId, "frame_advance", `Advanced ${String(action.frames)} frames`);
-        return { frames: action.frames, frame: state.frame, ramStateSha256: this.core.ramStateSha256() };
+        return {
+          frames: action.frames,
+          frame: state.frame,
+          mode: state.mode,
+          position: state.position,
+          facing: state.facing,
+          ramStateSha256: this.core.ramStateSha256(),
+        };
       }
     }
   }
@@ -549,6 +630,9 @@ function enforceCapability(action: GbaEmulatorAction, bounds: GbaEmulatorResourc
   const capability = (
     {
       button_press: "emulator.gba.input",
+      // A route is input, so it needs the input capability and no new grant:
+      // walking is a burst of the presses the session was already allowed.
+      walk_to: "emulator.gba.input",
       frame_advance: "emulator.gba.frame_advance",
       wait: "emulator.gba.wait",
     } as const
@@ -566,4 +650,77 @@ function closed(code: string): EnvironmentAdapterActionError {
 
 function boundedSummary(value: string): string {
   return value.trim().slice(0, 512) || "unspecified";
+}
+
+/** Frames per step. 16 is the documented hold that commits a move rather than a turn. */
+const WALK_HOLD_FRAMES = 16;
+
+/** Ceiling on tiles explored while planning, so a large map cannot stall a turn. */
+const MAX_WALK_SEARCH_TILES = 4_096;
+
+const WALK_STEPS = [
+  { button: "up", dx: 0, dy: -1 },
+  { button: "down", dx: 0, dy: 1 },
+  { button: "left", dx: -1, dy: 0 },
+  { button: "right", dx: 1, dy: 0 },
+] as const;
+
+export interface PlannedWalkStep {
+  button: "up" | "down" | "left" | "right";
+  x: number;
+  y: number;
+}
+
+/**
+ * Shortest route over passable tiles, or null when none exists.
+ *
+ * Breadth-first because the step cost is uniform, so the first route found is
+ * the shortest and a caller never walks further than it has to. The target
+ * itself must be passable: routing "as close as possible" to an unreachable
+ * tile would silently answer a different question than the one asked.
+ */
+export function planWalk(
+  grid: GbaCoreMapGrid,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+): PlannedWalkStep[] | null {
+  const inside = (x: number, y: number): boolean =>
+    x >= grid.minX && y >= grid.minY && x < grid.maxX && y < grid.maxY;
+  if (!inside(to.x, to.y) || !grid.isPassable(to.x, to.y)) return null;
+  if (from.x === to.x && from.y === to.y) return [];
+
+  const key = (x: number, y: number): string => `${String(x)},${String(y)}`;
+  const cameFrom = new Map<string, { prev: string; step: PlannedWalkStep }>();
+  const seen = new Set<string>([key(from.x, from.y)]);
+  let frontier = [{ x: from.x, y: from.y }];
+  let explored = 0;
+
+  while (frontier.length > 0) {
+    const next: { x: number; y: number }[] = [];
+    for (const tile of frontier) {
+      for (const step of WALK_STEPS) {
+        const x = tile.x + step.dx;
+        const y = tile.y + step.dy;
+        const id = key(x, y);
+        if (seen.has(id) || !inside(x, y) || !grid.isPassable(x, y)) continue;
+        seen.add(id);
+        cameFrom.set(id, { prev: key(tile.x, tile.y), step: { button: step.button, x, y } });
+        if (x === to.x && y === to.y) {
+          const path: PlannedWalkStep[] = [];
+          for (let at = id; at !== key(from.x, from.y); ) {
+            const entry = cameFrom.get(at);
+            if (entry === undefined) return null;
+            path.push(entry.step);
+            at = entry.prev;
+          }
+          return path.reverse();
+        }
+        next.push({ x, y });
+        explored += 1;
+        if (explored > MAX_WALK_SEARCH_TILES) return null;
+      }
+    }
+    frontier = next;
+  }
+  return null;
 }

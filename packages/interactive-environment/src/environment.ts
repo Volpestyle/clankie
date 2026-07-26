@@ -443,6 +443,8 @@ export const EnvironmentSemanticEventTypeSchema = z.enum([
   "environment.session.started",
   "environment.session.stopped",
   "environment.session.disconnected",
+  "environment.session.lease_expired",
+  "environment.session.lease_renewed",
   "environment.goal.changed",
   "environment.goal.superseded",
   "environment.goal.verified",
@@ -560,6 +562,13 @@ export const EnvironmentSemanticEventDataSchema = z.union([
   z.object({}).strict(),
   z.object({ characterId: CharacterIdSchema, worldId: WorldIdSchema }).strict(),
   z.object({ reason: SemanticSummarySchema }).strict(),
+  // Lease lifecycle: who lapsed or renewed, and whether the lapse paused the body.
+  z
+    .object({
+      holderId: z.string().min(1).max(256),
+      pausedBody: z.boolean().optional(),
+    })
+    .strict(),
   z.object({ actionId: ActionIdSchema }).strict(),
   z.object({ actionId: ActionIdSchema, kind: z.string().min(1).max(128) }).strict(),
   z.object({ actionId: ActionIdSchema, errorCode: z.string().min(1).max(128) }).strict(),

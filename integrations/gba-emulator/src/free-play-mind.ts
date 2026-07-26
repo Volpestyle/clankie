@@ -307,6 +307,7 @@ function describeAction(action: FreePlayView["history"][number]["action"]): stri
     return repeat === 1 ? `pressed ${action.button}` : `pressed ${action.button} x${String(repeat)}`;
   }
   if (action.kind === "frame_advance") return `advanced ${String(action.frames)} frames`;
+  if (action.kind === "walk_to") return `walked to (${String(action.x)}, ${String(action.y)})`;
   return `waited ${String(action.durationMs)}ms`;
 }
 

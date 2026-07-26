@@ -20,6 +20,8 @@ class FakeSession implements EnvironmentAdapterSession {
   readonly started: string[] = [];
   readonly cancelled: string[] = [];
   stops = 0;
+  pauses = 0;
+  resumes = 0;
   hangStartAction = false;
   hangCancelAction = false;
   background = false;
@@ -33,9 +35,11 @@ class FakeSession implements EnvironmentAdapterSession {
     this.adapterSessionId = adapterSessionId;
   }
   pause(): Promise<void> {
+    this.pauses += 1;
     return Promise.resolve();
   }
   resume(): Promise<void> {
+    this.resumes += 1;
     return Promise.resolve();
   }
   startAction(command: EnvironmentStartActionCommand): Promise<void | EnvironmentAdapterActionRunning> {
@@ -176,10 +180,62 @@ describe("EnvironmentRuntime fake-adapter contract", () => {
     await expect(runtime.startAction("wrong", command("s1", "a1"))).rejects.toThrow(/capability rejected/);
     now.value = new Date("2026-07-11T12:00:03.000Z");
     await expect(runtime.startAction(first.token, command("s1", "a1"))).rejects.toThrow(/expired/);
-    expect(adapter.sessions.get("adapter-s1")?.stops).toBe(1);
+    // The lapse pauses the body in place instead of destroying the session.
+    expect(adapter.sessions.get("adapter-s1")).toMatchObject({ stops: 0, pauses: 1 });
+    // A lapsed claim does not block the next writer on the body...
     await expect(
       runtime.start({ spec: baseSpec("s2"), holderId: "runner", correlationId: "c2" }),
     ).resolves.toBeDefined();
+    // ...and once someone else holds it, the lapsed session cannot renew back in.
+    await expect(runtime.renew(first.token, "s1")).rejects.toThrow(/already has writer/);
+  });
+
+  it("renews the lease on use and resumes a lapsed session exactly where it paused", async () => {
+    const { adapter, events, make, now } = await harness();
+    const runtime = make();
+    const { token } = await runtime.start({
+      spec: baseSpec("s1"),
+      holderId: "runner",
+      correlationId: "c1",
+      leaseDurationMs: 2_000,
+    });
+    // Each dispatch renews the claim, so steady play outlives the raw duration.
+    now.value = new Date("2026-07-11T12:00:01.500Z");
+    await expect(runtime.startAction(token, command("s1", "a1"))).resolves.toBeDefined();
+    now.value = new Date("2026-07-11T12:00:03.000Z");
+    await expect(runtime.startAction(token, command("s1", "a2"))).resolves.toBeDefined();
+    // Idling past the window lapses the claim and pauses the body.
+    now.value = new Date("2026-07-11T12:00:10.000Z");
+    await expect(runtime.startAction(token, command("s1", "a3"))).rejects.toThrow(/expired/);
+    const session = adapter.sessions.get("adapter-s1")!;
+    expect(session).toMatchObject({ stops: 0, pauses: 1 });
+    // Renewal re-acquires the claim and resumes the same adapter session.
+    await expect(runtime.renew(token, "s1")).resolves.toMatchObject({ phase: "active" });
+    expect(session.resumes).toBe(1);
+    await expect(runtime.startAction(token, command("s1", "a4"))).resolves.toBeDefined();
+    expect(session.started).toEqual(["a1", "a2", "a4"]);
+    const types = events.map((event) => (event as { type?: string }).type);
+    expect(types).toContain("environment.session.lease_expired");
+    expect(types).toContain("environment.session.lease_renewed");
+  });
+
+  it("never lets renewal undo a deliberate safety pause", async () => {
+    const { adapter, make, now } = await harness();
+    const runtime = make();
+    const { token } = await runtime.start({
+      spec: baseSpec("s1"),
+      holderId: "runner",
+      correlationId: "c1",
+      leaseDurationMs: 2_000,
+    });
+    await runtime.pause(token, "s1", "state looks uncertain");
+    now.value = new Date("2026-07-11T12:00:10.000Z");
+    await expect(runtime.startAction(token, command("s1", "a1"))).rejects.toThrow(/expired/);
+    // Renewal extends the claim but only resumes the pause the lapse caused.
+    await expect(runtime.renew(token, "s1")).resolves.toMatchObject({ phase: "paused" });
+    expect(adapter.sessions.get("adapter-s1")?.resumes).toBe(0);
+    await runtime.resume(token, "s1");
+    await expect(runtime.startAction(token, command("s1", "a2"))).resolves.toBeDefined();
   });
 
   it("makes action registration/cancellation, timeout, pause, and emergency stop idempotent", async () => {
@@ -204,6 +260,8 @@ describe("EnvironmentRuntime fake-adapter contract", () => {
     expect(stopped.phase).toBe("off");
     expect(adapter.sessions.get("adapter-s1")?.cancelled).toEqual(["a1", "a2", "a3"]);
     await expect(runtime.startAction(token, command("s1", "a4"))).rejects.toThrow(/revoked/);
+    // Revocation is final: renewal recovers a lapse, never an emergency stop.
+    await expect(runtime.renew(token, "s1")).rejects.toThrow(/revoked/);
     await expect(runtime.emergencyStop("s1", "again")).resolves.toMatchObject({ phase: "off" });
   });
 

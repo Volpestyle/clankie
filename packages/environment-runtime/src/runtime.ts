@@ -41,6 +41,18 @@ export interface EnvironmentAdapterActionRunning {
   completion: Promise<EnvironmentAdapterActionCompletion>;
 }
 
+/**
+ * The holder's claim lapsed while the body kept its state. Typed so a caller
+ * can tell this recoverable condition apart from a revocation, which is final:
+ * `renew` re-acquires a lapsed lease, nothing re-acquires a revoked one.
+ */
+export class EnvironmentLeaseExpiredError extends Error {
+  public constructor() {
+    super("Environment lease is expired");
+    this.name = "EnvironmentLeaseExpiredError";
+  }
+}
+
 export class EnvironmentAdapterActionError extends Error {
   public readonly errorCode: string;
   public readonly retryable: boolean;
@@ -107,7 +119,7 @@ export interface ReconcileEnvironmentReport {
   attached: string[];
   retained: string[];
   failed: string[];
-  stoppedExpired: string[];
+  expired: string[];
 }
 
 interface StoredAction {
@@ -124,6 +136,12 @@ interface StoredSession {
   phase: EnvironmentSessionPhase;
   adapterSessionId: string | null;
   revokedAt: string | null;
+  /**
+   * Set once when a lease lapse was handled, cleared by `renew`. `pausedBody`
+   * remembers whether the lapse itself paused the body, so renewal resumes
+   * exactly the pause it caused and never overrides a deliberate safety pause.
+   */
+  leaseLapse?: { at: string; pausedBody: boolean } | null;
   correlationId: string;
   actions: Record<string, StoredAction>;
 }
@@ -170,12 +188,7 @@ export class EnvironmentRuntime {
       ) {
         throw new Error(`Environment lease duration must be 1-${String(MAX_ENVIRONMENT_LEASE_MS)}ms`);
       }
-      const conflict = [...this.records.values()].find(
-        (candidate) =>
-          ownsBody(candidate) &&
-          candidate.spec.characterId === spec.characterId &&
-          candidate.spec.worldId === spec.worldId,
-      );
+      const conflict = this.writerConflict(spec.characterId, spec.worldId, null);
       if (conflict) throw new Error(`Body already has writer session ${conflict.spec.sessionId}`);
 
       const token = this.randomToken();
@@ -201,6 +214,7 @@ export class EnvironmentRuntime {
         phase: "starting",
         adapterSessionId: null,
         revokedAt: null,
+        leaseLapse: null,
         correlationId: sanitize(input.correlationId, sensitive) as string,
         actions: {},
       };
@@ -226,12 +240,41 @@ export class EnvironmentRuntime {
   }
 
   public heartbeat(token: string, sessionId: string): Promise<EnvironmentSessionSnapshot> {
+    // Every authorized call renews the lease, so a heartbeat is just an
+    // authorized call with nothing else to do.
+    return this.enqueue(async () => snapshot(await this.authorize(token, sessionId)));
+  }
+
+  /**
+   * Re-acquire a lapsed lease on a live session. Lease expiry is a statement
+   * about the holder — it went idle — not about the world, so the body was
+   * paused rather than destroyed and this is the sanctioned way back in. The
+   * claim is subject to the same one-writer rule as `start`, and a revoked
+   * session (explicit stop, emergency stop, adapter failure) stays dead.
+   */
+  public renew(token: string, sessionId: string): Promise<EnvironmentSessionSnapshot> {
     return this.enqueue(async () => {
-      const record = await this.authorize(token, sessionId);
+      await this.ensureLoaded();
+      const record = this.record(sessionId);
+      if (record.tokenHash !== hash(token)) throw new Error("Environment capability rejected");
+      this.secretSet(sessionId).add(token);
+      if (record.revokedAt !== null || !ownsBody(record)) throw new Error(`Environment lease is revoked`);
+      const conflict = this.writerConflict(record.spec.characterId, record.spec.worldId, record);
+      if (conflict) throw new Error(`Body already has writer session ${conflict.spec.sessionId}`);
+      if (!this.attached.has(sessionId)) await this.attachRecord(record);
+      if (record.revokedAt !== null || !ownsBody(record)) throw new Error(`Environment lease is revoked`);
       const now = this.clock();
       record.lease.heartbeatAt = now.toISOString();
       record.lease.expiresAt = new Date(now.getTime() + record.leaseDurationMs).toISOString();
+      if (record.leaseLapse?.pausedBody === true && record.phase === "paused") {
+        await this.session(sessionId).resume();
+        record.phase = "active";
+      }
+      record.leaseLapse = null;
       await this.persist(record);
+      await this.emit("environment.session.lease_renewed", record, record.correlationId, {
+        holderId: record.lease.holderId,
+      });
       return snapshot(record);
     });
   }
@@ -569,14 +612,14 @@ export class EnvironmentRuntime {
         attached: [],
         retained: [],
         failed: [],
-        stoppedExpired: [],
+        expired: [],
       };
       for (const record of this.records.values()) {
         if (!ownsBody(record)) continue;
         if (this.expired(record)) {
           await this.attachRecord(record);
-          await this.stopRecord(record, "lease expired during runner restart");
-          report.stoppedExpired.push(record.spec.sessionId);
+          await this.expireLease(record);
+          report.expired.push(record.spec.sessionId);
         } else if (this.attached.has(record.spec.sessionId)) {
           report.retained.push(record.spec.sessionId);
         } else {
@@ -610,11 +653,68 @@ export class EnvironmentRuntime {
     this.secretSet(sessionId).add(token);
     if (record.revokedAt !== null || !ownsBody(record)) throw new Error(`Environment lease is revoked`);
     if (this.expired(record)) {
-      await this.attachRecord(record);
-      await this.stopRecord(record, "lease expired");
-      throw new Error(`Environment lease is expired`);
+      await this.expireLease(record);
+      throw new EnvironmentLeaseExpiredError();
     }
+    // Use renews the lease: acting is liveness, so an actively driven session
+    // never lapses mid-play. Only an idle holder's claim expires.
+    const now = this.clock();
+    record.lease.heartbeatAt = now.toISOString();
+    record.lease.expiresAt = new Date(now.getTime() + record.leaseDurationMs).toISOString();
+    await this.persist(record);
     return record;
+  }
+
+  /**
+   * Handle a lease lapse without destroying the session: cancel what was in
+   * flight and pause the body, leaving it exactly where the last action put it
+   * so `renew` can resume play. Idempotent — one lapse is handled once, however
+   * many sweeps or rejected calls observe it. Contrast `stopRecord` and
+   * `emergencyStop`, which revoke: those are decisions about the session, while
+   * expiry is only the absence of the holder.
+   */
+  private async expireLease(record: StoredSession): Promise<void> {
+    if (record.leaseLapse != null) return;
+    if (!this.attached.has(record.spec.sessionId)) await this.attachRecord(record);
+    // attachRecord fails the record when the adapter session is gone; a lapse
+    // of a dead session has nothing to pause or keep.
+    if (record.revokedAt !== null || !ownsBody(record)) return;
+    const safe = this.safeText(record, "lease expired");
+    await this.cancelAll(record, safe);
+    const pausedBody = record.phase === "active" || record.phase === "starting";
+    if (pausedBody) {
+      await this.attached
+        .get(record.spec.sessionId)
+        ?.pause(safe)
+        .catch(() => undefined);
+      record.phase = "paused";
+    }
+    record.leaseLapse = { at: this.clock().toISOString(), pausedBody };
+    await this.persist(record);
+    await this.emit("environment.session.lease_expired", record, record.correlationId, {
+      holderId: record.lease.holderId,
+      pausedBody,
+    });
+  }
+
+  /**
+   * The live claim that blocks another writer on the same body. An expired
+   * lease is a lapsed claim: it does not block, and its holder gets the body
+   * back through `renew` only while nobody else has taken it.
+   */
+  private writerConflict(
+    characterId: string,
+    worldId: string,
+    except: StoredSession | null,
+  ): StoredSession | undefined {
+    return [...this.records.values()].find(
+      (candidate) =>
+        candidate !== except &&
+        ownsBody(candidate) &&
+        !this.expired(candidate) &&
+        candidate.spec.characterId === characterId &&
+        candidate.spec.worldId === worldId,
+    );
   }
 
   private async attachRecord(record: StoredSession): Promise<void> {
@@ -692,9 +792,12 @@ export class EnvironmentRuntime {
     for (const record of this.records.values()) {
       if (ownsBody(record) && !this.attached.has(record.spec.sessionId)) await this.attachRecord(record);
       if (!ownsBody(record)) continue;
-      if (ownsBody(record) && this.expired(record)) {
-        await this.stopRecord(record, "lease expired");
-        expiredSessions.push(record.spec.sessionId);
+      if (this.expired(record)) {
+        if (record.leaseLapse == null) {
+          await this.expireLease(record);
+          expiredSessions.push(record.spec.sessionId);
+        }
+        // A lapsed session's actions were cancelled when the lapse was handled.
         continue;
       }
       for (const [actionId, action] of Object.entries(record.actions)) {

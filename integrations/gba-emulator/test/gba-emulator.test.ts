@@ -329,6 +329,59 @@ describe("GBA emulator embodiment", () => {
     expect(adapter.session(spec.sessionId).trace().events).toHaveLength(1);
   });
 
+  it("walks a planned route and reports where it ended up", async () => {
+    const { adapter, command, grant, runtime, spec } = await harness();
+    const result = await runtime.startAction(grant.token, command("walk", { kind: "walk_to", x: 3, y: 1 }));
+    expect(result).toMatchObject({ status: "completed" });
+    expect(result).toMatchObject({
+      outcome: {
+        target: { x: 3, y: 1 },
+        plannedSteps: 3,
+        steps: 3,
+        arrived: true,
+        blockedAt: null,
+        position: { x: 3, y: 1 },
+      },
+    });
+    // One action, so one evidence event — a route is not three presses of trace.
+    expect(adapter.session(spec.sessionId).trace().events).toHaveLength(1);
+  });
+
+  it("reports adjacency so a wall is known before it is walked into", async () => {
+    const { command, grant, runtime } = await harness();
+    // (2,2) and (2,3) are blocked, so standing at (2,1) the tile south is a wall.
+    const walk = await runtime.startAction(grant.token, command("walk", { kind: "walk_to", x: 2, y: 1 }));
+    expect(walk).toMatchObject({
+      outcome: { arrived: true, surroundings: { south: { passable: false }, east: { passable: true } } },
+    });
+  });
+
+  it("refuses an unreachable target instead of walking as close as it can", async () => {
+    const { command, grant, runtime } = await harness();
+    const blocked = await runtime.startAction(
+      grant.token,
+      command("into-wall", { kind: "walk_to", x: 2, y: 2 }),
+    );
+    expect(blocked).toMatchObject({ status: "failed", errorCode: "no_path_to_target" });
+    const offMap = await runtime.startAction(
+      grant.token,
+      command("off-map", { kind: "walk_to", x: 99, y: 99 }),
+    );
+    expect(offMap).toMatchObject({ status: "failed", errorCode: "no_path_to_target" });
+  });
+
+  it("draws a route from the same input budget a burst of presses draws from", async () => {
+    const { adapter, command, grant, runtime, spec } = await harness();
+    // (7,5) is reachable but 11 steps away, past the 8-input bound.
+    const result = await runtime.startAction(
+      grant.token,
+      command("too-far", { kind: "walk_to", x: 7, y: 5 }),
+    );
+    expect(result).toMatchObject({ status: "failed", errorCode: "input_bound_exceeded" });
+    // Refused before moving, so the player has not been left mid-route.
+    expect(adapter.session(spec.sessionId).snapshot()).toMatchObject({ position: { x: 0, y: 1 } });
+  });
+
   it("fails uncertain adapter state closed without a retryable input path", async () => {
     const { adapter, command, grant, runtime, spec } = await harness();
     adapter.session(spec.sessionId).markStateUncertain("Observation sequence gap");
@@ -388,7 +441,16 @@ describe("GBA emulator embodiment", () => {
         second.grant.token,
         second.command("after-lease", { kind: "button_press", button: "right", holdFrames: 12 }),
       ),
-    ).rejects.toThrow(/revoked/);
+    ).rejects.toThrow(/expired/);
+    // Lease loss still fails closed, but it is the holder that lapsed, not the
+    // world: the same holder renews and plays on. Only revocation is final.
+    await second.runtime.renew(second.grant.token, second.spec.sessionId);
+    await expect(
+      second.runtime.startAction(
+        second.grant.token,
+        second.command("after-lease", { kind: "button_press", button: "right", holdFrames: 12 }),
+      ),
+    ).resolves.toMatchObject({ status: "completed" });
 
     const third = await harness();
     await third.runtime.startAction(

@@ -123,6 +123,9 @@ export async function runFrozenGbaScenario(
     pause: async (reason: string) => {
       await runtime.pause(grant.token, sessionId, reason);
     },
+    resume: async () => {
+      await runtime.resume(grant.token, sessionId);
+    },
   };
   const io = input.wrapIo ? input.wrapIo(baseIo) : baseIo;
   const { halt, decisionTrace } = await driveGbaScenario(io, scenario, input.fixtureSha256);

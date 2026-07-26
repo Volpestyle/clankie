@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import type { GbaButton } from "@clankie/interactive-environment";
 import type { FrozenGbaScenario } from "./contracts.ts";
+// Type-only, so the seam's reference back to `GbaCoreState` stays erasable.
+import type { GbaCoreMapGrid } from "./core-seam.ts";
 
 /**
  * Deterministic GBA core TEST DOUBLE.
@@ -44,6 +46,29 @@ export interface GbaCoreInventoryEntry {
   count: number;
 }
 
+export interface GbaCoreTileView {
+  x: number;
+  y: number;
+  /** False for walls and for anything off the map, so it is safe to act on. */
+  passable: boolean;
+  /** Null where no tile exists. The double models neither field. */
+  elevation: number | null;
+  metatileId: number | null;
+}
+
+/**
+ * What a player can see by looking, and a caller reading coordinates cannot.
+ * Without it the only way to discover a wall is to walk into one.
+ */
+export interface GbaCoreSurroundings {
+  north: GbaCoreTileView;
+  east: GbaCoreTileView;
+  south: GbaCoreTileView;
+  west: GbaCoreTileView;
+  /** The tile being faced — the one an A press would interact with. */
+  ahead: GbaCoreTileView;
+}
+
 export interface GbaCoreState {
   mode: "overworld" | "dialog" | "battle" | "battle_won" | "battle_lost";
   /**
@@ -71,6 +96,14 @@ export interface GbaCoreState {
   battle: GbaCoreBattleState | null;
   frame: number;
   inputCount: number;
+  /**
+   * Collision around the player, or null when no map is loaded — a battle or a
+   * mid-warp has genuinely nothing to report, and a fabricated "all open" would
+   * be worse than an absent field. Optional so cores may omit it entirely.
+   */
+  surroundings?: GbaCoreSurroundings | null;
+  /** Walkable map dimensions, when the core knows them. */
+  mapSize?: { width: number; height: number } | null;
 }
 
 const DIRECTIONS: Record<
@@ -81,6 +114,14 @@ const DIRECTIONS: Record<
   down: { dx: 0, dy: 1, facing: "south" },
   left: { dx: -1, dy: 0, facing: "west" },
   right: { dx: 1, dy: 0, facing: "east" },
+};
+
+/** Unit step for each facing, so "the tile ahead" needs no button mapping. */
+const FACING_STEPS: Record<GbaCoreState["facing"], { dx: number; dy: number }> = {
+  north: { dx: 0, dy: -1 },
+  south: { dx: 0, dy: 1 },
+  west: { dx: -1, dy: 0 },
+  east: { dx: 1, dy: 0 },
 };
 
 export function savestateIdentitySha256(savestateId: string): string {
@@ -151,7 +192,50 @@ export class DeterministicGbaCoreDouble {
   }
 
   public gameState(): GbaCoreState {
-    return structuredClone(this.state);
+    // Derived here rather than held in `this.state`, because `ramStateSha256`
+    // hashes that object and every frozen scenario digest depends on its shape.
+    return {
+      ...structuredClone(this.state),
+      surroundings: this.surroundings(),
+      mapSize: { width: this.scenario.map.width, height: this.scenario.map.height },
+    };
+  }
+
+  /** Collision grid for pathing, from the same bounds `moveTo` enforces. */
+  public mapGrid(): GbaCoreMapGrid {
+    return {
+      minX: 0,
+      minY: 0,
+      maxX: this.scenario.map.width,
+      maxY: this.scenario.map.height,
+      isPassable: (x, y) => this.tileView(x, y).passable,
+    };
+  }
+
+  /** The same collision rule `moveTo` enforces, reported before it is hit. */
+  private tileView(x: number, y: number): GbaCoreTileView {
+    const outside = x < 0 || y < 0 || x >= this.scenario.map.width || y >= this.scenario.map.height;
+    return {
+      x,
+      y,
+      passable: !outside && !this.blocked.has(`${String(x)},${String(y)}`),
+      // The double models no elevation or tileset, and says so rather than
+      // inventing values a caller might reason from.
+      elevation: null,
+      metatileId: null,
+    };
+  }
+
+  private surroundings(): GbaCoreSurroundings {
+    const { x, y } = this.state.position;
+    const ahead = FACING_STEPS[this.state.facing];
+    return {
+      north: this.tileView(x, y - 1),
+      east: this.tileView(x + 1, y),
+      south: this.tileView(x, y + 1),
+      west: this.tileView(x - 1, y),
+      ahead: this.tileView(x + ahead.dx, y + ahead.dy),
+    };
   }
 
   public ramStateSha256(): string {

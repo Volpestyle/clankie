@@ -27,6 +27,8 @@ export interface GbaDriverIo {
   observe(kind: GbaEmulatorObservationKind): GbaEmulatorObservation;
   act(action: GbaEmulatorAction): Promise<EnvironmentActionResult>;
   pause(reason: string): Promise<void>;
+  /** Undo a pause. A safety pause must be reversible by the mind that judged the state safe again. */
+  resume(): Promise<void>;
 }
 
 export interface GbaDriverView {

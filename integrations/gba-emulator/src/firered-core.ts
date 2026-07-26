@@ -1,7 +1,12 @@
 import type { GbaButton } from "@clankie/interactive-environment";
 import { sha256 } from "./core-double.ts";
 import type { GbaCoreState } from "./core-double.ts";
-import type { GbaCoreSeam } from "./core-seam.ts";
+import type { GbaCoreMapGrid, GbaCoreSeam } from "./core-seam.ts";
+import {
+  decodeFireRedMapGrid,
+  isFireRedTilePassable,
+  FIRERED_MAP_BORDER_OFFSET,
+} from "./firered-ram-map.ts";
 import { decodeFireRedState, FIRERED_US_V10_ROM_SHA256 } from "./firered-state.ts";
 import { MgbaLibretroCore, mgbaCoreWasmSha256, type MgbaFramebuffer } from "./mgba-core.ts";
 
@@ -136,6 +141,29 @@ export class MgbaFireRedCore implements GbaCoreSeam {
   /** The digests actually verified at creation time. */
   public identity(): MgbaFireRedCoreIdentity {
     return { ...this.verifiedIdentity };
+  }
+
+  /** Serialize the complete core state, for an operator-local checkpoint. */
+  public saveState(): Uint8Array {
+    return this.core.saveState();
+  }
+
+  /**
+   * Restore previously serialized state mid-session.
+   *
+   * Derived battle bookkeeping is reset because it describes the replaced
+   * timeline, not the restored one. The logical frame and input counters keep
+   * counting: they order evidence within this process run, and restoring RAM
+   * does not rewind what already happened here.
+   */
+  public loadState(bytes: Uint8Array): void {
+    this.core.loadState(bytes);
+    this.core.setHeldButtons([]);
+    this.core.runFrames(WARMUP_FRAMES_AFTER_RESTORE);
+    this.priorBattleHp = null;
+    this.retainedBattle = null;
+    this.retainedBattleMode = "overworld";
+    this.retainedActivePartySlot = 0;
   }
 
   /**
@@ -280,6 +308,8 @@ export class MgbaFireRedCore implements GbaCoreSeam {
         y: decoded.overworld.y,
       },
       facing: decoded.overworld.facing,
+      surroundings: decoded.surroundings,
+      mapSize: decoded.mapSize,
       dialogLineIndex: 0,
       dialogLines: decoded.dialogLines,
       menu: decoded.menu,
@@ -289,6 +319,29 @@ export class MgbaFireRedCore implements GbaCoreSeam {
       battle,
       frame: this.frame,
       inputCount: this.inputCount,
+    };
+  }
+
+  /**
+   * Collision for pathing, read from the live map buffer.
+   *
+   * Null while no map grid is loaded — a battle or a mid-warp — so a caller
+   * plans against real collision or not at all.
+   */
+  public mapGrid(): GbaCoreMapGrid | null {
+    let grid;
+    try {
+      grid = decodeFireRedMapGrid(this.core.readIwram(), this.core.readEwram());
+    } catch {
+      return null;
+    }
+    const min = FIRERED_MAP_BORDER_OFFSET;
+    return {
+      minX: min,
+      minY: min,
+      maxX: min + grid.mapWidth,
+      maxY: min + grid.mapHeight,
+      isPassable: (x, y) => isFireRedTilePassable(grid, x, y),
     };
   }
 

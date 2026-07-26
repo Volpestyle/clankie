@@ -9,6 +9,28 @@ import type { GbaCoreState } from "./core-double.ts";
  * button input consuming frames, a typed RAM-derived state view, and
  * RAM/framebuffer digests for hash-chained evidence.
  */
+/**
+ * Read-only collision view of the loaded map, for planning a route before
+ * walking it. Bounds are in the same coordinate space as `GbaCoreState.position`
+ * and `max` is exclusive.
+ *
+ * Deliberately a query rather than a field on `GbaCoreState`: the state view is
+ * cloned on every read, and copying a whole map grid per observation would make
+ * looking expensive to pay for a capability only pathing uses.
+ */
+export interface GbaCoreMapGrid {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  /**
+   * Whether tile collision leaves this tile open. It does not account for
+   * NPCs, which occupy tiles without appearing in collision, so a planned route
+   * must still be verified step by step.
+   */
+  isPassable(x: number, y: number): boolean;
+}
+
 export interface GbaCoreSeam {
   readonly coreId: string;
   /** Hold `button` for `holdFrames` frames, then release. */
@@ -17,6 +39,11 @@ export interface GbaCoreSeam {
   advanceFrames(frames: number): void;
   /** Typed game-state view decoded from the core's authoritative state. */
   gameState(): GbaCoreState;
+  /**
+   * Collision grid for pathing, or null when no map is loaded. Optional so a
+   * core that models no map stays conformant; `walk_to` then fails closed.
+   */
+  mapGrid?(): GbaCoreMapGrid | null;
   /** Digest of the core's system RAM for evidence chaining. */
   ramStateSha256(): string;
   /** Digest of the latest rendered framebuffer. */

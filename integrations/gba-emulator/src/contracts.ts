@@ -137,7 +137,7 @@ export const GbaEmulatorEvidenceEventSchema = z
     schemaVersion: z.literal(GBA_EMULATOR_INTEGRATION_SCHEMA_VERSION),
     sequence: z.number().int().positive().max(256),
     actionId: z.string().min(1).max(128),
-    actionKind: z.enum(["button_press", "frame_advance", "wait", "cancel_action"]),
+    actionKind: z.enum(["button_press", "walk_to", "frame_advance", "wait", "cancel_action"]),
     summary: z.string().min(1).max(512),
     frame: z.number().int().nonnegative().max(100_000_000),
     ramStateSha256: Sha256Schema,

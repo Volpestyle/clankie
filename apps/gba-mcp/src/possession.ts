@@ -123,11 +123,16 @@ export class PossessionLease {
    * Gate for gameplay tools. Observation deliberately does not call this: seeing
    * the game is not driving it, and a harness should be able to look before
    * deciding whether to take the body.
+   *
+   * Acting slides the expiry: a holder that is driving is alive, so the TTL
+   * bounds how long an *idle* possessor keeps the body from the resident loop,
+   * not how long a session of play may last.
    */
   public assertMayAct(token: string | undefined): void {
     const held = this.current();
     if (held === null) throw new Error("possession_lease_not_held");
     if (token !== held.token) throw new Error("possession_lease_held_by_another");
+    this.grant = { ...held, expiresAt: this.now() + this.ttlMs };
   }
 }
 
