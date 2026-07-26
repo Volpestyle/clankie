@@ -305,14 +305,9 @@ function settled(deliveryId: string): CaptainChannelTurnResult {
   };
 }
 
-describe("conversation window", () => {
-  function conversational(attentionMs?: number): DiscordTextIngressConfig {
-    return {
-      ...config(),
-      replyPolicy: "addressed",
-      characterNames: ["clankie"],
-      ...(attentionMs === undefined ? {} : { conversationAttentionMs: attentionMs }),
-    };
+describe("reading live, then checking in", () => {
+  function room(overrides: Partial<DiscordTextIngressConfig> = {}): DiscordTextIngressConfig {
+    return { ...config(), replyPolicy: "addressed", characterNames: ["clankie"], ...overrides };
   }
 
   function say(id: string, body: string, authorId = "james") {
@@ -327,133 +322,105 @@ describe("conversation window", () => {
     };
   }
 
-  it("keeps answering a follow-up that does not repeat his name", async () => {
-    const ingress = new DiscordTextIngress(new RecordingPort(), conversational(), () => undefined);
+  it("keeps answering follow-ups that do not repeat his name", async () => {
+    const ingress = new DiscordTextIngress(new RecordingPort(), room(), () => undefined);
 
     await expect(ingress.handle(say("m1", "clankie how did the run go?"))).resolves.toMatchObject({
       state: "settled",
     });
-    // Nobody says a name every sentence once a conversation is running.
     await expect(ingress.handle(say("m2", "did it pass?"))).resolves.toMatchObject({ state: "settled" });
   });
 
-  it("stays out of a conversation he was never part of", async () => {
-    const ingress = new DiscordTextIngress(new RecordingPort(), conversational(), () => undefined);
-
-    await expect(ingress.handle(say("m1", "did it pass?"))).resolves.toEqual({
-      state: "dropped",
-      reason: "not_addressed",
-    });
-  });
-
-  it("gives the grace only to the person he answered", async () => {
-    const ingress = new DiscordTextIngress(new RecordingPort(), conversational(), () => undefined);
-    await ingress.handle(say("m1", "clankie how did the run go?"));
-
-    // Two people in a channel: answering James must not pull him into whatever
-    // someone else is saying.
-    await expect(ingress.handle(say("m2", "did it pass?", "friend"))).resolves.toEqual({
-      state: "dropped",
-      reason: "not_addressed",
-    });
-  });
-
-  it("shows him a late reply instead of dropping it, and lets him answer", async () => {
-    // Someone goes quiet for an hour and then answers your question. No cutoff
-    // can tell that from noise, so he is shown it and decides.
-    let now = 1_000;
+  it("stops reading live once the conversation has moved on without him", async () => {
     const port = new RecordingPort();
-    const ingress = new DiscordTextIngress(
-      port,
-      conversational(6 * 60 * 60 * 1_000),
-      () => undefined,
-      () => now,
-    );
+    const ingress = new DiscordTextIngress(port, room({ liveMessageWindow: 2 }), () => undefined);
     await ingress.handle(say("m1", "clankie how did the run go?"));
 
-    now += 60 * 60 * 1_000;
-    await expect(ingress.handle(say("m2", "sorry — was in a meeting. did it pass?"))).resolves.toMatchObject(
-      { state: "settled" },
-    );
-    expect(port.turns.at(-1)?.trigger.unprompted).toBe(true);
+    // Answering resets the window, so drifting off requires him to actually
+    // stop answering — which is exactly what declining is.
+    port.silent = true;
+    await expect(ingress.handle(say("m2", "one"))).resolves.toMatchObject({ state: "declined" });
+    await expect(ingress.handle(say("m3", "two"))).resolves.toMatchObject({ state: "declined" });
+    await expect(ingress.handle(say("m4", "three"))).resolves.toEqual({ state: "buffered" });
   });
 
-  it("does not mark a message that actually addressed him as unprompted", async () => {
+  it("does nothing at all when no channel has anything waiting", async () => {
     const port = new RecordingPort();
-    const ingress = new DiscordTextIngress(port, conversational(), () => undefined);
-
+    const ingress = new DiscordTextIngress(port, room(), () => undefined);
     await ingress.handle(say("m1", "clankie how did the run go?"));
-    expect(port.turns.at(-1)?.trigger.unprompted).toBeUndefined();
+    const turnsAfterReply = port.turns.length;
+
+    // An idle server must not bill for silence: a person does not open an empty
+    // channel on a timer.
+    await expect(ingress.catchUp()).resolves.toEqual([]);
+    expect(port.turns).toHaveLength(turnsAfterReply);
   });
 
-  it("writes nothing when he reads a late message and chooses silence", async () => {
-    let now = 1_000;
+  it("reads the whole backlog in one turn when he checks in", async () => {
+    const port = new RecordingPort();
+    const ingress = new DiscordTextIngress(port, room({ liveMessageWindow: 0 }), () => undefined);
+    await ingress.handle(say("m1", "clankie how did the run go?"));
+    const turnsAfterReply = port.turns.length;
+
+    await ingress.handle(say("m2", "one"));
+    await ingress.handle(say("m3", "two"));
+    await ingress.handle(say("m4", "three"));
+
+    const outcomes = await ingress.catchUp();
+    expect(outcomes).toHaveLength(1);
+    // One turn for the channel, not one per message.
+    expect(port.turns).toHaveLength(turnsAfterReply + 1);
+    const caught = port.turns.at(-1);
+    expect(caught?.trigger.id).toBe("m4");
+    expect(caught?.trigger.unprompted).toBe(true);
+    expect(caught?.contextMessages.map((message) => message.id)).toEqual(
+      expect.arrayContaining(["m2", "m3"]),
+    );
+  });
+
+  it("clears the backlog even when he decides to say nothing", async () => {
     const port = new RecordingPort();
     port.silent = true;
-    const evidence: DiscordTextIngressEvidence[] = [];
-    const ingress = new DiscordTextIngress(
-      port,
-      conversational(6 * 60 * 60 * 1_000),
-      (event) => evidence.push(event),
-      () => now,
-    );
+    const ingress = new DiscordTextIngress(port, room({ liveMessageWindow: 0 }), () => undefined);
     await ingress.handle(say("m1", "clankie how did the run go?"));
-    const writesAfterReply = port.writes.length;
+    port.silent = true;
+    await ingress.handle(say("m2", "never mind"));
 
-    now += 60 * 60 * 1_000;
-    await expect(ingress.handle(say("m2", "never mind, found it"))).resolves.toMatchObject({
-      state: "declined",
-    });
-    expect(port.writes).toHaveLength(writesAfterReply);
-    expect(evidence.at(-1)?.outcome).toBe("declined");
+    await expect(ingress.catchUp()).resolves.toMatchObject([{ state: "declined" }]);
+    // He looked. Deciding there was nothing to say must not queue it up again.
+    await expect(ingress.catchUp()).resolves.toEqual([]);
   });
 
-  it("goes quiet for good once his attention has lapsed", async () => {
-    let now = 1_000;
-    const ingress = new DiscordTextIngress(
-      new RecordingPort(),
-      conversational(60 * 60 * 1_000),
-      () => undefined,
-      () => now,
-    );
-    await ingress.handle(say("m1", "clankie how did the run go?"));
+  it("never checks a channel he has not spoken in", async () => {
+    const ingress = new DiscordTextIngress(new RecordingPort(), room(), () => undefined);
 
-    now += 2 * 60 * 60 * 1_000;
-    await expect(ingress.handle(say("m2", "did it pass?"))).resolves.toEqual({
+    await expect(ingress.handle(say("m1", "morning all"))).resolves.toEqual({
       state: "dropped",
       reason: "not_addressed",
     });
+    await expect(ingress.catchUp()).resolves.toEqual([]);
   });
 
-  it("extends attention on each reply, so a long exchange stays live", async () => {
-    let now = 1_000;
+  it("keeps the backlog to the recent room rather than an archive", async () => {
     const ingress = new DiscordTextIngress(
       new RecordingPort(),
-      conversational(60_000),
+      room({ liveMessageWindow: 0, maxPendingPerChannel: 3 }),
       () => undefined,
-      () => now,
     );
     await ingress.handle(say("m1", "clankie how did the run go?"));
+    for (const index of [2, 3, 4, 5, 6]) await ingress.handle(say(`m${String(index)}`, `line ${String(index)}`));
 
-    now += 40_000;
-    await expect(ingress.handle(say("m2", "did it pass?"))).resolves.toMatchObject({ state: "settled" });
-    now += 40_000; // past the original expiry, inside the extended one
-    await expect(ingress.handle(say("m3", "and the flaky one?"))).resolves.toMatchObject({
+    const [outcome] = await ingress.catchUp();
+    expect(outcome).toMatchObject({ state: "settled" });
+  });
+
+  it("still answers a direct mention in a channel he had drifted from", async () => {
+    const ingress = new DiscordTextIngress(new RecordingPort(), room({ liveMessageWindow: 0 }), () => undefined);
+    await ingress.handle(say("m1", "clankie how did the run go?"));
+
+    await expect(ingress.handle(say("m2", "clankie you there?"))).resolves.toMatchObject({
       state: "settled",
     });
   });
-
-  it("can be switched off entirely", async () => {
-    const ingress = new DiscordTextIngress(
-      new RecordingPort(),
-      conversational(0),
-      () => undefined,
-    );
-    await ingress.handle(say("m1", "clankie how did the run go?"));
-
-    await expect(ingress.handle(say("m2", "did it pass?"))).resolves.toEqual({
-      state: "dropped",
-      reason: "not_addressed",
-    });
-  });
 });
+

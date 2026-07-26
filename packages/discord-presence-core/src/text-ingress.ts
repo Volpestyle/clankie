@@ -39,15 +39,18 @@ export interface DiscordTextIngressConfig {
   /** Lowercased names he answers to. Only consulted by the `addressed` policy. */
   readonly characterNames?: readonly string[];
   /**
-   * How long someone he has replied to keeps his attention in that channel
-   * without using his name again. `0` requires the name every time.
+   * How many messages may pass in a channel, after his last reply, before he
+   * stops reading it live.
    *
-   * There used to be a shorter "reflex" window inside this one, where a reply
-   * was compulsory. It bought nothing: both tiers ran the same turn at the same
-   * cost, and the only difference was that the inner one took away his choice.
-   * A gate decides what reaches him; whether to speak is his on every turn.
+   * Inside this he is mid-conversation and sees each message as it arrives.
+   * Past it he has drifted off, exactly as a person does, and the channel piles
+   * up unread until he next checks in. `0` means he never reads live.
    */
-  readonly conversationAttentionMs?: number;
+  readonly liveMessageWindow?: number;
+  /** Unread messages retained per channel for a catch-up. Oldest fall off. */
+  readonly maxPendingPerChannel?: number;
+  /** Channels tracked for catch-up at once. */
+  readonly maxTrackedChannels?: number;
   readonly deliveryRetentionMs?: number;
   readonly maxRetainedDeliveries?: number;
 }
@@ -102,11 +105,15 @@ export interface DiscordInboundMessage {
   readonly body: string;
   readonly contextMessages?: readonly DiscordInboundContextMessage[];
   readonly loadContextMessages?: () => Promise<readonly DiscordInboundContextMessage[]>;
+  /** Set only by {@link DiscordTextIngress.catchUp}; he is looking at a backlog. */
+  readonly catchingUp?: boolean;
 }
 
 export type DiscordTextIngressOutcome =
   | { state: "dropped"; reason: string }
   | { state: "settled"; turnId: string; responseMessageId: string }
+  /** Held for the next catch-up: he is not reading this channel right now. */
+  | { state: "buffered" }
   /** He read an unprompted message and chose silence. Nothing was written. */
   | { state: "declined"; turnId: string }
   | { state: "waiting_user"; turnId: string; responseMessageId: string }
@@ -114,7 +121,14 @@ export type DiscordTextIngressOutcome =
 
 export interface DiscordTextIngressEvidence {
   readonly service: "discord-text-ingress";
-  readonly outcome: "dropped" | "accepted" | "deduplicated" | "settled" | "declined" | "failed";
+  readonly outcome:
+    | "dropped"
+    | "accepted"
+    | "buffered"
+    | "deduplicated"
+    | "settled"
+    | "declined"
+    | "failed";
   readonly deliveryId: string;
   readonly correlationId: string;
   readonly presenceSessionId: string;
@@ -141,18 +155,42 @@ interface RetainedDelivery {
 
 const DEFAULT_DELIVERY_RETENTION_MS = 7 * 60 * 60 * 1_000;
 const DEFAULT_MAX_RETAINED_DELIVERIES = 50_000;
-/** Long enough to cover "sorry, was in a meeting", short enough that yesterday is over. */
-const DEFAULT_CONVERSATION_ATTENTION_MS = 6 * 60 * 60 * 1_000;
-/** A conversation is one person in one channel; a third party still has to use his name. */
-function conversationKey(channelId: string, authorId: string): string {
-  return `${channelId}:${authorId}`;
+/** Roughly how long a conversation stays "the one you are in" before you drift off. */
+const DEFAULT_LIVE_MESSAGE_WINDOW = 5;
+const DEFAULT_MAX_PENDING_PER_CHANNEL = 20;
+const DEFAULT_MAX_TRACKED_CHANNELS = 64;
+
+/**
+ * How often he glances at channels that have piled up, by how talkative he is.
+ * Mirrors the voice plane's `VOLITION_DEFAULTS` rather than inventing a second
+ * notion of chattiness. A tick with no backlog does nothing, so these are an
+ * upper bound on attention, not a polling cost.
+ */
+export const CATCH_UP_INTERVAL_MS: Readonly<Record<"quiet" | "balanced" | "chatty", number>> = {
+  quiet: 30 * 60_000,
+  balanced: 10 * 60_000,
+  chatty: 5 * 60_000,
+};
+
+/**
+ * A channel he has spoken in, and what has happened there since.
+ *
+ * Only channels he has actually replied in are tracked. A person checks the
+ * rooms they are part of, not every room on the server, and tracking the rest
+ * would turn one catch-up tick into a turn per channel.
+ */
+interface ChannelActivity {
+  /** Messages seen since his last reply here. */
+  sinceReply: number;
+  /** Unread messages awaiting a catch-up, oldest first. */
+  readonly pending: DiscordInboundMessage[];
 }
 
 /** Normalizes Discord gateway messages into bounded, policy-gated Eve turns. */
 export class DiscordTextIngress {
   private readonly deliveries = new Map<string, RetainedDelivery>();
-  /** `channel:author` -> when he last replied to them there. */
-  private readonly conversations = new Map<string, number>();
+  /** `channelId` -> what has happened there since he last spoke. */
+  private readonly channels = new Map<string, ChannelActivity>();
   private readonly port: DiscordTextIngressPort;
   private readonly config: DiscordTextIngressConfig;
   private readonly evidence: (event: DiscordTextIngressEvidence) => void;
@@ -235,6 +273,19 @@ export class DiscordTextIngress {
       event("dropped", { reason: "delivery_backpressure" });
       return { state: "dropped", reason: "delivery_backpressure" };
     }
+
+    if (!this.readsNow(message)) {
+      // He has drifted off this channel. Not dropped and not answered — it
+      // waits until he next looks, which is what a person does with a room they
+      // are no longer watching.
+      const activity = this.channels.get(message.channelId);
+      if (activity !== undefined) activity.sinceReply += 1;
+      this.buffer(message);
+      event("buffered");
+      return { state: "buffered" };
+    }
+    const active = this.channels.get(message.channelId);
+    if (active !== undefined) active.sinceReply += 1;
 
     const result = this.runTurn(message, body, presenceSessionId, correlationId, event);
     this.deliveries.set(message.id, {
@@ -329,7 +380,7 @@ export class DiscordTextIngress {
     });
     const reply = await this.port.executeDiscordPresenceAction(write);
     if (!reply.messageId) throw new Error("discord_presence_reply_message_missing");
-    this.rememberConversation(message);
+    this.rememberReply(message);
     event("settled", { turnId: result.turnId });
     return {
       state: result.state,
@@ -362,9 +413,10 @@ export class DiscordTextIngress {
     if ((this.config.replyPolicy ?? "addressed") === "addressed") {
       const addressed =
         message.mentionsBot || addressesCharacter(message.body, this.config.characterNames ?? []);
-      // Reaching him and answering him are different questions. This one only
-      // decides whether he sees it; he decides the rest, on every turn.
-      if (!addressed && !this.holdsAttention(message)) return "not_addressed";
+      // Whether he is *reading* is decided in `handle`, which can buffer for a
+      // later catch-up instead of refusing. Only a channel he has never spoken
+      // in refuses outright: a room he was never in is not one he checks.
+      if (!addressed && !this.channels.has(message.channelId)) return "not_addressed";
     }
     return undefined;
   }
@@ -374,24 +426,111 @@ export class DiscordTextIngress {
     return !message.mentionsBot && !addressesCharacter(message.body, this.config.characterNames ?? []);
   }
 
-  /** Whether this person still holds his attention in this channel. */
-  private holdsAttention(message: DiscordInboundMessage): boolean {
-    const repliedAt = this.conversations.get(conversationKey(message.channelId, message.authorId));
-    if (repliedAt === undefined) return false;
-    // Strictly less than, so an attention span of `0` disables this outright
-    // rather than matching the same millisecond he replied in.
-    return (
-      this.clock() - repliedAt < (this.config.conversationAttentionMs ?? DEFAULT_CONVERSATION_ATTENTION_MS)
-    );
+  /**
+   * Look at the channels that have piled up since he last spoke in them.
+   *
+   * Returns immediately when nothing is waiting, which is the point: an idle
+   * server costs nothing at all. A person does not open an empty channel on a
+   * timer, and a tick that turned into a model call per tracked channel would
+   * bill for silence.
+   *
+   * Each channel with a backlog gets one turn, never one per message: the most
+   * recent unread is the trigger and the rest are its context, so catching up
+   * on twenty messages costs the same as catching up on two. He may decline,
+   * and declining still clears the backlog — he looked, and deciding there was
+   * nothing to say is a real outcome, not a reason to look again.
+   */
+  public async catchUp(): Promise<readonly DiscordTextIngressOutcome[]> {
+    const waiting = [...this.channels.values()].filter((activity) => activity.pending.length > 0);
+    if (waiting.length === 0) return [];
+    const outcomes: DiscordTextIngressOutcome[] = [];
+    for (const activity of waiting) {
+      const backlog = [...activity.pending];
+      activity.pending.length = 0;
+      const trigger = backlog.at(-1);
+      if (trigger === undefined) continue;
+      outcomes.push(
+        await this.handleCatchUp(trigger, backlog.slice(0, -1)).catch((error: unknown) => ({
+          state: "failed" as const,
+          code: error instanceof Error ? error.name.slice(0, 64) : "catch_up_failed",
+        })),
+      );
+    }
+    return outcomes;
+  }
+
+  /** One catch-up turn: the newest unread message, carrying the rest as context. */
+  private handleCatchUp(
+    trigger: DiscordInboundMessage,
+    earlier: readonly DiscordInboundMessage[],
+  ): Promise<DiscordTextIngressOutcome> {
+    return this.handle({
+      ...trigger,
+      contextMessages: [
+        ...earlier.map((message) => ({
+          id: message.id,
+          authorId: message.authorId,
+          body: message.body,
+          createdAt: new Date(this.clock()).toISOString(),
+        })),
+        ...(trigger.contextMessages ?? []),
+      ],
+      // Reading the backlog *is* him looking, so this must not be buffered
+      // again — that would be a channel he can never catch up on.
+      catchingUp: true,
+    });
+  }
+
+  /** Is this one he looks at as it arrives, or one that waits for a catch-up? */
+  private readsNow(message: DiscordInboundMessage): boolean {
+    // A DM is addressed to him by construction, and `all` means he reads the
+    // room by policy. Neither drifts.
+    if (message.guildId === undefined) return true;
+    if ((this.config.replyPolicy ?? "addressed") === "all") return true;
+    if (message.mentionsBot || addressesCharacter(message.body, this.config.characterNames ?? [])) {
+      return true;
+    }
+    return this.readingLive(message);
+  }
+
+  /** Is he still mid-conversation here, or has he drifted off? */
+  private readingLive(message: DiscordInboundMessage): boolean {
+    if (message.catchingUp === true) return true;
+    const activity = this.channels.get(message.channelId);
+    if (activity === undefined) return false;
+    return activity.sinceReply < (this.config.liveMessageWindow ?? DEFAULT_LIVE_MESSAGE_WINDOW);
+  }
+
+  /** Records a message he did not read, for the next time he checks in. */
+  private buffer(message: DiscordInboundMessage): void {
+    const activity = this.channels.get(message.channelId);
+    if (activity === undefined) return;
+    activity.pending.push(message);
+    const cap = this.config.maxPendingPerChannel ?? DEFAULT_MAX_PENDING_PER_CHANNEL;
+    // A backlog is what he missed, not an archive: past the cap the oldest go,
+    // so checking in on a busy channel reads the recent room rather than
+    // replaying an hour of it.
+    while (activity.pending.length > cap) activity.pending.shift();
   }
 
   /**
-   * Called once he has actually replied to someone, so attention is earned by a
-   * real exchange rather than by merely having been spoken to — a turn that
-   * failed or was refused leaves him no more engaged than before.
+   * Called once he has actually replied, so a channel becomes one he is in by
+   * having spoken there — a turn that failed or was declined leaves him no more
+   * present than before.
    */
-  private rememberConversation(message: DiscordInboundMessage): void {
-    this.conversations.set(conversationKey(message.channelId, message.authorId), this.clock());
+  private rememberReply(message: DiscordInboundMessage): void {
+    const existing = this.channels.get(message.channelId);
+    if (existing !== undefined) {
+      existing.sinceReply = 0;
+      existing.pending.length = 0;
+      return;
+    }
+    const cap = this.config.maxTrackedChannels ?? DEFAULT_MAX_TRACKED_CHANNELS;
+    if (this.channels.size >= cap) {
+      const oldest = this.channels.keys().next().value;
+      if (oldest !== undefined) this.channels.delete(oldest);
+    }
+    this.channels.set(message.channelId, { sinceReply: 0, pending: [] });
   }
 
   private pruneDeliveries(): void {
@@ -399,10 +538,7 @@ export class DiscordTextIngress {
     for (const [deliveryId, delivery] of this.deliveries) {
       if (delivery.expiresAtMs <= now) this.deliveries.delete(deliveryId);
     }
-    const attentionMs = this.config.conversationAttentionMs ?? DEFAULT_CONVERSATION_ATTENTION_MS;
-    for (const [key, repliedAt] of this.conversations) {
-      if (now - repliedAt > attentionMs) this.conversations.delete(key);
-    }
+
   }
 }
 

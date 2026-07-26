@@ -29,21 +29,34 @@ import {
   type DiscordRoleBindings,
 } from "./authority.ts";
 import {
+  CATCH_UP_INTERVAL_MS,
   createAdvertisedDiscordPresencePort,
   DiscordBridgeReceiptStore,
   DiscordPresenceSession,
   DiscordTextIngress,
   DiscordVoiceIngress,
   DiscordVoiceSession,
-  OpenAiVoiceSpeechRuntime,
   parseDiscordDmPolicy,
   parseDiscordIdSet,
   type DiscordBridgeReceipt,
   type DiscordInboundContextMessage,
-  type DiscordVoiceEvidence,
 } from "@clankie/discord-presence-core";
+import type { DiscordVoiceEvidence } from "@clankie/protocol";
 import { applyDiscordSettingsToEnvironment, characterNames, SettingsStore } from "@clankie/settings";
 import { commands, DISCORD_COMMAND_NAME, DISCORD_SUBCOMMANDS } from "./commands.ts";
+import {
+  createVoiceBriefingProvider,
+  createVoiceRealtimePorts,
+  createVoiceVolitionDecider,
+  describeVoiceResponse,
+  parseVoiceRealtimeEnv,
+  renderVoiceConsentReply,
+  renderVoiceJoinDisclosure,
+  renderVoiceStatusReply,
+  VoiceIdleAutoLeave,
+  voiceEvidenceReceiptData,
+  voiceEvidenceReceiptType,
+} from "./voice-composition.ts";
 import { projectBoundMissionRecord, renderMissionSummary, sanitizeDiscordText } from "./mission-state.ts";
 import { MissionThreadProjector } from "./projector.ts";
 import {
@@ -161,7 +174,7 @@ const textIngress = textIngressEnabled
         // Persona owns who he is and when he speaks; the bridge only carries it.
         replyPolicy: storedSettings.persona.replyPolicy,
         characterNames: characterNames(storedSettings.persona),
-        conversationAttentionMs: storedSettings.persona.conversationAttentionSeconds * 1_000,
+        liveMessageWindow: storedSettings.persona.liveMessageWindow,
       },
       (event) => {
         console.info(event, "Discord text ingress event");
@@ -190,35 +203,14 @@ if (voiceEnabled && voiceGuildIds.size === 0) {
 const openAiCredential = voiceEnabled ? await credentialStore.get("openai") : undefined;
 if (voiceEnabled && openAiCredential?.type !== "api") {
   throw new Error(
-    "Discord voice requires the existing brokered openai API credential; OAuth and environment credentials are not accepted by the speech boundary.",
+    "Discord voice requires the existing brokered openai API credential; OAuth and environment credentials are not accepted by the realtime boundary.",
   );
 }
-const voiceSpeech =
-  openAiCredential?.type === "api"
-    ? new OpenAiVoiceSpeechRuntime({
-        apiKey: openAiCredential.key,
-        ...(process.env.CLANKIE_VOICE_STT_MODEL === undefined
-          ? {}
-          : { sttModel: process.env.CLANKIE_VOICE_STT_MODEL }),
-        ...(process.env.CLANKIE_VOICE_STT_LANGUAGE === undefined
-          ? {}
-          : { sttLanguage: process.env.CLANKIE_VOICE_STT_LANGUAGE }),
-        ...(process.env.CLANKIE_VOICE_TTS_MODEL === undefined
-          ? {}
-          : { ttsModel: process.env.CLANKIE_VOICE_TTS_MODEL }),
-        ...(process.env.CLANKIE_VOICE_TTS_VOICE === undefined
-          ? {}
-          : { voice: process.env.CLANKIE_VOICE_TTS_VOICE }),
-      })
-    : undefined;
-if (voiceSpeech !== undefined) {
-  const readiness = await voiceSpeech.readiness();
-  if (!readiness.ready) {
-    throw new Error("Discord voice is enabled but OpenAI speech readiness is incomplete.");
-  }
-}
+// Validated at startup like the rest of the env: truncation and idle auto-leave
+// are always configured, never defaulted to unbounded (ADR 0057, mission T6).
+const voiceRealtimeConfig = voiceEnabled ? parseVoiceRealtimeEnv(process.env) : undefined;
 const voiceSession =
-  voiceSpeech === undefined || voiceApi === undefined
+  openAiCredential?.type !== "api" || voiceApi === undefined || voiceRealtimeConfig === undefined
     ? undefined
     : new DiscordVoiceSession({
         ingress: new DiscordVoiceIngress(voiceApi, {
@@ -226,9 +218,41 @@ const voiceSession =
           credentialRef: "discord_bot",
           transportKind: "bot",
         }),
-        speech: voiceSpeech,
+        realtime: createVoiceRealtimePorts({
+          apiKey: openAiCredential.key,
+          config: voiceRealtimeConfig,
+        }),
+        briefing: createVoiceBriefingProvider(voiceApi),
+        floor: {
+          // Persona owns who he is and when he speaks; the bridge only carries it.
+          names: characterNames(storedSettings.persona),
+          replyPolicy: storedSettings.persona.replyPolicy,
+          chattiness: storedSettings.persona.chattiness,
+          decayWindowMs: voiceRealtimeConfig.decayWindowMs,
+        },
+        volitionDecider: createVoiceVolitionDecider({
+          apiKey: openAiCredential.key,
+          model: voiceRealtimeConfig.volitionModel,
+        }),
         presenceSessionId: () => presenceSession.record.sessionId,
         emit: recordVoiceEvidence,
+      });
+const voiceIdleAutoLeave =
+  voiceSession === undefined || voiceRealtimeConfig === undefined
+    ? undefined
+    : new VoiceIdleAutoLeave({
+        idleLeaveMs: voiceRealtimeConfig.idleLeaveMs,
+        isActive: () => voiceSession.status().active,
+        leave: () => voiceSession.leave(),
+        onLeave: (idleMs) => {
+          console.info(`Discord voice session idle for ${String(idleMs)}ms; leaving the metered channel.`);
+        },
+        onLeaveError: (error) => {
+          console.error(
+            { error: error instanceof Error ? error.message : String(error) },
+            "Discord voice idle auto-leave failed to close the session",
+          );
+        },
       });
 const registry = new MissionThreadRegistry({
   statePath: bridgeStatePath(),
@@ -754,7 +778,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
       }
       if (voiceSession === undefined) {
         await interaction.reply({
-          content: "Discord voice participation is disabled or brokered speech is not ready.",
+          content: "Discord voice participation is disabled or brokered realtime voice is not ready.",
           ephemeral: true,
         });
         return;
@@ -779,7 +803,11 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
         });
         return;
       }
-      await interaction.deferReply();
+      // Ephemeral by owner decision: no bot-chatter in the text channel on
+      // join — his public presence is sitting in the voice channel like
+      // anyone else. The residency disclosure goes privately to the invoker
+      // here and to every other participant in their own opt-in reply.
+      await interaction.deferReply({ ephemeral: true });
       const status = await voiceSession.join({
         channelId: channel.id,
         guildId: interaction.guild.id,
@@ -787,12 +815,9 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
         invokingUserId: interaction.user.id,
       });
       await interaction.editReply({
-        content:
-          `Joined with DAVE protocol ${String(status.daveProtocolVersion)}. ` +
-          `Only you are opted in: I send only explicitly consented, bounded utterances to OpenAI for transcription, ` +
-          `discard raw audio after each turn, and never treat speech as privileged approval. ` +
-          `My spoken responses use an AI-generated OpenAI voice. ` +
-          `Other participants can use **/clankie voice-consent opt-in** and revoke at any time.`,
+        // Live-session audio residency (ADR 0057): the wording must never
+        // promise per-turn discard.
+        content: renderVoiceJoinDisclosure(status.daveProtocolVersion),
         allowedMentions: { parse: [] },
       });
       return;
@@ -800,7 +825,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     case "voice-consent": {
       if (voiceSession === undefined) {
         await interaction.reply({
-          content: "Discord voice participation is disabled or brokered speech is not ready.",
+          content: "Discord voice participation is disabled or brokered realtime voice is not ready.",
           ephemeral: true,
         });
         return;
@@ -830,20 +855,18 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
         consented,
       );
       await interaction.reply({
-        content: consented
-          ? `You are opted in for this voice session. ${String(status.consentedParticipantCount)} participant(s) are now opted in.`
-          : "Your voice consent is revoked and any active capture for you was discarded.",
+        // Opt-in is where consent is actually granted, so the residency
+        // disclosure travels in this private reply (the join disclosure was
+        // only ever shown to the invoker).
+        content: renderVoiceConsentReply(consented, status.consentedParticipantCount),
         ephemeral: true,
+        allowedMentions: { parse: [] },
       });
       return;
     }
     case "voice-status": {
-      const status = voiceSession?.status();
       await interaction.reply({
-        content:
-          status?.active === true
-            ? `Voice is active with DAVE protocol ${String(status.daveProtocolVersion)}; ${String(status.consentedParticipantCount)} participant(s) opted in and ${String(status.activeCaptureCount)} bounded capture(s) active. Raw audio and transcripts are not retained.`
-            : `Voice is ${voiceEnabled ? "enabled but not connected" : "disabled"}.`,
+        content: renderVoiceStatusReply(voiceSession?.status(), voiceEnabled),
         ephemeral: true,
         allowedMentions: { parse: [] },
       });
@@ -1006,42 +1029,16 @@ function recordReceipt(
 }
 
 async function recordVoiceEvidence(evidence: DiscordVoiceEvidence): Promise<void> {
-  switch (evidence.type) {
-    case "joined":
-      await recordReceipt("discord.voice.joined", evidence);
-      return;
-    case "consent":
-      await recordReceipt("discord.voice.consent", evidence);
-      return;
-    case "utterance":
-      await recordReceipt("discord.voice.utterance", evidence);
-      return;
-    case "response": {
-      // Printed as well as recorded: "it felt slow" is only actionable next to
-      // the per-stage split, and an operator should see it without opening the
-      // receipt file.
-      console.info(
-        `voice turn: ${String(evidence.toFirstAudioMs)}ms to first audio ` +
-          `(silence hold ${String(evidence.silenceHoldMs)} + stt ${String(evidence.transcribeMs)} + ` +
-          `captain ${String(evidence.captainMs)} + tts ${String(evidence.synthesizeMs)}), ` +
-          `then ${String(evidence.playbackMs)}ms speaking`,
-      );
-      await recordReceipt("discord.voice.response", evidence);
-      return;
-    }
-    case "overlap":
-      await recordReceipt("discord.voice.overlap", evidence);
-      return;
-    case "interrupted":
-      await recordReceipt("discord.voice.interrupted", evidence);
-      return;
-    case "failed":
-      await recordReceipt("discord.voice.failed", evidence);
-      return;
-    case "left":
-      await recordReceipt("discord.voice.left", evidence);
-      return;
+  // The idle auto-leave watches the same stream the receipts do, so "activity"
+  // is exactly what the evidence says happened.
+  voiceIdleAutoLeave?.observe(evidence);
+  if (evidence.type === "response") {
+    // Printed as well as recorded: "it felt slow" is only actionable next to
+    // the per-stage split, and an operator should see it without opening the
+    // receipt file.
+    console.info(describeVoiceResponse(evidence));
   }
+  await recordReceipt(voiceEvidenceReceiptType(evidence), voiceEvidenceReceiptData(evidence));
 }
 
 function reportPresencePhaseFailure(error: unknown): void {
@@ -1056,6 +1053,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   if (shutdownPromise !== undefined) return shutdownPromise;
   shutdownPromise = (async () => {
     projector.stop();
+    voiceIdleAutoLeave?.stop();
     await voiceSession?.leave();
     client.destroy();
     await presenceSession.stop().catch(reportPresencePhaseFailure);
@@ -1074,6 +1072,37 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       process.exitCode = 1;
     });
   });
+}
+
+/**
+ * He glances at channels that piled up while he was not reading them.
+ *
+ * A tick with nothing waiting returns without a turn, so an idle server costs
+ * nothing — the interval is an upper bound on how stale a backlog gets, not a
+ * poll. Unref'd so it never holds the process open on its own, and serialized
+ * by awaiting the previous pass, because a slow catch-up must not stack.
+ */
+if (textIngress !== undefined) {
+  let catchingUp = false;
+  const catchUpTimer = setInterval(
+    () => {
+      if (catchingUp) return;
+      catchingUp = true;
+      void textIngress
+        .catchUp()
+        .catch((error: unknown) => {
+          console.error(
+            { errorName: error instanceof Error ? error.name.slice(0, 64) : "Error" },
+            "Discord catch-up pass failed",
+          );
+        })
+        .finally(() => {
+          catchingUp = false;
+        });
+    },
+    CATCH_UP_INTERVAL_MS[storedSettings.persona.chattiness],
+  );
+  catchUpTimer.unref();
 }
 
 await presenceSession.start().catch(reportPresencePhaseFailure);

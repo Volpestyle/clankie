@@ -86,13 +86,14 @@ export const PersonaSettingsSchema = z
      */
     replyPolicy: z.enum(["addressed", "all"]).default("addressed"),
     /**
-     * Seconds someone he has replied to keeps his attention in that channel
-     * without using his name again. `0` requires the name every time.
+     * How many messages may pass in a channel, after he last replied there,
+     * before he stops reading it live and lets it pile up until he next checks
+     * in. `0` means he only ever answers when named.
      *
      * This decides what he *sees*, never what he must say: he may stay silent
      * on any turn, including one that named him directly.
      */
-    conversationAttentionSeconds: z.number().int().min(0).max(86_400).default(21_600),
+    liveMessageWindow: z.number().int().min(0).max(100).default(5),
   })
   .strict();
 export type PersonaSettings = z.infer<typeof PersonaSettingsSchema>;

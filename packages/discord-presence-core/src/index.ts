@@ -25,9 +25,13 @@ export {
 } from "./presence-action-advertiser.ts";
 export {
   DiscordTextIngress,
+  addressesCharacter,
+  CATCH_UP_INTERVAL_MS,
   parseDiscordDmPolicy,
   parseDiscordIdSet,
+  parseDiscordReplyPolicy,
   type DiscordDmPolicy,
+  type DiscordReplyPolicy,
   type DiscordInboundContextMessage,
   type DiscordInboundMessage,
   type DiscordTextIngressConfig,
@@ -43,27 +47,69 @@ export {
   type DiscordVoiceTurnOutcome,
 } from "./voice-ingress.ts";
 export {
+  CAPTAIN_UNREACHABLE_TEXT,
   DiscordVoiceSession,
-  type DiscordVoiceEvidence,
+  ENGAGED_HOLD_MS,
+  ENGAGED_TICK_MS,
+  TRANSCRIPT_RING_MAX_BYTES,
+  TRANSCRIPT_RING_MAX_LINES,
+  type DiscordVoiceBriefing,
+  type DiscordVoiceBriefingRequest,
+  type DiscordVoiceRealtimePorts,
   type DiscordVoiceSessionOptions,
   type DiscordVoiceSessionStatus,
   type JoinDiscordVoiceInput,
+  type VoiceConversationOpenInput,
+  type VoiceConversationPort,
+  type VoiceTranscriptionHandlers,
+  type VoiceTranscriptionPort,
 } from "./voice-session.ts";
 export { DiscordVoiceConsentRegistry, type DiscordVoiceConsentSession } from "./voice-consent.ts";
+export { addressKeys, phoneticKey, releasesFloor, voiceAddressesCharacter } from "./voice-address.ts";
 export {
+  DEFAULT_DECAY_WINDOW_MS,
+  VOLITION_DEFAULTS,
+  VoiceFloor,
+  type FloorDecision,
+  type FloorState,
+  type VoiceFloorOptions,
+  type VoiceTranscriptEvent,
+  type VolitionAccounting,
+  type VolitionRateCap,
+} from "./voice-floor.ts";
+export {
+  ASK_CLANKIE_TOOL_NAME,
+  DEFAULT_REALTIME_POST_INSTRUCTIONS_TOKEN_LIMIT,
+  DEFAULT_REALTIME_SESSION_LIFETIME_MS,
+  DEFAULT_REALTIME_TRUNCATION_RETENTION_RATIO,
+  MAX_REALTIME_AUDIO_APPEND_BYTES,
+  MAX_REALTIME_INSTRUCTIONS_CHARACTERS,
+  MAX_REALTIME_RESPONSE_AUDIO_BYTES,
+  MAX_REALTIME_TEXT_ITEM_CHARACTERS,
+  openRealtimeConversationSession,
+  openRealtimeTranscriptionSession,
+  openRealtimeWebSocket,
+  REALTIME_AUDIO_SAMPLE_RATE,
+  RealtimeConversationSession,
+  RealtimeTranscriptionSession,
+  type RealtimeConversationSessionOptions,
+  type RealtimeFunctionCall,
+  type RealtimeResponseMeta,
+  type RealtimeSessionCloseReason,
+  type RealtimeSocket,
+  type RealtimeSocketFactory,
+  type RealtimeTimers,
+  type RealtimeTranscriptEvent,
+  type RealtimeTranscriptionSessionOptions,
+} from "./realtime-session.ts";
+export {
+  discordPcmToRealtimePcm,
   discordPcmToSpeechPcm,
   encodeMonoPcmWav,
   openAiPcmToDiscordPcm,
   pcmDurationMs,
   SPEECH_SAMPLE_RATE,
 } from "./voice-audio.ts";
-export {
-  OpenAiVoiceSpeechRuntime,
-  type OpenAiVoiceSpeechRuntimeOptions,
-  type SynthesizedVoiceAudio,
-  type VoiceSpeechReadiness,
-  type VoiceSpeechRuntime,
-} from "./voice-speech.ts";
 export {
   DiscordBridgeReceiptSchema,
   DiscordBridgeReceiptStore,
