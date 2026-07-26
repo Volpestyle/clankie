@@ -2133,6 +2133,26 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
           error instanceof Error && error.message.startsWith("discord_presence_")
             ? error.message
             : "discord_presence_failed";
+        // The generic code alone is a dead end: every transport, permission, and
+        // runtime failure collapses into `discord_presence_failed`, and the
+        // bridge surfaces exactly that to the operator. Whatever actually went
+        // wrong was being discarded here, so a silent Discord reply could not be
+        // diagnosed from the logs at all. Bounded, and never the raw stack.
+        logger.error(
+          {
+            service: "clankie-control-plane",
+            ...(write.identity.missionId === undefined ? {} : { missionId: write.identity.missionId }),
+            ...(write.identity.presenceSessionId === undefined
+              ? {}
+              : { presenceSessionId: write.identity.presenceSessionId }),
+            correlationId: write.identity.correlationId,
+            action: write.action,
+            code,
+            errorName: error instanceof Error ? error.name.slice(0, 64) : "Error",
+            errorMessage: error instanceof Error ? error.message.slice(0, 256) : String(error).slice(0, 256),
+          },
+          "Discord presence action failed",
+        );
         return context.json({ error: code }, 502);
       }
     });
