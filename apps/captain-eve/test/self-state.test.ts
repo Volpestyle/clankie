@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CaptainLaneSnapshot } from "@clankie/captain-runtime";
 import {
+  captainSelfStateInstructions,
   projectCaptainSelfState,
   renderCaptainSelfState,
   type CaptainSelfStateInput,
@@ -155,5 +156,14 @@ describe("captain self state", () => {
 
   it("says so plainly when this is the only room", () => {
     expect(renderCaptainSelfState(projectCaptainSelfState(input()))).toContain("only open room");
+  });
+});
+
+describe("captain self state instructions", () => {
+  it("returns nothing rather than throwing when the projection fails", async () => {
+    // An instruction hook that throws does not degrade the turn, it ends it.
+    // An unrecognised channel kind must cost the "where you are" line, not the
+    // whole reply.
+    await expect(captainSelfStateInstructions({ kind: "channel:not-a-known-lane" })).resolves.toBe("");
   });
 });

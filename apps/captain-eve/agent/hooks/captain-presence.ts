@@ -13,9 +13,24 @@ function occurredAt(event: { readonly meta?: { readonly at: string } }): string 
   return event.meta.at;
 }
 
+/**
+ * Runs a presence report without ever letting it end the turn.
+ *
+ * `operation().catch(...)` looks like it does that and does not: the thunks here
+ * build their argument with {@link occurredAt}, which throws when an event
+ * carries no durable timing, and a *synchronous* throw escapes before `.catch`
+ * is ever attached. It then leaves the hook, eve retries the step three times,
+ * and the session ends `failed` — a Discord message answered with silence
+ * because telemetry could not be reported.
+ *
+ * That path lay dormant while no captain token existed, because the reporter is
+ * undefined without one and every handler was a no-op. Brokering the credential
+ * woke it up. Starting from a resolved promise puts the thunk's own execution
+ * inside the chain, so sync and async failures are both merely logged.
+ */
 function safely(operation: (() => Promise<void>) | undefined): Promise<void> {
   if (operation === undefined) return Promise.resolve();
-  return operation().catch(logPresenceError);
+  return Promise.resolve().then(operation).catch(logPresenceError);
 }
 
 function missionIdentity(value: unknown): string | undefined {

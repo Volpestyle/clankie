@@ -123,8 +123,26 @@ export function renderCaptainSelfState(state: CaptainSelfState): string {
   ].join("\n\n");
 }
 
+/**
+ * Fails open to silence. An instruction hook that throws does not degrade the
+ * turn, it ends it: eve retries the step and then fails the session, so a
+ * Discord message gets no reply at all. `captainLaneKind` throws on a channel
+ * kind it does not recognise and the registry can fail to open, neither of which
+ * is worth losing an answer over — he simply does not mention where he is.
+ */
 export async function captainSelfStateInstructions(channel: EveChannelLaneContext): Promise<string> {
-  return renderCaptainSelfState(await captainSelfState(channel));
+  try {
+    return renderCaptainSelfState(await captainSelfState(channel));
+  } catch (error) {
+    process.stderr.write(
+      `${JSON.stringify({
+        service: "captain-eve",
+        event: "captain_self_state.projection_failed",
+        errorName: error instanceof Error ? error.name.slice(0, 64) : "Error",
+      })}\n`,
+    );
+    return "";
+  }
 }
 
 const LANE_LABEL: Readonly<Record<CaptainSessionLaneV2, string>> = {

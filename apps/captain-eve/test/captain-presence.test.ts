@@ -117,3 +117,30 @@ describe("CaptainPresenceReporter", () => {
     expect(reports[0]?.type).toBe("captain.heartbeat");
   });
 });
+
+describe("presence reporting never ends a turn", () => {
+  it("swallows a synchronous throw from the reported operation", async () => {
+    // The regression: `operation().catch(...)` does not catch a throw raised
+    // while evaluating `operation()`. The hook builds its argument with a
+    // timestamp check that throws on an event with no durable timing, so the
+    // exception escaped the hook, eve retried the step three times, and the
+    // session ended `failed` — a Discord message answered with silence.
+    const logged: unknown[] = [];
+    const safely = (operation: (() => Promise<void>) | undefined): Promise<void> => {
+      if (operation === undefined) return Promise.resolve();
+      return Promise.resolve()
+        .then(operation)
+        .catch((error: unknown) => {
+          logged.push(error);
+        });
+    };
+
+    await expect(
+      safely(() => {
+        throw new Error("Captain presence requires durable event timing metadata");
+      }),
+    ).resolves.toBeUndefined();
+    await expect(safely(() => Promise.reject(new Error("async failure")))).resolves.toBeUndefined();
+    expect(logged).toHaveLength(2);
+  });
+});
