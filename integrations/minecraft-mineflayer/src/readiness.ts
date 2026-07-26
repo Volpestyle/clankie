@@ -65,11 +65,10 @@ export function inspectMinecraftLiveReadiness(
       eulaAcknowledged,
     },
     missingInputs,
-    identities: {
-      ...(paperJarIdentityVerified && actualPaperSha256 !== undefined
+    identities:
+      paperJarIdentityVerified && actualPaperSha256 !== undefined
         ? { paperJarSha256: actualPaperSha256 }
-        : {}),
-    },
+        : {},
   });
   return {
     ...result,

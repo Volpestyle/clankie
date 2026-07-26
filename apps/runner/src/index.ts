@@ -7,6 +7,8 @@ import { SqliteEventStore } from "@clankie/event-store";
 import { loadMcpRegistryFile, type McpRegistry } from "@clankie/mcp-registry";
 import { createLogger } from "@clankie/observability";
 import { MissionWorker, parseMissionWorkerConcurrency } from "./mission-worker.ts";
+import { createGbaPlayExecution } from "./play-execution.ts";
+import { PlayHost } from "./play-host.ts";
 import { ProcessLeaseManager } from "./process-leases.ts";
 import { createReadyProviderFleet } from "./provider-factory.ts";
 import { publishProviderReadinessSignal } from "./provider-readiness-signal.ts";
@@ -169,6 +171,36 @@ if (runnerToken) {
     },
     "runner-owned worker transcript gateway enabled",
   );
+}
+
+// Asked embodiment (ADR 0063): the play host shares this process because it
+// shares the trust boundary — the runner owns the body and the producer
+// credential — but it needs neither a repo nor a provider fleet, so it starts
+// whenever the runner can authenticate at all.
+if (runnerToken) {
+  const playAbort = new AbortController();
+  process.once("SIGINT", () => playAbort.abort());
+  process.once("SIGTERM", () => playAbort.abort());
+  const playHost = new PlayHost({
+    client: new ClankieApiClient({
+      baseUrl: process.env.CLANKIE_CONTROL_PLANE_URL ?? "http://127.0.0.1:4310",
+      runnerToken,
+      runnerId: process.env.CLANKIE_RUNNER_ID ?? "local",
+    }),
+    runnerId: process.env.CLANKIE_RUNNER_ID ?? "local",
+    environmentIds: ["pokemon-firered"],
+    execute: createGbaPlayExecution({ logger }),
+    logger,
+  });
+  logger.info({ environmentIds: ["pokemon-firered"] }, "embodiment play host started");
+  void playHost.runForever(playAbort.signal).catch((error: unknown) => {
+    logger.error(
+      { err: error instanceof Error ? error.message : String(error) },
+      "embodiment play host stopped unexpectedly",
+    );
+  });
+} else {
+  logger.error("CLANKIE_RUNNER_TOKEN is required; asked play is unavailable");
 }
 
 if (!repoPath) {

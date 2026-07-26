@@ -5,7 +5,13 @@ description: Use when a test, verifier, provider session, terminal, integration,
 
 # Debug a failure
 
-1. Preserve the original failure output and environment identifiers.
+1. Preserve the original failure output and environment identifiers. For the
+   launcher-supervised local services (captain-eve, control-plane,
+   discord-bridge, activity), that output lives under
+   `${XDG_STATE_HOME:-~/.local/state}/clankie/`: `<service-id>.log` per
+   service, plus the bridge's `discord-live-receipts.jsonl` for the semantic
+   record of what Discord actions actually happened
+   (see `docs/11-development.md`).
 2. Reproduce with the smallest exact command.
 3. Classify: product defect, test defect, environment, dependency, provider, orchestration, policy, race, or flaky check.
 4. Identify the first causal divergence, not the last visible symptom.

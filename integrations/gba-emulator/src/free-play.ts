@@ -33,7 +33,6 @@ import {
   type FreePlayProgress,
 } from "./free-play-progress.ts";
 
-
 export const FreePlayDecisionSchema = z
   .object({
     /** Why this action, in Clankie's own voice. */
@@ -237,6 +236,12 @@ export interface RunFreePlayInput {
   voice?: ClankieVoice;
   /** Who is listening. Absent means he is alone and will reasonably stay quiet. */
   audience?: string;
+  /**
+   * Checked at each turn boundary; true ends the playthrough cleanly there.
+   * This is how an asked stop (ADR 0063) or an exhausted duration budget lands
+   * without tearing down a turn mid-dispatch.
+   */
+  shouldStop?: () => boolean;
 }
 
 export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResult> {
@@ -253,6 +258,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
   progress.seed(positionOf(observe(input.io)));
 
   for (let turn = 0; turn < input.turns; turn += 1) {
+    if (input.shouldStop?.() === true) break;
     const observations = observe(input.io);
     const record: FreePlayTurn = {
       turn,

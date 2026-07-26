@@ -2862,6 +2862,337 @@ export const DeviceEventSchema = z.discriminatedUnion("type", [
 ]);
 export type DeviceEvent = z.infer<typeof DeviceEventSchema>;
 
+// ---------------------------------------------------------------------------
+// Asked embodiment (ADR 0063): the captain asks for play, the control plane
+// holds the intent, the runner owns the session.
+//
+// Every schema is a STRICT, content-free wire boundary: ids, enums, counters,
+// and timestamps only. No field may carry free text, model output, frame
+// bytes, or anything a message body could smuggle through.
+// ---------------------------------------------------------------------------
+
+/** Environments the play seam serves; Minecraft joins when its host lands. */
+export const EmbodimentEnvironmentIdSchema = z.enum(["pokemon-firered"]);
+export type EmbodimentEnvironmentId = z.infer<typeof EmbodimentEnvironmentIdSchema>;
+
+export const EmbodimentIntentIdSchema = z.string().min(1).max(200);
+export type EmbodimentIntentId = z.infer<typeof EmbodimentIntentIdSchema>;
+
+export const EmbodimentRunnerIdSchema = z.string().min(1).max(200);
+export type EmbodimentRunnerId = z.infer<typeof EmbodimentRunnerIdSchema>;
+
+export const EmbodimentCheckpointIdSchema = z.string().min(1).max(200);
+export type EmbodimentCheckpointId = z.infer<typeof EmbodimentCheckpointIdSchema>;
+
+/**
+ * An absent field is "no cap" — the owner's chosen default (2026-07-26): he
+ * plays until asked to stop. The stop ask, the single-holder body lock, and
+ * lease mechanics are the standing controls; a present field is a caller's
+ * deliberate bound and must still be a positive integer.
+ */
+export const EmbodimentBudgetSchema = z
+  .object({
+    maxTurns: z.number().int().positive().optional(),
+    maxDurationMs: z.number().int().positive().optional(),
+  })
+  .strict();
+export type EmbodimentBudget = z.infer<typeof EmbodimentBudgetSchema>;
+
+const embodimentIntentBase = {
+  schemaVersion: z.literal(1),
+  intentId: EmbodimentIntentIdSchema,
+  originLane: CaptainSessionLaneV2Schema,
+  /** Content-free principal id, as the origin lane authenticated it. */
+  requestedBy: z.string().min(1).max(200),
+  requestedAt: z.string().datetime(),
+} as const;
+
+/**
+ * A stop intent targets the live session, never an environment: stopping "the
+ * game" when a different session than the asker imagines is running must stop
+ * nothing and refuse `not_playing`-adjacent, not guess.
+ */
+export const EmbodimentIntentSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("start"),
+      ...embodimentIntentBase,
+      environmentId: EmbodimentEnvironmentIdSchema,
+      budget: EmbodimentBudgetSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("stop"),
+      ...embodimentIntentBase,
+      sessionId: EnvironmentSessionIdSchema,
+    })
+    .strict(),
+]);
+export type EmbodimentIntent = z.infer<typeof EmbodimentIntentSchema>;
+
+export const EmbodimentSessionStateSchema = z.enum([
+  "requested",
+  "claimed",
+  "running",
+  "stopping",
+  "stopped",
+  "refused",
+  "failed",
+]);
+export type EmbodimentSessionState = z.infer<typeof EmbodimentSessionStateSchema>;
+
+/**
+ * `body_held` is one reason on purpose (ADR 0063): whether the control plane
+ * saw a live asked session or the runner's body lock saw an external
+ * possessor, he says the same true thing — someone is already driving.
+ */
+export const EmbodimentRefusalReasonSchema = z.enum([
+  "body_held",
+  "no_runner",
+  "environment_unavailable",
+  "budget",
+  "policy",
+  "not_playing",
+]);
+export type EmbodimentRefusalReason = z.infer<typeof EmbodimentRefusalReasonSchema>;
+
+/** The one authority for session-state transitions, shared by every process. */
+export const EMBODIMENT_SESSION_TRANSITIONS: Readonly<
+  Record<EmbodimentSessionState, readonly EmbodimentSessionState[]>
+> = {
+  requested: ["claimed", "refused"],
+  claimed: ["running", "refused", "failed"],
+  running: ["stopping", "stopped", "failed"],
+  stopping: ["stopped", "failed"],
+  stopped: [],
+  refused: [],
+  failed: [],
+};
+
+export function canTransitionEmbodimentSession(
+  from: EmbodimentSessionState,
+  to: EmbodimentSessionState,
+): boolean {
+  return EMBODIMENT_SESSION_TRANSITIONS[from].includes(to);
+}
+
+/** Durable control-plane record of one asked session, replayed from events. */
+export const EmbodimentSessionSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    sessionId: EnvironmentSessionIdSchema,
+    environmentId: EmbodimentEnvironmentIdSchema,
+    state: EmbodimentSessionStateSchema,
+    intentId: EmbodimentIntentIdSchema,
+    originLane: CaptainSessionLaneV2Schema,
+    requestedBy: z.string().min(1).max(200),
+    budget: EmbodimentBudgetSchema,
+    requestedAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+    /** Present from `claimed` onward; a pre-claim refusal never had a runner. */
+    runnerId: EmbodimentRunnerIdSchema.optional(),
+    refusalReason: EmbodimentRefusalReasonSchema.optional(),
+    /** ADR 0060 lineage; absent on a cold start. */
+    resumedFromCheckpointId: EmbodimentCheckpointIdSchema.optional(),
+    /** Minted on graceful stop. */
+    checkpointId: EmbodimentCheckpointIdSchema.optional(),
+  })
+  .strict()
+  .superRefine((session, context) => {
+    if (session.state === "refused" && session.refusalReason === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["refusalReason"],
+        message: "Refused sessions carry the typed reason his reply renders",
+      });
+    }
+    if (session.state !== "refused" && session.refusalReason !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["refusalReason"],
+        message: "Only refused sessions carry a refusal reason",
+      });
+    }
+    const postClaim: EmbodimentSessionState[] = ["claimed", "running", "stopping", "stopped", "failed"];
+    if (postClaim.includes(session.state) && session.runnerId === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["runnerId"],
+        message: "Post-claim states attribute the owning runner",
+      });
+    }
+  });
+export type EmbodimentSession = z.infer<typeof EmbodimentSessionSchema>;
+
+/** A runner's poll for embodiment work, in the mission claim shape. */
+export const EmbodimentClaimSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    claimId: z.string().min(1).max(200),
+    runnerId: EmbodimentRunnerIdSchema,
+    environmentIds: z.array(EmbodimentEnvironmentIdSchema).min(1),
+  })
+  .strict();
+export type EmbodimentClaim = z.infer<typeof EmbodimentClaimSchema>;
+
+/**
+ * The control plane's answer to a submitted intent. A refused start still
+ * carries the minted session id when one was recorded, so the refusal stays
+ * queryable rather than dropped.
+ */
+export const EmbodimentSubmitResultSchema = z.discriminatedUnion("outcome", [
+  z.object({ outcome: z.literal("accepted"), session: EmbodimentSessionSchema }).strict(),
+  z
+    .object({
+      outcome: z.literal("refused"),
+      reason: EmbodimentRefusalReasonSchema,
+      sessionId: EnvironmentSessionIdSchema.optional(),
+    })
+    .strict(),
+  z.object({ outcome: z.literal("stop_requested"), session: EmbodimentSessionSchema }).strict(),
+]);
+export type EmbodimentSubmitResult = z.infer<typeof EmbodimentSubmitResultSchema>;
+
+/**
+ * What a claim poll hands the runner: a start session to own, or a stop for a
+ * session it already owns. Stops re-deliver until the runner reports them
+ * done; stopping twice is idempotent, silently missing a stop is not.
+ */
+export const EmbodimentAssignmentSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("start"), session: EmbodimentSessionSchema }).strict(),
+  z.object({ kind: z.literal("stop"), sessionId: EnvironmentSessionIdSchema }).strict(),
+]);
+export type EmbodimentAssignment = z.infer<typeof EmbodimentAssignmentSchema>;
+
+export const EmbodimentSessionOutcomeSchema = z.enum([
+  "stopped",
+  "budget_exhausted",
+  "failed",
+  "lease_lapsed",
+]);
+export type EmbodimentSessionOutcome = z.infer<typeof EmbodimentSessionOutcomeSchema>;
+
+/** Terminal accounting for one session: counters and checkpoint lineage only. */
+export const EmbodimentSessionReceiptSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    sessionId: EnvironmentSessionIdSchema,
+    environmentId: EmbodimentEnvironmentIdSchema,
+    outcome: EmbodimentSessionOutcomeSchema,
+    turnsTaken: z.number().int().nonnegative(),
+    durationMs: z.number().int().nonnegative(),
+    framesPublished: z.number().int().nonnegative(),
+    /** Sink-degraded frames; play continues without a producer, counted not hidden. */
+    framesDropped: z.number().int().nonnegative(),
+    resumedFromCheckpointId: EmbodimentCheckpointIdSchema.optional(),
+    checkpointId: EmbodimentCheckpointIdSchema.optional(),
+  })
+  .strict();
+export type EmbodimentSessionReceipt = z.infer<typeof EmbodimentSessionReceiptSchema>;
+
+export const EmbodimentReportStateSchema = z.enum(["running", "stopping", "stopped", "refused", "failed"]);
+export type EmbodimentReportState = z.infer<typeof EmbodimentReportStateSchema>;
+
+/** One runner→control-plane lifecycle transition for a claimed session. */
+export const EmbodimentLifecycleReportSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    sessionId: EnvironmentSessionIdSchema,
+    runnerId: EmbodimentRunnerIdSchema,
+    state: EmbodimentReportStateSchema,
+    reportedAt: z.string().datetime(),
+    refusalReason: EmbodimentRefusalReasonSchema.optional(),
+    receipt: EmbodimentSessionReceiptSchema.optional(),
+    /** ADR 0060 lineage, reported at start; terminal receipts repeat it. */
+    resumedFromCheckpointId: EmbodimentCheckpointIdSchema.optional(),
+  })
+  .strict()
+  .superRefine((report, context) => {
+    if (report.resumedFromCheckpointId !== undefined && report.state !== "running") {
+      context.addIssue({
+        code: "custom",
+        path: ["resumedFromCheckpointId"],
+        message: "Checkpoint lineage is reported when the session starts running",
+      });
+    }
+    if (report.state === "refused" && report.refusalReason === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["refusalReason"],
+        message: "Refused reports carry the typed reason",
+      });
+    }
+    if (report.state !== "refused" && report.refusalReason !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["refusalReason"],
+        message: "Only refused reports carry a refusal reason",
+      });
+    }
+    const terminal = report.state === "stopped" || report.state === "failed";
+    if (terminal && report.receipt === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["receipt"],
+        message: "Terminal reports carry the session receipt",
+      });
+    }
+    if (!terminal && report.receipt !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["receipt"],
+        message: "Only terminal reports carry a receipt",
+      });
+    }
+  });
+export type EmbodimentLifecycleReport = z.infer<typeof EmbodimentLifecycleReportSchema>;
+
+/**
+ * The captain tool's typed outcome, mirroring DiscordVoicePresenceNote: the
+ * reply reflects what actually happened, and a refusal names a reason he can
+ * say out loud. `pending` means the bounded wait elapsed before the runner
+ * answered — the request stands, and he must not claim to be playing yet.
+ */
+export const EmbodimentPlayNoteSchema = z.discriminatedUnion("action", [
+  z
+    .object({
+      action: z.literal("started"),
+      sessionId: EnvironmentSessionIdSchema,
+      environmentId: EmbodimentEnvironmentIdSchema,
+      resumedFromCheckpointId: EmbodimentCheckpointIdSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("start_refused"),
+      environmentId: EmbodimentEnvironmentIdSchema,
+      reason: EmbodimentRefusalReasonSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("stopped"),
+      sessionId: EnvironmentSessionIdSchema,
+      checkpointId: EmbodimentCheckpointIdSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("stop_refused"),
+      sessionId: EnvironmentSessionIdSchema.optional(),
+      reason: EmbodimentRefusalReasonSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("pending"),
+      intentId: EmbodimentIntentIdSchema,
+    })
+    .strict(),
+]);
+export type EmbodimentPlayNote = z.infer<typeof EmbodimentPlayNoteSchema>;
+
 // Connector-neutral tracker ceremony (VUH-845)
 // Semantic roles and notification surfaces only — no provider, principal
 // identity, or tracker-vendor nouns.
@@ -3197,7 +3528,9 @@ export const CAPTAIN_AUTHORED_TOOL_NAMES = [
   "get_self_state",
   "remember_episode",
   "start_mission",
+  "start_play",
   "steer_worker",
+  "stop_play",
   "submit_plan",
 ] as const;
 
@@ -3432,4 +3765,5 @@ export const DiscordVoiceEvidenceSchema = z
       });
     }
   });
+
 export type DiscordVoiceEvidence = z.infer<typeof DiscordVoiceEvidenceSchema>;

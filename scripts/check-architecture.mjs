@@ -67,6 +67,15 @@ for (const name of uiPackages) {
   }
 }
 
+// Asked embodiment (ADR 0063): only the runner boots the emulator. The captain
+// holds nothing but the ask, and the control plane holds intent and record.
+for (const name of ["@clankie/captain-eve", "@clankie/control-plane"]) {
+  const forbidden = workspaceImports(name).filter((dependency) =>
+    ["@clankie/gba-emulator", "@clankie/environment-runtime"].includes(dependency),
+  );
+  if (forbidden.length) violations.push(`${name} may not own an environment body: ${forbidden.join(", ")}`);
+}
+
 const workerDirectories = directories.filter((directory) => basename(directory).startsWith("worker-"));
 for (const directory of workerDirectories) {
   const files = await walk(directory);

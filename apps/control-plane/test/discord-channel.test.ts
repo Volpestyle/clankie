@@ -172,8 +172,11 @@ describe("Discord channel control-plane runtime", () => {
     });
     await port.submit({ request: noted(undefined, "message-plain") });
 
-    const thread = (index: number) =>
-      (requests[index]?.body as { clientContext: { thread: Record<string, unknown> } }).clientContext.thread;
+    const thread = (index: number) => {
+      const request = requests[index];
+      if (request === undefined) throw new Error(`request ${String(index)} was never captured`);
+      return (request.body as { clientContext: { thread: Record<string, unknown> } }).clientContext.thread;
+    };
     expect(thread(0).voicePresence).toBe(
       "You just joined voice channel voice-1 in this server. Nobody is opted in until they use " +
         "/clankie voice-consent opt-in, and you only ever hear opted-in participants.",

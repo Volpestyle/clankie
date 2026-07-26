@@ -7,6 +7,9 @@ import {
   DiscordPresenceWriteResultSchema,
   DiscordPresenceWriteSchema,
   DiscordUserSessionOptInSchema,
+  EmbodimentAssignmentSchema,
+  EmbodimentSessionSchema,
+  EmbodimentSubmitResultSchema,
   LinearChannelTurnRequestSchema,
   ActiveMissionSelectionSchema,
   MissionEventAuthFailureSchema,
@@ -35,6 +38,12 @@ import {
   type DiscordPersonMemoryProjection,
   type DiscordPersonMemoryProposal,
   type DiscordUserSessionOptIn,
+  type EmbodimentAssignment,
+  type EmbodimentClaim,
+  type EmbodimentIntent,
+  type EmbodimentLifecycleReport,
+  type EmbodimentSession,
+  type EmbodimentSubmitResult,
   type LinearChannelTurnRequest,
   type MissionPlan,
   type MissionEventRecovery,
@@ -747,6 +756,53 @@ export class ClankieApiClient {
       headers: this.runnerHeaders(),
       body: JSON.stringify({ attempt }),
     });
+  }
+
+  /** Submit an asked-play intent (ADR 0063); the control plane answers with the typed outcome. */
+  public async submitEmbodimentIntent(intent: EmbodimentIntent): Promise<EmbodimentSubmitResult> {
+    const result = await this.request<unknown>("/v1/embodiment/intents", {
+      method: "POST",
+      headers: this.captainHeaders(),
+      body: JSON.stringify(intent),
+    });
+    return EmbodimentSubmitResultSchema.parse(result);
+  }
+
+  public async getEmbodimentSession(sessionId: string): Promise<EmbodimentSession | undefined> {
+    const response = await this.fetchImpl(
+      new URL(`/v1/embodiment/sessions/${encodeURIComponent(sessionId)}`, this.baseUrl),
+      { headers: { "content-type": "application/json", ...this.captainHeaders() } },
+    );
+    if (response.status === 404) return undefined;
+    if (!response.ok) throw new Error(`Clankie API ${response.status}: ${await response.text()}`);
+    const body = (await response.json()) as { session: unknown };
+    return EmbodimentSessionSchema.parse(body.session);
+  }
+
+  /** The single non-terminal asked session, if one exists: one body, one driver. */
+  public async getLiveEmbodimentSession(): Promise<EmbodimentSession | undefined> {
+    const headers = this.captainToken !== undefined ? this.captainHeaders() : this.runnerHeaders();
+    const body = await this.request<{ session: unknown }>("/v1/embodiment/sessions/live", { headers });
+    if (body.session === null || body.session === undefined) return undefined;
+    return EmbodimentSessionSchema.parse(body.session);
+  }
+
+  public async claimEmbodiment(claim: EmbodimentClaim): Promise<EmbodimentAssignment | undefined> {
+    const response = await this.request<{ assignment: unknown } | undefined>("/v1/embodiment/claims", {
+      method: "POST",
+      headers: this.runnerHeaders(),
+      body: JSON.stringify(claim),
+    });
+    if (response === undefined) return undefined;
+    return EmbodimentAssignmentSchema.parse(response.assignment);
+  }
+
+  public async reportEmbodiment(report: EmbodimentLifecycleReport): Promise<EmbodimentSession> {
+    const result = await this.request<{ accepted: boolean; session: unknown }>(
+      `/v1/embodiment/sessions/${encodeURIComponent(report.sessionId)}/report`,
+      { method: "POST", headers: this.runnerHeaders(), body: JSON.stringify(report) },
+    );
+    return EmbodimentSessionSchema.parse(result.session);
   }
 
   private runnerHeaders(): Record<string, string> {

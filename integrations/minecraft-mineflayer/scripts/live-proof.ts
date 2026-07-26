@@ -66,7 +66,8 @@ class MilestoneOutput {
     const boundedLine = line.slice(0, 8_192);
     this.lines.push(boundedLine);
     if (this.lines.length > 512) this.lines.shift();
-    for (const waiter of [...this.waiters]) {
+    // Deleting the visited entry mid-iteration is defined behavior for a Set.
+    for (const waiter of this.waiters) {
       waiter.pattern.lastIndex = 0;
       if (!waiter.pattern.test(boundedLine)) continue;
       this.waiters.delete(waiter);

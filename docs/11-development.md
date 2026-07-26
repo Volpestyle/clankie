@@ -66,8 +66,21 @@ Restart is health gated and stops at the first failure, so a dead captain does
 not bury its own error under downstream noise. Each service keeps a pid record
 under `${XDG_STATE_HOME:-~/.local/state}/clankie/`, and the launcher refuses to
 signal a pid whose live command no longer matches the service it started.
-Presence allowlists come from `~/.config/clankie/settings.json`, so no env prefix
-is needed to start the bridge or control plane.
+
+That state directory is also where every launcher-supervised service leaves its
+runtime evidence, so live debugging starts there rather than in a terminal
+scrollback:
+
+- `<service-id>.log` (`captain-eve.log`, `control-plane.log`,
+  `discord-bridge.log`, `activity.log`) — the service's structured log stream,
+  mode 0600, appended across restarts.
+- `discord-live-receipts.jsonl` — the bridge's content-free receipt record
+  (`discord.bridge.ready`, `discord.text.*`, `discord.voice.*`); the semantic
+  answer to "what did the bridge actually do", where logs are the answer to
+  "why".
+
+Presence allowlists come from `~/.config/clankie/settings.json`, so no env
+prefix is needed to start the bridge or control plane.
 
 For separate development processes:
 
@@ -77,6 +90,17 @@ pnpm --filter @clankie/captain-eve exec eve build
 pnpm --filter @clankie/captain-eve exec eve start --host 127.0.0.1 --port 4321
 CLANKIE_CAPTAIN_URL=http://127.0.0.1:4321 pnpm --filter @clankie/tui dev
 ```
+
+### Asked play
+
+"Clankie, play pokemon" is served end to end by the running services plus the
+runner: the captain's `start_play` tool submits an embodiment intent to the
+control plane, and the runner's play host (ADR 0063) claims it, drives the
+FireRed session, and streams frames to the activity service. A cold start
+therefore needs the launcher services, the activity service, and a runner
+process (`pnpm --filter @clankie/runner dev` with `CLANKIE_RUNNER_TOKEN`) — no
+manual gameplay script. `pnpm gba:free-play-live` stays as the development
+alias that drives the same composition without a control plane.
 
 ### Headless captain control
 

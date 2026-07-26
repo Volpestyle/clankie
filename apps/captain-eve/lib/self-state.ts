@@ -1,5 +1,6 @@
-import type { CaptainSessionLaneV2 } from "@clankie/protocol";
+import type { CaptainSessionLaneV2, EmbodimentSession } from "@clankie/protocol";
 import type { CaptainLaneSnapshot } from "@clankie/captain-runtime";
+import { controlPlaneClient } from "./client.ts";
 import { captainLaneKind, type EveChannelLaneContext } from "./lanes/context.ts";
 import { captainLaneRuntime } from "./lanes/runtime.ts";
 
@@ -41,6 +42,7 @@ export async function captainSelfState(
   now: Date = new Date(),
 ): Promise<CaptainSelfState> {
   const runtime = await captainLaneRuntime();
+  const embodiment = await liveEmbodimentSession();
   return projectCaptainSelfState({
     conversations: runtime.conversations.list(),
     lanes: runtime.registry.list(),
@@ -48,8 +50,30 @@ export async function captainSelfState(
     // so `get_self_state` cannot say which room it is being called from. It
     // still reports every room; only the "you are here" marker needs a channel.
     ...(channel === undefined ? {} : { here: currentRoom(channel) }),
+    ...(embodiment === undefined ? {} : { embodiment }),
     now,
   });
+}
+
+/**
+ * The asked-play session (ADR 0063) is control-plane state, not a lane row,
+ * so his gameplay presence is read from there. Bounded and fail-open: a slow
+ * or absent control plane costs at most the race timeout and never the turn.
+ */
+async function liveEmbodimentSession(): Promise<EmbodimentSession | undefined> {
+  try {
+    return await Promise.race([
+      controlPlaneClient().getLiveEmbodimentSession(),
+      new Promise<undefined>((settle) => {
+        const timer = setTimeout(() => {
+          settle(undefined);
+        }, 1_500);
+        timer.unref?.();
+      }),
+    ]);
+  } catch {
+    return undefined;
+  }
 }
 
 export interface CaptainSelfStateInput {
@@ -60,6 +84,8 @@ export interface CaptainSelfStateInput {
   }[];
   readonly lanes: readonly CaptainLaneSnapshot[];
   readonly here?: { readonly lane: CaptainSessionLaneV2; readonly targetId: string | undefined };
+  /** The live asked-play session, when one exists (ADR 0063). */
+  readonly embodiment?: EmbodimentSession;
   readonly now: Date;
 }
 
@@ -78,6 +104,17 @@ export function projectCaptainSelfState(input: CaptainSelfStateInput): CaptainSe
       here: here?.lane === "operator" && here.targetId === conversation.conversationId,
       active: conversation.sessionState === "active" || conversation.sessionState === "waiting",
       updatedAt: conversation.updatedAt,
+    });
+  }
+
+  if (input.embodiment !== undefined) {
+    const terminal = ["stopped", "refused", "failed"].includes(input.embodiment.state);
+    rooms.push({
+      lane: "gameplay",
+      targetId: input.embodiment.environmentId,
+      here: false,
+      active: !terminal,
+      updatedAt: input.embodiment.updatedAt,
     });
   }
 

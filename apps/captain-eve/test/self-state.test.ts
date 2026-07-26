@@ -145,9 +145,7 @@ describe("captain self state", () => {
     // forgotten. A resume state does carry one, so guard against it being
     // swapped in later.
     const resumeShaped = { ...lane({ lane: "discord_voice" }), continuationToken: "secret-token" };
-    const state = projectCaptainSelfState(
-      input({ lanes: [resumeShaped as CaptainLaneSnapshot], now: NOW }),
-    );
+    const state = projectCaptainSelfState(input({ lanes: [resumeShaped as CaptainLaneSnapshot], now: NOW }));
 
     const rendered = renderCaptainSelfState(state);
     expect(JSON.stringify(state)).not.toContain("secret-token");
@@ -156,6 +154,36 @@ describe("captain self state", () => {
 
   it("says so plainly when this is the only room", () => {
     expect(renderCaptainSelfState(projectCaptainSelfState(input()))).toContain("only open room");
+  });
+
+  it("reports a live asked-play session as a gameplay room (ADR 0063)", () => {
+    const state = projectCaptainSelfState(
+      input({
+        embodiment: {
+          schemaVersion: 1,
+          sessionId: "embodiment-1",
+          environmentId: "pokemon-firered",
+          state: "running",
+          intentId: "intent-1",
+          originLane: "discord_presence",
+          requestedBy: "user-1",
+          budget: { maxTurns: 40, maxDurationMs: 60_000 },
+          requestedAt: NOW.toISOString(),
+          updatedAt: NOW.toISOString(),
+          runnerId: "runner-local",
+        },
+      }),
+    );
+    expect(state.rooms).toEqual([
+      {
+        lane: "gameplay",
+        targetId: "pokemon-firered",
+        here: false,
+        active: true,
+        updatedAt: NOW.toISOString(),
+      },
+    ]);
+    expect(renderCaptainSelfState(state)).toContain("Gameplay · pokemon-firered");
   });
 });
 

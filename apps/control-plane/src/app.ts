@@ -65,6 +65,9 @@ import {
   DISCORD_TRANSPORT_ACTION_RISK_CLASS,
   DiscordUserSessionOptInRequestSchema,
   DiscordUserSessionOptInSchema,
+  EmbodimentClaimSchema,
+  EmbodimentIntentSchema,
+  EmbodimentLifecycleReportSchema,
   resolveDiscordPresenceLedgerContent,
   LinearChannelTurnRequestSchema,
   MissionEventAuthFailureSchema,
@@ -155,6 +158,7 @@ import {
   DiscordUserSessionOptInProjection,
 } from "./discord-user-session-opt-in.ts";
 import type { CaptainChannelTurnPort } from "./eve-captain-turn.ts";
+import { EmbodimentManager, embodimentEventScope, isEmbodimentEventType } from "./embodiment.ts";
 import { applyMissionTriggerEvent, dueOccurrences, MissionTriggerInputSchema } from "./mission-triggers.ts";
 import { mintPairingOffer, pairingOfferWire, PairingOfferStore } from "./pairing.ts";
 import { applyDeviceEvent, deviceListItem, isDevicePendingExpired, type DeviceRegistry } from "./devices.ts";
@@ -988,6 +992,48 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     await syncTrackerEvent(event);
     return event;
   };
+
+  // Asked play is classified, not action-listed: a bounded, stoppable,
+  // checkpointed session is a reversible write, and the profiles' risk-class
+  // posture already encodes who may start one (lab allows, high assurance
+  // requires approval, which an ambient surface renders as a refusal). Listing
+  // `environment.play.*` explicitly in a profile stays available to the owner
+  // as the doctrine-owned restriction path — it shifts the profile hash, so it
+  // comes with an eval-baseline regeneration, deliberately.
+  const embodimentClassifier = createConnectorActionClassifier([
+    { action: "environment.play.start", riskClass: "reversible-write" },
+    { action: "environment.play.stop", riskClass: "reversible-write" },
+  ]);
+  const embodiment = new EmbodimentManager({
+    clock,
+    idFactory: () => `embodiment-${idFactory()}`,
+    emit: async (type, sessionId, data) => {
+      await recordEvent(type, embodimentEventScope(sessionId), clock().toISOString(), data);
+    },
+    decide: (intent) => {
+      const action = intent.kind === "start" ? "environment.play.start" : "environment.play.stop";
+      const request = ActionRequestSchema.parse({
+        id: idFactory(),
+        principal: { kind: "captain", id: "captain-eve", role: "captain" },
+        action,
+        resource: {
+          type: "environment",
+          id: intent.kind === "start" ? intent.environmentId : intent.sessionId,
+        },
+        context: {
+          // ActionRequest v1 requires a policy scope in its missionId slot;
+          // embodiment sessions live outside any mission (ADR 0063).
+          missionId: embodimentEventScope(intent.intentId),
+          risk: "low",
+          profileHash: dependencies.doctrine.profileHash,
+        },
+      });
+      return decideAction(dependencies.doctrine, request, embodimentClassifier(action)).effect;
+    },
+  });
+  for (const event of storedEvents) {
+    if (isEmbodimentEventType(event.type)) embodiment.applyEvent(event);
+  }
 
   const commitApprovedMemoryProposal = async (
     proposal: StoredMemoryProposal,
@@ -3150,6 +3196,100 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     if (!mission) return context.json({ error: "mission_not_found" }, 404);
     const snapshot = engines.get(mission.id)?.getSnapshot();
     return context.json(snapshot ? liveMissionRecord(mission, snapshot) : mission);
+  });
+
+  app.post("/v1/embodiment/intents", async (context) => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") {
+      return context.json({ error: "captain_authentication_unavailable" }, 503);
+    }
+    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
+    const parsed = EmbodimentIntentSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_embodiment_intent" }, 400);
+    const result = await embodiment.submit(parsed.data);
+    if (result.outcome === "refused") {
+      logger.info(
+        { intentId: parsed.data.intentId, reason: result.reason, sessionId: result.sessionId },
+        "embodiment intent refused",
+      );
+    } else {
+      logger.info(
+        { intentId: parsed.data.intentId, sessionId: result.session.sessionId, kind: parsed.data.kind },
+        "embodiment intent accepted",
+      );
+    }
+    return context.json(result);
+  });
+
+  // Read by the captain tool and self-state, and by the runner's startup
+  // reconciliation — a dead runner's live session is only its own to disclaim.
+  app.get("/v1/embodiment/sessions/live", async (context) => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain !== "unavailable" && captain) {
+      return context.json({ session: embodiment.liveSession() ?? null });
+    }
+    const runner = await authenticateRunner(context.req.raw, dependencies);
+    if (runner !== "unavailable" && runner) {
+      return context.json({ session: embodiment.liveSession() ?? null });
+    }
+    if (captain === "unavailable" && runner === "unavailable") {
+      return context.json({ error: "captain_authentication_unavailable" }, 503);
+    }
+    return context.json({ error: "captain_authentication_required" }, 401);
+  });
+
+  app.get("/v1/embodiment/sessions/:id", async (context) => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") {
+      return context.json({ error: "captain_authentication_unavailable" }, 503);
+    }
+    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
+    const session = embodiment.getSession(context.req.param("id"));
+    if (session === undefined) return context.json({ error: "embodiment_session_not_found" }, 404);
+    return context.json({ session });
+  });
+
+  app.post("/v1/embodiment/claims", async (context) => {
+    const runner = await authenticateRunner(context.req.raw, dependencies);
+    if (runner === "unavailable") return context.json({ error: "runner_execution_unavailable" }, 503);
+    if (!runner) return context.json({ error: "runner_authentication_required" }, 401);
+    const parsed = EmbodimentClaimSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_embodiment_claim" }, 400);
+    if (parsed.data.runnerId !== runner.runnerId) {
+      return context.json({ error: "embodiment_claim_runner_mismatch" }, 403);
+    }
+    const assignment = await embodiment.claim(parsed.data);
+    if (assignment === undefined) return context.body(null, 204);
+    logger.info(
+      {
+        runnerId: runner.runnerId,
+        kind: assignment.kind,
+        sessionId: assignment.kind === "start" ? assignment.session.sessionId : assignment.sessionId,
+      },
+      "embodiment work claimed",
+    );
+    return context.json({ assignment });
+  });
+
+  app.post("/v1/embodiment/sessions/:id/report", async (context) => {
+    const runner = await authenticateRunner(context.req.raw, dependencies);
+    if (runner === "unavailable") return context.json({ error: "runner_execution_unavailable" }, 503);
+    if (!runner) return context.json({ error: "runner_authentication_required" }, 401);
+    const parsed = EmbodimentLifecycleReportSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_embodiment_report" }, 400);
+    if (parsed.data.sessionId !== context.req.param("id")) {
+      return context.json({ error: "embodiment_report_session_mismatch" }, 400);
+    }
+    if (parsed.data.runnerId !== runner.runnerId) {
+      return context.json({ error: "embodiment_report_runner_mismatch" }, 403);
+    }
+    const result = await embodiment.report(parsed.data);
+    if (result.outcome === "rejected") {
+      const status =
+        result.error === "unknown_session" ? 404 : result.error === "runner_mismatch" ? 403 : 409;
+      return context.json({ error: `embodiment_${result.error}` }, status);
+    }
+    return context.json({ accepted: true, session: result.session });
   });
 
   app.post("/v1/runner/claims", async (context) => {

@@ -2,6 +2,12 @@
 
 The runner is the trust boundary that owns worktrees, worker processes, PTYs, provider-native sessions, credentials, network restrictions, and control leases. It connects outbound to the control plane or relay.
 
+## Asked-play host (ADR 0063)
+
+Beside the mission worker, the runner hosts asked embodiment: `src/play-host.ts` polls the control plane's embodiment claim endpoint, and on a claimed start owns a FireRed free-play session end to end — body lock under a `captain-play` holder id, resume from the newest compatible checkpoint, frames and overlay to the activity producer, a checkpoint minted on stop, and every lifecycle transition reported back as content-free scalars. The host never blocks the claim loop, so a stop ask lands mid-playthrough and ends the session at the next turn boundary. On startup it reconciles: a live session attributed to this runner that the process does not hold is reported failed (`lease_lapsed`), so a crashed predecessor never blocks the next ask. A missing activity producer degrades to counted dropped frames; a held body refuses `body_held`; a missing ROM, fixture, or model refuses `environment_unavailable`.
+
+`scripts/free-play-live.ts` (`pnpm gba:free-play-live`) is the development alias: the same `src/play-execution.ts` composition driven by a locally fabricated session, so a playthrough is watchable without a control plane or a Discord ask.
+
 The production runner creates one `TerminalManager`. Generic interactive commands run in a native `node-pty` terminal with runner-supplied environment only; Codex App Server JSON-RPC, Claude Agent SDK, and Pi RPC retain their protocol-native control transports and are never relabeled as PTYs. The manager owns ordered raw-byte replay, headless `@xterm/headless` state, `@xterm/addon-serialize` VT restore snapshots at parser-quiescent boundaries, live-attempt correlation, bounded observers, and the single renewable human-control lease. Closed terminals leave discovery deterministically; restart marks non-reattachable PTY records orphaned and closed. Do not put merge, deployment, or organization-wide connector tokens inside worker environments.
 
 ## Worker transcript projection

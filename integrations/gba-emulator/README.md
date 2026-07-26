@@ -51,7 +51,7 @@ elevation transitions, or NPCs, which occupy tiles without appearing in it. An
 open tile means "not a wall", not "reachable on foot", which is why `walk_to`
 re-checks every step instead of trusting its own plan.
 
-Warp tiles block *and* transport: the stairs at `(16,9)` in `players-house-2f`
+Warp tiles block _and_ transport: the stairs at `(16,9)` in `players-house-2f`
 read as a wall, yet pressing into them from `(17,9)` arrives on
 `players-house-1f`. So `walk_to` routes within a map and crossing between maps
 stays a directional press. Routing through warps would need the map header's
@@ -165,3 +165,15 @@ gated.
 Runs against the core double with no ROM. The trace is written under
 `artifacts/` and stays untracked because it carries model monologue; a six-turn
 format sample lives in `fixtures/free-play/sample-trace.jsonl`.
+
+## Asked play (ADR 0063)
+
+The product entrance to free play is an ask: a captain turn submits an
+embodiment intent, the runner's play host claims it, and this package's
+composition — body lock, `createFreePlaySession`, `runFreePlay`, checkpoints —
+runs under the host instead of a hand-launched terminal. `RunFreePlayInput`
+takes a `shouldStop` hook so an asked stop or an exhausted duration budget ends
+the playthrough at a turn boundary, and an asked session resumes from the
+newest compatible checkpoint and mints one on the way out (ADR 0060).
+`pnpm gba:free-play-live` remains the development alias of the same composition
+(`apps/runner/src/play-execution.ts`).
