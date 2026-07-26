@@ -19,7 +19,7 @@ import { encodeFramebufferPng } from "../src/framebuffer-png.ts";
 import type { GbaCoreFactory } from "../src/core-seam.ts";
 import { sha256 } from "../src/core-double.ts";
 import { defaultGbaBodyRootDir } from "../src/free-play-boot.ts";
-import { createModelFreePlayMind } from "../src/free-play-mind.ts";
+import { createModelFreePlayMind, createModelVoice } from "../src/free-play-mind.ts";
 import { SettingsStore, personaInstructions } from "@clankie/settings";
 import { InterjectionQueue, runFreePlay, type FreePlayTurn } from "../src/free-play.ts";
 import { createFreePlaySession } from "../src/free-play-session.ts";
@@ -125,6 +125,14 @@ if (process.stdin.isTTY === true) {
 
 const result = await runFreePlay({
   io,
+  // The half of him that talks, as its own agent (ADR 0056). Same persona, no
+  // controller — which is what makes an interjection structurally unable to
+  // become a route.
+  voice: createModelVoice({
+    model: configured.model,
+    character: freePlayCharacter,
+    providerOptions: configured.modelOptions?.providerOptions ?? {},
+  }),
   mind: createModelFreePlayMind({
     model: configured.model,
     character: freePlayCharacter,

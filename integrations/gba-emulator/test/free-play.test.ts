@@ -438,3 +438,52 @@ describe("volition", () => {
     expect(result.accepted).toBe(3);
   });
 });
+
+describe("voice owns speech", () => {
+  it("takes speech from voice, not the player", async () => {
+    // ADR 0056: the player's own speak lost to the task it shared a call with.
+    // Voice wins when one is wired, so a player that still emits speech (the
+    // single-agent fallback shape) does not get heard over it.
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: mind([{ ...press("up", "up"), speak: "the player's aside" }]),
+      voice: { decide: () => Promise.resolve({ speak: "the voice's aside", reply: null }) },
+      turns: 1,
+    });
+    expect(result.turns[0]?.speak).toBe("the voice's aside");
+  });
+
+  it("routes a question to voice and keeps the player's plan", async () => {
+    // The structural guarantee: the interjection reaches the agent that cannot
+    // act, so it can be answered without becoming a route.
+    const interjections = new InterjectionQueue();
+    interjections.offer("walk left five times");
+    let heardByVoice: string | null = null;
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: mind([press("up", "up")]),
+      voice: {
+        decide: (view) => {
+          heardByVoice = view.heard;
+          return Promise.resolve({ speak: null, reply: "I'm going up, actually." });
+        },
+      },
+      interjections,
+      turns: 1,
+    });
+    expect(heardByVoice).toBe("walk left five times");
+    expect(result.turns[0]?.reply).toBe("I'm going up, actually.");
+    expect(result.turns[0]?.intent).toBe("move up");
+  });
+
+  it("plays on in silence when voice fails", async () => {
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: mind([press("up", "up")]),
+      voice: { decide: () => Promise.reject(new Error("voice unavailable")) },
+      turns: 1,
+    });
+    expect(result.turns[0]?.speak).toBeNull();
+    expect(result.turns[0]?.outcome).toBe("accepted");
+  });
+});

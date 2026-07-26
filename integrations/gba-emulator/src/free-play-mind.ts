@@ -4,6 +4,13 @@ import { streamObject } from "ai";
 /** Derived from the SDK signature so it tracks their type, not a guessed name. */
 type StreamProviderOptions = NonNullable<Parameters<typeof streamObject>[0]["providerOptions"]>;
 import { z } from "zod";
+import {
+  VoiceDecisionSchema,
+  VOICE_SYSTEM_PROMPT,
+  renderVoiceView,
+  type ClankieVoice,
+  type VoiceView,
+} from "./free-play-voice.ts";
 import { type FreePlayMind, type FreePlayView } from "./free-play.ts";
 
 /**
@@ -120,8 +127,10 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   "  of furniture — that belongs here, not in monologue. Nobody hears monologue.",
   "  Say it when something is genuinely worth reacting to: a surprise, a change",
   "  of mind, being stuck in a way that has become funny.",
-  "  Do NOT narrate your moves — people can see the screen — and do not speak",
-  "  every turn. Several quiet turns in a row are completely normal.",
+  "  Do NOT narrate your moves — people can see the screen.",
+  "  Spacing is handled for you: a rate gate drops an aside that comes too soon",
+  "  after the last one, so you cannot flood the room and do not need to ration",
+  "  yourself. If something is worth saying, say it and let the gate decide.",
   "- intent: the single concrete thing you will do NEXT TURN — a step or a",
   '  press, not the objective. "step left around the desk", not "reach the',
   '  stairs". You are scored on whether you then do it.',
@@ -246,8 +255,14 @@ export function renderView(view: FreePlayView): string {
   if (view.audience !== null && view.audience.length > 0) {
     lines.push("", `Watching you right now: ${view.audience}.`);
   }
-  if (view.turnsSinceSpoke !== null) {
-    // Context, not a rule: he knows how recently he spoke and judges from there.
+  // Context, not a rule: he knows how recently he spoke and judges from there.
+  // Never having spoken is the case that most needs saying — rendering this only
+  // once he had already spoken made the signal unreachable, because the thing
+  // that would prompt a first remark only appeared after one. That cold start is
+  // why four rounds of prompt tuning moved nothing.
+  if (view.turnsSinceSpoke === null) {
+    lines.push("", `You have not said anything out loud yet, ${String(view.turn)} turns in.`);
+  } else {
     lines.push("", `You last said something ${String(view.turnsSinceSpoke)} turns ago.`);
   }
   if (view.interjection !== null && view.interjection.length > 0) {
@@ -293,4 +308,58 @@ function describeAction(action: FreePlayView["history"][number]["action"]): stri
   }
   if (action.kind === "frame_advance") return `advanced ${String(action.frames)} frames`;
   return `waited ${String(action.durationMs)}ms`;
+}
+
+export interface ModelVoiceOptions extends ModelFreePlayMindOptions {
+  /** Voice may see the screen; omit to make it rely purely on his thinking. */
+  showFrame?: boolean;
+}
+
+/**
+ * The model-backed voice ([ADR 0056](../../../docs/adr/0056-voice-is-a-separate-agent-from-the-player.md)).
+ *
+ * Same persona-first ordering as the player, because this is one character with
+ * two jobs rather than two characters. It is handed no `GbaDriverIo`: the type
+ * simply has nowhere to put one, which is the point.
+ */
+export function createModelVoice(options: ModelVoiceOptions): ClankieVoice {
+  const system = [options.character, VOICE_SYSTEM_PROMPT, options.systemSuffix]
+    .filter((part): part is string => part !== undefined && part.trim().length > 0)
+    .join("\n\n");
+
+  return {
+    async decide(view: VoiceView): Promise<unknown> {
+      const showFrame = options.showFrame ?? true;
+      const stream = streamObject({
+        model: options.model,
+        schema: VoiceDecisionSchema,
+        system,
+        messages: [
+          {
+            role: "user",
+            content:
+              view.framePng === null || !showFrame
+                ? [{ type: "text" as const, text: renderVoiceView(view) }]
+                : [
+                    { type: "text" as const, text: renderVoiceView(view) },
+                    { type: "file" as const, mediaType: "image/png", data: view.framePng },
+                  ],
+          },
+        ],
+        maxRetries: options.maxRetries ?? 1,
+        providerOptions: options.providerOptions ?? {},
+      });
+
+      const settled = stream.object;
+      settled.catch(() => undefined);
+      try {
+        for await (const _partial of stream.partialObjectStream) {
+          // nothing downstream consumes a partial decision
+        }
+      } catch {
+        // Reported by awaiting the settled object below.
+      }
+      return await settled;
+    },
+  };
 }

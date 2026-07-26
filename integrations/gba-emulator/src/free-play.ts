@@ -6,6 +6,24 @@ import {
   type GbaEmulatorObservationKind,
 } from "@clankie/interactive-environment";
 import { z } from "zod";
+import {
+  FREE_PLAY_INTENT_MAX,
+  FREE_PLAY_INTERJECTION_MAX,
+  FREE_PLAY_MONOLOGUE_MAX,
+  FREE_PLAY_NOTES_MAX,
+  FREE_PLAY_OBJECTIVE_MAX,
+  FREE_PLAY_REPLY_MAX,
+  FREE_PLAY_SPEAK_COOLDOWN_TURNS,
+  FREE_PLAY_SPEAK_MAX,
+} from "./free-play-bounds.ts";
+import {
+  VoiceDecisionSchema,
+  voiceHasSomethingToConsider,
+  type ClankieVoice,
+  type VoiceView,
+} from "./free-play-voice.ts";
+
+export * from "./free-play-bounds.ts";
 import { canonicalJson, sha256 } from "./core-double.ts";
 import type { GbaDriverIo } from "./driver.ts";
 import {
@@ -15,49 +33,6 @@ import {
   type FreePlayProgress,
 } from "./free-play-progress.ts";
 
-/**
- * Free play: the model chooses, not an algorithm.
- *
- * The existing scenario drivers compute every action (`nextRealRouteStep` is
- * BFS, move selection is an argmax). They are deterministic and their receipts
- * are byte-identical across two fresh cores. This driver is the opposite: the
- * decision comes from a model, so no run reproduces another.
- *
- * That trade is deliberate and it does not weaken the deterministic scenarios,
- * which still run unchanged. What a free-play run asserts instead is recorded
- * per turn: that every action was legal, that observation → monologue → action
- * → outcome is causally linked, that bounds held, and how often stated intent
- * matched the next action.
- */
-
-/** Model text is untrusted and reaches operator surfaces, so it stays bounded. */
-export const FREE_PLAY_MONOLOGUE_MAX = 600;
-export const FREE_PLAY_INTENT_MAX = 200;
-/**
- * His own running notes, carried across turns.
- *
- * Bounded like every other model text field, and bounded for a second reason:
- * an unbounded scratchpad becomes an ever-growing prompt, which is the cost
- * problem this loop already has. A cap forces him to keep what matters.
- */
-export const FREE_PLAY_NOTES_MAX = 800;
-/** A standing objective, e.g. "get downstairs and out of the house". */
-export const FREE_PLAY_OBJECTIVE_MAX = 160;
-/** What someone said to him. Bounded like every other untrusted string. */
-export const FREE_PLAY_INTERJECTION_MAX = 500;
-/** What he says back. Discord's own message limit. */
-export const FREE_PLAY_REPLY_MAX = 2_000;
-/** Something he chose to say unprompted. */
-export const FREE_PLAY_SPEAK_MAX = 400;
-/**
- * Minimum turns between unprompted remarks.
- *
- * A rate gate, deliberately not a content rule. Nothing here decides *what* is
- * worth saying — no "speak on a new map", no "speak after a battle" — because a
- * rule per trigger produces a narrator hitting marks. He reads the situation and
- * decides; this only stops him talking over himself.
- */
-export const FREE_PLAY_SPEAK_COOLDOWN_TURNS = 4;
 
 export const FreePlayDecisionSchema = z
   .object({
@@ -255,6 +230,11 @@ export interface RunFreePlayInput {
   interjections?: InterjectionQueue;
   /** Minimum turns between unprompted remarks. */
   speakCooldownTurns?: number;
+  /**
+   * The half of him that talks. Omitted, speech falls back to the player's own
+   * decision — measurably near-silent, see ADR 0056.
+   */
+  voice?: ClankieVoice;
   /** Who is listening. Absent means he is alone and will reasonably stay quiet. */
   audience?: string;
 }
@@ -268,6 +248,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
   let lastSpokeTurn: number | null = null;
   const volition: FreePlayVolition = { offered: 0, taken: 0, suppressed: 0 };
   const cooldown = input.speakCooldownTurns ?? FREE_PLAY_SPEAK_COOLDOWN_TURNS;
+  const recentlySaid: string[] = [];
   const progress = new FreePlayProgressTracker();
   progress.seed(positionOf(observe(input.io)));
 
@@ -338,15 +319,48 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     record.objective = objective;
     record.reply = parsed.data.reply ?? null;
 
+    // Voice decides speech when one is wired; the player's own speak/reply are
+    // the single-agent fallback (ADR 0056). Voice cannot act, which is what
+    // makes "an interjection is not a route" structural rather than a prompt.
+    let wants = parsed.data.speak ?? null;
+    if (input.voice !== undefined) {
+      const voiceView: VoiceView = {
+        turn,
+        framePng: input.framePng?.() ?? null,
+        monologue: record.monologue,
+        effect: record.effect,
+        intent: record.intent,
+        objective,
+        heard: interjection,
+        turnsSinceSpoke: lastSpokeTurn === null ? null : turn - lastSpokeTurn,
+        audience: input.audience ?? null,
+        recentlySaid: [...recentlySaid],
+      };
+      if (voiceHasSomethingToConsider(voiceView)) {
+        try {
+          const spoken = VoiceDecisionSchema.safeParse(await input.voice.decide(voiceView));
+          if (spoken.success) {
+            wants = spoken.data.speak ?? null;
+            if (spoken.data.reply !== null && spoken.data.reply !== undefined) {
+              record.reply = spoken.data.reply;
+            }
+          }
+        } catch {
+          // A voice failure must not cost the turn. He plays on in silence.
+        }
+      }
+    }
+
     // Every turn is an opportunity; the gate only limits how often he takes it.
     volition.offered += 1;
-    const wants = parsed.data.speak ?? null;
     if (wants !== null && wants.trim().length > 0) {
       const ready = lastSpokeTurn === null || turn - lastSpokeTurn >= cooldown;
       if (ready) {
         record.speak = wants;
         lastSpokeTurn = turn;
         volition.taken += 1;
+        recentlySaid.push(wants);
+        if (recentlySaid.length > 3) recentlySaid.shift();
       } else {
         // Held, not dropped silently: a gate that never binds is a gate nobody
         // needs, and one that always binds is a muzzle. Both show up here.
