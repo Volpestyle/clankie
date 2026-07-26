@@ -10,7 +10,6 @@
     "live-proof": "tsx src/live-proof-cli.ts",
     "person-memory-live-proof": "tsx src/person-memory-live-proof-cli.ts",
     "voice-readiness": "tsx src/voice-readiness-cli.ts",
-    "voice-speech-live-proof": "tsx src/voice-speech-live-proof-cli.ts",
     "voice-live-proof": "tsx src/voice-live-proof-cli.ts",
     "build": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",

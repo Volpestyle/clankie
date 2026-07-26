@@ -32,7 +32,6 @@ import {
   type DiscordPersonIdentity,
   type DiscordPersonMemoryDeleteResult,
   type DiscordPersonMemoryExport,
-  type DiscordPersonMemoryFact,
   type DiscordPersonMemoryProjection,
   type DiscordPersonMemoryProposal,
   type DiscordUserSessionOptIn,
@@ -222,6 +221,28 @@ export interface DiscordControlPlaneReadiness {
     readonly discordPresenceRuntime: boolean;
     readonly eventStore: boolean;
   };
+}
+
+/**
+ * Realtime voice briefing request (ADR 0057). Ids only, deliberately: the
+ * control plane's strict schema rejects any other key, so a bridge cannot
+ * supply or widen persona, instructions, or person memory.
+ */
+export interface DiscordVoiceBriefingRequest {
+  readonly schemaVersion: 1;
+  readonly guildId: string;
+  readonly channelId: string;
+  /** Consented speaker ids (≤ 25, snowflake-shaped). */
+  readonly consentedUserIds: readonly string[];
+}
+
+export interface DiscordVoiceBriefing {
+  readonly schemaVersion: 1;
+  /** Persona + lane + realtime surface rules, composed control-plane-side; ≤ 8000 chars. */
+  readonly instructions: string;
+  /** Bounded self-state, shareable episodes, and approved person memory; ≤ 8000 chars. */
+  readonly briefing: string;
+  readonly refreshedAt: string;
 }
 
 export class ClankieApiClient {
@@ -529,6 +550,29 @@ export class ClankieApiClient {
     return this.request("/v1/discord/readiness", {
       headers: this.captainHeaders(),
     });
+  }
+
+  /**
+   * Fetches the control-plane-composed realtime voice session briefing
+   * (ADR 0057) through the authenticated captain lane. The request carries only
+   * ids; persona, lane instructions, self-state, episodes, and approved person
+   * memory are all resolved from control-plane-owned stores.
+   */
+  public async fetchDiscordVoiceBriefing(input: DiscordVoiceBriefingRequest): Promise<DiscordVoiceBriefing> {
+    const briefing = await this.request<DiscordVoiceBriefing>("/v1/discord/voice-briefing", {
+      method: "POST",
+      headers: this.captainHeaders(),
+      body: JSON.stringify(input),
+    });
+    if (
+      briefing.schemaVersion !== 1 ||
+      typeof briefing.instructions !== "string" ||
+      typeof briefing.briefing !== "string" ||
+      typeof briefing.refreshedAt !== "string"
+    ) {
+      throw new Error("Clankie API returned a malformed Discord voice briefing");
+    }
+    return briefing;
   }
 
   public proposeDiscordPersonMemory(input: DiscordPersonMemoryProposal): Promise<Record<string, unknown>> {

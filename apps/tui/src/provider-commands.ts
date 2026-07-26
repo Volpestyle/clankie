@@ -30,6 +30,7 @@ import {
   runAnthropicBrowserLogin,
   runCodexBrowserLogin,
   runCodexDeviceLogin,
+  subscriptionRefFor,
   updateGlobalConfig,
   type ClankieConfig,
 } from "@clankie/model-provider";
@@ -486,17 +487,36 @@ function modelHint(model: ModelEntry): string {
   return parts.join(" · ");
 }
 
+/**
+ * The subscription ref that will actually serve a configured ref, or undefined
+ * when the configured one stands. Keeps the precedence rule visible in status
+ * output instead of only showing up in the ledger after a turn.
+ */
+async function servedBySubscription(
+  resolved: { providerId: string; modelId: string },
+  config: ClankieConfig,
+  services: ProviderServices,
+): Promise<string | undefined> {
+  const ref = subscriptionRefFor(resolved, config);
+  if (ref === undefined) return undefined;
+  return (await services.store.get(CODEX_PROVIDER_ID)) === undefined ? undefined : ref;
+}
+
 async function showModelStatus(shell: ClankieFaceShell, services: ProviderServices): Promise<void> {
   const catalog = await services.registry.catalog();
   const { config } = await loadConfig({ env: services.env, cwd: services.cwd });
   const lines: string[] = [];
   for (const role of ["model", "small_model", "voice_model"] as const) {
     const resolved = resolveRole(role, { config, catalog });
+    if (resolved === undefined) {
+      lines.push(`${role}: unset`);
+      continue;
+    }
+    const served = await servedBySubscription(resolved, config, services);
+    const variant = resolved.variantId === undefined ? "" : ` (${resolved.variantId})`;
     lines.push(
-      `${role}: ${
-        resolved === undefined
-          ? "unset"
-          : `${formatModelRef(resolved)}${resolved.variantId === undefined ? "" : ` (${resolved.variantId})`}`
+      `${role}: ${formatModelRef(resolved)}${variant}${
+        served === undefined ? "" : ` → ${served} (ChatGPT subscription)`
       }`,
     );
   }
@@ -660,6 +680,7 @@ async function runModelWizard(
         continue;
       }
       const ref = formatModelRef({ providerId, modelId });
+      const served = await servedBySubscription({ providerId, modelId }, config, services);
       const updated = await updateGlobalConfig(
         (current) => {
           current[role] = ref;
@@ -673,7 +694,12 @@ async function runModelWizard(
         "/model",
         [
           `${roleLabel(role)} set to ${ref}.`,
-          ...(!provider.connected
+          ...(served === undefined
+            ? []
+            : [
+                `Served by your ChatGPT subscription as ${served}; log out with /auth for metered API access.`,
+              ]),
+          ...(!provider.connected && served === undefined
             ? [`Note: ${providerId} has no credential yet — run /auth before real captain turns.`]
             : []),
         ].join("\n"),

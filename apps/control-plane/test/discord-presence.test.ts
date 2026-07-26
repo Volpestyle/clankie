@@ -769,6 +769,67 @@ describe("Discord presence control-plane runtime (ADR 0024)", () => {
     );
     expect(response.status).toBe(503);
   });
+
+  describe("operator presence status", () => {
+    it("projects the live phase without the identity an action would need", async () => {
+      const app = await createPresenceControlPlane({
+        doctrine,
+        discordPresenceRuntime: new RecordingPresenceRuntime(),
+        authenticateOperator: operator,
+      });
+
+      const response = await app.request("/v1/discord/presence-status", {
+        headers: { authorization: "Bearer operator-secret" },
+      });
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        schemaVersion: number;
+        sessions: readonly Record<string, unknown>[];
+      };
+      expect(body.schemaVersion).toBe(1);
+      expect(body.sessions).toHaveLength(1);
+      expect(body.sessions[0]).toMatchObject({
+        phase: "present",
+        gatewayConnected: true,
+        voiceGuildCount: 0,
+        activityCount: 0,
+      });
+      // Status must not hand an operator the fields that authorize acting.
+      for (const field of ["sessionId", "credentialRef", "characterId", "revision"]) {
+        expect(body.sessions[0]).not.toHaveProperty(field);
+      }
+    });
+
+    it("requires an operator credential", async () => {
+      const app = await createPresenceControlPlane({
+        doctrine,
+        discordPresenceRuntime: new RecordingPresenceRuntime(),
+        authenticateOperator: operator,
+      });
+
+      const anonymous = await app.request("/v1/discord/presence-status");
+      expect(anonymous.status).toBe(401);
+
+      // A captain credential is not an operator credential on this route.
+      const captain = await app.request("/v1/discord/presence-status", {
+        headers: { authorization: "Bearer captain-secret" },
+      });
+      expect(captain.status).toBe(401);
+    });
+
+    it("fails closed when no operator authenticator is configured", async () => {
+      const app = await createPresenceControlPlane({
+        doctrine,
+        discordPresenceRuntime: new RecordingPresenceRuntime(),
+      });
+
+      const response = await app.request("/v1/discord/presence-status", {
+        headers: { authorization: "Bearer operator-secret" },
+      });
+      expect(response.status).toBe(503);
+    });
+  });
 });
 
 class RecordingPresenceRuntime implements DiscordPresenceRuntimePort {

@@ -19,6 +19,7 @@
     "@clankie/event-store": "workspace:*",
     "@clankie/model-provider": "workspace:*",
     "@clankie/protocol": "workspace:*",
+    "@clankie/settings": "workspace:*",
     "ai": "^7.0.19",
     "eve": "0.24.4",
     "zod": "4.4.3"

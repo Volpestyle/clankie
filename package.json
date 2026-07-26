@@ -22,7 +22,6 @@
     "discord:readiness": "pnpm --filter @clankie/discord-bridge readiness",
     "discord:live-proof": "pnpm --filter @clankie/discord-bridge live-proof",
     "discord:voice-readiness": "pnpm --filter @clankie/discord-bridge voice-readiness",
-    "discord:voice-speech-live-proof": "pnpm --filter @clankie/discord-bridge voice-speech-live-proof",
     "discord:voice-live-proof": "pnpm --filter @clankie/discord-bridge voice-live-proof",
     "discord:person-memory-live-proof": "pnpm --filter @clankie/discord-bridge person-memory-live-proof",
     "minecraft:readiness": "pnpm --filter @clankie/minecraft-mineflayer readiness",

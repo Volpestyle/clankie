@@ -1,0 +1,412 @@
+import { describe, expect, it } from "vitest";
+import type { DiscordVoiceEvidence } from "@clankie/protocol";
+import type { RealtimeTimers } from "@clankie/discord-presence-core";
+import {
+  createVoiceVolitionDecider,
+  describeVoiceResponse,
+  parseVoiceRealtimeEnv,
+  renderVoiceConsentReply,
+  renderVoiceJoinDisclosure,
+  renderVoiceStatusReply,
+  VoiceIdleAutoLeave,
+  voiceEvidenceReceiptData,
+  voiceEvidenceReceiptType,
+  VOICE_VOLITION_SYSTEM_PROMPT,
+} from "../src/voice-composition.ts";
+
+class TestTimers implements RealtimeTimers {
+  public readonly scheduled: { handle: number; delayMs: number; handler: () => void; cleared: boolean }[] =
+    [];
+  private nextHandle = 1;
+
+  public setTimeout(handler: () => void, delayMs: number): unknown {
+    const handle = this.nextHandle;
+    this.nextHandle += 1;
+    this.scheduled.push({ handle, delayMs, handler, cleared: false });
+    return handle;
+  }
+
+  public clearTimeout(handle: unknown): void {
+    const entry = this.scheduled.find((candidate) => candidate.handle === handle);
+    if (entry !== undefined) entry.cleared = true;
+  }
+
+  public armed(): { delayMs: number; handler: () => void }[] {
+    return this.scheduled.filter((candidate) => !candidate.cleared);
+  }
+}
+
+describe("realtime voice environment", () => {
+  it("applies the documented defaults, with truncation always configured", () => {
+    const config = parseVoiceRealtimeEnv({});
+    expect(config).toEqual({
+      realtimeModel: "gpt-realtime-2.1",
+      transcribeModel: "gpt-realtime-whisper",
+      voice: "marin",
+      truncationRetentionRatio: 0.7,
+      postInstructionsTokenLimit: 12_000,
+      decayWindowMs: 60_000,
+      idleLeaveMs: 900_000,
+      volitionModel: "gpt-4o-mini",
+    });
+  });
+
+  it("honors overrides, including the owner-tunable decay window", () => {
+    const config = parseVoiceRealtimeEnv({
+      CLANKIE_VOICE_REALTIME_MODEL: "gpt-realtime-2.1-mini",
+      CLANKIE_VOICE_TRANSCRIBE_MODEL: "gpt-realtime-whisper-2",
+      CLANKIE_VOICE_REALTIME_VOICE: "cedar",
+      CLANKIE_VOICE_STT_LANGUAGE: "",
+      CLANKIE_VOICE_TRUNCATION_RETENTION: "0.5",
+      CLANKIE_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT: "20000",
+      CLANKIE_VOICE_SESSION_LIFETIME_MS: "600000",
+      CLANKIE_VOICE_DECAY_WINDOW_MS: "45000",
+      CLANKIE_VOICE_IDLE_LEAVE_MS: "300000",
+      CLANKIE_VOICE_VOLITION_MODEL: "gpt-4.1-mini",
+    });
+    expect(config.realtimeModel).toBe("gpt-realtime-2.1-mini");
+    expect(config.transcribeModel).toBe("gpt-realtime-whisper-2");
+    expect(config.voice).toBe("cedar");
+    // Empty is meaningful: it restores per-utterance language auto-detection.
+    expect(config.language).toBe("");
+    expect(config.truncationRetentionRatio).toBe(0.5);
+    expect(config.postInstructionsTokenLimit).toBe(20_000);
+    expect(config.sessionLifetimeMs).toBe(600_000);
+    expect(config.decayWindowMs).toBe(45_000);
+    expect(config.idleLeaveMs).toBe(300_000);
+    expect(config.volitionModel).toBe("gpt-4.1-mini");
+  });
+
+  it("rejects unbounded or disabled idle auto-leave", () => {
+    expect(() => parseVoiceRealtimeEnv({ CLANKIE_VOICE_IDLE_LEAVE_MS: "0" })).toThrow(
+      /CLANKIE_VOICE_IDLE_LEAVE_MS/u,
+    );
+    expect(() => parseVoiceRealtimeEnv({ CLANKIE_VOICE_IDLE_LEAVE_MS: "-1" })).toThrow(
+      /CLANKIE_VOICE_IDLE_LEAVE_MS/u,
+    );
+    expect(() => parseVoiceRealtimeEnv({ CLANKIE_VOICE_IDLE_LEAVE_MS: "999999999999" })).toThrow(
+      /CLANKIE_VOICE_IDLE_LEAVE_MS/u,
+    );
+  });
+
+  it("rejects out-of-range truncation so the session is never unbounded", () => {
+    expect(() => parseVoiceRealtimeEnv({ CLANKIE_VOICE_TRUNCATION_RETENTION: "0" })).toThrow(/ratio/u);
+    expect(() => parseVoiceRealtimeEnv({ CLANKIE_VOICE_TRUNCATION_RETENTION: "1.5" })).toThrow(/ratio/u);
+    expect(() => parseVoiceRealtimeEnv({ CLANKIE_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT: "10" })).toThrow(
+      /CLANKIE_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT/u,
+    );
+  });
+
+  it("fails loudly on retired cascade knobs instead of silently ignoring them", () => {
+    for (const name of ["CLANKIE_VOICE_STT_MODEL", "CLANKIE_VOICE_TTS_MODEL", "CLANKIE_VOICE_TTS_VOICE"]) {
+      expect(() => parseVoiceRealtimeEnv({ [name]: "anything" })).toThrow(new RegExp(name, "u"));
+    }
+  });
+});
+
+describe("volition decider", () => {
+  const openAiAnswer = (content: unknown): Response =>
+    new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+
+  function decider(fetchImpl: typeof fetch): (roomText: string) => Promise<boolean> {
+    return createVoiceVolitionDecider({ apiKey: "vol-key", model: "gpt-4o-mini", fetchImpl });
+  }
+
+  it("sends the bounded room text with temperature 0 and the brokered key", async () => {
+    const requests: { url: string; init: RequestInit | undefined }[] = [];
+    const decide = decider(((url: URL | RequestInfo, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      return Promise.resolve(openAiAnswer("yes"));
+    }) as typeof fetch);
+    await expect(decide("1000: clankie should weigh in here")).resolves.toBe(true);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url).toBe("https://api.openai.com/v1/chat/completions");
+    const body = JSON.parse(String(requests[0]?.init?.body)) as {
+      model: string;
+      temperature: number;
+      messages: { role: string; content: string }[];
+    };
+    expect(body.model).toBe("gpt-4o-mini");
+    expect(body.temperature).toBe(0);
+    expect(body.messages[0]?.content).toBe(VOICE_VOLITION_SYSTEM_PROMPT);
+    expect(body.messages[1]?.content).toContain("clankie should weigh in");
+    const headers = requests[0]?.init?.headers as Record<string, string>;
+    expect(headers.authorization).toBe("Bearer vol-key");
+  });
+
+  it("parses yes strictly: only a clear yes speaks", async () => {
+    await expect(decider(() => Promise.resolve(openAiAnswer("Yes.")))("room")).resolves.toBe(true);
+    await expect(decider(() => Promise.resolve(openAiAnswer("no")))("room")).resolves.toBe(false);
+    await expect(decider(() => Promise.resolve(openAiAnswer("maybe yes")))("room")).resolves.toBe(false);
+    await expect(decider(() => Promise.resolve(openAiAnswer("yes, because")))("room")).resolves.toBe(false);
+    await expect(decider(() => Promise.resolve(openAiAnswer(42)))("room")).resolves.toBe(false);
+  });
+
+  it("fails closed on transport errors, bad statuses, and malformed payloads", async () => {
+    await expect(decider(() => Promise.reject(new Error("offline")))("room")).resolves.toBe(false);
+    await expect(decider(() => Promise.resolve(new Response("nope", { status: 500 })))("room")).resolves.toBe(
+      false,
+    );
+    await expect(
+      decider(() => Promise.resolve(new Response("not json", { status: 200 })))("room"),
+    ).resolves.toBe(false);
+  });
+
+  it("refuses a non-HTTPS non-loopback endpoint at construction", () => {
+    expect(() =>
+      createVoiceVolitionDecider({ apiKey: "k", model: "m", baseUrl: "http://example.com" }),
+    ).toThrow(/HTTPS/u);
+  });
+});
+
+describe("voice evidence receipts and the response line", () => {
+  const scope = { guildId: "12345", channelId: "67890" } as const;
+
+  it("maps floor and volition evidence onto their receipt types", () => {
+    expect(voiceEvidenceReceiptType({ type: "floor", ...scope, state: "engaged", reason: "addressed" })).toBe(
+      "discord.voice.floor",
+    );
+    expect(
+      voiceEvidenceReceiptType({ type: "volition", ...scope, offered: 3, taken: 1, suppressed: 2 }),
+    ).toBe("discord.voice.volition");
+    expect(voiceEvidenceReceiptType({ type: "left", ...scope })).toBe("discord.voice.left");
+  });
+
+  it("flattens evidence into scalar receipt data without undefined slots", () => {
+    const data = voiceEvidenceReceiptData({
+      type: "response",
+      ...scope,
+      deliveryId: "d-1",
+      state: "settled",
+      fastPath: true,
+      wake: "waking",
+      toFirstAudioMs: 420,
+      handoffMs: 0,
+      playbackMs: 900,
+    });
+    expect(data).toEqual({
+      type: "response",
+      guildId: "12345",
+      channelId: "67890",
+      deliveryId: "d-1",
+      state: "settled",
+      fastPath: true,
+      wake: "waking",
+      toFirstAudioMs: 420,
+      handoffMs: 0,
+      playbackMs: 900,
+    });
+    expect(Object.keys(data)).not.toContain("turnId");
+  });
+
+  it("prints the ADR 0057 stage split: wake class, path, first audio, handoff, playback", () => {
+    expect(
+      describeVoiceResponse({
+        type: "response",
+        ...scope,
+        deliveryId: "d-1",
+        state: "settled",
+        fastPath: true,
+        wake: "waking",
+        toFirstAudioMs: 420.4,
+        handoffMs: 0,
+        playbackMs: 900,
+      }),
+    ).toBe("voice turn (waking, fast path): 420ms to first audio, then 900ms speaking");
+    expect(
+      describeVoiceResponse({
+        type: "response",
+        ...scope,
+        deliveryId: "d-2",
+        turnId: "turn-9",
+        state: "waiting_user",
+        fastPath: false,
+        wake: "continuing",
+        toFirstAudioMs: 1500,
+        handoffMs: 1100,
+        playbackMs: 2000,
+      }),
+    ).toBe("voice turn (continuing, captain handoff 1100ms): 1500ms to first audio, then 2000ms speaking");
+  });
+});
+
+describe("idle auto-leave", () => {
+  function build(overrides: { isActive?: () => boolean } = {}) {
+    const timers = new TestTimers();
+    const leaves: number[] = [];
+    let leaveLogged: number | undefined;
+    const autoLeave = new VoiceIdleAutoLeave({
+      idleLeaveMs: 900_000,
+      isActive: overrides.isActive ?? (() => true),
+      leave: () => {
+        leaves.push(1);
+        return Promise.resolve();
+      },
+      onLeave: (idleMs) => {
+        leaveLogged = idleMs;
+      },
+      timers,
+    });
+    return { timers, leaves, autoLeave, leaveLogged: () => leaveLogged };
+  }
+
+  const evidence = (type: "joined" | "utterance" | "response" | "floor" | "left" | "volition") =>
+    ({
+      joined: { type: "joined", guildId: "1", channelId: "2", daveProtocolVersion: 1 },
+      utterance: {
+        type: "utterance",
+        guildId: "1",
+        channelId: "2",
+        userId: "3",
+        deliveryId: "d",
+        durationMs: 500,
+      },
+      response: {
+        type: "response",
+        guildId: "1",
+        channelId: "2",
+        deliveryId: "d",
+        state: "settled",
+        fastPath: true,
+        wake: "continuing",
+        toFirstAudioMs: 1,
+        handoffMs: 0,
+        playbackMs: 1,
+      },
+      floor: { type: "floor", guildId: "1", channelId: "2", state: "engaged", reason: "addressed" },
+      left: { type: "left", guildId: "1", channelId: "2" },
+      volition: { type: "volition", guildId: "1", channelId: "2", offered: 1, taken: 0, suppressed: 1 },
+    })[type] as DiscordVoiceEvidence;
+
+  it("arms on join, re-arms on activity, and leaves after the idle window", () => {
+    const { timers, leaves, autoLeave, leaveLogged } = build();
+    autoLeave.observe(evidence("joined"));
+    expect(timers.armed()).toHaveLength(1);
+    // Activity resets the timer rather than stacking a second one.
+    autoLeave.observe(evidence("utterance"));
+    autoLeave.observe(evidence("floor"));
+    autoLeave.observe(evidence("response"));
+    expect(timers.armed()).toHaveLength(1);
+    timers.armed()[0]?.handler();
+    expect(leaves).toHaveLength(1);
+    expect(leaveLogged()).toBe(900_000);
+  });
+
+  it("does not leave when the session is already inactive", () => {
+    const { timers, leaves, autoLeave } = build({ isActive: () => false });
+    autoLeave.observe(evidence("joined"));
+    timers.armed()[0]?.handler();
+    expect(leaves).toHaveLength(0);
+  });
+
+  it("disarms on left evidence and on stop, and ignores non-activity evidence", () => {
+    const { timers, autoLeave } = build();
+    autoLeave.observe(evidence("volition"));
+    expect(timers.armed()).toHaveLength(0);
+    autoLeave.observe(evidence("joined"));
+    autoLeave.observe(evidence("left"));
+    expect(timers.armed()).toHaveLength(0);
+    autoLeave.observe(evidence("joined"));
+    autoLeave.stop();
+    expect(timers.armed()).toHaveLength(0);
+  });
+
+  it("rejects a non-positive idle threshold", () => {
+    expect(
+      () =>
+        new VoiceIdleAutoLeave({
+          idleLeaveMs: 0,
+          isActive: () => true,
+          leave: () => Promise.resolve(),
+        }),
+    ).toThrow(/positive/u);
+  });
+});
+
+describe("voice disclosure and status wording (ADR 0057 audio residency)", () => {
+  it("states live-session residency and never promises per-turn discard", () => {
+    const disclosure = renderVoiceJoinDisclosure(1);
+    // Pinned as the mission's rendered-disclosure evidence.
+    expect(disclosure).toBe(
+      "Joined with DAVE protocol 1. Only you are opted in — audio from anyone who has not " +
+        "explicitly consented is never streamed anywhere. Consented audio feeds a live OpenAI " +
+        "realtime session that keeps this call's conversation on OpenAI's servers for as long as " +
+        "the call lasts. I listen continuously but speak only when addressed, or briefly on my " +
+        "own initiative. My spoken replies use an AI-generated voice, and nothing said in voice " +
+        "can ever approve privileged actions. Use **/clankie voice-consent opt-in** to let me " +
+        "hear you and **/clankie voice-consent opt-out** to revoke immediately.",
+    );
+    // The residency sentence and every required disclosure element.
+    expect(disclosure).toContain("DAVE protocol 1");
+    expect(disclosure).toContain("explicitly consented");
+    expect(disclosure).toContain("live OpenAI realtime session");
+    expect(disclosure).toContain("for as long as the call lasts");
+    expect(disclosure).toContain("listen continuously");
+    expect(disclosure).toContain("AI-generated voice");
+    expect(disclosure).toContain("privileged actions");
+    expect(disclosure).toContain("/clankie voice-consent opt-in");
+    expect(disclosure).toContain("/clankie voice-consent opt-out");
+    // The promise this architecture cannot honor must be gone.
+    expect(disclosure.toLowerCase()).not.toContain("discard");
+    expect(disclosure.toLowerCase()).not.toContain("after each turn");
+    expect(disclosure.toLowerCase()).not.toContain("not retained");
+  });
+
+  it("carries the residency terms in the opt-in reply, where consent is actually granted", () => {
+    // The join disclosure is ephemeral to the invoker only, so this private
+    // reply is the one every other participant consents through.
+    const optIn = renderVoiceConsentReply(true, 3);
+    expect(optIn).toContain("3 participant(s) are now opted in");
+    expect(optIn).toContain("live OpenAI realtime session");
+    expect(optIn).toContain("for as long as the call lasts");
+    expect(optIn).toContain("AI-generated voice");
+    expect(optIn).toContain("privileged actions");
+    expect(optIn).toContain("/clankie voice-consent opt-out");
+    expect(optIn.toLowerCase()).not.toContain("after each turn");
+    expect(optIn.toLowerCase()).not.toContain("not retained");
+
+    const optOut = renderVoiceConsentReply(false, 2);
+    expect(optOut).toBe("Your voice consent is revoked and any active capture for you was discarded.");
+  });
+
+  it("describes bounded local and server-side retention in voice-status", () => {
+    const active = renderVoiceStatusReply(
+      {
+        active: true,
+        guildId: "1",
+        channelId: "2",
+        daveProtocolVersion: 1,
+        consentedParticipantCount: 3,
+        activeCaptureCount: 1,
+        floorState: "engaged",
+        engaged: true,
+      },
+      true,
+    );
+    expect(active).toContain("DAVE protocol 1");
+    expect(active).toContain("3 participant(s) opted in");
+    expect(active).toContain("engaged in conversation");
+    expect(active).toContain("bounded transcript window in memory");
+    expect(active).toContain("server-side for the duration of the call");
+    // The cascade's false claim is gone.
+    expect(active.toLowerCase()).not.toContain("are not retained");
+    expect(
+      renderVoiceStatusReply(
+        {
+          active: true,
+          daveProtocolVersion: 1,
+          consentedParticipantCount: 1,
+          activeCaptureCount: 0,
+          floorState: "dormant",
+          engaged: false,
+        },
+        true,
+      ),
+    ).toContain("listening dormant");
+    expect(renderVoiceStatusReply(undefined, true)).toBe("Voice is enabled but not connected.");
+    expect(renderVoiceStatusReply(undefined, false)).toBe("Voice is disabled.");
+  });
+});

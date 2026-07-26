@@ -22,6 +22,33 @@ export function discordPcmToSpeechPcm(input: Uint8Array): Buffer {
   return output;
 }
 
+/**
+ * Converts interleaved 48 kHz stereo s16le into the 24 kHz mono s16le the
+ * realtime input buffer expects (ADR 0057). Channels are averaged into mono,
+ * then adjacent frame pairs are averaged down to 24 kHz — a cheap low-pass
+ * that keeps the whole path in memory, like the converters around it.
+ */
+export function discordPcmToRealtimePcm(input: Uint8Array): Buffer {
+  const source = Buffer.from(input);
+  const frameBytes = PCM_SAMPLE_BYTES * DISCORD_VOICE_CHANNELS;
+  const sourceFrames = Math.floor(source.byteLength / frameBytes);
+  const outputFrames = Math.floor(sourceFrames / 2);
+  const output = Buffer.allocUnsafe(outputFrames * PCM_SAMPLE_BYTES);
+  for (let outputFrame = 0; outputFrame < outputFrames; outputFrame += 1) {
+    const sourceOffset = outputFrame * 2 * frameBytes;
+    const first = monoSample(source, sourceOffset);
+    const second = monoSample(source, sourceOffset + frameBytes);
+    output.writeInt16LE(Math.trunc((first + second) / 2), outputFrame * PCM_SAMPLE_BYTES);
+  }
+  return output;
+}
+
+function monoSample(source: Buffer, offset: number): number {
+  const left = source.readInt16LE(offset);
+  const right = source.readInt16LE(offset + PCM_SAMPLE_BYTES);
+  return Math.trunc((left + right) / 2);
+}
+
 /** Wraps mono s16le samples in the canonical PCM WAV container accepted by whisper.cpp. */
 export function encodeMonoPcmWav(pcmInput: Uint8Array, sampleRate = SPEECH_SAMPLE_RATE): Buffer {
   const pcm = Buffer.from(pcmInput);

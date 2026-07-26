@@ -56,7 +56,7 @@ flowchart LR
   end
 
   subgraph discord["Discord voice channel"]
-    bot["official bot<br/>DAVE voice · TTS narration"]
+    bot["official bot<br/>DAVE voice · spoken narration"]
     act["activity iframe<br/>canvas + decoded-state overlay"]
   end
 

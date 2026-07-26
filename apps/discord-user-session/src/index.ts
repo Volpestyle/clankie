@@ -7,21 +7,23 @@ import {
 } from "@clankie/credential-broker";
 import {
   createAdvertisedDiscordPresencePort,
+  DEFAULT_DECAY_WINDOW_MS,
   DiscordBridgeReceiptStore,
   DiscordPresenceSession,
   DiscordTextIngress,
   DiscordVoiceIngress,
   DiscordVoiceSession,
-  OpenAiVoiceSpeechRuntime,
+  openRealtimeConversationSession,
+  openRealtimeTranscriptionSession,
   parseDiscordDmPolicy,
   parseDiscordIdSet,
   type DiscordBridgeReceipt,
-  type DiscordVoiceEvidence,
 } from "@clankie/discord-presence-core";
+import type { DiscordVoiceEvidence } from "@clankie/protocol";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
-import { applyDiscordSettingsToEnvironment, SettingsStore } from "@clankie/settings";
+import { applyDiscordSettingsToEnvironment, characterNames, SettingsStore } from "@clankie/settings";
 import { DiscordUserGateway } from "./gateway.ts";
 import { assertUserSessionAdmissible } from "./readiness.ts";
 import { DiscordUserVoiceAdapters } from "./voice-adapter.ts";
@@ -170,29 +172,11 @@ if (voiceEnabled && openAiCredential?.type !== "api") {
     "User-session voice requires the brokered openai API credential; environment credentials are not accepted.",
   );
 }
-const voiceSpeech =
-  openAiCredential?.type === "api"
-    ? new OpenAiVoiceSpeechRuntime({
-        apiKey: openAiCredential.key,
-        ...(process.env.CLANKIE_VOICE_STT_MODEL === undefined
-          ? {}
-          : { sttModel: process.env.CLANKIE_VOICE_STT_MODEL }),
-        ...(process.env.CLANKIE_VOICE_TTS_MODEL === undefined
-          ? {}
-          : { ttsModel: process.env.CLANKIE_VOICE_TTS_MODEL }),
-        ...(process.env.CLANKIE_VOICE_TTS_VOICE === undefined
-          ? {}
-          : { voice: process.env.CLANKIE_VOICE_TTS_VOICE }),
-      })
-    : undefined;
-if (voiceSpeech !== undefined) {
-  const readiness = await voiceSpeech.readiness();
-  if (!readiness.ready) {
-    throw new Error("User-session voice is enabled but OpenAI speech readiness is incomplete.");
-  }
-}
+// Minimal parallel of the bot bridge's realtime wiring (ADR 0057). Same env
+// names, same defaults, same always-explicit truncation.
+const voiceConfig = voiceEnabled ? parseUserSessionVoiceRealtimeEnv(process.env) : undefined;
 const voiceSession =
-  voiceSpeech === undefined || voiceApi === undefined
+  openAiCredential?.type !== "api" || voiceApi === undefined || voiceConfig === undefined
     ? undefined
     : new DiscordVoiceSession({
         ingress: new DiscordVoiceIngress(voiceApi, {
@@ -200,7 +184,55 @@ const voiceSession =
           credentialRef: DISCORD_USER_SESSION_PROVIDER_ID,
           transportKind: "user_session",
         }),
-        speech: voiceSpeech,
+        realtime: {
+          openTranscription: (handlers) =>
+            openRealtimeTranscriptionSession({
+              apiKey: openAiCredential.key,
+              model: voiceConfig.transcribeModel,
+              ...(voiceConfig.language === undefined ? {} : { language: voiceConfig.language }),
+              ...(voiceConfig.sessionLifetimeMs === undefined
+                ? {}
+                : { maxLifetimeMs: voiceConfig.sessionLifetimeMs }),
+              onTranscript: handlers.onTranscript,
+              onClose: handlers.onClose,
+              onError: handlers.onError,
+            }),
+          openConversation: (open) =>
+            openRealtimeConversationSession({
+              apiKey: openAiCredential.key,
+              model: voiceConfig.realtimeModel,
+              voice: voiceConfig.voice,
+              instructions: open.instructions,
+              truncationRetentionRatio: voiceConfig.truncationRetentionRatio,
+              postInstructionsTokenLimit: voiceConfig.postInstructionsTokenLimit,
+              ...(voiceConfig.sessionLifetimeMs === undefined
+                ? {}
+                : { maxLifetimeMs: voiceConfig.sessionLifetimeMs }),
+              onAudioDelta: open.onAudioDelta,
+              onFunctionCall: open.onFunctionCall,
+              onResponseDone: open.onResponseDone,
+              onClose: open.onClose,
+              onError: open.onError,
+            }),
+        },
+        briefing: async (request) => {
+          const briefing = await voiceApi.fetchDiscordVoiceBriefing({
+            schemaVersion: 1,
+            guildId: request.guildId,
+            channelId: request.channelId,
+            consentedUserIds: request.consentedUserIds,
+          });
+          return { instructions: briefing.instructions, briefing: briefing.briefing };
+        },
+        floor: {
+          names: characterNames(storedSettings.persona),
+          replyPolicy: storedSettings.persona.replyPolicy,
+          chattiness: storedSettings.persona.chattiness,
+          decayWindowMs: voiceConfig.decayWindowMs,
+        },
+        // Deliberately no volitionDecider: the personal-lab body is a secondary
+        // presence and must not interject on its own. Every volition offer is
+        // suppressed — still accounted, so the counters stay honest.
         presenceSessionId: () => presenceSession.record.sessionId,
         emit: recordVoiceEvidence,
       });
@@ -338,7 +370,132 @@ function recordReceipt(
 }
 
 async function recordVoiceEvidence(evidence: DiscordVoiceEvidence): Promise<void> {
-  await recordReceipt(`discord.voice.${evidence.type}` as DiscordBridgeReceipt["type"], evidence);
+  observeVoiceIdle(evidence);
+  // Evidence is content-free scalars by protocol construction; flattening
+  // drops absent optional fields the receipt record type cannot carry.
+  const data: Record<string, string | number | boolean> = {};
+  for (const [key, value] of Object.entries(evidence)) {
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      data[key] = value;
+    }
+  }
+  await recordReceipt(`discord.voice.${evidence.type}`, data);
+}
+
+/**
+ * Minimal parallel of the bot bridge's realtime voice environment parsing
+ * (`apps/discord-bridge/src/voice-composition.ts`): same names, same defaults,
+ * same bounds, so one set of operator knobs configures both bodies. Truncation
+ * and idle auto-leave are always configured, never unbounded (ADR 0057).
+ */
+function parseUserSessionVoiceRealtimeEnv(env: NodeJS.ProcessEnv): {
+  readonly realtimeModel: string;
+  readonly transcribeModel: string;
+  readonly voice: string;
+  readonly language?: string;
+  readonly truncationRetentionRatio: number;
+  readonly postInstructionsTokenLimit: number;
+  readonly sessionLifetimeMs?: number;
+  readonly decayWindowMs: number;
+  readonly idleLeaveMs: number;
+} {
+  const retired = ["CLANKIE_VOICE_STT_MODEL", "CLANKIE_VOICE_TTS_MODEL", "CLANKIE_VOICE_TTS_VOICE"].filter(
+    (name) => env[name] !== undefined,
+  );
+  if (retired.length > 0) {
+    throw new Error(
+      `${retired.join(", ")} belong to the removed STT→captain→TTS cascade. Use ` +
+        "CLANKIE_VOICE_TRANSCRIBE_MODEL, CLANKIE_VOICE_REALTIME_MODEL, and CLANKIE_VOICE_REALTIME_VOICE.",
+    );
+  }
+  const language = env.CLANKIE_VOICE_STT_LANGUAGE;
+  const sessionLifetimeMs = boundedVoiceInteger(env, "CLANKIE_VOICE_SESSION_LIFETIME_MS", 10_000, 14_400_000);
+  const retention = env.CLANKIE_VOICE_TRUNCATION_RETENTION;
+  const retentionRatio = retention === undefined ? 0.7 : Number(retention);
+  if (!Number.isFinite(retentionRatio) || retentionRatio <= 0 || retentionRatio > 1) {
+    throw new Error("CLANKIE_VOICE_TRUNCATION_RETENTION must be a ratio within (0, 1]");
+  }
+  return {
+    realtimeModel: nonEmptyVoiceEnv(env, "CLANKIE_VOICE_REALTIME_MODEL", "gpt-realtime-2.1"),
+    transcribeModel: nonEmptyVoiceEnv(env, "CLANKIE_VOICE_TRANSCRIBE_MODEL", "gpt-realtime-whisper"),
+    voice: nonEmptyVoiceEnv(env, "CLANKIE_VOICE_REALTIME_VOICE", "marin"),
+    ...(language === undefined ? {} : { language }),
+    truncationRetentionRatio: retentionRatio,
+    postInstructionsTokenLimit:
+      boundedVoiceInteger(env, "CLANKIE_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT", 1_000, 128_000) ?? 12_000,
+    ...(sessionLifetimeMs === undefined ? {} : { sessionLifetimeMs }),
+    decayWindowMs:
+      boundedVoiceInteger(env, "CLANKIE_VOICE_DECAY_WINDOW_MS", 1, Number.MAX_SAFE_INTEGER) ??
+      DEFAULT_DECAY_WINDOW_MS,
+    idleLeaveMs: boundedVoiceInteger(env, "CLANKIE_VOICE_IDLE_LEAVE_MS", 1, 86_400_000) ?? 900_000,
+  };
+}
+
+function nonEmptyVoiceEnv(env: NodeJS.ProcessEnv, name: string, fallback: string): string {
+  const value = env[name];
+  if (value === undefined) return fallback;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) throw new Error(`${name} must be non-empty when set`);
+  return trimmed;
+}
+
+function boundedVoiceInteger(
+  env: NodeJS.ProcessEnv,
+  name: string,
+  minimum: number,
+  maximum: number,
+): number | undefined {
+  const value = env[name];
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw new Error(`${name} must be an integer between ${minimum.toString()} and ${maximum.toString()}`);
+  }
+  return parsed;
+}
+
+let voiceIdleHandle: NodeJS.Timeout | undefined;
+
+/**
+ * Minimal parallel of the bot bridge's idle auto-leave: a joined channel is a
+ * metered realtime session (ADR 0057), so a call with no utterance, response,
+ * or floor movement for `CLANKIE_VOICE_IDLE_LEAVE_MS` ends itself.
+ */
+function observeVoiceIdle(evidence: DiscordVoiceEvidence): void {
+  const idleLeaveMs = voiceConfig?.idleLeaveMs;
+  if (idleLeaveMs === undefined || voiceSession === undefined) return;
+  if (evidence.type === "left") {
+    stopVoiceIdleTimer();
+    return;
+  }
+  if (
+    evidence.type !== "joined" &&
+    evidence.type !== "utterance" &&
+    evidence.type !== "response" &&
+    evidence.type !== "floor"
+  ) {
+    return;
+  }
+  stopVoiceIdleTimer();
+  voiceIdleHandle = setTimeout(() => {
+    voiceIdleHandle = undefined;
+    if (!voiceSession.status().active) return;
+    console.info(
+      `Discord user-session voice idle for ${String(idleLeaveMs)}ms; leaving the metered channel.`,
+    );
+    void voiceSession.leave().catch((error: unknown) => {
+      console.error(
+        { error: error instanceof Error ? error.message : String(error) },
+        "Discord user-session voice idle auto-leave failed to close the session",
+      );
+    });
+  }, idleLeaveMs);
+}
+
+function stopVoiceIdleTimer(): void {
+  if (voiceIdleHandle === undefined) return;
+  clearTimeout(voiceIdleHandle);
+  voiceIdleHandle = undefined;
 }
 
 function reportPhaseFailure(error: unknown): void {
@@ -352,6 +509,7 @@ let shutdownPromise: Promise<void> | undefined;
 async function shutdown(signal: NodeJS.Signals): Promise<void> {
   if (shutdownPromise !== undefined) return shutdownPromise;
   shutdownPromise = (async () => {
+    stopVoiceIdleTimer();
     await voiceSession?.leave();
     voiceAdapters.destroyAll();
     gateway.close();

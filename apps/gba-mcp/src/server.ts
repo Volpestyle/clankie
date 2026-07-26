@@ -111,7 +111,9 @@ export function createGbaMcpServer(context: GbaToolContext, options: GbaMcpServe
         description:
           "Acquire the possession lease before acting. One holder drives at a time; another " +
           "holder's live lease is only taken with force, which is logged. Observation needs no " +
-          "lease — look before deciding to take the body.",
+          "lease — look before deciding to take the body. While you hold it, checkpoint after " +
+          "major events (gba_emulator_save_state): progress lives only in this process until " +
+          "saved.",
         inputSchema: {
           holderId: z.string().min(1).max(128),
           force: z.boolean().optional().describe("Take the body from a live holder. Logged."),
@@ -190,8 +192,10 @@ export function createGbaMcpServer(context: GbaToolContext, options: GbaMcpServe
       title: "Save progress as a checkpoint",
       description:
         "Capture the full game state as a named operator-local checkpoint, with a companion " +
-        "scenario so a later boot can start from it. Requires the possession lease. Unavailable " +
-        "on the deterministic core double.",
+        "scenario so a later boot can start from it. Save after major events — a starter chosen, " +
+        "a battle won, a new area reached — because unsaved progress lives only in this process " +
+        "and dies with it. Requires the possession lease. Unavailable on the deterministic core " +
+        "double.",
       inputSchema: {
         label: z
           .string()

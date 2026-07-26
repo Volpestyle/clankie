@@ -55,6 +55,18 @@ const catalog = CatalogSchema.parse({
         reasoning: true,
         limit: { context: 200_000, output: 32_000 },
       },
+      "gpt-5.6": {
+        id: "gpt-5.6",
+        name: "GPT 5.6",
+        reasoning: true,
+        limit: { context: 1_050_000, output: 128_000 },
+      },
+      "gpt-5.6-sol": {
+        id: "gpt-5.6-sol",
+        name: "GPT 5.6 Sol",
+        reasoning: true,
+        limit: { context: 1_050_000, output: 128_000 },
+      },
       "gpt-5.6-luna": {
         id: "gpt-5.6-luna",
         name: "GPT 5.6 Luna",
@@ -75,6 +87,55 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
+function must<T>(value: T | undefined, label = "value"): T {
+  if (value === undefined) throw new Error(`expected ${label} to be defined`);
+  return value;
+}
+
+function codexCredential(): ProviderCredential {
+  return {
+    type: "oauth",
+    access: "access-secret",
+    refresh: "refresh-secret",
+    expires: Date.now() + 60_000,
+    accountId: "acct-test",
+  };
+}
+
+/** Minimal Responses reply, recording each request so tests can assert the transport. */
+function recordingCodexFetch(calls: { url: string; body: Record<string, unknown> }[]): typeof fetch {
+  return (input, init) => {
+    calls.push({
+      url: String(input),
+      body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+    });
+    return Promise.resolve(
+      Response.json({
+        id: "resp_test",
+        object: "response",
+        created_at: 1,
+        model: "gpt-5.5",
+        output: [
+          {
+            id: "msg_test",
+            type: "message",
+            role: "assistant",
+            status: "completed",
+            content: [{ type: "output_text", text: "live", annotations: [] }],
+          },
+        ],
+        usage: {
+          input_tokens: 1,
+          output_tokens: 1,
+          total_tokens: 2,
+          input_tokens_details: { cached_tokens: 0 },
+          output_tokens_details: { reasoning_tokens: 0 },
+        },
+      }),
+    );
+  };
+}
+
 async function configEnv(config: unknown): Promise<NodeJS.ProcessEnv> {
   const root = await mkdtemp(join(tmpdir(), "configured-model-"));
   tempDirs.push(root);
@@ -88,16 +149,27 @@ describe("withCodexSubscriptionProvider", () => {
   it("adds only verified subscription models beside the OpenAI API catalog", () => {
     const result = withCodexSubscriptionProvider(catalog);
     expect(result.openai?.models["gpt-5.6-luna"]).toBeDefined();
+    expect(result["openai-codex"]?.models["gpt-5.6-luna"]).toBeDefined();
     expect(result["openai-codex"]?.models["gpt-5.5"]?.cost).toEqual({
       input: 0,
       output: 0,
       cache_read: 0,
       cache_write: 0,
     });
-    expect(result["openai-codex"]?.models["gpt-5.6-luna"]).toBeUndefined();
     expect(result["openai-codex"]?.models["gpt-5.6-pro"]).toBeUndefined();
     expect(result.openai?.env).toEqual(["OPENAI_API_KEY"]);
     expect(result["openai-codex"]?.env).toEqual([]);
+  });
+
+  it("states the Codex backend window instead of the API-key window", () => {
+    const result = withCodexSubscriptionProvider(catalog);
+    const backendLimit = { context: 400_000, input: 272_000, output: 128_000 };
+    expect(result["openai-codex"]?.models["gpt-5.6-luna"]?.limit).toEqual(backendLimit);
+    expect(result["openai-codex"]?.models["gpt-5.4"]?.limit).toEqual(backendLimit);
+    expect(result.openai?.models["gpt-5.6-luna"]?.limit).toEqual({
+      context: 300_000,
+      output: 64_000,
+    });
   });
 });
 
@@ -176,16 +248,9 @@ describe("resolveConfiguredLanguageModel", () => {
     expect(JSON.stringify(capturedBody)).not.toContain("refresh-secret");
   });
 
-  it("never borrows the Codex credential for an OpenAI model ref", async () => {
-    const env = await configEnv({ model: "openai/gpt-5.6-luna" });
-    const store = new MemoryCredentialStore({
-      "openai-codex": {
-        type: "oauth",
-        access: "access-secret",
-        refresh: "refresh-secret",
-        expires: Date.now() + 60_000,
-      },
-    });
+  it("never borrows the Codex credential for a model the subscription cannot serve", async () => {
+    const env = await configEnv({ model: "openai/gpt-5.6-pro" });
+    const store = new MemoryCredentialStore({ "openai-codex": codexCredential() });
     await expect(
       resolveConfiguredLanguageModel({ env, cwd: tempDirs[0] as string, catalog, store }),
     ).rejects.toEqual(
@@ -194,5 +259,74 @@ describe("resolveConfiguredLanguageModel", () => {
         message: expect.stringContaining("No credential is configured for openai"),
       }),
     );
+  });
+});
+
+describe("subscription precedence", () => {
+  it("routes an API-key ref through the subscription and keeps the configured effort", async () => {
+    const env = await configEnv({
+      model: "openai/gpt-5.5",
+      variant: { "openai/gpt-5.5": "xhigh" },
+    });
+    const store = new MemoryCredentialStore({ "openai-codex": codexCredential() });
+    const calls: { url: string; body: Record<string, unknown> }[] = [];
+    const configured = await resolveConfiguredLanguageModel({
+      env: { ...env, OPENAI_API_KEY: "sk-metered" },
+      cwd: tempDirs[0] as string,
+      catalog,
+      store,
+      fetchImpl: recordingCodexFetch(calls),
+    });
+    const result = await generateText({
+      model: configured.model,
+      prompt: "say live",
+      ...configured.modelOptions,
+    });
+
+    expect(result.text).toBe("live");
+    expect(configured.ref).toBe("openai-codex/gpt-5.5");
+    // The Codex backend window, not the 1.05M API-key window the ref named.
+    expect(configured.modelContextWindowTokens).toBe(400_000);
+    expect(must(calls[0]).url).toBe(CODEX_API_ENDPOINT);
+    expect(must(calls[0]).body.reasoning).toMatchObject({ effort: "xhigh" });
+    expect(JSON.stringify(calls)).not.toContain("sk-metered");
+  });
+
+  it("resolves the bare gpt-5.6 alias to the size slug the backend answers", async () => {
+    const env = await configEnv({ model: "openai/gpt-5.6" });
+    const store = new MemoryCredentialStore({ "openai-codex": codexCredential() });
+    const configured = await resolveConfiguredLanguageModel({
+      env,
+      cwd: tempDirs[0] as string,
+      catalog,
+      store,
+      fetchImpl: recordingCodexFetch([]),
+    });
+    expect(configured.ref).toBe("openai-codex/gpt-5.6-sol");
+  });
+
+  it("leaves the ref alone without a subscription credential", async () => {
+    const env = await configEnv({ model: "openai/gpt-5.5" });
+    const store = new MemoryCredentialStore({});
+    const configured = await resolveConfiguredLanguageModel({
+      env: { ...env, OPENAI_API_KEY: "sk-metered" },
+      cwd: tempDirs[0] as string,
+      catalog,
+      store,
+    });
+    expect(configured.ref).toBe("openai/gpt-5.5");
+    expect(configured.modelContextWindowTokens).toBe(1_050_000);
+  });
+
+  it("honors disabling the subscription provider as the explicit metered opt-out", async () => {
+    const env = await configEnv({ model: "openai/gpt-5.5", disabled_providers: ["openai-codex"] });
+    const store = new MemoryCredentialStore({ "openai-codex": codexCredential() });
+    const configured = await resolveConfiguredLanguageModel({
+      env: { ...env, OPENAI_API_KEY: "sk-metered" },
+      cwd: tempDirs[0] as string,
+      catalog,
+      store,
+    });
+    expect(configured.ref).toBe("openai/gpt-5.5");
   });
 });

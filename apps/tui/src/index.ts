@@ -11,6 +11,7 @@ import { ClankieFaceShell } from "./shell/shell.ts";
 import { buildConsoleCommands } from "./commands.ts";
 import { buildProviderCommands, createProviderServices } from "./provider-commands.ts";
 import { buildDiscordCommands } from "./discord-commands.ts";
+import { buildPersonaCommands } from "./persona-commands.ts";
 import { createInitialConsoleState } from "./session/state.ts";
 import { EveCaptainSession } from "./session/eve-captain.ts";
 import { CaptainSessionCursorStore } from "./session/session-cursor.ts";
@@ -138,6 +139,7 @@ const commands = [
     setCredential: (providerId, key) => services.store.set(providerId, { type: "api", key }),
     removeCredential: (providerId) => services.store.delete(providerId),
   }),
+  ...buildPersonaCommands({ settings: new SettingsStore() }),
 ];
 
 function stageFromEnv(): { label?: string; value?: string } {

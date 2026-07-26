@@ -158,6 +158,13 @@ export const GbaEmulatorTraceSchema = z
     rngSeed: z.number().int().nonnegative().max(4_294_967_295),
     eventChainHeadSha256: Sha256Schema,
     events: z.array(GbaEmulatorEvidenceEventSchema).max(256),
+    /**
+     * Present only on rolling-evidence sessions (open-ended play): full
+     * windows sealed before this one, and how many events they held. Frozen
+     * receipt runs never roll, so their traces never carry these.
+     */
+    rolledWindows: z.number().int().positive().optional(),
+    droppedEvidenceEvents: z.number().int().positive().optional(),
   })
   .strict();
 export type GbaEmulatorTrace = z.infer<typeof GbaEmulatorTraceSchema>;

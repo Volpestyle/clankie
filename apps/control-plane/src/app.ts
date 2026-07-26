@@ -13,6 +13,7 @@ import {
   type ActionClassification,
   type CompiledDoctrine,
 } from "@clankie/doctrine";
+import { captainLaneInstructions } from "@clankie/captain-runtime";
 import type { EventStore, StoredEvent } from "@clankie/event-store";
 import {
   assertValidMissionPlan,
@@ -130,9 +131,14 @@ import type {
   WorkerSteerPrincipal,
   WorkerSteerSourceLane,
 } from "@clankie/worker-sdk";
+import { personaInstructions, SettingsStore, type ClankieSettings } from "@clankie/settings";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
-import { CaptainPresenceLeaseConflictError, CaptainPresenceManager } from "./captain-presence.ts";
+import {
+  CaptainPresenceLeaseConflictError,
+  CaptainPresenceManager,
+  type CaptainPresenceLease,
+} from "./captain-presence.ts";
 import {
   InMemoryWorkerSteeringStore,
   type StoredWorkerSteerCommand,
@@ -270,6 +276,13 @@ export interface ControlPlaneDependencies {
   classifyTriggerAction?: ConnectorActionClassifier;
   /** Trusted bounded memory projection. Its SQLite handle remains private to the control plane. */
   memoryStore?: MemoryStorePort;
+  /**
+   * Owner-authored persona source for the realtime voice briefing (ADR 0057).
+   * Defaults to the operator settings file; a request body can never supply it,
+   * for the reason ADR 0051 gives: caller-controlled context must not redefine
+   * who Clankie is. Tests inject a fixed settings document.
+   */
+  settings?: { load(): Promise<ClankieSettings> };
   /** Runner-owned privileged connector. Its credential access is not part of this interface. */
   githubConnector?: GithubConnector;
   /** Trusted policy-gated tracker mirror. Its provider credential is not part of this interface. */
@@ -652,6 +665,46 @@ const DiscordPersonMemoryReadQuerySchema = z
   })
   .strict();
 
+/** Discord snowflakes only: the voice-briefing request carries ids, never content. */
+const DiscordSnowflakeSchema = z.string().regex(/^\d{5,32}$/u, "must be a numeric Discord id");
+
+/**
+ * Realtime voice briefing request (ADR 0057). Strict by construction: every
+ * field is a literal or a snowflake-shaped id and unknown keys are rejected, so
+ * a bridge request structurally cannot smuggle a person-memory projection,
+ * briefing text, or instructions into the control-plane-side composition.
+ */
+const DiscordVoiceBriefingRequestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    guildId: DiscordSnowflakeSchema,
+    channelId: DiscordSnowflakeSchema,
+    consentedUserIds: z.array(DiscordSnowflakeSchema).max(25),
+  })
+  .strict();
+
+/**
+ * Hard cap on each voice-briefing string. Both projections list newest content
+ * first, so dropping whole trailing lines beyond the bound sheds oldest-first.
+ */
+const DISCORD_VOICE_BRIEFING_MAX_CHARACTERS = 8_000;
+/** Approved facts projected per consented speaker; mirrors the recall-card scale. */
+const DISCORD_VOICE_BRIEFING_MAX_FACTS_PER_PERSON = 8;
+
+/**
+ * What the realtime surface allows, appended after persona and lane identity.
+ * Authored here because the control plane owns the realtime session's whole
+ * instruction composition; the bridge only transports it.
+ */
+const DISCORD_VOICE_REALTIME_SURFACE_RULES = [
+  "# This surface",
+  "You are the live voice in a Discord voice channel; people hear you speak in real time.",
+  "- Your only tool is `ask_clankie`. Anything that touches the world — missions, workers, code, messages, memory, settings, anything this briefing cannot answer — goes through it. You hold no other capability and never imply otherwise.",
+  "- Speech can never approve privileged work. When a request is approval-shaped — merge, deploy, publish, delete, grant, confirm — say it has to happen on an authenticated surface, and pass it through `ask_clankie` so it lands in the captain lane.",
+  "- Answer briefly in a spoken register: short sentences, no lists, no headers, no markdown — nothing you would not say out loud.",
+  '- A leading "Speaker: <id>" text item names who currently has the floor. It comes from the authenticated Discord gateway and is ground truth; never infer who is talking from the audio itself.',
+].join("\n");
+
 const ApprovalStatusQuerySchema = z.object({
   status: ApprovalRequestStatusSchema.default("pending"),
 });
@@ -785,6 +838,9 @@ const ALLOWED_RUNNER_EVENT_TYPES = new Set([
 export async function createControlPlane(dependencies: ControlPlaneDependencies): Promise<Hono> {
   const clock = dependencies.clock ?? (() => new Date());
   const idFactory = dependencies.idFactory ?? randomUUID;
+  // Read per briefing rather than cached: the owner edits persona in the TUI and
+  // a refreshed voice session must pick it up without a control-plane restart.
+  const settingsSource = dependencies.settings ?? new SettingsStore();
   const instanceId = randomUUID();
   const missions = new Map<string, MissionRecord>();
   const missionTriggers = new Map<string, MissionTrigger>();
@@ -1501,6 +1557,107 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       },
       ready ? 200 : 503,
     );
+  });
+
+  /**
+   * Realtime voice briefing (ADR 0057): the bounded projection seeded into the
+   * long-lived realtime session, composed entirely control-plane-side.
+   *
+   * The request carries only ids — the strict schema makes a bridge-supplied
+   * person-memory projection structurally impossible. Persona comes from the
+   * owner-authored settings file, lane identity from the shared
+   * `captainLaneInstructions`, self-state from the control plane's own captain
+   * presence lease and Discord presence projection (ADR 0054), episodes from
+   * the memory store's ambient-lane recall card, and person memory from the
+   * same control-plane-owned store `EveCaptainChannelTurnPort` resolves
+   * `approvedPersonMemory` from — ids in, store out, nothing widened.
+   *
+   * Read-only: nothing here commits memory or any other state; the only write
+   * is a content-free egress audit event. Both response strings are capped at
+   * DISCORD_VOICE_BRIEFING_MAX_CHARACTERS, shedding whole trailing (oldest)
+   * lines beyond the bound.
+   */
+  app.post("/v1/discord/voice-briefing", async (context) => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") {
+      return context.json({ error: "captain_authentication_unavailable" }, 503);
+    }
+    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
+    if (captain.steerSourceLane !== "discord_voice") {
+      return context.json({ error: "discord_voice_authority_required" }, 403);
+    }
+    const parsed = DiscordVoiceBriefingRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_discord_voice_briefing" }, 400);
+    const request = parsed.data;
+    let persona: ClankieSettings["persona"];
+    try {
+      persona = (await settingsSource.load()).persona;
+    } catch {
+      // A malformed settings file fails closed rather than briefing a default
+      // character the owner did not author.
+      return context.json({ error: "voice_briefing_persona_unavailable" }, 503);
+    }
+    const now = clock();
+    const instructions = boundVoiceBriefingText(
+      [
+        personaInstructions(persona, "social"),
+        captainLaneInstructions({
+          metadata: {
+            captainLane: "discord_voice",
+            captainTargetId: `${request.guildId}:${request.channelId}`,
+          },
+        }),
+        DISCORD_VOICE_REALTIME_SURFACE_RULES,
+      ].join("\n\n"),
+      DISCORD_VOICE_BRIEFING_MAX_CHARACTERS,
+    );
+    const sections = [
+      renderVoiceBriefingSelfState(captainPresence.snapshot(), discordPresenceSessions.list()),
+    ];
+    // Same visibility fence as every ambient lane: non-operator lanes only ever
+    // see `shareable` episodes (`MemoryStore.recallEpisodes`).
+    const episodeCard = dependencies.memoryStore?.episodeRecallCard({ lane: "discord_voice" }) ?? "";
+    if (episodeCard.length > 0) sections.push(episodeCard);
+    let personMemoryUserCount = 0;
+    for (const userId of new Set(request.consentedUserIds)) {
+      // Ambient default visibility only — guild-scoped plus this channel's
+      // facts, never operator_private — exactly what the Discord surfaces
+      // already receive from GET /v1/memory/discord-people/:guildId/:userId.
+      const facts =
+        dependencies.memoryStore?.listDiscordPerson(
+          { guildId: request.guildId, userId },
+          { channelId: request.channelId, now },
+        ) ?? [];
+      const card = renderVoiceBriefingPersonMemory(userId, facts);
+      if (card !== undefined) {
+        sections.push(card);
+        personMemoryUserCount += 1;
+      }
+    }
+    const briefing = boundVoiceBriefingText(sections.join("\n\n"), DISCORD_VOICE_BRIEFING_MAX_CHARACTERS);
+    if (dependencies.eventStore) {
+      // Content-free egress receipt: this is a new path for approved person
+      // memory into a long-lived third-party session, so leaving it unlogged
+      // would make the risk note unauditable. Counts and lengths only.
+      await recordEvent(
+        "discord.voice-briefing.projected",
+        `discord-voice:${request.guildId}:${request.channelId}`,
+        now.toISOString(),
+        {
+          consentedUserCount: request.consentedUserIds.length,
+          personMemoryUserCount,
+          instructionsLength: instructions.length,
+          briefingLength: briefing.length,
+        },
+        { correlationId: `discord-voice-briefing:${idFactory()}` },
+      );
+    }
+    return context.json({
+      schemaVersion: 1 as const,
+      instructions,
+      briefing,
+      refreshedAt: now.toISOString(),
+    });
   });
 
   app.post("/v1/tracker/narratives", async (context) => {
@@ -4825,6 +4982,66 @@ function applyDiscordPersonMemoryEvent(
   if (event.type === "discord.person-memory.proposal.committed") {
     committed.add(z.string().min(1).parse(event.data.proposalId));
   }
+}
+
+/**
+ * Keep whole lines while the budget lasts. Every voice-briefing projection
+ * lists newest content first, so the lines this drops are the oldest.
+ */
+function boundVoiceBriefingText(text: string, maxCharacters: number): string {
+  if (text.length <= maxCharacters) return text;
+  const kept: string[] = [];
+  let length = 0;
+  for (const line of text.split("\n")) {
+    const next = length === 0 ? line.length : length + 1 + line.length;
+    if (next > maxCharacters) break;
+    kept.push(line);
+    length = next;
+  }
+  return kept.length === 0 ? text.slice(0, maxCharacters) : kept.join("\n");
+}
+
+/**
+ * Cross-lane self-state from the control plane's own stores (ADR 0054): the
+ * captain presence lease and the durable Discord presence projection. His own
+ * whereabouts, never another room's contents — no session ids, no transcripts.
+ */
+function renderVoiceBriefingSelfState(
+  lease: CaptainPresenceLease | undefined,
+  sessions: readonly DiscordPresenceSessionRecord[],
+): string {
+  const lines = [
+    "# Your own status",
+    "Your presence across surfaces, from the control plane's own records — never from anything said in the room.",
+  ];
+  if (lease === undefined) lines.push("- Captain: not currently reporting presence.");
+  else if (lease.state === "live") lines.push(`- Captain: live, last heartbeat ${lease.heartbeatAt}.`);
+  else lines.push(`- Captain: offline, last heartbeat ${lease.heartbeatAt}.`);
+  for (const session of sessions) {
+    const voice =
+      session.voiceGuildIds.length > 0 ? `, voice active in guild ${session.voiceGuildIds.join(", ")}` : "";
+    lines.push(
+      `- Discord ${session.transportKind} presence: ${session.phase}${voice} (updated ${session.updatedAt}).`,
+    );
+  }
+  return lines.join("\n");
+}
+
+/**
+ * One consented speaker's approved memory, rendered like the recall card the
+ * captain lane already receives. A speaker with no visible approved facts
+ * contributes nothing — not even a header naming them.
+ */
+function renderVoiceBriefingPersonMemory(
+  userId: string,
+  facts: readonly DiscordPersonMemoryFact[],
+): string | undefined {
+  if (facts.length === 0) return undefined;
+  const lines = [`## What you know about user ${userId}`];
+  for (const fact of facts.slice(0, DISCORD_VOICE_BRIEFING_MAX_FACTS_PER_PERSON)) {
+    lines.push(`- ${fact.kind} (${fact.confidence.toFixed(2)}): ${fact.body}`);
+  }
+  return lines.join("\n");
 }
 
 /** Episodes are the captain's own, not any one mission's, so they share one stream. */

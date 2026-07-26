@@ -39,7 +39,7 @@ describe("Discord mission projection", () => {
     expect(renderMissionChanges(previous, changed)).toEqual([
       "Mission **mission-1** changed from **running** to **verifying**.",
       "Task **Implement** is now **verifying**.",
-      "Mission attention: 1 new approval request(s). Discord cannot decide them; use `/captain-approval` for an authenticated handoff.",
+      "Mission attention: 1 new approval request(s). Discord cannot decide them; use `/clankie approval` for an authenticated handoff.",
     ]);
   });
 

@@ -13,8 +13,19 @@ export class DiscordVoiceConsentRegistry {
     | { readonly guildId: string; readonly channelId: string; readonly consentedUserIds: Set<string> }
     | undefined;
 
-  public open(guildId: string, channelId: string, invokingUserId: string): DiscordVoiceConsentSession {
-    this.session = { guildId, channelId, consentedUserIds: new Set([invokingUserId]) };
+  /**
+   * Opens the session for one guild voice channel. `invokingUserId` is the
+   * slash invoker who saw the join disclosure in their ephemeral reply and is
+   * auto-opted-in; an asked join (ADR 0062) passes nobody, so every
+   * participant — the asker included — consents only through
+   * `/clankie voice-consent opt-in`, which carries the residency disclosure.
+   */
+  public open(guildId: string, channelId: string, invokingUserId?: string): DiscordVoiceConsentSession {
+    this.session = {
+      guildId,
+      channelId,
+      consentedUserIds: new Set(invokingUserId === undefined ? [] : [invokingUserId]),
+    };
     return this.snapshot();
   }
 

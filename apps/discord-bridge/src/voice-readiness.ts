@@ -1,4 +1,8 @@
-import type { DiscordControlPlaneReadiness } from "@clankie/api-client";
+import type {
+  DiscordControlPlaneReadiness,
+  DiscordVoiceBriefing,
+  DiscordVoiceBriefingRequest,
+} from "@clankie/api-client";
 import {
   DISCORD_BOT_PROVIDER_ID,
   resolveDiscordVoiceBridgeCredential,
@@ -6,33 +10,84 @@ import {
 } from "@clankie/credential-broker";
 import { REST, Routes } from "discord.js";
 import { opus } from "prism-media";
-import type { VoiceSpeechReadiness, VoiceSpeechRuntime } from "@clankie/discord-presence-core";
+import {
+  openRealtimeConversationSession,
+  openRealtimeTranscriptionSession,
+  type RealtimeSocketFactory,
+  type RealtimeTimers,
+} from "@clankie/discord-presence-core";
 import type { DiscordReadinessCheck } from "./readiness.ts";
+import {
+  DEFAULT_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT,
+  DEFAULT_VOICE_REALTIME_MODEL,
+  DEFAULT_VOICE_REALTIME_VOICE,
+  DEFAULT_VOICE_TRANSCRIBE_MODEL,
+  DEFAULT_VOICE_TRUNCATION_RETENTION,
+  parseVoiceRealtimeEnv,
+  type VoiceRealtimeEnvConfig,
+} from "./voice-composition.ts";
+
+/** Content-free realtime configuration echo: provider, models, and truncation scalars only. */
+export interface VoiceRealtimeReadiness {
+  readonly provider: "openai";
+  readonly transcribeModel: string;
+  readonly realtimeModel: string;
+  readonly voice: string;
+  readonly truncationRetentionRatio: number;
+  readonly postInstructionsTokenLimit: number;
+}
 
 export interface DiscordVoiceReadinessReport {
   readonly schemaVersion: 1;
   readonly ready: boolean;
   readonly checkedAt: string;
   readonly checks: readonly DiscordReadinessCheck[];
-  readonly speech: VoiceSpeechReadiness;
+  readonly realtime: VoiceRealtimeReadiness;
 }
 
-interface DiscordControlPlaneReadinessPort {
+interface DiscordVoiceControlPlanePort {
   inspectDiscordReadiness(): Promise<DiscordControlPlaneReadiness>;
+  fetchDiscordVoiceBriefing(input: DiscordVoiceBriefingRequest): Promise<DiscordVoiceBriefing>;
 }
 
 interface DiscordRestReadPort {
   get(route: `/${string}`): Promise<unknown>;
 }
 
+/**
+ * One stage of the live wake probe: whether it passed and a content-free
+ * detail line. No transcript, response, or audio ever enters a result.
+ */
+export interface VoiceWakeProbeStage {
+  readonly ok: boolean;
+  readonly detail: string;
+}
+
+export interface VoiceWakeTransitionProbeResult {
+  readonly listener: VoiceWakeProbeStage;
+  readonly engaged: VoiceWakeProbeStage;
+}
+
+/**
+ * Injected by tests (fakes) and defaulted to {@link probeVoiceWakeTransition}
+ * by the CLI path, mirroring how the Discord REST probes default live.
+ */
+export type VoiceWakeTransitionProbe = () => Promise<VoiceWakeTransitionProbeResult>;
+
 export interface InspectDiscordVoiceReadinessOptions {
   readonly env: NodeJS.ProcessEnv;
   readonly store: CredentialStore;
-  readonly api: DiscordControlPlaneReadinessPort;
-  readonly speech: VoiceSpeechRuntime;
+  readonly api: DiscordVoiceControlPlanePort;
   readonly rest?: DiscordRestReadPort;
   readonly opusAvailable?: () => boolean;
   readonly clock?: () => Date;
+  /**
+   * The dormant→engaged live probe. When omitted it is built from the
+   * brokered openai credential and the parsed realtime configuration — the
+   * live CLI path — and skipped (as failed checks) when either is missing.
+   * Unit tests inject a fake to stay offline.
+   */
+  readonly wakeProbe?: VoiceWakeTransitionProbe;
 }
 
 /** Credential-safe readiness for official-bot DAVE group voice; no Discord names or content enter it. */
@@ -50,9 +105,9 @@ export async function inspectDiscordVoiceReadiness(
     "credential environment",
     forbiddenCredentials.length === 0,
     forbiddenCredentials.length === 0
-      ? "Discord credentials are absent from the process environment"
+      ? "Discord and OpenAI credentials are absent from the process environment"
       : `${String(forbiddenCredentials.length)} forbidden credential variable(s) are set`,
-    "Remove Discord token environment variables; use brokered discord_bot.",
+    "Remove credential environment variables; use the brokered discord_bot and openai entries.",
   );
   add(
     "voice enabled",
@@ -122,15 +177,38 @@ export async function inspectDiscordVoiceReadiness(
     );
   }
 
-  const speech = await options.speech.readiness();
+  // The realtime configuration is validated exactly as the bridge validates it
+  // at startup: truncation and idle auto-leave are configured, never unbounded.
+  let realtimeConfig: VoiceRealtimeEnvConfig | undefined;
+  try {
+    realtimeConfig = parseVoiceRealtimeEnv(options.env);
+    add(
+      "realtime configuration",
+      true,
+      `${realtimeConfig.transcribeModel} listener, ${realtimeConfig.realtimeModel}/${realtimeConfig.voice} ` +
+        `engaged session, truncation ${String(realtimeConfig.truncationRetentionRatio)} retention / ` +
+        `${String(realtimeConfig.postInstructionsTokenLimit)} post-instructions tokens`,
+      "",
+    );
+  } catch (error) {
+    add(
+      "realtime configuration",
+      false,
+      error instanceof Error ? error.message : "realtime voice environment is invalid",
+      "Correct the CLANKIE_VOICE_* realtime environment variables.",
+    );
+  }
+  const openAiCredential = await options.store.get("openai");
+  const openAiKey = openAiCredential?.type === "api" ? openAiCredential.key : undefined;
   add(
-    "OpenAI speech",
-    speech.ready,
-    speech.ready
-      ? `${speech.sttModel} transcription and ${speech.ttsModel}/${speech.voice} AI voice are configured`
-      : "broker-backed OpenAI speech is unavailable",
+    "OpenAI realtime credential",
+    openAiKey !== undefined,
+    openAiKey === undefined
+      ? "broker entry openai is missing or is not an API credential"
+      : "present in broker",
     "Store the existing OpenAI API key under provider openai; do not put it in the environment.",
   );
+
   let opusReady = false;
   try {
     opusReady =
@@ -168,6 +246,89 @@ export async function inspectDiscordVoiceReadiness(
     );
   }
 
+  // The briefing path end-to-end (T4→T6): the control plane composes
+  // instructions and a projection for the configured channel with zero
+  // consented ids, so nobody's person memory is touched by a readiness run.
+  if (guildId !== undefined && channelId !== undefined) {
+    try {
+      const briefing = await options.api.fetchDiscordVoiceBriefing({
+        schemaVersion: 1,
+        guildId,
+        channelId,
+        consentedUserIds: [],
+      });
+      add(
+        "voice briefing endpoint",
+        true,
+        `control plane composed ${String(briefing.instructions.length)} instruction and ` +
+          `${String(briefing.briefing.length)} briefing character(s)`,
+        "",
+      );
+    } catch (error) {
+      add(
+        "voice briefing endpoint",
+        false,
+        error instanceof Error ? error.message : "voice briefing request failed",
+        "Start the control plane with the Discord voice briefing route and a valid voice bridge identity.",
+      );
+    }
+  } else {
+    add(
+      "voice briefing endpoint",
+      false,
+      "not checked because the target guild or voice channel is missing",
+      "Resolve the target guild and voice channel checks first.",
+    );
+  }
+
+  // The wake transition is a new failure surface (ADR 0057): a dropped wake
+  // means he ignores someone who addressed him. Readiness therefore exercises
+  // dormant→engaged — a real listener session, then a real conversation
+  // session — not just one session round trip.
+  const wakeProbe =
+    options.wakeProbe ??
+    (openAiKey !== undefined && realtimeConfig !== undefined
+      ? buildDefaultWakeProbe(openAiKey, realtimeConfig)
+      : undefined);
+  if (wakeProbe === undefined) {
+    const detail = "not checked because the brokered openai credential or realtime configuration is missing";
+    const remediation = "Resolve the OpenAI realtime credential and realtime configuration checks first.";
+    add("listener session", false, detail, remediation);
+    add("engaged session", false, detail, remediation);
+    add("wake transition", false, detail, remediation);
+  } else {
+    let probe: VoiceWakeTransitionProbeResult;
+    try {
+      probe = await wakeProbe();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "wake transition probe failed";
+      probe = {
+        listener: { ok: false, detail },
+        engaged: { ok: false, detail },
+      };
+    }
+    add(
+      "listener session",
+      probe.listener.ok,
+      probe.listener.detail,
+      "Verify the brokered openai credential has access to the configured transcription model.",
+    );
+    add(
+      "engaged session",
+      probe.engaged.ok,
+      probe.engaged.detail,
+      "Verify the brokered openai credential has access to the configured realtime model.",
+    );
+    add(
+      "wake transition",
+      probe.listener.ok && probe.engaged.ok,
+      probe.listener.ok && probe.engaged.ok
+        ? "dormant listener and engaged session opened in sequence"
+        : "the dormant to engaged transition could not be exercised",
+      "Resolve the listener and engaged session checks first.",
+    );
+  }
+
   if (botToken !== undefined && applicationId !== undefined && guildId !== undefined) {
     const rest = options.rest ?? new REST({ version: "10" }).setToken(botToken);
     try {
@@ -187,7 +348,13 @@ export async function inspectDiscordVoiceReadiness(
       );
     }
     try {
-      await rest.get(Routes.guildMember(guildId, "@me"));
+      // Membership is probed by fetching the guild itself: it returns 404
+      // "Unknown Guild" to a bot that is not installed. The obvious-looking
+      // alternatives are both wrong here — `/guilds/{id}/members/@me` coerces
+      // user_id to a snowflake and rejects `@me`, and
+      // `/users/@me/guilds/{id}/member` is OAuth2-only ("Bots cannot use this
+      // endpoint").
+      await rest.get(Routes.guild(guildId));
       add("Discord guild membership", true, "official bot is installed in the target guild", "");
     } catch (error) {
       add(
@@ -217,8 +384,153 @@ export async function inspectDiscordVoiceReadiness(
     ready: checks.every((check) => check.ok),
     checkedAt: (options.clock ?? (() => new Date()))().toISOString(),
     checks,
-    speech,
+    realtime: {
+      provider: "openai",
+      transcribeModel: realtimeConfig?.transcribeModel ?? DEFAULT_VOICE_TRANSCRIBE_MODEL,
+      realtimeModel: realtimeConfig?.realtimeModel ?? DEFAULT_VOICE_REALTIME_MODEL,
+      voice: realtimeConfig?.voice ?? DEFAULT_VOICE_REALTIME_VOICE,
+      truncationRetentionRatio:
+        realtimeConfig?.truncationRetentionRatio ?? DEFAULT_VOICE_TRUNCATION_RETENTION,
+      postInstructionsTokenLimit:
+        realtimeConfig?.postInstructionsTokenLimit ?? DEFAULT_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT,
+    },
   };
+}
+
+// ---------------------------------------------------------------------------
+// The live wake-transition probe.
+// ---------------------------------------------------------------------------
+
+export interface VoiceWakeTransitionProbeOptions {
+  /** Broker-resolved OpenAI key. */
+  readonly apiKey: string;
+  readonly config: VoiceRealtimeEnvConfig;
+  /** Injected by tests; production uses the runtime's WebSocket factory. */
+  readonly socketFactory?: RealtimeSocketFactory;
+  readonly timers?: RealtimeTimers;
+  /** Per-stage cap. A probe must never hang readiness. */
+  readonly timeoutMs?: number;
+}
+
+const WAKE_PROBE_TIMEOUT_MS = 20_000;
+const WAKE_PROBE_INSTRUCTIONS =
+  "You are a connectivity probe for a readiness check. Reply with one short word.";
+const WAKE_PROBE_ITEM = "Readiness probe: reply with one short word.";
+
+/**
+ * Exercises the dormant→engaged wake transition against the live Realtime API:
+ * opens a real transcription session and waits for a clean open, then — with
+ * the listener still connected, exactly like a wake — opens a real
+ * conversation session with minimal instructions, sends one text item plus one
+ * `response.create`, and closes both on the first sign of a response. The
+ * runtime's byte caps bound everything received; audio deltas are zeroed on
+ * arrival and nothing content-bearing enters the result.
+ */
+export async function probeVoiceWakeTransition(
+  options: VoiceWakeTransitionProbeOptions,
+): Promise<VoiceWakeTransitionProbeResult> {
+  const timeoutMs = options.timeoutMs ?? WAKE_PROBE_TIMEOUT_MS;
+  const injected = {
+    ...(options.socketFactory === undefined ? {} : { socketFactory: options.socketFactory }),
+    ...(options.timers === undefined ? {} : { timers: options.timers }),
+  };
+  let listener: { close(): void } | undefined;
+  let listenerStage: VoiceWakeProbeStage;
+  let engagedStage: VoiceWakeProbeStage = {
+    ok: false,
+    detail: "not attempted because the listener session failed",
+  };
+  try {
+    listener = await withTimeout(
+      openRealtimeTranscriptionSession({
+        apiKey: options.apiKey,
+        model: options.config.transcribeModel,
+        ...(options.config.language === undefined ? {} : { language: options.config.language }),
+        ...injected,
+        onTranscript: () => undefined,
+      }),
+      timeoutMs,
+      "listener session open timed out",
+    );
+    listenerStage = { ok: true, detail: "dormant transcription session opened cleanly" };
+  } catch (error) {
+    listenerStage = {
+      ok: false,
+      detail: error instanceof Error ? error.message : "listener session open failed",
+    };
+  }
+  if (listenerStage.ok) {
+    try {
+      let settle: (() => void) | undefined;
+      const responded = new Promise<void>((resolvePromise) => {
+        settle = resolvePromise;
+      });
+      const engaged = await withTimeout(
+        openRealtimeConversationSession({
+          apiKey: options.apiKey,
+          model: options.config.realtimeModel,
+          voice: options.config.voice,
+          instructions: WAKE_PROBE_INSTRUCTIONS,
+          truncationRetentionRatio: options.config.truncationRetentionRatio,
+          postInstructionsTokenLimit: options.config.postInstructionsTokenLimit,
+          ...injected,
+          onAudioDelta: (pcm) => {
+            pcm.fill(0);
+            settle?.();
+          },
+          onResponseDone: () => {
+            settle?.();
+          },
+        }),
+        timeoutMs,
+        "engaged session open timed out",
+      );
+      try {
+        engaged.createTextItem(WAKE_PROBE_ITEM);
+        engaged.createResponse();
+        await withTimeout(responded, timeoutMs, "engaged session produced no response");
+        engagedStage = { ok: true, detail: "conversation session opened and produced a response" };
+      } finally {
+        try {
+          engaged.close();
+        } catch {
+          // Already closed; the probe result stands either way.
+        }
+      }
+    } catch (error) {
+      engagedStage = {
+        ok: false,
+        detail: error instanceof Error ? error.message : "engaged session probe failed",
+      };
+    }
+  }
+  try {
+    listener?.close();
+  } catch {
+    // Already closed; the probe result stands either way.
+  }
+  return { listener: listenerStage, engaged: engagedStage };
+}
+
+function buildDefaultWakeProbe(apiKey: string, config: VoiceRealtimeEnvConfig): VoiceWakeTransitionProbe {
+  return () => probeVoiceWakeTransition({ apiKey, config });
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolvePromise, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(message));
+    }, timeoutMs);
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolvePromise(value);
+      })
+      .catch((error: unknown) => {
+        clearTimeout(timer);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      });
+  });
 }
 
 function discordId(value: string | undefined): string | undefined {

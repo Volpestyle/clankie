@@ -21,7 +21,9 @@ import {
   gbaEmulatorGoalEvent,
   runFrozenGbaScenario,
   validateGbaEmulatorTrace,
+  type FrozenGbaScenario,
   type GbaDriverView,
+  type GbaEmulatorAdapterOptions,
 } from "../src/index.ts";
 
 const roots: string[] = [];
@@ -49,11 +51,20 @@ const allCapabilities = [
   "emulator.gba.wait",
 ] as const;
 
-async function harness() {
+async function harness(options?: {
+  mutateScenario?: (scenario: FrozenGbaScenario) => FrozenGbaScenario;
+  adapterOptions?: GbaEmulatorAdapterOptions;
+}) {
   const frozen = await fixture();
+  frozen.scenario = options?.mutateScenario?.(frozen.scenario) ?? frozen.scenario;
   const rootDir = await mkdtemp(join(tmpdir(), "gba-emulator-test-"));
   roots.push(rootDir);
-  const adapter = new GbaEmulatorAdapter(frozen.scenario, frozen.fixtureSha256);
+  const adapter = new GbaEmulatorAdapter(
+    frozen.scenario,
+    frozen.fixtureSha256,
+    undefined,
+    options?.adapterOptions,
+  );
   const events: EnvironmentEvent[] = [];
   const now = { value: new Date("2026-07-19T00:00:00.000Z") };
   const runtime = new EnvironmentRuntime({
@@ -397,6 +408,44 @@ describe("GBA emulator embodiment", () => {
     expect(adapter.session(spec.sessionId).observe("danger")).toMatchObject({
       data: { code: "uncertain_state", stateCertain: false },
     });
+  });
+
+  it("rolls the evidence window for open-ended play instead of killing the body at the cap", async () => {
+    const tiny = (scenario: FrozenGbaScenario) =>
+      FrozenGbaScenarioSchema.parse({ ...scenario, maxEvidenceEvents: 4 });
+    const rolling = await harness({
+      mutateScenario: tiny,
+      adapterOptions: { evidencePolicy: "rolling" },
+    });
+    // Far past the budget that wedged the frozen policy permanently.
+    for (let index = 0; index < 10; index += 1) {
+      const result = await rolling.runtime.startAction(
+        rolling.grant.token,
+        rolling.command(`roll-${String(index)}`, { kind: "frame_advance", frames: 1 }),
+      );
+      expect(result).toMatchObject({ status: "completed" });
+    }
+    const session = rolling.adapter.session(rolling.spec.sessionId);
+    expect(session.snapshot()).toMatchObject({ stateCertain: true });
+    // The cap is never silent: the trace confesses what rolled, and the
+    // retained window still validates as a chain.
+    const trace = session.trace();
+    expect(trace.events.length).toBeLessThanOrEqual(4);
+    expect(trace.rolledWindows).toBeGreaterThanOrEqual(2);
+    expect(trace.droppedEvidenceEvents).toBe((trace.rolledWindows ?? 0) * 4);
+    expect(() => validateGbaEmulatorTrace(trace)).not.toThrow();
+
+    // The frozen policy still fails closed at the same budget, exactly as before.
+    const frozen = await harness({ mutateScenario: tiny });
+    let refusal: unknown = null;
+    for (let index = 0; index < 10 && refusal === null; index += 1) {
+      const result = await frozen.runtime.startAction(
+        frozen.grant.token,
+        frozen.command(`frozen-${String(index)}`, { kind: "frame_advance", frames: 1 }),
+      );
+      if ((result as { status: string }).status !== "completed") refusal = result;
+    }
+    expect(refusal).toMatchObject({ errorCode: "evidence_bound_exceeded" });
   });
 
   it("rejects malformed commands, over-limit frames, and ungranted capabilities fail-closed", async () => {

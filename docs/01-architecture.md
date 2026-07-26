@@ -186,17 +186,26 @@ and never scrape gateway logs or infer lifecycle from action payloads.
 ([ADR 0045](adr/0045-official-bot-dave-group-voice.md)). It owns the voice
 WebSocket, UDP, RTP/Opus, transport encryption, and DAVE; a positive negotiated
 DAVE protocol is required before the session accepts audio. The bridge
-subscribes only to explicitly consented Discord user ids, caps each utterance,
-and zeroes raw PCM after the memory-only brokered speech request.
+subscribes only to explicitly consented Discord user ids, so unconsented audio
+never reaches the realtime input buffer, and local PCM buffers are memory-only
+and zeroed after use.
 
-Speaker-attributed text enters a continuing `discord_voice` Eve lane. The
-control plane adds only approved guild/user person-memory projection; the
-request cannot manufacture trusted memory. Spoken responses return as
-memory-only 24 kHz mono PCM, are converted to Discord's 48 kHz stereo stream,
-and disclose an AI-generated voice. Overlap and barge-in are explicit: another
-speaker can interrupt a stale synthesized response, while response playback is
-serialized. Receipts contain ids, counts, DAVE version, duration, and typed
-outcomes, never audio or text.
+Voice conversation is two-tier
+([ADR 0057](adr/0057-realtime-voice-with-captain-handoff.md)): consented audio
+is downmixed to 24 kHz mono and streamed into a dormant `gpt-realtime-whisper`
+transcription session, and a repository-owned floor machine decides when the
+engaged `gpt-realtime-2.1` session opens and speaks — being addressed wakes it
+for free, a rate-capped volition call covers unprompted speech, and release is
+an explicit phrase or decay. The engaged session holds exactly one tool,
+`ask_clankie`, which routes through the continuing `discord_voice` Eve lane;
+the control plane adds only approved guild/user person-memory projection to
+the briefing, and the request cannot manufacture trusted memory. Streamed
+24 kHz mono response audio is converted to Discord's 48 kHz stereo stream and
+disclosed as an AI-generated voice. Barge-in is deliberate — the floor holder
+or a re-address truncates playback while other crosstalk lets him finish — and
+captain handoffs and playback are serialized. Receipts contain ids, counts,
+DAVE version, durations, floor and volition counters, and typed outcomes,
+never audio or text.
 
 The ClankVox schema-1 parser and golden fixtures remain inactive compatibility
 artifacts. No AGPL ClankVox source is imported.

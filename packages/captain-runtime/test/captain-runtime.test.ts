@@ -16,6 +16,8 @@ import {
   LocalOperatorConversationService,
   OperatorConversationMigrationError,
   OperatorConversationOwnershipError,
+  captainLaneInstructions,
+  captainLaneKind,
   createAdmittedLanguageModel,
   createLocalOperatorConversationDispatch,
   openCaptainLaneRegistry,
@@ -985,5 +987,29 @@ describe("lane-scoped execution and model calls", () => {
     closeStream?.();
     expect(await reader.read()).toEqual({ done: true, value: undefined });
     expect(admission.snapshot().active).toEqual([]);
+  });
+});
+
+describe("shared captain lane context", () => {
+  it("resolves lanes from explicit metadata, legacy tui, and channel kinds", () => {
+    expect(captainLaneKind({ metadata: { captainLane: "discord_voice" } })).toBe("discord_voice");
+    expect(captainLaneKind({ metadata: { captainLane: "discord_presence" } })).toBe("discord_presence");
+    expect(captainLaneKind({ metadata: { captainLane: "tui" } })).toBe("operator");
+    expect(captainLaneKind({ kind: "http" })).toBe("operator");
+    expect(captainLaneKind({ kind: "channel:operator-conversations" })).toBe("operator");
+    expect(captainLaneKind({ kind: "discord-voice" })).toBe("discord_voice");
+    expect(captainLaneKind({ kind: "schedule" })).toBe("gameplay");
+    expect(() => captainLaneKind({ kind: "mystery" })).toThrow(/captainLane/);
+  });
+
+  it("renders one lane identity without including continuation authority", () => {
+    const markdown = captainLaneInstructions({
+      metadata: { captainLane: "discord_voice", captainTargetId: "guild-1:voice-1" },
+      continuationToken: "must-not-leak",
+    });
+    expect(markdown).toContain("same Clankie");
+    expect(markdown).toContain("ambient Discord voice lane");
+    expect(markdown).not.toContain("must-not-leak");
+    expect(markdown).not.toContain("continuationToken");
   });
 });

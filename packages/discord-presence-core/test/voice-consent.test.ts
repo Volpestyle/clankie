@@ -17,6 +17,17 @@ describe("Discord group voice consent", () => {
     expect(consent.permits("guild-1", "voice-1", "user-1")).toBe(false);
   });
 
+  it("an open with no invoker permits nobody — the asker included — until explicit opt-in", () => {
+    // The asked-join path (ADR 0062): asking him into the channel grants
+    // nothing; consent still arrives only through /clankie voice-consent.
+    const consent = new DiscordVoiceConsentRegistry();
+    const session = consent.open("guild-1", "voice-1");
+    expect(session.consentedUserIds.size).toBe(0);
+    expect(consent.permits("guild-1", "voice-1", "asker")).toBe(false);
+    consent.set("guild-1", "voice-1", "asker", true);
+    expect(consent.permits("guild-1", "voice-1", "asker")).toBe(true);
+  });
+
   it("refuses consent outside the active guild/channel", () => {
     const consent = new DiscordVoiceConsentRegistry();
     consent.open("guild-1", "voice-1", "user-1");

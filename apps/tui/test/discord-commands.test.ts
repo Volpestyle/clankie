@@ -33,12 +33,11 @@ describe("empty allowlist guard", () => {
     expect(describeEmptyAllowlist("text ingress", [], channels)).toMatch(/no server allowlisted/);
   });
 
-  it("lets voice admit every channel in a server but keeps ingress channels required", () => {
-    // Voice joining is still gated by the ambient role check and per-participant
-    // consent, so an empty channel list is a deliberate convenience.
+  it("lets either plane admit every channel in an allowlisted server", () => {
+    // The channel list is refinement below the server allowlist on both planes;
+    // empty admits every channel inside the servers the owner already chose.
     expect(describeEmptyAllowlist("voice", guilds, [])).toBeUndefined();
-    // Text ingress has no such gate: empty would silently drop every message.
-    expect(describeEmptyAllowlist("text ingress", guilds, [])).toMatch(/ignore every message/);
+    expect(describeEmptyAllowlist("text ingress", guilds, [])).toBeUndefined();
   });
 
   it("allows a fully specified plane", () => {

@@ -90,7 +90,7 @@ export function renderMissionChanges(
   if (current.approvalCount > previous.approvalCount) {
     messages.push(
       `Mission attention: ${String(current.approvalCount - previous.approvalCount)} new approval request(s). ` +
-        "Discord cannot decide them; use `/captain-approval` for an authenticated handoff.",
+        "Discord cannot decide them; use `/clankie approval` for an authenticated handoff.",
     );
   }
   return messages;

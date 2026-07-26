@@ -2197,6 +2197,32 @@ export type DiscordPresenceChannelIdentity = z.infer<typeof DiscordPresenceChann
 export const DISCORD_PRESENCE_TRIGGER_BODY_MAX = 16_384;
 export const DISCORD_PRESENCE_CONTEXT_MESSAGES_MAX = 50;
 
+export const DiscordVoicePresenceNoteReasonSchema = z.enum([
+  "authority",
+  "allowlist",
+  "not_in_voice",
+  "voice_disabled",
+  "other_guild",
+  "failed",
+]);
+export type DiscordVoicePresenceNoteReason = z.infer<typeof DiscordVoicePresenceNoteReasonSchema>;
+
+/**
+ * What the bridge just did about voice presence for this message: a member
+ * asked him into or out of voice in text chat, and the bridge decided and
+ * executed at its ingress boundary before the captain turn (ADR 0062). Enums
+ * and ids only, never free text, so a prompt-injected body can never author
+ * what he is told happened.
+ */
+export const DiscordVoicePresenceNoteSchema = z
+  .object({
+    action: z.enum(["joined", "join_refused", "left", "leave_refused"]),
+    channelId: z.string().min(1).optional(),
+    reason: DiscordVoicePresenceNoteReasonSchema.optional(),
+  })
+  .strict();
+export type DiscordVoicePresenceNote = z.infer<typeof DiscordVoicePresenceNoteSchema>;
+
 export const DiscordPresenceChannelTurnRequestSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -2217,6 +2243,13 @@ export const DiscordPresenceChannelTurnRequestSchema = z
          * stay silent on any turn — but he should know whether he was asked.
          */
         unprompted: z.boolean().optional(),
+        /**
+         * Set by the bridge when this message asked him into or out of voice
+         * and the bridge already executed the decision (ADR 0062). His reply
+         * must reflect what actually happened: he is the voice, the bridge is
+         * the actor.
+         */
+        voicePresenceNote: DiscordVoicePresenceNoteSchema.optional(),
       })
       .strict(),
     contextMessages: z

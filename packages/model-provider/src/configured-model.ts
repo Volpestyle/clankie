@@ -21,7 +21,14 @@ import {
 } from "./instantiate.ts";
 import { CODEX_PROVIDER_ID, createCodexFetch } from "./oauth/openai-codex.ts";
 import { ANTHROPIC_PROVIDER_ID, createAnthropicFetch } from "./oauth/anthropic.ts";
-import { mergedCatalog, resolveRole, type ModelRole } from "./resolve.ts";
+import {
+  mergedCatalog,
+  resolveRole,
+  subscriptionOverrideFor,
+  subscriptionRefFor,
+  type ModelRole,
+  type ResolvedRole,
+} from "./resolve.ts";
 import { effortVariantsFor, variantById, type ModelVariant } from "./variants.ts";
 
 export const CAPTAIN_CODEX_PREAMBLE =
@@ -79,6 +86,25 @@ function selectedVariant(
   return variant;
 }
 
+/**
+ * Redirects an `openai/…` ref to the ChatGPT subscription when one is stored.
+ * The credential lookup happens only for refs the subscription could serve, so
+ * an unaffected role never pays for an extra keychain read.
+ */
+async function withSubscriptionPrecedence(
+  role: ResolvedRole,
+  input: { config: ClankieConfig; catalog: Catalog; store: CredentialStore },
+): Promise<ResolvedRole> {
+  if (subscriptionRefFor(role, input.config) === undefined) return role;
+  const credential = await input.store.get(CODEX_PROVIDER_ID);
+  const override = subscriptionOverrideFor(role, {
+    config: input.config,
+    catalog: input.catalog,
+    hasSubscriptionCredential: credential !== undefined,
+  });
+  return override ?? role;
+}
+
 /** Resolve the configured captain role into an opaque, ready-to-call model. */
 export async function resolveConfiguredLanguageModel(
   options: ResolveConfiguredLanguageModelOptions = {},
@@ -97,9 +123,10 @@ export async function resolveConfiguredLanguageModel(
       `Captain config is invalid: ${issues.map((issue) => issue.message).join("; ")}`,
     );
   }
-  const resolved = resolveRole(role, { config, catalog: sourceCatalog });
-  if (resolved === undefined)
+  const configured = resolveRole(role, { config, catalog: sourceCatalog });
+  if (configured === undefined)
     throw new ConfiguredModelError(`No ${role.replace("_", " ")} is configured; run /model`);
+  const resolved = await withSubscriptionPrecedence(configured, { config, catalog: sourceCatalog, store });
   const catalog = mergedCatalog(config, sourceCatalog);
   const provider = catalog[resolved.providerId];
   if (provider === undefined || resolved.model === undefined) {

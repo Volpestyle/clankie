@@ -9,6 +9,7 @@ import {
   type CaptainChannelTurnResult,
   type DiscordPersonIdentity,
   type DiscordPresenceChannelTurnRequest,
+  type DiscordVoicePresenceNote,
   type LinearAgentThreadContext,
   type LinearChannelTurnRequest,
 } from "@clankie/protocol";
@@ -276,6 +277,12 @@ function normalizeSubmission(
         source: voice ? "discord_voice" : "discord",
         trust: "untrusted",
         retention: "turn_only",
+        // What the bridge just did about voice presence for this very message
+        // (ADR 0062), rendered from enums so the untrusted body can never
+        // author it. Factual only; the persona layer owns tone.
+        ...(request.trigger.voicePresenceNote === undefined
+          ? {}
+          : { voicePresence: renderVoicePresenceNote(request.trigger.voicePresenceNote) }),
         ...(approvedPersonMemory === undefined
           ? {}
           : {
@@ -297,6 +304,44 @@ function normalizeSubmission(
       },
     },
   };
+}
+
+const VOICE_PRESENCE_REFUSAL_PHRASES: Readonly<
+  Record<NonNullable<DiscordVoicePresenceNote["reason"]>, string>
+> = {
+  authority: "the asker does not hold the voice presence tier here",
+  allowlist: "that voice channel is outside the configured voice allowlist",
+  not_in_voice: "the asker is not in a voice channel in this server",
+  voice_disabled: "voice participation is disabled",
+  other_guild: "your active voice session is in another server",
+  failed: "the attempt failed",
+};
+
+/**
+ * One neutral factual line about what the bridge just did with voice presence
+ * for this message (ADR 0062). Built entirely from the note's enums and ids —
+ * the untrusted body can never author it — and kept toneless; the persona
+ * layer owns how he says it.
+ */
+function renderVoicePresenceNote(note: DiscordVoicePresenceNote): string {
+  const channel = note.channelId === undefined ? "the voice channel" : `voice channel ${note.channelId}`;
+  switch (note.action) {
+    case "joined":
+      return (
+        `You just joined ${channel} in this server. Nobody is opted in until they use ` +
+        `/clankie voice-consent opt-in, and you only ever hear opted-in participants.`
+      );
+    case "left":
+      return `You just left ${channel} in this server.`;
+    case "join_refused":
+      return `You could not join voice: ${voicePresenceReasonPhrase(note.reason)}.`;
+    case "leave_refused":
+      return `You could not leave voice: ${voicePresenceReasonPhrase(note.reason)}.`;
+  }
+}
+
+function voicePresenceReasonPhrase(reason: DiscordVoicePresenceNote["reason"]): string {
+  return reason === undefined ? "the attempt failed" : VOICE_PRESENCE_REFUSAL_PHRASES[reason];
 }
 
 function channelIdentity(

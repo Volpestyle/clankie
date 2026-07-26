@@ -57,6 +57,12 @@ import {
   voiceEvidenceReceiptData,
   voiceEvidenceReceiptType,
 } from "./voice-composition.ts";
+import {
+  createVoicePresenceIntentDecider,
+  handleVoicePresenceAsk,
+  type VoicePresenceAskOptions,
+  type VoicePresenceMember,
+} from "./voice-intent.ts";
 import { projectBoundMissionRecord, renderMissionSummary, sanitizeDiscordText } from "./mission-state.ts";
 import { MissionThreadProjector } from "./projector.ts";
 import {
@@ -155,6 +161,8 @@ const receipts = new DiscordBridgeReceiptStore({
 });
 const textIngressEnabled = process.env.DISCORD_TEXT_INGRESS_ENABLED === "true";
 const textIngressContextLimit = parseContextMessageLimit(process.env.DISCORD_INGRESS_CONTEXT_MESSAGES);
+const ingressGuildIds = parseDiscordIdSet(process.env.DISCORD_INGRESS_GUILD_IDS);
+const ingressChannelIds = parseDiscordIdSet(process.env.DISCORD_INGRESS_CHANNEL_IDS);
 const textIngress = textIngressEnabled
   ? new DiscordTextIngress(
       createAdvertisedDiscordPresencePort(api, presenceSession),
@@ -162,8 +170,8 @@ const textIngress = textIngressEnabled
         characterId,
         credentialRef: "discord_bot",
         transportKind: "bot",
-        guildIds: parseDiscordIdSet(process.env.DISCORD_INGRESS_GUILD_IDS),
-        channelIds: parseDiscordIdSet(process.env.DISCORD_INGRESS_CHANNEL_IDS),
+        guildIds: ingressGuildIds,
+        channelIds: ingressChannelIds,
         dmPolicy: parseDiscordDmPolicy(process.env.DISCORD_INGRESS_DM_POLICY),
         ...(process.env.DISCORD_OWNER_USER_ID === undefined
           ? {}
@@ -254,6 +262,32 @@ const voiceIdleAutoLeave =
           );
         },
       });
+// Asked voice presence (ADR 0062): "clankie hop in vc" in an admitted text
+// channel moves him under exactly the slash tier, executed here at the ingress
+// boundary before the same message's captain turn. Composed only when both
+// text ingress and brokered realtime voice exist — without voice there is no
+// decider budget and nothing to execute, so the gate machinery never runs.
+const voicePresenceAsk: VoicePresenceAskOptions | undefined =
+  textIngress === undefined || openAiCredential?.type !== "api" || voiceRealtimeConfig === undefined
+    ? undefined
+    : {
+        gate: {
+          ingressGuildIds,
+          ingressChannelIds,
+          characterNames: characterNames(storedSettings.persona),
+        },
+        decider: createVoicePresenceIntentDecider({
+          apiKey: openAiCredential.key,
+          model: voiceRealtimeConfig.volitionModel,
+        }),
+        execution: {
+          bindings: roleBindings,
+          joinPolicy: voiceJoinPolicy,
+          voiceGuildIds,
+          voiceChannelIds,
+          voiceSession,
+        },
+      };
 const registry = new MissionThreadRegistry({
   statePath: bridgeStatePath(),
 });
@@ -372,7 +406,7 @@ client.on("voiceStateUpdate", (previous, current) => {
 client.on("messageCreate", async (message) => {
   if (!textIngress) return;
   try {
-    const result = await textIngress.handle({
+    const inbound = {
       id: message.id,
       ...(message.guildId === null ? {} : { guildId: message.guildId }),
       channelId: message.channelId,
@@ -380,6 +414,17 @@ client.on("messageCreate", async (message) => {
       authorIsBot: message.author.bot || message.author.id === client.user?.id,
       mentionsBot: client.user !== null && message.mentions.users.has(client.user.id),
       body: message.content,
+    };
+    // Decided and executed before the turn, and awaited, so his reply in the
+    // same exchange reflects reality: he is the voice, the bridge is the
+    // actor (ADR 0062). A closed gate resolves immediately at no cost.
+    const voicePresenceNote =
+      voicePresenceAsk === undefined
+        ? undefined
+        : await handleVoicePresenceAsk(voicePresenceAsk, inbound, () => resolveVoiceMember(message));
+    const result = await textIngress.handle({
+      ...inbound,
+      ...(voicePresenceNote === undefined ? {} : { voicePresenceNote }),
       loadContextMessages: () => readDiscordContext(message, textIngressContextLimit),
     });
     if (result.state === "failed") {
@@ -903,6 +948,24 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   }
 }
 
+/**
+ * The asker as the gateway cache sees them right now: roles for the authority
+ * check, their current voice channel as the only possible join target, and the
+ * guild's voice adapter. Read at gate time and again at execution time so a
+ * decider in flight never acts on a stale channel.
+ */
+function resolveVoiceMember(message: Message): VoicePresenceMember | undefined {
+  const guild = message.guild;
+  if (guild === null) return undefined;
+  const member = message.member ?? guild.members.cache.get(message.author.id);
+  if (!member) return undefined;
+  return {
+    roleIds: new Set(member.roles.cache.keys()),
+    voiceChannelId: member.voice.channelId ?? undefined,
+    adapterCreator: guild.voiceAdapterCreator,
+  };
+}
+
 function memberRoleIds(interaction: ChatInputCommandInteraction): ReadonlySet<string> {
   if (interaction.member instanceof GuildMember) return new Set(interaction.member.roles.cache.keys());
   const roles = interaction.member?.roles;
@@ -1084,24 +1147,21 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
  */
 if (textIngress !== undefined) {
   let catchingUp = false;
-  const catchUpTimer = setInterval(
-    () => {
-      if (catchingUp) return;
-      catchingUp = true;
-      void textIngress
-        .catchUp()
-        .catch((error: unknown) => {
-          console.error(
-            { errorName: error instanceof Error ? error.name.slice(0, 64) : "Error" },
-            "Discord catch-up pass failed",
-          );
-        })
-        .finally(() => {
-          catchingUp = false;
-        });
-    },
-    CATCH_UP_INTERVAL_MS[storedSettings.persona.chattiness],
-  );
+  const catchUpTimer = setInterval(() => {
+    if (catchingUp) return;
+    catchingUp = true;
+    void textIngress
+      .catchUp()
+      .catch((error: unknown) => {
+        console.error(
+          { errorName: error instanceof Error ? error.name.slice(0, 64) : "Error" },
+          "Discord catch-up pass failed",
+        );
+      })
+      .finally(() => {
+        catchingUp = false;
+      });
+  }, CATCH_UP_INTERVAL_MS[storedSettings.persona.chattiness]);
   catchUpTimer.unref();
 }
 

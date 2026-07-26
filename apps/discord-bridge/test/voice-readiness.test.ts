@@ -1,4 +1,4 @@
-import type { DiscordControlPlaneReadiness } from "@clankie/api-client";
+import type { DiscordControlPlaneReadiness, DiscordVoiceBriefing } from "@clankie/api-client";
 import {
   DISCORD_BOT_PROVIDER_ID,
   DISCORD_VOICE_BRIDGE_CREDENTIAL_PROVIDER_ID,
@@ -6,9 +6,12 @@ import {
   type CredentialStore,
   type ProviderCredential,
 } from "@clankie/credential-broker";
+import { Buffer } from "node:buffer";
 import { Routes } from "discord.js";
 import { describe, expect, it } from "vitest";
-import { inspectDiscordVoiceReadiness } from "../src/voice-readiness.ts";
+import type { RealtimeSocket, RealtimeSocketFactory } from "@clankie/discord-presence-core";
+import { parseVoiceRealtimeEnv } from "../src/voice-composition.ts";
+import { inspectDiscordVoiceReadiness, probeVoiceWakeTransition } from "../src/voice-readiness.ts";
 
 class MemoryCredentialStore implements CredentialStore {
   public readonly credentials = new Map<string, ProviderCredential>();
@@ -36,8 +39,24 @@ const controlPlane: DiscordControlPlaneReadiness = {
   checks: { captainChannelTurns: true, discordPresenceRuntime: true, eventStore: true },
 };
 
+const briefing: DiscordVoiceBriefing = {
+  schemaVersion: 1,
+  instructions: "Be Clankie in the social register. Private composed instructions.",
+  briefing: "Right now: private composed self-state.",
+  refreshedAt: "2026-07-25T17:00:00.000Z",
+};
+
+function checkByName(
+  report: { checks: readonly { name: string; ok: boolean; detail: string }[] },
+  name: string,
+): { name: string; ok: boolean; detail: string } {
+  const check = report.checks.find((candidate) => candidate.name === name);
+  expect(check, `report has no check named ${name}`).toBeDefined();
+  return check as { name: string; ok: boolean; detail: string };
+}
+
 describe("Discord group voice readiness", () => {
-  it("proves the brokered bot, isolated voice identity, speech, Opus, and live guild", async () => {
+  it("proves credentials, realtime config, briefing path, wake transition, Opus, and live guild", async () => {
     const store = new MemoryCredentialStore();
     store.credentials.set(DISCORD_BOT_PROVIDER_ID, { type: "api", key: "bot-secret" });
     store.credentials.set(DISCORD_VOICE_BRIDGE_CREDENTIAL_PROVIDER_ID, {
@@ -53,24 +72,25 @@ describe("Discord group voice readiness", () => {
       DISCORD_VOICE_GUILD_IDS: "222222222222222222",
       DISCORD_VOICE_CHANNEL_IDS: "333333333333333333",
     };
+    const briefingRequests: unknown[] = [];
     const report = await inspectDiscordVoiceReadiness({
       env,
       store,
-      api: { inspectDiscordReadiness: () => Promise.resolve(controlPlane) },
-      speech: {
-        readiness: () =>
-          Promise.resolve({
-            ready: true,
-            provider: "openai",
-            sttModel: "gpt-4o-mini-transcribe",
-            ttsModel: "gpt-4o-mini-tts",
-            voice: "marin",
-            responseFormat: "pcm",
-          }),
-        transcribe: () => Promise.resolve("unused"),
-        synthesize: () => Promise.reject(new Error("unused")),
+      api: {
+        inspectDiscordReadiness: () => Promise.resolve(controlPlane),
+        fetchDiscordVoiceBriefing: (input) => {
+          briefingRequests.push(input);
+          return Promise.resolve(briefing);
+        },
       },
       opusAvailable: () => true,
+      // The live probe is faked so unit readiness stays offline; the CLI path
+      // builds the real one.
+      wakeProbe: () =>
+        Promise.resolve({
+          listener: { ok: true, detail: "dormant transcription session opened cleanly" },
+          engaged: { ok: true, detail: "conversation session opened and produced a response" },
+        }),
       rest: {
         get: (route) =>
           Promise.resolve(
@@ -82,33 +102,165 @@ describe("Discord group voice readiness", () => {
       clock: () => new Date("2026-07-25T17:00:00.000Z"),
     });
     expect(report.ready).toBe(true);
-    expect(JSON.stringify(report)).not.toContain("bot-secret");
-    expect(JSON.stringify(report)).not.toContain("openai-secret");
-    expect(JSON.stringify(report)).not.toContain("private-app-name");
-    expect(JSON.stringify(report)).not.toContain("private-user-name");
+    // The briefing path is exercised end-to-end with zero consented ids, so a
+    // readiness run touches nobody's person memory.
+    expect(briefingRequests).toEqual([
+      {
+        schemaVersion: 1,
+        guildId: env.DISCORD_GUILD_ID,
+        channelId: env.DISCORD_VOICE_CHANNEL_ID,
+        consentedUserIds: [],
+      },
+    ]);
+    // The wake transition is reported as separate checks (ADR 0057: readiness
+    // exercises dormant→engaged, not one session round trip).
+    expect(checkByName(report, "listener session").ok).toBe(true);
+    expect(checkByName(report, "engaged session").ok).toBe(true);
+    expect(checkByName(report, "wake transition").ok).toBe(true);
+    expect(checkByName(report, "voice briefing endpoint").ok).toBe(true);
+    // The realtime echo replaces the cascade's speech readiness: content-free
+    // provider/model/truncation scalars only.
+    expect(report.realtime).toEqual({
+      provider: "openai",
+      transcribeModel: "gpt-realtime-whisper",
+      realtimeModel: "gpt-realtime-2.1",
+      voice: "marin",
+      truncationRetentionRatio: 0.7,
+      postInstructionsTokenLimit: 12_000,
+    });
+    const serialized = JSON.stringify(report);
+    expect(serialized).not.toContain("bot-secret");
+    expect(serialized).not.toContain("openai-secret");
+    expect(serialized).not.toContain("private-app-name");
+    expect(serialized).not.toContain("private-user-name");
+    // The briefing content is control-plane-composed conversation material and
+    // must never enter a readiness report — only its lengths do.
+    expect(serialized).not.toContain("social register");
+    expect(serialized).not.toContain("self-state");
   });
 
-  it("fails closed when voice, speech, credentials, or control plane are absent", async () => {
+  it("fails closed when voice, credentials, config, or the control plane are absent", async () => {
     const report = await inspectDiscordVoiceReadiness({
       env: {},
       store: new MemoryCredentialStore(),
-      api: { inspectDiscordReadiness: () => Promise.reject(new Error("offline")) },
-      speech: {
-        readiness: () =>
-          Promise.resolve({
-            ready: false,
-            provider: "openai",
-            sttModel: "gpt-4o-mini-transcribe",
-            ttsModel: "gpt-4o-mini-tts",
-            voice: "marin",
-            responseFormat: "pcm",
-          }),
-        transcribe: () => Promise.resolve(undefined),
-        synthesize: () => Promise.reject(new Error("unused")),
+      api: {
+        inspectDiscordReadiness: () => Promise.reject(new Error("offline")),
+        fetchDiscordVoiceBriefing: () => Promise.reject(new Error("offline")),
       },
       opusAvailable: () => false,
     });
     expect(report.ready).toBe(false);
     expect(report.checks.filter((check) => !check.ok).length).toBeGreaterThan(5);
+    // No brokered openai credential means the live probe is skipped as failed
+    // checks rather than attempted.
+    expect(checkByName(report, "listener session").ok).toBe(false);
+    expect(checkByName(report, "engaged session").ok).toBe(false);
+    expect(checkByName(report, "wake transition").ok).toBe(false);
+    expect(checkByName(report, "voice briefing endpoint").ok).toBe(false);
+  });
+
+  it("fails the realtime configuration check when retired cascade envs are set", async () => {
+    const store = new MemoryCredentialStore();
+    store.credentials.set("openai", { type: "api", key: "openai-secret" });
+    const report = await inspectDiscordVoiceReadiness({
+      env: { DISCORD_VOICE_ENABLED: "true", CLANKIE_VOICE_TTS_MODEL: "gpt-4o-mini-tts" },
+      store,
+      api: {
+        inspectDiscordReadiness: () => Promise.resolve(controlPlane),
+        fetchDiscordVoiceBriefing: () => Promise.resolve(briefing),
+      },
+      opusAvailable: () => true,
+    });
+    expect(report.ready).toBe(false);
+    const config = checkByName(report, "realtime configuration");
+    expect(config.ok).toBe(false);
+    expect(config.detail).toContain("CLANKIE_VOICE_TTS_MODEL");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The wake-transition probe itself, offline over a fake socket factory: the
+// real session classes run, only the transport is injected.
+// ---------------------------------------------------------------------------
+
+class FakeProbeSocket implements RealtimeSocket {
+  public readonly sent: string[] = [];
+  private readonly messageHandlers: ((data: string) => void)[] = [];
+  private readonly closeHandlers: (() => void)[] = [];
+
+  public send(data: string): void {
+    this.sent.push(data);
+    const frame = JSON.parse(data) as { type?: string };
+    if (frame.type === "response.create") {
+      queueMicrotask(() => {
+        this.serverEvent({ type: "response.done", response: { id: "resp_1", status: "completed" } });
+      });
+    }
+  }
+
+  public close(): void {
+    for (const handler of this.closeHandlers) handler();
+  }
+
+  public onMessage(handler: (data: string) => void): void {
+    this.messageHandlers.push(handler);
+  }
+
+  public onClose(handler: () => void): void {
+    this.closeHandlers.push(handler);
+  }
+
+  public onError(): void {
+    // The probe never exercises transport errors in this fake.
+  }
+
+  public serverEvent(event: Record<string, unknown>): void {
+    for (const handler of this.messageHandlers) handler(JSON.stringify(event));
+  }
+}
+
+describe("voice wake-transition probe", () => {
+  it("opens the listener, then the engaged session, responds, and closes both", async () => {
+    const sockets: FakeProbeSocket[] = [];
+    const socketFactory: RealtimeSocketFactory = (url, headers) => {
+      expect(headers.authorization).toBe("Bearer probe-key");
+      expect(url.startsWith("wss://api.openai.com/v1/realtime")).toBe(true);
+      const socket = new FakeProbeSocket();
+      sockets.push(socket);
+      return Promise.resolve(socket);
+    };
+    const result = await probeVoiceWakeTransition({
+      apiKey: "probe-key",
+      config: parseVoiceRealtimeEnv({}),
+      socketFactory,
+      timeoutMs: 1_000,
+    });
+    expect(result.listener.ok).toBe(true);
+    expect(result.engaged.ok).toBe(true);
+    // Two sessions in sequence: the dormant listener first, the engaged
+    // conversation second — the wake transition, not one round trip.
+    expect(sockets).toHaveLength(2);
+    const listenerUpdate = JSON.parse(sockets[0]?.sent[0] ?? "{}") as {
+      session?: { type?: string };
+    };
+    expect(listenerUpdate.session?.type).toBe("transcription");
+    const conversationFrames = (sockets[1]?.sent ?? []).map(
+      (frame) => (JSON.parse(frame) as { type: string }).type,
+    );
+    expect(conversationFrames).toContain("session.update");
+    expect(conversationFrames).toContain("conversation.item.create");
+    expect(conversationFrames).toContain("response.create");
+  });
+
+  it("reports the engaged stage as not attempted when the listener cannot open", async () => {
+    const result = await probeVoiceWakeTransition({
+      apiKey: "probe-key",
+      config: parseVoiceRealtimeEnv({}),
+      socketFactory: () => Promise.reject(new Error("connection refused")),
+      timeoutMs: 1_000,
+    });
+    expect(result.listener.ok).toBe(false);
+    expect(result.engaged.ok).toBe(false);
+    expect(result.engaged.detail).toContain("not attempted");
   });
 });

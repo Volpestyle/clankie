@@ -10,6 +10,7 @@ import {
   type DiscordPresenceWrite,
   type DiscordPresenceWriteResult,
   type DiscordTransportKind,
+  type DiscordVoicePresenceNote,
 } from "@clankie/protocol";
 
 export type DiscordDmPolicy = "deny" | "owner_only" | "allowlist";
@@ -105,6 +106,13 @@ export interface DiscordInboundMessage {
   readonly body: string;
   readonly contextMessages?: readonly DiscordInboundContextMessage[];
   readonly loadContextMessages?: () => Promise<readonly DiscordInboundContextMessage[]>;
+  /**
+   * Set by the bridge when this message asked him into or out of voice and the
+   * bridge already executed the decision at its ingress boundary (ADR 0062).
+   * Passed through into the turn trigger unchanged so his reply reflects what
+   * actually happened.
+   */
+  readonly voicePresenceNote?: DiscordVoicePresenceNote;
   /** Set only by {@link DiscordTextIngress.catchUp}; he is looking at a backlog. */
   readonly catchingUp?: boolean;
 }
@@ -121,14 +129,7 @@ export type DiscordTextIngressOutcome =
 
 export interface DiscordTextIngressEvidence {
   readonly service: "discord-text-ingress";
-  readonly outcome:
-    | "dropped"
-    | "accepted"
-    | "buffered"
-    | "deduplicated"
-    | "settled"
-    | "declined"
-    | "failed";
+  readonly outcome: "dropped" | "accepted" | "buffered" | "deduplicated" | "settled" | "declined" | "failed";
   readonly deliveryId: string;
   readonly correlationId: string;
   readonly presenceSessionId: string;
@@ -336,6 +337,7 @@ export class DiscordTextIngress {
         actorId: message.authorId,
         body,
         ...(this.unprompted(message) ? { unprompted: true } : {}),
+        ...(message.voicePresenceNote === undefined ? {} : { voicePresenceNote: message.voicePresenceNote }),
       },
       contextMessages: boundedContext(contextMessages, this.config.contextMessageLimit),
     });
@@ -538,7 +540,6 @@ export class DiscordTextIngress {
     for (const [deliveryId, delivery] of this.deliveries) {
       if (delivery.expiresAtMs <= now) this.deliveries.delete(deliveryId);
     }
-
   }
 }
 

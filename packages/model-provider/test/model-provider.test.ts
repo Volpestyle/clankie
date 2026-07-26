@@ -13,7 +13,7 @@ import {
   updateGlobalConfig,
 } from "../src/config.ts";
 import { createLanguageModel, providerFamilyFor, variantProviderOptions } from "../src/instantiate.ts";
-import { mergedCatalog, resolveProviders, resolveRole } from "../src/resolve.ts";
+import { mergedCatalog, resolveProviders, resolveRole, subscriptionRefFor } from "../src/resolve.ts";
 import { effortVariantsFor, variantById } from "../src/variants.ts";
 
 const tempDirs: string[] = [];
@@ -455,6 +455,37 @@ describe("resolveRole", () => {
   });
 });
 
+describe("subscriptionRefFor", () => {
+  const gpt55 = { providerId: "openai", modelId: "gpt-5.5" };
+
+  it("supersedes an API-key ref for models the subscription serves", () => {
+    expect(subscriptionRefFor(gpt55, {})).toBe("openai-codex/gpt-5.5");
+    expect(subscriptionRefFor({ providerId: "openai", modelId: "gpt-5.6-terra" }, {})).toBe(
+      "openai-codex/gpt-5.6-terra",
+    );
+  });
+
+  it("maps the bare gpt-5.6 alias to the slug the backend answers", () => {
+    expect(subscriptionRefFor({ providerId: "openai", modelId: "gpt-5.6" }, {})).toBe(
+      "openai-codex/gpt-5.6-sol",
+    );
+  });
+
+  it("leaves other providers and models the subscription cannot serve alone", () => {
+    expect(subscriptionRefFor({ providerId: "openai", modelId: "gpt-5.6-pro" }, {})).toBeUndefined();
+    expect(subscriptionRefFor({ providerId: "anthropic", modelId: "claude-test" }, {})).toBeUndefined();
+    expect(subscriptionRefFor({ providerId: "openai-codex", modelId: "gpt-5.5" }, {})).toBeUndefined();
+  });
+
+  it("treats removing openai-codex from config as the metered opt-out", () => {
+    expect(subscriptionRefFor(gpt55, { disabled_providers: ["openai-codex"] })).toBeUndefined();
+    expect(subscriptionRefFor(gpt55, { enabled_providers: ["openai"] })).toBeUndefined();
+    expect(subscriptionRefFor(gpt55, { enabled_providers: ["openai", "openai-codex"] })).toBe(
+      "openai-codex/gpt-5.5",
+    );
+  });
+});
+
 // ---------------------------------------------------------------------------
 // variants
 // ---------------------------------------------------------------------------
@@ -475,7 +506,7 @@ describe("effortVariantsFor", () => {
     expect(effortVariantsFor("anthropic", fakeModel("claude-basic", false))).toEqual([]);
   });
 
-  it("emits reasoning_effort tiers for the openai family, with minimal for gpt-5", () => {
+  it("emits each openai model's documented reasoning_effort ladder", () => {
     const base = effortVariantsFor("openai", fakeModel("gpt-test", true));
     expect(base.map((variant) => variant.id)).toEqual(["low", "medium", "high"]);
     expect(must(base[0]).body).toEqual({ reasoning_effort: "low" });
@@ -483,11 +514,34 @@ describe("effortVariantsFor", () => {
     const gpt5 = effortVariantsFor("openai", fakeModel("gpt-5-test", true));
     expect(gpt5.map((variant) => variant.id)).toEqual(["minimal", "low", "medium", "high"]);
 
-    const gpt55 = effortVariantsFor("openai-codex", fakeModel("gpt-5.5", true));
-    expect(gpt55.map((variant) => variant.id)).toEqual(["low", "medium", "high"]);
+    const gpt56 = effortVariantsFor("openai", fakeModel("gpt-5.6-terra", true));
+    expect(gpt56.map((variant) => variant.id)).toEqual(["none", "low", "medium", "high", "xhigh", "max"]);
+
+    const gpt55 = effortVariantsFor("openai", fakeModel("gpt-5.5", true));
+    expect(gpt55.map((variant) => variant.id)).toEqual(["none", "low", "medium", "high", "xhigh"]);
+
+    const pro = effortVariantsFor("openai", fakeModel("gpt-5.5-pro", true));
+    expect(pro.map((variant) => variant.id)).toEqual(["medium", "high", "xhigh"]);
+
+    const gpt5Pro = effortVariantsFor("openai", fakeModel("gpt-5-pro", true));
+    expect(gpt5Pro.map((variant) => variant.id)).toEqual(["high"]);
 
     const compatible = effortVariantsFor("openai-compatible", fakeModel("some-reasoner", true));
     expect(compatible.map((variant) => variant.id)).toEqual(["low", "medium", "high"]);
+  });
+
+  it("offers the same ladder on the subscription transport, never the client-only ultra tier", () => {
+    const sol = effortVariantsFor("openai-codex", fakeModel("gpt-5.6-sol", true));
+    expect(sol.map((variant) => variant.id)).toEqual(["none", "low", "medium", "high", "xhigh", "max"]);
+    expect(must(sol[5]).body).toEqual({ reasoning_effort: "max" });
+
+    const gpt55 = effortVariantsFor("openai-codex", fakeModel("gpt-5.5", true));
+    expect(gpt55.map((variant) => variant.id)).toEqual(["none", "low", "medium", "high", "xhigh"]);
+
+    for (const modelId of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"]) {
+      const ids = effortVariantsFor("openai-codex", fakeModel(modelId, true)).map((v) => v.id);
+      expect(ids, `${modelId} must not offer the Codex-client-only tier`).not.toContain("ultra");
+    }
   });
 
   it("emits thinking budgets for anthropic", () => {

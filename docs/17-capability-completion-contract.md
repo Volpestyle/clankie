@@ -76,7 +76,7 @@ flowchart TB
 | Capability                        | End-to-end acceptance                                                                                                                                                                                                                                                                                                                                               | Required evidence                                                                                                                                                                         |
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Discord bot and text chat         | The credential-broker-backed official bot starts, registers commands, admits an allowlisted message or owner DM, completes one bounded Eve turn, posts the reply through governed presence, and creates one mission thread whose state survives bridge restart.                                                                                                     | Content-free bridge/control-plane event receipt, live Discord message and thread identifiers, restart projection check, and ambient-approval denial.                                      |
-| Multi-person Discord voice        | An explicit join disclosure starts one official-bot session with at least three human participants. Per-speaker PCM is attributed to the Discord user, transcribed, arbitrated with overlap/interruption handling, and answered with governed TTS. Leave, emergency stop, deletion, and raw-audio-default-off behavior work.                                        | Positive `@discordjs/voice` DAVE protocol, three speaker-attributed content-free receipts without raw audio/text, consent receipt, audible-response receipt, and clean leave.             |
+| Multi-person Discord voice        | An explicit join disclosure starts one official-bot session with at least three human participants. Per-speaker PCM is attributed to the Discord user, transcribed, arbitrated with overlap/interruption handling, and answered with governed AI-generated speech. Leave, emergency stop, deletion, and raw-audio-default-off behavior work.                        | Positive `@discordjs/voice` DAVE protocol, three speaker-attributed content-free receipts without raw audio/text, consent receipt, audible-response receipt, and clean leave.             |
 | Discord screen watch and publish  | An explicit owner opt-in starts the isolated personal-lab transport. Watch samples bounded frames from an approved Go Live stream into vision turns; publish sends an owned test pattern or Clankie-rendered surface with paced audio/video. Stop immediately revokes both paths.                                                                                   | Official-client live capture, bounded frame/health hashes, receive/send DAVE and recovery counters, stop receipt, and proof that raw frames are absent from semantic events.              |
 | Pokémon FireRed                   | With operator-supplied, hash-pinned ROM and savestate bytes, the state-derived controller handles overworld navigation, dialog, menus, party/inventory, and trainer battle without an input transcript. It pauses on uncertain state and reproduces deterministic scenarios across fresh cores.                                                                     | ROM-gated scenario receipts, screenshots, decision/evidence chains, no-network tripwire, and two-run determinism for each scenario.                                                       |
 | Minecraft                         | A runner-owned Mineflayer adapter joins the disposable private Paper server, performs the frozen survival gather/craft/place objective through bounded actions, and reconnects safely. The Paper plugin alone declares the goal result.                                                                                                                             | JDK 21 build/test receipt, server and adapter lifecycle events, Paper hash-chained report, reconnect/emergency-stop tests, and no public-server capability.                               |
@@ -126,19 +126,22 @@ flowchart LR
      observation seams, integration harness, and related docs/tests.
    - Success: the two completion-matrix rows pass in a configured test guild.
 3. **Group voice and social memory**
-   - Objective: land the official-bot DAVE media owner, voice brain, transcription,
-     TTS, speaker arbitration, consent, and governed person-memory proposal
-     flow.
+   - Objective: land the official-bot DAVE media owner, the two-tier realtime
+     voice brain, speaker arbitration, consent, and governed person-memory
+     proposal flow.
    - Write scope: Discord voice bridge, media/voice packages,
      memory-store/control-plane social schema, and related docs/tests.
    - Success: the group-voice and long-term-memory rows pass.
    - Current evidence: the single-owner DAVE media path, native Opus
-     capture/playback, explicit per-user consent, overlap/barge-in arbitration,
-     memory-only brokered OpenAI STT/TTS, continuing `discord_voice` Eve lane,
-     approved person-memory recall, content-free receipts, readiness, and a
-     three-speaker live evaluator pass deterministic tests. The row remains
-     non-passing until the official bot joins the configured private channel
-     and three consenting humans complete audible round trips.
+     capture/playback, explicit per-user consent, overlap and deliberate
+     barge-in arbitration, the two-tier realtime flow (a dormant
+     `gpt-realtime-whisper` listener and an engaged `gpt-realtime-2.1` session
+     whose only tool, `ask_clankie`, reaches the continuing `discord_voice`
+     Eve lane), approved person-memory briefing, content-free receipts,
+     readiness including the dormant→engaged wake probe, and a three-speaker
+     live evaluator pass deterministic tests. The row remains non-passing
+     until the official bot joins the configured private channel and three
+     consenting humans complete audible round trips.
 4. **Personal-lab screen media**
    - Objective: implement the isolated user-session transport and bounded watch
      and publish paths.

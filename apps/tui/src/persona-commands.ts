@@ -1,0 +1,220 @@
+import { SettingsStore, type PersonaSettings } from "@clankie/settings";
+import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
+
+export interface PersonaCommandServices {
+  settings: SettingsStore;
+}
+
+/**
+ * `/persona` edits **who Clankie is**, not what he may do.
+ *
+ * Character is deliberately owner-authored: the code carries a personality, it
+ * does not invent one. Authority lives in doctrine and the policy engine and is
+ * unreachable from here — a warmer persona never widens permission.
+ */
+export function buildPersonaCommands(services: PersonaCommandServices): FaceShellCommand[] {
+  return [
+    {
+      name: "persona",
+      aliases: [],
+      description: "Edit Clankie's character, names, and how readily he speaks",
+      argumentHint: "[status]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        if (argument.trim() === "status") {
+          await showPersonaStatus(shell, services);
+          return;
+        }
+        await runPersonaWizard(shell, services);
+      },
+    },
+  ];
+}
+
+function splitList(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+/** Typed input wins; blank keeps what was already configured. */
+export function resolvePersonaText(typed: string, existing: string): string {
+  return typed.trim().length > 0 ? typed.trim() : existing;
+}
+
+export function describePersona(persona: PersonaSettings): string[] {
+  const notes = persona.characterNotes.trim();
+  return [
+    `name: ${persona.displayName}`,
+    `also answers to: ${persona.aliases.length === 0 ? "—" : persona.aliases.join(", ")}`,
+    `chattiness: ${persona.chattiness}`,
+    `replies in text channels: ${persona.replyPolicy === "all" ? "every message" : "when addressed"}`,
+    "",
+    "character:",
+    ...(notes.length === 0 ? ["  (none set — he will sound like a default assistant)"] : indent(notes)),
+  ];
+}
+
+function indent(value: string): string[] {
+  return value.split("\n").map((line) => `  ${line}`);
+}
+
+async function showPersonaStatus(shell: ClankieFaceShell, services: PersonaCommandServices): Promise<void> {
+  const stored = await services.settings.load();
+  shell.insertCommandResult(
+    "/persona status",
+    [`settings file: ${services.settings.path}`, "", ...describePersona(stored.persona)].join("\n"),
+    "success",
+  );
+}
+
+async function runPersonaWizard(shell: ClankieFaceShell, services: PersonaCommandServices): Promise<void> {
+  const flow = shell.setupFlow;
+  flow.begin("persona");
+  try {
+    for (;;) {
+      const action = await flow.readSelect({
+        kind: "single",
+        message: "Character",
+        options: [
+          {
+            value: "character",
+            label: "Character",
+            hint: "who he is",
+            description: "Free-text personality carried into every surface.",
+          },
+          {
+            value: "names",
+            label: "Name and aliases",
+            hint: "what he answers to",
+            description: "Used both for display and to decide whether a message addressed him.",
+          },
+          {
+            value: "voice",
+            label: "How much he talks",
+            hint: "chattiness and reply policy",
+          },
+          { value: "status", label: "Show status" },
+          { value: "done", label: "Done" },
+        ],
+        required: true,
+      });
+      const choice = action?.[0];
+      if (choice === undefined || choice === "done") break;
+      if (choice === "status") {
+        await showPersonaStatus(shell, services);
+        continue;
+      }
+      if (choice === "character") await editCharacter(shell, services);
+      else if (choice === "names") await editNames(shell, services);
+      else if (choice === "voice") await editVoice(shell, services);
+    }
+  } finally {
+    flow.end();
+  }
+}
+
+async function apply(
+  services: PersonaCommandServices,
+  patch: (current: PersonaSettings) => PersonaSettings,
+): Promise<void> {
+  await services.settings.update((current) => ({
+    ...current,
+    persona: patch(current.persona),
+  }));
+}
+
+async function editCharacter(shell: ClankieFaceShell, services: PersonaCommandServices): Promise<void> {
+  const flow = shell.setupFlow;
+  const current = (await services.settings.load()).persona;
+  const notes = await flow.readText({
+    message: "Character — how he acts, jokes, and carries himself",
+    placeholder: current.characterNotes.split("\n")[0] ?? "chill, likes to roast, genuinely helpful",
+    validate: (value: string) => (value.length > 4_000 ? "Keep it under 4000 characters." : undefined),
+  });
+  if (notes === undefined) return;
+  await apply(services, (persona) => ({
+    ...persona,
+    characterNotes: resolvePersonaText(notes, persona.characterNotes),
+  }));
+  flow.renderLine("Saved character. New Discord and voice turns pick it up.", "success");
+}
+
+async function editNames(shell: ClankieFaceShell, services: PersonaCommandServices): Promise<void> {
+  const flow = shell.setupFlow;
+  const current = (await services.settings.load()).persona;
+
+  const displayName = await flow.readText({
+    message: "Name",
+    placeholder: current.displayName,
+    validate: (value: string) => (value.trim().length > 64 ? "Keep it under 64 characters." : undefined),
+  });
+  if (displayName === undefined) return;
+
+  // Humans shorten and misspell names constantly; every alias here is another
+  // way someone can get his attention without an @mention.
+  const aliases = await flow.readText({
+    message: "Other names he answers to (comma separated)",
+    placeholder: current.aliases.join(",") || "Clanky, clanker",
+    validate: (value: string) => (splitList(value).length > 16 ? "At most 16 aliases." : undefined),
+  });
+  if (aliases === undefined) return;
+
+  await apply(services, (persona) => ({
+    ...persona,
+    displayName: resolvePersonaText(displayName, persona.displayName),
+    ...(aliases.trim() ? { aliases: splitList(aliases) } : {}),
+  }));
+  flow.renderLine("Saved names.", "success");
+}
+
+async function editVoice(shell: ClankieFaceShell, services: PersonaCommandServices): Promise<void> {
+  const flow = shell.setupFlow;
+
+  const chattiness = await flow.readSelect({
+    kind: "single",
+    message: "How talkative is he by nature?",
+    options: [
+      { value: "quiet", label: "Quiet", hint: "short, sparing" },
+      { value: "balanced", label: "Balanced", hint: "a sentence or two" },
+      { value: "chatty", label: "Chatty", hint: "takes more room" },
+    ],
+    required: true,
+  });
+  const chattinessChoice = chattiness?.[0];
+  if (chattinessChoice === undefined) return;
+
+  const replyPolicy = await flow.readSelect({
+    kind: "single",
+    message: "When should he reply in a text channel?",
+    options: [
+      {
+        value: "addressed",
+        label: "When addressed",
+        hint: "recommended",
+        description: "An @mention, or a message using one of his names.",
+      },
+      {
+        value: "all",
+        label: "Every message",
+        description: "Replies to everything in every admitted channel, and spends a model turn on each one.",
+      },
+    ],
+    required: true,
+  });
+  const replyChoice = replyPolicy?.[0];
+  if (replyChoice === undefined) return;
+
+  await apply(services, (persona) => ({
+    ...persona,
+    chattiness: chattinessChoice as PersonaSettings["chattiness"],
+    replyPolicy: replyChoice as PersonaSettings["replyPolicy"],
+  }));
+  flow.renderLine(
+    replyChoice === "all"
+      ? "Saved. He will answer every message in every admitted channel — restart the bridge to apply."
+      : "Saved. Restart the bridge to apply.",
+    "success",
+  );
+}

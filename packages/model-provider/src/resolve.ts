@@ -8,7 +8,8 @@ import {
   type ProviderEntry,
 } from "@clankie/model-registry";
 import { parseModelRef, type ClankieConfig } from "./config.ts";
-import { withCodexSubscriptionProvider } from "./codex-catalog.ts";
+import { codexSubscriptionModelIdFor, withCodexSubscriptionProvider } from "./codex-catalog.ts";
+import { CODEX_PROVIDER_ID } from "./oauth/openai-codex.ts";
 
 // ---------------------------------------------------------------------------
 // Catalog merging — config-declared providers/models overlaid on the registry
@@ -108,6 +109,64 @@ export interface ResolvedRole {
   model: ModelEntry | undefined;
   /** Variant selected for this ref via `config.variant`, if any. */
   variantId: string | undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Subscription precedence — a stored ChatGPT subscription supersedes the
+// metered OpenAI API key for every model the Codex backend serves.
+// ---------------------------------------------------------------------------
+
+/** The API-key provider whose overlapping models the subscription supersedes. */
+const METERED_OPENAI_PROVIDER = "openai";
+
+function subscriptionProviderAllowed(config: ClankieConfig): boolean {
+  if (config.disabled_providers?.includes(CODEX_PROVIDER_ID) === true) return false;
+  const enabled = config.enabled_providers ?? [];
+  return enabled.length === 0 || enabled.includes(CODEX_PROVIDER_ID);
+}
+
+/**
+ * The subscription ref that supersedes an `openai/…` ref, ignoring credentials:
+ * the same turn costs nothing on the subscription, so metered access is a
+ * deliberate choice, never the residue of an older config. Undefined when the
+ * ref already names another provider, when the Codex backend cannot serve the
+ * model, or when config removes `openai-codex` from play — `disabled_providers`
+ * and a narrow `enabled_providers` are the explicit opt-outs beside `/auth`
+ * logout.
+ */
+export function subscriptionRefFor(
+  role: { providerId: string; modelId: string },
+  config: ClankieConfig,
+): string | undefined {
+  if (role.providerId !== METERED_OPENAI_PROVIDER) return undefined;
+  if (!subscriptionProviderAllowed(config)) return undefined;
+  const modelId = codexSubscriptionModelIdFor(role.modelId);
+  return modelId === undefined ? undefined : `${CODEX_PROVIDER_ID}/${modelId}`;
+}
+
+/**
+ * Applies {@link subscriptionRefFor} once the caller has confirmed a stored
+ * subscription credential. The configured effort survives the redirect: both
+ * OpenAI transports expose the same per-model ladder (see variants.ts), and an
+ * effort configured against the subscription ref wins over the API-key one.
+ */
+export function subscriptionOverrideFor(
+  role: ResolvedRole,
+  input: { config: ClankieConfig; catalog: Catalog; hasSubscriptionCredential: boolean },
+): ResolvedRole | undefined {
+  if (!input.hasSubscriptionCredential) return undefined;
+  const ref = subscriptionRefFor(role, input.config);
+  if (ref === undefined) return undefined;
+  const parsed = parseModelRef(ref);
+  if (parsed === undefined) return undefined;
+  const model = findModel(mergedCatalog(input.config, input.catalog), parsed.providerId, parsed.modelId);
+  if (model === undefined) return undefined;
+  return {
+    providerId: parsed.providerId,
+    modelId: parsed.modelId,
+    model,
+    variantId: input.config.variant?.[ref] ?? role.variantId,
+  };
 }
 
 export function resolveRole(

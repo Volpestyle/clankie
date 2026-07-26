@@ -267,7 +267,9 @@ export async function inspectDiscordTextReadiness(
 
     if (guildId !== undefined) {
       try {
-        await rest.get(Routes.guildMember(guildId, "@me"));
+        // See voice-readiness.ts: fetching the guild is the bot-usable
+        // membership probe; the `@me` member routes are unavailable to bots.
+        await rest.get(Routes.guild(guildId));
         add("Discord guild membership", true, "official bot is installed in the target guild", "");
       } catch (error) {
         add(

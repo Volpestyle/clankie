@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { compileDoctrine, loadDoctrineFile } from "@clankie/doctrine";
-import type { DiscordPresenceChannelTurnRequest } from "@clankie/protocol";
+import type { DiscordPresenceChannelTurnRequest, DiscordVoicePresenceNote } from "@clankie/protocol";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createControlPlane } from "../src/app.ts";
 import { EveCaptainChannelTurnPort } from "../src/eve-captain-turn.ts";
@@ -125,6 +125,64 @@ describe("Discord channel control-plane runtime", () => {
     expect(requests[0]?.body).not.toMatchObject({ message: expect.stringContaining("hello") });
     expect(requests[2]).toMatchObject({ url: "http://127.0.0.1:4321/eve/v1/session" });
     expect(requests[2]?.body).not.toHaveProperty("continuationToken");
+  });
+
+  it("renders the bridge's voice presence note as one neutral thread-context line", async () => {
+    const requests: Array<{ url: string; body?: unknown }> = [];
+    const port = new EveCaptainChannelTurnPort({
+      baseUrl: "http://127.0.0.1:4321",
+      fetchImpl: async (input, init) => {
+        requests.push({
+          url: String(input),
+          ...(init?.body === undefined ? {} : { body: JSON.parse(String(init.body)) }),
+        });
+        if (init?.method === "POST") {
+          return Response.json({ sessionId: "eve-note" }, { status: 202 });
+        }
+        return ndjson([
+          { type: "turn.started", data: { turnId: "note-turn" } },
+          {
+            type: "message.completed",
+            data: { turnId: "note-turn", finishReason: "stop", message: "I'm in." },
+          },
+          { type: "session.waiting", data: { turnId: "note-turn" } },
+        ]);
+      },
+    });
+    const noted = (voicePresenceNote: DiscordVoicePresenceNote | undefined, deliveryId: string) => ({
+      ...turnRequest(),
+      deliveryId,
+      trigger: {
+        kind: "mention" as const,
+        id: deliveryId,
+        guildId: "guild-1",
+        channelId: "channel-1",
+        messageId: deliveryId,
+        actorId: "james",
+        body: "clankie hop in vc",
+        ...(voicePresenceNote === undefined ? {} : { voicePresenceNote }),
+      },
+    });
+
+    await port.submit({
+      request: noted({ action: "joined", channelId: "voice-1" }, "message-joined"),
+    });
+    await port.submit({
+      request: noted({ action: "join_refused", reason: "authority" }, "message-refused"),
+    });
+    await port.submit({ request: noted(undefined, "message-plain") });
+
+    const thread = (index: number) =>
+      (requests[index]?.body as { clientContext: { thread: Record<string, unknown> } }).clientContext.thread;
+    expect(thread(0).voicePresence).toBe(
+      "You just joined voice channel voice-1 in this server. Nobody is opted in until they use " +
+        "/clankie voice-consent opt-in, and you only ever hear opted-in participants.",
+    );
+    expect(thread(2).voicePresence).toBe(
+      "You could not join voice: the asker does not hold the voice presence tier here.",
+    );
+    // An absent note renders nothing at all — not an empty line.
+    expect(thread(4)).not.toHaveProperty("voicePresence");
   });
 
   it("admits voice only from a Discord voice/text bridge identity and preserves text authority", async () => {

@@ -246,7 +246,7 @@ export function evaluateDiscordVoiceLiveProof(
   check(
     "speech round trips",
     respondedSpeakers.size >= 3 && failures.length === 0,
-    `${String(respondedSpeakers.size)} speaker(s) received a captain/TTS response; ${String(failures.length)} failure receipt(s)`,
+    `${String(respondedSpeakers.size)} speaker(s) received a spoken response; ${String(failures.length)} failure receipt(s)`,
   );
   const overlap = activeReceipts.find((receipt) => receipt.type === "discord.voice.overlap");
   const interruption = activeReceipts.find((receipt) => receipt.type === "discord.voice.interrupted");

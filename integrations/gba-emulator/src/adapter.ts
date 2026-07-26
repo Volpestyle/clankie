@@ -54,15 +54,46 @@ export interface GbaEmulatorSnapshot {
  * core for ROM-gated runs (ADR 0039 / ADR 0040). The seam is the only thing
  * that swaps; the governed surface does not change.
  */
+/**
+ * How the session behaves when the bounded evidence window fills.
+ *
+ * `frozen` (default) is the receipt model: a run that exceeds its evidence
+ * budget is invalid evidence, so the state goes uncertain and the body stops.
+ * `rolling` is for open-ended play (free play, possession): the full window is
+ * sealed and a fresh one starts, the trace counts what rolled, and the body
+ * keeps playing — a marathon must never die at a receipt-sized cap.
+ */
+export type GbaEvidencePolicy = "frozen" | "rolling";
+
+export interface GbaEmulatorAdapterOptions {
+  evidencePolicy?: GbaEvidencePolicy;
+}
+
 export class GbaEmulatorAdapter implements EnvironmentAdapter {
   private readonly scenario: GbaAdapterScenario;
   private readonly fixtureSha256: string;
   private readonly coreFactory: GbaCoreFactory;
+  private readonly evidencePolicy: GbaEvidencePolicy;
   private readonly sessions = new Map<string, GbaEmulatorSession>();
 
-  public constructor(scenarioInput: FrozenGbaScenario, fixtureSha256: string);
-  public constructor(scenarioInput: GbaAdapterScenario, fixtureSha256: string, coreFactory: GbaCoreFactory);
-  public constructor(scenarioInput: GbaAdapterScenario, fixtureSha256: string, coreFactory?: GbaCoreFactory) {
+  public constructor(
+    scenarioInput: FrozenGbaScenario,
+    fixtureSha256: string,
+    coreFactory?: undefined,
+    options?: GbaEmulatorAdapterOptions,
+  );
+  public constructor(
+    scenarioInput: GbaAdapterScenario,
+    fixtureSha256: string,
+    coreFactory: GbaCoreFactory,
+    options?: GbaEmulatorAdapterOptions,
+  );
+  public constructor(
+    scenarioInput: GbaAdapterScenario,
+    fixtureSha256: string,
+    coreFactory?: GbaCoreFactory,
+    options?: GbaEmulatorAdapterOptions,
+  ) {
     this.scenario = scenarioInput;
     if (!/^[a-f0-9]{64}$/u.test(fixtureSha256)) throw new Error("Fixture SHA-256 is invalid");
     this.fixtureSha256 = fixtureSha256;
@@ -71,6 +102,7 @@ export class GbaEmulatorAdapter implements EnvironmentAdapter {
     // double scenario fails closed here instead of running with wrong state.
     this.coreFactory =
       coreFactory ?? ((scenario) => new DeterministicGbaCoreDouble(scenario as FrozenGbaScenario));
+    this.evidencePolicy = options?.evidencePolicy ?? "frozen";
   }
 
   public start(
@@ -89,6 +121,7 @@ export class GbaEmulatorAdapter implements EnvironmentAdapter {
       this.scenario,
       this.fixtureSha256,
       this.coreFactory(this.scenario),
+      this.evidencePolicy,
     );
     this.sessions.set(adapterSessionId, session);
     return Promise.resolve(session);
@@ -120,6 +153,9 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
   private readonly completed = new Map<string, EnvironmentAdapterActionCompletion>();
   private readonly pendingWaits = new Set<string>();
   private readonly evidence: GbaEmulatorEvidenceEvent[] = [];
+  private readonly evidencePolicy: GbaEvidencePolicy;
+  private rolledWindows = 0;
+  private droppedEvidenceEvents = 0;
   private observationCount = 0;
   private certain = true;
   private uncertaintyReason: string | null = null;
@@ -132,6 +168,7 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
     scenario: GbaAdapterScenario,
     fixtureSha256: string,
     core: GbaCoreSeam,
+    evidencePolicy: GbaEvidencePolicy = "frozen",
   ) {
     this.adapterSessionId = adapterSessionId;
     this.sessionId = spec.sessionId;
@@ -139,6 +176,7 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
     this.scenario = scenario;
     this.fixtureSha256 = fixtureSha256;
     this.core = core;
+    this.evidencePolicy = evidencePolicy;
   }
 
   public pause(): Promise<void> {
@@ -171,7 +209,7 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
       enforceLimits(command.action.limits, this.spec.resourceBounds);
       enforceCapability(command.action.action, this.spec.resourceBounds);
       if (command.action.action.kind === "wait") {
-        if (this.evidence.length > this.scenario.maxEvidenceEvents - 2) {
+        if (this.evidence.length > this.scenario.maxEvidenceEvents - 2 && !this.rollEvidenceWindow()) {
           this.markStateUncertain("Bounded evidence capacity cannot cover a cancellable wait");
           throw closed("evidence_bound_exceeded");
         }
@@ -423,6 +461,10 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
       rngSeed: this.scenario.rngSeed,
       eventChainHeadSha256: this.evidence.at(-1)?.eventSha256 ?? GENESIS_HASH,
       events: structuredClone(this.evidence),
+      // Frozen runs never roll, so their receipts stay byte-identical.
+      ...(this.rolledWindows === 0
+        ? {}
+        : { rolledWindows: this.rolledWindows, droppedEvidenceEvents: this.droppedEvidenceEvents }),
     });
   }
 
@@ -431,7 +473,7 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
     action: Exclude<GbaEmulatorAction, { kind: "wait" }>,
     limits: GbaEmulatorActionLimits,
   ): Record<string, unknown> {
-    if (this.evidence.length >= this.scenario.maxEvidenceEvents) {
+    if (this.evidence.length >= this.scenario.maxEvidenceEvents && !this.rollEvidenceWindow()) {
       this.markStateUncertain("Bounded evidence capacity was exceeded");
       throw closed("evidence_bound_exceeded");
     }
@@ -552,12 +594,28 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
     }
   }
 
+  /**
+   * Under the rolling policy, seal the full window and start the next: the
+   * within-window hash chain restarts from genesis (the event schema itself
+   * caps `sequence` at the window size), and the trace carries how many
+   * windows and events rolled, so the cap is never silent. Frozen policy
+   * returns false — a receipt-bound run out of evidence is uncertain,
+   * exactly as before.
+   */
+  private rollEvidenceWindow(): boolean {
+    if (this.evidencePolicy === "frozen") return false;
+    this.rolledWindows += 1;
+    this.droppedEvidenceEvents += this.evidence.length;
+    this.evidence.length = 0;
+    return true;
+  }
+
   private record(
     actionId: string,
     actionKind: GbaEmulatorEvidenceEvent["actionKind"],
     summary: string,
   ): void {
-    if (this.evidence.length >= this.scenario.maxEvidenceEvents) {
+    if (this.evidence.length >= this.scenario.maxEvidenceEvents && !this.rollEvidenceWindow()) {
       this.markStateUncertain("Bounded evidence capacity was exceeded");
       throw closed("evidence_bound_exceeded");
     }

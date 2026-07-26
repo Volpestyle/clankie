@@ -62,6 +62,7 @@ export function resolveDiscordSettings(
   takeString("applicationId", "DISCORD_APPLICATION_ID");
   takeString("guildId", "DISCORD_GUILD_ID");
   takeList("ambientRoleIds", "DISCORD_AMBIENT_ROLE_IDS");
+  takeList("ambientUserIds", "DISCORD_AMBIENT_USER_IDS");
   takeList("approvalRoleIds", "DISCORD_APPROVAL_ROLE_IDS");
   takeString("ownerUserId", "DISCORD_OWNER_USER_ID");
 
@@ -79,6 +80,7 @@ export function resolveDiscordSettings(
   takeList("voiceGuildIds", "DISCORD_VOICE_GUILD_IDS");
   takeList("voiceChannelIds", "DISCORD_VOICE_CHANNEL_IDS");
   takeString("voiceChannelId", "DISCORD_VOICE_CHANNEL_ID");
+  takeString("voiceJoinPolicy", "DISCORD_VOICE_JOIN_POLICY");
 
   takeString("activityApplicationIdGba", "DISCORD_ACTIVITY_APPLICATION_ID_GBA");
 
@@ -130,6 +132,7 @@ export function discordSettingsToEnvironment(settings: DiscordSettings): Record<
   put("DISCORD_APPLICATION_ID", settings.applicationId);
   put("DISCORD_GUILD_ID", settings.guildId);
   putList("DISCORD_AMBIENT_ROLE_IDS", settings.ambientRoleIds);
+  putList("DISCORD_AMBIENT_USER_IDS", settings.ambientUserIds);
   putList("DISCORD_APPROVAL_ROLE_IDS", settings.approvalRoleIds);
   put("DISCORD_OWNER_USER_ID", settings.ownerUserId);
 
@@ -147,6 +150,7 @@ export function discordSettingsToEnvironment(settings: DiscordSettings): Record<
   putList("DISCORD_VOICE_GUILD_IDS", settings.voiceGuildIds);
   putList("DISCORD_VOICE_CHANNEL_IDS", settings.voiceChannelIds);
   put("DISCORD_VOICE_CHANNEL_ID", settings.voiceChannelId);
+  put("DISCORD_VOICE_JOIN_POLICY", settings.voiceJoinPolicy);
 
   put("DISCORD_ACTIVITY_APPLICATION_ID_GBA", settings.activityApplicationIdGba);
   return env;

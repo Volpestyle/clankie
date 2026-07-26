@@ -21,8 +21,10 @@ control subcommands are non-interactive:
 ```bash
 clankie                        # via the bin/clankie.ts launcher (~/.local/bin symlink)
 clankie --chat <conversationId> # select an existing server-owned conversation
-clankie health                 # canonical /eve/v1/health + /eve/v1/info probe
-clankie restart                # restart only a launcher-owned captain
+clankie status                 # captain probe plus every launcher-owned service
+clankie restart                # restart all three services in dependency order
+clankie restart discord        # restart one (captain | control-plane | discord)
+clankie down                   # stop them in reverse dependency order
 clankie msg "status report"    # submit on the isolated headless session
 clankie watch --timeout 600    # JSONL events until the turn settles
 clankie wait --timeout 600     # final boundary only
@@ -50,9 +52,37 @@ consumes sequenced terminal replay from the runner's semantic boundary, writes
 an atomic cursor checkpoint, and remains alive so the drill can crash the real
 TUI process. This is a CI proof surface, not an alternate operator interface.
 
+## Supervised local services
+
+`clankie` owns the three long-lived processes that put Clankie in Discord, and
+restarts them in dependency order ([ADR 0055](../../docs/adr/0055-launcher-owned-local-services.md)):
+
+```mermaid
+flowchart LR
+  captain["captain-eve :4321"] --> cp["control-plane :4310"] --> bridge["discord-bridge"]
+```
+
+`restart` walks that order and stops at the first failure; `down` walks the
+reverse. Each service keeps an atomic mode-0600 pid record at
+`${XDG_STATE_HOME:-~/.local/state}/clankie/<id>-service.json` and logs to
+`<id>.log` beside it. Before signalling, the launcher re-reads the recorded pid's
+live command and refuses if it no longer looks like the service it started, so a
+stale record can never kill a process that inherited the pid. A service started
+outside the launcher is reported, never adopted and never killed.
+
+Start is health gated: it returns when the service's probe reports healthy, not
+when the child spawns. The captain probes `/eve/v1/health` and `/eve/v1/info`,
+the control plane probes `GET /health`, and the bridge — which serves no HTTP —
+reports process state enriched with the presence phase it publishes to the
+control plane via the operator-readable `GET /v1/discord/presence-status`.
+
+Guild and channel allowlists come from `~/.config/clankie/settings.json`, not an
+env prefix; the launcher supplies only `CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE`,
+which is a repository path rather than a preference.
+
 The headless captain commands are a supported operator surface, not a recovery
 fixture. `health`/`status` never start a service and never probe the nonexistent
-`GET /health` route. `msg` does not echo message content; `watch` and `wait`
+`GET /health` route on the captain. `msg` does not echo message content; `watch` and `wait`
 consume the Eve semantic stream from a private mode-0600 cursor under
 `${XDG_STATE_HOME:-~/.local/state}/clankie/`, separate from the fullscreen
 face's `.data/tui/captain-session.json` cursor.
@@ -155,7 +185,10 @@ src/observation/  Read-only sequenced event source, durable observer cursor,
 - `/auth` manages provider credentials (masked API-key entry into the Keychain broker, ChatGPT/Codex browser or device OAuth, Claude Pro/Max manual-code OAuth, local credential removal, and harness-login guidance); `/provider` chooses a provider context per model role; `/model` picks an actual model from that provider in the models.dev registry; `/effort` sets reasoning variants. Provider intent stays process-local and is reconstructed from the configured `provider/model` ref after restart, so non-secret config has one authority in `~/.config/clankie/clankie.json`.
 - OpenAI API-key access is `openai/<model>`; ChatGPT subscription access is the
   explicit `openai-codex/<model>` provider. They never borrow each other's
-  credentials.
+  credentials. While a subscription credential is stored it supersedes the API
+  key for the models the Codex backend serves: `/model` and `/model status`
+  show the redirect (`openai/gpt-5.5 → openai-codex/gpt-5.5`), and `/auth`
+  logout is what restores metered access.
 - The Eve cursor is stored atomically with mode 0600 under
   `.data/tui/captain-session.json`. It is capability-like local state and is
   excluded from mission events and support bundles. Its hashed build generation

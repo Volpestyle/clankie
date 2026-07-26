@@ -26,7 +26,11 @@ export const DiscordBridgeReceiptSchema = z
       "discord.voice.joined",
       "discord.voice.consent",
       "discord.voice.utterance",
+      // ADR 0057: the floor machine and the volition gate are receipt-visible
+      // so wake/release and offered/taken/suppressed are numbers, not vibes.
+      "discord.voice.floor",
       "discord.voice.response",
+      "discord.voice.volition",
       "discord.voice.overlap",
       "discord.voice.interrupted",
       "discord.voice.failed",
@@ -45,6 +49,8 @@ export const DiscordBridgeReceiptSchema = z
   })
   .strict()
   .superRefine((receipt, context) => {
+    // Prefix match: every discord.voice.* type — including ADR 0057's floor
+    // and volition receipts — inherits the content fence.
     if (!receipt.type.startsWith("discord.voice.")) return;
     const forbidden = new Set(["transcript", "response", "prompt", "audio", "pcm"]);
     for (const key of Object.keys(receipt.data)) {

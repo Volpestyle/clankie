@@ -50,6 +50,62 @@ describe("DiscordBridgeReceiptStore", () => {
     await expect(store.append("discord.bridge.ready", { commandCount: 8 })).rejects.toThrow("not a symlink");
   });
 
+  it("appends the ADR 0057 floor and volition receipt types", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-discord-receipts-0057-"));
+    roots.push(root);
+    const path = join(root, "receipts.jsonl");
+    let nextId = 0;
+    const store = new DiscordBridgeReceiptStore({
+      path,
+      clock: () => new Date("2026-07-25T16:15:00.000Z"),
+      idFactory: () => `receipt-${(nextId += 1)}`,
+    });
+
+    await store.append("discord.voice.floor", {
+      guildId: "guild-1",
+      channelId: "channel-1",
+      state: "engaged",
+      reason: "addressed",
+    });
+    await store.append("discord.voice.volition", {
+      guildId: "guild-1",
+      channelId: "channel-1",
+      offered: 4,
+      taken: 1,
+      suppressed: 3,
+    });
+
+    const lines = (await readFile(path, "utf8")).trim().split("\n");
+    const receipts = lines.map((line) => parseDiscordBridgeReceipt(JSON.parse(line)));
+    expect(receipts.map((receipt) => receipt.type)).toEqual([
+      "discord.voice.floor",
+      "discord.voice.volition",
+    ]);
+    expect(receipts[1]?.data).toEqual({
+      guildId: "guild-1",
+      channelId: "channel-1",
+      offered: 4,
+      taken: 1,
+      suppressed: 3,
+    });
+  });
+
+  it("extends the forbidden-key fence over the ADR 0057 receipt types", () => {
+    for (const type of ["discord.voice.floor", "discord.voice.volition"] as const) {
+      for (const key of ["transcript", "response", "prompt", "audio", "pcm"]) {
+        expect(() =>
+          parseDiscordBridgeReceipt({
+            schemaVersion: 1,
+            id: "receipt-fence",
+            occurredAt: "2026-07-25T16:15:00.000Z",
+            type,
+            data: { [key]: "smuggled" },
+          }),
+        ).toThrow(`cannot contain ${key}`);
+      }
+    }
+  });
+
   it("makes transcript and audio fields unrepresentable in voice receipts", () => {
     const base = {
       schemaVersion: 1,

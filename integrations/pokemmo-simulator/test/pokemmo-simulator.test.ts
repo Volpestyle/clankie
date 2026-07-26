@@ -272,7 +272,16 @@ describe("PokeMMO deterministic simulator", () => {
         second.grant.token,
         second.command("after-lease", { kind: "navigate", target: { mapId: "lab-route", x: 1, y: 1 } }),
       ),
-    ).rejects.toThrow(/revoked/);
+    ).rejects.toThrow(/expired/);
+    // Lease loss still fails closed, but it is the holder that lapsed, not the
+    // world: the same holder renews and plays on. Only revocation is final.
+    await second.runtime.renew(second.grant.token, second.spec.sessionId);
+    await expect(
+      second.runtime.startAction(
+        second.grant.token,
+        second.command("after-lease", { kind: "navigate", target: { mapId: "lab-route", x: 1, y: 1 } }),
+      ),
+    ).resolves.toMatchObject({ status: "completed" });
 
     const third = await harness();
     await third.runtime.startAction(

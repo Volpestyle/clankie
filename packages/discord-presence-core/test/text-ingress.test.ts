@@ -105,6 +105,36 @@ describe("DiscordTextIngress", () => {
     expect(evidence.every((event) => event.outcome === "dropped")).toBe(true);
   });
 
+  it("passes the bridge's voice presence note through into the turn trigger unchanged", async () => {
+    const port = new RecordingPort();
+    const ingress = new DiscordTextIngress(port, config(), () => {});
+
+    await ingress.handle({
+      id: "message-noted",
+      guildId: "guild-1",
+      channelId: "channel-1",
+      authorId: "friend",
+      authorIsBot: false,
+      mentionsBot: true,
+      body: "clankie hop in vc",
+      voicePresenceNote: { action: "joined", channelId: "voice-9" },
+      loadContextMessages: () => Promise.resolve([]),
+    });
+    await ingress.handle({
+      id: "message-plain",
+      guildId: "guild-1",
+      channelId: "channel-1",
+      authorId: "friend",
+      authorIsBot: false,
+      mentionsBot: true,
+      body: "hello again",
+      loadContextMessages: () => Promise.resolve([]),
+    });
+
+    expect(port.turns[0]?.trigger.voicePresenceNote).toEqual({ action: "joined", channelId: "voice-9" });
+    expect(port.turns[1]?.trigger.voicePresenceNote).toBeUndefined();
+  });
+
   it("admits every channel in an allowlisted guild when no channel list is configured", async () => {
     const port = new RecordingPort();
     // `replyPolicy: "all"` isolates channel admission from the addressed gate.
@@ -408,14 +438,19 @@ describe("reading live, then checking in", () => {
       () => undefined,
     );
     await ingress.handle(say("m1", "clankie how did the run go?"));
-    for (const index of [2, 3, 4, 5, 6]) await ingress.handle(say(`m${String(index)}`, `line ${String(index)}`));
+    for (const index of [2, 3, 4, 5, 6])
+      await ingress.handle(say(`m${String(index)}`, `line ${String(index)}`));
 
     const [outcome] = await ingress.catchUp();
     expect(outcome).toMatchObject({ state: "settled" });
   });
 
   it("still answers a direct mention in a channel he had drifted from", async () => {
-    const ingress = new DiscordTextIngress(new RecordingPort(), room({ liveMessageWindow: 0 }), () => undefined);
+    const ingress = new DiscordTextIngress(
+      new RecordingPort(),
+      room({ liveMessageWindow: 0 }),
+      () => undefined,
+    );
     await ingress.handle(say("m1", "clankie how did the run go?"));
 
     await expect(ingress.handle(say("m2", "clankie you there?"))).resolves.toMatchObject({
@@ -423,4 +458,3 @@ describe("reading live, then checking in", () => {
     });
   });
 });
-

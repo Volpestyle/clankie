@@ -144,27 +144,20 @@ export function resolveIdList(typed: string, existing: readonly string[]): strin
 }
 
 /**
- * An empty allowlist denies everything — it never means "allow all". Enabling a
- * plane with nothing allowlisted is therefore always a mistake, and one the
- * operator would otherwise discover much later: voice refuses to start the
- * bridge at all, while text ingress starts fine and then silently ignores every
- * message. Catching it here turns both into an answer at configuration time.
+ * The **server** allowlist is what bounds a plane to servers the owner chose,
+ * so enabling a plane without one is always a mistake and is caught here rather
+ * than discovered later — voice refuses to start the bridge at all, while text
+ * ingress would start fine and then silently ignore every message.
+ *
+ * The **channel** list is optional refinement below it on both planes: empty
+ * admits every channel inside the allowlisted servers.
  */
 export function describeEmptyAllowlist(
   plane: "voice" | "text ingress",
   guildIds: readonly string[],
-  channelIds: readonly string[],
+  _channelIds: readonly string[],
 ): string | undefined {
-  // The server allowlist is what bounds a plane to servers the owner chose, so
-  // it is required for both.
   if (guildIds.length === 0) return `Cannot enable ${plane} with no server allowlisted.`;
-  // Voice treats an empty channel list as "every voice channel in those
-  // servers" — joining is still gated by the ambient role check and by
-  // per-participant consent. Text ingress has no such gate: an empty list there
-  // would silently drop every message, so it stays required.
-  if (plane === "text ingress" && channelIds.length === 0) {
-    return "Cannot enable text ingress with no channel allowlisted — Clankie would ignore every message.";
-  }
   return undefined;
 }
 
@@ -209,6 +202,7 @@ function describeSettings(settings: DiscordSettings): string[] {
     // Singular on purpose: only slash-command registration is one-server.
     `command server: ${settings.guildId ?? "— (commands register globally)"}`,
     showList("ambient roles", settings.ambientRoleIds),
+    showList("ambient users", settings.ambientUserIds),
     showList("approval roles", settings.approvalRoleIds),
     show("owner user id", settings.ownerUserId),
     "",
@@ -224,6 +218,7 @@ function describeSettings(settings: DiscordSettings): string[] {
     `voice: ${settings.voiceEnabled ? "enabled" : "disabled"}`,
     showList("  voice guilds", settings.voiceGuildIds),
     showList("  voice channels", settings.voiceChannelIds),
+    `  who may summon: ${settings.voiceJoinPolicy === "guild_members" ? "any member of those servers" : "ambient tier only"}`,
     "",
     show("activity application id (gba)", settings.activityApplicationIdGba),
   ];
@@ -394,11 +389,22 @@ async function editCore(shell: ClankieFaceShell, services: DiscordCommandService
   });
   if (ambient === undefined) return;
 
+  // Naming a user directly is the honest way to express "only me": a
+  // single-operator deployment has nobody to hand a role to, and inventing one
+  // drifts the moment the role is edited in the Discord UI.
+  const ambientUsers = await flow.readText({
+    message: "Ambient user ids (comma separated) — individuals with the same authority, no role needed",
+    placeholder: current.ambientUserIds.join(",") || "your Discord user id",
+    validate: validateSnowflakeList,
+  });
+  if (ambientUsers === undefined) return;
+
   await apply(services, (discord) => ({
     ...discord,
     ...(applicationId.trim() ? { applicationId: applicationId.trim() } : {}),
     ...(guildId.trim() ? { guildId: guildId.trim() } : {}),
     ...(ambient.trim() ? { ambientRoleIds: splitList(ambient) } : {}),
+    ...(ambientUsers.trim() ? { ambientUserIds: splitList(ambientUsers) } : {}),
   }));
   flow.renderLine("Saved server, application, and roles.", "success");
 }
@@ -427,8 +433,9 @@ async function editIngress(shell: ClankieFaceShell, services: DiscordCommandServ
   if (guilds === undefined) return;
 
   const channels = await flow.readText({
-    message: "Channel ids Clankie may read (comma separated, across all those servers)",
-    placeholder: current.ingressChannelIds.join(",") || "channel id",
+    message:
+      "Channel ids Clankie may read (comma separated) — blank admits every channel in those servers",
+    placeholder: current.ingressChannelIds.join(",") || "blank = all channels",
     validate: validateSnowflakeList,
   });
   if (channels === undefined) return;
@@ -478,7 +485,9 @@ async function editIngress(shell: ClankieFaceShell, services: DiscordCommandServ
     ...(channels.trim() ? { presenceChannelIds: splitList(channels) } : {}),
   }));
   flow.renderLine(
-    `Saved text ingress across ${String(guildIds.length)} server${guildIds.length === 1 ? "" : "s"}, and mirrored the presence allowlist to match.`,
+    `Saved text ingress across ${String(guildIds.length)} server${guildIds.length === 1 ? "" : "s"}` +
+      (channelIds.length === 0 ? ", admitting every channel in them" : "") +
+      ", and mirrored the presence allowlist to match.",
     "success",
   );
 }
@@ -513,6 +522,31 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
   });
   if (channels === undefined) return;
 
+  // Joining a call and spawning a worker have very different blast radii, so
+  // they get separate bindings rather than one shared allowlist.
+  const joinPolicy = await flow.readSelect({
+    kind: "single",
+    message: "Who may summon Clankie into a call?",
+    options: [
+      {
+        value: "ambient",
+        label: "Ambient tier only",
+        hint: "same people who may create missions",
+        description: "Voice stays behind the ambient role and user bindings.",
+      },
+      {
+        value: "guild_members",
+        label: "Anyone in the allowlisted servers",
+        hint: "voice only",
+        description:
+          "Any member may start or end a call. Mission creation, steering, and memory stay on the ambient tier.",
+      },
+    ],
+    required: true,
+  });
+  const joinPolicyChoice = joinPolicy?.[0];
+  if (joinPolicyChoice === undefined) return;
+
   const guildIds = resolveGuildList(guilds, current.voiceGuildIds, current.guildId);
   const channelIds = resolveIdList(channels, current.voiceChannelIds);
   if (enabledChoice === "true") {
@@ -525,6 +559,7 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
   await apply(services, (discord) => ({
     ...discord,
     voiceEnabled: enabledChoice === "true",
+    voiceJoinPolicy: joinPolicyChoice as DiscordSettings["voiceJoinPolicy"],
     ...(channels.trim()
       ? { voiceChannelIds: splitList(channels), voiceChannelId: splitList(channels)[0] }
       : {}),
@@ -532,7 +567,10 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
   }));
   flow.renderLine(
     `Saved voice across ${String(guildIds.length)} server${guildIds.length === 1 ? "" : "s"}` +
-      (channelIds.length === 0 ? ", admitting every voice channel in them." : "."),
+      (channelIds.length === 0 ? ", admitting every voice channel in them." : ".") +
+      (joinPolicyChoice === "guild_members"
+        ? " Any member of those servers may start a call; mission authority is unchanged."
+        : ""),
     "success",
   );
 }

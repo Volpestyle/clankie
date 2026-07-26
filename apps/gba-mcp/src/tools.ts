@@ -3,7 +3,7 @@ import {
   GbaEmulatorObservationKindSchema,
   type GbaEmulatorObservation,
 } from "@clankie/interactive-environment";
-import type { GbaDriverIo } from "@clankie/gba-emulator";
+import { FREE_PLAY_ACTION_LIMITS, type GbaDriverIo } from "@clankie/gba-emulator";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
@@ -35,7 +35,18 @@ export const ActArgumentsSchema = z
       .int()
       .optional()
       .describe("Frames to hold. 16 reliably commits a step; a short tap only turns."),
-    repeat: z.number().int().optional().describe("Press this many times in one action (max 16)."),
+    repeat: z
+      .number()
+      .int()
+      .min(1)
+      // The schema advertises exactly what the lease allows: promising more
+      // teaches a driver to distrust both and press one button at a time.
+      .max(FREE_PLAY_ACTION_LIMITS.maxInputs)
+      .optional()
+      .describe(
+        `Press this many times in one action (max ${String(FREE_PLAY_ACTION_LIMITS.maxInputs)}, the ` +
+          "per-action input budget). Use the full budget for dialog mashing.",
+      ),
     frames: z.number().int().optional().describe("Required for frame_advance."),
     durationMs: z.number().int().optional().describe("Required for wait."),
     x: z.number().int().optional().describe("Required for walk_to. Target tile x, as reported by observe."),

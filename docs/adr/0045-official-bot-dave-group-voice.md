@@ -1,7 +1,9 @@
 # ADR 0045: Official-bot group voice uses the maintained Discord media stack
 
-Status: accepted (2026-07-25). The official-bot implementation is present;
-live Discord evidence remains a deployment gate.
+Status: accepted (2026-07-25). The STT → captain → TTS pipeline is superseded
+by [ADR 0057](0057-realtime-voice-with-captain-handoff.md); media ownership,
+DAVE, the consent model, and the allowlists remain authoritative here. Live
+Discord evidence remains a deployment gate.
 
 ## Context
 
@@ -30,12 +32,14 @@ artifact; no AGPL ClankVox source is imported or executed.
 flowchart LR
   D[Discord group voice<br/>DAVE · RTP/Opus] <--> V[@discordjs/voice<br/>single media owner]
   V -->|consented user-id Opus| C[bounded per-speaker capture]
-  C -->|16 kHz mono WAV<br/>memory only| STT[brokered OpenAI STT]
-  STT --> E[Eve discord_voice lane]
-  M[(approved guild/user memory)] --> E
-  E --> TTS[brokered OpenAI TTS<br/>AI-voice disclosure]
-  TTS -->|24 kHz mono PCM<br/>memory only| V
-  E --> R[(content-free receipts)]
+  C -->|24 kHz mono PCM<br/>memory only| L[dormant listener<br/>gpt-realtime-whisper]
+  L --> F{floor machine}
+  F -->|wake| RT[engaged session<br/>gpt-realtime-2.1<br/>ADR 0057]
+  M[(approved guild/user memory)] --> B[control-plane briefing] --> RT
+  RT -->|ask_clankie| E[Eve discord_voice lane]
+  E -->|result text| RT
+  RT -->|streamed 24 kHz PCM<br/>AI-voice disclosure| V
+  RT --> R[(content-free receipts)]
 ```
 
 ### Consent and privacy
@@ -46,35 +50,44 @@ flowchart LR
   admits every voice channel inside an allowlisted guild; listing channels
   narrows it further. The guild allowlist is never skipped, so voice reach is
   always bounded to servers the owner chose, and joining still requires the
-  ambient role check on `/captain-join` plus per-participant consent. Text
-  ingress does not share this default: an empty channel list there admits
-  nothing, because ingress has no equivalent per-turn gate.
-- `/captain-join` is role-gated, joins the invoker's allowlisted channel,
-  discloses DAVE, OpenAI transcription, AI-generated speech, and raw-audio
-  handling, and opts in only the invoker.
-- Every other human uses `/captain-voice-consent opt-in`. Opt-out, leaving the
+  voice presence check on `/clankie join` plus per-participant consent.
+  `DISCORD_INGRESS_CHANNEL_IDS` follows the same rule, so one mental model
+  covers both planes: the guild allowlist bounds reach, the channel list refines
+  it. Text ingress has no per-turn gate equivalent to voice consent, so an open
+  channel list there makes the ingress trigger policy the only thing standing
+  between Clankie and a reply to every message in the server.
+- `/clankie join` is gated by the voice presence tier
+  ([ADR 0050](0050-voice-presence-authority-tier.md)), joins the invoker's
+  allowlisted channel, discloses DAVE, the live OpenAI realtime session's
+  audio residency, and AI-generated speech, and opts in only the invoker.
+- Every other human uses `/clankie voice-consent opt-in`. Opt-out, leaving the
   channel, bot leave, emergency shutdown, or process restart revokes ephemeral
   consent. Merely being present never implies consent.
-- The receiver subscribes only to consented Discord user ids. Each utterance is
-  capped at 30 seconds; raw PCM, generated PCM, and the WAV request buffer are
-  memory-only and zeroed after use. Voice receipts reject transcript, response,
-  prompt, audio, and PCM fields.
+- The receiver subscribes only to consented Discord user ids, so unconsented
+  audio never reaches the realtime input buffer. Local raw and generated PCM
+  buffers are memory-only and zeroed after use; the live realtime session
+  retains the call's audio conversation server-side for the duration of the
+  call, and the join disclosure says so
+  ([ADR 0057](0057-realtime-voice-with-captain-handoff.md)). Voice receipts
+  reject transcript, response, prompt, audio, and PCM fields.
 - Spoken input remains ambient authority and cannot approve privileged work.
   Approval-shaped results become a generic authenticated-surface handoff.
 
 ### Conversation, overlap, and memory
 
-Per-speaker Discord ids address turns to a continuing `discord_voice` Eve lane
-for the active guild/channel. The control plane, not the bridge request,
-retrieves approved person-memory facts for that guild/user/channel and supplies
-the bounded projection to Eve. Voice can use approved memory but cannot commit
-memory or persist a raw transcript.
+Conversation is answered by the engaged realtime session; anything that
+touches the world goes through its single `ask_clankie` tool to the continuing
+`discord_voice` Eve lane for the active guild/channel
+([ADR 0057](0057-realtime-voice-with-captain-handoff.md)). The control plane,
+not the bridge request, resolves approved person-memory facts for consented
+guild/user identities and supplies the bounded briefing projection. Voice can
+use approved memory but cannot commit memory or persist a raw transcript.
 
 Concurrent speakers retain separate Opus subscriptions. Overlap emits
-content-free evidence. A newly consented speaker interrupts synthesis or
-playback (barge-in), and the stale response generation is discarded. Captain
-turns and playback remain serialized so two responses do not talk over one
-another.
+content-free evidence. Barge-in is deliberate: the floor holder speaking over
+him, or a re-address, truncates playback, while crosstalk between other people
+lets him finish. Captain handoffs and playback remain serialized so two
+responses do not talk over one another.
 
 ### Credentials and evidence
 
@@ -116,5 +129,5 @@ media failure, and a clean leave.
 - [ADR 0048](0048-discord-user-session-transport.md) reuses this media owner
   behind the personal-lab user session through a custom gateway adapter. The
   single-media-owner decision constrains the media stack, not which credential
-  opened the gateway, so DAVE, consent, per-speaker capture, and memory-only
-  audio hold identically on both bodies.
+  opened the gateway, so DAVE, consent, per-speaker capture, and the local
+  memory-only audio discipline hold identically on both bodies.

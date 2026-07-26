@@ -19,7 +19,11 @@ import type { GbaDriverIo } from "./driver.ts";
  * pause/cancel, and emergency-stop fencing — so a model that asks for something
  * illegal is refused by the same machinery that refuses a script.
  */
-const ACTION_LIMITS = { maxInputs: 8, maxFrames: 600, timeoutMs: 5_000 } as const;
+/**
+ * Exported so tool surfaces can advertise the real budget: a schema that
+ * promises more than the lease allows teaches a driver to distrust both.
+ */
+export const FREE_PLAY_ACTION_LIMITS = { maxInputs: 8, maxFrames: 600, timeoutMs: 5_000 } as const;
 
 const ALL_EMULATOR_CAPABILITIES = [
   "emulator.gba.observe",
@@ -69,10 +73,17 @@ export interface FreePlaySession {
 }
 
 export async function createFreePlaySession(input: FreePlaySessionInput): Promise<FreePlaySession> {
+  // Free play is open-ended, so evidence rolls: a marathon session must never
+  // die at a receipt-sized cap. The deterministic scenario drivers keep the
+  // frozen policy, where exceeding the budget is invalid evidence.
   const adapter =
     input.coreFactory === undefined
-      ? new GbaEmulatorAdapter(input.scenario as never, input.fixtureSha256)
-      : new GbaEmulatorAdapter(input.scenario, input.fixtureSha256, input.coreFactory);
+      ? new GbaEmulatorAdapter(input.scenario as never, input.fixtureSha256, undefined, {
+          evidencePolicy: "rolling",
+        })
+      : new GbaEmulatorAdapter(input.scenario, input.fixtureSha256, input.coreFactory, {
+          evidencePolicy: "rolling",
+        });
   const sessionId = `gba-free-play:${input.scenario.scenarioId}:v${String(input.scenario.scenarioVersion)}`;
   const spec = GbaEmulatorSessionSpecSchema.parse({
     schemaVersion: 2,
@@ -93,9 +104,9 @@ export async function createFreePlaySession(input: FreePlaySessionInput): Promis
       rngSeed: input.scenario.rngSeed,
       worldId: input.scenario.worldId,
       characterId: input.scenario.player.characterId,
-      maxInputsPerAction: ACTION_LIMITS.maxInputs,
-      maxFramesPerAction: ACTION_LIMITS.maxFrames,
-      maxActionDurationMs: ACTION_LIMITS.timeoutMs,
+      maxInputsPerAction: FREE_PLAY_ACTION_LIMITS.maxInputs,
+      maxFramesPerAction: FREE_PLAY_ACTION_LIMITS.maxFrames,
+      maxActionDurationMs: FREE_PLAY_ACTION_LIMITS.timeoutMs,
       capabilities: ALL_EMULATOR_CAPABILITIES,
     },
   });
@@ -175,7 +186,7 @@ export async function createFreePlaySession(input: FreePlaySessionInput): Promis
         },
         sessionId,
         actionId: `free-play-action-${String(sequence)}`,
-        action: { kind: "gba_emulator_action", action, limits: ACTION_LIMITS },
+        action: { kind: "gba_emulator_action", action, limits: FREE_PLAY_ACTION_LIMITS },
       };
       return withLease(() => runtime.startAction(grant.token, command));
     },

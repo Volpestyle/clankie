@@ -98,6 +98,13 @@ CLANKIE_GBA_ROM_PATH=… CLANKIE_GBA_SAVESTATE_PATH=… \
   pnpm --filter @clankie/gba-emulator test
 ```
 
+Free-play sessions use the **rolling evidence policy**
+([ADR 0061](../../docs/adr/0061-evidence-rolls-for-open-ended-play.md)): when
+the bounded evidence window fills, it is sealed and a fresh one starts, with
+the roll counted in the trace — open-ended play never dies at a receipt-sized
+cap. The deterministic scenario drivers keep the frozen policy, where
+exceeding the budget is invalid evidence and fails closed.
+
 Play progress persists as minted checkpoints
 ([ADR 0060](../../docs/adr/0060-progress-as-minted-checkpoints.md)): the
 `checkpoint.ts` module captures the serialized core state into an

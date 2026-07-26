@@ -84,15 +84,15 @@ environment and remain ceilinged by the recorded opt-in either way.
 
 ## Capability differences from the bot plane
 
-| Capability                  | Bot | User session | Why                                                                                               |
-| --------------------------- | --- | ------------ | ------------------------------------------------------------------------------------------------- |
-| Text, reactions, threads    | ✅  | ✅           | Shared catalogue, one lane, one memory                                                            |
-| Group voice (DAVE, STT/TTS) | ✅  | ✅           | Same media owner via a custom gateway adapter                                                     |
-| Slash commands              | ✅  | ❌           | A user account cannot register them                                                               |
-| Mission threads/projector   | ✅  | ❌           | Bot-shaped ceremony                                                                               |
-| Ambient context messages    | ✅  | ❌           | Would require reading channels wholesale                                                          |
-| Embedded activities         | ✅  | ❌           | Owned by the bot application ([ADR 0047](../../docs/adr/0047-discord-activity-presence-plane.md)) |
-| Go Live                     | ❌  | ✅\*         | Requires the optional GPL selfbot stack — see below                                               |
+| Capability                   | Bot | User session | Why                                                                                               |
+| ---------------------------- | --- | ------------ | ------------------------------------------------------------------------------------------------- |
+| Text, reactions, threads     | ✅  | ✅           | Shared catalogue, one lane, one memory                                                            |
+| Group voice (DAVE, realtime) | ✅  | ✅           | Same media owner via a custom gateway adapter                                                     |
+| Slash commands               | ✅  | ❌           | A user account cannot register them                                                               |
+| Mission threads/projector    | ✅  | ❌           | Bot-shaped ceremony                                                                               |
+| Ambient context messages     | ✅  | ❌           | Would require reading channels wholesale                                                          |
+| Embedded activities          | ✅  | ❌           | Owned by the bot application ([ADR 0047](../../docs/adr/0047-discord-activity-presence-plane.md)) |
+| Go Live                      | ❌  | ✅\*         | Requires the optional GPL selfbot stack — see below                                               |
 
 \* Implemented, but inert until an operator installs the optional stack.
 

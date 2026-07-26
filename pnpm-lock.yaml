@@ -78,6 +78,9 @@ importers:
 
   apps/control-plane:
     dependencies:
+      '@clankie/captain-runtime':
+        specifier: workspace:*
+        version: link:../../packages/captain-runtime
       '@clankie/credential-broker':
         specifier: workspace:*
         version: link:../../packages/credential-broker
@@ -102,6 +105,9 @@ importers:
       '@clankie/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@clankie/settings':
+        specifier: workspace:*
+        version: link:../../packages/settings
       '@clankie/tracker-connector':
         specifier: workspace:*
         version: link:../../packages/tracker-connector

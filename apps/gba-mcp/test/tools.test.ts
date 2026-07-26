@@ -1,7 +1,8 @@
 import type { EnvironmentActionResult, GbaEmulatorObservation } from "@clankie/interactive-environment";
-import type { GbaDriverIo } from "@clankie/gba-emulator";
+import { FREE_PLAY_ACTION_LIMITS, type GbaDriverIo } from "@clankie/gba-emulator";
 import { describe, expect, it, vi } from "vitest";
 import {
+  ActArgumentsSchema,
   actTool,
   loadStateTool,
   observeTool,
@@ -262,6 +263,18 @@ describe("gba mcp tools", () => {
     );
     expect(result.isError).toBe(true);
     expect(String((result.content[0] as { text: string }).text)).toContain("checkpoint_not_found");
+  });
+
+  it("advertises exactly the repeat budget the lease allows, never more", () => {
+    // A schema promising more than the lease teaches a driver to distrust
+    // both and press one button at a time (the timid-repeat regression).
+    const press = { actionKind: "button_press", button: "a" } as const;
+    expect(
+      ActArgumentsSchema.safeParse({ ...press, repeat: FREE_PLAY_ACTION_LIMITS.maxInputs }).success,
+    ).toBe(true);
+    expect(
+      ActArgumentsSchema.safeParse({ ...press, repeat: FREE_PLAY_ACTION_LIMITS.maxInputs + 1 }).success,
+    ).toBe(false);
   });
 
   it("defaults a hold long enough to commit a step", () => {

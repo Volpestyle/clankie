@@ -50,7 +50,26 @@ clankie
 ```
 
 The launcher attaches to or starts the loopback captain service before opening
-the TUI. For separate development processes:
+the TUI.
+
+The same launcher supervises the three long-lived services that put Clankie in
+Discord, in dependency order ([ADR 0055](adr/0055-launcher-owned-local-services.md)):
+
+```bash
+clankie status           # every service, with the bridge's live presence phase
+clankie restart          # captain-eve -> control-plane -> discord-bridge
+clankie restart discord  # one service (captain | control-plane | discord)
+clankie down             # stop in reverse order
+```
+
+Restart is health gated and stops at the first failure, so a dead captain does
+not bury its own error under downstream noise. Each service keeps a pid record
+under `${XDG_STATE_HOME:-~/.local/state}/clankie/`, and the launcher refuses to
+signal a pid whose live command no longer matches the service it started.
+Presence allowlists come from `~/.config/clankie/settings.json`, so no env prefix
+is needed to start the bridge or control plane.
+
+For separate development processes:
 
 ```bash
 pnpm --filter @clankie/control-plane dev
@@ -119,6 +138,17 @@ Run provider contract smoke tests in disposable worktrees before enabling them i
 `openai/<model>` uses an OpenAI API key. `openai-codex/<model>` uses the
 ChatGPT subscription OAuth credential and the Codex Responses transport. The
 provider identity is explicit so both credentials can coexist safely.
+
+The subscription provider lists only models proven callable by Clankie's own
+`originator` identity. `pnpm models:codex-probe` streams one throwaway turn per
+model and effort tier and is the evidence required before that list grows
+([`@clankie/model-provider`](../packages/model-provider/README.md)).
+
+A stored subscription supersedes the API key for those models, so an
+`openai/<model>` ref resolves over the subscription transport while the
+credential exists ([ADR 0052](adr/0052-subscription-precedence-over-metered-api-key.md)).
+Log out through `/auth`, or set `disabled_providers: ["openai-codex"]`, to spend
+metered API credit on a model the subscription could serve.
 
 ## Command-center product app
 

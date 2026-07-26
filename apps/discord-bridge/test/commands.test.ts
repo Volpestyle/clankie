@@ -1,54 +1,75 @@
 import { describe, expect, it } from "vitest";
-import { commands } from "../src/commands.ts";
+import { commands, DISCORD_COMMAND_NAME, DISCORD_SUBCOMMANDS } from "../src/commands.ts";
 import { DISCORD_WORKER_STEER_CHOICES } from "../src/steering.ts";
 
+/**
+ * Everything lives under one `/clankie` namespace. Bare names would put
+ * `/join`, `/leave`, `/status`, and `/memory` in direct collision with
+ * essentially every music and utility bot in a shared server.
+ */
+const clankie = commands.find((command) => command.name === DISCORD_COMMAND_NAME);
+
+function subcommand(name: string) {
+  return clankie?.options?.find((option) => option.name === name);
+}
+
+function options(name: string) {
+  const found = subcommand(name);
+  return found && "options" in found ? found.options : undefined;
+}
+
+function choiceValues(subcommandName: string, optionName: string) {
+  const option = options(subcommandName)?.find((candidate) => candidate.name === optionName);
+  const choices = option && "choices" in option ? option.choices : undefined;
+  return choices?.map((choice) => choice.value);
+}
+
 describe("Discord commands", () => {
-  it("requires explicit join and leave commands", () => {
-    const names = commands.map((command) => command.name);
-    expect(names).toContain("captain-join");
-    expect(names).toContain("captain-voice-consent");
-    expect(names).toContain("captain-leave");
-    expect(names).not.toContain("listen-always");
-    const consent = commands.find((command) => command.name === "captain-voice-consent");
-    const action = consent?.options?.find((option) => option.name === "action");
-    const choices = action && "choices" in action ? action.choices : undefined;
-    expect(choices?.map((choice) => choice.value)).toEqual(["opt-in", "opt-out"]);
+  it("registers exactly one top-level namespace", () => {
+    expect(commands).toHaveLength(1);
+    expect(clankie?.name).toBe("clankie");
+  });
+
+  it("exposes every subcommand and nothing else", () => {
+    expect(clankie?.options?.map((option) => option.name)).toEqual([...DISCORD_SUBCOMMANDS]);
+    expect(DISCORD_SUBCOMMANDS).not.toContain("listen-always");
+  });
+
+  it("requires explicit join and leave subcommands", () => {
+    expect(subcommand("join")).toBeDefined();
+    expect(subcommand("leave")).toBeDefined();
+    expect(subcommand("voice-consent")).toBeDefined();
+    expect(choiceValues("voice-consent", "action")).toEqual(["opt-in", "opt-out"]);
   });
 
   it("offers only the three user-facing ceremony presets", () => {
-    const mission = commands.find((command) => command.name === "captain-mission");
-    const doctrine = mission?.options?.find((option) => option.name === "doctrine");
-    const choices = doctrine && "choices" in doctrine ? doctrine.choices : undefined;
-
-    expect(choices?.map((choice) => choice.value)).toEqual(["rawdog", "structured", "fine-control"]);
+    expect(choiceValues("mission", "doctrine")).toEqual(["rawdog", "structured", "fine-control"]);
   });
 
   it("exposes mission steering, ambient approval handoff, and memory controls", () => {
-    const names = commands.map((command) => command.name);
-    expect(names).toContain("captain-steer");
-    expect(names).toContain("captain-approval");
-    expect(names).toContain("captain-memory");
-    expect(names).toContain("captain-person-memory");
+    for (const name of ["steer", "approval", "memory", "person-memory"]) {
+      expect(subcommand(name), `missing /clankie ${name}`).toBeDefined();
+    }
   });
 
   it("keeps person-memory mutation proposal-only and excludes ambient export/delete", () => {
-    const memory = commands.find((command) => command.name === "captain-person-memory");
-    const action = memory?.options?.find((option) => option.name === "action");
-    const choices = action && "choices" in action ? action.choices : undefined;
-
-    expect(choices?.map((choice) => choice.value)).toEqual(["propose", "recall"]);
-    expect(choices?.map((choice) => choice.value)).not.toContain("delete");
-    expect(choices?.map((choice) => choice.value)).not.toContain("export");
+    const values = choiceValues("person-memory", "action");
+    expect(values).toEqual(["propose", "recall"]);
+    expect(values).not.toContain("delete");
+    expect(values).not.toContain("export");
   });
 
   it("makes arbitrary steering text impossible in the registered command schema", () => {
-    const steering = commands.find((command) => command.name === "captain-steer");
-    const intent = steering?.options?.find((option) => option.name === "intent");
+    const intent = options("steer")?.find((option) => option.name === "intent");
     const choices = intent && "choices" in intent ? intent.choices : undefined;
 
-    expect(steering?.options?.map((option) => option.name)).toEqual(["intent"]);
+    expect(options("steer")?.map((option) => option.name)).toEqual(["intent"]);
     expect(choices).toEqual(DISCORD_WORKER_STEER_CHOICES.map(({ name, value }) => ({ name, value })));
     expect(choices).toHaveLength(8);
     expect(intent && "max_length" in intent ? intent.max_length : undefined).toBeUndefined();
+  });
+
+  it("stays under Discord's per-command subcommand cap", () => {
+    expect(DISCORD_SUBCOMMANDS.length).toBeLessThanOrEqual(25);
   });
 });

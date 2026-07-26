@@ -501,7 +501,7 @@ function staticArgumentSpec(commandName: string, context: ArgumentContext): Stat
       );
     case "effort":
       return values(
-        ["status", "minimal", "low", "medium", "high", "xhigh", "unset"],
+        ["status", "none", "minimal", "low", "medium", "high", "xhigh", "max", "unset"],
         ["/effort status", "/effort high", "/effort unset"],
       );
     case "approvals":

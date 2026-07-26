@@ -4,7 +4,14 @@ import {
   resolveDiscordVoiceBridgeCredential,
 } from "@clankie/credential-broker";
 import { inspectDiscordVoiceReadiness } from "./voice-readiness.ts";
-import { OpenAiVoiceSpeechRuntime, type VoiceSpeechRuntime } from "@clankie/discord-presence-core";
+import { applyDiscordSettingsToEnvironment, SettingsStore } from "@clankie/settings";
+
+// Readiness must inspect the configuration the bridge will actually run with.
+// The bridge fills unset DISCORD_* names from the operator settings file at
+// startup, so a checker reading bare environment would report failures for a
+// deployment that is in fact configured — the exact opposite of its job.
+const storedSettings = await new SettingsStore().load();
+applyDiscordSettingsToEnvironment(storedSettings.discord);
 
 const store = createDefaultCredentialStore();
 const bridgeToken = await resolveDiscordVoiceBridgeCredential({ store });
@@ -12,39 +19,14 @@ const api = new ClankieApiClient({
   baseUrl: process.env.CLANKIE_API_URL ?? "http://127.0.0.1:4310",
   ...(bridgeToken === undefined ? {} : { captainToken: bridgeToken }),
 });
-const openAiCredential = await store.get("openai");
-const speech: VoiceSpeechRuntime =
-  openAiCredential?.type === "api"
-    ? new OpenAiVoiceSpeechRuntime({
-        apiKey: openAiCredential.key,
-        ...(process.env.CLANKIE_VOICE_STT_MODEL === undefined
-          ? {}
-          : { sttModel: process.env.CLANKIE_VOICE_STT_MODEL }),
-        ...(process.env.CLANKIE_VOICE_TTS_MODEL === undefined
-          ? {}
-          : { ttsModel: process.env.CLANKIE_VOICE_TTS_MODEL }),
-        ...(process.env.CLANKIE_VOICE_TTS_VOICE === undefined
-          ? {}
-          : { voice: process.env.CLANKIE_VOICE_TTS_VOICE }),
-      })
-    : {
-        readiness: () =>
-          Promise.resolve({
-            ready: false,
-            provider: "openai",
-            sttModel: process.env.CLANKIE_VOICE_STT_MODEL ?? "gpt-4o-mini-transcribe",
-            ttsModel: process.env.CLANKIE_VOICE_TTS_MODEL ?? "gpt-4o-mini-tts",
-            voice: process.env.CLANKIE_VOICE_TTS_VOICE ?? "marin",
-            responseFormat: "pcm",
-          }),
-        transcribe: () => Promise.reject(new Error("OpenAI speech credential is unavailable")),
-        synthesize: () => Promise.reject(new Error("OpenAI speech credential is unavailable")),
-      };
+// This is the live path: with no injected wakeProbe, readiness builds the real
+// dormant→engaged probe from the brokered openai credential and opens both
+// realtime session tiers in sequence (skipped as failed checks when the
+// credential or configuration is missing). Unit tests inject fakes instead.
 const report = await inspectDiscordVoiceReadiness({
   env: process.env,
   store,
   api,
-  speech,
 });
 
 if (process.argv.includes("--json")) {
