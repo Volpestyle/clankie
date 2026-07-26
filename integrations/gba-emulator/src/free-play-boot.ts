@@ -4,9 +4,9 @@ import path from "node:path";
 import { FrozenGbaScenarioSchema } from "./contracts.ts";
 import { sha256 } from "./core-double.ts";
 import type { GbaAdapterScenario, GbaCoreFactory } from "./core-seam.ts";
-import { MgbaFireRedCore } from "./firered-core.ts";
+import { MgbaFireRedCore, type MgbaFireRedCoreIdentity } from "./firered-core.ts";
 import { encodeFramebufferPng } from "./framebuffer-png.ts";
-import { RealGbaRouteScenarioSchema } from "./real-scenario.ts";
+import { RealGbaRouteScenarioSchema, type RealGbaRouteScenario } from "./real-scenario.ts";
 
 /**
  * Resolve which game Clankie is looking at.
@@ -20,11 +20,28 @@ import { RealGbaRouteScenarioSchema } from "./real-scenario.ts";
  * them it is the clearly-labeled deterministic double, so the surface is usable
  * without copyrighted bytes.
  */
+/**
+ * Savestate capture and restore, present only on the real core.
+ *
+ * The deterministic double has no serializable state — its determinism *is*
+ * its identity — so on the double the capability is absent rather than stubbed.
+ */
+export interface GbaCheckpointCapability {
+  saveState: () => Uint8Array;
+  loadState: (bytes: Uint8Array) => void;
+  /** Digests verified at core creation; a checkpoint must match them to load. */
+  identity: MgbaFireRedCoreIdentity;
+  /** The booted route scenario — the template a checkpoint's companion scenario is minted from. */
+  scenario: RealGbaRouteScenario;
+}
+
 export interface BootedGbaGame {
   scenario: GbaAdapterScenario;
   fixtureSha256: string;
   /** Undefined when running the deterministic double. */
   coreFactory: GbaCoreFactory | undefined;
+  /** Undefined when running the deterministic double. */
+  checkpoints: GbaCheckpointCapability | undefined;
   /** Latest rendered screen, upscaled, or null when nothing has rendered. */
   framePng: (scale?: number) => Uint8Array | null;
   /**
@@ -67,6 +84,7 @@ export async function bootGbaGame(options: BootGbaGameOptions): Promise<BootedGb
       scenario: FrozenGbaScenarioSchema.parse(parsed) as GbaAdapterScenario,
       fixtureSha256: sha256(fixtureBytes),
       coreFactory: undefined,
+      checkpoints: undefined,
       framePng: () => null,
       observeFrames: () => undefined,
       framebufferSha256: () => null,
@@ -89,6 +107,14 @@ export async function bootGbaGame(options: BootGbaGameOptions): Promise<BootedGb
     scenario: routeScenario as GbaAdapterScenario,
     fixtureSha256: sha256(fixtureBytes),
     coreFactory: () => core,
+    checkpoints: {
+      saveState: () => core.saveState(),
+      loadState: (bytes) => {
+        core.loadState(bytes);
+      },
+      identity: core.identity(),
+      scenario: routeScenario,
+    },
     framePng: (scale = 3) => {
       try {
         return encodeFramebufferPng(core.framebufferSnapshot(), scale);

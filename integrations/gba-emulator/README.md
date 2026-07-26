@@ -28,11 +28,34 @@ input consuming frames + typed RAM-derived state + framebuffer/RAM digests):
   single-threaded, no network) running an operator-supplied FireRed ROM.
   Creation fails closed unless the ROM, savestate, and core-wasm bytes match
   the SHA-256 digests pinned in the selected fixture. The gameplay decoder is
-  pinned to FireRed US v1.0 and derives overworld position/facing, encrypted
-  party records and legal moves, inventory pockets, dialog, start/party/bag
-  menus, and battle input/outcome from EWRAM, IWRAM, and the pinned ROM. An
-  unsupported ROM identity, pointer, checksum, value, menu state, or battle
-  outcome fails closed.
+  pinned to FireRed US v1.0 and derives overworld position/facing, the live map
+  collision grid, encrypted party records and legal moves, inventory pockets,
+  dialog, start/party/bag menus, and battle input/outcome from EWRAM, IWRAM, and
+  the pinned ROM. An unsupported ROM identity, pointer, checksum, value, menu
+  state, or battle outcome fails closed.
+
+## Collision
+
+`gBackupMapLayout` (IWRAM `0x03005040`) is FireRed's live map buffer, so walls
+are **read rather than remembered**
+([ADR 0058](../../docs/adr/0058-read-collision-from-the-live-map-buffer.md)).
+Each tile is a `u16`: metatile id in bits 0-9, collision in 10-11, elevation in
+12-15.
+
+The buffer carries seven tiles of border filler on every side and that filler
+decodes to collision 0, so every query is clamped to the real map and fails
+closed outside it — otherwise the void beyond a room's walls reads as open floor.
+
+Collision models walls and nothing else. It does not model ledges, water,
+elevation transitions, or NPCs, which occupy tiles without appearing in it. An
+open tile means "not a wall", not "reachable on foot", which is why `walk_to`
+re-checks every step instead of trusting its own plan.
+
+Warp tiles block *and* transport: the stairs at `(16,9)` in `players-house-2f`
+read as a wall, yet pressing into them from `(17,9)` arrives on
+`players-house-1f`. So `walk_to` routes within a map and crossing between maps
+stays a directional press. Routing through warps would need the map header's
+warp-event list decoded too.
 
 ## Scenarios
 
@@ -42,9 +65,9 @@ change when observed state changes, and uncertain or desynced state pauses the
 session and fails closed instead of replaying input. The expanded gameplay goal
 opens and observes party and bag state, navigates to a trainer, advances
 dialog, selects the strongest decoded legal move, and requires a decoded
-victory. The route driver's only navigation memory is the set of directed
-transitions the emulator itself refused — observed collision reality that BFS
-routes around.
+victory. The route driver also remembers the set of directed transitions the
+emulator itself refused, which covers what tile collision does not — NPCs, and
+anything else that blocks without being a wall.
 
 The default real scenario (`fixtures/firered-bedroom-route/v1`) is a bounded
 bedroom route. The `fixtures/firered-oaks-lab-rival/v1` scenario opens and
@@ -74,6 +97,16 @@ CLANKIE_GBA_LIVE_RECEIPT_PATH=… \
 CLANKIE_GBA_ROM_PATH=… CLANKIE_GBA_SAVESTATE_PATH=… \
   pnpm --filter @clankie/gba-emulator test
 ```
+
+Play progress persists as minted checkpoints
+([ADR 0060](../../docs/adr/0060-progress-as-minted-checkpoints.md)): the
+`checkpoint.ts` module captures the serialized core state into an
+operator-local directory with a digest receipt and a companion scenario that
+boots through this same fail-closed loader. The pinned fixtures stay frozen — a
+checkpoint is always a sibling identity, never an overwrite — and loading
+verifies the id, receipt, ROM, core build, and savestate digest before touching
+the core. The GBA MCP server publishes this as lease-gated
+`gba_emulator_save_state` / `gba_emulator_load_state` tools.
 
 Fixture development uses the bounded operator-local probe. Its JSON input list
 applies no more than 256 button presses and writes only decoded state,
