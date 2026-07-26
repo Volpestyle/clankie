@@ -213,6 +213,7 @@ export class CaptainSessionLedger {
       id: eventId(this.projectId, event),
       occurredAt: event.occurredAt,
       missionId: this.missionId,
+      streamKind: "captain_project",
       correlationId: event.sessionId,
       ...(event.turnId === undefined ? {} : { causationId: event.turnId }),
       profileHash: LEDGER_PROFILE_HASH,

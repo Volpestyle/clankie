@@ -18,6 +18,7 @@ import {
   MissionPlanSchema,
   TaskKindSchema,
   WorkerResultSchema,
+  isMissionEventStream,
   type ActiveMissionDescriptor,
   type ActiveMissionSelection,
   type DomainEvent,
@@ -326,6 +327,11 @@ export class MissionEventFeed {
     this.latestSourceSequence = stored.sequence;
     this.latestSourceHash = stored.hash;
     this.publishedEventIds.set(stored.event.id, { sequence: stored.sequence, hash: stored.hash });
+
+    // Reserved streams (presence sessions, devices, triggers) share the log but
+    // are not missions. They project to nothing, so buffering them only leaked a
+    // permanent empty buffer per stream id.
+    if (!isMissionEventStream(stored.event)) return;
 
     const buffer = this.buffer(stored.event.missionId);
     this.captureTaskKinds(buffer, stored.event);

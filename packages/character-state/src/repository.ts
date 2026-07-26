@@ -275,6 +275,7 @@ export class CharacterStateRepository {
         id: eventId(characterId, kind, idempotencyKey),
         occurredAt,
         missionId: streamId,
+        streamKind: "character",
         correlationId,
         ...(causationId === undefined ? {} : { causationId }),
         profileHash: PROFILE_HASH,

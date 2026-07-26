@@ -110,6 +110,7 @@ import {
   type WorkerTranscriptTailLine,
   DISCORD_PRESENCE_ACTION_RISK_CLASS,
   DiscordPresenceActionSchema,
+  eventStreamKindForId,
 } from "@clankie/protocol";
 import {
   TrackerAuthorityConflictError,
@@ -972,6 +973,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       id: idFactory(),
       occurredAt,
       missionId,
+      streamKind: eventStreamKindForId(missionId),
       correlationId: envelope.correlationId ?? missionId,
       profileHash: envelope.profileHash ?? dependencies.doctrine.profileHash,
       type,

@@ -307,6 +307,26 @@ reader, filters to garden visibility, and fails closed unless the paired device
 currently holds the `chat` grant. Transcript files are excluded from support
 bundles, analytics, crash reports, and the mission event store.
 
+## Event stream identity
+
+`DomainEvent.missionId` is the append-only log's partition key: it is what
+`ProjectionEventStore.readStream` reads, what the `events_by_mission` index
+covers, and what optimistic concurrency counts. Subsystems with no mission still
+need a partition, so they mint a namespaced stream id — `captain-presence`,
+`discord-presence:<sessionId>`, `embodiment:<sessionId>`, `device:<id>`,
+`trigger:<id>`, `pairing:<id>`, `character:<id>`, `captain-project:<id>`,
+`discord-person:<guild>:<user>`, `memory:retention`, `captain:episodes`.
+
+`streamKind` on the envelope says which kind of partition an event belongs to, so
+no reader infers meaning from the shape of an id
+([ADR 0065](adr/0065-event-streams-declare-their-kind.md)). Writers stamp it from
+`eventStreamKindForId`; readers ask `classifyEventStream` or
+`isMissionEventStream`, which prefer the stamped value and fall back to the
+reserved-namespace table for events appended before the field existed. The field
+is optional and never defaulted, because `seal()` re-parses before hashing and a
+default would break `verifyChain` on every event already stored. A mission id may
+not begin with a reserved prefix.
+
 ## Garden mission-event feed
 
 Garden mission state comes from an authenticated schema-v1 read projection of

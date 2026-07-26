@@ -1,16 +1,21 @@
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { CaptainPresenceEventSchema } from "@clankie/protocol";
+import { CaptainPresenceEventSchema, classifyEventStream } from "@clankie/protocol";
 import type {
   DashboardAgent,
   DashboardMission,
+  DashboardPresence,
   DashboardState,
   DashboardTask,
 } from "../components/mission-dashboard.ts";
 import type { MissionEventSource, ObservedMissionEvent, SequencedMissionEvent } from "./mission-events.ts";
 
-const CHECKPOINT_VERSION = 1;
+// v2 split reserved streams out of the mission map. The parser rejects other
+// versions and the caller replays from sequence 0, which is how a v1 checkpoint
+// full of phantom presence "missions" clears itself.
+const CHECKPOINT_VERSION = 2;
 const EVENT_TAIL_LENGTH = 12;
+const PRESENCE_SESSION_LIMIT = 8;
 
 type MissionProjection = {
   id: string;
@@ -23,13 +28,21 @@ type MissionProjection = {
   timeline: string[];
 };
 
+type PresenceProjection = {
+  streamId: string;
+  sessionId: string;
+  phase: string;
+  updatedSequence: number;
+};
+
 type ObservationCheckpoint = {
-  version: 1;
+  version: 2;
   sourceId: string;
   lastSequence: number;
   selectedMissionId?: string;
   captain?: CaptainPresenceProjection;
   missions: MissionProjection[];
+  presence: PresenceProjection[];
 };
 
 export type CaptainPresenceState = "working" | "waiting_user" | "waiting_dependency" | "idle" | "offline";
@@ -60,6 +73,7 @@ export class MissionObserver {
   private readonly checkpointPath: string;
   private readonly pollIntervalMs: number;
   private readonly missions = new Map<string, MissionProjection>();
+  private readonly presence = new Map<string, PresenceProjection>();
   private selectedMissionId: string | undefined;
   private captain: CaptainPresenceProjection | undefined;
   private lastSequence = 0;
@@ -95,11 +109,18 @@ export class MissionObserver {
       mission: selected === undefined ? "No observed mission" : `${selected.id} · ${selected.goal}`,
       doctrine: selected?.profileHash ?? "event log unavailable",
       missions,
+      presence: this.presenceList(),
       tasks: selected?.tasks ?? [],
       agents: selected?.agents ?? [],
       attention,
       timeline: selected?.timeline ?? [],
     };
+  }
+
+  private presenceList(): DashboardPresence[] {
+    return [...this.presence.values()]
+      .sort((left, right) => right.updatedSequence - left.updatedSequence)
+      .map((session) => ({ sessionId: session.sessionId, phase: session.phase }));
   }
 
   /** Latest authoritative captain state projected from control-plane events. */
@@ -129,6 +150,7 @@ export class MissionObserver {
     this.selectedMissionId = checkpoint.selectedMissionId;
     this.captain = checkpoint.captain;
     for (const mission of checkpoint.missions) this.missions.set(mission.id, mission);
+    for (const session of checkpoint.presence) this.presence.set(session.streamId, session);
     this.connection = `restored at sequence ${this.lastSequence.toString()}`;
   }
 
@@ -188,6 +210,7 @@ export class MissionObserver {
     let batch = await this.source.readAfter(this.lastSequence);
     if (batch.throughSequence < this.lastSequence || hasSequenceGap(batch.events, this.lastSequence)) {
       this.missions.clear();
+      this.presence.clear();
       this.lastSequence = 0;
       this.selectedMissionId = undefined;
       batch = await this.source.readAfter(0);
@@ -212,16 +235,48 @@ export class MissionObserver {
   private apply(entry: SequencedMissionEvent): void {
     const event = entry.event;
     this.applyCaptainPresence(event);
+    // `missionId` is the log's partition key, not a claim that a mission exists.
+    // Reserved streams get their own projection so they never masquerade as one.
+    const kind = classifyEventStream(event);
+    if (kind === "discord_presence") {
+      this.applyDiscordPresence(entry);
+      return;
+    }
+    if (kind !== "mission") return;
     const mission = this.missions.get(event.missionId) ?? createMission(event, entry.sequence);
     mission.profileHash = sanitize(event.profileHash);
     mission.updatedSequence = entry.sequence;
     applyMissionLifecycle(mission, event);
-    applyDiscordPresenceLifecycle(mission, event);
     applyTaskLifecycle(mission, event);
     applyWorkerLifecycle(mission, event);
     mission.timeline.push(summarizeEvent(entry));
     mission.timeline.splice(0, Math.max(0, mission.timeline.length - EVENT_TAIL_LENGTH));
     this.missions.set(mission.id, mission);
+  }
+
+  private applyDiscordPresence(entry: SequencedMissionEvent): void {
+    const event = entry.event;
+    if (event.type !== "discord.presence.session.phase_changed") return;
+    const session = recordData(event.data, "session");
+    const sessionId = stringData(session, "sessionId") ?? event.missionId;
+    const existing = this.presence.get(event.missionId);
+    const projection: PresenceProjection = {
+      streamId: sanitize(event.missionId),
+      sessionId,
+      phase: stringData(event.data, "phase") ?? existing?.phase ?? "unknown",
+      updatedSequence: entry.sequence,
+    };
+    this.presence.set(projection.streamId, projection);
+    // Every bridge restart mints a fresh session id, so old sessions would
+    // otherwise accumulate forever. Keep only the most recent few.
+    if (this.presence.size > PRESENCE_SESSION_LIMIT) {
+      const stale = [...this.presence.values()].sort(
+        (left, right) => left.updatedSequence - right.updatedSequence,
+      );
+      for (const entryToDrop of stale.slice(0, this.presence.size - PRESENCE_SESSION_LIMIT)) {
+        this.presence.delete(entryToDrop.streamId);
+      }
+    }
   }
 
   private applyCaptainPresence(event: ObservedMissionEvent): void {
@@ -315,6 +370,7 @@ export class MissionObserver {
       ...(this.selectedMissionId === undefined ? {} : { selectedMissionId: this.selectedMissionId }),
       ...(this.captain === undefined ? {} : { captain: this.captain }),
       missions: [...this.missions.values()],
+      presence: [...this.presence.values()],
     };
     const directory = dirname(this.checkpointPath);
     const temporaryPath = join(directory, `.${process.pid.toString()}-mission-observer.tmp`);
@@ -358,15 +414,6 @@ function applyMissionLifecycle(mission: MissionProjection, event: ObservedMissio
   } else if (event.type === "mission.succeeded") mission.state = "succeeded";
   else if (event.type === "mission.failed") mission.state = "failed";
   else if (event.type === "mission.cancelled") mission.state = "cancelled";
-}
-
-function applyDiscordPresenceLifecycle(mission: MissionProjection, event: ObservedMissionEvent): void {
-  if (event.type !== "discord.presence.session.phase_changed") return;
-  const session = recordData(event.data, "session");
-  const sessionId = stringData(session, "sessionId");
-  const phase = stringData(event.data, "phase");
-  mission.goal = sessionId === undefined ? "Discord presence" : `Discord presence · ${sessionId}`;
-  if (phase !== undefined) mission.state = phase;
 }
 
 function applyTaskLifecycle(mission: MissionProjection, event: ObservedMissionEvent): void {
@@ -444,12 +491,6 @@ function taskState(type: string): string {
 
 function summarizeEvent(entry: SequencedMissionEvent): string {
   const { event, sequence } = entry;
-  if (event.type === "discord.presence.session.phase_changed") {
-    const previous = stringData(event.data, "previousPhase") ?? "unknown";
-    const phase = stringData(event.data, "phase") ?? "unknown";
-    const reason = stringData(event.data, "reason") ?? "unspecified";
-    return `#${sequence.toString()} discord presence ${previous} → ${phase} · ${reason}`;
-  }
   const scope = [event.taskId, event.workerRunId].filter(isDefined).map(sanitize).join(" · ");
   return `#${sequence.toString()} ${sanitize(event.type)}${scope.length === 0 ? "" : ` · ${scope}`}`;
 }
@@ -515,6 +556,7 @@ function parseCheckpoint(value: unknown): ObservationCheckpoint {
     throw new Error("Invalid observation checkpoint cursor");
   }
   if (!Array.isArray(record.missions)) throw new Error("Invalid observation checkpoint missions");
+  if (!Array.isArray(record.presence)) throw new Error("Invalid observation checkpoint presence");
   const selectedMissionId =
     record.selectedMissionId === undefined
       ? undefined
@@ -530,6 +572,20 @@ function parseCheckpoint(value: unknown): ObservationCheckpoint {
     ...(selectedMissionId === undefined ? {} : { selectedMissionId }),
     ...(record.captain === undefined ? {} : { captain: parseCheckpointCaptain(record.captain) }),
     missions: record.missions.map(parseCheckpointMission),
+    presence: record.presence.map(parseCheckpointPresence),
+  };
+}
+
+function parseCheckpointPresence(value: unknown): PresenceProjection {
+  const record = checkpointRecord(value, "presence session");
+  if (!Number.isSafeInteger(record.updatedSequence) || Number(record.updatedSequence) < 0) {
+    throw new Error("Invalid presence session sequence in observation checkpoint");
+  }
+  return {
+    streamId: checkpointString(record, "streamId"),
+    sessionId: checkpointString(record, "sessionId"),
+    phase: checkpointString(record, "phase"),
+    updatedSequence: Number(record.updatedSequence),
   };
 }
 

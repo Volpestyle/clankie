@@ -179,7 +179,7 @@ describe("MissionObserver", () => {
     expect((await stat(join(checkpointPath, ".."))).mode & 0o777).toBe(0o700);
   });
 
-  it("displays Discord presence phase from its semantic event without terminal output", async () => {
+  it("projects a Discord presence session onto its own stream, never as a mission", async () => {
     const source = new FakeEventSource([
       event(1, "discord.presence.session.phase_changed", {
         missionId: "discord-presence:discord:bot:fixture",
@@ -197,9 +197,56 @@ describe("MissionObserver", () => {
     });
     await observer.refresh();
     expect(observer.dashboard).toMatchObject({
-      mission: "discord-presence:discord:bot:fixture · Discord presence · discord:bot:fixture",
-      missions: [{ id: "discord-presence:discord:bot:fixture", state: "degraded", selected: true }],
-      timeline: ["#1 discord presence present → degraded · gateway_disconnected"],
+      mission: "No observed mission",
+      missions: [],
+      presence: [{ sessionId: "discord:bot:fixture", phase: "degraded" }],
+    });
+  });
+
+  it("keeps only the newest presence sessions as bridge restarts mint new ids", async () => {
+    const source = new FakeEventSource(
+      Array.from({ length: 12 }, (_, index) =>
+        event(index + 1, "discord.presence.session.phase_changed", {
+          missionId: `discord-presence:discord:bot:app:session-${index.toString()}`,
+          data: {
+            previousPhase: "connecting",
+            phase: index === 11 ? "present" : "off",
+            reason: "process_exit",
+            session: { sessionId: `discord:bot:app:session-${index.toString()}` },
+          },
+        }),
+      ),
+    );
+    const observer = new MissionObserver({
+      source,
+      checkpointPath: await temporaryPath("presence-restart-observer.json"),
+    });
+    await observer.refresh();
+    const { presence, missions } = observer.dashboard;
+    expect(missions).toEqual([]);
+    expect(presence).toHaveLength(8);
+    expect(presence[0]).toEqual({ sessionId: "discord:bot:app:session-11", phase: "present" });
+  });
+
+  it("keeps reserved streams out of the mission list and default selection", async () => {
+    const source = new FakeEventSource([
+      event(1, "discord.presence.session.phase_changed", {
+        missionId: "discord-presence:discord:bot:fixture",
+        data: { phase: "off", session: { sessionId: "discord:bot:fixture" } },
+      }),
+      event(2, "embodiment.session.claimed", { missionId: "embodiment:session-1" }),
+      event(3, "device.pairing.redeemed", { missionId: "device:device-1" }),
+      event(4, "mission.trigger.fired", { missionId: "trigger:trigger-1" }),
+      event(5, "mission.drafted", { missionId: "mission-real", data: { goal: "Ship the thing" } }),
+    ]);
+    const observer = new MissionObserver({
+      source,
+      checkpointPath: await temporaryPath("reserved-observer.json"),
+    });
+    await observer.refresh();
+    expect(observer.dashboard).toMatchObject({
+      mission: "mission-real · Ship the thing",
+      missions: [{ id: "mission-real", state: "draft", selected: true }],
     });
   });
 

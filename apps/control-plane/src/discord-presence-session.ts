@@ -112,6 +112,7 @@ export function discordPresenceDomainEvent(
     id: parsed.id,
     occurredAt: parsed.occurredAt,
     missionId: `${DISCORD_PRESENCE_EVENT_STREAM_ID}:${parsed.sessionId}`,
+    streamKind: "discord_presence",
     correlationId: parsed.correlationId,
     profileHash,
     type: parsed.type,

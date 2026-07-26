@@ -1,5 +1,6 @@
 import {
   CaptainPresenceEventSchema,
+  isMissionEventStream,
   type DomainEvent,
   type Harness,
   type TaskKind,
@@ -94,7 +95,9 @@ function kind(value: unknown): TaskKind | undefined {
 }
 
 export function projectGarden(events: DomainEvent[]): GardenWorld {
-  const first = events[0];
+  // Reserved streams (captain presence, devices, triggers) share the log, so the
+  // first event is not necessarily a mission's.
+  const first = events.find((event) => isMissionEventStream(event));
   const missionId = first?.missionId ?? "unknown";
   const agents = new Map<string, GardenAgent>();
   const attention = new Map<string, GardenWorld["attentionQueue"][number]>();

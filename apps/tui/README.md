@@ -15,6 +15,15 @@ sanitized mode-0600 cursor checkpoint at `.data/tui/mission-observer.json`. The 
 and next/previous navigation. `CLANKIE_EVENT_STORE` overrides the default
 `artifacts/control-plane/events.db` path.
 
+The log is partitioned by `missionId`, but reserved streams share it — presence
+sessions, embodiment sessions, devices, triggers. The observer routes on
+`streamKind` ([ADR 0065](../../docs/adr/0065-event-streams-declare-their-kind.md)),
+so only real missions reach the mission list and its default selection. Discord
+presence gets its own section showing the newest sessions and their phase; a
+bridge restart mints a new session id, so older ones age out rather than
+accumulating. Other reserved kinds are not rendered. The checkpoint is version 2;
+an older checkpoint is rejected and replayed from sequence 0.
+
 Run after installing with Node 24. The fullscreen face requires a TTY; captain
 control subcommands are non-interactive:
 

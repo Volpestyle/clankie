@@ -16,6 +16,10 @@ const state: DashboardState = {
       selected: true,
     },
   ],
+  presence: [
+    { sessionId: "discord:bot:1530657471402737826:f35a58d0-6f03-45cc-a00b-57617c263573", phase: "present" },
+    { sessionId: "discord:bot:1530657471402737826:628d9942-4fc4-4c2a-b901-2ac3d8ff1446", phase: "off" },
+  ],
   tasks: [
     {
       id: "implementation-with-a-long-name",

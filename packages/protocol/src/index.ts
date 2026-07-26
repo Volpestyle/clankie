@@ -1036,10 +1036,109 @@ export const ApprovalDecisionInputSchema = z.object({
 });
 export type ApprovalDecisionInput = z.infer<typeof ApprovalDecisionInputSchema>;
 
+// ---------------------------------------------------------------------------
+// Event stream identity.
+//
+// `missionId` is the append-only log's partition key — it is what
+// `ProjectionEventStore.readStream` reads and what optimistic concurrency
+// counts. Subsystems that have no mission (presence sessions, embodiment
+// sessions, devices, triggers) still need their own partition, so they mint a
+// namespaced stream id. `streamKind` is what that partition *is*, so a reader
+// never has to infer meaning from the shape of an id.
+// ---------------------------------------------------------------------------
+
+export const EVENT_STREAM_KINDS = [
+  "mission",
+  "captain_presence",
+  "captain_episodes",
+  "captain_project",
+  "discord_presence",
+  "discord_user_session",
+  "embodiment",
+  "person_memory",
+  "memory_retention",
+  "trigger",
+  "pairing",
+  "device",
+  "character",
+  "diagnostic",
+] as const;
+export const EventStreamKindSchema = z.enum(EVENT_STREAM_KINDS);
+export type EventStreamKind = z.infer<typeof EventStreamKindSchema>;
+
+/**
+ * Reserved stream namespaces. A writer picks its namespace here and gets the
+ * matching `streamKind` stamped automatically; a reader of a pre-`streamKind`
+ * event recovers the same answer. Entries are matched longest-prefix-first, so
+ * an exact id and a prefix may coexist. Mission ids must never collide with a
+ * reserved namespace — see ADR 0065.
+ */
+const RESERVED_EVENT_STREAM_NAMESPACES: readonly {
+  readonly match: string;
+  readonly exact: boolean;
+  readonly kind: EventStreamKind;
+}[] = [
+  { match: "captain-presence", exact: true, kind: "captain_presence" },
+  { match: "captain:episodes", exact: true, kind: "captain_episodes" },
+  { match: "captain-project:", exact: false, kind: "captain_project" },
+  { match: "discord-presence:", exact: false, kind: "discord_presence" },
+  { match: "discord-user-session:", exact: false, kind: "discord_user_session" },
+  { match: "discord-person:", exact: false, kind: "person_memory" },
+  { match: "embodiment:", exact: false, kind: "embodiment" },
+  { match: "memory:retention", exact: true, kind: "memory_retention" },
+  { match: "trigger:", exact: false, kind: "trigger" },
+  { match: "pairing:", exact: false, kind: "pairing" },
+  { match: "device:", exact: false, kind: "device" },
+  { match: "character:", exact: false, kind: "character" },
+  { match: "provider-readiness", exact: true, kind: "diagnostic" },
+  { match: "media-readiness", exact: true, kind: "diagnostic" },
+];
+
+/** The reserved prefixes a freshly minted mission id may not start with. */
+export const RESERVED_EVENT_STREAM_PREFIXES: readonly string[] = RESERVED_EVENT_STREAM_NAMESPACES.filter(
+  (entry) => !entry.exact,
+).map((entry) => entry.match);
+
+/**
+ * The kind a stream id declares by its namespace. Writers call this so the kind
+ * is stamped once, at append time, rather than re-derived by every reader.
+ */
+export function eventStreamKindForId(streamId: string): EventStreamKind {
+  for (const entry of RESERVED_EVENT_STREAM_NAMESPACES) {
+    if (entry.exact ? streamId === entry.match : streamId.startsWith(entry.match)) return entry.kind;
+  }
+  return "mission";
+}
+
+/**
+ * What kind of stream an event belongs to. The stamped `streamKind` is
+ * authoritative; namespace inference is the compatibility path for events
+ * appended before the field existed, and for the handful of foreign writers
+ * (worker adapters, runner diagnostics) that copy a stream id verbatim.
+ */
+export function classifyEventStream(event: {
+  readonly missionId: string;
+  readonly streamKind?: EventStreamKind | undefined;
+}): EventStreamKind {
+  return event.streamKind ?? eventStreamKindForId(event.missionId);
+}
+
+/** True when the event belongs to a real mission rather than a reserved stream. */
+export function isMissionEventStream(event: {
+  readonly missionId: string;
+  readonly streamKind?: EventStreamKind | undefined;
+}): boolean {
+  return classifyEventStream(event) === "mission";
+}
+
 const EventBaseSchema = z.object({
   id: z.string().min(1),
   occurredAt: z.string().datetime(),
   missionId: MissionIdSchema,
+  // Optional, never defaulted: `seal()` re-parses before hashing, so a default
+  // would materialize a field absent from historical JSON and break
+  // `verifyChain` on every event already on disk.
+  streamKind: EventStreamKindSchema.optional(),
   taskId: TaskIdSchema.optional(),
   workerRunId: WorkerRunIdSchema.optional(),
   correlationId: z.string().min(1),

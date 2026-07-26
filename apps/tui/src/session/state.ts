@@ -27,6 +27,7 @@ export function createInitialConsoleState(): ConsoleState {
       mission: "No active mission",
       doctrine: "control-plane projection unavailable",
       missions: [],
+      presence: [],
       tasks: [],
       agents: [],
       attention: [],

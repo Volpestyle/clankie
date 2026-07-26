@@ -22,6 +22,12 @@ export interface DashboardTask {
   dependsOn: string[];
 }
 
+/** A Discord presence session. Its own stream, deliberately not a mission. */
+export interface DashboardPresence {
+  sessionId: string;
+  phase: string;
+}
+
 export interface DashboardState {
   connection: string;
   cursor: number;
@@ -29,6 +35,7 @@ export interface DashboardState {
   doctrine: string;
   score?: number;
   missions: DashboardMission[];
+  presence: DashboardPresence[];
   tasks: DashboardTask[];
   agents: DashboardAgent[];
   attention: string[];
@@ -53,6 +60,20 @@ function stateIcon(state: DashboardAgent["state"]): string {
     case "completed":
       return chalk.green("✓");
   }
+}
+
+const LIVE_PRESENCE_PHASES = new Set(["present", "voice_active", "go_live_active"]);
+
+function phaseIcon(phase: string): string {
+  if (LIVE_PRESENCE_PHASES.has(phase)) return chalk.green("●");
+  if (phase === "degraded" || phase === "connecting") return chalk.yellow("◐");
+  if (phase === "failed") return chalk.red("×");
+  return chalk.dim("○");
+}
+
+function phaseLabel(phase: string): string {
+  const label = `[${phase}]`;
+  return LIVE_PRESENCE_PHASES.has(phase) ? label : chalk.dim(label);
 }
 
 export class MissionDashboard implements Component {
@@ -89,6 +110,15 @@ export class MissionDashboard implements Component {
           width,
         ),
       );
+    }
+    if (state.presence.length > 0) {
+      lines.push("");
+      lines.push(pad(chalk.bold(" DISCORD PRESENCE"), width));
+      for (const session of state.presence.slice(0, 3)) {
+        lines.push(
+          pad(` ${phaseIcon(session.phase)} ${session.sessionId} ${phaseLabel(session.phase)}`, width),
+        );
+      }
     }
     lines.push("");
     lines.push(pad(chalk.bold(" TASK TREE"), width));
