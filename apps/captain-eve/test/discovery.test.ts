@@ -3,6 +3,7 @@ import { lstatSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { CAPTAIN_AUTHORED_TOOL_NAMES } from "@clankie/protocol";
 
 const appRoot = fileURLToPath(new URL("../", import.meta.url));
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
@@ -36,17 +37,11 @@ describe("captain Eve authored surface", () => {
       status: "ready",
     });
     expect(info.skills).toEqual(["debug-mission", "delegate-workers", "evaluate-mission", "lead-mission"]);
-    expect(info.tools).toEqual([
-      "add_recovery",
-      "create_mission",
-      "decide_action",
-      "get_mission",
-      "get_self_state",
-      "remember_episode",
-      "start_mission",
-      "steer_worker",
-      "submit_plan",
-    ]);
+    // Bound to the shared constant, not a second hand-written copy. The TUI
+    // refuses to adopt or signal a captain whose advertised tools differ from
+    // it, so a list maintained separately here would let the agent compile
+    // green and then be rejected by its own launcher at runtime.
+    expect(info.tools).toEqual([...CAPTAIN_AUTHORED_TOOL_NAMES].sort());
 
     const manifest = JSON.parse(
       readFileSync(resolve(appRoot, ".eve/compile/compiled-agent-manifest.json"), "utf8"),

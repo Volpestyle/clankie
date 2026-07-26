@@ -3011,6 +3011,32 @@ export const DiscordPersonMemoryDeleteResultSchema = z
   .strict();
 export type DiscordPersonMemoryDeleteResult = z.infer<typeof DiscordPersonMemoryDeleteResultSchema>;
 
+/**
+ * The captain's authored tool inventory, and part of its identity.
+ *
+ * This lives in the protocol because two places must agree on it and they are
+ * in different apps: the TUI refuses to adopt or signal a listener on the
+ * captain port whose advertised tools do not match exactly, and captain-eve's
+ * discovery test asserts what the agent actually compiles to. When those were
+ * two hand-maintained lists they drifted the first time a tool was added — the
+ * captain came up healthy and the launcher then declined to recognize it, with
+ * every unit test still green because each side asserted against its own copy.
+ *
+ * Adding a tool means adding it here, and the discovery test fails until the
+ * compiled agent agrees.
+ */
+export const CAPTAIN_AUTHORED_TOOL_NAMES = [
+  "add_recovery",
+  "create_mission",
+  "decide_action",
+  "get_mission",
+  "get_self_state",
+  "remember_episode",
+  "start_mission",
+  "steer_worker",
+  "submit_plan",
+] as const;
+
 // ---------------------------------------------------------------------------
 // Captain episodes (ADR 0054).
 //

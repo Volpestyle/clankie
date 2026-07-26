@@ -1,16 +1,14 @@
 import { createHash } from "node:crypto";
+import { CAPTAIN_AUTHORED_TOOL_NAMES } from "@clankie/protocol";
 
 export const EVE_WORKFLOW_ID = "workflow//eve//workflowEntry";
 export const CAPTAIN_AGENT_NAME = "captain-eve";
-export const CAPTAIN_AUTHORED_TOOL_NAMES = [
-  "add_recovery",
-  "create_mission",
-  "decide_action",
-  "get_mission",
-  "start_mission",
-  "steer_worker",
-  "submit_plan",
-] as const;
+/**
+ * Re-exported rather than redeclared: the authored inventory is shared with
+ * captain-eve's compile-time assertion so the launcher's identity check and the
+ * agent it is checking cannot disagree. See the definition in `@clankie/protocol`.
+ */
+export { CAPTAIN_AUTHORED_TOOL_NAMES };
 export const CAPTAIN_DISABLED_FRAMEWORK_TOOL_NAMES = [
   "bash",
   "glob",
