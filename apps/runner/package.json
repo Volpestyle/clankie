@@ -25,7 +25,10 @@
     "@clankie/minecraft-mineflayer": "workspace:*",
     "@clankie/model-provider": "workspace:*",
     "@clankie/observability": "workspace:*",
+    "@clankie/possessor-voice": "workspace:*",
     "@clankie/protocol": "workspace:*",
+    "@clankie/rendered-surface-client": "workspace:*",
+    "@clankie/settings": "workspace:*",
     "@clankie/terminal-protocol": "workspace:*",
     "@clankie/worker-claude": "workspace:*",
     "@clankie/worker-codex": "workspace:*",
@@ -35,8 +38,7 @@
     "@xterm/addon-serialize": "0.14.0",
     "@xterm/headless": "6.0.0",
     "node-pty": "1.2.0-beta.14",
-    "ws": "8.21.0",
-    "@clankie/rendered-surface-client": "workspace:*"
+    "ws": "8.21.0"
   },
   "devDependencies": {
     "@types/node": "24.12.4",

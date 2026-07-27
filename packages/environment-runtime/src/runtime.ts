@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
   EnvironmentSemanticEventSchema,
@@ -144,6 +144,23 @@ interface StoredSession {
   leaseLapse?: { at: string; pausedBody: boolean } | null;
   correlationId: string;
   actions: Record<string, StoredAction>;
+  /** Terminal action records dropped under retention. Honest, never silent. */
+  rolledActionRecords?: number;
+}
+
+/**
+ * Bounds for open-ended sessions (ADR 0061's rolling-evidence shape applied to
+ * runtime state). Unset means keep everything, which is right for the frozen
+ * deterministic scenarios; a marathon free-play caller opts in so its record
+ * stays a bounded working set instead of an ever-growing rewrite-on-every-action
+ * file. What rolls off is counted on the record; the durable play journal, not
+ * this operational state, is the full history.
+ */
+export interface EnvironmentRuntimeRetention {
+  /** Most recent action records kept per session; only terminal results roll. */
+  maxActionRecords?: number;
+  /** Ended (`off`/`failed`) session records kept on disk; older ones are removed. */
+  maxEndedSessionRecords?: number;
 }
 
 export interface EnvironmentRuntimeOptions {
@@ -152,6 +169,7 @@ export interface EnvironmentRuntimeOptions {
   events: EnvironmentEventSink;
   clock?: () => Date;
   randomToken?: () => string;
+  retention?: EnvironmentRuntimeRetention;
 }
 
 /** Durable, single-writer environment lifecycle owned by the trusted runner. */
@@ -161,6 +179,7 @@ export class EnvironmentRuntime {
   private readonly events: EnvironmentEventSink;
   private readonly clock: () => Date;
   private readonly randomToken: () => string;
+  private readonly retention: EnvironmentRuntimeRetention | undefined;
   private readonly records = new Map<string, StoredSession>();
   private readonly attached = new Map<string, EnvironmentAdapterSession>();
   private readonly secrets = new Map<string, Set<string>>();
@@ -173,6 +192,7 @@ export class EnvironmentRuntime {
     this.events = options.events;
     this.clock = options.clock ?? (() => new Date());
     this.randomToken = options.randomToken ?? (() => randomBytes(32).toString("base64url"));
+    this.retention = options.retention;
   }
 
   public start(input: StartEnvironmentInput): Promise<EnvironmentSessionGrant> {
@@ -319,6 +339,12 @@ export class EnvironmentRuntime {
             : parsedCommand;
       const prior = record.actions[command.actionId];
       if (prior) return structuredClone(prior.result);
+      // Deadlines are enforced wherever a dispatch touches the session, not
+      // only by the sweep at start: an in-flight action whose completion never
+      // settles (a wait nobody finishes, a hung adapter) would otherwise wedge
+      // the body permanently — the adapter fails closed with
+      // `action_already_pending` on every turn until the process dies.
+      await this.cancelTimedOutActions(record);
       if (record.phase !== "active") throw new Error(`Session ${command.sessionId} is not active`);
       if (command.context.expectedGoalVersion !== record.spec.initialGoalVersion) {
         return {
@@ -345,6 +371,7 @@ export class EnvironmentRuntime {
           this.clock().getTime() + record.lease.resourceBounds.maxActionDurationMs,
         ).toISOString(),
       };
+      this.rollActions(record);
       await this.persist(record); // register before dispatch: retries cannot repeat the action
       await this.emit("environment.action.requested", record, command.context.correlationId, {
         actionId: command.actionId,
@@ -800,14 +827,63 @@ export class EnvironmentRuntime {
         // A lapsed session's actions were cancelled when the lapse was handled.
         continue;
       }
-      for (const [actionId, action] of Object.entries(record.actions)) {
-        if (!terminal(action.result) && Date.parse(action.deadlineAt) <= this.clock().getTime()) {
-          await this.cancelOne(record, actionId, "action timeout");
-          timedOutActions.push(actionId);
-        }
+      timedOutActions.push(...(await this.cancelTimedOutActions(record)));
+    }
+    await this.pruneEndedRecords();
+    return { expiredSessions, timedOutActions };
+  }
+
+  /** Cancel every non-terminal action past its deadline. Returns what it cancelled. */
+  private async cancelTimedOutActions(record: StoredSession): Promise<string[]> {
+    const cancelledIds: string[] = [];
+    for (const [actionId, action] of Object.entries(record.actions)) {
+      if (!terminal(action.result) && Date.parse(action.deadlineAt) <= this.clock().getTime()) {
+        await this.cancelOne(record, actionId, "action timeout");
+        cancelledIds.push(actionId);
       }
     }
-    return { expiredSessions, timedOutActions };
+    return cancelledIds;
+  }
+
+  /**
+   * Retention for a session that outlives its usefulness as a record: only
+   * terminal results roll (an in-flight action must stay cancellable and
+   * idempotent), oldest first, and every drop is counted on the record.
+   */
+  private rollActions(record: StoredSession): void {
+    const max = this.retention?.maxActionRecords;
+    if (max === undefined) return;
+    let excess = Object.keys(record.actions).length - max;
+    if (excess <= 0) return;
+    for (const [actionId, action] of Object.entries(record.actions)) {
+      if (excess <= 0) break;
+      if (!terminal(action.result)) continue;
+      delete record.actions[actionId];
+      record.rolledActionRecords = (record.rolledActionRecords ?? 0) + 1;
+      excess -= 1;
+    }
+  }
+
+  /**
+   * Ended sessions keep their newest records for inspection and lose the rest,
+   * so per-run session identities cannot grow the records directory without
+   * bound. Live sessions are never candidates.
+   */
+  private async pruneEndedRecords(): Promise<void> {
+    const max = this.retention?.maxEndedSessionRecords;
+    if (max === undefined) return;
+    const ended = [...this.records.values()]
+      .filter((record) => record.phase === "off" || record.phase === "failed")
+      .sort((a, b) => Date.parse(a.lease.issuedAt) - Date.parse(b.lease.issuedAt));
+    while (ended.length > max) {
+      const oldest = ended.shift();
+      if (oldest === undefined) break;
+      const sessionId = oldest.spec.sessionId;
+      this.records.delete(sessionId);
+      this.secrets.delete(sessionId);
+      this.attached.delete(sessionId);
+      await unlink(join(this.recordsDir(), `${hash(sessionId)}.json`)).catch(() => undefined);
+    }
   }
 
   private async emit(

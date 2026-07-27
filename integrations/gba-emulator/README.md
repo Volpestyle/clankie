@@ -30,7 +30,8 @@ input consuming frames + typed RAM-derived state + framebuffer/RAM digests):
   the SHA-256 digests pinned in the selected fixture. The gameplay decoder is
   pinned to FireRed US v1.0 and derives overworld position/facing, the live map
   collision grid, encrypted party records and legal moves, inventory pockets,
-  dialog, start/party/bag menus, and battle input/outcome from EWRAM, IWRAM, and
+  dialog, start/party/bag menus, the naming screen (typed text, keyboard page,
+  and what is being named), and battle input/outcome from EWRAM, IWRAM, and
   the pinned ROM. An unsupported ROM identity, pointer, checksum, value, menu
   state, or battle outcome fails closed.
 
@@ -154,8 +155,27 @@ Each turn he receives the decoded state, returns a bounded `monologue` and
 readable text. Actions dispatch through `EnvironmentRuntime` exactly as scripted
 ones do, so an illegal choice is refused by the same machinery.
 
+A conversation is one turn, not one per text box: `advance_dialog` reads to the
+next real decision point and hands back the transcript
+([ADR 0066](../../docs/adr/0066-dialog-is-one-action-not-one-press-per-box.md)).
+The text he read arrives as that turn's observed effect, because the boxes are
+gone by the time the next turn looks at the screen. It also enters the states
+he reaches for it in: a script-held box (a fanfare) is waited out, and battle
+text reads like dialog, stopping at his action menu
+([ADR 0072](../../docs/adr/0072-the-harness-tells-him-the-truth.md)).
+
+A name is one turn too: `enter_text` drives the naming-screen keyboard from
+its decoded cursor state — verified key by key against the live buffer — and
+confirms with OK. A room is one turn: `walk_to` is on his action vocabulary
+alongside the presses.
+
 Failure is a turn outcome, never an exception: `rejected_by_adapter`,
-`invalid_decision`, and `mind_failed` are all recorded and the run continues.
+`invalid_decision`, and `mind_failed` are all recorded and the run continues —
+and the refusal reason is the turn's effect line, so a rejected action reads
+as the refusal it was, never as a fabricated result (ADR 0072). A `scene`
+observation carries `mode`, `inputReady`, and `waitingForDialogAdvance`, so a
+scripted hold or an undecoded screen announces itself instead of masquerading
+as a stuck overworld.
 
 The run reports **coherence** — how often the previous turn's stated intent
 referenced the action actually taken. It separates reasoning from post-hoc
@@ -163,8 +183,9 @@ narration and is a keyword heuristic over free text, so it is reported and never
 gated.
 
 Runs against the core double with no ROM. The trace is written under
-`artifacts/` and stays untracked because it carries model monologue; a six-turn
-format sample lives in `fixtures/free-play/sample-trace.jsonl`.
+`artifacts/` with a per-run filename (so runs never overwrite each other) and
+stays untracked because it carries model monologue; a six-turn format sample
+lives in `fixtures/free-play/sample-trace.jsonl`.
 
 ## Asked play (ADR 0063)
 
@@ -177,3 +198,13 @@ the playthrough at a turn boundary, and an asked session resumes from the
 newest compatible checkpoint and mints one on the way out (ADR 0060).
 `pnpm gba:free-play-live` remains the development alias of the same composition
 (`apps/runner/src/play-execution.ts`).
+
+Every run leaves a durable trail (ADR 0068). `openFreePlayJournal` writes one
+append-only JSONL per run — header, every validated `FreePlayTurn`, then a
+summary with the progress/volition/coherence metrics — which the production
+path stores under `~/.local/state/clankie/gba-play/`. Each run also has its own
+environment session identity (`gba-free-play:<scenario>:v<n>:<run-stamp>`), so
+a new playthrough never overwrites the previous run's session record; the
+record itself is a bounded working set under `EnvironmentRuntimeRetention`
+(newest 128 action outcomes, rolled with a count; newest 16 ended records),
+because the journal, not the runtime's operational state, is the full history.

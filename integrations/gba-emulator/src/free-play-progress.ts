@@ -69,6 +69,79 @@ export function transitionKey(position: GbaPosition, direction: string): string 
   return `${position.mapId}:${String(position.x)},${String(position.y)}:${direction}`;
 }
 
+/** How much read-back text a single turn's effect line may carry. */
+const DIALOG_TRANSCRIPT_LIMIT = 600;
+
+const DIALOG_ENDINGS: Readonly<Record<string, string>> = {
+  dialog_closed: "the text ended",
+  choice_open: "a choice is waiting — answer it",
+  battle_started: "a battle started",
+  battle_ended: "the battle ended",
+  script_released: "the script let go without more text — you have control again",
+  script_holding: "a script still holds the screen with no readable box — it may need more time",
+  input_bound_reached: "the input budget ran out; more text remains",
+  frame_bound_reached: "the frame budget ran out; more text remains",
+};
+
+function describeDialogAdvance(outcome: Record<string, unknown> | undefined): string {
+  const transcript = Array.isArray(outcome?.transcript)
+    ? outcome.transcript.filter((line): line is string => typeof line === "string")
+    : [];
+  const ending = typeof outcome?.endedBecause === "string" ? outcome.endedBecause : null;
+  const reason = ending === null ? "the dialog stopped" : (DIALOG_ENDINGS[ending] ?? ending);
+  if (transcript.length === 0) return `read no new text — ${reason}`;
+  // Oldest boxes drop first: the last thing said is the part still in play.
+  let text = transcript.join(" / ");
+  while (text.length > DIALOG_TRANSCRIPT_LIMIT && transcript.length > 1) {
+    transcript.shift();
+    text = `… / ${transcript.join(" / ")}`;
+  }
+  return `read: "${text.slice(0, DIALOG_TRANSCRIPT_LIMIT)}" — ${reason}`;
+}
+
+/** Bounded walk summary from the adapter's own account of the route. */
+function describeWalk(
+  action: { x: number; y: number },
+  outcome: Record<string, unknown>,
+  after: GbaPosition | null,
+): string {
+  const steps = typeof outcome["steps"] === "number" ? String(outcome["steps"]) : "?";
+  const planned = typeof outcome["plannedSteps"] === "number" ? String(outcome["plannedSteps"]) : "?";
+  const blocked = outcome["blockedAt"] as { x?: number; y?: number } | null | undefined;
+  if (outcome["warped"] === true && after !== null) {
+    return `walked onto a warp after ${steps} steps — entered ${after.mapId} at (${String(after.x)},${String(after.y)})`;
+  }
+  if (outcome["arrived"] === true) {
+    return `walked ${steps} steps and arrived at (${String(action.x)},${String(action.y)})`;
+  }
+  if (blocked != null && typeof blocked.x === "number" && typeof blocked.y === "number") {
+    return (
+      `walked ${steps} of ${planned} steps, then the way was blocked at ` +
+      `(${String(blocked.x)},${String(blocked.y)}) by something the map does not show — an NPC, ` +
+      "probably; step around it or talk to it"
+    );
+  }
+  return `walked ${steps} of ${planned} planned steps toward (${String(action.x)},${String(action.y)})`;
+}
+
+const ENTER_TEXT_ENDINGS: Readonly<Record<string, string>> = {
+  confirmed: "confirmed — the screen closed",
+  typed: "typed and left open, as asked",
+  screen_closed: "the naming screen closed before typing finished",
+  input_not_registered: "a press stopped registering; the entry stopped rather than guess",
+  input_bound_reached: "the input budget ran out mid-entry; repeat the action to continue",
+  frame_bound_reached: "the frame budget ran out mid-entry; repeat the action to continue",
+};
+
+/** Bounded entry summary from the adapter's own account of the typing. */
+function describeEnterText(text: string, outcome: Record<string, unknown> | undefined): string {
+  const typed = typeof outcome?.["typed"] === "string" ? outcome["typed"] : "";
+  const ending = typeof outcome?.["endedBecause"] === "string" ? outcome["endedBecause"] : null;
+  const reason = ending === null ? "the entry ended" : (ENTER_TEXT_ENDINGS[ending] ?? ending);
+  if (outcome?.["confirmed"] === true) return `named "${text}" — ${reason}`;
+  return `typed "${typed}" of "${text}" — ${reason}`;
+}
+
 export interface ObservedEffect {
   /** Bounded, human-readable — this is what the model is told. */
   summary: string;
@@ -76,6 +149,18 @@ export interface ObservedEffect {
   refused: { position: GbaPosition; direction: string } | null;
   position: GbaPosition | null;
   enteredMap: boolean;
+}
+
+/** Bounded "menuId: selected entry" line, so a menu effect names the menu. */
+function describeMenu(observation: GbaEmulatorObservation | null): string {
+  const data = (
+    observation as unknown as {
+      data?: { menuId?: string; cursor?: number; entries?: { label?: string }[] };
+    } | null
+  )?.data;
+  if (data?.menuId === undefined) return "a menu";
+  const selected = data.entries?.[data.cursor ?? 0]?.label;
+  return selected === undefined ? data.menuId : `${data.menuId}: ${selected.slice(0, 120)}`;
 }
 
 /**
@@ -88,10 +173,59 @@ export function observeEffect(input: {
   before: readonly GbaEmulatorObservation[];
   after: readonly GbaEmulatorObservation[];
   action: GbaEmulatorAction;
+  /** The adapter's action result, when it carries more than the diff can see. */
+  outcome?: Record<string, unknown> | undefined;
+  /**
+   * Whether the rendered frame's digest changed across this action, or null
+   * when the core exposes no framebuffer. The decoded RAM surface is
+   * deliberately narrow, so the frame gets the last word: "no visible change"
+   * is only claimed when the screen itself stood still.
+   */
+  screenChanged?: boolean | null;
 }): ObservedEffect {
   const before = positionOf(input.before);
   const after = positionOf(input.after);
   const direction = attemptedDirection(input.action);
+  const menuBefore = firstOfKind(input.before, "menu");
+  const menuAfter = firstOfKind(input.after, "menu");
+  // An open menu owns the d-pad: presses move its cursor, not the character.
+  // Judging them as walking is how the naming screen minted fake walls.
+  const menuOpen = menuBefore !== null || menuAfter !== null;
+
+  // A dialog advance is the one action whose result is not visible in the
+  // after-state: the boxes it read are gone by the time the diff runs, so the
+  // text has to come from the outcome or it is lost to him entirely.
+  if (input.action.kind === "advance_dialog") {
+    return {
+      summary: describeDialogAdvance(input.outcome),
+      refused: null,
+      position: after,
+      enteredMap: before !== null && after !== null && before.mapId !== after.mapId,
+    };
+  }
+
+  // A typed name's outcome carries what landed and whether it was confirmed —
+  // none of which the decoded overworld diff can see.
+  if (input.action.kind === "enter_text") {
+    return {
+      summary: describeEnterText(input.action.text, input.outcome),
+      refused: null,
+      position: after,
+      enteredMap: false,
+    };
+  }
+
+  // A walk's outcome knows more than the position diff: whether the route
+  // finished, and where it stopped if the world got in the way. "moved to
+  // (x,y)" after a 3-of-9-step walk would hide exactly the part he needs.
+  if (input.action.kind === "walk_to" && input.outcome !== undefined) {
+    return {
+      summary: describeWalk(input.action, input.outcome, after),
+      refused: null,
+      position: after,
+      enteredMap: before !== null && after !== null && before.mapId !== after.mapId,
+    };
+  }
 
   if (before !== null && after !== null) {
     if (before.mapId !== after.mapId) {
@@ -110,7 +244,7 @@ export function observeEffect(input: {
         enteredMap: false,
       };
     }
-    if (direction !== null) {
+    if (direction !== null && !menuOpen) {
       // A short directional tap turns the character to face that way without
       // stepping. Calling that "blocked" invents a wall and poisons the refusal
       // memory, so a turn is reported as a turn — the tile stays unjudged.
@@ -149,10 +283,12 @@ export function observeEffect(input: {
   if (JSON.stringify(dialogBefore) !== JSON.stringify(dialogAfter)) {
     return { summary: "dialog changed", refused: null, position: after, enteredMap: false };
   }
-  const menuBefore = firstOfKind(input.before, "menu");
-  const menuAfter = firstOfKind(input.after, "menu");
   if (JSON.stringify(menuBefore) !== JSON.stringify(menuAfter)) {
-    return { summary: "menu changed", refused: null, position: after, enteredMap: false };
+    const summary =
+      menuAfter === null
+        ? "menu closed"
+        : `${menuBefore === null ? "menu opened" : "menu changed"} — ${describeMenu(menuAfter)}`;
+    return { summary, refused: null, position: after, enteredMap: false };
   }
   const battleBefore = firstOfKind(input.before, "battle");
   const battleAfter = firstOfKind(input.after, "battle");
@@ -160,6 +296,28 @@ export function observeEffect(input: {
     return { summary: "battle state changed", refused: null, position: after, enteredMap: false };
   }
 
+  // The frame digest catches what the decoded surface misses — a naming-screen
+  // cursor, a page-swap animation. Without it, this branch told him "no
+  // visible change" while the screen visibly moved, and he had to learn to
+  // distrust his own effect line.
+  if (input.screenChanged === true) {
+    return {
+      summary: menuOpen
+        ? `screen changed inside ${describeMenu(menuAfter ?? menuBefore)} — a detail the decoder does not model; trust the frame`
+        : "screen changed though the decoded state did not — possibly ambient animation; trust the frame",
+      refused: null,
+      position: after,
+      enteredMap: false,
+    };
+  }
+  if (input.screenChanged === false) {
+    return {
+      summary: "no visible change — the frame is identical",
+      refused: null,
+      position: after,
+      enteredMap: false,
+    };
+  }
   return { summary: "no visible change", refused: null, position: after, enteredMap: false };
 }
 

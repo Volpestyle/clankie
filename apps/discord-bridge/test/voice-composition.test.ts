@@ -43,12 +43,35 @@ describe("realtime voice environment", () => {
       realtimeModel: "gpt-realtime-2.1",
       transcribeModel: "gpt-realtime-whisper",
       voice: "marin",
+      ttsProvider: "openai",
       truncationRetentionRatio: 0.7,
       postInstructionsTokenLimit: 12_000,
       decayWindowMs: 60_000,
       idleLeaveMs: 900_000,
       volitionModel: "gpt-4o-mini",
     });
+  });
+
+  it("parses the ElevenLabs TTS provider and demands a voice id for it", () => {
+    const config = parseVoiceRealtimeEnv({
+      CLANKIE_VOICE_TTS_PROVIDER: "elevenlabs",
+      CLANKIE_VOICE_ELEVENLABS_VOICE_ID: "voice_abc123",
+      CLANKIE_VOICE_ELEVENLABS_MODEL_ID: "eleven_flash_v2_5",
+    });
+    expect(config.ttsProvider).toBe("elevenlabs");
+    expect(config.elevenLabsVoiceId).toBe("voice_abc123");
+    expect(config.elevenLabsModelId).toBe("eleven_flash_v2_5");
+
+    expect(() => parseVoiceRealtimeEnv({ CLANKIE_VOICE_TTS_PROVIDER: "elevenlabs" })).toThrow(
+      /CLANKIE_VOICE_ELEVENLABS_VOICE_ID/u,
+    );
+    expect(() => parseVoiceRealtimeEnv({ CLANKIE_VOICE_TTS_PROVIDER: "espeak" })).toThrow(
+      /CLANKIE_VOICE_TTS_PROVIDER/u,
+    );
+    // Set-but-ignored identifiers are drift, exactly like the retired knobs.
+    expect(() => parseVoiceRealtimeEnv({ CLANKIE_VOICE_ELEVENLABS_VOICE_ID: "voice_abc123" })).toThrow(
+      /CLANKIE_VOICE_TTS_PROVIDER=elevenlabs/u,
+    );
   });
 
   it("honors overrides, including the owner-tunable decay window", () => {
@@ -335,7 +358,7 @@ describe("voice disclosure and status wording (ADR 0057 audio residency)", () =>
         "explicitly consented is never streamed anywhere. Consented audio feeds a live OpenAI " +
         "realtime session that keeps this call's conversation on OpenAI's servers for as long as " +
         "the call lasts. I listen continuously but speak only when addressed, or briefly on my " +
-        "own initiative. My spoken replies use an AI-generated voice, and nothing said in voice " +
+        "own initiative. My spoken replies use an AI-generated voice. Nothing said in voice " +
         "can ever approve privileged actions. Use **/clankie voice-consent opt-in** to let me " +
         "hear you and **/clankie voice-consent opt-out** to revoke immediately.",
     );
@@ -370,6 +393,24 @@ describe("voice disclosure and status wording (ADR 0057 audio residency)", () =>
 
     const optOut = renderVoiceConsentReply(false, 2);
     expect(optOut).toBe("Your voice consent is revoked and any active capture for you was discarded.");
+  });
+
+  it("discloses the second vendor when an external voice is configured (ADR 0070)", () => {
+    const disclosure = renderVoiceJoinDisclosure(1, "elevenlabs");
+    expect(disclosure).toContain("synthesized by ElevenLabs from the words I choose");
+    // The boundary that keeps consent posture unchanged: only his own words
+    // transit the second vendor, never anyone's audio.
+    expect(disclosure).toContain("your audio is never sent to ElevenLabs");
+    expect(disclosure).toContain("live OpenAI realtime session");
+
+    const optIn = renderVoiceConsentReply(true, 3, "elevenlabs");
+    expect(optIn).toContain("synthesized by ElevenLabs");
+    expect(optIn).toContain("your audio is never sent to ElevenLabs");
+
+    // The default stays vendor-silent: no ElevenLabs mention without the
+    // provider actually configured.
+    expect(renderVoiceJoinDisclosure(1)).not.toContain("ElevenLabs");
+    expect(renderVoiceConsentReply(true, 3)).not.toContain("ElevenLabs");
   });
 
   it("describes bounded local and server-side retention in voice-status", () => {

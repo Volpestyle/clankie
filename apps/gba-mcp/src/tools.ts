@@ -25,7 +25,7 @@ import { z } from "zod";
 /** Flat action arguments. Providers reject `oneOf` in tool schemas (ADR 0049). */
 export const ActArgumentsSchema = z
   .object({
-    actionKind: z.enum(["button_press", "walk_to", "frame_advance", "wait"]),
+    actionKind: z.enum(["button_press", "walk_to", "advance_dialog", "enter_text", "frame_advance", "wait"]),
     button: z
       .enum(["up", "down", "left", "right", "a", "b", "start", "select", "l", "r"])
       .optional()
@@ -45,12 +45,25 @@ export const ActArgumentsSchema = z
       .optional()
       .describe(
         `Press this many times in one action (max ${String(FREE_PLAY_ACTION_LIMITS.maxInputs)}, the ` +
-          "per-action input budget). Use the full budget for dialog mashing.",
+          "per-action input budget). For dialog, prefer advance_dialog over a blind mash: it " +
+          "stops at choices and box close instead of pressing through them.",
       ),
     frames: z.number().int().optional().describe("Required for frame_advance."),
     durationMs: z.number().int().optional().describe("Required for wait."),
     x: z.number().int().optional().describe("Required for walk_to. Target tile x, as reported by observe."),
     y: z.number().int().optional().describe("Required for walk_to. Target tile y, as reported by observe."),
+    text: z
+      .string()
+      .optional()
+      .describe(
+        "Required for enter_text: the whole name to type on the open naming screen " +
+          "(1-10 characters: letters, digits, space, basic punctuation). Typed text that " +
+          "matches is kept, a mismatch is erased first, so repeating the action resumes it.",
+      ),
+    submit: z
+      .boolean()
+      .optional()
+      .describe("enter_text only. Omit or true confirms with OK; false leaves the screen open."),
     monologue: z
       .string()
       .min(1)
@@ -74,6 +87,14 @@ export function toAction(args: ActArguments): unknown {
     };
   }
   if (args.actionKind === "walk_to") return { kind: "walk_to", x: args.x, y: args.y };
+  if (args.actionKind === "advance_dialog") return { kind: "advance_dialog" };
+  if (args.actionKind === "enter_text") {
+    return {
+      kind: "enter_text",
+      text: args.text,
+      ...(args.submit === undefined || args.submit ? {} : { submit: false }),
+    };
+  }
   if (args.actionKind === "frame_advance") return { kind: "frame_advance", frames: args.frames };
   return { kind: "wait", durationMs: args.durationMs };
 }
@@ -86,7 +107,7 @@ export const ObserveArgumentsSchema = z
   })
   .strict();
 
-const OBSERVED_KINDS = ["danger", "overworld", "battle", "dialog", "menu"] as const;
+const OBSERVED_KINDS = ["danger", "scene", "overworld", "battle", "dialog", "menu"] as const;
 
 /** The SDK's own result type, so this cannot drift from what it accepts. */
 export type McpToolResult = CallToolResult;

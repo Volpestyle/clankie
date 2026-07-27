@@ -29,6 +29,7 @@ export const DISCORD_SUBCOMMANDS = [
   "leave",
   "voice-consent",
   "voice-status",
+  "watch",
 ] as const;
 export type DiscordSubcommand = (typeof DISCORD_SUBCOMMANDS)[number];
 
@@ -176,5 +177,10 @@ export const commands = [
       sub
         .setName("voice-status")
         .setDescription("Show the consent-safe state of Clankie's current voice session."),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("watch")
+        .setDescription("Post a launch link for the activity surface so the room can watch him play."),
     ),
 ].map((command) => command.toJSON());

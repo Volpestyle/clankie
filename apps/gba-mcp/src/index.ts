@@ -11,6 +11,7 @@ import {
   type GbaCheckpointReceipt,
 } from "@clankie/gba-emulator";
 import { PossessionLease, parsePossessionHolders } from "./possession.ts";
+import { createPossessionEventLog } from "./possession-log.ts";
 import { acquireBodyLock, type BodyLock } from "@clankie/gba-emulator";
 import type { GbaCheckpointSummary } from "./tools.ts";
 import { createBrokeredActivityFrameSink } from "@clankie/rendered-surface-client";
@@ -23,6 +24,7 @@ import { createGbaMcpServer } from "./server.ts";
 export { createGbaMcpServer } from "./server.ts";
 export * from "./tools.ts";
 export * from "./possession.ts";
+export * from "./possession-log.ts";
 export * from "./speech.ts";
 
 /**
@@ -68,9 +70,19 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   // Observation needs neither (ADR 0053), which is what lets several servers
   // coexist while only one of them can ever drive.
   let bodyLock: BodyLock | null = null;
+  // Durable beside body.lock, because this process's stderr dies with the
+  // harness that launched it. Best-effort: recording observes the lease, it
+  // never gates it.
+  const possessionLog = createPossessionEventLog({
+    rootDir: bodyRoot,
+    onError: (error) => {
+      process.stderr.write(`possession event log append failed: ${String(error)}\n`);
+    },
+  });
   const possession = new PossessionLease({
     allowedHolders: holders,
     onEvent: (event) => {
+      possessionLog.append(event);
       process.stderr.write(
         `possession ${event.type}: ${event.holderId}${event.reason === undefined ? "" : ` (${event.reason})`}\n`,
       );

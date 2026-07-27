@@ -118,14 +118,38 @@ describe("EmbodimentManager", () => {
     expect(test.manager.liveSession()).toBeUndefined();
   });
 
-  it("refuses a second start while one session is live, before any runner claims it", async () => {
+  it("answers a repeat start for the environment he is already playing with the live session", async () => {
+    // The embodiment mirror of ADR 0062's never-rejoin: already being at the
+    // controls satisfies the ask. Tearing down and restarting would lose the
+    // run; refusing reads as "someone else is driving" when the driver is him.
     const test = harness();
     await test.manager.submit(startIntent());
     const second = await test.manager.submit(startIntent("intent-2"));
-    expect(second).toMatchObject({ outcome: "refused", reason: "body_held" });
-    // The refusal minted a queryable terminal session, not a dropped request.
-    expect(second.outcome === "refused" && second.sessionId).toBeTruthy();
+    expect(second).toMatchObject({ outcome: "accepted", session: { intentId: "intent-1" } });
     expect(test.manager.liveSession()?.intentId).toBe("intent-1");
+    // No second session was minted for the repeat ask.
+    expect(second.outcome === "accepted" && second.session.sessionId).toBe("session-1");
+  });
+
+  it("still refuses a start while the live session is winding down", async () => {
+    const test = harness();
+    await test.manager.submit(startIntent());
+    await test.manager.claim(claim);
+    await test.manager.report(report({ state: "running" }));
+    await test.manager.submit({
+      kind: "stop",
+      schemaVersion: 1,
+      intentId: "intent-stop",
+      originLane: "discord_presence",
+      requestedBy: "user-1",
+      requestedAt: "2026-07-26T12:02:00.000Z",
+      sessionId: "session-1",
+    });
+    await test.manager.report(report({ state: "stopping" }));
+    const during = await test.manager.submit(startIntent("intent-3"));
+    expect(during).toMatchObject({ outcome: "refused", reason: "body_held" });
+    // The refusal minted a queryable terminal session, not a dropped request.
+    expect(during.outcome === "refused" && during.sessionId).toBeTruthy();
   });
 
   it("refuses when doctrine does not allow, and approval-shaped means no", async () => {

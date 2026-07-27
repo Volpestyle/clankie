@@ -40,6 +40,17 @@ export interface GbaCoreMenuState {
   entries: { id: string; label: string }[];
 }
 
+/**
+ * Machine-usable naming-screen state: what is typed (exact, byte-faithful) and
+ * where the keyboard cursor sits. What `enter_text` navigates by.
+ */
+export interface GbaCoreNamingState {
+  text: string;
+  page: "symbols" | "upper-case" | "lower-case";
+  row: number;
+  column: number;
+}
+
 export interface GbaCoreInventoryEntry {
   pocket: "items" | "key-items" | "poke-balls" | "tm-hm" | "berries";
   itemId: string;
@@ -81,7 +92,19 @@ export interface GbaCoreState {
   facing: "north" | "east" | "south" | "west";
   dialogLineIndex: number;
   dialogLines?: string[];
+  /**
+   * True when the game has finished printing the visible dialog box and is
+   * holding it for an A/B press. False while text is still printing. Cores
+   * that do not model text printing may omit it and are treated as ready.
+   */
+  waitingForDialogAdvance?: boolean;
   menu?: GbaCoreMenuState | null;
+  /**
+   * Naming-screen keyboard state, when one is active and decodable: the exact
+   * entered text and the cursor. Cores without a naming screen omit it, and
+   * `enter_text` then fails closed.
+   */
+  naming?: GbaCoreNamingState | null;
   inventory?: GbaCoreInventoryEntry[];
   party: {
     slot: number;
@@ -115,6 +138,16 @@ const DIRECTIONS: Record<
   left: { dx: -1, dy: 0, facing: "west" },
   right: { dx: 1, dy: 0, facing: "east" },
 };
+
+/** Frames a dialog box spends printing before it will accept an advance. */
+const DIALOG_PRINT_FRAMES = 20;
+
+/**
+ * How much faster a box prints while A/B is held. FireRed zeroes the printer's
+ * per-character delay for a held A/B; against the default MID speed of four
+ * frames per character that is a 4× fast-read, which is what this models.
+ */
+const DIALOG_HELD_PRINT_SPEEDUP = 4;
 
 /** Unit step for each facing, so "the tile ahead" needs no button mapping. */
 const FACING_STEPS: Record<GbaCoreState["facing"], { dx: number; dy: number }> = {
@@ -191,6 +224,16 @@ export class DeterministicGbaCoreDouble {
     this.state.frame += frames;
   }
 
+  /** Advance frames with `button` held: no input spent, printing accelerated. */
+  public advanceFramesHolding(button: GbaButton, frames: number): void {
+    this.state.frame += frames;
+    if (this.state.mode === "dialog" && (button === "a" || button === "b")) {
+      // Each held frame counts multiply toward the box becoming ready — the
+      // double's shape of "a held A/B zeroes the per-character delay".
+      this.dialogReadyAtFrame -= frames * (DIALOG_HELD_PRINT_SPEEDUP - 1);
+    }
+  }
+
   public gameState(): GbaCoreState {
     // Derived here rather than held in `this.state`, because `ramStateSha256`
     // hashes that object and every frozen scenario digest depends on its shape.
@@ -198,8 +241,20 @@ export class DeterministicGbaCoreDouble {
       ...structuredClone(this.state),
       surroundings: this.surroundings(),
       mapSize: { width: this.scenario.map.width, height: this.scenario.map.height },
+      waitingForDialogAdvance: this.state.mode === "dialog" && this.state.frame >= this.dialogReadyAtFrame,
     };
   }
+
+  /**
+   * The frame a freshly-opened box finishes printing on.
+   *
+   * Modelled because the adapter now reads "is this box ready for an advance"
+   * and would otherwise only ever see the ready state here. A press still
+   * advances whether or not printing finished — the real core accelerates the
+   * printer rather than dropping the input — so this adds a state to observe
+   * without changing what any input does.
+   */
+  private dialogReadyAtFrame = 0;
 
   /** Collision grid for pathing, from the same bounds `moveTo` enforces. */
   public mapGrid(): GbaCoreMapGrid {
@@ -264,6 +319,7 @@ export class DeterministicGbaCoreDouble {
         this.state.mode = "dialog";
         this.state.dialogLineIndex = 0;
         this.state.dialogLines = [...trainer.dialog];
+        this.dialogReadyAtFrame = this.state.frame + DIALOG_PRINT_FRAMES;
       }
       return;
     }
@@ -285,6 +341,7 @@ export class DeterministicGbaCoreDouble {
 
   private advanceDialog(): void {
     this.state.dialogLineIndex += 1;
+    this.dialogReadyAtFrame = this.state.frame + DIALOG_PRINT_FRAMES;
     if (this.state.dialogLineIndex >= this.scenario.trainer.dialog.length) {
       this.state.mode = "battle";
       this.state.dialogLines = [];

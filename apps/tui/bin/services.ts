@@ -24,15 +24,17 @@ import {
 } from "./service-supervisor.ts";
 
 /**
- * The three long-lived processes that make Clankie present in Discord, and the
+ * The long-lived processes that make Clankie present in Discord, and the
  * order they depend on each other in:
  *
  *   captain-eve  ->  control-plane  ->  discord-bridge
+ *                                  \->  runner        (activity stands alone)
  *
- * The bridge authenticates to the control plane, and the control plane routes
- * turns to the captain, so a restart walks forwards and a shutdown walks back.
- * Before this registry existed each one was started by hand with a bespoke
- * `pgrep | kill` sequence and an env prefix that duplicated settings.json.
+ * The bridge authenticates to the control plane, the control plane routes
+ * turns to the captain, and the runner claims embodiment work from the control
+ * plane, so a restart walks forwards and a shutdown walks back. Before this
+ * registry existed each one was started by hand with a bespoke `pgrep | kill`
+ * sequence and an env prefix that duplicated settings.json.
  */
 
 /** Targets an operator may name; `all` fans out over {@link SERVICE_ORDER}. */
@@ -53,6 +55,7 @@ const TARGET_ALIASES: Readonly<Record<string, ServiceTarget>> = {
   viewer: "activity",
   "discord-bridge": "discord-bridge",
   bridge: "discord-bridge",
+  runner: "runner",
 };
 
 export function parseServiceTarget(raw: string | undefined): ServiceTarget {
@@ -60,7 +63,7 @@ export function parseServiceTarget(raw: string | undefined): ServiceTarget {
   const target = TARGET_ALIASES[raw.toLowerCase()];
   if (target === undefined) {
     throw new Error(
-      `Unknown service "${raw}". Expected one of: all, captain, control-plane, discord (aliases: eve, cp, bridge).`,
+      `Unknown service "${raw}". Expected one of: all, captain, control-plane, discord, activity, runner (aliases: eve, cp, bridge, watch, viewer).`,
     );
   }
   return target;
@@ -192,10 +195,14 @@ const CAPTAIN_EVE: ManagedService = {
   probe: async ({ env, fetchImpl }) => {
     const inspection = await inspectCaptain(captainUrl(env), fetchImpl);
     return {
-      state: inspection.state,
-      ...(inspection.generation === undefined
-        ? {}
-        : { detail: `generation ${inspection.generation.slice(0, 8)}` }),
+      // Ours but built before the current tool inventory: not healthy for this
+      // checkout, and `clankie restart` is the whole remedy.
+      state: inspection.state === "stale" ? "unhealthy" : inspection.state,
+      ...(inspection.state === "stale"
+        ? { detail: "older build than this checkout; run `clankie restart`" }
+        : inspection.generation === undefined
+          ? {}
+          : { detail: `generation ${inspection.generation.slice(0, 8)}` }),
     };
   },
 };
@@ -318,11 +325,36 @@ const ACTIVITY: ManagedService = {
   },
 };
 
+/**
+ * The process that owns Clankie's body (ADR 0063): it claims asked-play work
+ * from the control plane, boots the emulator, and dials frames out to the
+ * activity producer. In the registry because one evening of hand-started
+ * runners proved the alternative — an env-only token that died with its shell
+ * and a stray process no `clankie stop` could reach. Its bearer now comes from
+ * the credential broker (control plane mints, runner resolves), so it starts
+ * with no env prefix at all.
+ */
+const RUNNER: ManagedService = {
+  id: "runner",
+  label: "Runner",
+  dependsOn: ["control-plane"],
+  spawnArgs: ["--filter", "@clankie/runner", "start"],
+  commandMatches: (command) => command.includes("@clankie/runner"),
+  // The runner serves no operator HTTP surface; process liveness is the signal
+  // it owns, same as the bridge. A runner started by hand is still a runner.
+  probe: async ({ record, matchingPids }) => {
+    if (record !== undefined) return { state: "healthy" };
+    if (matchingPids.length === 0) return { state: "unreachable" };
+    return { state: "healthy", detail: "started outside the launcher" };
+  },
+};
+
 const SERVICES: Readonly<Record<ServiceId, ManagedService>> = {
   "captain-eve": CAPTAIN_EVE,
   "control-plane": CONTROL_PLANE,
   "discord-bridge": DISCORD_BRIDGE,
   activity: ACTIVITY,
+  runner: RUNNER,
 };
 
 export function managedService(id: ServiceId): ManagedService {

@@ -74,6 +74,19 @@ export function createProviderServices(options: {
 /** Providers surfaced first in /auth — everything else reachable via "other". */
 const FEATURED_PROVIDERS = ["anthropic", "openai", "xai", "google", "openrouter", "groq", "mistral"];
 
+/**
+ * Non-LLM credentials that are still first-class /auth citizens. These serve
+ * voice or other services, so they are absent from the models.dev catalog and
+ * cannot ride the FEATURED_PROVIDERS catalog filter above.
+ */
+const FEATURED_SERVICE_PROVIDERS: readonly MenuOption[] = [
+  {
+    value: "elevenlabs",
+    label: "ElevenLabs",
+    description: "Voice TTS for Discord (ADR 0070); pick the voice itself with /voice.",
+  },
+];
+
 const MODEL_ROLES = {
   "": "model",
   default: "model",
@@ -258,10 +271,18 @@ async function addApiKeyFlow(shell: ClankieFaceShell, services: ProviderServices
     label: catalog[id]?.name ?? id,
     ...(listed[id] !== undefined ? { hint: "configured" } : {}),
   }));
+  const featuredServices: MenuOption[] = FEATURED_SERVICE_PROVIDERS.map((option) => ({
+    ...option,
+    ...(listed[option.value] !== undefined ? { hint: "configured" } : {}),
+  }));
   const picked = await flow.readSelect({
     kind: "single",
     message: "Provider",
-    options: [...featured, { value: "__other__", label: "Other…", hint: "enter a provider id" }],
+    options: [
+      ...featured,
+      ...featuredServices,
+      { value: "__other__", label: "Other…", hint: "enter a provider id" },
+    ],
     required: true,
     allowBack: true,
   });
@@ -283,7 +304,14 @@ async function addApiKeyFlow(shell: ClankieFaceShell, services: ProviderServices
   if (key === undefined) return;
   await services.store.set(providerId, { type: "api", key: key.trim() });
   flow.renderLine(`Stored API key for ${providerId}.`, "success");
-  shell.insertCommandResult("/auth", `Credential stored for ${providerId} (api key, redacted).`, "success");
+  shell.insertCommandResult(
+    "/auth",
+    [
+      `Credential stored for ${providerId} (api key, redacted).`,
+      ...(providerId === "elevenlabs" ? ["Pick the ElevenLabs voice and model with /voice."] : []),
+    ].join("\n"),
+    "success",
+  );
 }
 
 async function codexOauthFlow(shell: ClankieFaceShell, services: ProviderServices): Promise<void> {

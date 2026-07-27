@@ -12,6 +12,7 @@ import { buildConsoleCommands } from "./commands.ts";
 import { buildProviderCommands, createProviderServices } from "./provider-commands.ts";
 import { buildDiscordCommands } from "./discord-commands.ts";
 import { buildPersonaCommands } from "./persona-commands.ts";
+import { buildVoiceCommands } from "./voice-commands.ts";
 import { createInitialConsoleState } from "./session/state.ts";
 import { EveCaptainSession } from "./session/eve-captain.ts";
 import { CaptainSessionCursorStore } from "./session/session-cursor.ts";
@@ -22,6 +23,7 @@ import {
   OperatorConversationSelectionStore,
   OperatorConversationTailStore,
   parseDirectConversation,
+  resolveCaptainRouteToken,
   resolveInitialConversation,
 } from "./session/operator-conversations.ts";
 import { createOperatorConversationShellSink } from "./session/operator-conversation-renderer.ts";
@@ -81,11 +83,12 @@ const services = createProviderServices({
 // dispatch route (Client.fetch). `--chat`/`/conversation` enumerate and select
 // the real server-owned registry; the selection persists (fail-closed) and
 // reloads across restart, confirmed against the server before attaching.
+// The bearer resolves through the credential broker (env override first), so a
+// shell-launched face matches the token the launcher injected into the captain.
+const captainRouteToken = await resolveCaptainRouteToken({ env: process.env });
 const conversationClient = createProductionOperatorConversationClient({
   host: process.env.CLANKIE_CAPTAIN_URL ?? "http://127.0.0.1:4321",
-  ...(process.env.CLANKIE_CAPTAIN_TOKEN === undefined
-    ? {}
-    : { captainToken: process.env.CLANKIE_CAPTAIN_TOKEN }),
+  ...(captainRouteToken === undefined ? {} : { captainToken: captainRouteToken }),
 });
 const conversationSelectionStore = new OperatorConversationSelectionStore(
   join(repoRoot, ".data", "tui", "operator-conversation.json"),
@@ -140,6 +143,12 @@ const commands = [
     removeCredential: (providerId) => services.store.delete(providerId),
   }),
   ...buildPersonaCommands({ settings: new SettingsStore() }),
+  ...buildVoiceCommands({
+    settings: new SettingsStore(),
+    listCredentials: () => services.store.list(),
+    setCredential: (providerId, key) => services.store.set(providerId, { type: "api", key }),
+    removeCredential: (providerId) => services.store.delete(providerId),
+  }),
 ];
 
 function stageFromEnv(): { label?: string; value?: string } {

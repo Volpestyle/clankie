@@ -189,9 +189,11 @@ function commandHelp(): string {
     "                           Revoke a device's access",
     "  operator-credential rotate [--json]",
     "                           Rotate the local operator credential",
+    "  play status              Show the live embodiment (asked play) session",
+    "  play stop                Stop the live playthrough cleanly (mints its checkpoint)",
     "",
-    "Services for restart/down: all (default), captain, control-plane, discord",
-    "Aliases: eve, cp, bridge",
+    "Services for restart/down: all (default), captain, control-plane, discord, activity, runner",
+    "Aliases: eve, cp, bridge, watch, viewer",
     "",
     "With no command, clankie opens the fullscreen operator console and requires a TTY.",
   ].join("\n");
@@ -210,6 +212,7 @@ export function isHeadlessCaptainCommand(command: string | undefined): boolean {
     command === "pair" ||
     command === "devices" ||
     command === "operator-credential" ||
+    command === "play" ||
     command === "help" ||
     command === "--help" ||
     command === "-h"
@@ -244,11 +247,16 @@ async function runInspection(options: HeadlessCaptainCommandOptions): Promise<nu
   const captainStatus: ServiceStatus = {
     id: "captain-eve",
     label: "Captain Eve",
-    state: inspection.state,
+    // A stale captain is ours but not serving this checkout's tools, so it
+    // reports as unhealthy with the reason rather than as a healthy captain
+    // that will surprise the next caller.
+    state: inspection.state === "stale" ? "unhealthy" : inspection.state,
     owned: record !== undefined,
-    ...(inspection.generation === undefined
-      ? {}
-      : { detail: `generation ${inspection.generation.slice(0, 8)}` }),
+    ...(inspection.state === "stale"
+      ? { detail: "older build than this checkout; run `clankie restart`" }
+      : inspection.generation === undefined
+        ? {}
+        : { detail: `generation ${inspection.generation.slice(0, 8)}` }),
     ...(record === undefined ? {} : { pid: record.pid }),
   };
   const services = [
@@ -1017,6 +1025,54 @@ function formatDevicesTable(devices: readonly DeviceListItem[]): string {
   return [renderRow(header), ...rows.map(renderRow)].join("\n");
 }
 
+/**
+ * Operator controls for the live playthrough (asked play, ADR 0063).
+ * `status` reads the live embodiment session; `stop` submits the operator
+ * stop intent — the kill-switch that never needs Discord, and never a kill:
+ * the runner winds down at the next turn boundary and mints its checkpoint.
+ */
+async function runPlay(args: readonly string[], options: HeadlessCaptainCommandOptions): Promise<number> {
+  const action = args[0];
+  if (action !== "status" && action !== "stop") {
+    throw new Error("Usage: clankie play <status|stop>");
+  }
+  const env = options.env ?? process.env;
+  const credential = await resolveOperatorCredential({
+    env,
+    ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
+  });
+  const token = credential?.token;
+  if (token === undefined) {
+    throw new Error("No operator credential is available; start the control plane once first.");
+  }
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const base = env.CLANKIE_CONTROL_PLANE_URL ?? DEFAULT_CONTROL_PLANE_URL;
+  const stdout = options.stdout ?? process.stdout;
+  if (action === "status") {
+    const response = await fetchImpl(new URL("/v1/embodiment/sessions/live", base), {
+      headers: { authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!response.ok) throw new Error(`control plane returned ${String(response.status)}`);
+    outputJson(stdout, await response.json());
+    return 0;
+  }
+  const response = await fetchImpl(new URL("/v1/embodiment/sessions/live/stop", base), {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(5_000),
+  });
+  if (response.status === 404) {
+    stdout.write("Nothing is playing.\n");
+    return 0;
+  }
+  if (!response.ok) {
+    throw new Error(`control plane returned ${String(response.status)}: ${await response.text()}`);
+  }
+  outputJson(stdout, await response.json());
+  return 0;
+}
+
 export async function runHeadlessCaptainCommand(
   args: readonly string[],
   options: HeadlessCaptainCommandOptions,
@@ -1035,6 +1091,7 @@ export async function runHeadlessCaptainCommand(
     if (command === "operator-credential") {
       return await runOperatorCredential(args.slice(1), options);
     }
+    if (command === "play") return await runPlay(args.slice(1), options);
     if (command === "help" || command === "--help" || command === "-h") {
       (options.stdout ?? process.stdout).write(`${commandHelp()}\n`);
       return 0;

@@ -15,6 +15,8 @@ import type {
 } from "@clankie/api-client";
 import {
   DEFAULT_DECAY_WINDOW_MS,
+  openElevenLabsTtsSession,
+  openExternalVoiceConversation,
   openRealtimeConversationSession,
   openRealtimeTranscriptionSession,
   type DiscordBridgeReceipt,
@@ -39,6 +41,14 @@ export const DEFAULT_VOICE_REALTIME_MODEL = "gpt-realtime-2.1";
 export const DEFAULT_VOICE_TRANSCRIBE_MODEL = "gpt-realtime-whisper";
 /** The voice the cascade already used, so the architecture swap does not change how he sounds. */
 export const DEFAULT_VOICE_REALTIME_VOICE = "marin";
+/**
+ * Who synthesizes his speech ([ADR 0070](../../../docs/adr/0070-external-voice-via-streaming-tts.md)):
+ * `openai` is the realtime model's own mouth, `elevenlabs` switches the
+ * engaged session to text output streamed through ElevenLabs TTS.
+ */
+export const VOICE_TTS_PROVIDERS = ["openai", "elevenlabs"] as const;
+export type VoiceTtsProvider = (typeof VOICE_TTS_PROVIDERS)[number];
+export const DEFAULT_VOICE_TTS_PROVIDER: VoiceTtsProvider = "openai";
 /** `session.truncation` retention ratio — configured, never defaulted to unbounded (mission T6). */
 export const DEFAULT_VOICE_TRUNCATION_RETENTION = 0.7;
 export const DEFAULT_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT = 12_000;
@@ -64,6 +74,10 @@ export interface VoiceRealtimeEnvConfig {
   readonly realtimeModel: string;
   readonly transcribeModel: string;
   readonly voice: string;
+  readonly ttsProvider: VoiceTtsProvider;
+  /** Required exactly when {@link ttsProvider} is `elevenlabs`. */
+  readonly elevenLabsVoiceId?: string;
+  readonly elevenLabsModelId?: string;
   /**
    * `CLANKIE_VOICE_STT_LANGUAGE`, unchanged semantics from the cascade: unset
    * defers to the runtime's pinned default, empty restores per-utterance
@@ -100,10 +114,32 @@ export function parseVoiceRealtimeEnv(env: NodeJS.ProcessEnv): VoiceRealtimeEnvC
     10_000,
     4 * 60 * 60_000,
   );
+  const ttsProvider = ttsProviderEnv(env);
+  const elevenLabsVoiceId = env.CLANKIE_VOICE_ELEVENLABS_VOICE_ID?.trim();
+  const elevenLabsModelId = env.CLANKIE_VOICE_ELEVENLABS_MODEL_ID?.trim();
+  if (ttsProvider === "elevenlabs") {
+    if (elevenLabsVoiceId === undefined || elevenLabsVoiceId.length === 0) {
+      throw new Error(
+        "CLANKIE_VOICE_ELEVENLABS_VOICE_ID is required when CLANKIE_VOICE_TTS_PROVIDER=elevenlabs",
+      );
+    }
+  } else if (elevenLabsVoiceId !== undefined || elevenLabsModelId !== undefined) {
+    // Set-but-ignored configuration is drift, the same rule the retired
+    // cascade names enforce above.
+    throw new Error(
+      "CLANKIE_VOICE_ELEVENLABS_VOICE_ID and CLANKIE_VOICE_ELEVENLABS_MODEL_ID require " +
+        "CLANKIE_VOICE_TTS_PROVIDER=elevenlabs",
+    );
+  }
   return {
     realtimeModel: nonEmptyEnv(env, "CLANKIE_VOICE_REALTIME_MODEL", DEFAULT_VOICE_REALTIME_MODEL),
     transcribeModel: nonEmptyEnv(env, "CLANKIE_VOICE_TRANSCRIBE_MODEL", DEFAULT_VOICE_TRANSCRIBE_MODEL),
     voice: nonEmptyEnv(env, "CLANKIE_VOICE_REALTIME_VOICE", DEFAULT_VOICE_REALTIME_VOICE),
+    ttsProvider,
+    ...(ttsProvider === "elevenlabs" && elevenLabsVoiceId !== undefined ? { elevenLabsVoiceId } : {}),
+    ...(ttsProvider === "elevenlabs" && elevenLabsModelId !== undefined && elevenLabsModelId.length > 0
+      ? { elevenLabsModelId }
+      : {}),
     ...(language === undefined ? {} : { language }),
     truncationRetentionRatio: ratioEnv(
       env,
@@ -122,6 +158,17 @@ export function parseVoiceRealtimeEnv(env: NodeJS.ProcessEnv): VoiceRealtimeEnvC
       DEFAULT_VOICE_IDLE_LEAVE_MS,
     volitionModel: nonEmptyEnv(env, "CLANKIE_VOICE_VOLITION_MODEL", DEFAULT_VOICE_VOLITION_MODEL),
   };
+}
+
+function ttsProviderEnv(env: NodeJS.ProcessEnv): VoiceTtsProvider {
+  const value = env.CLANKIE_VOICE_TTS_PROVIDER;
+  if (value === undefined) return DEFAULT_VOICE_TTS_PROVIDER;
+  const normalized = value.trim().toLowerCase();
+  const match = VOICE_TTS_PROVIDERS.find((provider) => provider === normalized);
+  if (match === undefined) {
+    throw new Error(`CLANKIE_VOICE_TTS_PROVIDER must be one of: ${VOICE_TTS_PROVIDERS.join(", ")}`);
+  }
+  return match;
 }
 
 function nonEmptyEnv(env: NodeJS.ProcessEnv, name: string, fallback: string): string {
@@ -164,6 +211,12 @@ function optionalIntegerEnv(
 export interface VoiceRealtimePortsInput {
   /** Broker-resolved OpenAI key — never `OPENAI_API_KEY` from the environment. */
   readonly apiKey: string;
+  /**
+   * Broker-resolved ElevenLabs key under provider id `elevenlabs` — never an
+   * environment variable. Required exactly when the config's TTS provider is
+   * `elevenlabs`.
+   */
+  readonly elevenLabsApiKey?: string;
   readonly config: VoiceRealtimeEnvConfig;
   /** Injected by tests; production defaults to the runtime's WebSocket factory. */
   readonly socketFactory?: RealtimeSocketFactory;
@@ -177,13 +230,75 @@ export interface VoiceRealtimePortsInput {
  * actually grows.
  */
 export function createVoiceRealtimePorts(input: VoiceRealtimePortsInput): DiscordVoiceRealtimePorts {
-  const { apiKey, config, socketFactory, timers } = input;
+  const { apiKey, elevenLabsApiKey, config, socketFactory, timers } = input;
+  if (config.ttsProvider === "elevenlabs" && elevenLabsApiKey === undefined) {
+    throw new Error(
+      "The elevenlabs TTS provider requires the brokered elevenlabs credential. " +
+        "Store the ElevenLabs API key under provider elevenlabs.",
+    );
+  }
   const common = {
     apiKey,
     ...(socketFactory === undefined ? {} : { socketFactory }),
     ...(timers === undefined ? {} : { timers }),
     ...(config.sessionLifetimeMs === undefined ? {} : { maxLifetimeMs: config.sessionLifetimeMs }),
   };
+  const openConversation =
+    config.ttsProvider === "elevenlabs" && elevenLabsApiKey !== undefined
+      ? (open: VoiceConversationOpenInput) =>
+          // ADR 0070: the engaged tier becomes a pair — text-modality
+          // realtime ears and an ElevenLabs mouth — behind the same port.
+          openExternalVoiceConversation(
+            open,
+            {
+              openRealtime: (handlers) =>
+                openRealtimeConversationSession({
+                  ...common,
+                  model: config.realtimeModel,
+                  outputModality: "text",
+                  instructions: open.instructions,
+                  truncationRetentionRatio: config.truncationRetentionRatio,
+                  postInstructionsTokenLimit: config.postInstructionsTokenLimit,
+                  onAudioDelta: open.onAudioDelta,
+                  onTextDelta: handlers.onTextDelta,
+                  onFunctionCall: handlers.onFunctionCall,
+                  onResponseDone: handlers.onResponseDone,
+                  onClose: handlers.onClose,
+                  onError: handlers.onError,
+                }),
+              openTts: (handlers) =>
+                openElevenLabsTtsSession({
+                  apiKey: elevenLabsApiKey,
+                  // Presence of the voice id is enforced by parseVoiceRealtimeEnv.
+                  voiceId: config.elevenLabsVoiceId ?? "",
+                  ...(config.elevenLabsModelId === undefined ? {} : { modelId: config.elevenLabsModelId }),
+                  ...(socketFactory === undefined ? {} : { socketFactory }),
+                  ...(timers === undefined ? {} : { timers }),
+                  ...(config.sessionLifetimeMs === undefined
+                    ? {}
+                    : { maxLifetimeMs: config.sessionLifetimeMs }),
+                  onAudio: handlers.onAudio,
+                  onContextDone: handlers.onContextDone,
+                  onClose: handlers.onClose,
+                  onError: handlers.onError,
+                }),
+            },
+            timers === undefined ? {} : { timers },
+          )
+      : (open: VoiceConversationOpenInput) =>
+          openRealtimeConversationSession({
+            ...common,
+            model: config.realtimeModel,
+            voice: config.voice,
+            instructions: open.instructions,
+            truncationRetentionRatio: config.truncationRetentionRatio,
+            postInstructionsTokenLimit: config.postInstructionsTokenLimit,
+            onAudioDelta: open.onAudioDelta,
+            onFunctionCall: open.onFunctionCall,
+            onResponseDone: open.onResponseDone,
+            onClose: open.onClose,
+            onError: open.onError,
+          });
   return {
     openTranscription: (handlers: VoiceTranscriptionHandlers) =>
       openRealtimeTranscriptionSession({
@@ -194,20 +309,7 @@ export function createVoiceRealtimePorts(input: VoiceRealtimePortsInput): Discor
         onClose: handlers.onClose,
         onError: handlers.onError,
       }),
-    openConversation: (open: VoiceConversationOpenInput) =>
-      openRealtimeConversationSession({
-        ...common,
-        model: config.realtimeModel,
-        voice: config.voice,
-        instructions: open.instructions,
-        truncationRetentionRatio: config.truncationRetentionRatio,
-        postInstructionsTokenLimit: config.postInstructionsTokenLimit,
-        onAudioDelta: open.onAudioDelta,
-        onFunctionCall: open.onFunctionCall,
-        onResponseDone: open.onResponseDone,
-        onClose: open.onClose,
-        onError: open.onError,
-      }),
+    openConversation,
   };
 }
 
@@ -495,17 +597,35 @@ export function describeVoiceResponse(evidence: DiscordVoiceResponseEvidence): s
  * the life of the call, so this text must state live-session residency and
  * must never promise per-turn discard.
  */
-export function renderVoiceJoinDisclosure(daveProtocolVersion: number | undefined): string {
+export function renderVoiceJoinDisclosure(
+  daveProtocolVersion: number | undefined,
+  ttsProvider: VoiceTtsProvider = DEFAULT_VOICE_TTS_PROVIDER,
+): string {
   return (
     `Joined with DAVE protocol ${String(daveProtocolVersion)}. Only you are opted in — ` +
     `audio from anyone who has not explicitly consented is never streamed anywhere. ` +
     `Consented audio feeds a live OpenAI realtime session that keeps this call's conversation ` +
     `on OpenAI's servers for as long as the call lasts. I listen continuously but speak only ` +
-    `when addressed, or briefly on my own initiative. My spoken replies use an AI-generated ` +
-    `voice, and nothing said in voice can ever approve privileged actions. ` +
+    `when addressed, or briefly on my own initiative. ${describeSpokenReplies(ttsProvider)} ` +
+    `Nothing said in voice can ever approve privileged actions. ` +
     `Use **/clankie voice-consent opt-in** to let me hear you and ` +
     `**/clankie voice-consent opt-out** to revoke immediately.`
   );
+}
+
+/**
+ * The synthesized-speech sentence (ADR 0070). Under an external voice the
+ * words Clankie chooses transit a second vendor, and the disclosure must say
+ * so — while staying equally clear that room audio never does.
+ */
+function describeSpokenReplies(ttsProvider: VoiceTtsProvider): string {
+  if (ttsProvider === "elevenlabs") {
+    return (
+      "My spoken replies use an AI-generated voice synthesized by ElevenLabs from the words I " +
+      "choose; your audio is never sent to ElevenLabs."
+    );
+  }
+  return "My spoken replies use an AI-generated voice.";
 }
 
 /**
@@ -515,15 +635,19 @@ export function renderVoiceJoinDisclosure(daveProtocolVersion: number | undefine
  * join disclosure was never shown to them — so the residency terms travel in
  * this reply, before anything of theirs is streamed on the next utterance.
  */
-export function renderVoiceConsentReply(consented: boolean, participantCount: number): string {
+export function renderVoiceConsentReply(
+  consented: boolean,
+  participantCount: number,
+  ttsProvider: VoiceTtsProvider = DEFAULT_VOICE_TTS_PROVIDER,
+): string {
   if (!consented) {
     return "Your voice consent is revoked and any active capture for you was discarded.";
   }
   return (
     `You are opted in for this voice session. ${String(participantCount)} participant(s) are now opted in. ` +
     `Your consented audio feeds a live OpenAI realtime session that keeps this call's conversation ` +
-    `on OpenAI's servers for as long as the call lasts; my replies use an AI-generated voice, and ` +
-    `nothing said in voice can ever approve privileged actions. ` +
+    `on OpenAI's servers for as long as the call lasts. ${describeSpokenReplies(ttsProvider)} ` +
+    `Nothing said in voice can ever approve privileged actions. ` +
     `**/clankie voice-consent opt-out** revokes immediately.`
   );
 }

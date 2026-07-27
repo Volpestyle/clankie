@@ -8,6 +8,7 @@ import {
   captainStartupTimeoutMs,
   DEFAULT_CAPTAIN_STARTUP_TIMEOUT_MS,
   ensureCaptainService,
+  inspectCaptain,
   restartCaptainService,
   type CaptainServiceHandle,
 } from "../bin/captain-service.ts";
@@ -356,8 +357,12 @@ describe("restartCaptainService", () => {
             String(input).endsWith("/eve/v1/info")
               ? Response.json(captainInfo())
               : Response.json({ ok: true, status: "ready", workflowId: EVE_WORKFLOW_ID }),
+          // Injected so the refusal is proven by the fixture rather than by
+          // whatever happens to hold port 4321 on the machine running this.
+          readListenerPidsImpl: () => [4242],
+          readProcessCommandImpl: () => "node /somewhere/else/unrelated-server.js",
         }),
-      ).rejects.toThrow("not owned by the clankie launcher");
+      ).rejects.toThrow("could not be confirmed as this checkout's captain-eve");
     } finally {
       await rm(stateRoot, { recursive: true, force: true });
     }
@@ -400,3 +405,164 @@ describe("restartCaptainService", () => {
     }
   });
 });
+
+/** A captain whose build predates a tool this checkout now authors. */
+function staleCaptainInfo(appRoot = "/repo/apps/captain-eve"): unknown {
+  const [, ...rest] = [...CAPTAIN_AUTHORED_TOOL_NAMES];
+  return {
+    kind: "eve-agent-info",
+    agent: { name: CAPTAIN_AGENT_NAME, appRoot, agentRoot: `${appRoot}/agent` },
+    tools: {
+      authored: rest.map((toolName) => ({ name: toolName })),
+      available: rest.map((toolName) => ({ name: toolName })),
+      disabledFramework: [...CAPTAIN_DISABLED_FRAMEWORK_TOOL_NAMES],
+    },
+  };
+}
+
+function respondWith(info: unknown): typeof fetch {
+  return (async (input: unknown) =>
+    String(input).endsWith("/eve/v1/info")
+      ? Response.json(info)
+      : Response.json({ ok: true, status: "ready", workflowId: EVE_WORKFLOW_ID })) as typeof fetch;
+}
+
+describe("a captain whose build predates the authored tools", () => {
+  it("is still recognised as ours rather than as a stranger on the port", async () => {
+    const inspection = await inspectCaptain("http://127.0.0.1:4321", respondWith(staleCaptainInfo()));
+
+    expect(inspection.state).toBe("stale");
+    expect(inspection.agent).toBe(CAPTAIN_AGENT_NAME);
+    // Names what drifted, so the operator is told which tool is missing.
+    expect(inspection.toolDrift?.missing).toEqual([[...CAPTAIN_AUTHORED_TOOL_NAMES][0]]);
+    // A stale build must still fingerprint, or the thing that detects staleness
+    // has no generation to compare.
+    expect(inspection.generation).toMatch(/^[a-f0-9]{64}$/u);
+  });
+
+  it("is rebuilt by restart instead of refused", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "captain-restart-stale-test-"));
+    const restarted: CaptainServiceHandle = {
+      generation: "b".repeat(64),
+      host: "http://127.0.0.1:4321",
+      owned: true,
+      stop: () => Promise.resolve(),
+      stopSync: () => undefined,
+    };
+    let reachable = true;
+    const signals: { pid: number; signal: string }[] = [];
+    const status: string[] = [];
+    try {
+      const handle = await restartCaptainService({
+        repoRoot: "/repo",
+        host: "http://127.0.0.1:4321",
+        env: { XDG_STATE_HOME: stateRoot },
+        fetchImpl: (async (input: unknown) => {
+          if (!reachable) throw new TypeError("fetch failed");
+          return respondWith(staleCaptainInfo())(input as string);
+        }) as typeof fetch,
+        onStatus: (line) => status.push(line),
+        readListenerPidsImpl: () => [4242],
+        // The listening process carries the appRoot the captain reported, which
+        // is what proves it is this checkout's captain however it was started.
+        readProcessCommandImpl: () => "node /repo/apps/captain-eve/.output/server/index.mjs",
+        killImpl: (pid, signal) => {
+          signals.push({ pid, signal });
+          reachable = false;
+        },
+        ensureImpl: async () => restarted,
+      });
+
+      expect(signals).toEqual([{ pid: 4242, signal: "SIGTERM" }]);
+      expect(handle).toBe(restarted);
+      expect(status.join("\n")).toContain("older build");
+    } finally {
+      await rm(stateRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("tells ensure to run restart rather than reading as an unknown occupant", async () => {
+    await expect(
+      ensureCaptainService({
+        repoRoot: "/unused",
+        host: "http://127.0.0.1:4321",
+        fetchImpl: respondWith(staleCaptainInfo()),
+      }),
+    ).rejects.toThrow("clankie restart");
+  });
+});
+
+describe("adopting a hand-started captain", () => {
+  it("stops one the launcher never started, once the process proves it is ours", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "captain-adopt-test-"));
+    const restarted: CaptainServiceHandle = {
+      generation: "c".repeat(64),
+      host: "http://127.0.0.1:4321",
+      owned: true,
+      stop: () => Promise.resolve(),
+      stopSync: () => undefined,
+    };
+    let reachable = true;
+    const signals: { pid: number; signal: string }[] = [];
+    try {
+      const handle = await restartCaptainService({
+        repoRoot: "/repo",
+        host: "http://127.0.0.1:4321",
+        env: { XDG_STATE_HOME: stateRoot },
+        fetchImpl: (async (input: unknown) => {
+          if (!reachable) throw new TypeError("fetch failed");
+          return respondWith(captainInfoWithRoot())(input as string);
+        }) as typeof fetch,
+        readListenerPidsImpl: () => [777],
+        readProcessCommandImpl: () =>
+          "pnpm --filter @clankie/captain-eve exec eve start --host 127.0.0.1 --port 4321",
+        killImpl: (pid, signal) => {
+          signals.push({ pid, signal });
+          reachable = false;
+        },
+        ensureImpl: async () => restarted,
+      });
+
+      expect(signals).toEqual([{ pid: 777, signal: "SIGTERM" }]);
+      expect(handle).toBe(restarted);
+    } finally {
+      await rm(stateRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("still refuses when the listening process is not this checkout's captain", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "captain-adopt-refuse-test-"));
+    try {
+      await expect(
+        restartCaptainService({
+          repoRoot: "/repo",
+          host: "http://127.0.0.1:4321",
+          env: { XDG_STATE_HOME: stateRoot },
+          fetchImpl: respondWith(captainInfoWithRoot()),
+          readListenerPidsImpl: () => [999],
+          readProcessCommandImpl: () => "node /elsewhere/some-other-eve/server.mjs",
+          killImpl: () => {
+            throw new Error("must not signal an unproven process");
+          },
+          ensureImpl: async () => {
+            throw new Error("must not reach ensure");
+          },
+        }),
+      ).rejects.toThrow("could not be confirmed as this checkout's captain-eve");
+    } finally {
+      await rm(stateRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+function captainInfoWithRoot(appRoot = "/repo/apps/captain-eve"): unknown {
+  return {
+    kind: "eve-agent-info",
+    agent: { name: CAPTAIN_AGENT_NAME, appRoot, agentRoot: `${appRoot}/agent` },
+    tools: {
+      authored: CAPTAIN_AUTHORED_TOOL_NAMES.map((toolName) => ({ name: toolName })),
+      available: CAPTAIN_AUTHORED_TOOL_NAMES.map((toolName) => ({ name: toolName })),
+      disabledFramework: [...CAPTAIN_DISABLED_FRAMEWORK_TOOL_NAMES],
+    },
+  };
+}

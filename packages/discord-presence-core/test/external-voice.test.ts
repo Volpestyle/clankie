@@ -1,0 +1,313 @@
+import { Buffer } from "node:buffer";
+import { describe, expect, it } from "vitest";
+import {
+  openExternalVoiceConversation,
+  type ExternalVoiceRealtimeHandlers,
+  type ExternalVoiceRealtimePort,
+  type ExternalVoiceSessionFactories,
+  type ExternalVoiceTtsHandlers,
+  type ExternalVoiceTtsPort,
+} from "../src/external-voice.ts";
+import type { RealtimeResponseMeta, RealtimeTimers } from "../src/realtime-session.ts";
+import type { VoiceConversationOpenInput } from "../src/voice-session.ts";
+
+class FakeRealtimePort implements ExternalVoiceRealtimePort {
+  public isOpen = true;
+  public readonly appended: Buffer[] = [];
+  public readonly textItems: string[] = [];
+  public responseCreates = 0;
+  public readonly functionResults: { callId: string; output: string }[] = [];
+  public closed = false;
+
+  public appendAudio(pcm: Buffer): void {
+    this.appended.push(Buffer.from(pcm));
+  }
+
+  public createTextItem(text: string): void {
+    this.textItems.push(text);
+  }
+
+  public createResponse(): void {
+    this.responseCreates += 1;
+  }
+
+  public submitFunctionResult(callId: string, output: string): void {
+    this.functionResults.push({ callId, output });
+  }
+
+  public close(): void {
+    this.closed = true;
+    this.isOpen = false;
+  }
+}
+
+class FakeTtsPort implements ExternalVoiceTtsPort {
+  public isOpen = true;
+  public readonly frames: { kind: string; contextId?: string; text?: string }[] = [];
+  public closed = false;
+
+  public openContext(contextId: string): void {
+    this.frames.push({ kind: "open", contextId });
+  }
+
+  public appendText(contextId: string, text: string): void {
+    this.frames.push({ kind: "append", contextId, text });
+  }
+
+  public flush(contextId: string): void {
+    this.frames.push({ kind: "flush", contextId });
+  }
+
+  public closeContext(contextId: string): void {
+    this.frames.push({ kind: "close_context", contextId });
+  }
+
+  public close(): void {
+    this.closed = true;
+    this.isOpen = false;
+  }
+}
+
+class FakeTimers implements RealtimeTimers {
+  public readonly scheduled: { handle: number; delayMs: number; handler: () => void; cleared: boolean }[] =
+    [];
+  private nextHandle = 1;
+
+  public setTimeout(handler: () => void, delayMs: number): unknown {
+    const handle = this.nextHandle;
+    this.nextHandle += 1;
+    this.scheduled.push({ handle, delayMs, handler, cleared: false });
+    return handle;
+  }
+
+  public clearTimeout(handle: unknown): void {
+    const entry = this.scheduled.find((candidate) => candidate.handle === handle);
+    if (entry !== undefined) entry.cleared = true;
+  }
+
+  public fire(): void {
+    const entry = this.scheduled.find((candidate) => !candidate.cleared);
+    if (entry === undefined) throw new Error("No armed timer to fire");
+    entry.cleared = true;
+    entry.handler();
+  }
+}
+
+async function settle(): Promise<void> {
+  // Drain the port's internal ops chain: each queued step is several
+  // microtasks deep, so yield whole macrotask turns instead of counting them.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function doneMeta(responseId: string): RealtimeResponseMeta {
+  return { responseId, status: "completed", audioBytes: 0, textCharacters: 12 };
+}
+
+interface Harness {
+  realtime: FakeRealtimePort;
+  ttsPorts: FakeTtsPort[];
+  timers: FakeTimers;
+  realtimeHandlers: ExternalVoiceRealtimeHandlers;
+  ttsHandlers: ExternalVoiceTtsHandlers[];
+  events: {
+    audio: { pcm: Buffer; itemId: string }[];
+    done: RealtimeResponseMeta[];
+    closes: string[];
+    errors: string[];
+  };
+  failNextTtsOpen: { value: boolean };
+}
+
+async function openHarness(): Promise<
+  Harness & { port: Awaited<ReturnType<typeof openExternalVoiceConversation>> }
+> {
+  const realtime = new FakeRealtimePort();
+  const ttsPorts: FakeTtsPort[] = [];
+  const timers = new FakeTimers();
+  const ttsHandlers: ExternalVoiceTtsHandlers[] = [];
+  const failNextTtsOpen = { value: false };
+  let realtimeHandlers: ExternalVoiceRealtimeHandlers | undefined;
+  const events: Harness["events"] = { audio: [], done: [], closes: [], errors: [] };
+  const input: VoiceConversationOpenInput = {
+    instructions: "Be Clankie.",
+    onAudioDelta: (pcm, itemId) => events.audio.push({ pcm: Buffer.from(pcm), itemId }),
+    onFunctionCall: () => undefined,
+    onResponseDone: (meta) => events.done.push(meta),
+    onClose: (reason) => events.closes.push(reason),
+    onError: (message) => events.errors.push(message),
+  };
+  const factories: ExternalVoiceSessionFactories = {
+    openRealtime: (handlers) => {
+      realtimeHandlers = handlers;
+      return Promise.resolve(realtime);
+    },
+    openTts: (handlers) => {
+      if (failNextTtsOpen.value) {
+        failNextTtsOpen.value = false;
+        return Promise.reject(new Error("ElevenLabs session error"));
+      }
+      const port = new FakeTtsPort();
+      ttsPorts.push(port);
+      ttsHandlers.push(handlers);
+      return Promise.resolve(port);
+    },
+  };
+  const port = await openExternalVoiceConversation(input, factories, { timers });
+  if (realtimeHandlers === undefined) throw new Error("realtime handlers were not captured");
+  return { port, realtime, ttsPorts, timers, realtimeHandlers, ttsHandlers, events, failNextTtsOpen };
+}
+
+describe("external voice conversation", () => {
+  it("closes the ears when the mouth cannot open", async () => {
+    const realtime = new FakeRealtimePort();
+    const factories: ExternalVoiceSessionFactories = {
+      openRealtime: () => Promise.resolve(realtime),
+      openTts: () => Promise.reject(new Error("ElevenLabs session error")),
+    };
+    const input: VoiceConversationOpenInput = {
+      instructions: "Be Clankie.",
+      onAudioDelta: () => undefined,
+      onFunctionCall: () => undefined,
+      onResponseDone: () => undefined,
+      onClose: () => undefined,
+      onError: () => undefined,
+    };
+    await expect(openExternalVoiceConversation(input, factories)).rejects.toThrow("ElevenLabs session error");
+    expect(realtime.closed).toBe(true);
+  });
+
+  it("streams text deltas into one context per item, in order", async () => {
+    const { realtimeHandlers, ttsPorts } = await openHarness();
+    realtimeHandlers.onTextDelta("Sure — ", "item_a");
+    realtimeHandlers.onTextDelta("one sec.", "item_a");
+    await settle();
+    expect(ttsPorts[0]?.frames).toEqual([
+      { kind: "open", contextId: "item_a" },
+      { kind: "append", contextId: "item_a", text: "Sure — " },
+      { kind: "append", contextId: "item_a", text: "one sec." },
+    ]);
+  });
+
+  it("holds response done until the synthesis context drains, then forwards it", async () => {
+    const { realtimeHandlers, ttsHandlers, ttsPorts, timers, events } = await openHarness();
+    realtimeHandlers.onTextDelta("Hello there.", "item_a");
+    await settle();
+    realtimeHandlers.onResponseDone(doneMeta("resp_1"));
+    await settle();
+    expect(ttsPorts[0]?.frames.at(-1)).toEqual({ kind: "flush", contextId: "item_a" });
+    expect(events.done).toHaveLength(0);
+
+    const pcm = Buffer.from([1, 0, 2, 0]);
+    ttsHandlers[0]?.onAudio(pcm, "item_a");
+    expect(events.audio).toEqual([{ pcm: Buffer.from([1, 0, 2, 0]), itemId: "item_a" }]);
+
+    ttsHandlers[0]?.onContextDone("item_a");
+    expect(events.done).toEqual([doneMeta("resp_1")]);
+    expect(timers.scheduled[0]?.cleared).toBe(true);
+    expect(events.errors).toHaveLength(0);
+  });
+
+  it("forwards a no-speech response done immediately", async () => {
+    const { realtimeHandlers, events } = await openHarness();
+    realtimeHandlers.onResponseDone(doneMeta("resp_tool"));
+    expect(events.done).toEqual([doneMeta("resp_tool")]);
+  });
+
+  it("forces the done through when synthesis does not drain in time", async () => {
+    const { realtimeHandlers, timers, events } = await openHarness();
+    realtimeHandlers.onTextDelta("Hello there.", "item_a");
+    await settle();
+    realtimeHandlers.onResponseDone(doneMeta("resp_1"));
+    expect(events.done).toHaveLength(0);
+
+    timers.fire();
+    expect(events.errors).toEqual(["External voice synthesis did not drain in time"]);
+    expect(events.done).toEqual([doneMeta("resp_1")]);
+  });
+
+  it("turns barge-in into context close, a marker item, and dropped late output", async () => {
+    const { port, realtimeHandlers, ttsHandlers, ttsPorts, realtime, events } = await openHarness();
+    realtimeHandlers.onTextDelta("A very long ", "item_a");
+    await settle();
+
+    port.truncate("item_a", 420);
+    await settle();
+    expect(ttsPorts[0]?.frames.at(-1)).toEqual({ kind: "close_context", contextId: "item_a" });
+    expect(realtime.textItems.at(-1)).toContain("interrupted about 420ms");
+
+    // Late deltas and late audio for the truncated item never reach anything.
+    realtimeHandlers.onTextDelta("tail that nobody hears", "item_a");
+    await settle();
+    expect(ttsPorts[0]?.frames.filter((frame) => frame.kind === "append")).toHaveLength(1);
+    const late = Buffer.from([7, 0]);
+    ttsHandlers[0]?.onAudio(late, "item_a");
+    expect(events.audio).toHaveLength(0);
+    expect(late.equals(Buffer.alloc(2))).toBe(true);
+
+    // The response done for a truncated item is not held.
+    realtimeHandlers.onResponseDone(doneMeta("resp_1"));
+    expect(events.done).toEqual([doneMeta("resp_1")]);
+  });
+
+  it("releases held dones when the mouth dies and reopens it for the next utterance", async () => {
+    const { realtimeHandlers, ttsHandlers, ttsPorts, events, failNextTtsOpen } = await openHarness();
+    realtimeHandlers.onTextDelta("Hello there.", "item_a");
+    await settle();
+    realtimeHandlers.onResponseDone(doneMeta("resp_1"));
+    expect(events.done).toHaveLength(0);
+
+    ttsPorts[0]?.close();
+    ttsHandlers[0]?.onClose();
+    expect(events.done).toEqual([doneMeta("resp_1")]);
+
+    // Next utterance opens a fresh TTS session and speaks normally.
+    realtimeHandlers.onTextDelta("Still here.", "item_b");
+    await settle();
+    expect(ttsPorts).toHaveLength(2);
+    expect(ttsPorts[1]?.frames).toEqual([
+      { kind: "open", contextId: "item_b" },
+      { kind: "append", contextId: "item_b", text: "Still here." },
+    ]);
+    expect(failNextTtsOpen.value).toBe(false);
+  });
+
+  it("reports a reopen failure and still settles the turn", async () => {
+    const { realtimeHandlers, ttsHandlers, ttsPorts, events, failNextTtsOpen } = await openHarness();
+    ttsPorts[0]?.close();
+    ttsHandlers[0]?.onClose();
+    failNextTtsOpen.value = true;
+
+    realtimeHandlers.onTextDelta("Hello?", "item_a");
+    await settle();
+    expect(events.errors).toEqual(["ElevenLabs session error"]);
+
+    realtimeHandlers.onResponseDone(doneMeta("resp_1"));
+    await settle();
+    // The failed open dropped the utterance, so its done event is forwarded
+    // immediately instead of waiting out the drain timer.
+    expect(events.done).toEqual([doneMeta("resp_1")]);
+  });
+
+  it("delegates the realtime-only surface and closes both sessions", async () => {
+    const { port, realtime, ttsPorts, realtimeHandlers, events } = await openHarness();
+    port.createTextItem("Speaker: james");
+    port.createResponse();
+    port.submitFunctionResult("call_1", "done");
+    port.appendAudio(Buffer.from([1, 0]));
+    expect(realtime.textItems).toEqual(["Speaker: james"]);
+    expect(realtime.responseCreates).toBe(1);
+    expect(realtime.functionResults).toEqual([{ callId: "call_1", output: "done" }]);
+    expect(realtime.appended).toHaveLength(1);
+
+    port.close();
+    expect(realtime.closed).toBe(true);
+    expect(ttsPorts[0]?.closed).toBe(true);
+    expect(port.isOpen).toBe(false);
+
+    // A close arriving from the realtime side after local close still reaches
+    // the media owner exactly once.
+    realtimeHandlers.onClose("socket");
+    expect(events.closes).toEqual(["socket"]);
+  });
+});

@@ -185,6 +185,286 @@ describe("captain self state", () => {
     ]);
     expect(renderCaptainSelfState(state)).toContain("Gameplay · pokemon-firered");
   });
+
+  it("reports a bridge-owned voice session as a Discord voice room without any lane row", () => {
+    // The realtime voice agent joins VC without a captain turn ever flowing
+    // (ADR 0056/0057), so no discord_voice lane row exists — the presence
+    // session is the only source that can say his body is in a voice channel.
+    const state = projectCaptainSelfState(
+      input({
+        presence: [
+          {
+            sessionId: "sess-1",
+            phase: "voice_active",
+            voiceGuildIds: ["guild-42"],
+            updatedAt: NOW.toISOString(),
+          },
+        ],
+      }),
+    );
+
+    expect(state.rooms).toEqual([
+      {
+        lane: "discord_voice",
+        targetId: "guild-42",
+        here: false,
+        active: true,
+        updatedAt: NOW.toISOString(),
+      },
+    ]);
+    expect(renderCaptainSelfState(state)).toContain("Discord voice · guild-42");
+  });
+
+  it("reports gateway presence as Discord text and skips sessions that are not connected", () => {
+    const state = projectCaptainSelfState(
+      input({
+        presence: [
+          { sessionId: "sess-text", phase: "present", voiceGuildIds: [], updatedAt: NOW.toISOString() },
+          { sessionId: "sess-off", phase: "off", voiceGuildIds: [], updatedAt: NOW.toISOString() },
+          { sessionId: "sess-mid", phase: "connecting", voiceGuildIds: [], updatedAt: NOW.toISOString() },
+          { sessionId: "sess-bad", phase: "degraded", voiceGuildIds: [], updatedAt: NOW.toISOString() },
+          { sessionId: "sess-dead", phase: "failed", voiceGuildIds: [], updatedAt: NOW.toISOString() },
+        ],
+      }),
+    );
+
+    expect(state.rooms).toEqual([
+      {
+        lane: "discord_presence",
+        targetId: "sess-text",
+        here: false,
+        active: true,
+        updatedAt: NOW.toISOString(),
+      },
+    ]);
+  });
+
+  it("keeps a Go Live session a voice room, addressed by session id when no guild is listed", () => {
+    const state = projectCaptainSelfState(
+      input({
+        presence: [
+          {
+            sessionId: "sess-live",
+            phase: "go_live_active",
+            voiceGuildIds: [],
+            updatedAt: NOW.toISOString(),
+          },
+        ],
+      }),
+    );
+
+    expect(state.rooms).toEqual([
+      {
+        lane: "discord_voice",
+        targetId: "sess-live",
+        here: false,
+        active: true,
+        updatedAt: NOW.toISOString(),
+      },
+    ]);
+  });
+
+  it("renders live rooms in the present tense so they cannot be read as history", () => {
+    // Shown "last active <three minutes ago>" for a voice channel he was
+    // sitting in, he answered "not in it now" — a live room must never render
+    // as a bare timestamp.
+    const state = projectCaptainSelfState(
+      input({
+        presence: [
+          {
+            sessionId: "sess-1",
+            phase: "voice_active",
+            voiceGuildIds: ["guild-42"],
+            updatedAt: NOW.toISOString(),
+          },
+        ],
+        lanes: [
+          lane({
+            lane: "discord_presence",
+            targetId: "old-room",
+            state: "completed",
+            updatedAt: "2026-07-25T11:59:00.000Z",
+          }),
+        ],
+      }),
+    );
+
+    const rendered = renderCaptainSelfState(state);
+    expect(rendered).toMatch(/Discord voice · guild-42 · open right now/u);
+    expect(rendered).not.toMatch(/Discord voice[^\n]*last active/u);
+    expect(rendered).toMatch(/Discord text · old-room · last active [^\n]*\(settled\)/u);
+    expect(rendered).toContain('"open right now"');
+  });
+
+  it("labels a voice room with its guild, channel, and occupants when names are published", () => {
+    const state = projectCaptainSelfState(
+      input({
+        presence: [
+          {
+            sessionId: "sess-1",
+            phase: "voice_active",
+            voiceGuildIds: ["guild-42"],
+            voiceRooms: [
+              {
+                guildId: "guild-42",
+                guildName: "Vuhlp",
+                channelId: "chan-7",
+                channelName: "General",
+                occupants: [
+                  { userId: "u1", displayName: "James" },
+                  { userId: "u2", displayName: "Sam" },
+                ],
+              },
+            ],
+            updatedAt: NOW.toISOString(),
+          },
+        ],
+      }),
+    );
+
+    expect(state.rooms[0]?.label).toBe("Vuhlp — General (with James, Sam)");
+    expect(state.rooms[0]?.targetId).toBe("guild-42");
+    expect(renderCaptainSelfState(state)).toContain(
+      "Discord voice · Vuhlp — General (with James, Sam) · open right now",
+    );
+  });
+
+  it("falls back to the guild id and summarizes a crowd beyond the label cap", () => {
+    const occupants = Array.from({ length: 8 }, (_unused, index) => ({
+      userId: `u${String(index)}`,
+      displayName: `Person${String(index)}`,
+    }));
+    const state = projectCaptainSelfState(
+      input({
+        presence: [
+          {
+            sessionId: "sess-1",
+            phase: "voice_active",
+            voiceGuildIds: ["guild-42"],
+            voiceRooms: [{ guildId: "guild-42", occupants }],
+            updatedAt: NOW.toISOString(),
+          },
+        ],
+      }),
+    );
+
+    expect(state.rooms[0]?.label).toBe("guild-42 (with Person0, Person1, Person2, Person3, Person4 +3 more)");
+  });
+
+  it("reports a possessed body as a live gameplay room naming the driver (VUH-938)", () => {
+    const state = projectCaptainSelfState(
+      input({
+        possession: { holderId: "gba-mcp:claude-code", acquiredAt: NOW.toISOString() },
+      }),
+    );
+
+    expect(state.rooms).toEqual([
+      {
+        lane: "gameplay",
+        targetId: "gba-body",
+        label: "GBA body — driven by claude-code",
+        here: false,
+        active: true,
+        updatedAt: NOW.toISOString(),
+      },
+    ]);
+    expect(renderCaptainSelfState(state)).toContain(
+      "Gameplay · GBA body — driven by claude-code · open right now",
+    );
+  });
+
+  it("folds the runner's own asked-play hold into the embodiment room instead of double-reporting", () => {
+    const state = projectCaptainSelfState(
+      input({
+        embodiment: {
+          schemaVersion: 1,
+          sessionId: "embodiment-1",
+          environmentId: "pokemon-firered",
+          state: "running",
+          intentId: "intent-1",
+          originLane: "discord_presence",
+          requestedBy: "user-1",
+          budget: {},
+          requestedAt: NOW.toISOString(),
+          updatedAt: NOW.toISOString(),
+          runnerId: "runner-local",
+        },
+        possession: { holderId: "captain-play:embodiment-1", acquiredAt: NOW.toISOString() },
+      }),
+    );
+
+    expect(state.rooms.filter((room) => room.lane === "gameplay")).toHaveLength(1);
+    expect(state.rooms[0]?.targetId).toBe("pokemon-firered");
+  });
+
+  it("answers 'were you just in VC' from recent stays, past tense, with the company (VUH-940)", () => {
+    const leftAt = new Date(NOW.getTime() - 10 * 60 * 1000).toISOString();
+    const state = projectCaptainSelfState(
+      input({
+        voiceHistory: [
+          {
+            guildId: "guild-42",
+            guildName: "Vuhlp",
+            channelName: "General",
+            occupants: [{ userId: "u1", displayName: "James" }],
+            leftAt,
+          },
+        ],
+      }),
+    );
+
+    expect(state.recentVoice).toEqual([{ label: "Vuhlp — General (with James)", leftAt }]);
+    const rendered = renderCaptainSelfState(state);
+    expect(rendered).toContain(
+      `Discord voice · Vuhlp — General (with James) · you left at ${leftAt} — not in it anymore`,
+    );
+  });
+
+  it("keeps rejoined rooms and stale stays out of the recent-voice lines", () => {
+    const state = projectCaptainSelfState(
+      input({
+        presence: [
+          {
+            sessionId: "sess-1",
+            phase: "voice_active",
+            voiceGuildIds: ["guild-42"],
+            updatedAt: NOW.toISOString(),
+          },
+        ],
+        voiceHistory: [
+          {
+            guildId: "guild-42",
+            occupants: [],
+            leftAt: new Date(NOW.getTime() - 2 * 60 * 1000).toISOString(),
+          },
+          {
+            guildId: "guild-77",
+            occupants: [],
+            leftAt: new Date(NOW.getTime() - 2 * 60 * 60 * 1000).toISOString(),
+          },
+        ],
+      }),
+    );
+
+    expect(state.recentVoice).toEqual([]);
+  });
+
+  it("carries no credential reference from a presence record into the projection", () => {
+    // Production passes full DiscordPresenceSessionRecords; the projection's
+    // presence input names only address-and-liveness fields, so the fence is
+    // structural here too — guard against a wider shape being swapped in.
+    const recordShaped = {
+      sessionId: "sess-1",
+      phase: "voice_active",
+      voiceGuildIds: ["guild-42"],
+      updatedAt: NOW.toISOString(),
+      credentialRef: "secret-credential",
+    };
+    const state = projectCaptainSelfState(input({ presence: [recordShaped] }));
+
+    expect(JSON.stringify(state)).not.toContain("secret-credential");
+    expect(renderCaptainSelfState(state)).not.toContain("secret-credential");
+  });
 });
 
 describe("captain self state instructions", () => {

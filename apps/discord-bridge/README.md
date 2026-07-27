@@ -75,6 +75,9 @@ DISCORD_VOICE_CHANNEL_ID=...         # one private channel used by readiness/liv
 CLANKIE_VOICE_REALTIME_MODEL=gpt-realtime-2.1       # optional; engaged conversation tier
 CLANKIE_VOICE_TRANSCRIBE_MODEL=gpt-realtime-whisper # optional; dormant listener tier
 CLANKIE_VOICE_REALTIME_VOICE=marin                  # optional
+CLANKIE_VOICE_TTS_PROVIDER=openai    # optional; openai | elevenlabs (ADR 0070) — usually set from /voice in the TUI
+CLANKIE_VOICE_ELEVENLABS_VOICE_ID=...               # required with the elevenlabs provider; public voice id
+CLANKIE_VOICE_ELEVENLABS_MODEL_ID=eleven_flash_v2_5 # optional; elevenlabs provider only
 CLANKIE_VOICE_STT_LANGUAGE=...       # optional; unset keeps the pinned default, empty restores auto-detect
 CLANKIE_VOICE_TRUNCATION_RETENTION=0.7              # optional; session.truncation retention ratio in (0, 1]
 CLANKIE_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT=12000   # optional; 1000-128000
@@ -87,7 +90,10 @@ CLANKIE_VOICE_VOLITION_MODEL=gpt-4o-mini            # optional; the volition gat
 DISCORD_ACTIVITY_APPLICATION_ID_GBA=...        # embedded application id for the gba_emulator surface
 
 # Optional possessor voice seam (ADR 0064) — a harness driving the body, commentating
-CLANKIE_POSSESSOR_VOICE_ENABLED=true           # off by default; needs a live voice session
+# Off by default; needs a live voice session. Persistently enabled via
+# `discord.possessorVoiceEnabled: true` in the operator settings; the env name
+# remains as the override.
+CLANKIE_POSSESSOR_VOICE_ENABLED=true
 CLANKIE_POSSESSOR_VOICE_PORT=4323              # optional; loopback listener port
 ```
 
@@ -128,7 +134,10 @@ the credential broker and authenticates them as the `discord_text` and
 `discord_voice` captain lanes. The bridge resolves both directly from the
 broker; `CLANKIE_CAPTAIN_TOKEN` is a hard startup error and no shared shell
 secret is required. Voice reuses the brokered `openai` API credential;
-`OPENAI_API_KEY` is a hard startup error when voice is enabled.
+`OPENAI_API_KEY` is a hard startup error when voice is enabled. When the
+external voice is configured ([ADR 0070](../../docs/adr/0070-external-voice-via-streaming-tts.md)),
+speech synthesis additionally uses the brokered `elevenlabs` API credential,
+and `ELEVENLABS_API_KEY` / `XI_API_KEY` are hard startup errors the same way.
 
 The bridge is a channel adapter. It never owns mission state, model credentials, approval credentials, or merge authority.
 
@@ -185,6 +194,8 @@ flowchart LR
   F -->|wake| RT["engaged session<br/>gpt-realtime-2.1"]
   B["briefing<br/>persona · lane · self-state · person memory"] --> RT
   RT -->|"streamed audio<br/>24 kHz → 48 kHz"| D
+  RT -.->|"text deltas<br/>external voice only"| XI["ElevenLabs TTS<br/>24 kHz PCM"]
+  XI -.-> D
   RT -->|"ask_clankie"| C["captain discord_voice lane"]
   C -->|"result text"| RT
   RT -.->|"release or decay"| L
@@ -202,6 +213,15 @@ releases on an explicit closing phrase or by decay
 (`CLANKIE_VOICE_DECAY_WINDOW_MS`), and the engaged session is held connected
 briefly across a release so a conversation that resumes wakes instantly.
 
+How he sounds is configurable from the TUI's `/voice` wizard
+([ADR 0070](../../docs/adr/0070-external-voice-via-streaming-tts.md)). The
+default is the realtime model's own voice (`CLANKIE_VOICE_REALTIME_VOICE`).
+With the `elevenlabs` provider the engaged session runs in text modality and
+its deltas stream through an ElevenLabs multi-context TTS WebSocket — one
+context per response, flushed when the response's text completes, closed early
+on barge-in — whose 24 kHz PCM feeds the same playback path. The ears, floor
+machine, `ask_clankie` fence, and receipts are identical in both modes.
+
 The engaged session holds exactly one tool: `ask_clankie`, which routes
 through the unchanged continuing `discord_voice` captain lane and recalls only
 control-plane-approved person memory. Conversation never pays a captain turn;
@@ -212,7 +232,9 @@ into using.
 
 Audio residency: local PCM buffers are memory-only and zeroed after use, and
 the live OpenAI realtime session keeps the call's conversation on OpenAI's
-servers for as long as the call lasts. The ephemeral `/clankie join` and
+servers for as long as the call lasts. Under the external voice, the words
+Clankie chooses to say additionally transit ElevenLabs — participant audio
+never does — and the disclosures say so. The ephemeral `/clankie join` and
 opt-in replies state exactly that to the participant they bind, and
 `/clankie voice-status` reports the DAVE version, consent and capture counts,
 and the current floor posture. An idle call ends itself
@@ -254,6 +276,12 @@ gateway and therefore no live presence claim, so it cannot speak for itself. It
 reports what the body just did; the bridge — which does hold the gateway —
 seeds that report into the live conversation session and lets the persona
 compose the words.
+
+Two possessors use this listener, under the same flag and the same fence: an
+external MCP harness, and the runner's asked-play host when Clankie is playing
+because someone asked him to
+([ADR 0067](../../docs/adr/0067-asked-play-speaks-through-the-possessor-seam.md)).
+With the flag off, both stay silent and both keep working.
 
 ```mermaid
 flowchart LR

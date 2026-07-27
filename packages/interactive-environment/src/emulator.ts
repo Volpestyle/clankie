@@ -77,6 +77,43 @@ export const GbaEmulatorActionSchema = z.discriminatedUnion("kind", [
       y: z.number().int().nonnegative().max(1_023),
     })
     .strict(),
+  /**
+   * Advance the open dialog to its next decision point, accumulating the text.
+   *
+   * A catalogued action rather than a caller-side press loop for the same
+   * reason `walk_to` is: termination must be checked against the live state
+   * between presses. A blind A mash cannot stop when the box closes — the next
+   * press re-engages the NPC — or when a choice appears, where it would answer
+   * for the player. This presses only when the game is holding the box for an
+   * advance, stops exactly at close/choice/battle, and returns everything it
+   * read, so one action covers a whole conversation instead of one press plus
+   * one observe per box. Bounded by the same input and frame budget a burst of
+   * presses draws from.
+   */
+  z.object({ kind: z.literal("advance_dialog") }).strict(),
+  /**
+   * Type a name on the open naming screen and (by default) confirm it.
+   *
+   * A catalogued action for the same reason `walk_to` and `advance_dialog`
+   * are: the keyboard cursor must be verified against live state between
+   * presses, and spelling a six-letter nickname by hand cost nineteen model
+   * turns on the 2026-07-27 run. Idempotent by prefix: text already typed is
+   * kept when it matches, erased when it does not, so a budget-interrupted
+   * entry resumes with a second identical action. The character set is the
+   * keyboard's empirically verified keys.
+   */
+  z
+    .object({
+      kind: z.literal("enter_text"),
+      text: z
+        .string()
+        .min(1)
+        .max(10)
+        .regex(/^[A-Za-z0-9 .,!?/-]+$/u),
+      /** Omit or true: press OK when done. False: leave the screen open. */
+      submit: z.boolean().optional(),
+    })
+    .strict(),
 ]);
 export type GbaEmulatorAction = z.infer<typeof GbaEmulatorActionSchema>;
 
@@ -369,6 +406,25 @@ export const GbaEmulatorObservationSchema = z.discriminatedUnion("kind", [
       })
       .strict(),
   }).strict(),
+  /**
+   * Which part of the game currently owns the screen, and whether it is
+   * accepting input. This is the decoder saying where it stands: `mode` is
+   * "overworld" with `inputReady` false whenever something the decoder does not
+   * model — a scripted sequence, a naming screen, a transition — holds the
+   * controls, which is exactly when the other observations read misleadingly.
+   */
+  GbaEmulatorObservationBaseSchema.extend({
+    kind: z.literal("scene"),
+    data: z
+      .object({
+        mode: z.enum(["overworld", "dialog", "battle", "battle_won", "battle_lost"]),
+        /** Whether the overworld field is accepting player input right now. */
+        inputReady: z.boolean(),
+        /** The visible dialog finished printing and is holding for an A/B press. */
+        waitingForDialogAdvance: z.boolean(),
+      })
+      .strict(),
+  }).strict(),
   GbaEmulatorObservationBaseSchema.extend({
     kind: z.literal("frame_reference"),
     data: z
@@ -418,6 +474,7 @@ export const GbaEmulatorObservationKindSchema = z.enum([
   "inventory",
   "battle",
   "dialog",
+  "scene",
   "frame_reference",
   "danger",
   "action",

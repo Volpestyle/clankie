@@ -64,6 +64,15 @@ export {
   type ActivityProducerCredentialOptions,
 } from "./activity-producer-credential.ts";
 export {
+  RUNNER_CREDENTIAL_PROVIDER_ID,
+  RunnerCredentialError,
+  ensureRunnerCredential,
+  mintRunnerToken,
+  resolveRunnerCredential,
+  type RunnerCredentialErrorCode,
+  type RunnerCredentialOptions,
+} from "./runner-credential.ts";
+export {
   POSSESSOR_VOICE_CREDENTIAL_PROVIDER_ID,
   POSSESSOR_VOICE_FORBIDDEN_ENV,
   PossessorVoiceCredentialError,

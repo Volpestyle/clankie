@@ -64,7 +64,11 @@ export {
   type VoiceTranscriptionHandlers,
   type VoiceTranscriptionPort,
 } from "./voice-session.ts";
-export { DiscordVoiceConsentRegistry, type DiscordVoiceConsentSession } from "./voice-consent.ts";
+export {
+  DiscordVoiceConsentRegistry,
+  type DiscordVoiceConsentPolicy,
+  type DiscordVoiceConsentSession,
+} from "./voice-consent.ts";
 export { addressKeys, phoneticKey, releasesFloor, voiceAddressesCharacter } from "./voice-address.ts";
 export {
   DEFAULT_DECAY_WINDOW_MS,
@@ -85,6 +89,7 @@ export {
   MAX_REALTIME_AUDIO_APPEND_BYTES,
   MAX_REALTIME_INSTRUCTIONS_CHARACTERS,
   MAX_REALTIME_RESPONSE_AUDIO_BYTES,
+  MAX_REALTIME_RESPONSE_TEXT_CHARACTERS,
   MAX_REALTIME_TEXT_ITEM_CHARACTERS,
   openRealtimeConversationSession,
   openRealtimeTranscriptionSession,
@@ -102,6 +107,28 @@ export {
   type RealtimeTranscriptEvent,
   type RealtimeTranscriptionSessionOptions,
 } from "./realtime-session.ts";
+export {
+  DEFAULT_TTS_DRAIN_TIMEOUT_MS,
+  openExternalVoiceConversation,
+  type ExternalVoiceConversationOptions,
+  type ExternalVoiceRealtimeHandlers,
+  type ExternalVoiceRealtimePort,
+  type ExternalVoiceSessionFactories,
+  type ExternalVoiceTtsHandlers,
+  type ExternalVoiceTtsPort,
+} from "./external-voice.ts";
+export {
+  DEFAULT_ELEVENLABS_SESSION_LIFETIME_MS,
+  ELEVENLABS_OUTPUT_FORMAT,
+  ElevenLabsTtsSession,
+  MAX_ELEVENLABS_CONTEXT_AUDIO_BYTES,
+  MAX_ELEVENLABS_OPEN_CONTEXTS,
+  MAX_ELEVENLABS_TEXT_APPEND_CHARACTERS,
+  openElevenLabsTtsSession,
+  type ElevenLabsTtsCloseReason,
+  type ElevenLabsTtsSessionOptions,
+  type ElevenLabsVoiceSettings,
+} from "./elevenlabs-tts.ts";
 export {
   discordPcmToRealtimePcm,
   discordPcmToSpeechPcm,

@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { acquireBodyLock, BodyBusyError, BODY_LOCK_FILENAME } from "../src/body-lock.ts";
+import { acquireBodyLock, BodyBusyError, BODY_LOCK_FILENAME, observeBodyHolder } from "../src/index.ts";
 
 function root(): string {
   return mkdtempSync(path.join(tmpdir(), "body-lock-"));
@@ -69,5 +69,25 @@ describe("body lock", () => {
     expect(() => acquireBodyLock({ rootDir, holderId: "gba-mcp", pid: 99, isAlive: () => true })).toThrow(
       BodyBusyError,
     );
+  });
+
+  it("observes the live holder read-only and reports a dead or absent one as nobody", () => {
+    const rootDir = root();
+    expect(observeBodyHolder(rootDir, () => true)).toBeNull();
+
+    const lock = acquireBodyLock({
+      rootDir,
+      holderId: "gba-mcp:claude-code",
+      pid: 4242,
+      isAlive: () => true,
+    });
+    expect(observeBodyHolder(rootDir, () => true)?.holderId).toBe("gba-mcp:claude-code");
+    // A dead holder's lock must not haunt observers…
+    expect(observeBodyHolder(rootDir, () => false)).toBeNull();
+    // …and observing must never mutate the lock: the acquire path still sees it.
+    expect(() => acquireBodyLock({ rootDir, holderId: "third", pid: 7, isAlive: () => true })).toThrow(
+      BodyBusyError,
+    );
+    lock.release();
   });
 });

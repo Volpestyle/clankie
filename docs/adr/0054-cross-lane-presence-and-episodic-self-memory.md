@@ -12,11 +12,11 @@ token or transcript — and standing alone, that reads as total isolation.
 
 Three properties of "one Clankie across every channel" were already true:
 
-| Property                                       | Mechanism                                                       |
-| ---------------------------------------------- | --------------------------------------------------------------- |
-| One identity                                   | one `characterId`, soul, provider, persona ([ADR 0051](0051-layered-character-register-and-reply-policy.md)) |
-| Lanes do not block each other                  | `CaptainAdmissionController`, capacity 2, per-lane queue          |
-| Each lane owns its own session and token       | `CaptainLaneRegistry` ([ADR 0032](0032-conversation-scoped-operator-lanes.md)) |
+| Property                                 | Mechanism                                                                                                    |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| One identity                             | one `characterId`, soul, provider, persona ([ADR 0051](0051-layered-character-register-and-reply-policy.md)) |
+| Lanes do not block each other            | `CaptainAdmissionController`, capacity 2, per-lane queue                                                     |
+| Each lane owns its own session and token | `CaptainLaneRegistry` ([ADR 0032](0032-conversation-scoped-operator-lanes.md))                               |
 
 The fourth was missing. Nothing ever told him what his other surfaces were
 doing. The registry already knew — `list()` returns every lane for the character
@@ -25,7 +25,7 @@ it was amnesiac, and those are different problems.
 
 The obvious fix is to widen memory across lanes, and the obvious way to do that
 is `publicToPrivatePropagation`, which already exists in doctrine and is already
-enforced. That flag is the wrong instrument. It governs *every* public-sourced
+enforced. That flag is the wrong instrument. It governs _every_ public-sourced
 fact entering private memory, so flipping it to buy cross-room continuity would
 also admit any claim a Discord user could talk him into believing.
 
@@ -35,10 +35,38 @@ Two changes that do not touch the world-fact fences.
 
 ### Presence is shared, always, in every lane
 
-`captainSelfState` projects the lane registry and the operator conversation
-registry into a bounded list of open rooms — lane, target, liveness, last
-activity — injected as an instruction on every turn and available from
-`get_self_state`.
+`captainSelfState` projects his whereabouts from every registry that holds a
+piece of them, into a bounded list of open rooms — lane, target, a
+human-readable label when names are known, liveness, last activity — injected
+as an instruction on every turn and available from `get_self_state`:
+
+1. the operator conversation registry;
+2. the captain lane registry;
+3. the live asked-play session ([ADR 0063](0063-asked-embodiment-and-captain-started-play.md));
+4. the bridge-owned Discord presence sessions, whose records carry the voice
+   rooms' guild/channel names and occupant display names captured at join
+   (VUH-939);
+5. the body lock, read through the control plane (VUH-938), because a
+   possessor drives his body without any embodiment session existing
+   ([ADR 0053](0053-mcp-possession-of-clankies-body.md)) — the mutex lives in
+   `@clankie/body-lock` so reading it never crosses the ADR 0063 fence that
+   keeps environment bodies out of the control plane;
+6. recently completed voice stays (VUH-940), a read-side projection over the
+   durable phase stream, so "were you just in VC — who was there?" is
+   answerable in the past tense with the company captured at join time.
+
+The presence-session source exists because the body in a Discord voice channel
+is the bridge's realtime agent ([ADR 0056](0056-voice-is-a-separate-agent-from-the-player.md)),
+not a captain lane: no `discord_voice` lane row exists until a handoff turn
+flows, so without it he denies being in a voice channel everyone can see him
+in. Connected phases (`present`, `voice_active`, `go_live_active`) project as
+rooms; disconnected ones are not rooms at all.
+
+Voice history is deliberately a projection, not machine-minted episodes: an
+episode asserts _Clankie summarizing himself_, and this ADR already rejected
+the harness summarizing him automatically. His whereabouts and their company
+are presence-class facts; the episode ring stays reserved for notes he
+composes.
 
 Continuation tokens cannot leak through it structurally rather than by
 filtering: the projection's only lane source is `CaptainLaneSnapshot`, which
@@ -50,13 +78,13 @@ not cover: other rooms' contents, not his own whereabouts.
 
 ### Memory has two trust classes, not one
 
-| | **World-fact** (`MemoryFact`) | **Episode** (`CaptainEpisode`) |
-| --- | --- | --- |
-| Asserts | something true about the world | what Clankie himself did |
-| Entry point | `applyApprovedProposal` | `recordEpisode` |
-| Gate | approval envelope + `publicToPrivatePropagation` + `inferredFacts` | bounded length, `selfAuthored`, visibility scope |
-| Lifetime | capped per category, retention-pruned | ring of 128, oldest fall off |
-| Recall | `recallCard`, by query | `episodeRecallCard`, by lane |
+|             | **World-fact** (`MemoryFact`)                                      | **Episode** (`CaptainEpisode`)                   |
+| ----------- | ------------------------------------------------------------------ | ------------------------------------------------ |
+| Asserts     | something true about the world                                     | what Clankie himself did                         |
+| Entry point | `applyApprovedProposal`                                            | `recordEpisode`                                  |
+| Gate        | approval envelope + `publicToPrivatePropagation` + `inferredFacts` | bounded length, `selfAuthored`, visibility scope |
+| Lifetime    | capped per category, retention-pruned                              | ring of 128, oldest fall off                     |
+| Recall      | `recallCard`, by query                                             | `episodeRecallCard`, by lane                     |
 
 An episode makes no claim about the world, so it does not need the gate that
 exists to stop untrusted input becoming durable belief. `selfAuthored: true` and

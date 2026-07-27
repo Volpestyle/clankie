@@ -259,6 +259,26 @@ describe("auth command", () => {
     expect(validateApiKey("key with whitespace")).toBe("API keys cannot contain whitespace.");
   });
 
+  it("features ElevenLabs in the API-key picker despite its absence from the catalog", async () => {
+    const { credentials, services } = await testServices();
+    const secret = "elevenlabs-live-key";
+    const view = testShell([["api"], ["elevenlabs"], ["done"]], [secret]);
+
+    await command(buildProviderCommands(services), "auth").run("", view.shell);
+
+    const offered = view.selects[1]?.options.find((option) => option.value === "elevenlabs");
+    expect(offered?.label).toBe("ElevenLabs");
+    expect(credentials.get("elevenlabs")).toEqual({ type: "api", key: secret });
+    expect(rendered(view)).toContain("Pick the ElevenLabs voice and model with /voice.");
+    expect(rendered(view)).not.toContain(secret);
+
+    const rerun = testShell([["api"], undefined]);
+    await command(buildProviderCommands(services), "auth").run("", rerun.shell);
+    expect(rerun.selects[1]?.options.find((option) => option.value === "elevenlabs")?.hint).toBe(
+      "configured",
+    );
+  });
+
   it("stores Codex browser OAuth through the broker without rendering tokens", async () => {
     const fixture = await testServices();
     const services: ProviderServices = {

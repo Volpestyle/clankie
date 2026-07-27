@@ -24,6 +24,29 @@ function at(mapId: string, x: number, y: number, facing = "south"): GbaEmulatorO
   ];
 }
 
+function withMenu(
+  observations: GbaEmulatorObservation[],
+  menuId: string,
+  cursor: number,
+  entries: { id: string; label: string }[],
+): GbaEmulatorObservation[] {
+  return [
+    ...observations,
+    {
+      schemaVersion: 1,
+      kind: "menu",
+      observationId: `obs-${menuId}-${String(cursor)}`,
+      sessionId: "s",
+      characterId: "clankie",
+      worldId: "w",
+      goalVersion: 0,
+      capturedAt: "2026-07-25T18:00:00.000Z",
+      frame: 1,
+      data: { menuId, cursor, entries, untrusted: true },
+    } as unknown as GbaEmulatorObservation,
+  ];
+}
+
 const pressLeft: GbaEmulatorAction = { kind: "button_press", button: "left", holdFrames: 4 };
 const pressA: GbaEmulatorAction = { kind: "button_press", button: "a", holdFrames: 4 };
 
@@ -83,6 +106,68 @@ describe("observed effect", () => {
     // Pressing A rarely moves you; calling that "blocked" would be a lie.
     expect(effect.refused).toBeNull();
     expect(effect.summary).toBe("no visible change");
+  });
+
+  it("treats a d-pad press inside an open menu as navigation, not walking", () => {
+    // On the naming screen the overworld decoder still reports the stale field
+    // position underneath. Judging the press as movement minted fake walls and
+    // poisoned the refusal memory with tiles he never actually walked at.
+    const typing = [{ id: "typed-text", label: 'typed so far: "G"' }];
+    const typed = [{ id: "typed-text", label: 'typed so far: "GA"' }];
+    const changed = observeEffect({
+      before: withMenu(at("bedroom", 10, 5, "west"), "naming-screen", 0, typing),
+      after: withMenu(at("bedroom", 10, 5, "west"), "naming-screen", 0, typed),
+      action: pressA,
+    });
+    expect(changed.summary).toBe('menu changed — naming-screen: typed so far: "GA"');
+    expect(changed.refused).toBeNull();
+
+    const cursorOnly = observeEffect({
+      before: withMenu(at("bedroom", 10, 5, "west"), "naming-screen", 0, typed),
+      after: withMenu(at("bedroom", 10, 5, "west"), "naming-screen", 0, typed),
+      action: pressLeft,
+      screenChanged: true,
+    });
+    // The decoded menu missed the cursor move, but the frame did not.
+    expect(cursorOnly.summary).toContain("screen changed inside naming-screen");
+    expect(cursorOnly.summary).toContain("trust the frame");
+    expect(cursorOnly.refused).toBeNull();
+  });
+
+  it("reports a menu opening and closing by name", () => {
+    const entries = [{ id: "start-menu-1", label: "Pokémon" }];
+    const opened = observeEffect({
+      before: at("bedroom", 10, 5),
+      after: withMenu(at("bedroom", 10, 5), "start-menu", 0, entries),
+      action: pressA,
+    });
+    expect(opened.summary).toBe("menu opened — start-menu: Pokémon");
+    const closed = observeEffect({
+      before: withMenu(at("bedroom", 10, 5), "start-menu", 0, entries),
+      after: at("bedroom", 10, 5),
+      action: pressA,
+    });
+    expect(closed.summary).toBe("menu closed");
+  });
+
+  it("lets the frame digest veto a false 'no visible change'", () => {
+    const moved = observeEffect({
+      before: at("bedroom", 10, 5),
+      after: at("bedroom", 10, 5),
+      action: pressA,
+      screenChanged: true,
+    });
+    expect(moved.summary).toContain("screen changed though the decoded state did not");
+    expect(moved.refused).toBeNull();
+
+    const still = observeEffect({
+      before: at("bedroom", 10, 5),
+      after: at("bedroom", 10, 5),
+      action: pressA,
+      screenChanged: false,
+    });
+    // An identical digest upgrades "no visible change" from a guess to a fact.
+    expect(still.summary).toBe("no visible change — the frame is identical");
   });
 
   it("extracts position and direction, ignoring non-directional buttons", () => {
@@ -174,5 +259,32 @@ describe("frame upscale", () => {
     expect(one.readUInt32BE(16)).toBe(4);
     expect(() => encodeFramebufferPng(frame, 0)).toThrow(/scale_invalid/);
     expect(() => encodeFramebufferPng(frame, 99)).toThrow(/scale_invalid/);
+  });
+});
+
+describe("walk effects", () => {
+  const walk = (outcome: Record<string, unknown>) =>
+    observeEffect({
+      before: [],
+      after: [],
+      action: { kind: "walk_to", x: 8, y: 14 },
+      outcome,
+    });
+
+  it("reports an arrival as the route's own account, not a bare position", () => {
+    const effect = walk({ steps: 9, plannedSteps: 9, arrived: true, blockedAt: null, warped: false });
+    expect(effect.summary).toBe("walked 9 steps and arrived at (8,14)");
+  });
+
+  it("says where a route stopped and why, so the obstacle is actionable", () => {
+    const effect = walk({
+      steps: 3,
+      plannedSteps: 9,
+      arrived: false,
+      blockedAt: { x: 6, y: 14 },
+      warped: false,
+    });
+    expect(effect.summary).toContain("blocked at (6,14)");
+    expect(effect.summary).toContain("NPC");
   });
 });

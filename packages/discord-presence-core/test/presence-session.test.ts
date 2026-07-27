@@ -39,6 +39,43 @@ describe("Discord presence gateway session", () => {
     ]);
   });
 
+  it("carries named voice rooms with occupants and drops them when the channel is left", async () => {
+    const events: DiscordPresencePhaseEvent[] = [];
+    const session = fixtureSession(events);
+    await session.start();
+    await session.gatewayReady();
+    await session.voiceStateChanged("guild-1", true, {
+      guildName: "Vuhlp",
+      channelId: "chan-7",
+      channelName: "General",
+      occupants: [
+        { userId: "u1", displayName: "James" },
+        { userId: "u2", displayName: "Sam" },
+      ],
+    });
+    expect(session.record.voiceRooms).toEqual([
+      {
+        guildId: "guild-1",
+        guildName: "Vuhlp",
+        channelId: "chan-7",
+        channelName: "General",
+        occupants: [
+          { userId: "u1", displayName: "James" },
+          { userId: "u2", displayName: "Sam" },
+        ],
+      },
+    ]);
+    await session.voiceStateChanged("guild-1", false);
+    expect(session.record.voiceRooms).toEqual([]);
+    // A nameless join (user-session transport passes ids only) still mirrors.
+    await session.voiceStateChanged("guild-9", true);
+    expect(session.record.voiceRooms).toEqual([{ guildId: "guild-9", occupants: [] }]);
+    // A disconnecting transition clears rooms with the guild set.
+    await session.gatewayDisconnected();
+    expect(session.record.voiceRooms).toEqual([]);
+    expect(session.record.voiceGuildIds).toEqual([]);
+  });
+
   it("fails closed and emits a semantic event when its lease is lost", async () => {
     const events: DiscordPresencePhaseEvent[] = [];
     const session = fixtureSession(events);

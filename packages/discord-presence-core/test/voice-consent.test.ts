@@ -34,4 +34,34 @@ describe("Discord group voice consent", () => {
     expect(() => consent.set("guild-2", "voice-1", "user-2", true)).toThrow("active guild");
     expect(() => consent.set("guild-1", "voice-2", "user-2", true)).toThrow("active guild");
   });
+
+  it("presence policy consents the room, only in the active channel, and never a refuser", () => {
+    // The owner's call for a private room whose participants know he
+    // transcribes when he is in it: presence implies yes.
+    const consent = new DiscordVoiceConsentRegistry("presence");
+    consent.open("guild-1", "voice-1");
+    expect(consent.permits("guild-1", "voice-1", "anyone")).toBe(true);
+    // Only the room he is actually in; a closed session permits nobody.
+    expect(consent.permits("guild-1", "voice-2", "anyone")).toBe(false);
+
+    // Saying no always wins over presence, and rejoining must not undo it.
+    consent.set("guild-1", "voice-1", "objector", false);
+    expect(consent.permits("guild-1", "voice-1", "objector")).toBe(false);
+    consent.memberChannelChanged("objector", undefined);
+    consent.memberChannelChanged("objector", "voice-1");
+    expect(consent.permits("guild-1", "voice-1", "objector")).toBe(false);
+    // Opting back in clears the refusal.
+    consent.set("guild-1", "voice-1", "objector", true);
+    expect(consent.permits("guild-1", "voice-1", "objector")).toBe(true);
+
+    consent.close();
+    expect(consent.permits("guild-1", "voice-1", "anyone")).toBe(false);
+  });
+
+  it("explicit policy still honours a refusal after a later accidental opt-in path", () => {
+    const consent = new DiscordVoiceConsentRegistry();
+    consent.open("guild-1", "voice-1", "user-1");
+    consent.set("guild-1", "voice-1", "user-1", false);
+    expect(consent.permits("guild-1", "voice-1", "user-1")).toBe(false);
+  });
 });

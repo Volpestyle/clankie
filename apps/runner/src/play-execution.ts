@@ -7,7 +7,12 @@
  * - another holder on the body lock refuses `body_held`, never crashes;
  * - a missing ROM, fixture, or model refuses `environment_unavailable`;
  * - a missing activity producer degrades to counted dropped frames — the
- *   playthrough continues, the receipt says nobody could watch.
+ *   playthrough continues, the receipt says nobody could watch;
+ * - a missing voice seam degrades to a silent playthrough (ADR 0067): he is
+ *   watchable but not audible, and the log says which;
+ * - an unwritable play journal degrades to an unrecorded playthrough
+ *   (ADR 0068): a full disk costs the record, never the play, and the log
+ *   says so.
  */
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
@@ -18,21 +23,28 @@ import {
   bootGbaGame,
   createFreePlaySession,
   createModelFreePlayMind,
+  createModelVoice,
   defaultGbaBodyRootDir,
   defaultGbaCheckpointDir,
+  defaultGbaPlayJournalDir,
+  InterjectionQueue,
   listGbaCheckpoints,
+  openFreePlayJournal,
   readGbaCheckpoint,
   runFreePlay,
   writeGbaCheckpoint,
   type BodyLock,
   type BootedGbaGame,
+  type ClankieVoice,
+  type FreePlayJournal,
   type FreePlayMind,
   type FreePlayTurn,
-  type InterjectionQueue,
 } from "@clankie/gba-emulator";
 import { RenderedSurfaceOverlaySchema } from "@clankie/interactive-environment";
 import { resolveConfiguredLanguageModel } from "@clankie/model-provider";
+import { createBrokeredPossessorVoiceClient, type PossessorVoiceClient } from "@clankie/possessor-voice";
 import { createBrokeredActivityFrameSink } from "@clankie/rendered-surface-client";
+import { personaInstructions, SettingsStore } from "@clankie/settings";
 import type { PlayExecution } from "./play-host.ts";
 
 const FRAME_WIDTH = 240 * 3;
@@ -47,14 +59,26 @@ export interface GbaPlayExecutionOptions {
   logger: PlayExecutionLogger;
   env?: NodeJS.ProcessEnv;
   clock?: () => Date;
-  /** Where mid-play questions land; the dev script wires stdin, voice comes later. */
+  /**
+   * Where mid-play questions land. The dev script wires stdin; in production
+   * the voice seam feeds it, so a person in the channel can talk to him
+   * mid-playthrough. Supplying one adds a source rather than replacing voice.
+   */
   interjections?: InterjectionQueue;
   /** Extra per-turn observer beside the overlay publish (dev script logging). */
   onTurn?: (turn: FreePlayTurn) => void;
   /** Test/dev injection; production resolves the configured model. */
   createMind?: () => Promise<FreePlayMind>;
+  /**
+   * Test/dev injection for the half of him that talks (ADR 0056). Production
+   * builds it from the same model and persona the mind gets, so the two halves
+   * are one character.
+   */
+  createVoiceAgent?: () => Promise<ClankieVoice | undefined>;
   /** Test injection; production boots the ROM-gated game or the double. */
   boot?: () => Promise<BootedGbaGame>;
+  /** Test injection; production resolves the brokered possessor voice seam. */
+  createVoice?: () => Promise<PossessorVoiceClient | undefined>;
 }
 
 export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayExecution {
@@ -100,6 +124,9 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
 
     let game: BootedGbaGame;
     let mind: FreePlayMind;
+    // The half of him that talks, as its own agent (ADR 0056). Undefined only
+    // when a test supplies its own mind: speech is not what those exercise.
+    let voiceAgent: ClankieVoice | undefined;
     try {
       game =
         options.boot !== undefined
@@ -112,14 +139,18 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
                 "scenarios/emulator/verdant-path-trainer-battle/v1/scenario.json",
               ),
             });
+      if (options.createVoiceAgent !== undefined) voiceAgent = await options.createVoiceAgent();
       if (options.createMind !== undefined) {
         mind = await options.createMind();
       } else {
         const configured = await resolveConfiguredLanguageModel({ cwd: repoRoot, env });
-        mind = createModelFreePlayMind({
-          model: configured.model,
-          providerOptions: configured.modelOptions?.providerOptions ?? {},
-        });
+        // One character across every surface (ADR 0051): the Clankie an
+        // audience watches play is the one they talk to, in his `gameplay`
+        // register — not a second character defined by this file's prompt.
+        const character = personaInstructions((await new SettingsStore().load()).persona, "gameplay");
+        const providerOptions = configured.modelOptions?.providerOptions ?? {};
+        mind = createModelFreePlayMind({ model: configured.model, character, providerOptions });
+        voiceAgent = createModelVoice({ model: configured.model, character, providerOptions });
       }
     } catch (error) {
       options.logger.warn(
@@ -181,6 +212,43 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
       });
     };
 
+    // The room, both directions (ADR 0067 over ADR 0064's seam). Best-effort
+    // exactly like the frame sink: the runner holds no gateway, so with no
+    // credential or no bridge listening he plays watchable but silent rather
+    // than not playing at all.
+    const voice =
+      options.createVoice === undefined
+        ? await createBrokeredPossessorVoiceClient()
+        : await options.createVoice();
+    if (voice === undefined) {
+      options.logger.info(
+        { sessionId: session.sessionId },
+        "no possessor voice seam; this playthrough is silent",
+      );
+    }
+    // Voice feeds the same queue the dev script's stdin does, so hearing the
+    // room needs no second path into the loop.
+    const interjections = options.interjections ?? new InterjectionQueue();
+    const unsubscribe = voice?.subscribe((utterance) => interjections.offer(utterance));
+
+    // One log line per session, not per turn: a bridge that is down stays down,
+    // and a line per turn would bury the playthrough in its own failure.
+    let speechFailureLogged = false;
+    const speakToRoom = (line: string | null): void => {
+      if (line === null || voice === undefined) return;
+      void voice.say(line).catch((error: unknown) => {
+        if (speechFailureLogged) return;
+        speechFailureLogged = true;
+        options.logger.info(
+          {
+            sessionId: session.sessionId,
+            errorMessage: error instanceof Error ? error.message : "unknown",
+          },
+          "embodiment speech unavailable; play continues in silence",
+        );
+      });
+    };
+
     let freePlay;
     try {
       freePlay = await createFreePlaySession({
@@ -195,11 +263,45 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
       });
     } catch (error) {
       sink?.close();
+      unsubscribe?.();
+      voice?.close();
       options.logger.warn(
         { sessionId: session.sessionId, errorName: error instanceof Error ? error.name : "Error" },
         "embodiment session start refused",
       );
       return { kind: "refused", reason: "environment_unavailable" };
+    }
+
+    // The durable trail (ADR 0068): header now, every turn as it settles, the
+    // summary at the end. Best-effort in both directions — an unwritable
+    // journal is an unrecorded playthrough, never a refused one.
+    let journal: FreePlayJournal | undefined;
+    let journalFailureLogged = false;
+    try {
+      journal = openFreePlayJournal({
+        rootDir: defaultGbaPlayJournalDir(env),
+        runId: session.sessionId,
+        environmentSessionId: freePlay.sessionId,
+        scenarioId: game.scenario.scenarioId,
+        resumedFromCheckpointId,
+        clock,
+        onError: (error) => {
+          if (journalFailureLogged) return;
+          journalFailureLogged = true;
+          options.logger.warn(
+            {
+              sessionId: session.sessionId,
+              errorName: error instanceof Error ? error.name : "Error",
+            },
+            "play journal append failed; playthrough continues unrecorded",
+          );
+        },
+      });
+    } catch (error) {
+      options.logger.warn(
+        { sessionId: session.sessionId, errorName: error instanceof Error ? error.name : "Error" },
+        "play journal unavailable; this playthrough is unrecorded",
+      );
     }
 
     const startedAt = clock().getTime();
@@ -214,10 +316,15 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
         mind,
         // No cap means play until asked to stop (the owner's default).
         turns: session.budget.maxTurns ?? Number.MAX_SAFE_INTEGER,
-        audience: env["CLANKIE_FREE_PLAY_AUDIENCE"] ?? "people watching the activity surface",
+        audience:
+          env["CLANKIE_FREE_PLAY_AUDIENCE"] ??
+          (voice === undefined
+            ? "people watching the activity surface"
+            : "people in the voice channel, watching him play"),
+        ...(voiceAgent === undefined ? {} : { voice: voiceAgent }),
         framebufferSha256: () => game.framebufferSha256(),
         framePng: () => game.framePng(),
-        ...(options.interjections === undefined ? {} : { interjections: options.interjections }),
+        interjections,
         shouldStop: () =>
           control.stopRequested() ||
           (session.budget.maxDurationMs !== undefined &&
@@ -243,6 +350,12 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
             );
           }
           publishFrame(turn.turn);
+          // Answer first, then the aside: someone who spoke to him is owed the
+          // reply before an unrelated remark. Both are already gated upstream —
+          // the speak cooldown here, the persona's own rate limit at the bridge.
+          speakToRoom(turn.reply);
+          speakToRoom(turn.speak);
+          journal?.turn(turn);
           options.onTurn?.(turn);
         },
       });
@@ -266,20 +379,48 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
         }
       }
 
+      const outcome = control.stopRequested() ? "stopped" : "budget_exhausted";
+      const durationMs = clock().getTime() - startedAt;
+      const framesDropped = (sink?.droppedFrameCount ?? 0) + framesDroppedWithoutSink;
+      journal?.summary({ outcome, result, durationMs, framesPublished, framesDropped, checkpointId });
+      // The receipt is content-free by construction; the metrics the loop
+      // computed (progress, volition, coherence) land here and in the journal
+      // summary instead of being dropped on conversion.
+      options.logger.info(
+        {
+          sessionId: session.sessionId,
+          outcome,
+          turnsTaken: result.turns.length,
+          accepted: result.accepted,
+          durationMs,
+          distinctTiles: result.progress.distinctTiles,
+          maps: result.progress.maps,
+          turnsSinceNewTile: result.progress.turnsSinceNewTile,
+          volitionTaken: result.volition.taken,
+          volitionOffered: result.volition.offered,
+          coherence: result.coherence,
+          ...(checkpointId === undefined ? {} : { checkpointId }),
+          ...(journal === undefined ? {} : { journalPath: journal.path }),
+        },
+        "embodiment playthrough finished",
+      );
+
       return {
         kind: "ran",
         result: {
-          outcome: control.stopRequested() ? "stopped" : "budget_exhausted",
+          outcome,
           turnsTaken: result.turns.length,
-          durationMs: clock().getTime() - startedAt,
+          durationMs,
           framesPublished,
-          framesDropped: (sink?.droppedFrameCount ?? 0) + framesDroppedWithoutSink,
+          framesDropped,
           ...(checkpointId === undefined ? {} : { checkpointId }),
           ...(resumedFromCheckpointId === undefined ? {} : { resumedFromCheckpointId }),
         },
       };
     } finally {
       sink?.close();
+      unsubscribe?.();
+      voice?.close();
       freePlay.close();
     }
   }

@@ -1,6 +1,7 @@
 import {
   ApprovalRequestRecordSchema,
   ActionDecisionSchema,
+  BodyPossessionReadSchema,
   CaptainChannelTurnResultSchema,
   CaptainPresenceReportSchema,
   DiscordPresenceChannelTurnRequestSchema,
@@ -24,6 +25,7 @@ import {
   type ApprovalDecisionInput,
   type ApprovalRequestRecord,
   type ApprovalRequestStatus,
+  type BodyPossession,
   type CaptainPresenceReport,
   type DomainEvent,
   type CaptainChannelTurnResult,
@@ -64,6 +66,8 @@ import {
   type DiscordPresenceLiveClaim,
   type DiscordPresencePhaseEvent,
   type DiscordPresenceSessionRecord,
+  DiscordVoiceHistorySchema,
+  type DiscordVoiceStay,
 } from "@clankie/interactive-environment";
 
 export * from "./terminal-gateway.ts";
@@ -510,6 +514,11 @@ export class ClankieApiClient {
       },
       body: JSON.stringify(write),
     });
+    // Approval-required (and kin) come back as an error-shaped body, not a
+    // write result; surfacing the reason beats a result-schema parse spray.
+    if (result !== null && typeof result === "object" && "error" in result) {
+      throw new Error(String((result as { error: unknown }).error));
+    }
     return DiscordPresenceWriteResultSchema.parse(result);
   }
 
@@ -553,6 +562,19 @@ export class ClankieApiClient {
       headers: this.captainHeaders(),
     });
     return DiscordPresenceSessionRecordSchema.array().parse(result);
+  }
+
+  /**
+   * Completed voice stays with join-time room context (VUH-940) — where
+   * Clankie's body was, when, and who shared the channel. A read-side
+   * projection over the durable phase stream; nothing is written.
+   */
+  public async listDiscordVoiceHistory(limit?: number): Promise<DiscordVoiceStay[]> {
+    const query = limit === undefined ? "" : `?limit=${String(limit)}`;
+    const result = await this.request<unknown>(`/v1/discord/voice-history${query}`, {
+      headers: this.captainHeaders(),
+    });
+    return DiscordVoiceHistorySchema.parse(result).stays;
   }
 
   public inspectDiscordReadiness(): Promise<DiscordControlPlaneReadiness> {
@@ -787,11 +809,27 @@ export class ClankieApiClient {
     return EmbodimentSessionSchema.parse(body.session);
   }
 
+  /**
+   * Who holds Clankie's body right now (VUH-938): a liveness-checked view of
+   * the cross-process body lock, which sees every suitor — including an MCP
+   * possessor no embodiment session ever recorded. `undefined` means nobody.
+   */
+  public async getBodyPossession(): Promise<BodyPossession | undefined> {
+    const body = await this.request<unknown>("/v1/embodiment/possession", {
+      headers: this.captainHeaders(),
+    });
+    return BodyPossessionReadSchema.parse(body).possession ?? undefined;
+  }
+
   public async claimEmbodiment(claim: EmbodimentClaim): Promise<EmbodimentAssignment | undefined> {
     const response = await this.request<{ assignment: unknown } | undefined>("/v1/embodiment/claims", {
       method: "POST",
       headers: this.runnerHeaders(),
       body: JSON.stringify(claim),
+      // A claim is one cheap poll on a 1s cadence. Without a bound, one
+      // request hung across a control-plane restart wedges the entire claim
+      // loop silently — the runner looks alive and claims nothing forever.
+      signal: AbortSignal.timeout(10_000),
     });
     if (response === undefined) return undefined;
     return EmbodimentAssignmentSchema.parse(response.assignment);

@@ -1,4 +1,9 @@
-import type { GbaCoreInventoryEntry, GbaCoreMenuState, GbaCoreState } from "./core-double.ts";
+import type {
+  GbaCoreInventoryEntry,
+  GbaCoreMenuState,
+  GbaCoreNamingState,
+  GbaCoreState,
+} from "./core-double.ts";
 import {
   GBA_EWRAM_BASE,
   GBA_EWRAM_SIZE,
@@ -57,6 +62,35 @@ const TASK_START_MENU_HANDLE_INPUT = 0x0806f1f0;
 const CB2_OVERWORLD = 0x080565b4;
 const CB2_UPDATE_PARTY_MENU = 0x0811eba0;
 const NATIVE_WAIT_FOR_A_OR_B_PRESS = 0x0806b898;
+
+// Naming screen (`naming_screen.c`). `sNamingScreen` points at the
+// heap-allocated NamingScreenData; the typed text, keyboard page, and template
+// live at fixed offsets inside it.
+const S_NAMING_SCREEN_POINTER_ADDRESS = 0x0203998c;
+const CB2_LOAD_NAMING_SCREEN = 0x0809d9e0;
+const CB2_NAMING_SCREEN = 0x0809fb70;
+const NAMING_SCREEN_TEXT_BUFFER_OFFSET = 0x1800;
+const NAMING_SCREEN_TEXT_BUFFER_BYTE_LENGTH = 0x10;
+const NAMING_SCREEN_CURRENT_PAGE_OFFSET = 0x1e22;
+const NAMING_SCREEN_TEMPLATE_NUM_OFFSET = 0x1e2c;
+// The keyboard cursor is gSprites slot 0; its data words carry the logical
+// (column, row), which keep tracking even on the button strip where the OAM
+// pixel shadow stops. Verified empirically (2026-07-26 naming probe): +1 per
+// move, 9-column ring on the letter pages, 7 on symbols.
+const G_SPRITES_CURSOR_COLUMN_ADDRESS = 0x0202066a;
+const G_SPRITES_CURSOR_ROW_ADDRESS = 0x0202066c;
+const NAMING_SCREEN_MAX_COLUMN = 8;
+const NAMING_SCREEN_MAX_ROW = 3;
+/** `currentPage` domain, in the order the pages cycle (`KBPAGE_*`). */
+const NAMING_SCREEN_PAGES = ["symbols", "upper-case", "lower-case"] as const;
+/** `templateNum` domain (`NAMING_SCREEN_*` template ids). */
+const NAMING_SCREEN_SUBJECTS = [
+  "the player",
+  "a storage box",
+  "a caught Pokémon",
+  "a Pokémon's nickname",
+  "the rival",
+] as const;
 
 /** `gBattleMoves` starts here in the supported ROM and has a 12-byte stride. */
 export const FIRERED_BATTLE_MOVES_ROM_OFFSET = 0x00250c04;
@@ -172,7 +206,20 @@ export interface FireRedDecodedState {
   inventory: GbaCoreInventoryEntry[];
   battle: FireRedDecodedBattle | null;
   dialogLines: string[];
+  /**
+   * True when the field script is holding the visible dialog for an A/B press
+   * — the box has finished printing and an advance will land. False while text
+   * is still printing, so a driver can wait instead of wasting presses.
+   */
+  waitingForDialogAdvance: boolean;
   menu: GbaCoreMenuState | null;
+  /**
+   * Machine-usable naming-screen keyboard state — the exact entered text and
+   * the cursor — when one is active and past its loading callback. The menu
+   * above presents the same screen for reading; this field is what `enter_text`
+   * navigates by.
+   */
+  naming: GbaCoreNamingState | null;
   fieldInputReady: boolean;
 }
 
@@ -481,11 +528,72 @@ function decodeBattle(
   };
 }
 
+/**
+ * The Western Gen III accented range, straight from the decomp's charmap. The
+ * game spells "POKéMON" with 0x1B, so leaving these out rendered the single
+ * most common word in the script as "POK�MON".
+ */
+const ACCENTED_CHARACTERS: Readonly<Record<number, string>> = {
+  0x01: "À",
+  0x02: "Á",
+  0x03: "Â",
+  0x04: "Ç",
+  0x05: "È",
+  0x06: "É",
+  0x07: "Ê",
+  0x08: "Ë",
+  0x09: "Ì",
+  0x0b: "Î",
+  0x0c: "Ï",
+  0x0d: "Ò",
+  0x0e: "Ó",
+  0x0f: "Ô",
+  0x10: "Œ",
+  0x11: "Ù",
+  0x12: "Ú",
+  0x13: "Û",
+  0x14: "Ñ",
+  0x15: "ß",
+  0x16: "à",
+  0x17: "á",
+  0x19: "ç",
+  0x1a: "è",
+  0x1b: "é",
+  0x1c: "ê",
+  0x1d: "ë",
+  0x1e: "ì",
+  0x20: "î",
+  0x21: "ï",
+  0x22: "ò",
+  0x23: "ó",
+  0x24: "ô",
+  0x25: "œ",
+  0x26: "ù",
+  0x27: "ú",
+  0x28: "û",
+  0x29: "ñ",
+  0x2a: "º",
+  0x2b: "ª",
+  0x51: "¿",
+  0x52: "¡",
+  0x5a: "Í",
+  0x68: "â",
+  0x6f: "í",
+  0xf1: "Ä",
+  0xf2: "Ö",
+  0xf3: "Ü",
+  0xf4: "ä",
+  0xf5: "ö",
+  0xf6: "ü",
+};
+
 const decodeCharacter = (value: number): string | null => {
   if (value === 0) return " ";
   if (value >= 0xa1 && value <= 0xaa) return String(value - 0xa1);
   if (value >= 0xbb && value <= 0xd4) return String.fromCharCode(65 + value - 0xbb);
   if (value >= 0xd5 && value <= 0xee) return String.fromCharCode(97 + value - 0xd5);
+  const accented = ACCENTED_CHARACTERS[value];
+  if (accented !== undefined) return accented;
   const punctuation: Record<number, string> = {
     0x2d: "&",
     0x2e: "+",
@@ -575,10 +683,23 @@ function readEwramBytes(ewram: DataView, address: number, length: number): Uint8
   return new Uint8Array(ewram.buffer, ewram.byteOffset + offset, length);
 }
 
-function decodeDialog(ewram: DataView, iwram: DataView, battle: DecodedBattleContext | null): string[] {
+interface DecodedDialog {
+  lines: string[];
+  /**
+   * True when the field script is parked on the wait-for-A/B native — the
+   * visible box has finished printing and the game will accept an advance.
+   * Always false for battle text, which resolves on its own clock.
+   */
+  waitingForAdvance: boolean;
+}
+
+function decodeDialog(ewram: DataView, iwram: DataView, battle: DecodedBattleContext | null): DecodedDialog {
   if (battle) {
-    if (battle.battle.inputMode !== "resolving") return [];
-    return decodeFireRedText(readEwramBytes(ewram, G_DISPLAYED_STRING_BATTLE_ADDRESS, 0x12c));
+    if (battle.battle.inputMode !== "resolving") return { lines: [], waitingForAdvance: false };
+    return {
+      lines: decodeFireRedText(readEwramBytes(ewram, G_DISPLAYED_STRING_BATTLE_ADDRESS, 0x12c)),
+      waitingForAdvance: false,
+    };
   }
   const messageBoxType = ewram.getUint8(ewramOffset(S_MESSAGE_BOX_TYPE_ADDRESS));
   if (messageBoxType > 2)
@@ -594,10 +715,12 @@ function decodeDialog(ewram: DataView, iwram: DataView, battle: DecodedBattleCon
   const scriptNative = normalizeThumbPointer(
     iwram.getUint32(iwramOffset(S_GLOBAL_SCRIPT_CONTEXT_ADDRESS + 4, 4), true),
   );
-  const waitingForDialogAdvance = scriptMode === 2 && scriptNative === NATIVE_WAIT_FOR_A_OR_B_PRESS;
-  if (messageBoxType === 0 && printer0Active === 0 && !waitingForDialogAdvance) return [];
+  const waitingForAdvance = scriptMode === 2 && scriptNative === NATIVE_WAIT_FOR_A_OR_B_PRESS;
+  if (messageBoxType === 0 && printer0Active === 0 && !waitingForAdvance) {
+    return { lines: [], waitingForAdvance: false };
+  }
   const lines = decodeFireRedText(readEwramBytes(ewram, G_STRING_VAR_4_ADDRESS, 0x3e8));
-  return lines.length > 0 ? lines : ["Field dialog"];
+  return { lines: lines.length > 0 ? lines : ["Field dialog"], waitingForAdvance };
 }
 
 function hasActiveTask(iwram: DataView, functionAddress: number): boolean {
@@ -616,6 +739,83 @@ function hasActiveTask(iwram: DataView, functionAddress: number): boolean {
 
 function mainCallback2(iwram: DataView): number {
   return normalizeThumbPointer(iwram.getUint32(iwramOffset(G_MAIN_ADDRESS + 4, 4), true));
+}
+
+/**
+ * The naming screen runs under its own main callback while the overworld
+ * decoder keeps reporting the stale field state underneath it. Left undecoded,
+ * every keyboard press read as "position unchanged" — the harness told him
+ * nothing happened while the screen visibly typed. This surfaces it as a menu:
+ * what is typed so far, which keyboard page is up, and what is being named.
+ */
+interface DecodedNaming {
+  menu: GbaCoreMenuState;
+  /** Machine-usable keyboard state; null while the screen is still loading. */
+  state: GbaCoreNamingState | null;
+}
+
+/**
+ * The exact entered text, byte for byte. The display path collapses
+ * whitespace, which would make a name containing a space compare wrongly
+ * against what a driver asked to type.
+ */
+function decodeNamingBuffer(bytes: Uint8Array): string {
+  let text = "";
+  for (const value of bytes) {
+    if (value === 0xff) break;
+    text += decodeCharacter(value) ?? "�";
+  }
+  return text;
+}
+
+function decodeNamingScreen(ewram: DataView, iwram: DataView): DecodedNaming | null {
+  const callback = mainCallback2(iwram);
+  if (callback !== CB2_NAMING_SCREEN && callback !== CB2_LOAD_NAMING_SCREEN) return null;
+  // During the load callback the heap block is allocated but its page and text
+  // bytes are not yet initialized, so only presence is reported.
+  if (callback === CB2_LOAD_NAMING_SCREEN) {
+    return {
+      menu: {
+        menuId: "naming-screen",
+        cursor: 0,
+        entries: [{ id: "loading", label: "the naming screen is still loading" }],
+      },
+      state: null,
+    };
+  }
+  const dataAddress = ewram.getUint32(ewramOffset(S_NAMING_SCREEN_POINTER_ADDRESS, 4), true);
+  if (dataAddress === 0) {
+    throw new Error("FireRed naming screen is running without its data block");
+  }
+  const structBase = ewramOffset(dataAddress, NAMING_SCREEN_TEMPLATE_NUM_OFFSET + 1);
+  const bufferBytes = readEwramBytes(
+    ewram,
+    dataAddress + NAMING_SCREEN_TEXT_BUFFER_OFFSET,
+    NAMING_SCREEN_TEXT_BUFFER_BYTE_LENGTH,
+  );
+  const typed = decodeFireRedText(bufferBytes).join(" ").trim();
+  const page = NAMING_SCREEN_PAGES[ewram.getUint8(structBase + NAMING_SCREEN_CURRENT_PAGE_OFFSET)];
+  const subject = NAMING_SCREEN_SUBJECTS[ewram.getUint8(structBase + NAMING_SCREEN_TEMPLATE_NUM_OFFSET)];
+  if (page === undefined || subject === undefined) {
+    throw new Error("FireRed naming screen decoded outside the supported domain");
+  }
+  const column = ewram.getUint8(ewramOffset(G_SPRITES_CURSOR_COLUMN_ADDRESS));
+  const row = ewram.getUint8(ewramOffset(G_SPRITES_CURSOR_ROW_ADDRESS));
+  if (column > NAMING_SCREEN_MAX_COLUMN || row > NAMING_SCREEN_MAX_ROW) {
+    throw new Error("FireRed naming-screen cursor is outside the keyboard");
+  }
+  return {
+    menu: {
+      menuId: "naming-screen",
+      cursor: 0,
+      entries: [
+        { id: "typed-text", label: typed.length > 0 ? `typed so far: "${typed}"` : "nothing typed yet" },
+        { id: "keyboard-page", label: `${page} keyboard` },
+        { id: "naming", label: `naming ${subject}` },
+      ],
+    },
+    state: { text: decodeNamingBuffer(bufferBytes), page, row, column },
+  };
 }
 
 function decodeStartMenu(ewram: DataView, iwram: DataView): GbaCoreMenuState | null {
@@ -751,6 +951,8 @@ export function decodeFireRedState(
     surroundings = null;
     mapSize = null;
   }
+  const dialog = decodeDialog(ewram, iwram, battleContext);
+  const namingScreen = decodeNamingScreen(ewram, iwram);
   return {
     overworld,
     surroundings,
@@ -759,8 +961,10 @@ export function decodeFireRedState(
     party,
     inventory,
     battle: battleContext?.battle ?? null,
-    dialogLines: decodeDialog(ewram, iwram, battleContext),
-    menu: decodeMenu(ewram, iwram, party, inventory, battleContext),
+    dialogLines: dialog.lines,
+    waitingForDialogAdvance: dialog.waitingForAdvance,
+    naming: namingScreen?.state ?? null,
+    menu: namingScreen?.menu ?? decodeMenu(ewram, iwram, party, inventory, battleContext),
     fieldInputReady:
       mainCallback2(iwram) === CB2_OVERWORLD &&
       iwram.getUint8(iwramOffset(S_LOCK_FIELD_CONTROLS_ADDRESS)) === 0,

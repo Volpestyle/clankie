@@ -586,7 +586,8 @@ export class MemoryStore {
       DEFAULT_EPISODE_CAP,
       "maxEpisodes",
     );
-    const visibilities: readonly string[] = lane === "operator" ? ["shareable", "operator_private"] : ["shareable"];
+    const visibilities: readonly string[] =
+      lane === "operator" ? ["shareable", "operator_private"] : ["shareable"];
     const placeholders = visibilities.map(() => "?").join(", ");
     const rows = this.database
       .prepare(

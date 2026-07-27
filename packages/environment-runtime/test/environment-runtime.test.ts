@@ -9,6 +9,7 @@ import {
   type EnvironmentAdapterActionRunning,
   type EnvironmentAdapterSession,
   type EnvironmentEventSink,
+  type EnvironmentRuntimeRetention,
   type EnvironmentStartActionCommand,
 } from "../src/index.ts";
 
@@ -127,13 +128,14 @@ async function harness() {
   const adapter = new FakeAdapter();
   const events: Parameters<EnvironmentEventSink["append"]>[0][] = [];
   const now = { value: new Date("2026-07-11T12:00:00.000Z") };
-  const make = () =>
+  const make = (overrides: { retention?: EnvironmentRuntimeRetention } = {}) =>
     new EnvironmentRuntime({
       rootDir,
       adapter,
       events: { append: (event) => (events.push(event), Promise.resolve()) },
       clock: () => now.value,
       randomToken: () => "grant-marker",
+      ...overrides,
     });
   return { adapter, events, make, now, rootDir };
 }
@@ -400,5 +402,95 @@ describe("EnvironmentRuntime fake-adapter contract", () => {
     expect(await readFile(join(rootDir, "environment-sessions", file), "utf8")).not.toMatch(
       /connection-marker/,
     );
+  });
+});
+
+describe("retention for open-ended sessions", () => {
+  it("rolls the oldest terminal action records and counts what rolled", async () => {
+    const { adapter, make, rootDir } = await harness();
+    const runtime = make({ retention: { maxActionRecords: 2 } });
+    const { token } = await runtime.start({ spec: baseSpec("s1"), holderId: "runner", correlationId: "c1" });
+    await runtime.startAction(token, command("s1", "a1"));
+    await runtime.finishAction(token, "s1", "a1", { done: true });
+    await runtime.startAction(token, command("s1", "a2"));
+    await runtime.finishAction(token, "s1", "a2", { done: true });
+    await runtime.startAction(token, command("s1", "a3"));
+    const file = (await readdir(join(rootDir, "environment-sessions"))).find((name) =>
+      name.endsWith(".json"),
+    )!;
+    const persisted = JSON.parse(await readFile(join(rootDir, "environment-sessions", file), "utf8")) as {
+      actions: Record<string, unknown>;
+      rolledActionRecords?: number;
+    };
+    // The record is a bounded working set, and what rolled off is counted —
+    // a capped file that looks complete would be a lie.
+    expect(Object.keys(persisted.actions)).toEqual(["a2", "a3"]);
+    expect(persisted.rolledActionRecords).toBe(1);
+    // Idempotency holds for what is retained: a retried a3 returns the recorded
+    // result without re-dispatching.
+    await runtime.startAction(token, command("s1", "a3"));
+    expect(adapter.sessions.get("adapter-s1")!.started).toEqual(["a1", "a2", "a3"]);
+    // A rolled action id is outside the retention window: a very late retry
+    // dispatches anew. That bounded window is the price of a bounded record.
+    await runtime.startAction(token, command("s1", "a1"));
+    expect(adapter.sessions.get("adapter-s1")!.started).toEqual(["a1", "a2", "a3", "a1"]);
+  });
+
+  it("prunes the oldest ended session records past the cap", async () => {
+    const { make, now, rootDir } = await harness();
+    const retention = { maxEndedSessionRecords: 1 };
+    for (const sessionId of ["s1", "s2", "s3"]) {
+      const runtime = make({ retention });
+      const { token } = await runtime.start({
+        spec: baseSpec(sessionId),
+        holderId: "runner",
+        correlationId: `c-${sessionId}`,
+      });
+      await runtime.stop(token, sessionId, "done");
+      // Distinct issuedAt stamps so "oldest" is well-defined.
+      now.value = new Date(now.value.getTime() + 60_000);
+    }
+    await make({ retention }).sweep();
+    const records = (await readdir(join(rootDir, "environment-sessions"))).filter((name) =>
+      name.endsWith(".json"),
+    );
+    // Only the newest ended record survives; live sessions are never pruned.
+    expect(records).toHaveLength(1);
+  });
+
+  it("keeps everything when no retention is configured", async () => {
+    const { make, rootDir } = await harness();
+    const runtime = make();
+    const { token } = await runtime.start({ spec: baseSpec("s1"), holderId: "runner", correlationId: "c1" });
+    for (const actionId of ["a1", "a2", "a3", "a4"]) {
+      await runtime.startAction(token, command("s1", actionId));
+    }
+    const file = (await readdir(join(rootDir, "environment-sessions"))).find((name) =>
+      name.endsWith(".json"),
+    )!;
+    const persisted = JSON.parse(await readFile(join(rootDir, "environment-sessions", file), "utf8")) as {
+      actions: Record<string, unknown>;
+      rolledActionRecords?: number;
+    };
+    expect(Object.keys(persisted.actions)).toEqual(["a1", "a2", "a3", "a4"]);
+    expect(persisted.rolledActionRecords).toBeUndefined();
+  });
+});
+
+describe("mid-run action deadline enforcement", () => {
+  it("cancels a timed-out in-flight action on the next dispatch instead of wedging", async () => {
+    const { adapter, make, now } = await harness();
+    const runtime = make();
+    const { token } = await runtime.start({ spec: baseSpec("s1"), holderId: "runner", correlationId: "c1" });
+    // A void dispatch is recorded as running with a deadline; if its completion
+    // never settles, only deadline enforcement can ever clear it. Before this
+    // ran mid-session, an unsettled action wedged the body until process death.
+    await runtime.startAction(token, command("s1", "a1"));
+    now.value = new Date(now.value.getTime() + 2_000); // past the 1s deadline
+    await runtime.startAction(token, command("s1", "a2"));
+    const stale = await runtime.actionStatus(token, "s1", "a1");
+    expect(stale.status).toBe("cancelled");
+    expect(adapter.sessions.get("adapter-s1")!.cancelled).toContain("a1");
+    expect(adapter.sessions.get("adapter-s1")!.started).toEqual(["a1", "a2"]);
   });
 });

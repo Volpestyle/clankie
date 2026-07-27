@@ -40,10 +40,69 @@ export function isReadyEveHealth(value: unknown): boolean {
   );
 }
 
-export function isCaptainInfo(value: unknown): boolean {
+/**
+ * Whether this endpoint **is Clankie's captain** — deliberately not whether it
+ * is an up-to-date one.
+ *
+ * Identity and currency are different questions with different remedies. A
+ * stranger on the port must never be signalled; our own captain running an
+ * older build must be rebuilt and restarted, which the launcher already knows
+ * how to do. Folding the authored tool inventory into identity conflated the
+ * two, so every change to the captain's tool list turned the running captain
+ * into an unidentifiable stranger and dead-ended `clankie restart` into a
+ * manual `lsof`-and-kill. Identity is therefore the agent's name and the roots
+ * it reports; currency is {@link hasCurrentCaptainTools}.
+ */
+export function isCaptainIdentity(value: unknown): boolean {
   if (value === null || typeof value !== "object") return false;
   if (!("agent" in value) || value.agent === null || typeof value.agent !== "object") return false;
-  if (!("name" in value.agent) || value.agent.name !== CAPTAIN_AGENT_NAME) return false;
+  // Deliberately just the name, alongside the ready-eve health probe the caller
+  // has already passed. Identity must not depend on anything that legitimately
+  // changes as the captain is developed — that is the mistake this split
+  // exists to correct — so roots stay optional and serve adoption proof and
+  // the generation fingerprint instead.
+  return "name" in value.agent && value.agent.name === CAPTAIN_AGENT_NAME;
+}
+
+/** The app root a captain reports, used to prove it belongs to this checkout. */
+export function captainInfoAppRoot(value: unknown): string | undefined {
+  if (!isCaptainIdentity(value) || value === null || typeof value !== "object") return undefined;
+  const agent = (value as { agent: Record<string, unknown> }).agent;
+  return typeof agent.appRoot === "string" ? agent.appRoot : undefined;
+}
+
+/**
+ * How a running captain's tool inventory differs from the authored one. Empty
+ * arrays mean it is current; anything else names what drifted, so the operator
+ * is told *what* is stale rather than that something is.
+ */
+export function captainToolDrift(value: unknown): { missing: string[]; unexpected: string[] } {
+  const authored = new Set(CAPTAIN_AUTHORED_TOOL_NAMES as readonly string[]);
+  const running = new Set(readToolNames(value, "authored"));
+  return {
+    missing: [...authored].filter((name) => !running.has(name)).sort(),
+    unexpected: [...running].filter((name) => !authored.has(name)).sort(),
+  };
+}
+
+function readToolNames(value: unknown, bucket: "authored" | "available"): string[] {
+  if (value === null || typeof value !== "object") return [];
+  if (!("tools" in value) || value.tools === null || typeof value.tools !== "object") return [];
+  const tools = value.tools as Record<string, unknown>;
+  const list = tools[bucket];
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((tool) =>
+      tool !== null && typeof tool === "object" && "name" in tool && typeof tool.name === "string"
+        ? tool.name
+        : undefined,
+    )
+    .filter((name): name is string => name !== undefined);
+}
+
+/** Whether the running captain's tools match what this checkout authors. */
+export function hasCurrentCaptainTools(value: unknown): boolean {
+  if (value === null || typeof value !== "object") return false;
   if (!("tools" in value) || value.tools === null || typeof value.tools !== "object") return false;
   if (!("authored" in value.tools) || !Array.isArray(value.tools.authored)) return false;
   const names = value.tools.authored
@@ -75,8 +134,21 @@ export function isCaptainInfo(value: unknown): boolean {
   return CAPTAIN_DISABLED_FRAMEWORK_TOOL_NAMES.every((name) => !available.has(name));
 }
 
+/**
+ * Ours *and* current. Kept as the strict predicate for callers that need a
+ * fully-matching captain ({@link assertCaptainEndpoint}, the session client);
+ * the launcher splits the two so it can rebuild a stale one instead of
+ * refusing to touch it.
+ */
+export function isCaptainInfo(value: unknown): boolean {
+  return isCaptainIdentity(value) && hasCurrentCaptainTools(value);
+}
+
 export function captainInfoGeneration(value: unknown): string | undefined {
-  if (!isCaptainInfo(value) || value === null || typeof value !== "object") return undefined;
+  // Identity, not currency: the generation fingerprint is what *detects* a
+  // stale build, so requiring a current tool inventory to compute it would
+  // leave exactly the captains that need rebuilding without a generation.
+  if (!isCaptainIdentity(value) || value === null || typeof value !== "object") return undefined;
   if (!("agent" in value) || value.agent === null || typeof value.agent !== "object") return undefined;
   const agent = value.agent as Record<string, unknown>;
   const mode = "mode" in value && typeof value.mode === "string" ? value.mode : "unknown";

@@ -36,9 +36,15 @@ if (!Number.isSafeInteger(frameScale) || frameScale < 1 || frameScale > 8) {
   process.exit(2);
 }
 
+// Per-run by default: a fixed name meant every run destroyed the previous
+// run's trace at startup. An explicit CLANKIE_FREE_PLAY_TRACE still names one
+// exact file (and is truncated below so it never interleaves two runs).
 const tracePath =
   process.env["CLANKIE_FREE_PLAY_TRACE"] ??
-  path.resolve(process.cwd(), "artifacts/gba-free-play/trace.jsonl");
+  path.resolve(
+    process.cwd(),
+    `artifacts/gba-free-play/trace-${new Date().toISOString().replace(/[:.]/gu, "-")}.jsonl`,
+  );
 
 // ROM-gated: with a ROM and savestate configured Clankie plays the real game
 // behind the pinned core; without them he plays the clearly-labeled
@@ -93,9 +99,9 @@ const configured = await resolveConfiguredLanguageModel({ cwd: process.cwd(), en
 console.log(`clankie is playing with ${configured.ref}\n`);
 
 mkdirSync(path.dirname(tracePath), { recursive: true });
-// Start a fresh trace. Appending would silently interleave this playthrough
-// with a previous one, and the coherence number would be read off a file that
-// spans two different runs.
+// Start fresh even when an override names an existing file. Appending would
+// silently interleave this playthrough with a previous one, and the coherence
+// number would be read off a file that spans two different runs.
 writeFileSync(tracePath, "", { encoding: "utf8", mode: 0o600 });
 
 // One character across every surface (ADR 0051). Free play reads the same
@@ -201,7 +207,11 @@ function print(turn: FreePlayTurn): void {
           ? `advance ${String(turn.action.frames)}`
           : turn.action.kind === "walk_to"
             ? `walk to (${String(turn.action.x)}, ${String(turn.action.y)})`
-            : `wait ${String(turn.action.durationMs)}ms`;
+            : turn.action.kind === "advance_dialog"
+              ? "advance dialog"
+              : turn.action.kind === "enter_text"
+                ? `type "${turn.action.text}"`
+                : `wait ${String(turn.action.durationMs)}ms`;
   const marker = turn.outcome === "accepted" ? "→" : "✗";
   const detail = turn.outcome === "accepted" ? "" : `  [${turn.outcome}: ${turn.detail ?? ""}]`;
   console.log(`          ${marker} ${action}${detail}`);

@@ -95,6 +95,95 @@ describe("PlayHost", () => {
     });
   });
 
+  it("narrates claim, running, and settled into the runner log", async () => {
+    // The successful path used to be the invisible one: a clean claim-run-stop
+    // left the runner's own log with nothing to say a playthrough happened.
+    const lines: string[] = [];
+    const logger = {
+      info: (_context: Record<string, unknown>, message: string) => {
+        lines.push(message);
+      },
+      warn: () => undefined,
+      error: () => undefined,
+    };
+    const client = fakeClient({ assignments: [{ kind: "start", session: session() }] });
+    const subject = new PlayHost({
+      client,
+      runnerId: "runner-local",
+      environmentIds: ["pokemon-firered"],
+      execute: async (_session, _control, onRunning) => {
+        await onRunning("checkpoint-8");
+        return {
+          kind: "ran",
+          result: {
+            outcome: "stopped",
+            turnsTaken: 3,
+            durationMs: 10,
+            framesPublished: 6,
+            framesDropped: 0,
+          },
+        };
+      },
+      logger,
+    });
+    await subject.poll();
+    await subject.settled();
+    expect(lines).toEqual([
+      "embodiment session claimed",
+      "embodiment session running",
+      "embodiment session settled",
+    ]);
+  });
+
+  it("logs a failing claim poll once per failure signature, and its recovery once", async () => {
+    // On a 1s cadence a line per failed poll is spam, but the fully silent
+    // catch this replaces spent a live evening indistinguishable from "no
+    // work" while every claim 401'd against a token-less control plane.
+    const errors: string[] = [];
+    const infos: string[] = [];
+    const logger = {
+      info: (context: Record<string, unknown> | string, message?: string) => {
+        infos.push(message ?? String(context));
+      },
+      warn: () => undefined,
+      error: (_context: Record<string, unknown>, message: string) => {
+        errors.push(message);
+      },
+    };
+    let failing = true;
+    const client = {
+      claims: [] as EmbodimentClaim[],
+      reports: [] as EmbodimentLifecycleReport[],
+      claimEmbodiment(): Promise<EmbodimentAssignment | undefined> {
+        if (failing) return Promise.reject(new Error("Clankie API 401: unauthorized"));
+        return Promise.resolve(undefined);
+      },
+      reportEmbodiment(): Promise<unknown> {
+        return Promise.resolve({});
+      },
+      getLiveEmbodimentSession(): Promise<EmbodimentSession | undefined> {
+        return Promise.resolve(undefined);
+      },
+    };
+    const subject = new PlayHost({
+      client,
+      runnerId: "runner-local",
+      environmentIds: ["pokemon-firered"],
+      execute: async () => ({ kind: "refused", reason: "body_held" }),
+      logger,
+    });
+
+    await subject.poll();
+    await subject.poll();
+    expect(errors).toEqual(["embodiment claim poll failing"]);
+
+    failing = false;
+    await subject.poll();
+    await subject.poll();
+    expect(infos).toContain("embodiment claim poll recovered");
+    expect(infos.filter((line) => line === "embodiment claim poll recovered")).toHaveLength(1);
+  });
+
   it("reports a refusal without ever reporting running", async () => {
     const client = fakeClient({ assignments: [{ kind: "start", session: session() }] });
     const subject = host(client, () => Promise.resolve({ kind: "refused", reason: "body_held" }));

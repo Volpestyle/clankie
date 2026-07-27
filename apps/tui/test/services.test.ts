@@ -387,8 +387,15 @@ describe("service targets", () => {
   });
 
   it("restarts forwards and stops backwards along the dependency chain", () => {
-    expect(resolveTargets("all")).toEqual(["captain-eve", "control-plane", "discord-bridge", "activity"]);
+    expect(resolveTargets("all")).toEqual([
+      "captain-eve",
+      "control-plane",
+      "discord-bridge",
+      "activity",
+      "runner",
+    ]);
     expect([...resolveTargets("all")].reverse()).toEqual([
+      "runner",
       "activity",
       "discord-bridge",
       "control-plane",
@@ -428,6 +435,7 @@ describe("service targets", () => {
     });
 
     expect(outcomes.map((outcome) => outcome.id)).toEqual([
+      "runner",
       "activity",
       "discord-bridge",
       "control-plane",
@@ -457,6 +465,7 @@ describe("service targets", () => {
     });
 
     expect(outcomes.map((outcome) => [outcome.id, outcome.ok])).toEqual([
+      ["runner", true],
       ["activity", true],
       ["discord-bridge", true],
       ["control-plane", false],

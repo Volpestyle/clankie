@@ -5,6 +5,8 @@ import {
   type DiscordPresencePhaseEvent,
   type DiscordPresenceSessionRecord,
   type DiscordPresenceToolExposure,
+  type DiscordVoiceRoom,
+  type DiscordVoiceStay,
 } from "@clankie/interactive-environment";
 import type { CaptainLane, DiscordPresenceChannelIdentity, DomainEvent } from "@clankie/protocol";
 
@@ -134,6 +136,58 @@ function phaseEventFromDomainEvent(event: DomainEvent): DiscordPresencePhaseEven
     data: event.data,
   });
   return parsed.success ? parsed.data : undefined;
+}
+
+/**
+ * Completed voice stays, derived from the durable phase stream (VUH-940).
+ *
+ * A stay opens when a guild appears in a session's `voiceGuildIds` and closes
+ * when it disappears — including via `process_stopped`/`failed`, which empty
+ * the list. Room context (names, occupants) is the one captured at join time;
+ * a session killed without a final publication leaves its stay open, and an
+ * open stay is simply never reported, because inventing a `leftAt` would be a
+ * false record. Newest stays first.
+ *
+ * This is a read-side projection, not memory: "who was I just with" stays
+ * presence-class data about his own whereabouts, and the episode ring
+ * (ADR 0054) remains reserved for notes Clankie composes himself.
+ */
+export function deriveDiscordVoiceHistory(events: readonly DomainEvent[], limit: number): DiscordVoiceStay[] {
+  const guildsBySession = new Map<string, ReadonlySet<string>>();
+  const openStays = new Map<string, { joinedAt: string; room: DiscordVoiceRoom | undefined }>();
+  const closed: DiscordVoiceStay[] = [];
+  for (const domainEvent of events) {
+    const event = phaseEventFromDomainEvent(domainEvent);
+    if (event === undefined) continue;
+    const session = event.data.session;
+    const nextGuilds = new Set(session.voiceGuildIds);
+    const previousGuilds = guildsBySession.get(session.sessionId) ?? new Set<string>();
+    for (const guildId of nextGuilds) {
+      if (previousGuilds.has(guildId)) continue;
+      openStays.set(`${session.sessionId}//${guildId}`, {
+        joinedAt: event.occurredAt,
+        room: session.voiceRooms?.find((room) => room.guildId === guildId),
+      });
+    }
+    for (const guildId of previousGuilds) {
+      if (nextGuilds.has(guildId)) continue;
+      const stayKey = `${session.sessionId}//${guildId}`;
+      const open = openStays.get(stayKey);
+      if (open === undefined) continue;
+      openStays.delete(stayKey);
+      closed.push({
+        guildId,
+        ...(open.room?.guildName === undefined ? {} : { guildName: open.room.guildName }),
+        ...(open.room?.channelId === undefined ? {} : { channelId: open.room.channelId }),
+        ...(open.room?.channelName === undefined ? {} : { channelName: open.room.channelName }),
+        occupants: open.room?.occupants ?? [],
+        joinedAt: open.joinedAt,
+        leftAt: event.occurredAt,
+      });
+    }
+    guildsBySession.set(session.sessionId, nextGuilds);
+  }
+  return closed.slice(Math.max(0, closed.length - limit)).reverse();
 }
 
 function bindingKey(

@@ -495,7 +495,12 @@ describe.skipIf(!romAvailable)("real mGBA core (ROM-gated)", () => {
 describe.skipIf(!romAvailable)("watching an action (ROM-gated)", () => {
   async function core(): Promise<MgbaFireRedCore> {
     const scenario = RealGbaRouteScenarioSchema.parse(
-      JSON.parse(readFileSync(resolve(import.meta.dirname, "../fixtures/firered-bedroom-route/v1/scenario.json"), "utf8")),
+      JSON.parse(
+        readFileSync(
+          resolve(import.meta.dirname, "../fixtures/firered-bedroom-route/v1/scenario.json"),
+          "utf8",
+        ),
+      ),
     );
     return MgbaFireRedCore.create({
       coreId: scenario.coreId,

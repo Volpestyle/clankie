@@ -2,11 +2,7 @@ import type { GbaButton } from "@clankie/interactive-environment";
 import { sha256 } from "./core-double.ts";
 import type { GbaCoreState } from "./core-double.ts";
 import type { GbaCoreMapGrid, GbaCoreSeam } from "./core-seam.ts";
-import {
-  decodeFireRedMapGrid,
-  isFireRedTilePassable,
-  FIRERED_MAP_BORDER_OFFSET,
-} from "./firered-ram-map.ts";
+import { decodeFireRedMapGrid, isFireRedTilePassable, FIRERED_MAP_BORDER_OFFSET } from "./firered-ram-map.ts";
 import { decodeFireRedState, FIRERED_US_V10_ROM_SHA256 } from "./firered-state.ts";
 import { MgbaLibretroCore, mgbaCoreWasmSha256, type MgbaFramebuffer } from "./mgba-core.ts";
 
@@ -229,6 +225,24 @@ export class MgbaFireRedCore implements GbaCoreSeam {
     this.frame += frames;
   }
 
+  /**
+   * Advance frames with `button` held, spending no input. FireRed zeroes the
+   * text printer's per-character delay while A/B is held, so holding through a
+   * printing box reads it at accelerated speed. The last frame always runs
+   * released: a button held straight into a `pressButton` would never produce
+   * the fresh-press edge the wait-for-press native requires.
+   */
+  public advanceFramesHolding(button: GbaButton, frames: number): void {
+    if (frames <= 0) return;
+    if (frames > 1) {
+      this.core.setHeldButtons([button]);
+      this.runFramesObserved(frames - 1);
+    }
+    this.core.setHeldButtons([]);
+    this.runFramesObserved(1);
+    this.frame += frames;
+  }
+
   public gameState(): GbaCoreState {
     const decoded = decodeFireRedState(
       {
@@ -312,6 +326,8 @@ export class MgbaFireRedCore implements GbaCoreSeam {
       mapSize: decoded.mapSize,
       dialogLineIndex: 0,
       dialogLines: decoded.dialogLines,
+      waitingForDialogAdvance: decoded.waitingForDialogAdvance,
+      naming: decoded.naming,
       menu: decoded.menu,
       inventory: decoded.inventory,
       party: decoded.party,

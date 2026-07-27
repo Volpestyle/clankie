@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_REALTIME_AUDIO_APPEND_BYTES,
   MAX_REALTIME_RESPONSE_AUDIO_BYTES,
+  MAX_REALTIME_RESPONSE_TEXT_CHARACTERS,
   MAX_REALTIME_TEXT_ITEM_CHARACTERS,
   openRealtimeConversationSession,
   openRealtimeTranscriptionSession,
@@ -380,8 +381,96 @@ describe("realtime conversation session", () => {
       response: { id: "resp_1", status: "completed", usage: { input_tokens: 100, output_tokens: 42 } },
     });
     expect(events.done).toEqual([
-      { responseId: "resp_1", status: "completed", audioBytes: 4, inputTokens: 100, outputTokens: 42 },
+      {
+        responseId: "resp_1",
+        status: "completed",
+        audioBytes: 4,
+        textCharacters: 0,
+        inputTokens: 100,
+        outputTokens: 42,
+      },
     ]);
+  });
+
+  it("opens without a model mouth in text modality and surfaces bounded text deltas", async () => {
+    const texts: { delta: string; itemId: string }[] = [];
+    const { socket, events } = await openConversation({
+      outputModality: "text",
+      onTextDelta: (delta, itemId) => texts.push({ delta, itemId }),
+    });
+    const update = frames(socket)[0] as {
+      session?: { output_modalities?: string[]; audio?: { output?: unknown; input?: unknown } };
+    };
+    expect(update.session?.output_modalities).toEqual(["text"]);
+    // The ears are unchanged; only the mouth is gone (ADR 0070).
+    expect(update.session?.audio?.input).toBeDefined();
+    expect(update.session?.audio?.output).toBeUndefined();
+
+    socket.emit({
+      type: "response.output_text.delta",
+      response_id: "resp_1",
+      item_id: "item_a",
+      delta: "Sure — ",
+    });
+    socket.emit({
+      type: "response.output_text.delta",
+      response_id: "resp_1",
+      item_id: "item_a",
+      delta: "give me a second.",
+    });
+    expect(texts).toEqual([
+      { delta: "Sure — ", itemId: "item_a" },
+      { delta: "give me a second.", itemId: "item_a" },
+    ]);
+
+    socket.emit({
+      type: "response.done",
+      response: { id: "resp_1", status: "completed", usage: { input_tokens: 10, output_tokens: 8 } },
+    });
+    expect(events.done).toEqual([
+      {
+        responseId: "resp_1",
+        status: "completed",
+        audioBytes: 0,
+        textCharacters: "Sure — give me a second.".length,
+        inputTokens: 10,
+        outputTokens: 8,
+      },
+    ]);
+  });
+
+  it("fails closed past the per-response text cap, with per-response reset", async () => {
+    const texts: string[] = [];
+    const { socket, events } = await openConversation({
+      outputModality: "text",
+      onTextDelta: (delta) => texts.push(delta),
+    });
+    const nearCap = "x".repeat(MAX_REALTIME_RESPONSE_TEXT_CHARACTERS - 10);
+    socket.emit({ type: "response.output_text.delta", response_id: "resp_1", item_id: "a", delta: nearCap });
+    socket.emit({ type: "response.done", response: { id: "resp_1", status: "completed" } });
+    socket.emit({ type: "response.output_text.delta", response_id: "resp_2", item_id: "b", delta: nearCap });
+    expect(events.errors).toHaveLength(0);
+
+    const surfacedBefore = texts.length;
+    socket.emit({
+      type: "response.output_text.delta",
+      response_id: "resp_2",
+      item_id: "b",
+      delta: "y".repeat(20),
+    });
+    expect(texts).toHaveLength(surfacedBefore);
+    expect(events.errors).toEqual(["Realtime response text exceeded the character limit"]);
+    expect(events.closes).toEqual(["error"]);
+    expect(socket.closed).toBe(true);
+  });
+
+  it("requires a text sink before taking the mouth away", async () => {
+    const attempt = openConversation({ outputModality: "text" });
+    const failure = await attempt.then(
+      () => "unexpectedly opened",
+      (error: unknown) => String(error),
+    );
+    expect(failure).toContain("onTextDelta");
   });
 
   it("keeps the api key in connection headers and out of frames and errors", async () => {

@@ -67,9 +67,12 @@ describe("captain episode stamping", () => {
   });
 
   it("always marks provenance self-authored and transcript-free", () => {
-    const episode = build({ metadata: { captainLane: "discord_voice", captainTargetId: "t" } }, {
-      summary: "Chatted in voice.",
-    });
+    const episode = build(
+      { metadata: { captainLane: "discord_voice", captainTargetId: "t" } },
+      {
+        summary: "Chatted in voice.",
+      },
+    );
 
     expect(episode.provenance).toEqual({
       characterId: "clankie",

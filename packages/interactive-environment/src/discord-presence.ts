@@ -70,6 +70,60 @@ export type DiscordActivityInstance = z.infer<typeof DiscordActivityInstanceSche
 
 export const DISCORD_ACTIVITY_INSTANCE_MAX = 8;
 
+/**
+ * One voice channel the session currently occupies, with the human-readable
+ * context the ids alone cannot give: guild and channel display names plus who
+ * is sharing the room. This is presence metadata about Clankie's own
+ * whereabouts (ADR 0054) — names of a room he is standing in, never another
+ * room's contents. Occupants exclude the session's own user, are sorted by
+ * userId so record JSON stays byte-stable across replays, and are capped.
+ *
+ * Name fields are optional: the user-session transport observes raw gateway
+ * ids only and publishes rooms without names.
+ */
+export const DiscordVoiceRoomOccupantSchema = z
+  .object({
+    userId: z.string().min(1),
+    displayName: z.string().min(1).max(100),
+  })
+  .strict();
+export type DiscordVoiceRoomOccupant = z.infer<typeof DiscordVoiceRoomOccupantSchema>;
+
+export const DISCORD_VOICE_ROOM_OCCUPANT_MAX = 32;
+
+export const DiscordVoiceRoomSchema = z
+  .object({
+    guildId: z.string().min(1),
+    guildName: z.string().min(1).max(100).optional(),
+    channelId: z.string().min(1).optional(),
+    channelName: z.string().min(1).max(100).optional(),
+    occupants: z.array(DiscordVoiceRoomOccupantSchema).max(DISCORD_VOICE_ROOM_OCCUPANT_MAX),
+  })
+  .strict();
+export type DiscordVoiceRoom = z.infer<typeof DiscordVoiceRoomSchema>;
+
+/**
+ * One completed stay in a voice channel, derived read-side from the durable
+ * phase stream: the room context captured when the session joined, bounded by
+ * join and leave times. History stays presence-class data about Clankie's own
+ * whereabouts — the episode ring (ADR 0054) remains reserved for notes he
+ * composes himself.
+ */
+export const DiscordVoiceStaySchema = DiscordVoiceRoomSchema.extend({
+  joinedAt: z.string().datetime(),
+  leftAt: z.string().datetime(),
+}).strict();
+export type DiscordVoiceStay = z.infer<typeof DiscordVoiceStaySchema>;
+
+/** Wire shape of `GET /v1/discord/voice-history`. */
+export const DiscordVoiceHistorySchema = z
+  .object({
+    schemaVersion: z.literal(INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION),
+    stays: z.array(DiscordVoiceStaySchema).max(32),
+  })
+  .strict();
+export type DiscordVoiceHistory = z.infer<typeof DiscordVoiceHistorySchema>;
+
 export const DiscordPresenceSessionRecordSchema = z
   .object({
     schemaVersion: z.literal(INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION),
@@ -80,6 +134,13 @@ export const DiscordPresenceSessionRecordSchema = z
     phase: DiscordPresenceSessionPhaseSchema,
     gatewayConnected: z.boolean(),
     voiceGuildIds: z.array(z.string().min(1)).max(64),
+    /**
+     * Named context for the occupied voice channels. Optional so records
+     * published before this field existed still parse; when present it must
+     * mirror `voiceGuildIds` exactly (one room per guild, sorted), so a
+     * consumer never has to reconcile two divergent views of the same state.
+     */
+    voiceRooms: z.array(DiscordVoiceRoomSchema).max(64).optional(),
     /** Rendered surfaces currently published by this session. */
     activityInstances: z.array(DiscordActivityInstanceSchema).max(DISCORD_ACTIVITY_INSTANCE_MAX).default([]),
     revision: z.number().int().nonnegative(),
@@ -108,6 +169,16 @@ export const DiscordPresenceSessionRecordSchema = z
         code: "custom",
         path: ["voiceGuildIds"],
         message: `voice guild state does not match phase ${session.phase}`,
+      });
+    }
+    if (
+      session.voiceRooms !== undefined &&
+      JSON.stringify(session.voiceRooms.map((room) => room.guildId)) !== JSON.stringify(session.voiceGuildIds)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["voiceRooms"],
+        message: "voice rooms must mirror voiceGuildIds exactly, in the same order",
       });
     }
   });

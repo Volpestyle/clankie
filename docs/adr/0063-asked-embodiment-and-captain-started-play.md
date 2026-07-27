@@ -155,5 +155,8 @@ flowchart LR
 - The manual `free-play-live.ts` path stops being the product story and
   becomes a thin development alias of the same host composition, so there is
   exactly one place the pipeline is assembled.
-- The live proof of the product sentence (join, play, watch, stop) depends on
-  ADR 0057's open human items for its voice half; the text half stands alone.
+- The live proof of the product sentence (join, play, watch, hear, stop) depends
+  on ADR 0057's open human items for its voice half; the text half stands alone.
+  Speech and hearing during a playthrough are carried by
+  [ADR 0067](0067-asked-play-speaks-through-the-possessor-seam.md) over ADR
+  0064's seam, under the same operator flag.

@@ -70,7 +70,10 @@ describe("planWalk", () => {
 const frozenScenario = FrozenGbaScenarioSchema.parse(
   JSON.parse(
     readFileSync(
-      resolve(import.meta.dirname, "../../../scenarios/emulator/verdant-path-trainer-battle/v1/scenario.json"),
+      resolve(
+        import.meta.dirname,
+        "../../../scenarios/emulator/verdant-path-trainer-battle/v1/scenario.json",
+      ),
       "utf8",
     ),
   ),
@@ -118,7 +121,9 @@ const romAvailable =
   romPath !== undefined && existsSync(romPath) && savestatePath !== undefined && existsSync(savestatePath);
 
 const routeScenario = RealGbaRouteScenarioSchema.parse(
-  JSON.parse(readFileSync(resolve(import.meta.dirname, "../fixtures/firered-bedroom-route/v1/scenario.json"), "utf8")),
+  JSON.parse(
+    readFileSync(resolve(import.meta.dirname, "../fixtures/firered-bedroom-route/v1/scenario.json"), "utf8"),
+  ),
 );
 
 describe.skipIf(!romAvailable)("FireRed map grid (ROM-gated)", () => {
@@ -179,16 +184,20 @@ describe.skipIf(!romAvailable)("FireRed map grid (ROM-gated)", () => {
     expect(state.mapSize).toEqual({ width: 12, height: 9 });
   });
 
-  it("reports a warp tile as blocking, which is what stops walk_to taking stairs", { timeout: 240_000 }, async () => {
-    const core = await createCore();
-    const grid = core.mapGrid();
-    // (16,9) is the stairs down. Its collision bits block, yet pressing left
-    // into it from (17,9) warps to players-house-1f — verified by hand and in
-    // the live end-to-end check. So a route planned purely from collision can
-    // never step onto a warp, and crossing maps stays a directional press.
-    expect(grid?.isPassable(16, 9)).toBe(false);
-    expect(planWalk(grid as GbaCoreMapGrid, { x: 17, y: 9 }, { x: 16, y: 9 })).toBeNull();
-  });
+  it(
+    "reports a warp tile as blocking, which is what stops walk_to taking stairs",
+    { timeout: 240_000 },
+    async () => {
+      const core = await createCore();
+      const grid = core.mapGrid();
+      // (16,9) is the stairs down. Its collision bits block, yet pressing left
+      // into it from (17,9) warps to players-house-1f — verified by hand and in
+      // the live end-to-end check. So a route planned purely from collision can
+      // never step onto a warp, and crossing maps stays a directional press.
+      expect(grid?.isPassable(16, 9)).toBe(false);
+      expect(planWalk(grid as GbaCoreMapGrid, { x: 17, y: 9 }, { x: 16, y: 9 })).toBeNull();
+    },
+  );
 
   it("plans a route to the stairs that avoids the banister", { timeout: 240_000 }, async () => {
     const core = await createCore();

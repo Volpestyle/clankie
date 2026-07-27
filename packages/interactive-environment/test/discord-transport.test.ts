@@ -73,6 +73,47 @@ describe("Discord transport bindings", () => {
   });
 });
 
+describe("Discord presence voice rooms", () => {
+  it("parses a record whose named rooms mirror voiceGuildIds and keeps them optional", () => {
+    const base = session("voice_active", "bot");
+    const named = DiscordPresenceSessionRecordSchema.parse({
+      ...base,
+      voiceRooms: [
+        {
+          guildId: "guild-1",
+          guildName: "Vuhlp",
+          channelId: "chan-7",
+          channelName: "General",
+          occupants: [{ userId: "u1", displayName: "James" }],
+        },
+      ],
+    });
+    expect(named.voiceRooms?.[0]?.guildName).toBe("Vuhlp");
+    // Records published before the field existed still parse.
+    expect(base.voiceRooms).toBeUndefined();
+  });
+
+  it("rejects rooms that diverge from voiceGuildIds in membership or order", () => {
+    const base = session("voice_active", "bot");
+    expect(
+      DiscordPresenceSessionRecordSchema.safeParse({
+        ...base,
+        voiceRooms: [{ guildId: "guild-9", occupants: [] }],
+      }).success,
+    ).toBe(false);
+    expect(
+      DiscordPresenceSessionRecordSchema.safeParse({
+        ...base,
+        voiceGuildIds: ["guild-1", "guild-2"],
+        voiceRooms: [
+          { guildId: "guild-2", occupants: [] },
+          { guildId: "guild-1", occupants: [] },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+});
+
 function session(
   phase: "present" | "voice_active",
   transportKind: DiscordTransportKind,

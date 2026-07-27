@@ -651,34 +651,10 @@ function mcpArguments(context: ArgumentContext): StaticArgumentSpec {
 
 function voiceArguments(context: ArgumentContext): StaticArgumentSpec {
   const setting = context.args[0]?.toLowerCase();
-  if (setting === "mode" || setting === "provider" || setting === "realtime-provider") {
-    return values(["openai", "xai", "local"], ["/voice mode local", "/voice mode openai"]);
-  }
-  if (setting === "tts-provider") return values(["realtime", "elevenlabs"], ["/voice tts-provider realtime"]);
-  if (setting === "local-tts-engine") return values(["say", "command"], ["/voice local-tts-engine say"]);
-  if (setting === "eve-session") return values(["on", "off"], ["/voice eve-session on"]);
-  if (setting === "memory-limit") return values(["0", "8", "16", "32", "50"], ["/voice memory-limit 16"]);
   if (setting === "status") return { values: [], examples: ["/voice status"] };
-  return values(
-    [
-      "status",
-      "mode",
-      "local-defaults",
-      "realtime-model",
-      "realtime-voice",
-      "tts-provider",
-      "asr-model",
-      "asr-command",
-      "local-base-url",
-      "local-tts-engine",
-      "local-tts-command",
-      "elevenlabs-voice",
-      "elevenlabs-model",
-      "memory-limit",
-      "eve-session",
-    ],
-    ["/voice mode local", "/voice mode openai", "/voice local-defaults"],
-  );
+  // The bare command opens the wizard (provider, ElevenLabs voice/model/key);
+  // `status` is its only argument (ADR 0070).
+  return values(["status"], ["/voice", "/voice status"]);
 }
 
 function harnessArguments(context: ArgumentContext): StaticArgumentSpec {

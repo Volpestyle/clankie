@@ -840,7 +840,12 @@ describe("fast path responses", () => {
     expect(delta.equals(Buffer.alloc(480))).toBe(true);
     await flush();
     harness.clock.now = 1_150;
-    conversation.input.onResponseDone({ responseId: "resp_1", status: "completed", audioBytes: 480 });
+    conversation.input.onResponseDone({
+      responseId: "resp_1",
+      status: "completed",
+      audioBytes: 480,
+      textCharacters: 0,
+    });
     await flush();
     const first = at(harness.ofType("response"), 0);
     expect(first).toMatchObject({
@@ -863,7 +868,12 @@ describe("fast path responses", () => {
     conversation.input.onAudioDelta(pcmDelta(480), "item_2");
     await flush();
     harness.clock.now = 2_130;
-    conversation.input.onResponseDone({ responseId: "resp_2", status: "completed", audioBytes: 480 });
+    conversation.input.onResponseDone({
+      responseId: "resp_2",
+      status: "completed",
+      audioBytes: 480,
+      textCharacters: 0,
+    });
     await flush();
     expect(at(harness.ofType("response"), 1)).toMatchObject({
       fastPath: true,
@@ -900,7 +910,12 @@ describe("ability path", () => {
       argumentsJson: '{"request":"and restart the runner"}',
     });
     // The function-call response itself settles with no audio.
-    conversation.input.onResponseDone({ responseId: "resp_fn", status: "completed", audioBytes: 0 });
+    conversation.input.onResponseDone({
+      responseId: "resp_fn",
+      status: "completed",
+      audioBytes: 0,
+      textCharacters: 0,
+    });
     await flush();
     // Serialized: the second handoff waits for the first to finish.
     expect(harness.submitCalls).toHaveLength(1);
@@ -924,11 +939,21 @@ describe("ability path", () => {
     // Their spoken results play and receipt in order.
     conversation.input.onAudioDelta(pcmDelta(480), "item_r1");
     await flush();
-    conversation.input.onResponseDone({ responseId: "resp_r1", status: "completed", audioBytes: 480 });
+    conversation.input.onResponseDone({
+      responseId: "resp_r1",
+      status: "completed",
+      audioBytes: 480,
+      textCharacters: 0,
+    });
     await flush();
     conversation.input.onAudioDelta(pcmDelta(480), "item_r2");
     await flush();
-    conversation.input.onResponseDone({ responseId: "resp_r2", status: "completed", audioBytes: 480 });
+    conversation.input.onResponseDone({
+      responseId: "resp_r2",
+      status: "completed",
+      audioBytes: 480,
+      textCharacters: 0,
+    });
     await flush();
     const responses = harness.ofType("response");
     expect(responses.map((event) => event.turnId)).toEqual(["turn-1", "turn-2"]);
@@ -959,14 +984,24 @@ describe("ability path", () => {
       name: "ask_clankie",
       argumentsJson: '{"request":"merge the release"}',
     });
-    conversation.input.onResponseDone({ responseId: "resp_fn", status: "completed", audioBytes: 0 });
+    conversation.input.onResponseDone({
+      responseId: "resp_fn",
+      status: "completed",
+      audioBytes: 0,
+      textCharacters: 0,
+    });
     await flush();
     const result = at(conversation.functionResults, 0);
     expect(result.output).toBe("I need you to continue that request on the authenticated operator surface.");
     expect(result.output).not.toContain("secret");
     conversation.input.onAudioDelta(pcmDelta(480), "item_r1");
     await flush();
-    conversation.input.onResponseDone({ responseId: "resp_r1", status: "completed", audioBytes: 480 });
+    conversation.input.onResponseDone({
+      responseId: "resp_r1",
+      status: "completed",
+      audioBytes: 480,
+      textCharacters: 0,
+    });
     await flush();
     expect(at(harness.ofType("response"), 0)).toMatchObject({
       fastPath: false,

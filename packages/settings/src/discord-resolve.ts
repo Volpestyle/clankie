@@ -81,6 +81,8 @@ export function resolveDiscordSettings(
   takeList("voiceChannelIds", "DISCORD_VOICE_CHANNEL_IDS");
   takeString("voiceChannelId", "DISCORD_VOICE_CHANNEL_ID");
   takeString("voiceJoinPolicy", "DISCORD_VOICE_JOIN_POLICY");
+  takeString("voiceConsentPolicy", "DISCORD_VOICE_CONSENT_POLICY");
+  takeBoolean("possessorVoiceEnabled", "CLANKIE_POSSESSOR_VOICE_ENABLED");
 
   takeString("activityApplicationIdGba", "DISCORD_ACTIVITY_APPLICATION_ID_GBA");
 
@@ -151,6 +153,8 @@ export function discordSettingsToEnvironment(settings: DiscordSettings): Record<
   putList("DISCORD_VOICE_CHANNEL_IDS", settings.voiceChannelIds);
   put("DISCORD_VOICE_CHANNEL_ID", settings.voiceChannelId);
   put("DISCORD_VOICE_JOIN_POLICY", settings.voiceJoinPolicy);
+  put("DISCORD_VOICE_CONSENT_POLICY", settings.voiceConsentPolicy);
+  if (settings.possessorVoiceEnabled) env["CLANKIE_POSSESSOR_VOICE_ENABLED"] = "true";
 
   put("DISCORD_ACTIVITY_APPLICATION_ID_GBA", settings.activityApplicationIdGba);
   return env;

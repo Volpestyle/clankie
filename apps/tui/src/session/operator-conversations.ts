@@ -1,6 +1,7 @@
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
+import { resolveCaptainCredential, type CaptainCredentialOptions } from "@clankie/credential-broker";
 import {
   createOperatorConversationServiceClient,
   OPERATOR_CONVERSATION_DISPATCH_PATH,
@@ -28,6 +29,25 @@ export type OperatorConversationClient = OperatorConversationServiceClient;
 /** Minimal authenticated fetch surface — satisfied by eve's `Client.fetch`. */
 export interface CaptainRouteFetcher {
   fetch(path: string, init?: RequestInit): Promise<Response>;
+}
+
+/**
+ * Resolves the bearer for the captain route the same way the launcher
+ * provisions the captain's half: an explicit `CLANKIE_CAPTAIN_TOKEN` wins,
+ * otherwise the brokered credential store supplies the shared secret. This is
+ * what lets a shell-launched face authenticate against a launcher-started
+ * captain with no exports. Resolution failure degrades to the token-less
+ * loopback client rather than killing the console; a captain that does require
+ * the bearer then answers 401, which surfaces in the conversation notice.
+ */
+export async function resolveCaptainRouteToken(
+  options: CaptainCredentialOptions = {},
+): Promise<string | undefined> {
+  try {
+    return (await resolveCaptainCredential(options))?.token;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

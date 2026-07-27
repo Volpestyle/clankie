@@ -16,8 +16,11 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
   assertLoopbackCaptainHost,
+  captainInfoAppRoot,
   captainInfoGeneration,
-  isCaptainInfo,
+  captainToolDrift,
+  hasCurrentCaptainTools,
+  isCaptainIdentity,
   isReadyEveHealth,
 } from "../src/session/captain-identity.ts";
 
@@ -35,11 +38,15 @@ export interface CaptainServiceRecord {
 
 export interface CaptainInspection {
   readonly agent?: string;
+  /** The captain's own `appRoot`, used to prove it belongs to this checkout. */
+  readonly appRoot?: string;
   readonly generation?: string;
   readonly healthPath: "/eve/v1/health";
   readonly host: string;
   readonly infoPath: "/eve/v1/info";
   readonly state: CaptainEndpointState;
+  /** Present only when `state` is `stale`: what its tool inventory is missing. */
+  readonly toolDrift?: { missing: string[]; unexpected: string[] };
 }
 
 export interface CaptainServiceHandle {
@@ -62,7 +69,13 @@ export interface EnsureCaptainServiceOptions {
   readonly timeoutMs?: number;
 }
 
-export type CaptainEndpointState = "healthy" | "unhealthy" | "unreachable";
+/**
+ * `stale` is Clankie's own captain running an older build — proven ours by
+ * identity, but advertising a tool inventory this checkout no longer authors.
+ * It is separated from `unhealthy` (a stranger on the port) because the two
+ * have opposite remedies: rebuild the first, never signal the second.
+ */
+export type CaptainEndpointState = "healthy" | "stale" | "unhealthy" | "unreachable";
 
 export async function inspectCaptain(
   host: string,
@@ -92,13 +105,17 @@ export async function inspectCaptain(
     });
     if (!info.ok) return { ...base, state: "unhealthy" };
     const payload = await info.json();
-    if (!isCaptainInfo(payload)) return { ...base, state: "unhealthy" };
+    if (!isCaptainIdentity(payload)) return { ...base, state: "unhealthy" };
     const generation = captainInfoGeneration(payload);
+    const appRoot = captainInfoAppRoot(payload);
     return {
       ...base,
       agent: "captain-eve",
       ...(generation === undefined ? {} : { generation }),
-      state: "healthy",
+      ...(appRoot === undefined ? {} : { appRoot }),
+      // Ours either way; only the remedy differs.
+      state: hasCurrentCaptainTools(payload) ? "healthy" : "stale",
+      ...(hasCurrentCaptainTools(payload) ? {} : { toolDrift: captainToolDrift(payload) }),
     };
   } catch {
     return { ...base, state: "unhealthy" };
@@ -398,6 +415,15 @@ export async function ensureCaptainService(
       stopSync: () => {},
     };
   }
+  if (endpointState === "stale") {
+    // Ensure never signals anything — that is `restart`'s job — so the remedy
+    // is named rather than performed. Without this a stale captain fell into
+    // the "unhealthy" branch and read as a stranger on the port.
+    releaseLock();
+    throw new Error(
+      `Captain at ${host} is Clankie's captain running an older build than this checkout authors. Run \`clankie restart\` to rebuild it.`,
+    );
+  }
   if (endpointState === "unhealthy") {
     releaseLock();
     throw new Error(
@@ -518,6 +544,7 @@ export interface RestartCaptainServiceOptions extends EnsureCaptainServiceOption
   readonly ensureImpl?: typeof ensureCaptainService;
   readonly killImpl?: (pid: number, signal: NodeJS.Signals) => void;
   readonly processIsAliveImpl?: (pid: number) => boolean;
+  readonly readListenerPidsImpl?: (port: string) => number[];
   readonly readProcessCommandImpl?: (pid: number) => string;
 }
 
@@ -527,6 +554,82 @@ function readProcessCommand(pid: number): string {
 
 function isLauncherCaptainCommand(command: string): boolean {
   return command.includes("@clankie/captain-eve") && /\beve\b.*\bstart\b/u.test(command);
+}
+
+/**
+ * Whether a command line is *this checkout's* captain-eve, however it was
+ * started. Broader than {@link isLauncherCaptainCommand} on purpose: that one
+ * asks "did the launcher start this", which a hand-started captain fails; this
+ * asks "is this our captain process at all", which is the question that makes
+ * signalling it safe.
+ */
+function isCaptainProcessCommand(command: string, appRoot: string | undefined): boolean {
+  if (appRoot === undefined || appRoot.trim().length === 0) return false;
+  return command.includes(appRoot);
+}
+
+/** PIDs listening on a loopback port, most recent first. Empty when `lsof` finds nothing. */
+function readListenerPids(port: string): number[] {
+  try {
+    const output = execFileSync("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"], {
+      encoding: "utf8",
+    });
+    return output
+      .split("\n")
+      .map((line) => Number.parseInt(line.trim(), 10))
+      .filter((pid) => Number.isInteger(pid) && pid > 0);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Stop a captain the launcher did not start, but which is provably ours.
+ *
+ * The alternative — refusing, as this used to — left `clankie restart` unable
+ * to restart Clankie's own captain whenever it had been started by hand or
+ * outlived the session that spawned it, and the operator had to run `lsof` and
+ * `kill` themselves. Ownership is re-derived from the process rather than
+ * trusted from the endpoint: the listening pid's command line must contain the
+ * `appRoot` that captain itself reported, so a stranger holding the port is
+ * still never signalled.
+ */
+async function adoptUnownedCaptain(input: {
+  readonly host: string;
+  readonly appRoot: string | undefined;
+  readonly fetchImpl: typeof fetch;
+  readonly killImpl: (pid: number, signal: NodeJS.Signals) => void;
+  readonly onStatus?: (status: string) => void;
+  readonly readListenerPidsImpl: (port: string) => number[];
+  readonly readProcessCommandImpl: (pid: number) => string;
+  readonly timeoutMs: number;
+}): Promise<void> {
+  const port = servicePort(input.host);
+  const candidates = input.readListenerPidsImpl(port);
+  const owned = candidates.filter((pid) => {
+    let command: string;
+    try {
+      command = input.readProcessCommandImpl(pid);
+    } catch {
+      return false;
+    }
+    return isCaptainProcessCommand(command, input.appRoot) || isLauncherCaptainCommand(command);
+  });
+  if (owned.length === 0) {
+    throw new Error(
+      `Captain at ${input.host} is not owned by the clankie launcher and its listening process could not be ` +
+        `confirmed as this checkout's captain-eve; refusing to signal it. Inspect it with ` +
+        `\`lsof -nP -iTCP:${port} -sTCP:LISTEN\`, stop it, then run \`clankie restart\`.`,
+    );
+  }
+  input.onStatus?.("Adopting an unowned captain and stopping it…");
+  for (const pid of owned) input.killImpl(pid, "SIGTERM");
+  const deadline = Date.now() + Math.min(input.timeoutMs, 10_000);
+  while (Date.now() < deadline) {
+    if ((await inspectCaptain(input.host, input.fetchImpl)).state === "unreachable") return;
+    await sleep(100);
+  }
+  throw new Error(`Captain at ${input.host} did not stop after SIGTERM; refusing to start a replacement.`);
 }
 
 function signalProcessGroup(pid: number, signal: NodeJS.Signals): void {
@@ -553,12 +656,43 @@ export async function restartCaptainService(
       `Captain endpoint ${host} is occupied but does not identify as the authored captain; refusing to signal it. Inspect the listener with \`lsof -nP -iTCP:${servicePort(host)} -sTCP:LISTEN\`.`,
     );
   }
+  if (inspection.state === "stale") {
+    // Ours, just built before the current tool inventory. Restarting is the
+    // whole remedy, so say what drifted and carry on rather than refusing.
+    const drift = inspection.toolDrift;
+    const detail = [
+      drift?.missing.length ? `missing ${drift.missing.join(", ")}` : undefined,
+      drift?.unexpected.length ? `unexpected ${drift.unexpected.join(", ")}` : undefined,
+    ]
+      .filter((part): part is string => part !== undefined)
+      .join("; ");
+    options.onStatus?.(
+      `Captain at ${host} is running an older build${detail.length > 0 ? ` (${detail})` : ""}; rebuilding it.`,
+    );
+  }
 
   const record = readCaptainServiceRecord(statePath, host, options.processIsAliveImpl ?? processIsAlive);
-  if (inspection.state === "healthy" && record === undefined) {
-    throw new Error(
-      `Captain at ${host} is healthy but is not owned by the clankie launcher. Stop its owning process, then run \`clankie restart\`.`,
-    );
+  // Only an occupied port can be adopted. An unreachable endpoint with no
+  // record is simply a captain that is not running, and the ensure step below
+  // starts one.
+  if (record === undefined && inspection.state !== "unreachable") {
+    // Started by hand, or outlived the launcher run that spawned it. Ownership
+    // is re-derived from the listening process before anything is signalled.
+    await adoptUnownedCaptain({
+      host,
+      appRoot: inspection.appRoot,
+      fetchImpl,
+      killImpl: options.killImpl ?? signalProcessGroup,
+      ...(options.onStatus === undefined ? {} : { onStatus: options.onStatus }),
+      readListenerPidsImpl: options.readListenerPidsImpl ?? readListenerPids,
+      readProcessCommandImpl: options.readProcessCommandImpl ?? readProcessCommand,
+      timeoutMs,
+    });
+    try {
+      unlinkSync(statePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
   }
   if (record !== undefined) {
     const command = (options.readProcessCommandImpl ?? readProcessCommand)(record.pid);

@@ -33,38 +33,59 @@ informed rather than asked.
 
 ```mermaid
 flowchart LR
-  M["guild message<br/>admitted by text ingress"] --> G{"gate (free)<br/>addressed · author in voice<br/>loose voice-token regex"}
+  M["guild message<br/>admitted by text ingress"] --> G{"gate (free)<br/>addressed OR mid-conversation<br/>voice-token regex, or explicit<br/>name + asker in voice"}
   G -->|closed| T["normal captain turn<br/>untouched"]
   G -->|open| D["intent decider<br/>CLANKIE_VOICE_VOLITION_MODEL<br/>join / leave / none, fail closed"]
   D -->|none| T
-  D -->|join / leave| A["deterministic execution<br/>ADR 0050 tier · voice allowlists<br/>asker's channel from the gateway cache"]
+  D -->|join / leave| A["deterministic execution<br/>ADR 0050 tier · voice allowlists<br/>asker in voice? · channel from the gateway cache"]
   A -->|"voiceSession.join / leave"| V["DiscordVoiceSession"]
-  A --> N["content-free note<br/>enums + ids only"]
+  A --> N["content-free note<br/>enums + ids only<br/>(joined, or an honest refusal)"]
   N --> T2["the SAME captain turn<br/>reply reflects reality"]
 ```
 
 - **Gate (free).** Runs only on inbound guild messages that already pass the
-  ingress admission text ingress applies and that address him — the same
-  `mentionsBot`/`addressesCharacter` test, never a second matcher. It opens
-  only when the author is currently in a voice channel of that guild per the
-  gateway voice-state cache and the body matches a deliberately loose
-  voice-token regex. Closed means zero added cost and an untouched turn.
+  ingress admission text ingress applies and that speak to him the way text
+  ingress itself reads "spoken to" — an explicit mention/name
+  (`mentionsBot`/`addressesCharacter`) **or** a message inside a conversation
+  he is actively answering (`DiscordTextIngress.engagedInChannel`, the same
+  live-message window that keeps him replying to follow-ups). Never a second
+  matcher: the first live run proved that a narrower per-message name test
+  makes him answer "hop in vc and play" in text while the voice seam pretends
+  nobody spoke to him. The body must also match a deliberately loose
+  voice-token regex — **or** name him explicitly while the asker is already in
+  a voice channel: the second live run showed the word list missing natural
+  asks ("clankie i wanna talk to you" from inside vc), and the asker's gateway
+  voice-state is a stronger mechanical ask signal than any word. The wordless
+  door requires the explicit mention/name, not merely an engaged conversation,
+  so an engaged channel whose members sit in voice does not pay a decider read
+  per message. Whether the asker is in voice never _closes_ the gate — that is
+  voice state, and execution owns it, so an early worded ask earns an honest
+  refusal instead of silence. Closed means zero added cost and an untouched
+  turn.
 - **Intent decider (one bounded call).** The brokered OpenAI key and
   `CLANKIE_VOICE_VOLITION_MODEL` — the same cost tier as the volition call, not
   a new knob — at temperature 0 with a hard timeout, asked one question: does
   this message ask Clankie to join the speaker's voice channel, to leave voice,
   or neither? Anything but a clear answer is "none" (fail closed). It reads the
-  message body only — never room audio, never transcripts — and the body is
-  never logged.
+  message body plus a few bounded recent channel lines, attributed only as
+  Clankie / the sender / another member — natural addressing means the ask
+  often names nobody, and without the surrounding lines the decider cannot
+  tell an ask to Clankie from an ask to another member. Never room audio,
+  never transcripts, and none of the text is ever logged. A failed context
+  read degrades to a body-only decision rather than dropping the ask.
 - **Deterministic execution.** The model authorizes nothing. A read ask runs
   exactly the slash checks — `authorizeVoicePresenceCommand` under
   `DISCORD_VOICE_JOIN_POLICY`, the `DISCORD_VOICE_GUILD_IDS` /
   `DISCORD_VOICE_CHANNEL_IDS` allowlists, and slash leave's cross-guild bound —
-  then joins the asker's *current* voice channel, read from the gateway cache
-  at execution time. The model returns an intent enum and nothing else, so a
-  prompt-injected body can never steer *where* he joins. If he is already in
-  exactly the asked channel, nothing is rejoined: a rejoin resets the consent
-  registry, and silently un-consenting a room is worse than doing nothing.
+  then joins the asker's _current_ voice channel, read from the gateway cache
+  at execution time. An asker who is not in a voice channel gets
+  `join_refused: not_in_voice` — the note that lets his reply say "hop in a
+  channel and ask again" instead of enthusiasm followed by nothing. A leave
+  ask requires no voice presence from the asker. The model returns an intent
+  enum and nothing else, so a prompt-injected body can never steer _where_ he
+  joins. If he is already in exactly the asked channel, nothing is rejoined: a
+  rejoin resets the consent registry, and silently un-consenting a room is
+  worse than doing nothing.
 - **Consent is never granted by asking.** An asked join opts in nobody — the
   asker included. Everyone consents through `/clankie voice-consent opt-in`,
   which already carries the residency disclosure ephemerally. The slash join
@@ -98,10 +119,16 @@ flowchart LR
 
 - Gated messages cost one cheap model call; everything else costs nothing. The
   gate is deliberately loose because a false positive is one bounded call and a
-  false negative is a missed convenience.
+  false negative is a missed convenience — and the first live run showed the
+  false negatives are the expensive side: they cost a debugging session, not a
+  model call. Mid-conversation admission means a busy engaged channel spends a
+  few more decider reads on stray "come"/"out" tokens; each is one bounded
+  call that fails closed. An explicitly named wordless message from an asker
+  inside voice also costs one read — rare, and the strongest ask signal there
+  is.
 - The intent decider is untrusted-input-facing, but it returns only an enum:
-  a hostile body can at most ask him to join the channel its author is sitting
-  in, under the asker's own authority.
+  a hostile body (or hostile context lines) can at most ask him to join the
+  channel its author is sitting in, under the asker's own authority.
 - The join surface widens from slash to natural speech within the same
   authority tier — who may move him is unchanged; only the phrasing is.
 - An asked join starts with zero consented participants, so he sits in the

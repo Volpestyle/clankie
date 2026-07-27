@@ -319,4 +319,133 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
 
     await session.leave();
   });
+
+  it("speaks through ElevenLabs when the external voice is configured (ADR 0070)", async () => {
+    const sockets: FakeRealtimeSocket[] = [];
+    const socketFactory: RealtimeSocketFactory = (url, headers) => {
+      const socket = new FakeRealtimeSocket(url, headers);
+      sockets.push(socket);
+      return Promise.resolve(socket);
+    };
+    const timers = new TestTimers();
+    const config = parseVoiceRealtimeEnv({
+      CLANKIE_VOICE_TTS_PROVIDER: "elevenlabs",
+      CLANKIE_VOICE_ELEVENLABS_VOICE_ID: "voice_abc123",
+      CLANKIE_VOICE_ELEVENLABS_MODEL_ID: "eleven_flash_v2_5",
+    });
+    const voiceApi = new ClankieApiClient({
+      baseUrl: "http://127.0.0.1:9",
+      captainToken: "voice-bridge-token",
+      fetchImpl: (() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              schemaVersion: 1,
+              instructions: "Be Clankie, in the social register, on the realtime surface.",
+              briefing: "Right now: tending the garden.",
+              refreshedAt: "2026-07-25T17:00:00.000Z",
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        )) as typeof fetch,
+    });
+    const evidence: DiscordVoiceEvidence[] = [];
+    const clock = { now: 0 };
+    const session = new DiscordVoiceSession({
+      ingress: new DiscordVoiceIngress(voiceApi, {
+        characterId: "clankie",
+        credentialRef: "discord_bot",
+        transportKind: "bot",
+      }),
+      realtime: createVoiceRealtimePorts({
+        apiKey: "brokered-openai-key",
+        elevenLabsApiKey: "brokered-elevenlabs-key",
+        config,
+        socketFactory,
+        timers,
+      }),
+      briefing: createVoiceBriefingProvider(voiceApi),
+      floor: { names: ["clankie"], replyPolicy: "addressed", chattiness: "balanced" },
+      presenceSessionId: () => "presence-1",
+      emit: (event) => {
+        DiscordVoiceEvidenceSchema.parse(event);
+        evidence.push(event);
+        return Promise.resolve();
+      },
+      clock: () => clock.now,
+      timers,
+    });
+
+    await session.join({
+      guildId: GUILD,
+      channelId: CHANNEL,
+      invokingUserId: OWNER,
+      adapterCreator: (() => ({ sendPayload: () => true, destroy: () => undefined })) as never,
+    });
+
+    // Wake him with an addressed transcript.
+    const connection = voiceMock.connections[voiceMock.connections.length - 1] as MockConnection;
+    connection.receiver.speaking.emit("start", OWNER);
+    const listener = sockets[0] as FakeRealtimeSocket;
+    listener.serverEvent({
+      type: "conversation.item.input_audio_transcription.completed",
+      item_id: "item_1",
+      transcript: "clankie, you there?",
+    });
+    await flush(12);
+
+    // The engaged pair opened: text-modality realtime ears plus the
+    // ElevenLabs mouth, each over its own brokered key.
+    expect(sockets).toHaveLength(3);
+    const engaged = sockets[1] as FakeRealtimeSocket;
+    const mouth = sockets[2] as FakeRealtimeSocket;
+    expect(engaged.headers.authorization).toBe("Bearer brokered-openai-key");
+    expect(engaged.url).toContain("model=gpt-realtime-2.1");
+    const engagedUpdate = engaged.frames().find((frame) => frame.type === "session.update") as {
+      session: { output_modalities: string[]; audio: { input?: unknown; output?: unknown } };
+    };
+    expect(engagedUpdate.session.output_modalities).toEqual(["text"]);
+    expect(engagedUpdate.session.audio.input).toBeDefined();
+    expect(engagedUpdate.session.audio.output).toBeUndefined();
+    expect(mouth.headers).toEqual({ "xi-api-key": "brokered-elevenlabs-key" });
+    expect(mouth.url).toContain("/voice_abc123/multi-stream-input");
+    expect(mouth.url).toContain("model_id=eleven_flash_v2_5");
+    expect(mouth.url).toContain("output_format=pcm_24000");
+
+    // Model text streams into one TTS context per item, then flushes on done.
+    engaged.serverEvent({
+      type: "response.output_text.delta",
+      response_id: "resp_1",
+      item_id: "item_say",
+      delta: "Right here.",
+    });
+    await flush(12);
+    engaged.serverEvent({ type: "response.done", response: { id: "resp_1", status: "completed" } });
+    await flush(12);
+    expect(mouth.frames()).toEqual([
+      { text: " ", context_id: "item_say" },
+      { text: "Right here.", context_id: "item_say" },
+      { text: " ", context_id: "item_say", flush: true },
+    ]);
+
+    // Synthesized PCM plays back through the unchanged path, and the receipt
+    // cut for the turn is the ordinary fast-path response receipt.
+    clock.now = 120;
+    mouth.serverEvent({ audio: Buffer.from([1, 0, 2, 0]).toString("base64"), contextId: "item_say" });
+    mouth.serverEvent({ isFinal: true, contextId: "item_say" });
+    await flush(12);
+    const responses = evidence.filter((event) => event.type === "response");
+    expect(responses).toHaveLength(1);
+    expect(responses[0]).toMatchObject({ fastPath: true, wake: "waking", toFirstAudioMs: 120 });
+
+    // Nothing spoken or heard ever reached a frame with the wrong key on it.
+    for (const socket of [engaged, mouth]) {
+      for (const raw of socket.sent) {
+        expect(raw).not.toContain("brokered-openai-key");
+        expect(raw).not.toContain("brokered-elevenlabs-key");
+      }
+    }
+
+    await session.leave();
+  });
 });

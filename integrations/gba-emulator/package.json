@@ -20,6 +20,7 @@
     "free-play": "tsx scripts/free-play-cli.ts"
   },
   "dependencies": {
+    "@clankie/body-lock": "workspace:*",
     "@clankie/environment-runtime": "workspace:*",
     "@clankie/interactive-environment": "workspace:*",
     "@clankie/model-provider": "workspace:*",

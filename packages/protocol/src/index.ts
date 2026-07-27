@@ -2523,7 +2523,17 @@ export const DiscordPresenceWriteSchema = z
     }
     if (
       DISCORD_PRESENCE_ACTION_RISK_CLASS[write.action] !== "narrative-write" &&
-      write.identity.missionId === undefined
+      write.identity.missionId === undefined &&
+      // The activity surface also serves the ambient embodiment plane (ADR
+      // 0063): an asked play session has no mission, so its launch and stop
+      // writes may attribute to the presence session they serve instead. The
+      // publish-external approval gate is unchanged — this widens attribution,
+      // never authority.
+      !(
+        (write.action === "discord.presence.activity_start" ||
+          write.action === "discord.presence.activity_stop") &&
+        write.identity.presenceSessionId !== undefined
+      )
     ) {
       context.addIssue({
         code: "custom",
@@ -3090,6 +3100,32 @@ export const EmbodimentSessionReceiptSchema = z
   })
   .strict();
 export type EmbodimentSessionReceipt = z.infer<typeof EmbodimentSessionReceiptSchema>;
+
+/**
+ * Who holds Clankie's body right now (VUH-938): a read-only projection of the
+ * cross-process body lock, the one authority that sees every suitor —
+ * including an MCP possessor no embodiment session ever recorded (ADR 0053,
+ * ADR 0063). Liveness-checked at read time; a dead holder's lock reports as
+ * nobody. The pid stays off the wire: consumers need who and since when, not
+ * process trivia.
+ */
+export const BodyPossessionSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    holderId: z.string().min(1).max(200),
+    acquiredAt: z.string().min(1),
+  })
+  .strict();
+export type BodyPossession = z.infer<typeof BodyPossessionSchema>;
+
+/** Wire shape of `GET /v1/embodiment/possession`; `possession: null` means nobody holds the body. */
+export const BodyPossessionReadSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    possession: BodyPossessionSchema.nullable(),
+  })
+  .strict();
+export type BodyPossessionRead = z.infer<typeof BodyPossessionReadSchema>;
 
 export const EmbodimentReportStateSchema = z.enum(["running", "stopping", "stopped", "refused", "failed"]);
 export type EmbodimentReportState = z.infer<typeof EmbodimentReportStateSchema>;

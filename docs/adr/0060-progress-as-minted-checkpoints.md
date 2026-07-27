@@ -56,7 +56,7 @@ captures the body's complete state — more than observation exposes — and
 `gba_emulator_load_state` rewrites the body's whole world, so both are gated by
 possession exactly like acting ([ADR 0053](0053-mcp-possession-of-clankies-body.md)).
 Load with no id lists what exists instead of guessing. Both are absent on the
-deterministic double, whose determinism *is* its identity: there is no state to
+deterministic double, whose determinism _is_ its identity: there is no state to
 serialize that the scenario does not already pin.
 
 ## Consequences

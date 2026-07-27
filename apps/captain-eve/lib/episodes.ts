@@ -130,10 +130,9 @@ export async function captainEpisodeInstructions(
 ): Promise<string> {
   try {
     const lane = captainLaneKind(channel);
-    const { recallCard } = await boundedControlPlaneClient(
-      RECALL_TIMEOUT_MS,
-      options,
-    ).recallCaptainEpisodes(lane);
+    const { recallCard } = await boundedControlPlaneClient(RECALL_TIMEOUT_MS, options).recallCaptainEpisodes(
+      lane,
+    );
     return recallCard;
   } catch (error) {
     reportEpisodeError("recall", error);

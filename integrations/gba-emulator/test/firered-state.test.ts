@@ -296,6 +296,71 @@ describe("version-pinned FireRed state decoder", () => {
     });
   });
 
+  it("decodes the naming screen instead of leaving the overworld to lie", () => {
+    const memory = syntheticMemory();
+    const rom = syntheticRom();
+
+    // Loading callback: the heap block is not initialized yet, so only
+    // presence is reported.
+    memory.iwramView.setUint32(iwramOffset(0x030030f4), 0x0809d9e1, true);
+    expect(decodeFireRedState(memory, rom).menu).toEqual({
+      menuId: "naming-screen",
+      cursor: 0,
+      entries: [{ id: "loading", label: "the naming screen is still loading" }],
+    });
+
+    // Running callback without a data block is corruption, not a menu.
+    memory.iwramView.setUint32(iwramOffset(0x030030f4), 0x0809fb71, true);
+    expect(() => decodeFireRedState(memory, rom)).toThrow(/naming screen/);
+
+    // Running: typed text, keyboard page, and subject decode from the block.
+    const dataAddress = 0x02030000;
+    memory.ewramView.setUint32(ewramOffset(0x0203998c), dataAddress, true);
+    memory.ewram.fill(0xff, ewramOffset(dataAddress) + 0x1800, ewramOffset(dataAddress) + 0x1810);
+    memory.ewram.set([0xc1, 0xbb], ewramOffset(dataAddress) + 0x1800); // "GA"
+    memory.ewramView.setUint8(ewramOffset(dataAddress) + 0x1e22, 1); // upper-case page
+    memory.ewramView.setUint8(ewramOffset(dataAddress) + 0x1e2c, 2); // caught-mon template
+    expect(decodeFireRedState(memory, rom).menu).toEqual({
+      menuId: "naming-screen",
+      cursor: 0,
+      entries: [
+        { id: "typed-text", label: 'typed so far: "GA"' },
+        { id: "keyboard-page", label: "upper-case keyboard" },
+        { id: "naming", label: "naming a caught Pokémon" },
+      ],
+    });
+    // The keyboard owns input here; the field must not claim readiness.
+    expect(decodeFireRedState(memory, rom).fieldInputReady).toBe(false);
+
+    // The machine state carries the exact text and the keyboard cursor (from
+    // the cursor sprite's data words), which is what enter_text navigates by.
+    expect(decodeFireRedState(memory, rom).naming).toEqual({
+      text: "GA",
+      page: "upper-case",
+      row: 0,
+      column: 0,
+    });
+    memory.ewramView.setUint8(ewramOffset(0x0202066a), 5); // column
+    memory.ewramView.setUint8(ewramOffset(0x0202066c), 2); // row
+    expect(decodeFireRedState(memory, rom).naming).toMatchObject({ row: 2, column: 5 });
+
+    // A cursor outside the keyboard refuses rather than navigates blind.
+    memory.ewramView.setUint8(ewramOffset(0x0202066a), 9);
+    expect(() => decodeFireRedState(memory, rom)).toThrow(/cursor/);
+    memory.ewramView.setUint8(ewramOffset(0x0202066a), 0);
+
+    // An empty buffer reads as such rather than as invented text.
+    memory.ewram.fill(0xff, ewramOffset(dataAddress) + 0x1800, ewramOffset(dataAddress) + 0x1810);
+    expect(decodeFireRedState(memory, rom).menu?.entries[0]).toEqual({
+      id: "typed-text",
+      label: "nothing typed yet",
+    });
+
+    // A page outside the cycled domain refuses rather than guesses.
+    memory.ewramView.setUint8(ewramOffset(dataAddress) + 0x1e22, 3);
+    expect(() => decodeFireRedState(memory, rom)).toThrow(/naming screen/);
+  });
+
   it("reports field input ready only when the overworld callback is unlocked", () => {
     const memory = syntheticMemory();
     const rom = syntheticRom();
@@ -323,6 +388,16 @@ describe("version-pinned FireRed state decoder", () => {
       { pocket: "items", itemId: "firered-item-13", count: 7 },
       { pocket: "poke-balls", itemId: "firered-item-4", count: 12 },
     ]);
+  });
+
+  it("decodes the accented range, because the game spells POKéMON with it", () => {
+    // P O K é M O N — 0x1b carried the most common word in the script, and an
+    // uncovered charmap rendered it "POK�MON" in every transcript he read.
+    expect(
+      decodeFireRedText(Uint8Array.from([0xca, 0xc9, 0xc5, 0x1b, 0xc7, 0xc9, 0xc8, 0xff])),
+    ).toEqual(["POKéMON"]);
+    // É Ä ñ ç — a sample across the upper and lower accented blocks.
+    expect(decodeFireRedText(Uint8Array.from([0x06, 0xf1, 0x29, 0x19, 0xff]))).toEqual(["ÉÄñç"]);
   });
 
   it("decodes control-bearing text and rejects malformed snapshots and domains", () => {

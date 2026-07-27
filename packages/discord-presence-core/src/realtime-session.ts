@@ -84,6 +84,14 @@ export const MAX_REALTIME_INSTRUCTIONS_CHARACTERS = 24_000;
  */
 const MAX_TRANSCRIPT_CHARACTERS = 2_000;
 
+/**
+ * Per-response output text cap for text-modality sessions ([ADR 0070](../../../docs/adr/0070-external-voice-via-streaming-tts.md)).
+ * Everything a response says is synthesized and spoken aloud; more than this
+ * is runaway output, not an utterance, and it fails closed exactly as the
+ * audio byte cap does.
+ */
+export const MAX_REALTIME_RESPONSE_TEXT_CHARACTERS = 8_000;
+
 /** Same bound as text items; `ask_clankie` takes one plain-language request. */
 const MAX_FUNCTION_ARGUMENTS_CHARACTERS = 8_000;
 
@@ -182,6 +190,8 @@ export interface RealtimeResponseMeta {
   readonly status: string;
   /** Total decoded response audio bytes observed for this response. */
   readonly audioBytes: number;
+  /** Total response text characters observed for this response (text modality). */
+  readonly textCharacters: number;
   readonly inputTokens?: number;
   readonly outputTokens?: number;
 }
@@ -211,6 +221,14 @@ export interface RealtimeTranscriptionSessionOptions extends RealtimeSessionComm
 export interface RealtimeConversationSessionOptions extends RealtimeSessionCommonOptions {
   readonly model?: string;
   readonly voice?: string;
+  /**
+   * What the responses are made of ([ADR 0070](../../../docs/adr/0070-external-voice-via-streaming-tts.md)).
+   * `"audio"` (the default) is the model's own voice; `"text"` takes the
+   * mouth away — deltas stream to {@link onTextDelta} for an external
+   * synthesizer, `voice` is ignored, and the input side (native audio ears,
+   * boundary-only VAD) is unchanged.
+   */
+  readonly outputModality?: "audio" | "text";
   /** Composed persona + lane + surface rules, supplied by the caller — never authored here. */
   readonly instructions: string;
   readonly truncationRetentionRatio?: number;
@@ -222,6 +240,12 @@ export interface RealtimeConversationSessionOptions extends RealtimeSessionCommo
    * the cascade zeroed synthesized PCM after each turn.
    */
   readonly onAudioDelta: (pcm: Buffer, itemId: string) => void;
+  /**
+   * Response text deltas, only in `"text"` modality. This is what Clankie is
+   * about to say out loud through the external voice — bounded per response
+   * by {@link MAX_REALTIME_RESPONSE_TEXT_CHARACTERS} and never logged.
+   */
+  readonly onTextDelta?: (delta: string, itemId: string) => void;
   readonly onResponseDone?: (meta: RealtimeResponseMeta) => void;
   readonly onFunctionCall?: (call: RealtimeFunctionCall) => void;
 }
@@ -485,14 +509,22 @@ export class RealtimeTranscriptionSession extends RealtimeSessionCore {
  */
 export class RealtimeConversationSession extends RealtimeSessionCore {
   private readonly onAudioDeltaCallback: (pcm: Buffer, itemId: string) => void;
+  private readonly onTextDeltaCallback: ((delta: string, itemId: string) => void) | undefined;
   private readonly onResponseDoneCallback: ((meta: RealtimeResponseMeta) => void) | undefined;
   private readonly onFunctionCallCallback: ((call: RealtimeFunctionCall) => void) | undefined;
   private currentResponseId = "";
   private currentResponseAudioBytes = 0;
+  private currentResponseTextCharacters = 0;
 
   public constructor(socket: RealtimeSocket, options: RealtimeConversationSessionOptions) {
     const model = nonEmpty(options.model ?? DEFAULT_CONVERSATION_MODEL, "Realtime conversation model");
+    const outputModality = options.outputModality ?? "audio";
     const voice = nonEmpty(options.voice ?? DEFAULT_VOICE, "Realtime voice");
+    if (outputModality === "text" && options.onTextDelta === undefined) {
+      // A text-modality session with no text sink would speak into the void;
+      // failing at construction beats a silently mute Clankie.
+      throw new Error("Realtime text modality requires an onTextDelta callback");
+    }
     const instructions = boundedText(
       options.instructions,
       MAX_REALTIME_INSTRUCTIONS_CHARACTERS,
@@ -506,6 +538,7 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
     );
     super(coreInit(socket, options));
     this.onAudioDeltaCallback = options.onAudioDelta;
+    this.onTextDeltaCallback = options.onTextDelta;
     this.onResponseDoneCallback = options.onResponseDone;
     this.onFunctionCallCallback = options.onFunctionCall;
     this.sendFrame({
@@ -513,7 +546,7 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
       session: {
         type: "realtime",
         model,
-        output_modalities: ["audio"],
+        output_modalities: [outputModality],
         instructions,
         audio: {
           input: {
@@ -527,10 +560,16 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
               interrupt_response: false,
             },
           },
-          output: {
-            format: REALTIME_PCM_FORMAT,
-            voice,
-          },
+          // In text modality there is no model mouth to configure; the
+          // external synthesizer owns how he sounds (ADR 0070).
+          ...(outputModality === "audio"
+            ? {
+                output: {
+                  format: REALTIME_PCM_FORMAT,
+                  voice,
+                },
+              }
+            : {}),
         },
         tools: [ASK_CLANKIE_TOOL],
         tool_choice: "auto",
@@ -617,6 +656,12 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
         this.handleAudioDelta(event);
         return;
       }
+      case "response.output_text.delta":
+      // Pre-GA name, same treatment as the audio pair above.
+      case "response.text.delta": {
+        this.handleTextDelta(event);
+        return;
+      }
       case "response.done": {
         this.handleResponseDone(event);
         return;
@@ -631,6 +676,28 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
     }
   }
 
+  private handleTextDelta(event: Record<string, unknown>): void {
+    if (this.onTextDeltaCallback === undefined) return;
+    const delta = asString(event.delta);
+    if (delta === undefined || delta.length === 0) return;
+    const itemId = asString(event.item_id) ?? "";
+    const responseId = asString(event.response_id) ?? "";
+    if (responseId !== this.currentResponseId) {
+      this.currentResponseId = responseId;
+      this.currentResponseAudioBytes = 0;
+      this.currentResponseTextCharacters = 0;
+    }
+    this.currentResponseTextCharacters += delta.length;
+    if (this.currentResponseTextCharacters > MAX_REALTIME_RESPONSE_TEXT_CHARACTERS) {
+      // Fail closed like the audio byte cap: everything surfaced here is
+      // spoken aloud, and unbounded server text means unbounded speech.
+      this.onErrorCallback?.("Realtime response text exceeded the character limit");
+      this.closeWith("error");
+      return;
+    }
+    this.onTextDeltaCallback(delta, itemId);
+  }
+
   private handleAudioDelta(event: Record<string, unknown>): void {
     const delta = asString(event.delta);
     if (delta === undefined || delta.length === 0) return;
@@ -639,6 +706,7 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
     if (responseId !== this.currentResponseId) {
       this.currentResponseId = responseId;
       this.currentResponseAudioBytes = 0;
+      this.currentResponseTextCharacters = 0;
     }
     const pcm = Buffer.from(delta, "base64");
     this.currentResponseAudioBytes += pcm.byteLength;
@@ -661,15 +729,19 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
     const usage = asRecord(response?.usage);
     const inputTokens = asCount(usage?.input_tokens);
     const outputTokens = asCount(usage?.output_tokens);
-    const audioBytes = responseId === this.currentResponseId ? this.currentResponseAudioBytes : 0;
-    if (responseId === this.currentResponseId) {
+    const isCurrent = responseId === this.currentResponseId;
+    const audioBytes = isCurrent ? this.currentResponseAudioBytes : 0;
+    const textCharacters = isCurrent ? this.currentResponseTextCharacters : 0;
+    if (isCurrent) {
       this.currentResponseId = "";
       this.currentResponseAudioBytes = 0;
+      this.currentResponseTextCharacters = 0;
     }
     this.onResponseDoneCallback?.({
       responseId,
       status,
       audioBytes,
+      textCharacters,
       ...(inputTokens === undefined ? {} : { inputTokens }),
       ...(outputTokens === undefined ? {} : { outputTokens }),
     });

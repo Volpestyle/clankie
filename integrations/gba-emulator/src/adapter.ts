@@ -3,6 +3,7 @@ import {
   GbaEmulatorSessionSpecSchema,
   GbaEmulatorStartActionCommandSchema,
   type EnvironmentSessionSpecV2,
+  type GbaButton,
   type GbaEmulatorAction,
   type GbaEmulatorActionLimits,
   type GbaEmulatorObservation,
@@ -26,6 +27,7 @@ import {
 } from "./contracts.ts";
 import { DeterministicGbaCoreDouble, canonicalJson, sha256 } from "./core-double.ts";
 import type { GbaAdapterScenario, GbaCoreFactory, GbaCoreMapGrid, GbaCoreSeam } from "./core-seam.ts";
+import { BUTTON_COLUMN, OK_ROW, findNamingKey, stepTowardNamingKey } from "./naming-keyboard.ts";
 
 const GENESIS_HASH = "0".repeat(64);
 
@@ -374,6 +376,19 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
             },
           };
         }
+        case "scene":
+          // Honest even when the decoder is out of its depth: an undecoded
+          // screen (naming, scripted sequence, transition) reads as mode
+          // "overworld" with inputReady false, which is the signal itself.
+          return {
+            ...base,
+            kind,
+            data: {
+              mode: state.mode,
+              inputReady: state.inputReady ?? true,
+              waitingForDialogAdvance: state.waitingForDialogAdvance ?? false,
+            },
+          };
         case "frame_reference":
           return {
             ...base,
@@ -519,6 +534,10 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
           /** True when the press only changed which way the player looks. */
           turned: before.facing !== state.facing,
           surroundings: state.surroundings ?? null,
+          // The text or menu the press produced, so reading it back does not
+          // cost an observe round trip — the same reason position rides along.
+          ...(state.dialogLines?.length ? { dialogLines: state.dialogLines } : {}),
+          ...(state.menu ? { menu: state.menu } : {}),
           ramStateSha256: this.core.ramStateSha256(),
         };
       }
@@ -566,7 +585,8 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
           target: { x: action.x, y: action.y },
           plannedSteps: path.length,
           steps: taken,
-          arrived: !warped && blockedAt === null && state.position.x === action.x && state.position.y === action.y,
+          arrived:
+            !warped && blockedAt === null && state.position.x === action.x && state.position.y === action.y,
           blockedAt,
           warped,
           frame: state.frame,
@@ -574,6 +594,318 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
           position: state.position,
           facing: state.facing,
           surroundings: state.surroundings ?? null,
+          ramStateSha256: this.core.ramStateSha256(),
+        };
+      }
+      case "advance_dialog": {
+        // A visible box is not always a decoded dialog. A scripted sequence
+        // (the starter fanfare) holds the box while the script runs a wait the
+        // dialog decoder does not model — mode reads "overworld" with field
+        // controls locked — and battle text lives under mode "battle". Both
+        // are exactly when a driver reaches for this action, so both are
+        // entered rather than refused; only a screen with nothing readable
+        // and nothing held fails closed.
+        {
+          const opening = this.core.gameState();
+          const readable =
+            opening.mode === "dialog" ||
+            (opening.mode === "battle" && opening.battle?.inputMode === "resolving");
+          const held = opening.mode === "overworld" && !(opening.inputReady ?? true);
+          if (!readable && !held) throw closed("dialog_not_open");
+        }
+        const startedInBattle = this.core.gameState().mode === "battle";
+        // Every distinct box read along the way, oldest first. A capture that
+        // extends the previous one replaces it, so a box caught mid-print by
+        // the stall-break never leaves its prefix behind as a phantom entry.
+        const transcript: string[] = [];
+        const capture = (lines: readonly string[] | undefined): void => {
+          const text = (lines ?? []).join("\n");
+          if (text.length === 0) return;
+          const last = transcript.at(-1);
+          if (last === text) return;
+          if (last !== undefined && text.startsWith(last)) {
+            transcript[transcript.length - 1] = text;
+            return;
+          }
+          transcript.push(text);
+        };
+        let presses = 0;
+        let framesSpent = 0;
+        let idleFrames = 0;
+        let heldFrames = 0;
+        let sawText = false;
+        let endedBecause:
+          | "dialog_closed"
+          | "choice_open"
+          | "battle_started"
+          | "battle_ended"
+          | "script_released"
+          | "script_holding"
+          | "input_bound_reached"
+          | "frame_bound_reached";
+        for (;;) {
+          const during = this.core.gameState();
+          const readable =
+            during.mode === "dialog" ||
+            (during.mode === "battle" && during.battle?.inputMode === "resolving");
+          if (!readable) {
+            const scriptHeld = during.mode === "overworld" && !(during.inputReady ?? true);
+            if (scriptHeld) {
+              // The script owns the screen with no readable box — a fanfare, a
+              // cutscene beat between boxes. Waiting here, bounded, is what
+              // stops a visibly held box from reading as "no dialog is open".
+              if (
+                framesSpent + DIALOG_PRINT_WAIT_FRAMES > limits.maxFrames ||
+                (!sawText && heldFrames >= SCRIPT_HOLD_MAX_FRAMES)
+              ) {
+                endedBecause = sawText ? "frame_bound_reached" : "script_holding";
+                break;
+              }
+              this.core.advanceFrames(DIALOG_PRINT_WAIT_FRAMES);
+              framesSpent += DIALOG_PRINT_WAIT_FRAMES;
+              heldFrames += DIALOG_PRINT_WAIT_FRAMES;
+              continue;
+            }
+            // The screen is free; say what ended the reading. The next A press
+            // would re-engage whatever is ahead, so ending here is the point.
+            endedBecause =
+              during.mode === "overworld"
+                ? sawText
+                  ? "dialog_closed"
+                  : "script_released"
+                : during.mode === "battle"
+                  ? startedInBattle
+                    ? "choice_open"
+                    : "battle_started"
+                  : "battle_ended";
+            break;
+          }
+          sawText = true;
+          heldFrames = 0;
+          if (during.menu !== null && during.menu !== undefined) {
+            // A choice is a decision, not a formality — never answer it here.
+            capture(during.dialogLines);
+            endedBecause = "choice_open";
+            break;
+          }
+          const ready = during.waitingForDialogAdvance ?? during.mode === "dialog";
+          if (ready || idleFrames >= DIALOG_STALL_FRAMES) {
+            if (presses >= limits.maxInputs) {
+              capture(during.dialogLines);
+              endedBecause = "input_bound_reached";
+              break;
+            }
+            if (framesSpent + DIALOG_HOLD_FRAMES > limits.maxFrames) {
+              capture(during.dialogLines);
+              endedBecause = "frame_bound_reached";
+              break;
+            }
+            capture(during.dialogLines);
+            this.core.pressButton("a", DIALOG_HOLD_FRAMES);
+            presses += 1;
+            framesSpent += DIALOG_HOLD_FRAMES;
+            idleFrames = 0;
+            continue;
+          }
+          // Text is still printing (or battle text is flowing on its own
+          // clock): wait for the box instead of wasting an input on a press
+          // the game will not accept.
+          if (framesSpent + DIALOG_PRINT_WAIT_FRAMES > limits.maxFrames) {
+            capture(during.dialogLines);
+            endedBecause = "frame_bound_reached";
+            break;
+          }
+          // Captured before the wait: if the box turns ready inside this very
+          // window, the hold's initial edge can advance it, and the lines
+          // would otherwise be gone before the next capture.
+          capture(during.dialogLines);
+          if (this.core.advanceFramesHolding === undefined) {
+            this.core.advanceFrames(DIALOG_PRINT_WAIT_FRAMES);
+          } else {
+            // Waiting with A held: FireRed reads a held A/B as "zero the
+            // per-character delay" — the fast-read every human does — and a
+            // held button can never register as the fresh press a waiting box
+            // requires, so this cannot answer a prompt or skip a box.
+            this.core.advanceFramesHolding("a", DIALOG_PRINT_WAIT_FRAMES);
+          }
+          framesSpent += DIALOG_PRINT_WAIT_FRAMES;
+          idleFrames += DIALOG_PRINT_WAIT_FRAMES;
+        }
+        const state = this.core.gameState();
+        this.record(
+          actionId,
+          "advance_dialog",
+          `Advanced dialog through ${String(presses)} presses (${endedBecause})`,
+        );
+        return {
+          transcript,
+          presses,
+          framesSpent,
+          endedBecause,
+          frame: state.frame,
+          mode: state.mode,
+          position: state.position,
+          facing: state.facing,
+          ...(state.dialogLines?.length ? { dialogLines: state.dialogLines } : {}),
+          ...(state.menu ? { menu: state.menu } : {}),
+          ramStateSha256: this.core.ramStateSha256(),
+        };
+      }
+      case "enter_text": {
+        // Spelling a six-letter nickname by hand cost nineteen model turns on
+        // the 2026-07-27 run. This is the composite that makes it one: verify
+        // the cursor against live state, press, verify what actually landed.
+        // Every claimed key that matters is empirically verified; the typed-
+        // byte check after each A catches the few transcribed-only cells, so
+        // a wrong mapping surfaces as an honest stop rather than a wrong name.
+        if (this.core.gameState().naming == null) throw closed("naming_screen_not_open");
+        const desired = action.text;
+        const submit = action.submit ?? true;
+        let presses = 0;
+        let framesSpent = 0;
+        let typedSoFar = "";
+        let endedBecause:
+          | "confirmed"
+          | "typed"
+          | "screen_closed"
+          | "input_not_registered"
+          | "input_bound_reached"
+          | "frame_bound_reached" = submit ? "confirmed" : "typed";
+        const naming = () => this.core.gameState().naming ?? null;
+        const budgetLeft = (frames: number): boolean => {
+          if (presses >= limits.maxInputs) {
+            endedBecause = "input_bound_reached";
+            return false;
+          }
+          if (framesSpent + frames > limits.maxFrames) {
+            endedBecause = "frame_bound_reached";
+            return false;
+          }
+          return true;
+        };
+        const press = (button: GbaButton, settleFrames: number): boolean => {
+          if (!budgetLeft(NAMING_HOLD_FRAMES + settleFrames)) return false;
+          this.core.pressButton(button, NAMING_HOLD_FRAMES);
+          this.core.advanceFrames(settleFrames);
+          presses += 1;
+          framesSpent += NAMING_HOLD_FRAMES + settleFrames;
+          return true;
+        };
+        // A press the page-swap animation ate is retried once; a press that
+        // still changes nothing means the decoded state and the screen have
+        // parted ways, and honesty beats persistence.
+        const pressVerified = (
+          button: GbaButton,
+          settleFrames: number,
+          changed: () => boolean,
+        ): "changed" | "unchanged" | "budget" => {
+          for (let attempt = 0; attempt < 2; attempt += 1) {
+            if (!press(button, settleFrames)) return "budget";
+            if (changed()) return "changed";
+          }
+          endedBecause = "input_not_registered";
+          return "unchanged";
+        };
+
+        for (;;) {
+          let state = naming();
+          if (state === null) {
+            endedBecause = "screen_closed";
+            break;
+          }
+          typedSoFar = state.text;
+          // Idempotent by prefix: keep a matching start, erase a wrong one, so
+          // a budget-interrupted entry resumes with the same action repeated.
+          if (!desired.startsWith(state.text)) {
+            const before = state.text;
+            if (pressVerified("b", NAMING_SETTLE_FRAMES, () => naming()?.text !== before) !== "changed") {
+              break;
+            }
+            continue;
+          }
+          const nextCharacter = desired.slice(state.text.length).charAt(0);
+          if (nextCharacter === "") break; // everything is typed
+          const key = findNamingKey(nextCharacter, state.page);
+          if (key === null) throw closed("enter_text_unsupported_character");
+          if (key.page !== state.page) {
+            const before = state.page;
+            if (
+              pressVerified("select", NAMING_PAGE_SETTLE_FRAMES, () => naming()?.page !== before) !==
+              "changed"
+            ) {
+              break;
+            }
+            continue;
+          }
+          const step = stepTowardNamingKey(state.page, state, key);
+          if (step !== null) {
+            const before = { row: state.row, column: state.column };
+            const moved = () => {
+              const now = naming();
+              return now !== null && (now.row !== before.row || now.column !== before.column);
+            };
+            if (pressVerified(step, NAMING_SETTLE_FRAMES, moved) !== "changed") break;
+            continue;
+          }
+          // On the key: type it, then check the byte that actually landed.
+          const lengthBefore = state.text.length;
+          if (pressVerified("a", NAMING_SETTLE_FRAMES, () => (naming()?.text.length ?? 0) !== lengthBefore) !== "changed") {
+            break;
+          }
+          state = naming();
+          if (state !== null && state.text !== desired.slice(0, state.text.length)) {
+            // The cell typed something else (a transcribed-only key that was
+            // wrong): erase it and stop honestly rather than confirm a typo.
+            press("b", NAMING_SETTLE_FRAMES);
+            endedBecause = "input_not_registered";
+            break;
+          }
+        }
+
+        const fullyTyped = naming()?.text === desired;
+        if (submit && fullyTyped && (endedBecause === "confirmed" || endedBecause === "typed")) {
+          endedBecause = "confirmed";
+          // START jumps to OK from anywhere — verified on the letter pages
+          // only, so a symbols-page entry cycles back to the upper page first.
+          if (naming()?.page === "symbols") {
+            const before = naming()?.page;
+            pressVerified("select", NAMING_PAGE_SETTLE_FRAMES, () => naming()?.page !== before);
+          }
+          const onOk = () => {
+            const now = naming();
+            return now !== null && now.row === OK_ROW && now.column === BUTTON_COLUMN[now.page];
+          };
+          if (!onOk()) pressVerified("start", NAMING_SETTLE_FRAMES, onOk);
+          if (onOk() && press("a", NAMING_SETTLE_FRAMES)) {
+            // The close runs a callback chain about 37 frames long.
+            for (let waited = 0; naming() !== null && waited < NAMING_CLOSE_WAIT_FRAMES; ) {
+              this.core.advanceFrames(NAMING_SETTLE_FRAMES);
+              framesSpent += NAMING_SETTLE_FRAMES;
+              waited += NAMING_SETTLE_FRAMES;
+            }
+          }
+          if (naming() !== null) endedBecause = "input_not_registered";
+        }
+
+        const state = this.core.gameState();
+        this.record(
+          actionId,
+          "enter_text",
+          `Typed "${desired}" through ${String(presses)} presses (${endedBecause})`,
+        );
+        return {
+          text: desired,
+          typed: state.naming?.text ?? (endedBecause === "confirmed" ? desired : typedSoFar),
+          submitted: submit,
+          confirmed: endedBecause === "confirmed" && state.naming == null,
+          presses,
+          framesSpent,
+          endedBecause,
+          frame: state.frame,
+          mode: state.mode,
+          position: state.position,
+          facing: state.facing,
+          ...(state.menu ? { menu: state.menu } : {}),
           ramStateSha256: this.core.ramStateSha256(),
         };
       }
@@ -691,6 +1023,10 @@ function enforceCapability(action: GbaEmulatorAction, bounds: GbaEmulatorResourc
       // A route is input, so it needs the input capability and no new grant:
       // walking is a burst of the presses the session was already allowed.
       walk_to: "emulator.gba.input",
+      // A conversation is a burst of A presses, by the same reasoning.
+      advance_dialog: "emulator.gba.input",
+      // A name is a burst of cursor moves and A presses, by the same reasoning.
+      enter_text: "emulator.gba.input",
       frame_advance: "emulator.gba.frame_advance",
       wait: "emulator.gba.wait",
     } as const
@@ -712,6 +1048,44 @@ function boundedSummary(value: string): string {
 
 /** Frames per step. 16 is the documented hold that commits a move rather than a turn. */
 const WALK_HOLD_FRAMES = 16;
+
+/** A dialog advance registers on a short tap; the full step hold would waste frames. */
+const DIALOG_HOLD_FRAMES = 4;
+
+/** How long to let text print between state checks while a box is not ready. */
+const DIALOG_PRINT_WAIT_FRAMES = 12;
+
+/**
+ * Frames of "open but not ready" to tolerate before pressing A anyway. Some
+ * boxes never park on the wait-for-press native (signs, scripted text), and in
+ * FireRed a press during printing accelerates it, so the stall-break is both
+ * an escape hatch and a speed-up rather than a wasted input.
+ */
+const DIALOG_STALL_FRAMES = 60;
+
+/**
+ * How long a script may hold a boxless screen before advance_dialog gives up
+ * on it. Ten seconds of game time covers every scripted beat the playthrough
+ * has met (the starter fanfare runs about four); a hold longer than this is a
+ * cutscene the driver should watch deliberately with frame_advance instead.
+ */
+const SCRIPT_HOLD_MAX_FRAMES = 600;
+
+/** An 8-frame hold plus release lands exactly one naming-screen cursor step. */
+const NAMING_HOLD_FRAMES = 8;
+
+/** Frames for a press to settle before its effect is read back. */
+const NAMING_SETTLE_FRAMES = 12;
+
+/**
+ * Frames after SELECT before the keyboard takes d-pad input again — the
+ * page-swap animation eats presses for about thirty frames (observed twice in
+ * the naming probe), so the settle stays comfortably past it.
+ */
+const NAMING_PAGE_SETTLE_FRAMES = 64;
+
+/** The confirm's close callback chain runs ~37 frames; wait a little past it. */
+const NAMING_CLOSE_WAIT_FRAMES = 120;
 
 /** Ceiling on tiles explored while planning, so a large map cannot stall a turn. */
 const MAX_WALK_SEARCH_TILES = 4_096;
@@ -765,7 +1139,7 @@ export function planWalk(
         cameFrom.set(id, { prev: key(tile.x, tile.y), step: { button: step.button, x, y } });
         if (x === to.x && y === to.y) {
           const path: PlannedWalkStep[] = [];
-          for (let at = id; at !== key(from.x, from.y); ) {
+          for (let at = id; at !== key(from.x, from.y);) {
             const entry = cameFrom.get(at);
             if (entry === undefined) return null;
             path.push(entry.step);

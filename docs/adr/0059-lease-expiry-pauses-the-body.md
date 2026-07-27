@@ -49,7 +49,7 @@ runtime now separates the two consequences that were previously fused:
   but the world is kept.
 - **Revocation stays final.** Explicit stop, emergency stop, and adapter
   failure still revoke, and nothing recovers a revoked session. Those are
-  decisions *about the session*; expiry is only the absence of its holder.
+  decisions _about the session_; expiry is only the absence of its holder.
 
 ### Use renews the lease
 
@@ -90,7 +90,7 @@ acting.
   observable rather than silent.
 - The lease still does its containment job. An idle holder frees the body for
   the next writer, emergency stop remains unrecoverable, and a vanished
-  *process* is still handled where it always was — body-lock liveness and
+  _process_ is still handled where it always was — body-lock liveness and
   `reconcile`.
 - `ReconcileEnvironmentReport.stoppedExpired` is now `expired`: a runner restart
   over a lapsed record pauses it rather than killing it. World state still does

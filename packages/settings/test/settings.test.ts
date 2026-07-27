@@ -4,13 +4,17 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   DiscordSettingsSchema,
+  VoiceSettingsSchema,
   applyDiscordSettingsToEnvironment,
+  applyVoiceSettingsToEnvironment,
   SettingsStore,
   assertNoSecretShapedValue,
   defaultSettingsPath,
   discordSettingsToEnvironment,
   emptySettings,
   resolveDiscordSettings,
+  resolveVoiceSettings,
+  voiceSettingsToEnvironment,
 } from "../src/index.ts";
 
 async function tempStore(): Promise<SettingsStore> {
@@ -140,5 +144,92 @@ describe("discord settings resolution", () => {
     // Disabled flags are omitted rather than set to "false", so a stale export
     // cannot accidentally enable a plane.
     expect(env["DISCORD_VOICE_ENABLED"]).toBeUndefined();
+    expect(env["CLANKIE_POSSESSOR_VOICE_ENABLED"]).toBeUndefined();
+  });
+
+  it("carries the possessor voice seam flag so a bridge restart cannot silently mute play", () => {
+    // The env-only flag muted his playthroughs whenever the bridge restarted
+    // from a shell without it. Stored, deny-by-default, env still wins.
+    const enabled = DiscordSettingsSchema.parse({ possessorVoiceEnabled: true });
+    expect(discordSettingsToEnvironment(enabled)["CLANKIE_POSSESSOR_VOICE_ENABLED"]).toBe("true");
+
+    const filled = {} as NodeJS.ProcessEnv;
+    expect(applyDiscordSettingsToEnvironment(enabled, filled)).toContain("CLANKIE_POSSESSOR_VOICE_ENABLED");
+    expect(filled["CLANKIE_POSSESSOR_VOICE_ENABLED"]).toBe("true");
+
+    const overridden = resolveDiscordSettings(enabled, {
+      CLANKIE_POSSESSOR_VOICE_ENABLED: "false",
+    } as NodeJS.ProcessEnv);
+    expect(overridden.settings.possessorVoiceEnabled).toBe(false);
+    expect(overridden.overriddenByEnvironment).toContain("CLANKIE_POSSESSOR_VOICE_ENABLED");
+  });
+
+  it("carries the voice consent policy, defaulting to explicit opt-in", () => {
+    // Presence-as-consent is an owner decision (ADR 0045's boundary made
+    // configurable); the default preserves the explicit policy exactly.
+    expect(discordSettingsToEnvironment(stored)["DISCORD_VOICE_CONSENT_POLICY"]).toBe("explicit");
+    const roomConsents = DiscordSettingsSchema.parse({ voiceConsentPolicy: "presence" });
+    expect(discordSettingsToEnvironment(roomConsents)["DISCORD_VOICE_CONSENT_POLICY"]).toBe("presence");
+    const overridden = resolveDiscordSettings(roomConsents, {
+      DISCORD_VOICE_CONSENT_POLICY: "explicit",
+    } as NodeJS.ProcessEnv);
+    expect(overridden.settings.voiceConsentPolicy).toBe("explicit");
+  });
+});
+
+describe("voice settings resolution", () => {
+  it("defaults to the OpenAI realtime voice and projects nothing", () => {
+    const settings = VoiceSettingsSchema.parse({});
+    expect(settings.ttsProvider).toBe("openai");
+    // Nothing to project: the runtime's own defaults apply, and the default
+    // provider is omitted exactly like a disabled flag.
+    expect(voiceSettingsToEnvironment(settings)).toEqual({});
+  });
+
+  it("requires an ElevenLabs voice id before the provider can be elevenlabs", () => {
+    expect(() => VoiceSettingsSchema.parse({ ttsProvider: "elevenlabs" })).toThrow(/elevenLabsVoiceId/);
+    expect(() => VoiceSettingsSchema.parse({ elevenLabsVoiceId: "not a safe id!" })).toThrow();
+  });
+
+  it("projects the ElevenLabs configuration only under its provider", () => {
+    const elevenLabs = VoiceSettingsSchema.parse({
+      ttsProvider: "elevenlabs",
+      elevenLabsVoiceId: "voice_abc123",
+      elevenLabsModelId: "eleven_flash_v2_5",
+      openAiVoice: "marin",
+    });
+    expect(voiceSettingsToEnvironment(elevenLabs)).toEqual({
+      CLANKIE_VOICE_TTS_PROVIDER: "elevenlabs",
+      CLANKIE_VOICE_ELEVENLABS_VOICE_ID: "voice_abc123",
+      CLANKIE_VOICE_ELEVENLABS_MODEL_ID: "eleven_flash_v2_5",
+      CLANKIE_VOICE_REALTIME_VOICE: "marin",
+    });
+
+    // Stored ElevenLabs ids with the openai provider are inactive
+    // configuration, and the projection must not manufacture the env parser's
+    // set-but-ignored failure from them.
+    const inactive = VoiceSettingsSchema.parse({
+      ttsProvider: "openai",
+      openAiVoice: "cedar",
+      elevenLabsVoiceId: "voice_abc123",
+    });
+    expect(voiceSettingsToEnvironment(inactive)).toEqual({ CLANKIE_VOICE_REALTIME_VOICE: "cedar" });
+  });
+
+  it("fills only unset names and lets the environment win on read", () => {
+    const settings = VoiceSettingsSchema.parse({
+      ttsProvider: "elevenlabs",
+      elevenLabsVoiceId: "voice_abc123",
+    });
+    const env = { CLANKIE_VOICE_ELEVENLABS_VOICE_ID: "voice_from_shell" } as NodeJS.ProcessEnv;
+    const applied = applyVoiceSettingsToEnvironment(settings, env);
+    expect(env["CLANKIE_VOICE_ELEVENLABS_VOICE_ID"]).toBe("voice_from_shell");
+    expect(applied).toEqual(["CLANKIE_VOICE_TTS_PROVIDER"]);
+
+    const resolved = resolveVoiceSettings(settings, {
+      CLANKIE_VOICE_ELEVENLABS_VOICE_ID: "voice_from_shell",
+    } as NodeJS.ProcessEnv);
+    expect(resolved.settings.elevenLabsVoiceId).toBe("voice_from_shell");
+    expect(resolved.overriddenByEnvironment).toEqual(["CLANKIE_VOICE_ELEVENLABS_VOICE_ID"]);
   });
 });

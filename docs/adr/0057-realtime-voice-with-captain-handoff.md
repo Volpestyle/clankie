@@ -33,7 +33,7 @@ second implementation of that is the "two souls" outcome
 ## Decision
 
 `gpt-realtime-2.1` owns the ears, the mouth, and turn-taking in a Discord voice
-channel. The captain owns everything Clankie can *do*. The realtime session
+channel. The captain owns everything Clankie can _do_. The realtime session
 reaches it through exactly one tool.
 
 ```mermaid
@@ -89,7 +89,7 @@ Voice and Captain.
 ### Fencing the controller is a safety improvement
 
 Spoken input has never been able to approve privileged work, but today that is
-enforced downstream of a captain that *does* hold every tool. Under this
+enforced downstream of a captain that _does_ hold every tool. Under this
 decision the realtime agent holds **no privileged tool at all** — `ask_clankie`
 is its entire surface. A realtime model that is charmed, confused, or
 prompt-injected by room audio cannot execute anything, because it has nothing to
@@ -131,7 +131,7 @@ speaker identity is injected out of band: on a Discord `speaking` transition, a
 therefore comes from the gateway, which is authenticated, rather than from voice
 characteristics, which are not.
 
-Consent is *stronger* than a room microphone rather than weaker: an unconsented
+Consent is _stronger_ than a room microphone rather than weaker: an unconsented
 participant is never subscribed, so their audio never reaches
 `input_audio_buffer.append` at all. Opt-out, leaving the channel, bot leave,
 shutdown, and restart revoke as they do today.
@@ -142,12 +142,12 @@ The Realtime API's defaults assume one user talking to one assistant. Four of
 them are wrong for a Discord voice channel, and they are wrong in ways that get
 worse as the room gets livelier:
 
-| Default | What it does in a group |
-| --- | --- |
-| `turn_detection.create_response: true` | He answers every utterance, including the ones two other people exchange with each other |
+| Default                                   | What it does in a group                                                                                                     |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `turn_detection.create_response: true`    | He answers every utterance, including the ones two other people exchange with each other                                    |
 | `turn_detection.interrupt_response: true` | Anyone speaking truncates him — he cannot finish a sentence in a busy room, even when the speaker is answering someone else |
-| single input buffer | No notion of who is talking, and simultaneous speakers arrive as one signal |
-| conversation accumulates | Every overheard word enters context and is re-billed on every subsequent response |
+| single input buffer                       | No notion of who is talking, and simultaneous speakers arrive as one signal                                                 |
+| conversation accumulates                  | Every overheard word enters context and is re-billed on every subsequent response                                           |
 
 The text plane already faced the same question and ADR 0051 answered it with a
 principle this decision inherits: **deciding to stay quiet must not cost a model
@@ -191,7 +191,7 @@ transcript window as `conversation.item.create` text so he has the context he
 just overheard, and drives `response.create` explicitly. While the floor is
 held, follow-ups do not need his name.
 
-In both states everyone consented is always *heard* and nobody is ever
+In both states everyone consented is always _heard_ and nobody is ever
 auto-answered: no utterance reaches `response.create` without the floor logic
 deciding it should. `persona.replyPolicy` governs that decision exactly as it
 governs text — `addressed` (the default) runs the machine above, and `all` means
@@ -215,11 +215,11 @@ transcript stream:
 
 Three situations, one question:
 
-| Situation | Answer | Cost |
-| --- | --- | --- |
-| Someone addressed him | yes, trivially | free — `addressesCharacter()`, no model |
-| Nobody addressed him, but he has something worth saying | volition decides | one cheap gated call |
-| He holds the floor and the room has moved on | no reason → decay | the same call, answering no |
+| Situation                                               | Answer            | Cost                                    |
+| ------------------------------------------------------- | ----------------- | --------------------------------------- |
+| Someone addressed him                                   | yes, trivially    | free — `addressesCharacter()`, no model |
+| Nobody addressed him, but he has something worth saying | volition decides  | one cheap gated call                    |
+| He holds the floor and the room has moved on            | no reason → decay | the same call, answering no             |
 
 Release stops being a signal to detect and becomes the absence of a reason to
 hold the floor. The identical mechanism that lets him re-engage unprompted is
@@ -230,7 +230,7 @@ This is [ADR 0056](0056-voice-is-a-separate-agent-from-the-player.md)'s finding
 applied to a room instead of a game, and its measurement is the reason volition
 is a dedicated call rather than a flag on something else: speech offered as an
 optional field on another decision produced silence in 15 of 16 turns across
-four prompt revisions, and only a decision whose *entire* job was whether to
+four prompt revisions, and only a decision whose _entire_ job was whether to
 speak moved it. A "should I also say something?" boolean bolted onto the wake
 check would reproduce that failure exactly.
 

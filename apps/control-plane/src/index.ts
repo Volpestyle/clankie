@@ -8,8 +8,10 @@ import {
   ensureDiscordUserVoiceBridgeCredential,
   ensureDiscordVoiceBridgeCredential,
   ensureOperatorCredential,
+  ensureRunnerCredential,
 } from "@clankie/credential-broker";
 import { compileDoctrine, loadDoctrineFile, projectCaptainCeremony } from "@clankie/doctrine";
+import { defaultGbaBodyRootDir, observeBodyHolder } from "@clankie/body-lock";
 import { SqliteEventStore } from "@clankie/event-store";
 import { createLogger } from "@clankie/observability";
 import { MemoryStore } from "@clankie/memory-store";
@@ -74,13 +76,19 @@ const memoryStorePath = resolve(
 const memoryStore = new MemoryStore(memoryStorePath, {
   doctrine: doctrine.profile.memory,
 });
-const runnerToken = process.env.CLANKIE_RUNNER_TOKEN;
 const captainToken = process.env.CLANKIE_CAPTAIN_TOKEN;
 const captainSteerSourceLane = parseCaptainSteerSourceLane(
   process.env.CLANKIE_CAPTAIN_STEER_SOURCE_LANE ?? "api",
 );
 const operatorCredentialStore = createDefaultCredentialStore();
 await ensureOperatorCredential({ env: process.env, store: operatorCredentialStore });
+// Env wins when deliberately set (tests, split deployments) — then it must be
+// set for the runner too. Otherwise the broker-owned bearer applies, so a
+// restart from a token-less shell can never silently lose the runner plane
+// again: three separate outages in one evening taught this line its shape.
+const runnerToken =
+  process.env.CLANKIE_RUNNER_TOKEN ??
+  (await ensureRunnerCredential({ env: process.env, store: operatorCredentialStore }));
 const discordBridgeToken = await ensureDiscordBridgeCredential({
   env: process.env,
   store: operatorCredentialStore,
@@ -174,6 +182,15 @@ const app = await createControlPlane({
   doctrine,
   eventStore,
   memoryStore,
+  // Read-only view of the shared body lock (VUH-938): the one authority that
+  // sees every suitor for the body, including MCP possessors the embodiment
+  // registry never hears about. Observation only — never acquires or releases.
+  bodyPossession: () => {
+    const holder = observeBodyHolder(defaultGbaBodyRootDir(process.env));
+    return holder === null
+      ? null
+      : { schemaVersion: 1 as const, holderId: holder.holderId, acquiredAt: holder.acquiredAt };
+  },
   workerSteeringStore: new FileWorkerSteeringStore(`${eventStorePath}.steering.json`),
   authorizeWorkerSteer: createDeterministicWorkerSteerAuthorizer(),
   ...(deviceSessionKey === undefined ? {} : { deviceSessionKey }),

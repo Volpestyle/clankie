@@ -44,6 +44,12 @@ const DISCORD_CREDENTIALS = [
     hint: "voice STT/TTS",
     description: "Reused by group voice for transcription and speech.",
   },
+  {
+    id: "elevenlabs",
+    label: "ElevenLabs key",
+    hint: "external voice",
+    description: "Speech synthesis when /voice selects the ElevenLabs provider (ADR 0070).",
+  },
 ] as const;
 
 /**
@@ -433,8 +439,7 @@ async function editIngress(shell: ClankieFaceShell, services: DiscordCommandServ
   if (guilds === undefined) return;
 
   const channels = await flow.readText({
-    message:
-      "Channel ids Clankie may read (comma separated) — blank admits every channel in those servers",
+    message: "Channel ids Clankie may read (comma separated) — blank admits every channel in those servers",
     placeholder: current.ingressChannelIds.join(",") || "blank = all channels",
     validate: validateSnowflakeList,
   });

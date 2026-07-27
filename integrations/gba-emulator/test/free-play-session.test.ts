@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -97,7 +97,8 @@ describe("observe-only sessions", () => {
     const rootDir = mkdtempSync(path.join(tmpdir(), "observe-only-"));
     const first = await createFreePlaySession({ rootDir, scenario, fixtureSha256, acquireBody: false });
     const second = await createFreePlaySession({ rootDir, scenario, fixtureSha256, acquireBody: false });
-    expect(second.sessionId).toBe(first.sessionId);
+    // Each server is its own run: distinct identities, coexisting freely.
+    expect(second.sessionId).not.toBe(first.sessionId);
     first.close();
     second.close();
   });
@@ -113,5 +114,49 @@ describe("observe-only sessions", () => {
     );
     driver.close();
     observer.close();
+  });
+});
+
+describe("per-run session identity", () => {
+  it("keeps each run's record instead of overwriting the last one", async () => {
+    // With one stable id, the second playthrough reused the first one's record
+    // file and destroyed its action history the moment it started. A run is a
+    // run: two playthroughs, two identities, two records on disk.
+    const rootDir = mkdtempSync(path.join(tmpdir(), "per-run-"));
+    const first = await createFreePlaySession({ rootDir, scenario, fixtureSha256 });
+    await first.io.act({ kind: "button_press", button: "a", holdFrames: 4 });
+    first.close();
+    const second = await createFreePlaySession({ rootDir, scenario, fixtureSha256 });
+    await second.io.act({ kind: "button_press", button: "a", holdFrames: 4 });
+    second.close();
+    expect(second.sessionId).not.toBe(first.sessionId);
+    expect(first.sessionId).toMatch(/^gba-free-play:.+:v\d+:/u);
+    const records = readdirSync(path.join(rootDir, "environment-sessions")).filter((name) =>
+      name.endsWith(".json"),
+    );
+    expect(records).toHaveLength(2);
+  });
+});
+
+describe("stalled wait recovery", () => {
+  it("cancels a timed-out wait at the next act instead of wedging the playthrough", async () => {
+    // The 2026-07-26 marathon softlock: he chose a wait, nothing in free play
+    // ever completes one, and the adapter refused every following action with
+    // action_already_pending until the process died. Mid-run deadline
+    // enforcement turns that into a bounded pause.
+    const rootDir = mkdtempSync(path.join(tmpdir(), "wait-wedge-"));
+    const now = { value: new Date("2026-07-19T00:00:00.000Z") };
+    const session = await createFreePlaySession({
+      rootDir,
+      scenario,
+      fixtureSha256,
+      clock: () => now.value,
+    });
+    const wait = await session.io.act({ kind: "wait", durationMs: 1_000 });
+    expect(wait.status).toBe("running");
+    now.value = new Date("2026-07-19T00:00:06.000Z"); // past the 5s action deadline
+    const next = await session.io.act({ kind: "button_press", button: "a", holdFrames: 4 });
+    expect(next.status).toBe("completed");
+    session.close();
   });
 });

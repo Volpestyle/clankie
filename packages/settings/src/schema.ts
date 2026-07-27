@@ -48,6 +48,22 @@ export const DiscordSettingsSchema = z
      * an operator deliberately opens it.
      */
     voiceJoinPolicy: z.enum(["ambient", "guild_members"]).default("ambient"),
+    /**
+     * Who counts as consented to being heard (ADR 0045). `explicit` requires
+     * `/clankie voice-consent opt-in` per participant per session; `presence`
+     * treats being in his active channel as consent — the owner's call for a
+     * private room whose participants know he transcribes when he is in it.
+     * An explicit opt-out binds under either policy.
+     */
+    voiceConsentPolicy: z.enum(["explicit", "presence"]).default("explicit"),
+    /**
+     * The possessor voice seam (ADR 0064, ADR 0067): whether a process driving
+     * his body — asked play, an MCP possessor — may speak and hear through his
+     * live voice session. Deny-by-default like every authority binding, and
+     * stored here so a bridge restart does not silently mute his playthroughs
+     * the way an env-only flag did.
+     */
+    possessorVoiceEnabled: z.boolean().default(false),
 
     /** Activity plane (ADR 0047): surface → embedded application id. */
     activityApplicationIdGba: SnowflakeSchema.optional(),
@@ -98,6 +114,44 @@ export const PersonaSettingsSchema = z
   .strict();
 export type PersonaSettings = z.infer<typeof PersonaSettingsSchema>;
 
+/** Vendor identifiers travel in URLs and protocol frames; constrain them early. */
+const VendorIdentifierSchema = z
+  .string()
+  .regex(/^[\w-]{1,128}$/u, "must be at most 128 word characters or hyphens");
+
+/**
+ * How Clankie sounds ([ADR 0070](../../../docs/adr/0070-external-voice-via-streaming-tts.md))
+ * — a peer of `persona` for the same reason persona is a peer of `discord`:
+ * this is who he *is* across surfaces, not a Discord authority knob. Like the
+ * rest of settings these are public identifiers; the ElevenLabs API key lives
+ * in the credential broker under provider id `elevenlabs`, never here.
+ */
+export const VoiceSettingsSchema = z
+  .object({
+    /**
+     * Who synthesizes his speech: `openai` is the realtime model's own voice,
+     * `elevenlabs` streams the model's words through ElevenLabs TTS.
+     */
+    ttsProvider: z.enum(["openai", "elevenlabs"]).default("openai"),
+    /** OpenAI realtime voice name (e.g. `marin`); unset defers to the runtime default. */
+    openAiVoice: z.string().min(1).max(64).optional(),
+    /** Public ElevenLabs voice identifier, required when {@link ttsProvider} is `elevenlabs`. */
+    elevenLabsVoiceId: VendorIdentifierSchema.optional(),
+    /** ElevenLabs model (e.g. `eleven_flash_v2_5`); unset defers to the runtime default. */
+    elevenLabsModelId: VendorIdentifierSchema.optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.ttsProvider === "elevenlabs" && value.elevenLabsVoiceId === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["elevenLabsVoiceId"],
+        message: "required when ttsProvider is elevenlabs",
+      });
+    }
+  });
+export type VoiceSettings = z.infer<typeof VoiceSettingsSchema>;
+
 export const ClankieSettingsSchema = z
   .object({
     schemaVersion: z.literal(SETTINGS_SCHEMA_VERSION),
@@ -105,6 +159,7 @@ export const ClankieSettingsSchema = z
     // which a bare `{}` literal does not satisfy.
     discord: DiscordSettingsSchema.default(() => DiscordSettingsSchema.parse({})),
     persona: PersonaSettingsSchema.default(() => PersonaSettingsSchema.parse({})),
+    voice: VoiceSettingsSchema.default(() => VoiceSettingsSchema.parse({})),
   })
   .strict();
 export type ClankieSettings = z.infer<typeof ClankieSettingsSchema>;

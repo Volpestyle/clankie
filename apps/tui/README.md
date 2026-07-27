@@ -76,8 +76,35 @@ reverse. Each service keeps an atomic mode-0600 pid record at
 `${XDG_STATE_HOME:-~/.local/state}/clankie/<id>-service.json` and logs to
 `<id>.log` beside it. Before signalling, the launcher re-reads the recorded pid's
 live command and refuses if it no longer looks like the service it started, so a
-stale record can never kill a process that inherited the pid. A service started
-outside the launcher is reported, never adopted and never killed.
+stale record can never kill a process that inherited the pid.
+
+### Restarting a captain the launcher did not start
+
+`clankie restart` adopts an unowned **captain** rather than refusing it, because
+refusing left the operator unable to restart Clankie's own captain whenever it
+had been started by hand or outlived the run that spawned it — the remedy was a
+manual `lsof` and `kill`. Adoption never trusts the endpoint's word for it: the
+listening pid is read from the port, and its live command must contain the
+`appRoot` that captain itself reported (or match the launcher's own start
+command) before anything is signalled. A listener that cannot be proven to be
+this checkout's captain-eve is still reported and never killed. The other
+services are unchanged — reported, never adopted.
+
+### Identity and currency are different questions
+
+A captain is inspected for two things, and they have opposite remedies:
+
+| Question                        | Answered by                   | When it fails                                         |
+| ------------------------------- | ----------------------------- | ----------------------------------------------------- |
+| Is this Clankie's captain?      | agent name + ready eve health | `unhealthy` — a stranger on the port, never signalled |
+| Is it built from this checkout? | authored tool inventory       | `stale` — ours, rebuilt by `clankie restart`          |
+
+Keeping the tool inventory out of the identity check is load-bearing. While it
+was part of identity, adding any captain tool made the running captain fail to
+identify as the authored captain, and `restart` refused to touch it — a captain
+that had merely fallen behind read as an intruder. A `stale` inspection names
+which tools drifted, so the message says what is old rather than that something
+is wrong.
 
 Start is health gated: it returns when the service's probe reports healthy, not
 when the child spawns. The captain probes `/eve/v1/health` and `/eve/v1/info`,
@@ -191,7 +218,7 @@ src/observation/  Read-only sequenced event source, durable observer cursor,
   another prompt.
 - Mouse: wheel scrolls, drag selects (OSC-52 copy), scrollbar gutter drags, click collapses tool blocks.
 - `/layout` moves the input/status bands, toggles the header, and picks the spinner (`CLANKIE_TUI_*` env vars seed the defaults).
-- `/auth` manages provider credentials (masked API-key entry into the Keychain broker, ChatGPT/Codex browser or device OAuth, Claude Pro/Max manual-code OAuth, local credential removal, and harness-login guidance); `/provider` chooses a provider context per model role; `/model` picks an actual model from that provider in the models.dev registry; `/effort` sets reasoning variants. Provider intent stays process-local and is reconstructed from the configured `provider/model` ref after restart, so non-secret config has one authority in `~/.config/clankie/clankie.json`.
+- `/auth` manages provider credentials (masked API-key entry into the Keychain broker — LLM providers plus the featured `elevenlabs` voice credential — ChatGPT/Codex browser or device OAuth, Claude Pro/Max manual-code OAuth, local credential removal, and harness-login guidance); `/provider` chooses a provider context per model role; `/model` picks an actual model from that provider in the models.dev registry; `/effort` sets reasoning variants. Provider intent stays process-local and is reconstructed from the configured `provider/model` ref after restart, so non-secret config has one authority in `~/.config/clankie/clankie.json`.
 - OpenAI API-key access is `openai/<model>`; ChatGPT subscription access is the
   explicit `openai-codex/<model>` provider. They never borrow each other's
   credentials. While a subscription credential is stored it supersedes the API

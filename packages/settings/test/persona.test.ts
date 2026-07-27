@@ -45,6 +45,9 @@ describe("persona instructions", () => {
     const operator = personaInstructions(persona(), "operator");
     expect(operator).toContain("evidence-first");
     expect(operator).not.toContain("participant in this room");
+    // Evidence-first is scoped to work: a casual "were you just in discord?"
+    // must get a person's answer, not a telemetry readout.
+    expect(operator).toMatch(/not like a status report/u);
   });
 
   it("states in every register that voice changes and authority does not", () => {

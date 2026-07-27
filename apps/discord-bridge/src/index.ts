@@ -47,8 +47,13 @@ import {
   type DiscordBridgeReceipt,
   type DiscordInboundContextMessage,
 } from "@clankie/discord-presence-core";
-import type { DiscordVoiceEvidence } from "@clankie/protocol";
-import { applyDiscordSettingsToEnvironment, characterNames, SettingsStore } from "@clankie/settings";
+import { DiscordPresenceWriteSchema, type DiscordVoiceEvidence } from "@clankie/protocol";
+import {
+  applyDiscordSettingsToEnvironment,
+  applyVoiceSettingsToEnvironment,
+  characterNames,
+  SettingsStore,
+} from "@clankie/settings";
 import { commands, DISCORD_COMMAND_NAME, DISCORD_SUBCOMMANDS } from "./commands.ts";
 import {
   createVoiceBriefingProvider,
@@ -84,7 +89,10 @@ import { MissionThreadRegistry, ZERO_RETENTION_STATUS, threadNameForMission } fr
 // guards afterwards means a token-shaped value that ever reached the settings
 // schema by mistake would still be caught here rather than used.
 const storedSettings = await new SettingsStore().load();
-const settingsFilledNames = applyDiscordSettingsToEnvironment(storedSettings.discord);
+const settingsFilledNames = [
+  ...applyDiscordSettingsToEnvironment(storedSettings.discord),
+  ...applyVoiceSettingsToEnvironment(storedSettings.voice),
+];
 
 if (process.env.DISCORD_USER_TOKEN) {
   throw new Error("DISCORD_USER_TOKEN must not be set for the official Discord bot bridge.");
@@ -125,6 +133,11 @@ if (voiceEnabled && voiceBridgeToken === undefined) {
 }
 if (voiceEnabled && process.env.OPENAI_API_KEY) {
   throw new Error("OPENAI_API_KEY must not be set. Reuse the brokered openai credential.");
+}
+if (voiceEnabled && (process.env.ELEVENLABS_API_KEY ?? process.env.XI_API_KEY)) {
+  throw new Error(
+    "ELEVENLABS_API_KEY and XI_API_KEY must not be set. Store the ElevenLabs key under the brokered elevenlabs provider.",
+  );
 }
 const authenticatedSurfaceUrl =
   process.env.CLANKIE_AUTHENTICATED_SURFACE_URL ?? "http://127.0.0.1:4311/approvals";
@@ -169,9 +182,13 @@ const textIngressEnabled = process.env.DISCORD_TEXT_INGRESS_ENABLED === "true";
 const textIngressContextLimit = parseContextMessageLimit(process.env.DISCORD_INGRESS_CONTEXT_MESSAGES);
 const ingressGuildIds = parseDiscordIdSet(process.env.DISCORD_INGRESS_GUILD_IDS);
 const ingressChannelIds = parseDiscordIdSet(process.env.DISCORD_INGRESS_CHANNEL_IDS);
+// One advertised port for every bridge-side presence write: text ingress
+// replies and the slash-invoked activity launch go through the same live-claim
+// and tool-exposure guards.
+const presencePort = createAdvertisedDiscordPresencePort(api, presenceSession);
 const textIngress = textIngressEnabled
   ? new DiscordTextIngress(
-      createAdvertisedDiscordPresencePort(api, presenceSession),
+      presencePort,
       {
         characterId,
         credentialRef: "discord_bot",
@@ -223,6 +240,21 @@ if (voiceEnabled && openAiCredential?.type !== "api") {
 // Validated at startup like the rest of the env: truncation and idle auto-leave
 // are always configured, never defaulted to unbounded (ADR 0057, mission T6).
 const voiceRealtimeConfig = voiceEnabled ? parseVoiceRealtimeEnv(process.env) : undefined;
+// The external voice (ADR 0070) follows the exact openai credential shape:
+// broker-resolved, API-type only, resolved once at startup.
+const elevenLabsCredential =
+  voiceRealtimeConfig?.ttsProvider === "elevenlabs" ? await credentialStore.get("elevenlabs") : undefined;
+if (voiceRealtimeConfig?.ttsProvider === "elevenlabs" && elevenLabsCredential?.type !== "api") {
+  throw new Error(
+    "CLANKIE_VOICE_TTS_PROVIDER=elevenlabs requires a brokered elevenlabs API credential. " +
+      "Store the ElevenLabs API key under provider elevenlabs via /auth.",
+  );
+}
+// Who counts as consented to being heard (ADR 0045). Settings-backed like the
+// rest of the voice configuration; anything but the exact "presence" value
+// stays on the explicit opt-in policy.
+const voiceConsentPolicy =
+  process.env["DISCORD_VOICE_CONSENT_POLICY"] === "presence" ? ("presence" as const) : ("explicit" as const);
 const voiceSession =
   openAiCredential?.type !== "api" || voiceApi === undefined || voiceRealtimeConfig === undefined
     ? undefined
@@ -232,8 +264,10 @@ const voiceSession =
           credentialRef: "discord_bot",
           transportKind: "bot",
         }),
+        consentPolicy: voiceConsentPolicy,
         realtime: createVoiceRealtimePorts({
           apiKey: openAiCredential.key,
+          ...(elevenLabsCredential?.type === "api" ? { elevenLabsApiKey: elevenLabsCredential.key } : {}),
           config: voiceRealtimeConfig,
         }),
         briefing: createVoiceBriefingProvider(voiceApi),
@@ -319,6 +353,8 @@ const voicePresenceAsk: VoicePresenceAskOptions | undefined =
           voiceChannelIds,
           voiceSession,
         },
+        // Content-free by construction (ids, booleans, enums — never the body).
+        onTrace: (trace) => console.info(trace, "Discord voice presence ask"),
       };
 const registry = new MissionThreadRegistry({
   statePath: bridgeStatePath(),
@@ -355,11 +391,23 @@ const projector = new MissionThreadProjector(
 client.once("ready", async () => {
   void presenceSession.gatewayReady().catch(reportPresencePhaseFailure);
   const rest = new REST({ version: "10" }).setToken(token);
-  const guildId = process.env.DISCORD_GUILD_ID;
-  const route = guildId
-    ? Routes.applicationGuildCommands(applicationId, guildId)
-    : Routes.applicationCommands(applicationId);
-  await rest.put(route, { body: commands });
+  // Guild-scoped to every server he reads, not just the home guild: a member
+  // who can talk to him should see his command surface. Global registration
+  // stays the no-config fallback and is otherwise avoided — a global PUT
+  // overwrites ALL global commands, including the Discord-managed Entry Point
+  // command that makes the activity launchable from the launcher.
+  const commandGuildIds = new Set(
+    [process.env.DISCORD_GUILD_ID, ...ingressGuildIds].filter(
+      (id): id is string => id !== undefined && id.length > 0,
+    ),
+  );
+  if (commandGuildIds.size === 0) {
+    await rest.put(Routes.applicationCommands(applicationId), { body: commands });
+  } else {
+    for (const commandGuildId of commandGuildIds) {
+      await rest.put(Routes.applicationGuildCommands(applicationId, commandGuildId), { body: commands });
+    }
+  }
 
   for (const binding of registry.bindings()) {
     const channel = await client.channels.fetch(binding.threadId).catch(() => undefined);
@@ -419,8 +467,29 @@ client.on("invalidated", () => {
 client.on("voiceStateUpdate", (previous, current) => {
   voiceSession?.memberChannelChanged(current.guild.id, current.id, current.channelId ?? undefined);
   if (current.id === client.user?.id) {
+    // Names and occupants ride the presence record (VUH-939): this is the one
+    // point where the gateway objects are in hand. Occupants exclude the bot
+    // itself, are sorted by userId for byte-stable record JSON, and are capped
+    // to the schema bound. Cached voice states are the source, so members who
+    // joined before this process connected may be absent — ids stay authority.
+    const joinedChannel = current.channel;
     void presenceSession
-      .voiceStateChanged(current.guild.id, current.channelId !== null)
+      .voiceStateChanged(
+        current.guild.id,
+        current.channelId !== null,
+        current.channelId === null || joinedChannel === null
+          ? undefined
+          : {
+              guildName: current.guild.name,
+              channelId: current.channelId,
+              channelName: joinedChannel.name,
+              occupants: [...joinedChannel.members.values()]
+                .filter((member) => member.id !== client.user?.id)
+                .map((member) => ({ userId: member.id, displayName: member.displayName }))
+                .sort((left, right) => (left.userId < right.userId ? -1 : left.userId > right.userId ? 1 : 0))
+                .slice(0, 32),
+            },
+      )
       .catch(reportPresencePhaseFailure);
     const activeVoiceSession = voiceSession;
     const status = activeVoiceSession?.status();
@@ -447,17 +516,40 @@ client.on("messageCreate", async (message) => {
       mentionsBot: client.user !== null && message.mentions.users.has(client.user.id),
       body: message.content,
     };
+    // One context fetch per message at most, shared by the ask's decider and
+    // the captain turn — whichever reads first pays for both.
+    let contextRead: Promise<readonly DiscordInboundContextMessage[]> | undefined;
+    const loadContextOnce = () => (contextRead ??= readDiscordContext(message, textIngressContextLimit));
     // Decided and executed before the turn, and awaited, so his reply in the
     // same exchange reflects reality: he is the voice, the bridge is the
     // actor (ADR 0062). A closed gate resolves immediately at no cost.
     const voicePresenceNote =
       voicePresenceAsk === undefined
         ? undefined
-        : await handleVoicePresenceAsk(voicePresenceAsk, inbound, () => resolveVoiceMember(message));
+        : await handleVoicePresenceAsk(
+            voicePresenceAsk,
+            {
+              ...inbound,
+              // Read before the ingress turn touches its counters, so this is
+              // his engagement as of when the message arrived.
+              engagedInChannel: textIngress.engagedInChannel(message.channelId),
+              loadContext: async () =>
+                (await loadContextOnce()).map((line) => ({
+                  speaker:
+                    line.authorId === client.user?.id
+                      ? ("clankie" as const)
+                      : line.authorId === message.author.id
+                        ? ("asker" as const)
+                        : ("other" as const),
+                  body: line.body,
+                })),
+            },
+            () => resolveVoiceMember(message),
+          );
     const result = await textIngress.handle({
       ...inbound,
       ...(voicePresenceNote === undefined ? {} : { voicePresenceNote }),
-      loadContextMessages: () => readDiscordContext(message, textIngressContextLimit),
+      loadContextMessages: loadContextOnce,
     });
     if (result.state === "failed") {
       console.error(
@@ -894,9 +986,90 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
       await interaction.editReply({
         // Live-session audio residency (ADR 0057): the wording must never
         // promise per-turn discard.
-        content: renderVoiceJoinDisclosure(status.daveProtocolVersion),
+        content: renderVoiceJoinDisclosure(
+          status.daveProtocolVersion,
+          voiceRealtimeConfig?.ttsProvider ?? "openai",
+        ),
         allowedMentions: { parse: [] },
       });
+      return;
+    }
+    case "watch": {
+      // The launch link is the activity plane's designed entry (ADR 0047): an
+      // EMBEDDED_APPLICATION invite posted by the bot, not the client's
+      // activity launcher. Same tier as join — who may put him on a stage is
+      // who may point a camera at him.
+      const authority = authorizeVoicePresenceCommand(
+        commandPrincipal(interaction),
+        roleBindings,
+        voiceJoinPolicy,
+      );
+      if (!authority.allowed) {
+        await interaction.reply(authority.message);
+        return;
+      }
+      const member = interaction.member instanceof GuildMember ? interaction.member : undefined;
+      const channel = member?.voice.channel;
+      if (!interaction.guild || !channel) {
+        await interaction.reply({
+          content: "Join a voice channel first, then invoke this command.",
+          ephemeral: true,
+        });
+        return;
+      }
+      const channelAllowed = voiceChannelIds.size === 0 || voiceChannelIds.has(channel.id);
+      if (!voiceGuildIds.has(interaction.guild.id) || !channelAllowed) {
+        await interaction.reply({
+          content: "This guild voice channel is outside Clankie's configured voice allowlist.",
+          ephemeral: true,
+        });
+        return;
+      }
+      await interaction.deferReply({ ephemeral: true });
+      const health = await presencePort.getHealth();
+      const write = DiscordPresenceWriteSchema.parse({
+        schemaVersion: 1,
+        // Deterministic per channel: an operator approval recorded for this
+        // write matches the retried command instead of minting a fresh
+        // approval each attempt, and a repeat within the dedup window returns
+        // the already-posted link rather than piling up invites. The
+        // correlation id must be equally stable — approval matching compares
+        // it, so a per-interaction id would orphan the approval it earned.
+        idempotencyKey: `activity-start:gba:${channel.id}:v2`,
+        action: "discord.presence.activity_start",
+        identity: {
+          presenceSessionId: `discord:${interaction.guild.id}:${channel.id}`,
+          correlationId: `discord-activity-start:${channel.id}`,
+          profileHash: health.profileHash,
+          characterId,
+          credentialRef: "discord_bot",
+          transportKind: "bot",
+        },
+        payload: {
+          kind: "activity_start",
+          guildId: interaction.guild.id,
+          channelId: channel.id,
+          surface: "gba_emulator",
+        },
+      });
+      try {
+        await presencePort.executeDiscordPresenceAction(write);
+        await interaction.editReply({
+          content: "Launch link posted in the voice channel's chat — click it to open the watch surface.",
+          allowedMentions: { parse: [] },
+        });
+      } catch (error) {
+        // activity_start is publish-external, so the first use in a channel
+        // typically parks on the authenticated approval surface. Point there
+        // rather than pretending the link went out.
+        const message = sanitizeDiscordText(error instanceof Error ? error.message : String(error));
+        await interaction.editReply({
+          content:
+            `The launch was not posted: ${message}\n` +
+            "If this is a pending approval, decide it in the clankie TUI (/approvals) and run /clankie watch again.",
+          allowedMentions: { parse: [] },
+        });
+      }
       return;
     }
     case "voice-consent": {
@@ -935,7 +1108,11 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
         // Opt-in is where consent is actually granted, so the residency
         // disclosure travels in this private reply (the join disclosure was
         // only ever shown to the invoker).
-        content: renderVoiceConsentReply(consented, status.consentedParticipantCount),
+        content: renderVoiceConsentReply(
+          consented,
+          status.consentedParticipantCount,
+          voiceRealtimeConfig?.ttsProvider ?? "openai",
+        ),
         ephemeral: true,
         allowedMentions: { parse: [] },
       });

@@ -92,6 +92,7 @@ import {
   type ActionDecision,
   type ActionRequest,
   type ApprovalRequestRecord,
+  type BodyPossession,
   type CaptainChannelTurnResult,
   type DeviceGrantSet,
   type DeviceRecord,
@@ -150,7 +151,11 @@ import {
   type WorkerSteerOutcome,
 } from "./worker-steering.ts";
 import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
-import { DiscordPresenceSessionProjection, discordPresenceDomainEvent } from "./discord-presence-session.ts";
+import {
+  DiscordPresenceSessionProjection,
+  deriveDiscordVoiceHistory,
+  discordPresenceDomainEvent,
+} from "./discord-presence-session.ts";
 import {
   DISCORD_USER_SESSION_OPT_IN_MISSION_ID,
   DISCORD_USER_SESSION_OPT_IN_RECORDED,
@@ -307,6 +312,13 @@ export interface ControlPlaneDependencies {
    * cannot execute a user-session write even if one is somehow authenticated.
    */
   discordUserPresenceRuntime?: DiscordPresenceRuntimePort;
+  /**
+   * Read-only view of the cross-process body lock (VUH-938): who holds
+   * Clankie's body right now, liveness-checked. The composition root wires the
+   * shared body root; tests inject a fake. Absent means unwired, which reads
+   * as "nobody" — a missing observer must never invent a holder.
+   */
+  bodyPossession?: () => BodyPossession | null;
   /** Authenticates the outbound local runner. Missing configuration leaves execution unavailable. */
   authenticateRunner?: RunnerAuthenticator;
   /** Authenticates the captain/operator starting an already validated plan. */
@@ -1977,6 +1989,28 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
   });
 
   /**
+   * Completed voice stays with the room context captured at join time
+   * (VUH-940): where he was, when, and who shared the channel. A read-side
+   * projection over the durable phase stream — nothing is written, so "who was
+   * I just with" stays presence-class data and the episode ring (ADR 0054)
+   * remains reserved for notes Clankie composes himself.
+   */
+  app.get("/v1/discord/voice-history", async (context) => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") return context.json({ error: "captain_execution_unavailable" }, 503);
+    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
+    const rawLimit = context.req.query("limit");
+    const parsedLimit = rawLimit === undefined ? 5 : Number.parseInt(rawLimit, 10);
+    if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 32) {
+      return context.json({ error: "invalid_voice_history_limit" }, 400);
+    }
+    return context.json({
+      schemaVersion: 1 as const,
+      stays: deriveDiscordVoiceHistory(storedEvents, parsedLimit),
+    });
+  });
+
+  /**
    * Operator-readable presence status for `clankie status`.
    *
    * ADR 0024 requires operator status to come from the semantic phase stream
@@ -3221,8 +3255,40 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     return context.json(result);
   });
 
-  // Read by the captain tool and self-state, and by the runner's startup
-  // reconciliation — a dead runner's live session is only its own to disclaim.
+  /**
+   * Operator kill-switch for the live playthrough (asked play, ADR 0063). A
+   * stuck game must be stoppable from the machine that runs it without going
+   * through Discord: this submits an ordinary stop intent under the operator
+   * lane, so the runner winds the session down at the next turn boundary and
+   * mints its checkpoint exactly as an asked stop would — never a kill.
+   */
+  app.post("/v1/embodiment/sessions/live/stop", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable") {
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    }
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const live = embodiment.liveSession();
+    if (live === undefined) return context.json({ error: "not_playing" }, 404);
+    const result = await embodiment.submit({
+      kind: "stop",
+      schemaVersion: 1,
+      intentId: `operator-stop-${idFactory()}`,
+      originLane: "operator",
+      requestedBy: operator.operatorId,
+      requestedAt: clock().toISOString(),
+      sessionId: live.sessionId,
+    });
+    logger.info(
+      { sessionId: live.sessionId, operatorId: operator.operatorId, outcome: result.outcome },
+      "operator embodiment stop submitted",
+    );
+    return context.json(result);
+  });
+
+  // Read by the captain tool and self-state, by the runner's startup
+  // reconciliation — a dead runner's live session is only its own to disclaim —
+  // and by the operator's `clankie play status`.
   app.get("/v1/embodiment/sessions/live", async (context) => {
     const captain = await authenticateCaptain(context.req.raw, dependencies);
     if (captain !== "unavailable" && captain) {
@@ -3232,7 +3298,11 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     if (runner !== "unavailable" && runner) {
       return context.json({ session: embodiment.liveSession() ?? null });
     }
-    if (captain === "unavailable" && runner === "unavailable") {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator !== "unavailable" && operator) {
+      return context.json({ session: embodiment.liveSession() ?? null });
+    }
+    if (captain === "unavailable" && runner === "unavailable" && operator === "unavailable") {
       return context.json({ error: "captain_authentication_unavailable" }, 503);
     }
     return context.json({ error: "captain_authentication_required" }, 401);
@@ -3247,6 +3317,25 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     const session = embodiment.getSession(context.req.param("id"));
     if (session === undefined) return context.json({ error: "embodiment_session_not_found" }, 404);
     return context.json({ session });
+  });
+
+  /**
+   * Who holds Clankie's body right now (VUH-938). The embodiment registry only
+   * knows sessions it minted; the body lock sees every suitor, including an
+   * MCP possessor no session ever recorded (ADR 0053, ADR 0063). An unwired
+   * observer reports nobody rather than failing: this surface exists so the
+   * captain can say his body is busy, and it must never invent a holder.
+   */
+  app.get("/v1/embodiment/possession", async (context) => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") {
+      return context.json({ error: "captain_authentication_unavailable" }, 503);
+    }
+    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
+    return context.json({
+      schemaVersion: 1 as const,
+      possession: dependencies.bodyPossession?.() ?? null,
+    });
   });
 
   app.post("/v1/embodiment/claims", async (context) => {

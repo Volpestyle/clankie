@@ -49,9 +49,7 @@ describe("gba checkpoints", () => {
 
     // The companion scenario boots through the same fail-closed loader: it must
     // parse under the route schema and pin the checkpoint's own digest.
-    const scenario = RealGbaRouteScenarioSchema.parse(
-      JSON.parse(readFileSync(written.scenarioPath, "utf8")),
-    );
+    const scenario = RealGbaRouteScenarioSchema.parse(JSON.parse(readFileSync(written.scenarioPath, "utf8")));
     expect(scenario.savestateSha256).toBe(sha256(bytes));
     expect(scenario.savestateId).toBe(`checkpoint:${written.receipt.checkpointId}`);
     // The pinned fixture identity is untouched.
@@ -123,9 +121,9 @@ describe("gba checkpoints", () => {
     const movedId = `${written.receipt.checkpointId}-moved`;
     renameSync(written.directory, path.join(dir, movedId));
     expect(listGbaCheckpoints(dir)).toEqual([]);
-    expect(() =>
-      readGbaCheckpoint({ rootDir: dir, checkpointId: movedId, identity: cap.identity }),
-    ).toThrow("checkpoint_receipt_mismatch");
+    expect(() => readGbaCheckpoint({ rootDir: dir, checkpointId: movedId, identity: cap.identity })).toThrow(
+      "checkpoint_receipt_mismatch",
+    );
   });
 
   it("lists newest first and skips foreign files", () => {

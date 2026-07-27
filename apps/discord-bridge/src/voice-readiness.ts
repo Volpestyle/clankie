@@ -23,8 +23,10 @@ import {
   DEFAULT_VOICE_REALTIME_VOICE,
   DEFAULT_VOICE_TRANSCRIBE_MODEL,
   DEFAULT_VOICE_TRUNCATION_RETENTION,
+  DEFAULT_VOICE_TTS_PROVIDER,
   parseVoiceRealtimeEnv,
   type VoiceRealtimeEnvConfig,
+  type VoiceTtsProvider,
 } from "./voice-composition.ts";
 
 /** Content-free realtime configuration echo: provider, models, and truncation scalars only. */
@@ -33,6 +35,10 @@ export interface VoiceRealtimeReadiness {
   readonly transcribeModel: string;
   readonly realtimeModel: string;
   readonly voice: string;
+  /** Who synthesizes his speech (ADR 0070); the ids are public identifiers. */
+  readonly ttsProvider: VoiceTtsProvider;
+  readonly elevenLabsVoiceId?: string;
+  readonly elevenLabsModelId?: string;
   readonly truncationRetentionRatio: number;
   readonly postInstructionsTokenLimit: number;
 }
@@ -98,16 +104,20 @@ export async function inspectDiscordVoiceReadiness(
   const add = (name: string, ok: boolean, detail: string, remediation: string): void => {
     checks.push({ name, ok, detail, remediation });
   };
-  const forbiddenCredentials = ["DISCORD_BOT_TOKEN", "DISCORD_USER_TOKEN", "OPENAI_API_KEY"].filter(
-    (name) => options.env[name],
-  );
+  const forbiddenCredentials = [
+    "DISCORD_BOT_TOKEN",
+    "DISCORD_USER_TOKEN",
+    "OPENAI_API_KEY",
+    "ELEVENLABS_API_KEY",
+    "XI_API_KEY",
+  ].filter((name) => options.env[name]);
   add(
     "credential environment",
     forbiddenCredentials.length === 0,
     forbiddenCredentials.length === 0
-      ? "Discord and OpenAI credentials are absent from the process environment"
+      ? "Discord and voice-vendor credentials are absent from the process environment"
       : `${String(forbiddenCredentials.length)} forbidden credential variable(s) are set`,
-    "Remove credential environment variables; use the brokered discord_bot and openai entries.",
+    "Remove credential environment variables; use the brokered discord_bot, openai, and elevenlabs entries.",
   );
   add(
     "voice enabled",
@@ -182,10 +192,14 @@ export async function inspectDiscordVoiceReadiness(
   let realtimeConfig: VoiceRealtimeEnvConfig | undefined;
   try {
     realtimeConfig = parseVoiceRealtimeEnv(options.env);
+    const mouth =
+      realtimeConfig.ttsProvider === "elevenlabs"
+        ? `elevenlabs TTS ${realtimeConfig.elevenLabsVoiceId ?? ""}`
+        : realtimeConfig.voice;
     add(
       "realtime configuration",
       true,
-      `${realtimeConfig.transcribeModel} listener, ${realtimeConfig.realtimeModel}/${realtimeConfig.voice} ` +
+      `${realtimeConfig.transcribeModel} listener, ${realtimeConfig.realtimeModel}/${mouth} ` +
         `engaged session, truncation ${String(realtimeConfig.truncationRetentionRatio)} retention / ` +
         `${String(realtimeConfig.postInstructionsTokenLimit)} post-instructions tokens`,
       "",
@@ -208,6 +222,20 @@ export async function inspectDiscordVoiceReadiness(
       : "present in broker",
     "Store the existing OpenAI API key under provider openai; do not put it in the environment.",
   );
+  // Only when the external voice is configured: readiness must fail the same
+  // way the bridge startup gate would, before a call ever depends on it.
+  if (realtimeConfig?.ttsProvider === "elevenlabs") {
+    const elevenLabsCredential = await options.store.get("elevenlabs");
+    const elevenLabsKey = elevenLabsCredential?.type === "api" ? elevenLabsCredential.key : undefined;
+    add(
+      "ElevenLabs voice credential",
+      elevenLabsKey !== undefined,
+      elevenLabsKey === undefined
+        ? "broker entry elevenlabs is missing or is not an API credential"
+        : "present in broker",
+      "Store the ElevenLabs API key under provider elevenlabs via /auth; do not put it in the environment.",
+    );
+  }
 
   let opusReady = false;
   try {
@@ -389,6 +417,13 @@ export async function inspectDiscordVoiceReadiness(
       transcribeModel: realtimeConfig?.transcribeModel ?? DEFAULT_VOICE_TRANSCRIBE_MODEL,
       realtimeModel: realtimeConfig?.realtimeModel ?? DEFAULT_VOICE_REALTIME_MODEL,
       voice: realtimeConfig?.voice ?? DEFAULT_VOICE_REALTIME_VOICE,
+      ttsProvider: realtimeConfig?.ttsProvider ?? DEFAULT_VOICE_TTS_PROVIDER,
+      ...(realtimeConfig?.elevenLabsVoiceId === undefined
+        ? {}
+        : { elevenLabsVoiceId: realtimeConfig.elevenLabsVoiceId }),
+      ...(realtimeConfig?.elevenLabsModelId === undefined
+        ? {}
+        : { elevenLabsModelId: realtimeConfig.elevenLabsModelId }),
       truncationRetentionRatio:
         realtimeConfig?.truncationRetentionRatio ?? DEFAULT_VOICE_TRUNCATION_RETENTION,
       postInstructionsTokenLimit:
@@ -465,11 +500,17 @@ export async function probeVoiceWakeTransition(
       const responded = new Promise<void>((resolvePromise) => {
         settle = resolvePromise;
       });
+      // Under the external voice (ADR 0070) the engaged session runs in text
+      // modality, so the probe settles on text exactly as the runtime speaks
+      // it. The ElevenLabs socket is deliberately not probed — its credential
+      // is checked separately, and a readiness run should not spend paid
+      // synthesis to prove connectivity the first utterance will prove anyway.
+      const textModality = options.config.ttsProvider === "elevenlabs";
       const engaged = await withTimeout(
         openRealtimeConversationSession({
           apiKey: options.apiKey,
           model: options.config.realtimeModel,
-          voice: options.config.voice,
+          ...(textModality ? { outputModality: "text" as const } : { voice: options.config.voice }),
           instructions: WAKE_PROBE_INSTRUCTIONS,
           truncationRetentionRatio: options.config.truncationRetentionRatio,
           postInstructionsTokenLimit: options.config.postInstructionsTokenLimit,
@@ -478,6 +519,13 @@ export async function probeVoiceWakeTransition(
             pcm.fill(0);
             settle?.();
           },
+          ...(textModality
+            ? {
+                onTextDelta: () => {
+                  settle?.();
+                },
+              }
+            : {}),
           onResponseDone: () => {
             settle?.();
           },

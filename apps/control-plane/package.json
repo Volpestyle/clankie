@@ -12,6 +12,7 @@
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {
+    "@clankie/body-lock": "workspace:*",
     "@clankie/captain-runtime": "workspace:*",
     "@clankie/credential-broker": "workspace:*",
     "@clankie/doctrine": "workspace:*",

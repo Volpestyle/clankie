@@ -131,6 +131,19 @@ it as blocked invented obstacles and poisoned the refusal memory, and the model
 correctly protested that it could see open floor. A turn is now reported as a
 turn, and only a refusal while already facing that way records a block.
 
+Two more rules keep the diff honest on screens the RAM decoder models thinly:
+
+- **An open menu owns the d-pad.** While a menu observation is present, a
+  directional press is cursor navigation, never walking — the overworld decoder
+  keeps reporting the stale field position underneath overlays like the naming
+  screen, and judging those presses as movement minted fake walls at tiles he
+  never walked at.
+- **The frame digest gets the last word.** "No visible change" is only claimed
+  when the framebuffer digest also stood still across the action. When the
+  screen redrew but nothing decodable moved, the effect says so and tells him
+  to trust the frame — instead of the harness insisting nothing happened while
+  he watched the naming-screen cursor move.
+
 ### Bursts are coarser granularity, not a wider budget
 
 One model call per button press is the wrong unit: a corridor cost a decision

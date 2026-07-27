@@ -8,6 +8,16 @@ Beside the mission worker, the runner hosts asked embodiment: `src/play-host.ts`
 
 `scripts/free-play-live.ts` (`pnpm gba:free-play-live`) is the development alias: the same `src/play-execution.ts` composition driven by a locally fabricated session, so a playthrough is watchable without a control plane or a Discord ask.
 
+### The durable trail (ADR 0068)
+
+Every playthrough journals itself: one append-only JSONL per run under `~/.local/state/clankie/gba-play/` — a header with the run identity and resume lineage, every `FreePlayTurn` (monologue, intent, objective, action, outcome, effect) as it settles, and a summary carrying the metrics the content-free receipt cannot (progress, volition, coherence). The same metrics land in the runner log as `embodiment playthrough finished`, and the play host narrates each lifecycle transition (`claimed`, `running`, `settled`, `refused`, stop asks) so the log tells the same story the control-plane events record. An unwritable journal degrades to an unrecorded playthrough that still runs; the log says so. See [`docs/08-observability-debugging.md`](../../docs/08-observability-debugging.md) for the full artifact map.
+
+### Speaking and hearing while he plays (ADR 0067)
+
+A playthrough is audible as well as watchable: his reply and his aside go out through the [possessor voice seam](../../docs/adr/0064-possessor-voice-seam.md), and what the room says comes back as an interjection at the next turn boundary. The runner holds no gateway, so it reports and the bridge's persona composes the words — the same fence an MCP possessor plays under, and the reason this path cannot put a chosen sentence in his mouth.
+
+It is deny-by-default and off unless the bridge enables the possessor seam — `possessorVoiceEnabled: true` in the operator settings' `discord` block, or the `CLANKIE_POSSESSOR_VOICE_ENABLED=true` env override — and holds a live voice session. Absent credential, absent bridge, or a rejected line all degrade to a silent playthrough that still runs and is still watchable; the first rejection logs once per session.
+
 The production runner creates one `TerminalManager`. Generic interactive commands run in a native `node-pty` terminal with runner-supplied environment only; Codex App Server JSON-RPC, Claude Agent SDK, and Pi RPC retain their protocol-native control transports and are never relabeled as PTYs. The manager owns ordered raw-byte replay, headless `@xterm/headless` state, `@xterm/addon-serialize` VT restore snapshots at parser-quiescent boundaries, live-attempt correlation, bounded observers, and the single renewable human-control lease. Closed terminals leave discovery deterministically; restart marks non-reattachable PTY records orphaned and closed. Do not put merge, deployment, or organization-wide connector tokens inside worker environments.
 
 ## Worker transcript projection

@@ -58,7 +58,7 @@ import {
 } from "./realtime-session.ts";
 import { voiceAddressesCharacter } from "./voice-address.ts";
 import { discordPcmToRealtimePcm, openAiPcmToDiscordPcm, PCM_SAMPLE_BYTES } from "./voice-audio.ts";
-import { DiscordVoiceConsentRegistry } from "./voice-consent.ts";
+import { DiscordVoiceConsentRegistry, type DiscordVoiceConsentPolicy } from "./voice-consent.ts";
 import { VoiceFloor, type FloorDecision, type FloorState, type VoiceFloorOptions } from "./voice-floor.ts";
 import type { DiscordVoiceIngress, DiscordVoiceTurnOutcome } from "./voice-ingress.ts";
 
@@ -238,6 +238,12 @@ export interface DiscordVoiceSessionOptions {
   readonly narrationMinIntervalMs?: number;
   readonly presenceSessionId: () => string;
   readonly emit: (evidence: DiscordVoiceEvidence) => Promise<void>;
+  /**
+   * Who counts as consented to being heard (ADR 0045). Defaults to `explicit`;
+   * `presence` is the owner's call for a private room whose participants know
+   * he transcribes when he is in it.
+   */
+  readonly consentPolicy?: DiscordVoiceConsentPolicy;
   /** Monotonic milliseconds; defaults to `performance.now`. Injected by tests. */
   readonly clock?: () => number;
   /** Timer seam shared with the realtime runtimes; drives decay ticks, the hold window, and reconnect backoff. */
@@ -295,7 +301,7 @@ export class DiscordVoiceSession {
   /** Injectable so latency assertions are deterministic in tests. */
   private readonly clock: () => number;
   private readonly timers: RealtimeTimers;
-  private readonly consent = new DiscordVoiceConsentRegistry();
+  private readonly consent: DiscordVoiceConsentRegistry;
   private readonly player: AudioPlayer;
   private floor: VoiceFloor;
   private connection: VoiceConnection | undefined;
@@ -353,6 +359,7 @@ export class DiscordVoiceSession {
     this.options = options;
     this.clock = options.clock ?? (() => performance.now());
     this.timers = options.timers ?? defaultTimers;
+    this.consent = new DiscordVoiceConsentRegistry(options.consentPolicy);
     this.floor = new VoiceFloor(options.floor);
     this.narrationMinIntervalMs = options.narrationMinIntervalMs ?? DEFAULT_NARRATION_MIN_INTERVAL_MS;
     this.player = createAudioPlayer({

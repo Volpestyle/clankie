@@ -819,6 +819,19 @@ describe("protocol", () => {
         payload: { kind: "create_thread", channelId: "dm1", messageId: "m1", name: "nope" },
       }),
     ).toThrow(/mission attribution/);
+    // The activity surface serves the ambient embodiment plane too (ADR 0063):
+    // asked play has no mission, so its launch write attributes to the
+    // presence session it serves. Authority is unchanged — publish-external
+    // still routes through the operator approval gate.
+    expect(
+      DiscordPresenceWriteSchema.parse({
+        schemaVersion: 1,
+        idempotencyKey: "ambient-activity",
+        action: "discord.presence.activity_start",
+        identity: ambientTurn.identity,
+        payload: { kind: "activity_start", guildId: "g1", channelId: "vc1", surface: "gba_emulator" },
+      }).identity.presenceSessionId,
+    ).toBe("discord:dm:dm1");
   });
 
   it("carries a content-free bridge voice presence note on Discord turn triggers", () => {

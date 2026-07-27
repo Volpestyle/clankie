@@ -14,6 +14,8 @@ what lets both bodies be one character
 | `voice-address`              | Phonetic wake and explicit-release detection over `characterNames()` (ADR 0057)                               |
 | `voice-floor`                | The dormant ↔ engaged floor machine: wake, decay, and the volition rate cap                                   |
 | `realtime-session`           | Injectable OpenAI Realtime boundary: transcription + conversation sessions, `ask_clankie` round trips         |
+| `elevenlabs-tts`             | Injectable ElevenLabs multi-context streaming-TTS boundary (ADR 0070)                                         |
+| `external-voice`             | Pairs a text-modality realtime session with a TTS mouth behind the one conversation port (ADR 0070)           |
 | `voice-session`              | Media owner: consent, per-speaker capture, the two-tier realtime flow, deliberate barge-in, streamed playback |
 | `voice-ingress`              | Routes one `ask_clankie` handoff to the continuing `discord_voice` captain lane                               |
 | `voice-consent`              | Ephemeral, session-bound consent — never inferred from presence                                               |

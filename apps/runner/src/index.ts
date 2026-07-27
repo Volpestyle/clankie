@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { ClankieApiClient } from "@clankie/api-client";
-import { createDefaultCredentialStore } from "@clankie/credential-broker";
+import { createDefaultCredentialStore, resolveRunnerCredential } from "@clankie/credential-broker";
 import { compileDoctrine, loadDoctrineFile, type CompiledDoctrine } from "@clankie/doctrine";
 import { SqliteEventStore } from "@clankie/event-store";
 import { loadMcpRegistryFile, type McpRegistry } from "@clankie/mcp-registry";
@@ -87,7 +87,10 @@ if (repoPath) {
 }
 
 const runnerStateRoot = process.env.CLANKIE_RUNNER_STATE ?? join(homedir(), ".clankie", "runner");
-const runnerToken = process.env.CLANKIE_RUNNER_TOKEN;
+// Env wins when deliberately set; otherwise the broker-owned bearer the
+// control plane minted on its first start. Resolve-only — the runner never
+// mints, which keeps a single writer for the credential.
+const runnerToken = process.env.CLANKIE_RUNNER_TOKEN ?? (await resolveRunnerCredential());
 const terminalManager = new TerminalManager();
 const transcriptProjection = await WorkerTranscriptProjection.open(
   process.env.CLANKIE_WORKER_TRANSCRIPT_ROOT ?? join(runnerStateRoot, "worker-transcripts"),
@@ -200,13 +203,13 @@ if (runnerToken) {
     );
   });
 } else {
-  logger.error("CLANKIE_RUNNER_TOKEN is required; asked play is unavailable");
+  logger.error("No runner credential (start the control plane once to mint it); asked play is unavailable");
 }
 
 if (!repoPath) {
   logger.error("CLANKIE_REPO_PATH is required; mission execution is unavailable");
 } else if (!runnerToken) {
-  logger.error("CLANKIE_RUNNER_TOKEN is required; mission execution is unavailable");
+  logger.error("No runner credential (start the control plane once to mint it); mission execution is unavailable");
 } else if (worktrees) {
   const workerEnvironment = buildWorkerEnvironment(process.env);
   const verificationChecks = parseVerificationChecks(process.env.CLANKIE_VERIFICATION_CHECKS);

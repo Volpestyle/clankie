@@ -37,6 +37,15 @@ export interface GbaCoreSeam {
   pressButton(button: GbaButton, holdFrames: number): void;
   /** Advance `frames` frames with no input held. */
   advanceFrames(frames: number): void;
+  /**
+   * Advance `frames` frames with `button` held, spending no input. FireRed's
+   * text printer zeroes its per-character delay while A/B is held — the
+   * fast-read every human does — so holding through a printing box collapses
+   * the wait. The final frame runs released so a following press still lands
+   * as a fresh edge. Optional: a core without it prints at its configured
+   * text speed and `advance_dialog` simply waits longer.
+   */
+  advanceFramesHolding?(button: GbaButton, frames: number): void;
   /** Typed game-state view decoded from the core's authoritative state. */
   gameState(): GbaCoreState;
   /**

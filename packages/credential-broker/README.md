@@ -64,7 +64,11 @@ cannot reuse the text bridge bearer, and the text bridge cannot submit a
 `voice_event`. The bridge resolves both internal credentials directly from the
 store after control-plane startup; neither enters an environment variable.
 OpenAI transcription and speech reuse the brokered `openai` API credential
-inside the voice process and never expose it to Eve or a worker.
+inside the voice process and never expose it to Eve or a worker. When the
+external voice is configured ([ADR 0070](../../docs/adr/0070-external-voice-via-streaming-tts.md)),
+ElevenLabs speech synthesis uses the brokered `elevenlabs` API credential the
+same way — connection headers only, and the `ELEVENLABS_API_KEY` / `XI_API_KEY`
+environment names are hard startup errors in the bridge.
 
 `discord_user_session` holds the personal-lab normal-user credential
 ([ADR 0048](../../docs/adr/0048-discord-user-session-transport.md)).

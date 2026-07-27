@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { FrozenGbaScenarioSchema } from "./contracts.ts";
@@ -65,10 +65,34 @@ export interface BootGbaGameOptions {
   doubleScenarioPath: string;
 }
 
+/**
+ * Where the operator's ROM and savestate live when no env names them —
+ * `~/.local/share/clankie/gba/`, the same well-known operator-local home the
+ * checkpoint and body-lock directories use. Existence-gated: a machine without
+ * the files keeps today's deterministic-double behavior, so a supervised
+ * runner starts with no env prefix at all on a machine that has them.
+ */
+export function defaultGbaGameDir(env: NodeJS.ProcessEnv = process.env): string {
+  const dataHome =
+    env["XDG_DATA_HOME"] !== undefined && env["XDG_DATA_HOME"].length > 0
+      ? env["XDG_DATA_HOME"]
+      : path.join(homedir(), ".local", "share");
+  return path.join(dataHome, "clankie", "gba");
+}
+
+function defaultedGamePath(configured: string | undefined, fallback: string): string | undefined {
+  if (configured !== undefined) return configured;
+  return existsSync(fallback) ? fallback : undefined;
+}
+
 export async function bootGbaGame(options: BootGbaGameOptions): Promise<BootedGbaGame> {
   const env = options.env ?? process.env;
-  const romPath = env["CLANKIE_GBA_ROM_PATH"];
-  const savestatePath = env["CLANKIE_GBA_SAVESTATE_PATH"];
+  const gameDir = defaultGbaGameDir(env);
+  const romPath = defaultedGamePath(env["CLANKIE_GBA_ROM_PATH"], path.join(gameDir, "firered.gba"));
+  const savestatePath = defaultedGamePath(
+    env["CLANKIE_GBA_SAVESTATE_PATH"],
+    path.join(gameDir, "firered-bedroom.state"),
+  );
   const real = romPath !== undefined && savestatePath !== undefined;
 
   const scenarioPath =
@@ -137,30 +161,6 @@ export async function bootGbaGame(options: BootGbaGameOptions): Promise<BootedGb
   };
 }
 
-/**
- * Where the emulator body's environment lease lives.
- *
- * Every entrypoint that drives the body must use the *same* directory, because
- * that is what makes `EnvironmentRuntime`'s existing one-writer rule apply
- * across processes: it already refuses a second writer with "Body already has
- * writer session", but only for sessions it can see.
- *
- * Previously each entrypoint made its own temp directory, so the free-play CLI
- * and the MCP server were invisible to one another and could drive the same
- * game at once — the footgun ADR 0053 recorded. A stable path turns that from a
- * documented warning into a refusal.
- */
-export function defaultGbaBodyRootDir(env: NodeJS.ProcessEnv = process.env): string {
-  const override = env["CLANKIE_GBA_BODY_ROOT"];
-  if (override !== undefined && override.length > 0) {
-    mkdirSync(override, { recursive: true });
-    return override;
-  }
-  const stateHome =
-    env["XDG_STATE_HOME"] !== undefined && env["XDG_STATE_HOME"].length > 0
-      ? env["XDG_STATE_HOME"]
-      : path.join(homedir(), ".local", "state");
-  const root = path.join(stateHome, "clankie", "gba-body");
-  mkdirSync(root, { recursive: true });
-  return root;
-}
+// The body root resolver moved to `@clankie/body-lock` with the mutex it
+// scopes (VUH-938); re-exported so existing imports keep working.
+export { defaultGbaBodyRootDir } from "@clankie/body-lock";

@@ -246,7 +246,15 @@ export class EmbodimentManager {
         });
         return { outcome: "stop_requested" as const, session: this.mustGet(session.sessionId) };
       }
-      if (this.liveSession() !== undefined) {
+      const live = this.liveSession();
+      if (live !== undefined) {
+        // He is already at these controls: a repeat ask to play the same
+        // environment is satisfied, not blocked — the embodiment mirror of
+        // ADR 0062's never-rejoin. A different environment, or a session
+        // already winding down, stays an honest body_held.
+        if (live.environmentId === intent.environmentId && live.state !== "stopping") {
+          return { outcome: "accepted" as const, session: this.mustGet(live.sessionId) };
+        }
         return this.refuseStart(intent, "body_held");
       }
       const sessionId = this.options.idFactory();

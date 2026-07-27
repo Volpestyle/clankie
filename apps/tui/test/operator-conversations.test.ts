@@ -4,6 +4,7 @@ import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { mintCaptainToken, type CredentialStore } from "@clankie/credential-broker";
 import type {
   OperatorConversation,
   OperatorConversationRecovery,
@@ -19,6 +20,7 @@ import {
   OperatorConversationSelectionStoreError,
   OperatorConversationTailStore,
   parseDirectConversation,
+  resolveCaptainRouteToken,
   resolveInitialConversation,
   type OperatorConversationEventSink,
   type OperatorConversationClient,
@@ -87,6 +89,15 @@ async function tempStore(): Promise<OperatorConversationSelectionStore> {
   const root = await mkdtemp(join(tmpdir(), "operator-selection-"));
   roots.push(root);
   return new OperatorConversationSelectionStore(join(root, "nested", "operator-conversation.json"));
+}
+
+function fakeCredentialStore(credential?: { type: "api"; key: string }): CredentialStore {
+  return {
+    get: async () => credential,
+    set: async () => undefined,
+    delete: async () => false,
+    list: async () => ({}),
+  };
 }
 
 async function tempTailStore(): Promise<{ store: OperatorConversationTailStore; path: string }> {
@@ -253,6 +264,32 @@ describe("TUI operator conversation selection", () => {
       }
     },
   );
+
+  it("resolves the captain bearer from the env override, then the brokered store", async () => {
+    const stored = mintCaptainToken();
+    const store = fakeCredentialStore({ type: "api", key: stored });
+    expect(await resolveCaptainRouteToken({ env: { CLANKIE_CAPTAIN_TOKEN: "explicit" }, store })).toBe(
+      "explicit",
+    );
+    expect(await resolveCaptainRouteToken({ env: {}, store })).toBe(stored);
+  });
+
+  it("degrades to no bearer when the store is empty, failing, or holds an invalid token", async () => {
+    expect(await resolveCaptainRouteToken({ env: {}, store: fakeCredentialStore() })).toBeUndefined();
+    const failing: CredentialStore = {
+      ...fakeCredentialStore(),
+      get: async () => {
+        throw new Error("keychain unavailable");
+      },
+    };
+    expect(await resolveCaptainRouteToken({ env: {}, store: failing })).toBeUndefined();
+    expect(
+      await resolveCaptainRouteToken({
+        env: {},
+        store: fakeCredentialStore({ type: "api", key: "not-a-captain-token" }),
+      }),
+    ).toBeUndefined();
+  });
 
   it("fails schema-invalid transport responses closed without leaking their payload", async () => {
     const captain = createCaptainOperatorConversationClient({

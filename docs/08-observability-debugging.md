@@ -1,5 +1,49 @@
 # Logging, tracing, replay, and debugging
 
+## Embodiment and free play
+
+A playthrough leaves a durable trail ([ADR 0068](adr/0068-a-playthrough-leaves-a-durable-trail.md)).
+Every artifact of an asked-play session ([ADR 0063](adr/0063-asked-embodiment-and-captain-started-play.md))
+or an MCP possession ([ADR 0053](adr/0053-mcp-possession-of-clankies-body.md)) lives in a file an
+operator can read after the fact:
+
+| Artifact                   | Path                                                                            | Contents                                                                                                                                                                                           |
+| -------------------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Play journal               | `~/.local/state/clankie/gba-play/<stamp>-<runId>.jsonl`                         | One file per run: header (identity, resume lineage), every `FreePlayTurn` (monologue, intent, objective, action, outcome, effect) as it settles, summary (outcome, progress, volition, coherence). |
+| Environment session record | `~/.local/state/clankie/gba-body/environment-sessions/<sha256(sessionId)>.json` | Operational state per run: lease, phase, and the newest 128 action outcomes (position, facing, collisions, mode, RAM digest); older terminal actions roll with a `rolledActionRecords` count.      |
+| Possession event log       | `~/.local/state/clankie/gba-body/possession-events.jsonl`                       | Every MCP possession lease transition (acquired, released, expired, stolen, refused) across all servers.                                                                                           |
+| Body lock                  | `~/.local/state/clankie/gba-body/body.lock`                                     | Who is driving right now (holder id, pid, acquired-at).                                                                                                                                            |
+| Checkpoints                | `~/.local/state/clankie/gba-checkpoints/<stamp>[-label]/`                       | Minted savestate + receipt + bootable companion scenario ([ADR 0060](adr/0060-progress-as-minted-checkpoints.md)).                                                                                 |
+| Runner log                 | `~/.local/state/clankie/runner.log`                                             | Play-host lifecycle: claimed, running, settled with receipt, refused, failed.                                                                                                                      |
+| Embodiment events          | control-plane event store (`events.db`), scope `embodiment:<sessionId>`         | The authoritative lifecycle record.                                                                                                                                                                |
+| CLI trace                  | `artifacts/gba-free-play/trace-<stamp>.jsonl`                                   | `pnpm gba:free-play` runs only; per-run by default.                                                                                                                                                |
+
+```mermaid
+flowchart LR
+  subgraph runner["runner (PlayHost)"]
+    exec["play execution"]
+  end
+  subgraph emulator["gba-emulator"]
+    loop["free-play loop"] --> session["environment runtime"]
+  end
+  mind["model mind"] -->|decision| loop
+  exec --> loop
+  loop -->|"FreePlayTurn"| journal[("gba-play/*.jsonl<br/>play journal")]
+  session -->|"per action"| record[("gba-body/environment-sessions/*.json<br/>bounded operational state")]
+  exec -->|lifecycle| rlog[("runner.log")]
+  exec -->|reports| cp[("control-plane events.db")]
+  exec -->|"frames + overlay"| activity["activity surface (live only)"]
+  exec -->|"mint / resume"| ckpt[("gba-checkpoints/")]
+  mcp["gba-mcp possession"] -->|"lease transitions"| plog[("gba-body/possession-events.jsonl")]
+```
+
+Watching live is the activity surface (`http://127.0.0.1:4320`); everything
+else above is for afterwards. To follow a run as it happens from a terminal:
+
+```bash
+tail -f ~/.local/state/clankie/gba-play/$(ls -t ~/.local/state/clankie/gba-play | head -1)
+```
+
 ## Structured logs
 
 Use `@clankie/observability` and Pino JSON logs. Required context where known:

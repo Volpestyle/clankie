@@ -17,7 +17,7 @@ uncertainty about the game state.
 
 The bound itself is correct for what it was built for. A **receipt** run — the
 frozen deterministic scenarios with their byte-identical two-core replays — is
-*supposed* to be invalid when it exceeds its evidence budget; that is the
+_supposed_ to be invalid when it exceeds its evidence budget; that is the
 fail-closed evidence model doing its job. The bug was applying receipt rules to
 open-ended play, where [ADR 0049](0049-free-play-agency-and-non-deterministic-evidence.md)
 already accepts that no run reproduces another and evidence is per-turn, not a

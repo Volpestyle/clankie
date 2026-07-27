@@ -80,6 +80,8 @@ export class PlayHost {
   private readonly clock: () => Date;
   private readonly claimIdFactory: () => string;
   private active: { sessionId: string; stop: boolean; done: Promise<void> } | undefined;
+  /** Last logged claim-failure signature; undefined while the poll is healthy. */
+  private claimFailure: string | undefined;
 
   public constructor(options: PlayHostOptions) {
     this.options = options;
@@ -134,12 +136,28 @@ export class PlayHost {
         runnerId: this.options.runnerId,
         environmentIds: [...this.options.environmentIds],
       });
-    } catch {
+    } catch (error) {
+      // Deduplicated by signature, not swallowed: on a 1s cadence a per-poll
+      // line is spam, but a fully silent catch spent a live evening looking
+      // exactly like "no work" while every claim was failing.
+      const signature = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      if (this.claimFailure !== signature) {
+        this.claimFailure = signature;
+        this.options.logger.error({ err: signature }, "embodiment claim poll failing");
+      }
       return false;
+    }
+    if (this.claimFailure !== undefined) {
+      this.claimFailure = undefined;
+      this.options.logger.info({}, "embodiment claim poll recovered");
     }
     if (assignment === undefined) return false;
     if (assignment.kind === "stop") {
       if (this.active?.sessionId === assignment.sessionId) {
+        this.options.logger.info(
+          { sessionId: assignment.sessionId },
+          "embodiment stop received; ends at the next turn boundary",
+        );
         this.active.stop = true;
       } else {
         // A stop for a session this process does not hold: the control plane
@@ -157,6 +175,18 @@ export class PlayHost {
       });
       return false;
     }
+    // The whole lifecycle narrates into this log (ADR 0068): before these
+    // lines existed, a session that claimed, ran, and settled cleanly left the
+    // runner's own log silent — the successful path was the invisible one.
+    this.options.logger.info(
+      {
+        sessionId: assignment.session.sessionId,
+        environmentId: assignment.session.environmentId,
+        originLane: assignment.session.originLane,
+        requestedBy: assignment.session.requestedBy,
+      },
+      "embodiment session claimed",
+    );
     const done = this.runSession(assignment.session);
     this.active = { sessionId: assignment.session.sessionId, stop: false, done };
     return true;
@@ -187,6 +217,13 @@ export class PlayHost {
         session,
         { stopRequested: () => this.active?.stop === true },
         async (resumedFromCheckpointId) => {
+          this.options.logger.info(
+            {
+              sessionId: session.sessionId,
+              ...(resumedFromCheckpointId === undefined ? {} : { resumedFromCheckpointId }),
+            },
+            "embodiment session running",
+          );
           await this.report(session.sessionId, {
             state: "running",
             ...(resumedFromCheckpointId === undefined ? {} : { resumedFromCheckpointId }),
@@ -194,9 +231,25 @@ export class PlayHost {
         },
       );
       if (result.kind === "refused") {
+        this.options.logger.info(
+          { sessionId: session.sessionId, refusalReason: result.reason },
+          "embodiment session refused",
+        );
         await this.report(session.sessionId, { state: "refused", refusalReason: result.reason });
         return;
       }
+      this.options.logger.info(
+        {
+          sessionId: session.sessionId,
+          outcome: result.result.outcome,
+          turnsTaken: result.result.turnsTaken,
+          durationMs: result.result.durationMs,
+          framesPublished: result.result.framesPublished,
+          framesDropped: result.result.framesDropped,
+          ...(result.result.checkpointId === undefined ? {} : { checkpointId: result.result.checkpointId }),
+        },
+        "embodiment session settled",
+      );
       await this.report(session.sessionId, {
         state: result.result.outcome === "failed" ? "failed" : "stopped",
         receipt: this.receipt(session, result.result),

@@ -489,3 +489,47 @@ describe("voice owns speech", () => {
     expect(result.turns[0]?.outcome).toBe("accepted");
   });
 });
+
+describe("rejection visibility", () => {
+  it("tells him the refusal instead of narrating an action that never ran", async () => {
+    // T45 of the 2026-07-27 run: a repeat:14 was refused for exceeding the
+    // input budget, and the effect line said "position unchanged after right"
+    // — so he concluded the repeat mechanism "behaved oddly" and learned
+    // nothing about the budget.
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(failed("input_bound_exceeded"))),
+      mind: mind([press("right", "east")]),
+      turns: 1,
+    });
+    expect(result.turns[0]?.outcome).toBe("rejected_by_adapter");
+    expect(result.turns[0]?.effect).toMatch(/^rejected, nothing ran/u);
+    expect(result.turns[0]?.effect).toContain("more button presses");
+  });
+
+  it("translates a refused dialog advance instead of claiming it read nothing", async () => {
+    // The worst historical lie: a rejected advance_dialog rendered as
+    // "read no new text — the dialog stopped", a success-shaped sentence
+    // about an action the adapter never ran.
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(failed("dialog_not_open"))),
+      mind: mind([
+        {
+          monologue: "The box is on screen; I should advance it.",
+          intent: "advance the dialog",
+          notes: null,
+          action: { kind: "advance_dialog" },
+        },
+      ]),
+      turns: 1,
+    });
+    expect(result.turns[0]?.effect).toContain("script or fanfare");
+    expect(result.turns[0]?.effect).not.toContain("read no new text");
+  });
+});
+
+describe("walk_to intent", () => {
+  it("scores a stated walk against the walk he then takes", () => {
+    expect(intentMatchesAction("walk to the lab exit", { kind: "walk_to", x: 3, y: 9 })).toBe(true);
+    expect(intentMatchesAction("press A at the sign", { kind: "walk_to", x: 3, y: 9 })).toBe(false);
+  });
+});

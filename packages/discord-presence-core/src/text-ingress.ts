@@ -546,7 +546,17 @@ export class DiscordTextIngress {
   /** Is he still mid-conversation here, or has he drifted off? */
   private readingLive(message: DiscordInboundMessage): boolean {
     if (message.catchingUp === true) return true;
-    const activity = this.channels.get(message.channelId);
+    return this.engagedInChannel(message.channelId);
+  }
+
+  /**
+   * Is he mid-conversation in this channel right now — reading it live because
+   * he spoke there recently? Public so seams at the same ingress boundary (the
+   * asked voice presence gate, ADR 0062) share this exact notion of being
+   * spoken to instead of growing a second, narrower matcher.
+   */
+  public engagedInChannel(channelId: string): boolean {
+    const activity = this.channels.get(channelId);
     if (activity === undefined) return false;
     return activity.sinceReply < (this.config.liveMessageWindow ?? DEFAULT_LIVE_MESSAGE_WINDOW);
   }

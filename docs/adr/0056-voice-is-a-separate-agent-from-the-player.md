@@ -9,16 +9,16 @@ player's own decision.
 Free play gave Clankie one model call per turn returning an action, a monologue,
 and an optional `speak`. Speech was measured and it did not happen.
 
-| Attempt                                        | Spoke     |
-| ---------------------------------------------- | --------- |
-| Original framing                                | 0 of 12   |
-| Three further prompt revisions                  | 0 of 12   |
-| Cold-start fix + named audience                 | 0 of 16   |
-| Prompt discouragement removed (gate is the cap) | 1 of 16   |
+| Attempt                                         | Spoke                        |
+| ----------------------------------------------- | ---------------------------- |
+| Original framing                                | 0 of 12                      |
+| Three further prompt revisions                  | 0 of 12                      |
+| Cold-start fix + named audience                 | 0 of 16                      |
+| Prompt discouragement removed (gate is the cap) | 1 of 16                      |
 | **Voice as its own agent**                      | **7 of 16 wanted, 2 spoken** |
 
 The last row is the decision's evidence: with speech as its own decision he
-*wanted* to speak seven times and the rate gate held five. The gate binds now,
+_wanted_ to speak seven times and the rate gate held five. The gate binds now,
 which is what it was built for — before, nothing reached it.
 
 Follow-through also rose from 18% to 57% on those runs. One run each, so it is
@@ -31,7 +31,7 @@ Two real defects were found and fixed along the way, and both were worth fixing:
   null until he first speaks. The signal that would prompt a first remark only
   appeared after one had happened.
 - **Double suppression.** A mechanical rate gate capped how often he could
-  speak *and* the prompt told him not to speak often. The prompt was rationing
+  speak _and_ the prompt told him not to speak often. The prompt was rationing
   against a ceiling that was already enforced.
 
 Fixing both moved 0 to 1 in sixteen turns. That is the finding: the remaining

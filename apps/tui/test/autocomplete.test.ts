@@ -127,8 +127,8 @@ const commands: ClankieAutocompleteCommand[] = [
   {
     name: "voice",
     aliases: [],
-    description: "Configure Discord voice runtime",
-    argumentHint: "[status|mode|model|realtime-voice|tts|elevenlabs|memory|eve-session] [value]",
+    description: "Configure how Clankie sounds in Discord voice",
+    argumentHint: "[status]",
     takesArgument: true,
   },
   {
@@ -282,9 +282,9 @@ describe("argument suggestions", () => {
   it("completes discord-token, image-model, and voice arguments", async () => {
     expect((await items("/discord-token st", 17)).some((item) => item.value === "status")).toBe(true);
     expect((await items("/image-model st", 15)).some((item) => item.value === "status")).toBe(true);
+    // `status` is /voice's only argument; the v1 runtime vocabulary
+    // (`mode`, `local`, …) is gone with the wizard (ADR 0070).
     expect((await items("/voice st", 9)).some((item) => item.value === "status")).toBe(true);
-    expect((await items("/voice mo", 9)).some((item) => item.value === "mode")).toBe(true);
-    expect((await items("/voice mode l", 14)).some((item) => item.value === "local")).toBe(true);
   });
 
   it("completes profile, policies, and layout arguments", async () => {

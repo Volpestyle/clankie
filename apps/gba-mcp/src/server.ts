@@ -172,15 +172,18 @@ export function createGbaMcpServer(context: GbaToolContext, options: GbaMcpServe
   server.registerTool(
     "gba_emulator_start_action",
     {
-      title: "Press a button, or walk to a tile",
+      title: "Press a button, walk to a tile, or read through a dialog",
       description:
         "Take one catalogued action. A short directional tap only turns the character — hold 16 " +
         "frames to commit a step, or use repeat to cross several tiles in one action. Prefer " +
         "walk_to with a target x/y for anything further than a step: it routes around walls using " +
-        "the map's own collision and reports where it stopped. The result carries the resulting " +
-        "position, facing, whether the press actually moved, and what is now adjacent, so a move " +
-        "needs no follow-up observe. Illegal buttons, exceeded frame bounds, unreachable targets " +
-        "and missing capabilities are refused with the reason.",
+        "the map's own collision and reports where it stopped. When a dialog is open, prefer " +
+        "advance_dialog: it presses through every text box, returns the full transcript, and " +
+        "stops exactly when the dialog closes, a choice or battle appears, or the budget runs " +
+        "out — never answering a choice for you. The result carries the resulting position, " +
+        "facing, whether the press actually moved, what is now adjacent, and any visible dialog " +
+        "or menu, so a move needs no follow-up observe. Illegal buttons, exceeded frame bounds, " +
+        "unreachable targets and missing capabilities are refused with the reason.",
       inputSchema: { ...ActArgumentsSchema.shape, possessionToken: z.string().optional() },
     },
     (args) => actTool({ ...context, possessionToken: args.possessionToken }, args),

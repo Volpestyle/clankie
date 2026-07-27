@@ -125,9 +125,12 @@ describe("Discord group voice readiness", () => {
       transcribeModel: "gpt-realtime-whisper",
       realtimeModel: "gpt-realtime-2.1",
       voice: "marin",
+      ttsProvider: "openai",
       truncationRetentionRatio: 0.7,
       postInstructionsTokenLimit: 12_000,
     });
+    // The native-voice report carries no vendor check it does not need.
+    expect(report.checks.some((check) => check.name === "ElevenLabs voice credential")).toBe(false);
     const serialized = JSON.stringify(report);
     expect(serialized).not.toContain("bot-secret");
     expect(serialized).not.toContain("openai-secret");
@@ -157,6 +160,48 @@ describe("Discord group voice readiness", () => {
     expect(checkByName(report, "engaged session").ok).toBe(false);
     expect(checkByName(report, "wake transition").ok).toBe(false);
     expect(checkByName(report, "voice briefing endpoint").ok).toBe(false);
+  });
+
+  it("checks the ElevenLabs credential exactly when the external voice is configured (ADR 0070)", async () => {
+    const store = new MemoryCredentialStore();
+    store.credentials.set("openai", { type: "api", key: "openai-secret" });
+    const env = {
+      DISCORD_VOICE_ENABLED: "true",
+      CLANKIE_VOICE_TTS_PROVIDER: "elevenlabs",
+      CLANKIE_VOICE_ELEVENLABS_VOICE_ID: "voice_abc123",
+    };
+    const api = {
+      inspectDiscordReadiness: () => Promise.resolve(controlPlane),
+      fetchDiscordVoiceBriefing: () => Promise.resolve(briefing),
+    };
+    const wakeProbe = () =>
+      Promise.resolve({
+        listener: { ok: true, detail: "dormant transcription session opened cleanly" },
+        engaged: { ok: true, detail: "conversation session opened and produced a response" },
+      });
+    const missing = await inspectDiscordVoiceReadiness({
+      env,
+      store,
+      api,
+      opusAvailable: () => true,
+      wakeProbe,
+    });
+    const credentialCheck = checkByName(missing, "ElevenLabs voice credential");
+    expect(credentialCheck.ok).toBe(false);
+    expect(missing.realtime.ttsProvider).toBe("elevenlabs");
+    expect(missing.realtime.elevenLabsVoiceId).toBe("voice_abc123");
+    expect(checkByName(missing, "realtime configuration").detail).toContain("elevenlabs TTS voice_abc123");
+
+    store.credentials.set("elevenlabs", { type: "api", key: "elevenlabs-secret" });
+    const present = await inspectDiscordVoiceReadiness({
+      env,
+      store,
+      api,
+      opusAvailable: () => true,
+      wakeProbe,
+    });
+    expect(checkByName(present, "ElevenLabs voice credential").ok).toBe(true);
+    expect(JSON.stringify(present)).not.toContain("elevenlabs-secret");
   });
 
   it("fails the realtime configuration check when retired cascade envs are set", async () => {
@@ -250,6 +295,35 @@ describe("voice wake-transition probe", () => {
     expect(conversationFrames).toContain("session.update");
     expect(conversationFrames).toContain("conversation.item.create");
     expect(conversationFrames).toContain("response.create");
+  });
+
+  it("probes the engaged session in text modality when the external voice is configured", async () => {
+    const sockets: FakeProbeSocket[] = [];
+    const socketFactory: RealtimeSocketFactory = (url) => {
+      // Both probe sessions are realtime sessions; the ElevenLabs socket is
+      // deliberately never opened by readiness.
+      expect(url.startsWith("wss://api.openai.com/v1/realtime")).toBe(true);
+      const socket = new FakeProbeSocket();
+      sockets.push(socket);
+      return Promise.resolve(socket);
+    };
+    const result = await probeVoiceWakeTransition({
+      apiKey: "probe-key",
+      config: parseVoiceRealtimeEnv({
+        CLANKIE_VOICE_TTS_PROVIDER: "elevenlabs",
+        CLANKIE_VOICE_ELEVENLABS_VOICE_ID: "voice_abc123",
+      }),
+      socketFactory,
+      timeoutMs: 1_000,
+    });
+    expect(result.listener.ok).toBe(true);
+    expect(result.engaged.ok).toBe(true);
+    expect(sockets).toHaveLength(2);
+    const engagedUpdate = JSON.parse(sockets[1]?.sent[0] ?? "{}") as {
+      session?: { output_modalities?: string[]; audio?: { output?: unknown } };
+    };
+    expect(engagedUpdate.session?.output_modalities).toEqual(["text"]);
+    expect(engagedUpdate.session?.audio?.output).toBeUndefined();
   });
 
   it("reports the engaged stage as not attempted when the listener cannot open", async () => {

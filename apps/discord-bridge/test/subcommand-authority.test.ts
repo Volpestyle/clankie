@@ -44,8 +44,10 @@ describe("subcommand authority tiers", () => {
     }
   });
 
-  it("gates join and leave on the voice presence tier", () => {
-    for (const subcommand of ["join", "leave"]) {
+  it("gates join, leave, and watch on the voice presence tier", () => {
+    // Watch shares the tier deliberately: who may put him on a stage is who
+    // may point a camera at him (ADR 0047's launch surface, ADR 0050's tier).
+    for (const subcommand of ["join", "leave", "watch"]) {
       const body = caseBody(subcommand);
       expect(body, `/clankie ${subcommand} lost its voice presence check`).toContain(VOICE_PRESENCE);
       expect(body, `/clankie ${subcommand} must not fall back to the ambient tier`).not.toContain(AMBIENT);

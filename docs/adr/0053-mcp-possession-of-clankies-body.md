@@ -132,7 +132,7 @@ be revisited rather than inherited.
 ## Consequences
 
 - **Two locks, two jobs.** The possession lease decides which harness drives a
-  running loop; a lockfile in the shared body root decides which *process* owns
+  running loop; a lockfile in the shared body root decides which _process_ owns
   the body at all. `EnvironmentRuntime`'s one-writer rule turned out not to close
   the second gap: every entrypoint constructs its own runtime, so the rule was
   in-memory and invisible across processes — the MCP server and the free-play CLI

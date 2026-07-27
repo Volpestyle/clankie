@@ -1,4 +1,8 @@
-import type { EnvironmentActionResult, GbaEmulatorObservation } from "@clankie/interactive-environment";
+import {
+  GbaEmulatorActionSchema,
+  type EnvironmentActionResult,
+  type GbaEmulatorObservation,
+} from "@clankie/interactive-environment";
 import { FREE_PLAY_ACTION_LIMITS, type GbaDriverIo } from "@clankie/gba-emulator";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -224,10 +228,7 @@ describe("gba mcp tools", () => {
       position: null,
     };
     const loadCheckpoint = vi.fn();
-    const result = loadStateTool(
-      context({ loadCheckpoint, listCheckpoints: () => [summary] }),
-      undefined,
-    );
+    const result = loadStateTool(context({ loadCheckpoint, listCheckpoints: () => [summary] }), undefined);
     expect(loadCheckpoint).not.toHaveBeenCalled();
     expect(String((result.content[0] as { text: string }).text)).toContain(summary.checkpointId);
   });
@@ -282,5 +283,12 @@ describe("gba mcp tools", () => {
     expect(toAction({ actionKind: "button_press", button: "up" })).toMatchObject({ holdFrames: 16 });
     expect(toAction({ actionKind: "button_press", button: "up", repeat: 1 })).not.toHaveProperty("repeat");
     expect(toAction({ actionKind: "button_press", button: "up", repeat: 4 })).toMatchObject({ repeat: 4 });
+  });
+
+  it("maps a dialog advance to the catalogued action, carrying no arguments", () => {
+    // The action takes nothing: where it stops is read from the game, never
+    // supplied by the caller (ADR 0066).
+    expect(toAction({ actionKind: "advance_dialog" })).toEqual({ kind: "advance_dialog" });
+    expect(GbaEmulatorActionSchema.safeParse(toAction({ actionKind: "advance_dialog" })).success).toBe(true);
   });
 });

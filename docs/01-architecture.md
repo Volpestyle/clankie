@@ -201,7 +201,12 @@ an explicit phrase or decay. The engaged session holds exactly one tool,
 the control plane adds only approved guild/user person-memory projection to
 the briefing, and the request cannot manufacture trusted memory. Streamed
 24 kHz mono response audio is converted to Discord's 48 kHz stereo stream and
-disclosed as an AI-generated voice. Barge-in is deliberate — the floor holder
+disclosed as an AI-generated voice. The mouth is owner-configurable
+([ADR 0070](adr/0070-external-voice-via-streaming-tts.md)): with the
+`elevenlabs` TTS provider the engaged session emits text instead of audio and
+an ElevenLabs streaming-TTS session synthesizes it into the same 24 kHz PCM
+path — only Clankie's own words reach the second vendor, never participant
+audio. Barge-in is deliberate — the floor holder
 or a re-address truncates playback while other crosstalk lets him finish — and
 captain handoffs and playback are serialized. Receipts contain ids, counts,
 DAVE version, durations, floor and volition counters, and typed outcomes,

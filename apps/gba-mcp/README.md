@@ -47,7 +47,7 @@ without them it is the clearly-labeled deterministic double.
 | Tool                        | What it does                                                                          |
 | --------------------------- | ------------------------------------------------------------------------------------- |
 | `gba_emulator_observe`      | Decoded state **and the rendered screen as an image**                                 |
-| `gba_emulator_start_action` | One catalogued action: a button press, or `walk_to` a tile                            |
+| `gba_emulator_start_action` | One catalogued action: a button press, `walk_to`, `advance_dialog`, or `enter_text`   |
 | `gba_emulator_pause`        | Stop for a stated reason when the state looks uncertain                               |
 | `gba_emulator_resume`       | Undo a pause. Pausing is safe from anyone; resuming is driving, so it needs the lease |
 
@@ -72,9 +72,38 @@ and transport anyway, so no collision-planned route can step onto one — walk t
 the tile beside the stairs, then press into them.
 
 Every action result carries the state it produced — `position`, `facing`,
-`moved`, `turned`, and `surroundings` — so a move needs no follow-up observe.
-`moved` is the one that matters: a press into a wall completes, and changes the
-RAM digest, because the bump animation is itself a state change.
+`moved`, `turned`, `surroundings`, and any visible `dialogLines`/`menu` — so a
+move needs no follow-up observe. `moved` is the one that matters: a press into a
+wall completes, and changes the RAM digest, because the bump animation is itself
+a state change.
+
+### Talking
+
+`advance_dialog` reads an open conversation to its next real decision point in
+one action ([ADR 0066](../../docs/adr/0066-dialog-is-one-action-not-one-press-per-box.md)).
+It presses only when the game is holding a box for an advance, waits on frames
+rather than inputs while text is still printing, and returns a `transcript` of
+every box it read.
+
+It stops — and says which in `endedBecause` — when the dialog closes, a choice
+opens, a battle starts, or the budget runs out. It never answers a choice: the
+menu comes back in the outcome so the next action is the decision. Prefer it to
+`repeat`-mashing A, which cannot see the box close and re-engages the NPC.
+
+A script-held box (a fanfare holding the screen with controls locked) is waited
+out rather than refused, and battle text reads like dialog, stopping at the
+action menu ([ADR 0072](../../docs/adr/0072-the-harness-tells-him-the-truth.md)).
+
+Text speed is an in-game Option. Setting it to FAST once and minting a
+checkpoint makes every later session read faster.
+
+### Naming
+
+`enter_text` types a whole name on the open naming screen — cursor navigation,
+page switches, and the OK confirm — in one action, verifying every press
+against the decoded keyboard state. Typed text that matches the requested name
+is kept, a mismatch is erased first, so repeating the action resumes a
+budget-interrupted entry. `submit: false` leaves the screen open.
 
 ## Fail-closed, at two layers
 
@@ -292,7 +321,11 @@ a specific sentence. Anything needing verbatim output belongs on the
 presence-action path with a live claim, not here.
 
 **Possession is not announced in the channel** (owner decision, ADR 0053). It is
-visible operator-side — every lease transition is logged — and the room is not
+visible operator-side — every lease transition (acquired, released, expired,
+stolen, refused) writes the server's stderr **and** appends durably to
+`possession-events.jsonl` beside `body.lock` in the shared body root
+([ADR 0068](../../docs/adr/0068-a-playthrough-leaves-a-durable-trail.md)), so
+who held the body survives the process that granted it — and the room is not
 told a guest is driving. That trade rests on the deployment being private and
 its participants known to the owner, and ADR 0053 records the trigger for
 revisiting it.

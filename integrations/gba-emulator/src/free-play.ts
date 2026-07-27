@@ -5,6 +5,7 @@ import {
   type GbaEmulatorObservation,
   type GbaEmulatorObservationKind,
 } from "@clankie/interactive-environment";
+import { EnvironmentAdapterActionError } from "@clankie/environment-runtime";
 import { z } from "zod";
 import {
   FREE_PLAY_INTENT_MAX,
@@ -187,7 +188,14 @@ export interface FreePlayResult {
   coherence: number | null;
 }
 
-const OBSERVED_KINDS: GbaEmulatorObservationKind[] = ["danger", "overworld", "battle", "dialog", "menu"];
+const OBSERVED_KINDS: GbaEmulatorObservationKind[] = [
+  "danger",
+  "scene",
+  "overworld",
+  "battle",
+  "dialog",
+  "menu",
+];
 
 /**
  * Somewhere for a person's message to wait until the next turn reads it.
@@ -377,6 +385,8 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     record.action = parsed.data.action;
 
     let accepted = false;
+    let actionOutcome: Record<string, unknown> | undefined;
+    let rejection: string | null = null;
     try {
       const result = await input.io.act(parsed.data.action);
       // A rejection arrives as a status, not only as a throw: the adapter fails
@@ -386,23 +396,49 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
       if (result.status === "completed") {
         record.outcome = "accepted";
         accepted = true;
+        actionOutcome = result.outcome as Record<string, unknown>;
         record.detail = bounded(JSON.stringify(result.outcome));
       } else {
         record.outcome = "rejected_by_adapter";
         record.detail = bounded(`${result.status}:${describeRejection(result)}`);
+        rejection = describeRejectionForPlayer(
+          result.status === "failed" ? result.errorCode : null,
+          describeRejection(result),
+        );
       }
     } catch (error) {
       record.outcome = "rejected_by_adapter";
       record.detail = bounded(error);
+      rejection = describeRejectionForPlayer(
+        error instanceof EnvironmentAdapterActionError ? error.errorCode : null,
+        bounded(error),
+      );
     }
 
     // Re-observe and diff, so the turn records what changed rather than only
-    // that the adapter took the button.
-    const effect = observeEffect({
-      before: observations,
-      after: observe(input.io),
-      action: parsed.data.action,
-    });
+    // that the adapter took the button. The frame digest is sampled digest-to-
+    // digest around the action — the core only runs frames the action asked
+    // for, so the comparison spans exactly what this turn did to the screen.
+    //
+    // A rejected action never ran, so diffing around it would invent an effect
+    // — the worst case was a refused advance_dialog reading as "read no new
+    // text", a success-shaped sentence about an action that did not happen.
+    // The rejection reason IS the effect of that turn, and it is the one line
+    // the model actually sees (detail stays journal-only).
+    const frameAfter = input.framebufferSha256?.() ?? null;
+    const effect =
+      rejection !== null
+        ? { summary: rejection, refused: null, position: positionOf(observations), enteredMap: false }
+        : observeEffect({
+            before: observations,
+            after: observe(input.io),
+            action: parsed.data.action,
+            outcome: actionOutcome,
+            screenChanged:
+              record.framebufferSha256 !== null && frameAfter !== null
+                ? frameAfter !== record.framebufferSha256
+                : null,
+          });
     progress.record(effect, accepted);
     record.effect = effect.summary.slice(0, 200);
 
@@ -450,6 +486,33 @@ function describeRejection(result: EnvironmentActionResult): string {
   return "";
 }
 
+/**
+ * What a refusal means in play terms, for the effect line the model reads.
+ *
+ * The raw code already lands in `detail`, but detail stays in the journal —
+ * the history the model sees carries only the effect. Telling him "position
+ * unchanged" about an action the adapter never ran taught him wrong lessons
+ * ("the long repeat behaved oddly"); the codes below are the refusals a
+ * playthrough actually meets, translated into what to do about them.
+ */
+const REJECTION_HINTS: Readonly<Record<string, string>> = {
+  input_bound_exceeded: "it asked for more button presses than one action may spend",
+  frame_bound_exceeded: "it asked for more frames than one action may spend",
+  dialog_not_open:
+    "the game is not treating any dialog as open — if text is visibly on screen, a script or " +
+    "fanfare is holding it; advance a few frames and look again",
+  walk_requires_overworld: "walking needs overworld control — close whatever is open first",
+  no_path_to_target: "no walkable route to that tile exists from here",
+  map_grid_unavailable: "no map is loaded to route over — walking waits for the overworld",
+  naming_screen_not_open: "no naming screen is open to type on",
+  capability_not_granted: "this session does not allow that action",
+};
+
+function describeRejectionForPlayer(errorCode: string | null, raw: string): string {
+  const hint = errorCode === null ? undefined : REJECTION_HINTS[errorCode];
+  return `rejected, nothing ran — ${hint ?? raw}`;
+}
+
 function bounded(value: unknown): string {
   if (value instanceof Error) {
     // Some provider SDKs throw with an empty message and put the useful part in
@@ -482,7 +545,12 @@ function planSurvived(effect: string | null): boolean {
     effect.includes("blocked") ||
     effect.includes("turned to face") ||
     effect.includes("no visible change") ||
-    effect.includes("position unchanged")
+    effect.includes("position unchanged") ||
+    // The frame moved but nothing decodable did — whether the plan landed is
+    // unknowable from here, so the turn stays unscored rather than guessed.
+    effect.startsWith("screen changed") ||
+    // A refused action never ran; re-planning after one is correctness.
+    effect.startsWith("rejected")
   );
 }
 
@@ -529,6 +597,17 @@ export function intentMatchesAction(intent: string, action: GbaEmulatorAction): 
     const needles = synonyms[action.button] ?? [action.button];
     const padded = ` ${text} `;
     return needles.some((needle) => padded.includes(needle));
+  }
+  if (action.kind === "walk_to") {
+    return ["walk", "go", "head", "toward", "cross", "route", "move", "reach", "exit"].some((n) =>
+      text.includes(n),
+    );
+  }
+  if (action.kind === "enter_text") {
+    return (
+      ["name", "type", "spell", "enter", "call"].some((n) => text.includes(n)) ||
+      text.includes(action.text.toLowerCase())
+    );
   }
   if (action.kind === "frame_advance") {
     return ["wait", "advance", "let", "watch", "frame", "continue"].some((n) => text.includes(n));

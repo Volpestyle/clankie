@@ -7,9 +7,24 @@ import {
   type DiscordPresencePhaseTransitionReason,
   type DiscordPresenceSessionPhase,
   type DiscordPresenceSessionRecord,
+  type DiscordVoiceRoom,
+  type DiscordVoiceRoomOccupant,
 } from "@clankie/interactive-environment";
 import type { CaptainLane } from "@clankie/protocol";
 import { randomUUID } from "node:crypto";
+
+/**
+ * Human-readable context for a voice channel the session is entering, supplied
+ * by the transport that has the gateway objects in hand. Every field is
+ * optional: the user-session transport observes raw ids only and passes
+ * nothing, which still yields a valid (nameless) room.
+ */
+export interface DiscordVoiceRoomContext {
+  readonly guildName?: string;
+  readonly channelId?: string;
+  readonly channelName?: string;
+  readonly occupants?: readonly DiscordVoiceRoomOccupant[];
+}
 
 export interface DiscordPresenceSessionOptions {
   sessionId: string;
@@ -94,6 +109,7 @@ export class DiscordPresenceSession {
   private readonly onPublicationFailure: NonNullable<DiscordPresenceSessionOptions["onPublicationFailure"]>;
   private readonly onTerminalFailure: NonNullable<DiscordPresenceSessionOptions["onTerminalFailure"]>;
   private readonly voiceGuildIds = new Set<string>();
+  private readonly voiceRooms = new Map<string, DiscordVoiceRoom>();
   private readonly toolCatalogs = new Map<CaptainLane, DiscordPresenceAdvertisedToolCatalog>();
   private recordValue: DiscordPresenceSessionRecord;
   private liveRecordValue: DiscordPresenceSessionRecord;
@@ -120,6 +136,7 @@ export class DiscordPresenceSession {
       phase: "off",
       gatewayConnected: false,
       voiceGuildIds: [],
+      voiceRooms: [],
       revision: 0,
       updatedAt: this.clock().toISOString(),
     });
@@ -179,13 +196,35 @@ export class DiscordPresenceSession {
     return this.transition("off", "process_stopped", false);
   }
 
-  public voiceStateChanged(guildId: string, connected: boolean): Promise<DiscordPresenceSessionRecord> {
+  public voiceStateChanged(
+    guildId: string,
+    connected: boolean,
+    room?: DiscordVoiceRoomContext,
+  ): Promise<DiscordPresenceSessionRecord> {
     return this.enqueue(async () => {
-      if (connected) this.voiceGuildIds.add(guildId);
-      else this.voiceGuildIds.delete(guildId);
+      if (connected) {
+        this.voiceGuildIds.add(guildId);
+        this.voiceRooms.set(guildId, {
+          guildId,
+          ...(room?.guildName === undefined ? {} : { guildName: room.guildName }),
+          ...(room?.channelId === undefined ? {} : { channelId: room.channelId }),
+          ...(room?.channelName === undefined ? {} : { channelName: room.channelName }),
+          occupants: [...(room?.occupants ?? [])],
+        });
+      } else {
+        this.voiceGuildIds.delete(guildId);
+        this.voiceRooms.delete(guildId);
+      }
       if (!this.recordValue.gatewayConnected) return this.record;
       return this.applyTransition(this.activePhase(), connected ? "voice_joined" : "voice_left", true);
     });
+  }
+
+  /** Rooms sorted by guildId with default string ordering, mirroring `voiceGuildIds`. */
+  private sortedVoiceRooms(): DiscordVoiceRoom[] {
+    return [...this.voiceRooms.values()].sort((left, right) =>
+      left.guildId < right.guildId ? -1 : left.guildId > right.guildId ? 1 : 0,
+    );
   }
 
   private activePhase(): DiscordPresenceSessionPhase {
@@ -203,7 +242,10 @@ export class DiscordPresenceSession {
   ): Promise<DiscordPresenceSessionRecord> {
     this.fenceAdvertisedToolLoss(phase, gatewayConnected);
     return this.enqueue(() => {
-      if (!gatewayConnected) this.voiceGuildIds.clear();
+      if (!gatewayConnected) {
+        this.voiceGuildIds.clear();
+        this.voiceRooms.clear();
+      }
       return this.applyTransition(phase, reason, gatewayConnected);
     });
   }
@@ -214,6 +256,7 @@ export class DiscordPresenceSession {
       phase,
       gatewayConnected,
       voiceGuildIds: gatewayConnected ? [...this.voiceGuildIds].sort() : [],
+      voiceRooms: gatewayConnected ? this.sortedVoiceRooms() : [],
       revision: this.recordValue.revision + 1,
     });
     if (this.revokesActCapability(preview)) {
@@ -237,6 +280,7 @@ export class DiscordPresenceSession {
       phase,
       gatewayConnected,
       voiceGuildIds: [...this.voiceGuildIds].sort(),
+      voiceRooms: this.sortedVoiceRooms(),
       revision: this.recordValue.revision + 1,
       updatedAt: occurredAt,
     });
@@ -313,6 +357,7 @@ export class DiscordPresenceSession {
       phase: "failed",
       gatewayConnected: false,
       voiceGuildIds: [],
+      voiceRooms: [],
       revision: this.recordValue.revision + 1,
       updatedAt: occurredAt,
     });

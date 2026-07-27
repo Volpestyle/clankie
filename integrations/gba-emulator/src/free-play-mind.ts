@@ -36,15 +36,17 @@ const FreePlayWireDecisionSchema = z
       .string()
       .nullable()
       .describe(
-        'An aside said out loud to whoever is watching. Example: "this desk has beaten me ' +
-          "four times now, I'm starting to take it personally\". Use it when something is " +
+        "An aside said out loud to whoever is watching. Use it when something is " +
           "worth reacting to — a joke, exasperation, a surprise, changing your mind. Not " +
           "narration of your moves. Null when you have nothing to say.",
       ),
-    actionKind: z.enum(["button_press", "frame_advance", "wait"]),
+    actionKind: z.enum(["button_press", "walk_to", "advance_dialog", "enter_text", "frame_advance", "wait"]),
     button: z.enum(["up", "down", "left", "right", "a", "b", "start", "select", "l", "r"]).nullable(),
     holdFrames: z.number().int().nullable(),
     repeat: z.number().int().nullable(),
+    x: z.number().int().nullable().describe("Target tile x for walk_to, as reported in position."),
+    y: z.number().int().nullable().describe("Target tile y for walk_to, as reported in position."),
+    text: z.string().nullable().describe("The name to type for enter_text, 1-10 characters."),
     frames: z.number().int().nullable(),
     durationMs: z.number().int().nullable(),
   })
@@ -71,9 +73,15 @@ function toDecision(wire: z.infer<typeof FreePlayWireDecisionSchema>): unknown {
           holdFrames: wire.holdFrames ?? DEFAULT_HOLD_FRAMES,
           ...(wire.repeat === null || wire.repeat === 1 ? {} : { repeat: wire.repeat }),
         }
-      : wire.actionKind === "frame_advance"
-        ? { kind: "frame_advance", frames: wire.frames }
-        : { kind: "wait", durationMs: wire.durationMs };
+      : wire.actionKind === "walk_to"
+        ? { kind: "walk_to", x: wire.x, y: wire.y }
+        : wire.actionKind === "advance_dialog"
+          ? { kind: "advance_dialog" }
+          : wire.actionKind === "enter_text"
+            ? { kind: "enter_text", text: wire.text }
+            : wire.actionKind === "frame_advance"
+              ? { kind: "frame_advance", frames: wire.frames }
+              : { kind: "wait", durationMs: wire.durationMs };
   return {
     monologue: wire.monologue,
     intent: wire.intent,
@@ -140,6 +148,9 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   "  they are. Nothing else writes this, and nothing else remembers for you.",
   "- action: exactly one of",
   '    {"kind":"button_press","button":"up|down|left|right|a|b|start|select|l|r","holdFrames":N,"repeat":N}',
+  '    {"kind":"walk_to","x":N,"y":N}',
+  '    {"kind":"advance_dialog"}',
+  '    {"kind":"enter_text","text":"NAME"}',
   '    {"kind":"frame_advance","frames":N}',
   '    {"kind":"wait","durationMs":N}',
   "",
@@ -148,6 +159,27 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   "action (max 16), which",
   "is how you cross a corridor without spending a decision per tile. A short tap",
   "only turns you; a step needs a longer hold or a repeat.",
+  "",
+  "To cross a room, prefer walk_to: give it a tile on the current map and it",
+  "routes around walls and furniture using the game's own collision, walking",
+  "the whole way in one action. It stops early and says so if the way is",
+  "blocked mid-route or a script interrupts. Coordinates come from position in",
+  "the decoded state; d-pad presses are for fine adjustment, doorways, and",
+  "when you want to feel your way.",
+  "",
+  "When text is on screen, use advance_dialog rather than pressing A box by box.",
+  "It reads the whole conversation in one action and hands you the transcript,",
+  "then stops the moment the text ends or a choice appears — so you spend your",
+  "turn on the decision, not on the reading. It never answers a choice for you.",
+  "It also works when a scripted moment is holding the box (a fanfare, a jingle",
+  "— it waits the script out) and during battles, where it reads the battle",
+  "text and stops at your action menu.",
+  "",
+  "On a naming screen, use enter_text with the whole name (letters, digits,",
+  "space, basic punctuation; 10 characters max): it drives the keyboard, types",
+  "the name, and confirms it in one action. Anything already typed is kept when",
+  "it matches and erased when it does not, so repeating the same enter_text",
+  "safely finishes a partial entry.",
   "",
   "After each action you are told what actually changed — whether you moved,",
   "or the direction was blocked. Directions already refused from your current",
@@ -308,6 +340,8 @@ function describeAction(action: FreePlayView["history"][number]["action"]): stri
   }
   if (action.kind === "frame_advance") return `advanced ${String(action.frames)} frames`;
   if (action.kind === "walk_to") return `walked to (${String(action.x)}, ${String(action.y)})`;
+  if (action.kind === "advance_dialog") return "advanced the dialog";
+  if (action.kind === "enter_text") return `typed "${action.text}"`;
   return `waited ${String(action.durationMs)}ms`;
 }
 

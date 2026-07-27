@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   GbaEmulatorSessionSpecSchema,
   type EnvironmentEvent,
@@ -22,8 +23,19 @@ import type { GbaDriverIo } from "./driver.ts";
 /**
  * Exported so tool surfaces can advertise the real budget: a schema that
  * promises more than the lease allows teaches a driver to distrust both.
+ *
+ * Sized for the composite actions, not the single press: the action schema
+ * allows `repeat` up to 16, `walk_to` spends an input per step, and
+ * `advance_dialog` spends one per box — a whole rival monologue or a
+ * lab-length walk should fit in one decision. 8 was small enough that a
+ * legal-looking `repeat: 14` was rejected whole, and the driver was left
+ * inventing wrong explanations for a budget it was never told about.
+ *
+ * `timeoutMs` stays tight on purpose: composite actions run synchronously and
+ * never meet it — it is the deadline that cancels a stalled `wait`, so raising
+ * it would only slow softlock recovery.
  */
-export const FREE_PLAY_ACTION_LIMITS = { maxInputs: 8, maxFrames: 600, timeoutMs: 5_000 } as const;
+export const FREE_PLAY_ACTION_LIMITS = { maxInputs: 64, maxFrames: 1_800, timeoutMs: 5_000 } as const;
 
 const ALL_EMULATOR_CAPABILITIES = [
   "emulator.gba.observe",
@@ -62,6 +74,12 @@ export interface FreePlaySessionInput {
    * observation is not driving (ADR 0053).
    */
   acquireBody?: boolean;
+  /**
+   * Names this run inside the session id. Defaults to a start-stamped unique
+   * id so two playthroughs of the same scenario are two records, not one file
+   * the newer run overwrites. Supply it to make tests deterministic.
+   */
+  runId?: string;
 }
 
 export interface FreePlaySession {
@@ -84,7 +102,12 @@ export async function createFreePlaySession(input: FreePlaySessionInput): Promis
       : new GbaEmulatorAdapter(input.scenario, input.fixtureSha256, input.coreFactory, {
           evidencePolicy: "rolling",
         });
-  const sessionId = `gba-free-play:${input.scenario.scenarioId}:v${String(input.scenario.scenarioVersion)}`;
+  const clock = input.clock ?? (() => new Date());
+  // Per-run identity: the scenario names the world, the run stamp names the
+  // playthrough. A stable id meant every new run reused one record file and
+  // silently destroyed the previous run's action history.
+  const runId = input.runId ?? `${clock().toISOString().replace(/[:.]/gu, "-")}-${randomUUID().slice(0, 8)}`;
+  const sessionId = `gba-free-play:${input.scenario.scenarioId}:v${String(input.scenario.scenarioVersion)}:${runId}`;
   const spec = GbaEmulatorSessionSpecSchema.parse({
     schemaVersion: 2,
     sessionId,
@@ -112,7 +135,6 @@ export async function createFreePlaySession(input: FreePlaySessionInput): Promis
   });
 
   const events: EnvironmentEvent[] = [];
-  const clock = input.clock ?? (() => new Date());
   const runtime = new EnvironmentRuntime({
     rootDir: input.rootDir,
     adapter,
@@ -123,6 +145,11 @@ export async function createFreePlaySession(input: FreePlaySessionInput): Promis
       },
     },
     clock,
+    // Open-ended play needs bounded operational state: the record is rewritten
+    // whole on every persist, so an uncapped marathon pays O(n²) writes, and
+    // per-run ids would otherwise grow the records directory forever. The full
+    // history lives in the play journal, not here.
+    retention: { maxActionRecords: 128, maxEndedSessionRecords: 16 },
   });
   // Before anything drives the core: one writer per body, across processes.
   const lock: BodyLock | null =

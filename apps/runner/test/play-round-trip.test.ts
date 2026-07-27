@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -6,6 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import {
   acquireBodyLock,
   FrozenGbaScenarioSchema,
+  parseFreePlayJournal,
   RealGbaRouteScenarioSchema,
   sha256,
   type BootedGbaGame,
@@ -77,12 +78,14 @@ async function playEnv(): Promise<NodeJS.ProcessEnv> {
   return {
     CLANKIE_GBA_BODY_ROOT: join(root, "body"),
     CLANKIE_GBA_CHECKPOINT_DIR: join(root, "checkpoints"),
+    CLANKIE_GBA_PLAY_JOURNAL_DIR: join(root, "gba-play"),
     CLANKIE_ACTIVITY_PRODUCER_URL: "ws://127.0.0.1:1/producer",
   };
 }
 
 describe("asked play round trip on the deterministic double", () => {
   it("claims, runs the budgeted turns for real, and reports the receipt", async () => {
+    const env = await playEnv();
     const client = fakeClient({ kind: "start", session: session() });
     const host = new PlayHost({
       client,
@@ -90,7 +93,7 @@ describe("asked play round trip on the deterministic double", () => {
       environmentIds: ["pokemon-firered"],
       execute: createGbaPlayExecution({
         logger: silentLogger,
-        env: await playEnv(),
+        env,
         createMind: buttonMasher,
       }),
       logger: silentLogger,
@@ -100,6 +103,17 @@ describe("asked play round trip on the deterministic double", () => {
     expect(client.reports.map((report) => report.state)).toEqual(["running", "stopped"]);
     const receipt = client.reports[1]?.receipt;
     expect(receipt).toMatchObject({ outcome: "budget_exhausted", turnsTaken: 2 });
+
+    // The durable trail (ADR 0068): the run left a journal with the header,
+    // both turns, and a summary carrying the metrics the receipt cannot.
+    const journalDir = env["CLANKIE_GBA_PLAY_JOURNAL_DIR"] as string;
+    const journalFiles = readdirSync(journalDir);
+    expect(journalFiles).toHaveLength(1);
+    const lines = parseFreePlayJournal(readFileSync(join(journalDir, journalFiles[0]!), "utf8"));
+    expect(lines.map((line) => line.kind)).toEqual(["header", "turn", "turn", "summary"]);
+    expect(lines[0]).toMatchObject({ runId: "round-trip-1" });
+    expect(lines[1]).toMatchObject({ turn: { monologue: "pressing on", outcome: "accepted" } });
+    expect(lines.at(-1)).toMatchObject({ outcome: "budget_exhausted", turnsTaken: 2 });
   });
 
   it("mints a checkpoint on stop and resumes from it on the next ask", async () => {

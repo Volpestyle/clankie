@@ -378,6 +378,24 @@ describe("reading live, then checking in", () => {
     await expect(ingress.handle(say("m2", "did it pass?"))).resolves.toMatchObject({ state: "settled" });
   });
 
+  it("exposes engagement so ingress-boundary seams share the same notion of spoken to", async () => {
+    const port = new RecordingPort();
+    const ingress = new DiscordTextIngress(port, room({ liveMessageWindow: 2 }), () => undefined);
+
+    // A channel he has never spoken in is not one he is engaged with.
+    expect(ingress.engagedInChannel("channel-1")).toBe(false);
+    await ingress.handle(say("m1", "clankie how did the run go?"));
+    expect(ingress.engagedInChannel("channel-1")).toBe(true);
+    expect(ingress.engagedInChannel("channel-9")).toBe(false);
+
+    // Staying quiet while the room moves on closes engagement, exactly as it
+    // ends live reading — the two must never drift apart.
+    port.silent = true;
+    await ingress.handle(say("m2", "one"));
+    await ingress.handle(say("m3", "two"));
+    expect(ingress.engagedInChannel("channel-1")).toBe(false);
+  });
+
   it("stops reading live once the conversation has moved on without him", async () => {
     const port = new RecordingPort();
     const ingress = new DiscordTextIngress(port, room({ liveMessageWindow: 2 }), () => undefined);
