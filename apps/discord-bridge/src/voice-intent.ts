@@ -19,7 +19,11 @@
  * body cannot steer where he joins. The executed outcome is injected into the
  * same captain turn as a content-free note, so his conversational reply
  * reflects what actually happened — including the honest refusal when the
- * asker is not in a voice channel yet.
+ * asker is not in a voice channel yet. That refusal opens a bounded pending
+ * retry ({@link VoicePresenceRetryWindow}): for a short window the same
+ * asker's follow-up in the same channel — "try now", "im in general" — earns
+ * one retry-framed read once the gateway reports them in voice, with no
+ * voice-ish word required, so nobody has to repeat the ask he already heard.
  *
  * Everything here is injectable and free of the discord.js client, so the
  * whole path is unit-testable offline.
@@ -77,6 +81,14 @@ export interface VoicePresenceGateInput {
    * word — see {@link voicePresenceGateOpen}.
    */
   readonly askerInVoice: boolean;
+  /**
+   * An unexpired {@link VoicePresenceRetryWindow} entry for this exact
+   * guild/channel/asker: Clankie refused a join moments ago only because the
+   * asker was not in voice yet. While that door he held open stands, the
+   * asker's follow-up counts as spoken-to, and — once they are in voice — as
+   * worth a read with no voice-ish word ("try now", "im in general").
+   */
+  readonly pendingJoinRetry?: boolean;
 }
 
 /**
@@ -112,15 +124,25 @@ export function voicePresenceGateOpen(
   if (input.guildId === undefined) return false;
   if (!config.ingressGuildIds.has(input.guildId)) return false;
   if (config.ingressChannelIds.size > 0 && !config.ingressChannelIds.has(input.channelId)) return false;
+  const pendingJoinRetry = input.pendingJoinRetry === true;
   if (
     !input.mentionsBot &&
     !addressesCharacter(input.body, config.characterNames) &&
-    !input.engagedInChannel
+    !input.engagedInChannel &&
+    !pendingJoinRetry
   ) {
     return false;
   }
   if (VOICE_PRESENCE_TOKEN_PATTERN.test(input.body)) return true;
-  return (input.mentionsBot || addressesCharacter(input.body, config.characterNames)) && input.askerInVoice;
+  if ((input.mentionsBot || addressesCharacter(input.body, config.characterNames)) && input.askerInVoice) {
+    return true;
+  }
+  // The third wordless door: he refused this asker's join moments ago only
+  // because they were not in voice, and now they are. Their follow-up in the
+  // same channel is the "ask again" his refusal invited, whatever words it
+  // uses — a live trace showed "try now" and "im in general" exiting unread
+  // while he improvised that he still could not see voice.
+  return pendingJoinRetry && input.askerInVoice;
 }
 
 // ---------------------------------------------------------------------------
@@ -135,6 +157,26 @@ export const VOICE_PRESENCE_INTENT_SYSTEM_PROMPT =
   "Clankie to LEAVE voice, or neither. Earlier channel messages may precede it for context only — " +
   "judge the final message alone, and only what it asks of Clankie: a request aimed at another " +
   'member is "none". Answer strictly with one word: "join", "leave", or "none".';
+
+/**
+ * The read for a follow-up inside a pending join retry
+ * ({@link VoicePresenceRetryWindow}). The standing prompt judges the final
+ * message alone as a fresh ask, which is exactly wrong here: "try now" and
+ * "im in general" ask nothing on their own — a live trace showed both exiting
+ * unread while Clankie improvised that he still could not see voice. This
+ * framing tells the model the one mechanical fact the window already
+ * established — a join was asked and refused only because the sender was not
+ * in voice, and they are in voice now — and asks whether this message renews
+ * that ask. Unrelated chatter stays "none", so a pending window never joins on
+ * the strength of the sender merely talking.
+ */
+export const VOICE_PRESENCE_RETRY_SYSTEM_PROMPT =
+  "A Discord member recently asked Clankie to join their voice channel, but they were not in a " +
+  "voice channel yet, so Clankie could not join. The sender is in a voice channel now and sent " +
+  "Clankie the text message that follows. Decide whether it tells Clankie to go ahead with that " +
+  "join now — confirming they are in voice, asking him to try again, or repeating the ask — asks " +
+  "Clankie to LEAVE voice, or does neither. Unrelated chatter is \"none\". Earlier channel messages " +
+  'may precede it for context only. Answer strictly with one word: "join", "leave", or "none".';
 
 /** Discord message bodies cap at 4 000 characters; longer is not a message. */
 const INTENT_BODY_MAX_CHARACTERS = 4_000;
@@ -158,6 +200,13 @@ export interface VoicePresenceContextLine {
 export interface VoicePresenceAsk {
   readonly body: string;
   readonly context: readonly VoicePresenceContextLine[];
+  /**
+   * Set when this message arrived inside a pending join retry with the sender
+   * now in voice: the read uses {@link VOICE_PRESENCE_RETRY_SYSTEM_PROMPT}, so
+   * a bare "try now" can renew the already-asked join instead of being judged
+   * as a fresh ask that asks nothing.
+   */
+  readonly pendingJoinRetry?: boolean;
 }
 
 const SPEAKER_LABELS: Readonly<Record<VoicePresenceContextLine["speaker"], string>> = {
@@ -202,19 +251,103 @@ export interface VoicePresenceIntentDeciderInput {
 export function createVoicePresenceIntentDecider(
   input: VoicePresenceIntentDeciderInput,
 ): (ask: VoicePresenceAsk) => Promise<VoicePresenceIntent> {
-  const verdict = createBoundedChatVerdict({
-    apiKey: input.apiKey,
-    model: input.model,
-    systemPrompt: VOICE_PRESENCE_INTENT_SYSTEM_PROMPT,
-    maxUserTextCharacters: INTENT_TEXT_MAX_CHARACTERS,
-    ...(input.baseUrl === undefined ? {} : { baseUrl: input.baseUrl }),
-    ...(input.fetchImpl === undefined ? {} : { fetchImpl: input.fetchImpl }),
-    ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
-  });
+  const verdictWith = (systemPrompt: string) =>
+    createBoundedChatVerdict({
+      apiKey: input.apiKey,
+      model: input.model,
+      systemPrompt,
+      maxUserTextCharacters: INTENT_TEXT_MAX_CHARACTERS,
+      ...(input.baseUrl === undefined ? {} : { baseUrl: input.baseUrl }),
+      ...(input.fetchImpl === undefined ? {} : { fetchImpl: input.fetchImpl }),
+      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+    });
+  const asked = verdictWith(VOICE_PRESENCE_INTENT_SYSTEM_PROMPT);
+  const retry = verdictWith(VOICE_PRESENCE_RETRY_SYSTEM_PROMPT);
   return async (ask) => {
+    const verdict = ask.pendingJoinRetry === true ? retry : asked;
     const answer = await verdict(renderVoicePresenceAskText(ask));
     return answer === "join" || answer === "leave" ? answer : "none";
   };
+}
+
+// ---------------------------------------------------------------------------
+// The pending retry window: a refused join keeps listening, briefly.
+// ---------------------------------------------------------------------------
+
+/** How long a `join_refused: not_in_voice` keeps listening for a follow-up. */
+export const VOICE_PRESENCE_RETRY_WINDOW_MS = 120_000;
+/** A hard bound on retained pending retries; the oldest fall off first. */
+const RETRY_WINDOW_MAX_ENTRIES = 64;
+
+/** Exactly who a pending retry belongs to — never wider than one asker in one channel. */
+export interface VoicePresenceRetryKey {
+  readonly guildId: string;
+  readonly channelId: string;
+  readonly actorId: string;
+}
+
+/**
+ * The bounded state behind the honest refusal: when an asked join is refused
+ * only because the asker was not in a voice channel yet, his reply says "hop
+ * in a channel and ask again" — and this window is him actually listening for
+ * that. While it is open, a message from the same asker in the same text
+ * channel counts as spoken-to and, once the gateway reports them in voice,
+ * earns one bounded retry-framed read with no voice-ish word required
+ * ("try now", "im in general").
+ *
+ * The window holds no text and grants nothing: ids and a deadline only, and
+ * every retry runs the full deterministic execution — the ADR 0050 tier, the
+ * voice allowlists, and a fresh gateway voice-state read for the target
+ * channel. It opens only on `join_refused: not_in_voice`, is consumed by the
+ * next executed decision for its key, expires on its own, and is bounded to
+ * {@link RETRY_WINDOW_MAX_ENTRIES} entries, so a late message, another
+ * member, or another channel can never ride an old refusal into a join.
+ */
+export class VoicePresenceRetryWindow {
+  /** Retry key -> expiry, insertion-ordered so overflow evicts the oldest. */
+  private readonly entries = new Map<string, number>();
+  private readonly windowMs: number;
+  private readonly clock: () => number;
+
+  public constructor(windowMs: number = VOICE_PRESENCE_RETRY_WINDOW_MS, clock: () => number = Date.now) {
+    this.windowMs = windowMs;
+    this.clock = clock;
+  }
+
+  /** Is a retry pending for exactly this asker in this channel, unexpired? */
+  public pending(key: VoicePresenceRetryKey): boolean {
+    this.prune();
+    return this.entries.has(retryEntryId(key));
+  }
+
+  /**
+   * Record an executed decision for this key: any executed note consumes the
+   * pending retry, and only `join_refused: not_in_voice` opens a fresh one —
+   * including a retry that found the asker gone again, so the door he
+   * explicitly held open never closes on a race.
+   */
+  public settle(key: VoicePresenceRetryKey, note: DiscordVoicePresenceNote): void {
+    const id = retryEntryId(key);
+    this.entries.delete(id);
+    if (note.action !== "join_refused" || note.reason !== "not_in_voice") return;
+    this.prune();
+    if (this.entries.size >= RETRY_WINDOW_MAX_ENTRIES) {
+      const oldest = this.entries.keys().next().value;
+      if (oldest !== undefined) this.entries.delete(oldest);
+    }
+    this.entries.set(id, this.clock() + this.windowMs);
+  }
+
+  private prune(): void {
+    const now = this.clock();
+    for (const [id, expiresAt] of this.entries) {
+      if (expiresAt <= now) this.entries.delete(id);
+    }
+  }
+}
+
+function retryEntryId(key: VoicePresenceRetryKey): string {
+  return `${key.guildId}\n${key.channelId}\n${key.actorId}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -323,6 +456,12 @@ export interface VoicePresenceAskOptions {
   readonly decider: (ask: VoicePresenceAsk) => Promise<VoicePresenceIntent>;
   readonly execution: VoicePresenceExecutionConfig;
   /**
+   * The pending join retries this handler consults and settles. Optional so
+   * the seam stays additive; without it a refused join simply keeps requiring
+   * a worded re-ask.
+   */
+  readonly retry?: VoicePresenceRetryWindow;
+  /**
    * One content-free trace per message that speaks to him (never the body),
    * emitted whether or not anything executed. Such messages are rare enough to
    * log every evaluation, and a silent early exit here already cost one live
@@ -341,6 +480,13 @@ export interface VoicePresenceAskTrace {
   /** The asker's gateway voice-state presence at gate time. */
   readonly inVoice: boolean;
   readonly voiceToken: boolean;
+  /**
+   * Present when an unexpired pending join retry for this guild/channel/asker
+   * was open as the message arrived — the trace that says whether a refused
+   * join was still listening, without which a missed follow-up is
+   * undiagnosable.
+   */
+  readonly pendingRetry?: true;
   /** Absent when the gate stayed closed. */
   readonly intent?: VoicePresenceIntent;
   /** Present when execution ran. */
@@ -388,11 +534,19 @@ export async function handleVoicePresenceAsk(
   if (options.gate.ingressChannelIds.size > 0 && !options.gate.ingressChannelIds.has(message.channelId)) {
     return undefined;
   }
+  const retryKey: VoicePresenceRetryKey = {
+    guildId,
+    channelId: message.channelId,
+    actorId: message.authorId,
+  };
+  const pendingRetry = options.retry?.pending(retryKey) ?? false;
   const addressed = message.mentionsBot || addressesCharacter(message.body, options.gate.characterNames);
   // Messages that speak to nobody he answers exit before tracing — they are
   // the common case and a trace per guild message is log spam, not
-  // observability.
-  if (!addressed && !message.engagedInChannel) return undefined;
+  // observability. A pending retry counts as spoken-to: he just told this
+  // asker to hop in a channel and ask again, so their follow-up is rare and
+  // worth a trace either way.
+  if (!addressed && !message.engagedInChannel && !pendingRetry) return undefined;
   const member = resolveMember();
   const voiceToken = VOICE_PRESENCE_TOKEN_PATTERN.test(message.body);
   const trace = (extra: Partial<VoicePresenceAskTrace> = {}): void => {
@@ -403,6 +557,7 @@ export async function handleVoicePresenceAsk(
       memberResolved: member !== undefined,
       inVoice: member?.voiceChannelId !== undefined,
       voiceToken,
+      ...(pendingRetry ? { pendingRetry: true } : {}),
       ...extra,
     });
   };
@@ -410,8 +565,13 @@ export async function handleVoicePresenceAsk(
   // to execute under, so the read would be wasted. The asker being out of
   // voice is NOT an exit: execution answers that with an honest note. A
   // wordless message opens only through the second door — named explicitly by
-  // an asker already standing in voice.
-  if (member === undefined || (!voiceToken && !(addressed && member.voiceChannelId !== undefined))) {
+  // an asker already standing in voice — or the third: a pending join retry
+  // for exactly this asker and channel, with the asker in voice at last.
+  const askerInVoice = member?.voiceChannelId !== undefined;
+  if (
+    member === undefined ||
+    (!voiceToken && !(addressed && askerInVoice) && !(pendingRetry && askerInVoice))
+  ) {
     trace();
     return undefined;
   }
@@ -423,7 +583,15 @@ export async function handleVoicePresenceAsk(
       // Body-only is a degraded read, not a dropped ask.
     }
   }
-  const intent = await options.decider({ body: message.body, context });
+  // Inside a pending retry with the asker in voice, the read is framed as the
+  // follow-up it is: the standing prompt judges the message alone, and "try
+  // now" alone asks nothing. Either framing fails closed to "none".
+  const retryRead = pendingRetry && askerInVoice;
+  const intent = await options.decider({
+    body: message.body,
+    context,
+    ...(retryRead ? { pendingJoinRetry: true } : {}),
+  });
   if (intent === "none") {
     trace({ intent });
     return undefined;
@@ -438,6 +606,9 @@ export async function handleVoicePresenceAsk(
     memberVoiceChannelId: current?.voiceChannelId,
     adapterCreator: (current ?? member).adapterCreator,
   });
+  // Every executed decision settles the window for this asker: consumed on
+  // anything final, reopened only by another honest not_in_voice refusal.
+  options.retry?.settle(retryKey, note);
   trace({ intent, action: note.action, ...(note.reason === undefined ? {} : { reason: note.reason }) });
   return note;
 }

@@ -127,6 +127,95 @@ describe("Discord channel control-plane runtime", () => {
     expect(requests[2]?.body).not.toHaveProperty("continuationToken");
   });
 
+  it("a bare wake after a real request composes the prior request as the actionable subject", async () => {
+    // The live miss, replayed: "hop in vc and play pokemon" (excluded as
+    // unaddressed), then a bare "clankie". The wake's turn must present the
+    // prior conversation chronologically and tell him a bare wake points back
+    // at it — he answered "yo, what's up?" and made the asker repeat
+    // themselves. The composed Eve request is the strongest deterministic
+    // boundary there is here; live model compliance is a persona concern.
+    const requests: Array<{ url: string; body?: unknown }> = [];
+    const port = new EveCaptainChannelTurnPort({
+      baseUrl: "http://127.0.0.1:4321",
+      fetchImpl: async (input, init) => {
+        requests.push({
+          url: String(input),
+          ...(init?.body === undefined ? {} : { body: JSON.parse(String(init.body)) }),
+        });
+        if (init?.method === "POST") {
+          return Response.json({ sessionId: "eve-wake" }, { status: 202 });
+        }
+        return ndjson([
+          { type: "turn.started", data: { turnId: "wake-turn" } },
+          {
+            type: "message.completed",
+            data: { turnId: "wake-turn", finishReason: "stop", message: "On it." },
+          },
+          { type: "session.waiting", data: { turnId: "wake-turn" } },
+        ]);
+      },
+    });
+    const conversation = [
+      {
+        id: "ctx-ask",
+        authorId: "asker-1",
+        body: "hop in vc and play pokemon",
+        createdAt: "2026-08-02T12:35:00.000Z",
+      },
+      {
+        id: "ctx-other",
+        authorId: "bystander",
+        body: "good luck with the elite four",
+        createdAt: "2026-08-02T12:35:20.000Z",
+      },
+    ];
+    const wake = (contextMessages: typeof conversation, deliveryId: string) => ({
+      ...turnRequest(),
+      deliveryId,
+      trigger: {
+        kind: "message" as const,
+        id: deliveryId,
+        guildId: "guild-1",
+        channelId: "channel-1",
+        messageId: deliveryId,
+        actorId: "asker-1",
+        body: "clankie",
+      },
+      contextMessages,
+    });
+
+    await port.submit({ request: wake(conversation, "message-wake") });
+    await port.submit({ request: wake([], "message-bare") });
+
+    const body = (index: number) => {
+      const request = requests[index];
+      if (request === undefined) throw new Error(`request ${String(index)} was never captured`);
+      return request.body as {
+        message: string;
+        clientContext: { thread: { trigger: unknown; messages: unknown } };
+      };
+    };
+    // The durable message carries the fixed framing — chronology plus the
+    // bare-wake rule — and never any untrusted body.
+    expect(body(0).message).toContain("chronological order, oldest first");
+    expect(body(0).message).toContain(
+      "treat their most recent relevant message there (the latest whose author matches the trigger's actorId) as what they are asking you to act on",
+    );
+    expect(body(0).message).not.toContain("pokemon");
+    // The prior request reaches him inside the turn-only thread context, in
+    // order, attributed to the wake's own actor — the actionable subject.
+    expect(body(0).clientContext.thread.trigger).toEqual({
+      id: "message-wake",
+      actorId: "asker-1",
+      body: "clankie",
+    });
+    expect(body(0).clientContext.thread.messages).toEqual(conversation);
+    // With no prior conversation there is nothing to point back at, so the
+    // framing paragraph is absent rather than describing context that is not
+    // there.
+    expect(body(2).message).not.toContain("chronological order");
+  });
+
   it("renders the bridge's voice presence note as one neutral thread-context line", async () => {
     const requests: Array<{ url: string; body?: unknown }> = [];
     const port = new EveCaptainChannelTurnPort({

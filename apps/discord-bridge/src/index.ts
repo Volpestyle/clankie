@@ -71,6 +71,7 @@ import {
 import {
   createVoicePresenceIntentDecider,
   handleVoicePresenceAsk,
+  VoicePresenceRetryWindow,
   type VoicePresenceAskOptions,
   type VoicePresenceMember,
 } from "./voice-intent.ts";
@@ -367,6 +368,10 @@ const voicePresenceAsk: VoicePresenceAskOptions | undefined =
           voiceChannelIds,
           voiceSession,
         },
+        // A refused not-in-voice join listens briefly for the asker's
+        // follow-up, so "try now" from inside voice retries instead of
+        // making them repeat the ask.
+        retry: new VoicePresenceRetryWindow(),
         // Content-free by construction (ids, booleans, enums — never the body).
         onTrace: (trace) => console.info(trace, "Discord voice presence ask"),
       };

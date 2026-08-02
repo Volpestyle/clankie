@@ -1,6 +1,7 @@
 # ADR 0062: Voice join by asking
 
-Status: accepted (2026-07-26). Builds on
+Status: accepted (2026-07-26, amended 2026-08-02 with the pending join
+retry). Builds on
 [ADR 0050](0050-voice-presence-authority-tier.md) (the voice presence authority
 tier) and [ADR 0057](0057-realtime-voice-with-captain-handoff.md) (the realtime
 voice architecture and its consent disclosures), neither of which changes here.
@@ -33,14 +34,16 @@ informed rather than asked.
 
 ```mermaid
 flowchart LR
-  M["guild message<br/>admitted by text ingress"] --> G{"gate (free)<br/>addressed OR mid-conversation<br/>voice-token regex, or explicit<br/>name + asker in voice"}
+  M["guild message<br/>admitted by text ingress"] --> G{"gate (free)<br/>addressed OR mid-conversation<br/>OR pending retry · voice-token regex,<br/>explicit name + asker in voice,<br/>or pending retry + asker in voice"}
   G -->|closed| T["normal captain turn<br/>untouched"]
-  G -->|open| D["intent decider<br/>CLANKIE_VOICE_VOLITION_MODEL<br/>join / leave / none, fail closed"]
+  G -->|open| D["intent decider<br/>CLANKIE_VOICE_VOLITION_MODEL<br/>join / leave / none, fail closed<br/>(retry framing inside a pending window)"]
   D -->|none| T
   D -->|join / leave| A["deterministic execution<br/>ADR 0050 tier · voice allowlists<br/>asker in voice? · channel from the gateway cache"]
   A -->|"voiceSession.join / leave"| V["DiscordVoiceSession"]
   A --> N["content-free note<br/>enums + ids only<br/>(joined, or an honest refusal)"]
   N --> T2["the SAME captain turn<br/>reply reflects reality"]
+  N -->|"join_refused: not_in_voice"| R["pending retry window<br/>same guild/channel/asker<br/>ids + deadline only, 2 min"]
+  R -.->|"next follow-up,<br/>asker now in voice"| G
 ```
 
 - **Gate (free).** Runs only on inbound guild messages that already pass the
@@ -86,6 +89,24 @@ flowchart LR
   joins. If he is already in exactly the asked channel, nothing is rejoined: a
   rejoin resets the consent registry, and silently un-consenting a room is
   worse than doing nothing.
+- **The honest refusal keeps listening.** `join_refused: not_in_voice` opens a
+  pending retry window — ids and a deadline only (two minutes), bound to
+  exactly that guild, text channel, and asker, capped in count, consumed by
+  the next executed decision for its key. His reply says "hop in a channel and
+  ask again", and the window is him actually listening for that: while it is
+  open, the same asker's follow-up in the same channel counts as spoken-to,
+  and once the gateway reports them in a voice channel it earns one bounded
+  read with no voice-ish word — the second live run showed "try now" and
+  "im in general" exiting unread while his reply improvised that he still
+  could not see voice. That read uses a retry framing (the standing prompt
+  judges the message alone, and "try now" alone asks nothing): does this
+  message renew the already-asked join, ask a leave, or neither — unrelated
+  chatter stays "none", so the window never joins on the strength of the
+  sender merely talking. A renewed join then runs the unchanged deterministic
+  execution — same tier, same allowlists, target channel from a fresh gateway
+  read — and a retry that finds the asker gone again reopens the window
+  instead of eating the follow-up. Another member, another channel, or a late
+  message can never ride an old refusal into a join.
 - **Consent is never granted by asking.** An asked join opts in nobody — the
   asker included. Everyone consents through `/clankie voice-consent opt-in`,
   which already carries the residency disclosure ephemerally. The slash join
@@ -134,3 +155,8 @@ flowchart LR
 - An asked join starts with zero consented participants, so he sits in the
   channel hearing nobody until people opt in. That is the consent model working
   as designed, and the injected note tells him so, so he can say it.
+- A pending retry window spends at most one bounded read per follow-up message
+  from its one asker for its two minutes, and each read fails closed. The
+  content-free ask trace carries a `pendingRetry` flag, so whether a refused
+  join was still listening when a follow-up arrived is a recorded fact rather
+  than an inference from his reply.

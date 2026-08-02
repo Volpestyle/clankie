@@ -12,8 +12,12 @@ import {
   handleVoicePresenceAsk,
   renderVoicePresenceAskText,
   voicePresenceGateOpen,
+  VoicePresenceRetryWindow,
   VOICE_PRESENCE_INTENT_SYSTEM_PROMPT,
+  VOICE_PRESENCE_RETRY_SYSTEM_PROMPT,
+  VOICE_PRESENCE_RETRY_WINDOW_MS,
   VOICE_PRESENCE_TOKEN_PATTERN,
+  type VoicePresenceAsk,
   type VoicePresenceAskOptions,
   type VoicePresenceExecutionConfig,
   type VoicePresenceGateConfig,
@@ -164,6 +168,25 @@ describe("the mechanical gate", () => {
     for (const body of ["clankie hop in", "clankie join us", "clankie you can leave", "clankie dip"]) {
       expect(VOICE_PRESENCE_TOKEN_PATTERN.test(body)).toBe(true);
     }
+  });
+
+  it("a pending join retry opens the gate wordlessly, but only with the asker in voice", () => {
+    // The third door — the live miss this widened for: "try now" and "im in
+    // general" carry no voice-ish word and no name, yet follow a refusal that
+    // explicitly invited them.
+    expect(open({ body: "try now", pendingJoinRetry: true, askerInVoice: true })).toBe(true);
+    expect(open({ body: "im in general", pendingJoinRetry: true, askerInVoice: true })).toBe(true);
+    // Still out of voice: nothing to retry against, the gate stays closed.
+    expect(open({ body: "try now", pendingJoinRetry: true, askerInVoice: false })).toBe(false);
+    // No pending retry: a wordless unaddressed message stays closed, as ever.
+    expect(open({ body: "try now", askerInVoice: true })).toBe(false);
+    // The admission checks are never bypassed by a pending retry.
+    expect(open({ body: "try now", pendingJoinRetry: true, askerInVoice: true, authorIsBot: true })).toBe(
+      false,
+    );
+    expect(
+      open({ body: "try now", pendingJoinRetry: true, askerInVoice: true, guildId: "guild-elsewhere" }),
+    ).toBe(false);
   });
 
   it("a closed gate never runs the decider; an open gate runs it exactly once", async () => {
@@ -726,6 +749,247 @@ describe("the composed ask path", () => {
       action: "join_refused",
       reason: "not_in_voice",
     });
+  });
+});
+
+describe("the pending join retry", () => {
+  /** Options wired the way index.ts wires them, with a scripted decider. */
+  function retryOptions(input: {
+    session: FakeVoiceSession;
+    retry: VoicePresenceRetryWindow;
+    decide: (ask: VoicePresenceAsk) => "join" | "leave" | "none";
+    asks?: VoicePresenceAsk[];
+    traces?: unknown[];
+  }): VoicePresenceAskOptions {
+    return {
+      gate: gateConfig(),
+      decider: (ask) => {
+        input.asks?.push(ask);
+        return Promise.resolve(input.decide(ask));
+      },
+      execution: executionConfig(input.session),
+      retry: input.retry,
+      ...(input.traces === undefined ? {} : { onTrace: (trace: unknown) => input.traces?.push(trace) }),
+    };
+  }
+
+  /** The refusal that opens the window: a worded ask from outside voice. */
+  async function refuseJoin(options: VoicePresenceAskOptions): Promise<void> {
+    await expect(
+      handleVoicePresenceAsk(options, inbound({ id: "message-ask", body: "clankie hop in vc" }), () =>
+        member({ voiceChannelId: undefined }),
+      ),
+    ).resolves.toEqual({ action: "join_refused", reason: "not_in_voice" });
+  }
+
+  it("the live miss, replayed: 'try now' from inside voice retries the refused join", async () => {
+    const session = new FakeVoiceSession();
+    const retry = new VoicePresenceRetryWindow();
+    const asks: VoicePresenceAsk[] = [];
+    const traces: unknown[] = [];
+    const options = retryOptions({ session, retry, decide: () => "join", asks, traces });
+
+    await refuseJoin(options);
+    // "try now": no voice-ish word, no name, mid-conversation — exactly the
+    // live follow-up that exited unread. The asker is in General now.
+    const note = await handleVoicePresenceAsk(
+      options,
+      inbound({ id: "message-try-now", body: "try now", engagedInChannel: true }),
+      () => member({ voiceChannelId: "voice-general" }),
+    );
+    expect(note).toEqual({ action: "joined", channelId: "voice-general" });
+    // The target came from the fresh gateway read, never text or the model.
+    expect(session.joinInputs).toEqual([
+      { guildId: "guild-1", channelId: "voice-general", adapterCreator: ADAPTER },
+    ]);
+    // The follow-up read carried the retry framing, not the fresh-ask one.
+    expect(asks.map((ask) => ask.pendingJoinRetry === true)).toEqual([false, true]);
+    // The trace says a pending retry was open and what happened — enough to
+    // diagnose a missed follow-up without a single body.
+    expect(traces.at(-1)).toEqual({
+      deliveryId: "message-try-now",
+      addressed: false,
+      engaged: true,
+      memberResolved: true,
+      inVoice: true,
+      voiceToken: false,
+      pendingRetry: true,
+      intent: "join",
+      action: "joined",
+    });
+
+    // The join consumed the window: the asker's next wordless message earns
+    // no further read.
+    await expect(
+      handleVoicePresenceAsk(options, inbound({ id: "message-later", body: "nice" }), () =>
+        member({ voiceChannelId: "voice-general" }),
+      ),
+    ).resolves.toBeUndefined();
+    expect(asks).toHaveLength(2);
+  });
+
+  it("unrelated chatter inside the window cannot join: the read fails closed and the window survives", async () => {
+    const session = new FakeVoiceSession();
+    const retry = new VoicePresenceRetryWindow();
+    const asks: VoicePresenceAsk[] = [];
+    const options = retryOptions({
+      session,
+      retry,
+      // The fresh ask reads "join"; inside the window only the actual
+      // follow-up does — chatter reads "none", as the live decider would.
+      decide: (ask) =>
+        ask.pendingJoinRetry === true ? (ask.body === "ok try now" ? "join" : "none") : "join",
+      asks,
+    });
+
+    await refuseJoin(options);
+    // The asker walks into voice and just… talks. One bounded read says
+    // "none"; nothing joins, and the door he held open stays open.
+    await expect(
+      handleVoicePresenceAsk(options, inbound({ id: "message-chatter", body: "that boss was wild" }), () =>
+        member({ voiceChannelId: "voice-general" }),
+      ),
+    ).resolves.toBeUndefined();
+    expect(session.joinInputs).toHaveLength(0);
+    // The actual follow-up still works after the chatter.
+    await expect(
+      handleVoicePresenceAsk(options, inbound({ id: "message-affirm", body: "ok try now" }), () =>
+        member({ voiceChannelId: "voice-general" }),
+      ),
+    ).resolves.toEqual({ action: "joined", channelId: "voice-general" });
+    expect(asks.map((ask) => ask.pendingJoinRetry === true)).toEqual([false, true, true]);
+  });
+
+  it("the window binds one asker in one channel and expires: nobody else, nowhere else, never late", async () => {
+    const session = new FakeVoiceSession();
+    let now = 0;
+    const retry = new VoicePresenceRetryWindow(VOICE_PRESENCE_RETRY_WINDOW_MS, () => now);
+    const asks: VoicePresenceAsk[] = [];
+    const options = retryOptions({ session, retry, decide: () => "join", asks });
+
+    await refuseJoin(options);
+    // Another member's wordless message in the same channel: no read.
+    await expect(
+      handleVoicePresenceAsk(
+        options,
+        inbound({ id: "message-other-user", body: "try now", authorId: "someone-else" }),
+        () => member({ voiceChannelId: "voice-general" }),
+      ),
+    ).resolves.toBeUndefined();
+    // The same asker in another text channel: no read.
+    await expect(
+      handleVoicePresenceAsk(
+        options,
+        inbound({ id: "message-other-channel", body: "try now", channelId: "channel-2" }),
+        () => member({ voiceChannelId: "voice-general" }),
+      ),
+    ).resolves.toBeUndefined();
+    // The same asker, same channel, but past the window: no read.
+    now += VOICE_PRESENCE_RETRY_WINDOW_MS + 1;
+    await expect(
+      handleVoicePresenceAsk(options, inbound({ id: "message-late", body: "try now" }), () =>
+        member({ voiceChannelId: "voice-general" }),
+      ),
+    ).resolves.toBeUndefined();
+    expect(asks).toHaveLength(1);
+    expect(session.joinInputs).toHaveLength(0);
+  });
+
+  it("a follow-up from still outside voice earns no read, but the trace shows the open window", async () => {
+    const session = new FakeVoiceSession();
+    const retry = new VoicePresenceRetryWindow();
+    const traces: unknown[] = [];
+    const asks: VoicePresenceAsk[] = [];
+    const options = retryOptions({ session, retry, decide: () => "join", asks, traces });
+
+    await refuseJoin(options);
+    traces.length = 0;
+    await expect(
+      handleVoicePresenceAsk(options, inbound({ id: "message-still-out", body: "try now" }), () =>
+        member({ voiceChannelId: undefined }),
+      ),
+    ).resolves.toBeUndefined();
+    expect(asks).toHaveLength(1);
+    expect(traces).toEqual([
+      {
+        deliveryId: "message-still-out",
+        addressed: false,
+        engaged: false,
+        memberResolved: true,
+        inVoice: false,
+        voiceToken: false,
+        pendingRetry: true,
+      },
+    ]);
+  });
+
+  it("only not_in_voice opens the window; other refusals leave nothing pending", async () => {
+    const session = new FakeVoiceSession();
+    const retry = new VoicePresenceRetryWindow();
+    const asks: VoicePresenceAsk[] = [];
+    const options: VoicePresenceAskOptions = {
+      gate: gateConfig(),
+      decider: (ask) => {
+        asks.push(ask);
+        return Promise.resolve("join");
+      },
+      execution: executionConfig(session, { voiceGuildIds: new Set(["guild-9"]) }),
+      retry,
+    };
+
+    await expect(
+      handleVoicePresenceAsk(options, inbound({ id: "message-ask", body: "clankie hop in vc" }), () =>
+        member(),
+      ),
+    ).resolves.toEqual({ action: "join_refused", reason: "allowlist" });
+    await expect(
+      handleVoicePresenceAsk(options, inbound({ id: "message-try", body: "try now" }), () => member()),
+    ).resolves.toBeUndefined();
+    expect(asks).toHaveLength(1);
+  });
+
+  it("a retry that finds the asker gone again reopens the window instead of eating the follow-up", async () => {
+    const session = new FakeVoiceSession();
+    const retry = new VoicePresenceRetryWindow();
+    const options = retryOptions({ session, retry, decide: () => "join" });
+
+    await refuseJoin(options);
+    // Gate time says in voice; execution's fresh read says gone — the asker
+    // hopped out while the decider ran. The honest refusal re-arms the window.
+    let reads = 0;
+    await expect(
+      handleVoicePresenceAsk(options, inbound({ id: "message-flicker", body: "try now" }), () => {
+        reads += 1;
+        return member({ voiceChannelId: reads === 1 ? "voice-general" : undefined });
+      }),
+    ).resolves.toEqual({ action: "join_refused", reason: "not_in_voice" });
+    // Back in voice, the next follow-up still lands.
+    await expect(
+      handleVoicePresenceAsk(options, inbound({ id: "message-back", body: "ok now" }), () =>
+        member({ voiceChannelId: "voice-general" }),
+      ),
+    ).resolves.toEqual({ action: "joined", channelId: "voice-general" });
+  });
+
+  it("the retry read sends the retry framing; a fresh ask keeps the standing prompt", async () => {
+    const prompts: string[] = [];
+    const decide = createVoicePresenceIntentDecider({
+      apiKey: "intent-key",
+      model: "gpt-4o-mini",
+      fetchImpl: ((_url: URL | RequestInfo, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as { messages: { content: string }[] };
+        prompts.push(body.messages[0]?.content ?? "");
+        return Promise.resolve(
+          new Response(JSON.stringify({ choices: [{ message: { content: "join" } }] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }) as typeof fetch,
+    });
+    await decide({ body: "clankie hop in vc", context: [] });
+    await decide({ body: "try now", context: [], pendingJoinRetry: true });
+    expect(prompts).toEqual([VOICE_PRESENCE_INTENT_SYSTEM_PROMPT, VOICE_PRESENCE_RETRY_SYSTEM_PROMPT]);
   });
 });
 
