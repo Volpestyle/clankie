@@ -114,6 +114,23 @@ export const GbaEmulatorActionSchema = z.discriminatedUnion("kind", [
       submit: z.boolean().optional(),
     })
     .strict(),
+  /**
+   * Move the open menu's cursor to a named entry and confirm it.
+   *
+   * A catalogued action for the same reason `walk_to` and `advance_dialog`
+   * are: the cursor must be verified against live state between presses, and
+   * choosing a battle move otherwise costs one decision per cursor step. It
+   * never chooses — the caller names the entry by the id the menu observation
+   * reported; this walks the cursor there and presses A. The naming screen
+   * stays `enter_text`'s.
+   */
+  z
+    .object({
+      kind: z.literal("select_menu_entry"),
+      /** The entry id exactly as the menu observation lists it. */
+      entryId: z.string().min(1).max(64),
+    })
+    .strict(),
 ]);
 export type GbaEmulatorAction = z.infer<typeof GbaEmulatorActionSchema>;
 

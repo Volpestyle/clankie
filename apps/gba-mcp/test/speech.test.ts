@@ -13,8 +13,8 @@ describe("clankie speech", () => {
   it("refuses by default, and says why rather than failing opaquely", async () => {
     // A possessor holds no gateway, so it holds no live presence claim — the
     // fence that stops an action reaching a session that is not live.
-    await expect(deniedSpeechPort.say("hello")).rejects.toThrow(/clankie_speech_unavailable/);
-    await expect(deniedSpeechPort.say("hello")).rejects.toThrow(/live claim/);
+    await expect(deniedSpeechPort.narrate("hello")).rejects.toThrow(/clankie_speech_unavailable/);
+    await expect(deniedSpeechPort.narrate("hello")).rejects.toThrow(/live claim/);
   });
 
   it("bounds what can be said in one go", () => {
@@ -23,10 +23,10 @@ describe("clankie speech", () => {
   });
 
   it("accepts a wired port without knowing how it reaches Discord", async () => {
-    const say = vi.fn((_text: string) => Promise.resolve());
-    const port: ClankieSpeechPort = { say };
-    await expect(port.say("hi")).resolves.toBeUndefined();
-    expect(say).toHaveBeenCalledWith("hi");
+    const narrate = vi.fn((_text: string) => Promise.resolve());
+    const port: ClankieSpeechPort = { narrate };
+    await expect(port.narrate("hi")).resolves.toBeUndefined();
+    expect(narrate).toHaveBeenCalledWith("hi");
   });
 });
 

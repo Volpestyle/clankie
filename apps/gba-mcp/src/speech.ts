@@ -24,14 +24,22 @@
  */
 export interface ClankieSpeechPort {
   /**
-   * Say something as Clankie in the channel he is present in.
+   * Report what just happened in the body, so Clankie can talk about it in the
+   * channel he is present in.
+   *
+   * Named for what it does rather than what a caller wants, because the
+   * difference is load-bearing: this is **not** a script. The bridge seeds the
+   * text as a conversation item and the persona composes the words (ADR 0064).
+   * A caller that passes a finished sentence gets it treated as an event that
+   * happened and replied to — the ADR 0074 defect, which reached production
+   * precisely because this method used to be called `say`.
    *
    * The implementation is expected to route through the bridge's existing
    * policy-gated presence path, so doctrine, rate ledger, and the live-session
    * fence all still apply. It must not accept a channel id from the caller: a
    * possessor drives the character, it does not choose new audiences.
    */
-  say(text: string): Promise<void>;
+  narrate(text: string): Promise<void>;
 }
 
 export const CLANKIE_SPEECH_MAX = 2_000;
@@ -41,7 +49,7 @@ export const CLANKIE_SPEECH_MAX = 2_000;
  * the refusal explains what is missing instead of failing opaquely.
  */
 export const deniedSpeechPort: ClankieSpeechPort = {
-  say: () =>
+  narrate: () =>
     Promise.reject(
       new Error(
         "clankie_speech_unavailable: no speech port is wired. A possessor cannot speak directly — " +

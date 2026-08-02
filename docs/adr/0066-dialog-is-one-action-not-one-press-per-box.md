@@ -73,7 +73,7 @@ the action advances frames **with A held** rather than spending an input on a
 press the game will not accept: FireRed zeroes the printer's per-character
 delay while A/B is held, so the wait doubles as the fast-read every human does,
 and a whole conversation fits one action's frame budget even at the default MID
-text speed. A held button can never register as the *fresh* press a waiting box
+text speed. A held button can never register as the _fresh_ press a waiting box
 requires, so holding cannot answer a prompt or skip a box, and each held wait
 ends on a released frame so the following press always lands as a new edge
 (`advanceFramesHolding` on the core seam; a core without it simply waits at its

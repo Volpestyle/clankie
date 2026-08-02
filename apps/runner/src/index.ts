@@ -209,7 +209,9 @@ if (runnerToken) {
 if (!repoPath) {
   logger.error("CLANKIE_REPO_PATH is required; mission execution is unavailable");
 } else if (!runnerToken) {
-  logger.error("No runner credential (start the control plane once to mint it); mission execution is unavailable");
+  logger.error(
+    "No runner credential (start the control plane once to mint it); mission execution is unavailable",
+  );
 } else if (worktrees) {
   const workerEnvironment = buildWorkerEnvironment(process.env);
   const verificationChecks = parseVerificationChecks(process.env.CLANKIE_VERIFICATION_CHECKS);

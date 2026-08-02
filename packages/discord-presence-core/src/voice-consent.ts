@@ -96,6 +96,23 @@ export class DiscordVoiceConsentRegistry {
     return this.session === undefined ? undefined : this.snapshot();
   }
 
+  /**
+   * Who may actually be heard right now, which is the question a caller almost
+   * always means when it reaches for the consent list.
+   *
+   * Under `explicit` this is the opt-in set and `occupants` is ignored: consent
+   * there outlives a momentarily empty roster, and presence never grants it.
+   * Under `presence` it is the room minus anyone who said no — the opt-in set
+   * is empty by construction there, so reading it would answer "nobody" about a
+   * room he is lawfully listening to.
+   */
+  public permitted(guildId: string, channelId: string, occupants: readonly string[]): string[] {
+    const session = this.session;
+    if (session?.guildId !== guildId || session.channelId !== channelId) return [];
+    if (this.policy !== "presence") return [...session.consentedUserIds];
+    return occupants.filter((userId) => !session.refusedUserIds.has(userId));
+  }
+
   private requireSession(
     guildId: string,
     channelId: string,

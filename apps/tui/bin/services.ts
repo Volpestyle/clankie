@@ -53,6 +53,8 @@ const TARGET_ALIASES: Readonly<Record<string, ServiceTarget>> = {
   activity: "activity",
   watch: "activity",
   viewer: "activity",
+  tunnel: "tunnel",
+  cloudflared: "tunnel",
   "discord-bridge": "discord-bridge",
   bridge: "discord-bridge",
   runner: "runner",
@@ -63,7 +65,7 @@ export function parseServiceTarget(raw: string | undefined): ServiceTarget {
   const target = TARGET_ALIASES[raw.toLowerCase()];
   if (target === undefined) {
     throw new Error(
-      `Unknown service "${raw}". Expected one of: all, captain, control-plane, discord, activity, runner (aliases: eve, cp, bridge, watch, viewer).`,
+      `Unknown service "${raw}". Expected one of: all, captain, control-plane, discord, activity, tunnel, runner (aliases: eve, cp, bridge, watch, viewer, cloudflared).`,
     );
   }
   return target;
@@ -325,6 +327,69 @@ const ACTIVITY: ManagedService = {
   },
 };
 
+/** Empty means the operator has configured no tunnel; the launcher runs none. */
+function tunnelName(env: NodeJS.ProcessEnv): string {
+  return env["CLANKIE_ACTIVITY_TUNNEL_NAME"]?.trim() ?? "";
+}
+
+function tunnelHostname(env: NodeJS.ProcessEnv): string {
+  return env["CLANKIE_ACTIVITY_TUNNEL_HOSTNAME"]?.trim() ?? "";
+}
+
+/** The public URL Discord embeds, when one is configured. */
+export function activityTunnelUrl(env: NodeJS.ProcessEnv): string | undefined {
+  const hostname = tunnelHostname(env);
+  return hostname.length === 0 ? undefined : `https://${hostname}`;
+}
+
+/**
+ * The hop that makes the activity surface reachable from Discord.
+ *
+ * In the registry because it is the one part of the stack that used to be
+ * started by hand, outlive every `clankie restart`, and fail silently. On
+ * 2026-08-01 a six-day-old quick tunnel had a live process, a healthy local
+ * server behind it, and an edge connection that had been failing for days; the
+ * activity rendered blank in Discord and nothing anywhere said why. Its probe
+ * is therefore end-to-end — it asks the public hostname, not the process table,
+ * because "a `cloudflared` is running" was true the entire time it was broken.
+ *
+ * Depends on the activity surface it fronts: publishing a tunnel to a port
+ * nobody is serving is how you get a 502 that looks like a Discord problem.
+ */
+const TUNNEL: ManagedService = {
+  id: "tunnel",
+  label: "Activity tunnel",
+  dependsOn: ["activity"],
+  command: "cloudflared",
+  spawnArgs: (env) => ["tunnel", "run", tunnelName(env)],
+  enabled: (env) => tunnelName(env).length > 0,
+  commandMatches: (command) => command.includes("cloudflared") && command.includes("tunnel"),
+  probe: async ({ env, fetchImpl, matchingPids }) => {
+    if (tunnelName(env).length === 0) {
+      return { state: "healthy", detail: "not configured; activity stays local" };
+    }
+    const url = activityTunnelUrl(env);
+    if (url === undefined) {
+      return { state: "unhealthy", detail: "tunnel name set with no hostname to probe" };
+    }
+    try {
+      const response = await fetchImpl(url, { redirect: "manual", signal: AbortSignal.timeout(4_000) });
+      // Any answer at all proves the whole path: DNS, the Cloudflare edge, the
+      // tunnel's control stream, and the local server behind it. A 502 means
+      // the edge is up and the origin is not, which is a different repair.
+      if (response.status >= 500) {
+        return { state: "unhealthy", detail: `${url} → ${String(response.status)} (edge up, origin down)` };
+      }
+      return { state: "healthy", detail: url };
+    } catch {
+      return {
+        state: matchingPids.length === 0 ? "unreachable" : "unhealthy",
+        detail: `${url} unreachable${matchingPids.length === 0 ? "" : " despite a live cloudflared"}`,
+      };
+    }
+  },
+};
+
 /**
  * The process that owns Clankie's body (ADR 0063): it claims asked-play work
  * from the control plane, boots the emulator, and dials frames out to the
@@ -354,6 +419,7 @@ const SERVICES: Readonly<Record<ServiceId, ManagedService>> = {
   "control-plane": CONTROL_PLANE,
   "discord-bridge": DISCORD_BRIDGE,
   activity: ACTIVITY,
+  tunnel: TUNNEL,
   runner: RUNNER,
 };
 

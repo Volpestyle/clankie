@@ -153,9 +153,7 @@ class ScriptedNamingCore implements GbaCoreSeam {
       facing: "north",
       dialogLineIndex: 0,
       dialogLines: [],
-      naming: this.open
-        ? { text: this.buffer, page: this.page, row: this.row, column: this.column }
-        : null,
+      naming: this.open ? { text: this.buffer, page: this.page, row: this.row, column: this.column } : null,
       menu: this.open ? { menuId: "naming-screen", cursor: 0, entries: [] } : null,
       party: [],
       activePartySlot: 0,

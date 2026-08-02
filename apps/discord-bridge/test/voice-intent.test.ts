@@ -186,11 +186,7 @@ describe("the mechanical gate", () => {
     expect(deciderCalls).toBe(0);
     // Wordless and engaged-only: the second door needs his explicit name.
     await expect(
-      handleVoicePresenceAsk(
-        options,
-        inbound({ body: "what's up", engagedInChannel: true }),
-        () => member(),
-      ),
+      handleVoicePresenceAsk(options, inbound({ body: "what's up", engagedInChannel: true }), () => member()),
     ).resolves.toBeUndefined();
     expect(deciderCalls).toBe(0);
     await expect(

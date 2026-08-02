@@ -13,26 +13,32 @@ import { createGbaPlayExecution } from "../src/play-execution.ts";
 import { PlayHost } from "../src/play-host.ts";
 
 /**
- * Asked play speaks and hears through the possessor seam (ADR 0067).
+ * Asked play reports events and hears the room (ADR 0067 as amended by
+ * [ADR 0074](../../../docs/adr/0074-the-room-hears-one-voice.md)).
  *
  * The seam itself is proven in `@clankie/possessor-voice`; what is under test
- * here is the wiring: that his own words leave the playthrough, that the room's
- * words reach it, and that neither is load-bearing for play continuing.
+ * here is the wiring, and the wiring is exactly what ADR 0074 changed. These
+ * assertions were inverted rather than relaxed: this file used to require that
+ * his authored asides cross the seam, which is the defect that made a six-word
+ * quip into seventeen seconds of speech. What must cross now is what happened,
+ * and what must never cross is a sentence.
  */
 
 const silentLogger = { info: () => undefined, warn: () => undefined, error: () => undefined };
 
 /** Records what left the body, and can push what the room said back into it. */
-function fakeVoice(options: { failSay?: boolean; roomSaysOnSubscribe?: string } = {}) {
-  const said: string[] = [];
+function fakeVoice(
+  options: { failNarrate?: boolean; roomSaysOnSubscribe?: string; roomListening?: boolean } = {},
+) {
+  const reported: string[] = [];
   const listeners = new Set<(utterance: string) => void>();
   let closed = false;
   const client: PossessorVoiceClient = {
-    say(text) {
-      if (options.failSay === true) {
+    narrate(text) {
+      if (options.failNarrate === true) {
         return Promise.reject(new Error("clankie_speech_unavailable: the Discord bridge is not reachable"));
       }
-      said.push(text);
+      reported.push(text);
       return Promise.resolve();
     },
     subscribe(listener) {
@@ -41,6 +47,9 @@ function fakeVoice(options: { failSay?: boolean; roomSaysOnSubscribe?: string } 
       // the moment the seam is listening, so the test never races the loop.
       if (options.roomSaysOnSubscribe !== undefined) listener(options.roomSaysOnSubscribe);
       return () => listeners.delete(listener);
+    },
+    get roomListening() {
+      return options.roomListening ?? true;
     },
     get connected() {
       return !closed;
@@ -52,7 +61,7 @@ function fakeVoice(options: { failSay?: boolean; roomSaysOnSubscribe?: string } 
   };
   return {
     client,
-    said,
+    reported,
     isClosed: () => closed,
     hasListeners: () => listeners.size > 0,
   };
@@ -154,58 +163,81 @@ async function play(options: {
 }
 
 describe("asked play voice", () => {
-  it("says his asides into the room he is playing in", async () => {
+  it("reports what happened, and never a sentence to say", async () => {
     const voice = fakeVoice();
     const mind = talkingMind("this desk has beaten me twice now");
     const client = await play({ voice: voice.client, mind: mind.create });
 
-    expect(voice.said).toContain("this desk has beaten me twice now");
-    // The playthrough still ran and reported normally.
+    // Something crossed the seam...
+    expect(voice.reported.length).toBeGreaterThan(0);
+    // ...and it was never his authored line. The persona in the room composes
+    // the words; handing it finished speech is the ADR 0074 defect.
+    expect(voice.reported).not.toContain("this desk has beaten me twice now");
     expect(client.reports.map((report) => report.state)).toEqual(["running", "stopped"]);
   });
 
-  it("hears the room, and answers what was said", async () => {
+  it("hears the room, and leaves the answer to the room", async () => {
     const voice = fakeVoice({ roomSaysOnSubscribe: "how's it going?" });
     const mind = talkingMind(null);
     await play({ voice: voice.client, mind: mind.create });
 
-    // What the room said reached his turn as an interjection...
+    // What the room said still reaches his turn — the player needs to know it
+    // was spoken to even though it no longer answers out loud (ADR 0074).
     expect(mind.heard).toContain("how's it going?");
-    // ...and his answer went back out to the room.
-    expect(voice.said).toContain("you said how's it going?");
+    // The answer is the realtime session's to compose: it already heard the
+    // same audio, so a reply authored here would be a second answer.
+    expect(voice.reported).not.toContain("you said how's it going?");
   });
 
-  it("carries the voice agent's line, not only the player's own aside", async () => {
-    // ADR 0056: the player model asked to act and remark in one call stays
-    // near-silent, so a transport fed only by its `speak` field carries almost
-    // nothing. The half of him that talks is what fills this pipe.
-    const voice = fakeVoice();
-    const mind = talkingMind(null);
+  it("does not consult the voice agent while a room is listening", async () => {
+    let consulted = 0;
+    const voice = fakeVoice({ roomListening: true });
     await play({
       voice: voice.client,
-      mind: mind.create,
+      mind: talkingMind(null).create,
       voiceAgent: () =>
         Promise.resolve({
-          // Both keys always present: `reply: null` is how he stays quiet, and
-          // an omitted key fails the schema rather than defaulting.
-          decide: () =>
-            Promise.resolve({
-              speak: "okay that bookshelf is just a wall with ambitions",
-              reply: null,
-            }),
+          decide: () => {
+            consulted += 1;
+            return Promise.resolve({ speak: "a second voice in the same room", reply: null });
+          },
         }),
     });
 
-    expect(voice.said).toContain("okay that bookshelf is just a wall with ambitions");
+    // One author per surface: the room composes, so this half of him is not
+    // asked and its line never reaches the seam.
+    expect(consulted).toBe(0);
+    expect(voice.reported).not.toContain("a second voice in the same room");
   });
 
-  it("keeps playing when the bridge will not take his words", async () => {
-    const voice = fakeVoice({ failSay: true });
+  it("still consults the voice agent when nobody is listening", async () => {
+    let consulted = 0;
+    const voice = fakeVoice({ roomListening: false });
+    await play({
+      voice: voice.client,
+      mind: talkingMind(null).create,
+      voiceAgent: () =>
+        Promise.resolve({
+          decide: () => {
+            consulted += 1;
+            return Promise.resolve({ speak: "talking to the overlay", reply: null });
+          },
+        }),
+    });
+
+    // ADR 0056 keeps its agent and its surfaces; it only loses the room.
+    expect(consulted).toBeGreaterThan(0);
+    // With no room there is nothing to report to, so nothing crosses the seam.
+    expect(voice.reported).toEqual([]);
+  });
+
+  it("keeps playing when the bridge will not take his report", async () => {
+    const voice = fakeVoice({ failNarrate: true });
     const mind = talkingMind("nobody can hear this");
     const client = await play({ voice: voice.client, mind: mind.create });
 
-    expect(voice.said).toEqual([]);
-    // A rejected line is not a failed playthrough: he is watchable, just silent.
+    expect(voice.reported).toEqual([]);
+    // A rejected event is not a failed playthrough: he is watchable, just silent.
     expect(client.reports.map((report) => report.state)).toEqual(["running", "stopped"]);
     expect(client.reports[1]?.receipt).toMatchObject({ outcome: "budget_exhausted", turnsTaken: 2 });
   });

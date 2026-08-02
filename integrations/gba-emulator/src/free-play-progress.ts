@@ -142,6 +142,23 @@ function describeEnterText(text: string, outcome: Record<string, unknown> | unde
   return `typed "${typed}" of "${text}" — ${reason}`;
 }
 
+const SELECT_MENU_ENDINGS: Readonly<Record<string, string>> = {
+  menu_closed: "the menu closed before the cursor arrived",
+  cursor_stalled: "the cursor refused to move — steer this menu with single presses",
+  input_bound_reached: "the input budget ran out before the cursor arrived",
+  frame_bound_reached: "the frame budget ran out before the cursor arrived",
+};
+
+/** Bounded choice summary from the adapter's own account of the selection. */
+function describeSelectMenuEntry(outcome: Record<string, unknown> | undefined): string {
+  const label = typeof outcome?.["label"] === "string" ? outcome["label"] : "an entry";
+  const menuId = typeof outcome?.["menuId"] === "string" ? outcome["menuId"] : "the menu";
+  if (outcome?.["confirmed"] === true) return `chose "${label.slice(0, 120)}" in ${menuId}`;
+  const ending = typeof outcome?.["endedBecause"] === "string" ? outcome["endedBecause"] : null;
+  const reason = ending === null ? "the selection stopped" : (SELECT_MENU_ENDINGS[ending] ?? ending);
+  return `did not choose "${label.slice(0, 120)}" — ${reason}`;
+}
+
 export interface ObservedEffect {
   /** Bounded, human-readable — this is what the model is told. */
   summary: string;
@@ -209,6 +226,17 @@ export function observeEffect(input: {
   if (input.action.kind === "enter_text") {
     return {
       summary: describeEnterText(input.action.text, input.outcome),
+      refused: null,
+      position: after,
+      enteredMap: false,
+    };
+  }
+
+  // A menu choice's outcome knows which entry was confirmed and why the
+  // cursor stopped when it was not — the diff alone reads as "menu changed".
+  if (input.action.kind === "select_menu_entry") {
+    return {
+      summary: describeSelectMenuEntry(input.outcome),
       refused: null,
       position: after,
       enteredMap: false,

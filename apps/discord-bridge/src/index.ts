@@ -265,6 +265,16 @@ const voiceSession =
           transportKind: "bot",
         }),
         consentPolicy: voiceConsentPolicy,
+        // The gateway holder answers "who is in the room"; the core package
+        // never touches a Discord client. Read at conversation-open time, which
+        // is always after the gateway is ready, so the closure over `client`
+        // below is resolved rather than hoisted.
+        channelOccupants: (guildId, channelId) => {
+          const channel = client.guilds.cache.get(guildId)?.channels.cache.get(channelId);
+          if (channel === undefined || !channel.isVoiceBased()) return [];
+          // He is in his own channel and is not someone he needs memory of.
+          return [...channel.members.keys()].filter((userId) => userId !== client.user?.id);
+        },
         realtime: createVoiceRealtimePorts({
           apiKey: openAiCredential.key,
           ...(elevenLabsCredential?.type === "api" ? { elevenLabsApiKey: elevenLabsCredential.key } : {}),
@@ -314,6 +324,9 @@ const possessorVoiceListener =
         // possessor only ever resolves.
         token: await ensurePossessorVoiceCredential(),
         narrate: (text) => voiceSession.narrate(text),
+        // Read at attach time so a play loop that starts mid-call learns the
+        // room immediately instead of waiting for the next join or leave.
+        room: () => ({ listening: voiceSession.status().active }),
       })
     : undefined;
 if (possessorVoiceListener !== undefined && voiceSession !== undefined) {
@@ -1304,6 +1317,12 @@ async function recordVoiceEvidence(evidence: DiscordVoiceEvidence): Promise<void
   // The idle auto-leave watches the same stream the receipts do, so "activity"
   // is exactly what the evidence says happened.
   voiceIdleAutoLeave?.observe(evidence);
+  // A possessor authors for its own surfaces until it learns it has an audience
+  // (ADR 0074). These two transitions are the whole of "is anyone listening",
+  // and they are already the authority the idle watcher trusts.
+  if (evidence.type === "joined" || evidence.type === "left") {
+    possessorVoiceListener?.publishRoom({ listening: evidence.type === "joined" });
+  }
   if (evidence.type === "response") {
     // Printed as well as recorded: "it felt slow" is only actionable next to
     // the per-stage split, and an operator should see it without opening the

@@ -25,7 +25,18 @@ import { z } from "zod";
 /** Flat action arguments. Providers reject `oneOf` in tool schemas (ADR 0049). */
 export const ActArgumentsSchema = z
   .object({
-    actionKind: z.enum(["button_press", "walk_to", "advance_dialog", "enter_text", "frame_advance", "wait"]),
+    // The catalogued `wait` is deliberately not offered here: a clockless core
+    // never completes one — the runtime parks it as "running" until a deadline
+    // sweep cancels it, wedging every action in between behind
+    // `action_already_pending`. `frame_advance` is how a driver waits.
+    actionKind: z.enum([
+      "button_press",
+      "walk_to",
+      "advance_dialog",
+      "enter_text",
+      "select_menu_entry",
+      "frame_advance",
+    ]),
     button: z
       .enum(["up", "down", "left", "right", "a", "b", "start", "select", "l", "r"])
       .optional()
@@ -48,8 +59,11 @@ export const ActArgumentsSchema = z
           "per-action input budget). For dialog, prefer advance_dialog over a blind mash: it " +
           "stops at choices and box close instead of pressing through them.",
       ),
-    frames: z.number().int().optional().describe("Required for frame_advance."),
-    durationMs: z.number().int().optional().describe("Required for wait."),
+    frames: z
+      .number()
+      .int()
+      .optional()
+      .describe("Required for frame_advance — also how you wait: 60 frames is one second."),
     x: z.number().int().optional().describe("Required for walk_to. Target tile x, as reported by observe."),
     y: z.number().int().optional().describe("Required for walk_to. Target tile y, as reported by observe."),
     text: z
@@ -64,6 +78,14 @@ export const ActArgumentsSchema = z
       .boolean()
       .optional()
       .describe("enter_text only. Omit or true confirms with OK; false leaves the screen open."),
+    entryId: z
+      .string()
+      .optional()
+      .describe(
+        "Required for select_menu_entry: the entry id exactly as the menu view lists it. Walks " +
+          "the cursor to that entry and confirms it in one action — battle command and move " +
+          "menus, the start menu, party and short bag lists. Never chooses for you.",
+      ),
     monologue: z
       .string()
       .min(1)
@@ -95,8 +117,8 @@ export function toAction(args: ActArguments): unknown {
       ...(args.submit === undefined || args.submit ? {} : { submit: false }),
     };
   }
-  if (args.actionKind === "frame_advance") return { kind: "frame_advance", frames: args.frames };
-  return { kind: "wait", durationMs: args.durationMs };
+  if (args.actionKind === "select_menu_entry") return { kind: "select_menu_entry", entryId: args.entryId };
+  return { kind: "frame_advance", frames: args.frames };
 }
 
 export const ObserveArgumentsSchema = z

@@ -2,7 +2,10 @@
 
 Status: proposed (2026-07-26). Supersedes the single-call volition design in
 [ADR 0049](0049-free-play-agency-and-non-deterministic-evidence.md), which kept `speak` as a field on the
-player's own decision.
+player's own decision. Narrowed by
+[ADR 0074](0074-the-room-hears-one-voice.md): this agent authors for the
+activity overlay and the journal, and is not consulted while a voice room is
+listening — there the realtime session is the sole author.
 
 ## Context
 
@@ -97,7 +100,18 @@ one that is fenced.
 ## Consequences
 
 - One extra model call. Voice runs when something happened or someone spoke, not
-  unconditionally, so it is not one call per turn.
+  unconditionally, so it is not one call per turn. The has-something-to-consider
+  check alone turned out to bind never in practice — the player's monologue is
+  a required field, so every valid turn had something to consider — which made
+  this one call per turn after all. The loop therefore also skips the
+  consultation when nobody spoke and the rate gate could not let an aside
+  through anyway: an aside the gate would drop is not worth a model call. The
+  skip is mechanical and content-free (rate and audience, never topic), and it
+  is counted in the volition metrics as `skipped` so its binding stays
+  measurable.
+- Voice is consulted after the action settles, so "what just happened" is the
+  turn's real effect line. Consulting it before the dispatch handed it a blank
+  effect on every production turn.
 - `FreePlayTurn.speak` and `.reply` keep their meaning and their bounds; only
   their source changes. The rate gate stays, because Voice with no ceiling is
   the opposite failure and the more likely one.

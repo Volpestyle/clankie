@@ -597,6 +597,109 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
           ramStateSha256: this.core.ramStateSha256(),
         };
       }
+      case "select_menu_entry": {
+        const opening = this.core.gameState();
+        const menu = opening.menu;
+        if (menu === null || menu === undefined) throw closed("menu_not_open");
+        // The naming screen is a keyboard, not a list; enter_text owns it.
+        if (menu.menuId === "naming-screen") throw closed("menu_not_navigable");
+        // Bag windows scroll: entries are a slice while the cursor stays
+        // absolute, so a full window cannot be navigated by entry index.
+        if (menu.menuId.startsWith("bag-") && menu.entries.length >= 16) {
+          throw closed("menu_window_scrolled");
+        }
+        const targetIndex = menu.entries.findIndex((entry) => entry.id === action.entryId);
+        if (targetIndex === -1) throw closed("menu_entry_not_found");
+        // The battle menus are 2×2 grids whose cursor moves by XOR — left and
+        // right flip bit 0, up and down flip bit 1 — every other decoded menu
+        // is a vertical list. Either way each press is verified against the
+        // live cursor, so a geometry this model does not fit stops the action
+        // instead of wandering the menu.
+        const grid = menu.menuId === "battle-action-menu" || menu.menuId === "battle-move-menu";
+
+        let presses = 0;
+        let framesSpent = 0;
+        let endedBecause:
+          | "selected"
+          | "menu_closed"
+          | "cursor_stalled"
+          | "input_bound_reached"
+          | "frame_bound_reached" = "selected";
+        for (;;) {
+          const during = this.core.gameState();
+          const current = during.menu;
+          if (current === null || current === undefined || current.menuId !== menu.menuId) {
+            endedBecause = "menu_closed";
+            break;
+          }
+          if (current.cursor === targetIndex) break;
+          // The confirming A below needs an input too, hence the -1.
+          if (presses >= limits.maxInputs - 1) {
+            endedBecause = "input_bound_reached";
+            break;
+          }
+          if (framesSpent + MENU_HOLD_FRAMES > limits.maxFrames) {
+            endedBecause = "frame_bound_reached";
+            break;
+          }
+          const button: GbaButton = grid
+            ? ((current.cursor ^ targetIndex) & 1) !== 0
+              ? (targetIndex & 1) !== 0
+                ? "right"
+                : "left"
+              : (targetIndex & 2) !== 0
+                ? "down"
+                : "up"
+            : current.cursor < targetIndex
+              ? "down"
+              : "up";
+          this.core.pressButton(button, MENU_HOLD_FRAMES);
+          presses += 1;
+          framesSpent += MENU_HOLD_FRAMES;
+          const after = this.core.gameState().menu;
+          if (
+            after !== null &&
+            after !== undefined &&
+            after.menuId === current.menuId &&
+            after.cursor === current.cursor
+          ) {
+            endedBecause = "cursor_stalled";
+            break;
+          }
+        }
+        let confirmed = false;
+        if (endedBecause === "selected") {
+          this.core.pressButton("a", MENU_HOLD_FRAMES);
+          presses += 1;
+          framesSpent += MENU_HOLD_FRAMES;
+          confirmed = true;
+        }
+        const state = this.core.gameState();
+        const label = menu.entries[targetIndex]?.label ?? action.entryId;
+        this.record(
+          actionId,
+          "select_menu_entry",
+          confirmed
+            ? `Selected "${label}" in ${menu.menuId}`
+            : `Stopped selecting "${label}" in ${menu.menuId}: ${endedBecause}`,
+        );
+        return {
+          menuId: menu.menuId,
+          entryId: action.entryId,
+          label,
+          confirmed,
+          presses,
+          framesSpent,
+          endedBecause,
+          frame: state.frame,
+          mode: state.mode,
+          position: state.position,
+          facing: state.facing,
+          ...(state.dialogLines?.length ? { dialogLines: state.dialogLines } : {}),
+          ...(state.menu ? { menu: state.menu } : {}),
+          ramStateSha256: this.core.ramStateSha256(),
+        };
+      }
       case "advance_dialog": {
         // A visible box is not always a decoded dialog. A scripted sequence
         // (the starter fanfare) holds the box while the script runs a wait the
@@ -849,7 +952,10 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
           }
           // On the key: type it, then check the byte that actually landed.
           const lengthBefore = state.text.length;
-          if (pressVerified("a", NAMING_SETTLE_FRAMES, () => (naming()?.text.length ?? 0) !== lengthBefore) !== "changed") {
+          if (
+            pressVerified("a", NAMING_SETTLE_FRAMES, () => (naming()?.text.length ?? 0) !== lengthBefore) !==
+            "changed"
+          ) {
             break;
           }
           state = naming();
@@ -878,7 +984,7 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
           if (!onOk()) pressVerified("start", NAMING_SETTLE_FRAMES, onOk);
           if (onOk() && press("a", NAMING_SETTLE_FRAMES)) {
             // The close runs a callback chain about 37 frames long.
-            for (let waited = 0; naming() !== null && waited < NAMING_CLOSE_WAIT_FRAMES; ) {
+            for (let waited = 0; naming() !== null && waited < NAMING_CLOSE_WAIT_FRAMES;) {
               this.core.advanceFrames(NAMING_SETTLE_FRAMES);
               framesSpent += NAMING_SETTLE_FRAMES;
               waited += NAMING_SETTLE_FRAMES;
@@ -1027,6 +1133,8 @@ function enforceCapability(action: GbaEmulatorAction, bounds: GbaEmulatorResourc
       advance_dialog: "emulator.gba.input",
       // A name is a burst of cursor moves and A presses, by the same reasoning.
       enter_text: "emulator.gba.input",
+      // A menu choice is cursor presses and an A, by the same reasoning.
+      select_menu_entry: "emulator.gba.input",
       frame_advance: "emulator.gba.frame_advance",
       wait: "emulator.gba.wait",
     } as const
@@ -1048,6 +1156,9 @@ function boundedSummary(value: string): string {
 
 /** Frames per step. 16 is the documented hold that commits a move rather than a turn. */
 const WALK_HOLD_FRAMES = 16;
+
+/** Menu cursor presses are edges, not holds: short, like the naming keyboard's. */
+const MENU_HOLD_FRAMES = 8;
 
 /** A dialog advance registers on a short tap; the full step hold would waste frames. */
 const DIALOG_HOLD_FRAMES = 4;

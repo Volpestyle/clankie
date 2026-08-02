@@ -22,6 +22,7 @@ function capability(savestate: Uint8Array = new Uint8Array([1, 2, 3, 4])): GbaCh
   return {
     saveState: () => savestate,
     loadState: vi.fn(),
+    bootSavestate: () => savestate,
     identity: {
       romSha256: scenario.romSha256,
       savestateSha256: scenario.savestateSha256,
@@ -124,6 +125,44 @@ describe("gba checkpoints", () => {
     expect(() => readGbaCheckpoint({ rootDir: dir, checkpointId: movedId, identity: cap.identity })).toThrow(
       "checkpoint_receipt_mismatch",
     );
+  });
+
+  it("carries his notes and objective, so a resume restores the mind with the world", () => {
+    const dir = root();
+    const cap = capability();
+    const written = writeGbaCheckpoint({
+      rootDir: dir,
+      capability: cap,
+      position: POSITION,
+      continuity: { notes: "stairs upper-right, rival took Squirtle", objective: "reach Viridian" },
+      clock: CLOCK,
+    });
+    const { receipt } = readGbaCheckpoint({
+      rootDir: dir,
+      checkpointId: written.receipt.checkpointId,
+      identity: cap.identity,
+    });
+    expect(receipt.continuity).toEqual({
+      notes: "stairs upper-right, rival took Squirtle",
+      objective: "reach Viridian",
+    });
+  });
+
+  it("still reads a receipt minted before continuity existed", () => {
+    const dir = root();
+    const cap = capability();
+    const written = writeGbaCheckpoint({ rootDir: dir, capability: cap, position: null, clock: CLOCK });
+    // Rewrite the receipt without the field, exactly as an old mint left it.
+    const receiptPath = path.join(written.directory, "checkpoint.json");
+    const receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as Record<string, unknown>;
+    delete receipt["continuity"];
+    writeFileSync(receiptPath, `${JSON.stringify(receipt)}\n`);
+    const read = readGbaCheckpoint({
+      rootDir: dir,
+      checkpointId: written.receipt.checkpointId,
+      identity: cap.identity,
+    });
+    expect(read.receipt.continuity).toBeNull();
   });
 
   it("lists newest first and skips foreign files", () => {

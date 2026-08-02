@@ -167,7 +167,17 @@ text reads like dialog, stopping at his action menu
 A name is one turn too: `enter_text` drives the naming-screen keyboard from
 its decoded cursor state — verified key by key against the live buffer — and
 confirms with OK. A room is one turn: `walk_to` is on his action vocabulary
-alongside the presses.
+alongside the presses. A menu choice is one turn: `select_menu_entry` walks
+the cursor to the entry he named and confirms it, verified press by press
+([ADR 0073](../../docs/adr/0073-a-menu-choice-is-one-action-not-one-press-per-cursor-step.md))
+— which entry stays entirely his decision.
+
+His saved time is his too ([ADR 0075](../../docs/adr/0075-rewinding-is-a-play-choice.md)):
+`load_checkpoint` lists or restores minted checkpoints and `restart_game`
+reboots to the configured beginning, both dispatched to an injected checkpoint
+port rather than the frozen emulator catalog. The present is banked as a
+`before-rewind` checkpoint before either, so the choice destroys nothing, and
+his notes ride across the jump — the world rewinds, the mind does not.
 
 Failure is a turn outcome, never an exception: `rejected_by_adapter`,
 `invalid_decision`, and `mind_failed` are all recorded and the run continues —

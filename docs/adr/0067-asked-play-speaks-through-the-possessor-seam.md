@@ -55,6 +55,12 @@ The production host composes what the development alias always did — persona,
 voice agent, and now a transport — and asked play speaks and hears through the
 ADR 0064 possessor seam rather than a second path.
 
+> **Superseded in part by [ADR 0074](0074-the-room-hears-one-voice.md).** The
+> outbound half below sends `reply, then speak` — finished sentences — through a
+> seam whose contract carries events, which is the defect ADR 0074 repairs. The
+> play loop now reports what happened and the realtime session authors the
+> words. The inbound half of this diagram is unchanged and still correct.
+
 ```mermaid
 flowchart LR
   subgraph runner["runner · play host"]
@@ -122,9 +128,11 @@ bury the playthrough in its own failure.
   `@clankie/settings`. It gains no credential class of its own: the bearer is
   broker-resolved exactly as the activity producer bearer is.
 - A playthrough now costs up to two model calls per turn instead of one, gated
-  by ADR 0056's has-something-to-consider check. That is the price of him being
-  a character rather than a cursor, and it is bounded by the same budget and
-  stop ask every playthrough already carries.
+  by ADR 0056's has-something-to-consider check and by the rate gate itself:
+  the consultation is skipped when nobody spoke and the cooldown could not let
+  an aside through, so most turns inside the cooldown cost one call. That is
+  the price of him being a character rather than a cursor, and it is bounded by
+  the same budget and stop ask every playthrough already carries.
 - `free-play-cli.ts` and the production host now compose the same three things,
   so the dev alias is finally the thin wrapper ADR 0063 described. A future
   capability added to one and not the other is the drift to watch for.

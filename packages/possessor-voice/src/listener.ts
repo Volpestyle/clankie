@@ -5,6 +5,7 @@ import {
   POSSESSOR_VOICE_PATH,
   POSSESSOR_VOICE_SCHEMA_VERSION,
   PossessorClientMessageSchema,
+  type PossessorRoom,
   type PossessorUtterance,
 } from "./protocol.ts";
 
@@ -26,7 +27,19 @@ export interface PossessorVoiceListenerOptions {
    * back to the possessor rather than being swallowed.
    */
   narrate: (text: string) => Promise<void>;
+  /**
+   * Whether anyone can currently hear the body, read at attach time so a
+   * possessor that connects mid-call learns the room without waiting for the
+   * next change. Absent means "no room", which is the safe default: the
+   * possessor keeps authoring for its own surfaces (ADR 0074).
+   */
+  room?: () => PossessorRoomState;
   maxPayloadBytes?: number;
+}
+
+/** Whether anyone can hear the body — never who. */
+export interface PossessorRoomState {
+  readonly listening: boolean;
 }
 
 export interface PossessorVoiceListener {
@@ -34,6 +47,12 @@ export interface PossessorVoiceListener {
   listen(port: number): Promise<number>;
   /** Push one transcript line to every attached possessor. Never retained here. */
   publishUtterance(text: string): void;
+  /**
+   * Push the room's listening state to every attached possessor. The bridge
+   * calls this on every presence change so a play loop learns it has an
+   * audience — or lost one — at the turn boundary rather than a call later.
+   */
+  publishRoom(state: PossessorRoomState): void;
   readonly attachedCount: number;
   close(): Promise<void>;
 }
@@ -46,6 +65,7 @@ export function createPossessorVoiceListener(options: PossessorVoiceListenerOpti
     throw new Error("possessor_voice_token_required");
   }
   const { token, narrate } = options;
+  const readRoom = options.room;
   const wss = new WebSocketServer({
     noServer: true,
     maxPayload: options.maxPayloadBytes ?? DEFAULT_MAX_PAYLOAD_BYTES,
@@ -57,6 +77,20 @@ export function createPossessorVoiceListener(options: PossessorVoiceListenerOpti
     response.writeHead(404).end();
   });
 
+  const sendTo = (ws: WebSocket, payload: string): void => {
+    if (ws.readyState !== OPEN) return;
+    try {
+      ws.send(payload);
+    } catch {
+      // A possessor that cannot be reached simply misses this message. The
+      // room does not wait for it and nothing is queued on its behalf.
+    }
+  };
+
+  const broadcast = (payload: string): void => {
+    for (const ws of attached) sendTo(ws, payload);
+  };
+
   server.on("upgrade", (request, socket, head) => {
     const path = new URL(request.url ?? "/", "http://localhost").pathname;
     if (path !== POSSESSOR_VOICE_PATH || !authorized(request, token)) {
@@ -65,6 +99,10 @@ export function createPossessorVoiceListener(options: PossessorVoiceListenerOpti
     }
     wss.handleUpgrade(request, socket, head, (ws) => {
       attached.add(ws);
+      // The room as it is right now, not as it will be at the next change: a
+      // possessor attaching mid-call would otherwise spend the rest of the
+      // call believing nobody is listening.
+      if (readRoom !== undefined) sendTo(ws, roomPayload(readRoom()));
       ws.on("close", () => attached.delete(ws));
       ws.on("error", () => ws.close());
       ws.on("message", (raw) => {
@@ -88,22 +126,16 @@ export function createPossessorVoiceListener(options: PossessorVoiceListenerOpti
     },
     publishUtterance(text) {
       const trimmed = text.trim();
-      if (trimmed.length === 0 || attached.size === 0) return;
+      if (trimmed.length === 0) return;
       const message: PossessorUtterance = {
         schemaVersion: POSSESSOR_VOICE_SCHEMA_VERSION,
         type: "utterance",
         text: trimmed,
       };
-      const payload = JSON.stringify(message);
-      for (const ws of attached) {
-        if (ws.readyState !== OPEN) continue;
-        try {
-          ws.send(payload);
-        } catch {
-          // A possessor that cannot be reached simply misses this line. The
-          // room does not wait for it and nothing is queued on its behalf.
-        }
-      }
+      broadcast(JSON.stringify(message));
+    },
+    publishRoom(state) {
+      broadcast(roomPayload(state));
     },
     get attachedCount() {
       return attached.size;
@@ -115,6 +147,15 @@ export function createPossessorVoiceListener(options: PossessorVoiceListenerOpti
       await new Promise<void>((done) => server.close(() => done()));
     },
   };
+}
+
+function roomPayload(state: PossessorRoomState): string {
+  const message: PossessorRoom = {
+    schemaVersion: POSSESSOR_VOICE_SCHEMA_VERSION,
+    type: "room",
+    listening: state.listening,
+  };
+  return JSON.stringify(message);
 }
 
 function authorized(request: IncomingMessage, token: string): boolean {

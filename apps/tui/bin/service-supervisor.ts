@@ -26,7 +26,7 @@ import { setTimeout as sleep } from "node:timers/promises";
  * - a health probe gate, so "restarted" means "answered healthy", not "spawned".
  */
 
-export type ServiceId = "captain-eve" | "control-plane" | "discord-bridge" | "activity" | "runner";
+export type ServiceId = "captain-eve" | "control-plane" | "discord-bridge" | "activity" | "tunnel" | "runner";
 
 /** Ordered by dependency: each service may only depend on those before it. */
 export const SERVICE_ORDER: readonly ServiceId[] = [
@@ -34,6 +34,7 @@ export const SERVICE_ORDER: readonly ServiceId[] = [
   "control-plane",
   "discord-bridge",
   "activity",
+  "tunnel",
   "runner",
 ];
 
@@ -71,8 +72,27 @@ export interface ManagedService {
   readonly id: ServiceId;
   readonly label: string;
   readonly dependsOn: readonly ServiceId[];
-  /** Arguments passed to `pnpm` to start the service. */
-  readonly spawnArgs: readonly string[];
+  /**
+   * Executable to spawn. Defaults to `pnpm`, which every workspace service
+   * uses; named so the registry can also own a process that is not one of ours
+   * — the activity tunnel is a `cloudflared` binary and was the last thing an
+   * operator had to start, remember, and notice the death of by hand.
+   */
+  readonly command?: string;
+  /**
+   * Arguments passed to {@link ManagedService.command}. A function form is
+   * resolved against the launcher's environment at spawn time, for a service
+   * whose arguments are operator configuration rather than a fixed workspace
+   * filter.
+   */
+  readonly spawnArgs: readonly string[] | ((env: NodeJS.ProcessEnv) => readonly string[]);
+  /**
+   * Whether this service should run at all in this environment. A service that
+   * answers false is never spawned and reports its own reason from `probe`,
+   * which is how an unconfigured optional dependency stays out of the way
+   * without the operator having to name it in every command.
+   */
+  readonly enabled?: (env: NodeJS.ProcessEnv) => boolean;
   /** Guards signalling: must recognise the live `ps` command of an owned pid. */
   readonly commandMatches: (command: string) => boolean;
   /**
@@ -400,6 +420,10 @@ export async function startService(
   const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? DEFAULT_SERVICE_STARTUP_TIMEOUT_MS;
 
+  // A service the operator has not configured is not a failure to report or a
+  // process to spawn; its probe explains itself and `all` walks past it.
+  if (service.enabled?.(env) === false) return await inspectService(service, options);
+
   const existing = await inspectService(service, options);
   if (existing.state === "healthy") return existing;
   if (existing.state === "unhealthy" && !existing.owned) {
@@ -420,7 +444,9 @@ export async function startService(
     options.onStatus?.(`Starting ${service.label}…`);
     const serviceEnv =
       service.serviceEnv?.({ env, repoRoot: options.repoRoot, captainToken: options.captainToken }) ?? env;
-    child = (options.spawnImpl ?? spawn)("pnpm", [...service.spawnArgs], {
+    const spawnArgs =
+      typeof service.spawnArgs === "function" ? service.spawnArgs(serviceEnv) : service.spawnArgs;
+    child = (options.spawnImpl ?? spawn)(service.command ?? "pnpm", [...spawnArgs], {
       cwd: options.repoRoot,
       detached: true,
       env: serviceEnv,

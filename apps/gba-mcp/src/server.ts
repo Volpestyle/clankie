@@ -79,11 +79,14 @@ export function createGbaMcpServer(context: GbaToolContext, options: GbaMcpServe
   server.registerTool(
     "clankie_say",
     {
-      title: "Say something as Clankie",
+      title: "Tell Clankie what just happened, so he can talk about it",
       description:
-        "Speak in the channel Clankie is present in. Requires the possession lease: talking as him " +
-        "is driving him. You cannot choose the audience — a possessor drives the character, it does " +
-        "not pick new rooms. Ambient authority: this can never approve privileged work.",
+        "Report an event from the body — what you just did, what changed — and Clankie talks about " +
+        "it in the channel he is present in, in his own words. This is not a script: pass what " +
+        "happened, not the sentence you want said, or he will react to your sentence as if it were " +
+        "an event. Requires the possession lease: talking as him is driving him. You cannot choose " +
+        "the audience — a possessor drives the character, it does not pick new rooms. Ambient " +
+        "authority: this can never approve privileged work.",
       inputSchema: {
         text: z.string().min(1).max(CLANKIE_SPEECH_MAX),
         possessionToken: z.string().optional(),
@@ -92,8 +95,8 @@ export function createGbaMcpServer(context: GbaToolContext, options: GbaMcpServe
     async (args) => {
       try {
         context.assertMayAct?.(args.possessionToken);
-        await speech.say(args.text);
-        return { content: [{ type: "text" as const, text: "said" }] };
+        await speech.narrate(args.text);
+        return { content: [{ type: "text" as const, text: "reported" }] };
       } catch (error) {
         return {
           content: [{ type: "text" as const, text: error instanceof Error ? error.message : "refused" }],
@@ -160,10 +163,11 @@ export function createGbaMcpServer(context: GbaToolContext, options: GbaMcpServe
     {
       title: "Look at the game",
       description:
-        "Read the decoded game state and see the current screen. Returns the overworld position, " +
-        "party, dialog, menu and battle views that apply right now, plus the rendered frame as an " +
-        "image. Look before you press: the screen shows walls, furniture, doors and text that the " +
-        "decoded state does not describe.",
+        "Read the decoded game state and see the current screen. With no kind it returns the " +
+        "danger, scene, overworld, battle, dialog and menu views that apply right now, plus the " +
+        'rendered frame as an image; pass kind "party" or "inventory" for those views. Look ' +
+        "before you press: the screen shows walls, furniture, doors and text that the decoded " +
+        "state does not describe.",
       inputSchema: { kind: GbaEmulatorObservationKindSchema.optional() },
     },
     (args) => observeTool(context, args),

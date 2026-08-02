@@ -87,6 +87,15 @@ describe("gba mcp tools", () => {
     expect(result.isError).toBeUndefined();
   });
 
+  it("does not offer the catalogued wait, which a clockless core never completes", () => {
+    // A wait parks as "running" until the deadline sweep cancels it, wedging
+    // every action behind action_already_pending — so the wire never offers
+    // it. frame_advance is how a driver waits. This is a tripwire: if wait
+    // returns to the schema, the wedge returns with it.
+    const parsed = ActArgumentsSchema.safeParse({ actionKind: "wait", durationMs: 1000 });
+    expect(parsed.success).toBe(false);
+  });
+
   it("fails closed on an uncatalogued button instead of guessing", async () => {
     const result = await actTool(context(), {
       actionKind: "button_press",

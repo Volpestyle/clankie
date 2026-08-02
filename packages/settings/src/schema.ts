@@ -67,6 +67,28 @@ export const DiscordSettingsSchema = z
 
     /** Activity plane (ADR 0047): surface → embedded application id. */
     activityApplicationIdGba: SnowflakeSchema.optional(),
+    /**
+     * The named Cloudflare tunnel that publishes the activity surface, as
+     * created by `cloudflared tunnel create <name>`.
+     *
+     * Named rather than quick on purpose. A quick tunnel mints a fresh
+     * `*.trycloudflare.com` hostname on every start, and Discord's activity URL
+     * mapping is configured once in the developer portal — so a quick tunnel
+     * makes restarting the thing that publishes him a breaking change, which is
+     * how one came to be left running for six days until its edge died and the
+     * activity went blank with nothing reporting it. A named tunnel keeps its
+     * hostname across restarts, which is what lets the launcher own it at all.
+     *
+     * Absent means the launcher runs no tunnel and the activity stays local.
+     */
+    activityTunnelName: z.string().min(1).optional(),
+    /**
+     * The public hostname routed to that tunnel, used to probe the whole path
+     * end to end rather than only asking whether a process is alive. The
+     * 2026-08-01 failure had a healthy local server, a live `cloudflared`
+     * process, and a dead edge — process liveness would have called that fine.
+     */
+    activityTunnelHostname: z.string().min(1).optional(),
   })
   .strict();
 export type DiscordSettings = z.infer<typeof DiscordSettingsSchema>;

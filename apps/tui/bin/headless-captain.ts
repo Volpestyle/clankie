@@ -192,8 +192,8 @@ function commandHelp(): string {
     "  play status              Show the live embodiment (asked play) session",
     "  play stop                Stop the live playthrough cleanly (mints its checkpoint)",
     "",
-    "Services for restart/down: all (default), captain, control-plane, discord, activity, runner",
-    "Aliases: eve, cp, bridge, watch, viewer",
+    "Services for restart/down: all (default), captain, control-plane, discord, activity, tunnel, runner",
+    "Aliases: eve, cp, bridge, watch, viewer, cloudflared",
     "",
     "With no command, clankie opens the fullscreen operator console and requires a TTY.",
   ].join("\n");
@@ -259,9 +259,17 @@ async function runInspection(options: HeadlessCaptainCommandOptions): Promise<nu
         : { detail: `generation ${inspection.generation.slice(0, 8)}` }),
     ...(record === undefined ? {} : { pid: record.pid }),
   };
+  // Every local service, which is what this command has always claimed to
+  // report. It used to stop after the bridge, so the surfaces an audience
+  // actually reaches — the activity and the tunnel publishing it — were the
+  // two a `clankie health` could never tell you were down. That is how a
+  // tunnel stayed dead for six days while health said ready.
   const services = [
     captainStatus,
-    ...(await inspectServices(["control-plane", "discord-bridge"], await serviceOptions(options))),
+    ...(await inspectServices(
+      ["control-plane", "discord-bridge", "activity", "tunnel", "runner"],
+      await serviceOptions(options),
+    )),
   ];
   outputJson(options.stdout ?? process.stdout, {
     ok: inspection.state === "healthy" && operatorCredentialHealthy,

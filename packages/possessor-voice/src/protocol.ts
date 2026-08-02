@@ -3,10 +3,11 @@ import { z } from "zod";
 /**
  * The wire contract for the possessor voice seam (ADR 0064).
  *
- * Two messages, one in each direction, and deliberately nothing else. This is
- * not a general-purpose channel into the body: a possessor may report what it
- * just did and may be told what the room said. It cannot choose an audience,
- * join or leave a channel, or reach any other presence action from here.
+ * Three messages — one outbound, two inbound — and deliberately nothing else.
+ * This is not a general-purpose channel into the body: a possessor may report
+ * what it just did, and may be told what the room said and whether anyone is
+ * there to hear it. It cannot choose an audience, join or leave a channel, or
+ * reach any other presence action from here.
  */
 export const POSSESSOR_VOICE_SCHEMA_VERSION = 1 as const;
 
@@ -52,7 +53,33 @@ export const PossessorUtteranceSchema = z
   .strict();
 export type PossessorUtterance = z.infer<typeof PossessorUtteranceSchema>;
 
-export const PossessorServerMessageSchema = z.discriminatedUnion("type", [PossessorUtteranceSchema]);
+/**
+ * Bridge → possessor. Whether anyone can currently hear this body, pushed on
+ * every change and once on connect.
+ *
+ * A possessor needs this to know who is authoring: while a room is listening
+ * the realtime session composes everything it hears (ADR 0074), so a play loop
+ * that also authored asides would be a second voice in the same channel.
+ *
+ * One boolean and deliberately nothing else. A participant count was drafted
+ * here and cut: the voice session knows who it is capturing, not who is in the
+ * channel, so any number this carried would have been a different question's
+ * answer wearing an audience's name. Identities never cross, so this adds no
+ * retention and asks no new consent question.
+ */
+export const PossessorRoomSchema = z
+  .object({
+    ...EnvelopeShape,
+    type: z.literal("room"),
+    listening: z.boolean(),
+  })
+  .strict();
+export type PossessorRoom = z.infer<typeof PossessorRoomSchema>;
+
+export const PossessorServerMessageSchema = z.discriminatedUnion("type", [
+  PossessorUtteranceSchema,
+  PossessorRoomSchema,
+]);
 export type PossessorServerMessage = z.infer<typeof PossessorServerMessageSchema>;
 
 /** The loopback path the bridge listens on and a possessor dials. */

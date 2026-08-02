@@ -40,10 +40,22 @@ export interface PossessorVoiceSocket {
 }
 
 export interface PossessorVoiceClient {
-  /** Report what just happened in the body. Rejects when the bridge is unreachable. */
-  say(text: string): Promise<void>;
+  /**
+   * Report what just happened in the body — an event, never a sentence to say.
+   * The persona on the other side composes the words (ADR 0064), so a caller
+   * that passes finished speech here gets it treated as something that
+   * happened and replied to, which is the ADR 0074 defect. Rejects when the
+   * bridge is unreachable.
+   */
+  narrate(text: string): Promise<void>;
   /** Subscribe to room utterances as they happen. Returns an unsubscribe. */
   subscribe(listener: (utterance: string) => void): () => void;
+  /**
+   * Whether anyone can currently hear this body. False until the bridge says
+   * otherwise, so a possessor that never hears from the bridge behaves as if
+   * the room is empty and keeps authoring for its own surfaces (ADR 0074).
+   */
+  readonly roomListening: boolean;
   readonly connected: boolean;
   close(): void;
 }
@@ -72,6 +84,7 @@ export function createPossessorVoiceClient(options: PossessorVoiceClientOptions)
 
   let socket: PossessorVoiceSocket | null = null;
   let closed = false;
+  let roomListening = false;
 
   const open = (): void => {
     if (closed) return;
@@ -80,6 +93,10 @@ export function createPossessorVoiceClient(options: PossessorVoiceClientOptions)
     next.on("message", (data: unknown) => {
       const parsed = PossessorServerMessageSchema.safeParse(safeJson(String(data)));
       if (!parsed.success) return;
+      if (parsed.data.type === "room") {
+        roomListening = parsed.data.listening;
+        return;
+      }
       for (const listener of listeners) {
         try {
           listener(parsed.data.text);
@@ -90,6 +107,10 @@ export function createPossessorVoiceClient(options: PossessorVoiceClientOptions)
     });
     next.on("close", () => {
       socket = null;
+      // A dropped seam is not a silent room: reverting to "nobody is
+      // listening" hands authorship back to the possessor's own surfaces
+      // rather than leaving the loop mute until the socket returns.
+      roomListening = false;
       if (!closed) schedule(open, reconnectDelayMs);
     });
     next.on("error", () => next.close());
@@ -97,7 +118,7 @@ export function createPossessorVoiceClient(options: PossessorVoiceClientOptions)
   open();
 
   return {
-    say(text) {
+    narrate(text) {
       const trimmed = text.trim();
       if (trimmed.length === 0) {
         return Promise.reject(new Error("clankie_speech_empty: nothing to say"));
@@ -135,12 +156,16 @@ export function createPossessorVoiceClient(options: PossessorVoiceClientOptions)
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    get roomListening() {
+      return roomListening;
+    },
     get connected() {
       return socket !== null && socket.readyState === OPEN;
     },
     close() {
       closed = true;
       listeners.clear();
+      roomListening = false;
       socket?.close();
       socket = null;
     },

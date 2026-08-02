@@ -71,6 +71,9 @@ export const FreePlayJournalSummarySchema = z
         offered: z.number().int().nonnegative(),
         taken: z.number().int().nonnegative(),
         suppressed: z.number().int().nonnegative(),
+        // Defaulted, not required: journals written before the consultation
+        // gate existed carry no skip count, and they must keep parsing.
+        skipped: z.number().int().nonnegative().default(0),
       })
       .strict(),
     coherence: z.number().min(0).max(1).nullable(),

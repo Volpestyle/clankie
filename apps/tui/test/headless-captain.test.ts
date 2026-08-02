@@ -176,7 +176,16 @@ describe("headless captain commands", () => {
       ["captain-eve", "healthy", false],
       ["control-plane", "unhealthy", false],
       ["discord-bridge", "unreachable", false],
+      // The surfaces an audience actually reaches are reported too — health
+      // used to stop at the bridge, which is how a dead tunnel stayed invisible.
+      ["activity", "healthy", false],
+      ["tunnel", "healthy", false],
+      ["runner", "unreachable", false],
     ]);
+    // No tunnel configured in this fixture, and that is not a fault to report.
+    expect(services.find((service) => service.id === "tunnel")).toMatchObject({
+      state: "healthy",
+    });
   });
 
   it("diagnoses an env/store mismatch without printing either credential", async () => {

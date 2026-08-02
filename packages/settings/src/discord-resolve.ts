@@ -85,6 +85,8 @@ export function resolveDiscordSettings(
   takeBoolean("possessorVoiceEnabled", "CLANKIE_POSSESSOR_VOICE_ENABLED");
 
   takeString("activityApplicationIdGba", "DISCORD_ACTIVITY_APPLICATION_ID_GBA");
+  takeString("activityTunnelName", "CLANKIE_ACTIVITY_TUNNEL_NAME");
+  takeString("activityTunnelHostname", "CLANKIE_ACTIVITY_TUNNEL_HOSTNAME");
 
   return {
     settings: DiscordSettingsSchema.parse(merged),
@@ -157,5 +159,7 @@ export function discordSettingsToEnvironment(settings: DiscordSettings): Record<
   if (settings.possessorVoiceEnabled) env["CLANKIE_POSSESSOR_VOICE_ENABLED"] = "true";
 
   put("DISCORD_ACTIVITY_APPLICATION_ID_GBA", settings.activityApplicationIdGba);
+  put("CLANKIE_ACTIVITY_TUNNEL_NAME", settings.activityTunnelName);
+  put("CLANKIE_ACTIVITY_TUNNEL_HOSTNAME", settings.activityTunnelHostname);
   return env;
 }

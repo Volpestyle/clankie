@@ -306,9 +306,7 @@ describe("advance_dialog", () => {
     // The wait ran with A held, so 30 nominal print frames finished in fewer
     // wall frames than the box's own print time — the whole point.
     expect(core.held).toContain("a");
-    expect(
-      (result as unknown as { outcome: { framesSpent: number } }).outcome.framesSpent,
-    ).toBeLessThan(30);
+    expect((result as unknown as { outcome: { framesSpent: number } }).outcome.framesSpent).toBeLessThan(30);
   });
 
   it("presses anyway when a box never reports itself ready", async () => {

@@ -50,6 +50,14 @@ import type { PlayExecution } from "./play-host.ts";
 const FRAME_WIDTH = 240 * 3;
 const FRAME_HEIGHT = 160 * 3;
 
+/** Autosave cadence in turns. Unset or unparseable falls back to 50; 0 disables. */
+const DEFAULT_AUTOSAVE_TURNS = 50;
+function parseAutosaveTurns(raw: string | undefined): number {
+  if (raw === undefined || raw.length === 0) return DEFAULT_AUTOSAVE_TURNS;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : DEFAULT_AUTOSAVE_TURNS;
+}
+
 interface PlayExecutionLogger {
   info(context: Record<string, unknown>, message: string): void;
   warn(context: Record<string, unknown>, message: string): void;
@@ -164,6 +172,10 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
     // that fails its identity or digest gate is skipped, never trusted.
     const checkpointDir = defaultGbaCheckpointDir(env);
     let resumedFromCheckpointId: string | undefined;
+    // What he was thinking when the resumed checkpoint was minted. Restoring
+    // the RAM without it resumes a world whose player has forgotten why he is
+    // standing where he stands.
+    let resumedContinuity: { notes: string | null; objective: string | null } | null = null;
     if (game.checkpoints !== undefined) {
       for (const candidate of listGbaCheckpoints(checkpointDir)) {
         try {
@@ -174,8 +186,19 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
           });
           game.checkpoints.loadState(checkpoint.savestateBytes);
           resumedFromCheckpointId = candidate.checkpointId;
+          resumedContinuity = checkpoint.receipt.continuity;
           break;
-        } catch {
+        } catch (error) {
+          // Skipped, not silent: a corrupt newest checkpoint that quietly falls
+          // through to an older one reads exactly like lost progress.
+          options.logger.warn(
+            {
+              sessionId: session.sessionId,
+              checkpointId: candidate.checkpointId,
+              errorName: error instanceof Error ? error.name : "Error",
+            },
+            "checkpoint skipped: failed its identity or digest gate",
+          );
           continue;
         }
       }
@@ -234,9 +257,22 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
     // One log line per session, not per turn: a bridge that is down stays down,
     // and a line per turn would bury the playthrough in its own failure.
     let speechFailureLogged = false;
-    const speakToRoom = (line: string | null): void => {
-      if (line === null || voice === undefined) return;
-      void voice.say(line).catch((error: unknown) => {
+    /**
+     * Report an event to the room — never a sentence to say (ADR 0074).
+     *
+     * The seam has always carried "what just happened" and let the persona on
+     * the far side compose the words. Handing it `turn.speak` instead handed a
+     * finished quip to a conversational model as something to react to, which
+     * is how six words became seventeen seconds of speech in the 2026-08-01
+     * run. What crosses here is the turn's own effect line.
+     */
+    const reportToRoom = (event: string | null): void => {
+      if (event === null || event.length === 0 || voice === undefined) return;
+      // No room, nothing to report to. Without this the bridge rejects every
+      // event with "not in a channel" and the one-shot failure log below would
+      // report a broken seam when the truth is an empty room.
+      if (!voice.roomListening) return;
+      void voice.narrate(event).catch((error: unknown) => {
         if (speechFailureLogged) return;
         speechFailureLogged = true;
         options.logger.info(
@@ -304,6 +340,73 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
       );
     }
 
+    // How often a marathon banks its progress. The stop mint only covers a
+    // clean stop; with no default cap on session length (ADR 0063), a crash
+    // otherwise loses everything since the session began. 0 disables.
+    const autosaveEvery = parseAutosaveTurns(env["CLANKIE_PLAY_AUTOSAVE_TURNS"]);
+
+    // His reach into the body's saved time (ADR 0074). Every rewind banks the
+    // present first — checkpoints are append-only, so his own choice can never
+    // destroy the progress it leaves behind.
+    let latestTurn: FreePlayTurn | undefined;
+    const bankBeforeRewind = (): void => {
+      if (game.checkpoints === undefined) return;
+      const banked = writeGbaCheckpoint({
+        rootDir: checkpointDir,
+        capability: game.checkpoints,
+        label: "before-rewind",
+        position: null,
+        continuity:
+          latestTurn === undefined ? null : { notes: latestTurn.notes, objective: latestTurn.objective },
+        clock,
+      });
+      options.logger.info(
+        { sessionId: session.sessionId, checkpointId: banked.receipt.checkpointId },
+        "banked the present before a rewind",
+      );
+    };
+    const checkpointPort =
+      game.checkpoints === undefined
+        ? undefined
+        : {
+            list: () =>
+              listGbaCheckpoints(checkpointDir).map((receipt) => ({
+                checkpointId: receipt.checkpointId,
+                label: receipt.label,
+                capturedAt: receipt.capturedAt,
+                position: receipt.position,
+              })),
+            load: (checkpointId: string) => {
+              const checkpoints = game.checkpoints;
+              if (checkpoints === undefined) throw new Error("checkpoints_unavailable");
+              // Verify before banking, so a refused load mints nothing.
+              const checkpoint = readGbaCheckpoint({
+                rootDir: checkpointDir,
+                checkpointId,
+                identity: checkpoints.identity,
+              });
+              bankBeforeRewind();
+              checkpoints.loadState(checkpoint.savestateBytes);
+              options.logger.info({ sessionId: session.sessionId, checkpointId }, "he loaded a checkpoint");
+              return {
+                checkpointId: checkpoint.receipt.checkpointId,
+                label: checkpoint.receipt.label,
+                capturedAt: checkpoint.receipt.capturedAt,
+                position: checkpoint.receipt.position,
+              };
+            },
+            restart: () => {
+              const checkpoints = game.checkpoints;
+              if (checkpoints === undefined) throw new Error("checkpoints_unavailable");
+              bankBeforeRewind();
+              checkpoints.loadState(checkpoints.bootSavestate());
+              options.logger.info(
+                { sessionId: session.sessionId },
+                "he restarted the game from its beginning",
+              );
+            },
+          };
+
     const startedAt = clock().getTime();
     try {
       await onRunning(resumedFromCheckpointId);
@@ -322,6 +425,16 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
             ? "people watching the activity surface"
             : "people in the voice channel, watching him play"),
         ...(voiceAgent === undefined ? {} : { voice: voiceAgent }),
+        // Read per turn: someone joining the channel mid-playthrough hands
+        // authorship to the room from that turn on, and leaving hands it back.
+        ...(voice === undefined ? {} : { roomAuthors: () => voice.roomListening }),
+        ...(checkpointPort === undefined ? {} : { checkpoints: checkpointPort }),
+        ...(resumedContinuity === null
+          ? {}
+          : {
+              initialNotes: resumedContinuity.notes,
+              initialObjective: resumedContinuity.objective,
+            }),
         framebufferSha256: () => game.framebufferSha256(),
         framePng: () => game.framePng(),
         interjections,
@@ -330,6 +443,7 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
           (session.budget.maxDurationMs !== undefined &&
             clock().getTime() - startedAt >= session.budget.maxDurationMs),
         onTurn: (turn) => {
+          latestTurn = turn;
           sequence += 1;
           if (sink !== undefined) {
             const lines = [
@@ -350,12 +464,46 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
             );
           }
           publishFrame(turn.turn);
-          // Answer first, then the aside: someone who spoke to him is owed the
-          // reply before an unrelated remark. Both are already gated upstream —
-          // the speak cooldown here, the persona's own rate limit at the bridge.
-          speakToRoom(turn.reply);
-          speakToRoom(turn.speak);
+          // What happened, not what to say (ADR 0074). The room's own persona
+          // decides whether this is worth a remark and what the remark is; it
+          // already heard anything that was said to him, so a reply composed
+          // here would be a second answer in a different voice.
+          reportToRoom(turn.effect);
           journal?.turn(turn);
+          if (
+            autosaveEvery > 0 &&
+            game.checkpoints !== undefined &&
+            turn.turn > 0 &&
+            turn.turn % autosaveEvery === 0
+          ) {
+            try {
+              const autosave = writeGbaCheckpoint({
+                rootDir: checkpointDir,
+                capability: game.checkpoints,
+                label: "autosave",
+                position: null,
+                continuity: { notes: turn.notes, objective: turn.objective },
+                clock,
+              });
+              options.logger.info(
+                {
+                  sessionId: session.sessionId,
+                  checkpointId: autosave.receipt.checkpointId,
+                  turn: turn.turn,
+                },
+                "autosave checkpoint minted",
+              );
+            } catch (error) {
+              options.logger.warn(
+                {
+                  sessionId: session.sessionId,
+                  turn: turn.turn,
+                  errorName: error instanceof Error ? error.name : "Error",
+                },
+                "autosave checkpoint mint failed; play continues",
+              );
+            }
+          }
           options.onTurn?.(turn);
         },
       });
@@ -364,11 +512,16 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
       let checkpointId: string | undefined;
       if (game.checkpoints !== undefined) {
         try {
+          // The final turn's notes and objective ride along, so the next
+          // session resumes his mind with the world.
+          const lastTurn = result.turns.at(-1);
           checkpointId = writeGbaCheckpoint({
             rootDir: checkpointDir,
             capability: game.checkpoints,
             label: "asked-play",
             position: null,
+            continuity:
+              lastTurn === undefined ? null : { notes: lastTurn.notes, objective: lastTurn.objective },
             clock,
           }).receipt.checkpointId;
         } catch (error) {

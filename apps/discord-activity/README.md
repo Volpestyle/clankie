@@ -38,6 +38,43 @@ answers both `/.proxy/*` and bare paths and local development needs an HTTPS
 tunnel with a matching URL Mapping registered in the developer portal. A
 relative request without the `/.proxy` prefix is refused as `blocked:csp`.
 
+## The tunnel is a launcher-owned service
+
+`clankie restart` starts and supervises the tunnel alongside everything else,
+and `clankie health` probes it end to end. Configure it once in the operator
+settings' `discord` block:
+
+```jsonc
+{
+  "activityTunnelName": "clankie-activity", // cloudflared tunnel create <name>
+  "activityTunnelHostname": "clankie.example.com", // the DNS route to it
+}
+```
+
+Both unset means the launcher runs no tunnel and the activity stays local —
+reported as healthy, because wanting it local is not a fault.
+
+**Use a named tunnel, not a quick one.** `cloudflared tunnel --url …` mints a
+fresh `*.trycloudflare.com` hostname on every start, and the URL Mapping is
+configured once in the developer portal — so a quick tunnel makes restarting the
+thing that publishes him a breaking change. The predictable result: one gets
+started by hand, never restarted, and outlives every deploy until its edge dies.
+That is the 2026-08-01 failure, where a six-day-old quick tunnel had a live
+process, a healthy server behind it, and a dead edge, and the activity rendered
+blank in Discord with nothing reporting why
+([ADR 0047](../../docs/adr/0047-discord-activity-presence-plane.md) owns the
+plane; the incident is recorded in the launcher's tunnel service).
+
+The probe asks the public hostname rather than the process table, because "a
+`cloudflared` is running" was true for every one of those six days. It
+distinguishes three states an operator repairs differently:
+
+| Probe result           | Means                                         |
+| ---------------------- | --------------------------------------------- |
+| `healthy` + URL        | DNS, edge, tunnel, and origin all answered    |
+| `edge up, origin down` | 5xx — the tunnel is fine, the activity is not |
+| `unreachable`          | DNS or the edge is gone; restart the tunnel   |
+
 ## Two listeners, on purpose
 
 | Listener | Bind      | Exposure                       | Purpose                             |

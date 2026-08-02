@@ -23,21 +23,21 @@ was out of its depth.**
   only `effect`, which was computed by diffing state around an action that
   never ran. A `repeat: 14` refused for exceeding the 8-input budget read as
   "position unchanged after right", and he concluded the repeat mechanism
-  "behaved oddly". A refused `advance_dialog` rendered as *"read no new text —
-  the dialog stopped"* — a success-shaped sentence about an action that did
+  "behaved oddly". A refused `advance_dialog` rendered as _"read no new text —
+  the dialog stopped"_ — a success-shaped sentence about an action that did
   not happen — six times in one run.
 - **Script-held screens read as "no dialog".** During the starter fanfare the
   box is visibly on screen, but the field script parks on a wait native the
   dialog decoder does not model: mode reads "overworld", controls locked.
   `advance_dialog` refused instantly, exactly when it was the right choice. He
   independently theorized the fanfare and waited it out with `frame_advance
-  180` — six turns later. Battle text had the same shape (it lives under mode
+180` — six turns later. Battle text had the same shape (it lives under mode
   "battle"), so the rival-battle intro refused him twice more.
 - **Undecoded screens masqueraded as the overworld.** Spelling "GASKET" on the
   naming screen took nineteen turns, each reported against stale overworld
   state: "position unchanged — up is blocked from (16,12)" minted fake walls
   into refusal memory, letter entries read as "no visible change", and the
-  screen *closing* read as "no visible change" — he pressed Start twice more
+  screen _closing_ read as "no visible change" — he pressed Start twice more
   before realizing the name had been accepted.
 - **The budget and the schema disagreed.** The prompt and action schema allow
   `repeat` up to 16; the free-play lease allowed 8 inputs per action. A
@@ -116,7 +116,7 @@ vocabulary for the new endings.
   reads in one action instead of refusing into `frame_advance` guesswork.
 - Refusal memory can no longer be poisoned by non-overworld screens, so
   route-around behaviour degrades only on real walls.
-- A model that is told *why* an action was refused can correct on the next
+- A model that is told _why_ an action was refused can correct on the next
   turn instead of forming superstitions; the run archive keeps both the raw
   code (`detail`) and the played line (`effect`) for evaluation.
 - The scripted dialog core in tests models held screens, timed releases, and

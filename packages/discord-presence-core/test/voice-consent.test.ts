@@ -58,6 +58,30 @@ describe("Discord group voice consent", () => {
     expect(consent.permits("guild-1", "voice-1", "anyone")).toBe(false);
   });
 
+  it("reports the room as permitted under presence, not the empty opt-in list", () => {
+    // The bug this exists to stop: person memory resolves for whoever may be
+    // heard, and under `presence` the explicit opt-in set is empty forever — so
+    // reading it answered "nobody" about a room he was lawfully listening to.
+    const consent = new DiscordVoiceConsentRegistry("presence");
+    consent.open("guild-1", "voice-1");
+    expect(consent.current()?.consentedUserIds.size).toBe(0);
+
+    expect(consent.permitted("guild-1", "voice-1", ["alice", "bob"])).toEqual(["alice", "bob"]);
+    // A refusal still removes someone from the room's permitted set.
+    consent.set("guild-1", "voice-1", "bob", false);
+    expect(consent.permitted("guild-1", "voice-1", ["alice", "bob"])).toEqual(["alice"]);
+    // Never a room he is not in.
+    expect(consent.permitted("guild-1", "voice-2", ["alice"])).toEqual([]);
+  });
+
+  it("keeps explicit consent authoritative regardless of who is in the room", () => {
+    // Under `explicit`, presence is not consent and an occupant list must not
+    // become a back door into being heard.
+    const consent = new DiscordVoiceConsentRegistry("explicit");
+    consent.open("guild-1", "voice-1", "invoker");
+    expect(consent.permitted("guild-1", "voice-1", ["invoker", "lurker"])).toEqual(["invoker"]);
+  });
+
   it("explicit policy still honours a refusal after a later accidental opt-in path", () => {
     const consent = new DiscordVoiceConsentRegistry();
     consent.open("guild-1", "voice-1", "user-1");

@@ -142,6 +142,7 @@ export const GbaEmulatorEvidenceEventSchema = z
       "walk_to",
       "advance_dialog",
       "enter_text",
+      "select_menu_entry",
       "frame_advance",
       "wait",
       "cancel_action",

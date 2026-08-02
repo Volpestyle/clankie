@@ -2,11 +2,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import {
-  openFreePlayJournal,
-  parseFreePlayJournal,
-  type FreePlayJournalLine,
-} from "../src/free-play-journal.ts";
+import { openFreePlayJournal, parseFreePlayJournal } from "../src/free-play-journal.ts";
 import type { FreePlayResult, FreePlayTurn } from "../src/free-play.ts";
 
 const turn = (index: number): FreePlayTurn => ({
@@ -31,7 +27,7 @@ const result = (turns: FreePlayTurn[]): FreePlayResult => ({
   turns,
   accepted: turns.length,
   progress: { distinctTiles: 3, maps: ["pallet-town/house-1f"], turnsSinceNewTile: 0, actionsPerNewTile: 1 },
-  volition: { offered: turns.length, taken: 1, suppressed: 0 },
+  volition: { offered: turns.length, taken: 1, suppressed: 0, skipped: 0 },
   coherence: 0.5,
 });
 

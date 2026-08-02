@@ -120,9 +120,7 @@ export function voicePresenceGateOpen(
     return false;
   }
   if (VOICE_PRESENCE_TOKEN_PATTERN.test(input.body)) return true;
-  return (
-    (input.mentionsBot || addressesCharacter(input.body, config.characterNames)) && input.askerInVoice
-  );
+  return (input.mentionsBot || addressesCharacter(input.body, config.characterNames)) && input.askerInVoice;
 }
 
 // ---------------------------------------------------------------------------

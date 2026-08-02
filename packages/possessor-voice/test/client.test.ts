@@ -34,7 +34,7 @@ describe("possessor voice client", () => {
     expect(connect).toHaveBeenCalledWith("ws://127.0.0.1:4323/possessor", "possessor-secret");
     expect(client.connected).toBe(true);
 
-    await client.say("  walked into a wall by the lab  ");
+    await client.narrate("  walked into a wall by the lab  ");
     expect(socket.sent).toHaveLength(1);
     expect(JSON.parse(socket.sent[0] ?? "{}")).toEqual({
       schemaVersion: POSSESSOR_VOICE_SCHEMA_VERSION,
@@ -51,7 +51,7 @@ describe("possessor voice client", () => {
       connect: () => socket as unknown as PossessorVoiceSocket,
     });
 
-    await expect(client.say("anyone there")).rejects.toThrow(/clankie_speech_unavailable/u);
+    await expect(client.narrate("anyone there")).rejects.toThrow(/clankie_speech_unavailable/u);
     expect(socket.sent).toHaveLength(0);
   });
 
@@ -63,7 +63,7 @@ describe("possessor voice client", () => {
       connect: () => socket as unknown as PossessorVoiceSocket,
     });
 
-    await expect(client.say("x".repeat(POSSESSOR_NARRATION_MAX_CHARS + 1))).rejects.toThrow(
+    await expect(client.narrate("x".repeat(POSSESSOR_NARRATION_MAX_CHARS + 1))).rejects.toThrow(
       /clankie_speech_too_long/u,
     );
     expect(socket.sent).toHaveLength(0);
@@ -115,6 +115,66 @@ describe("possessor voice client", () => {
     socket.fire("message", JSON.stringify({ schemaVersion: 1, type: "join_channel", text: "hi" }));
     socket.fire("message", JSON.stringify({ schemaVersion: 99, type: "utterance", text: "hi" }));
     expect(heard).toEqual([]);
+  });
+
+  it("tracks whether a room is listening, and never treats it as an utterance", () => {
+    const socket = fakeSocket();
+    const client = createPossessorVoiceClient({
+      url: "ws://127.0.0.1:4323/possessor",
+      token: "possessor-secret",
+      connect: () => socket as unknown as PossessorVoiceSocket,
+    });
+
+    const heard: string[] = [];
+    client.subscribe((utterance) => heard.push(utterance));
+    // Nobody has said anything about a room yet, so the possessor keeps
+    // authoring for its own surfaces (ADR 0074).
+    expect(client.roomListening).toBe(false);
+
+    socket.fire(
+      "message",
+      JSON.stringify({
+        schemaVersion: POSSESSOR_VOICE_SCHEMA_VERSION,
+        type: "room",
+        listening: true,
+      }),
+    );
+    expect(client.roomListening).toBe(true);
+    expect(heard).toEqual([]);
+
+    socket.fire(
+      "message",
+      JSON.stringify({
+        schemaVersion: POSSESSOR_VOICE_SCHEMA_VERSION,
+        type: "room",
+        listening: false,
+      }),
+    );
+    expect(client.roomListening).toBe(false);
+  });
+
+  it("stops believing a room is listening when the seam drops", () => {
+    const sockets = [fakeSocket(), fakeSocket()];
+    let index = 0;
+    const client = createPossessorVoiceClient({
+      url: "ws://127.0.0.1:4323/possessor",
+      token: "possessor-secret",
+      connect: () => sockets[index++] as unknown as PossessorVoiceSocket,
+      setTimeoutImpl: () => undefined,
+    });
+
+    sockets[0]?.fire(
+      "message",
+      JSON.stringify({
+        schemaVersion: POSSESSOR_VOICE_SCHEMA_VERSION,
+        type: "room",
+        listening: true,
+      }),
+    );
+    expect(client.roomListening).toBe(true);
+
+    sockets[0]?.fire("close");
+    expect(client.roomListening).toBe(false);
   });
 
   it("reconnects after a close instead of going permanently silent", () => {

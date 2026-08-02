@@ -6,12 +6,14 @@ import { dirname, join, resolve } from "node:path";
 import {
   acquireBodyLock,
   FrozenGbaScenarioSchema,
+  listGbaCheckpoints,
   parseFreePlayJournal,
   RealGbaRouteScenarioSchema,
   sha256,
   type BootedGbaGame,
   type GbaAdapterScenario,
 } from "@clankie/gba-emulator";
+import type { FreePlayMind } from "@clankie/gba-emulator";
 import type {
   EmbodimentAssignment,
   EmbodimentClaim,
@@ -57,7 +59,7 @@ function fakeClient(assignment: EmbodimentAssignment) {
   };
 }
 
-function session(): EmbodimentSession {
+function session(maxTurns = 2): EmbodimentSession {
   return {
     schemaVersion: 1,
     sessionId: "round-trip-1",
@@ -66,7 +68,7 @@ function session(): EmbodimentSession {
     intentId: "intent-1",
     originLane: "discord_presence",
     requestedBy: "user-1",
-    budget: { maxTurns: 2, maxDurationMs: 60_000 },
+    budget: { maxTurns, maxDurationMs: 60_000 },
     requestedAt: "2026-07-26T12:00:00.000Z",
     updatedAt: "2026-07-26T12:00:01.000Z",
     runnerId: "runner-local",
@@ -147,6 +149,7 @@ describe("asked play round trip on the deterministic double", () => {
           loadState: (bytes: Uint8Array) => {
             loaded.push(bytes);
           },
+          bootSavestate: () => new TextEncoder().encode("boot-savestate"),
           identity: {
             romSha256: routeScenario.romSha256,
             savestateSha256: routeScenario.savestateSha256,
@@ -161,6 +164,18 @@ describe("asked play round trip on the deterministic double", () => {
       });
     const env = await playEnv();
 
+    // The first run writes notes and an objective, so the mint has a mind to carry.
+    const notingMind = (): Promise<FreePlayMind> =>
+      Promise.resolve({
+        decide: () =>
+          Promise.resolve({
+            monologue: "pressing on",
+            intent: "press a",
+            notes: "the grass is tall here",
+            objective: "win the trainer battle",
+            action: { kind: "button_press", button: "a", holdFrames: 2 },
+          }),
+      });
     const first = fakeClient({ kind: "start", session: session() });
     const firstHost = new PlayHost({
       client: first,
@@ -169,7 +184,7 @@ describe("asked play round trip on the deterministic double", () => {
       execute: createGbaPlayExecution({
         logger: silentLogger,
         env,
-        createMind: buttonMasher,
+        createMind: notingMind,
         boot: fakeBoot,
       }),
       logger: silentLogger,
@@ -181,6 +196,22 @@ describe("asked play round trip on the deterministic double", () => {
     const mintedId = first.reports[1]?.receipt?.checkpointId;
     expect(mintedId).toBeDefined();
 
+    // The second run records what its first view carries: the previous run's
+    // mind must arrive with the world, before he has written anything himself.
+    const seenNotes: (string | null)[] = [];
+    const seenObjectives: (string | null)[] = [];
+    const recallingMind = (): Promise<FreePlayMind> =>
+      Promise.resolve({
+        decide: (view) => {
+          seenNotes.push(view.notes);
+          seenObjectives.push(view.objective);
+          return Promise.resolve({
+            monologue: "pressing on",
+            intent: "press a",
+            action: { kind: "button_press", button: "a", holdFrames: 2 },
+          });
+        },
+      });
     const second = fakeClient({ kind: "start", session: session() });
     const secondHost = new PlayHost({
       client: second,
@@ -189,7 +220,7 @@ describe("asked play round trip on the deterministic double", () => {
       execute: createGbaPlayExecution({
         logger: silentLogger,
         env,
-        createMind: buttonMasher,
+        createMind: recallingMind,
         boot: fakeBoot,
       }),
       logger: silentLogger,
@@ -204,6 +235,167 @@ describe("asked play round trip on the deterministic double", () => {
     // The exact minted savestate bytes reached the core, digest-verified.
     expect(loaded).toHaveLength(1);
     expect(Buffer.from(loaded[0] as Uint8Array).equals(Buffer.from(savedBytes))).toBe(true);
+    // And the mind resumed with the world: seeded from the checkpoint, turn one.
+    expect(seenNotes[0]).toBe("the grass is tall here");
+    expect(seenObjectives[0]).toBe("win the trainer battle");
+  });
+
+  it("banks progress with autosave checkpoints on the configured cadence", async () => {
+    // A marathon with no cap only minted at a clean stop, so a crash lost the
+    // whole session. Autosaves run through the same real mint gate.
+    const require = createRequire(import.meta.url);
+    const emulatorPackage = dirname(require.resolve("@clankie/gba-emulator/package.json"));
+    const repoRoot = resolve(emulatorPackage, "../..");
+    const doubleBytes = readFileSync(
+      join(repoRoot, "scenarios/emulator/verdant-path-trainer-battle/v1/scenario.json"),
+    );
+    const routeScenario = RealGbaRouteScenarioSchema.parse(
+      JSON.parse(
+        readFileSync(join(emulatorPackage, "fixtures/firered-bedroom-route/v1/scenario.json"), "utf8"),
+      ),
+    );
+    const fakeBoot = (): Promise<BootedGbaGame> =>
+      Promise.resolve({
+        scenario: FrozenGbaScenarioSchema.parse(
+          JSON.parse(doubleBytes.toString("utf8")),
+        ) as GbaAdapterScenario,
+        fixtureSha256: sha256(doubleBytes),
+        coreFactory: undefined,
+        checkpoints: {
+          saveState: () => new TextEncoder().encode("autosave-bytes"),
+          loadState: () => undefined,
+          bootSavestate: () => new TextEncoder().encode("boot-savestate"),
+          identity: {
+            romSha256: routeScenario.romSha256,
+            savestateSha256: routeScenario.savestateSha256,
+            coreWasmSha256: routeScenario.coreWasmSha256,
+          },
+          scenario: routeScenario,
+        },
+        framePng: () => null,
+        observeFrames: () => undefined,
+        framebufferSha256: () => null,
+        real: false,
+      });
+    const env = await playEnv();
+    env["CLANKIE_PLAY_AUTOSAVE_TURNS"] = "2";
+
+    // Checkpoint ids are timestamp-stamped; a wall clock could mint two
+    // same-millisecond autosaves whose directories collide. Ticking per call
+    // keeps every stamp distinct without racing the real clock.
+    let tick = 0;
+    const clock = (): Date => new Date(1_753_500_000_000 + (tick += 10));
+    const client = fakeClient({ kind: "start", session: session(5) });
+    const host = new PlayHost({
+      client,
+      runnerId: "runner-local",
+      environmentIds: ["pokemon-firered"],
+      execute: createGbaPlayExecution({
+        logger: silentLogger,
+        env,
+        clock,
+        createMind: buttonMasher,
+        boot: fakeBoot,
+      }),
+      logger: silentLogger,
+    });
+    await host.poll();
+    await host.settled();
+
+    // Turns 2 and 4 autosaved; the clean stop minted its own on top.
+    const receipts = listGbaCheckpoints(env["CLANKIE_GBA_CHECKPOINT_DIR"] as string);
+    expect(receipts.filter((receipt) => receipt.label === "autosave")).toHaveLength(2);
+    expect(receipts.filter((receipt) => receipt.label === "asked-play")).toHaveLength(1);
+  });
+
+  it("restarts to the boot savestate when he asks, banking the present first", async () => {
+    // ADR 0075: the rewind is his choice; the port banks a before-rewind
+    // checkpoint through the real mint gate so the choice destroys nothing.
+    const require = createRequire(import.meta.url);
+    const emulatorPackage = dirname(require.resolve("@clankie/gba-emulator/package.json"));
+    const repoRoot = resolve(emulatorPackage, "../..");
+    const doubleBytes = readFileSync(
+      join(repoRoot, "scenarios/emulator/verdant-path-trainer-battle/v1/scenario.json"),
+    );
+    const routeScenario = RealGbaRouteScenarioSchema.parse(
+      JSON.parse(
+        readFileSync(join(emulatorPackage, "fixtures/firered-bedroom-route/v1/scenario.json"), "utf8"),
+      ),
+    );
+    const bootBytes = new TextEncoder().encode("the-pinned-beginning");
+    const loaded: Uint8Array[] = [];
+    const fakeBoot = (): Promise<BootedGbaGame> =>
+      Promise.resolve({
+        scenario: FrozenGbaScenarioSchema.parse(
+          JSON.parse(doubleBytes.toString("utf8")),
+        ) as GbaAdapterScenario,
+        fixtureSha256: sha256(doubleBytes),
+        coreFactory: undefined,
+        checkpoints: {
+          saveState: () => new TextEncoder().encode("the-present"),
+          loadState: (bytes: Uint8Array) => {
+            loaded.push(bytes);
+          },
+          bootSavestate: () => bootBytes,
+          identity: {
+            romSha256: routeScenario.romSha256,
+            savestateSha256: routeScenario.savestateSha256,
+            coreWasmSha256: routeScenario.coreWasmSha256,
+          },
+          scenario: routeScenario,
+        },
+        framePng: () => null,
+        observeFrames: () => undefined,
+        framebufferSha256: () => null,
+        real: false,
+      });
+    const env = await playEnv();
+    let tick = 0;
+    const clock = (): Date => new Date(1_753_500_000_000 + (tick += 10));
+
+    const restartingMind = (): Promise<FreePlayMind> =>
+      Promise.resolve({
+        decide: (view) =>
+          Promise.resolve(
+            view.turn === 0
+              ? {
+                  monologue: "pressing on",
+                  intent: "press a",
+                  notes: "about to start over",
+                  action: { kind: "button_press", button: "a", holdFrames: 2 },
+                }
+              : {
+                  monologue: "clean run",
+                  intent: "restart the game",
+                  action: { kind: "restart_game" },
+                },
+          ),
+      });
+    const client = fakeClient({ kind: "start", session: session(2) });
+    const host = new PlayHost({
+      client,
+      runnerId: "runner-local",
+      environmentIds: ["pokemon-firered"],
+      execute: createGbaPlayExecution({
+        logger: silentLogger,
+        env,
+        clock,
+        createMind: restartingMind,
+        boot: fakeBoot,
+      }),
+      logger: silentLogger,
+    });
+    await host.poll();
+    await host.settled();
+
+    // The boot savestate reached the core, and only after the bank.
+    expect(loaded).toHaveLength(1);
+    expect(Buffer.from(loaded[0] as Uint8Array).equals(Buffer.from(bootBytes))).toBe(true);
+    const receipts = listGbaCheckpoints(env["CLANKIE_GBA_CHECKPOINT_DIR"] as string);
+    const banked = receipts.find((receipt) => receipt.label === "before-rewind");
+    expect(banked).toBeDefined();
+    // The bank carries what he knew at the moment he chose to rewind.
+    expect(banked?.continuity).toEqual({ notes: "about to start over", objective: null });
   });
 
   it("refuses body_held when another process holds the body lock", async () => {

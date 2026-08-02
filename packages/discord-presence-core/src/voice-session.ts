@@ -244,6 +244,19 @@ export interface DiscordVoiceSessionOptions {
    * he transcribes when he is in it.
    */
   readonly consentPolicy?: DiscordVoiceConsentPolicy;
+  /**
+   * Who is currently sitting in the voice channel, supplied by whoever holds
+   * the gateway. Ids only; this package never touches a Discord client.
+   *
+   * Needed because "who consented" and "who may be heard" stop being the same
+   * set under the `presence` policy (ADR 0071): presence *is* consent there, so
+   * the explicit opt-in list stays empty while the whole room is permitted. The
+   * briefing resolves person memory for whoever may be heard, and reading the
+   * explicit list meant it resolved memory for nobody — he could hear the room
+   * and had no idea who was in it. Absent falls back to the explicit list,
+   * which is exactly right under the `explicit` policy.
+   */
+  readonly channelOccupants?: (guildId: string, channelId: string) => readonly string[];
   /** Monotonic milliseconds; defaults to `performance.now`. Injected by tests. */
   readonly clock?: () => number;
   /** Timer seam shared with the realtime runtimes; drives decay ticks, the hold window, and reconnect backoff. */
@@ -905,7 +918,13 @@ export class DiscordVoiceSession {
       briefing = await this.options.briefing({
         guildId,
         channelId,
-        consentedUserIds: [...(this.consent.current()?.consentedUserIds ?? [])],
+        // Who may be heard, not who filled in a form: under the `presence`
+        // policy those are different sets and only the first one is the room.
+        consentedUserIds: this.consent.permitted(
+          guildId,
+          channelId,
+          this.options.channelOccupants?.(guildId, channelId) ?? [],
+        ),
       });
     } catch {
       await this.emitSafely({

@@ -97,6 +97,17 @@ action menu ([ADR 0072](../../docs/adr/0072-the-harness-tells-him-the-truth.md))
 Text speed is an in-game Option. Setting it to FAST once and minting a
 checkpoint makes every later session read faster.
 
+### Choosing
+
+`select_menu_entry` walks the open menu's cursor to a named entry and confirms
+it in one action ([ADR 0073](../../docs/adr/0073-a-menu-choice-is-one-action-not-one-press-per-cursor-step.md)).
+Pass the `entryId` exactly as the menu view lists it — a battle move, a battle
+command, a start-menu option, a party slot. It never chooses for you, verifies
+the cursor between presses, and stops with `endedBecause` (never pressing A) if
+the menu closes or the cursor will not move. The naming screen stays
+`enter_text`'s, and a scrolled bag window is refused rather than mis-navigated
+— steer those with single presses.
+
 ### Naming
 
 `enter_text` types a whole name on the open naming screen — cursor navigation,
@@ -218,9 +229,18 @@ go through a **port**, because the same fence blocks them.
 
 ### Speaking as Clankie
 
-`clankie_say` speaks in the channel Clankie is present in, and requires the
-possession lease — talking as him is driving him. The caller cannot choose the
-audience: a possessor drives the character, it does not pick new rooms.
+`clankie_say` makes Clankie talk about something in the channel he is present
+in, and requires the possession lease — talking as him is driving him. The
+caller cannot choose the audience: a possessor drives the character, it does not
+pick new rooms.
+
+**Pass what happened, not the sentence you want said.** The `text` is an event
+report, seeded as a conversation item so the persona composes the words in his
+own voice; it is not a script and never spoken verbatim. A caller that passes
+finished speech gets it treated as an event that happened and replied to — see
+[ADR 0074](../../docs/adr/0074-the-room-hears-one-voice.md), where exactly that
+turned a six-word quip into seventeen seconds of speech in a live run. The port
+behind this tool is named `narrate` for the same reason.
 
 **A possessor cannot speak directly, and that is a fence rather than an
 oversight.** The control plane's presence action requires a _live presence

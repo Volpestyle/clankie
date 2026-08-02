@@ -29,6 +29,12 @@ import { RealGbaRouteScenarioSchema, type RealGbaRouteScenario } from "./real-sc
 export interface GbaCheckpointCapability {
   saveState: () => Uint8Array;
   loadState: (bytes: Uint8Array) => void;
+  /**
+   * The savestate the core booted from — the configured beginning. Held so a
+   * restart (ADR 0075) reboots to it without re-reading the operator's file;
+   * the bytes were digest-verified at core creation.
+   */
+  bootSavestate: () => Uint8Array;
   /** Digests verified at core creation; a checkpoint must match them to load. */
   identity: MgbaFireRedCoreIdentity;
   /** The booted route scenario — the template a checkpoint's companion scenario is minted from. */
@@ -117,10 +123,11 @@ export async function bootGbaGame(options: BootGbaGameOptions): Promise<BootedGb
   }
 
   const routeScenario = RealGbaRouteScenarioSchema.parse(parsed);
+  const savestateBytes = readFileSync(savestatePath);
   const core = await MgbaFireRedCore.create({
     coreId: routeScenario.coreId,
     romBytes: readFileSync(romPath),
-    savestateBytes: readFileSync(savestatePath),
+    savestateBytes,
     romSha256: routeScenario.romSha256,
     savestateSha256: routeScenario.savestateSha256,
     coreWasmSha256: routeScenario.coreWasmSha256,
@@ -136,6 +143,7 @@ export async function bootGbaGame(options: BootGbaGameOptions): Promise<BootedGb
       loadState: (bytes) => {
         core.loadState(bytes);
       },
+      bootSavestate: () => savestateBytes,
       identity: core.identity(),
       scenario: routeScenario,
     },

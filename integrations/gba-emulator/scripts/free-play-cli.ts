@@ -182,7 +182,8 @@ console.log(
 const v = result.volition;
 console.log(
   `volition: spoke ${String(v.taken)} of ${String(v.offered)} turns` +
-    (v.suppressed === 0 ? "" : ` · ${String(v.suppressed)} held by the cooldown`),
+    (v.suppressed === 0 ? "" : ` · ${String(v.suppressed)} held by the cooldown`) +
+    (v.skipped === 0 ? "" : ` · ${String(v.skipped)} voice calls skipped inside it`),
 );
 console.log(
   result.coherence === null
@@ -211,7 +212,13 @@ function print(turn: FreePlayTurn): void {
               ? "advance dialog"
               : turn.action.kind === "enter_text"
                 ? `type "${turn.action.text}"`
-                : `wait ${String(turn.action.durationMs)}ms`;
+                : turn.action.kind === "select_menu_entry"
+                  ? `select "${turn.action.entryId}"`
+                  : turn.action.kind === "load_checkpoint"
+                    ? `load ${turn.action.checkpointId ?? "(list)"}`
+                    : turn.action.kind === "restart_game"
+                      ? "restart game"
+                      : `wait ${String(turn.action.durationMs)}ms`;
   const marker = turn.outcome === "accepted" ? "→" : "✗";
   const detail = turn.outcome === "accepted" ? "" : `  [${turn.outcome}: ${turn.detail ?? ""}]`;
   console.log(`          ${marker} ${action}${detail}`);

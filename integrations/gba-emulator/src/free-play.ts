@@ -34,6 +34,41 @@ import {
   type FreePlayProgress,
 } from "./free-play-progress.ts";
 
+/**
+ * Actions on the body's saved time, owned by the loop rather than the frozen
+ * emulator catalog ([ADR 0075](../../../docs/adr/0075-rewinding-is-a-play-choice.md)).
+ *
+ * State loads have always lived outside the adapter — ADR 0060 shipped save
+ * and load as possession hooks beside the action surface, not inside it — and
+ * these follow that shape: the loop consults a checkpoint port the composer
+ * injects, and the governed emulator catalog does not change. What changes is
+ * *who may want one*: the owner ruled that restarting or loading a save is a
+ * play choice, his to make. Rewinding is non-destructive by construction —
+ * checkpoints are append-only sibling identities, and the port banks the
+ * present before restoring the past.
+ */
+export const FreePlayBodyActionSchema = z.discriminatedUnion("kind", [
+  /**
+   * Restore a minted checkpoint, or list what exists.
+   *
+   * Absent `checkpointId` is a question, not a change: the action completes
+   * with the listing as its effect, exactly like the MCP load tool with no id.
+   */
+  z
+    .object({
+      kind: z.literal("load_checkpoint"),
+      checkpointId: z.string().min(1).max(200).optional(),
+    })
+    .strict(),
+  /** Reboot the game to its configured starting savestate. */
+  z.object({ kind: z.literal("restart_game") }).strict(),
+]);
+export type FreePlayBodyAction = z.infer<typeof FreePlayBodyActionSchema>;
+
+/** Everything a free-play decision may do: play the game, or move through its saves. */
+export const FreePlayActionSchema = z.union([GbaEmulatorActionSchema, FreePlayBodyActionSchema]);
+export type FreePlayAction = z.infer<typeof FreePlayActionSchema>;
+
 export const FreePlayDecisionSchema = z
   .object({
     /** Why this action, in Clankie's own voice. */
@@ -72,7 +107,7 @@ export const FreePlayDecisionSchema = z
     // alone", and losing an entire turn over a missing optional field would be a
     // harsh reading of a decision that is otherwise valid.
     notes: z.string().max(FREE_PLAY_NOTES_MAX).nullish(),
-    action: GbaEmulatorActionSchema,
+    action: FreePlayActionSchema,
   })
   .strict();
 export type FreePlayDecision = z.infer<typeof FreePlayDecisionSchema>;
@@ -96,6 +131,14 @@ export interface FreePlayView {
    * never a suggested route — the model still chooses.
    */
   refusedHere: readonly string[];
+  /**
+   * Turns since he last stood on a tile he had never stood on before, surfaced
+   * only once it is long enough to mean something. The loop always computed
+   * this; a measured run sat at 85 while the number stayed in the summary
+   * nobody reads mid-game. Information, never advice: a long conversation
+   * stalls it legitimately, and what to do about it stays his call.
+   */
+  stalledForTurns: number | null;
   /** The notes he wrote on the previous turn, verbatim. */
   notes: string | null;
   /** His standing objective, carried until he changes it. */
@@ -120,7 +163,7 @@ export interface FreePlayView {
    */
   interjection: string | null;
   /** Prior turns, most recent last, so the model has continuity. */
-  history: readonly { intent: string; action: GbaEmulatorAction; outcome: string; effect: string }[];
+  history: readonly { intent: string; action: FreePlayAction; outcome: string; effect: string }[];
 }
 
 /**
@@ -152,7 +195,7 @@ export const FreePlayTurnSchema = z
     speak: z.string().max(FREE_PLAY_SPEAK_MAX).nullable(),
     /** He wanted to speak but the gate held him. Measures whether it binds. */
     speakSuppressed: z.boolean(),
-    action: GbaEmulatorActionSchema.nullable(),
+    action: FreePlayActionSchema.nullable(),
     outcome: z.enum(["accepted", "rejected_by_adapter", "invalid_decision", "mind_failed"]),
     /** Bounded reason when the turn did not produce an accepted action. */
     detail: z.string().max(400).nullable(),
@@ -172,6 +215,12 @@ export interface FreePlayVolition {
   taken: number;
   /** Turns he chose to but the gate held him. */
   suppressed: number;
+  /**
+   * Turns where Voice was not consulted at all: nobody spoke and the rate
+   * gate could not open, so any aside it produced would have been dropped.
+   * Counted so the saved calls stay measurable rather than invisible.
+   */
+  skipped: number;
 }
 
 export interface FreePlayResult {
@@ -187,6 +236,14 @@ export interface FreePlayResult {
    */
   coherence: number | null;
 }
+
+/**
+ * How many tile-stalled turns pass before the view says so. Below this the
+ * signal is noise — reading a sign stalls it for a turn or two; above it he is
+ * either deep in a conversation (and knows it) or going in circles (and may
+ * not). The measured failure was 85.
+ */
+export const FREE_PLAY_STALL_TURNS = 12;
 
 const OBSERVED_KINDS: GbaEmulatorObservationKind[] = [
   "danger",
@@ -222,10 +279,42 @@ export class InterjectionQueue {
   }
 }
 
+/** One checkpoint, as the listing and the load report it to the player. */
+export interface FreePlayCheckpointSummary {
+  checkpointId: string;
+  label: string | null;
+  capturedAt: string;
+  position: { mapId: string; x: number; y: number } | null;
+}
+
+/**
+ * The body's saved time, as the loop may touch it (ADR 0075).
+ *
+ * Injected by the composer, exactly as the MCP surface injects its checkpoint
+ * hooks — the loop holds no filesystem and no digest policy. Implementations
+ * must bank the present before restoring the past, so a rewind can never
+ * destroy the state it left; `readGbaCheckpoint`'s identity and digest gates
+ * do the refusing on a bad load.
+ */
+export interface FreePlayCheckpointPort {
+  /** Every loadable checkpoint, newest first. */
+  list(): FreePlayCheckpointSummary[];
+  /** Restore one by id. Throws with a self-describing reason on refusal. */
+  load(checkpointId: string): FreePlayCheckpointSummary;
+  /** Reboot to the configured starting savestate. */
+  restart(): void;
+}
+
 export interface RunFreePlayInput {
   io: GbaDriverIo;
   mind: FreePlayMind;
   turns: number;
+  /**
+   * His reach into the body's saved time. Absent — the deterministic double,
+   * a test that exercises play only — a rewind decision is refused truthfully
+   * rather than pretended at.
+   */
+  checkpoints?: FreePlayCheckpointPort;
   /** Called after every turn so a CLI can stream the playthrough. */
   onTurn?: (turn: FreePlayTurn) => void;
   /** Latest framebuffer digest, when a core exposes one. */
@@ -242,8 +331,28 @@ export interface RunFreePlayInput {
    * decision — measurably near-silent, see ADR 0056.
    */
   voice?: ClankieVoice;
+  /**
+   * Whether a live room is composing his speech itself (ADR 0074).
+   *
+   * While this is true neither author here runs: the realtime session in the
+   * voice channel is the sole voice that room hears, it already heard anything
+   * said to him, and a line promoted here would be a second author for the same
+   * character in the same moment. Read per turn rather than once, because
+   * people join and leave mid-playthrough. Absent means nobody is listening and
+   * the loop authors as it always has.
+   */
+  roomAuthors?: () => boolean;
   /** Who is listening. Absent means he is alone and will reasonably stay quiet. */
   audience?: string;
+  /**
+   * Notes carried over from a previous run, typically the ones stamped into
+   * the checkpoint this session resumed from. Seeded, then entirely his: he
+   * rewrites or discards them exactly like notes he wrote this session. A
+   * resume without them restores the world but not the mind that was in it.
+   */
+  initialNotes?: string | null;
+  /** The standing objective from a previous run, same contract as the notes. */
+  initialObjective?: string | null;
   /**
    * Checked at each turn boundary; true ends the playthrough cleanly there.
    * This is how an asked stop (ADR 0063) or an exhausted duration budget lands
@@ -255,11 +364,13 @@ export interface RunFreePlayInput {
 export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResult> {
   const historyLimit = input.historyLimit ?? 8;
   const turns: FreePlayTurn[] = [];
-  const history: { intent: string; action: GbaEmulatorAction; outcome: string; effect: string }[] = [];
-  let notes: string | null = null;
-  let objective: string | null = null;
+  const history: { intent: string; action: FreePlayAction; outcome: string; effect: string }[] = [];
+  // Bounded on entry: seeds come from validated receipts today, but the bound
+  // is the loop's own invariant, not the caller's promise.
+  let notes: string | null = input.initialNotes?.slice(0, FREE_PLAY_NOTES_MAX) ?? null;
+  let objective: string | null = input.initialObjective?.slice(0, FREE_PLAY_OBJECTIVE_MAX) ?? null;
   let lastSpokeTurn: number | null = null;
-  const volition: FreePlayVolition = { offered: 0, taken: 0, suppressed: 0 };
+  const volition: FreePlayVolition = { offered: 0, taken: 0, suppressed: 0, skipped: 0 };
   const cooldown = input.speakCooldownTurns ?? FREE_PLAY_SPEAK_COOLDOWN_TURNS;
   const recentlySaid: string[] = [];
   const progress = new FreePlayProgressTracker();
@@ -293,11 +404,16 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
 
     let raw: unknown;
     try {
+      const sinceNewTile = progress.snapshot().turnsSinceNewTile;
       raw = await input.mind.decide({
         turn,
         observations,
         framePng: input.framePng?.() ?? null,
         refusedHere: progress.refusedFrom(positionOf(observations)),
+        // Only when he has a position to be stuck at: mid-battle and mid-warp
+        // the tile counter stalls for reasons that need no telling.
+        stalledForTurns:
+          sinceNewTile >= FREE_PLAY_STALL_TURNS && positionOf(observations) !== null ? sinceNewTile : null,
         notes,
         objective,
         interjection,
@@ -333,11 +449,124 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     record.objective = objective;
     record.reply = parsed.data.reply ?? null;
 
+    record.action = parsed.data.action;
+    const chosen = parsed.data.action;
+
+    let accepted = false;
+    let actionOutcome: Record<string, unknown> | undefined;
+    let rejection: string | null = null;
+    /** Set only by an accepted body action, whose effect no diff can read. */
+    let bodySummary: string | null = null;
+    if (chosen.kind === "load_checkpoint" || chosen.kind === "restart_game") {
+      // The body's saved time, not the emulator (ADR 0075): dispatched to the
+      // injected checkpoint port, never to io.act — the frozen catalog does
+      // not change, and a body without the port refuses truthfully.
+      if (input.checkpoints === undefined) {
+        record.outcome = "rejected_by_adapter";
+        record.detail = "checkpoints_unavailable";
+        rejection = "rejected, nothing ran — this body has no saved time to move through";
+      } else {
+        try {
+          bodySummary = applyBodyAction(chosen, input.checkpoints);
+          record.outcome = "accepted";
+          accepted = true;
+          record.detail = bounded(bodySummary);
+        } catch (error) {
+          // The port's gates speak for themselves: checkpoint_not_found, a
+          // digest mismatch, a foreign ROM. The reason is the effect.
+          record.outcome = "rejected_by_adapter";
+          record.detail = bounded(error);
+          rejection = `rejected, nothing ran — ${bounded(error)}`;
+        }
+      }
+    } else {
+      try {
+        const result = await input.io.act(chosen);
+        // A rejection arrives as a status, not only as a throw: the adapter fails
+        // closed on an illegal button, an exceeded frame bound, a missing
+        // capability, or a stale goal version. Both shapes are legitimate answers
+        // rather than crashes, so both keep the playthrough running.
+        if (result.status === "completed") {
+          record.outcome = "accepted";
+          accepted = true;
+          actionOutcome = result.outcome as Record<string, unknown>;
+          record.detail = bounded(JSON.stringify(result.outcome));
+        } else {
+          record.outcome = "rejected_by_adapter";
+          record.detail = bounded(`${result.status}:${describeRejection(result)}`);
+          rejection = describeRejectionForPlayer(
+            result.status === "failed" ? result.errorCode : null,
+            describeRejection(result),
+          );
+        }
+      } catch (error) {
+        record.outcome = "rejected_by_adapter";
+        record.detail = bounded(error);
+        rejection = describeRejectionForPlayer(
+          error instanceof EnvironmentAdapterActionError ? error.errorCode : null,
+          bounded(error),
+        );
+      }
+    }
+
+    // Re-observe and diff, so the turn records what changed rather than only
+    // that the adapter took the button. The frame digest is sampled digest-to-
+    // digest around the action — the core only runs frames the action asked
+    // for, so the comparison spans exactly what this turn did to the screen.
+    //
+    // A rejected action never ran, so diffing around it would invent an effect
+    // — the worst case was a refused advance_dialog reading as "read no new
+    // text", a success-shaped sentence about an action that did not happen.
+    // The rejection reason IS the effect of that turn, and it is the one line
+    // the model actually sees (detail stays journal-only).
+    const frameAfter = input.framebufferSha256?.() ?? null;
+    const effect =
+      rejection !== null
+        ? { summary: rejection, refused: null, position: positionOf(observations), enteredMap: false }
+        : bodySummary !== null
+          ? // A rewind's effect is what the port reports plus where he now
+            // stands — a state diff around a restored world would only restate
+            // it, and the restored position must still reach the progress
+            // tracker so the tile memory follows him back.
+            rewindEffect(bodySummary, observations, observe(input.io))
+          : observeEffect({
+              before: observations,
+              // Body actions never reach here, so this narrows to the emulator kinds.
+              after: observe(input.io),
+              action: chosen as GbaEmulatorAction,
+              outcome: actionOutcome,
+              screenChanged:
+                record.framebufferSha256 !== null && frameAfter !== null
+                  ? frameAfter !== record.framebufferSha256
+                  : null,
+            });
+    progress.record(effect, accepted);
+    record.effect = effect.summary.slice(0, 200);
+
+    // Whether the rate gate could let an unprompted remark through this turn.
+    // Computed before Voice is consulted, because a consultation whose only
+    // possible aside would be dropped by this same gate is a model call bought
+    // for nothing.
+    const ready = lastSpokeTurn === null || turn - lastSpokeTurn >= cooldown;
+
     // Voice decides speech when one is wired; the player's own speak/reply are
     // the single-agent fallback (ADR 0056). Voice cannot act, which is what
     // makes "an interjection is not a route" structural rather than a prompt.
-    let wants = parsed.data.speak ?? null;
-    if (input.voice !== undefined) {
+    // It runs after the action settles so "what just happened" is the turn's
+    // real effect — commentary about a move belongs after the move lands.
+    // While a room composes for itself (ADR 0074), neither author here runs —
+    // not Voice, and not the player's own fallback quip. Both would be a second
+    // author for one character in one moment: in the channel if the seam
+    // carried them, on the overlay if it did not.
+    const roomAuthors = input.roomAuthors?.() === true;
+    let wants = roomAuthors ? null : (parsed.data.speak ?? null);
+    if (input.voice !== undefined && roomAuthors) {
+      // Not consulted at all: the room is already speaking in his voice.
+      volition.skipped += 1;
+    } else if (input.voice !== undefined && interjection === null && !ready) {
+      // Not consulted at all: nobody spoke, and the gate could not open.
+      volition.skipped += 1;
+    } else if (input.voice !== undefined) {
       const voiceView: VoiceView = {
         turn,
         framePng: input.framePng?.() ?? null,
@@ -368,7 +597,6 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     // Every turn is an opportunity; the gate only limits how often he takes it.
     volition.offered += 1;
     if (wants !== null && wants.trim().length > 0) {
-      const ready = lastSpokeTurn === null || turn - lastSpokeTurn >= cooldown;
       if (ready) {
         record.speak = wants;
         lastSpokeTurn = turn;
@@ -382,65 +610,6 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
         volition.suppressed += 1;
       }
     }
-    record.action = parsed.data.action;
-
-    let accepted = false;
-    let actionOutcome: Record<string, unknown> | undefined;
-    let rejection: string | null = null;
-    try {
-      const result = await input.io.act(parsed.data.action);
-      // A rejection arrives as a status, not only as a throw: the adapter fails
-      // closed on an illegal button, an exceeded frame bound, a missing
-      // capability, or a stale goal version. Both shapes are legitimate answers
-      // rather than crashes, so both keep the playthrough running.
-      if (result.status === "completed") {
-        record.outcome = "accepted";
-        accepted = true;
-        actionOutcome = result.outcome as Record<string, unknown>;
-        record.detail = bounded(JSON.stringify(result.outcome));
-      } else {
-        record.outcome = "rejected_by_adapter";
-        record.detail = bounded(`${result.status}:${describeRejection(result)}`);
-        rejection = describeRejectionForPlayer(
-          result.status === "failed" ? result.errorCode : null,
-          describeRejection(result),
-        );
-      }
-    } catch (error) {
-      record.outcome = "rejected_by_adapter";
-      record.detail = bounded(error);
-      rejection = describeRejectionForPlayer(
-        error instanceof EnvironmentAdapterActionError ? error.errorCode : null,
-        bounded(error),
-      );
-    }
-
-    // Re-observe and diff, so the turn records what changed rather than only
-    // that the adapter took the button. The frame digest is sampled digest-to-
-    // digest around the action — the core only runs frames the action asked
-    // for, so the comparison spans exactly what this turn did to the screen.
-    //
-    // A rejected action never ran, so diffing around it would invent an effect
-    // — the worst case was a refused advance_dialog reading as "read no new
-    // text", a success-shaped sentence about an action that did not happen.
-    // The rejection reason IS the effect of that turn, and it is the one line
-    // the model actually sees (detail stays journal-only).
-    const frameAfter = input.framebufferSha256?.() ?? null;
-    const effect =
-      rejection !== null
-        ? { summary: rejection, refused: null, position: positionOf(observations), enteredMap: false }
-        : observeEffect({
-            before: observations,
-            after: observe(input.io),
-            action: parsed.data.action,
-            outcome: actionOutcome,
-            screenChanged:
-              record.framebufferSha256 !== null && frameAfter !== null
-                ? frameAfter !== record.framebufferSha256
-                : null,
-          });
-    progress.record(effect, accepted);
-    record.effect = effect.summary.slice(0, 200);
 
     history.push({
       intent: parsed.data.intent,
@@ -480,6 +649,63 @@ function finalize(record: FreePlayTurn, onTurn: RunFreePlayInput["onTurn"]): Fre
   return validated;
 }
 
+/** How many checkpoints a listing effect names before it counts the rest. */
+const CHECKPOINT_LISTING_LIMIT = 6;
+
+/**
+ * Dispatch a body action to the checkpoint port and say what happened.
+ *
+ * The returned line is the whole effect: a rewind's result is not readable
+ * from a state diff, exactly as a dialog's transcript is not, so the port's
+ * own account is what he gets. Throws propagate — the caller renders them as
+ * the rejection they are.
+ */
+function applyBodyAction(action: FreePlayBodyAction, checkpoints: FreePlayCheckpointPort): string {
+  if (action.kind === "restart_game") {
+    checkpoints.restart();
+    return "the game restarted from its configured beginning — the world rewound, your notes are still yours";
+  }
+  if (action.checkpointId === undefined) {
+    const listed = checkpoints.list();
+    if (listed.length === 0) return "no checkpoints exist yet — the beginning is still restart_game away";
+    const shown = listed
+      .slice(0, CHECKPOINT_LISTING_LIMIT)
+      .map((checkpoint) => {
+        const label = checkpoint.label === null ? "" : ` (${checkpoint.label})`;
+        const where =
+          checkpoint.position === null
+            ? ""
+            : ` at ${checkpoint.position.mapId} (${String(checkpoint.position.x)},${String(checkpoint.position.y)})`;
+        return `${checkpoint.checkpointId}${label}${where}`;
+      })
+      .join("; ");
+    const more =
+      listed.length > CHECKPOINT_LISTING_LIMIT
+        ? `; and ${String(listed.length - CHECKPOINT_LISTING_LIMIT)} older`
+        : "";
+    return `your checkpoints, newest first: ${shown}${more} — load one by its id, or restart_game for the beginning`;
+  }
+  const restored = checkpoints.load(action.checkpointId);
+  const label = restored.label === null ? "" : ` (${restored.label})`;
+  return `restored checkpoint ${restored.checkpointId}${label}, captured ${restored.capturedAt} — the world is as it was then; your notes are still yours`;
+}
+
+/** An accepted rewind's effect: the port's account, plus where he now stands. */
+function rewindEffect(
+  summary: string,
+  before: readonly GbaEmulatorObservation[],
+  after: readonly GbaEmulatorObservation[],
+): { summary: string; refused: null; position: ReturnType<typeof positionOf>; enteredMap: boolean } {
+  const from = positionOf(before);
+  const to = positionOf(after);
+  return {
+    summary,
+    refused: null,
+    position: to,
+    enteredMap: from !== null && to !== null && from.mapId !== to.mapId,
+  };
+}
+
 function describeRejection(result: EnvironmentActionResult): string {
   if (result.status === "failed") return `${result.errorCode}:${result.message}`;
   if (result.status === "denied" || result.status === "cancelled") return result.reason;
@@ -505,6 +731,10 @@ const REJECTION_HINTS: Readonly<Record<string, string>> = {
   no_path_to_target: "no walkable route to that tile exists from here",
   map_grid_unavailable: "no map is loaded to route over — walking waits for the overworld",
   naming_screen_not_open: "no naming screen is open to type on",
+  menu_not_open: "no menu is open to select from",
+  menu_entry_not_found: "no open menu entry has that id — use an id the menu view lists",
+  menu_not_navigable: "that screen is typed on with enter_text, not selected from",
+  menu_window_scrolled: "this list is scrolled; move through it with single presses",
   capability_not_granted: "this session does not allow that action",
 };
 
@@ -579,7 +809,7 @@ function coherence(turns: readonly FreePlayTurn[]): { coherence: number | null }
  * separate reasoning from post-hoc narration at the population level, which is
  * why the result is reported and never gated.
  */
-export function intentMatchesAction(intent: string, action: GbaEmulatorAction): boolean {
+export function intentMatchesAction(intent: string, action: FreePlayAction): boolean {
   const text = intent.toLowerCase();
   if (action.kind === "button_press") {
     const synonyms: Record<string, string[]> = {
@@ -611,6 +841,23 @@ export function intentMatchesAction(intent: string, action: GbaEmulatorAction): 
   }
   if (action.kind === "frame_advance") {
     return ["wait", "advance", "let", "watch", "frame", "continue"].some((n) => text.includes(n));
+  }
+  if (action.kind === "select_menu_entry") {
+    return (
+      ["choose", "select", "pick", "use", "menu", "option"].some((n) => text.includes(n)) ||
+      text.includes(action.entryId.toLowerCase())
+    );
+  }
+  if (action.kind === "load_checkpoint") {
+    return (
+      ["load", "checkpoint", "restore", "rewind", "go back", "save"].some((n) => text.includes(n)) ||
+      (action.checkpointId !== undefined && text.includes(action.checkpointId.toLowerCase()))
+    );
+  }
+  if (action.kind === "restart_game") {
+    return ["restart", "start over", "start again", "reset", "begin", "new game"].some((n) =>
+      text.includes(n),
+    );
   }
   return ["wait", "pause", "hold"].some((n) => text.includes(n));
 }

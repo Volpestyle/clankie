@@ -392,15 +392,90 @@ describe("service targets", () => {
       "control-plane",
       "discord-bridge",
       "activity",
+      // The tunnel fronts the activity surface, so it starts after the thing it
+      // publishes and is torn down before it.
+      "tunnel",
       "runner",
     ]);
     expect([...resolveTargets("all")].reverse()).toEqual([
       "runner",
+      "tunnel",
       "activity",
       "discord-bridge",
       "control-plane",
       "captain-eve",
     ]);
+  });
+
+  it("calls a tunnel with a dead edge unhealthy even while cloudflared runs", async () => {
+    // The 2026-08-01 failure exactly: a live `cloudflared`, a healthy local
+    // activity server, and an edge that had been failing for days. Anything
+    // that probed the process table called this fine and the activity rendered
+    // blank in Discord with nothing anywhere saying why.
+    const status = await inspectService(managedService("tunnel"), {
+      repoRoot: "/repo",
+      env: {
+        CLANKIE_ACTIVITY_TUNNEL_NAME: "clankie-activity",
+        CLANKIE_ACTIVITY_TUNNEL_HOSTNAME: "clankie.example.com",
+      },
+      fetchImpl: (async () => {
+        throw new Error("getaddrinfo ENOTFOUND");
+      }) as unknown as typeof fetch,
+      listProcessCommandsImpl: processList("cloudflared tunnel run clankie-activity"),
+    });
+
+    expect(status).toMatchObject({ id: "tunnel", state: "unhealthy" });
+    expect(status.detail).toMatch(/despite a live cloudflared/u);
+  });
+
+  it("separates a dead edge from a live edge with nothing behind it", async () => {
+    // A 502 is the other repair entirely — the tunnel is fine and the thing it
+    // publishes is down — so it must not read as "the tunnel is broken".
+    const status = await inspectService(managedService("tunnel"), {
+      repoRoot: "/repo",
+      env: {
+        CLANKIE_ACTIVITY_TUNNEL_NAME: "clankie-activity",
+        CLANKIE_ACTIVITY_TUNNEL_HOSTNAME: "clankie.example.com",
+      },
+      fetchImpl: (async () => new Response("", { status: 502 })) as unknown as typeof fetch,
+      listProcessCommandsImpl: processList("cloudflared tunnel run clankie-activity"),
+    });
+
+    expect(status.detail).toMatch(/edge up, origin down/u);
+  });
+
+  it("stays out of the way when no tunnel is configured", async () => {
+    const status = await inspectService(managedService("tunnel"), {
+      repoRoot: "/repo",
+      env: {},
+      fetchImpl: (async () => {
+        throw new Error("should never be called");
+      }) as unknown as typeof fetch,
+      listProcessCommandsImpl: noProcesses,
+    });
+
+    // Not an error to report and not a process to start: an operator who wants
+    // the activity local should never be told something is broken.
+    expect(status).toMatchObject({ state: "healthy" });
+    expect(status.detail).toMatch(/not configured/u);
+  });
+
+  it("never spawns an unconfigured tunnel", async () => {
+    const spawned: string[] = [];
+    const status = await startService(managedService("tunnel"), {
+      repoRoot: "/repo",
+      env: await stateEnv(),
+      fetchImpl: (async () => new Response("")) as unknown as typeof fetch,
+      listProcessCommandsImpl: noProcesses,
+      spawnImpl: ((command: string) => {
+        spawned.push(command);
+        return runningChild(1234);
+      }) as unknown as typeof spawn,
+    });
+
+    // `cloudflared tunnel run ""` is not a command anyone wants run for them.
+    expect(spawned).toEqual([]);
+    expect(status.state).toBe("healthy");
   });
 
   it("stops the fan-out at the first failure so downstream errors cannot mask it", async () => {
@@ -436,6 +511,7 @@ describe("service targets", () => {
 
     expect(outcomes.map((outcome) => outcome.id)).toEqual([
       "runner",
+      "tunnel",
       "activity",
       "discord-bridge",
       "control-plane",
@@ -466,6 +542,7 @@ describe("service targets", () => {
 
     expect(outcomes.map((outcome) => [outcome.id, outcome.ok])).toEqual([
       ["runner", true],
+      ["tunnel", true],
       ["activity", true],
       ["discord-bridge", true],
       ["control-plane", false],

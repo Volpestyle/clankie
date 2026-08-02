@@ -393,9 +393,9 @@ describe("version-pinned FireRed state decoder", () => {
   it("decodes the accented range, because the game spells POKéMON with it", () => {
     // P O K é M O N — 0x1b carried the most common word in the script, and an
     // uncovered charmap rendered it "POK�MON" in every transcript he read.
-    expect(
-      decodeFireRedText(Uint8Array.from([0xca, 0xc9, 0xc5, 0x1b, 0xc7, 0xc9, 0xc8, 0xff])),
-    ).toEqual(["POKéMON"]);
+    expect(decodeFireRedText(Uint8Array.from([0xca, 0xc9, 0xc5, 0x1b, 0xc7, 0xc9, 0xc8, 0xff]))).toEqual([
+      "POKéMON",
+    ]);
     // É Ä ñ ç — a sample across the upper and lower accented blocks.
     expect(decodeFireRedText(Uint8Array.from([0x06, 0xf1, 0x29, 0x19, 0xff]))).toEqual(["ÉÄñç"]);
   });

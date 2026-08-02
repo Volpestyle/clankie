@@ -1,11 +1,13 @@
 import type { EnvironmentActionResult, GbaEmulatorObservation } from "@clankie/interactive-environment";
 import { describe, expect, it, vi } from "vitest";
 import type { GbaDriverIo } from "../src/driver.ts";
+import type { VoiceView } from "../src/free-play-voice.ts";
 import {
   FREE_PLAY_INTERJECTION_MAX,
   FREE_PLAY_MONOLOGUE_MAX,
   FREE_PLAY_NOTES_MAX,
   FREE_PLAY_REPLY_MAX,
+  FREE_PLAY_STALL_TURNS,
   InterjectionQueue,
   intentMatchesAction,
   runFreePlay,
@@ -258,6 +260,147 @@ describe("free play", () => {
   });
 });
 
+describe("rewind is his to choose", () => {
+  // ADR 0075: restart and checkpoint loads are play choices, dispatched to an
+  // injected port rather than the frozen emulator catalog.
+  const summary = (checkpointId: string) => ({
+    checkpointId,
+    label: "autosave" as string | null,
+    capturedAt: "2026-08-01T00:00:00.000Z",
+    position: { mapId: "PALLET_TOWN", x: 5, y: 6 } as { mapId: string; x: number; y: number } | null,
+  });
+
+  it("lists his checkpoints when he asks with no id", async () => {
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: mind([
+        {
+          monologue: "what saves do I have?",
+          intent: "list my checkpoints",
+          action: { kind: "load_checkpoint" },
+        },
+      ]),
+      checkpoints: {
+        list: () => [summary("cp-newest"), summary("cp-older")],
+        load: () => summary("unused"),
+        restart: () => undefined,
+      },
+      turns: 1,
+    });
+    expect(result.turns[0]?.outcome).toBe("accepted");
+    expect(result.turns[0]?.effect).toContain("cp-newest");
+    expect(result.turns[0]?.effect).toContain("newest first");
+  });
+
+  it("restores the checkpoint he names and keeps his notes", async () => {
+    const load = vi.fn((checkpointId: string) => summary(checkpointId));
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: mind([
+        {
+          monologue: "back to before the gym",
+          intent: "load my checkpoint",
+          notes: "Brock uses rock types",
+          action: { kind: "load_checkpoint", checkpointId: "cp-before-gym" },
+        },
+      ]),
+      checkpoints: { list: () => [], load, restart: () => undefined },
+      turns: 1,
+    });
+    expect(load).toHaveBeenCalledWith("cp-before-gym");
+    expect(result.turns[0]?.outcome).toBe("accepted");
+    expect(result.turns[0]?.effect).toContain("restored checkpoint cp-before-gym");
+    // The world rewound; his memory did not.
+    expect(result.turns[0]?.notes).toBe("Brock uses rock types");
+  });
+
+  it("restarts the game from its beginning when he chooses to", async () => {
+    const restart = vi.fn();
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: mind([
+        {
+          monologue: "I want a clean run",
+          intent: "restart the game",
+          action: { kind: "restart_game" },
+        },
+      ]),
+      checkpoints: { list: () => [], load: () => summary("unused"), restart },
+      turns: 1,
+    });
+    expect(restart).toHaveBeenCalledOnce();
+    expect(result.turns[0]?.outcome).toBe("accepted");
+    expect(result.turns[0]?.effect).toContain("restarted from its configured beginning");
+  });
+
+  it("refuses truthfully when the body has no saved time", async () => {
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: mind([{ monologue: "start over", intent: "restart the game", action: { kind: "restart_game" } }]),
+      turns: 1,
+    });
+    expect(result.turns[0]?.outcome).toBe("rejected_by_adapter");
+    expect(result.turns[0]?.effect).toContain("no saved time");
+  });
+
+  it("reports a refused load as the refusal, and the game does not move", async () => {
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: mind([
+        {
+          monologue: "load something",
+          intent: "load a checkpoint",
+          action: { kind: "load_checkpoint", checkpointId: "not-a-checkpoint" },
+        },
+      ]),
+      checkpoints: {
+        list: () => [],
+        load: () => {
+          throw new Error("checkpoint_not_found: not-a-checkpoint");
+        },
+        restart: () => undefined,
+      },
+      turns: 1,
+    });
+    expect(result.turns[0]?.outcome).toBe("rejected_by_adapter");
+    expect(result.turns[0]?.effect).toContain("checkpoint_not_found");
+  });
+});
+
+describe("stall visibility", () => {
+  it("tells him when he has stopped reaching new tiles, once it means something", async () => {
+    // The measured failure: 85 turns without a new tile while the counter sat
+    // in a summary nobody reads mid-game. The view now carries it — as a fact,
+    // past the noise threshold, never as advice.
+    const stalls: (number | null)[] = [];
+    const stuckIo: GbaDriverIo = {
+      observe: (kind) => {
+        if (kind !== "overworld") throw new Error(`no ${kind} view`);
+        return overworld(100);
+      },
+      act: () => Promise.resolve(completed()),
+      pause: () => Promise.resolve(),
+      resume: () => Promise.resolve(),
+    };
+    await runFreePlay({
+      io: stuckIo,
+      mind: {
+        decide: (view) => {
+          stalls.push(view.stalledForTurns);
+          return Promise.resolve(press("up", "up"));
+        },
+      },
+      turns: FREE_PLAY_STALL_TURNS + 3,
+    });
+
+    // Quiet below the threshold, then the count itself.
+    expect(stalls[0]).toBeNull();
+    expect(stalls[FREE_PLAY_STALL_TURNS - 1]).toBeNull();
+    expect(stalls[FREE_PLAY_STALL_TURNS]).toBe(FREE_PLAY_STALL_TURNS);
+    expect(stalls[FREE_PLAY_STALL_TURNS + 2]).toBe(FREE_PLAY_STALL_TURNS + 2);
+  });
+});
+
 describe("burst actions", () => {
   it("accepts a bounded repeat and reports it in the trace", async () => {
     const result = await runFreePlay({
@@ -325,6 +468,34 @@ describe("persistent notes", () => {
     // Returning null leaves them standing rather than erasing them.
     expect(seen[2]).toBe("stairs are upper-right");
     expect(result.turns.at(-1)?.notes).toBe("stairs are upper-right");
+  });
+
+  it("seeds notes and objective from a previous run, then they are his to rewrite", async () => {
+    const seenNotes: (string | null)[] = [];
+    const seenObjectives: (string | null)[] = [];
+    const recordingMind: FreePlayMind = {
+      decide: (view) => {
+        seenNotes.push(view.notes);
+        seenObjectives.push(view.objective);
+        return Promise.resolve(
+          seenNotes.length === 1 ? press("up", "up") : press("up", "up", "new plan entirely"),
+        );
+      },
+    };
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: recordingMind,
+      turns: 3,
+      initialNotes: "stairs upper-right",
+      initialObjective: "get outside",
+    });
+
+    // The resumed mind arrives on turn one, not after his first rewrite.
+    expect(seenNotes[0]).toBe("stairs upper-right");
+    expect(seenObjectives[0]).toBe("get outside");
+    // And it is memory, not a script: his rewrite wins immediately.
+    expect(seenNotes[2]).toBe("new plan entirely");
+    expect(result.turns.at(-1)?.objective).toBe("get outside");
   });
 
   it("rejects notes beyond the bound instead of growing the prompt forever", async () => {
@@ -487,6 +658,119 @@ describe("voice owns speech", () => {
     });
     expect(result.turns[0]?.speak).toBeNull();
     expect(result.turns[0]?.outcome).toBe("accepted");
+  });
+
+  it("hands voice the turn's settled effect, not a blank", async () => {
+    // Voice runs after the action lands: "what just happened" is the same
+    // effect line the player will read, never the null it saw when it was
+    // consulted before the dispatch.
+    let effectSeen: string | null = null;
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: mind([press("up", "up")]),
+      voice: {
+        decide: (view) => {
+          effectSeen = view.effect;
+          return Promise.resolve({ speak: null, reply: null });
+        },
+      },
+      turns: 1,
+    });
+    expect(effectSeen).toBe(result.turns[0]?.effect);
+    expect(effectSeen).toContain("moved to");
+  });
+
+  it("does not consult voice inside the cooldown when nobody spoke", async () => {
+    // An aside produced during the cooldown would be dropped by the rate gate,
+    // so the call that produces it is not worth paying for. The skip is
+    // counted, never silent.
+    const decide = vi.fn(() => Promise.resolve({ speak: "another aside", reply: null }));
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: mind([press("up", "up")]),
+      voice: { decide },
+      turns: 3,
+      speakCooldownTurns: 5,
+    });
+    // Consulted on turn 0 (never spoke, gate open), skipped on turns 1-2.
+    expect(decide).toHaveBeenCalledTimes(1);
+    expect(result.volition).toMatchObject({ taken: 1, skipped: 2, suppressed: 0 });
+  });
+
+  it("does not consult voice at all while a room composes for itself", async () => {
+    // ADR 0074: the realtime session in the voice channel is the sole author of
+    // what that room hears. Consulting this agent too would put two authors on
+    // one character in one moment.
+    const decide = vi.fn(() => Promise.resolve({ speak: "a second voice", reply: null }));
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: mind([press("up", "up")]),
+      voice: { decide },
+      roomAuthors: () => true,
+      turns: 3,
+    });
+    expect(decide).not.toHaveBeenCalled();
+    expect(result.volition).toMatchObject({ taken: 0, skipped: 3, suppressed: 0 });
+    // Nor does the player's own fallback quip stand in for it — that would be
+    // the same second author wearing the other agent's name.
+    expect(result.turns.every((turn) => turn.speak === null)).toBe(true);
+  });
+
+  it("hands authorship back when the room empties mid-playthrough", async () => {
+    // Read per turn, not once: someone leaving the channel returns the surfaces
+    // to the loop's own author without restarting the playthrough.
+    const decide = vi.fn(() => Promise.resolve({ speak: "back to the overlay", reply: null }));
+    let listening = true;
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: {
+        decide: (view) => {
+          if (view.turn === 1) listening = false;
+          return Promise.resolve(press("up", "up"));
+        },
+      },
+      voice: { decide },
+      roomAuthors: () => listening,
+      turns: 3,
+      // Explicit so the rate gate is not the thing under test: at the default
+      // cooldown turn 2 is held back by having spoken on turn 1, which would
+      // hide whether authorship came back at all.
+      speakCooldownTurns: 1,
+    });
+    // Turn 0 had a room. Turns 1-2 did not, so the loop's author runs again.
+    expect(decide).toHaveBeenCalledTimes(2);
+    expect(result.turns[0]?.speak).toBeNull();
+    expect(result.turns[1]?.speak).toBe("back to the overlay");
+  });
+
+  it("still consults voice inside the cooldown when someone spoke", async () => {
+    // A reply is owed regardless of the aside gate: a question mid-cooldown
+    // must reach the agent that answers it.
+    const interjections = new InterjectionQueue();
+    const decide = vi.fn((view: VoiceView) =>
+      Promise.resolve({
+        speak: view.heard === null ? "an aside" : null,
+        reply: view.heard === null ? null : "still working on this desk",
+      }),
+    );
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: {
+        decide: (view) => {
+          if (view.turn === 1) interjections.offer("you good?");
+          return Promise.resolve(press("up", "up"));
+        },
+      },
+      voice: { decide },
+      interjections,
+      turns: 3,
+      speakCooldownTurns: 5,
+    });
+    // Turn 0: gate open, spoke. Turn 1: cooldown, silent, skipped. Turn 2: the
+    // question forces a consultation despite the cooldown.
+    expect(decide).toHaveBeenCalledTimes(2);
+    expect(result.turns[2]?.reply).toContain("desk");
+    expect(result.volition.skipped).toBe(1);
   });
 });
 

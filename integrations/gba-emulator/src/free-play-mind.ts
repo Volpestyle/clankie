@@ -40,17 +40,47 @@ const FreePlayWireDecisionSchema = z
           "worth reacting to — a joke, exasperation, a surprise, changing your mind. Not " +
           "narration of your moves. Null when you have nothing to say.",
       ),
-    actionKind: z.enum(["button_press", "walk_to", "advance_dialog", "enter_text", "frame_advance", "wait"]),
+    // The catalogued `wait` is deliberately not offered: on a clockless core it
+    // never completes — the turn records a rejection and the parked action can
+    // wedge the next one. frame_advance is how he waits, and it finishes.
+    actionKind: z.enum([
+      "button_press",
+      "walk_to",
+      "advance_dialog",
+      "enter_text",
+      "select_menu_entry",
+      "frame_advance",
+      "load_checkpoint",
+      "restart_game",
+    ]),
     button: z.enum(["up", "down", "left", "right", "a", "b", "start", "select", "l", "r"]).nullable(),
     holdFrames: z.number().int().nullable(),
     repeat: z.number().int().nullable(),
     x: z.number().int().nullable().describe("Target tile x for walk_to, as reported in position."),
     y: z.number().int().nullable().describe("Target tile y for walk_to, as reported in position."),
     text: z.string().nullable().describe("The name to type for enter_text, 1-10 characters."),
+    entryId: z
+      .string()
+      .nullable()
+      .describe("For select_menu_entry: the entry id exactly as the menu view lists it."),
     frames: z.number().int().nullable(),
-    durationMs: z.number().int().nullable(),
+    checkpointId: z
+      .string()
+      .nullable()
+      .describe("For load_checkpoint: the checkpoint id to restore, or null to be told what exists."),
   })
   .strict();
+
+/**
+ * Marks the system prompt as a prompt-cache breakpoint on Anthropic-routed
+ * providers. The persona and the surface rules are identical on every turn of
+ * a session, and a playthrough makes this call several times a minute — so
+ * each turn should pay for that prefix once per cache window, not in full.
+ * The namespace is provider-scoped: every other configured family ignores it.
+ */
+const SYSTEM_CACHE_OPTIONS: StreamProviderOptions = {
+  anthropic: { cacheControl: { type: "ephemeral" } },
+};
 
 /**
  * A press long enough to commit a step rather than only turn.
@@ -79,9 +109,16 @@ function toDecision(wire: z.infer<typeof FreePlayWireDecisionSchema>): unknown {
           ? { kind: "advance_dialog" }
           : wire.actionKind === "enter_text"
             ? { kind: "enter_text", text: wire.text }
-            : wire.actionKind === "frame_advance"
-              ? { kind: "frame_advance", frames: wire.frames }
-              : { kind: "wait", durationMs: wire.durationMs };
+            : wire.actionKind === "select_menu_entry"
+              ? { kind: "select_menu_entry", entryId: wire.entryId }
+              : wire.actionKind === "load_checkpoint"
+                ? {
+                    kind: "load_checkpoint",
+                    ...(wire.checkpointId === null ? {} : { checkpointId: wire.checkpointId }),
+                  }
+                : wire.actionKind === "restart_game"
+                  ? { kind: "restart_game" }
+                  : { kind: "frame_advance", frames: wire.frames };
   return {
     monologue: wire.monologue,
     intent: wire.intent,
@@ -151,8 +188,10 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   '    {"kind":"walk_to","x":N,"y":N}',
   '    {"kind":"advance_dialog"}',
   '    {"kind":"enter_text","text":"NAME"}',
+  '    {"kind":"select_menu_entry","entryId":"ID"}',
   '    {"kind":"frame_advance","frames":N}',
-  '    {"kind":"wait","durationMs":N}',
+  '    {"kind":"load_checkpoint","checkpointId":"ID or null to list"}',
+  '    {"kind":"restart_game"}',
   "",
   "Always give holdFrames on a button press — 16 is a reliable step; a short",
   "hold only turns you. repeat presses the same button that many times in ONE",
@@ -175,11 +214,26 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   "— it waits the script out) and during battles, where it reads the battle",
   "text and stops at your action menu.",
   "",
+  "In a menu — the battle command list, your moves, the start menu — use",
+  "select_menu_entry with the id shown in the menu view: it walks the cursor",
+  "to that entry and confirms it in one action. Which entry to pick is still",
+  "entirely your decision; this only saves you the cursor presses. It stops",
+  "and says so if the menu closes or the cursor will not move.",
+  "",
   "On a naming screen, use enter_text with the whole name (letters, digits,",
   "space, basic punctuation; 10 characters max): it drives the keyboard, types",
   "the name, and confirms it in one action. Anything already typed is kept when",
   "it matches and erased when it does not, so repeating the same enter_text",
   "safely finishes a partial entry.",
+  "",
+  "Your save states are yours too. load_checkpoint with a null checkpointId",
+  "tells you what checkpoints exist as the action's result; with an id it",
+  "restores that moment. restart_game reboots the game to its configured",
+  "beginning. Either way the present is checkpointed automatically first, so",
+  "nothing you rewind past is ever lost — and your notes and memory stay",
+  "yours across the jump; only the game rewinds. Whether to rewind, replay,",
+  "or start fresh is entirely your call, like any other move. Nobody is",
+  "suggesting it.",
   "",
   "After each action you are told what actually changed — whether you moved,",
   "or the direction was blocked. Directions already refused from your current",
@@ -231,11 +285,11 @@ export function createModelFreePlayMind(options: ModelFreePlayMindOptions): Free
       const stream = streamObject({
         model: options.model,
         schema: FreePlayWireDecisionSchema,
-        system,
         // The screen goes in as an image alongside the decoded state. Looking at
         // the room is how he learns where the furniture is; the decoded state is
         // for the values a screenshot reads badly.
         messages: [
+          { role: "system" as const, content: system, providerOptions: SYSTEM_CACHE_OPTIONS },
           {
             role: "user",
             content:
@@ -312,6 +366,10 @@ export function renderView(view: FreePlayView): string {
     // What he already learned the hard way from this exact tile.
     lines.push("", `Already blocked from this tile: ${view.refusedHere.join(", ")}.`);
   }
+  if (view.stalledForTurns !== null) {
+    // A fact, not a nudge: what to do about standing still is his call.
+    lines.push("", `You have not stepped onto a new tile in ${String(view.stalledForTurns)} turns.`);
+  }
   if (view.history.length > 0) {
     lines.push("", "Recently:");
     for (const entry of view.history) {
@@ -342,6 +400,13 @@ function describeAction(action: FreePlayView["history"][number]["action"]): stri
   if (action.kind === "walk_to") return `walked to (${String(action.x)}, ${String(action.y)})`;
   if (action.kind === "advance_dialog") return "advanced the dialog";
   if (action.kind === "enter_text") return `typed "${action.text}"`;
+  if (action.kind === "select_menu_entry") return `selected "${action.entryId}"`;
+  if (action.kind === "load_checkpoint") {
+    return action.checkpointId === undefined
+      ? "listed the checkpoints"
+      : `loaded checkpoint ${action.checkpointId}`;
+  }
+  if (action.kind === "restart_game") return "restarted the game";
   return `waited ${String(action.durationMs)}ms`;
 }
 
@@ -368,8 +433,8 @@ export function createModelVoice(options: ModelVoiceOptions): ClankieVoice {
       const stream = streamObject({
         model: options.model,
         schema: VoiceDecisionSchema,
-        system,
         messages: [
+          { role: "system" as const, content: system, providerOptions: SYSTEM_CACHE_OPTIONS },
           {
             role: "user",
             content:

@@ -4,6 +4,7 @@ import path from "node:path";
 import { z } from "zod";
 import { Sha256Schema } from "./contracts.ts";
 import { canonicalJson, sha256 } from "./core-double.ts";
+import { FREE_PLAY_NOTES_MAX, FREE_PLAY_OBJECTIVE_MAX } from "./free-play-bounds.ts";
 import type { GbaCheckpointCapability } from "./free-play-boot.ts";
 import type { MgbaFireRedCoreIdentity } from "./firered-core.ts";
 import { RealGbaRouteScenarioSchema } from "./real-scenario.ts";
@@ -45,6 +46,21 @@ export const GbaCheckpointReceiptSchema = z
       .object({ mapId: z.string().min(1).max(128), x: z.number().int(), y: z.number().int() })
       .strict()
       .nullable(),
+    /**
+     * What he was thinking at capture: his own notes and standing objective,
+     * carried so a resumed session restores his mind along with the RAM. A
+     * checkpoint without them resumes a world whose player has forgotten what
+     * he was doing there. Defaulted, because receipts minted before continuity
+     * existed must keep parsing.
+     */
+    continuity: z
+      .object({
+        notes: z.string().max(FREE_PLAY_NOTES_MAX).nullable(),
+        objective: z.string().max(FREE_PLAY_OBJECTIVE_MAX).nullable(),
+      })
+      .strict()
+      .nullable()
+      .default(null),
   })
   .strict();
 export type GbaCheckpointReceipt = z.infer<typeof GbaCheckpointReceiptSchema>;
@@ -74,6 +90,8 @@ export interface WriteGbaCheckpointInput {
   capability: GbaCheckpointCapability;
   label?: string | undefined;
   position: { mapId: string; x: number; y: number } | null;
+  /** His notes and objective at capture, when the minting driver has them. */
+  continuity?: { notes: string | null; objective: string | null } | null;
   clock?: () => Date;
 }
 
@@ -110,6 +128,7 @@ export function writeGbaCheckpoint(input: WriteGbaCheckpointInput): WrittenGbaCh
     coreWasmSha256: input.capability.identity.coreWasmSha256,
     savestateSha256,
     position: input.position,
+    continuity: input.continuity ?? null,
   });
 
   const directory = path.join(input.rootDir, checkpointId);
