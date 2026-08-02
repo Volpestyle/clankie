@@ -20,3 +20,4 @@ export * from "./body-lock.ts";
 export * from "./checkpoint.ts";
 export * from "./free-play-boot.ts";
 export * from "./free-play-voice.ts";
+export * from "./free-play-competence.ts";

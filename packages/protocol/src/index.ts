@@ -3686,6 +3686,10 @@ export type DiscordVoiceFailureStage = z.infer<typeof DiscordVoiceFailureStageSc
 export const DiscordVoiceFailureCodeSchema = z.string().regex(/^[a-z0-9_]{1,64}$/u);
 export type DiscordVoiceFailureCode = z.infer<typeof DiscordVoiceFailureCodeSchema>;
 
+/** The loopback possessor seam attaches and detaches locally; no room text is retained. */
+export const DiscordVoicePossessorConnectionPhaseSchema = z.enum(["attached", "detached"]);
+export type DiscordVoicePossessorConnectionPhase = z.infer<typeof DiscordVoicePossessorConnectionPhaseSchema>;
+
 export const DiscordVoiceEvidenceSchema = z
   .discriminatedUnion("type", [
     z
@@ -3775,6 +3779,44 @@ export const DiscordVoiceEvidenceSchema = z
       })
       .strict(),
     z.object({ type: z.literal("left"), ...discordVoiceChannelScope }).strict(),
+    z
+      .object({
+        type: z.literal("possessor_connection"),
+        phase: DiscordVoicePossessorConnectionPhaseSchema,
+        attachedCount: DiscordVoiceCounterSchema,
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("possessor_room"),
+        listening: z.boolean(),
+        attachedCount: DiscordVoiceCounterSchema,
+        deliveredCount: DiscordVoiceCounterSchema,
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("possessor_transcript_delivery"),
+        deliveryId: DiscordVoiceLocalIdSchema,
+        attachedCount: DiscordVoiceCounterSchema,
+        deliveredCount: DiscordVoiceCounterSchema,
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("possessor_narration_submission"),
+        deliveryId: DiscordVoiceLocalIdSchema,
+        attachedCount: DiscordVoiceCounterSchema,
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("possessor_refusal"),
+        deliveryId: DiscordVoiceLocalIdSchema.optional(),
+        attachedCount: DiscordVoiceCounterSchema,
+        reason: DiscordVoiceFailureCodeSchema,
+      })
+      .strict(),
   ])
   .superRefine((evidence, context) => {
     if (evidence.type !== "response") return;

@@ -3,6 +3,7 @@ import { streamObject } from "ai";
 
 /** Derived from the SDK signature so it tracks their type, not a guessed name. */
 type StreamProviderOptions = NonNullable<Parameters<typeof streamObject>[0]["providerOptions"]>;
+export const DEFAULT_FREE_PLAY_MODEL_REQUEST_TIMEOUT_MS = 60_000;
 import { z } from "zod";
 import {
   VoiceDecisionSchema,
@@ -265,6 +266,8 @@ export interface ModelFreePlayMindOptions {
    * holding a `ConfiguredLanguageModel` should pass `modelOptions.providerOptions`.
    */
   providerOptions?: StreamProviderOptions;
+  /** Bounds one model stream so a lost provider response cannot freeze play. */
+  requestTimeoutMs?: number;
 }
 
 export function createModelFreePlayMind(options: ModelFreePlayMindOptions): FreePlayMind {
@@ -307,6 +310,7 @@ export function createModelFreePlayMind(options: ModelFreePlayMindOptions): Free
           },
         ],
         maxRetries: options.maxRetries ?? 1,
+        abortSignal: modelRequestAbortSignal(options.requestTimeoutMs),
         providerOptions: options.providerOptions ?? {},
       });
 
@@ -447,6 +451,7 @@ export function createModelVoice(options: ModelVoiceOptions): ClankieVoice {
           },
         ],
         maxRetries: options.maxRetries ?? 1,
+        abortSignal: modelRequestAbortSignal(options.requestTimeoutMs),
         providerOptions: options.providerOptions ?? {},
       });
 
@@ -462,4 +467,12 @@ export function createModelVoice(options: ModelVoiceOptions): ClankieVoice {
       return await settled;
     },
   };
+}
+
+function modelRequestAbortSignal(timeoutMs: number | undefined): AbortSignal {
+  const resolved = timeoutMs ?? DEFAULT_FREE_PLAY_MODEL_REQUEST_TIMEOUT_MS;
+  if (!Number.isSafeInteger(resolved) || resolved <= 0) {
+    throw new RangeError("free_play_model_request_timeout_invalid");
+  }
+  return AbortSignal.timeout(resolved);
 }

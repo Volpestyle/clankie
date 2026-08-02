@@ -162,7 +162,7 @@ const MAX_COMMAND_OUTPUT_BYTES = 5 * 1024 * 1024;
 
 export async function loadCapabilityManifest(
   repoRoot: string,
-  manifestPath = join(repoRoot, "evals/capabilities/v1/manifest.yaml"),
+  manifestPath = join(repoRoot, "evals/capabilities/v2/manifest.yaml"),
 ): Promise<{ manifest: CapabilityManifest; path: string; sha256: string }> {
   const absolute = resolve(manifestPath);
   assertContained(repoRoot, absolute);

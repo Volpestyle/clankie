@@ -17,6 +17,7 @@ operator can read after the fact:
 | Runner log                 | `~/.local/state/clankie/runner.log`                                             | Play-host lifecycle: claimed, running, settled with receipt, refused, failed.                                                                                                                      |
 | Embodiment events          | control-plane event store (`events.db`), scope `embodiment:<sessionId>`         | The authoritative lifecycle record.                                                                                                                                                                |
 | CLI trace                  | `artifacts/gba-free-play/trace-<stamp>.jsonl`                                   | `pnpm gba:free-play` runs only; per-run by default.                                                                                                                                                |
+| Competence receipt         | operator-selected `CLANKIE_GBA_COMPETENCE_RECEIPT_DIR`                          | Content-free pinned benchmark identity, milestone/action/stall metrics, and report hash; ROM, savestate, frames, transcript, prompts, and decisions are absent.                                    |
 
 ```mermaid
 flowchart LR
@@ -32,6 +33,7 @@ flowchart LR
   session -->|"per action"| record[("gba-body/environment-sessions/*.json<br/>bounded operational state")]
   exec -->|lifecycle| rlog[("runner.log")]
   exec -->|reports| cp[("control-plane events.db")]
+  loop -->|pinned metrics| competence[("free-play competence receipt")]
   exec -->|"frames + overlay"| activity["activity surface (live only)"]
   exec -->|"mint / resume"| ckpt[("gba-checkpoints/")]
   mcp["gba-mcp possession"] -->|"lease transitions"| plog[("gba-body/possession-events.jsonl")]

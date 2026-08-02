@@ -16,6 +16,8 @@
     "probe:firered": "tsx scripts/probe-fire-red.ts",
     "gameplay:live-proof": "tsx scripts/run-real-scenario.ts",
     "gameplay:evaluate-receipt": "tsx scripts/evaluate-live-receipt.ts",
+    "gameplay:competence": "tsx scripts/run-free-play-competence.ts",
+    "gameplay:evaluate-competence-receipt": "tsx scripts/evaluate-free-play-competence-receipt.ts",
     "clean": "rm -rf dist coverage",
     "free-play": "tsx scripts/free-play-cli.ts"
   },

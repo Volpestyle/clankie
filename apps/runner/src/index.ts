@@ -1,6 +1,21 @@
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { ClankieApiClient } from "@clankie/api-client";
+import {
+  acquireBodyLock,
+  defaultGbaBodyRootDir,
+  defaultGbaCheckpointDir,
+  defaultGbaPlayJournalDir,
+  openFreePlayJournal,
+  RealGbaRouteScenarioSchema,
+  writeGbaCheckpoint,
+  type FreePlayResult,
+  type FreePlayTurn,
+  type GbaCheckpointCapability,
+} from "@clankie/gba-emulator";
 import { createDefaultCredentialStore, resolveRunnerCredential } from "@clankie/credential-broker";
 import { compileDoctrine, loadDoctrineFile, type CompiledDoctrine } from "@clankie/doctrine";
 import { SqliteEventStore } from "@clankie/event-store";
@@ -8,7 +23,7 @@ import { loadMcpRegistryFile, type McpRegistry } from "@clankie/mcp-registry";
 import { createLogger } from "@clankie/observability";
 import { MissionWorker, parseMissionWorkerConcurrency } from "./mission-worker.ts";
 import { createGbaPlayExecution } from "./play-execution.ts";
-import { PlayHost } from "./play-host.ts";
+import { PlayHost, type PlayExecution } from "./play-host.ts";
 import { ProcessLeaseManager } from "./process-leases.ts";
 import { createReadyProviderFleet } from "./provider-factory.ts";
 import { publishProviderReadinessSignal } from "./provider-readiness-signal.ts";
@@ -55,6 +70,37 @@ logger.info(
   },
   "runner skeleton started",
 );
+
+const runnerAbort = new AbortController();
+const playShutdownDeadlineMs = parsePositiveInt(process.env.CLANKIE_PLAY_SHUTDOWN_DEADLINE_MS, 15_000);
+let playHostForShutdown: PlayHost | undefined;
+let shutdownStarted = false;
+
+function requestRunnerShutdown(signal: "SIGINT" | "SIGTERM"): void {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+  const exitCode = signal === "SIGINT" ? 130 : 143;
+  process.exitCode = exitCode;
+  logger.info({ signal, exitCode, playShutdownDeadlineMs }, "runner shutdown requested");
+  runnerAbort.abort(signal);
+  void (async () => {
+    const result = await (playHostForShutdown?.stopAndWait({
+      deadlineMs: playShutdownDeadlineMs,
+      reason: signal,
+    }) ?? Promise.resolve({ status: "idle" as const }));
+    if (result.status === "deadline_expired") {
+      logger.error(
+        { signal, sessionId: result.sessionId, deadlineMs: playShutdownDeadlineMs, exitCode: 1 },
+        "runner shutdown forced after asked-play deadline expired",
+      );
+      process.exit(1);
+    }
+    logger.info({ signal, exitCode, playShutdown: result.status }, "runner shutdown settled");
+  })();
+}
+
+process.on("SIGINT", () => requestRunnerShutdown("SIGINT"));
+process.on("SIGTERM", () => requestRunnerShutdown("SIGTERM"));
 
 const repoPath = process.env.CLANKIE_REPO_PATH;
 let worktrees: WorktreeManager | undefined;
@@ -181,9 +227,6 @@ if (runnerToken) {
 // credential — but it needs neither a repo nor a provider fleet, so it starts
 // whenever the runner can authenticate at all.
 if (runnerToken) {
-  const playAbort = new AbortController();
-  process.once("SIGINT", () => playAbort.abort());
-  process.once("SIGTERM", () => playAbort.abort());
   const playHost = new PlayHost({
     client: new ClankieApiClient({
       baseUrl: process.env.CLANKIE_CONTROL_PLANE_URL ?? "http://127.0.0.1:4310",
@@ -192,11 +235,12 @@ if (runnerToken) {
     }),
     runnerId: process.env.CLANKIE_RUNNER_ID ?? "local",
     environmentIds: ["pokemon-firered"],
-    execute: createGbaPlayExecution({ logger }),
+    execute: createConfiguredPlayExecution(),
     logger,
   });
+  playHostForShutdown = playHost;
   logger.info({ environmentIds: ["pokemon-firered"] }, "embodiment play host started");
-  void playHost.runForever(playAbort.signal).catch((error: unknown) => {
+  void playHost.runForever(runnerAbort.signal).catch((error: unknown) => {
     logger.error(
       { err: error instanceof Error ? error.message : String(error) },
       "embodiment play host stopped unexpectedly",
@@ -343,9 +387,6 @@ if (!repoPath) {
   if (fleet.adapters.length === 0) {
     logger.error("No provider passed readiness; mission execution remains fail-closed");
   } else {
-    const abort = new AbortController();
-    process.once("SIGINT", () => abort.abort());
-    process.once("SIGTERM", () => abort.abort());
     const missionWorker = new MissionWorker({
       client: new ClankieApiClient({
         baseUrl: process.env.CLANKIE_CONTROL_PLANE_URL ?? "http://127.0.0.1:4310",
@@ -373,6 +414,135 @@ if (!repoPath) {
       },
       "runner pull worker started",
     );
-    await missionWorker.runForever(abort.signal);
+    await missionWorker.runForever(runnerAbort.signal);
   }
+}
+
+function parsePositiveInt(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw.trim().length === 0) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function createConfiguredPlayExecution(): PlayExecution {
+  const fixture = process.env.CLANKIE_RUNNER_TEST_PLAY_EXECUTION;
+  if (fixture === "shutdown-fixture" || fixture === "ignore-stop") {
+    return createShutdownFixturePlayExecution({ ignoreStop: fixture === "ignore-stop" });
+  }
+  return createGbaPlayExecution({ logger });
+}
+
+function createShutdownFixturePlayExecution(input: { ignoreStop: boolean }): PlayExecution {
+  return async (session, control, onRunning) => {
+    const bodyLock = acquireBodyLock({
+      rootDir: defaultGbaBodyRootDir(process.env),
+      holderId: `captain-play:${session.sessionId}`,
+    });
+    const startedAt = Date.now();
+    try {
+      const journal = openFreePlayJournal({
+        rootDir: defaultGbaPlayJournalDir(process.env),
+        runId: session.sessionId,
+        environmentSessionId: `test-play:${session.sessionId}`,
+        scenarioId: "shutdown-fixture",
+      });
+      await onRunning();
+      const turns: FreePlayTurn[] = [];
+      for (let turn = 0; input.ignoreStop || !control.stopRequested() || turns.length === 0; turn += 1) {
+        await sleep(25);
+        const record = shutdownFixtureTurn(turn);
+        turns.push(record);
+        journal.turn(record);
+      }
+      const result = shutdownFixtureResult(turns);
+      const checkpoint = writeGbaCheckpoint({
+        rootDir: defaultGbaCheckpointDir(process.env),
+        capability: shutdownFixtureCheckpointCapability(session.sessionId),
+        label: "asked-play",
+        position: null,
+        continuity:
+          turns.at(-1) === undefined
+            ? null
+            : { notes: turns.at(-1)?.notes ?? null, objective: turns.at(-1)?.objective ?? null },
+      });
+      const durationMs = Date.now() - startedAt;
+      journal.summary({
+        outcome: "stopped",
+        result,
+        durationMs,
+        framesPublished: turns.length,
+        framesDropped: 0,
+        checkpointId: checkpoint.receipt.checkpointId,
+      });
+      return {
+        kind: "ran",
+        result: {
+          outcome: "stopped",
+          turnsTaken: turns.length,
+          durationMs,
+          framesPublished: turns.length,
+          framesDropped: 0,
+          checkpointId: checkpoint.receipt.checkpointId,
+        },
+      };
+    } finally {
+      bodyLock.release();
+    }
+  };
+}
+
+function shutdownFixtureTurn(turn: number): FreePlayTurn {
+  return {
+    turn,
+    observationSha256: "a".repeat(64),
+    framebufferSha256: null,
+    monologue: "settling shutdown at a turn boundary",
+    intent: "press a",
+    action: { kind: "button_press", button: "a", holdFrames: 2 },
+    outcome: "accepted",
+    detail: null,
+    effect: "advanced one fixture turn",
+    notes: "remember the shutdown boundary",
+    objective: "settle cleanly",
+    interjection: null,
+    reply: null,
+    speak: null,
+    speakSuppressed: false,
+  };
+}
+
+function shutdownFixtureResult(turns: readonly FreePlayTurn[]): FreePlayResult {
+  return {
+    turns: [...turns],
+    accepted: turns.length,
+    progress: {
+      distinctTiles: turns.length,
+      maps: ["shutdown-fixture"],
+      turnsSinceNewTile: 0,
+      actionsPerNewTile: turns.length === 0 ? null : 1,
+    },
+    volition: { offered: turns.length, taken: 0, suppressed: 0, skipped: 0 },
+    coherence: 1,
+  };
+}
+
+function shutdownFixtureCheckpointCapability(sessionId: string): GbaCheckpointCapability {
+  const require = createRequire(import.meta.url);
+  const emulatorPackage = dirname(require.resolve("@clankie/gba-emulator/package.json"));
+  const scenario = RealGbaRouteScenarioSchema.parse(
+    JSON.parse(
+      readFileSync(join(emulatorPackage, "fixtures", "firered-bedroom-route", "v1", "scenario.json"), "utf8"),
+    ),
+  );
+  return {
+    saveState: () => new TextEncoder().encode(`shutdown-fixture:${sessionId}:${Date.now().toString()}`),
+    loadState: () => undefined,
+    bootSavestate: () => new TextEncoder().encode("shutdown-fixture-boot"),
+    identity: {
+      romSha256: scenario.romSha256,
+      savestateSha256: scenario.savestateSha256,
+      coreWasmSha256: scenario.coreWasmSha256,
+    },
+    scenario,
+  };
 }

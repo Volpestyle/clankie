@@ -97,9 +97,10 @@ CLANKIE_CAPTAIN_URL=http://127.0.0.1:4321 pnpm --filter @clankie/tui dev
 runner: the captain's `start_play` tool submits an embodiment intent to the
 control plane, and the runner's play host (ADR 0063) claims it, drives the
 FireRed session, and streams frames to the activity service. A cold start
-therefore needs the launcher services, the activity service, and a runner
-process (`pnpm --filter @clankie/runner dev` with `CLANKIE_RUNNER_TOKEN`) — no
-manual gameplay script. `pnpm gba:free-play-live` stays as the development
+therefore needs `clankie start`: the supervised runner resolves its brokered
+credential and receives the repository path plus baseline verification checks
+from the launcher, with no shell env prefix and no manual gameplay script.
+`pnpm gba:free-play-live` stays as the development
 alias that drives the same composition without a control plane.
 
 ### Headless captain control

@@ -215,8 +215,78 @@ describe("PlayHost", () => {
     expect(await subject.poll()).toBe(false);
     await subject.settled();
     expect(sawStop).toBe(true);
-    expect(client.reports.at(-1)).toMatchObject({ state: "stopped" });
+    expect(client.reports.map((report) => report.state)).toEqual(["running", "stopping", "stopped"]);
     expect(client.reports.at(-1)?.receipt).toMatchObject({ outcome: "stopped" });
+  });
+
+  it("forces a truthful failed state when shutdown settlement misses its deadline", async () => {
+    const client = fakeClient({ assignments: [{ kind: "start", session: session() }] });
+    let release!: () => void;
+    const subject = host(client, async (_session, _control, onRunning) => {
+      await onRunning();
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return {
+        kind: "ran",
+        result: {
+          outcome: "stopped",
+          turnsTaken: 3,
+          durationMs: 30,
+          framesPublished: 3,
+          framesDropped: 0,
+          checkpointId: "late-checkpoint",
+        },
+      };
+    });
+
+    await subject.poll();
+    await expect(subject.stopAndWait({ deadlineMs: 1, reason: "SIGTERM" })).resolves.toEqual({
+      status: "deadline_expired",
+      sessionId: "session-1",
+    });
+    expect(client.reports.map((report) => report.state)).toEqual(["running", "stopping", "failed"]);
+    expect(client.reports.at(-1)?.receipt).toMatchObject({ outcome: "failed" });
+
+    release();
+    await subject.settled();
+    expect(client.reports.map((report) => report.state)).toEqual(["running", "stopping", "failed"]);
+  });
+
+  it("bounds shutdown when the control plane hangs on the forced failure report", async () => {
+    const reports: EmbodimentLifecycleReport[] = [];
+    let claimed = false;
+    const client = {
+      claimEmbodiment(): Promise<EmbodimentAssignment | undefined> {
+        if (claimed) return Promise.resolve(undefined);
+        claimed = true;
+        return Promise.resolve({ kind: "start", session: session() });
+      },
+      reportEmbodiment(report: EmbodimentLifecycleReport): Promise<unknown> {
+        reports.push(report);
+        if (report.state === "failed") return new Promise(() => undefined);
+        return Promise.resolve({});
+      },
+      getLiveEmbodimentSession: () => Promise.resolve(undefined),
+    };
+    const subject = new PlayHost({
+      client,
+      runnerId: "runner-local",
+      environmentIds: ["pokemon-firered"],
+      execute: async (_session, _control, onRunning) => {
+        await onRunning();
+        return new Promise(() => undefined);
+      },
+      logger: silentLogger,
+      forcedReportGraceMs: 1,
+    });
+
+    await subject.poll();
+    await expect(subject.stopAndWait({ deadlineMs: 1, reason: "SIGTERM" })).resolves.toEqual({
+      status: "deadline_expired",
+      sessionId: "session-1",
+    });
+    expect(reports.map((report) => report.state)).toEqual(["running", "stopping", "failed"]);
   });
 
   it("reports failed with a receipt when the execution throws mid-run", async () => {

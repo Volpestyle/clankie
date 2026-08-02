@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 import {
@@ -34,6 +34,10 @@ export interface PossessorVoiceListenerOptions {
    * possessor keeps authoring for its own surfaces (ADR 0074).
    */
   room?: () => PossessorRoomState;
+  /** Content-free seam evidence for the bridge receipt log; never carries text. */
+  emit?: (evidence: PossessorVoiceListenerEvidence) => void | Promise<void>;
+  /** Injected by tests so delivery ids stay deterministic. */
+  idFactory?: () => string;
   maxPayloadBytes?: number;
 }
 
@@ -41,6 +45,36 @@ export interface PossessorVoiceListenerOptions {
 export interface PossessorRoomState {
   readonly listening: boolean;
 }
+
+export type PossessorVoiceListenerEvidence =
+  | {
+      readonly type: "possessor_connection";
+      readonly phase: "attached" | "detached";
+      readonly attachedCount: number;
+    }
+  | {
+      readonly type: "possessor_room";
+      readonly listening: boolean;
+      readonly attachedCount: number;
+      readonly deliveredCount: number;
+    }
+  | {
+      readonly type: "possessor_transcript_delivery";
+      readonly deliveryId: string;
+      readonly attachedCount: number;
+      readonly deliveredCount: number;
+    }
+  | {
+      readonly type: "possessor_narration_submission";
+      readonly deliveryId: string;
+      readonly attachedCount: number;
+    }
+  | {
+      readonly type: "possessor_refusal";
+      readonly deliveryId: string;
+      readonly attachedCount: number;
+      readonly reason: string;
+    };
 
 export interface PossessorVoiceListener {
   readonly server: Server;
@@ -66,6 +100,8 @@ export function createPossessorVoiceListener(options: PossessorVoiceListenerOpti
   }
   const { token, narrate } = options;
   const readRoom = options.room;
+  const emit = options.emit;
+  const idFactory = options.idFactory ?? randomUUID;
   const wss = new WebSocketServer({
     noServer: true,
     maxPayload: options.maxPayloadBytes ?? DEFAULT_MAX_PAYLOAD_BYTES,
@@ -77,18 +113,41 @@ export function createPossessorVoiceListener(options: PossessorVoiceListenerOpti
     response.writeHead(404).end();
   });
 
-  const sendTo = (ws: WebSocket, payload: string): void => {
-    if (ws.readyState !== OPEN) return;
+  const emitSafely = (evidence: PossessorVoiceListenerEvidence): void => {
+    if (emit === undefined) return;
+    void Promise.resolve()
+      .then(() => emit(evidence))
+      .catch(() => undefined);
+  };
+
+  const sendTo = (ws: WebSocket, payload: string): boolean => {
+    if (ws.readyState !== OPEN) return false;
     try {
       ws.send(payload);
+      return true;
     } catch {
       // A possessor that cannot be reached simply misses this message. The
       // room does not wait for it and nothing is queued on its behalf.
+      return false;
     }
   };
 
-  const broadcast = (payload: string): void => {
-    for (const ws of attached) sendTo(ws, payload);
+  const broadcast = (payload: string): number => {
+    let deliveredCount = 0;
+    for (const ws of attached) {
+      if (sendTo(ws, payload)) deliveredCount += 1;
+    }
+    return deliveredCount;
+  };
+
+  const publishRoomTo = (ws: WebSocket, state: PossessorRoomState): void => {
+    const deliveredCount = sendTo(ws, roomPayload(state)) ? 1 : 0;
+    emitSafely({
+      type: "possessor_room",
+      listening: state.listening,
+      attachedCount: attached.size,
+      deliveredCount,
+    });
   };
 
   server.on("upgrade", (request, socket, head) => {
@@ -99,19 +158,43 @@ export function createPossessorVoiceListener(options: PossessorVoiceListenerOpti
     }
     wss.handleUpgrade(request, socket, head, (ws) => {
       attached.add(ws);
+      emitSafely({ type: "possessor_connection", phase: "attached", attachedCount: attached.size });
       // The room as it is right now, not as it will be at the next change: a
       // possessor attaching mid-call would otherwise spend the rest of the
       // call believing nobody is listening.
-      if (readRoom !== undefined) sendTo(ws, roomPayload(readRoom()));
-      ws.on("close", () => attached.delete(ws));
+      if (readRoom !== undefined) publishRoomTo(ws, readRoom());
+      ws.on("close", () => {
+        attached.delete(ws);
+        emitSafely({ type: "possessor_connection", phase: "detached", attachedCount: attached.size });
+      });
       ws.on("error", () => ws.close());
       ws.on("message", (raw) => {
         const parsed = PossessorClientMessageSchema.safeParse(safeJson(raw.toString()));
         if (!parsed.success) return;
+        const deliveryId = idFactory();
         // Fire-and-forget on purpose: narration is an utterance in a live room,
         // not a request/response. A failure is reported through the bridge's own
         // evidence, and a possessor that waited on it would stall its play loop.
-        void narrate(parsed.data.text).catch(() => undefined);
+        void narrate(parsed.data.text)
+          .then(() => {
+            // A submission receipt means the live persona accepted the event,
+            // not merely that the listener attempted the call. Keeping it
+            // after resolution prevents refused narration from proving the
+            // two-way seam.
+            emitSafely({
+              type: "possessor_narration_submission",
+              deliveryId,
+              attachedCount: attached.size,
+            });
+          })
+          .catch((error: unknown) => {
+            emitSafely({
+              type: "possessor_refusal",
+              deliveryId,
+              attachedCount: attached.size,
+              reason: refusalReason(error),
+            });
+          });
       });
     });
   });
@@ -132,10 +215,22 @@ export function createPossessorVoiceListener(options: PossessorVoiceListenerOpti
         type: "utterance",
         text: trimmed,
       };
-      broadcast(JSON.stringify(message));
+      const deliveredCount = broadcast(JSON.stringify(message));
+      emitSafely({
+        type: "possessor_transcript_delivery",
+        deliveryId: idFactory(),
+        attachedCount: attached.size,
+        deliveredCount,
+      });
     },
     publishRoom(state) {
-      broadcast(roomPayload(state));
+      const deliveredCount = broadcast(roomPayload(state));
+      emitSafely({
+        type: "possessor_room",
+        listening: state.listening,
+        attachedCount: attached.size,
+        deliveredCount,
+      });
     },
     get attachedCount() {
       return attached.size;
@@ -156,6 +251,16 @@ function roomPayload(state: PossessorRoomState): string {
     listening: state.listening,
   };
   return JSON.stringify(message);
+}
+
+function refusalReason(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const token = raw.trim().split(/[:\s]/u)[0]?.toLowerCase() ?? "";
+  const normalized = token
+    .replace(/[^a-z0-9_]/gu, "_")
+    .replace(/_+/gu, "_")
+    .slice(0, 64);
+  return /^[a-z0-9_]{1,64}$/u.test(normalized) ? normalized : "possessor_narration_refused";
 }
 
 function authorized(request: IncomingMessage, token: string): boolean {

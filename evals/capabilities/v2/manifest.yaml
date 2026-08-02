@@ -1,0 +1,259 @@
+schemaVersion: 1
+id: clankie-capabilities
+version: "2"
+capabilities:
+  - id: discord_text
+    label: Discord bot and text chat
+    gates:
+      - id: readiness
+        kind: command
+        phase: readiness
+        command:
+          - pnpm
+          - exec
+          - tsx
+          - apps/discord-bridge/src/readiness-cli.ts
+          - --json
+        timeoutMs: 30000
+        success:
+          kind: json_boolean
+          path: ready
+      - id: live_round_trip
+        kind: command
+        phase: live
+        command:
+          - pnpm
+          - exec
+          - tsx
+          - apps/discord-bridge/src/live-proof-cli.ts
+          - --json
+        timeoutMs: 30000
+        success:
+          kind: json_boolean
+          path: passed
+
+  - id: discord_voice
+    label: Multi-person Discord voice
+    gates:
+      - id: readiness
+        kind: command
+        phase: readiness
+        command:
+          - pnpm
+          - exec
+          - tsx
+          - apps/discord-bridge/src/voice-readiness-cli.ts
+          - --json
+        timeoutMs: 30000
+        success:
+          kind: json_boolean
+          path: ready
+      - id: three_speaker_live_round_trip
+        kind: command
+        phase: live
+        command:
+          - pnpm
+          - exec
+          - tsx
+          - apps/discord-bridge/src/voice-live-proof-cli.ts
+          - --json
+        timeoutMs: 30000
+        success:
+          kind: json_boolean
+          path: passed
+
+  - id: discord_screen
+    label: Discord screen watch and publish
+    gates:
+      - id: official_transport
+        kind: blocker
+        code: discord_screen_official_transport_unavailable
+        reason: Discord exposes no supported bot or Social SDK Go Live watch/publish transport, while normal-user automation is forbidden.
+
+  - id: firered
+    label: Pokémon FireRed
+    gates:
+      - id: state_derived_free_play_competence
+        kind: command
+        phase: deterministic
+        command:
+          - pnpm
+          - exec
+          - tsx
+          - integrations/gba-emulator/scripts/run-free-play-competence.ts
+          - --mode
+          - deterministic_double
+        timeoutMs: 120000
+        success:
+          kind: json_boolean
+          path: passed
+      - id: real_gameplay
+        kind: command
+        phase: live
+        command:
+          - pnpm
+          - exec
+          - tsx
+          - integrations/gba-emulator/scripts/evaluate-live-receipt.ts
+        timeoutMs: 30000
+        requiredEnvironment:
+          CLANKIE_GBA_LIVE_RECEIPT_PATH: firered_live_receipt_path
+        success:
+          kind: json_boolean
+          path: passed
+      - id: rom_gated_free_play_competence
+        kind: command
+        phase: live
+        command:
+          - pnpm
+          - exec
+          - tsx
+          - integrations/gba-emulator/scripts/evaluate-free-play-competence-receipt.ts
+        timeoutMs: 30000
+        requiredEnvironment:
+          CLANKIE_GBA_COMPETENCE_RECEIPT_PATH: firered_free_play_competence_receipt_path
+        success:
+          kind: json_boolean
+          path: passed
+
+  - id: minecraft
+    label: Minecraft
+    gates:
+      - id: readiness
+        kind: command
+        phase: readiness
+        command:
+          - pnpm
+          - exec
+          - tsx
+          - integrations/minecraft-mineflayer/scripts/readiness.ts
+        timeoutMs: 30000
+        success:
+          kind: json_equals
+          path: status
+          value: ready
+      - id: private_paper_live_gameplay
+        kind: command
+        phase: live
+        command:
+          - pnpm
+          - minecraft:live-proof
+        timeoutMs: 600000
+        success:
+          kind: exit_zero
+
+  - id: people_memory
+    label: Long-term Discord people memory
+    gates:
+      - id: deterministic_boundaries
+        kind: command
+        phase: deterministic
+        command:
+          - pnpm
+          - exec
+          - vitest
+          - run
+          - packages/memory-store/test/discord-person-memory.test.ts
+          - packages/protocol/test/discord-person-memory.test.ts
+          - apps/control-plane/test/discord-person-memory.test.ts
+        timeoutMs: 120000
+        success:
+          kind: exit_zero
+      - id: live_recall_after_restart
+        kind: command
+        phase: live
+        command:
+          - pnpm
+          - exec
+          - tsx
+          - apps/discord-bridge/src/person-memory-live-proof-cli.ts
+          - --json
+        timeoutMs: 30000
+        success:
+          kind: json_boolean
+          path: passed
+
+  - id: coding_workers
+    label: Command-started coding workers
+    gates:
+      - id: provider_readiness
+        kind: command
+        phase: readiness
+        command:
+          - node
+          - scripts/real-provider-readiness.mjs
+        timeoutMs: 120000
+        success:
+          kind: jsonl_all_boolean
+          path: ready
+      - id: real_provider_mission
+        kind: command
+        phase: live
+        command:
+          - pnpm
+          - eval:real-workers:receipt
+        timeoutMs: 30000
+        success:
+          kind: json_boolean
+          path: passed
+
+  - id: tui
+    label: Live operator TUI
+    gates:
+      - id: captain_health
+        kind: command
+        phase: readiness
+        command:
+          - pnpm
+          - exec
+          - tsx
+          - apps/tui/bin/clankie.ts
+          - health
+        timeoutMs: 30000
+        success:
+          kind: json_boolean
+          path: ok
+      - id: restart_cursor_and_interaction
+        kind: command
+        phase: deterministic
+        command:
+          - pnpm
+          - exec
+          - vitest
+          - run
+          - apps/tui/test/headless-captain.test.ts
+          - apps/tui/test/operator-conversations.test.ts
+          - apps/tui/test/mission-observer.test.ts
+        timeoutMs: 120000
+        success:
+          kind: exit_zero
+
+  - id: discord_workers_in_tui
+    label: Discord-origin workers in the TUI
+    gates:
+      - id: canonical_projection
+        kind: command
+        phase: deterministic
+        command:
+          - pnpm
+          - exec
+          - vitest
+          - run
+          - apps/discord-bridge/test/tui-worker-visibility.integration.test.ts
+        timeoutMs: 120000
+        success:
+          kind: exit_zero
+      - id: live_cross_surface_receipt
+        kind: command
+        phase: live
+        command:
+          - pnpm
+          - exec
+          - tsx
+          - apps/lead-agent-lab/src/discord-tui-live-proof-cli.ts
+        timeoutMs: 30000
+        requiredEnvironment:
+          CLANKIE_DISCORD_TUI_LIVE_RECEIPT_PATH: discord_tui_live_receipt_path
+        success:
+          kind: json_boolean
+          path: passed

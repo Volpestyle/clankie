@@ -88,10 +88,21 @@ describe("unified capability evaluation", () => {
         { status: "skipped", issueCodes: ["readiness_not_passed"] },
       ],
     });
-    expect(report.capabilities.find((entry) => entry.id === "firered")?.gates[0]).toMatchObject({
-      status: "missing_input",
-      issueCodes: ["firered_live_receipt_path"],
-    });
+    expect(report.capabilities.find((entry) => entry.id === "firered")?.gates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "state_derived_free_play_competence", status: "passed" }),
+        expect.objectContaining({
+          id: "real_gameplay",
+          status: "missing_input",
+          issueCodes: ["firered_live_receipt_path"],
+        }),
+        expect.objectContaining({
+          id: "rom_gated_free_play_competence",
+          status: "missing_input",
+          issueCodes: ["firered_free_play_competence_receipt_path"],
+        }),
+      ]),
+    );
     expect(invoked.some((command) => has(command, "evaluate-live-receipt.ts"))).toBe(false);
     expect(JSON.stringify(report)).not.toContain(sentinel);
   });
@@ -201,6 +212,7 @@ function replaceScreenBlocker(manifest: CapabilityManifest): CapabilityManifest 
 function completeRequiredEnvironment(): NodeJS.ProcessEnv {
   return {
     CLANKIE_GBA_LIVE_RECEIPT_PATH: "/operator/firered-live-receipt.json",
+    CLANKIE_GBA_COMPETENCE_RECEIPT_PATH: "/operator/firered-free-play-competence-receipt.json",
     CLANKIE_DISCORD_TUI_LIVE_RECEIPT_PATH: "/operator/discord-tui.json",
   };
 }
@@ -221,6 +233,12 @@ function successFor(command: readonly string[]): CapabilityCommandResult {
   }
   if (has(command, "apps/tui/bin/clankie.ts")) return result(0, JSON.stringify({ ok: true }));
   if (has(command, "evaluate-live-receipt.ts")) {
+    return result(0, JSON.stringify({ passed: true, checks: [] }));
+  }
+  if (
+    has(command, "run-free-play-competence.ts") ||
+    has(command, "evaluate-free-play-competence-receipt.ts")
+  ) {
     return result(0, JSON.stringify({ passed: true, checks: [] }));
   }
   if (has(command, "eval:real-workers:receipt")) {

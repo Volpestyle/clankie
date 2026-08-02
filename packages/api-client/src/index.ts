@@ -838,7 +838,14 @@ export class ClankieApiClient {
   public async reportEmbodiment(report: EmbodimentLifecycleReport): Promise<EmbodimentSession> {
     const result = await this.request<{ accepted: boolean; session: unknown }>(
       `/v1/embodiment/sessions/${encodeURIComponent(report.sessionId)}/report`,
-      { method: "POST", headers: this.runnerHeaders(), body: JSON.stringify(report) },
+      {
+        method: "POST",
+        headers: this.runnerHeaders(),
+        body: JSON.stringify(report),
+        // Lifecycle reporting is safety-critical, but it cannot wedge the
+        // runner forever when the control plane disappears mid-shutdown.
+        signal: AbortSignal.timeout(10_000),
+      },
     );
     return EmbodimentSessionSchema.parse(result.session);
   }

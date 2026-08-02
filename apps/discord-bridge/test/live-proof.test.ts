@@ -127,6 +127,7 @@ describe("Discord group voice live proof", () => {
         daveProtocolVersion: 1,
       }),
     ];
+    receipts.push(...possessorSeamReceipts());
     for (const [index, userId] of ["user-1", "user-2", "user-3"].entries()) {
       receipts.push(
         receipt("discord.voice.consent", {
@@ -179,6 +180,98 @@ describe("Discord group voice live proof", () => {
     expect(evaluateDiscordVoiceLiveProof(receipts)).toMatchObject({ passed: true });
   });
 
+  it("evaluates the latest complete qualifying session in a cumulative receipt log", () => {
+    const receipts: DiscordBridgeReceipt[] = [
+      receipt("discord.voice.joined", {
+        guildId: "guild-1",
+        channelId: "voice-1",
+        daveProtocolVersion: 1,
+      }),
+      receipt("discord.voice.consent", {
+        guildId: "guild-1",
+        channelId: "voice-1",
+        userId: "historical-user",
+        consented: true,
+        participantCount: 1,
+      }),
+      receipt("discord.voice.failed", {
+        guildId: "guild-1",
+        channelId: "voice-1",
+        stage: "playback",
+        code: "voice_playback_timeout",
+      }),
+      receipt("discord.voice.left", { guildId: "guild-1", channelId: "voice-1" }),
+      // This abandoned join used to poison proof selection because the first
+      // historical join was treated as the active session. It is replaced by
+      // the following coherent session rather than borrowing its leave.
+      receipt("discord.voice.joined", {
+        guildId: "guild-1",
+        channelId: "voice-1",
+        daveProtocolVersion: 1,
+      }),
+      receipt("discord.voice.joined", {
+        guildId: "guild-1",
+        channelId: "voice-1",
+        daveProtocolVersion: 1,
+      }),
+      ...possessorSeamReceipts(),
+    ];
+    for (const [index, userId] of ["user-1", "user-2", "user-3"].entries()) {
+      receipts.push(
+        receipt("discord.voice.consent", {
+          guildId: "guild-1",
+          channelId: "voice-1",
+          userId,
+          consented: true,
+          participantCount: index + 1,
+        }),
+        receipt("discord.voice.utterance", {
+          guildId: "guild-1",
+          channelId: "voice-1",
+          userId,
+          deliveryId: `latest-delivery-${String(index + 1)}`,
+          durationMs: 1_000,
+        }),
+        receipt("discord.voice.response", {
+          guildId: "guild-1",
+          channelId: "voice-1",
+          deliveryId: `latest-delivery-${String(index + 1)}`,
+          turnId: `latest-turn-${String(index + 1)}`,
+          state: "settled",
+        }),
+      );
+    }
+    receipts.push(
+      receipt("discord.voice.overlap", {
+        guildId: "guild-1",
+        channelId: "voice-1",
+        userId: "user-2",
+        activeCaptureCount: 2,
+      }),
+      receipt("discord.voice.interrupted", {
+        guildId: "guild-1",
+        channelId: "voice-1",
+        userId: "user-3",
+        phase: "playing",
+      }),
+      receipt("discord.voice.left", { guildId: "guild-1", channelId: "voice-1" }),
+      // Reconnect proof: complete, but no participant activity, so it must not
+      // be selected as the main proof session.
+      receipt("discord.voice.joined", {
+        guildId: "guild-1",
+        channelId: "voice-1",
+        daveProtocolVersion: 1,
+      }),
+      receipt("discord.voice.left", { guildId: "guild-1", channelId: "voice-1" }),
+    );
+
+    const report = evaluateDiscordVoiceLiveProof(receipts);
+    expect(report.passed).toBe(true);
+    expect(report.checks.find((check) => check.name === "DAVE voice session")?.detail).toContain(
+      "latest complete qualifying",
+    );
+  });
+
   it("rejects a synthetic single-speaker or failed media path", () => {
     const report = evaluateDiscordVoiceLiveProof([
       receipt("discord.voice.joined", {
@@ -207,10 +300,139 @@ describe("Discord group voice live proof", () => {
       "speech round trips",
       "overlap and barge-in",
       "clean leave",
+      "possessor room state",
+      "possessor two-way delivery",
       "DAVE reconnect",
     ]);
   });
+
+  it("does not let an older ceremony hide a newer failed DAVE session", () => {
+    const receipts = passingVoiceCeremony();
+    receipts.push(
+      receipt("discord.voice.joined", {
+        guildId: "guild-1",
+        channelId: "voice-1",
+        daveProtocolVersion: 1,
+      }),
+      receipt("discord.voice.failed", {
+        guildId: "guild-1",
+        channelId: "voice-1",
+        stage: "playback",
+        code: "voice_playback_timeout",
+      }),
+    );
+
+    const report = evaluateDiscordVoiceLiveProof(receipts);
+    expect(report.passed).toBe(false);
+    expect(report.checks.find((check) => check.name === "DAVE voice session")).toMatchObject({
+      ok: true,
+      detail: expect.stringContaining("no matching leave"),
+    });
+    expect(report.checks.find((check) => check.name === "speech round trips")?.detail).toContain(
+      "1 failure receipt",
+    );
+  });
+
+  it("does not count a refused possessor narration as two-way delivery", () => {
+    const receipts = passingVoiceCeremony();
+    const submission = receipts.find(
+      (entry) => entry.type === "discord.voice.possessor_narration_submission",
+    );
+    expect(submission).toBeDefined();
+    const deliveryId = submission?.data.deliveryId;
+    if (typeof deliveryId !== "string") throw new Error("passing fixture has no narration delivery id");
+    const mainLeaveIndex = receipts.findIndex((entry) => entry.type === "discord.voice.left");
+    receipts.splice(
+      mainLeaveIndex,
+      0,
+      receipt("discord.voice.possessor_refusal", {
+        deliveryId,
+        attachedCount: 1,
+        reason: "voice_narration_not_in_channel",
+      }),
+    );
+
+    const report = evaluateDiscordVoiceLiveProof(receipts);
+    expect(report.passed).toBe(false);
+    expect(report.checks.find((check) => check.name === "possessor two-way delivery")?.detail).toContain(
+      "1 refusal",
+    );
+  });
 });
+
+function passingVoiceCeremony(): DiscordBridgeReceipt[] {
+  const receipts: DiscordBridgeReceipt[] = [
+    receipt("discord.voice.joined", {
+      guildId: "guild-1",
+      channelId: "voice-1",
+      daveProtocolVersion: 1,
+    }),
+    ...possessorSeamReceipts(),
+  ];
+  for (const [index, userId] of ["user-1", "user-2", "user-3"].entries()) {
+    receipts.push(
+      receipt("discord.voice.consent", {
+        guildId: "guild-1",
+        channelId: "voice-1",
+        userId,
+        consented: true,
+        participantCount: index + 1,
+      }),
+      receipt("discord.voice.utterance", {
+        guildId: "guild-1",
+        channelId: "voice-1",
+        userId,
+        deliveryId: `passing-delivery-${String(index + 1)}`,
+        durationMs: 1_000,
+      }),
+      receipt("discord.voice.response", {
+        guildId: "guild-1",
+        channelId: "voice-1",
+        deliveryId: `passing-delivery-${String(index + 1)}`,
+        turnId: `passing-turn-${String(index + 1)}`,
+        state: "settled",
+      }),
+    );
+  }
+  receipts.push(
+    receipt("discord.voice.overlap", {
+      guildId: "guild-1",
+      channelId: "voice-1",
+      userId: "user-2",
+      activeCaptureCount: 2,
+    }),
+    receipt("discord.voice.interrupted", {
+      guildId: "guild-1",
+      channelId: "voice-1",
+      userId: "user-3",
+      phase: "playing",
+    }),
+    receipt("discord.voice.left", { guildId: "guild-1", channelId: "voice-1" }),
+    receipt("discord.voice.joined", {
+      guildId: "guild-1",
+      channelId: "voice-1",
+      daveProtocolVersion: 1,
+    }),
+    receipt("discord.voice.left", { guildId: "guild-1", channelId: "voice-1" }),
+  );
+  return receipts;
+}
+
+function possessorSeamReceipts(): DiscordBridgeReceipt[] {
+  return [
+    receipt("discord.voice.possessor_connection", { phase: "attached", attachedCount: 1 }),
+    receipt("discord.voice.possessor_room", { listening: true, attachedCount: 1, deliveredCount: 1 }),
+    receipt("discord.voice.possessor_transcript_delivery", {
+      deliveryId: "possessor-heard-1",
+      attachedCount: 1,
+      deliveredCount: 1,
+    }),
+    receipt("discord.voice.possessor_narration_submission", {
+      deliveryId: "possessor-narration-1",
+      attachedCount: 1,
+    }),
+  ];
+}
 
 function receipt(
   type: DiscordBridgeReceipt["type"],

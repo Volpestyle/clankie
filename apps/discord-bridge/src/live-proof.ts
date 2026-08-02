@@ -173,36 +173,20 @@ export function evaluateDiscordVoiceLiveProof(
   const check = (name: string, ok: boolean, detail: string): void => {
     checks.push({ name, ok, detail });
   };
-  const joined = receipts.find(
-    (receipt) =>
-      receipt.type === "discord.voice.joined" &&
-      typeof receipt.data.guildId === "string" &&
-      typeof receipt.data.channelId === "string" &&
-      typeof receipt.data.daveProtocolVersion === "number" &&
-      receipt.data.daveProtocolVersion > 0,
-  );
+  const sessions = voiceProofSessions(receipts);
+  const selected = selectVoiceProofSession(sessions);
+  const joined = selected?.joined;
   check(
     "DAVE voice session",
     joined !== undefined,
-    joined ? "official-bot voice joined with a positive DAVE protocol version" : "no DAVE-ready join receipt",
+    selected === undefined
+      ? "no DAVE-ready voice session receipt"
+      : selected.complete
+        ? `latest complete qualifying DAVE session selected at receipt ${String(selected.joinedIndex + 1)}`
+        : `latest DAVE session selected at receipt ${String(selected.joinedIndex + 1)} but it has no matching leave`,
   );
-  const sessionReceipts =
-    joined === undefined
-      ? []
-      : receipts.slice(receipts.indexOf(joined) + 1).filter((receipt) => {
-          if (
-            receipt.type === "discord.voice.left" &&
-            receipt.data.guildId === joined.data.guildId &&
-            receipt.data.channelId === joined.data.channelId
-          ) {
-            return true;
-          }
-          return (
-            receipt.data.guildId === joined.data.guildId && receipt.data.channelId === joined.data.channelId
-          );
-        });
-  const leftIndex = sessionReceipts.findIndex((receipt) => receipt.type === "discord.voice.left");
-  const activeReceipts = leftIndex < 0 ? sessionReceipts : sessionReceipts.slice(0, leftIndex);
+
+  const activeReceipts = selected?.activeReceipts ?? [];
   const consented = new Set(
     activeReceipts
       .filter(
@@ -259,40 +243,59 @@ export function evaluateDiscordVoiceLiveProof(
   );
   check(
     "clean leave",
-    leftIndex >= 0,
-    leftIndex >= 0 ? "voice session ended with an explicit leave receipt" : "no matching leave receipt",
+    selected?.complete === true,
+    selected?.complete === true
+      ? "voice session ended with an explicit leave receipt"
+      : "no matching leave receipt",
   );
-  const mainLeaveReceipt = leftIndex < 0 ? undefined : sessionReceipts[leftIndex];
-  const mainLeaveGlobalIndex = mainLeaveReceipt === undefined ? -1 : receipts.indexOf(mainLeaveReceipt);
-  const rejoined =
-    mainLeaveGlobalIndex < 0
+
+  const possessorAttached = activeReceipts.some(
+    (receipt) =>
+      receipt.type === "discord.voice.possessor_connection" &&
+      receipt.data.phase === "attached" &&
+      numberField(receipt, "attachedCount") >= 1,
+  );
+  const roomDeliveries = sumReceiptNumber(
+    activeReceipts.filter(
+      (receipt) => receipt.type === "discord.voice.possessor_room" && receipt.data.listening === true,
+    ),
+    "deliveredCount",
+  );
+  check(
+    "possessor room state",
+    possessorAttached && roomDeliveries >= 1,
+    `${possessorAttached ? "attached" : "no attach"}; ${String(roomDeliveries)} listening room-state delivery receipt(s)`,
+  );
+
+  const transcriptDeliveries = sumReceiptNumber(
+    activeReceipts.filter((receipt) => receipt.type === "discord.voice.possessor_transcript_delivery"),
+    "deliveredCount",
+  );
+  const narrationSubmissions = activeReceipts.filter(
+    (receipt) => receipt.type === "discord.voice.possessor_narration_submission",
+  ).length;
+  const possessorRefusals = activeReceipts.filter(
+    (receipt) => receipt.type === "discord.voice.possessor_refusal",
+  ).length;
+  check(
+    "possessor two-way delivery",
+    transcriptDeliveries >= 1 && narrationSubmissions >= 1 && possessorRefusals === 0,
+    `${String(transcriptDeliveries)} transcript delivery counter(s); ${String(narrationSubmissions)} accepted narration submission(s); ${String(possessorRefusals)} refusal(s)`,
+  );
+
+  const reconnected =
+    selected?.complete !== true
       ? undefined
-      : receipts
-          .slice(mainLeaveGlobalIndex + 1)
-          .find(
-            (receipt) =>
-              receipt.type === "discord.voice.joined" &&
-              receipt.data.guildId === joined?.data.guildId &&
-              receipt.data.channelId === joined?.data.channelId &&
-              typeof receipt.data.daveProtocolVersion === "number" &&
-              receipt.data.daveProtocolVersion > 0,
-          );
-  const rejoinIndex = rejoined === undefined ? -1 : receipts.indexOf(rejoined);
-  const reconnectedLeave =
-    rejoinIndex < 0
-      ? undefined
-      : receipts
-          .slice(rejoinIndex + 1)
-          .find(
-            (receipt) =>
-              receipt.type === "discord.voice.left" &&
-              receipt.data.guildId === joined?.data.guildId &&
-              receipt.data.channelId === joined?.data.channelId,
-          );
+      : sessions.find(
+          (session) =>
+            session.joinedIndex > selected.leftIndex &&
+            sameVoiceScope(session.joined, selected.joined) &&
+            session.complete,
+        );
   check(
     "DAVE reconnect",
-    rejoined !== undefined && reconnectedLeave !== undefined,
-    rejoined !== undefined && reconnectedLeave !== undefined
+    reconnected !== undefined,
+    reconnected !== undefined
       ? "the same allowlisted channel rejoined with DAVE and stopped cleanly"
       : "no complete leave/rejoin/leave DAVE recovery sequence",
   );
@@ -303,6 +306,139 @@ export function evaluateDiscordVoiceLiveProof(
     receiptCount: receipts.length,
     checks,
   };
+}
+
+interface VoiceProofSession {
+  readonly joined: DiscordBridgeReceipt;
+  readonly joinedIndex: number;
+  readonly activeReceipts: readonly DiscordBridgeReceipt[];
+  readonly complete: boolean;
+  readonly left?: DiscordBridgeReceipt;
+  readonly leftIndex: number;
+}
+
+function voiceProofSessions(receipts: readonly DiscordBridgeReceipt[]): VoiceProofSession[] {
+  const active = new Map<
+    string,
+    { joined: DiscordBridgeReceipt; joinedIndex: number; activeReceipts: DiscordBridgeReceipt[] }
+  >();
+  const sessions: VoiceProofSession[] = [];
+  for (const [index, receipt] of receipts.entries()) {
+    if (!receipt.type.startsWith("discord.voice.")) continue;
+    if (isDaveJoin(receipt)) {
+      const key = voiceScopeKey(receipt);
+      if (key !== undefined) {
+        const superseded = active.get(key);
+        if (superseded !== undefined) {
+          sessions.push({
+            joined: superseded.joined,
+            joinedIndex: superseded.joinedIndex,
+            activeReceipts: superseded.activeReceipts,
+            complete: false,
+            leftIndex: index,
+          });
+        }
+        active.set(key, { joined: receipt, joinedIndex: index, activeReceipts: [] });
+      }
+      continue;
+    }
+    if (receipt.type === "discord.voice.left") {
+      const key = voiceScopeKey(receipt);
+      const session = key === undefined ? undefined : active.get(key);
+      if (session !== undefined) {
+        sessions.push({
+          joined: session.joined,
+          joinedIndex: session.joinedIndex,
+          activeReceipts: session.activeReceipts,
+          complete: true,
+          left: receipt,
+          leftIndex: index,
+        });
+        if (key !== undefined) active.delete(key);
+      }
+      continue;
+    }
+    const key = voiceScopeKey(receipt);
+    if (key !== undefined) {
+      active.get(key)?.activeReceipts.push(receipt);
+      continue;
+    }
+    if (receipt.type.startsWith("discord.voice.possessor_")) {
+      latestActiveSession(active)?.activeReceipts.push(receipt);
+    }
+  }
+  for (const session of active.values()) {
+    sessions.push({
+      joined: session.joined,
+      joinedIndex: session.joinedIndex,
+      activeReceipts: session.activeReceipts,
+      complete: false,
+      leftIndex: receipts.length,
+    });
+  }
+  return sessions.sort((left, right) => left.joinedIndex - right.joinedIndex);
+}
+
+function selectVoiceProofSession(sessions: readonly VoiceProofSession[]): VoiceProofSession | undefined {
+  const latest = sessions.at(-1);
+  if (latest === undefined || !latest.complete || hasCeremonyActivity(latest)) return latest;
+  // A clean join/leave with no participant or failure activity is the recovery
+  // proof and must not displace the ceremony immediately before it. An
+  // incomplete latest join or any newer failed/participant-active session is
+  // always selected, so stale success cannot hide a current regression.
+  return sessions.slice(0, -1).filter(hasCeremonyActivity).at(-1) ?? sessions.at(-2) ?? latest;
+}
+
+function hasCeremonyActivity(session: VoiceProofSession): boolean {
+  return session.activeReceipts.some((receipt) =>
+    [
+      "discord.voice.consent",
+      "discord.voice.utterance",
+      "discord.voice.response",
+      "discord.voice.overlap",
+      "discord.voice.interrupted",
+      "discord.voice.failed",
+    ].includes(receipt.type),
+  );
+}
+
+function latestActiveSession(
+  sessions: ReadonlyMap<
+    string,
+    { joined: DiscordBridgeReceipt; joinedIndex: number; activeReceipts: DiscordBridgeReceipt[] }
+  >,
+): { joined: DiscordBridgeReceipt; joinedIndex: number; activeReceipts: DiscordBridgeReceipt[] } | undefined {
+  return [...sessions.values()].sort((left, right) => left.joinedIndex - right.joinedIndex).at(-1);
+}
+
+function isDaveJoin(receipt: DiscordBridgeReceipt): boolean {
+  return (
+    receipt.type === "discord.voice.joined" &&
+    typeof receipt.data.guildId === "string" &&
+    typeof receipt.data.channelId === "string" &&
+    typeof receipt.data.daveProtocolVersion === "number" &&
+    receipt.data.daveProtocolVersion > 0
+  );
+}
+
+function sameVoiceScope(left: DiscordBridgeReceipt, right: DiscordBridgeReceipt): boolean {
+  return voiceScopeKey(left) !== undefined && voiceScopeKey(left) === voiceScopeKey(right);
+}
+
+function voiceScopeKey(receipt: DiscordBridgeReceipt): string | undefined {
+  const { guildId, channelId } = receipt.data;
+  return typeof guildId === "string" && typeof channelId === "string"
+    ? `${guildId}\u0000${channelId}`
+    : undefined;
+}
+
+function numberField(receipt: DiscordBridgeReceipt, key: string): number {
+  const value = receipt.data[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function sumReceiptNumber(receipts: readonly DiscordBridgeReceipt[], key: string): number {
+  return receipts.reduce((sum, receipt) => sum + numberField(receipt, key), 0);
 }
 
 export async function readDiscordLiveReceipts(

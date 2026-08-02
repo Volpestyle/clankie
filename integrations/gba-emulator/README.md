@@ -192,6 +192,33 @@ referenced the action actually taken. It separates reasoning from post-hoc
 narration and is a keyword heuristic over free text, so it is reported and never
 gated.
 
+### Free-play competence gate
+
+`pnpm gba:competence -- --mode deterministic_double` runs two pinned ROM-free
+seeds through a state-derived controller and requires objective milestones,
+turn-budget efficiency, distinct accepted actions, and no unresolved stall.
+A repeat-only controller fails even when the adapter accepts every press.
+
+The operator-local real-core row uses the same evaluator and writes no game or
+model content:
+
+```bash
+CLANKIE_GBA_COMPETENCE_RECEIPT_DIR=/operator/evidence/free-play \
+  pnpm gba:competence -- --mode rom_gated
+
+CLANKIE_GBA_COMPETENCE_RECEIPT_PATH=/operator/evidence/free-play/free-play-competence-receipt.json \
+  pnpm --filter @clankie/gba-emulator gameplay:evaluate-competence-receipt
+```
+
+The receipt binds each run to its actual deterministic fixture or
+ROM/savestate/core hashes and contains only milestone, action-efficiency, and
+stall metrics. Evaluation loads the canonical benchmark independently,
+recomputes the checks, requires the exact ROM-gated state set and identities,
+and reruns that state on a fresh operator-local core before matching the new
+report to the stored one. “Optimal” means repeatable milestone progress within
+the pinned budget without repeat-only input or unresolved stalls; it does not
+claim a globally optimal route or speedrun.
+
 Runs against the core double with no ROM. The trace is written under
 `artifacts/` with a per-run filename (so runs never overwrite each other) and
 stays untracked because it carries model monologue; a six-turn format sample

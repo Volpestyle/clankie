@@ -405,6 +405,22 @@ const RUNNER: ManagedService = {
   dependsOn: ["control-plane"],
   spawnArgs: ["--filter", "@clankie/runner", "start"],
   commandMatches: (command) => command.includes("@clankie/runner"),
+  // Mission execution is part of the launcher's normal runner contract. A
+  // process without a repo path still answers the liveness probe but leaves
+  // the pull worker disabled; a process without trusted checks claims work and
+  // then fails every successful provider turn at settlement. Supply safe,
+  // dependency-free repository checks by default while preserving deliberate
+  // operator overrides.
+  serviceEnv: ({ env, repoRoot }) => ({
+    ...env,
+    CLANKIE_REPO_PATH: env.CLANKIE_REPO_PATH?.trim() || repoRoot,
+    CLANKIE_VERIFICATION_CHECKS:
+      env.CLANKIE_VERIFICATION_CHECKS?.trim() ||
+      JSON.stringify([
+        { id: "architecture", command: "node", args: ["scripts/check-architecture.mjs"] },
+        { id: "docs-links", command: "node", args: ["scripts/check-doc-links.mjs"] },
+      ]),
+  }),
   // The runner serves no operator HTTP surface; process liveness is the signal
   // it owns, same as the bridge. A runner started by hand is still a runner.
   probe: async ({ record, matchingPids }) => {

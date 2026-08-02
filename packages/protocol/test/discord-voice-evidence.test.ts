@@ -43,6 +43,21 @@ describe("Discord voice evidence (ADR 0057)", () => {
       { type: "interrupted", ...scope, userId: "user-1", phase: "playing" },
       { type: "failed", ...scope, stage: "captain_handoff", code: "voice_captain_turn_failed" },
       { type: "left", ...scope },
+      { type: "possessor_connection", phase: "attached", attachedCount: 1 },
+      { type: "possessor_room", listening: true, attachedCount: 1, deliveredCount: 1 },
+      {
+        type: "possessor_transcript_delivery",
+        deliveryId: "possessor-delivery-1",
+        attachedCount: 1,
+        deliveredCount: 1,
+      },
+      { type: "possessor_narration_submission", deliveryId: "possessor-delivery-2", attachedCount: 1 },
+      {
+        type: "possessor_refusal",
+        deliveryId: "possessor-delivery-3",
+        attachedCount: 1,
+        reason: "voice_narration_not_in_channel",
+      },
     ] as const;
     for (const variant of variants) {
       expect(DiscordVoiceEvidenceSchema.parse(variant)).toEqual(variant);
@@ -91,6 +106,23 @@ describe("Discord voice evidence (ADR 0057)", () => {
     ).toThrow();
     expect(() =>
       DiscordVoiceEvidenceSchema.parse({ type: "left", guildId: "guild one", channelId: "channel-1" }),
+    ).toThrow();
+    expect(() =>
+      DiscordVoiceEvidenceSchema.parse({
+        type: "possessor_transcript_delivery",
+        deliveryId: "possessor-delivery-1",
+        attachedCount: 1,
+        deliveredCount: 1,
+        text: "speaker: private words",
+      }),
+    ).toThrow();
+    expect(() =>
+      DiscordVoiceEvidenceSchema.parse({
+        type: "possessor_narration_submission",
+        deliveryId: "possessor-delivery-2",
+        attachedCount: 1,
+        narration: "walked into a wall",
+      }),
     ).toThrow();
   });
 

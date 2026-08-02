@@ -18,8 +18,8 @@ status.
 
 ## Decision
 
-`evals/capabilities/v1/manifest.yaml` is the versioned executable gate for the
-nine rows in
+`evals/capabilities/v1/manifest.yaml` freezes the original executable gate.
+`evals/capabilities/v2/manifest.yaml` is the current gate for the nine rows in
 [`docs/17-capability-completion-contract.md`](../17-capability-completion-contract.md).
 `apps/lead-agent-lab` validates the manifest, invokes each declared command
 directly without a shell, caps command output, and publishes
@@ -58,6 +58,13 @@ Live FireRed evidence is re-checked without replaying copyrighted inputs:
 requires the complete rival-battle result, two-core determinism and zero
 network attempts, and recomputes the hashes of the report, decision trace,
 event trace, semantic events, and screenshot.
+
+Manifest v2 also requires state-derived free-play competence. Two pinned
+ROM-free seeds exercise navigation, dialog, menu choice, and battle milestones;
+an operator-local ROM-gated receipt proves the bedroom route against the pinned
+real core. The evaluator rejects repeat-only input, unresolved stall windows,
+unreached milestones, unbound core identity, and receipts containing content
+payloads. This is operational competence, not a speedrun optimality claim.
 
 Real-provider evidence is also re-checked rather than re-spending provider
 turns on every status query. `pnpm eval:real-workers` atomically publishes a

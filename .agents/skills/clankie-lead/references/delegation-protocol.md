@@ -42,6 +42,16 @@ workers/<slug>/ARM_FAILED
 
 Before the first implementation spawn, run `references/preflight-base.sh --receipt-dir <run-dir> <base-sha>`. It creates an isolated detached workspace, installs, and runs the repository-owned `preflight` script, falling back to `check`; `preflight.json` records the selected gate. For the `clankie-app` external workspace layout it also creates an isolated sibling agent-OS worktree and records that revision. A red receipt stops the wave until the base is fixed or rebased; an exception must be explicit, justified, and recorded in `manifest.json`.
 
+Before relying on an adapter-hosted runner, confirm its effective environment includes
+`CLANKIE_REPO_PATH` and at least one `CLANKIE_VERIFICATION_CHECKS` entry. Process
+health alone is not mission readiness: an unset repo path leaves claiming idle, while
+an empty check list fails an otherwise successful worker at settlement. Choose checks
+that work inside the runner's restricted linked-worktree boundary. In particular, a
+Git command such as `git diff --check` follows the worktree `.git` pointer to the
+repository's external administrative directory and is denied unless that exact input
+is deliberately exposed; prefer dependency-free source checks when no dependency root
+has been declared.
+
 ## Goal arming
 
 For every pane-hosted worker the mandatory sequence is **spawn → preflight → arm → verify-arm**. Wait until the harness is ready, apply supported `/model` and `/effort` configuration, then run:

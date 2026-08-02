@@ -35,6 +35,11 @@ export const DiscordBridgeReceiptSchema = z
       "discord.voice.interrupted",
       "discord.voice.failed",
       "discord.voice.left",
+      "discord.voice.possessor_connection",
+      "discord.voice.possessor_room",
+      "discord.voice.possessor_transcript_delivery",
+      "discord.voice.possessor_narration_submission",
+      "discord.voice.possessor_refusal",
     ]),
     data: z
       .record(z.string().min(1).max(64), z.string().max(512).or(z.boolean()).or(z.number().finite()))
@@ -52,7 +57,17 @@ export const DiscordBridgeReceiptSchema = z
     // Prefix match: every discord.voice.* type — including ADR 0057's floor
     // and volition receipts — inherits the content fence.
     if (!receipt.type.startsWith("discord.voice.")) return;
-    const forbidden = new Set(["transcript", "response", "prompt", "audio", "pcm"]);
+    const forbidden = new Set([
+      "transcript",
+      "response",
+      "prompt",
+      "audio",
+      "pcm",
+      "text",
+      "message",
+      "narration",
+      "utterance",
+    ]);
     for (const key of Object.keys(receipt.data)) {
       if (forbidden.has(key.toLowerCase())) {
         context.addIssue({

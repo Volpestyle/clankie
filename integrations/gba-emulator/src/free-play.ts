@@ -317,6 +317,12 @@ export interface RunFreePlayInput {
   checkpoints?: FreePlayCheckpointPort;
   /** Called after every turn so a CLI can stream the playthrough. */
   onTurn?: (turn: FreePlayTurn) => void;
+  /**
+   * Called after an action has settled and progress has consumed its observed
+   * effect. Benchmarks use this boundary so they measure what the adapter
+   * actually accepted and what state resulted, never the mind's proposal.
+   */
+  onSettledTurn?: (event: FreePlaySettledTurn) => void;
   /** Latest framebuffer digest, when a core exposes one. */
   framebufferSha256?: () => string | null;
   /** Latest rendered screen as PNG bytes, when a core exposes one. */
@@ -359,6 +365,13 @@ export interface RunFreePlayInput {
    * without tearing down a turn mid-dispatch.
    */
   shouldStop?: () => boolean;
+}
+
+export interface FreePlaySettledTurn {
+  turn: FreePlayTurn;
+  before: readonly GbaEmulatorObservation[];
+  after: readonly GbaEmulatorObservation[];
+  progress: FreePlayProgress;
 }
 
 export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResult> {
@@ -520,6 +533,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     // The rejection reason IS the effect of that turn, and it is the one line
     // the model actually sees (detail stays journal-only).
     const frameAfter = input.framebufferSha256?.() ?? null;
+    const afterObservations = accepted ? observe(input.io) : observations;
     const effect =
       rejection !== null
         ? { summary: rejection, refused: null, position: positionOf(observations), enteredMap: false }
@@ -528,11 +542,11 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
             // stands — a state diff around a restored world would only restate
             // it, and the restored position must still reach the progress
             // tracker so the tile memory follows him back.
-            rewindEffect(bodySummary, observations, observe(input.io))
+            rewindEffect(bodySummary, observations, afterObservations)
           : observeEffect({
               before: observations,
               // Body actions never reach here, so this narrows to the emulator kinds.
-              after: observe(input.io),
+              after: afterObservations,
               action: chosen as GbaEmulatorAction,
               outcome: actionOutcome,
               screenChanged:
@@ -618,7 +632,14 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
       effect: effect.summary,
     });
     if (history.length > historyLimit) history.shift();
-    turns.push(finalize(record, input.onTurn));
+    const settledTurn = finalize(record, input.onTurn);
+    turns.push(settledTurn);
+    input.onSettledTurn?.({
+      turn: settledTurn,
+      before: observations,
+      after: afterObservations,
+      progress: progress.snapshot(),
+    });
   }
 
   return {

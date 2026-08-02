@@ -24,6 +24,7 @@
     "discord:voice-readiness": "pnpm --filter @clankie/discord-bridge voice-readiness",
     "discord:voice-live-proof": "pnpm --filter @clankie/discord-bridge voice-live-proof",
     "discord:person-memory-live-proof": "pnpm --filter @clankie/discord-bridge person-memory-live-proof",
+    "gba:competence": "pnpm --filter @clankie/gba-emulator gameplay:competence",
     "minecraft:readiness": "pnpm --filter @clankie/minecraft-mineflayer readiness",
     "minecraft:paper:bootstrap": "pnpm --filter @clankie/minecraft-mineflayer paper:bootstrap",
     "minecraft:live-proof": "pnpm --filter @clankie/minecraft-mineflayer live-proof",

@@ -35,7 +35,7 @@ Scenario artifacts are written under `artifacts/evals/experiment/scenarios/<scen
 ## Unified capability gate
 
 `pnpm eval:capabilities` runs the versioned nine-row manifest at
-`evals/capabilities/v1/manifest.yaml`. It combines readiness, deterministic,
+`evals/capabilities/v2/manifest.yaml`. It combines readiness, deterministic,
 and live-proof commands without a shell and exits nonzero unless every
 capability passes. Missing operator inputs and policy/API blockers are typed
 separately from implementation failures.

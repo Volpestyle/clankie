@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
-import { createPossessorVoiceListener, type PossessorVoiceListener } from "../src/listener.ts";
+import {
+  createPossessorVoiceListener,
+  type PossessorVoiceListener,
+  type PossessorVoiceListenerEvidence,
+} from "../src/listener.ts";
 import { POSSESSOR_VOICE_SCHEMA_VERSION } from "../src/protocol.ts";
 
 const TOKEN = "clankie_possessor_voice_test_token";
@@ -36,12 +40,27 @@ describe("possessor voice listener", () => {
 
   it("hands a narration to the live voice session", async () => {
     const narrate = vi.fn(async () => undefined);
-    listener = createPossessorVoiceListener({ token: TOKEN, narrate });
+    const evidence: PossessorVoiceListenerEvidence[] = [];
+    listener = createPossessorVoiceListener({
+      token: TOKEN,
+      narrate,
+      emit: (event) => {
+        evidence.push(event);
+      },
+      idFactory: () => "accepted-narration",
+    });
     const port = await listener.listen(0);
 
     const socket = await attach(port);
     socket.send(narration("walked into a wall by the lab"));
     await vi.waitFor(() => expect(narrate).toHaveBeenCalledWith("walked into a wall by the lab"));
+    await vi.waitFor(() =>
+      expect(evidence).toContainEqual({
+        type: "possessor_narration_submission",
+        deliveryId: "accepted-narration",
+        attachedCount: 1,
+      }),
+    );
     socket.close();
   });
 
@@ -115,6 +134,58 @@ describe("possessor voice listener", () => {
     });
     // The dropped line from before the attach is not replayed.
     expect(received).toHaveLength(1);
+    socket.close();
+  });
+
+  it("emits only content-free seam lifecycle and delivery evidence", async () => {
+    const evidence: PossessorVoiceListenerEvidence[] = [];
+    const narrate = vi.fn(async () => {
+      throw new Error("voice_narration_not_in_channel: private words must not escape");
+    });
+    let nextId = 0;
+    listener = createPossessorVoiceListener({
+      token: TOKEN,
+      narrate,
+      room: () => ({ listening: true }),
+      emit: (event) => {
+        evidence.push(event);
+      },
+      idFactory: () => `delivery-${String(++nextId)}`,
+    });
+    const port = await listener.listen(0);
+    const socket = await attach(port);
+
+    listener.publishUtterance("james: go left after the desk");
+    socket.send(narration("walked into the private laboratory wall"));
+    await vi.waitFor(() => expect(evidence.some((event) => event.type === "possessor_refusal")).toBe(true));
+
+    expect(evidence).toEqual(
+      expect.arrayContaining([
+        { type: "possessor_connection", phase: "attached", attachedCount: 1 },
+        { type: "possessor_room", listening: true, attachedCount: 1, deliveredCount: 1 },
+        {
+          type: "possessor_transcript_delivery",
+          deliveryId: "delivery-1",
+          attachedCount: 1,
+          deliveredCount: 1,
+        },
+        {
+          type: "possessor_refusal",
+          deliveryId: "delivery-2",
+          attachedCount: 1,
+          reason: "voice_narration_not_in_channel",
+        },
+      ]),
+    );
+    expect(evidence).not.toContainEqual({
+      type: "possessor_narration_submission",
+      deliveryId: "delivery-2",
+      attachedCount: 1,
+    });
+    const serialized = JSON.stringify(evidence);
+    expect(serialized).not.toContain("go left");
+    expect(serialized).not.toContain("laboratory wall");
+    expect(serialized).not.toContain("private words");
     socket.close();
   });
 });

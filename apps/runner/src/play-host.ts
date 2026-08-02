@@ -65,6 +65,21 @@ interface PlayHostLogger {
   error(context: Record<string, unknown>, message: string): void;
 }
 
+type ActivePlay = {
+  session: Pick<EmbodimentSession, "sessionId" | "environmentId">;
+  stop: boolean;
+  stoppingReported: boolean;
+  runningReported: boolean;
+  deadlineExpired: boolean;
+  startedAt: number;
+  done: Promise<void>;
+};
+
+export type PlayShutdownResult =
+  | { status: "idle" }
+  | { status: "settled"; sessionId: string }
+  | { status: "deadline_expired"; sessionId: string };
+
 export interface PlayHostOptions {
   client: EmbodimentClientPort;
   runnerId: string;
@@ -73,13 +88,16 @@ export interface PlayHostOptions {
   logger: PlayHostLogger;
   clock?: () => Date;
   claimIdFactory?: () => string;
+  /** Best-effort grace for the forced terminal report after a shutdown deadline. */
+  forcedReportGraceMs?: number;
 }
 
 export class PlayHost {
   private readonly options: PlayHostOptions;
   private readonly clock: () => Date;
   private readonly claimIdFactory: () => string;
-  private active: { sessionId: string; stop: boolean; done: Promise<void> } | undefined;
+  private readonly forcedReportGraceMs: number;
+  private active: ActivePlay | undefined;
   /** Last logged claim-failure signature; undefined while the poll is healthy. */
   private claimFailure: string | undefined;
 
@@ -87,6 +105,7 @@ export class PlayHost {
     this.options = options;
     this.clock = options.clock ?? (() => new Date());
     this.claimIdFactory = options.claimIdFactory ?? randomUUID;
+    this.forcedReportGraceMs = options.forcedReportGraceMs ?? 1_000;
   }
 
   /**
@@ -103,7 +122,7 @@ export class PlayHost {
       return;
     }
     if (live === undefined || live.runnerId !== this.options.runnerId) return;
-    if (this.active?.sessionId === live.sessionId) return;
+    if (this.active?.session.sessionId === live.sessionId) return;
     if (live.state !== "claimed" && live.state !== "running" && live.state !== "stopping") return;
     this.options.logger.warn(
       { sessionId: live.sessionId, state: live.state },
@@ -153,13 +172,7 @@ export class PlayHost {
     }
     if (assignment === undefined) return false;
     if (assignment.kind === "stop") {
-      if (this.active?.sessionId === assignment.sessionId) {
-        this.options.logger.info(
-          { sessionId: assignment.sessionId },
-          "embodiment stop received; ends at the next turn boundary",
-        );
-        this.active.stop = true;
-      } else {
+      if (!(await this.requestStop(assignment.sessionId, "claim"))) {
         // A stop for a session this process does not hold: the control plane
         // still believes a dead process is playing. Same truth as reconcile.
         await this.reconcile();
@@ -187,8 +200,20 @@ export class PlayHost {
       },
       "embodiment session claimed",
     );
-    const done = this.runSession(assignment.session);
-    this.active = { sessionId: assignment.session.sessionId, stop: false, done };
+    const active: ActivePlay = {
+      session: {
+        sessionId: assignment.session.sessionId,
+        environmentId: assignment.session.environmentId,
+      },
+      stop: false,
+      stoppingReported: false,
+      runningReported: false,
+      deadlineExpired: false,
+      startedAt: this.clock().getTime(),
+      done: Promise.resolve(),
+    };
+    this.active = active;
+    active.done = this.runSession(active, assignment.session);
     return true;
   }
 
@@ -199,10 +224,91 @@ export class PlayHost {
       const claimed = await this.poll();
       if (!claimed) await abortableDelay(pollIntervalMs, signal);
     }
-    if (this.active !== undefined) {
-      this.active.stop = true;
-      await this.active.done;
+    if (this.active !== undefined) await this.stopAndWait({ reason: "shutdown" });
+  }
+
+  /**
+   * Ask the active playthrough to stop at the next turn boundary. Once it has
+   * reached `running`, also publish `stopping` so operator state reflects that
+   * the process is draining rather than still freely playing.
+   */
+  public async requestStop(sessionId?: string, reason = "operator"): Promise<boolean> {
+    const active = this.active;
+    if (active === undefined) return false;
+    if (sessionId !== undefined && active.session.sessionId !== sessionId) return false;
+    this.markStop(active, reason);
+    await this.reportStopping(active);
+    return true;
+  }
+
+  private markStop(active: ActivePlay, reason: string): void {
+    const wasAlreadyStopping = active.stop;
+    active.stop = true;
+    if (!wasAlreadyStopping) {
+      this.options.logger.info(
+        { sessionId: active.session.sessionId, reason },
+        "embodiment stop received; ends at the next turn boundary",
+      );
     }
+  }
+
+  /**
+   * Request stop and wait for settlement, optionally bounded. If the deadline
+   * expires, publish an explicit failed terminal state; a late clean settlement
+   * is ignored so it cannot overwrite the truth that shutdown forced exit.
+   */
+  public async stopAndWait(
+    options: { deadlineMs?: number; reason?: string } = {},
+  ): Promise<PlayShutdownResult> {
+    const active = this.active;
+    if (active === undefined) return { status: "idle" };
+    const reason = options.reason ?? "shutdown";
+    this.markStop(active, reason);
+    if (options.deadlineMs === undefined) {
+      await this.reportStopping(active);
+      await active.done;
+      return { status: "settled", sessionId: active.session.sessionId };
+    }
+
+    // The stopping report is inside the deadline. A wedged control-plane
+    // request must not defeat the process-level shutdown bound.
+    const deadlineAt = Date.now() + options.deadlineMs;
+    const stoppingReported = await settlesWithin(
+      this.reportStopping(active),
+      remainingMilliseconds(deadlineAt),
+    );
+    if (stoppingReported && (await settlesWithin(active.done, remainingMilliseconds(deadlineAt)))) {
+      return { status: "settled", sessionId: active.session.sessionId };
+    }
+    active.deadlineExpired = true;
+    this.options.logger.error(
+      {
+        sessionId: active.session.sessionId,
+        deadlineMs: options.deadlineMs,
+        reason,
+      },
+      "embodiment shutdown deadline expired",
+    );
+    const forcedReportSettled = await settlesWithin(
+      this.report(active.session.sessionId, {
+        state: "failed",
+        receipt: this.receipt(active.session, {
+          outcome: "failed",
+          turnsTaken: 0,
+          durationMs: this.clock().getTime() - active.startedAt,
+          framesPublished: 0,
+          framesDropped: 0,
+        }),
+      }),
+      this.forcedReportGraceMs,
+    );
+    if (!forcedReportSettled) {
+      this.options.logger.warn(
+        { sessionId: active.session.sessionId, graceMs: this.forcedReportGraceMs },
+        "forced embodiment failure report exceeded shutdown grace",
+      );
+    }
+    return { status: "deadline_expired", sessionId: active.session.sessionId };
   }
 
   /** Resolves when the current session (if any) fully settles. Test seam. */
@@ -210,12 +316,11 @@ export class PlayHost {
     await this.active?.done;
   }
 
-  private async runSession(session: EmbodimentSession): Promise<void> {
-    const startedAt = this.clock().getTime();
+  private async runSession(active: ActivePlay, session: EmbodimentSession): Promise<void> {
     try {
       const result = await this.options.execute(
         session,
-        { stopRequested: () => this.active?.stop === true },
+        { stopRequested: () => active.stop },
         async (resumedFromCheckpointId) => {
           this.options.logger.info(
             {
@@ -228,8 +333,17 @@ export class PlayHost {
             state: "running",
             ...(resumedFromCheckpointId === undefined ? {} : { resumedFromCheckpointId }),
           });
+          active.runningReported = true;
+          if (active.stop) await this.reportStopping(active);
         },
       );
+      if (active.deadlineExpired) {
+        this.options.logger.warn(
+          { sessionId: session.sessionId },
+          "embodiment session settled after shutdown deadline; forced failure already reported",
+        );
+        return;
+      }
       if (result.kind === "refused") {
         this.options.logger.info(
           { sessionId: session.sessionId, refusalReason: result.reason },
@@ -259,19 +373,26 @@ export class PlayHost {
         { sessionId: session.sessionId, errorName: error instanceof Error ? error.name : "Error" },
         "embodiment session failed",
       );
+      if (active.deadlineExpired) return;
       await this.report(session.sessionId, {
         state: "failed",
         receipt: this.receipt(session, {
           outcome: "failed",
           turnsTaken: 0,
-          durationMs: this.clock().getTime() - startedAt,
+          durationMs: this.clock().getTime() - active.startedAt,
           framesPublished: 0,
           framesDropped: 0,
         }),
       });
     } finally {
-      this.active = undefined;
+      if (this.active === active) this.active = undefined;
     }
+  }
+
+  private async reportStopping(active: ActivePlay): Promise<void> {
+    if (!active.runningReported || active.stoppingReported) return;
+    active.stoppingReported = true;
+    await this.report(active.session.sessionId, { state: "stopping" });
   }
 
   private receipt(
@@ -298,6 +419,7 @@ export class PlayHost {
     sessionId: string,
     partial:
       | { state: "running"; resumedFromCheckpointId?: string }
+      | { state: "stopping" }
       | { state: "refused"; refusalReason: EmbodimentRefusalReason }
       | { state: "stopped" | "failed"; receipt: EmbodimentSessionReceipt },
   ): Promise<void> {
@@ -318,6 +440,24 @@ export class PlayHost {
       );
     }
   }
+}
+
+async function settlesWithin(promise: Promise<void>, milliseconds: number): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise.then(() => true),
+      new Promise<boolean>((resolveDelay) => {
+        timer = setTimeout(() => resolveDelay(false), milliseconds);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+function remainingMilliseconds(deadlineAt: number): number {
+  return Math.max(0, deadlineAt - Date.now());
 }
 
 async function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {

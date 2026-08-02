@@ -157,8 +157,19 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
         // register — not a second character defined by this file's prompt.
         const character = personaInstructions((await new SettingsStore().load()).persona, "gameplay");
         const providerOptions = configured.modelOptions?.providerOptions ?? {};
-        mind = createModelFreePlayMind({ model: configured.model, character, providerOptions });
-        voiceAgent = createModelVoice({ model: configured.model, character, providerOptions });
+        const requestTimeoutMs = positiveIntegerOr(env["CLANKIE_PLAY_MODEL_REQUEST_TIMEOUT_MS"], 60_000);
+        mind = createModelFreePlayMind({
+          model: configured.model,
+          character,
+          providerOptions,
+          requestTimeoutMs,
+        });
+        voiceAgent = createModelVoice({
+          model: configured.model,
+          character,
+          providerOptions,
+          requestTimeoutMs,
+        });
       }
     } catch (error) {
       options.logger.warn(
@@ -577,4 +588,10 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
       freePlay.close();
     }
   }
+}
+
+function positiveIntegerOr(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw.trim().length === 0) return fallback;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }

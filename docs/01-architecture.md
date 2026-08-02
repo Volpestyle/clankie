@@ -396,7 +396,7 @@ records never supply grants.
 ## Unified live capability evaluation
 
 The lead-agent lab runs the strict nine-row manifest under
-`evals/capabilities/v1/manifest.yaml`
+`evals/capabilities/v2/manifest.yaml`
 ([ADR 0046](adr/0046-versioned-unified-capability-evaluation.md)). Readiness
 gates run before live work, deterministic checks remain visible when an
 external service is unavailable, and missing human/operator input is distinct
@@ -405,9 +405,10 @@ must pass.
 
 Command output is bounded and discarded after hashing. The durable report
 contains only gate ids, typed status/issue codes, exit status, durations, and
-output hashes. Existing FireRed evidence is verified from its operator-local
-receipt by recomputing every artifact hash; copyrighted bytes are not reopened
-or copied into the report.
+output hashes. FireRed has both its full rival-battle receipt and a free-play
+competence receipt: the latter measures milestone progress, action efficiency,
+repeat-only behavior, and unresolved stalls on pinned deterministic and real
+states. Copyrighted bytes are not reopened or copied into either report.
 
 ## Package dependency direction
 

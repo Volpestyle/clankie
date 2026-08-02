@@ -8,7 +8,19 @@ import {
   codexMcpServerArguments,
   completedCodexItem,
   renderTaskPrompt,
+  resolveCodexTurnTimeoutMs,
 } from "../src/index.ts";
+
+describe("Codex turn timeout", () => {
+  it("honors explicit overrides and otherwise includes planned-task settlement headroom", () => {
+    expect(resolveCodexTurnTimeoutMs(12_345, 60)).toBe(12_345);
+    expect(resolveCodexTurnTimeoutMs(undefined, undefined)).toBe(30 * 60_000);
+    expect(resolveCodexTurnTimeoutMs(undefined, 10)).toBe(30 * 60_000);
+    expect(resolveCodexTurnTimeoutMs(undefined, 45)).toBe(60 * 60_000);
+    expect(resolveCodexTurnTimeoutMs(undefined, 60)).toBe(75 * 60_000);
+    expect(resolveCodexTurnTimeoutMs(undefined, 10_000)).toBe(4 * 60 * 60_000);
+  });
+});
 
 describe("Codex tool boundary", () => {
   it("injects strict named profiles, exact deny-read paths, and a synthetic shell environment", () => {

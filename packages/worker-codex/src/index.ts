@@ -13,6 +13,30 @@ import {
   type WorkerSteerCommand,
 } from "@clankie/worker-sdk";
 
+const DEFAULT_CODEX_TURN_TIMEOUT_MS = 30 * 60_000;
+const CODEX_TASK_TIMEOUT_BUFFER_MINUTES = 15;
+const MAX_CODEX_TURN_TIMEOUT_MS = 4 * 60 * 60_000;
+
+/**
+ * Gives a planned task its declared execution window plus settlement headroom.
+ *
+ * The old fixed 15-minute timeout cut every member of a parallel implementation
+ * wave off simultaneously even though their task contracts estimated 45–60
+ * minutes. The plan already carries the bounded duration, so it is the durable
+ * source for the adapter deadline. An explicit adapter override still wins.
+ */
+export function resolveCodexTurnTimeoutMs(
+  explicitTimeoutMs: number | undefined,
+  estimatedDurationMinutes: number | undefined,
+): number {
+  if (explicitTimeoutMs !== undefined) return explicitTimeoutMs;
+  const plannedTimeoutMs =
+    estimatedDurationMinutes === undefined
+      ? DEFAULT_CODEX_TURN_TIMEOUT_MS
+      : (estimatedDurationMinutes + CODEX_TASK_TIMEOUT_BUFFER_MINUTES) * 60_000;
+  return Math.min(MAX_CODEX_TURN_TIMEOUT_MS, Math.max(DEFAULT_CODEX_TURN_TIMEOUT_MS, plannedTimeoutMs));
+}
+
 /**
  * One stdio MCP server pre-approved by the runner's doctrine projection.
  * Codex cannot filter individual MCP tools, so the runner only projects
@@ -85,7 +109,7 @@ export class CodexAppServerClient implements CodexTurnClient {
         command: options.command ?? "codex",
         args: codexAppServerArguments(options),
         env: options.environment ?? process.env,
-        requestTimeoutMs: options.turnTimeoutMs ?? 15 * 60_000,
+        requestTimeoutMs: resolveCodexTurnTimeoutMs(options.turnTimeoutMs, undefined),
       });
   }
 
@@ -142,7 +166,7 @@ export class CodexAppServerClient implements CodexTurnClient {
           message.method === "turn/completed" &&
           readNestedStringOrUndefined(message, ["params", "threadId"]) === threadId &&
           (turnId === undefined || readNestedStringOrUndefined(message, ["params", "turn", "id"]) === turnId),
-        this.options.turnTimeoutMs ?? 15 * 60_000,
+        resolveCodexTurnTimeoutMs(this.options.turnTimeoutMs, undefined),
         terminalWait.signal,
       );
       let turnResponse: JsonObject;
@@ -376,7 +400,14 @@ export class CodexWorkerAdapter implements WorkerAdapter {
     const mcpServers = (this.options.mcpServers ?? []).filter(
       (server) => !server.kinds || server.kinds.includes(context.task.kind),
     );
-    const client = new CodexAppServerClient({ ...this.options, mcpServers });
+    const client = new CodexAppServerClient({
+      ...this.options,
+      mcpServers,
+      turnTimeoutMs: resolveCodexTurnTimeoutMs(
+        this.options.turnTimeoutMs,
+        context.task.estimatedDurationMinutes,
+      ),
+    });
     this.activeClients.set(context.workerRunId, client);
     const writeEnabled = ["implementation", "debugging", "integration", "design"].includes(context.task.kind);
     try {

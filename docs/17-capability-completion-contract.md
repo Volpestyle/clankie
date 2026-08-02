@@ -138,8 +138,12 @@ flowchart LR
      `gpt-realtime-whisper` listener and an engaged `gpt-realtime-2.1` session
      whose only tool, `ask_clankie`, reaches the continuing `discord_voice`
      Eve lane), approved person-memory briefing, content-free receipts,
-     readiness including the dormant→engaged wake probe, and a three-speaker
-     live evaluator pass deterministic tests. The row remains non-passing
+     readiness including the dormant→engaged wake probe, a content-free
+     possessor seam receipt, a production-shaped gameplay loopback in both
+     directions, and a three-speaker live evaluator pass deterministic tests.
+     The evaluator selects the latest ceremony candidate from a cumulative
+     receipt log; an incomplete or failed newer DAVE session displaces stale
+     success, while a trailing clean reconnect-only session does not. The row remains non-passing
      until the official bot joins the configured private channel and three
      consenting humans complete audible round trips.
 4. **Personal-lab screen media**
@@ -166,9 +170,15 @@ flowchart LR
      cores produce byte-identical report, decision, and event traces; the run
      observes party and bag, reaches the trigger from decoded coordinates, wins
      on decoded outcome `1`, and records zero network attempts. This row passes.
-     The unified evaluator revalidates the operator-local receipt and
-     recomputes every referenced artifact hash without reopening ROM or
-     savestate bytes.
+     Manifest v2 adds a free-play competence gate: two pinned deterministic
+     seeds reach every navigation/dialog/battle milestone within eight turns,
+     repeat-only control fails, and the operator-local real bedroom route
+     reaches its target in one state-derived macro action with no unresolved
+     stall. The competence evaluator reopens only the operator-local source
+     bytes, runs a fresh core instance, binds the stored receipt/report to the
+     canonical benchmark pins, recomputes its checks, and requires the fresh
+     report to match. No ROM or savestate bytes enter an artifact. “Optimal” here means repeatable,
+     efficient milestone progress with bounded stalls, not speedrun optimality.
 6. **Minecraft gameplay**
    - Objective: add the production Mineflayer adapter/account boundary and run
      the frozen private-Paper objective.
@@ -189,12 +199,10 @@ flowchart LR
    - Success: every row is green or the overall result is non-passing with a
      typed missing-human-input reason.
    - Current evidence: `pnpm eval:capabilities` validates the nine-row
-     `evals/capabilities/v1/manifest.yaml`, invokes commands without a shell,
+     `evals/capabilities/v2/manifest.yaml`, invokes commands without a shell,
      caps and discards raw output after hashing, and writes an atomic redacted
-     report. The current configured run has three passing rows (FireRed,
-     command-started coding workers, and TUI), five rows with typed missing
-     live/operator input, one policy/API-blocked row (Discord screen media),
-     and zero implementation failures.
+     report. Missing live/operator inputs and the Discord screen policy/API
+     blocker remain typed separately from implementation failures.
 
 Each wave uses an implementer and a separate verifier. Failed unchanged checks
 produce a debugger task with the exact failure evidence. No wave changes frozen

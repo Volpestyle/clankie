@@ -7,8 +7,13 @@ import type {
   EmbodimentLifecycleReport,
   EmbodimentSession,
 } from "@clankie/protocol";
-import type { PossessorVoiceClient } from "@clankie/possessor-voice";
-import { describe, expect, it } from "vitest";
+import {
+  createPossessorVoiceClient,
+  createPossessorVoiceListener,
+  type PossessorVoiceClient,
+  type PossessorVoiceListenerEvidence,
+} from "@clankie/possessor-voice";
+import { describe, expect, it, vi } from "vitest";
 import { createGbaPlayExecution } from "../src/play-execution.ts";
 import { PlayHost } from "../src/play-host.ts";
 
@@ -67,7 +72,10 @@ function fakeVoice(
   };
 }
 
-function fakeClient(assignment: EmbodimentAssignment) {
+function fakeClient(
+  assignment: EmbodimentAssignment,
+  onReport?: (report: EmbodimentLifecycleReport) => void | Promise<void>,
+) {
   const assignments = [assignment];
   const reports: EmbodimentLifecycleReport[] = [];
   return {
@@ -75,9 +83,10 @@ function fakeClient(assignment: EmbodimentAssignment) {
     claimEmbodiment(_claim: EmbodimentClaim): Promise<EmbodimentAssignment | undefined> {
       return Promise.resolve(assignments.shift());
     },
-    reportEmbodiment(report: EmbodimentLifecycleReport): Promise<unknown> {
+    async reportEmbodiment(report: EmbodimentLifecycleReport): Promise<unknown> {
       reports.push(report);
-      return Promise.resolve({});
+      await onReport?.(report);
+      return {};
     },
     getLiveEmbodimentSession(): Promise<EmbodimentSession | undefined> {
       return Promise.resolve(undefined);
@@ -140,8 +149,9 @@ async function play(options: {
   mind: () => Promise<{ decide: (view: { interjection: string | null }) => Promise<unknown> }>;
   voiceAgent?: () => Promise<{ decide: () => Promise<unknown> } | undefined>;
   turns?: number;
+  onReport?: (report: EmbodimentLifecycleReport) => void | Promise<void>;
 }) {
-  const client = fakeClient({ kind: "start", session: session(options.turns ?? 2) });
+  const client = fakeClient({ kind: "start", session: session(options.turns ?? 2) }, options.onReport);
   const host = new PlayHost({
     client,
     runnerId: "runner-local",
@@ -187,6 +197,70 @@ describe("asked play voice", () => {
     // The answer is the realtime session's to compose: it already heard the
     // same audio, so a reply authored here would be a second answer.
     expect(voice.reported).not.toContain("you said how's it going?");
+  });
+
+  it("consumes a post-start room transcript on the next turn through the production loopback seam", async () => {
+    const evidence: PossessorVoiceListenerEvidence[] = [];
+    const narrated: string[] = [];
+    const listener = createPossessorVoiceListener({
+      token: "clankie_possessor_voice_loopback_test",
+      narrate: (event) => {
+        narrated.push(event);
+        return Promise.resolve();
+      },
+      room: () => ({ listening: true }),
+      emit: (event) => {
+        evidence.push(event);
+      },
+    });
+    const port = await listener.listen(0);
+    const voice = createPossessorVoiceClient({
+      url: `ws://127.0.0.1:${String(port)}/possessor`,
+      token: "clankie_possessor_voice_loopback_test",
+      reconnectDelayMs: 10,
+    });
+    try {
+      await vi.waitFor(() => {
+        expect(voice.connected).toBe(true);
+        expect(voice.roomListening).toBe(true);
+      });
+      const mind = talkingMind(null);
+      let deliveredAfterRunning = false;
+      let acknowledgeTranscript!: () => void;
+      const transcriptDelivered = new Promise<void>((resolve) => {
+        acknowledgeTranscript = resolve;
+      });
+      const stopAcknowledging = voice.subscribe(() => acknowledgeTranscript());
+      await play({
+        voice,
+        mind: mind.create,
+        onReport: async (report) => {
+          if (report.state !== "running" || deliveredAfterRunning) return;
+          deliveredAfterRunning = true;
+          listener.publishUtterance("james: check the path above you");
+          await transcriptDelivered;
+        },
+      });
+      stopAcknowledging();
+
+      expect(deliveredAfterRunning).toBe(true);
+      expect(mind.heard[0]).toBe("james: check the path above you");
+      expect(narrated.length).toBeGreaterThan(0);
+      expect(evidence).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "possessor_transcript_delivery",
+            attachedCount: 1,
+            deliveredCount: 1,
+          }),
+          expect.objectContaining({ type: "possessor_narration_submission", attachedCount: 1 }),
+        ]),
+      );
+      expect(JSON.stringify(evidence)).not.toContain("check the path");
+    } finally {
+      voice.close();
+      await listener.close();
+    }
   });
 
   it("does not consult the voice agent while a room is listening", async () => {

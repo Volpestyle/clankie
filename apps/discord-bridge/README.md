@@ -261,7 +261,11 @@ a wake — a real engaged session must produce a response. Run
 human speakers. The live evaluator requires a positive DAVE protocol, three
 unique explicit consents, three attributed speakers with captain round trips,
 an observed overlap plus a deliberate interruption, no failure receipt, a
-clean leave, and a DAVE leave/rejoin recovery.
+clean leave, a DAVE leave/rejoin recovery, and two-way gameplay possessor seam
+delivery. Receipt logs are cumulative: evaluation selects the latest ceremony
+candidate, so an incomplete or failed newer session cannot be masked by old
+success, while a trailing clean reconnect-only session does not displace the
+main proof.
 
 The reviewed inactive ClankVox schema-1 compatibility parser remains in
 [`src/clankvox-ipc.ts`](src/clankvox-ipc.ts); no AGPL ClankVox source is
@@ -301,6 +305,14 @@ audience or reach any other presence action (the wire carries `narrate` and
 `utterance` and nothing else), and it cannot make him say a specific sentence —
 narration is context, never a script. Hearing is push-only, so the bridge's
 transcript retention stays at zero.
+
+The bridge adds content-free `possessor_connection`, `possessor_room`,
+`possessor_transcript_delivery`, `possessor_narration_submission`, and
+`possessor_refusal` receipts. They carry only local delivery ids, counts,
+listening state, and a bounded reason code. Narration submission is emitted only
+after the live persona accepts the event; a refusal emits no success-shaped
+submission and fails the two-way live gate. Transcript and narration text are
+rejected by the receipt schema.
 
 ## Presence actions (ADR 0024 P1)
 

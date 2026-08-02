@@ -561,7 +561,7 @@ export class DiscordVoiceSession {
       this.pendingResponses.push({
         deliveryId: randomUUID(),
         wake,
-        fastPath: false,
+        fastPath: true,
         state: "settled",
         handoffMs: 0,
         decidedAtMs: this.clock(),

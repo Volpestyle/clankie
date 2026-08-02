@@ -218,6 +218,56 @@ describe("service supervisor", () => {
     expect(record.pid).toBe(9_100);
   });
 
+  it("starts the runner as a launcher-owned service without a manual runner-token env prefix", async () => {
+    const env = await stateEnv();
+    let capturedEnv: NodeJS.ProcessEnv | undefined;
+    const spawnImpl = ((_command: string, _args: readonly string[], options: { env?: NodeJS.ProcessEnv }) => {
+      capturedEnv = options.env;
+      return runningChild(9_150);
+    }) as unknown as typeof spawn;
+
+    const status = await startService(managedService("runner"), {
+      repoRoot: "/repo",
+      env,
+      spawnImpl,
+      processIsAliveImpl: () => true,
+      listProcessCommandsImpl: noProcesses,
+    });
+
+    expect(status).toMatchObject({ id: "runner", state: "healthy", owned: true, pid: 9_150 });
+    expect(capturedEnv).toBeDefined();
+    expect(capturedEnv).not.toHaveProperty("CLANKIE_RUNNER_TOKEN");
+    expect(capturedEnv?.CLANKIE_REPO_PATH).toBe("/repo");
+    expect(JSON.parse(capturedEnv?.CLANKIE_VERIFICATION_CHECKS ?? "[]")).toEqual([
+      { id: "architecture", command: "node", args: ["scripts/check-architecture.mjs"] },
+      { id: "docs-links", command: "node", args: ["scripts/check-doc-links.mjs"] },
+    ]);
+  });
+
+  it("preserves explicit runner repository and verification configuration", async () => {
+    const env = {
+      ...(await stateEnv()),
+      CLANKIE_REPO_PATH: "/operator/repo",
+      CLANKIE_VERIFICATION_CHECKS: '[{"id":"operator-check","command":"node","args":["check.mjs"]}]',
+    };
+    let capturedEnv: NodeJS.ProcessEnv | undefined;
+    const spawnImpl = ((_command: string, _args: readonly string[], options: { env?: NodeJS.ProcessEnv }) => {
+      capturedEnv = options.env;
+      return runningChild(9_151);
+    }) as unknown as typeof spawn;
+
+    await startService(managedService("runner"), {
+      repoRoot: "/repo",
+      env,
+      spawnImpl,
+      processIsAliveImpl: () => true,
+      listProcessCommandsImpl: noProcesses,
+    });
+
+    expect(capturedEnv?.CLANKIE_REPO_PATH).toBe("/operator/repo");
+    expect(capturedEnv?.CLANKIE_VERIFICATION_CHECKS).toBe(env.CLANKIE_VERIFICATION_CHECKS);
+  });
+
   it("surfaces the log path when the service exits during startup", async () => {
     const env = await stateEnv();
     const service = stubService({ states: ["unreachable"] });

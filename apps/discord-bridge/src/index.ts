@@ -324,6 +324,7 @@ const possessorVoiceListener =
         // possessor only ever resolves.
         token: await ensurePossessorVoiceCredential(),
         narrate: (text) => voiceSession.narrate(text),
+        emit: (evidence) => recordVoiceEvidence(evidence),
         // Read at attach time so a play loop that starts mid-call learns the
         // room immediately instead of waiting for the next join or leave.
         room: () => ({ listening: voiceSession.status().active }),
