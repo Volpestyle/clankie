@@ -971,6 +971,27 @@ describe("the pending join retry", () => {
     ).resolves.toEqual({ action: "joined", channelId: "voice-general" });
   });
 
+  it("retains at most 64 pending retries and evicts the oldest first", () => {
+    // The documented capacity contract: 64 retained entries, oldest evicted on
+    // overflow, so a refusal flood can never grow the state unboundedly. The
+    // window's whole write surface is this call — ids plus the typed note —
+    // so there is no parameter through which a message body could enter the
+    // retained state.
+    const retry = new VoicePresenceRetryWindow(VOICE_PRESENCE_RETRY_WINDOW_MS, () => 0);
+    const refusal = { action: "join_refused", reason: "not_in_voice" } as const;
+    const key = (index: number) => ({
+      guildId: "guild-1",
+      channelId: `channel-${String(index)}`,
+      actorId: "asker",
+    });
+    for (let index = 0; index <= 64; index += 1) retry.settle(key(index), refusal);
+    // The 65th entry displaced only the oldest; the next-oldest and the
+    // newest both survive.
+    expect(retry.pending(key(0))).toBe(false);
+    expect(retry.pending(key(1))).toBe(true);
+    expect(retry.pending(key(64))).toBe(true);
+  });
+
   it("the retry read sends the retry framing; a fresh ask keeps the standing prompt", async () => {
     const prompts: string[] = [];
     const decide = createVoicePresenceIntentDecider({

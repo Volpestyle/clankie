@@ -100,11 +100,16 @@ flowchart LR
   "im in general" exiting unread while his reply improvised that he still
   could not see voice. That read uses a retry framing (the standing prompt
   judges the message alone, and "try now" alone asks nothing): does this
-  message renew the already-asked join, ask a leave, or neither — unrelated
-  chatter stays "none", so the window never joins on the strength of the
-  sender merely talking. A renewed join then runs the unchanged deterministic
-  execution — same tier, same allowlists, target channel from a fresh gateway
-  read — and a retry that finds the asker gone again reopens the window
+  message renew the already-asked join, ask a leave, or neither. The framing
+  instructs the model to classify unrelated chatter as "none", and anything
+  malformed or unclear fails closed to "none" — but that filtering is model
+  semantics, not a deterministic guarantee, and it is the deterministic
+  bounds that contain a misread: the window binds exactly one asker in one
+  text channel under its TTL and capacity cap, and a renewed join still runs
+  the unchanged deterministic execution — same tier, same allowlists, target
+  channel only from a fresh gateway read. The worst misread therefore
+  executes the join this same asker asked for moments earlier, in their own
+  current channel. A retry that finds the asker gone again reopens the window
   instead of eating the follow-up. Another member, another channel, or a late
   message can never ride an old refusal into a join.
 - **Consent is never granted by asking.** An asked join opts in nobody — the
