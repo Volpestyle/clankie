@@ -175,7 +175,7 @@ export const VOICE_PRESENCE_RETRY_SYSTEM_PROMPT =
   "voice channel yet, so Clankie could not join. The sender is in a voice channel now and sent " +
   "Clankie the text message that follows. Decide whether it tells Clankie to go ahead with that " +
   "join now — confirming they are in voice, asking him to try again, or repeating the ask — asks " +
-  "Clankie to LEAVE voice, or does neither. Unrelated chatter is \"none\". Earlier channel messages " +
+  'Clankie to LEAVE voice, or does neither. Unrelated chatter is "none". Earlier channel messages ' +
   'may precede it for context only. Answer strictly with one word: "join", "leave", or "none".';
 
 /** Discord message bodies cap at 4 000 characters; longer is not a message. */
