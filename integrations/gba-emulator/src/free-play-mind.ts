@@ -285,14 +285,17 @@ export function createModelFreePlayMind(options: ModelFreePlayMindOptions): Free
       // streaming is accepted by every other configured provider, so this is
       // the portable call. The final object is still awaited whole — nothing
       // downstream consumes partial decisions.
+      const deadline = modelRequestAbortSignal(options.requestTimeoutMs);
       const stream = streamObject({
         model: options.model,
         schema: FreePlayWireDecisionSchema,
+        // Carried as a system *message* rather than a bare string so the cache
+        // breakpoint rides along; `instructions` accepts either.
+        instructions: { role: "system" as const, content: system, providerOptions: SYSTEM_CACHE_OPTIONS },
         // The screen goes in as an image alongside the decoded state. Looking at
         // the room is how he learns where the furniture is; the decoded state is
         // for the values a screenshot reads badly.
         messages: [
-          { role: "system" as const, content: system, providerOptions: SYSTEM_CACHE_OPTIONS },
           {
             role: "user",
             content:
@@ -310,7 +313,7 @@ export function createModelFreePlayMind(options: ModelFreePlayMindOptions): Free
           },
         ],
         maxRetries: options.maxRetries ?? 1,
-        abortSignal: modelRequestAbortSignal(options.requestTimeoutMs),
+        abortSignal: deadline,
         providerOptions: options.providerOptions ?? {},
       });
 
@@ -328,7 +331,7 @@ export function createModelFreePlayMind(options: ModelFreePlayMindOptions): Free
       } catch {
         // The same failure is reported by awaiting the settled object below.
       }
-      return toDecision(await settled);
+      return toDecision(await settleWithinDeadline(settled, deadline));
     },
   };
 }
@@ -434,11 +437,12 @@ export function createModelVoice(options: ModelVoiceOptions): ClankieVoice {
   return {
     async decide(view: VoiceView): Promise<unknown> {
       const showFrame = options.showFrame ?? true;
+      const deadline = modelRequestAbortSignal(options.requestTimeoutMs);
       const stream = streamObject({
         model: options.model,
         schema: VoiceDecisionSchema,
+        instructions: { role: "system" as const, content: system, providerOptions: SYSTEM_CACHE_OPTIONS },
         messages: [
-          { role: "system" as const, content: system, providerOptions: SYSTEM_CACHE_OPTIONS },
           {
             role: "user",
             content:
@@ -451,7 +455,7 @@ export function createModelVoice(options: ModelVoiceOptions): ClankieVoice {
           },
         ],
         maxRetries: options.maxRetries ?? 1,
-        abortSignal: modelRequestAbortSignal(options.requestTimeoutMs),
+        abortSignal: deadline,
         providerOptions: options.providerOptions ?? {},
       });
 
@@ -464,7 +468,7 @@ export function createModelVoice(options: ModelVoiceOptions): ClankieVoice {
       } catch {
         // Reported by awaiting the settled object below.
       }
-      return await settled;
+      return await settleWithinDeadline(settled, deadline);
     },
   };
 }
@@ -475,4 +479,36 @@ function modelRequestAbortSignal(timeoutMs: number | undefined): AbortSignal {
     throw new RangeError("free_play_model_request_timeout_invalid");
   }
   return AbortSignal.timeout(resolved);
+}
+
+/**
+ * Awaits a model result without ever outliving the request deadline.
+ *
+ * Handing `abortSignal` to the SDK is not enough on its own, because honouring
+ * it is the SDK's to do and there are paths where it cannot. On 2026-08-02 a
+ * prompt the SDK rejected during standardization was routed into the stream as
+ * an error part and the stream was closed — the drain below finished normally
+ * and `stream.object` never settled at all, so there was nothing for the abort
+ * to interrupt. `decide` never returned, the turn never failed, and an
+ * asked-play session hung for three hours holding the body lock while Clankie
+ * sat silent in voice.
+ *
+ * So the deadline is enforced here as well as there. Whatever the provider
+ * layer does or fails to do, the turn ends and the loop records it.
+ */
+async function settleWithinDeadline<T>(settled: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) throw deadlineExceeded(signal);
+  return await new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => {
+      reject(deadlineExceeded(signal));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    settled.then(resolve, reject).finally(() => {
+      signal.removeEventListener("abort", onAbort);
+    });
+  });
+}
+
+function deadlineExceeded(signal: AbortSignal): Error {
+  return new Error("free_play_model_request_deadline_exceeded", { cause: signal.reason });
 }
