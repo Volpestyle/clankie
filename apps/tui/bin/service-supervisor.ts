@@ -426,10 +426,24 @@ export async function startService(
 
   const existing = await inspectService(service, options);
   if (existing.state === "healthy") return existing;
-  if (existing.state === "unhealthy" && !existing.owned) {
-    throw new Error(
-      `${service.label} is occupied by a process the clankie launcher does not own and is not healthy. Stop it, then retry.`,
+  // "Occupied" is a claim about a *process*, so ask the process table — the same
+  // correction `stopService` already carries. An unhealthy probe is not evidence
+  // that anything is squatting: the activity tunnel's probe asks a public
+  // hostname, and Cloudflare answers 530 for a tunnel whose origin is down,
+  // which this read as "someone else's process holds the port" and refused to
+  // start. That is backwards — an edge serving 5xx because cloudflared is not
+  // running is precisely when it must be started. On 2026-08-03 it left the
+  // tunnel unstartable through the launcher at the exact moment it was needed.
+  if (!existing.owned) {
+    const occupyingPids = findServiceProcessPids(
+      service,
+      options.listProcessCommandsImpl ?? listProcessCommands,
     );
+    if (occupyingPids.length > 0) {
+      throw new Error(
+        `${service.label} is occupied by a process the clankie launcher does not own and is not healthy. Stop it, then retry.`,
+      );
+    }
   }
 
   const stateDir = clankieStateDirectory(env);

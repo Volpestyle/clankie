@@ -278,6 +278,51 @@ describe("service supervisor", () => {
     ).rejects.toThrow(/exited with code 1.*control-plane\.log/su);
   });
 
+  it("starts an unowned service whose probe is unhealthy but has no process behind it", async () => {
+    // The activity tunnel's probe asks a public hostname, and Cloudflare answers
+    // 530 when a tunnel's origin is down — which the probe reports as unhealthy.
+    // Refusing to start on that reading is backwards: an edge serving 5xx
+    // because cloudflared is not running is exactly when it must be started.
+    // "Occupied" has to mean a process exists, not that a probe was unhappy.
+    const env = await stateEnv();
+    let spawned = 0;
+    const spawnImpl = (() => {
+      spawned += 1;
+      return runningChild(9_300);
+    }) as unknown as typeof spawn;
+
+    const status = await startService(stubService({ states: ["unhealthy", "healthy"] }), {
+      repoRoot: "/repo",
+      env,
+      spawnImpl,
+      processIsAliveImpl: () => true,
+      listProcessCommandsImpl: noProcesses,
+    });
+
+    expect(spawned).toBe(1);
+    expect(status.state).toBe("healthy");
+  });
+
+  it("still refuses to start when a foreign process really is holding the service", async () => {
+    const env = await stateEnv();
+    let spawned = 0;
+    const spawnImpl = (() => {
+      spawned += 1;
+      return runningChild(9_400);
+    }) as unknown as typeof spawn;
+
+    await expect(
+      startService(stubService({ states: ["unhealthy"] }), {
+        repoRoot: "/repo",
+        env,
+        spawnImpl,
+        processIsAliveImpl: () => true,
+        listProcessCommandsImpl: processList("node @clankie/stub start"),
+      }),
+    ).rejects.toThrow(/occupied by a process the clankie launcher does not own/u);
+    expect(spawned).toBe(0);
+  });
+
   it("does not start a second copy when the service is already healthy", async () => {
     const env = await stateEnv();
     let spawned = 0;
