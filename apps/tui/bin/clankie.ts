@@ -3,11 +3,22 @@
 // the fullscreen face to one healthy shared captain service.
 import { resolve } from "node:path";
 import { ensureOperatorCredential } from "@clankie/credential-broker";
+import { applyDiscordSettingsToEnvironment, SettingsStore } from "@clankie/settings";
 import { ensureCaptainService } from "./captain-service.ts";
 import { isHeadlessCaptainCommand, runHeadlessCaptainCommand } from "./headless-captain.ts";
 import { parseDirectConversation } from "../src/session/operator-conversations.ts";
 
 const repoRoot = resolve(import.meta.dirname, "../../..");
+
+// Every spawned service fills its own env from the settings store at startup,
+// which is enough for settings a *child* consumes. The activity tunnel is the
+// exception: the launcher itself decides whether to run it, what to name it,
+// and which hostname to probe, so an unfilled env here means a configured
+// tunnel silently reports "not configured; activity stays local" and no tunnel
+// is ever started. That is exactly what happened on 2026-08-02 — the settings
+// were correct, the README described this path, and the launcher could not see
+// either value. Fill before any service registry read.
+applyDiscordSettingsToEnvironment((await new SettingsStore().load()).discord);
 let direct;
 try {
   direct = parseDirectConversation(process.argv.slice(2));

@@ -54,6 +54,39 @@ settings' `discord` block:
 Both unset means the launcher runs no tunnel and the activity stays local —
 reported as healthy, because wanting it local is not a fault.
 
+Settings alone are not enough. The launcher runs `cloudflared tunnel run <name>`,
+which takes its ingress rules from `~/.cloudflared/config.yml` — the settings say
+*which* tunnel, that file says *where it points*. Create it alongside the tunnel:
+
+```yaml
+tunnel: clankie-activity
+credentials-file: /Users/<you>/.cloudflared/<tunnel-uuid>.json
+
+ingress:
+  - hostname: activity.example.com
+    service: http://127.0.0.1:4320 # the viewer, never the producer
+  - service: http_status:404
+```
+
+Publish only the viewer. The producer on 4322 must stay on loopback, for the
+reason the two-listener table below spells out.
+
+Full first-time setup, once the hostname's zone is on Cloudflare:
+
+```bash
+cloudflared tunnel login
+cloudflared tunnel create clankie-activity
+cloudflared tunnel route dns clankie-activity activity.example.com
+# write ~/.cloudflared/config.yml as above, set both settings, then:
+clankie restart tunnel
+```
+
+The zone must be **active** in Cloudflare, not merely added. A pending zone
+serves the routed hostname as a bare `*.cfargotunnel.com` CNAME that resolves to
+nothing, because Cloudflare only proxies once it is authoritative — the probe
+reports `unreachable` and the tunnel itself logs a clean connection, which reads
+as a tunnel fault rather than an unfinished delegation.
+
 **Use a named tunnel, not a quick one.** `cloudflared tunnel --url …` mints a
 fresh `*.trycloudflare.com` hostname on every start, and the URL Mapping is
 configured once in the developer portal — so a quick tunnel makes restarting the
