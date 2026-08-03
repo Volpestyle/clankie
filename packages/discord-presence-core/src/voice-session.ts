@@ -45,7 +45,11 @@ import { randomUUID } from "node:crypto";
 import { PassThrough } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { opus } from "prism-media";
-import type { DiscordVoiceEvidence, DiscordVoiceWake } from "@clankie/protocol";
+import type {
+  DiscordVoiceEvidence,
+  DiscordVoiceResponseTrigger,
+  DiscordVoiceWake,
+} from "@clankie/protocol";
 import {
   ASK_CLANKIE_TOOL_NAME,
   MAX_REALTIME_AUDIO_APPEND_BYTES,
@@ -268,6 +272,8 @@ interface PendingVoiceResponse {
   readonly deliveryId: string;
   readonly wake: DiscordVoiceWake;
   readonly fastPath: boolean;
+  /** Who prompted it: the room, or a possessor's report of the body. */
+  readonly trigger: DiscordVoiceResponseTrigger;
   readonly turnId?: string;
   readonly state: "settled" | "waiting_user";
   readonly handoffMs: number;
@@ -562,6 +568,7 @@ export class DiscordVoiceSession {
         deliveryId: randomUUID(),
         wake,
         fastPath: true,
+        trigger: "narration",
         state: "settled",
         handoffMs: 0,
         decidedAtMs: this.clock(),
@@ -897,6 +904,7 @@ export class DiscordVoiceSession {
           deliveryId: randomUUID(),
           wake,
           fastPath: true,
+          trigger: "room",
           state: "settled",
           handoffMs: 0,
           decidedAtMs: this.clock(),
@@ -1141,6 +1149,8 @@ export class DiscordVoiceSession {
       deliveryId,
       wake,
       fastPath: false,
+      // `ask_clankie` is only ever reached from a question the room asked.
+      trigger: "room",
       turnId: outcome.turnId,
       state: outcome.state,
       handoffMs,
@@ -1259,6 +1269,7 @@ export class DiscordVoiceSession {
           ...(pending.turnId === undefined ? {} : { turnId: pending.turnId }),
           state: pending.state,
           fastPath: pending.fastPath,
+          trigger: pending.trigger,
           wake: pending.wake,
           toFirstAudioMs: Math.max(
             0,

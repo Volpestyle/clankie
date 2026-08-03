@@ -26,3 +26,11 @@ capability.
 
 Mineflayer and Paper types stay behind runtime adapters. This package is the
 stable protocol boundary those adapters implement.
+
+`ActivityObservationSnapshotSchema` defines present-tense self-observation for
+active activities. The first `gba_emulator` variant separates bounded
+`selfAuthored` objective/intent/commentary from `runnerObserved` settled
+outcome/effect/progress and admits only a framebuffer digest, never frame bytes.
+`ActivityObservationReadSchema` distinguishes a matching snapshot, a live
+session whose first turn is still pending, and no live activity. This is a read
+contract, not an environment command or capability projection.

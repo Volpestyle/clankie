@@ -295,6 +295,19 @@ Raw frames remain artifact-plane data. Semantic events admit only bounded
 summaries and opaque `artifact://` references, and credentials are invalid in
 PokeMMO fixtures, resource bounds, commands, events, and evidence reports.
 
+### Current-activity self-observation
+
+The current-activity read in
+[ADR 0077](adr/0077-current-activity-is-a-runner-owned-self-observation.md)
+does not widen environment capabilities. It is an authenticated, read-only
+projection of a turn that already settled, and it exposes no environment action
+or lease. The runner keeps self-authored objective, intent, and commentary
+structurally separate from runner-observed outcome, effect, and progress. Frame
+bytes, decoded emulator state, prompts, continuation tokens, and other lanes'
+transcripts are invalid at this boundary. A missing or mismatched current
+snapshot yields `pending` or fails closed; consumers never substitute an older
+session and never infer gameplay details from presence alone.
+
 ## Policy tests
 
 Each profile needs executable examples:

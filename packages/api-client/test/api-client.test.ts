@@ -429,4 +429,32 @@ describe("ClankieApiClient runner surface", () => {
 
     expect(credentials).toEqual(["Bearer captain-secret", "Bearer operator-secret", "Bearer device-secret"]);
   });
+
+  it("authenticates and validates current activity reads for captain or operator", async () => {
+    const credentials: string[] = [];
+    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe("http://127.0.0.1:4310/v1/embodiment/sessions/live/activity");
+      const headers = init?.headers as Record<string, string> | undefined;
+      credentials.push(headers?.authorization ?? "");
+      return Response.json({ schemaVersion: 1, outcome: "not_playing" });
+    });
+
+    await expect(
+      new ClankieApiClient({
+        baseUrl: "http://127.0.0.1:4310",
+        fetchImpl,
+        captainToken: "captain-secret",
+        operatorToken: "operator-secret",
+      }).getCurrentActivityObservation(),
+    ).resolves.toEqual({ schemaVersion: 1, outcome: "not_playing" });
+    await expect(
+      new ClankieApiClient({
+        baseUrl: "http://127.0.0.1:4310",
+        fetchImpl,
+        operatorToken: "operator-secret",
+      }).getCurrentActivityObservation(),
+    ).resolves.toEqual({ schemaVersion: 1, outcome: "not_playing" });
+
+    expect(credentials).toEqual(["Bearer captain-secret", "Bearer operator-secret"]);
+  });
 });

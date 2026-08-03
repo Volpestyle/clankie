@@ -570,8 +570,12 @@ export function describeVoiceResponse(evidence: DiscordVoiceResponseEvidence): s
   const path = evidence.fastPath
     ? "fast path"
     : `captain handoff ${String(Math.round(evidence.handoffMs))}ms`;
+  // Both fast-path triggers report a zero handoff, so without naming the
+  // trigger a play narration and a real reply to the room are the same line.
+  const trigger = evidence.trigger === "narration" ? "narration" : "room";
   return (
-    `voice turn (${evidence.wake}, ${path}): ${String(Math.round(evidence.toFirstAudioMs))}ms ` +
+    `voice turn (${evidence.wake}, ${trigger}, ${path}): ` +
+    `${String(Math.round(evidence.toFirstAudioMs))}ms ` +
     `to first audio, then ${String(Math.round(evidence.playbackMs))}ms speaking`
   );
 }

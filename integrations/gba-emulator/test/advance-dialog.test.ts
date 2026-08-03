@@ -449,6 +449,50 @@ describe("advance_dialog", () => {
     expect(core.pressed).toEqual(["a", "a"]);
   });
 
+  it("reads the aftermath a won battle prints, instead of refusing at the mode label", async () => {
+    // The 2026-08-02 live playthrough sat here for six minutes: the rival
+    // battle ended, the mode decoded as `battle_won`, and every advance_dialog
+    // was refused `dialog_not_open` — so the longest text run in the early game
+    // fell back to one A press per box at one model decision each.
+    const won = { mode: "battle_won", inputReady: false } as const;
+    const core = new ScriptedDialogCore([
+      { ...won, lines: ["Foe BULBASAUR fainted!"] },
+      { ...won, lines: ["GASKET gained 62 EXP. Points!"] },
+      { ...won, lines: ["GREEN: Yeah! Am I great or what?"] },
+      { mode: "overworld", inputReady: true },
+    ]);
+    const { command, grant, runtime } = await harness(core);
+    const result = await runtime.startAction(grant.token, command("aftermath", advance()));
+
+    expect(result).toMatchObject({
+      status: "completed",
+      outcome: {
+        transcript: [
+          "Foe BULBASAUR fainted!",
+          "GASKET gained 62 EXP. Points!",
+          "GREEN: Yeah! Am I great or what?",
+        ],
+        presses: 3,
+        endedBecause: "dialog_closed",
+        mode: "overworld",
+      },
+    });
+    expect(core.pressed).toEqual(["a", "a", "a"]);
+  });
+
+  it("refuses a terminal battle mode the core merely retained, and spends no press", async () => {
+    // The core keeps `battle_won` until the next press, so the mode outlives
+    // the screen that earned it. Field input being ready is what says the
+    // engine handed control back: there is nothing to read, and an A here
+    // would talk to whatever the player is standing in front of.
+    const core = new ScriptedDialogCore([{ mode: "battle_won", inputReady: true }]);
+    const { command, grant, runtime } = await harness(core);
+    const result = await runtime.startAction(grant.token, command("retained", advance()));
+
+    expect(result).toMatchObject({ status: "failed", errorCode: "dialog_not_open" });
+    expect(core.pressed).toEqual([]);
+  });
+
   it("still refuses when the screen is free and nothing is readable", async () => {
     const core = new ScriptedDialogCore([{ mode: "overworld", inputReady: true }]);
     const { command, grant, runtime } = await harness(core);

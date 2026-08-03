@@ -195,6 +195,13 @@ export const FreePlayTurnSchema = z
     speak: z.string().max(FREE_PLAY_SPEAK_MAX).nullable(),
     /** He wanted to speak but the gate held him. Measures whether it binds. */
     speakSuppressed: z.boolean(),
+    /**
+     * His volition fired this turn — he judged the moment worth a word —
+     * regardless of who ended up authoring it or whether the gate let it out.
+     * True on room-authored turns where `speak` is deliberately null, which is
+     * what the possessor seam reports on.
+     */
+    speakWanted: z.boolean().default(false),
     action: FreePlayActionSchema.nullable(),
     outcome: z.enum(["accepted", "rejected_by_adapter", "invalid_decision", "mind_failed"]),
     /** Bounded reason when the turn did not produce an accepted action. */
@@ -408,6 +415,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
       reply: null,
       speak: null,
       speakSuppressed: false,
+      speakWanted: false,
     };
 
     // Taken at the boundary, before he decides, so a question reaches the turn
@@ -573,7 +581,13 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     // author for one character in one moment: in the channel if the seam
     // carried them, on the overlay if it did not.
     const roomAuthors = input.roomAuthors?.() === true;
-    let wants = roomAuthors ? null : (parsed.data.speak ?? null);
+    // His own volition, read before anyone decides who authors the words.
+    // ADR 0074 moves *authorship* to the room; it does not move the judgement
+    // of whether this moment was worth remarking on at all. Keeping that
+    // judgement is what lets the possessor seam report the turns he thought
+    // were worth a word, instead of narrating every turn's diagnostics.
+    const ownWish = parsed.data.speak ?? null;
+    let wants = roomAuthors ? null : ownWish;
     if (input.voice !== undefined && roomAuthors) {
       // Not consulted at all: the room is already speaking in his voice.
       volition.skipped += 1;
@@ -624,6 +638,11 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
         volition.suppressed += 1;
       }
     }
+    // Recorded whoever ends up holding the pen: when the room authors, `wants`
+    // is deliberately null and this is the only surviving trace that he judged
+    // the moment worth a word.
+    const wished = roomAuthors ? ownWish : wants;
+    record.speakWanted = wished !== null && wished.trim().length > 0;
 
     history.push({
       intent: parsed.data.intent,

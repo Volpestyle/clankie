@@ -20,6 +20,7 @@ import {
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 import type { MenuOption } from "./shell/setup-flow.ts";
 import { MissionDashboard } from "./components/mission-dashboard.ts";
+import { formatActivityObservation, type ActivityObservationClient } from "./activity-command.ts";
 import type { MissionObserver } from "./observation/mission-observer.ts";
 import { pushTimeline, type ConsoleState, type DoctrineSettings } from "./session/state.ts";
 
@@ -29,6 +30,8 @@ export interface ConsoleCommandContext {
   readonly state: ConsoleState;
   readonly observer?: MissionObserver;
   readonly approvalClient?: ApprovalInboxClient;
+  readonly activityClient?: ActivityObservationClient;
+  readonly activityWatchUrl?: string;
   readonly conversations?: {
     readonly conversationId?: string | undefined;
     conversations(): Promise<
@@ -50,7 +53,8 @@ export interface ConsoleCommandContext {
 }
 
 export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellCommand[] {
-  const { state, captain, observer, approvalClient, conversations } = context;
+  const { state, captain, observer, approvalClient, activityClient, activityWatchUrl, conversations } =
+    context;
   const commands: FaceShellCommand[] = [];
   const dashboard = () => observer?.dashboard ?? state.dashboard;
 
@@ -232,6 +236,39 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         shell.clearTranscript();
         shell.insertMarkdown("**Notice**\n\nFresh captain session. Mission state is unchanged.");
         shell.refreshStatus("ready");
+      },
+    },
+    {
+      name: "activity",
+      aliases: ["watch"],
+      description: "Show Clankie's current activity and live watch surface",
+      takesArgument: false,
+      async run(_argument, shell): Promise<void> {
+        if (activityClient === undefined) {
+          shell.insertCommandResult(
+            "/activity",
+            "Activity observation is unavailable until operator authentication is configured.",
+            "error",
+          );
+          return;
+        }
+        try {
+          const observation = await activityClient.getCurrentActivityObservation();
+          shell.insertCommandResult(
+            "/activity",
+            formatActivityObservation(observation, {
+              ...(activityWatchUrl === undefined ? {} : { watchUrl: activityWatchUrl }),
+            }),
+            "success",
+          );
+        } catch (error) {
+          const errorName = error instanceof Error ? error.name : "Error";
+          shell.insertCommandResult(
+            "/activity",
+            `Activity observation is temporarily unavailable (${errorName}).`,
+            "error",
+          );
+        }
       },
     },
     {

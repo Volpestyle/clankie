@@ -3562,6 +3562,7 @@ export const CAPTAIN_AUTHORED_TOOL_NAMES = [
   "decide_action",
   "get_mission",
   "get_self_state",
+  "observe_current_activity",
   "remember_episode",
   "start_mission",
   "start_play",
@@ -3672,6 +3673,15 @@ export type DiscordVoiceWake = z.infer<typeof DiscordVoiceWakeSchema>;
 export const DiscordVoiceResponseStateSchema = z.enum(["settled", "waiting_user"]);
 export type DiscordVoiceResponseState = z.infer<typeof DiscordVoiceResponseStateSchema>;
 
+/**
+ * What made him speak: someone in the room, or a possessor reporting what the
+ * body just did. Both take the fast path with a zero handoff, so without this
+ * the latency line cannot tell a real reply from a play narration — which is
+ * exactly the ambiguity that slowed the 2026-08-02 diagnosis.
+ */
+export const DiscordVoiceResponseTriggerSchema = z.enum(["room", "narration"]);
+export type DiscordVoiceResponseTrigger = z.infer<typeof DiscordVoiceResponseTriggerSchema>;
+
 /** The realtime pipeline's failure stages. The cascade stages left with the cascade. */
 export const DiscordVoiceFailureStageSchema = z.enum([
   "capture",
@@ -3736,6 +3746,8 @@ export const DiscordVoiceEvidenceSchema = z
         state: DiscordVoiceResponseStateSchema,
         /** True when the realtime session answered directly, without `ask_clankie`. */
         fastPath: z.boolean(),
+        /** Optional so records written before the field existed still parse. */
+        trigger: DiscordVoiceResponseTriggerSchema.optional(),
         wake: DiscordVoiceWakeSchema,
         toFirstAudioMs: DiscordVoiceDurationMsSchema,
         /** Captain round trip inside `ask_clankie`; 0 on the fast path. */

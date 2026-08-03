@@ -31,7 +31,8 @@ worker harnesses; `pnpm doctor` reports both, redacted.
 ## Local service ports
 
 - control plane: `4310`
-- development relay: `4320`
+- runner current-activity gateway: `4314`
+- activity watch surface / development relay: `4320`
 - captain Eve session API: `4321`
 - OTLP HTTP: `4318`
 - local telemetry UI: see `infra/observability/README.md`
@@ -102,6 +103,10 @@ credential and receives the repository path plus baseline verification checks
 from the launcher, with no shell env prefix and no manual gameplay script.
 `pnpm gba:free-play-live` stays as the development
 alias that drives the same composition without a control plane.
+
+Use `/activity` in the TUI for the latest settled semantic state and open
+`http://127.0.0.1:4320` for the live framebuffer. The semantic read travels
+captain/operator → control plane → runner gateway; it never scrapes the viewer.
 
 ### Headless captain control
 

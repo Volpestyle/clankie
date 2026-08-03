@@ -58,10 +58,21 @@ play loop reports events and never sentences.
 Three parts:
 
 **1. The seam carries events, as it always said it did.** The play host sends
-what happened — the turn's effect, a changed objective, an outcome worth
-remarking on — and never `speak` or `reply`. The client method is renamed from
-`say()` to `narrate()` to match the wire message and the contract; `say()` is
-the name that invited a script through a seam that never accepted one.
+what happened — the turn's effect, the objective it served — and never `speak`
+or `reply`. The client method is renamed from `say()` to `narrate()` to match
+the wire message and the contract; `say()` is the name that invited a script
+through a seam that never accepted one.
+
+**Authorship moves to the room; the judgement of what is worth remarking on
+does not.** Reporting every turn hands the room a running commentary of turn
+diagnostics — lines like `"no visible change — the frame is identical"`, which
+are written for his own next decision and read as telemetry out of context —
+and the narration throttle then speaks whichever fragment happens to land on
+its interval. So the seam reports only the turns his own volition fired on
+(`speakWanted`), which the loop records even while the room holds the pen. One
+judgement of "is this worth a word", made where the whole moment is visible,
+rather than a second list of notable-looking effects that would drift from it.
+The words are still never sent: volition says *whether*, the room says *what*.
 
 **2. The Voice agent is not consulted while a room is listening.** The bridge
 tells the possessor whether anyone can hear it, and the play loop skips ADR
@@ -100,6 +111,14 @@ session authors, and it authors from events plus the audio it already hears.
   session's context, so "what are you doing?" is answerable from state rather
   than from whatever quip was most recent. This is new capability, not a
   restoration — it never worked before.
+- Events only land as sense if the persona knows a body is playing at all. The
+  voice briefing therefore carries a live-embodiment card naming the game and
+  saying reports of his own play arrive as text items — without it the room got
+  a persona with no frame of reference, which on 2026-08-02 turned one reported
+  event into a 39-second invention.
+- A narration and a real reply are separately visible in the latency line. Both
+  take the fast path with a zero handoff, so the response receipt records which
+  one triggered it; without that the two are byte-identical in the log.
 - The overlay and the room can differ in wording while nobody is in voice and
   then converge on a single author when someone joins. That is intended: they
   are different surfaces with different audiences, and the alternative — piping

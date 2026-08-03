@@ -44,6 +44,18 @@ snapshot and results.
 
 The execution boundary is fail-closed: `CLANKIE_CAPTAIN_TOKEN` authenticates start separately from `CLANKIE_RUNNER_TOKEN`; missing configuration returns an unavailable error and invalid credentials return an authentication error. Production authenticators compare bearer credentials in constant time and bind the runner ID from server configuration, never a caller header. The control plane owns serialized scheduling and replay only. Codex, Git worktrees, provider processes, and credentials remain in the runner.
 
+## Current activity self-observation
+
+`GET /v1/embodiment/sessions/live/activity` is the authenticated captain/operator
+read for Clankie's present activity ([ADR 0077](../../docs/adr/0077-current-activity-is-a-runner-owned-self-observation.md)).
+The injected `RunnerActivityObservationClient` reads the runner's exact-loopback
+gateway at `CLANKIE_ACTIVITY_OBSERVATION_URL` (default
+`http://127.0.0.1:4314`) with the runner credential. The control plane never
+persists or reconstructs the snapshot. It returns `not_playing` when there is no
+live embodiment session, `pending` before that session's first settled turn,
+and `snapshot` only when runner and control-plane session/environment identities
+match. Upstream failure and stale identity fail closed.
+
 ## Worker transcript read and tail
 
 The control plane exposes paired-device reads at:

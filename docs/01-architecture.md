@@ -174,6 +174,28 @@ victory all pass with byte-identical evidence and zero network attempts. ROM,
 BIOS, and savestate bytes never enter the repository, fixtures, events, or
 reports — only SHA-256 identity digests.
 
+Current activity is projected separately from both the rendered frame and the
+durable play journal
+([ADR 0077](adr/0077-current-activity-is-a-runner-owned-self-observation.md)).
+After each turn settles, the runner replaces one memory-only snapshot whose
+strict `selfAuthored` and `runnerObserved` sections keep intention distinct from
+execution fact. An authenticated exact-loopback gateway supplies that snapshot
+to the control plane, which verifies it against the authoritative live
+embodiment session. The captain's `observe_current_activity` tool and the TUI's
+`/activity` command read this projection; frame bytes stay on the activity
+surface and the gameplay continuation token stays in its lane.
+
+```mermaid
+flowchart LR
+  G[Settled FireRed turn] --> S[Runner current-activity snapshot]
+  G --> J[(Private play journal)]
+  R[Framebuffer] --> W[Watch surface]
+  R -->|digest only| S
+  S -->|runner-authenticated loopback| C[Control plane]
+  C --> E[Captain self-observation tool]
+  C --> T[TUI /activity]
+```
+
 ## Discord voice media plane
 
 The Discord bridge is the single writer for the official-bot presence session. Gateway and bot

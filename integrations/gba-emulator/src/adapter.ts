@@ -26,6 +26,7 @@ import {
   type GbaEmulatorTrace,
 } from "./contracts.ts";
 import { DeterministicGbaCoreDouble, canonicalJson, sha256 } from "./core-double.ts";
+import type { GbaCoreState } from "./core-double.ts";
 import type { GbaAdapterScenario, GbaCoreFactory, GbaCoreMapGrid, GbaCoreSeam } from "./core-seam.ts";
 import { BUTTON_COLUMN, OK_ROW, findNamingKey, stepTowardNamingKey } from "./naming-keyboard.ts";
 
@@ -704,17 +705,14 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
         // A visible box is not always a decoded dialog. A scripted sequence
         // (the starter fanfare) holds the box while the script runs a wait the
         // dialog decoder does not model — mode reads "overworld" with field
-        // controls locked — and battle text lives under mode "battle". Both
-        // are exactly when a driver reaches for this action, so both are
+        // controls locked — and battle text lives under the battle modes. All
+        // are exactly when a driver reaches for this action, so all are
         // entered rather than refused; only a screen with nothing readable
         // and nothing held fails closed.
         {
           const opening = this.core.gameState();
-          const readable =
-            opening.mode === "dialog" ||
-            (opening.mode === "battle" && opening.battle?.inputMode === "resolving");
           const held = opening.mode === "overworld" && !(opening.inputReady ?? true);
-          if (!readable && !held) throw closed("dialog_not_open");
+          if (!isReadableText(opening) && !held) throw closed("dialog_not_open");
         }
         const startedInBattle = this.core.gameState().mode === "battle";
         // Every distinct box read along the way, oldest first. A capture that
@@ -748,10 +746,7 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
           | "frame_bound_reached";
         for (;;) {
           const during = this.core.gameState();
-          const readable =
-            during.mode === "dialog" ||
-            (during.mode === "battle" && during.battle?.inputMode === "resolving");
-          if (!readable) {
+          if (!isReadableText(during)) {
             const scriptHeld = during.mode === "overworld" && !(during.inputReady ?? true);
             if (scriptHeld) {
               // The script owns the screen with no readable box — a fanfare, a
@@ -1152,6 +1147,32 @@ function closed(code: string): EnvironmentAdapterActionError {
 
 function boundedSummary(value: string): string {
   return value.trim().slice(0, 512) || "unspecified";
+}
+
+/**
+ * Whether the screen has text `advance_dialog` should read on through.
+ *
+ * The question is about the screen, not the mode label. A won or lost battle is
+ * not a finished conversation: FireRed prints the entire aftermath — the faint,
+ * the EXP, the level-up, the rival's parting line, the prize money — while the
+ * mode still decodes as terminal, and that is the longest unbroken run of text
+ * in the early game. Reading it as "no dialog is open" is what left a whole
+ * post-battle sequence to one A press per box, at one model decision each.
+ *
+ * `inputReady` is what separates a live battle still printing (the field
+ * callback is not running, so field input is locked) from a terminal mode
+ * merely *retained* after the engine handed control back — the core keeps that
+ * bookkeeping until the next press. So a stale terminal mode standing in the
+ * overworld still fails closed, and never spends a stray A on whatever the
+ * player happens to be facing.
+ */
+function isReadableText(state: GbaCoreState): boolean {
+  if (state.mode === "dialog") return true;
+  if (state.mode === "battle") return state.battle?.inputMode === "resolving";
+  if (state.mode === "battle_won" || state.mode === "battle_lost") {
+    return !(state.inputReady ?? true);
+  }
+  return false;
 }
 
 /** Frames per step. 16 is the documented hold that commits a move rather than a turn. */

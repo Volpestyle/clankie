@@ -61,6 +61,7 @@ import {
   DISCORD_PRESENCE_LIVE_REVISION_HEADER,
   DISCORD_PRESENCE_LIVE_SESSION_HEADER,
   DiscordPresenceLiveClaimSchema,
+  ActivityObservationReadSchema,
   DiscordPresencePhaseEventSchema,
   DiscordPresenceSessionRecordSchema,
   type DiscordPresenceLiveClaim,
@@ -68,9 +69,15 @@ import {
   type DiscordPresenceSessionRecord,
   DiscordVoiceHistorySchema,
   type DiscordVoiceStay,
+  type ActivityObservationRead,
 } from "@clankie/interactive-environment";
 
 export * from "./terminal-gateway.ts";
+export type {
+  ActivityObservationRead,
+  ActivityObservationSnapshot,
+  GbaActivityObservationSnapshot,
+} from "@clankie/interactive-environment";
 
 export interface ClankieApiClientOptions {
   baseUrl: string;
@@ -809,6 +816,14 @@ export class ClankieApiClient {
     return EmbodimentSessionSchema.parse(body.session);
   }
 
+  /** Latest settled state of Clankie's own active activity, without another lane's transcript. */
+  public async getCurrentActivityObservation(): Promise<ActivityObservationRead> {
+    const body = await this.request<unknown>("/v1/embodiment/sessions/live/activity", {
+      headers: this.activityReadHeaders(),
+    });
+    return ActivityObservationReadSchema.parse(body);
+  }
+
   /**
    * Who holds Clankie's body right now (VUH-938): a liveness-checked view of
    * the cross-process body lock, which sees every suitor — including an MCP
@@ -878,6 +893,14 @@ export class ClankieApiClient {
       throw new Error("CLANKIE_OPERATOR_TOKEN is required for approval decisions");
     }
     return { authorization: `Bearer ${this.operatorToken}` };
+  }
+
+  private activityReadHeaders(): Record<string, string> {
+    const token = this.captainToken ?? this.operatorToken;
+    if (!token) {
+      throw new Error("A captain or operator token is required for activity observation");
+    }
+    return { authorization: `Bearer ${token}` };
   }
 
   private deviceHeaders(): Record<string, string> {

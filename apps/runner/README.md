@@ -8,6 +8,22 @@ Beside the mission worker, the runner hosts asked embodiment: `src/play-host.ts`
 
 `scripts/free-play-live.ts` (`pnpm gba:free-play-live`) is the development alias: the same `src/play-execution.ts` composition driven by a locally fabricated session, so a playthrough is watchable without a control plane or a Discord ask.
 
+### Current-activity projection (ADR 0077)
+
+Each settled free-play turn replaces one memory-only activity observation. The
+strict schema keeps Clankie's bounded objective, intent, and commentary under
+`selfAuthored`, while the adapter outcome, effect, progress counters, and
+framebuffer digest remain under `runnerObserved`. Raw frames, decoded emulator
+state, prompts, action payloads, and gameplay continuation authority cannot be
+represented.
+
+The exact-loopback gateway listens on
+`CLANKIE_ACTIVITY_OBSERVATION_PORT` (default `4314`) and authenticates with the
+runner bearer. It serves only the current snapshot and returns not-found before
+the first settled turn or after the matching session clears. The durable journal
+remains the historical debugging artifact; the projection is present-tense and
+is never persisted.
+
 ### The durable trail (ADR 0068)
 
 Every playthrough journals itself: one append-only JSONL per run under `~/.local/state/clankie/gba-play/` — a header with the run identity and resume lineage, every `FreePlayTurn` (monologue, intent, objective, action, outcome, effect) as it settles, and a summary carrying the metrics the content-free receipt cannot (progress, volition, coherence). The same metrics land in the runner log as `embodiment playthrough finished`, and the play host narrates each lifecycle transition (`claimed`, `running`, `settled`, `refused`, stop asks) so the log tells the same story the control-plane events record. An unwritable journal degrades to an unrecorded playthrough that still runs; the log says so. See [`docs/08-observability-debugging.md`](../../docs/08-observability-debugging.md) for the full artifact map.

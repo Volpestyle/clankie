@@ -133,7 +133,13 @@ const commands = [
     captain,
     observer: missionObserver,
     conversations: conversationsContext,
-    ...(approvalClient ? { approvalClient } : {}),
+    ...(approvalClient
+      ? {
+          approvalClient,
+          activityClient: approvalClient,
+          activityWatchUrl: `http://127.0.0.1:${process.env.CLANKIE_ACTIVITY_PORT ?? "4320"}`,
+        }
+      : {}),
   }),
   ...buildProviderCommands(services),
   ...buildDiscordCommands({

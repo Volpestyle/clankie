@@ -42,8 +42,8 @@ open conversation to its next real decision point.
 
 ```mermaid
 flowchart TB
-  S["advance_dialog"] --> C{"mode still dialog?"}
-  C -->|no| E1["dialog_closed / battle_started"]
+  S["advance_dialog"] --> C{"text still readable?"}
+  C -->|no| E1["dialog_closed / battle_started / battle_ended"]
   C -->|yes| M{"menu open?"}
   M -->|yes| E2["choice_open<br/>never answered here"]
   M -->|no| R{"waitingForDialogAdvance?"}
@@ -80,6 +80,23 @@ ends on a released frame so the following press always lands as a new edge
 configured text speed). A box that never reports itself ready (signs and some
 scripted text never park on the native) is pressed anyway after a stall
 threshold, which in FireRed accelerates the printer rather than being wasted.
+
+### Readable is a question about the screen, not the mode label
+
+What counts as "still reading" is decided from what the screen is doing, because
+the mode label and the visible text disagree at the exact moment the game talks
+most. A won or lost battle is not a finished conversation: FireRed prints the
+whole aftermath — the faint, the EXP, the level-up, the rival's parting line,
+the prize money — while the mode still decodes as terminal. Asking `mode ===
+"dialog"` refuses that entire run, which is the longest unbroken text in the
+early game.
+
+The terminal battle modes are therefore readable while field input is locked.
+That qualifier is what keeps the action honest: the core retains `battle_won`
+until the next press, so the mode outlives the screen that earned it, and
+`inputReady` is the signal that the engine has handed control back. A retained
+mode standing in the overworld still fails closed rather than spending a stray A
+on whatever the player is facing.
 
 ### The text has to come back
 

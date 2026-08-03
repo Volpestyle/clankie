@@ -45,6 +45,11 @@ import {
   createWorkerTranscriptGateway,
   WORKER_TRANSCRIPT_GATEWAY_PORT,
 } from "./worker-transcript-gateway.ts";
+import { ActivityObservationProjection } from "./activity-observation.ts";
+import {
+  ACTIVITY_OBSERVATION_GATEWAY_PORT,
+  createActivityObservationGateway,
+} from "./activity-observation-gateway.ts";
 
 export {
   createRunnerEnvironmentLifecycle,
@@ -144,6 +149,7 @@ const transcriptProjection = await WorkerTranscriptProjection.open(
     maxEntriesPerRun: Number(process.env.CLANKIE_WORKER_TRANSCRIPT_MAX_ENTRIES ?? 500),
   },
 );
+const activityObservationProjection = new ActivityObservationProjection();
 const runnerEvents = new SqliteEventStore(join(runnerStateRoot, "runner-events.db"));
 try {
   const processLeases = new ProcessLeaseManager({
@@ -219,6 +225,25 @@ if (runnerToken) {
       port: transcriptGateway.address.port,
     },
     "runner-owned worker transcript gateway enabled",
+  );
+}
+
+if (runnerToken) {
+  const activityGateway = await createActivityObservationGateway({
+    projection: activityObservationProjection,
+    token: runnerToken,
+    port: Number(process.env.CLANKIE_ACTIVITY_OBSERVATION_PORT ?? ACTIVITY_OBSERVATION_GATEWAY_PORT),
+  });
+  const closeActivityGateway = () => void activityGateway.close().catch(() => undefined);
+  process.once("SIGINT", closeActivityGateway);
+  process.once("SIGTERM", closeActivityGateway);
+  logger.info(
+    {
+      event: "activity_observation.gateway.enabled",
+      host: activityGateway.address.host,
+      port: activityGateway.address.port,
+    },
+    "runner-owned activity observation gateway enabled",
   );
 }
 
@@ -429,7 +454,7 @@ function createConfiguredPlayExecution(): PlayExecution {
   if (fixture === "shutdown-fixture" || fixture === "ignore-stop") {
     return createShutdownFixturePlayExecution({ ignoreStop: fixture === "ignore-stop" });
   }
-  return createGbaPlayExecution({ logger });
+  return createGbaPlayExecution({ logger, activityObservations: activityObservationProjection });
 }
 
 function createShutdownFixturePlayExecution(input: { ignoreStop: boolean }): PlayExecution {
@@ -508,6 +533,7 @@ function shutdownFixtureTurn(turn: number): FreePlayTurn {
     reply: null,
     speak: null,
     speakSuppressed: false,
+    speakWanted: false,
   };
 }
 

@@ -205,6 +205,11 @@ src/observation/  Read-only sequenced event source, durable observer cursor,
   `CLANKIE_OPERATOR_TOKEN` is an explicit CI/test override.
   `CLANKIE_CONTROL_PLANE_URL` defaults to `http://127.0.0.1:4310`. The console
   records decisions only—connector execution returns through the policy path.
+- `/activity` reads Clankie's authenticated current-activity projection. It
+  labels model-authored goal/commentary/intent separately from runner-observed
+  outcome/effect/progress and prints the loopback watch URL for live frames.
+  `CLANKIE_ACTIVITY_PORT` selects the viewer port (default `4320`). The command
+  neither reads the gameplay transcript nor controls the emulator.
 - `clankie health` reports operator-credential presence and env/store
   consistency without fingerprints or secret content. A mismatch fails the
   health command while the explicit env value remains the runtime override.

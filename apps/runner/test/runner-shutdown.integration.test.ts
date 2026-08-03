@@ -141,6 +141,7 @@ function startRunner(
       CLANKIE_REPO_PATH: "",
       CLANKIE_RUNNER_STATE: path.join(root, "runner-state"),
       CLANKIE_WORKER_TRANSCRIPT_PORT: "0",
+      CLANKIE_ACTIVITY_OBSERVATION_PORT: "0",
       CLANKIE_GBA_BODY_ROOT: path.join(root, "body"),
       CLANKIE_GBA_CHECKPOINT_DIR: path.join(root, "checkpoints"),
       CLANKIE_GBA_PLAY_JOURNAL_DIR: path.join(root, "journals"),

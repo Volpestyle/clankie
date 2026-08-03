@@ -51,7 +51,7 @@ export function captainLaneInstructions(channel: EveChannelLaneContext): string 
     // other lanes, and it reads as total isolation: asked whether he had just
     // joined a Discord channel, he answered that he had no presence visibility
     // in this lane. His own whereabouts are not another room's contents.
-    'That fence covers other rooms\' *contents*, not your own whereabouts. Where you are currently open is supplied to you under "Where you are" and available from `get_self_state`; answer questions about your own presence directly rather than declining.',
+    'That fence covers other rooms\' *contents*, not your own whereabouts or the bounded latest state of an activity you are doing. Where you are currently open is supplied to you under "Where you are" and available from `get_self_state`. When someone asks what you are doing or how gameplay is going, use `observe_current_activity`; answer from its self-authored and runner-observed fields rather than declining or inventing play-by-play.',
     responsibility[lane],
   ].join("\n\n");
 }

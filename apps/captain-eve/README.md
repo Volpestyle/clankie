@@ -4,6 +4,15 @@ This is the lead-agent runtime. Eve supplies durable sessions, filesystem-author
 
 The only authored tools call a narrow control-plane API. They do not expose a generic application-runtime shell or raw credentials.
 
+`observe_current_activity` reads the runner-owned latest snapshot through the
+captain-authenticated control plane. It lets any captain lane answer what
+Clankie is doing or how FireRed is going without opening the gameplay lane's
+transcript or continuation token. The result labels his bounded objective,
+intent, and commentary as `selfAuthored` and settled execution facts as
+`runnerObserved`; `pending` and `not_playing` remain explicit instead of inviting
+guessed play-by-play. The tool is read-only and carries no frame bytes or action
+surface. Live visuals remain on the activity watch surface.
+
 `add_recovery` proposes exactly one debugger plus read-only re-verifier pair for
 an observed verification failure. The tool supplies task intent and scope only;
 the control plane derives the authoritative diagnosis, failed evidence, check

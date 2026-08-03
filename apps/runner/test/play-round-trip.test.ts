@@ -23,6 +23,7 @@ import type {
 import { describe, expect, it } from "vitest";
 import { createGbaPlayExecution } from "../src/play-execution.ts";
 import { PlayHost } from "../src/play-host.ts";
+import type { ActivityObservationSnapshot } from "@clankie/interactive-environment";
 
 const silentLogger = {
   info: () => undefined,
@@ -89,6 +90,8 @@ describe("asked play round trip on the deterministic double", () => {
   it("claims, runs the budgeted turns for real, and reports the receipt", async () => {
     const env = await playEnv();
     const client = fakeClient({ kind: "start", session: session() });
+    const activitySnapshots: ActivityObservationSnapshot[] = [];
+    const clearedSessions: string[] = [];
     const host = new PlayHost({
       client,
       runnerId: "runner-local",
@@ -97,6 +100,15 @@ describe("asked play round trip on the deterministic double", () => {
         logger: silentLogger,
         env,
         createMind: buttonMasher,
+        activityObservations: {
+          publish(snapshot) {
+            activitySnapshots.push(snapshot);
+            return snapshot;
+          },
+          clear(sessionId) {
+            clearedSessions.push(sessionId);
+          },
+        },
       }),
       logger: silentLogger,
     });
@@ -116,6 +128,14 @@ describe("asked play round trip on the deterministic double", () => {
     expect(lines[0]).toMatchObject({ runId: "round-trip-1" });
     expect(lines[1]).toMatchObject({ turn: { monologue: "pressing on", outcome: "accepted" } });
     expect(lines.at(-1)).toMatchObject({ outcome: "budget_exhausted", turnsTaken: 2 });
+    expect(activitySnapshots).toHaveLength(2);
+    expect(activitySnapshots.at(-1)).toMatchObject({
+      sessionId: "round-trip-1",
+      sequence: 1,
+      selfAuthored: { commentary: "pressing on", intent: "press a" },
+      runnerObserved: { outcome: "accepted" },
+    });
+    expect(clearedSessions).toEqual(["round-trip-1"]);
   });
 
   it("mints a checkpoint on stop and resumes from it on the next ask", async () => {

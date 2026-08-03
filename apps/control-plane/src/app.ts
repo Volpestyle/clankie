@@ -30,6 +30,7 @@ import {
   DISCORD_PRESENCE_LIVE_SESSION_HEADER,
   DiscordPresenceLiveClaimSchema,
   DiscordPresencePhaseEventSchema,
+  ActivityObservationReadSchema,
   isDiscordPresenceActionAvailable,
   resolveDiscordPresencePhaseToolExposure,
   type DiscordPresenceSessionRecord,
@@ -66,8 +67,10 @@ import {
   DiscordUserSessionOptInRequestSchema,
   DiscordUserSessionOptInSchema,
   EmbodimentClaimSchema,
+  type EmbodimentEnvironmentId,
   EmbodimentIntentSchema,
   EmbodimentLifecycleReportSchema,
+  type EmbodimentSession,
   resolveDiscordPresenceLedgerContent,
   LinearChannelTurnRequestSchema,
   MissionEventAuthFailureSchema,
@@ -182,6 +185,7 @@ import {
   type WorkspaceBindingResolver,
 } from "./tracker-ceremony.ts";
 import type { WorkerTranscriptReadPort } from "./worker-transcripts.ts";
+import type { ActivityObservationReadPort } from "./activity-observations.ts";
 import { MissionEventFeed, type MissionEventFeedTailRead } from "./mission-event-feed.ts";
 
 const logger = createLogger({ service: "clankie-control-plane", version: "0.1.0" });
@@ -365,6 +369,8 @@ export interface ControlPlaneDependencies {
   attentionDeliveryStore?: AttentionDeliveryStore;
   /** Injected runner-owned transcript reader. The control plane never persists transcript entries. */
   workerTranscripts?: WorkerTranscriptReadPort;
+  /** Injected runner-owned activity reader. The control plane never persists activity content. */
+  activityObservations?: ActivityObservationReadPort;
 }
 
 export type WorkerSteerAuthorizer = (input: {
@@ -1674,6 +1680,11 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     const sections = [
       renderVoiceBriefingSelfState(captainPresence.snapshot(), discordPresenceSessions.list()),
     ];
+    // What his body is doing, if anything. Without this the room hears a
+    // persona that does not know it is mid-playthrough, so every report from
+    // the play loop arrives with no frame of reference to remark against.
+    const embodimentCard = renderVoiceBriefingEmbodiment(embodiment.liveSession());
+    if (embodimentCard !== undefined) sections.push(embodimentCard);
     // Same visibility fence as every ambient lane: non-operator lanes only ever
     // see `shareable` episodes (`MemoryStore.recallEpisodes`).
     const episodeCard = dependencies.memoryStore?.episodeRecallCard({ lane: "discord_voice" }) ?? "";
@@ -3306,6 +3317,57 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       return context.json({ error: "captain_authentication_unavailable" }, 503);
     }
     return context.json({ error: "captain_authentication_required" }, 401);
+  });
+
+  /**
+   * Present-tense self-observation for the captain and authenticated operator.
+   * The runner owns the latest snapshot; this route validates its identity
+   * against the authoritative live embodiment session and never persists it.
+   */
+  app.get("/v1/embodiment/sessions/live/activity", async (context) => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable" || !captain) {
+      const operator = await authenticateOperator(context.req.raw, dependencies);
+      if (operator === "unavailable") {
+        if (captain === "unavailable") {
+          return context.json({ error: "activity_observation_authentication_unavailable" }, 503);
+        }
+        return context.json({ error: "activity_observation_authentication_required" }, 401);
+      }
+      if (!operator) return context.json({ error: "activity_observation_authentication_required" }, 401);
+    }
+
+    const live = embodiment.liveSession();
+    if (live === undefined) {
+      return context.json(ActivityObservationReadSchema.parse({ schemaVersion: 1, outcome: "not_playing" }));
+    }
+    if (dependencies.activityObservations === undefined) {
+      return context.json({ error: "activity_observation_unavailable" }, 503);
+    }
+    let snapshot;
+    try {
+      snapshot = await dependencies.activityObservations.current(context.req.raw.signal);
+    } catch {
+      return context.json({ error: "activity_observation_upstream_failure" }, 502);
+    }
+    if (snapshot === undefined) {
+      return context.json(
+        ActivityObservationReadSchema.parse({
+          schemaVersion: 1,
+          outcome: "pending",
+          sessionId: live.sessionId,
+          environmentId: live.environmentId,
+          state: live.state,
+          updatedAt: live.updatedAt,
+        }),
+      );
+    }
+    if (snapshot.sessionId !== live.sessionId || snapshot.environmentId !== live.environmentId) {
+      return context.json({ error: "activity_observation_identity_mismatch" }, 502);
+    }
+    return context.json(
+      ActivityObservationReadSchema.parse({ schemaVersion: 1, outcome: "snapshot", snapshot }),
+    );
   });
 
   app.get("/v1/embodiment/sessions/:id", async (context) => {
@@ -5256,6 +5318,36 @@ function renderVoiceBriefingSelfState(
     );
   }
   return lines.join("\n");
+}
+
+/** Human names for the environments a body can occupy, for the room's benefit. */
+const EMBODIMENT_ENVIRONMENT_NAMES: Record<EmbodimentEnvironmentId, string> = {
+  "pokemon-firered": "Pokémon FireRed on a Game Boy Advance emulator",
+};
+
+/**
+ * What his body is doing right now.
+ *
+ * The play loop reports events into the voice conversation as they happen, and
+ * a persona with no idea it is mid-playthrough has nothing to hang them on —
+ * which is how a report of one game event became a 39-second invention on
+ * 2026-08-02. This card is the frame of reference those reports land against.
+ *
+ * Only live sessions render: a finished playthrough is history, and history
+ * belongs to the episode card, not to "right now".
+ */
+function renderVoiceBriefingEmbodiment(session: EmbodimentSession | undefined): string | undefined {
+  if (session === undefined) return undefined;
+  if (session.state !== "running" && session.state !== "stopping") return undefined;
+  const name = EMBODIMENT_ENVIRONMENT_NAMES[session.environmentId];
+  return [
+    "# What you are doing right now",
+    `You are playing ${name}. This is really happening — you are at the controls as you speak, and`,
+    "the people in this room can watch the screen live on the Discord activity surface.",
+    'Reports of what you just did arrive as text items beginning "While playing, Clankie just:".',
+    "They are notes about your own play, not something anyone said to you — react the way a person",
+    "half-narrating their own game would, or let one pass without comment. Never read one aloud.",
+  ].join("\n");
 }
 
 /**

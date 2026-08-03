@@ -17,6 +17,7 @@ const turn = (index: number): FreePlayTurn => ({
   reply: null,
   speak: null,
   speakSuppressed: false,
+  speakWanted: false,
   action: { kind: "button_press", button: "a", holdFrames: 2 },
   outcome: "accepted",
   detail: null,

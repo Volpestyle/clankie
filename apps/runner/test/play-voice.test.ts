@@ -135,6 +135,7 @@ function talkingMind(speak: string | null) {
           return Promise.resolve({
             monologue: "still going",
             intent: "press a",
+            objective: "get out of the house",
             speak,
             reply: view.interjection === null ? null : `you said ${view.interjection}`,
             action: { kind: "button_press", button: "a", holdFrames: 2 },
@@ -186,6 +187,28 @@ describe("asked play voice", () => {
     expect(client.reports.map((report) => report.state)).toEqual(["running", "stopped"]);
   });
 
+  it("stays quiet on the turns his volition passed over", async () => {
+    // The room used to hear every turn's diagnostic — "no visible change — the
+    // frame is identical" — which the 12s narration throttle then sampled at
+    // random. Volition is the judgement of whether a moment is worth a word,
+    // and it is the same judgement whether or not the room holds the pen.
+    const voice = fakeVoice();
+    const mind = talkingMind(null);
+    await play({ voice: voice.client, mind: mind.create });
+
+    expect(voice.reported).toEqual([]);
+  });
+
+  it("names the goal the event served, so the room can react to a moment", async () => {
+    const voice = fakeVoice();
+    const mind = talkingMind("this desk has beaten me twice now");
+    await play({ voice: voice.client, mind: mind.create });
+
+    // The effect line alone is written for his own next decision and reads as
+    // telemetry out of context; the objective is what makes it a moment.
+    expect(voice.reported.join("\n")).toContain("working toward:");
+  });
+
   it("hears the room, and leaves the answer to the room", async () => {
     const voice = fakeVoice({ roomSaysOnSubscribe: "how's it going?" });
     const mind = talkingMind(null);
@@ -224,7 +247,9 @@ describe("asked play voice", () => {
         expect(voice.connected).toBe(true);
         expect(voice.roomListening).toBe(true);
       });
-      const mind = talkingMind(null);
+      // Volition must fire for anything to reach the room: narration reports
+      // the turns he judged worth a word, not every turn.
+      const mind = talkingMind("that ledge is going to be a problem");
       let deliveredAfterRunning = false;
       let acknowledgeTranscript!: () => void;
       const transcriptDelivered = new Promise<void>((resolve) => {

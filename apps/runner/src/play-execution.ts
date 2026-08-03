@@ -38,13 +38,18 @@ import {
   type ClankieVoice,
   type FreePlayJournal,
   type FreePlayMind,
+  type FreePlaySettledTurn,
   type FreePlayTurn,
 } from "@clankie/gba-emulator";
-import { RenderedSurfaceOverlaySchema } from "@clankie/interactive-environment";
+import {
+  GbaActivityObservationSnapshotSchema,
+  RenderedSurfaceOverlaySchema,
+} from "@clankie/interactive-environment";
 import { resolveConfiguredLanguageModel } from "@clankie/model-provider";
 import { createBrokeredPossessorVoiceClient, type PossessorVoiceClient } from "@clankie/possessor-voice";
 import { createBrokeredActivityFrameSink } from "@clankie/rendered-surface-client";
 import { personaInstructions, SettingsStore } from "@clankie/settings";
+import type { ActivityObservationWritePort } from "./activity-observation.ts";
 import type { PlayExecution } from "./play-host.ts";
 
 const FRAME_WIDTH = 240 * 3;
@@ -75,6 +80,8 @@ export interface GbaPlayExecutionOptions {
   interjections?: InterjectionQueue;
   /** Extra per-turn observer beside the overlay publish (dev script logging). */
   onTurn?: (turn: FreePlayTurn) => void;
+  /** Latest-only self-observation for captain and authenticated operator reads. */
+  activityObservations?: ActivityObservationWritePort;
   /** Test/dev injection; production resolves the configured model. */
   createMind?: () => Promise<FreePlayMind>;
   /**
@@ -475,11 +482,15 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
             );
           }
           publishFrame(turn.turn);
-          // What happened, not what to say (ADR 0074). The room's own persona
-          // decides whether this is worth a remark and what the remark is; it
-          // already heard anything that was said to him, so a reply composed
-          // here would be a second answer in a different voice.
-          reportToRoom(turn.effect);
+          // What happened, not what to say (ADR 0074) — but only on the turns
+          // his own volition judged worth remarking on. Reporting every turn
+          // fed the room a running commentary of turn diagnostics ("no visible
+          // change — the frame is identical"), and the 12s narration throttle
+          // then picked whichever fragment happened to land on the boundary.
+          // `speak` is the gate that already reads the whole moment; reusing it
+          // keeps one judgement of "is this worth saying" rather than a second
+          // list of notable-looking effects that would drift from the first.
+          reportToRoom(roomEvent(turn));
           journal?.turn(turn);
           if (
             autosaveEvery > 0 &&
@@ -516,6 +527,35 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
             }
           }
           options.onTurn?.(turn);
+        },
+        onSettledTurn: (event: FreePlaySettledTurn) => {
+          options.activityObservations?.publish(
+            GbaActivityObservationSnapshotSchema.parse({
+              schemaVersion: 1,
+              surface: "gba_emulator",
+              sessionId: session.sessionId,
+              environmentId: session.environmentId,
+              sequence: event.turn.turn,
+              observedAt: clock().toISOString(),
+              selfAuthored: {
+                objective: event.turn.objective,
+                intent: event.turn.intent,
+                commentary: event.turn.monologue,
+              },
+              runnerObserved: {
+                outcome: event.turn.outcome,
+                effect: event.turn.effect,
+                progress: {
+                  ...event.progress,
+                  // A long route can revisit maps indefinitely. Keep the
+                  // newest bounded path tail without making observation able
+                  // to fail or stop gameplay.
+                  maps: event.progress.maps.slice(-64).map((mapId) => mapId.slice(0, 200)),
+                },
+                framebufferSha256: game.framebufferSha256(),
+              },
+            }),
+          );
         },
       });
 
@@ -582,12 +622,40 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
         },
       };
     } finally {
+      options.activityObservations?.clear(session.sessionId);
       sink?.close();
       unsubscribe?.();
       voice?.close();
       freePlay.close();
     }
   }
+}
+
+/** Bound on the objective clause, so a rambling goal cannot crowd out the event. */
+const ROOM_EVENT_OBJECTIVE_MAX = 120;
+
+/**
+ * The event this turn is worth reporting to the room, or null for silence.
+ *
+ * Two things are decided here. **Whether** to report defers to `speak`: the
+ * volition gate already weighs the whole turn against what he has been doing,
+ * so asking it again with a second rule would give the room a different answer
+ * than the one he made. `speak` itself is deliberately not sent — ADR 0074 —
+ * because handing a finished quip to a conversational model produces a reply
+ * *to* the quip rather than a remark of its own.
+ *
+ * **What** to report is the effect plus the goal it was in service of. The
+ * effect line alone is written for his own next decision and reads like
+ * telemetry out of context ("turned to face north without stepping"); naming
+ * the objective is what turns it back into a moment someone can react to.
+ */
+function roomEvent(turn: FreePlayTurn): string | null {
+  if (!turn.speakWanted) return null;
+  const effect = turn.effect?.trim();
+  if (effect === undefined || effect.length === 0) return null;
+  const objective = turn.objective?.trim();
+  if (objective === undefined || objective.length === 0) return effect;
+  return `${effect} (working toward: ${objective.slice(0, ROOM_EVENT_OBJECTIVE_MAX)})`;
 }
 
 function positiveIntegerOr(raw: string | undefined, fallback: number): number {
