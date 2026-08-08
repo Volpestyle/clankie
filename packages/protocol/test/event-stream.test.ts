@@ -83,6 +83,7 @@ describe("event stream identity", () => {
         "pairing:a",
         "device:a",
         "character:a",
+        "adoption:a",
         "provider-readiness",
         "mission-a",
       ].map(eventStreamKindForId),

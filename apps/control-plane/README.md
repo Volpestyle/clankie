@@ -56,6 +56,28 @@ live embodiment session, `pending` before that session's first settled turn,
 and `snapshot` only when runner and control-plane session/environment identities
 match. Upstream failure and stale identity fail closed.
 
+## Agent census and adoption
+
+Four authenticated captain/operator routes proxy the runner's census gateway
+([ADR 0078](../../docs/adr/0078-adopted-workers.md)) at
+`CLANKIE_AGENT_CENSUS_URL` (default `http://127.0.0.1:4315`):
+
+| Route                     | Purpose                                   | Authority                        |
+| ------------------------- | ----------------------------------------- | -------------------------------- |
+| `GET /v1/agents/census`   | what is running, including foreign agents | captain or operator              |
+| `POST /v1/agents/adopt`   | take bounded responsibility               | operator required for `directed` |
+| `POST /v1/agents/direct`  | bounded operator-parity steering text     | captain or operator              |
+| `POST /v1/agents/release` | give an adopted agent back                | captain or operator              |
+
+Reading the census sits at the same tier as reading current activity: knowing
+which agents are running is a read the owner should never have to authorize.
+Adopting at `directed` grade is different — it grants steering and task
+assignment over a process this fleet never built, so a captain bearer alone is
+answered `refused: approval_required` before the runner is ever asked. The
+control plane proxies and persists nothing; a cached census would be a second,
+staler authority. Upstream failure returns `502` rather than a fabricated
+answer, and an unwired runner returns `503` rather than an empty machine.
+
 ## Worker transcript read and tail
 
 The control plane exposes paired-device reads at:

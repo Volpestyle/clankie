@@ -3,8 +3,8 @@
 ## System diagram
 
 ```text
-Discord text/voice      Pi TUI       iOS/Android/macOS garden/graph/terminal
-        │                  │                       │
+Discord · Linear · Slack   Pi TUI    iOS/Android/macOS garden/graph/terminal
+        │                     │                    │
         └────────── commands, approvals, queries ─┘
                                    │
                          Captain / Eve boundary
@@ -17,6 +17,7 @@ Discord text/voice      Pi TUI       iOS/Android/macOS garden/graph/terminal
                                    │
                          Local runner (trusted)
    worktrees · PTYs · native sessions · sandbox · capability exchange · leases
+   process leases · agent census · adoptions
           │                  │                  │                │
    Codex App Server   Claude Agent SDK       Pi RPC       shell/local adapters
           │                  │                  │                │
@@ -24,6 +25,12 @@ Discord text/voice      Pi TUI       iOS/Android/macOS garden/graph/terminal
                                    │
                    Herdr/tmux/native PTY presentation adapters
 ```
+
+Every ingress normalizes into the same captain turn; none of them plans. The
+lane address comes from the channel rather than the transport, so a Linear
+thread, a Discord channel, and a Slack thread each continue their own
+conversation ([ADR 0080](adr/0080-slack-is-a-channel-not-a-second-captain.md)).
+An instruction may arrive on any of them; an approval may not.
 
 ## Trust boundaries
 
@@ -255,6 +262,26 @@ a bot or the Social SDK, and normal-user automation remains forbidden. The
 versioned capability evaluator therefore reports screen media as an explicit
 API/policy blocker rather than advertising the transport stubs as working.
 
+## Discord image perception
+
+An image posted with a message is part of what was said, so a caption-less
+image is a real turn rather than an empty one
+([ADR 0081](adr/0081-an-image-is-part-of-what-was-said.md)). Both transports
+apply one shared selection rule (`selectInboundImageAttachments`): up to four
+`image/png|jpeg|gif|webp` attachments of at most 8 MB each, with everything
+left out reported to him as a count so he can say a file went unread.
+
+Images cross the control plane as references — `{ id, url, mediaType,
+filename?, byteSize }` — never as bytes. `apps/control-plane`'s
+`discord-attachment-fetch` is the only module that resolves one into content,
+bounded to HTTPS on Discord's CDN with no redirects, a size ceiling checked on
+both the declared length and the bytes read, the served media type re-checked
+against the allowlist, and a hard timeout. Resolved images reach the model as
+file parts on the durable Eve message — the one untrusted payload there, since
+`clientContext` cannot carry bytes — beside fixed framing that names them as
+sender-posted content rather than instructions. A fetch that fails costs the
+picture, not the turn. Context messages stay text-only.
+
 ## Discord person-memory projection
 
 Long-term social memory is separate from mission memory. The durable key is the
@@ -300,6 +327,72 @@ metadata such as terminal identity, geometry, sequence boundaries, capability
 flags, lease lifecycle, and typed error codes crosses the semantic/diagnostic
 boundary; artifacts use their separately authenticated retrieval plane.
 
+## Agent census and adoption
+
+The runner accounts for agents it did not start
+([ADR 0078](adr/0078-adopted-workers.md)). After lease reconciliation at boot it
+enumerates the Herdr transport and classifies every hosted agent as `owned`
+(this runner spawned it and holds its process lease), `adopted` (a durable
+binding still matches), `lapsed` (the binding broke), or `unclaimed` (live, and
+nobody has taken responsibility). The census reports; it never adopts.
+`transportAvailable: false` is a distinct state from an empty census, so a dead
+socket can never read as a quiet machine.
+
+```mermaid
+flowchart TB
+  T["Herdr pane.list"] --> O["AgentObservation<br/>harness · session id · status · cwd"]
+  L[("process leases")] --> C{classify}
+  A[("adoption records")] --> C
+  O --> C
+  C --> OW[owned] & AD[adopted] & LA[lapsed] & UN[unclaimed]
+  UN -.->|operator or captain| G{grade}
+  G -->|no approval| OBS["observed:<br/>knowledge only"]
+  G -->|approval + write scope| DIR["directed:<br/>steerable · routable"]
+  DIR --> S["/v1/agents/direct<br/>bounded operator-parity text"]
+  DIR -.->|never| V[verifier of record]
+```
+
+Adoption grades authority. `observed` needs no approval and grants exactly
+knowledge: that the agent exists, its observed status, and a bounded digest
+whose `runnerObserved` and `selfDeclared` sections keep what the runner saw
+apart from what the agent claimed. `directed` is an operator decision requiring
+an explicit write scope, and it grants the existing operator-parity vocabulary
+— bounded steering text, never approvals, credentials, or policy overrides. An
+adopted worker is never the verifier of record, because the runner cannot attest
+to an environment it did not build.
+
+The binding is `(transport, terminalId, harness, agentSessionId)`. The native
+provider session id is the identity because it survives pane churn and changes
+exactly when the agent restarts; pane ids are session-local and re-resolved at
+every use. A binding whose session no longer matches becomes `lapsed` rather
+than being re-pointed, and direction re-verifies the binding immediately before
+delivering. The census travels the same authenticated loopback path as worker
+transcripts and current activity; terminal bytes never enter it.
+
+## Worker routing
+
+Selection is a hard filter, then a deterministic score
+([ADR 0079](adr/0079-routing-prefers-the-worker-that-already-holds-the-context.md)),
+shared by the pull path (`leaseReadyTask`) and the push path
+(`StaticWorkerRouter`) so they cannot disagree. Capability kinds,
+`preferredHarness`, `canWrite`, and the verification-independence exclusion set
+remain hard filters; an adopted worker is a candidate only at `directed` grade
+and never for verification or review.
+
+Among eligible workers, preference runs warmth before load: ran the previous
+attempt, holds a settled assignment overlapping this write scope, completed a
+dependency, then idle over busy. Adoption carries a penalty larger than every
+warmth signal combined, so a spawned worker always wins when both are eligible.
+Ties break lexicographically by worker id, keeping identical missions
+byte-identical.
+
+Plan-time validation already refuses parallel tasks with overlapping write
+scopes, but an adopted worker's declared scope was never in any plan. A ready
+task whose scope overlaps a live `directed` adoption is therefore offered only
+to that adoption; if it cannot run the task the task stays queued and emits
+`task.scope_contended` once per episode, so a held-back task never looks like a
+stalled mission.
+
 ## Worker transcript projection
 
 Garden-facing worker activity comes from a runner-owned semantic projection,
@@ -342,7 +435,8 @@ covers, and what optimistic concurrency counts. Subsystems with no mission still
 need a partition, so they mint a namespaced stream id — `captain-presence`,
 `discord-presence:<sessionId>`, `embodiment:<sessionId>`, `device:<id>`,
 `trigger:<id>`, `pairing:<id>`, `character:<id>`, `captain-project:<id>`,
-`discord-person:<guild>:<user>`, `memory:retention`, `captain:episodes`.
+`discord-person:<guild>:<user>`, `memory:retention`, `captain:episodes`,
+`adoption:<adoptionId>`.
 
 `streamKind` on the envelope says which kind of partition an event belongs to, so
 no reader infers meaning from the shape of an id

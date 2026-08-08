@@ -1061,6 +1061,7 @@ export const EVENT_STREAM_KINDS = [
   "pairing",
   "device",
   "character",
+  "adoption",
   "diagnostic",
 ] as const;
 export const EventStreamKindSchema = z.enum(EVENT_STREAM_KINDS);
@@ -1090,6 +1091,9 @@ const RESERVED_EVENT_STREAM_NAMESPACES: readonly {
   { match: "pairing:", exact: false, kind: "pairing" },
   { match: "device:", exact: false, kind: "device" },
   { match: "character:", exact: false, kind: "character" },
+  // An adoption has no mission of its own (ADR 0078): the agent existed before
+  // any mission wanted it, and may outlive the one that borrows it.
+  { match: "adoption:", exact: false, kind: "adoption" },
   { match: "provider-readiness", exact: true, kind: "diagnostic" },
   { match: "media-readiness", exact: true, kind: "diagnostic" },
 ];
@@ -2296,6 +2300,48 @@ export type DiscordPresenceChannelIdentity = z.infer<typeof DiscordPresenceChann
 export const DISCORD_PRESENCE_TRIGGER_BODY_MAX = 16_384;
 export const DISCORD_PRESENCE_CONTEXT_MESSAGES_MAX = 50;
 
+/**
+ * Images he can actually be shown. Deliberately the intersection of what
+ * Discord serves and what vision models accept — an unsupported type is
+ * dropped at ingress rather than fetched and rejected at the model.
+ */
+export const DISCORD_PRESENCE_ATTACHMENT_MEDIA_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+] as const;
+export type DiscordPresenceAttachmentMediaType = (typeof DISCORD_PRESENCE_ATTACHMENT_MEDIA_TYPES)[number];
+
+/**
+ * Discord allows ten attachments per message; he is shown at most four. A turn
+ * that inlines images pays for every one of them in the model call, and four is
+ * already more than a person takes in from one message.
+ */
+export const DISCORD_PRESENCE_TRIGGER_ATTACHMENTS_MAX = 4;
+/** Per-image ceiling. Enforced at ingress on Discord's stated size and again on the bytes actually read. */
+export const DISCORD_PRESENCE_ATTACHMENT_BYTES_MAX = 8 * 1024 * 1024;
+
+/**
+ * One image on the trigger message, carried as a reference rather than bytes.
+ *
+ * The control plane stays a control plane: what crosses it is a URL and its
+ * metadata, and the bytes are fetched once at the last hop before the model
+ * (see `discord-attachment-fetch`). Passing base64 through here instead would
+ * put multi-megabyte payloads into every turn request, receipt fingerprint, and
+ * idempotency hash on the path.
+ */
+export const DiscordPresenceAttachmentSchema = z
+  .object({
+    id: z.string().min(1),
+    url: z.string().url(),
+    mediaType: z.enum(DISCORD_PRESENCE_ATTACHMENT_MEDIA_TYPES),
+    filename: z.string().min(1).max(256).optional(),
+    byteSize: z.number().int().positive().max(DISCORD_PRESENCE_ATTACHMENT_BYTES_MAX),
+  })
+  .strict();
+export type DiscordPresenceAttachment = z.infer<typeof DiscordPresenceAttachmentSchema>;
+
 export const DiscordVoicePresenceNoteReasonSchema = z.enum([
   "authority",
   "allowlist",
@@ -2337,6 +2383,22 @@ export const DiscordPresenceChannelTurnRequestSchema = z
         actorId: z.string().min(1),
         body: z.string().min(1).max(DISCORD_PRESENCE_TRIGGER_BODY_MAX).optional(),
         /**
+         * Images posted with the trigger message. An image is part of what was
+         * said, so a message carrying only images is a real turn with an empty
+         * body — see the request-level refinement below (ADR 0081).
+         */
+        attachments: z
+          .array(DiscordPresenceAttachmentSchema)
+          .max(DISCORD_PRESENCE_TRIGGER_ATTACHMENTS_MAX)
+          .default([]),
+        /**
+         * Attachments the ingress policy left out — wrong type, oversized, or
+         * past the per-message cap. A count, never a filename: he is told
+         * something went unread so he can say so, and the untrusted message
+         * never gets to author a sentence about it (ADR 0072).
+         */
+        attachmentsOmitted: z.number().int().positive().optional(),
+        /**
          * Nobody addressed him: this reached him because he had been talking to
          * this person, not because they used his name. Framing only — he may
          * stay silent on any turn — but he should know whether he was asked.
@@ -2372,6 +2434,16 @@ export const DiscordPresenceChannelTurnRequestSchema = z
         code: "custom",
         path: ["identity", "presenceSessionId"],
         message: "Discord channel turns require missionId or presenceSessionId attribution",
+      });
+    }
+    // A turn must carry something he can perceive. Text or images both qualify;
+    // neither is required on its own, because "here, look at this" with no
+    // caption is an ordinary thing for a person to send (ADR 0081).
+    if ((request.trigger.body ?? "").trim().length === 0 && request.trigger.attachments.length === 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["trigger", "body"],
+        message: "Discord channel turns require a trigger body or at least one attachment",
       });
     }
   });
@@ -3418,6 +3490,14 @@ export const HumanAttentionResponseSchema = z
   });
 export type HumanAttentionResponse = z.infer<typeof HumanAttentionResponseSchema>;
 
+// End connector-neutral tracker ceremony (VUH-845)
+//
+// The ceremony source scan runs between this marker and the section's opening
+// one. Without an explicit end the scan ran to end-of-file, so every schema
+// family appended later inherited the ceremony's connector-noun ban — a
+// provider-shaped field name in an unrelated transport would fail a check that
+// was never about it.
+
 // ---------------------------------------------------------------------------
 // Discord person memory (ADR 0042).
 //
@@ -3558,8 +3638,10 @@ export type DiscordPersonMemoryDeleteResult = z.infer<typeof DiscordPersonMemory
  */
 export const CAPTAIN_AUTHORED_TOOL_NAMES = [
   "add_recovery",
+  "adopt_agent",
   "create_mission",
   "decide_action",
+  "direct_agent",
   "get_mission",
   "get_self_state",
   "observe_current_activity",
@@ -3569,6 +3651,7 @@ export const CAPTAIN_AUTHORED_TOOL_NAMES = [
   "steer_worker",
   "stop_play",
   "submit_plan",
+  "survey_agents",
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -3857,3 +3940,430 @@ export const DiscordVoiceEvidenceSchema = z
   });
 
 export type DiscordVoiceEvidence = z.infer<typeof DiscordVoiceEvidenceSchema>;
+
+// ---------------------------------------------------------------------------
+// Adopted workers (ADR 0078): an agent the runner did not start can be given
+// bounded mission identity. Two grades — `observed` grants knowledge only,
+// `directed` grants the existing operator-parity vocabulary and requires an
+// authenticated approval plus an adopter-declared write scope.
+//
+// Every schema is a STRICT wire boundary. The one free-text field is the
+// agent's own `objective`, which is bounded and lives under `selfDeclared` so
+// no reader can mistake it for something the runner observed.
+// ---------------------------------------------------------------------------
+
+export const WorkerAdoptionIdSchema = z.string().min(1).max(200);
+export type WorkerAdoptionId = z.infer<typeof WorkerAdoptionIdSchema>;
+
+/** Transports that can host an agent this runner did not start. */
+export const AdoptedWorkerTransportSchema = z.enum(["herdr"]);
+export type AdoptedWorkerTransport = z.infer<typeof AdoptedWorkerTransportSchema>;
+
+export const AdoptedWorkerTerminalIdSchema = z.string().min(1).max(200);
+export type AdoptedWorkerTerminalId = z.infer<typeof AdoptedWorkerTerminalIdSchema>;
+
+export const AdoptedAgentSessionIdSchema = z.string().min(1).max(200);
+export type AdoptedAgentSessionId = z.infer<typeof AdoptedAgentSessionIdSchema>;
+
+/**
+ * Durable binding to the hosted agent. Pane ids are session-local and reusable
+ * so they are never stored; the native provider session id is, because it
+ * identifies the *agent* rather than its window, and it changes exactly when
+ * the agent restarts — which is exactly when an adoption should lapse. The
+ * terminal id rides along as the transport handle to re-resolve, never as the
+ * identity to trust.
+ */
+export const AdoptedWorkerBindingSchema = z
+  .object({
+    transport: AdoptedWorkerTransportSchema,
+    terminalId: AdoptedWorkerTerminalIdSchema,
+    harness: HarnessSchema,
+    agentSessionId: AdoptedAgentSessionIdSchema,
+  })
+  .strict();
+export type AdoptedWorkerBinding = z.infer<typeof AdoptedWorkerBindingSchema>;
+
+export const WorkerAdoptionGradeSchema = z.enum(["observed", "directed"]);
+export type WorkerAdoptionGrade = z.infer<typeof WorkerAdoptionGradeSchema>;
+
+export const WorkerAdoptionStateSchema = z.enum(["active", "lapsed", "released"]);
+export type WorkerAdoptionState = z.infer<typeof WorkerAdoptionStateSchema>;
+
+/**
+ * A lapse is always a fact about the process, never an inference from silence.
+ * An idle agent stays `active`; only a broken binding lapses.
+ */
+export const WorkerAdoptionLapseReasonSchema = z.enum([
+  "session_replaced",
+  "terminal_gone",
+  "transport_lost",
+]);
+export type WorkerAdoptionLapseReason = z.infer<typeof WorkerAdoptionLapseReasonSchema>;
+
+/** Server-authenticated authority that adopted the agent. */
+export const WorkerAdoptionPrincipalSchema = z
+  .object({
+    kind: z.enum(["operator", "captain"]),
+    id: z.string().min(1).max(200),
+  })
+  .strict();
+export type WorkerAdoptionPrincipal = z.infer<typeof WorkerAdoptionPrincipalSchema>;
+
+/**
+ * One durable adoption record. `writeScope` is declared by the adopter and
+ * never inferred from a pane title, cwd, or diff: at `directed` it is required
+ * so the concurrency invariant stays enforceable, and at `observed` it must be
+ * empty so nothing claims a scope the runner cannot hold anyone to.
+ */
+export const WorkerAdoptionSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    adoptionId: WorkerAdoptionIdSchema,
+    workerRunId: WorkerRunIdSchema,
+    grade: WorkerAdoptionGradeSchema,
+    state: WorkerAdoptionStateSchema,
+    binding: AdoptedWorkerBindingSchema,
+    writeScope: z.array(z.string().min(1).max(400)).max(64),
+    adoptedBy: WorkerAdoptionPrincipalSchema,
+    adoptedAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+    lapseReason: WorkerAdoptionLapseReasonSchema.optional(),
+  })
+  .strict()
+  .superRefine((adoption, context) => {
+    if (adoption.grade === "directed" && adoption.writeScope.length === 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["writeScope"],
+        message: "A directed adoption declares the write scope it will be held to",
+      });
+    }
+    if (adoption.grade === "observed" && adoption.writeScope.length > 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["writeScope"],
+        message: "An observed adoption grants no writes and therefore declares no scope",
+      });
+    }
+    if (adoption.state === "lapsed" && adoption.lapseReason === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["lapseReason"],
+        message: "A lapsed adoption records the observed cause",
+      });
+    }
+    if (adoption.state !== "lapsed" && adoption.lapseReason !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["lapseReason"],
+        message: "Only a lapsed adoption carries a lapse reason",
+      });
+    }
+  });
+export type WorkerAdoption = z.infer<typeof WorkerAdoptionSchema>;
+
+export const AgentDeclarationStatusSchema = z.enum(["working", "blocked", "waiting_user", "idle", "done"]);
+export type AgentDeclarationStatus = z.infer<typeof AgentDeclarationStatusSchema>;
+
+/**
+ * The cooperative half of the census: what an agent says about itself by
+ * writing a bounded record into the runner's declaration directory. It is
+ * untrusted model-authored content — advisory for contention warnings, never
+ * an authority for scope enforcement or completion.
+ */
+export const AgentDeclarationSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    terminalId: AdoptedWorkerTerminalIdSchema,
+    status: AgentDeclarationStatusSchema,
+    objective: z.string().min(1).max(500),
+    writeScope: z.array(z.string().min(1).max(400)).max(64),
+    declaredAt: z.string().datetime(),
+  })
+  .strict();
+export type AgentDeclaration = z.infer<typeof AgentDeclarationSchema>;
+
+/**
+ * The transport's own heuristic about what a pane is doing. This is a Tier-2
+ * signal in the ADR 0015 sense: it may fill `unknown` or raise attention, and
+ * it never overrides a Tier-0 protocol fact or a Tier-1 runner lease.
+ */
+export const AgentReportedStatusSchema = z.enum(["working", "idle", "done", "blocked", "unknown"]);
+export type AgentReportedStatus = z.infer<typeof AgentReportedStatusSchema>;
+
+/**
+ * What the runner itself can attest to about a hosted agent. `label` is the
+ * transport's sanitized title and `cwd` its attributed working directory;
+ * pane scrollback never appears here, because terminal bytes do not cross into
+ * the semantic plane (ADR 0033).
+ *
+ * `harness` and `agentSessionId` are absent for a pane that is merely a shell.
+ * `adoptable` states the consequence directly so no reader re-derives it: an
+ * agentless pane can be reported but never adopted.
+ */
+export const AgentObservationSchema = z
+  .object({
+    transport: AdoptedWorkerTransportSchema,
+    terminalId: AdoptedWorkerTerminalIdSchema,
+    label: z.string().min(1).max(200),
+    reportedStatus: AgentReportedStatusSchema,
+    adoptable: z.boolean(),
+    harness: HarnessSchema.optional(),
+    agentSessionId: AdoptedAgentSessionIdSchema.optional(),
+    cwd: z.string().min(1).max(1024).optional(),
+  })
+  .strict()
+  .superRefine((observation, context) => {
+    const identified = observation.harness !== undefined && observation.agentSessionId !== undefined;
+    if (observation.adoptable !== identified) {
+      context.addIssue({
+        code: "custom",
+        path: ["adoptable"],
+        message: "Adoptable means exactly that the transport identified a native agent session",
+      });
+    }
+  });
+export type AgentObservation = z.infer<typeof AgentObservationSchema>;
+
+/**
+ * Intention and execution fact stay in separate sections, the same split
+ * ADR 0077 applies to current activity. A reader can always tell what the
+ * runner saw from what the agent claimed.
+ */
+export const AgentCensusDigestSchema = z
+  .object({
+    runnerObserved: AgentObservationSchema,
+    selfDeclared: AgentDeclarationSchema.optional(),
+  })
+  .strict();
+export type AgentCensusDigest = z.infer<typeof AgentCensusDigestSchema>;
+
+/**
+ * `owned` was spawned by this runner and holds a live process lease.
+ * `adopted` carries a valid binding. `lapsed` had one that broke.
+ * `unclaimed` is a live agent nobody has taken responsibility for — reported
+ * on purpose, and never auto-adopted.
+ */
+export const AgentCensusClassificationSchema = z.enum(["owned", "adopted", "lapsed", "unclaimed"]);
+export type AgentCensusClassification = z.infer<typeof AgentCensusClassificationSchema>;
+
+export const AgentCensusEntrySchema = z
+  .object({
+    classification: AgentCensusClassificationSchema,
+    digest: AgentCensusDigestSchema,
+    workerRunId: WorkerRunIdSchema.optional(),
+    adoptionId: WorkerAdoptionIdSchema.optional(),
+    grade: WorkerAdoptionGradeSchema.optional(),
+    missionId: MissionIdSchema.optional(),
+    taskId: TaskIdSchema.optional(),
+    lapseReason: WorkerAdoptionLapseReasonSchema.optional(),
+  })
+  .strict()
+  .superRefine((entry, context) => {
+    if (entry.classification === "unclaimed") {
+      for (const field of ["workerRunId", "adoptionId", "grade"] as const) {
+        if (entry[field] !== undefined) {
+          context.addIssue({
+            code: "custom",
+            path: [field],
+            message: "An unclaimed agent holds no mission identity",
+          });
+        }
+      }
+    }
+    if (entry.classification === "adopted" || entry.classification === "lapsed") {
+      for (const field of ["adoptionId", "grade", "workerRunId"] as const) {
+        if (entry[field] === undefined) {
+          context.addIssue({
+            code: "custom",
+            path: [field],
+            message: "An adopted or lapsed agent carries its adoption identity",
+          });
+        }
+      }
+    }
+    if (entry.classification === "lapsed" && entry.lapseReason === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["lapseReason"],
+        message: "A lapsed entry records the observed cause",
+      });
+    }
+    if (entry.classification !== "lapsed" && entry.lapseReason !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["lapseReason"],
+        message: "Only a lapsed entry carries a lapse reason",
+      });
+    }
+  });
+export type AgentCensusEntry = z.infer<typeof AgentCensusEntrySchema>;
+
+export const AGENT_CENSUS_MAX_ENTRIES = 256;
+
+/**
+ * The runner's answer to "what is running on this machine?". Counts are
+ * carried rather than recomputed so every surface renders the same totals,
+ * and `transportAvailable: false` is an explicit state — an empty census with
+ * a dead transport must never read as "nothing is running".
+ */
+export const AgentCensusSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    runnerId: z.string().min(1).max(200),
+    takenAt: z.string().datetime(),
+    transportAvailable: z.boolean(),
+    entries: z.array(AgentCensusEntrySchema).max(AGENT_CENSUS_MAX_ENTRIES),
+    counts: z
+      .object({
+        owned: z.number().int().nonnegative(),
+        adopted: z.number().int().nonnegative(),
+        lapsed: z.number().int().nonnegative(),
+        unclaimed: z.number().int().nonnegative(),
+      })
+      .strict(),
+    /** Entries beyond the cap, so a truncated census never reads as complete. */
+    truncated: z.number().int().nonnegative(),
+  })
+  .strict();
+export type AgentCensus = z.infer<typeof AgentCensusSchema>;
+
+export const AdoptWorkerRequestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    transport: AdoptedWorkerTransportSchema,
+    terminalId: AdoptedWorkerTerminalIdSchema,
+    grade: WorkerAdoptionGradeSchema,
+    writeScope: z.array(z.string().min(1).max(400)).max(64).default([]),
+    adoptedBy: WorkerAdoptionPrincipalSchema,
+  })
+  .strict();
+export type AdoptWorkerRequest = z.infer<typeof AdoptWorkerRequestSchema>;
+
+export const WorkerAdoptionRefusalReasonSchema = z.enum([
+  "not_found",
+  "not_an_agent",
+  "already_owned",
+  "already_adopted",
+  "write_scope_required",
+  "write_scope_forbidden",
+  "approval_required",
+  "transport_unavailable",
+]);
+export type WorkerAdoptionRefusalReason = z.infer<typeof WorkerAdoptionRefusalReasonSchema>;
+
+export const AdoptWorkerResultSchema = z.discriminatedUnion("outcome", [
+  z.object({ outcome: z.literal("adopted"), adoption: WorkerAdoptionSchema }).strict(),
+  z.object({ outcome: z.literal("refused"), reason: WorkerAdoptionRefusalReasonSchema }).strict(),
+]);
+export type AdoptWorkerResult = z.infer<typeof AdoptWorkerResultSchema>;
+
+export const ReleaseWorkerAdoptionRequestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    adoptionId: WorkerAdoptionIdSchema,
+    releasedBy: WorkerAdoptionPrincipalSchema,
+  })
+  .strict();
+export type ReleaseWorkerAdoptionRequest = z.infer<typeof ReleaseWorkerAdoptionRequestSchema>;
+
+/**
+ * Bounded direction delivered into an adopted agent (ADR 0078). This is the
+ * operator-parity vocabulary a human already has — plain steering text — not a
+ * new captain-only control path, and it is deliberately not an approval,
+ * credential, or policy channel.
+ */
+export const DirectAdoptedWorkerRequestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    adoptionId: WorkerAdoptionIdSchema,
+    /** Bounded steering text. Matches the worker-steer input ceiling. */
+    text: z.string().min(1).max(20_000),
+    directedBy: WorkerAdoptionPrincipalSchema,
+  })
+  .strict();
+export type DirectAdoptedWorkerRequest = z.infer<typeof DirectAdoptedWorkerRequestSchema>;
+
+export const AdoptedWorkerDirectionRefusalReasonSchema = z.enum([
+  "unknown_adoption",
+  "not_active",
+  "not_directed",
+  "binding_lapsed",
+  "transport_unavailable",
+]);
+export type AdoptedWorkerDirectionRefusalReason = z.infer<typeof AdoptedWorkerDirectionRefusalReasonSchema>;
+
+export const DirectAdoptedWorkerResultSchema = z.discriminatedUnion("outcome", [
+  z
+    .object({
+      outcome: z.literal("delivered"),
+      adoptionId: WorkerAdoptionIdSchema,
+      workerRunId: WorkerRunIdSchema,
+    })
+    .strict(),
+  z.object({ outcome: z.literal("refused"), reason: AdoptedWorkerDirectionRefusalReasonSchema }).strict(),
+]);
+export type DirectAdoptedWorkerResult = z.infer<typeof DirectAdoptedWorkerResultSchema>;
+
+// ---------------------------------------------------------------------------
+// Slack channel turns (ADR 0080). A sibling of the Linear family, never a
+// widening of it: doctrine forbids a provider reusing another provider's field
+// under a new meaning, so Slack carries team/channel/thread identity of its own
+// rather than borrowing `workspaceId` or `issue`.
+// ---------------------------------------------------------------------------
+
+export const SlackChannelIdentitySchema = z
+  .object({
+    correlationId: z.string().min(1).max(160),
+    profileHash: z.string().min(1),
+    /** Slack workspace (team) the event came from. */
+    teamId: z.string().min(1).max(64),
+    /** The bot user this workspace installed; a mismatch is another app's event. */
+    appUserId: z.string().min(1).max(64),
+    missionId: MissionIdSchema.optional(),
+    taskId: TaskIdSchema.optional(),
+    workerRunId: WorkerRunIdSchema.optional(),
+  })
+  .strict();
+export type SlackChannelIdentity = z.infer<typeof SlackChannelIdentitySchema>;
+
+/**
+ * A Slack thread is the durable conversation address (ADR 0048's rule applied
+ * to a third transport): the lane comes from the channel, not the wire. A
+ * top-level message uses its own timestamp as the thread root, so the first
+ * reply continues the same conversation instead of forking a second one.
+ */
+export const SlackConversationAddressSchema = z
+  .object({
+    channelId: z.string().min(1).max(64),
+    threadTs: z.string().min(1).max(64),
+    isDirectMessage: z.boolean(),
+  })
+  .strict();
+export type SlackConversationAddress = z.infer<typeof SlackConversationAddressSchema>;
+
+/** Only addressed events; the bridge never subscribes to a channel firehose. */
+export const SlackTriggerKindSchema = z.enum(["app_mention", "thread_reply", "direct_message"]);
+export type SlackTriggerKind = z.infer<typeof SlackTriggerKindSchema>;
+
+export const SLACK_TRIGGER_BODY_MAX = 16_384;
+
+export const SlackChannelTurnRequestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    deliveryId: z.string().uuid(),
+    identity: SlackChannelIdentitySchema,
+    conversation: SlackConversationAddressSchema,
+    trigger: z
+      .object({
+        kind: SlackTriggerKindSchema,
+        /** Slack's `event_id`; the dedupe key for at-least-once delivery. */
+        eventId: z.string().min(1).max(64),
+        messageTs: z.string().min(1).max(64),
+        actorId: z.string().min(1).max(64),
+        body: z.string().min(1).max(SLACK_TRIGGER_BODY_MAX),
+      })
+      .strict(),
+  })
+  .strict();
+export type SlackChannelTurnRequest = z.infer<typeof SlackChannelTurnRequestSchema>;

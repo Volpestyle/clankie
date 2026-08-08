@@ -1,4 +1,7 @@
 import {
+  AdoptWorkerResultSchema,
+  AgentCensusSchema,
+  DirectAdoptedWorkerResultSchema,
   ApprovalRequestRecordSchema,
   ActionDecisionSchema,
   BodyPossessionReadSchema,
@@ -12,6 +15,7 @@ import {
   EmbodimentSessionSchema,
   EmbodimentSubmitResultSchema,
   LinearChannelTurnRequestSchema,
+  SlackChannelTurnRequestSchema,
   ActiveMissionSelectionSchema,
   MissionEventAuthFailureSchema,
   MissionEventRecoverySchema,
@@ -22,7 +26,13 @@ import {
   TrackerNarrativeWriteSchema,
   type ActionRequest,
   type ActiveMissionSelection,
+  type AdoptWorkerRequest,
+  type AdoptWorkerResult,
+  type AgentCensus,
   type ApprovalDecisionInput,
+  type DirectAdoptedWorkerRequest,
+  type DirectAdoptedWorkerResult,
+  type ReleaseWorkerAdoptionRequest,
   type ApprovalRequestRecord,
   type ApprovalRequestStatus,
   type BodyPossession,
@@ -47,6 +57,7 @@ import {
   type EmbodimentSession,
   type EmbodimentSubmitResult,
   type LinearChannelTurnRequest,
+  type SlackChannelTurnRequest,
   type MissionPlan,
   type MissionEventRecovery,
   type MissionEventSnapshot,
@@ -478,6 +489,18 @@ export class ClankieApiClient {
     return CaptainChannelTurnResultSchema.parse(result);
   }
 
+  /** Submits a bounded Slack thread turn; the thread is the conversation address (ADR 0080). */
+  public async submitSlackCaptainChannelTurn(
+    input: SlackChannelTurnRequest,
+  ): Promise<CaptainChannelTurnResult> {
+    const request = SlackChannelTurnRequestSchema.parse(input);
+    const result = await this.request<unknown>("/v1/captain/channel-turns", {
+      method: "POST",
+      body: JSON.stringify(request),
+    });
+    return CaptainChannelTurnResultSchema.parse(result);
+  }
+
   /** Submits a bounded, ambient Discord text turn through the authenticated captain lane. */
   public async submitDiscordCaptainChannelTurn(
     input: DiscordPresenceChannelTurnRequest,
@@ -822,6 +845,56 @@ export class ClankieApiClient {
       headers: this.activityReadHeaders(),
     });
     return ActivityObservationReadSchema.parse(body);
+  }
+
+  /**
+   * Which agents are running on this machine (ADR 0078), including ones this
+   * fleet did not start. `transportAvailable: false` means he could not look —
+   * never that the machine is quiet.
+   */
+  public async getAgentCensus(): Promise<AgentCensus> {
+    const body = await this.request<{ census: unknown }>("/v1/agents/census", {
+      headers: this.activityReadHeaders(),
+    });
+    return AgentCensusSchema.parse(body.census);
+  }
+
+  /**
+   * Take bounded responsibility for an agent this fleet did not start. A
+   * `directed` grade needs an operator token; a captain token alone comes back
+   * refused with `approval_required` rather than throwing, because being told
+   * no is a normal outcome he should be able to relay.
+   */
+  public async adoptAgent(request: AdoptWorkerRequest): Promise<AdoptWorkerResult> {
+    const body = await this.request<{ result: unknown }>("/v1/agents/adopt", {
+      method: "POST",
+      headers: this.activityReadHeaders(),
+      body: JSON.stringify(request),
+    });
+    return AdoptWorkerResultSchema.parse(body.result);
+  }
+
+  /**
+   * Send bounded steering text to an adopted agent. Refusals are typed results,
+   * not throws: `binding_lapsed` means the agent that was there has been
+   * replaced, which is a normal thing to report rather than an error.
+   */
+  public async directAdoptedAgent(request: DirectAdoptedWorkerRequest): Promise<DirectAdoptedWorkerResult> {
+    const body = await this.request<{ result: unknown }>("/v1/agents/direct", {
+      method: "POST",
+      headers: this.activityReadHeaders(),
+      body: JSON.stringify(request),
+    });
+    return DirectAdoptedWorkerResultSchema.parse(body.result);
+  }
+
+  /** Give an adopted agent back. */
+  public async releaseAgentAdoption(request: ReleaseWorkerAdoptionRequest): Promise<void> {
+    await this.request("/v1/agents/release", {
+      method: "POST",
+      headers: this.activityReadHeaders(),
+      body: JSON.stringify(request),
+    });
   }
 
   /**

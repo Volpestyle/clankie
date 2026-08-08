@@ -205,12 +205,19 @@ describe("VUH-845 tracker ceremony protocol", () => {
   it("keeps protocol ceremony source free of forbidden provider/user nouns", () => {
     const here = dirname(fileURLToPath(import.meta.url));
     const source = readFileSync(join(here, "../src/index.ts"), "utf8");
-    // Slice from the VUH-845 marker so unrelated Discord action names in the
-    // rest of the protocol package do not fail this ceremony check. Strip
-    // line comments so prose about the ban does not trip the scanner.
+    // Scan between the section's own markers so unrelated action names
+    // elsewhere in the protocol package do not fail this ceremony check. The
+    // end marker matters: scanning to end-of-file made every schema family
+    // appended later inherit a ban that was never about it. Strip line
+    // comments so prose about the ban does not trip the scanner.
     const marker = "// Connector-neutral tracker ceremony (VUH-845)";
+    const endMarker = "// End connector-neutral tracker ceremony (VUH-845)";
+    const start = source.indexOf(marker);
+    const end = source.indexOf(endMarker);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
     const ceremonySource = source
-      .slice(source.indexOf(marker))
+      .slice(start, end)
       .split("\n")
       .map((line) => line.replace(/\/\/.*$/u, "").replace(/\/\*[\s\S]*?\*\//gu, ""))
       .join("\n")

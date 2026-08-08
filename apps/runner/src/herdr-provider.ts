@@ -1,6 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createConnection, type Socket } from "node:net";
 import {
+  AgentObservationSchema,
+  type AgentObservation,
+  type AgentReportedStatus,
+  type Harness,
+} from "@clankie/protocol";
+import {
   decodeTerminalBytes,
   type ControlLease,
   type TerminalCapabilities,
@@ -81,6 +87,27 @@ export interface HerdrTransport {
   sendInput(paneId: string, text: string): Promise<void>;
 }
 
+/**
+ * The census view of the same transport (ADR 0078), kept separate from
+ * `HerdrTransport` because it answers a different question on a different
+ * plane: `HerdrTransport` serves the observe-only terminal data plane, which
+ * strips paths and session identifiers by design, while the census serves an
+ * authenticated runner-owned surface whose entire job is to say which agents
+ * are running and where. Neither ever carries terminal bytes.
+ */
+export interface HerdrAgentSource {
+  listAgents(): Promise<AgentObservation[]>;
+  /**
+   * Deliver bounded operator-parity text to the pane hosting a terminal.
+   * Takes a terminal id, never a pane id: pane ids are session-local and
+   * reusable, so the handle is re-resolved at delivery time (ADR 0078). A
+   * terminal the transport can no longer see resolves to `undefined` rather
+   * than being guessed at — sending steering into the wrong pane is worse than
+   * not sending it.
+   */
+  sendToTerminal(terminalId: string, text: string): Promise<"delivered" | "terminal_gone">;
+}
+
 export interface HerdrSocketTransportOptions {
   socketPath: string;
   connect?: (socketPath: string) => Socket;
@@ -112,6 +139,37 @@ export class HerdrSocketTransport implements HerdrTransport {
       const label = optionalString(value.label) ?? optionalString(value.title) ?? "Herdr pane";
       return { paneId, terminalId, title: safeTitle(label, paneId) };
     });
+  }
+
+  /**
+   * Census listing (ADR 0078). Reuses the same `pane.list` call as
+   * `listPanes` but keeps the structured agent fields the terminal plane drops.
+   * A pane the parser cannot understand is omitted rather than guessed at: a
+   * census entry that misstates which agent occupies a terminal is worse than a
+   * census that admits it saw one fewer.
+   */
+  public async listAgents(): Promise<AgentObservation[]> {
+    const result = await this.request("pane.list", {});
+    if (!isRecord(result) || result.type !== "pane_list" || !Array.isArray(result.panes)) {
+      throw new HerdrTerminalError("protocol_error");
+    }
+    const observations: AgentObservation[] = [];
+    const seen = new Set<string>();
+    for (const pane of result.panes) {
+      const observation = herdrPaneToAgentObservation(pane);
+      if (!observation || seen.has(observation.terminalId)) continue;
+      seen.add(observation.terminalId);
+      observations.push(observation);
+    }
+    return observations;
+  }
+
+  /** Re-resolves the pane hosting a terminal, then delivers (ADR 0078). */
+  public async sendToTerminal(terminalId: string, text: string): Promise<"delivered" | "terminal_gone"> {
+    const pane = (await this.listPanes()).find((summary) => summary.terminalId === terminalId);
+    if (!pane) return "terminal_gone";
+    await this.sendInput(pane.paneId, text);
+    return "delivered";
   }
 
   public async readVisible(paneId: string): Promise<HerdrVisibleState> {
@@ -682,6 +740,71 @@ function requiredString(value: unknown): string {
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/** Herdr agent labels the runner can map onto a harness; anything else is not an agent. */
+const HERDR_HARNESS_BY_AGENT: Readonly<Record<string, Harness>> = {
+  claude: "claude",
+  codex: "codex",
+  pi: "pi",
+};
+
+const HERDR_STATUS_BY_AGENT_STATUS: Readonly<Record<string, AgentReportedStatus>> = {
+  working: "working",
+  idle: "idle",
+  done: "done",
+  blocked: "blocked",
+};
+
+/**
+ * Pure `pane.list` record → census observation. Exported so the mapping can be
+ * frozen by tests without a socket.
+ *
+ * A pane is `adoptable` only when Herdr reports both a known harness and a
+ * native session id: a bare shell is reportable but can never be given mission
+ * identity (ADR 0078). An unrecognized `agent_status` degrades to `unknown`
+ * rather than being dropped, because the pane's existence is the fact that
+ * matters and its status is only a Tier-2 hint.
+ */
+export function herdrPaneToAgentObservation(value: unknown): AgentObservation | undefined {
+  if (!isRecord(value)) return undefined;
+  const terminalId = optionalString(value.terminal_id);
+  if (terminalId === undefined) return undefined;
+  const paneId = optionalString(value.pane_id);
+  const rawTitle =
+    optionalString(value.terminal_title_stripped) ?? optionalString(value.terminal_title) ?? "Herdr pane";
+  const harness = readHerdrHarness(value.agent);
+  const agentSessionId = readHerdrAgentSessionId(value.agent_session);
+  const adoptable = harness !== undefined && agentSessionId !== undefined;
+  const cwd = optionalString(value.cwd);
+  const status = optionalString(value.agent_status);
+  const observation: AgentObservation = {
+    transport: "herdr",
+    terminalId,
+    label: safeTitle(rawTitle, paneId),
+    reportedStatus: (status === undefined ? undefined : HERDR_STATUS_BY_AGENT_STATUS[status]) ?? "unknown",
+    adoptable,
+    ...(harness === undefined ? {} : { harness }),
+    ...(agentSessionId === undefined ? {} : { agentSessionId }),
+    ...(cwd === undefined ? {} : { cwd: cwd.slice(0, 1024) }),
+  };
+  const parsed = AgentObservationSchema.safeParse(observation);
+  return parsed.success ? parsed.data : undefined;
+}
+
+function readHerdrHarness(value: unknown): Harness | undefined {
+  const agent = optionalString(value);
+  return agent === undefined ? undefined : HERDR_HARNESS_BY_AGENT[agent];
+}
+
+/**
+ * Only an `id`-kind session is a durable binding key. Herdr also reports
+ * inferred session shapes; binding to one would silently re-point the adoption
+ * the moment the inference changed.
+ */
+function readHerdrAgentSessionId(value: unknown): string | undefined {
+  if (!isRecord(value) || value.kind !== "id") return undefined;
+  return optionalString(value.value);
 }
 
 function safeTitle(value: string, privatePaneId?: string): string {

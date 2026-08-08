@@ -24,6 +24,44 @@ the first settled turn or after the matching session clears. The durable journal
 remains the historical debugging artifact; the projection is present-tense and
 is never persisted.
 
+### Agent census and adoption (ADR 0078)
+
+The runner accounts for agents it did not start. After lease reconciliation at
+boot it lists the Herdr transport and classifies every hosted agent as `owned`,
+`adopted`, `lapsed`, or `unclaimed`. It reports and never adopts: an unclaimed
+agent is an offer, and leaving it alone is a valid outcome. An unreachable
+transport is reported as `transportAvailable: false` rather than an empty
+census, and it lapses nothing — "I cannot see" is not evidence that an agent
+stopped.
+
+The census reads Herdr whenever `HERDR_SOCKET_PATH` is set, independently of
+`CLANKIE_HERDR_TERMINAL_SOURCE_ENABLED`, which gates the observe-only terminal
+_data_ plane. Knowing which agents exist is a cheaper question than streaming
+their bytes, and gating it behind the byte plane would leave the runner blind
+for the wrong reason. Each entry keeps `runnerObserved` (sanitized label,
+harness, native session id, transport status, cwd) apart from `selfDeclared`
+(a bounded record an agent may write into `<state>/agent-declarations/`, read
+only while fresh, well-formed, and self-consistent). Pane scrollback is never
+context.
+
+Adoption binds `(transport, terminalId, harness, agentSessionId)` — the native
+session id, because it identifies the agent rather than its window and changes
+exactly when the agent restarts. `observed` grade grants knowledge only;
+`directed` grade requires an operator approval and a declared write scope, and
+grants bounded operator-parity steering. An adopted worker is never the verifier
+of record.
+
+The exact-loopback gateway listens on `CLANKIE_AGENT_CENSUS_PORT` (default
+`4315`) with the runner bearer and serves `/v1/agents/census`, `/v1/agents/adopt`,
+`/v1/agents/direct`, and `/v1/agents/release`. Direction re-verifies the binding
+against the live transport immediately before delivering, and records that
+direction happened and how long it was — never what was said.
+
+```bash
+# What is running on this machine right now, read-only, adopting nothing.
+pnpm --filter @clankie/runner census:probe
+```
+
 ### The durable trail (ADR 0068)
 
 Every playthrough journals itself: one append-only JSONL per run under `~/.local/state/clankie/gba-play/` — a header with the run identity and resume lineage, every `FreePlayTurn` (monologue, intent, objective, action, outcome, effect) as it settles, and a summary carrying the metrics the content-free receipt cannot (progress, volition, coherence). The same metrics land in the runner log as `embodiment playthrough finished`, and the play host narrates each lifecycle transition (`claimed`, `running`, `settled`, `refused`, stop asks) so the log tells the same story the control-plane events record. An unwritable journal degrades to an unrecorded playthrough that still runs; the log says so. See [`docs/08-observability-debugging.md`](../../docs/08-observability-debugging.md) for the full artifact map.

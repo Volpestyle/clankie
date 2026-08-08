@@ -10,14 +10,25 @@ import {
   type TaskState,
   type WorkerResult,
 } from "@clankie/protocol";
-import type { WorkerAdapter, WorkerDescriptor, WorkerRouter } from "@clankie/worker-sdk";
+import {
+  isWorkerEligible,
+  selectWorkerDescriptor,
+  type WorkerAdapter,
+  type WorkerDescriptor,
+  type WorkerRouter,
+  type WorkerSelectionContext,
+} from "@clankie/worker-sdk";
 import {
   AgentStatusResolver,
   STATUS_RESOLVED_EVENT_TYPE,
   toResolvedStatusEventData,
   type ResolvedAgentStatus,
 } from "@clankie/status-resolver";
-import { assertValidMissionPlan, type MissionPlanValidationEvidence } from "./plan-validator.ts";
+import {
+  assertValidMissionPlan,
+  scopePatternsOverlap,
+  type MissionPlanValidationEvidence,
+} from "./plan-validator.ts";
 
 export * from "./plan-validator.ts";
 
@@ -186,6 +197,7 @@ export class MissionEngine {
   private readonly debuggerEvidenceByRunId = new Map<string, { reproduced: boolean; repaired: boolean }>();
   /** Task ids that have emitted an unacknowledged pull-path exclusion-starve signal. */
   private readonly verificationStarveSignaled = new Set<string>();
+  private readonly scopeContendedSignaled = new Set<string>();
   /** Debugging task ids whose runtime failure evidence has been bound (bridge, VUH-827). */
   private readonly runtimeEvidenceBound = new Set<string>();
   /** Task ids whose debugger metadata was bound by an engine-owned evidence transition. */
@@ -621,15 +633,21 @@ export class MissionEngine {
       }
       const excluded = this.excludedWorkers(runtime.spec);
       const isCapable = (candidate: WorkerDescriptor): boolean =>
-        candidate.capabilities.kinds.includes(runtime.spec.kind) &&
-        (!runtime.spec.preferredHarness || candidate.harness === runtime.spec.preferredHarness) &&
-        (runtime.spec.writeScope.length === 0 || candidate.capabilities.canWrite);
-      const worker = workers.find((candidate) => !excluded.has(candidate.id) && isCapable(candidate));
+        isWorkerEligible(runtime.spec, candidate, new Set());
+      // An adopted worker's declared scope was never in this plan, so plan-time
+      // validation could not have caught a collision with it (ADR 0079). Where
+      // one exists the path belongs to that worker: it is the only candidate,
+      // and if it cannot take the task, nobody may.
+      const scopeOwners = this.adoptedScopeOwners(runtime.spec, workers);
+      const offered = scopeOwners ?? workers;
+      const worker = selectWorkerDescriptor(runtime.spec, offered, excluded, this.selectionContext(runtime));
       if (!worker) {
-        this.signalVerificationStarveIfExcluded(runtime, workers, excluded, isCapable);
+        if (scopeOwners) this.signalScopeContended(runtime, scopeOwners);
+        else this.signalVerificationStarveIfExcluded(runtime, workers, excluded, isCapable);
         continue;
       }
       this.verificationStarveSignaled.delete(runtime.spec.id);
+      this.scopeContendedSignaled.delete(runtime.spec.id);
 
       runtime.attempts += 1;
       runtime.state = "running";
@@ -687,6 +705,83 @@ export class MissionEngine {
    * Plain availability starvation (no capable worker offered at all) is normal
    * and stays silent.
    */
+  /**
+   * Warmth and load, derived entirely from this mission's own runtime state
+   * (ADR 0079). No wall clock and no history outside the mission log, so a
+   * replay of the same log makes the same choice.
+   */
+  private selectionContext(runtime: TaskRuntime): WorkerSelectionContext {
+    const scopeWarm = new Set<string>();
+    const dependencyWorkers = new Set<string>();
+    const busy = new Set<string>();
+    for (const other of this.tasks.values()) {
+      if (other.spec.id === runtime.spec.id) continue;
+      if (isActiveWorkerTaskState(other.state) || other.state === "leased") {
+        if (other.workerId) busy.add(other.workerId);
+        continue;
+      }
+      if (other.state !== "succeeded") continue;
+      if (runtime.spec.dependsOn.includes(other.spec.id) && other.workerId) {
+        dependencyWorkers.add(other.workerId);
+      }
+      if (!other.workerId) continue;
+      if (this.scopesOverlap(runtime.spec.writeScope, other.spec.writeScope)) {
+        scopeWarm.add(other.workerId);
+      }
+    }
+    // The previous attempt's worker is the strongest signal: it already paid
+    // for the failure this retry exists to fix.
+    const previousWorkerId = runtime.workerIds.at(-1);
+    return {
+      ...(previousWorkerId === undefined ? {} : { previousWorkerId }),
+      scopeWarmWorkerIds: scopeWarm,
+      dependencyWorkerIds: dependencyWorkers,
+      busyWorkerIds: busy,
+    };
+  }
+
+  /**
+   * Adopted workers whose declared write scope touches this task's, or
+   * `undefined` when the path is uncontended. An empty array means the path is
+   * owned by an adoption that cannot run this task — the task must wait rather
+   * than route around a live writer.
+   */
+  private adoptedScopeOwners(
+    spec: TaskSpec,
+    workers: readonly WorkerDescriptor[],
+  ): WorkerDescriptor[] | undefined {
+    if (spec.writeScope.length === 0) return undefined;
+    const owners = workers.filter(
+      (candidate) =>
+        candidate.adoption !== undefined &&
+        this.scopesOverlap(spec.writeScope, candidate.adoption.writeScope),
+    );
+    return owners.length > 0 ? owners : undefined;
+  }
+
+  private scopesOverlap(left: readonly string[], right: readonly string[]): boolean {
+    return left.some((leftScope) => right.some((rightScope) => scopePatternsOverlap(leftScope, rightScope)));
+  }
+
+  /**
+   * A task held back by a live adoption looks exactly like a stalled mission
+   * unless it says so. Emitted once per episode and cleared on a successful
+   * lease, mirroring `task.verification_starved`.
+   */
+  private signalScopeContended(runtime: TaskRuntime, owners: readonly WorkerDescriptor[]): void {
+    if (this.scopeContendedSignaled.has(runtime.spec.id)) return;
+    this.scopeContendedSignaled.add(runtime.spec.id);
+    this.emit(
+      "task.scope_contended",
+      {
+        reason:
+          "An adopted worker holds a write scope overlapping this task and cannot run it; release the adoption or narrow the scope.",
+        adoptedWorkerIds: owners.map((owner) => owner.id).sort(),
+      },
+      runtime.spec.id,
+    );
+  }
+
   private signalVerificationStarveIfExcluded(
     runtime: TaskRuntime,
     workers: readonly WorkerDescriptor[],
@@ -1424,7 +1519,9 @@ export class MissionEngine {
 
     let worker: WorkerAdapter;
     try {
-      worker = router.select(runtime.spec, excluded);
+      // The push path gets the same warmth and load context as the pull path,
+      // so a mission's worker choices do not depend on which path drove it.
+      worker = router.select(runtime.spec, excluded, this.selectionContext(runtime));
       if (excluded.has(worker.descriptor.id)) {
         throw new Error(
           `Worker router selected excluded worker ${worker.descriptor.id} for verification task ${runtime.spec.id}`,

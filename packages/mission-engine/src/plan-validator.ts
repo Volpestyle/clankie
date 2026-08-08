@@ -219,7 +219,13 @@ function findScopeOverlaps(leftScopes: readonly string[], rightScopes: readonly 
   return [...overlaps].sort();
 }
 
-function scopePatternsOverlap(left: string, right: string): boolean {
+/**
+ * One authority for "do these two write scopes touch". Exported because the
+ * scheduler needs the same answer at lease time that the validator gives at
+ * plan time — an adopted worker's declared scope (ADR 0078) was never in any
+ * plan, so plan-time validation structurally cannot see it (ADR 0079).
+ */
+export function scopePatternsOverlap(left: string, right: string): boolean {
   const normalizedLeft = normalizeScope(left);
   const normalizedRight = normalizeScope(right);
   if (normalizedLeft === normalizedRight) return true;

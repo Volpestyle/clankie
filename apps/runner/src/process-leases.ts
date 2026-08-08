@@ -404,8 +404,13 @@ export class ProcessLeaseManager {
   }
 }
 
-/** Pid + start time defeats pid reuse: `ps` start time changes with the process. */
-async function defaultProcessIdentity(pid: number): Promise<string | undefined> {
+/**
+ * Pid + start time defeats pid reuse: `ps` start time changes with the process.
+ * Exported so adoption bindings (ADR 0078) key on the same identity a process
+ * lease does — one authority, so an adopted agent and an owned worker can never
+ * disagree about whether the same pid is still the same process.
+ */
+export async function defaultProcessIdentity(pid: number): Promise<string | undefined> {
   try {
     const result = await execFileAsync("ps", ["-o", "lstart=", "-p", String(pid)]);
     const startedAt = result.stdout.trim();

@@ -11,7 +11,8 @@
     "test": "vitest run",
     "terminal:lifecycle-evidence": "vitest run test/terminal-lifecycle-evidence.test.ts",
     "clean": "rm -rf dist coverage",
-    "free-play-live": "tsx scripts/free-play-live.ts"
+    "free-play-live": "tsx scripts/free-play-live.ts",
+    "census:probe": "tsx scripts/agent-census-probe.ts"
   },
   "dependencies": {
     "@clankie/api-client": "workspace:*",

@@ -52,11 +52,14 @@ import {
   type RecallCardOptions,
 } from "@clankie/memory-store";
 import {
+  AdoptWorkerRequestSchema,
+  DirectAdoptedWorkerRequestSchema,
   ApprovalDecisionInputSchema,
   ApprovalRequestRecordSchema,
   ApprovalRequestStatusSchema,
   ActionResourceSchema,
   ActionRequestSchema,
+  ReleaseWorkerAdoptionRequestSchema,
   CaptainChannelTurnResultSchema,
   CaptainEpisodeSchema,
   CaptainPresenceReportSchema,
@@ -73,6 +76,7 @@ import {
   type EmbodimentSession,
   resolveDiscordPresenceLedgerContent,
   LinearChannelTurnRequestSchema,
+  SlackChannelTurnRequestSchema,
   MissionEventAuthFailureSchema,
   MissionEventTailAuthLineSchema,
   MissionPlanSchema,
@@ -186,10 +190,18 @@ import {
 } from "./tracker-ceremony.ts";
 import type { WorkerTranscriptReadPort } from "./worker-transcripts.ts";
 import type { ActivityObservationReadPort } from "./activity-observations.ts";
+import type { AgentCensusReadPort } from "./agent-census.ts";
 import { MissionEventFeed, type MissionEventFeedTailRead } from "./mission-event-feed.ts";
 
 const logger = createLogger({ service: "clankie-control-plane", version: "0.1.0" });
 const LINEAR_DELIVERY_RETENTION_MS = 7 * 60 * 60 * 1_000;
+
+/** Log labels for the channel-turn providers; the union grows here, not inline. */
+const CHANNEL_PROVIDER_LABELS = {
+  linear: "Linear",
+  discord: "Discord",
+  slack: "Slack",
+} as const;
 
 function logMissionEventFeedAuthorityFailure(error: unknown, missionId?: string): void {
   logger.error(
@@ -371,6 +383,8 @@ export interface ControlPlaneDependencies {
   workerTranscripts?: WorkerTranscriptReadPort;
   /** Injected runner-owned activity reader. The control plane never persists activity content. */
   activityObservations?: ActivityObservationReadPort;
+  /** Runner-owned view of agents this control plane did not start (ADR 0078). */
+  agentCensus?: AgentCensusReadPort;
 }
 
 export type WorkerSteerAuthorizer = (input: {
@@ -1588,6 +1602,27 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     return denial ? context.json(denial.body, denial.status) : undefined;
   };
 
+  /**
+   * Census access (ADR 0078): the captain or an authenticated operator. Knowing
+   * which agents are running is a read the owner should never have to
+   * authorize, so it sits at the same tier as reading current activity. The
+   * extra authority `directed` adoption needs is checked at that route, not
+   * here.
+   */
+  const authorizeAgentCensus = async (context: Context): Promise<Response | undefined> => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain && captain !== "unavailable") return undefined;
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable") {
+      if (captain === "unavailable") {
+        return context.json({ error: "agent_census_authentication_unavailable" }, 503);
+      }
+      return context.json({ error: "agent_census_authentication_required" }, 401);
+    }
+    if (!operator) return context.json({ error: "agent_census_authentication_required" }, 401);
+    return undefined;
+  };
+
   app.get("/health", (context) =>
     context.json({
       ok: true,
@@ -2419,7 +2454,10 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       ? { provider: "linear" as const, request: linear.data }
       : (() => {
           const discord = DiscordPresenceChannelTurnRequestSchema.safeParse(body);
-          return discord.success ? { provider: "discord" as const, request: discord.data } : undefined;
+          if (discord.success) return { provider: "discord" as const, request: discord.data };
+          // Slack is a sibling family, never a widening of Linear's (ADR 0080).
+          const slack = SlackChannelTurnRequestSchema.safeParse(body);
+          return slack.success ? { provider: "slack" as const, request: slack.data } : undefined;
         })();
     if (parsedTurn === undefined) {
       return context.json({ error: "invalid_captain_channel_turn" }, 400);
@@ -2457,6 +2495,14 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
             await captainChannelTurns.submit({ request: parsedTurn.request, thread }),
           );
         }
+        // One branch per provider: narrowing `{ request: A | B }` does not
+        // narrow the submission union, and a cast here would let a future
+        // provider reach the wrong normalizer without a type error.
+        if (parsedTurn.provider === "slack") {
+          return CaptainChannelTurnResultSchema.parse(
+            await captainChannelTurns.submit({ request: parsedTurn.request }),
+          );
+        }
         return CaptainChannelTurnResultSchema.parse(
           await captainChannelTurns.submit({ request: parsedTurn.request }),
         );
@@ -2485,7 +2531,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
           deliveryId: request.deliveryId,
           state: result.state,
         },
-        `${provider === "linear" ? "Linear" : "Discord"} channel captain turn settled`,
+        `${CHANNEL_PROVIDER_LABELS[provider]} channel captain turn settled`,
       );
       return context.json(result);
     } catch {
@@ -3368,6 +3414,118 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     return context.json(
       ActivityObservationReadSchema.parse({ schemaVersion: 1, outcome: "snapshot", snapshot }),
     );
+  });
+
+  /**
+   * What is running on this machine (ADR 0078). Readable by the captain or an
+   * authenticated operator, because "which agents exist" is a question the
+   * owner should never have to authorize. The control plane proxies the runner
+   * and stores nothing: a cached census would be a second, staler authority.
+   */
+  app.get("/v1/agents/census", async (context) => {
+    const authorization = await authorizeAgentCensus(context);
+    if (authorization) return authorization;
+    if (dependencies.agentCensus === undefined) {
+      return context.json({ error: "agent_census_unavailable" }, 503);
+    }
+    try {
+      return context.json({ census: await dependencies.agentCensus.census(context.req.raw.signal) }, 200, {
+        "cache-control": "no-store",
+      });
+    } catch {
+      return context.json({ error: "agent_census_upstream_failure" }, 502);
+    }
+  });
+
+  /**
+   * Adoption (ADR 0078). `observed` grants knowledge only and needs no more
+   * authority than reading the census does. `directed` grants steering and task
+   * assignment over a process this runner never built, so it is an operator
+   * decision: a captain bearer alone is refused with `approval_required`.
+   */
+  app.post("/v1/agents/adopt", async (context) => {
+    const authorization = await authorizeAgentCensus(context);
+    if (authorization) return authorization;
+    if (dependencies.agentCensus === undefined) {
+      return context.json({ error: "agent_census_unavailable" }, 503);
+    }
+    let body: unknown;
+    try {
+      body = await context.req.json();
+    } catch {
+      return context.json({ error: "invalid_adopt_request" }, 400);
+    }
+    const parsed = AdoptWorkerRequestSchema.safeParse(body);
+    if (!parsed.success) return context.json({ error: "invalid_adopt_request" }, 400);
+    if (parsed.data.grade === "directed") {
+      const operator = await authenticateOperator(context.req.raw, dependencies);
+      if (operator === "unavailable") {
+        return context.json({ error: "agent_adoption_authentication_unavailable" }, 503);
+      }
+      if (!operator) {
+        return context.json({ result: { outcome: "refused", reason: "approval_required" } }, 200);
+      }
+    }
+    try {
+      return context.json(
+        { result: await dependencies.agentCensus.adopt(parsed.data, context.req.raw.signal) },
+        200,
+      );
+    } catch {
+      return context.json({ error: "agent_census_upstream_failure" }, 502);
+    }
+  });
+
+  /**
+   * Direct an adopted agent (ADR 0078). This is the operator-parity vocabulary
+   * a human already has — bounded steering text — and it carries the same
+   * authority ceiling: an instruction may arrive here, an approval may not.
+   */
+  app.post("/v1/agents/direct", async (context) => {
+    const authorization = await authorizeAgentCensus(context);
+    if (authorization) return authorization;
+    if (dependencies.agentCensus === undefined) {
+      return context.json({ error: "agent_census_unavailable" }, 503);
+    }
+    let body: unknown;
+    try {
+      body = await context.req.json();
+    } catch {
+      return context.json({ error: "invalid_direct_request" }, 400);
+    }
+    const parsed = DirectAdoptedWorkerRequestSchema.safeParse(body);
+    if (!parsed.success) return context.json({ error: "invalid_direct_request" }, 400);
+    try {
+      return context.json(
+        { result: await dependencies.agentCensus.direct(parsed.data, context.req.raw.signal) },
+        200,
+      );
+    } catch {
+      return context.json({ error: "agent_census_upstream_failure" }, 502);
+    }
+  });
+
+  /** Give an adopted agent back. Releasing is always allowed to the adopter's tier. */
+  app.post("/v1/agents/release", async (context) => {
+    const authorization = await authorizeAgentCensus(context);
+    if (authorization) return authorization;
+    if (dependencies.agentCensus === undefined) {
+      return context.json({ error: "agent_census_unavailable" }, 503);
+    }
+    let body: unknown;
+    try {
+      body = await context.req.json();
+    } catch {
+      return context.json({ error: "invalid_release_request" }, 400);
+    }
+    const parsed = ReleaseWorkerAdoptionRequestSchema.safeParse(body);
+    if (!parsed.success) return context.json({ error: "invalid_release_request" }, 400);
+    try {
+      await dependencies.agentCensus.release(parsed.data, context.req.raw.signal);
+      return context.json({ released: true }, 200);
+    } catch {
+      return context.json({ error: "agent_census_upstream_failure" }, 502);
+    }
   });
 
   app.get("/v1/embodiment/sessions/:id", async (context) => {

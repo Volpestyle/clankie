@@ -33,7 +33,10 @@ import { buildConfiguredShellAdapter, buildWorkerAdapters, simWorkersEnabled } f
 import { buildWorkerEnvironment } from "./worker-environment.ts";
 import { parseVerificationChecks } from "./verification-checks.ts";
 import { TerminalManager } from "./terminals.ts";
-import { HerdrSocketTransport, HerdrTerminalProvider } from "./herdr-provider.ts";
+import { HerdrSocketTransport, HerdrTerminalProvider, type HerdrAgentSource } from "./herdr-provider.ts";
+import { AgentCensusService } from "./agent-census.ts";
+import { AGENT_CENSUS_GATEWAY_PORT, createAgentCensusGateway } from "./agent-census-gateway.ts";
+import { WorkerAdoptionStore } from "./worker-adoptions.ts";
 import { CompositeTerminalSourceProvider, type TerminalSourceProvider } from "./terminal-source.ts";
 import {
   installDevHandoffShutdown,
@@ -151,11 +154,11 @@ const transcriptProjection = await WorkerTranscriptProjection.open(
 );
 const activityObservationProjection = new ActivityObservationProjection();
 const runnerEvents = new SqliteEventStore(join(runnerStateRoot, "runner-events.db"));
+const processLeases = new ProcessLeaseManager({
+  rootDir: runnerStateRoot,
+  events: runnerEvents,
+});
 try {
-  const processLeases = new ProcessLeaseManager({
-    rootDir: runnerStateRoot,
-    events: runnerEvents,
-  });
   const reconciled = await processLeases.reconcile();
   logger.info(
     {
@@ -171,6 +174,39 @@ try {
   logger.error(
     { runnerStateRoot, err: error instanceof Error ? error.message : String(error) },
     "startup process-lease reconciliation failed; runner continuing",
+  );
+}
+
+// Adoption (ADR 0078). The census runs after lease reconciliation so this
+// runner's own workers are already recognizable, and it never adopts anything:
+// an unclaimed agent is reported and left alone.
+const workerAdoptions = new WorkerAdoptionStore({ rootDir: runnerStateRoot, events: runnerEvents });
+const herdrAgentSource = createHerdrAgentSource(process.env);
+const agentCensus = new AgentCensusService({
+  runnerId: process.env.CLANKIE_RUNNER_ID ?? "local",
+  adoptions: workerAdoptions,
+  observe: async () => {
+    if (!herdrAgentSource) return undefined;
+    try {
+      return await herdrAgentSource.listAgents();
+    } catch {
+      // "I cannot see" is not "nothing is running": returning undefined keeps
+      // the census honest and lapses no live adoption.
+      logger.warn({ event: "agent_census.transport_unavailable" }, "herdr agent listing failed");
+      return undefined;
+    }
+  },
+  leases: () => processLeases.list(),
+  ...(herdrAgentSource
+    ? { deliver: (terminalId, text) => herdrAgentSource.sendToTerminal(terminalId, text) }
+    : {}),
+});
+try {
+  await agentCensus.reconcileAtStartup();
+} catch (error) {
+  logger.error(
+    { err: error instanceof Error ? error.message : String(error) },
+    "startup agent census failed; runner continuing with an unknown fleet",
   );
 }
 
@@ -225,6 +261,25 @@ if (runnerToken) {
       port: transcriptGateway.address.port,
     },
     "runner-owned worker transcript gateway enabled",
+  );
+}
+
+if (runnerToken) {
+  const censusGateway = await createAgentCensusGateway({
+    agents: agentCensus,
+    token: runnerToken,
+    port: Number(process.env.CLANKIE_AGENT_CENSUS_PORT ?? AGENT_CENSUS_GATEWAY_PORT),
+  });
+  const closeCensusGateway = () => void censusGateway.close().catch(() => undefined);
+  process.once("SIGINT", closeCensusGateway);
+  process.once("SIGTERM", closeCensusGateway);
+  logger.info(
+    {
+      event: "agent_census.gateway.enabled",
+      host: censusGateway.address.host,
+      port: censusGateway.address.port,
+    },
+    "runner-owned agent census gateway enabled",
   );
 }
 
@@ -441,6 +496,19 @@ if (!repoPath) {
     );
     await missionWorker.runForever(runnerAbort.signal);
   }
+}
+
+/**
+ * The census reads Herdr whenever the socket is configured. It is independent
+ * of `CLANKIE_HERDR_TERMINAL_SOURCE_ENABLED`, which gates the observe-only
+ * terminal *data* plane: knowing which agents exist is a different, cheaper
+ * question than streaming their bytes, and gating it behind the byte plane
+ * would leave the runner blind for the wrong reason.
+ */
+function createHerdrAgentSource(env: NodeJS.ProcessEnv): HerdrAgentSource | undefined {
+  const socketPath = env.HERDR_SOCKET_PATH?.trim();
+  if (!socketPath) return undefined;
+  return new HerdrSocketTransport({ socketPath });
 }
 
 function parsePositiveInt(raw: string | undefined, fallback: number): number {

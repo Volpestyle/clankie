@@ -27,12 +27,14 @@ import {
   createDeterministicWorkerSteerAuthorizer,
 } from "./app.ts";
 import { loadOrCreateDeviceSessionKey } from "./device-session.ts";
+import { createDiscordAttachmentResolver } from "./discord-attachment-fetch.ts";
 import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
 import { EveCaptainChannelTurnPort } from "./eve-captain-turn.ts";
 import { createCredentialBackedOperatorAuthenticator } from "./operator-auth.ts";
 import { FileWorkerSteeringStore } from "./worker-steering.ts";
 import { RunnerWorkerTranscriptClient } from "./worker-transcripts.ts";
 import { RunnerActivityObservationClient } from "./activity-observations.ts";
+import { RunnerAgentCensusClient } from "./agent-census.ts";
 
 const logger = createLogger({ service: "clankie-control-plane", version: "0.1.0" });
 
@@ -178,6 +180,7 @@ const captainChannelTurns = new EveCaptainChannelTurnPort({
       ...options,
       now: new Date(),
     }),
+  resolveDiscordAttachments: createDiscordAttachmentResolver(),
 });
 const app = await createControlPlane({
   doctrine,
@@ -219,6 +222,10 @@ const app = await createControlPlane({
         }),
         activityObservations: new RunnerActivityObservationClient({
           baseUrl: process.env.CLANKIE_ACTIVITY_OBSERVATION_URL ?? "http://127.0.0.1:4314",
+          token: runnerToken,
+        }),
+        agentCensus: new RunnerAgentCensusClient({
+          baseUrl: process.env.CLANKIE_AGENT_CENSUS_URL ?? "http://127.0.0.1:4315",
           token: runnerToken,
         }),
       }
