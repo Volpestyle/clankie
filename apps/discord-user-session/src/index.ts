@@ -17,6 +17,7 @@ import {
   openRealtimeTranscriptionSession,
   parseDiscordDmPolicy,
   parseDiscordIdSet,
+  selectInboundImageAttachments,
   type DiscordBridgeReceipt,
 } from "@clankie/discord-presence-core";
 import type { DiscordVoiceEvidence } from "@clankie/protocol";
@@ -265,6 +266,7 @@ gateway.on("failed", (reason) => {
 gateway.on("messageCreate", (message) => {
   void (async () => {
     try {
+      const selection = selectInboundImageAttachments(message.attachments);
       const result = await textIngress.handle({
         id: message.id,
         ...(message.guildId === undefined ? {} : { guildId: message.guildId }),
@@ -274,6 +276,8 @@ gateway.on("messageCreate", (message) => {
         authorIsBot: message.authorIsBot || message.authorId === gateway.userId,
         mentionsBot: message.mentionsSelf,
         body: message.content,
+        attachments: selection.attachments,
+        attachmentsOmitted: selection.omitted,
       });
       if (result.state === "failed") {
         console.error(

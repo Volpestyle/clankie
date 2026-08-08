@@ -45,6 +45,9 @@ describe("Discord voice ingress", () => {
           channelId: "67890",
           actorId: "24680",
           body: "hello Clankie",
+          // Spoken audio carries no attachments; the schema default applies to
+          // every trigger kind so one shape covers both planes.
+          attachments: [],
         },
       }),
     );

@@ -1,11 +1,15 @@
 import { createHash } from "node:crypto";
 import { discordPresenceLaneAddress } from "@clankie/interactive-environment";
 import {
+  DISCORD_PRESENCE_ATTACHMENT_BYTES_MAX,
+  DISCORD_PRESENCE_ATTACHMENT_MEDIA_TYPES,
   DISCORD_PRESENCE_CONTEXT_MESSAGES_MAX,
+  DISCORD_PRESENCE_TRIGGER_ATTACHMENTS_MAX,
   DISCORD_PRESENCE_TRIGGER_BODY_MAX,
   DiscordPresenceChannelTurnRequestSchema,
   DiscordPresenceWriteSchema,
   type CaptainChannelTurnResult,
+  type DiscordPresenceAttachment,
   type DiscordPresenceChannelTurnRequest,
   type DiscordPresenceWrite,
   type DiscordPresenceWriteResult,
@@ -96,6 +100,86 @@ export interface DiscordInboundContextMessage {
   readonly createdAt: string;
 }
 
+/**
+ * An attachment as either transport reports it, before any policy is applied.
+ * Deliberately loose — `discord.js` and the raw user-session gateway disagree on
+ * nullability and casing, and normalising here is what keeps this package free
+ * of a `discord.js` import.
+ */
+export interface DiscordRawAttachment {
+  readonly id: string;
+  readonly url: string;
+  readonly contentType?: string | null;
+  readonly filename?: string | null;
+  readonly size?: number | null;
+}
+
+export interface DiscordInboundAttachmentSelection {
+  /** What he will actually be shown, in the order posted. */
+  readonly attachments: readonly DiscordPresenceAttachment[];
+  /**
+   * How many attachments were left out — unsupported type, oversized, or past
+   * the per-message cap. He is told the count so he can say a file went
+   * unread instead of answering as though he saw everything (ADR 0072).
+   */
+  readonly omitted: number;
+}
+
+/**
+ * Decides which of a message's attachments he can be shown.
+ *
+ * Both bridges call this so one rule governs both bodies: a policy that
+ * admitted a 40 MB TIFF on the user session and not the bot would be two
+ * characters, not one.
+ */
+export function selectInboundImageAttachments(
+  raw: readonly DiscordRawAttachment[],
+): DiscordInboundAttachmentSelection {
+  const attachments: DiscordPresenceAttachment[] = [];
+  let omitted = 0;
+  for (const candidate of raw) {
+    if (attachments.length >= DISCORD_PRESENCE_TRIGGER_ATTACHMENTS_MAX) {
+      omitted += 1;
+      continue;
+    }
+    const selected = selectAttachment(candidate);
+    if (selected === undefined) omitted += 1;
+    else attachments.push(selected);
+  }
+  return { attachments, omitted };
+}
+
+function selectAttachment(candidate: DiscordRawAttachment): DiscordPresenceAttachment | undefined {
+  // `image/png; charset=binary` is a content type Discord really does serve.
+  const mediaType = candidate.contentType?.split(";")[0]?.trim().toLowerCase();
+  if (mediaType === undefined || !isSupportedMediaType(mediaType)) return undefined;
+  const byteSize = candidate.size ?? 0;
+  if (!Number.isInteger(byteSize) || byteSize <= 0 || byteSize > DISCORD_PRESENCE_ATTACHMENT_BYTES_MAX) {
+    return undefined;
+  }
+  // Checked here as well as at the fetch, so an unusable URL costs nothing
+  // downstream and never reaches a turn as a dangling reference.
+  let url: URL;
+  try {
+    url = new URL(candidate.url);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== "https:") return undefined;
+  const filename = candidate.filename?.trim().slice(0, 256);
+  return {
+    id: candidate.id,
+    url: candidate.url,
+    mediaType,
+    ...(filename === undefined || filename.length === 0 ? {} : { filename }),
+    byteSize,
+  };
+}
+
+function isSupportedMediaType(value: string): value is DiscordPresenceAttachment["mediaType"] {
+  return (DISCORD_PRESENCE_ATTACHMENT_MEDIA_TYPES as readonly string[]).includes(value);
+}
+
 export interface DiscordInboundMessage {
   readonly id: string;
   readonly guildId?: string;
@@ -104,6 +188,10 @@ export interface DiscordInboundMessage {
   readonly authorIsBot: boolean;
   readonly mentionsBot: boolean;
   readonly body: string;
+  /** Images posted with this message, already policy-filtered by {@link selectInboundImageAttachments}. */
+  readonly attachments?: readonly DiscordPresenceAttachment[];
+  /** How many attachments the selection left out, so he can be told (ADR 0072). */
+  readonly attachmentsOmitted?: number;
   readonly contextMessages?: readonly DiscordInboundContextMessage[];
   readonly loadContextMessages?: () => Promise<readonly DiscordInboundContextMessage[]>;
   /**
@@ -246,7 +334,10 @@ export class DiscordTextIngress {
     }
 
     const body = message.body.trim().slice(0, DISCORD_PRESENCE_TRIGGER_BODY_MAX);
-    if (body.length === 0) {
+    const attachments = message.attachments ?? [];
+    // An image with no caption is a real message. Only a message he can
+    // perceive nothing of is empty (ADR 0081).
+    if (body.length === 0 && attachments.length === 0) {
       event("dropped", { reason: "empty_message" });
       return { state: "dropped", reason: "empty_message" };
     }
@@ -260,6 +351,9 @@ export class DiscordTextIngress {
           channelId: message.channelId,
           authorId: message.authorId,
           body,
+          // An edit that swaps the image while keeping the caption is a
+          // different message, and must not dedupe onto the first delivery.
+          attachments: attachments.map((attachment) => attachment.id),
         }),
       )
       .digest("hex");
@@ -337,7 +431,13 @@ export class DiscordTextIngress {
         channelId: message.channelId,
         messageId: message.id,
         actorId: message.authorId,
-        body,
+        // Optional in the schema: an image-only message has no body at all,
+        // and an empty string is not a body.
+        ...(body.length === 0 ? {} : { body }),
+        attachments: message.attachments ?? [],
+        ...(message.attachmentsOmitted === undefined || message.attachmentsOmitted <= 0
+          ? {}
+          : { attachmentsOmitted: message.attachmentsOmitted }),
         ...(this.unprompted(message) ? { unprompted: true } : {}),
         ...(message.voicePresenceNote === undefined ? {} : { voicePresenceNote: message.voicePresenceNote }),
       },

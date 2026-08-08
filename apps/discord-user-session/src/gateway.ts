@@ -1,3 +1,4 @@
+import type { DiscordRawAttachment } from "@clankie/discord-presence-core";
 import { WebSocket, type RawData } from "ws";
 
 /**
@@ -40,6 +41,8 @@ export interface DiscordGatewayMessage {
   readonly authorIsBot: boolean;
   readonly mentionsSelf: boolean;
   readonly content: string;
+  /** Raw `attachments` from the dispatch; ingress policy decides which he is shown. */
+  readonly attachments: readonly DiscordRawAttachment[];
 }
 
 export interface DiscordGatewayVoiceState {
@@ -244,6 +247,7 @@ export class DiscordUserGateway {
             (mention) => record(mention)?.id === this.selfUserId && this.selfUserId !== undefined,
           ),
           content: typeof payload.content === "string" ? payload.content : "",
+          attachments: readAttachments(payload.attachments),
         });
         return;
       }
@@ -382,4 +386,27 @@ function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+/**
+ * Reads the dispatch's `attachments` into the transport-neutral shape ingress
+ * policy consumes. Only the fields that policy actually reads are carried, and
+ * a malformed entry is skipped rather than defaulted — a guessed size or type
+ * would be a policy decision made by bad data.
+ */
+function readAttachments(value: unknown): readonly DiscordRawAttachment[] {
+  if (!Array.isArray(value)) return [];
+  const attachments: DiscordRawAttachment[] = [];
+  for (const entry of value) {
+    const attachment = record(entry);
+    if (typeof attachment?.id !== "string" || typeof attachment.url !== "string") continue;
+    attachments.push({
+      id: attachment.id,
+      url: attachment.url,
+      ...(typeof attachment.content_type === "string" ? { contentType: attachment.content_type } : {}),
+      ...(typeof attachment.filename === "string" ? { filename: attachment.filename } : {}),
+      ...(typeof attachment.size === "number" ? { size: attachment.size } : {}),
+    });
+  }
+  return attachments;
 }

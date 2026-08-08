@@ -66,6 +66,7 @@ describe("DiscordUserGateway", () => {
         authorIsBot: false,
         mentionsSelf: true,
         content: "hey clankie",
+        attachments: [],
       },
     ]);
 

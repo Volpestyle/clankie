@@ -132,6 +132,16 @@ owner's to make, per persona, in settings — not a code default.
 
 ## Consequences
 
+- **`auto_mode` moves the buffering job to this repository.** It disables
+  ElevenLabs' chunk schedule and every server-side buffer, so each frame is
+  synthesized as one unit with its own prosody. That is what makes a short
+  reply fast, and it is only correct for a caller sending complete phrases:
+  relaying the model's token deltas straight through made every word its own
+  utterance. The pairing therefore accumulates deltas and emits on sentence and
+  clause boundaries (`splitSpeakableUnits`), with a character cap so an
+  unpunctuated run still starts speaking and an end-of-response drain so a tail
+  without punctuation is never lost. Anything sending partial phrases to the
+  mouth is a bug, not a latency optimization.
 - **Latency adds one hop but stays conversational.** Text deltas arrive
   faster than audio deltas, so the net cost is roughly the TTS time-to-first
   byte (~100–300 ms with `eleven_flash_v2_5` and `auto_mode`). The captain

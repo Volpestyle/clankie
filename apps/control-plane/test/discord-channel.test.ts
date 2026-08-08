@@ -180,6 +180,7 @@ describe("Discord channel control-plane runtime", () => {
         messageId: deliveryId,
         actorId: "asker-1",
         body: "clankie",
+        attachments: [],
       },
       contextMessages,
     });
@@ -249,6 +250,7 @@ describe("Discord channel control-plane runtime", () => {
         messageId: deliveryId,
         actorId: "james",
         body: "clankie hop in vc",
+        attachments: [],
         ...(voicePresenceNote === undefined ? {} : { voicePresenceNote }),
       },
     });
@@ -402,6 +404,7 @@ function turnRequest(): DiscordPresenceChannelTurnRequest {
       messageId: "message-1",
       actorId: "james",
       body: "hello",
+      attachments: [],
     },
     contextMessages: [
       {
@@ -433,6 +436,7 @@ function voiceTurnRequest(): DiscordPresenceChannelTurnRequest {
       channelId: "voice-1",
       actorId: "user-1",
       body: "hello group",
+      attachments: [],
     },
     contextMessages: [],
   };
@@ -452,6 +456,168 @@ async function post(
     body: JSON.stringify(body),
   });
 }
+
+describe("showing him an image", () => {
+  const imageTurn = (
+    overrides: Partial<DiscordPresenceChannelTurnRequest["trigger"]> = {},
+  ): DiscordPresenceChannelTurnRequest => {
+    const base = turnRequest();
+    return {
+      ...base,
+      deliveryId: "message-image",
+      trigger: {
+        ...base.trigger,
+        id: "message-image",
+        messageId: "message-image",
+        body: "what is this",
+        attachments: [
+          {
+            id: "att-1",
+            url: "https://cdn.discordapp.com/attachments/1/2/shot.png",
+            mediaType: "image/png",
+            filename: "shot.png",
+            byteSize: 64,
+          },
+        ],
+        ...overrides,
+      },
+    };
+  };
+
+  const capture = (
+    request: DiscordPresenceChannelTurnRequest,
+    options: Partial<ConstructorParameters<typeof EveCaptainChannelTurnPort>[0]> = {},
+  ) => {
+    const posted: Array<Record<string, unknown>> = [];
+    const port = new EveCaptainChannelTurnPort({
+      baseUrl: "http://127.0.0.1:4321",
+      fetchImpl: (input, init) => {
+        if (init?.method === "POST") {
+          posted.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+          return Promise.resolve(Response.json({ sessionId: "eve-image" }, { status: 202 }));
+        }
+        return Promise.resolve(
+          ndjson([
+            { type: "turn.started", data: { turnId: "turn-image" } },
+            {
+              type: "message.completed",
+              data: { turnId: "turn-image", finishReason: "stop", message: "A screenshot." },
+            },
+            { type: "session.waiting", data: { turnId: "turn-image" } },
+          ]),
+        );
+      },
+      ...options,
+    });
+    return { posted, submit: () => port.submit({ request }) };
+  };
+
+  /** The first POSTed turn body, failing loudly rather than reading through an absent one. */
+  const firstPost = (posted: ReadonlyArray<Record<string, unknown>>) => {
+    const body = posted[0];
+    if (body === undefined) throw new Error("no turn was posted to Eve");
+    return {
+      message: body.message,
+      thread: (body.clientContext as { thread: { trigger: Record<string, unknown> } }).thread,
+    };
+  };
+
+  it("sends the picture to the model as a file part beside the fixed framing", async () => {
+    const { posted, submit } = capture(imageTurn(), {
+      resolveDiscordAttachments: (attachments) =>
+        Promise.resolve(
+          attachments.map((attachment) => ({
+            id: attachment.id,
+            mediaType: attachment.mediaType,
+            ...(attachment.filename === undefined ? {} : { filename: attachment.filename }),
+            dataUrl: `data:${attachment.mediaType};base64,AAAA`,
+          })),
+        ),
+    });
+
+    await expect(submit()).resolves.toMatchObject({ state: "settled", response: "A screenshot." });
+
+    const message = firstPost(posted).message as Array<Record<string, unknown>>;
+    expect(Array.isArray(message)).toBe(true);
+    expect(message[0]).toMatchObject({ type: "text" });
+    // Images are untrusted content, and the framing says so in fixed text.
+    expect(String(message[0]?.text)).toContain("untrusted content");
+    expect(message[1]).toEqual({
+      type: "file",
+      data: "data:image/png;base64,AAAA",
+      mediaType: "image/png",
+      filename: "shot.png",
+    });
+    // Bytes never appear in the context envelope, only the shape of what he was shown.
+    const { thread } = firstPost(posted);
+    expect(thread.trigger).toMatchObject({
+      body: "what is this",
+      attachments: [{ mediaType: "image/png", filename: "shot.png" }],
+    });
+    expect(JSON.stringify(thread)).not.toContain("AAAA");
+  });
+
+  it("keeps a caption-less image a real turn, with no empty body", async () => {
+    const { posted, submit } = capture(imageTurn({ body: undefined }), {
+      resolveDiscordAttachments: (attachments) =>
+        Promise.resolve(
+          attachments.map((attachment) => ({
+            id: attachment.id,
+            mediaType: attachment.mediaType,
+            dataUrl: "data:image/png;base64,AAAA",
+          })),
+        ),
+    });
+
+    await expect(submit()).resolves.toMatchObject({ state: "settled" });
+
+    const { thread } = firstPost(posted);
+    expect(thread.trigger.body).toBeUndefined();
+    expect(thread.trigger.attachments).toHaveLength(1);
+  });
+
+  it("answers anyway when the image cannot be fetched, and says one went unread", async () => {
+    const { posted, submit } = capture(imageTurn(), {
+      resolveDiscordAttachments: () => Promise.resolve([]),
+    });
+
+    await expect(submit()).resolves.toMatchObject({ state: "settled" });
+
+    // Degrades to the plain-string message rather than failing the turn.
+    const { message, thread } = firstPost(posted);
+    expect(typeof message).toBe("string");
+    expect(String(message)).toContain("cannot see");
+    expect(thread.trigger.unreadableAttachments).toBe(1);
+    expect(thread.trigger.attachments).toBeUndefined();
+  });
+
+  it("counts what ingress dropped alongside what the fetch lost", async () => {
+    const { posted, submit } = capture(imageTurn({ attachmentsOmitted: 2 }), {
+      resolveDiscordAttachments: () => Promise.resolve([]),
+    });
+
+    await submit();
+
+    const { thread } = firstPost(posted);
+    expect(thread.trigger.unreadableAttachments).toBe(3);
+  });
+
+  it("leaves a text-only turn byte-for-byte the plain string it always was", async () => {
+    const { posted, submit } = capture(turnRequest(), {
+      resolveDiscordAttachments: () => Promise.reject(new Error("must not be called")),
+    });
+
+    await expect(submit()).resolves.toMatchObject({ state: "settled" });
+
+    expect(typeof firstPost(posted).message).toBe("string");
+  });
+
+  it("refuses a turn carrying neither text nor an image", async () => {
+    const { submit } = capture(imageTurn({ body: undefined, attachments: [] }));
+
+    await expect(submit()).rejects.toThrow(/trigger body or at least one attachment/u);
+  });
+});
 
 function ndjson(events: readonly unknown[]): Response {
   return new Response(events.map((event) => JSON.stringify(event)).join("\n"));

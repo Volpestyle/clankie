@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { describe, expect, it } from "vitest";
 import {
   openExternalVoiceConversation,
+  splitSpeakableUnits,
   type ExternalVoiceRealtimeHandlers,
   type ExternalVoiceRealtimePort,
   type ExternalVoiceSessionFactories,
@@ -182,11 +183,53 @@ describe("external voice conversation", () => {
     realtimeHandlers.onTextDelta("Sure — ", "item_a");
     realtimeHandlers.onTextDelta("one sec.", "item_a");
     await settle();
+    // Held until the boundary lands: `auto_mode` voices each frame as its own
+    // unit, so a partial phrase would be spoken as a partial phrase.
     expect(ttsPorts[0]?.frames).toEqual([
       { kind: "open", contextId: "item_a" },
-      { kind: "append", contextId: "item_a", text: "Sure — " },
-      { kind: "append", contextId: "item_a", text: "one sec." },
+      { kind: "append", contextId: "item_a", text: "Sure — one sec." },
     ]);
+  });
+
+  it("never sends a bare token, which is what made every word its own utterance", async () => {
+    const { realtimeHandlers, ttsPorts } = await openHarness();
+    for (const token of ["I", " walked", " into", " the", " wall", " again", "."]) {
+      realtimeHandlers.onTextDelta(token, "item_a");
+    }
+    await settle();
+    const appends = (ttsPorts[0]?.frames ?? []).filter((frame) => frame.kind === "append");
+    expect(appends).toEqual([
+      { kind: "append", contextId: "item_a", text: "I walked into the wall again." },
+    ]);
+  });
+
+  it("speaks each sentence as it completes, rather than waiting for the whole reply", async () => {
+    const { realtimeHandlers, ttsPorts } = await openHarness();
+    realtimeHandlers.onTextDelta("Got it. Heading", "item_a");
+    await settle();
+    realtimeHandlers.onTextDelta(" north now.", "item_a");
+    await settle();
+    const appends = (ttsPorts[0]?.frames ?? []).filter((frame) => frame.kind === "append");
+    expect(appends).toEqual([
+      { kind: "append", contextId: "item_a", text: "Got it. " },
+      { kind: "append", contextId: "item_a", text: "Heading north now." },
+    ]);
+  });
+
+  it("flushes a held tail that never got its punctuation", async () => {
+    const { realtimeHandlers, ttsPorts, events } = await openHarness();
+    realtimeHandlers.onTextDelta("no period here", "item_a");
+    await settle();
+    expect((ttsPorts[0]?.frames ?? []).filter((frame) => frame.kind === "append")).toEqual([]);
+
+    realtimeHandlers.onResponseDone(doneMeta("resp_1"));
+    await settle();
+    // The tail is spoken before the flush, or the last words are simply lost.
+    expect(ttsPorts[0]?.frames.slice(-2)).toEqual([
+      { kind: "append", contextId: "item_a", text: "no period here" },
+      { kind: "flush", contextId: "item_a" },
+    ]);
+    expect(events.errors).toHaveLength(0);
   });
 
   it("holds response done until the synthesis context drains, then forwards it", async () => {
@@ -228,7 +271,9 @@ describe("external voice conversation", () => {
 
   it("turns barge-in into context close, a marker item, and dropped late output", async () => {
     const { port, realtimeHandlers, ttsHandlers, ttsPorts, realtime, events } = await openHarness();
-    realtimeHandlers.onTextDelta("A very long ", "item_a");
+    // A complete phrase, so it reaches the mouth and the late-delta assertion
+    // below is measuring the drop rather than the boundary buffer.
+    realtimeHandlers.onTextDelta("A very long answer. ", "item_a");
     await settle();
 
     port.truncate("item_a", 420);
@@ -309,5 +354,39 @@ describe("external voice conversation", () => {
     // the media owner exactly once.
     realtimeHandlers.onClose("socket");
     expect(events.closes).toEqual(["socket"]);
+  });
+});
+
+describe("splitSpeakableUnits", () => {
+  it("holds a partial phrase and releases it once a boundary lands", () => {
+    expect(splitSpeakableUnits("Heading north")).toEqual({ emit: "", rest: "Heading north" });
+    expect(splitSpeakableUnits("Heading north. Then")).toEqual({
+      emit: "Heading north. ",
+      rest: "Then",
+    });
+  });
+
+  it("treats a boundary at the very end as complete, since no more text has arrived", () => {
+    expect(splitSpeakableUnits("Done.")).toEqual({ emit: "Done.", rest: "" });
+  });
+
+  it("does not split a decimal or an abbreviation mid-word", () => {
+    expect(splitSpeakableUnits("Route 1.5 is")).toEqual({ emit: "", rest: "Route 1.5 is" });
+  });
+
+  it("breaks a long unpunctuated run at a word break rather than holding the mouth shut", () => {
+    const run = `${"word ".repeat(60)}tail`;
+    const { emit, rest } = splitSpeakableUnits(run);
+    expect(emit.length).toBeGreaterThan(0);
+    expect(emit.endsWith(" ")).toBe(true);
+    expect(rest).toBe("tail");
+    expect(emit + rest).toBe(run);
+  });
+
+  it("splits on clause enders too, so a long sentence still starts speaking", () => {
+    expect(splitSpeakableUnits("Two things: first")).toEqual({
+      emit: "Two things: ",
+      rest: "first",
+    });
   });
 });

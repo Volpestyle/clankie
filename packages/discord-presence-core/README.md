@@ -10,7 +10,7 @@ what lets both bodies be one character
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | `presence-session`           | Gateway/voice phase lifecycle, typed phase events, act-tool revoke fence                                      |
 | `presence-action-advertiser` | Retains the live catalogue and forwards phase as an execution fence                                           |
-| `text-ingress`               | Normalises gateway messages into bounded, policy-gated Eve turns                                              |
+| `text-ingress`               | Normalises gateway messages into bounded, policy-gated Eve turns, images included (ADR 0081)                  |
 | `voice-address`              | Phonetic wake and explicit-release detection over `characterNames()` (ADR 0057)                               |
 | `voice-floor`                | The dormant ↔ engaged floor machine: wake, decay, and the volition rate cap                                   |
 | `realtime-session`           | Injectable OpenAI Realtime boundary: transcription + conversation sessions, `ask_clankie` round trips         |
@@ -38,6 +38,13 @@ durations, and typed outcomes, never transcript, prompt, audio, or PCM.
   conversation into two Eve lanes and split the character in half.
 - **`transportKind` is configuration, not inference.** Both ingress paths take
   it from their host process; neither guesses.
+- **Attachments are selected here, never in a bridge.** Both transports map
+  their raw attachment shape and call `selectInboundImageAttachments`, so one
+  rule decides what he can be shown. A policy that admitted an image on one
+  body and not the other would be two characters, not one
+  ([ADR 0081](../../docs/adr/0081-an-image-is-part-of-what-was-said.md)).
+- **This package never fetches attachment bytes.** It carries references; the
+  control plane resolves them at the last hop before the model.
 
 ## Consumers
 

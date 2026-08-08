@@ -4,9 +4,14 @@ import type {
   DiscordPresenceWrite,
   DiscordPresenceWriteResult,
 } from "@clankie/protocol";
+import {
+  DISCORD_PRESENCE_ATTACHMENT_BYTES_MAX,
+  DISCORD_PRESENCE_TRIGGER_ATTACHMENTS_MAX,
+} from "@clankie/protocol";
 import { describe, expect, it, vi } from "vitest";
 import {
   DiscordTextIngress,
+  selectInboundImageAttachments,
   TYPING_REFRESH_MS,
   type DiscordTextIngressConfig,
   type DiscordTextIngressEvidence,
@@ -586,5 +591,196 @@ describe("typing while he composes", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("images are part of what was said", () => {
+  it("selects only images he can be shown, and counts what it leaves out", () => {
+    const selection = selectInboundImageAttachments([
+      { id: "a", url: "https://cdn.discordapp.com/a.png", contentType: "image/png", size: 1_024 },
+      // Discord really does serve a charset parameter on image types.
+      {
+        id: "b",
+        url: "https://cdn.discordapp.com/b.jpg",
+        contentType: "image/jpeg; charset=binary",
+        filename: "b.jpg",
+        size: 2_048,
+      },
+      { id: "pdf", url: "https://cdn.discordapp.com/c.pdf", contentType: "application/pdf", size: 10 },
+      {
+        id: "huge",
+        url: "https://cdn.discordapp.com/d.png",
+        contentType: "image/png",
+        size: DISCORD_PRESENCE_ATTACHMENT_BYTES_MAX + 1,
+      },
+      { id: "insecure", url: "http://cdn.discordapp.com/e.png", contentType: "image/png", size: 10 },
+      { id: "typeless", url: "https://cdn.discordapp.com/f.png", size: 10 },
+    ]);
+
+    expect(selection.attachments).toEqual([
+      { id: "a", url: "https://cdn.discordapp.com/a.png", mediaType: "image/png", byteSize: 1_024 },
+      {
+        id: "b",
+        url: "https://cdn.discordapp.com/b.jpg",
+        mediaType: "image/jpeg",
+        filename: "b.jpg",
+        byteSize: 2_048,
+      },
+    ]);
+    expect(selection.omitted).toBe(4);
+  });
+
+  it("caps how many images one message may carry and counts the overflow", () => {
+    const raw = Array.from({ length: DISCORD_PRESENCE_TRIGGER_ATTACHMENTS_MAX + 3 }, (_unused, index) => ({
+      id: `image-${String(index)}`,
+      url: `https://cdn.discordapp.com/${String(index)}.png`,
+      contentType: "image/png",
+      size: 512,
+    }));
+
+    const selection = selectInboundImageAttachments(raw);
+
+    expect(selection.attachments).toHaveLength(DISCORD_PRESENCE_TRIGGER_ATTACHMENTS_MAX);
+    expect(selection.omitted).toBe(3);
+  });
+
+  it("runs a turn for a caption-less image instead of dropping it as empty", async () => {
+    const port = new RecordingPort();
+    const evidence: DiscordTextIngressEvidence[] = [];
+    const ingress = new DiscordTextIngress(port, config(), (event) => evidence.push(event));
+
+    await expect(
+      ingress.handle({
+        id: "message-image",
+        channelId: "dm-1",
+        authorId: "james",
+        authorIsBot: false,
+        mentionsBot: false,
+        body: "",
+        attachments: [
+          {
+            id: "att-1",
+            url: "https://cdn.discordapp.com/att-1.png",
+            mediaType: "image/png",
+            byteSize: 4_096,
+          },
+        ],
+        attachmentsOmitted: 1,
+      }),
+    ).resolves.toMatchObject({ state: "settled" });
+
+    expect(evidence.map((event) => event.outcome)).toEqual(["accepted", "settled"]);
+    const trigger = port.turns[0]?.trigger;
+    // No body at all rather than an empty one: they did not say nothing.
+    expect(trigger?.body).toBeUndefined();
+    expect(trigger?.attachments).toEqual([
+      {
+        id: "att-1",
+        url: "https://cdn.discordapp.com/att-1.png",
+        mediaType: "image/png",
+        byteSize: 4_096,
+      },
+    ]);
+    expect(trigger?.attachmentsOmitted).toBe(1);
+    // No URL, filename, or byte count reaches the receipts.
+    expect(JSON.stringify(evidence)).not.toContain("cdn.discordapp.com");
+  });
+
+  it("still drops a message carrying neither text nor an image he can see", async () => {
+    const port = new RecordingPort();
+    const ingress = new DiscordTextIngress(port, config());
+
+    await expect(
+      ingress.handle({
+        id: "message-nothing",
+        channelId: "dm-1",
+        authorId: "james",
+        authorIsBot: false,
+        mentionsBot: false,
+        body: "   ",
+        attachments: [],
+        // A PDF was posted; the policy left it out, so there is nothing to see.
+        attachmentsOmitted: 1,
+      }),
+    ).resolves.toEqual({ state: "dropped", reason: "empty_message" });
+    expect(port.turns).toHaveLength(0);
+  });
+
+  it("treats a swapped image on the same message id as a new delivery, not a duplicate", async () => {
+    const port = new RecordingPort();
+    const ingress = new DiscordTextIngress(port, config());
+    const message = (attachmentId: string) => ({
+      id: "message-edited",
+      channelId: "dm-1",
+      authorId: "james",
+      authorIsBot: false,
+      mentionsBot: false,
+      body: "look",
+      attachments: [
+        {
+          id: attachmentId,
+          url: `https://cdn.discordapp.com/${attachmentId}.png`,
+          mediaType: "image/png" as const,
+          byteSize: 1_000,
+        },
+      ],
+    });
+
+    await expect(ingress.handle(message("att-first"))).resolves.toMatchObject({ state: "settled" });
+    await expect(ingress.handle(message("att-second"))).resolves.toEqual({
+      state: "dropped",
+      reason: "delivery_id_conflict",
+    });
+  });
+
+  it("keeps the images on a message that waits for a catch-up", async () => {
+    const port = new RecordingPort();
+    const ingress = new DiscordTextIngress(port, { ...config(), liveMessageWindow: 1 });
+    const guild = { guildId: "guild-1", channelId: "channel-1" };
+    const attachments = [
+      {
+        id: "att-buffered",
+        url: "https://cdn.discordapp.com/att-buffered.png",
+        mediaType: "image/png" as const,
+        byteSize: 900,
+      },
+    ];
+
+    // He speaks here first, so the channel is one he is in.
+    await ingress.handle({
+      id: "message-open",
+      ...guild,
+      authorId: "james",
+      authorIsBot: false,
+      mentionsBot: true,
+      body: "clankie hi",
+    });
+    // He reads the next one and stays quiet, which does not refresh the
+    // exchange — so by the third he has drifted off the channel.
+    port.silent = true;
+    await ingress.handle({
+      id: "message-drift",
+      ...guild,
+      authorId: "friend",
+      authorIsBot: false,
+      mentionsBot: false,
+      body: "chatter",
+    });
+    await expect(
+      ingress.handle({
+        id: "message-buffered-image",
+        ...guild,
+        authorId: "friend",
+        authorIsBot: false,
+        mentionsBot: false,
+        body: "",
+        attachments,
+      }),
+    ).resolves.toEqual({ state: "buffered" });
+
+    const outcomes = await ingress.catchUp();
+
+    expect(outcomes).toHaveLength(1);
+    expect(port.turns.at(-1)?.trigger.attachments).toEqual(attachments);
   });
 });

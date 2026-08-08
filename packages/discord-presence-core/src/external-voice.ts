@@ -124,6 +124,8 @@ class ExternalVoiceConversation implements VoiceConversationPort {
   private readonly liveItemIds = new Set<string>();
   private readonly droppedItemIds = new Set<string>();
   private readonly heldDone = new Map<string, { meta: RealtimeResponseMeta; handle: unknown }>();
+  /** Per-utterance tail held back until it completes a speakable unit. */
+  private readonly pendingText = new Map<string, string>();
   private lastTextItemId = "";
   private closed = false;
 
@@ -222,8 +224,22 @@ class ExternalVoiceConversation implements VoiceConversationPort {
         this.requireTts().openContext(itemId);
       });
     }
+    const pending = (this.pendingText.get(itemId) ?? "") + delta;
+    const { emit, rest } = splitSpeakableUnits(pending);
+    this.pendingText.set(itemId, rest);
+    if (emit.length === 0) return;
     this.queueItemStep(itemId, () => {
-      this.requireTts().appendText(itemId, delta);
+      this.requireTts().appendText(itemId, emit);
+    });
+  }
+
+  /** Whatever the boundary splitter is still holding, so nothing is lost at the end. */
+  private drainPendingText(itemId: string): void {
+    const rest = this.pendingText.get(itemId);
+    this.pendingText.delete(itemId);
+    if (rest === undefined || rest.length === 0) return;
+    this.queueItemStep(itemId, () => {
+      this.requireTts().appendText(itemId, rest);
     });
   }
 
@@ -246,6 +262,7 @@ class ExternalVoiceConversation implements VoiceConversationPort {
       this.releaseHeldDone(itemId);
     }, this.drainTimeoutMs);
     this.heldDone.set(itemId, { meta, handle });
+    this.drainPendingText(itemId);
     this.queueItemStep(itemId, () => {
       this.requireTts().flush(itemId);
     });
@@ -288,6 +305,7 @@ class ExternalVoiceConversation implements VoiceConversationPort {
   private dropItem(itemId: string): void {
     this.liveItemIds.delete(itemId);
     this.droppedItemIds.add(itemId);
+    this.pendingText.delete(itemId);
     this.releaseHeldDone(itemId);
   }
 
@@ -363,4 +381,56 @@ export async function openExternalVoiceConversation(
   const conversation = new ExternalVoiceConversation(input, factories, options);
   await conversation.open();
   return conversation;
+}
+
+/**
+ * Punctuation that ends something a synthesizer can voice on its own.
+ * Deliberately includes the clause enders: a long sentence delivered as two
+ * clauses still sounds like speech, while a whole paragraph held back to find
+ * a period would stall the reply.
+ */
+const SPEAKABLE_BOUNDARY = /[.!?…:;\n]/gu;
+/**
+ * Longest run held back with no boundary in sight before it is emitted at the
+ * last word break. A model that writes one long unpunctuated clause must not
+ * be able to hold the mouth shut until the response ends.
+ */
+const MAX_HELD_TEXT_CHARACTERS = 200;
+
+/**
+ * Split streamed text into what can be spoken now and what must wait.
+ *
+ * The mouth runs with `auto_mode`, which disables ElevenLabs' chunk schedule
+ * and every buffer: whatever arrives in one frame is synthesized as one unit,
+ * with its own prosody and its own boundaries. That is the right mode for a
+ * caller sending finished sentences and the wrong one for a caller relaying
+ * a model's token deltas — a delta is a word or part of one, so every word
+ * became its own utterance and the reply came out as a list of words rather
+ * than a sentence. Boundary-splitting here is what makes `auto_mode`'s
+ * contract true: complete units in, natural speech out.
+ *
+ * A boundary must be followed by whitespace or end the buffer, so decimals and
+ * abbreviations mid-word are not mistaken for sentence ends while the next
+ * delta is still unseen.
+ */
+export function splitSpeakableUnits(pending: string): { emit: string; rest: string } {
+  let cut = -1;
+  SPEAKABLE_BOUNDARY.lastIndex = 0;
+  for (let match = SPEAKABLE_BOUNDARY.exec(pending); match !== null; match = SPEAKABLE_BOUNDARY.exec(pending)) {
+    const after = pending[match.index + 1];
+    if (after !== undefined && !/\s/u.test(after)) continue;
+    // The whitespace after the boundary belongs to the unit that just ended,
+    // so the next one starts on a word rather than a leading space.
+    let end = match.index + 1;
+    while (end < pending.length && /\s/u.test(pending[end] ?? "")) end += 1;
+    cut = end;
+  }
+  if (cut === -1 && pending.length > MAX_HELD_TEXT_CHARACTERS) {
+    // No boundary in a long run: break at the last word break so the split
+    // lands between words rather than inside one.
+    const lastBreak = pending.lastIndexOf(" ");
+    if (lastBreak > 0) cut = lastBreak + 1;
+  }
+  if (cut === -1) return { emit: "", rest: pending };
+  return { emit: pending.slice(0, cut), rest: pending.slice(cut) };
 }

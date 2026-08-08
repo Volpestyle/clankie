@@ -44,6 +44,7 @@ import {
   DiscordVoiceSession,
   parseDiscordDmPolicy,
   parseDiscordIdSet,
+  selectInboundImageAttachments,
   type DiscordBridgeReceipt,
   type DiscordInboundContextMessage,
 } from "@clankie/discord-presence-core";
@@ -526,6 +527,15 @@ client.on("voiceStateUpdate", (previous, current) => {
 client.on("messageCreate", async (message) => {
   if (!textIngress) return;
   try {
+    const selection = selectInboundImageAttachments(
+      [...message.attachments.values()].map((attachment) => ({
+        id: attachment.id,
+        url: attachment.url,
+        contentType: attachment.contentType,
+        filename: attachment.name,
+        size: attachment.size,
+      })),
+    );
     const inbound = {
       id: message.id,
       ...(message.guildId === null ? {} : { guildId: message.guildId }),
@@ -534,6 +544,8 @@ client.on("messageCreate", async (message) => {
       authorIsBot: message.author.bot || message.author.id === client.user?.id,
       mentionsBot: client.user !== null && message.mentions.users.has(client.user.id),
       body: message.content,
+      attachments: selection.attachments,
+      attachmentsOmitted: selection.omitted,
     };
     // One context fetch per message at most, shared by the ask's decider and
     // the captain turn — whichever reads first pays for both.

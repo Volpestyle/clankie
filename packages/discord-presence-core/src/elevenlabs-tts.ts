@@ -194,7 +194,12 @@ export class ElevenLabsTtsSession {
     });
   }
 
-  /** Streams one text delta into an open context, verbatim — deltas can split words, and joining them is the server's job. */
+  /**
+   * Streams text into an open context, verbatim.
+   *
+   * Under `auto_mode` the server does no buffering, so the caller must send
+   * complete phrases — joining deltas is not the server's job here.
+   */
   public appendText(contextId: string, text: string): void {
     this.assertOpen();
     const id = this.requireOpenContext(contextId);
@@ -377,8 +382,14 @@ function buildElevenLabsUrl(options: ElevenLabsTtsSessionOptions): string {
   }
   url.searchParams.set("model_id", modelId);
   url.searchParams.set("output_format", ELEVENLABS_OUTPUT_FORMAT);
-  // Sentence-boundary generation instead of the 120-character chunk floor:
-  // short conversational replies should not wait for a buffer to fill.
+  // Disables the chunk schedule and every server-side buffer, so a short
+  // conversational reply does not wait for a 120-character floor to fill.
+  //
+  // The cost is that whatever arrives in one frame is synthesized as one unit:
+  // this mode is only correct for a caller sending complete phrases, and
+  // relaying a model's token deltas straight through it makes every word its
+  // own utterance. `splitSpeakableUnits` in `external-voice.ts` is what holds
+  // up that end of the bargain; do not send partial phrases here.
   url.searchParams.set("auto_mode", "true");
   url.searchParams.set(
     "inactivity_timeout",
