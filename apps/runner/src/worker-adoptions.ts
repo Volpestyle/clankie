@@ -7,7 +7,7 @@ import {
   AgentDeclarationSchema,
   WorkerAdoptionSchema,
   eventStreamKindForId,
-  type AdoptWorkerRequest,
+  type AdoptWorkerCommand,
   type AdoptWorkerResult,
   type AgentDeclaration,
   type AgentObservation,
@@ -46,10 +46,10 @@ export interface WorkerAdoptionStoreOptions {
  *
  * The contract that makes adoption safe is narrow and enforced here rather than
  * by callers: only a pane the transport identified as a real agent session is
- * adoptable, a `directed` adoption must declare the write scope it will be held
- * to, an `observed` one must declare none, and a binding whose native session
- * id no longer matches lapses explicitly instead of silently re-pointing at
- * whatever now occupies that terminal.
+ * adoptable, a `directed` adoption must declare its expected write scope and
+ * receives a whole-workspace scheduler reservation, an `observed` one must
+ * declare none, and a binding whose native session or workspace no longer
+ * matches lapses explicitly instead of silently re-pointing.
  *
  * Adoption events use the reserved `adoption:<adoptionId>` stream (ADR 0065)
  * because an adopted agent has no mission of its own — it existed before any
@@ -77,7 +77,7 @@ export class WorkerAdoptionStore {
    * never has to distinguish "refused" from "failed".
    */
   public adopt(
-    request: AdoptWorkerRequest,
+    request: AdoptWorkerCommand,
     observation: AgentObservation | undefined,
     ownedSessionIds: ReadonlySet<string> = new Set(),
   ): Promise<AdoptWorkerResult> {
@@ -91,12 +91,27 @@ export class WorkerAdoptionStore {
       if (
         !observation ||
         observation.terminalId !== request.terminalId ||
-        observation.transport !== request.transport
+        observation.transport !== request.transport ||
+        observation.transportInstanceId !== request.transportInstanceId
       ) {
         return { outcome: "refused", reason: "not_found" } as const;
       }
+      if (observation.workspace.workspaceId !== request.workspaceId) {
+        return { outcome: "refused", reason: "workspace_mismatch" } as const;
+      }
       if (!observation.adoptable || !observation.harness || !observation.agentSessionId) {
         return { outcome: "refused", reason: "not_an_agent" } as const;
+      }
+      if (request.grade === "directed") {
+        const approval = request.approval;
+        if (
+          approval === undefined ||
+          request.adoptedBy.kind !== "operator" ||
+          approval.approvedBy.kind !== "operator" ||
+          approval.approvedBy.id !== request.adoptedBy.id
+        ) {
+          return { outcome: "refused", reason: "approval_required" } as const;
+        }
       }
       if (ownedSessionIds.has(observation.agentSessionId)) {
         return { outcome: "refused", reason: "already_owned" } as const;
@@ -105,6 +120,7 @@ export class WorkerAdoptionStore {
         (record) =>
           record.state === "active" &&
           record.binding.transport === request.transport &&
+          record.binding.transportInstanceId === request.transportInstanceId &&
           record.binding.agentSessionId === observation.agentSessionId,
       );
       if (existing) return { outcome: "refused", reason: "already_adopted" } as const;
@@ -118,12 +134,16 @@ export class WorkerAdoptionStore {
         state: "active",
         binding: {
           transport: request.transport,
+          transportInstanceId: request.transportInstanceId,
           terminalId: request.terminalId,
           harness: observation.harness,
           agentSessionId: observation.agentSessionId,
+          workspace: observation.workspace,
         },
         writeScope: [...request.writeScope],
+        reservedWriteScope: request.grade === "directed" ? ["**"] : [],
         adoptedBy: request.adoptedBy,
+        ...(request.approval === undefined ? {} : { approval: request.approval }),
         adoptedAt: now,
         updatedAt: now,
       } satisfies WorkerAdoption);
@@ -134,6 +154,7 @@ export class WorkerAdoptionStore {
         harness: parsed.binding.harness,
         writeScopeCount: parsed.writeScope.length,
         adoptedByKind: parsed.adoptedBy.kind,
+        adoptedById: parsed.adoptedBy.id,
       });
       logger.info(
         {
@@ -163,7 +184,10 @@ export class WorkerAdoptionStore {
         updatedAt: this.clock().toISOString(),
       });
       await this.persist(parsed);
-      await this.record("worker.adoption.released", parsed, { releasedByKind: releasedBy.kind });
+      await this.record("worker.adoption.released", parsed, {
+        releasedByKind: releasedBy.kind,
+        releasedById: releasedBy.id,
+      });
     });
   }
 
@@ -197,13 +221,17 @@ export class WorkerAdoptionStore {
       }
       const byTerminal = new Map(
         observations.map((observation) => [
-          terminalKey(observation.transport, observation.terminalId),
+          terminalKey(observation.transport, observation.transportInstanceId, observation.terminalId),
           observation,
         ]),
       );
       for (const adoption of active) {
         const observation = byTerminal.get(
-          terminalKey(adoption.binding.transport, adoption.binding.terminalId),
+          terminalKey(
+            adoption.binding.transport,
+            adoption.binding.transportInstanceId,
+            adoption.binding.terminalId,
+          ),
         );
         const lapseReason = lapseReasonFor(adoption, observation);
         if (lapseReason === undefined) {
@@ -245,6 +273,7 @@ export class WorkerAdoptionStore {
     return this.enqueue(async () => {
       await this.record("worker.adoption.directed", adoption, {
         directedByKind: directedBy.kind,
+        directedById: directedBy.id,
         textLength,
       });
     });
@@ -254,7 +283,7 @@ export class WorkerAdoptionStore {
     return this.enqueue(async () => (await this.readAll()).adoptions);
   }
 
-  /** Active adoptions only — what routing and contention checks consult. */
+  /** Active adoptions only — what steering and contention checks consult. */
   public async active(): Promise<WorkerAdoption[]> {
     return (await this.list()).filter((adoption) => adoption.state === "active");
   }
@@ -265,17 +294,30 @@ export class WorkerAdoptionStore {
    * rather than surfaced — a malformed declaration must not become a census
    * entry that looks authoritative.
    */
-  public async readDeclaration(terminalId: string): Promise<AgentDeclaration | undefined> {
+  public async readDeclaration(observation: AgentObservation): Promise<AgentDeclaration | undefined> {
     let raw: string;
     try {
-      raw = await readFile(agentDeclarationPath(this.rootDir, terminalId), "utf8");
+      raw = await readFile(
+        agentDeclarationPath(
+          this.rootDir,
+          observation.transportInstanceId,
+          observation.terminalId,
+        ),
+        "utf8",
+      );
     } catch {
       return undefined;
     }
     if (raw.length > DECLARATION_MAX_BYTES) return undefined;
     const parsed = AgentDeclarationSchema.safeParse(safeJsonParse(raw));
     if (!parsed.success) return undefined;
-    if (parsed.data.terminalId !== terminalId) return undefined;
+    if (
+      parsed.data.terminalId !== observation.terminalId ||
+      parsed.data.transportInstanceId !== observation.transportInstanceId ||
+      parsed.data.workspaceId !== observation.workspace.workspaceId
+    ) {
+      return undefined;
+    }
     const age = this.clock().getTime() - Date.parse(parsed.data.declaredAt);
     if (!Number.isFinite(age) || age < 0 || age > DECLARATION_MAX_AGE_MS) return undefined;
     return parsed.data;
@@ -359,18 +401,35 @@ function lapseReasonFor(
   observation: AgentObservation | undefined,
 ): WorkerAdoptionLapseReason | undefined {
   if (!observation) return "terminal_gone";
+  if (!observation.adoptable || observation.harness !== adoption.binding.harness) {
+    return "session_replaced";
+  }
   if (observation.agentSessionId === undefined) return "session_replaced";
   if (observation.agentSessionId !== adoption.binding.agentSessionId) return "session_replaced";
+  if (
+    observation.workspace.workspaceId !== adoption.binding.workspace.workspaceId ||
+    observation.workspace.root !== adoption.binding.workspace.root
+  ) {
+    return "workspace_changed";
+  }
   return undefined;
 }
 
-/** Path an agent writes its self-declaration to, keyed by terminal id. */
-export function agentDeclarationPath(rootDir: string, terminalId: string): string {
-  return join(resolve(rootDir), DECLARATIONS_DIR, `${encodeURIComponent(terminalId)}.json`);
+/** Path an agent writes its self-declaration to, keyed by transport instance plus terminal. */
+export function agentDeclarationPath(
+  rootDir: string,
+  transportInstanceId: string,
+  terminalId: string,
+): string {
+  return join(
+    resolve(rootDir),
+    DECLARATIONS_DIR,
+    `${encodeURIComponent(transportInstanceId)}--${encodeURIComponent(terminalId)}.json`,
+  );
 }
 
-function terminalKey(transport: string, terminalId: string): string {
-  return `${transport}:${terminalId}`;
+function terminalKey(transport: string, transportInstanceId: string, terminalId: string): string {
+  return `${transport}:${transportInstanceId}:${terminalId}`;
 }
 
 function safeJsonParse(raw: string): unknown {

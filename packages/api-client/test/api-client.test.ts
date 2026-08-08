@@ -246,6 +246,9 @@ describe("ClankieApiClient runner surface", () => {
         authorization: "Bearer runner-secret",
         "x-clankie-runner-id": "runner-1",
       });
+      expect(JSON.parse(String(init?.body))).toMatchObject({
+        reservations: [{ id: "adoption-1", workspaceRoot: "/repo", writeScope: ["**"] }],
+      });
       return Response.json({
         assignment: {
           missionId: "mission-1",
@@ -337,20 +340,24 @@ describe("ClankieApiClient runner surface", () => {
       }),
     ).resolves.toEqual({ accepted: true });
     await expect(
-      client.claimTask("claim-1", [
-        {
-          id: "codex-implementer",
-          displayName: "Codex implementer",
-          harness: "codex",
-          capabilities: {
-            kinds: ["implementation"],
-            canWrite: true,
-            supportsStructuredEvents: true,
-            supportsTerminal: true,
-            supportsNativeSession: true,
+      client.claimTask(
+        "claim-1",
+        [
+          {
+            id: "codex-implementer",
+            displayName: "Codex implementer",
+            harness: "codex",
+            capabilities: {
+              kinds: ["implementation"],
+              canWrite: true,
+              supportsStructuredEvents: true,
+              supportsTerminal: true,
+              supportsNativeSession: true,
+            },
           },
-        },
-      ]),
+        ],
+        [{ id: "adoption-1", workspaceRoot: "/repo", writeScope: ["**"] }],
+      ),
     ).resolves.toMatchObject({ workerRunId: "run-1" });
   });
 

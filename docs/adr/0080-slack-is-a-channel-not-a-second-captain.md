@@ -3,8 +3,8 @@
 Status: accepted (2026-08-07). Follows the tracker-channel ingress established
 for Linear (`docs/linear-agent-webhook-ingress.md`) and the lane-address rule
 from [ADR 0048](0048-discord-user-session-transport.md) (the lane is derived
-from the channel, not the transport). Routes reach existing agents through
-[ADR 0078](0078-adopted-workers.md) and
+from the channel, not the transport). Agent accounting and executable-worker
+routing follow [ADR 0078](0078-adopted-workers.md) and
 [ADR 0079](0079-routing-prefers-the-worker-that-already-holds-the-context.md).
 
 ## Context
@@ -41,7 +41,7 @@ flowchart LR
   RL --> BR["slack-bridge<br/>dedupe · caps · ack budget"]
   BR -->|SlackChannelTurnRequest| CP["POST /v1/captain/channel-turns"]
   CP --> EV["captain turn<br/>(existing lane)"]
-  EV -->|routing| A["adopted or fresh worker<br/>ADR 0078 · 0079"]
+  EV -->|routing| A["runner-owned worker<br/>foreign reservations gate writes<br/>ADR 0078 · 0079"]
   BR -->|reply| S
 ```
 

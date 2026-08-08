@@ -98,10 +98,17 @@ describe("agent census gateway", () => {
       body: JSON.stringify({
         schemaVersion: 1,
         transport: "herdr",
+        transportInstanceId: "default",
         terminalId: "term_a",
+        workspaceId: "workspace-a",
         grade: "directed",
         writeScope: ["apps/**"],
         adoptedBy: { kind: "operator", id: "james" },
+        approval: {
+          receiptId: "approval-1",
+          approvedBy: { kind: "operator", id: "james" },
+          approvedAt: "2026-08-07T00:00:00.000Z",
+        },
       }),
     });
 

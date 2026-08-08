@@ -2,12 +2,12 @@ import {
   AdoptWorkerResultSchema,
   AgentCensusSchema,
   DirectAdoptedWorkerResultSchema,
-  type AdoptWorkerRequest,
+  type AdoptWorkerCommand,
   type AdoptWorkerResult,
   type AgentCensus,
-  type DirectAdoptedWorkerRequest,
+  type DirectAdoptedWorkerCommand,
   type DirectAdoptedWorkerResult,
-  type ReleaseWorkerAdoptionRequest,
+  type ReleaseWorkerAdoptionCommand,
 } from "@clankie/protocol";
 
 /**
@@ -18,9 +18,9 @@ import {
  */
 export interface AgentCensusReadPort {
   census(signal?: AbortSignal): Promise<AgentCensus>;
-  adopt(request: AdoptWorkerRequest, signal?: AbortSignal): Promise<AdoptWorkerResult>;
-  release(request: ReleaseWorkerAdoptionRequest, signal?: AbortSignal): Promise<void>;
-  direct(request: DirectAdoptedWorkerRequest, signal?: AbortSignal): Promise<DirectAdoptedWorkerResult>;
+  adopt(request: AdoptWorkerCommand, signal?: AbortSignal): Promise<AdoptWorkerResult>;
+  release(request: ReleaseWorkerAdoptionCommand, signal?: AbortSignal): Promise<void>;
+  direct(request: DirectAdoptedWorkerCommand, signal?: AbortSignal): Promise<DirectAdoptedWorkerResult>;
 }
 
 export class RunnerAgentCensusClient implements AgentCensusReadPort {
@@ -47,7 +47,7 @@ export class RunnerAgentCensusClient implements AgentCensusReadPort {
     return AgentCensusSchema.parse(value.census);
   }
 
-  public async adopt(request: AdoptWorkerRequest, signal?: AbortSignal): Promise<AdoptWorkerResult> {
+  public async adopt(request: AdoptWorkerCommand, signal?: AbortSignal): Promise<AdoptWorkerResult> {
     const response = await fetch(`${this.baseUrl}/v1/agents/adopt`, {
       method: "POST",
       headers: { ...this.headers(), "content-type": "application/json" },
@@ -59,7 +59,7 @@ export class RunnerAgentCensusClient implements AgentCensusReadPort {
     return AdoptWorkerResultSchema.parse(value.result);
   }
 
-  public async release(request: ReleaseWorkerAdoptionRequest, signal?: AbortSignal): Promise<void> {
+  public async release(request: ReleaseWorkerAdoptionCommand, signal?: AbortSignal): Promise<void> {
     const response = await fetch(`${this.baseUrl}/v1/agents/release`, {
       method: "POST",
       headers: { ...this.headers(), "content-type": "application/json" },
@@ -70,7 +70,7 @@ export class RunnerAgentCensusClient implements AgentCensusReadPort {
   }
 
   public async direct(
-    request: DirectAdoptedWorkerRequest,
+    request: DirectAdoptedWorkerCommand,
     signal?: AbortSignal,
   ): Promise<DirectAdoptedWorkerResult> {
     const response = await fetch(`${this.baseUrl}/v1/agents/direct`, {

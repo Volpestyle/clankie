@@ -330,8 +330,9 @@ boundary; artifacts use their separately authenticated retrieval plane.
 ## Agent census and adoption
 
 The runner accounts for agents it did not start
-([ADR 0078](adr/0078-adopted-workers.md)). After lease reconciliation at boot it
-enumerates the Herdr transport and classifies every hosted agent as `owned`
+([ADR 0078](adr/0078-adopted-workers.md)). It discovers every running local
+Herdr session, independently of whether Clankie starts inside Herdr, and
+classifies every hosted agent as `owned`
 (this runner spawned it and holds its process lease), `adopted` (a durable
 binding still matches), `lapsed` (the binding broke), or `unclaimed` (live, and
 nobody has taken responsibility). The census reports; it never adopts.
@@ -340,58 +341,65 @@ socket can never read as a quiet machine.
 
 ```mermaid
 flowchart TB
-  T["Herdr pane.list"] --> O["AgentObservation<br/>harness · session id · status · cwd"]
+  D["herdr session list"] --> T["pane.list per running session"]
+  T --> O["AgentObservation<br/>transport instance · workspace · agent session"]
   L[("process leases")] --> C{classify}
   A[("adoption records")] --> C
   O --> C
   C --> OW[owned] & AD[adopted] & LA[lapsed] & UN[unclaimed]
   UN -.->|operator or captain| G{grade}
   G -->|no approval| OBS["observed:<br/>knowledge only"]
-  G -->|approval + write scope| DIR["directed:<br/>steerable · routable"]
-  DIR --> S["/v1/agents/direct<br/>bounded operator-parity text"]
-  DIR -.->|never| V[verifier of record]
+  G -->|operator approval + expected scope| DIR["directed:<br/>semantically steerable"]
+  DIR --> S["Herdr agent.prompt"]
+  DIR --> R["whole-workspace reservation"]
+  DIR -.->|never| V["mission WorkerDescriptor"]
 ```
 
 Adoption grades authority. `observed` needs no approval and grants exactly
 knowledge: that the agent exists, its observed status, and a bounded digest
 whose `runnerObserved` and `selfDeclared` sections keep what the runner saw
 apart from what the agent claimed. `directed` is an operator decision requiring
-an explicit write scope, and it grants the existing operator-parity vocabulary
-— bounded steering text, never approvals, credentials, or policy overrides. An
-adopted worker is never the verifier of record, because the runner cannot attest
-to an environment it did not build.
+an explicit expected write scope, and it grants the existing operator-parity
+vocabulary — bounded steering text, never approvals, credentials, policy
+overrides, or mission task assignment. Because the runner cannot sandbox or
+settle a process it did not launch, a directed adoption reserves its entire
+bound workspace from new Clankie-owned write tasks.
 
-The binding is `(transport, terminalId, harness, agentSessionId)`. The native
-provider session id is the identity because it survives pane churn and changes
-exactly when the agent restarts; pane ids are session-local and re-resolved at
-every use. A binding whose session no longer matches becomes `lapsed` rather
-than being re-pointed, and direction re-verifies the binding immediately before
-delivering. The census travels the same authenticated loopback path as worker
-transcripts and current activity; terminal bytes never enter it.
+The binding is `(transport, transportInstanceId, terminalId, harness,
+agentSessionId, workspaceId, canonicalWorkspaceRoot)`. The transport instance
+prevents equal terminal ids in separate Herdr sessions from aliasing; the native
+provider session identifies the agent; and workspace identity prevents
+cross-repository adoption. A changed session or workspace becomes `lapsed`
+rather than being re-pointed. Every census read reconciles first, and a vanished
+terminal remains visible as lapsed until release. Direction re-verifies the
+binding and uses Herdr's semantic `agent.prompt` API. The census travels the same
+authenticated loopback path as worker transcripts and current activity;
+terminal bytes never enter it.
 
 ## Worker routing
 
-Selection is a hard filter, then a deterministic score
+Owned-worker selection is a hard filter, then a deterministic score
 ([ADR 0079](adr/0079-routing-prefers-the-worker-that-already-holds-the-context.md)),
 shared by the pull path (`leaseReadyTask`) and the push path
 (`StaticWorkerRouter`) so they cannot disagree. Capability kinds,
 `preferredHarness`, `canWrite`, and the verification-independence exclusion set
-remain hard filters; an adopted worker is a candidate only at `directed` grade
-and never for verification or review.
+remain hard filters. A foreign adopted process is never a candidate because it
+has no runner-owned worktree, attempt lifecycle, result protocol, or evidence
+boundary.
 
-Among eligible workers, preference runs warmth before load: ran the previous
+Among eligible owned workers, preference runs warmth before load: ran the previous
 attempt, holds a settled assignment overlapping this write scope, completed a
-dependency, then idle over busy. Adoption carries a penalty larger than every
-warmth signal combined, so a spawned worker always wins when both are eligible.
-Ties break lexicographically by worker id, keeping identical missions
-byte-identical.
+dependency, then idle over busy. Ties break lexicographically by worker id,
+keeping identical missions byte-identical.
 
 Plan-time validation already refuses parallel tasks with overlapping write
-scopes, but an adopted worker's declared scope was never in any plan. A ready
-task whose scope overlaps a live `directed` adoption is therefore offered only
-to that adoption; if it cannot run the task the task stays queued and emits
-`task.scope_contended` once per episode, so a held-back task never looks like a
-stalled mission.
+scopes, but a foreign process is outside every plan. Each runner claim therefore
+carries the active directed adoptions for the runner's canonical repository as
+separate `WorkerScopeReservation` values. Their enforced scope is the whole
+workspace because the runner cannot hold a foreign process to its declared
+glob. An overlapping write task stays queued and emits `task.scope_contended`
+once per episode; scope-free tasks continue. Release or lapse removes the
+reservation from the next claim.
 
 ## Worker transcript projection
 

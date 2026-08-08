@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type {
   RunnerAssignment,
+  RunnerScopeReservation,
   RunnerWorkerDescriptor,
   WorkerSteerCommand,
   WorkerSteerOutcome,
@@ -33,6 +34,7 @@ export interface MissionControlClient {
   claimTask(
     claimId: string,
     workers: readonly RunnerWorkerDescriptor[],
+    reservations?: readonly RunnerScopeReservation[],
   ): Promise<RunnerAssignment | undefined>;
   recordWorkerEvent(
     workerRunId: string,
@@ -52,6 +54,8 @@ export interface MissionControlClient {
 export interface MissionWorkerOptions {
   client: MissionControlClient;
   adapters: readonly WorkerAdapter[];
+  /** Live foreign-process reservations for this runner's canonical workspace. */
+  reservations?: () => Promise<readonly RunnerScopeReservation[]>;
   worktrees: WorktreeManager;
   artifactRoot: string;
   baseRef?: string;
@@ -127,8 +131,9 @@ export class MissionWorker {
     if (signal.aborted) return false;
     const claimId = this.claimIdFactory();
     const workers = [...this.adapters.values()].map((adapter) => structuredClone(adapter.descriptor));
+    const reservations = (await this.options.reservations?.()) ?? [];
     const assignment = await retry(
-      () => this.options.client.claimTask(claimId, workers),
+      () => this.options.client.claimTask(claimId, workers, reservations),
       this.options.reportAttempts,
       this.options.retryDelayMs,
       signal,

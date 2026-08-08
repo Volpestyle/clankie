@@ -71,12 +71,14 @@ Four authenticated captain/operator routes proxy the runner's census gateway
 
 Reading the census sits at the same tier as reading current activity: knowing
 which agents are running is a read the owner should never have to authorize.
-Adopting at `directed` grade is different — it grants steering and task
-assignment over a process this fleet never built, so a captain bearer alone is
-answered `refused: approval_required` before the runner is ever asked. The
-control plane proxies and persists nothing; a cached census would be a second,
-staler authority. Upstream failure returns `502` rather than a fabricated
-answer, and an unwired runner returns `503` rather than an empty machine.
+Adopting at `directed` grade is different — it grants steering and reserves the
+foreign process's bound workspace from new mission writers, so a captain bearer
+alone is answered `refused: approval_required` before the runner is ever asked.
+The control plane derives every audit principal from the authenticated bearer
+and mints the directed-approval receipt server-side; request bodies cannot claim
+either identity. It proxies and persists no census state. Upstream failure
+returns `502` rather than a fabricated answer, and an unwired runner returns
+`503` rather than an empty machine.
 
 ## Worker transcript read and tail
 

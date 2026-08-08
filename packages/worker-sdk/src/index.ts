@@ -2,7 +2,6 @@ import type {
   DomainEvent,
   Harness,
   TaskSpec,
-  WorkerAdoptionGrade,
   WorkerResult,
   WorkerStatusProvenance,
 } from "@clankie/protocol";
@@ -15,23 +14,23 @@ export interface WorkerCapabilities {
   supportsNativeSession: boolean;
 }
 
-/**
- * Present only on a worker the runner did not start (ADR 0078). Its declared
- * write scope is what the adopter promised on its behalf, and it is the reason
- * an adopted worker can participate in path-collision checks at all.
- */
-export interface WorkerAdoptionFacts {
-  grade: WorkerAdoptionGrade;
-  writeScope: readonly string[];
-}
-
 export interface WorkerDescriptor {
   id: string;
   displayName: string;
   harness: Harness;
   model?: string;
   capabilities: WorkerCapabilities;
-  adoption?: WorkerAdoptionFacts;
+}
+
+/**
+ * A foreign process that may write in the mission workspace. It is deliberately
+ * not a WorkerDescriptor: the runner cannot execute or settle a process it did
+ * not launch, but the scheduler must still keep owned writers out of its path.
+ */
+export interface WorkerScopeReservation {
+  id: string;
+  workspaceRoot: string;
+  writeScope: readonly string[];
 }
 
 export interface WorkerRunContext {
@@ -176,18 +175,8 @@ export function isWorkerEligible(
   if (!descriptor.capabilities.kinds.includes(task.kind)) return false;
   if (task.preferredHarness && descriptor.harness !== task.preferredHarness) return false;
   if (task.writeScope.length > 0 && !descriptor.capabilities.canWrite) return false;
-  if (descriptor.adoption) {
-    // Knowledge-only adoptions are not workers, and no adopted worker may be
-    // the verifier of record: the runner cannot attest to an environment it
-    // did not build (ADR 0078).
-    if (descriptor.adoption.grade !== "directed") return false;
-    if (task.kind === "verification" || task.kind === "review") return false;
-  }
   return true;
 }
-
-/** Maximum warmth-and-load score, used to size the adoption penalty. */
-const MAX_AFFINITY_SCORE = 8 + 4 + 2 + 1;
 
 /**
  * Warmth outranks load, because rebuilding context costs more than waiting for
@@ -195,13 +184,6 @@ const MAX_AFFINITY_SCORE = 8 + 4 + 2 + 1;
  * stronger one — a worker that ran the previous attempt wins over one that is
  * merely idle and scope-warm.
  *
- * Adoption is a penalty larger than every warmth signal combined, so a spawned
- * worker always beats an adopted one when both are eligible. Adoption is a
- * fallback, not a preference: an adopted worker runs in an environment the
- * runner never built and drags a mandatory external verification behind it, so
- * borrowing one when an owned worker is free is a strictly worse trade. The
- * case where an adopted worker *must* be used — it holds the write scope — is
- * a hard filter upstream, not something this score is asked to express.
  */
 export function scoreWorkerAffinity(
   descriptor: WorkerDescriptor,
@@ -212,7 +194,6 @@ export function scoreWorkerAffinity(
   if (context.scopeWarmWorkerIds?.has(descriptor.id)) score += 4;
   if (context.dependencyWorkerIds?.has(descriptor.id)) score += 2;
   if (!context.busyWorkerIds?.has(descriptor.id)) score += 1;
-  if (descriptor.adoption) score -= MAX_AFFINITY_SCORE + 1;
   return score;
 }
 

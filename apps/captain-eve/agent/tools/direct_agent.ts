@@ -14,7 +14,6 @@ export default defineTool({
       schemaVersion: 1,
       adoptionId,
       text,
-      directedBy: { kind: "captain", id: "eve" },
     });
   },
 });

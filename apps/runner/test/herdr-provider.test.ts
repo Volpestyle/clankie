@@ -1,5 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { createServer, type Server } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  HerdrSocketTransport,
   HerdrTerminalError,
   HerdrTerminalProvider,
   type HerdrAttachChunk,
@@ -8,6 +13,19 @@ import {
   type HerdrTransport,
   type HerdrVisibleState,
 } from "../src/herdr-provider.ts";
+
+const socketServers: Array<{ server: Server; root: string }> = [];
+
+afterEach(async () => {
+  await Promise.all(
+    socketServers.splice(0).map(
+      ({ server, root }) =>
+        new Promise<void>((resolve) => {
+          server.close(() => resolve());
+        }).finally(() => rm(root, { recursive: true, force: true })),
+    ),
+  );
+});
 
 const encoded = (text: string): string => Buffer.from(text).toString("base64");
 
@@ -275,5 +293,94 @@ describe("Herdr terminal source adapter", () => {
     const error = new HerdrTerminalError("seed_unstable", true);
     expect(error.message).not.toContain("secret-pane");
     expect(error).toMatchObject({ code: "seed_unstable", retryable: true });
+  });
+});
+
+describe("Herdr agent source", () => {
+  it("binds observations to the exact session and steers through agent.prompt", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-herdr-agent-source-"));
+    const socketPath = join(root, "herdr.sock");
+    const methods: Array<{ method: string; params: Record<string, unknown> }> = [];
+    let agentSessionId = "session-a";
+    const server = createServer((socket) => {
+      let buffer = "";
+      socket.on("data", (chunk) => {
+        buffer += chunk.toString("utf8");
+        const newline = buffer.indexOf("\n");
+        if (newline < 0) return;
+        const request = JSON.parse(buffer.slice(0, newline)) as {
+          id: string;
+          method: string;
+          params: Record<string, unknown>;
+        };
+        methods.push({ method: request.method, params: request.params });
+        const result =
+          request.method === "pane.list"
+            ? {
+                type: "pane_list",
+                panes: [
+                  {
+                    agent: "claude",
+                    agent_session: { kind: "id", value: agentSessionId },
+                    agent_status: "working",
+                    cwd: "/repo/src",
+                    pane_id: "w1:p1",
+                    terminal_id: "term-a",
+                    terminal_title_stripped: "Implement workspace binding",
+                    workspace_id: "workspace-a",
+                  },
+                ],
+              }
+            : { type: "agent_prompted" };
+        socket.end(`${JSON.stringify({ id: request.id, result })}\n`);
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(socketPath, resolve);
+    });
+    socketServers.push({ server, root });
+    const transport = new HerdrSocketTransport({
+      socketPath,
+      instanceId: "default",
+      resolveWorkspaceRoot: () => Promise.resolve("/repo"),
+    });
+
+    const observation = {
+      transport: "herdr" as const,
+      transportInstanceId: "default",
+      terminalId: "term-a",
+      workspace: { workspaceId: "workspace-a", root: "/repo" },
+      label: "Implement workspace binding",
+      reportedStatus: "working" as const,
+      adoptable: true as const,
+      harness: "claude" as const,
+      agentSessionId: "session-a",
+      cwd: "/repo/src",
+    };
+    const binding = {
+      transport: observation.transport,
+      transportInstanceId: observation.transportInstanceId,
+      terminalId: observation.terminalId,
+      harness: observation.harness,
+      agentSessionId: observation.agentSessionId,
+      workspace: observation.workspace,
+    };
+    await expect(transport.listAgents()).resolves.toEqual([observation]);
+    await expect(transport.sendToAgent(binding, "continue")).resolves.toBe("delivered");
+    expect(methods.map(({ method }) => method)).toEqual(["pane.list", "pane.list", "agent.prompt"]);
+    expect(methods.at(-1)?.params).toEqual({ target: "term-a", text: "continue", wait: null });
+    await expect(
+      transport.sendToAgent({ ...binding, transportInstanceId: "another" }, "continue"),
+    ).resolves.toBe("terminal_gone");
+
+    agentSessionId = "replacement-session";
+    await expect(transport.sendToAgent(binding, "continue")).resolves.toBe("terminal_gone");
+    expect(methods.map(({ method }) => method)).toEqual([
+      "pane.list",
+      "pane.list",
+      "agent.prompt",
+      "pane.list",
+    ]);
   });
 });

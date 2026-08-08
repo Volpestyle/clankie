@@ -1,11 +1,12 @@
 import { resolve } from "node:path";
 import { compileDoctrine, loadDoctrineFile } from "@clankie/doctrine";
 import type {
+  AdoptWorkerCommand,
   AdoptWorkerRequest,
   AdoptWorkerResult,
   AgentCensus,
-  DirectAdoptedWorkerRequest,
-  ReleaseWorkerAdoptionRequest,
+  DirectAdoptedWorkerCommand,
+  ReleaseWorkerAdoptionCommand,
 } from "@clankie/protocol";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createControlPlane, type TrustedOperatorIdentity } from "../src/app.ts";
@@ -36,7 +37,9 @@ const census: AgentCensus = {
       digest: {
         runnerObserved: {
           transport: "herdr",
+          transportInstanceId: "default",
           terminalId: "term_a",
+          workspace: { workspaceId: "workspace-a", root: "/repo/a" },
           label: "A stranger",
           reportedStatus: "working",
           adoptable: true,
@@ -51,19 +54,19 @@ const census: AgentCensus = {
 };
 
 function stubCensusPort(): AgentCensusReadPort & {
-  adopted: AdoptWorkerRequest[];
-  released: string[];
-  directed: DirectAdoptedWorkerRequest[];
+  adopted: AdoptWorkerCommand[];
+  released: ReleaseWorkerAdoptionCommand[];
+  directed: DirectAdoptedWorkerCommand[];
 } {
-  const adopted: AdoptWorkerRequest[] = [];
-  const released: string[] = [];
-  const directed: DirectAdoptedWorkerRequest[] = [];
+  const adopted: AdoptWorkerCommand[] = [];
+  const released: ReleaseWorkerAdoptionCommand[] = [];
+  const directed: DirectAdoptedWorkerCommand[] = [];
   return {
     adopted,
     released,
     directed,
     census: () => Promise.resolve(census),
-    adopt: (request: AdoptWorkerRequest): Promise<AdoptWorkerResult> => {
+    adopt: (request: AdoptWorkerCommand): Promise<AdoptWorkerResult> => {
       adopted.push(request);
       return Promise.resolve({
         outcome: "adopted",
@@ -75,22 +78,26 @@ function stubCensusPort(): AgentCensusReadPort & {
           state: "active",
           binding: {
             transport: "herdr",
+            transportInstanceId: request.transportInstanceId,
             terminalId: request.terminalId,
             harness: "codex",
             agentSessionId: "session-a",
+            workspace: { workspaceId: request.workspaceId, root: "/repo/a" },
           },
           writeScope: [...request.writeScope],
+          reservedWriteScope: request.grade === "directed" ? ["**"] : [],
           adoptedBy: request.adoptedBy,
+          ...(request.approval === undefined ? {} : { approval: request.approval }),
           adoptedAt: "2026-08-07T00:00:00.000Z",
           updatedAt: "2026-08-07T00:00:00.000Z",
         },
       });
     },
-    release: (request: ReleaseWorkerAdoptionRequest) => {
-      released.push(request.adoptionId);
+    release: (request: ReleaseWorkerAdoptionCommand) => {
+      released.push(request);
       return Promise.resolve();
     },
-    direct: (request: DirectAdoptedWorkerRequest) => {
+    direct: (request: DirectAdoptedWorkerCommand) => {
       directed.push(request);
       return Promise.resolve({
         outcome: "delivered" as const,
@@ -124,10 +131,11 @@ const adoptBody = (overrides: Partial<AdoptWorkerRequest> = {}): string =>
   JSON.stringify({
     schemaVersion: 1,
     transport: "herdr",
+    transportInstanceId: "default",
     terminalId: "term_a",
+    workspaceId: "workspace-a",
     grade: "observed",
     writeScope: [],
-    adoptedBy: { kind: "captain", id: "eve" },
     ...overrides,
   });
 
@@ -182,6 +190,7 @@ describe("agent census routes", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ result: { outcome: "adopted" } });
     expect(port.adopted).toHaveLength(1);
+    expect(port.adopted[0]?.adoptedBy).toEqual({ kind: "captain", id: "captain-test" });
   });
 
   it("refuses a directed adoption backed only by a captain token", async () => {
@@ -215,6 +224,10 @@ describe("agent census routes", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ result: { outcome: "adopted" } });
     expect(port.adopted[0]?.grade).toBe("directed");
+    expect(port.adopted[0]?.adoptedBy).toEqual({ kind: "operator", id: "operator-james" });
+    expect(port.adopted[0]?.approval).toMatchObject({
+      approvedBy: { kind: "operator", id: "operator-james" },
+    });
   });
 
   it("rejects a malformed adoption request", async () => {
@@ -225,6 +238,29 @@ describe("agent census routes", () => {
       method: "POST",
       headers: { ...CAPTAIN_HEADERS, "content-type": "application/json" },
       body: JSON.stringify({ schemaVersion: 1, transport: "carrier-pigeon" }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(port.adopted).toEqual([]);
+  });
+
+  it("rejects a caller-supplied adoption principal", async () => {
+    const port = stubCensusPort();
+    const app = await makeApp(port);
+
+    const response = await app.request("/v1/agents/adopt", {
+      method: "POST",
+      headers: { ...CAPTAIN_HEADERS, "content-type": "application/json" },
+      body: JSON.stringify({
+        schemaVersion: 1,
+        transport: "herdr",
+        transportInstanceId: "default",
+        terminalId: "term_a",
+        workspaceId: "workspace-a",
+        grade: "observed",
+        writeScope: [],
+        adoptedBy: { kind: "operator", id: "forged" },
+      }),
     });
 
     expect(response.status).toBe(400);
@@ -242,13 +278,32 @@ describe("agent census routes", () => {
         schemaVersion: 1,
         adoptionId: "adopt-1",
         text: "check the failing migration first",
-        directedBy: { kind: "captain", id: "eve" },
       }),
     });
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ result: { outcome: "delivered" } });
     expect(port.directed[0]?.text).toBe("check the failing migration first");
+    expect(port.directed[0]?.directedBy).toEqual({ kind: "captain", id: "captain-test" });
+  });
+
+  it("rejects a caller-supplied direction principal", async () => {
+    const port = stubCensusPort();
+    const app = await makeApp(port);
+
+    const response = await app.request("/v1/agents/direct", {
+      method: "POST",
+      headers: { ...CAPTAIN_HEADERS, "content-type": "application/json" },
+      body: JSON.stringify({
+        schemaVersion: 1,
+        adoptionId: "adopt-1",
+        text: "continue",
+        directedBy: { kind: "operator", id: "forged" },
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(port.directed).toEqual([]);
   });
 
   it("refuses unbounded direction text", async () => {
@@ -262,7 +317,6 @@ describe("agent census routes", () => {
         schemaVersion: 1,
         adoptionId: "adopt-1",
         text: "x".repeat(20_001),
-        directedBy: { kind: "captain", id: "eve" },
       }),
     });
 
@@ -281,7 +335,6 @@ describe("agent census routes", () => {
         schemaVersion: 1,
         adoptionId: "adopt-1",
         text: "hello",
-        directedBy: { kind: "captain", id: "eve" },
       }),
     });
 
@@ -299,11 +352,34 @@ describe("agent census routes", () => {
       body: JSON.stringify({
         schemaVersion: 1,
         adoptionId: "adopt-1",
-        releasedBy: { kind: "captain", id: "eve" },
       }),
     });
 
     expect(response.status).toBe(200);
-    expect(port.released).toEqual(["adopt-1"]);
+    expect(port.released).toEqual([
+      {
+        schemaVersion: 1,
+        adoptionId: "adopt-1",
+        releasedBy: { kind: "captain", id: "captain-test" },
+      },
+    ]);
+  });
+
+  it("rejects a caller-supplied release principal", async () => {
+    const port = stubCensusPort();
+    const app = await makeApp(port);
+
+    const response = await app.request("/v1/agents/release", {
+      method: "POST",
+      headers: { ...CAPTAIN_HEADERS, "content-type": "application/json" },
+      body: JSON.stringify({
+        schemaVersion: 1,
+        adoptionId: "adopt-1",
+        releasedBy: { kind: "operator", id: "forged" },
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(port.released).toEqual([]);
   });
 });

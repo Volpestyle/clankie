@@ -117,6 +117,7 @@ import {
   type TaskSpec,
   type TrackerNarrativeWriteResult,
   type WorkerResult,
+  type WorkerAdoptionPrincipal,
   type WorkerTranscriptKey,
   type WorkerTranscriptTailLine,
   DISCORD_PRESENCE_ACTION_RISK_CLASS,
@@ -138,6 +139,7 @@ import {
 } from "@clankie/tracker-connector";
 import type {
   WorkerDescriptor,
+  WorkerScopeReservation,
   WorkerSteerCommand,
   WorkerSteerIntent,
   WorkerSteerPrincipal,
@@ -584,6 +586,18 @@ const WorkerDescriptorSchema = z.object({
 const RunnerClaimSchema = z.object({
   claimId: z.string().min(1),
   workers: z.array(WorkerDescriptorSchema).min(1),
+  reservations: z
+    .array(
+      z
+        .object({
+          id: z.string().min(1).max(200),
+          workspaceRoot: z.string().min(1).max(1024),
+          writeScope: z.array(z.string().min(1).max(400)).min(1).max(64),
+        })
+        .strict(),
+    )
+    .max(256)
+    .default([]),
 });
 
 const RunnerEventSchema = z.object({
@@ -1609,18 +1623,24 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
    * extra authority `directed` adoption needs is checked at that route, not
    * here.
    */
-  const authorizeAgentCensus = async (context: Context): Promise<Response | undefined> => {
+  const authenticateAgentCensusPrincipal = async (
+    context: Context,
+  ): Promise<{ principal: WorkerAdoptionPrincipal } | { denial: Response }> => {
     const captain = await authenticateCaptain(context.req.raw, dependencies);
-    if (captain && captain !== "unavailable") return undefined;
+    if (captain && captain !== "unavailable") {
+      return { principal: { kind: "captain", id: captain.captainId } };
+    }
     const operator = await authenticateOperator(context.req.raw, dependencies);
     if (operator === "unavailable") {
       if (captain === "unavailable") {
-        return context.json({ error: "agent_census_authentication_unavailable" }, 503);
+        return { denial: context.json({ error: "agent_census_authentication_unavailable" }, 503) };
       }
-      return context.json({ error: "agent_census_authentication_required" }, 401);
+      return { denial: context.json({ error: "agent_census_authentication_required" }, 401) };
     }
-    if (!operator) return context.json({ error: "agent_census_authentication_required" }, 401);
-    return undefined;
+    if (!operator) {
+      return { denial: context.json({ error: "agent_census_authentication_required" }, 401) };
+    }
+    return { principal: { kind: "operator", id: operator.operatorId } };
   };
 
   app.get("/health", (context) =>
@@ -3423,8 +3443,8 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
    * and stores nothing: a cached census would be a second, staler authority.
    */
   app.get("/v1/agents/census", async (context) => {
-    const authorization = await authorizeAgentCensus(context);
-    if (authorization) return authorization;
+    const authorization = await authenticateAgentCensusPrincipal(context);
+    if ("denial" in authorization) return authorization.denial;
     if (dependencies.agentCensus === undefined) {
       return context.json({ error: "agent_census_unavailable" }, 503);
     }
@@ -3439,13 +3459,13 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
 
   /**
    * Adoption (ADR 0078). `observed` grants knowledge only and needs no more
-   * authority than reading the census does. `directed` grants steering and task
-   * assignment over a process this runner never built, so it is an operator
+   * authority than reading the census does. `directed` grants steering and
+   * reserves a workspace against new mission writers, so it is an operator
    * decision: a captain bearer alone is refused with `approval_required`.
    */
   app.post("/v1/agents/adopt", async (context) => {
-    const authorization = await authorizeAgentCensus(context);
-    if (authorization) return authorization;
+    const authorization = await authenticateAgentCensusPrincipal(context);
+    if ("denial" in authorization) return authorization.denial;
     if (dependencies.agentCensus === undefined) {
       return context.json({ error: "agent_census_unavailable" }, 503);
     }
@@ -3457,6 +3477,8 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     }
     const parsed = AdoptWorkerRequestSchema.safeParse(body);
     if (!parsed.success) return context.json({ error: "invalid_adopt_request" }, 400);
+    let principal = authorization.principal;
+    let approval;
     if (parsed.data.grade === "directed") {
       const operator = await authenticateOperator(context.req.raw, dependencies);
       if (operator === "unavailable") {
@@ -3465,10 +3487,25 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       if (!operator) {
         return context.json({ result: { outcome: "refused", reason: "approval_required" } }, 200);
       }
+      principal = { kind: "operator", id: operator.operatorId };
+      approval = {
+        receiptId: `agent-adoption-approval:${idFactory()}`,
+        approvedBy: principal,
+        approvedAt: clock().toISOString(),
+      };
     }
     try {
       return context.json(
-        { result: await dependencies.agentCensus.adopt(parsed.data, context.req.raw.signal) },
+        {
+          result: await dependencies.agentCensus.adopt(
+            {
+              ...parsed.data,
+              adoptedBy: principal,
+              ...(approval === undefined ? {} : { approval }),
+            },
+            context.req.raw.signal,
+          ),
+        },
         200,
       );
     } catch {
@@ -3482,8 +3519,8 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
    * authority ceiling: an instruction may arrive here, an approval may not.
    */
   app.post("/v1/agents/direct", async (context) => {
-    const authorization = await authorizeAgentCensus(context);
-    if (authorization) return authorization;
+    const authorization = await authenticateAgentCensusPrincipal(context);
+    if ("denial" in authorization) return authorization.denial;
     if (dependencies.agentCensus === undefined) {
       return context.json({ error: "agent_census_unavailable" }, 503);
     }
@@ -3497,7 +3534,12 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     if (!parsed.success) return context.json({ error: "invalid_direct_request" }, 400);
     try {
       return context.json(
-        { result: await dependencies.agentCensus.direct(parsed.data, context.req.raw.signal) },
+        {
+          result: await dependencies.agentCensus.direct(
+            { ...parsed.data, directedBy: authorization.principal },
+            context.req.raw.signal,
+          ),
+        },
         200,
       );
     } catch {
@@ -3507,8 +3549,8 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
 
   /** Give an adopted agent back. Releasing is always allowed to the adopter's tier. */
   app.post("/v1/agents/release", async (context) => {
-    const authorization = await authorizeAgentCensus(context);
-    if (authorization) return authorization;
+    const authorization = await authenticateAgentCensusPrincipal(context);
+    if ("denial" in authorization) return authorization.denial;
     if (dependencies.agentCensus === undefined) {
       return context.json({ error: "agent_census_unavailable" }, 503);
     }
@@ -3521,7 +3563,10 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
     const parsed = ReleaseWorkerAdoptionRequestSchema.safeParse(body);
     if (!parsed.success) return context.json({ error: "invalid_release_request" }, 400);
     try {
-      await dependencies.agentCensus.release(parsed.data, context.req.raw.signal);
+      await dependencies.agentCensus.release(
+        { ...parsed.data, releasedBy: authorization.principal },
+        context.req.raw.signal,
+      );
       return context.json({ released: true }, 200);
     } catch {
       return context.json({ error: "agent_census_upstream_failure" }, 502);
@@ -3621,6 +3666,7 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
           claimId,
           runner.runnerId,
           dependencies.workerLeaseDurationMs,
+          parsed.data.reservations as WorkerScopeReservation[],
         );
         await flushEngine(engine);
         if (leased) claimMissions.set(claimId, missionId);

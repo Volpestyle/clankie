@@ -3965,6 +3965,22 @@ export type AdoptedWorkerTerminalId = z.infer<typeof AdoptedWorkerTerminalIdSche
 export const AdoptedAgentSessionIdSchema = z.string().min(1).max(200);
 export type AdoptedAgentSessionId = z.infer<typeof AdoptedAgentSessionIdSchema>;
 
+/** One discoverable Herdr server/session. Names are runner-derived, never pane-authored. */
+export const AgentTransportInstanceIdSchema = z.string().min(1).max(200);
+export type AgentTransportInstanceId = z.infer<typeof AgentTransportInstanceIdSchema>;
+
+/**
+ * Workspace identity attached by the runner. `workspaceId` is transport-local;
+ * `root` is the canonical checkout/root against which relative scopes resolve.
+ */
+export const AgentWorkspaceBindingSchema = z
+  .object({
+    workspaceId: z.string().min(1).max(200),
+    root: z.string().min(1).max(1024),
+  })
+  .strict();
+export type AgentWorkspaceBinding = z.infer<typeof AgentWorkspaceBindingSchema>;
+
 /**
  * Durable binding to the hosted agent. Pane ids are session-local and reusable
  * so they are never stored; the native provider session id is, because it
@@ -3976,9 +3992,11 @@ export type AdoptedAgentSessionId = z.infer<typeof AdoptedAgentSessionIdSchema>;
 export const AdoptedWorkerBindingSchema = z
   .object({
     transport: AdoptedWorkerTransportSchema,
+    transportInstanceId: AgentTransportInstanceIdSchema,
     terminalId: AdoptedWorkerTerminalIdSchema,
     harness: HarnessSchema,
     agentSessionId: AdoptedAgentSessionIdSchema,
+    workspace: AgentWorkspaceBindingSchema,
   })
   .strict();
 export type AdoptedWorkerBinding = z.infer<typeof AdoptedWorkerBindingSchema>;
@@ -3995,6 +4013,7 @@ export type WorkerAdoptionState = z.infer<typeof WorkerAdoptionStateSchema>;
  */
 export const WorkerAdoptionLapseReasonSchema = z.enum([
   "session_replaced",
+  "workspace_changed",
   "terminal_gone",
   "transport_lost",
 ]);
@@ -4009,11 +4028,23 @@ export const WorkerAdoptionPrincipalSchema = z
   .strict();
 export type WorkerAdoptionPrincipal = z.infer<typeof WorkerAdoptionPrincipalSchema>;
 
+/** Durable proof that an authenticated operator authorized directed control. */
+export const WorkerAdoptionApprovalReceiptSchema = z
+  .object({
+    receiptId: z.string().min(1).max(200),
+    approvedBy: WorkerAdoptionPrincipalSchema.refine((principal) => principal.kind === "operator", {
+      message: "Directed adoption approval must come from an operator",
+    }),
+    approvedAt: z.string().datetime(),
+  })
+  .strict();
+export type WorkerAdoptionApprovalReceipt = z.infer<typeof WorkerAdoptionApprovalReceiptSchema>;
+
 /**
- * One durable adoption record. `writeScope` is declared by the adopter and
- * never inferred from a pane title, cwd, or diff: at `directed` it is required
- * so the concurrency invariant stays enforceable, and at `observed` it must be
- * empty so nothing claims a scope the runner cannot hold anyone to.
+ * One durable adoption record. `writeScope` is the adopter's expected scope and
+ * is never inferred from a pane title, cwd, or diff. Because the runner cannot
+ * sandbox a foreign process, `reservedWriteScope` separately records the
+ * conservative scheduler boundary it can enforce on its own workers.
  */
 export const WorkerAdoptionSchema = z
   .object({
@@ -4023,8 +4054,12 @@ export const WorkerAdoptionSchema = z
     grade: WorkerAdoptionGradeSchema,
     state: WorkerAdoptionStateSchema,
     binding: AdoptedWorkerBindingSchema,
+    /** Operator-declared expected writes; useful context, but not a sandbox. */
     writeScope: z.array(z.string().min(1).max(400)).max(64),
+    /** Enforced scheduler reservation; foreign processes reserve the whole workspace. */
+    reservedWriteScope: z.array(z.string().min(1).max(400)).max(64),
     adoptedBy: WorkerAdoptionPrincipalSchema,
+    approval: WorkerAdoptionApprovalReceiptSchema.optional(),
     adoptedAt: z.string().datetime(),
     updatedAt: z.string().datetime(),
     lapseReason: WorkerAdoptionLapseReasonSchema.optional(),
@@ -4035,7 +4070,7 @@ export const WorkerAdoptionSchema = z
       context.addIssue({
         code: "custom",
         path: ["writeScope"],
-        message: "A directed adoption declares the write scope it will be held to",
+        message: "A directed adoption declares its expected write scope",
       });
     }
     if (adoption.grade === "observed" && adoption.writeScope.length > 0) {
@@ -4043,6 +4078,37 @@ export const WorkerAdoptionSchema = z
         code: "custom",
         path: ["writeScope"],
         message: "An observed adoption grants no writes and therefore declares no scope",
+      });
+    }
+    if (
+      adoption.grade === "directed" &&
+      (adoption.reservedWriteScope.length !== 1 || adoption.reservedWriteScope[0] !== "**")
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["reservedWriteScope"],
+        message: "A directed foreign process reserves its entire workspace",
+      });
+    }
+    if (adoption.grade === "observed" && adoption.reservedWriteScope.length > 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["reservedWriteScope"],
+        message: "An observed adoption reserves no write scope",
+      });
+    }
+    if (adoption.grade === "directed" && adoption.approval === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["approval"],
+        message: "A directed adoption carries an authenticated operator approval receipt",
+      });
+    }
+    if (adoption.grade === "observed" && adoption.approval !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["approval"],
+        message: "An observed adoption does not carry a privileged approval receipt",
       });
     }
     if (adoption.state === "lapsed" && adoption.lapseReason === undefined) {
@@ -4074,7 +4140,9 @@ export type AgentDeclarationStatus = z.infer<typeof AgentDeclarationStatusSchema
 export const AgentDeclarationSchema = z
   .object({
     schemaVersion: z.literal(1),
+    transportInstanceId: AgentTransportInstanceIdSchema,
     terminalId: AdoptedWorkerTerminalIdSchema,
+    workspaceId: z.string().min(1).max(200),
     status: AgentDeclarationStatusSchema,
     objective: z.string().min(1).max(500),
     writeScope: z.array(z.string().min(1).max(400)).max(64),
@@ -4104,7 +4172,9 @@ export type AgentReportedStatus = z.infer<typeof AgentReportedStatusSchema>;
 export const AgentObservationSchema = z
   .object({
     transport: AdoptedWorkerTransportSchema,
+    transportInstanceId: AgentTransportInstanceIdSchema,
     terminalId: AdoptedWorkerTerminalIdSchema,
+    workspace: AgentWorkspaceBindingSchema,
     label: z.string().min(1).max(200),
     reportedStatus: AgentReportedStatusSchema,
     adoptable: z.boolean(),
@@ -4132,10 +4202,19 @@ export type AgentObservation = z.infer<typeof AgentObservationSchema>;
  */
 export const AgentCensusDigestSchema = z
   .object({
-    runnerObserved: AgentObservationSchema,
+    runnerObserved: AgentObservationSchema.optional(),
+    /** Last durable binding when the terminal is no longer observable. */
+    adoptionBinding: AdoptedWorkerBindingSchema.optional(),
     selfDeclared: AgentDeclarationSchema.optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (digest) =>
+      digest.runnerObserved !== undefined ||
+      digest.adoptionBinding !== undefined ||
+      digest.selfDeclared !== undefined,
+    { message: "A census digest must contain at least one attributable fact" },
+  );
 export type AgentCensusDigest = z.infer<typeof AgentCensusDigestSchema>;
 
 /**
@@ -4232,13 +4311,21 @@ export const AdoptWorkerRequestSchema = z
   .object({
     schemaVersion: z.literal(1),
     transport: AdoptedWorkerTransportSchema,
+    transportInstanceId: AgentTransportInstanceIdSchema,
     terminalId: AdoptedWorkerTerminalIdSchema,
+    workspaceId: z.string().min(1).max(200),
     grade: WorkerAdoptionGradeSchema,
     writeScope: z.array(z.string().min(1).max(400)).max(64).default([]),
-    adoptedBy: WorkerAdoptionPrincipalSchema,
   })
   .strict();
 export type AdoptWorkerRequest = z.infer<typeof AdoptWorkerRequestSchema>;
+
+/** Trusted control-plane → runner command; never accepted from an app client. */
+export const AdoptWorkerCommandSchema = AdoptWorkerRequestSchema.extend({
+  adoptedBy: WorkerAdoptionPrincipalSchema,
+  approval: WorkerAdoptionApprovalReceiptSchema.optional(),
+}).strict();
+export type AdoptWorkerCommand = z.infer<typeof AdoptWorkerCommandSchema>;
 
 export const WorkerAdoptionRefusalReasonSchema = z.enum([
   "not_found",
@@ -4248,6 +4335,7 @@ export const WorkerAdoptionRefusalReasonSchema = z.enum([
   "write_scope_required",
   "write_scope_forbidden",
   "approval_required",
+  "workspace_mismatch",
   "transport_unavailable",
 ]);
 export type WorkerAdoptionRefusalReason = z.infer<typeof WorkerAdoptionRefusalReasonSchema>;
@@ -4262,10 +4350,14 @@ export const ReleaseWorkerAdoptionRequestSchema = z
   .object({
     schemaVersion: z.literal(1),
     adoptionId: WorkerAdoptionIdSchema,
-    releasedBy: WorkerAdoptionPrincipalSchema,
   })
   .strict();
 export type ReleaseWorkerAdoptionRequest = z.infer<typeof ReleaseWorkerAdoptionRequestSchema>;
+
+export const ReleaseWorkerAdoptionCommandSchema = ReleaseWorkerAdoptionRequestSchema.extend({
+  releasedBy: WorkerAdoptionPrincipalSchema,
+}).strict();
+export type ReleaseWorkerAdoptionCommand = z.infer<typeof ReleaseWorkerAdoptionCommandSchema>;
 
 /**
  * Bounded direction delivered into an adopted agent (ADR 0078). This is the
@@ -4279,10 +4371,14 @@ export const DirectAdoptedWorkerRequestSchema = z
     adoptionId: WorkerAdoptionIdSchema,
     /** Bounded steering text. Matches the worker-steer input ceiling. */
     text: z.string().min(1).max(20_000),
-    directedBy: WorkerAdoptionPrincipalSchema,
   })
   .strict();
 export type DirectAdoptedWorkerRequest = z.infer<typeof DirectAdoptedWorkerRequestSchema>;
+
+export const DirectAdoptedWorkerCommandSchema = DirectAdoptedWorkerRequestSchema.extend({
+  directedBy: WorkerAdoptionPrincipalSchema,
+}).strict();
+export type DirectAdoptedWorkerCommand = z.infer<typeof DirectAdoptedWorkerCommandSchema>;
 
 export const AdoptedWorkerDirectionRefusalReasonSchema = z.enum([
   "unknown_adoption",

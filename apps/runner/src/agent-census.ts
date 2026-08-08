@@ -1,11 +1,12 @@
 import { createLogger } from "@clankie/observability";
 import {
   AGENT_CENSUS_MAX_ENTRIES,
-  AdoptWorkerRequestSchema,
+  AdoptWorkerCommandSchema,
   AgentCensusSchema,
-  DirectAdoptedWorkerRequestSchema,
-  ReleaseWorkerAdoptionRequestSchema,
+  DirectAdoptedWorkerCommandSchema,
+  ReleaseWorkerAdoptionCommandSchema,
   type AdoptWorkerResult,
+  type AdoptedWorkerBinding,
   type DirectAdoptedWorkerResult,
   type AgentCensus,
   type AgentCensusEntry,
@@ -55,7 +56,8 @@ export async function takeAgentCensus(input: TakeAgentCensusInput): Promise<Agen
     });
   }
 
-  const adoptionByTerminal = indexAdoptionsByTerminal(await input.adoptions.list());
+  const adoptions = await input.adoptions.list();
+  const adoptionByTerminal = indexAdoptionsByTerminal(adoptions);
   const ownedWorkerRunIds = new Map<string, ProcessLease>();
   for (const lease of input.leases) {
     if (lease.state === "live" || lease.state === "cancelling") {
@@ -66,14 +68,15 @@ export async function takeAgentCensus(input: TakeAgentCensusInput): Promise<Agen
   // Deterministic order so a census taken twice from the same state is
   // byte-identical; transports make no ordering promise.
   const sorted = [...input.observations].sort((left, right) =>
-    terminalKey(left.transport, left.terminalId).localeCompare(
-      terminalKey(right.transport, right.terminalId),
+    terminalKey(left.transport, left.transportInstanceId, left.terminalId).localeCompare(
+      terminalKey(right.transport, right.transportInstanceId, right.terminalId),
     ),
   );
-  const visible = sorted.slice(0, AGENT_CENSUS_MAX_ENTRIES);
   const entries: AgentCensusEntry[] = [];
-  for (const observation of visible) {
-    const declaration = await input.adoptions.readDeclaration(observation.terminalId);
+  const observedKeys = new Set<string>();
+  for (const observation of sorted) {
+    observedKeys.add(terminalKey(observation.transport, observation.transportInstanceId, observation.terminalId));
+    const declaration = await input.adoptions.readDeclaration(observation);
     const digest = {
       runnerObserved: observation,
       ...(declaration ? { selfDeclared: declaration } : {}),
@@ -81,19 +84,42 @@ export async function takeAgentCensus(input: TakeAgentCensusInput): Promise<Agen
     entries.push(classify(observation, digest, adoptionByTerminal, ownedWorkerRunIds));
   }
 
+  // A terminal-gone lapse has no current observation to iterate. Keep the
+  // durable binding visible until an operator releases it instead of letting a
+  // broken adoption disappear from the census that is meant to expose it.
+  for (const adoption of adoptions) {
+    if (adoption.state !== "lapsed" || adoption.lapseReason === undefined) continue;
+    const key = terminalKey(
+      adoption.binding.transport,
+      adoption.binding.transportInstanceId,
+      adoption.binding.terminalId,
+    );
+    if (observedKeys.has(key)) continue;
+    entries.push({
+      classification: "lapsed",
+      digest: { adoptionBinding: adoption.binding },
+      workerRunId: adoption.workerRunId,
+      adoptionId: adoption.adoptionId,
+      grade: adoption.grade,
+      lapseReason: adoption.lapseReason,
+    });
+  }
+  const truncated = Math.max(0, entries.length - AGENT_CENSUS_MAX_ENTRIES);
+  const visible = entries.slice(0, AGENT_CENSUS_MAX_ENTRIES);
+
   return AgentCensusSchema.parse({
     schemaVersion: 1,
     runnerId: input.runnerId,
     takenAt,
     transportAvailable: true,
-    entries,
+    entries: visible,
     counts: {
-      owned: countOf(entries, "owned"),
-      adopted: countOf(entries, "adopted"),
-      lapsed: countOf(entries, "lapsed"),
-      unclaimed: countOf(entries, "unclaimed"),
+      owned: countOf(visible, "owned"),
+      adopted: countOf(visible, "adopted"),
+      lapsed: countOf(visible, "lapsed"),
+      unclaimed: countOf(visible, "unclaimed"),
     },
-    truncated: Math.max(0, sorted.length - visible.length),
+    truncated,
   });
 }
 
@@ -105,7 +131,10 @@ export interface AgentCensusServiceOptions {
   /** Process leases this runner owns. */
   leases: () => Promise<readonly ProcessLease[]>;
   /** Bounded operator-parity delivery into a hosted agent, if the transport can. */
-  deliver?: (terminalId: string, text: string) => Promise<"delivered" | "terminal_gone">;
+  deliver?: (
+    binding: AdoptedWorkerBinding,
+    text: string,
+  ) => Promise<"delivered" | "terminal_gone">;
   clock?: () => Date;
 }
 
@@ -113,12 +142,10 @@ export interface AgentCensusServiceOptions {
  * Binds the transport, the adoption store, and this runner's own leases into
  * the one surface the control plane talks to (ADR 0078).
  *
- * The approval that `directed` adoption requires is *not* enforced here. This
- * gateway sits behind the runner bearer on loopback, and policy lives in the
- * control plane; putting an approval check in the runner as well would create a
- * second authority for the same decision. What the runner enforces is the part
- * only it can see: whether the agent exists, whether it is already owned, and
- * whether the declared scope matches the grade.
+ * The control plane authenticates the operator and mints the directed-approval
+ * receipt. The runner validates that receipt's closed shape and enforces facts
+ * only it can see: exact transport instance, workspace, native agent session,
+ * ownership, and grade/scope consistency.
  */
 export class AgentCensusService implements AgentCensusPort {
   private readonly options: AgentCensusServiceOptions;
@@ -128,9 +155,11 @@ export class AgentCensusService implements AgentCensusPort {
   }
 
   public async census(): Promise<AgentCensus> {
+    const observations = await this.options.observe();
+    await this.options.adoptions.reconcile(observations);
     return takeAgentCensus({
       runnerId: this.options.runnerId,
-      observations: await this.options.observe(),
+      observations,
       leases: await this.options.leases(),
       adoptions: this.options.adoptions,
       ...(this.options.clock ? { clock: this.options.clock } : {}),
@@ -138,19 +167,21 @@ export class AgentCensusService implements AgentCensusPort {
   }
 
   public async adopt(request: unknown): Promise<AdoptWorkerResult> {
-    const parsed = AdoptWorkerRequestSchema.safeParse(request);
+    const parsed = AdoptWorkerCommandSchema.safeParse(request);
     if (!parsed.success) return { outcome: "refused", reason: "not_found" };
     const observations = await this.options.observe();
     if (observations === undefined) return { outcome: "refused", reason: "transport_unavailable" };
     const observation = observations.find(
       (candidate) =>
-        candidate.transport === parsed.data.transport && candidate.terminalId === parsed.data.terminalId,
+        candidate.transport === parsed.data.transport &&
+        candidate.transportInstanceId === parsed.data.transportInstanceId &&
+        candidate.terminalId === parsed.data.terminalId,
     );
     return this.options.adoptions.adopt(parsed.data, observation, await this.ownedSessionIds());
   }
 
   public async release(request: unknown): Promise<void> {
-    const parsed = ReleaseWorkerAdoptionRequestSchema.safeParse(request);
+    const parsed = ReleaseWorkerAdoptionCommandSchema.safeParse(request);
     if (!parsed.success) return;
     await this.options.adoptions.release(parsed.data.adoptionId, parsed.data.releasedBy);
   }
@@ -164,7 +195,7 @@ export class AgentCensusService implements AgentCensusPort {
    * into the wrong session is the one failure this whole seam exists to avoid.
    */
   public async direct(request: unknown): Promise<DirectAdoptedWorkerResult> {
-    const parsed = DirectAdoptedWorkerRequestSchema.safeParse(request);
+    const parsed = DirectAdoptedWorkerCommandSchema.safeParse(request);
     if (!parsed.success) return { outcome: "refused", reason: "unknown_adoption" };
     const deliver = this.options.deliver;
     if (!deliver) return { outcome: "refused", reason: "transport_unavailable" };
@@ -183,14 +214,19 @@ export class AgentCensusService implements AgentCensusPort {
     const observation = observations.find(
       (candidate) =>
         candidate.transport === adoption.binding.transport &&
+        candidate.transportInstanceId === adoption.binding.transportInstanceId &&
         candidate.terminalId === adoption.binding.terminalId,
     );
-    if (!observation || observation.agentSessionId !== adoption.binding.agentSessionId) {
+    if (!observation || !matchesAdoptedBinding(observation, adoption.binding)) {
+      await this.options.adoptions.reconcile(observations);
       return { outcome: "refused", reason: "binding_lapsed" };
     }
 
-    const delivery = await deliver(adoption.binding.terminalId, parsed.data.text);
-    if (delivery === "terminal_gone") return { outcome: "refused", reason: "binding_lapsed" };
+    const delivery = await deliver(adoption.binding, parsed.data.text);
+    if (delivery === "terminal_gone") {
+      await this.options.adoptions.reconcile(await this.options.observe());
+      return { outcome: "refused", reason: "binding_lapsed" };
+    }
     await this.options.adoptions.recordDirection(adoption, parsed.data.directedBy, parsed.data.text.length);
     return {
       outcome: "delivered",
@@ -259,8 +295,13 @@ function classify(
     };
   }
 
-  const adoption = adoptionByTerminal.get(terminalKey(observation.transport, observation.terminalId));
-  if (adoption?.state === "active") {
+  const adoption = adoptionByTerminal.get(
+    terminalKey(observation.transport, observation.transportInstanceId, observation.terminalId),
+  );
+  if (
+    adoption?.state === "active" &&
+    matchesAdoptedBinding(observation, adoption.binding)
+  ) {
     return {
       classification: "adopted",
       digest,
@@ -286,7 +327,11 @@ function indexAdoptionsByTerminal(adoptions: readonly WorkerAdoption[]): Map<str
   const index = new Map<string, WorkerAdoption>();
   for (const adoption of adoptions) {
     if (adoption.state === "released") continue;
-    const key = terminalKey(adoption.binding.transport, adoption.binding.terminalId);
+    const key = terminalKey(
+      adoption.binding.transport,
+      adoption.binding.transportInstanceId,
+      adoption.binding.terminalId,
+    );
     const existing = index.get(key);
     // Prefer the active record when a terminal carries both an active and a
     // lapsed history, so a re-adopted agent is not reported by its old failure.
@@ -304,6 +349,22 @@ function countOf(
   return entries.filter((entry) => entry.classification === classification).length;
 }
 
-function terminalKey(transport: string, terminalId: string): string {
-  return `${transport}:${terminalId}`;
+function matchesAdoptedBinding(
+  observation: AgentObservation,
+  binding: AdoptedWorkerBinding,
+): boolean {
+  return (
+    observation.adoptable &&
+    observation.transport === binding.transport &&
+    observation.transportInstanceId === binding.transportInstanceId &&
+    observation.terminalId === binding.terminalId &&
+    observation.harness === binding.harness &&
+    observation.agentSessionId === binding.agentSessionId &&
+    observation.workspace.workspaceId === binding.workspace.workspaceId &&
+    observation.workspace.root === binding.workspace.root
+  );
+}
+
+function terminalKey(transport: string, transportInstanceId: string, terminalId: string): string {
+  return `${transport}:${transportInstanceId}:${terminalId}`;
 }

@@ -34,22 +34,23 @@ transport is reported as `transportAvailable: false` rather than an empty
 census, and it lapses nothing — "I cannot see" is not evidence that an agent
 stopped.
 
-The census reads Herdr whenever `HERDR_SOCKET_PATH` is set, independently of
-`CLANKIE_HERDR_TERMINAL_SOURCE_ENABLED`, which gates the observe-only terminal
-_data_ plane. Knowing which agents exist is a cheaper question than streaming
-their bytes, and gating it behind the byte plane would leave the runner blind
-for the wrong reason. Each entry keeps `runnerObserved` (sanitized label,
-harness, native session id, transport status, cwd) apart from `selfDeclared`
-(a bounded record an agent may write into `<state>/agent-declarations/`, read
-only while fresh, well-formed, and self-consistent). Pane scrollback is never
+The census discovers every running local Herdr session with
+`herdr session list --json`; an inherited `HERDR_SOCKET_PATH` is only a fallback.
+It runs independently of `CLANKIE_HERDR_TERMINAL_SOURCE_ENABLED`, which gates
+the observe-only terminal _data_ plane. Each entry keeps `runnerObserved`
+(sanitized label, harness, native session id, transport instance, workspace,
+status, cwd) apart from `selfDeclared` (a bounded record an agent may write into
+`<state>/agent-declarations/`, read only while fresh, well-formed, and bound to
+the same transport instance, terminal, and workspace). Pane scrollback is never
 context.
 
-Adoption binds `(transport, terminalId, harness, agentSessionId)` — the native
-session id, because it identifies the agent rather than its window and changes
-exactly when the agent restarts. `observed` grade grants knowledge only;
-`directed` grade requires an operator approval and a declared write scope, and
-grants bounded operator-parity steering. An adopted worker is never the verifier
-of record.
+Adoption binds `(transport, transportInstanceId, terminalId, harness,
+agentSessionId, workspaceId, canonicalWorkspaceRoot)`. `observed` grants
+knowledge only. `directed` requires an authenticated operator approval and a
+declared expected write scope, grants bounded operator-parity steering through
+Herdr's `agent.prompt`, and reserves the whole bound workspace from new mission
+write tasks. A foreign adopted process is not an executable worker and never
+receives a mission assignment or acts as verifier of record.
 
 The exact-loopback gateway listens on `CLANKIE_AGENT_CENSUS_PORT` (default
 `4315`) with the runner bearer and serves `/v1/agents/census`, `/v1/agents/adopt`,

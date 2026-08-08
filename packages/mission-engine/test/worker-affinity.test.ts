@@ -1,6 +1,6 @@
 import { compileDoctrine, type OrchestrationProfile } from "@clankie/doctrine";
 import { MissionPlanSchema, type WorkerResult } from "@clankie/protocol";
-import type { WorkerDescriptor } from "@clankie/worker-sdk";
+import type { WorkerDescriptor, WorkerScopeReservation } from "@clankie/worker-sdk";
 import { describe, expect, it } from "vitest";
 import { MissionEngine } from "../src/index.ts";
 
@@ -38,7 +38,6 @@ const doctrine = compileDoctrine([profile]);
 function descriptor(
   id: string,
   kinds: Array<"implementation" | "debugging" | "verification" | "review">,
-  adoption?: { grade: "observed" | "directed"; writeScope: string[] },
 ): WorkerDescriptor {
   return {
     id,
@@ -51,7 +50,6 @@ function descriptor(
       supportsTerminal: false,
       supportsNativeSession: false,
     },
-    ...(adoption ? { adoption } : {}),
   };
 }
 
@@ -232,49 +230,14 @@ describe("worker affinity", () => {
   });
 });
 
-describe("adopted worker routing", () => {
-  const adoptedDirected = descriptor("adopted-directed", ["implementation"], {
-    grade: "directed",
-    writeScope: ["packages/owned/**"],
-  });
+describe("foreign process scope reservations", () => {
+  const reservation: WorkerScopeReservation = {
+    id: "adoption-1",
+    workspaceRoot: "/tmp",
+    writeScope: ["**"],
+  };
 
-  it("never routes to an observed adoption", () => {
-    const engine = engineFor([{ id: "implement", kind: "implementation", role: "implementer" }]);
-    const observed = descriptor("adopted-observed", ["implementation"], {
-      grade: "observed",
-      writeScope: [],
-    });
-
-    expect(engine.leaseReadyTask([observed], "claim-1")).toBeUndefined();
-  });
-
-  it("never routes verification or review to an adopted worker", () => {
-    const engine = engineFor([{ id: "review", kind: "review", role: "reviewer" }]);
-    const adoptedReviewer = descriptor("adopted-reviewer", ["review"], {
-      grade: "directed",
-      writeScope: ["packages/owned/**"],
-    });
-
-    expect(engine.leaseReadyTask([adoptedReviewer], "claim-1")).toBeUndefined();
-  });
-
-  it("routes a task into the adopted worker that owns the path", () => {
-    const engine = engineFor([
-      {
-        id: "implement",
-        kind: "implementation",
-        role: "implementer",
-        writeScope: ["packages/owned/src/**"],
-      },
-    ]);
-    const spawned = descriptor("aaa-spawned", ["implementation"]);
-
-    const assignment = engine.leaseReadyTask([spawned, adoptedDirected], "claim-1");
-
-    expect(assignment?.worker.id).toBe("adopted-directed");
-  });
-
-  it("holds a task back rather than routing around a live adopted writer", () => {
+  it("holds a write task back while allowing a read-only task to proceed", () => {
     const engine = engineFor([
       { id: "verify-owned", kind: "verification", role: "verifier" },
       {
@@ -284,26 +247,20 @@ describe("adopted worker routing", () => {
         writeScope: ["packages/owned/src/**"],
       },
     ]);
-    // The adopted worker owns the path but may not run verification, and the
-    // spawned worker may not enter a path a live adoption holds.
     const spawned = descriptor("spawned", ["implementation", "verification"]);
-    const adoptedVerifierless = descriptor("adopted", ["verification"], {
-      grade: "directed",
-      writeScope: ["packages/owned/**"],
-    });
 
-    const assignment = engine.leaseReadyTask([spawned, adoptedVerifierless], "claim-1");
+    const assignment = engine.leaseReadyTask([spawned], "claim-1", "local", 30_000, [reservation]);
     // Only the scope-free verification task can proceed. The lease loop returns
     // on its first success, so the contended task is reached on the next poll.
     expect(assignment?.task.id).toBe("verify-owned");
 
-    expect(engine.leaseReadyTask([spawned, adoptedVerifierless], "claim-2")).toBeUndefined();
+    expect(engine.leaseReadyTask([spawned], "claim-2", "local", 30_000, [reservation])).toBeUndefined();
 
     const contended = engine.getEvents().filter((event) => event.type === "task.scope_contended");
     expect(contended).toHaveLength(1);
     expect(contended[0]).toMatchObject({
       taskId: "implement",
-      data: { adoptedWorkerIds: ["adopted"] },
+      data: { reservationIds: ["adoption-1"] },
     });
   });
 
@@ -316,27 +273,24 @@ describe("adopted worker routing", () => {
         writeScope: ["packages/owned/src/**"],
       },
     ]);
-    const adoptedVerifierless = descriptor("adopted", ["verification"], {
-      grade: "directed",
-      writeScope: ["packages/owned/**"],
-    });
+    const spawned = descriptor("spawned", ["implementation"]);
 
-    engine.leaseReadyTask([adoptedVerifierless], "claim-1");
-    engine.leaseReadyTask([adoptedVerifierless], "claim-2");
-    engine.leaseReadyTask([adoptedVerifierless], "claim-3");
+    engine.leaseReadyTask([spawned], "claim-1", "local", 30_000, [reservation]);
+    engine.leaseReadyTask([spawned], "claim-2", "local", 30_000, [reservation]);
+    engine.leaseReadyTask([spawned], "claim-3", "local", 30_000, [reservation]);
 
     expect(engine.getEvents().filter((event) => event.type === "task.scope_contended")).toHaveLength(1);
   });
 
-  it("leaves an unrelated write scope untouched by an adoption", () => {
+  it("leases the task after the reservation is released", () => {
     const engine = engineFor([
       { id: "implement", kind: "implementation", role: "implementer", writeScope: ["apps/other/**"] },
     ]);
     const spawned = descriptor("spawned", ["implementation"]);
 
-    const assignment = engine.leaseReadyTask([spawned, adoptedDirected], "claim-1");
+    expect(engine.leaseReadyTask([spawned], "claim-1", "local", 30_000, [reservation])).toBeUndefined();
+    const assignment = engine.leaseReadyTask([spawned], "claim-2", "local", 30_000, []);
 
     expect(assignment?.worker.id).toBe("spawned");
-    expect(engine.getEvents().filter((event) => event.type === "task.scope_contended")).toEqual([]);
   });
 });

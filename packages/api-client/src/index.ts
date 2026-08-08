@@ -115,6 +115,12 @@ export interface RunnerWorkerDescriptor {
   };
 }
 
+export interface RunnerScopeReservation {
+  id: string;
+  workspaceRoot: string;
+  writeScope: string[];
+}
+
 export interface RunnerAssignment {
   missionId: string;
   profileHash: string;
@@ -770,11 +776,12 @@ export class ClankieApiClient {
   public async claimTask(
     claimId: string,
     workers: readonly RunnerWorkerDescriptor[],
+    reservations: readonly RunnerScopeReservation[] = [],
   ): Promise<RunnerAssignment | undefined> {
     const response = await this.request<{ assignment: RunnerAssignment } | undefined>("/v1/runner/claims", {
       method: "POST",
       headers: this.runnerHeaders(),
-      body: JSON.stringify({ claimId, workers }),
+      body: JSON.stringify({ claimId, workers, reservations }),
     });
     return response?.assignment;
   }

@@ -1,7 +1,11 @@
+import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createConnection, type Socket } from "node:net";
+import { resolve } from "node:path";
+import { promisify } from "node:util";
 import {
   AgentObservationSchema,
+  type AdoptedWorkerBinding,
   type AgentObservation,
   type AgentReportedStatus,
   type Harness,
@@ -30,6 +34,7 @@ const DEFAULT_COLUMNS = 120;
 const DEFAULT_ROWS = 40;
 const DEFAULT_SEED_ATTEMPTS = 8;
 const DEFAULT_SEED_QUIET_MS = 10;
+const execFileAsync = promisify(execFile);
 
 export type HerdrTerminalErrorCode =
   | "control_unavailable"
@@ -99,29 +104,37 @@ export interface HerdrAgentSource {
   listAgents(): Promise<AgentObservation[]>;
   /**
    * Deliver bounded operator-parity text to the pane hosting a terminal.
-   * Takes a terminal id, never a pane id: pane ids are session-local and
-   * reusable, so the handle is re-resolved at delivery time (ADR 0078). A
-   * terminal the transport can no longer see resolves to `undefined` rather
-   * than being guessed at — sending steering into the wrong pane is worse than
-   * not sending it.
+   * Takes the full adoption binding, never a pane id: pane ids are session-local
+   * and reusable, so every identity field is re-resolved at delivery time (ADR
+   * 0078). A binding the transport can no longer prove returns `terminal_gone`
+   * rather than being guessed at — sending steering into the wrong agent is
+   * worse than not sending it.
    */
-  sendToTerminal(terminalId: string, text: string): Promise<"delivered" | "terminal_gone">;
+  sendToAgent(binding: AdoptedWorkerBinding, text: string): Promise<"delivered" | "terminal_gone">;
 }
 
 export interface HerdrSocketTransportOptions {
   socketPath: string;
+  /** Stable non-secret name for this Herdr session (for example `default`). */
+  instanceId?: string;
   connect?: (socketPath: string) => Socket;
+  resolveWorkspaceRoot?: (cwd: string) => Promise<string>;
 }
 
 /** Strict NDJSON client for Herdr's documented local socket protocol. */
 export class HerdrSocketTransport implements HerdrTransport {
   private readonly socketPath: string;
+  private readonly instanceId: string;
   private readonly connect: (socketPath: string) => Socket;
+  private readonly resolveWorkspaceRoot: (cwd: string) => Promise<string>;
 
   public constructor(options: HerdrSocketTransportOptions) {
     if (options.socketPath.trim().length === 0) throw new HerdrTerminalError("transport_lost", true);
     this.socketPath = options.socketPath;
+    this.instanceId =
+      options.instanceId ?? `socket-${createHash("sha256").update(options.socketPath).digest("hex").slice(0, 16)}`;
     this.connect = options.connect ?? ((socketPath) => createConnection({ path: socketPath }));
+    this.resolveWorkspaceRoot = options.resolveWorkspaceRoot ?? canonicalWorkspaceRoot;
   }
 
   public async listPanes(): Promise<HerdrPaneSummary[]> {
@@ -155,8 +168,20 @@ export class HerdrSocketTransport implements HerdrTransport {
     }
     const observations: AgentObservation[] = [];
     const seen = new Set<string>();
+    const workspaceRoots = new Map<string, Promise<string>>();
     for (const pane of result.panes) {
-      const observation = herdrPaneToAgentObservation(pane);
+      if (!isRecord(pane)) continue;
+      const cwd = optionalString(pane.cwd);
+      let workspaceRoot: string | undefined;
+      if (cwd !== undefined) {
+        const pending = workspaceRoots.get(cwd) ?? this.resolveWorkspaceRoot(cwd);
+        workspaceRoots.set(cwd, pending);
+        workspaceRoot = await pending;
+      }
+      const observation = herdrPaneToAgentObservation(pane, {
+        transportInstanceId: this.instanceId,
+        ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
+      });
       if (!observation || seen.has(observation.terminalId)) continue;
       seen.add(observation.terminalId);
       observations.push(observation);
@@ -164,11 +189,24 @@ export class HerdrSocketTransport implements HerdrTransport {
     return observations;
   }
 
-  /** Re-resolves the pane hosting a terminal, then delivers (ADR 0078). */
-  public async sendToTerminal(terminalId: string, text: string): Promise<"delivered" | "terminal_gone"> {
-    const pane = (await this.listPanes()).find((summary) => summary.terminalId === terminalId);
-    if (!pane) return "terminal_gone";
-    await this.sendInput(pane.paneId, text);
+  /** Re-resolves and revalidates the full agent binding, then delivers (ADR 0078). */
+  public async sendToAgent(
+    binding: AdoptedWorkerBinding,
+    text: string,
+  ): Promise<"delivered" | "terminal_gone"> {
+    if (binding.transportInstanceId !== this.instanceId) return "terminal_gone";
+    const observation = (await this.listAgents()).find((candidate) =>
+      matchesAdoptedBinding(candidate, binding),
+    );
+    if (!observation) return "terminal_gone";
+    const result = await this.request("agent.prompt", {
+      target: binding.terminalId,
+      text,
+      wait: null,
+    });
+    if (!isRecord(result) || result.type !== "agent_prompted") {
+      throw new HerdrTerminalError("protocol_error");
+    }
     return "delivered";
   }
 
@@ -312,6 +350,22 @@ export class HerdrSocketTransport implements HerdrTransport {
       signal?.addEventListener("abort", onAbort, { once: true });
     });
   }
+}
+
+function matchesAdoptedBinding(
+  observation: AgentObservation,
+  binding: AdoptedWorkerBinding,
+): boolean {
+  return (
+    observation.adoptable &&
+    observation.transport === binding.transport &&
+    observation.transportInstanceId === binding.transportInstanceId &&
+    observation.terminalId === binding.terminalId &&
+    observation.harness === binding.harness &&
+    observation.agentSessionId === binding.agentSessionId &&
+    observation.workspace.workspaceId === binding.workspace.workspaceId &&
+    observation.workspace.root === binding.workspace.root
+  );
 }
 
 export interface HerdrTerminalProviderOptions {
@@ -760,16 +814,22 @@ const HERDR_STATUS_BY_AGENT_STATUS: Readonly<Record<string, AgentReportedStatus>
  * Pure `pane.list` record → census observation. Exported so the mapping can be
  * frozen by tests without a socket.
  *
- * A pane is `adoptable` only when Herdr reports both a known harness and a
- * native session id: a bare shell is reportable but can never be given mission
- * identity (ADR 0078). An unrecognized `agent_status` degrades to `unknown`
+ * A pane is `adoptable` only when Herdr reports a workspace, a known harness,
+ * and a native session id: a bare shell is reportable but can never be steered
+ * (ADR 0078). An unrecognized `agent_status` degrades to `unknown`
  * rather than being dropped, because the pane's existence is the fact that
  * matters and its status is only a Tier-2 hint.
  */
-export function herdrPaneToAgentObservation(value: unknown): AgentObservation | undefined {
+export function herdrPaneToAgentObservation(
+  value: unknown,
+  identity: { transportInstanceId?: string; workspaceRoot?: string } = {},
+): AgentObservation | undefined {
   if (!isRecord(value)) return undefined;
   const terminalId = optionalString(value.terminal_id);
-  if (terminalId === undefined) return undefined;
+  const workspaceId = optionalString(value.workspace_id);
+  if (terminalId === undefined || workspaceId === undefined || identity.workspaceRoot === undefined) {
+    return undefined;
+  }
   const paneId = optionalString(value.pane_id);
   const rawTitle =
     optionalString(value.terminal_title_stripped) ?? optionalString(value.terminal_title) ?? "Herdr pane";
@@ -780,7 +840,12 @@ export function herdrPaneToAgentObservation(value: unknown): AgentObservation | 
   const status = optionalString(value.agent_status);
   const observation: AgentObservation = {
     transport: "herdr",
+    transportInstanceId: identity.transportInstanceId ?? "default",
     terminalId,
+    workspace: {
+      workspaceId,
+      root: identity.workspaceRoot,
+    },
     label: safeTitle(rawTitle, paneId),
     reportedStatus: (status === undefined ? undefined : HERDR_STATUS_BY_AGENT_STATUS[status]) ?? "unknown",
     adoptable,
@@ -826,6 +891,20 @@ function safeTitle(value: string, privatePaneId?: string): string {
     return "Herdr pane";
   }
   return title || "Herdr pane";
+}
+
+export async function canonicalWorkspaceRoot(cwd: string): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+      timeout: 5_000,
+      maxBuffer: 64 * 1024,
+    });
+    const root = stdout.trim();
+    return resolve(root || cwd);
+  } catch {
+    return resolve(cwd);
+  }
 }
 
 function assertPublicTerminalId(value: string): void {

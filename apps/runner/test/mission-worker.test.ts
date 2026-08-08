@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import type {
   RunnerAssignment,
+  RunnerScopeReservation,
   RunnerWorkerDescriptor,
   WorkerSteerCommand,
   WorkerSteerOutcome,
@@ -39,6 +40,7 @@ class FakeControl implements MissionControlClient {
   public heartbeatAttempts = 0;
   public readonly steerCommands: WorkerSteerCommand[] = [];
   public readonly steerOutcomes: WorkerSteerOutcome[] = [];
+  public readonly claimReservations: RunnerScopeReservation[][] = [];
 
   private readonly assignments: RunnerAssignment[];
   private readonly loseFirstEvent: boolean;
@@ -56,7 +58,12 @@ class FakeControl implements MissionControlClient {
     this.claimFailures = options.claimFailures ?? 0;
   }
 
-  public claimTask(): Promise<RunnerAssignment | undefined> {
+  public claimTask(
+    _claimId: string,
+    _workers: readonly RunnerWorkerDescriptor[],
+    reservations: readonly RunnerScopeReservation[] = [],
+  ): Promise<RunnerAssignment | undefined> {
+    this.claimReservations.push(structuredClone([...reservations]));
     if (this.claimFailures > 0) {
       this.claimFailures -= 1;
       return Promise.reject(new Error("transient claim failure"));
@@ -115,6 +122,26 @@ describe("MissionWorker", () => {
     for (const invalid of ["0", "33", "1.5", "many"]) {
       expect(() => parseMissionWorkerConcurrency(invalid)).toThrow(/integer between 1 and 32/u);
     }
+  });
+
+  it("includes live foreign-process reservations in every claim", async () => {
+    const fixture = await gitFixture();
+    const control = new FakeControl([]);
+    const reservation = {
+      id: "adoption-1",
+      workspaceRoot: fixture.repo,
+      writeScope: ["**"],
+    };
+    const worker = new MissionWorker({
+      client: control,
+      adapters: [adapter("reservation-probe", "implementation", () => Promise.resolve())],
+      reservations: () => Promise.resolve([reservation]),
+      worktrees: new WorktreeManager({ repoPath: fixture.repo, rootDir: fixture.worktrees }),
+      artifactRoot: fixture.artifacts,
+    });
+
+    await expect(worker.runOnce()).resolves.toBe(false);
+    expect(control.claimReservations).toEqual([[reservation]]);
   });
 
   it("constructs an explicit child environment without runner, captain, connector, or sentinel secrets", () => {

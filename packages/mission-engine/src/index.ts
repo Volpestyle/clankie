@@ -16,6 +16,7 @@ import {
   type WorkerAdapter,
   type WorkerDescriptor,
   type WorkerRouter,
+  type WorkerScopeReservation,
   type WorkerSelectionContext,
 } from "@clankie/worker-sdk";
 import {
@@ -604,6 +605,7 @@ export class MissionEngine {
     claimId: string,
     runnerId = "local",
     leaseDurationMs = 30_000,
+    reservations: readonly WorkerScopeReservation[] = [],
   ): WorkerAssignment | undefined {
     const previous = this.assignmentsByClaimId.get(claimId);
     if (previous) {
@@ -634,16 +636,17 @@ export class MissionEngine {
       const excluded = this.excludedWorkers(runtime.spec);
       const isCapable = (candidate: WorkerDescriptor): boolean =>
         isWorkerEligible(runtime.spec, candidate, new Set());
-      // An adopted worker's declared scope was never in this plan, so plan-time
-      // validation could not have caught a collision with it (ADR 0079). Where
-      // one exists the path belongs to that worker: it is the only candidate,
-      // and if it cannot take the task, nobody may.
-      const scopeOwners = this.adoptedScopeOwners(runtime.spec, workers);
-      const offered = scopeOwners ?? workers;
-      const worker = selectWorkerDescriptor(runtime.spec, offered, excluded, this.selectionContext(runtime));
+      // A foreign-process reservation was never in this plan, so plan-time
+      // validation could not have caught it. It is not an executable worker and
+      // must hold the task back rather than being routed around.
+      const scopeReservations = this.foreignScopeReservations(runtime.spec, reservations);
+      if (scopeReservations.length > 0) {
+        this.signalScopeContended(runtime, scopeReservations);
+        continue;
+      }
+      const worker = selectWorkerDescriptor(runtime.spec, workers, excluded, this.selectionContext(runtime));
       if (!worker) {
-        if (scopeOwners) this.signalScopeContended(runtime, scopeOwners);
-        else this.signalVerificationStarveIfExcluded(runtime, workers, excluded, isCapable);
+        this.signalVerificationStarveIfExcluded(runtime, workers, excluded, isCapable);
         continue;
       }
       this.verificationStarveSignaled.delete(runtime.spec.id);
@@ -740,23 +743,15 @@ export class MissionEngine {
     };
   }
 
-  /**
-   * Adopted workers whose declared write scope touches this task's, or
-   * `undefined` when the path is uncontended. An empty array means the path is
-   * owned by an adoption that cannot run this task — the task must wait rather
-   * than route around a live writer.
-   */
-  private adoptedScopeOwners(
+  /** Foreign-process reservations whose enforced scope touches this task. */
+  private foreignScopeReservations(
     spec: TaskSpec,
-    workers: readonly WorkerDescriptor[],
-  ): WorkerDescriptor[] | undefined {
-    if (spec.writeScope.length === 0) return undefined;
-    const owners = workers.filter(
-      (candidate) =>
-        candidate.adoption !== undefined &&
-        this.scopesOverlap(spec.writeScope, candidate.adoption.writeScope),
+    reservations: readonly WorkerScopeReservation[],
+  ): WorkerScopeReservation[] {
+    if (spec.writeScope.length === 0) return [];
+    return reservations.filter(
+      (reservation) => this.scopesOverlap(spec.writeScope, reservation.writeScope),
     );
-    return owners.length > 0 ? owners : undefined;
   }
 
   private scopesOverlap(left: readonly string[], right: readonly string[]): boolean {
@@ -764,19 +759,22 @@ export class MissionEngine {
   }
 
   /**
-   * A task held back by a live adoption looks exactly like a stalled mission
+   * A task held back by a live foreign process looks exactly like a stalled mission
    * unless it says so. Emitted once per episode and cleared on a successful
    * lease, mirroring `task.verification_starved`.
    */
-  private signalScopeContended(runtime: TaskRuntime, owners: readonly WorkerDescriptor[]): void {
+  private signalScopeContended(
+    runtime: TaskRuntime,
+    reservations: readonly WorkerScopeReservation[],
+  ): void {
     if (this.scopeContendedSignaled.has(runtime.spec.id)) return;
     this.scopeContendedSignaled.add(runtime.spec.id);
     this.emit(
       "task.scope_contended",
       {
         reason:
-          "An adopted worker holds a write scope overlapping this task and cannot run it; release the adoption or narrow the scope.",
-        adoptedWorkerIds: owners.map((owner) => owner.id).sort(),
+          "A foreign process reserves a write scope overlapping this task; release the adoption before starting another writer.",
+        reservationIds: reservations.map((reservation) => reservation.id).sort(),
       },
       runtime.spec.id,
     );

@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { SqliteEventStore } from "@clankie/event-store";
-import type { AgentObservation } from "@clankie/protocol";
+import type { AdoptedWorkerBinding, AgentObservation } from "@clankie/protocol";
 import { describe, expect, it } from "vitest";
 import { AgentCensusService, takeAgentCensus } from "../src/agent-census.ts";
 import { herdrPaneToAgentObservation } from "../src/herdr-provider.ts";
@@ -14,7 +14,9 @@ const now = new Date("2026-08-07T00:00:00.000Z");
 function observation(overrides: Partial<AgentObservation> = {}): AgentObservation {
   return {
     transport: "herdr",
+    transportInstanceId: "default",
     terminalId: "term_a",
+    workspace: { workspaceId: "workspace-a", root: "/Users/james/dev/clankie" },
     label: "A working agent",
     reportedStatus: "working",
     adoptable: true,
@@ -134,10 +136,17 @@ describe("takeAgentCensus", () => {
       {
         schemaVersion: 1,
         transport: "herdr",
+        transportInstanceId: "default",
         terminalId: "term_a",
+        workspaceId: "workspace-a",
         grade: "directed",
         writeScope: ["apps/**"],
         adoptedBy: { kind: "operator", id: "james" },
+        approval: {
+          receiptId: "approval-1",
+          approvedBy: { kind: "operator", id: "james" },
+          approvedAt: now.toISOString(),
+        },
       },
       observation(),
     );
@@ -145,7 +154,9 @@ describe("takeAgentCensus", () => {
       {
         schemaVersion: 1,
         transport: "herdr",
+        transportInstanceId: "default",
         terminalId: "term_b",
+        workspaceId: "workspace-a",
         grade: "observed",
         writeScope: [],
         adoptedBy: { kind: "captain", id: "eve" },
@@ -174,13 +185,15 @@ describe("takeAgentCensus", () => {
 
   it("keeps the agent's own words separate from what the runner observed", async () => {
     const { store, rootDir } = await makeStore();
-    const path = agentDeclarationPath(rootDir, "term_a");
+    const path = agentDeclarationPath(rootDir, "default", "term_a");
     await mkdir(dirname(path), { recursive: true });
     await writeFile(
       path,
       JSON.stringify({
         schemaVersion: 1,
+        transportInstanceId: "default",
         terminalId: "term_a",
+        workspaceId: "workspace-a",
         status: "blocked",
         objective: "Waiting on a review",
         writeScope: ["docs/**"],
@@ -198,7 +211,7 @@ describe("takeAgentCensus", () => {
     });
 
     const digest = census.entries[0]?.digest;
-    expect(digest?.runnerObserved.reportedStatus).toBe("working");
+    expect(digest?.runnerObserved?.reportedStatus).toBe("working");
     expect(digest?.selfDeclared?.status).toBe("blocked");
     expect(digest?.selfDeclared?.objective).toBe("Waiting on a review");
   });
@@ -227,7 +240,7 @@ describe("takeAgentCensus", () => {
     });
 
     expect(JSON.stringify(first)).toEqual(JSON.stringify(second));
-    expect(first.entries.map((entry) => entry.digest.runnerObserved.terminalId)).toEqual([
+    expect(first.entries.map((entry) => entry.digest.runnerObserved?.terminalId)).toEqual([
       "term_a",
       "term_b",
       "term_c",
@@ -260,24 +273,40 @@ describe("AgentCensusService.direct", () => {
   const adoptRequest = {
     schemaVersion: 1 as const,
     transport: "herdr" as const,
+    transportInstanceId: "default",
     terminalId: "term_a",
+    workspaceId: "workspace-a",
     grade: "directed" as const,
     writeScope: ["apps/**"],
     adoptedBy: { kind: "operator" as const, id: "james" },
+    approval: {
+      receiptId: "approval-1",
+      approvedBy: { kind: "operator" as const, id: "james" },
+      approvedAt: now.toISOString(),
+    },
   };
   const directedBy = { kind: "captain" as const, id: "eve" };
 
   async function makeService(
     overrides: {
       observations?: readonly AgentObservation[] | undefined;
-      deliver?: (terminalId: string, text: string) => Promise<"delivered" | "terminal_gone">;
+      deliver?: (
+        binding: AdoptedWorkerBinding,
+        text: string,
+      ) => Promise<"delivered" | "terminal_gone">;
       grade?: "observed" | "directed";
     } = {},
   ) {
     const { store, events } = await makeStore();
-    const delivered: Array<{ terminalId: string; text: string }> = [];
+    const delivered: Array<{ binding: AdoptedWorkerBinding; text: string }> = [];
     const adopted = await store.adopt(
-      overrides.grade === "observed" ? { ...adoptRequest, grade: "observed", writeScope: [] } : adoptRequest,
+      overrides.grade === "observed"
+        ? (({ approval: _approval, ...request }) => ({
+            ...request,
+            grade: "observed" as const,
+            writeScope: [],
+          }))(adoptRequest)
+        : adoptRequest,
       observation(),
     );
     if (adopted.outcome !== "adopted") throw new Error("expected adoption");
@@ -288,8 +317,8 @@ describe("AgentCensusService.direct", () => {
       leases: () => Promise.resolve([]),
       deliver:
         overrides.deliver ??
-        ((terminalId, text) => {
-          delivered.push({ terminalId, text });
+        ((binding, text) => {
+          delivered.push({ binding, text });
           return Promise.resolve("delivered");
         }),
       clock: () => now,
@@ -308,7 +337,43 @@ describe("AgentCensusService.direct", () => {
     });
 
     expect(result.outcome).toBe("delivered");
-    expect(delivered).toEqual([{ terminalId: "term_a", text: "focus on the failing test" }]);
+    expect(delivered).toEqual([
+      {
+        binding: {
+          transport: "herdr",
+          transportInstanceId: "default",
+          terminalId: "term_a",
+          harness: "claude",
+          agentSessionId: "session-a",
+          workspace: { workspaceId: "workspace-a", root: "/Users/james/dev/clankie" },
+        },
+        text: "focus on the failing test",
+      },
+    ]);
+  });
+
+  it("reconciles on every census and keeps a vanished adoption visible", async () => {
+    const { service, events } = await makeService({ observations: [] });
+
+    const census = await service.census();
+
+    expect(census.entries).toHaveLength(1);
+    expect(census.entries[0]).toMatchObject({
+      classification: "lapsed",
+      lapseReason: "terminal_gone",
+      digest: {
+        adoptionBinding: {
+          transportInstanceId: "default",
+          terminalId: "term_a",
+          workspace: { workspaceId: "workspace-a", root: "/Users/james/dev/clankie" },
+        },
+      },
+    });
+    expect(census.entries[0]?.digest.runnerObserved).toBeUndefined();
+    expect((await events.readAll()).map((entry) => entry.event.type)).toEqual([
+      "worker.adopted",
+      "worker.adoption.lapsed",
+    ]);
   });
 
   it("records that direction happened without recording what was said", async () => {
@@ -317,7 +382,11 @@ describe("AgentCensusService.direct", () => {
 
     const stored = await events.readAll();
     const directed = stored.find((entry) => entry.event.type === "worker.adoption.directed");
-    expect(directed?.event.data).toMatchObject({ directedByKind: "captain", textLength: 11 });
+    expect(directed?.event.data).toMatchObject({
+      directedByKind: "captain",
+      directedById: "eve",
+      textLength: 11,
+    });
     expect(JSON.stringify(directed?.event.data)).not.toContain("secret plan");
   });
 
@@ -375,19 +444,25 @@ describe("AgentCensusService.direct", () => {
 
 describe("herdrPaneToAgentObservation", () => {
   it("maps an agent pane to an adoptable observation", () => {
-    const observed = herdrPaneToAgentObservation({
-      agent: "claude",
-      agent_session: { agent: "claude", kind: "id", source: "herdr:claude", value: "sess-1" },
-      agent_status: "working",
-      cwd: "/Users/james/dev/clankie",
-      pane_id: "w12:p1Z",
-      terminal_id: "term_6581afd5edc966c",
-      terminal_title_stripped: "Evaluate Clankie as agent router",
-    });
+    const observed = herdrPaneToAgentObservation(
+      {
+        agent: "claude",
+        agent_session: { agent: "claude", kind: "id", source: "herdr:claude", value: "sess-1" },
+        agent_status: "working",
+        cwd: "/Users/james/dev/clankie",
+        pane_id: "w12:p1Z",
+        workspace_id: "workspace-a",
+        terminal_id: "term_6581afd5edc966c",
+        terminal_title_stripped: "Evaluate Clankie as agent router",
+      },
+      { transportInstanceId: "default", workspaceRoot: "/Users/james/dev/clankie" },
+    );
 
     expect(observed).toEqual({
       transport: "herdr",
+      transportInstanceId: "default",
       terminalId: "term_6581afd5edc966c",
+      workspace: { workspaceId: "workspace-a", root: "/Users/james/dev/clankie" },
       label: "Evaluate Clankie as agent router",
       reportedStatus: "working",
       adoptable: true,
@@ -398,13 +473,17 @@ describe("herdrPaneToAgentObservation", () => {
   });
 
   it("reports a plain shell pane but never marks it adoptable", () => {
-    const observed = herdrPaneToAgentObservation({
-      agent_status: "unknown",
-      cwd: "/Users/james/dev/clankie",
-      pane_id: "w12:p10",
-      terminal_id: "term_6581b016e7f3f6d",
-      terminal_title_stripped: "james@Jamess-MacBook-Pro:~/dev/clankie",
-    });
+    const observed = herdrPaneToAgentObservation(
+      {
+        agent_status: "unknown",
+        cwd: "/Users/james/dev/clankie",
+        pane_id: "w12:p10",
+        workspace_id: "workspace-a",
+        terminal_id: "term_6581b016e7f3f6d",
+        terminal_title_stripped: "james@Jamess-MacBook-Pro:~/dev/clankie",
+      },
+      { transportInstanceId: "default", workspaceRoot: "/Users/james/dev/clankie" },
+    );
 
     expect(observed).toMatchObject({ adoptable: false, reportedStatus: "unknown" });
     expect(observed?.harness).toBeUndefined();
@@ -413,43 +492,60 @@ describe("herdrPaneToAgentObservation", () => {
   });
 
   it("replaces a label the terminal-plane sanitizer rejects", () => {
-    const observed = herdrPaneToAgentObservation({
-      agent_status: "unknown",
-      pane_id: "w12:p10",
-      terminal_id: "term_leaky",
-      terminal_title_stripped: "editing ~/dev/secret-project",
-    });
+    const observed = herdrPaneToAgentObservation(
+      {
+        agent_status: "unknown",
+        pane_id: "w12:p10",
+        workspace_id: "workspace-a",
+        terminal_id: "term_leaky",
+        terminal_title_stripped: "editing ~/dev/secret-project",
+      },
+      { transportInstanceId: "default", workspaceRoot: "/Users/james/dev/clankie" },
+    );
 
     expect(observed?.label).toBe("Herdr pane");
   });
 
   it("refuses to bind to a session the transport only inferred", () => {
-    const observed = herdrPaneToAgentObservation({
-      agent: "codex",
-      agent_session: { agent: "codex", kind: "inferred", value: "guess" },
-      agent_status: "idle",
-      terminal_id: "term_x",
-      terminal_title_stripped: "clankie",
-    });
+    const observed = herdrPaneToAgentObservation(
+      {
+        agent: "codex",
+        agent_session: { agent: "codex", kind: "inferred", value: "guess" },
+        agent_status: "idle",
+        workspace_id: "workspace-a",
+        terminal_id: "term_x",
+        terminal_title_stripped: "clankie",
+      },
+      { transportInstanceId: "default", workspaceRoot: "/Users/james/dev/clankie" },
+    );
 
     expect(observed?.adoptable).toBe(false);
     expect(observed?.harness).toBe("codex");
   });
 
   it("degrades an unrecognized status to unknown instead of dropping the pane", () => {
-    const observed = herdrPaneToAgentObservation({
-      agent: "claude",
-      agent_session: { agent: "claude", kind: "id", value: "sess-2" },
-      agent_status: "spelunking",
-      terminal_id: "term_y",
-      terminal_title_stripped: "Something new",
-    });
+    const observed = herdrPaneToAgentObservation(
+      {
+        agent: "claude",
+        agent_session: { agent: "claude", kind: "id", value: "sess-2" },
+        agent_status: "spelunking",
+        workspace_id: "workspace-a",
+        terminal_id: "term_y",
+        terminal_title_stripped: "Something new",
+      },
+      { transportInstanceId: "default", workspaceRoot: "/Users/james/dev/clankie" },
+    );
 
     expect(observed).toMatchObject({ reportedStatus: "unknown", adoptable: true });
   });
 
   it("omits a pane with no terminal identity", () => {
-    expect(herdrPaneToAgentObservation({ agent: "claude", pane_id: "w1:p1" })).toBeUndefined();
+    expect(
+      herdrPaneToAgentObservation(
+        { agent: "claude", pane_id: "w1:p1", workspace_id: "workspace-a" },
+        { transportInstanceId: "default", workspaceRoot: "/Users/james/dev/clankie" },
+      ),
+    ).toBeUndefined();
     expect(herdrPaneToAgentObservation("not a pane")).toBeUndefined();
   });
 });

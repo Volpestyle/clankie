@@ -1,9 +1,9 @@
 import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import {
-  AdoptWorkerRequestSchema,
-  DirectAdoptedWorkerRequestSchema,
-  ReleaseWorkerAdoptionRequestSchema,
+  AdoptWorkerCommandSchema,
+  DirectAdoptedWorkerCommandSchema,
+  ReleaseWorkerAdoptionCommandSchema,
   type AgentCensus,
 } from "@clankie/protocol";
 
@@ -92,7 +92,7 @@ async function handle(
     if (request.method !== "POST") return json(response, 405, { error: "method_not_allowed" });
     const body = await readJsonBody(request);
     if (body === undefined) return json(response, 400, { error: "invalid_body" });
-    const parsed = AdoptWorkerRequestSchema.safeParse(body);
+    const parsed = AdoptWorkerCommandSchema.safeParse(body);
     if (!parsed.success) return json(response, 400, { error: "invalid_request" });
     return json(response, 200, { result: await options.agents.adopt(parsed.data) });
   }
@@ -100,7 +100,7 @@ async function handle(
     if (request.method !== "POST") return json(response, 405, { error: "method_not_allowed" });
     const body = await readJsonBody(request);
     if (body === undefined) return json(response, 400, { error: "invalid_body" });
-    const parsed = DirectAdoptedWorkerRequestSchema.safeParse(body);
+    const parsed = DirectAdoptedWorkerCommandSchema.safeParse(body);
     if (!parsed.success) return json(response, 400, { error: "invalid_request" });
     return json(response, 200, { result: await options.agents.direct(parsed.data) });
   }
@@ -108,7 +108,7 @@ async function handle(
     if (request.method !== "POST") return json(response, 405, { error: "method_not_allowed" });
     const body = await readJsonBody(request);
     if (body === undefined) return json(response, 400, { error: "invalid_body" });
-    const parsed = ReleaseWorkerAdoptionRequestSchema.safeParse(body);
+    const parsed = ReleaseWorkerAdoptionCommandSchema.safeParse(body);
     if (!parsed.success) return json(response, 400, { error: "invalid_request" });
     await options.agents.release(parsed.data);
     return json(response, 200, { released: true });

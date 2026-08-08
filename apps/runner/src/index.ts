@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { ClankieApiClient } from "@clankie/api-client";
 import {
@@ -33,7 +33,15 @@ import { buildConfiguredShellAdapter, buildWorkerAdapters, simWorkersEnabled } f
 import { buildWorkerEnvironment } from "./worker-environment.ts";
 import { parseVerificationChecks } from "./verification-checks.ts";
 import { TerminalManager } from "./terminals.ts";
-import { HerdrSocketTransport, HerdrTerminalProvider, type HerdrAgentSource } from "./herdr-provider.ts";
+import {
+  canonicalWorkspaceRoot,
+  HerdrSocketTransport,
+  HerdrTerminalProvider,
+} from "./herdr-provider.ts";
+import {
+  createCompositeHerdrAgentSource,
+  discoverHerdrSessionEndpoints,
+} from "./herdr-session-discovery.ts";
 import { AgentCensusService } from "./agent-census.ts";
 import { AGENT_CENSUS_GATEWAY_PORT, createAgentCensusGateway } from "./agent-census-gateway.ts";
 import { WorkerAdoptionStore } from "./worker-adoptions.ts";
@@ -111,6 +119,7 @@ process.on("SIGINT", () => requestRunnerShutdown("SIGINT"));
 process.on("SIGTERM", () => requestRunnerShutdown("SIGTERM"));
 
 const repoPath = process.env.CLANKIE_REPO_PATH;
+const canonicalRepoRoot = repoPath ? await canonicalWorkspaceRoot(repoPath) : undefined;
 let worktrees: WorktreeManager | undefined;
 if (repoPath) {
   worktrees = new WorktreeManager({
@@ -181,7 +190,12 @@ try {
 // runner's own workers are already recognizable, and it never adopts anything:
 // an unclaimed agent is reported and left alone.
 const workerAdoptions = new WorkerAdoptionStore({ rootDir: runnerStateRoot, events: runnerEvents });
-const herdrAgentSource = createHerdrAgentSource(process.env);
+const herdrSessionEndpoints = await discoverHerdrSessionEndpoints(process.env);
+const herdrAgentSource = createCompositeHerdrAgentSource(herdrSessionEndpoints);
+logger.info(
+  { event: "agent_census.herdr_sessions_discovered", count: herdrSessionEndpoints.length },
+  "Herdr session discovery finished",
+);
 const agentCensus = new AgentCensusService({
   runnerId: process.env.CLANKIE_RUNNER_ID ?? "local",
   adoptions: workerAdoptions,
@@ -198,7 +212,9 @@ const agentCensus = new AgentCensusService({
   },
   leases: () => processLeases.list(),
   ...(herdrAgentSource
-    ? { deliver: (terminalId, text) => herdrAgentSource.sendToTerminal(terminalId, text) }
+    ? {
+        deliver: (binding, text) => herdrAgentSource.sendToAgent(binding, text),
+      }
     : {}),
 });
 try {
@@ -474,6 +490,27 @@ if (!repoPath) {
         runnerId: process.env.CLANKIE_RUNNER_ID ?? "local",
       }),
       adapters: fleet.adapters,
+      reservations: async () => {
+        if (herdrAgentSource) {
+          try {
+            await workerAdoptions.reconcile(await herdrAgentSource.listAgents());
+          } catch {
+            // Preserve active reservations when the transport cannot be asked:
+            // uncertainty must not silently admit a second writer.
+          }
+        }
+        return (await workerAdoptions.active())
+          .filter(
+            (adoption) =>
+              adoption.grade === "directed" &&
+              adoption.binding.workspace.root === canonicalRepoRoot,
+          )
+          .map((adoption) => ({
+            id: adoption.adoptionId,
+            workspaceRoot: adoption.binding.workspace.root,
+            writeScope: [...adoption.reservedWriteScope],
+          }));
+      },
       worktrees,
       artifactRoot: process.env.CLANKIE_ARTIFACT_ROOT ?? join(runnerStateRoot, "artifacts"),
       workerEnvironment,
@@ -496,19 +533,6 @@ if (!repoPath) {
     );
     await missionWorker.runForever(runnerAbort.signal);
   }
-}
-
-/**
- * The census reads Herdr whenever the socket is configured. It is independent
- * of `CLANKIE_HERDR_TERMINAL_SOURCE_ENABLED`, which gates the observe-only
- * terminal *data* plane: knowing which agents exist is a different, cheaper
- * question than streaming their bytes, and gating it behind the byte plane
- * would leave the runner blind for the wrong reason.
- */
-function createHerdrAgentSource(env: NodeJS.ProcessEnv): HerdrAgentSource | undefined {
-  const socketPath = env.HERDR_SOCKET_PATH?.trim();
-  if (!socketPath) return undefined;
-  return new HerdrSocketTransport({ socketPath });
 }
 
 function parsePositiveInt(raw: string | undefined, fallback: number): number {
