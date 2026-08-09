@@ -4,7 +4,9 @@ These instructions apply to every autonomous or human-assisted coding agent in t
 
 ## Read before acting
 
-Read, in order:
+Load the `orient-clankie` skill first unless you already hold this system's layering and vocabulary. It maps the four layers, the invariants behind most surprising behavior, and which files own a given kind of change — including which of the documents below your task actually needs.
+
+Then read, in order:
 
 1. `README.md`
 2. `docs/01-architecture.md`

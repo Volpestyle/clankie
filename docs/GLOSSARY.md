@@ -7,6 +7,14 @@
 - **Task:** bounded unit with dependencies, role, execution class, scope, and evidence contract.
 - **Worker:** provider-native agent or process capable of executing a task.
 - **Worker run:** one attributable task execution with native session and terminal/artifact links.
+- **Mission control plane:** the trusted deterministic service owning the event store, DAG scheduler, doctrine compilation, action policy, budgets, and approvals. Authoritative for every fact a model could otherwise merely assert.
+- **Local runner:** the trusted process owning worktrees, PTYs, native provider sessions, the sandbox, credential exchange, control leases, and the agent census. Workers execute here; organization-wide credentials never leave it.
+- **Captain turn:** the single normalized unit every ingress produces. The channel supplies the lane address; no ingress plans on its own, and an approval may not arrive on an ambient one.
+- **Tool bank:** the captain's one authored tool inventory (`apps/captain-eve/agent/tools/`), pinned by `CAPTAIN_AUTHORED_TOOL_NAMES` in `@clankie/protocol` and checked at launch. A branch of Clankie never grows its own tools.
+- **One-tool handoff:** a non-captain surface whose entire tool surface is a single function into a captain lane, such as `ask_clankie` for Discord voice, so untrusted input cannot reach a privileged tool.
+- **Projection:** a derived read model rebuilt from the typed event log — mission, transcript, garden, status. Raw terminal streams and provider transcripts are diagnostic attachments, never authoritative state ([ADR 0002](adr/0002-event-sourced-mission-state.md)).
+- **Warmth:** the routing preference among eligible owned workers — ran the previous attempt, holds a settled assignment overlapping this write scope, completed a dependency, then idle over busy. Applied after hard capability filters, ties broken lexicographically ([ADR 0079](adr/0079-routing-prefers-the-worker-that-already-holds-the-context.md)).
+- **Evidence policy (`frozen` / `rolling`):** how an adapter session bounds its hash-chained evidence window. `frozen` marks state uncertain on overflow and keeps receipt runs byte-identical; `rolling` seals the full window and starts a fresh chain, confessing the cap through `rolledWindows` and `droppedEvidenceEvents`. A rolling trace is a window onto a run, not a receipt of it ([ADR 0061](adr/0061-evidence-rolls-for-open-ended-play.md)).
 - **Doctrine:** versioned preferences, targets, constraints, permissions, authority, topology, and budgets.
 - **Ceremony preset:** one of `rawdog`, `structured`, or `fine-control`; selects integration ceremony without weakening the invariant floor.
 - **Connector risk class:** connector-neutral action category (`read`, `reversible-write`, `irreversible-write`, `publish-external`, or `destructive`) used for default policy.
