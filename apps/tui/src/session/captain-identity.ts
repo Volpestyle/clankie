@@ -9,15 +9,19 @@ export const CAPTAIN_AGENT_NAME = "captain-eve";
  * agent it is checking cannot disagree. See the definition in `@clankie/protocol`.
  */
 export { CAPTAIN_AUTHORED_TOOL_NAMES };
-export const CAPTAIN_DISABLED_FRAMEWORK_TOOL_NAMES = [
-  "bash",
-  "glob",
-  "grep",
-  "read_file",
-  "web_fetch",
-  "web_search",
-  "write_file",
-] as const;
+/**
+ * The framework tools the captain deliberately does not have.
+ *
+ * Shell and filesystem stay disabled: execution belongs in governed workers
+ * that own a worktree and a sandbox, and a captain that can write files is a
+ * captain that can edit the doctrine it is judged against.
+ *
+ * Web reach is deliberately *not* on this list ([ADR 0082](../../../../docs/adr/0082-clankie-holds-the-browser.md)).
+ * Looking something up is what every lane asks him for and no lane could do,
+ * so `web_fetch` and `web_search` are part of the bank rather than a reason to
+ * spawn a research worker.
+ */
+export const CAPTAIN_DISABLED_FRAMEWORK_TOOL_NAMES = ["bash", "glob", "grep", "read_file", "write_file"] as const;
 
 export function assertLoopbackCaptainHost(host: string): URL {
   const url = new URL(host);
