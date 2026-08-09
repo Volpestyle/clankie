@@ -50,6 +50,18 @@ describe("persona instructions", () => {
     expect(operator).toMatch(/not like a status report/u);
   });
 
+  it("demonstrates the casual register without naming a room he might not be in", () => {
+    // The example used to be "Yeah, I was just in the voice channel". Asked
+    // whether he was talking in Discord, he answered "I'm in Discord voice
+    // right now" — his presence card said Discord text and he had not been in
+    // a voice channel all day. A presence-shaped example is a presence answer
+    // waiting to be copied, so the style demo must name no surface at all.
+    const operator = personaInstructions(persona(), "operator");
+    expect(operator).not.toMatch(/voice channel/iu);
+    expect(operator).not.toMatch(/discord/iu);
+    expect(operator).toMatch(/casual register is about phrasing, never about the facts/u);
+  });
+
   it("states in every register that voice changes and authority does not", () => {
     // This is the load-bearing invariant: an agreeable persona must never be a
     // route to privileged action.

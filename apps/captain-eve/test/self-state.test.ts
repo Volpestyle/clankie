@@ -232,11 +232,61 @@ describe("captain self state", () => {
       {
         lane: "discord_presence",
         targetId: "sess-text",
+        label: "signed in to Discord",
         here: false,
         active: true,
         updatedAt: NOW.toISOString(),
       },
     ]);
+    // A gateway session is not a channel and has no names to render, so as a
+    // bare id it was the least readable line on the card — exactly the line
+    // that has to outshout a wrong guess about being in voice.
+    expect(renderCaptainSelfState(state)).toContain("Discord text · signed in to Discord · open right now");
+    expect(renderCaptainSelfState(state)).not.toContain("sess-text");
+  });
+
+  it("says outright that he is in no voice channel, rather than leaving it to be inferred", () => {
+    // The failure this closes: with a live Discord *text* session on the card
+    // and no voice room anywhere on it, asked "are you talking in discord
+    // chat" he answered "I'm in Discord voice right now, yeah". Nothing on the
+    // card was wrong — the absence of a voice line simply carried no weight.
+    const rendered = renderCaptainSelfState(
+      projectCaptainSelfState(
+        input({
+          presence: [
+            { sessionId: "sess-text", phase: "present", voiceGuildIds: [], updatedAt: NOW.toISOString() },
+          ],
+        }),
+      ),
+    );
+
+    expect(rendered).toContain("You are not in any voice channel right now.");
+  });
+
+  it("states the same absence when he has no open rooms at all", () => {
+    expect(renderCaptainSelfState(projectCaptainSelfState(input()))).toContain(
+      "You are not in any voice channel right now.",
+    );
+  });
+
+  it("stays quiet about voice when a voice room is live and speaks for itself", () => {
+    const rendered = renderCaptainSelfState(
+      projectCaptainSelfState(
+        input({
+          presence: [
+            {
+              sessionId: "sess-1",
+              phase: "voice_active",
+              voiceGuildIds: ["guild-42"],
+              updatedAt: NOW.toISOString(),
+            },
+          ],
+        }),
+      ),
+    );
+
+    expect(rendered).toContain("Discord voice · guild-42 · open right now");
+    expect(rendered).not.toContain("not in any voice channel");
   });
 
   it("keeps a Go Live session a voice room, addressed by session id when no guild is listed", () => {

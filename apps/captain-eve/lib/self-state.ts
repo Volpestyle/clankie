@@ -237,7 +237,15 @@ export function projectCaptainSelfState(input: CaptainSelfStateInput): CaptainSe
   // other, because the lane row settles while he is still in the channel.
   for (const session of input.presence ?? []) {
     if (session.phase === "present") {
-      rooms.push(presenceRoom("discord_presence", session.sessionId, session.updatedAt, here));
+      // A connected-but-not-in-voice session is the gateway itself, not a
+      // channel: the record carries no guild or channel names to label it with
+      // (`voiceRooms` mirrors `voiceGuildIds`, which is empty at this phase).
+      // Rendered as a bare session id it was the least legible line on the
+      // card while voice rooms got human names — so the one line that
+      // contradicts "I'm in voice" was the one hardest to read. Say what it is.
+      rooms.push(
+        presenceRoom("discord_presence", session.sessionId, session.updatedAt, here, "signed in to Discord"),
+      );
     }
     if (session.phase !== "voice_active" && session.phase !== "go_live_active") continue;
     const targets = session.voiceGuildIds.length > 0 ? session.voiceGuildIds : [session.sessionId];
@@ -306,8 +314,16 @@ export function renderCaptainSelfState(state: CaptainSelfState): string {
   const recent = state.recentVoice.map(
     (stay) => `- Discord voice · ${stay.label} · you left at ${stay.leftAt} — not in it anymore`,
   );
+  // A missing line is weak evidence: asked whether he was talking in Discord
+  // with no voice room on the card at all, he said he was in voice anyway.
+  // Absence of a room has to be stated, not inferred from the gaps.
+  const voiceStanding = state.rooms.some((room) => room.lane === "discord_voice" && room.active)
+    ? undefined
+    : "You are not in any voice channel right now.";
   if (state.rooms.length === 0 && recent.length === 0) {
-    return ["# Where you are", "This is your only open room right now."].join("\n\n");
+    return ["# Where you are", `This is your only open room right now. ${voiceStanding ?? ""}`.trim()].join(
+      "\n\n",
+    );
   }
   const lines = state.rooms.map((room) => {
     const when = room.active
@@ -322,6 +338,9 @@ export function renderCaptainSelfState(state: CaptainSelfState): string {
     "# Where you are",
     'Your own open rooms across every surface. A room marked "open right now" is one you are in at this moment — answer presence questions about it in the present tense, the way a person says where they are, never by citing "my presence" or this card. A "you left" line is your own recent whereabouts, company included. This is your presence, not their contents — you still have no access to another room\'s transcript.',
     lines.join("\n"),
+    // Last, so it reads as a closing fact about the list rather than another
+    // room in it. Only stated when it is true; a live voice room speaks for itself.
+    ...(voiceStanding === undefined ? [] : [voiceStanding]),
   ].join("\n\n");
 }
 
