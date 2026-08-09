@@ -15,14 +15,17 @@ import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { isAbsolute, join, relative } from "node:path";
 import {
+  ChannelType,
   Client,
   GatewayIntentBits,
   GuildMember,
   Partials,
+  PermissionFlagsBits,
   REST,
   Routes,
   ThreadAutoArchiveDuration,
   type ChatInputCommandInteraction,
+  type Guild,
   type Message,
 } from "discord.js";
 import {
@@ -408,7 +411,69 @@ const projector = new MissionThreadProjector(
   },
 );
 
+// The gateway is the authority on which servers he is in and how much of each
+// he can see; the presence record is how that knowledge reaches the captain.
+// Synced before every ready/resume publication (membership rides the phase
+// event instead of costing a second one) and again whenever membership or
+// channel reach changes.
+const guildChannelAccess = (guild: Guild) => {
+  // The bot's own member is delivered with GUILD_CREATE; without it there is
+  // no permission subject, so reach is honestly "unknown" rather than a guess.
+  const me = guild.members.me;
+  if (me === null) return undefined;
+  // Threads inherit their parent's visibility and categories are grouping
+  // chrome — neither is what "channels" means in "can you see all of them?".
+  const channels = [...guild.channels.cache.values()].filter(
+    (channel) => !channel.isThread() && channel.type !== ChannelType.GuildCategory,
+  );
+  const visible: string[] = [];
+  const hidden: string[] = [];
+  for (const channel of channels) {
+    (channel.permissionsFor(me).has(PermissionFlagsBits.ViewChannel) ? visible : hidden).push(channel.name);
+  }
+  // Sorted by name, not position: a server reorder then changes nothing in
+  // the record, and the presence core drops the no-op sync instead of
+  // publishing a fresh durable event.
+  visible.sort((left, right) => left.localeCompare(right));
+  hidden.sort((left, right) => left.localeCompare(right));
+  return {
+    total: channels.length,
+    viewable: visible.length,
+    ...(visible.length === 0 ? {} : { visible }),
+    ...(hidden.length === 0 ? {} : { hidden }),
+  };
+};
+const syncGuildMembership = () => {
+  // An empty cache at shardReady means "not populated yet", not "in no
+  // servers" — guilds stream in after READY. Skipping keeps the record at
+  // "unknown" instead of briefly claiming zero membership; the ready handler
+  // and guild events re-sync once the cache is real.
+  if (client.guilds.cache.size === 0) return;
+  const guilds = [...client.guilds.cache.values()].map((guild) => {
+    const channelAccess = guildChannelAccess(guild);
+    return {
+      guildId: guild.id,
+      guildName: guild.name,
+      ...(channelAccess === undefined ? {} : { channelAccess }),
+    };
+  });
+  void presenceSession.guildMembershipChanged(guilds).catch(reportPresencePhaseFailure);
+};
+// Channel and role churn arrives in bursts (a server reorganization fires one
+// event per change); a trailing coalesce keeps that from spraying the durable
+// stream. The presence core additionally drops syncs that change nothing.
+let membershipSyncTimer: NodeJS.Timeout | undefined;
+const scheduleGuildMembershipSync = () => {
+  if (membershipSyncTimer !== undefined) clearTimeout(membershipSyncTimer);
+  membershipSyncTimer = setTimeout(() => {
+    membershipSyncTimer = undefined;
+    syncGuildMembership();
+  }, 1_500);
+  membershipSyncTimer.unref?.();
+};
+
 client.once("ready", async () => {
+  syncGuildMembership();
   void presenceSession.gatewayReady().catch(reportPresencePhaseFailure);
   const rest = new REST({ version: "10" }).setToken(token);
   // Guild-scoped to every server he reads, not just the home guild: a member
@@ -465,11 +530,31 @@ client.once("ready", async () => {
 });
 
 client.on("shardReady", () => {
+  syncGuildMembership();
   void presenceSession.gatewayReady().catch(reportPresencePhaseFailure);
 });
 
 client.on("shardResume", () => {
+  syncGuildMembership();
   void presenceSession.gatewayResumed().catch(reportPresencePhaseFailure);
+});
+
+// A membership change while disconnected is invisible until the next
+// ready/resume sync; these keep the record live in between.
+client.on("guildCreate", syncGuildMembership);
+client.on("guildDelete", syncGuildMembership);
+// Channel reach and server names drift without membership changing: channels
+// appear and vanish, permission overwrites move, his roles change, servers
+// rename. Coalesced — see scheduleGuildMembershipSync.
+client.on("guildUpdate", scheduleGuildMembershipSync);
+client.on("channelCreate", scheduleGuildMembershipSync);
+client.on("channelDelete", scheduleGuildMembershipSync);
+client.on("channelUpdate", scheduleGuildMembershipSync);
+client.on("roleCreate", scheduleGuildMembershipSync);
+client.on("roleUpdate", scheduleGuildMembershipSync);
+client.on("roleDelete", scheduleGuildMembershipSync);
+client.on("guildMemberUpdate", (_previous, current) => {
+  if (current.id === client.user?.id) scheduleGuildMembershipSync();
 });
 
 client.on("shardReconnecting", () => {

@@ -15,9 +15,9 @@ import { captainSelfState, renderCaptainSelfState } from "../../lib/self-state.t
  */
 export default defineTool({
   description:
-    "List your own currently open rooms across every lane: operator conversations, Discord voice and text, gameplay. Rooms marked open right now are rooms you are in at this moment — never another room's contents. For what is happening inside your current activity, use observe_current_activity.",
+    "List your own currently open rooms across every lane — operator conversations, Discord voice and text, gameplay — plus the Discord servers your account is a member of with channel-level reach: the names of the channels you can see in each server and the ones hidden from you. This detail lives here, not on the standing card. Rooms marked open right now are rooms you are in at this moment — never another room's contents. For what is happening inside your current activity, use observe_current_activity.",
   inputSchema: z.object({}),
   async execute() {
-    return renderCaptainSelfState(await captainSelfState());
+    return renderCaptainSelfState(await captainSelfState(), { integrationDetail: "detailed" });
   },
 });

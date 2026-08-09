@@ -36,11 +36,33 @@ export interface CaptainRecentVoiceStay {
   readonly leftAt: string;
 }
 
+/** One server his account belongs to, with channel reach when a body could compute it. */
+export interface CaptainDiscordServer {
+  readonly guildId: string;
+  readonly guildName?: string | undefined;
+  readonly channelAccess?:
+    | {
+        readonly total: number;
+        readonly viewable: number;
+        readonly visible?: readonly string[] | undefined;
+        readonly visibleTruncated?: number | undefined;
+        readonly hidden?: readonly string[] | undefined;
+        readonly hiddenTruncated?: number | undefined;
+      }
+    | undefined;
+}
+
 export interface CaptainSelfState {
   readonly rooms: readonly CaptainRoom[];
   readonly truncated: number;
   /** Rooms he was in within the recent-voice window but is not in now. */
   readonly recentVoice: readonly CaptainRecentVoiceStay[];
+  /**
+   * Servers his Discord account belongs to. Absent means unknown — no
+   * connected presence session reported membership — which is different from
+   * an empty array, a live claim of belonging to none.
+   */
+  readonly discordServers?: readonly CaptainDiscordServer[];
 }
 
 /**
@@ -170,6 +192,24 @@ export interface CaptainSelfStateInput {
     readonly sessionId: string;
     readonly phase: string;
     readonly voiceGuildIds: readonly string[];
+    /** Servers the session's account is a member of (last-known, gateway-fed). */
+    readonly guilds?:
+      | readonly {
+          readonly guildId: string;
+          readonly guildName?: string | undefined;
+          /** How far into the server he can see, when the transport can tell. */
+          readonly channelAccess?:
+            | {
+                readonly total: number;
+                readonly viewable: number;
+                readonly visible?: readonly string[] | undefined;
+                readonly visibleTruncated?: number | undefined;
+                readonly hidden?: readonly string[] | undefined;
+                readonly hiddenTruncated?: number | undefined;
+              }
+            | undefined;
+        }[]
+      | undefined;
     readonly voiceRooms?:
       | readonly {
           readonly guildId: string;
@@ -293,11 +333,110 @@ export function projectCaptainSelfState(input: CaptainSelfStateInput): CaptainSe
     )
     .map((stay) => ({ label: voiceRoomLabel(stay), leftAt: stay.leftAt }));
 
+  const discordServers = discordServerMembership(input.presence);
+
   return {
     rooms: ranked.slice(0, MAX_ROOMS),
     truncated: Math.max(0, ranked.length - MAX_ROOMS),
     recentVoice,
+    ...(discordServers === undefined ? {} : { discordServers }),
   };
+}
+
+/** Presence phases whose gateway is connected — the only ones whose membership claim is live. */
+const CONNECTED_PRESENCE_PHASES = new Set(["present", "voice_active", "go_live_active"]);
+
+/**
+ * Which Discord servers he belongs to — and how much of each he can see —
+ * across every connected body: the bot and the user session are one character
+ * in possibly different server sets (ADR 0048), so membership is the union,
+ * merged by guild id field-wise (a body that knows the name or the channel
+ * reach beats one that does not). `undefined` when no connected session
+ * reports membership at all — "I can't see my server list" stays sayable and
+ * honest.
+ */
+function discordServerMembership(
+  presence: CaptainSelfStateInput["presence"],
+): CaptainDiscordServer[] | undefined {
+  const byId = new Map<string, Omit<CaptainDiscordServer, "guildId">>();
+  let reported = false;
+  for (const session of presence ?? []) {
+    if (!CONNECTED_PRESENCE_PHASES.has(session.phase) || session.guilds === undefined) continue;
+    reported = true;
+    for (const guild of session.guilds) {
+      const known = byId.get(guild.guildId) ?? {};
+      byId.set(guild.guildId, {
+        ...(known.guildName === undefined && guild.guildName === undefined
+          ? {}
+          : { guildName: known.guildName ?? guild.guildName }),
+        ...(known.channelAccess === undefined && guild.channelAccess === undefined
+          ? {}
+          : { channelAccess: known.channelAccess ?? guild.channelAccess }),
+      });
+    }
+  }
+  if (!reported) return undefined;
+  return [...byId.entries()]
+    .sort(([leftId, left], [rightId, right]) =>
+      (left.guildName ?? leftId).localeCompare(right.guildName ?? rightId, undefined, {
+        sensitivity: "base",
+      }),
+    )
+    .map(([guildId, guild]) => ({ guildId, ...guild }));
+}
+
+/**
+ * "blinker city (12 of 13 channels visible: #dev, #general and 10 more —
+ * hidden from you: #🥰)". Membership without reach stays a bare name; full
+ * reach is said outright so "do you have access to all of it?" never needs
+ * hedging in either direction.
+ */
+function serverReachLabel(server: CaptainDiscordServer): string {
+  const name = server.guildName ?? server.guildId;
+  const access = server.channelAccess;
+  if (access === undefined) return name;
+  const visible = channelNameList(
+    access.visible,
+    access.visibleTruncated,
+    Math.max(0, access.viewable - (access.visible?.length ?? 0)),
+  );
+  const named = visible === undefined ? "" : `: ${visible}`;
+  if (access.viewable >= access.total) {
+    return `${name} (all ${String(access.total)} channels visible${named})`;
+  }
+  const counts = `${String(access.viewable)} of ${String(access.total)} channels visible`;
+  const hidden = channelNameList(
+    access.hidden,
+    access.hiddenTruncated,
+    Math.max(0, access.total - access.viewable - (access.hidden?.length ?? 0)),
+  );
+  if (hidden === undefined) return `${name} (${counts}${named})`;
+  return `${name} (${counts}${named} — hidden from you: ${hidden})`;
+}
+
+/**
+ * "#dev, #general and 3 more" — `fallbackBeyond` covers a publisher that sent
+ * fewer names than the count without marking the truncation.
+ */
+function channelNameList(
+  names: readonly string[] | undefined,
+  truncated: number | undefined,
+  fallbackBeyond: number,
+): string | undefined {
+  if (names === undefined || names.length === 0) return undefined;
+  const beyond = Math.max(truncated ?? 0, fallbackBeyond);
+  return `${names.map((channel) => `#${channel}`).join(", ")}${beyond > 0 ? ` and ${String(beyond)} more` : ""}`;
+}
+
+export interface CaptainSelfStateRenderOptions {
+  /**
+   * How much integration detail the card carries. The standing instruction
+   * stays "summary" — server names plus a pointer at get_self_state — so
+   * per-channel lists cost one tool call instead of every turn's context; any
+   * integration's or downstream body's deep state is tool-reachable, not
+   * ambient. `get_self_state` renders "detailed".
+   */
+  readonly integrationDetail?: "summary" | "detailed";
 }
 
 /**
@@ -310,7 +449,10 @@ export function projectCaptainSelfState(input: CaptainSelfStateInput): CaptainSe
  * "last active <three minutes ago>" for a voice channel he was sitting in, he
  * read his own presence as history and answered "not in it now".
  */
-export function renderCaptainSelfState(state: CaptainSelfState): string {
+export function renderCaptainSelfState(
+  state: CaptainSelfState,
+  options: CaptainSelfStateRenderOptions = {},
+): string {
   const recent = state.recentVoice.map(
     (stay) => `- Discord voice · ${stay.label} · you left at ${stay.leftAt} — not in it anymore`,
   );
@@ -320,10 +462,13 @@ export function renderCaptainSelfState(state: CaptainSelfState): string {
   const voiceStanding = state.rooms.some((room) => room.lane === "discord_voice" && room.active)
     ? undefined
     : "You are not in any voice channel right now.";
+  const membership = serverMembershipLine(state.discordServers, options.integrationDetail ?? "summary");
   if (state.rooms.length === 0 && recent.length === 0) {
-    return ["# Where you are", `This is your only open room right now. ${voiceStanding ?? ""}`.trim()].join(
-      "\n\n",
-    );
+    return [
+      "# Where you are",
+      `This is your only open room right now. ${voiceStanding ?? ""}`.trim(),
+      ...(membership === undefined ? [] : [membership]),
+    ].join("\n\n");
   }
   const lines = state.rooms.map((room) => {
     const when = room.active
@@ -338,10 +483,37 @@ export function renderCaptainSelfState(state: CaptainSelfState): string {
     "# Where you are",
     'Your own open rooms across every surface. A room marked "open right now" is one you are in at this moment — answer presence questions about it in the present tense, the way a person says where they are, never by citing "my presence" or this card. A "you left" line is your own recent whereabouts, company included. This is your presence, not their contents — you still have no access to another room\'s transcript.',
     lines.join("\n"),
-    // Last, so it reads as a closing fact about the list rather than another
-    // room in it. Only stated when it is true; a live voice room speaks for itself.
+    // Closing facts, so they read as standing truths about him rather than
+    // more rooms in the list. Membership is not a room: he is a member of a
+    // server whether or not anything is happening in it right now.
+    ...(membership === undefined ? [] : [membership]),
     ...(voiceStanding === undefined ? [] : [voiceStanding]),
   ].join("\n\n");
+}
+
+/** More servers than a card line can carry is a count, not a list. */
+const MAX_SERVER_LABELS = 24;
+
+function serverMembershipLine(
+  servers: readonly CaptainDiscordServer[] | undefined,
+  detail: "summary" | "detailed",
+): string | undefined {
+  if (servers === undefined) return undefined;
+  if (servers.length === 0) return "Your Discord account is not a member of any servers.";
+  const shown = servers.slice(0, MAX_SERVER_LABELS);
+  const extra = servers.length - shown.length;
+  if (detail === "summary") {
+    const names = shown.map((server) => server.guildName ?? server.guildId);
+    // Reach detail exists but stays behind the tool: pointing at it is what
+    // makes the model reach instead of hedging "I can't know from here".
+    const pointer = servers.some((server) => server.channelAccess !== undefined)
+      ? " Channel-level reach — which channels you can and cannot see in each — comes from get_self_state."
+      : "";
+    return `Discord servers you are a member of: ${names.join(", ")}${extra > 0 ? ` and ${String(extra)} more` : ""}.${pointer}`;
+  }
+  // Semicolons because a label's own channel detail uses commas.
+  const labels = shown.map((server) => serverReachLabel(server));
+  return `Discord servers you are a member of: ${labels.join("; ")}${extra > 0 ? `; and ${String(extra)} more` : ""}.`;
 }
 
 /**

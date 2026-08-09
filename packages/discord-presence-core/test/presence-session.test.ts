@@ -76,6 +76,59 @@ describe("Discord presence gateway session", () => {
     expect(session.record.voiceGuildIds).toEqual([]);
   });
 
+  it("publishes guild membership with the ready transition and on live change", async () => {
+    const events: DiscordPresencePhaseEvent[] = [];
+    const session = fixtureSession(events);
+    await session.start();
+    // Synced before ready (the bridge's ordering): membership rides the ready
+    // publication instead of costing a second event.
+    await session.guildMembershipChanged([
+      { guildId: "guild-2", guildName: "Beta" },
+      {
+        guildId: "guild-1",
+        guildName: "Vuhlp",
+        channelAccess: { total: 14, viewable: 12, visible: ["dev", "general"], hidden: ["admin", "mod-log"] },
+      },
+    ]);
+    await session.gatewayReady();
+    expect(session.record.guilds).toEqual([
+      {
+        guildId: "guild-1",
+        guildName: "Vuhlp",
+        channelAccess: { total: 14, viewable: 12, visible: ["dev", "general"], hidden: ["admin", "mod-log"] },
+      },
+      { guildId: "guild-2", guildName: "Beta" },
+    ]);
+    expect(events.map((event) => event.data.reason)).toEqual(["process_start", "gateway_ready"]);
+
+    // A live change publishes its own transition without moving the phase.
+    await session.guildMembershipChanged([{ guildId: "guild-1", guildName: "Vuhlp" }]);
+    expect(events.at(-1)).toMatchObject({
+      data: { previousPhase: "present", phase: "present", reason: "guild_membership_changed" },
+    });
+    expect(session.record.guilds).toEqual([{ guildId: "guild-1", guildName: "Vuhlp" }]);
+
+    // An identical re-sync publishes nothing.
+    const published = events.length;
+    await session.guildMembershipChanged([{ guildId: "guild-1", guildName: "Vuhlp" }]);
+    expect(events.length).toBe(published);
+  });
+
+  it("keeps membership across a disconnect as last-known account standing", async () => {
+    // Being dropped by the gateway does not remove him from any server, so
+    // membership survives the transitions that clear voice state.
+    const events: DiscordPresencePhaseEvent[] = [];
+    const session = fixtureSession(events);
+    await session.start();
+    await session.guildMembershipChanged([{ guildId: "guild-1", guildName: "Vuhlp" }]);
+    await session.gatewayReady();
+    await session.voiceStateChanged("guild-1", true);
+    await session.gatewayDisconnected();
+    expect(session.record.phase).toBe("degraded");
+    expect(session.record.voiceGuildIds).toEqual([]);
+    expect(session.record.guilds).toEqual([{ guildId: "guild-1", guildName: "Vuhlp" }]);
+  });
+
   it("fails closed and emits a semantic event when its lease is lost", async () => {
     const events: DiscordPresencePhaseEvent[] = [];
     const session = fixtureSession(events);

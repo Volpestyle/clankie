@@ -1,7 +1,11 @@
 import {
+  DISCORD_GUILD_HIDDEN_CHANNEL_MAX,
+  DISCORD_GUILD_MEMBERSHIP_MAX,
+  DISCORD_GUILD_VISIBLE_CHANNEL_MAX,
   DiscordPresencePhaseEventSchema,
   DiscordPresenceSessionRecordSchema,
   resolveDiscordPresenceToolExposure,
+  type DiscordGuildMembership,
   type DiscordPresenceToolExposure,
   type DiscordPresencePhaseEvent,
   type DiscordPresencePhaseTransitionReason,
@@ -110,6 +114,13 @@ export class DiscordPresenceSession {
   private readonly onTerminalFailure: NonNullable<DiscordPresenceSessionOptions["onTerminalFailure"]>;
   private readonly voiceGuildIds = new Set<string>();
   private readonly voiceRooms = new Map<string, DiscordVoiceRoom>();
+  /**
+   * Servers the account belongs to, undefined until the transport first
+   * reports them: a transport that never can (the user session observes raw
+   * gateway ids only) keeps the record field absent rather than claiming an
+   * empty membership.
+   */
+  private guildMemberships: DiscordGuildMembership[] | undefined;
   private readonly toolCatalogs = new Map<CaptainLane, DiscordPresenceAdvertisedToolCatalog>();
   private recordValue: DiscordPresenceSessionRecord;
   private liveRecordValue: DiscordPresenceSessionRecord;
@@ -220,6 +231,23 @@ export class DiscordPresenceSession {
     });
   }
 
+  /**
+   * The transport's current view of which servers the account is in. Stored
+   * immediately; published with the next transition, or right now via a
+   * `guild_membership_changed` transition when the gateway is connected and
+   * the membership actually differs from the durable record. Membership is
+   * account standing, not connection state, so a disconnect does not clear it.
+   */
+  public guildMembershipChanged(
+    guilds: readonly DiscordGuildMembership[],
+  ): Promise<DiscordPresenceSessionRecord> {
+    return this.enqueue(async () => {
+      this.guildMemberships = normalizeGuildMemberships(guilds);
+      if (!this.recordValue.gatewayConnected) return this.record;
+      return this.applyTransition(this.recordValue.phase, "guild_membership_changed", true);
+    });
+  }
+
   /** Rooms sorted by guildId with default string ordering, mirroring `voiceGuildIds`. */
   private sortedVoiceRooms(): DiscordVoiceRoom[] {
     return [...this.voiceRooms.values()].sort((left, right) =>
@@ -257,6 +285,7 @@ export class DiscordPresenceSession {
       gatewayConnected,
       voiceGuildIds: gatewayConnected ? [...this.voiceGuildIds].sort() : [],
       voiceRooms: gatewayConnected ? this.sortedVoiceRooms() : [],
+      ...(this.guildMemberships === undefined ? {} : { guilds: this.guildMemberships }),
       revision: this.recordValue.revision + 1,
     });
     if (this.revokesActCapability(preview)) {
@@ -271,7 +300,11 @@ export class DiscordPresenceSession {
     gatewayConnected: boolean,
   ): Promise<DiscordPresenceSessionRecord> {
     const previousPhase = this.recordValue.phase;
-    if (previousPhase === phase && this.recordValue.gatewayConnected === gatewayConnected) {
+    if (
+      previousPhase === phase &&
+      this.recordValue.gatewayConnected === gatewayConnected &&
+      !this.guildMembershipDiffersFromRecord()
+    ) {
       return this.record;
     }
     const occurredAt = this.clock().toISOString();
@@ -281,6 +314,7 @@ export class DiscordPresenceSession {
       gatewayConnected,
       voiceGuildIds: [...this.voiceGuildIds].sort(),
       voiceRooms: this.sortedVoiceRooms(),
+      ...(this.guildMemberships === undefined ? {} : { guilds: this.guildMemberships }),
       revision: this.recordValue.revision + 1,
       updatedAt: occurredAt,
     });
@@ -318,6 +352,11 @@ export class DiscordPresenceSession {
       this.onTerminalFailure(error, terminalEvent);
       throw error;
     }
+  }
+
+  private guildMembershipDiffersFromRecord(): boolean {
+    if (this.guildMemberships === undefined) return false;
+    return JSON.stringify(this.guildMemberships) !== JSON.stringify(this.recordValue.guilds ?? null);
   }
 
   private revokesActCapability(candidate: DiscordPresenceSessionRecord): boolean {
@@ -384,6 +423,56 @@ export class DiscordPresenceSession {
     this.queue = next.catch(() => undefined);
     return next;
   }
+}
+
+/**
+ * Deterministic wire shape from whatever the transport hands over: deduped by
+ * guildId (first entry wins), sorted by guildId, names trimmed to the schema
+ * bound, capped at the record maximum. Normalizing here keeps every transport
+ * honest without each reimplementing the bounds.
+ */
+function normalizeGuildMemberships(guilds: readonly DiscordGuildMembership[]): DiscordGuildMembership[] {
+  const byId = new Map<string, DiscordGuildMembership>();
+  for (const guild of guilds) {
+    if (guild.guildId.length === 0 || byId.has(guild.guildId)) continue;
+    const name = guild.guildName?.trim().slice(0, 100);
+    const access = normalizeChannelAccess(guild.channelAccess);
+    byId.set(guild.guildId, {
+      guildId: guild.guildId,
+      ...(name === undefined || name.length === 0 ? {} : { guildName: name }),
+      ...(access === undefined ? {} : { channelAccess: access }),
+    });
+  }
+  return [...byId.values()]
+    .sort((left, right) => (left.guildId < right.guildId ? -1 : left.guildId > right.guildId ? 1 : 0))
+    .slice(0, DISCORD_GUILD_MEMBERSHIP_MAX);
+}
+
+/** Bounds the channel-name lists to the schema caps, tracking what fell off. */
+function normalizeChannelAccess(
+  access: DiscordGuildMembership["channelAccess"],
+): DiscordGuildMembership["channelAccess"] {
+  if (access === undefined) return undefined;
+  const visible = boundedChannelNames(access.visible, access.visibleTruncated, DISCORD_GUILD_VISIBLE_CHANNEL_MAX);
+  const hidden = boundedChannelNames(access.hidden, access.hiddenTruncated, DISCORD_GUILD_HIDDEN_CHANNEL_MAX);
+  return {
+    total: access.total,
+    viewable: Math.min(access.viewable, access.total),
+    ...(visible.names.length === 0 ? {} : { visible: visible.names }),
+    ...(visible.truncated === 0 ? {} : { visibleTruncated: visible.truncated }),
+    ...(hidden.names.length === 0 ? {} : { hidden: hidden.names }),
+    ...(hidden.truncated === 0 ? {} : { hiddenTruncated: hidden.truncated }),
+  };
+}
+
+function boundedChannelNames(
+  raw: readonly string[] | undefined,
+  reportedTruncated: number | undefined,
+  cap: number,
+): { names: string[]; truncated: number } {
+  const cleaned = (raw ?? []).map((name) => name.trim().slice(0, 100)).filter((name) => name.length > 0);
+  const names = cleaned.slice(0, cap);
+  return { names, truncated: (reportedTruncated ?? 0) + (cleaned.length - names.length) };
 }
 
 function publicationFailureDisposition(error: unknown): DiscordPresencePublicationFailureDisposition {

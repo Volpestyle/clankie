@@ -245,6 +245,147 @@ describe("captain self state", () => {
     expect(renderCaptainSelfState(state)).not.toContain("sess-text");
   });
 
+  it("names the Discord servers he belongs to as a standing fact on the card", () => {
+    // The failure this closes: asked "what discord servers are you in", the
+    // captain answered that he could only see he was signed in — membership
+    // never crossed from the gateway into his self-knowledge.
+    const state = projectCaptainSelfState(
+      input({
+        presence: [
+          {
+            sessionId: "sess-text",
+            phase: "present",
+            voiceGuildIds: [],
+            guilds: [
+              { guildId: "guild-2", guildName: "Beta Lab" },
+              { guildId: "guild-1", guildName: "Vuhlp" },
+              { guildId: "guild-3" },
+            ],
+            updatedAt: NOW.toISOString(),
+          },
+        ],
+      }),
+    );
+
+    // Sorted by display name, a nameless guild identified by id.
+    expect(state.discordServers).toEqual([
+      { guildId: "guild-2", guildName: "Beta Lab" },
+      { guildId: "guild-3" },
+      { guildId: "guild-1", guildName: "Vuhlp" },
+    ]);
+    expect(renderCaptainSelfState(state)).toContain(
+      "Discord servers you are a member of: Beta Lab, guild-3, Vuhlp.",
+    );
+  });
+
+  it("keeps channel reach behind get_self_state: the card points, the tool names names", () => {
+    // The failure this closes: asked "do you have access to all blinker city
+    // channels?", he could only hedge that permissions might restrict him.
+    // The bot receives every channel over the gateway, so both what he can
+    // see and what he cannot are knowable — but per-channel lists are
+    // integration detail, so they cost one tool call, not every turn's
+    // context. The standing card carries the names and the pointer.
+    const state = projectCaptainSelfState(
+      input({
+        presence: [
+          {
+            sessionId: "sess-text",
+            phase: "present",
+            voiceGuildIds: [],
+            guilds: [
+              {
+                guildId: "guild-1",
+                guildName: "Blinker City",
+                channelAccess: {
+                  total: 14,
+                  viewable: 12,
+                  visible: ["dev", "general"],
+                  hidden: ["admin", "mod-log"],
+                },
+              },
+              {
+                guildId: "guild-2",
+                guildName: "Oathkeeper",
+                channelAccess: { total: 2, viewable: 2, visible: ["general", "ideas"] },
+              },
+              {
+                guildId: "guild-3",
+                guildName: "Crowded",
+                channelAccess: { total: 40, viewable: 2, hidden: ["one"], hiddenTruncated: 37 },
+              },
+            ],
+            updatedAt: NOW.toISOString(),
+          },
+        ],
+      }),
+    );
+
+    const standing = renderCaptainSelfState(state);
+    expect(standing).toContain(
+      "Discord servers you are a member of: Blinker City, Crowded, Oathkeeper. " +
+        "Channel-level reach — which channels you can and cannot see in each — comes from get_self_state.",
+    );
+    expect(standing).not.toContain("#admin");
+
+    expect(renderCaptainSelfState(state, { integrationDetail: "detailed" })).toContain(
+      "Discord servers you are a member of: " +
+        "Blinker City (12 of 14 channels visible: #dev, #general and 10 more — hidden from you: #admin, #mod-log); " +
+        "Crowded (2 of 40 channels visible — hidden from you: #one and 37 more); " +
+        "Oathkeeper (all 2 channels visible: #general, #ideas).",
+    );
+  });
+
+  it("unions membership across bodies and treats an unreported list as unknown, not empty", () => {
+    // Two bodies, one character (ADR 0048): membership is the union, with a
+    // named entry beating a nameless one. A session that reports no guilds
+    // field at all leaves the card silent — "I can't see my server list"
+    // stays sayable — and a disconnected session's list is not a live claim.
+    const unknown = projectCaptainSelfState(
+      input({
+        presence: [
+          { sessionId: "sess-text", phase: "present", voiceGuildIds: [], updatedAt: NOW.toISOString() },
+          {
+            sessionId: "sess-dead",
+            phase: "failed",
+            voiceGuildIds: [],
+            guilds: [{ guildId: "guild-9", guildName: "Gone" }],
+            updatedAt: NOW.toISOString(),
+          },
+        ],
+      }),
+    );
+    expect(unknown.discordServers).toBeUndefined();
+    expect(renderCaptainSelfState(unknown)).not.toContain("Discord servers you are a member of");
+
+    const union = projectCaptainSelfState(
+      input({
+        presence: [
+          {
+            sessionId: "sess-bot",
+            phase: "present",
+            voiceGuildIds: [],
+            guilds: [{ guildId: "guild-1" }],
+            updatedAt: NOW.toISOString(),
+          },
+          {
+            sessionId: "sess-user",
+            phase: "present",
+            voiceGuildIds: [],
+            guilds: [
+              { guildId: "guild-1", guildName: "Vuhlp" },
+              { guildId: "guild-2", guildName: "Beta Lab" },
+            ],
+            updatedAt: NOW.toISOString(),
+          },
+        ],
+      }),
+    );
+    expect(union.discordServers).toEqual([
+      { guildId: "guild-2", guildName: "Beta Lab" },
+      { guildId: "guild-1", guildName: "Vuhlp" },
+    ]);
+  });
+
   it("says outright that he is in no voice channel, rather than leaving it to be inferred", () => {
     // The failure this closes: with a live Discord *text* session on the card
     // and no voice room anywhere on it, asked "are you talking in discord

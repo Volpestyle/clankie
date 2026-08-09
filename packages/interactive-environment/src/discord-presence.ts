@@ -103,6 +103,61 @@ export const DiscordVoiceRoomSchema = z
 export type DiscordVoiceRoom = z.infer<typeof DiscordVoiceRoomSchema>;
 
 /**
+ * How far into a server he can actually reach. Bots receive every guild
+ * channel over the gateway regardless of view permission, so both the
+ * channels he can see and the ones he cannot are nameable — membership alone
+ * answers "are you in it?", this answers "which parts of it can you see?".
+ * Threads and categories are excluded from the counts; names are sorted,
+ * carried without the leading `#`, and capped with truncation counts so a
+ * huge server stays a bounded record.
+ */
+export const DISCORD_GUILD_HIDDEN_CHANNEL_MAX = 32;
+export const DISCORD_GUILD_VISIBLE_CHANNEL_MAX = 64;
+
+export const DiscordGuildChannelAccessSchema = z
+  .object({
+    total: z.number().int().nonnegative(),
+    viewable: z.number().int().nonnegative(),
+    /** Names he can see. */
+    visible: z.array(z.string().min(1).max(100)).max(DISCORD_GUILD_VISIBLE_CHANNEL_MAX).optional(),
+    /** Visible channels beyond the `visible` name cap. */
+    visibleTruncated: z.number().int().nonnegative().optional(),
+    /** Names he cannot see. */
+    hidden: z.array(z.string().min(1).max(100)).max(DISCORD_GUILD_HIDDEN_CHANNEL_MAX).optional(),
+    /** Hidden channels beyond the `hidden` name cap. */
+    hiddenTruncated: z.number().int().nonnegative().optional(),
+  })
+  .strict()
+  .superRefine((access, context) => {
+    if (access.viewable > access.total) {
+      context.addIssue({
+        code: "custom",
+        path: ["viewable"],
+        message: "viewable channels cannot exceed the total",
+      });
+    }
+  });
+export type DiscordGuildChannelAccess = z.infer<typeof DiscordGuildChannelAccessSchema>;
+
+/**
+ * One server the session's account is a member of. The name is optional for
+ * the same reason voice-room names are: a transport that observes raw gateway
+ * ids only still publishes a valid (nameless) membership. Channel access is
+ * optional the same way — a transport that cannot compute permissions still
+ * publishes an honest membership.
+ */
+export const DiscordGuildMembershipSchema = z
+  .object({
+    guildId: z.string().min(1),
+    guildName: z.string().min(1).max(100).optional(),
+    channelAccess: DiscordGuildChannelAccessSchema.optional(),
+  })
+  .strict();
+export type DiscordGuildMembership = z.infer<typeof DiscordGuildMembershipSchema>;
+
+export const DISCORD_GUILD_MEMBERSHIP_MAX = 200;
+
+/**
  * One completed stay in a voice channel, derived read-side from the durable
  * phase stream: the room context captured when the session joined, bounded by
  * join and leave times. History stays presence-class data about Clankie's own
@@ -141,6 +196,14 @@ export const DiscordPresenceSessionRecordSchema = z
      * consumer never has to reconcile two divergent views of the same state.
      */
     voiceRooms: z.array(DiscordVoiceRoomSchema).max(64).optional(),
+    /**
+     * Servers the account is a member of, sorted by guildId. Account-level
+     * standing rather than connection state, so it is not cleared on
+     * disconnect the way voice state is — it is last-known membership,
+     * refreshed on every gateway ready/resume. Optional so records published
+     * before this field existed still parse.
+     */
+    guilds: z.array(DiscordGuildMembershipSchema).max(DISCORD_GUILD_MEMBERSHIP_MAX).optional(),
     /** Rendered surfaces currently published by this session. */
     activityInstances: z.array(DiscordActivityInstanceSchema).max(DISCORD_ACTIVITY_INSTANCE_MAX).default([]),
     revision: z.number().int().nonnegative(),
@@ -192,6 +255,7 @@ export const DiscordPresencePhaseTransitionReasonSchema = z.enum([
   "gateway_reconnecting",
   "voice_joined",
   "voice_left",
+  "guild_membership_changed",
   "lease_lost",
   "gateway_failed",
   "publication_failed",
