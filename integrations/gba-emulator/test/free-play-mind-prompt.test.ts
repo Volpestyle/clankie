@@ -37,7 +37,9 @@ describe("model minds issue a prompt the SDK accepts", () => {
       }),
     );
 
-    const decision = await createModelFreePlayMind({ model, character: "You are Clankie." }).decide(emptyView());
+    const decision = await createModelFreePlayMind({ model, character: "You are Clankie." }).decide(
+      emptyView(),
+    );
 
     expect(decision).toMatchObject({ intent: "get downstairs" });
     // The persona must still arrive as instructions, and must not have been

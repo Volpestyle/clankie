@@ -1,6 +1,9 @@
 # ADR 0054: Presence is shared, world-facts stay fenced
 
-Status: accepted (James, 2026-07-25).
+Status: accepted (James, 2026-07-25). Amended by
+[ADR 0084](0084-the-head-can-read-his-branches.md), which lifts the transcript
+half of the fence in the operator lane only: the supervising seat reads what he
+did in any of his rooms, and every ambient lane keeps this ADR's fence intact.
 
 ## Context
 

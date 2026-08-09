@@ -666,3 +666,35 @@ describe("captain self state instructions", () => {
     await expect(captainSelfStateInstructions({ kind: "channel:not-a-known-lane" })).resolves.toBe("");
   });
 });
+
+describe("what each seat is told it can reach (ADR 0084)", () => {
+  const state = () =>
+    projectCaptainSelfState(input({ lanes: [lane({ lane: "discord_presence", targetId: "1:2" })] }));
+
+  it("tells the supervising seat its rooms are readable", () => {
+    const rendered = renderCaptainSelfState(state(), { reach: "readable" });
+    expect(rendered).toContain("observe_room");
+    expect(rendered).not.toContain("no access to another room's transcript");
+  });
+
+  it("keeps the fence on an ambient seat", () => {
+    const rendered = renderCaptainSelfState(state(), { reach: "presence_only" });
+    expect(rendered).toContain("no access to another room's transcript");
+    expect(rendered).not.toContain("observe_room");
+  });
+
+  it("claims neither when the caller cannot resolve its own lane", () => {
+    // `get_self_state` is that caller: a tool executor receives the AI SDK's
+    // options, not the eve session context. Asserting either answer there would
+    // contradict the standing card in one seat or the other.
+    const rendered = renderCaptainSelfState(state());
+    expect(rendered).not.toContain("observe_room");
+    expect(rendered).not.toContain("no access to another room's transcript");
+  });
+
+  it("says it in the only-room card too, since a settled room is still readable", () => {
+    const rendered = renderCaptainSelfState(projectCaptainSelfState(input()), { reach: "readable" });
+    expect(rendered).toContain("only open room");
+    expect(rendered).toContain("observe_room");
+  });
+});

@@ -96,12 +96,21 @@ importers:
       '@clankie/interactive-environment':
         specifier: workspace:*
         version: link:../../packages/interactive-environment
+      '@clankie/media-connector':
+        specifier: workspace:*
+        version: link:../../packages/media-connector
       '@clankie/memory-store':
         specifier: workspace:*
         version: link:../../packages/memory-store
       '@clankie/mission-engine':
         specifier: workspace:*
         version: link:../../packages/mission-engine
+      '@clankie/model-provider':
+        specifier: workspace:*
+        version: link:../../packages/model-provider
+      '@clankie/model-registry':
+        specifier: workspace:*
+        version: link:../../packages/model-registry
       '@clankie/observability':
         specifier: workspace:*
         version: link:../../packages/observability

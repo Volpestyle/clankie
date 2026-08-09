@@ -198,9 +198,7 @@ describe("external voice conversation", () => {
     }
     await settle();
     const appends = (ttsPorts[0]?.frames ?? []).filter((frame) => frame.kind === "append");
-    expect(appends).toEqual([
-      { kind: "append", contextId: "item_a", text: "I walked into the wall again." },
-    ]);
+    expect(appends).toEqual([{ kind: "append", contextId: "item_a", text: "I walked into the wall again." }]);
   });
 
   it("speaks each sentence as it completes, rather than waiting for the whole reply", async () => {

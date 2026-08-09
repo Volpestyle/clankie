@@ -133,6 +133,29 @@ describe("Eve captain lane context", () => {
     }
   });
 
+  it("gives the operator seat reach into his other rooms and keeps every ambient lane fenced", () => {
+    // The failure this fixes: asked in the console what he had done over in
+    // Discord, he read the fence as total isolation and said he could not see
+    // that room from here. Transparency runs down-chain — the supervising seat
+    // reads every room, and an untrusted room reads none of the others.
+    const operator = captainLaneInstructions({
+      kind: "http",
+      metadata: { captainLane: "operator", captainTargetId: "global-default" },
+    });
+    expect(operator).toContain("observe_room");
+    expect(operator).toContain("look it up before you answer");
+    expect(operator).not.toContain("Never infer, request, copy, or reuse another room's transcript");
+
+    for (const lane of ["discord_voice", "discord_presence", "gameplay"] as const) {
+      const ambient = captainLaneInstructions({
+        kind: "discord-text",
+        metadata: { captainLane: lane, captainTargetId: "guild-1:channel-1" },
+      });
+      expect(ambient).toContain("Never infer, request, copy, or reuse another room's transcript");
+      expect(ambient, lane).not.toContain("observe_room");
+    }
+  });
+
   it("resolves the unscoped operator lane to the default conversation with no env coupling", () => {
     // No process-global CLANKIE_CONVERSATION_ID: the direct operator channel is
     // always the default; per-conversation targeting rides the authored channel.

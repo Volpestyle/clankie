@@ -82,7 +82,9 @@ export async function takeAgentCensus(input: TakeAgentCensusInput): Promise<Agen
   const entries: AgentCensusEntry[] = [];
   const observedKeys = new Set<string>();
   for (const observation of sorted) {
-    observedKeys.add(terminalKey(observation.transport, observation.transportInstanceId, observation.terminalId));
+    observedKeys.add(
+      terminalKey(observation.transport, observation.transportInstanceId, observation.terminalId),
+    );
     const declaration = await input.adoptions.readDeclaration(observation);
     const digest = {
       runnerObserved: observation,
@@ -138,10 +140,7 @@ export interface AgentCensusServiceOptions {
   /** Process leases this runner owns. */
   leases: () => Promise<readonly ProcessLease[]>;
   /** Bounded operator-parity delivery into a hosted agent, if the transport can. */
-  deliver?: (
-    binding: AdoptedWorkerBinding,
-    text: string,
-  ) => Promise<"delivered" | "terminal_gone">;
+  deliver?: (binding: AdoptedWorkerBinding, text: string) => Promise<"delivered" | "terminal_gone">;
   clock?: () => Date;
 }
 
@@ -305,10 +304,7 @@ function classify(
   const adoption = adoptionByTerminal.get(
     terminalKey(observation.transport, observation.transportInstanceId, observation.terminalId),
   );
-  if (
-    adoption?.state === "active" &&
-    matchesAdoptedBinding(observation, adoption.binding)
-  ) {
+  if (adoption?.state === "active" && matchesAdoptedBinding(observation, adoption.binding)) {
     return {
       classification: "adopted",
       digest,
@@ -356,10 +352,7 @@ function countOf(
   return entries.filter((entry) => entry.classification === classification).length;
 }
 
-function matchesAdoptedBinding(
-  observation: AgentObservation,
-  binding: AdoptedWorkerBinding,
-): boolean {
+function matchesAdoptedBinding(observation: AgentObservation, binding: AdoptedWorkerBinding): boolean {
   return (
     observation.adoptable &&
     observation.transport === binding.transport &&

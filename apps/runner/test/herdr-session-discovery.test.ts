@@ -1,10 +1,7 @@
 import type { AdoptedWorkerBinding, AgentObservation } from "@clankie/protocol";
 import { describe, expect, it, vi } from "vitest";
 import type { HerdrAgentSource } from "../src/herdr-provider.ts";
-import {
-  CompositeHerdrAgentSource,
-  discoverHerdrSessionEndpoints,
-} from "../src/herdr-session-discovery.ts";
+import { CompositeHerdrAgentSource, discoverHerdrSessionEndpoints } from "../src/herdr-session-discovery.ts";
 
 function observation(transportInstanceId: string, terminalId: string): AgentObservation {
   return {
@@ -77,9 +74,8 @@ describe("discoverHerdrSessionEndpoints", () => {
   });
 
   it("uses the inherited socket when CLI discovery is unavailable", async () => {
-    const endpoints = await discoverHerdrSessionEndpoints(
-      { HERDR_SOCKET_PATH: "/tmp/inherited.sock" },
-      () => Promise.reject(new Error("herdr is not installed")),
+    const endpoints = await discoverHerdrSessionEndpoints({ HERDR_SOCKET_PATH: "/tmp/inherited.sock" }, () =>
+      Promise.reject(new Error("herdr is not installed")),
     );
 
     expect(endpoints).toEqual([{ instanceId: "current", socketPath: "/tmp/inherited.sock" }]);
@@ -148,8 +144,6 @@ describe("CompositeHerdrAgentSource", () => {
     expect(await composite.sendToAgent(betaBinding, "continue")).toBe("delivered");
     expect(alphaSend).not.toHaveBeenCalled();
     expect(betaSend).toHaveBeenCalledWith(betaBinding, "continue");
-    expect(await composite.sendToAgent(binding("missing", "term-1"), "continue")).toBe(
-      "terminal_gone",
-    );
+    expect(await composite.sendToAgent(binding("missing", "term-1"), "continue")).toBe("terminal_gone");
   });
 });

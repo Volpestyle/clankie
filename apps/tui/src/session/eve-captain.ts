@@ -123,7 +123,9 @@ export class EveCaptainSession {
       );
     }
     if (this.cursor === undefined || this.serviceGeneration === undefined) {
-      throw new Error("Clankie's runtime identity is unavailable; refusing to create an unversioned session.");
+      throw new Error(
+        "Clankie's runtime identity is unavailable; refusing to create an unversioned session.",
+      );
     }
     if (this.cursor.active) {
       shell.setTurnLoaderMessage("Reattaching to the active Clankie turn...");

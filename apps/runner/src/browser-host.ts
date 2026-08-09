@@ -20,7 +20,8 @@
  *   captain sees it, so `requiresApproval` is a decided fact on the wire.
  */
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { mkdir } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { CompiledDoctrine } from "@clankie/doctrine";
 import {
@@ -35,6 +36,7 @@ import {
   type BrowserToolCatalog,
   type BrowserToolDescriptor,
   type CallBrowserToolRequest,
+  type BrowserArtifact,
   type CallBrowserToolResult,
 } from "@clankie/protocol";
 
@@ -59,6 +61,9 @@ export function browserEnabled(value: string | undefined): boolean {
 
 /** One tool result is capped well below the protocol's ceiling so a page dump cannot flood a turn. */
 const MAX_RESULT_CHARACTERS = 100_000;
+/** Matches the Discord attachment ceiling; a larger image could never be sent anyway. */
+const MAX_ARTIFACT_BYTES = 25 * 1024 * 1024;
+const ARTIFACT_SUBDIRECTORY = "browser";
 const REQUEST_TIMEOUT_MS = 60_000;
 const STARTUP_TIMEOUT_MS = 30_000;
 
@@ -187,6 +192,14 @@ class StdioMcpClient {
   }
 }
 
+/** Extensions the resolver can label; anything else lands as a generic blob. */
+const ARTIFACT_EXTENSIONS: Readonly<Record<string, string>> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+  "application/pdf": "pdf",
+};
+
 export async function createBrowserHost(options: BrowserHostOptions): Promise<BrowserHost> {
   const environment = options.environment ?? process.env;
   const server = options.registry.servers.find((entry) => entry.name === BROWSER_SERVER_NAME);
@@ -207,6 +220,14 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
   const socketDirectory = join(options.runnerStateRoot, "browser", "run");
   await mkdir(profileDirectory, { recursive: true, mode: 0o700 });
   await mkdir(socketDirectory, { recursive: true, mode: 0o700 });
+
+  // Artifacts land under the root the Discord attachment resolver already
+  // serves, so a screenshot is attachable without a second copy or a second
+  // trust boundary. Without that root configured they still get written —
+  // under runner state — and are simply not sendable yet, which keeps the
+  // browser working when Discord is not configured at all.
+  const artifactRoot = environment.CLANKIE_DISCORD_ATTACHMENT_ROOT?.trim() || options.runnerStateRoot;
+  await mkdir(join(artifactRoot, ARTIFACT_SUBDIRECTORY), { recursive: true, mode: 0o700 });
 
   const command = environment.CLANKIE_AGENT_BROWSER_EXECUTABLE?.trim() || server.transport.command;
   const child = (options.spawnImpl ?? spawn)(command, [...server.transport.args], {
@@ -245,7 +266,10 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
     );
   } catch (error) {
     unavailableReason = error instanceof Error ? error.message : "browser_host_unavailable";
-    options.logger.warn({ event: "browser.host.unavailable", reason: unavailableReason }, "browser host unavailable");
+    options.logger.warn(
+      { event: "browser.host.unavailable", reason: unavailableReason },
+      "browser host unavailable",
+    );
   }
 
   async function loadDescriptors(): Promise<BrowserToolDescriptor[]> {
@@ -320,7 +344,10 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
           detail: unavailableReason ?? "browser_host_closed",
         });
       }
-      let result: { content?: { type?: unknown; text?: unknown }[]; isError?: unknown };
+      let result: {
+        content?: { type?: unknown; text?: unknown; data?: unknown; mimeType?: unknown }[];
+        isError?: unknown;
+      };
       try {
         result = (await client.request(
           "tools/call",
@@ -339,6 +366,27 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
         .filter((block) => block.type === "text" && typeof block.text === "string")
         .map((block) => block.text as string)
         .join("\n");
+      // Screenshots return a text path *and* an image block. Keeping only the
+      // text is what let a screenshot look successful while no pixels existed
+      // anywhere he could reach: he was handed a path on the runner's disk and
+      // rendered it as though it were an attachment.
+      const artifacts: BrowserArtifact[] = [];
+      for (const block of result.content ?? []) {
+        if (block.type !== "image" || typeof block.data !== "string") continue;
+        const mimeType = typeof block.mimeType === "string" ? block.mimeType : "application/octet-stream";
+        const bytes = Buffer.from(block.data, "base64");
+        if (bytes.byteLength === 0 || bytes.byteLength > MAX_ARTIFACT_BYTES) continue;
+        const digest = createHash("sha256").update(bytes).digest("hex");
+        const extension = ARTIFACT_EXTENSIONS[mimeType] ?? "bin";
+        const relativePath = join(ARTIFACT_SUBDIRECTORY, `${digest}.${extension}`);
+        await writeFile(join(artifactRoot, relativePath), bytes, { mode: 0o600 });
+        artifacts.push({
+          artifactRef: `sha256:${digest}:${relativePath}`,
+          filename: `${request.tool.replace(/^agent_browser_/u, "")}-${digest.slice(0, 8)}.${extension}`,
+          mimeType,
+          byteLength: bytes.byteLength,
+        });
+      }
       options.logger.info(
         { event: "browser.host.call", tool: request.tool, riskClass: grant.riskClass },
         "browser tool called",
@@ -348,6 +396,7 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
         tool: request.tool,
         content: text.slice(0, MAX_RESULT_CHARACTERS),
         isError: result.isError === true,
+        artifacts,
       });
     },
 

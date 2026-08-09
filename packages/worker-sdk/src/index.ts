@@ -1,10 +1,4 @@
-import type {
-  DomainEvent,
-  Harness,
-  TaskSpec,
-  WorkerResult,
-  WorkerStatusProvenance,
-} from "@clankie/protocol";
+import type { DomainEvent, Harness, TaskSpec, WorkerResult, WorkerStatusProvenance } from "@clankie/protocol";
 
 export interface WorkerCapabilities {
   kinds: TaskSpec["kind"][];

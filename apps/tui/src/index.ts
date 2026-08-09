@@ -17,7 +17,8 @@ import { createInitialConsoleState } from "./session/state.ts";
 import { EveCaptainSession } from "./session/eve-captain.ts";
 import { CaptainSessionCursorStore } from "./session/session-cursor.ts";
 import {
-  createProductionOperatorConversationClient,
+  createCaptainRouteClient,
+  createCaptainOperatorConversationClient,
   OperatorConversationPromptSession,
   OperatorConversationSelection,
   OperatorConversationSelectionStore,
@@ -27,6 +28,7 @@ import {
   resolveInitialConversation,
 } from "./session/operator-conversations.ts";
 import { createOperatorConversationShellSink } from "./session/operator-conversation-renderer.ts";
+import { CaptainLaneTraceController, createCaptainLaneClient } from "./session/lane-observation.ts";
 import { runRecoveryProbe } from "./recovery-probe.ts";
 import { MissionDashboard } from "./components/mission-dashboard.ts";
 import { SqliteMissionEventSource } from "./observation/mission-events.ts";
@@ -86,9 +88,15 @@ const services = createProviderServices({
 // The bearer resolves through the credential broker (env override first), so a
 // shell-launched face matches the token the launcher injected into the captain.
 const captainRouteToken = await resolveCaptainRouteToken({ env: process.env });
-const conversationClient = createProductionOperatorConversationClient({
+const captainRouteClient = createCaptainRouteClient({
   host: process.env.CLANKIE_CAPTAIN_URL ?? "http://127.0.0.1:4321",
   ...(captainRouteToken === undefined ? {} : { captainToken: captainRouteToken }),
+});
+const conversationClient = createCaptainOperatorConversationClient(captainRouteClient);
+// Read-only tails onto the rooms the console is not talking in (ADR 0083).
+const laneTrace = new CaptainLaneTraceController({
+  client: captainRouteClient,
+  lanes: createCaptainLaneClient(captainRouteClient),
 });
 const conversationSelectionStore = new OperatorConversationSelectionStore(
   join(repoRoot, ".data", "tui", "operator-conversation.json"),
@@ -133,6 +141,7 @@ const commands = [
     captain,
     observer: missionObserver,
     conversations: conversationsContext,
+    laneTrace,
     ...(approvalClient
       ? {
           approvalClient,

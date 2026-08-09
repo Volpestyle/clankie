@@ -38,6 +38,44 @@ export const CaptainLaneCompatibilitySchema = z.union([CaptainLaneSchema, z.lite
 export type CaptainLane = z.infer<typeof CaptainLaneCompatibilitySchema>;
 
 // ---------------------------------------------------------------------------
+// Captain lane observation (ADR 0083).
+//
+// The read-only session→lane listing an operator surface needs before it can
+// watch a lane it is not talking in. Identity only: which room, which durable
+// session, what state. No message, reasoning, tool, or continuation-token field
+// appears here — the events themselves come from the Eve session stream.
+// ---------------------------------------------------------------------------
+
+/** The authenticated captain route that lists observable lanes. */
+export const CAPTAIN_LANE_OBSERVATION_PATH = "/captain/v1/lanes";
+
+export const CaptainLaneSessionStateSchema = z.enum(["active", "waiting", "completed", "failed"]);
+export type CaptainLaneSessionState = z.infer<typeof CaptainLaneSessionStateSchema>;
+
+export const ObservableCaptainLaneSchema = z
+  .object({
+    lane: CaptainLaneCompatibilitySchema,
+    /** The room address: `guildId:channelId` for Discord, conversation-shaped elsewhere. */
+    targetId: z.string().trim().min(1).max(512),
+    /** Absent until the lane has run a turn; rotates when a lane starts a fresh session. */
+    sessionId: z.string().trim().min(1).max(512).optional(),
+    state: CaptainLaneSessionStateSchema,
+    updatedAt: z.string().datetime(),
+  })
+  .strict();
+export type ObservableCaptainLane = z.infer<typeof ObservableCaptainLaneSchema>;
+
+export const CAPTAIN_LANE_LISTING_MAX = 256;
+
+export const CaptainLaneListingSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    lanes: z.array(ObservableCaptainLaneSchema).max(CAPTAIN_LANE_LISTING_MAX),
+  })
+  .strict();
+export type CaptainLaneListing = z.infer<typeof CaptainLaneListingSchema>;
+
+// ---------------------------------------------------------------------------
 // Operator conversations (ADR 0032, VUH-769).
 //
 // Every schema below is a STRICT, provider-neutral, bounded public boundary

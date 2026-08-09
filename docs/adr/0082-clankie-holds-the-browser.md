@@ -19,11 +19,11 @@ own tools. That part of the architecture was already right.
 What the bank did not hold was any way to look something up. Measured on the
 owner's machine, every web path was closed at once:
 
-| Path | State |
-| --- | --- |
-| Captain `web_search` / `web_fetch` | `disableTool()` per ADR 0027 |
-| Claude worker native web research | `CLANKIE_CLAUDE_WEB_RESEARCH_ENABLED` unset |
-| Codex worker `agent-browser` | `CLANKIE_BROWSER_ENABLED` unset, binary not installed |
+| Path                               | State                                                 |
+| ---------------------------------- | ----------------------------------------------------- |
+| Captain `web_search` / `web_fetch` | `disableTool()` per ADR 0027                          |
+| Claude worker native web research  | `CLANKIE_CLAUDE_WEB_RESEARCH_ENABLED` unset           |
+| Codex worker `agent-browser`       | `CLANKIE_BROWSER_ENABLED` unset, binary not installed |
 
 So "look that up" had no answer in any lane. In a Discord voice channel the
 only sanctioned route — create a mission and delegate a research worker — costs
@@ -106,7 +106,7 @@ the job asked of it.
 one way, and it is the safety mechanism that makes the full action set
 tractable. A worker cannot pause mid-tool for a human, so an approval-class
 tool in a worker's set would either execute unapproved or deadlock — hence the
-worker rule. The captain is the seat that *owns* the approval envelope, so
+worker rule. The captain is the seat that _owns_ the approval envelope, so
 withholding approval-class tools from it would mean no principal could ever
 perform them. `deny` still denies, and an undeclared tool is still never
 projected.
@@ -145,7 +145,7 @@ flowchart TB
   the approval gate is enforced at the control plane on every call instead of
   by a step-scoped hook that a replayed turn could skip.
 - Risk classes are assigned per tool against the names `agent-browser mcp
-  --tools all` actually advertises (64 at v0.33.2), not against the CLI's
+--tools all` actually advertises (64 at v0.33.2), not against the CLI's
   documented command groups. An earlier draft classified thirty-three guessed
   names and would have projected nothing at all, because the host drops
   anything the registry does not declare — a typo silently removes a

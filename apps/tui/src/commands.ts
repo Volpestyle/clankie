@@ -21,6 +21,13 @@ import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 import type { MenuOption } from "./shell/setup-flow.ts";
 import { MissionDashboard } from "./components/mission-dashboard.ts";
 import { formatActivityObservation, type ActivityObservationClient } from "./activity-command.ts";
+import {
+  formatLaneListing,
+  laneKey,
+  selectLanes,
+  type CaptainLaneTraceController,
+} from "./session/lane-observation.ts";
+import type { ObservableCaptainLane } from "@clankie/protocol";
 import type { MissionObserver } from "./observation/mission-observer.ts";
 import { pushTimeline, type ConsoleState, type DoctrineSettings } from "./session/state.ts";
 
@@ -32,6 +39,8 @@ export interface ConsoleCommandContext {
   readonly approvalClient?: ApprovalInboxClient;
   readonly activityClient?: ActivityObservationClient;
   readonly activityWatchUrl?: string;
+  /** Read-only tails onto the lanes the operator is not talking in (ADR 0083). */
+  readonly laneTrace?: CaptainLaneTraceController;
   readonly conversations?: {
     readonly conversationId?: string | undefined;
     conversations(): Promise<
@@ -53,8 +62,16 @@ export interface ConsoleCommandContext {
 }
 
 export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellCommand[] {
-  const { state, captain, observer, approvalClient, activityClient, activityWatchUrl, conversations } =
-    context;
+  const {
+    state,
+    captain,
+    observer,
+    approvalClient,
+    activityClient,
+    activityWatchUrl,
+    conversations,
+    laneTrace,
+  } = context;
   const commands: FaceShellCommand[] = [];
   const dashboard = () => observer?.dashboard ?? state.dashboard;
 
@@ -144,6 +161,60 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
                 `${item.conversationId === conversations.conversationId ? "*" : " "} ${item.title} · ${item.conversationId} · revision ${item.revision}${item.isDefault ? " · default" : ""}`,
             )
             .join("\n"),
+          "success",
+        );
+      },
+    },
+    {
+      name: "trace",
+      aliases: [],
+      description: "Watch another lane's reasoning and tool calls (Discord servers, voice, gameplay)",
+      argumentHint: "[<lane>|<guild:channel>|all|off]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        const selector = argument.trim();
+        const label = selector.length === 0 ? "/trace" : `/trace ${selector}`;
+        if (laneTrace === undefined) {
+          shell.insertCommandResult(label, "Clankie's lane listing is unavailable.", "error");
+          return;
+        }
+        if (selector === "off") {
+          const stopped = laneTrace.detachAll();
+          shell.insertCommandResult(
+            label,
+            stopped === 0 ? "No lane was being traced." : `Stopped tracing ${String(stopped)} lane(s).`,
+            "success",
+          );
+          return;
+        }
+        let lanes: readonly ObservableCaptainLane[];
+        try {
+          lanes = await laneTrace.lanes();
+        } catch (error) {
+          shell.insertCommandResult(label, error instanceof Error ? error.message : String(error), "error");
+          return;
+        }
+        if (selector.length === 0 || selector === "status") {
+          shell.insertCommandResult(label, formatLaneListing(lanes, laneTrace.watched), "success");
+          return;
+        }
+        const selected = selectLanes(lanes, selector);
+        if (selected.length === 0) {
+          shell.insertCommandResult(
+            label,
+            `No lane matches ${selector}.\n\n${formatLaneListing(lanes, laneTrace.watched)}`,
+            "error",
+          );
+          return;
+        }
+        const attached = selected.filter((lane) =>
+          laneTrace.attach({ lane: lane.lane, targetId: lane.targetId }, shell),
+        );
+        shell.insertCommandResult(
+          label,
+          attached.length === 0
+            ? "Already tracing every matching lane."
+            : `Tracing ${attached.map((lane) => laneKey(lane)).join(", ")}. Use /trace off to stop.`,
           "success",
         );
       },

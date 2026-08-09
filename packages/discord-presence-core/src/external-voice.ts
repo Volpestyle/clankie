@@ -416,7 +416,11 @@ const MAX_HELD_TEXT_CHARACTERS = 200;
 export function splitSpeakableUnits(pending: string): { emit: string; rest: string } {
   let cut = -1;
   SPEAKABLE_BOUNDARY.lastIndex = 0;
-  for (let match = SPEAKABLE_BOUNDARY.exec(pending); match !== null; match = SPEAKABLE_BOUNDARY.exec(pending)) {
+  for (
+    let match = SPEAKABLE_BOUNDARY.exec(pending);
+    match !== null;
+    match = SPEAKABLE_BOUNDARY.exec(pending)
+  ) {
     const after = pending[match.index + 1];
     if (after !== undefined && !/\s/u.test(after)) continue;
     // The whitespace after the boundary belongs to the unit that just ended,

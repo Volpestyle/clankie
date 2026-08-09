@@ -33,18 +33,19 @@ import { buildConfiguredShellAdapter, buildWorkerAdapters, simWorkersEnabled } f
 import { buildWorkerEnvironment } from "./worker-environment.ts";
 import { parseVerificationChecks } from "./verification-checks.ts";
 import { TerminalManager } from "./terminals.ts";
-import {
-  canonicalWorkspaceRoot,
-  HerdrSocketTransport,
-  HerdrTerminalProvider,
-} from "./herdr-provider.ts";
-import {
-  createCompositeHerdrAgentSource,
-  discoverHerdrSessionEndpoints,
-} from "./herdr-session-discovery.ts";
+import { canonicalWorkspaceRoot, HerdrSocketTransport, HerdrTerminalProvider } from "./herdr-provider.ts";
+import { createCompositeHerdrAgentSource, discoverHerdrSessionEndpoints } from "./herdr-session-discovery.ts";
 import { AgentCensusService } from "./agent-census.ts";
-import { AGENT_CENSUS_GATEWAY_PORT, createAgentCensusGateway } from "./agent-census-gateway.ts";
-import { BROWSER_GATEWAY_PORT, createBrowserGateway } from "./browser-gateway.ts";
+import {
+  activityObservationCapability,
+  agentCensusCapability,
+  browserCapability,
+  captainShellCapability,
+  createLoopbackGateway,
+  LOOPBACK_GATEWAY_PORT,
+  workerTranscriptCapability,
+} from "./loopback-gateway.ts";
+import { createCaptainShellHost } from "./captain-shell-host.ts";
 import { browserEnabled, createBrowserHost } from "./browser-host.ts";
 import { WorkerAdoptionStore } from "./worker-adoptions.ts";
 import { CompositeTerminalSourceProvider, type TerminalSourceProvider } from "./terminal-source.ts";

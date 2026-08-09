@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import { compileDoctrine, loadDoctrineFile } from "@clankie/doctrine";
 import { McpRegistrySchema } from "@clankie/mcp-registry";
@@ -8,7 +10,15 @@ import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { browserEnabled, createBrowserHost, type BrowserHost } from "../src/browser-host.ts";
 
-const doctrinePath = join(import.meta.dirname, "..", "..", "..", "doctrine", "profiles", "self-build-lab.yaml");
+const doctrinePath = join(
+  import.meta.dirname,
+  "..",
+  "..",
+  "..",
+  "doctrine",
+  "profiles",
+  "self-build-lab.yaml",
+);
 
 const registry = McpRegistrySchema.parse({
   schemaVersion: "1",
@@ -34,7 +44,13 @@ const logger = { info: () => undefined, warn: () => undefined };
  */
 function fakeServer(options: {
   tools?: { name: string; description?: string; inputSchema?: unknown }[];
-  onCall?: (name: string, args: unknown) => { content: { type: string; text: string }[]; isError?: boolean };
+  onCall?: (
+    name: string,
+    args: unknown,
+  ) => {
+    content: { type: string; text?: string; data?: string; mimeType?: string }[];
+    isError?: boolean;
+  };
 }) {
   const stdin = new PassThrough();
   const stdout = new PassThrough();
@@ -59,7 +75,11 @@ function fakeServer(options: {
       buffer = buffer.slice(newline + 1);
       newline = buffer.indexOf("\n");
       if (!line) continue;
-      const message = JSON.parse(line) as { id?: number; method: string; params?: { name?: string; arguments?: unknown } };
+      const message = JSON.parse(line) as {
+        id?: number;
+        method: string;
+        params?: { name?: string; arguments?: unknown };
+      };
       if (message.id === undefined) continue;
       const reply = (result: unknown) =>
         stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: message.id, result })}\n`);
@@ -160,8 +180,39 @@ describe("browser host", () => {
     expect(result).toMatchObject({ outcome: "ok", tool: "navigate", content: "visited via navigate" });
   });
 
+  it("parks an image block as a hash-bound artifact instead of dropping it", async () => {
+    const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+    const created = await build(
+      fakeServer({
+        tools: [{ name: "navigate", inputSchema: { type: "object" } }],
+        onCall: () => ({
+          content: [
+            { type: "text", text: "/tmp/shot.png" },
+            { type: "image", data: png.toString("base64"), mimeType: "image/png" },
+          ],
+        }),
+      }),
+    );
+    const result = await created.call({ schemaVersion: 1, tool: "navigate", arguments: {} });
+    expect(result.outcome).toBe("ok");
+    if (result.outcome !== "ok") return;
+    // The path still reaches him as text, but the pixels now exist somewhere
+    // he can point at — that gap is what made a screenshot look successful
+    // while nothing attachable had been produced.
+    expect(result.content).toContain("/tmp/shot.png");
+    expect(result.artifacts).toHaveLength(1);
+    const artifact = result.artifacts[0]!;
+    const digest = createHash("sha256").update(png).digest("hex");
+    expect(artifact.artifactRef).toBe(`sha256:${digest}:${join("browser", `${digest}.png`)}`);
+    expect(artifact).toMatchObject({ mimeType: "image/png", byteLength: png.byteLength });
+    // Written where the Discord attachment resolver already looks.
+    expect(readFileSync(join(stateRoot, "browser", `${digest}.png`)).equals(png)).toBe(true);
+  });
+
   it("refuses a tool the registry never declared instead of forwarding it", async () => {
-    const created = await build(fakeServer({ tools: [{ name: "navigate", inputSchema: { type: "object" } }] }));
+    const created = await build(
+      fakeServer({ tools: [{ name: "navigate", inputSchema: { type: "object" } }] }),
+    );
     const result = await created.call({ schemaVersion: 1, tool: "undeclared_superpower", arguments: {} });
     expect(result).toMatchObject({ outcome: "refused", reason: "doctrine_denied" });
   });

@@ -453,7 +453,11 @@ function normalizeChannelAccess(
   access: DiscordGuildMembership["channelAccess"],
 ): DiscordGuildMembership["channelAccess"] {
   if (access === undefined) return undefined;
-  const visible = boundedChannelNames(access.visible, access.visibleTruncated, DISCORD_GUILD_VISIBLE_CHANNEL_MAX);
+  const visible = boundedChannelNames(
+    access.visible,
+    access.visibleTruncated,
+    DISCORD_GUILD_VISIBLE_CHANNEL_MAX,
+  );
   const hidden = boundedChannelNames(access.hidden, access.hiddenTruncated, DISCORD_GUILD_HIDDEN_CHANNEL_MAX);
   return {
     total: access.total,

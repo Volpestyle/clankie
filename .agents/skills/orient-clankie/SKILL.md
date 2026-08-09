@@ -58,18 +58,18 @@ a layer.
 
 ## Where a change lives
 
-| Change | Read first | Write in |
-| --- | --- | --- |
-| Captain ability, instruction, or lane | [`apps/captain-eve/README.md`](../../../apps/captain-eve/README.md) | `apps/captain-eve/agent/` and the pinned name list in `packages/protocol` |
-| Policy, authority, routing, ceremony | [`docs/04-doctrine.md`](../../../docs/04-doctrine.md) | `packages/doctrine` plus its policy tests |
-| Mission lifecycle, DAG, leasing, approvals | [control flow](../../../docs/01-architecture.md#control-flow) | `packages/mission-engine`, `apps/control-plane` |
-| Worker execution, worktrees, PTYs, status | [`docs/05-worker-and-terminal-runtime.md`](../../../docs/05-worker-and-terminal-runtime.md) | `apps/runner`, `packages/worker-*`, `packages/terminal-protocol` |
-| Any message crossing a service boundary | — | `packages/protocol` first; versioned and provider-neutral |
-| Embodiment (Minecraft, GBA, PokeMMO) | [interactive environments](../../../docs/01-architecture.md#interactive-environments) | `packages/environment-runtime`, `integrations/<name>` |
-| Discord presence, voice, perception, memory | [`apps/discord-bridge/README.md`](../../../apps/discord-bridge/README.md) | `apps/discord-bridge`, `packages/discord-presence-core` |
-| Garden, graph, terminal deck | [`docs/06-garden-and-graph.md`](../../../docs/06-garden-and-graph.md) and the `garden-control-design` skill | `packages/garden-model` |
-| Evaluation, scoring, release gates | [`docs/07-evaluations.md`](../../../docs/07-evaluations.md), [`docs/17-capability-completion-contract.md`](../../../docs/17-capability-completion-contract.md) | `packages/evals`, `apps/lead-agent-lab` |
-| Pixel art, garden sprites, app UI | — | the private `clankie-app` repo, not here |
+| Change                                      | Read first                                                                                                                                                     | Write in                                                                  |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Captain ability, instruction, or lane       | [`apps/captain-eve/README.md`](../../../apps/captain-eve/README.md)                                                                                            | `apps/captain-eve/agent/` and the pinned name list in `packages/protocol` |
+| Policy, authority, routing, ceremony        | [`docs/04-doctrine.md`](../../../docs/04-doctrine.md)                                                                                                          | `packages/doctrine` plus its policy tests                                 |
+| Mission lifecycle, DAG, leasing, approvals  | [control flow](../../../docs/01-architecture.md#control-flow)                                                                                                  | `packages/mission-engine`, `apps/control-plane`                           |
+| Worker execution, worktrees, PTYs, status   | [`docs/05-worker-and-terminal-runtime.md`](../../../docs/05-worker-and-terminal-runtime.md)                                                                    | `apps/runner`, `packages/worker-*`, `packages/terminal-protocol`          |
+| Any message crossing a service boundary     | —                                                                                                                                                              | `packages/protocol` first; versioned and provider-neutral                 |
+| Embodiment (Minecraft, GBA, PokeMMO)        | [interactive environments](../../../docs/01-architecture.md#interactive-environments)                                                                          | `packages/environment-runtime`, `integrations/<name>`                     |
+| Discord presence, voice, perception, memory | [`apps/discord-bridge/README.md`](../../../apps/discord-bridge/README.md)                                                                                      | `apps/discord-bridge`, `packages/discord-presence-core`                   |
+| Garden, graph, terminal deck                | [`docs/06-garden-and-graph.md`](../../../docs/06-garden-and-graph.md) and the `garden-control-design` skill                                                    | `packages/garden-model`                                                   |
+| Evaluation, scoring, release gates          | [`docs/07-evaluations.md`](../../../docs/07-evaluations.md), [`docs/17-capability-completion-contract.md`](../../../docs/17-capability-completion-contract.md) | `packages/evals`, `apps/lead-agent-lab`                                   |
+| Pixel art, garden sprites, app UI           | —                                                                                                                                                              | the private `clankie-app` repo, not here                                  |
 
 Dependency direction is enforced by `pnpm arch:check`. A cross-package import that
 feels natural but fails the check is usually a shared type that belongs in

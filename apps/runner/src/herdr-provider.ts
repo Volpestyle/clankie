@@ -132,7 +132,8 @@ export class HerdrSocketTransport implements HerdrTransport {
     if (options.socketPath.trim().length === 0) throw new HerdrTerminalError("transport_lost", true);
     this.socketPath = options.socketPath;
     this.instanceId =
-      options.instanceId ?? `socket-${createHash("sha256").update(options.socketPath).digest("hex").slice(0, 16)}`;
+      options.instanceId ??
+      `socket-${createHash("sha256").update(options.socketPath).digest("hex").slice(0, 16)}`;
     this.connect = options.connect ?? ((socketPath) => createConnection({ path: socketPath }));
     this.resolveWorkspaceRoot = options.resolveWorkspaceRoot ?? canonicalWorkspaceRoot;
   }
@@ -352,10 +353,7 @@ export class HerdrSocketTransport implements HerdrTransport {
   }
 }
 
-function matchesAdoptedBinding(
-  observation: AgentObservation,
-  binding: AdoptedWorkerBinding,
-): boolean {
+function matchesAdoptedBinding(observation: AgentObservation, binding: AdoptedWorkerBinding): boolean {
   return (
     observation.adoptable &&
     observation.transport === binding.transport &&

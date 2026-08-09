@@ -1,3 +1,4 @@
+import { sanitizeForSupportBundle } from "@clankie/observability";
 import type { HandleMessageStreamEvent } from "eve/client";
 import type { ClankieFaceShell, FaceBlockHandle } from "../shell/shell.ts";
 
@@ -62,8 +63,20 @@ function resultName(
   }
 }
 
+/**
+ * Marks a renderer as watching a lane the operator is not talking in (ADR 0083).
+ * Every block is tagged with the room, the loader and status bar stay owned by
+ * the operator's own turn, and tool payloads pass through the support-bundle
+ * sanitizer because another room's arguments are not the operator's to leak.
+ */
+export interface EveRenderOrigin {
+  /** Room tag shown on each block, e.g. `discord_presence 1234:5678`. */
+  readonly label: string;
+}
+
 export class EveFaceRenderer {
   private readonly shell: ClankieFaceShell;
+  private readonly origin: EveRenderOrigin | undefined;
   private readonly prefixes = new Map<string, string>();
   private readonly actionBlocks = new Map<string, FaceBlockHandle>();
   private assistantBlock: FaceBlockHandle | undefined;
@@ -76,8 +89,19 @@ export class EveFaceRenderer {
   private submittedPrompt: string | undefined;
   private usage: StepUsage | undefined;
 
-  public constructor(shell: ClankieFaceShell) {
+  public constructor(shell: ClankieFaceShell, origin?: EveRenderOrigin) {
     this.shell = shell;
+    this.origin = origin;
+  }
+
+  /** Bold block heading, tagged with the room when this renderer watches another lane. */
+  private heading(text: string): string {
+    return this.origin === undefined ? `**${text}**` : `\`${sanitize(this.origin.label)}\` **${text}**`;
+  }
+
+  /** Another room's tool arguments and results are redacted the way support bundles are. */
+  private payload(value: unknown): string {
+    return json(this.origin === undefined ? value : sanitizeForSupportBundle(value));
   }
 
   public get lastUsage(): StepUsage | undefined {
@@ -113,13 +137,24 @@ export class EveFaceRenderer {
         break;
       case "message.received": {
         const message = event.data.message.trim();
+        if (this.origin !== undefined) {
+          // Another room's turn: whoever spoke there is never "You", and the
+          // framing the bridge wrapped it in is the only body available.
+          if (message.length > 0) {
+            this.shell.insertMarkdown(`${this.heading("Turn received")}\n\n${sanitize(message)}`, COLLAPSED);
+          }
+          break;
+        }
         if (this.submittedPrompt === message) this.submittedPrompt = undefined;
         else if (message.length > 0) this.shell.insertMarkdown(`**You**\n\n${sanitize(message)}`);
         break;
       }
       case "step.started":
         this.closeStreamingBlocks();
-        this.shell.setTurnLoaderMessage(`Step ${event.data.stepIndex + 1} running...`);
+        // The loader belongs to the operator's own turn; a watched lane never steals it.
+        if (this.origin === undefined) {
+          this.shell.setTurnLoaderMessage(`Step ${event.data.stepIndex + 1} running...`);
+        }
         break;
       case "reasoning.appended":
         this.appendReasoning(
@@ -150,7 +185,7 @@ export class EveFaceRenderer {
           this.actionBlocks.set(
             action.callId,
             this.shell.insertMarkdown(
-              `**Tool: ${sanitize(name)} - running**\n\ncall: ${sanitize(action.callId)}\n\n\`\`\`json\n${sanitize(json(action.input))}\n\`\`\``,
+              `${this.heading(`Tool: ${sanitize(name)} - running`)}\n\ncall: ${sanitize(action.callId)}\n\n\`\`\`json\n${sanitize(this.payload(action.input))}\n\`\`\``,
               COLLAPSED,
             ),
           );
@@ -160,7 +195,7 @@ export class EveFaceRenderer {
         this.closeStreamingBlocks();
         const name = resultName(event.data.result);
         const failed = event.data.status === "failed" || event.data.result.isError === true;
-        const markdown = `**Tool: ${sanitize(name)} - ${failed ? "failed" : "completed"}**\n\ncall: ${sanitize(event.data.result.callId)}\nstatus: ${sanitize(event.data.status)}\n\n\`\`\`json\n${sanitize(json(event.data.result.output))}\n\`\`\``;
+        const markdown = `${this.heading(`Tool: ${sanitize(name)} - ${failed ? "failed" : "completed"}`)}\n\ncall: ${sanitize(event.data.result.callId)}\nstatus: ${sanitize(event.data.status)}\n\n\`\`\`json\n${sanitize(this.payload(event.data.result.output))}\n\`\`\``;
         const block = this.actionBlocks.get(event.data.result.callId);
         if (block === undefined) this.shell.insertMarkdown(markdown, COLLAPSED);
         else block.setMarkdown(markdown);
@@ -171,29 +206,33 @@ export class EveFaceRenderer {
         for (const request of event.data.requests) {
           const options = request.options?.map((option) => `- ${option.id}: ${option.label}`).join("\n");
           this.shell.insertMarkdown(
-            `**Input requested**\n\n${sanitize(request.prompt)}${options === undefined ? "" : `\n\n${sanitize(options)}`}`,
+            `${this.heading("Input requested")}\n\n${sanitize(request.prompt)}${options === undefined ? "" : `\n\n${sanitize(options)}`}`,
           );
         }
         break;
       case "authorization.required":
         this.closeStreamingBlocks();
-        this.shell.insertMarkdown(`**Authorization required**\n\n${sanitize(event.data.description)}`);
+        this.shell.insertMarkdown(
+          `${this.heading("Authorization required")}\n\n${sanitize(event.data.description)}`,
+        );
         break;
       case "authorization.completed":
         this.closeStreamingBlocks();
-        this.shell.insertMarkdown(`**Authorization ${event.data.outcome}**\n\n${sanitize(event.data.name)}`);
+        this.shell.insertMarkdown(
+          `${this.heading(`Authorization ${event.data.outcome}`)}\n\n${sanitize(event.data.name)}`,
+        );
         break;
       case "subagent.called":
         this.closeStreamingBlocks();
         this.shell.insertMarkdown(
-          `**Subagent: ${sanitize(event.data.name)} - running**\n\nchild session: ${sanitize(event.data.childSessionId)}`,
+          `${this.heading(`Subagent: ${sanitize(event.data.name)} - running`)}\n\nchild session: ${sanitize(event.data.childSessionId)}`,
           COLLAPSED,
         );
         break;
       case "subagent.completed":
         this.closeStreamingBlocks();
         this.shell.insertMarkdown(
-          `**Subagent: ${sanitize(event.data.subagentName)} - completed**\n\n${sanitize(event.data.output)}`,
+          `${this.heading(`Subagent: ${sanitize(event.data.subagentName)} - completed`)}\n\n${sanitize(event.data.output)}`,
           COLLAPSED,
         );
         break;
@@ -206,23 +245,25 @@ export class EveFaceRenderer {
       case "session.failed":
         this.closeStreamingBlocks();
         this.shell.insertMarkdown(
-          `**${event.type.replace(".", " ")}**\n\n${sanitize(event.data.code)}: ${sanitize(event.data.message)}`,
+          `${this.heading(event.type.replace(".", " "))}\n\n${sanitize(event.data.code)}: ${sanitize(event.data.message)}`,
         );
         break;
       case "compaction.requested":
         this.closeStreamingBlocks();
-        this.shell.insertMarkdown(`**Compaction requested**\n\n${sanitize(event.data.modelId)}`);
+        this.shell.insertMarkdown(
+          `${this.heading("Compaction requested")}\n\n${sanitize(event.data.modelId)}`,
+        );
         break;
       case "compaction.completed":
         this.closeStreamingBlocks();
         this.shell.insertMarkdown(
-          "**Compaction completed**\n\nOlder context was summarized; recent turns are preserved.",
+          `${this.heading("Compaction completed")}\n\nOlder context was summarized; recent turns are preserved.`,
         );
         break;
       case "result.completed":
         this.closeStreamingBlocks();
         this.shell.insertMarkdown(
-          `**Result completed**\n\n\`\`\`json\n${sanitize(json(event.data.result))}\n\`\`\``,
+          `${this.heading("Result completed")}\n\n\`\`\`json\n${sanitize(this.payload(event.data.result))}\n\`\`\``,
         );
         break;
       case "session.waiting":
@@ -241,7 +282,7 @@ export class EveFaceRenderer {
     const suffix = this.suffix(`message:${turnId}:${stepIndex}`, soFar, delta);
     if (suffix.length === 0) return;
     this.assistantText += sanitize(suffix);
-    const markdown = `**Clankie**\n\n${this.assistantText}`;
+    const markdown = `${this.heading("Clankie")}\n\n${this.assistantText}`;
     if (this.assistantBlock === undefined) this.assistantBlock = this.shell.insertMarkdown(markdown);
     else {
       this.pendingAssistant = markdown;
@@ -253,7 +294,7 @@ export class EveFaceRenderer {
     const suffix = this.suffix(`reasoning:${turnId}:${stepIndex}`, soFar, delta);
     if (suffix.length === 0) return;
     this.reasoningText += sanitize(suffix);
-    const markdown = `**Reasoning**\n\n${this.reasoningText}`;
+    const markdown = `${this.heading("Reasoning")}\n\n${this.reasoningText}`;
     if (this.reasoningBlock === undefined) this.reasoningBlock = this.shell.insertMarkdown(markdown);
     else {
       this.pendingReasoning = markdown;

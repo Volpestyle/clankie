@@ -298,11 +298,7 @@ export class WorkerAdoptionStore {
     let raw: string;
     try {
       raw = await readFile(
-        agentDeclarationPath(
-          this.rootDir,
-          observation.transportInstanceId,
-          observation.terminalId,
-        ),
+        agentDeclarationPath(this.rootDir, observation.transportInstanceId, observation.terminalId),
         "utf8",
       );
     } catch {

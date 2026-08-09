@@ -13,6 +13,16 @@ intent, and commentary as `selfAuthored` and settled execution facts as
 guessed play-by-play. The tool is read-only and carries no frame bytes or action
 surface. Live visuals remain on the activity watch surface.
 
+`observe_room` is how the operator seat reads his other rooms
+([ADR 0084](../../docs/adr/0084-the-head-can-read-his-branches.md)). It lists the
+rooms he has answered in and, given one, replays that room's durable Eve
+sessions newest-first and renders his own side: what he said, which tools he
+called with what arguments, and what came back. It is resolved per session and
+offered **in the operator lane only** — the supervising seat reads every room,
+while an ambient Discord, voice, or gameplay turn keeps the transcript fence and
+reads none of the others. Reasoning, other people's words, and continuation
+tokens are never carried, and the read is bounded in both size and wall clock.
+
 `add_recovery` proposes exactly one debugger plus read-only re-verifier pair for
 an observed verification failure. The tool supplies task intent and scope only;
 the control plane derives the authoritative diagnosis, failed evidence, check

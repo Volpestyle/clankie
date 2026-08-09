@@ -437,6 +437,18 @@ export interface CaptainSelfStateRenderOptions {
    * ambient. `get_self_state` renders "detailed".
    */
   readonly integrationDetail?: "summary" | "detailed";
+  /**
+   * Whether this card is being read from the seat that supervises the others
+   * (ADR 0084). It decides one sentence: whether the listed rooms are only
+   * places he is, or places he can also read.
+   *
+   * Omitted means the sentence is left out, which is what a caller that cannot
+   * resolve its own lane must do. A tool executor receives the AI SDK's options
+   * rather than the eve session context, so `get_self_state` is exactly that
+   * caller — and asserting either answer there would contradict the standing
+   * card in one seat or the other.
+   */
+  readonly reach?: "presence_only" | "readable";
 }
 
 /**
@@ -463,10 +475,20 @@ export function renderCaptainSelfState(
     ? undefined
     : "You are not in any voice channel right now.";
   const membership = serverMembershipLine(state.discordServers, options.integrationDetail ?? "summary");
+  // The card used to end "you still have no access to another room's
+  // transcript", which stayed true for an ambient room and became a false
+  // refusal in the operator seat: asked what he had done in Discord, he read
+  // his own card and declined. Each seat is told what it can actually reach.
+  const reach =
+    options.reach === undefined
+      ? ""
+      : options.reach === "readable"
+        ? " This is your presence. What you *did* in any of your rooms — including ones that have gone quiet and are not listed here — is readable from this seat with `observe_room`, so look it up rather than saying you cannot see another room."
+        : " This is your presence, not their contents — you still have no access to another room's transcript.";
   if (state.rooms.length === 0 && recent.length === 0) {
     return [
       "# Where you are",
-      `This is your only open room right now. ${voiceStanding ?? ""}`.trim(),
+      `This is your only open room right now. ${voiceStanding ?? ""}${reach}`.trim(),
       ...(membership === undefined ? [] : [membership]),
     ].join("\n\n");
   }
@@ -481,7 +503,9 @@ export function renderCaptainSelfState(
   lines.push(...recent);
   return [
     "# Where you are",
-    'Your own open rooms across every surface. A room marked "open right now" is one you are in at this moment — answer presence questions about it in the present tense, the way a person says where they are, never by citing "my presence" or this card. A "you left" line is your own recent whereabouts, company included. This is your presence, not their contents — you still have no access to another room\'s transcript.',
+    // Only rooms that are live or recent are listed; a room that settled hours
+    // ago is still readable, so the reach sentence is not scoped to this list.
+    `Your own open rooms across every surface. A room marked "open right now" is one you are in at this moment — answer presence questions about it in the present tense, the way a person says where they are, never by citing "my presence" or this card. A "you left" line is your own recent whereabouts, company included.${reach}`,
     lines.join("\n"),
     // Closing facts, so they read as standing truths about him rather than
     // more rooms in the list. Membership is not a room: he is a member of a
@@ -525,7 +549,9 @@ function serverMembershipLine(
  */
 export async function captainSelfStateInstructions(channel: EveChannelLaneContext): Promise<string> {
   try {
-    return renderCaptainSelfState(await captainSelfState(channel));
+    return renderCaptainSelfState(await captainSelfState(channel), {
+      reach: captainRoomReach(channel),
+    });
   } catch (error) {
     process.stderr.write(
       `${JSON.stringify({
@@ -535,6 +561,21 @@ export async function captainSelfStateInstructions(channel: EveChannelLaneContex
       })}\n`,
     );
     return "";
+  }
+}
+
+/**
+ * Whether the room this card is being read in can read the others (ADR 0084).
+ * Fails to the closed answer: an unresolvable channel is not the operator seat.
+ */
+export function captainRoomReach(
+  channel: EveChannelLaneContext | undefined,
+): NonNullable<CaptainSelfStateRenderOptions["reach"]> {
+  if (channel === undefined) return "presence_only";
+  try {
+    return captainLaneKind(channel) === "operator" ? "readable" : "presence_only";
+  } catch {
+    return "presence_only";
   }
 }
 

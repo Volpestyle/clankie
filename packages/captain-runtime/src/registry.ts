@@ -27,6 +27,27 @@ interface LaneRow {
   updated_at: string;
 }
 
+interface LaneSessionRow {
+  session_id: string;
+  lane_key: string;
+  bound_at: string;
+  last_seen_at: string;
+}
+
+/**
+ * How many past sessions one room keeps. A Discord text room mints a fresh Eve
+ * session per message, so the current session is only ever the latest turn;
+ * without this history the room has no readable past at all.
+ */
+export const CAPTAIN_LANE_SESSION_HISTORY_MAX = 64;
+
+/** One Eve session a room has run, for reading that room's past back. */
+export interface CaptainLaneSessionRecord {
+  readonly sessionId: string;
+  readonly boundAt: string;
+  readonly lastSeenAt: string;
+}
+
 export interface CaptainLaneRegistryOptions {
   readonly identity: CaptainIdentity;
   readonly clock?: () => Date;
@@ -104,13 +125,16 @@ export class CaptainLaneRegistry {
     const continuationToken = optionalSecret(input.continuationToken, "Continuation token");
     this.assertSessionOwnership(key, sessionId);
     if (continuationToken !== undefined) this.assertContinuationOwnership(key, continuationToken);
-    if (
-      current.session_id !== null &&
-      current.session_id !== sessionId &&
-      !["completed", "failed"].includes(current.state)
-    ) {
+    const rotating = current.session_id !== null && current.session_id !== sessionId;
+    // A room parked on `waiting` is between turns, and a lane that mints a fresh
+    // Eve session per message (Discord text) arrives here with a new id every
+    // time. Refusing that stranded such a room on its first session forever —
+    // the registry, `/captain/v1/lanes`, and anything reading the room's past
+    // all kept pointing at a session that had already been replaced. Only a
+    // genuinely in-flight turn still refuses to be displaced.
+    if (rotating && current.state === "active") {
       throw new CaptainLaneSessionConflictError(
-        `Lane ${key} still owns active session ${current.session_id}; it cannot adopt ${sessionId}`,
+        `Lane ${key} still owns active session ${String(current.session_id)}; it cannot adopt ${sessionId}`,
       );
     }
     if (
@@ -120,11 +144,17 @@ export class CaptainLaneRegistry {
     ) {
       throw new CaptainContinuationOwnershipError(`Lane ${key} omitted its already-bound continuation token`);
     }
-    const token = continuationToken ?? current.continuation_token;
+    // A continuation token resumes the session that issued it. Carrying the old
+    // one onto a rotated session id would hand the new session a resume handle
+    // for a conversation it is not.
+    const token = rotating ? (continuationToken ?? null) : (continuationToken ?? current.continuation_token);
     const state = input.state ?? "active";
     const changed =
       current.session_id !== sessionId || current.continuation_token !== token || current.state !== state;
-    if (!changed) return snapshot(current);
+    if (!changed) {
+      this.recordSession(key, sessionId);
+      return snapshot(current);
+    }
     const updatedAt = this.clock().toISOString();
     this.database
       .prepare(
@@ -134,6 +164,7 @@ export class CaptainLaneRegistry {
          WHERE lane_key = ?`,
       )
       .run(sessionId, token, state, updatedAt, key);
+    this.recordSession(key, sessionId);
     const updated = this.requiredRow(key);
     await this.emit("lane.session.bound", updated);
     return snapshot(updated);
@@ -179,6 +210,39 @@ export class CaptainLaneRegistry {
     return rows.map(snapshot);
   }
 
+  /**
+   * The Eve sessions this room has run, newest first — the readable past of a
+   * room whose current session is only its latest turn. Identity only: no
+   * continuation token is stored against a historical session, so reading a
+   * room's past can never become resuming it.
+   */
+  public sessions(
+    addressInput: CaptainLaneAddress,
+    limit: number = CAPTAIN_LANE_SESSION_HISTORY_MAX,
+  ): CaptainLaneSessionRecord[] {
+    const key = captainLaneKey(parseCaptainLaneAddress(addressInput));
+    return this.sessionsForKey(key, limit);
+  }
+
+  /** Same read, addressed by the lane key `list()` already hands out. */
+  public sessionsForKey(
+    laneKey: string,
+    limit: number = CAPTAIN_LANE_SESSION_HISTORY_MAX,
+  ): CaptainLaneSessionRecord[] {
+    const bounded = Math.max(1, Math.min(Math.trunc(limit), CAPTAIN_LANE_SESSION_HISTORY_MAX));
+    const rows = this.database
+      .prepare(
+        `SELECT * FROM captain_lane_sessions WHERE lane_key = ?
+         ORDER BY last_seen_at DESC, session_id DESC LIMIT ?`,
+      )
+      .all(laneKey, bounded) as unknown as LaneSessionRow[];
+    return rows.map((row) => ({
+      sessionId: row.session_id,
+      boundAt: row.bound_at,
+      lastSeenAt: row.last_seen_at,
+    }));
+  }
+
   public close(): void {
     this.database.close();
   }
@@ -207,6 +271,17 @@ export class CaptainLaneRegistry {
         updated_at TEXT NOT NULL,
         UNIQUE(character_id, lane, target_id)
       ) STRICT;
+      CREATE TABLE IF NOT EXISTS captain_lane_sessions (
+        session_id TEXT PRIMARY KEY,
+        lane_key TEXT NOT NULL,
+        bound_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL
+      ) STRICT;
+      CREATE INDEX IF NOT EXISTS captain_lane_sessions_by_lane
+        ON captain_lane_sessions(lane_key, last_seen_at DESC);
+      INSERT OR IGNORE INTO captain_lane_sessions (session_id, lane_key, bound_at, last_seen_at)
+        SELECT session_id, lane_key, updated_at, updated_at
+        FROM captain_lanes WHERE session_id IS NOT NULL;
     `);
     const stored = this.database.prepare("SELECT * FROM captain_identity WHERE singleton = 1").get() as
       | Record<string, unknown>
@@ -244,14 +319,44 @@ export class CaptainLaneRegistry {
   }
 
   private assertSessionOwnership(key: string, sessionId: string): void {
-    const owner = this.database
+    // Both the live binding and the room's session history are checked: a
+    // session that has rotated out of `captain_lanes` still belongs to the room
+    // that ran it, and must not be adoptable by another one.
+    const owner = (this.database
       .prepare("SELECT lane_key FROM captain_lanes WHERE session_id = ? AND lane_key <> ?")
-      .get(sessionId, key) as { lane_key: string } | undefined;
+      .get(sessionId, key) ??
+      this.database
+        .prepare("SELECT lane_key FROM captain_lane_sessions WHERE session_id = ? AND lane_key <> ?")
+        .get(sessionId, key)) as { lane_key: string } | undefined;
     if (owner !== undefined) {
       throw new CaptainLaneSessionConflictError(
         `Session ${sessionId} is already owned by lane ${owner.lane_key}`,
       );
     }
+  }
+
+  /**
+   * Appends the session to the room's history and trims it to the newest
+   * {@link CAPTAIN_LANE_SESSION_HISTORY_MAX}. Bounded per room rather than
+   * globally, so a busy Discord channel cannot age out a quiet one.
+   */
+  private recordSession(laneKey: string, sessionId: string): void {
+    const now = this.clock().toISOString();
+    this.database
+      .prepare(
+        `INSERT INTO captain_lane_sessions (session_id, lane_key, bound_at, last_seen_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(session_id) DO UPDATE SET last_seen_at = excluded.last_seen_at`,
+      )
+      .run(sessionId, laneKey, now, now);
+    this.database
+      .prepare(
+        `DELETE FROM captain_lane_sessions WHERE lane_key = ? AND session_id NOT IN (
+           SELECT session_id FROM captain_lane_sessions WHERE lane_key = ?
+           ORDER BY last_seen_at DESC, session_id DESC LIMIT ?
+         )`,
+      )
+      .run(laneKey, laneKey, CAPTAIN_LANE_SESSION_HISTORY_MAX);
   }
 
   private assertContinuationOwnership(key: string, token: string): void {

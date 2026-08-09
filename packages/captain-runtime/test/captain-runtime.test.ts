@@ -765,6 +765,53 @@ describe("durable captain lane registry", () => {
       }),
     ).rejects.toThrow(/identity does not match/);
   });
+
+  it("keeps a room's past sessions so a lane that rotates per turn stays readable", async () => {
+    const test = await registryHarness();
+    // A Discord text room mints a fresh Eve session per message and parks on
+    // `waiting` between them. Refusing that rotation stranded the room on its
+    // first session forever, which is what made its past unreadable.
+    const PRESENCE: CaptainLaneAddress = {
+      characterId: "clankie",
+      lane: "discord_presence",
+      targetId: "guild-1:channel-1",
+    };
+    await test.registry.bindSession(PRESENCE, { sessionId: "turn-1" });
+    await test.registry.markSessionState(PRESENCE, "turn-1", "waiting");
+    await test.registry.bindSession(PRESENCE, { sessionId: "turn-2" });
+    await test.registry.markSessionState(PRESENCE, "turn-2", "waiting");
+    await test.registry.bindSession(PRESENCE, { sessionId: "turn-3" });
+
+    expect(test.registry.lane(PRESENCE)?.sessionId).toBe("turn-3");
+    expect(test.registry.sessions(PRESENCE).map((session) => session.sessionId)).toEqual(
+      expect.arrayContaining(["turn-1", "turn-2", "turn-3"]),
+    );
+    expect(test.registry.sessions(PRESENCE)).toHaveLength(3);
+    // Identity only: a historical session carries no resume handle.
+    expect(JSON.stringify(test.registry.sessions(PRESENCE))).not.toContain("token");
+
+    // A turn genuinely in flight still refuses to be displaced.
+    await expect(test.registry.bindSession(PRESENCE, { sessionId: "turn-4" })).rejects.toBeInstanceOf(
+      CaptainLaneSessionConflictError,
+    );
+
+    // A session that has rotated out of the live binding still belongs to the
+    // room that ran it, so no other room can adopt it.
+    await expect(test.registry.bindSession(VOICE, { sessionId: "turn-1" })).rejects.toBeInstanceOf(
+      CaptainLaneSessionConflictError,
+    );
+    test.registry.close();
+  });
+
+  it("does not carry a continuation token across a rotated session", async () => {
+    const test = await registryHarness();
+    await test.registry.bindSession(VOICE, { sessionId: "voice-1", continuationToken: "voice-token-1" });
+    await test.registry.markSessionState(VOICE, "voice-1", "waiting");
+    // The token resumes the session that issued it; the new session is not it.
+    await test.registry.bindSession(VOICE, { sessionId: "voice-2" });
+    expect(test.registry.resumeState(VOICE)?.continuationToken).toBeUndefined();
+    test.registry.close();
+  });
 });
 
 describe("foreground-aware provider admission", () => {

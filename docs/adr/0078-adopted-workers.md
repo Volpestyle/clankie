@@ -47,7 +47,7 @@ flowchart TB
 
 - **The binding includes workspace identity.** A record binds
   `(transport, transportInstanceId, terminalId, harness, agentSessionId,
-  workspaceId, canonicalWorkspaceRoot)`. The terminal id is the stable handle
+workspaceId, canonicalWorkspaceRoot)`. The terminal id is the stable handle
   used to re-resolve the pane; the native agent session id identifies the agent;
   and the workspace pair prevents a census or command from crossing repositories.
   A changed session or workspace lapses the record instead of re-pointing it.

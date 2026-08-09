@@ -512,7 +512,10 @@ function staticArgumentSpec(commandName: string, context: ArgumentContext): Stat
         ["/agent-md status", "/agent-md on", "/agent-md root ~/dev/project"],
       );
     case "trace":
-      return values(["status", "off", "no-reply", "all"], ["/trace no-reply", "/trace all"]);
+      return values(
+        ["status", "all", "off", "discord_presence", "discord_voice", "gameplay"],
+        ["/trace discord_presence", "/trace all", "/trace off"],
+      );
     case "layout":
       return layoutArguments(context);
     case "mcp":

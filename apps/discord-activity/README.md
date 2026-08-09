@@ -56,7 +56,7 @@ reported as healthy, because wanting it local is not a fault.
 
 Settings alone are not enough. The launcher runs `cloudflared tunnel run <name>`,
 which takes its ingress rules from `~/.cloudflared/config.yml` — the settings say
-*which* tunnel, that file says *where it points*. Create it alongside the tunnel:
+_which_ tunnel, that file says _where it points_. Create it alongside the tunnel:
 
 ```yaml
 tunnel: clankie-activity

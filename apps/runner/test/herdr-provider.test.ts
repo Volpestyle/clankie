@@ -18,11 +18,10 @@ const socketServers: Array<{ server: Server; root: string }> = [];
 
 afterEach(async () => {
   await Promise.all(
-    socketServers.splice(0).map(
-      ({ server, root }) =>
-        new Promise<void>((resolve) => {
-          server.close(() => resolve());
-        }).finally(() => rm(root, { recursive: true, force: true })),
+    socketServers.splice(0).map(({ server, root }) =>
+      new Promise<void>((resolve) => {
+        server.close(() => resolve());
+      }).finally(() => rm(root, { recursive: true, force: true })),
     ),
   );
 });

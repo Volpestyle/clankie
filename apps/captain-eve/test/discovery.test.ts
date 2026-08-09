@@ -70,6 +70,7 @@ describe("captain Eve authored surface", () => {
       "evaluate-lead-run",
       "garden-control-design",
       "implement-bounded-task",
+      "orient-clankie",
       "plan-mission",
       "review-change",
       "security-incident",

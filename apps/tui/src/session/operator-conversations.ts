@@ -60,14 +60,24 @@ export function createProductionOperatorConversationClient(input: {
   readonly host: string;
   readonly captainToken?: string;
 }): OperatorConversationClient {
+  return createCaptainOperatorConversationClient(createCaptainRouteClient(input));
+}
+
+/**
+ * One authenticated captain client for every console-side captain route —
+ * conversation dispatch and the lane listing both ride it, and it also carries
+ * the public session stream a lane trace subscribes to.
+ */
+export function createCaptainRouteClient(input: {
+  readonly host: string;
+  readonly captainToken?: string;
+}): Client {
   const captainToken = input.captainToken?.trim();
-  return createCaptainOperatorConversationClient(
-    new Client({
-      host: input.host,
-      redirect: "error",
-      ...(captainToken === undefined || captainToken.length === 0 ? {} : { auth: { bearer: captainToken } }),
-    }),
-  );
+  return new Client({
+    host: input.host,
+    redirect: "error",
+    ...(captainToken === undefined || captainToken.length === 0 ? {} : { auth: { bearer: captainToken } }),
+  });
 }
 
 /**

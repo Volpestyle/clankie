@@ -139,9 +139,10 @@ terminal text.
   Lane labels come from session context (default HTTP headless path → `tui` per
   captain-eve channel mapping, or an explicit `--lane` value). They are never
   inferred from model/reasoning prose. The public Eve stream event body does not
-  stamp lane per event; multi-lane fan-in of concurrent sessions would need a
-  public session→lane listing API before a live multi-session merge can be
-  trustworthy without operator/session context.
+  stamp lane per event, so the CLI still follows the headless session; the
+  session→lane map that resolves any other room is
+  `GET /captain/v1/lanes`, and the fullscreen face's `/trace` consumes it
+  ([ADR 0083](../../docs/adr/0083-every-room-he-thinks-in-is-watchable.md)).
 - **No payload persistence.** The mode-0600 checkpoint at
   `${XDG_STATE_HOME:-~/.local/state}/clankie/captain-trace-session.json` holds
   only sanitized continuation identity (`generation`, `sessionId`, `streamIndex`,
@@ -164,6 +165,36 @@ Dedicated Herdr pane (from a sibling pane):
 NEW=$(herdr pane split --direction right --no-focus | python3 -c 'import sys,json; print(json.load(sys.stdin)["result"]["pane"]["pane_id"])')
 herdr pane run "$NEW" "clankie trace"
 ```
+
+### `/trace` (watching the rooms you are not in)
+
+`/trace` in the fullscreen face tails any other captain lane — each Discord
+server and channel he answers in, voice, gameplay — into the transcript
+([ADR 0083](../../docs/adr/0083-every-room-he-thinks-in-is-watchable.md)).
+
+```text
+/trace                      list every room, its state, and which are watched
+/trace discord_presence     watch a whole lane
+/trace 1234:5678            watch one room by guild:channel (or any substring)
+/trace all                  watch every room except this conversation
+/trace off                  stop watching
+```
+
+Rooms come from `GET /captain/v1/lanes`, the captain's authenticated
+identity-only listing over `CaptainLaneRegistry`: lane, target id, bound session
+id, state, and last update — no message, reasoning, tool, or continuation field.
+Events come from the same public `/eve/v1/session/:id/stream` this console uses
+for its own conversation, so a watched room renders his reasoning, tool calls
+with arguments, and tool results as the same blocks, tagged with the room.
+
+Watching is a subscription and nothing else: no send, no continuation token, no
+steering. A watched room never drives the turn loader or status bar, and its tool
+payloads pass through `sanitizeForSupportBundle`. Because a Discord text lane
+starts a fresh session per turn, a tail re-reads the listing when a stream ends
+and resets on rotation, so consecutive turns keep rendering in one feed.
+
+The listing is a live map, not a history: attaching backfills the session in
+progress and follows forward, and cannot reconstruct a text room's earlier turns.
 
 The `clankie` command runs `bin/clankie.ts` under Node's native type stripping, so the whole dependency graph stays erasable TypeScript (no enums, namespaces, or constructor parameter properties) — enforced repo-wide by `erasableSyntaxOnly` in `tsconfig.base.json`.
 

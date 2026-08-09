@@ -290,10 +290,7 @@ describe("AgentCensusService.direct", () => {
   async function makeService(
     overrides: {
       observations?: readonly AgentObservation[] | undefined;
-      deliver?: (
-        binding: AdoptedWorkerBinding,
-        text: string,
-      ) => Promise<"delivered" | "terminal_gone">;
+      deliver?: (binding: AdoptedWorkerBinding, text: string) => Promise<"delivered" | "terminal_gone">;
       grade?: "observed" | "directed";
     } = {},
   ) {

@@ -3,10 +3,7 @@ import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 import type { AdoptedWorkerBinding, AgentObservation } from "@clankie/protocol";
-import {
-  HerdrSocketTransport,
-  type HerdrAgentSource,
-} from "./herdr-provider.ts";
+import { HerdrSocketTransport, type HerdrAgentSource } from "./herdr-provider.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -108,7 +105,11 @@ export function createCompositeHerdrAgentSource(
 
 function parseSessionList(raw: string): HerdrSessionList {
   const value: unknown = JSON.parse(raw);
-  if (typeof value !== "object" || value === null || !Array.isArray((value as { sessions?: unknown }).sessions)) {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !Array.isArray((value as { sessions?: unknown }).sessions)
+  ) {
     throw new Error("invalid_herdr_session_list");
   }
   const sessions = (value as { sessions: unknown[] }).sessions.map((session) => {
@@ -127,7 +128,10 @@ function parseSessionList(raw: string): HerdrSessionList {
 }
 
 function normalizeInstanceId(value: string): string {
-  const normalized = value.trim().replace(/[^A-Za-z0-9._-]+/gu, "-").slice(0, 200);
+  const normalized = value
+    .trim()
+    .replace(/[^A-Za-z0-9._-]+/gu, "-")
+    .slice(0, 200);
   return normalized || "default";
 }
 

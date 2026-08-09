@@ -749,9 +749,7 @@ export class MissionEngine {
     reservations: readonly WorkerScopeReservation[],
   ): WorkerScopeReservation[] {
     if (spec.writeScope.length === 0) return [];
-    return reservations.filter(
-      (reservation) => this.scopesOverlap(spec.writeScope, reservation.writeScope),
-    );
+    return reservations.filter((reservation) => this.scopesOverlap(spec.writeScope, reservation.writeScope));
   }
 
   private scopesOverlap(left: readonly string[], right: readonly string[]): boolean {
@@ -763,10 +761,7 @@ export class MissionEngine {
    * unless it says so. Emitted once per episode and cleared on a successful
    * lease, mirroring `task.verification_starved`.
    */
-  private signalScopeContended(
-    runtime: TaskRuntime,
-    reservations: readonly WorkerScopeReservation[],
-  ): void {
+  private signalScopeContended(runtime: TaskRuntime, reservations: readonly WorkerScopeReservation[]): void {
     if (this.scopeContendedSignaled.has(runtime.spec.id)) return;
     this.scopeContendedSignaled.add(runtime.spec.id);
     this.emit(

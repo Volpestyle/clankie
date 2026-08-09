@@ -72,7 +72,7 @@ its interval. So the seam reports only the turns his own volition fired on
 (`speakWanted`), which the loop records even while the room holds the pen. One
 judgement of "is this worth a word", made where the whole moment is visible,
 rather than a second list of notable-looking effects that would drift from it.
-The words are still never sent: volition says *whether*, the room says *what*.
+The words are still never sent: volition says _whether_, the room says _what_.
 
 **2. The Voice agent is not consulted while a room is listening.** The bridge
 tells the possessor whether anyone can hear it, and the play loop skips ADR

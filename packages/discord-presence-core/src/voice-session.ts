@@ -45,11 +45,7 @@ import { randomUUID } from "node:crypto";
 import { PassThrough } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { opus } from "prism-media";
-import type {
-  DiscordVoiceEvidence,
-  DiscordVoiceResponseTrigger,
-  DiscordVoiceWake,
-} from "@clankie/protocol";
+import type { DiscordVoiceEvidence, DiscordVoiceResponseTrigger, DiscordVoiceWake } from "@clankie/protocol";
 import {
   ASK_CLANKIE_TOOL_NAME,
   MAX_REALTIME_AUDIO_APPEND_BYTES,
