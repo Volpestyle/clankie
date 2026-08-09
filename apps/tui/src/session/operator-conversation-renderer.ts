@@ -24,7 +24,7 @@ const COLLAPSE_BODY_CHARS = 160;
  * Detail-heavy machinery blocks (tool activity, reasoning, worker transcript
  * tails) toggle open/closed on click. They start collapsed only when the body
  * actually hides detail — multi-line or longer than a couple of wrapped rows —
- * so short entries stay readable in place. Conversation content (You/Captain
+ * so short entries stay readable in place. Conversation content (You/Clankie
  * messages, input and auth prompts, failures) always renders expanded.
  */
 export function operatorConversationBlockOptions(
@@ -50,7 +50,7 @@ export function operatorConversationBlockOptions(
 export function renderOperatorConversationEvent(event: OperatorConversationStreamEvent): string | undefined {
   switch (event.type) {
     case "message":
-      return `**${event.role === "operator" ? "You" : "Captain"}**\n\n${event.text}`;
+      return `**${event.role === "operator" ? "You" : "Clankie"}**\n\n${event.text}`;
     case "reasoning":
       return `**Reasoning**\n\n${event.text}`;
     case "tool":
@@ -66,17 +66,17 @@ export function renderOperatorConversationEvent(event: OperatorConversationStrea
     case "session":
       // started/waiting/completed are healthy lifecycle plumbing; only a
       // failure is worth a transcript block.
-      return event.phase === "failed" ? `**Captain session**\n\n${event.phase}` : undefined;
+      return event.phase === "failed" ? `**Clankie session**\n\n${event.phase}` : undefined;
     case "turn":
       // accepted/completed drive the status line; failures carry a reasonCode
       // the operator needs to see.
       return event.phase === "failed" || event.phase === "cancelled"
-        ? `**Captain turn**\n\n${event.phase}${event.reasonCode === undefined ? "" : ` · ${event.reasonCode}`}`
+        ? `**Clankie turn**\n\n${event.phase}${event.reasonCode === undefined ? "" : ` · ${event.reasonCode}`}`
         : undefined;
     case "worker_transcript":
       return `**Worker ${event.phase}**\n\n${event.summary}`;
     case "unsupported":
-      return `**Unsupported captain event**\n\n${event.kind} · ${event.summary}`;
+      return `**Unsupported Clankie event**\n\n${event.kind} · ${event.summary}`;
     default: {
       const exhaustive: never = event;
       return exhaustive;

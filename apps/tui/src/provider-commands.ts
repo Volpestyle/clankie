@@ -157,7 +157,7 @@ export function buildProviderCommands(services: ProviderServices): FaceShellComm
     {
       name: "effort",
       aliases: ["reasoning"],
-      description: "Configure reasoning effort for the current captain model",
+      description: "Configure reasoning effort for Clankie's current model",
       takesArgument: false,
       async run(_argument, shell): Promise<void> {
         await runEffortWizard(shell, services);
@@ -208,7 +208,7 @@ async function runAuthWizard(shell: ClankieFaceShell, services: ProviderServices
           value: "codex",
           label: "Connect ChatGPT subscription",
           hint: "Codex OAuth",
-          description: "Reuses your ChatGPT plan for captain turns. Stored as openai-codex.",
+          description: "Reuses your ChatGPT plan for Clankie's turns. Stored as openai-codex.",
         },
         {
           value: "anthropic-oauth",
@@ -618,7 +618,7 @@ async function runProviderWizard(
         [
           `Provider for ${roleLabel(role)} set to ${providerId}. Run /model to choose the actual model.`,
           ...(provider !== undefined && !provider.connected
-            ? [`Note: ${providerId} has no credential yet — run /auth before real captain turns.`]
+            ? [`Note: ${providerId} has no credential yet — run /auth before real Clankie turns.`]
             : []),
         ].join("\n"),
         "success",
@@ -728,7 +728,7 @@ async function runModelWizard(
                 `Served by your ChatGPT subscription as ${served}; log out with /auth for metered API access.`,
               ]),
           ...(!provider.connected && served === undefined
-            ? [`Note: ${providerId} has no credential yet — run /auth before real captain turns.`]
+            ? [`Note: ${providerId} has no credential yet — run /auth before real Clankie turns.`]
             : []),
         ].join("\n"),
         "success",
@@ -751,7 +751,7 @@ async function runEffortWizard(shell: ClankieFaceShell, services: ProviderServic
   if (resolved === undefined) {
     shell.insertCommandResult(
       "/effort",
-      "No captain model configured — run /provider, then /model first.",
+      "No Clankie model configured — run /provider, then /model first.",
       "error",
     );
     return;

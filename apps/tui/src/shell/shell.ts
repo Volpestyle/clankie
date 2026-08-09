@@ -1084,7 +1084,7 @@ export class ClankieFaceShell {
   private async submitPrompt(prompt: string): Promise<void> {
     const onPrompt = this.options.onPrompt;
     if (onPrompt === undefined) {
-      this.insertMarkdown("**Notice**\n\nNo captain session is connected; prompts go nowhere yet.");
+      this.insertMarkdown("**Notice**\n\nNo Clankie session is connected; prompts go nowhere yet.");
       return;
     }
     const controller = new AbortController();
@@ -1109,8 +1109,8 @@ export class ClankieFaceShell {
 
     if (this.options.interruptMode === "detach") {
       turn.promptRestoreEligible = false;
-      turn.loader?.setMessage("Detaching — captain continues...");
-      this.refreshStatus("detaching — captain continues");
+      turn.loader?.setMessage("Detaching — Clankie continues...");
+      this.refreshStatus("detaching — Clankie continues");
       turn.controller.abort();
       this.tui.requestRender();
       return true;

@@ -737,7 +737,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
       const response = await fetch(new URL("/health", apiUrl));
       await interaction.reply({
         content: response.ok
-          ? "Captain control plane is healthy. Run this command inside a Clankie mission thread for mission state."
+          ? "Clankie's control plane is healthy. Run this command inside a Clankie mission thread for mission state."
           : `Control plane returned ${response.status}.`,
         ephemeral: true,
       });
@@ -912,7 +912,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
       projector.forget(thread.id);
       await interaction.reply(
         "Forgot the bridge-owned thread-to-mission correlation and stopped lifecycle projection. " +
-          "Discord history and authoritative captain/control-plane memory were not deleted.",
+          "Discord history and authoritative Clankie/control-plane memory were not deleted.",
       );
       await thread.setArchived(true, "Bridge mission correlation forgotten by explicit command");
       return;

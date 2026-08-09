@@ -16,7 +16,7 @@ export function isTraceLane(value: unknown): value is TraceLane {
 
 export function parseTraceLane(value: string): TraceLane {
   if (!isTraceLane(value)) {
-    throw new Error(`Unknown captain lane ${value}; expected one of ${TRACE_LANES.join(", ")}`);
+    throw new Error(`Unknown Clankie lane ${value}; expected one of ${TRACE_LANES.join(", ")}`);
   }
   return value;
 }

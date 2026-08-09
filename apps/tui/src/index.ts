@@ -175,7 +175,7 @@ const baseBannerFields = {
   tagline: "clankie agent os · operator console",
   hint: "/help for commands · ctrl+c to exit",
   cwd: repoRoot.replace(process.env.HOME ?? " ", "~"),
-  server: `captain: ${captain.connectionState}`,
+  server: `clankie: ${captain.connectionState}`,
   ...(stage.value === undefined ? {} : { stage: stage.value }),
   ...(stage.label === undefined ? {} : { stageLabel: stage.label }),
 };
@@ -258,8 +258,8 @@ shell.insertMarkdown(
     "",
     captain.connectionState === "live"
       ? (captain.startupNotice ??
-        "Connected to the durable local Eve captain. Plain prompts use the selected server-owned conversation.")
-      : "The captain service is unavailable. Direct `clankie` startup normally launches it; check the captain log.",
+        "Connected to the durable local Clankie. Plain prompts use the selected server-owned conversation.")
+      : "Clankie is unavailable. Direct `clankie` startup normally launches him; check the Clankie log.",
     ...(conversationSelection.conversationId === undefined
       ? []
       : [`Conversation: ${conversationSelection.conversationId} · /conversation to list or switch.`]),

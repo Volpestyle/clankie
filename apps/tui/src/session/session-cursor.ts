@@ -66,13 +66,13 @@ export class CaptainSessionCursorStore {
     try {
       const parsed = parseCursor(JSON.parse(await readFile(this.path, "utf8")));
       if (parsed === undefined) {
-        throw new Error(`Captain session cursor ${this.path} has an invalid schema`);
+        throw new Error(`Clankie session cursor ${this.path} has an invalid schema`);
       }
       return parsed;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
       throw new Error(
-        `Cannot safely resume the captain session from ${this.path}; refusing to start a new session`,
+        `Cannot safely resume the Clankie session from ${this.path}; refusing to start a new session`,
         { cause: error },
       );
     }

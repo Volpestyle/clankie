@@ -255,7 +255,7 @@ describe("voice evidence receipts and the response line", () => {
         playbackMs: 2000,
       }),
     ).toBe(
-      "voice turn (continuing, room, captain handoff 1100ms): 1500ms to first audio, then 2000ms speaking",
+      "voice turn (continuing, room, clankie handoff 1100ms): 1500ms to first audio, then 2000ms speaking",
     );
   });
 

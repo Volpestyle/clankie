@@ -267,7 +267,7 @@ describe("headless captain commands", () => {
       services: [{ id: "captain-eve", ok: true }],
     });
     // Progress narration must stay off stdout so it remains a JSON document.
-    expect(stderr.text()).toContain("Captain Eve");
+    expect(stderr.text()).toContain("Clankie");
   });
 
   it("rejects an unknown restart target without signalling anything", async () => {

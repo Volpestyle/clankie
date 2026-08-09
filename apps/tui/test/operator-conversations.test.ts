@@ -494,7 +494,7 @@ describe("TUI selected-conversation prompt path", () => {
       { ...base, type: "unsupported", kind: "future", summary: "Update required" },
     ];
     const rendered = events.map(renderOperatorConversationEvent).join("\n");
-    expect(rendered).toContain("Captain");
+    expect(rendered).toContain("Clankie");
     expect(rendered).toContain("**You**\n\ntyped elsewhere");
     expect(rendered).toContain("Reasoning");
     expect(rendered).toContain("Worker tail");
@@ -555,7 +555,7 @@ describe("TUI selected-conversation prompt path", () => {
     sink.event(operatorMessage("hi"));
     sink.event({ ...base, type: "turn", runId: "run", phase: "accepted" });
     sink.event({ ...base, type: "message", role: "captain", text: "hello", streaming: false });
-    expect(inserted).toEqual(["**You**\n\nfrom the phone", "**You**\n\nhi", "**Captain**\n\nhello"]);
+    expect(inserted).toEqual(["**You**\n\nfrom the phone", "**You**\n\nhi", "**Clankie**\n\nhello"]);
     // Turn lifecycle still drives the status line even when not rendered.
     expect(statuses).toEqual(["conversation turn accepted"]);
   });

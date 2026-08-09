@@ -203,7 +203,7 @@ async function acquireBuildLock(input: {
       await sleep(100);
     }
   }
-  throw new Error(`Timed out waiting for the shared captain build lock at ${input.lockPath}.`);
+  throw new Error(`Timed out waiting for the shared Clankie build lock at ${input.lockPath}.`);
 }
 
 function readBuildGeneration(repoRoot: string): string {
@@ -215,12 +215,12 @@ function readBuildGeneration(repoRoot: string): string {
     };
     generation = metadata.discovery?.sourceGraphHash;
   } catch (error) {
-    throw new Error(`Captain Eve build metadata could not be read at ${metadataPath}.`, {
+    throw new Error(`Clankie build metadata could not be read at ${metadataPath}.`, {
       cause: error,
     });
   }
   if (typeof generation !== "string" || !/^[a-f0-9]{64}$/u.test(generation)) {
-    throw new Error(`Captain Eve build metadata at ${metadataPath} has no valid source graph hash.`);
+    throw new Error(`Clankie build metadata at ${metadataPath} has no valid source graph hash.`);
   }
   return generation;
 }
@@ -244,7 +244,7 @@ async function buildCaptain(input: {
   await new Promise<void>((resolve, reject) => {
     child.once("error", (error) => {
       reject(
-        new Error(`Captain Eve build failed: ${error.message}. See ${input.logPath}.`, {
+        new Error(`Clankie build failed: ${error.message}. See ${input.logPath}.`, {
           cause: error,
         }),
       );
@@ -254,7 +254,7 @@ async function buildCaptain(input: {
       else {
         reject(
           new Error(
-            `Captain Eve build exited with code ${String(code)}${exitSignal === null ? "" : ` (${exitSignal})`}. See ${input.logPath}.`,
+            `Clankie build exited with code ${String(code)}${exitSignal === null ? "" : ` (${exitSignal})`}. See ${input.logPath}.`,
           ),
         );
       }
@@ -363,7 +363,7 @@ export async function ensureCaptainService(
   const deadline = Date.now() + timeoutMs;
   const stateDir = captainStateDirectory(options.env);
   const serviceStatePath = join(stateDir, SERVICE_STATE_NAME);
-  options.onStatus?.("Checking for a running captain…");
+  options.onStatus?.("Checking for a running Clankie…");
   if ((await probeCaptain(host, fetchImpl)) === "healthy") {
     const generation = readServiceGeneration(serviceStatePath, host);
     return {
@@ -421,13 +421,13 @@ export async function ensureCaptainService(
     // the "unhealthy" branch and read as a stranger on the port.
     releaseLock();
     throw new Error(
-      `Captain at ${host} is Clankie's captain running an older build than this checkout authors. Run \`clankie restart\` to rebuild it.`,
+      `Clankie at ${host} is running an older build than this checkout authors. Run \`clankie restart\` to rebuild it.`,
     );
   }
   if (endpointState === "unhealthy") {
     releaseLock();
     throw new Error(
-      `Captain endpoint ${host} is occupied but unhealthy. Stop the existing process (often a stale eve dev service), then retry.`,
+      `Clankie's endpoint ${host} is occupied but unhealthy. Stop the existing process (often a stale eve dev service), then retry.`,
     );
   }
   const logFd = openSync(logPath, "a", 0o600);
@@ -436,7 +436,7 @@ export async function ensureCaptainService(
   let generation: string;
   try {
     const env = { ...process.env, ...options.env, PORT: port };
-    options.onStatus?.("Building the durable captain…");
+    options.onStatus?.("Building Clankie…");
     generation = await buildCaptain({
       env,
       logFd,
@@ -446,7 +446,7 @@ export async function ensureCaptainService(
       spawnBuildImpl: options.spawnBuildImpl ?? spawn,
       timeoutMs: Math.max(1, deadline - Date.now()),
     });
-    options.onStatus?.("Starting the durable captain…");
+    options.onStatus?.("Starting Clankie…");
     child = (options.spawnImpl ?? spawn)(
       "pnpm",
       ["--filter", "@clankie/captain-eve", "exec", "eve", "start", "--host", "127.0.0.1", "--port", port],
@@ -467,7 +467,7 @@ export async function ensureCaptainService(
   }
   if (child === undefined) {
     releaseLock();
-    throw new Error("Captain Eve service spawn returned no child process.");
+    throw new Error("Clankie service spawn returned no child process.");
   }
   const serviceChild = child;
 
@@ -507,13 +507,13 @@ export async function ensureCaptainService(
     ) {
       if (spawnError !== undefined) {
         releaseLock();
-        throw new Error(`Captain Eve service could not start: ${spawnError.message}`, {
+        throw new Error(`Clankie service could not start: ${spawnError.message}`, {
           cause: spawnError,
         });
       }
       releaseLock();
       throw new Error(
-        `Captain Eve service exited with code ${String(serviceChild.exitCode)}. See ${join(stateDir, "captain-eve.log")}.`,
+        `Clankie service exited with code ${String(serviceChild.exitCode)}. See ${join(stateDir, "captain-eve.log")}.`,
       );
     }
     await sleep(100);
@@ -521,11 +521,11 @@ export async function ensureCaptainService(
   releaseLock();
   if (spawnError !== undefined) {
     stopChildSync(serviceChild);
-    throw new Error(`Captain Eve service could not start: ${spawnError.message}`, { cause: spawnError });
+    throw new Error(`Clankie service could not start: ${spawnError.message}`, { cause: spawnError });
   }
   if (serviceChild.exitCode !== null) {
     throw new Error(
-      `Captain Eve service exited with code ${String(serviceChild.exitCode)}. See ${join(stateDir, "captain-eve.log")}.`,
+      `Clankie service exited with code ${String(serviceChild.exitCode)}. See ${join(stateDir, "captain-eve.log")}.`,
     );
   }
   // Deadline reached but the process is still alive and booting (a cold nitro
@@ -617,19 +617,19 @@ async function adoptUnownedCaptain(input: {
   });
   if (owned.length === 0) {
     throw new Error(
-      `Captain at ${input.host} is not owned by the clankie launcher and its listening process could not be ` +
+      `Clankie at ${input.host} is not owned by the clankie launcher and its listening process could not be ` +
         `confirmed as this checkout's captain-eve; refusing to signal it. Inspect it with ` +
         `\`lsof -nP -iTCP:${port} -sTCP:LISTEN\`, stop it, then run \`clankie restart\`.`,
     );
   }
-  input.onStatus?.("Adopting an unowned captain and stopping it…");
+  input.onStatus?.("Adopting an unowned Clankie and stopping it…");
   for (const pid of owned) input.killImpl(pid, "SIGTERM");
   const deadline = Date.now() + Math.min(input.timeoutMs, 10_000);
   while (Date.now() < deadline) {
     if ((await inspectCaptain(input.host, input.fetchImpl)).state === "unreachable") return;
     await sleep(100);
   }
-  throw new Error(`Captain at ${input.host} did not stop after SIGTERM; refusing to start a replacement.`);
+  throw new Error(`Clankie at ${input.host} did not stop after SIGTERM; refusing to start a replacement.`);
 }
 
 function signalProcessGroup(pid: number, signal: NodeJS.Signals): void {
@@ -653,7 +653,7 @@ export async function restartCaptainService(
   const inspection = await inspectCaptain(host, fetchImpl);
   if (inspection.state === "unhealthy") {
     throw new Error(
-      `Captain endpoint ${host} is occupied but does not identify as the authored captain; refusing to signal it. Inspect the listener with \`lsof -nP -iTCP:${servicePort(host)} -sTCP:LISTEN\`.`,
+      `Clankie's endpoint ${host} is occupied but does not identify as the authored Clankie; refusing to signal it. Inspect the listener with \`lsof -nP -iTCP:${servicePort(host)} -sTCP:LISTEN\`.`,
     );
   }
   if (inspection.state === "stale") {
@@ -667,7 +667,7 @@ export async function restartCaptainService(
       .filter((part): part is string => part !== undefined)
       .join("; ");
     options.onStatus?.(
-      `Captain at ${host} is running an older build${detail.length > 0 ? ` (${detail})` : ""}; rebuilding it.`,
+      `Clankie at ${host} is running an older build${detail.length > 0 ? ` (${detail})` : ""}; rebuilding it.`,
     );
   }
 
@@ -698,7 +698,7 @@ export async function restartCaptainService(
     const command = (options.readProcessCommandImpl ?? readProcessCommand)(record.pid);
     if (!isLauncherCaptainCommand(command)) {
       throw new Error(
-        `Recorded captain pid ${record.pid} no longer identifies a launcher-owned Eve service; refusing to signal it.`,
+        `Recorded Clankie pid ${record.pid} no longer identifies a launcher-owned Eve service; refusing to signal it.`,
       );
     }
     (options.killImpl ?? signalProcessGroup)(record.pid, "SIGTERM");
@@ -708,7 +708,7 @@ export async function restartCaptainService(
       await sleep(100);
     }
     if ((await inspectCaptain(host, fetchImpl)).state !== "unreachable") {
-      throw new Error(`Captain at ${host} did not stop after SIGTERM; refusing to start a replacement.`);
+      throw new Error(`Clankie at ${host} did not stop after SIGTERM; refusing to start a replacement.`);
     }
     try {
       unlinkSync(statePath);

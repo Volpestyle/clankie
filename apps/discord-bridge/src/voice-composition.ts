@@ -569,7 +569,7 @@ export type DiscordVoiceResponseEvidence = Extract<DiscordVoiceEvidence, { type:
 export function describeVoiceResponse(evidence: DiscordVoiceResponseEvidence): string {
   const path = evidence.fastPath
     ? "fast path"
-    : `captain handoff ${String(Math.round(evidence.handoffMs))}ms`;
+    : `clankie handoff ${String(Math.round(evidence.handoffMs))}ms`;
   // Both fast-path triggers report a zero handoff, so without naming the
   // trigger a play narration and a real reply to the room are the same line.
   const trigger = evidence.trigger === "narration" ? "narration" : "room";

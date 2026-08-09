@@ -72,10 +72,10 @@ export class EveCaptainSession {
 
   public get startupNotice(): string | undefined {
     if (this.incompatibleGeneration) {
-      return "The captain changed while the previous turn may still be active. Check mission state, then use /new to explicitly abandon that conversation before sending another prompt.";
+      return "Clankie changed while the previous turn may still be active. Check mission state, then use /new to explicitly abandon that conversation before sending another prompt.";
     }
     if (this.generationReset) {
-      return "The captain build changed, so Clankie started a fresh conversation. Mission state is unchanged.";
+      return "The Clankie build changed, so he started a fresh conversation. Mission state is unchanged.";
     }
     return undefined;
   }
@@ -114,19 +114,19 @@ export class EveCaptainSession {
         this.connection = "live";
       } catch {
         this.connection = "unavailable";
-        throw new Error("Captain service is unavailable. Restart clankie or run the captain Eve service.");
+        throw new Error("Clankie is unavailable. Restart clankie or run the Clankie Eve service.");
       }
     }
     if (this.incompatibleGeneration) {
       throw new Error(
-        "The prior captain turn belongs to a different build and may have produced mission side effects. Check mission state, then use /new to explicitly abandon it.",
+        "The prior Clankie turn belongs to a different build and may have produced mission side effects. Check mission state, then use /new to explicitly abandon it.",
       );
     }
     if (this.cursor === undefined || this.serviceGeneration === undefined) {
-      throw new Error("Captain runtime identity is unavailable; refusing to create an unversioned session.");
+      throw new Error("Clankie's runtime identity is unavailable; refusing to create an unversioned session.");
     }
     if (this.cursor.active) {
-      shell.setTurnLoaderMessage("Reattaching to the active captain turn...");
+      shell.setTurnLoaderMessage("Reattaching to the active Clankie turn...");
       await this.consume(shell, this.cursor.streamIndex, signal, false);
       if (signal.aborted || this.cursor.active) return;
     }
@@ -153,11 +153,11 @@ export class EveCaptainSession {
 
   public async newSession(): Promise<void> {
     if (this.cursor?.active && !this.incompatibleGeneration) {
-      throw new Error("The captain is still working. Wait for the active turn to settle before /new.");
+      throw new Error("Clankie is still working. Wait for the active turn to settle before /new.");
     }
     this.generation += 1;
     if (this.serviceGeneration === undefined) {
-      throw new Error("Captain runtime identity is unavailable; cannot start a versioned session.");
+      throw new Error("Clankie's runtime identity is unavailable; cannot start a versioned session.");
     }
     this.cursor = emptyCaptainCursor(this.serviceGeneration);
     this.incompatibleGeneration = false;
@@ -204,7 +204,7 @@ export class EveCaptainSession {
         }
         const current = this.cursor;
         if (current === undefined) {
-          throw new Error("Captain session cursor disappeared while consuming its event stream");
+          throw new Error("Clankie session cursor disappeared while consuming its event stream");
         }
         this.cursor = reset
           ? emptyCaptainCursor(this.requireServiceGeneration())
@@ -224,7 +224,7 @@ export class EveCaptainSession {
     } catch (error) {
       if (signal?.aborted || isAbort(error)) {
         this.connection = "detached";
-        shell.refreshStatus("detached — captain continues");
+        shell.refreshStatus("detached — Clankie continues");
         return;
       }
       this.connection = "failed";
@@ -234,7 +234,7 @@ export class EveCaptainSession {
 
   private requireServiceGeneration(): string {
     if (this.serviceGeneration === undefined) {
-      throw new Error("Captain runtime identity is unavailable");
+      throw new Error("Clankie's runtime identity is unavailable");
     }
     return this.serviceGeneration;
   }
@@ -244,7 +244,7 @@ export class EveCaptainSession {
     assertCaptainEndpoint(health, info);
     const generation = this.configuredGeneration ?? captainInfoGeneration(info);
     if (generation === undefined) {
-      throw new Error("The captain endpoint did not expose enough identity to version its session cursor");
+      throw new Error("Clankie's endpoint did not expose enough identity to version its session cursor");
     }
     this.serviceGeneration = generation;
     const saved = this.cursor;

@@ -9,7 +9,7 @@ description: Use when starting, replanning, or finalizing a governed multi-agent
 1. Create the mission, load effective doctrine, and gather each field from its declared authority.
 2. Ask the planner for a `MissionPlanSchema` plan, then ask the critic to attack acceptance ambiguity, write conflicts, missing evidence, policy exposure, and budget risk.
 3. Revise and submit only a valid DAG whose tasks have explicit roles, disjoint parallel write scopes, observable success criteria, and non-empty evidence requirements.
-4. After the control plane accepts the plan, invoke `start_mission`. Coding is a governed runner capability: the captain never opens a shell, edits files, or treats provider completion as independent verification.
+4. After the control plane accepts the plan, invoke `start_mission`. Coding is a governed runner capability: you never open a shell, edit files, or treat provider completion as independent verification.
 
 ## During execution
 

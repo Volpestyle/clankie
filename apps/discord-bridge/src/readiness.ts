@@ -213,7 +213,7 @@ export async function inspectDiscordTextReadiness(
       "control-plane composition",
       ready,
       ready
-        ? "event store, captain channel turns, and Discord presence runtime are ready"
+        ? "event store, Clankie channel turns, and Discord presence runtime are ready"
         : "one or more Discord control-plane dependencies are unavailable",
       "Start the control plane with CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE configured.",
     );

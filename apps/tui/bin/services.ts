@@ -43,6 +43,7 @@ export type ServiceTarget = ServiceId | "all";
 /** Short aliases, because nobody wants to type `discord-bridge` every time. */
 const TARGET_ALIASES: Readonly<Record<string, ServiceTarget>> = {
   all: "all",
+  clankie: "captain-eve",
   captain: "captain-eve",
   "captain-eve": "captain-eve",
   eve: "captain-eve",
@@ -65,7 +66,7 @@ export function parseServiceTarget(raw: string | undefined): ServiceTarget {
   const target = TARGET_ALIASES[raw.toLowerCase()];
   if (target === undefined) {
     throw new Error(
-      `Unknown service "${raw}". Expected one of: all, captain, control-plane, discord, activity, tunnel, runner (aliases: eve, cp, bridge, watch, viewer, cloudflared).`,
+      `Unknown service "${raw}". Expected one of: all, clankie, control-plane, discord, activity, tunnel, runner (aliases: captain, eve, cp, bridge, watch, viewer, cloudflared).`,
     );
   }
   return target;
@@ -178,7 +179,7 @@ function readCaptainRecord(
 
 const CAPTAIN_EVE: ManagedService = {
   id: "captain-eve",
-  label: "Captain Eve",
+  label: "Clankie",
   dependsOn: [],
   spawnArgs: [
     "--filter",

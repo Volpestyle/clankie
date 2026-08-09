@@ -262,8 +262,8 @@ export async function inspectDiscordVoiceReadiness(
     add(
       "control-plane composition",
       ready,
-      ready ? "captain lane and event store are ready" : "control-plane Discord dependencies are incomplete",
-      "Start the control plane and Eve captain before the bridge.",
+      ready ? "Clankie's lane and event store are ready" : "control-plane Discord dependencies are incomplete",
+      "Start the control plane and Clankie before the bridge.",
     );
   } catch (error) {
     add(

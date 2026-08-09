@@ -120,7 +120,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         if (conversations === undefined) {
           shell.insertCommandResult(
             "/conversation",
-            "The captain conversation registry port is unavailable.",
+            "Clankie's conversation registry port is unavailable.",
             "error",
           );
           return;
@@ -229,12 +229,12 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "new",
       aliases: ["n"],
-      description: "Start a fresh captain session",
+      description: "Start a fresh Clankie session",
       takesArgument: false,
       async run(_argument, shell): Promise<void> {
         await captain?.newSession();
         shell.clearTranscript();
-        shell.insertMarkdown("**Notice**\n\nFresh captain session. Mission state is unchanged.");
+        shell.insertMarkdown("**Notice**\n\nFresh Clankie session. Mission state is unchanged.");
         shell.refreshStatus("ready");
       },
     },
@@ -297,7 +297,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
               approvalClient ? "ok" : "warn",
             ),
             s.line(
-              "captain",
+              "clankie",
               captain?.connectionState ?? "not configured",
               captain?.connectionState === "live" ? "ok" : "warn",
             ),

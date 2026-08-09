@@ -130,9 +130,9 @@ describe("ensureCaptainService", () => {
       expect(handle.generation).toBe(TEST_GENERATION);
       expect(unreffed).toBe(1);
       expect(statuses).toEqual([
-        "Checking for a running captain…",
-        "Building the durable captain…",
-        "Starting the durable captain…",
+        "Checking for a running Clankie…",
+        "Building Clankie…",
+        "Starting Clankie…",
       ]);
       expect(calls).toEqual([
         {

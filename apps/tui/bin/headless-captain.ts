@@ -138,7 +138,7 @@ async function withHeadlessLock<T>(env: NodeJS.ProcessEnv, operation: () => Prom
       stale = true;
     }
     if (!stale) {
-      throw new Error("Another clankie msg/watch command owns the headless captain session.");
+      throw new Error("Another clankie msg/watch command owns the headless Clankie session.");
     }
     unlinkSync(path);
     fd = openSync(path, "wx", 0o600);
@@ -173,8 +173,8 @@ function commandHelp(): string {
   return [
     "Usage: clankie <command>",
     "",
-    "Headless captain commands:",
-    "  health | status          Probe the captain and report every local service",
+    "Headless Clankie commands:",
+    "  health | status          Probe Clankie and report every local service",
     "  restart [service]        Restart launcher-owned services in dependency order",
     "  down [service]           Stop launcher-owned services in reverse order",
     "  msg [--new] <message>    Send without opening the TTY face; omit message to read stdin",
@@ -192,8 +192,8 @@ function commandHelp(): string {
     "  play status              Show the live embodiment (asked play) session",
     "  play stop                Stop the live playthrough cleanly (mints its checkpoint)",
     "",
-    "Services for restart/down: all (default), captain, control-plane, discord, activity, tunnel, runner",
-    "Aliases: eve, cp, bridge, watch, viewer, cloudflared",
+    "Services for restart/down: all (default), clankie, control-plane, discord, activity, tunnel, runner",
+    "Aliases: captain, eve, cp, bridge, watch, viewer, cloudflared",
     "",
     "With no command, clankie opens the fullscreen operator console and requires a TTY.",
   ].join("\n");
@@ -246,7 +246,7 @@ async function runInspection(options: HeadlessCaptainCommandOptions): Promise<nu
   // a second round trip to the same two endpoints.
   const captainStatus: ServiceStatus = {
     id: "captain-eve",
-    label: "Captain Eve",
+    label: "Clankie",
     // A stale captain is ours but not serving this checkout's tools, so it
     // reports as unhealthy with the reason rather than as a healthy captain
     // that will surprise the next caller.
@@ -421,7 +421,7 @@ async function connectCaptain(input: {
   assertCaptainEndpoint(health, info);
   const generation = input.generation ?? captainInfoGeneration(info);
   if (generation === undefined) {
-    throw new Error("Captain endpoint does not expose a durable build identity.");
+    throw new Error("Clankie's endpoint does not expose a durable build identity.");
   }
   return { client, generation };
 }
@@ -435,7 +435,7 @@ function normalizeCursor(
   if (cursor.version !== 2 || cursor.generation !== generation) {
     if (cursor.active) {
       throw new Error(
-        "The saved headless turn belongs to a different captain build. Inspect mission state, then use `clankie msg --new ...` to abandon it explicitly.",
+        "The saved headless turn belongs to a different Clankie build. Inspect mission state, then use `clankie msg --new ...` to abandon it explicitly.",
       );
     }
     return emptyCaptainCursor(generation);
@@ -462,7 +462,7 @@ async function runMessage(args: readonly string[], options: HeadlessCaptainComma
     const store = new CaptainSessionCursorStore(headlessCaptainCursorPath(env));
     const cursor = normalizeCursor(await store.read(), connected.generation, input.startNew);
     if (cursor.active) {
-      throw new Error("The headless captain turn is still active. Run `clankie watch` or `clankie wait`.");
+      throw new Error("The headless Clankie turn is still active. Run `clankie watch` or `clankie wait`.");
     }
     const response = await connected.client.session(cursor).send({ message: input.message });
     const next: CaptainSessionCursor = {
@@ -602,7 +602,7 @@ async function runWatch(
       if (timer !== undefined) clearTimeout(timer);
     }
     if (boundary === undefined) {
-      throw new Error("Captain event stream ended before the turn reached a boundary.");
+      throw new Error("Clankie's event stream ended before the turn reached a boundary.");
     }
     outputJson(options.stdout ?? process.stdout, {
       ok: boundary !== "failed",
@@ -730,7 +730,7 @@ async function runTrace(args: readonly string[], options: HeadlessCaptainCommand
   });
   await reportHerdrAgent("working", {
     ...herdrOpts,
-    message: "tracing captain session stream",
+    message: "tracing Clankie session stream",
   });
 
   const controller = new AbortController();

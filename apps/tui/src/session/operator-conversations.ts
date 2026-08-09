@@ -91,7 +91,7 @@ export function createCaptainOperatorConversationClient(
       return OperatorConversationServiceResultSchema.parse(await response.json());
     } catch (error) {
       throw new OperatorConversationClientError(
-        "Captain conversation response failed schema validation",
+        "Clankie conversation response failed schema validation",
         error,
       );
     }
@@ -518,7 +518,7 @@ export class OperatorConversationPromptSession {
       );
     }
     if (accepted.status === "unsupported") {
-      throw new OperatorConversationClientError("Captain does not support ordinary conversation messages");
+      throw new OperatorConversationClientError("Clankie does not support ordinary conversation messages");
     }
 
     const cursor = this.tails.cursor(conversationId);

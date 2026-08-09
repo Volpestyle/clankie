@@ -26,7 +26,7 @@ export const CAPTAIN_DISABLED_FRAMEWORK_TOOL_NAMES = ["bash", "glob", "grep", "r
 export function assertLoopbackCaptainHost(host: string): URL {
   const url = new URL(host);
   if (url.protocol !== "http:" || (url.hostname !== "127.0.0.1" && url.hostname !== "localhost")) {
-    throw new Error(`The Clankie captain must use a loopback http URL, received ${host}`);
+    throw new Error(`Clankie must use a loopback http URL, received ${host}`);
   }
   return url;
 }
@@ -164,6 +164,6 @@ export function captainInfoGeneration(value: unknown): string | undefined {
 
 export function assertCaptainEndpoint(health: unknown, info: unknown): void {
   if (!isReadyEveHealth(health) || !isCaptainInfo(info)) {
-    throw new Error("The configured endpoint is not the authored Clankie captain");
+    throw new Error("The configured endpoint is not the authored Clankie");
   }
 }

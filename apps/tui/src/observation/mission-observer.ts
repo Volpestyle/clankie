@@ -293,7 +293,7 @@ export class MissionObserver {
     }
     const current = this.captain ?? {
       state: "idle" as const,
-      summary: "Captain online",
+      summary: "Clankie online",
       updatedAt: presence.occurredAt,
       generationId,
       tierZeroGeneration: undefined,
@@ -306,23 +306,23 @@ export class MissionObserver {
       current.tierZeroGeneration = undefined;
       current.offlineGeneration = undefined;
       current.state = "idle";
-      current.summary = "Captain online";
+      current.summary = "Clankie online";
     } else if (presence.type === "captain.presence.offline") {
       current.tierZeroGeneration = undefined;
       current.offlineGeneration = generationId;
       current.state = "offline";
-      current.summary = "Captain offline";
+      current.summary = "Clankie offline";
     } else if (presence.type === "captain.heartbeat") {
       if (current.tierZeroGeneration !== generationId && current.offlineGeneration !== generationId) {
         current.state = "idle";
-        current.summary = "Captain online";
+        current.summary = "Clankie online";
       }
     } else {
       current.tierZeroGeneration = generationId;
       current.offlineGeneration = undefined;
       if (presence.type === "captain.turn.started") {
         current.state = "working";
-        current.summary = "Captain working";
+        current.summary = "Clankie working";
       } else if (presence.type === "captain.waiting_dependency") {
         current.state = "waiting_dependency";
         current.summary = sanitize(presence.data.summary);
@@ -331,7 +331,7 @@ export class MissionObserver {
         current.summary = sanitize(presence.data.questionSummary);
       } else {
         current.state = "idle";
-        current.summary = "Captain idle";
+        current.summary = "Clankie idle";
       }
     }
     this.captain = current;
@@ -590,10 +590,10 @@ function parseCheckpointPresence(value: unknown): PresenceProjection {
 }
 
 function parseCheckpointCaptain(value: unknown): CaptainPresenceProjection {
-  const record = checkpointRecord(value, "captain presence");
+  const record = checkpointRecord(value, "Clankie presence");
   const state = checkpointString(record, "state");
   if (!["working", "waiting_user", "waiting_dependency", "idle", "offline"].includes(state)) {
-    throw new Error("Invalid captain state in observation checkpoint");
+    throw new Error("Invalid Clankie state in observation checkpoint");
   }
   const optionalGeneration = (key: "tierZeroGeneration" | "offlineGeneration"): string | undefined => {
     const generation = record[key];
