@@ -51,8 +51,13 @@ Options weighed:
 2. Register a search MCP server for the captain only. Rejected as insufficient
    alone: it answers search but not the authenticated, JavaScript-heavy, or
    multi-step pages that a real lookup reaches.
-3. Re-enable eve's built-in web tools and give the captain `agent-browser`
-   with its full action set. Accepted.
+3. Mount `agent-browser` as an eve MCP connection on the captain. Rejected
+   twice over: `defineMcpClientConnection` requires a URL speaking Streamable
+   HTTP or SSE and `agent-browser mcp` is stdio-only, and even bridged it
+   would put process ownership in the captain and replace doctrine projection
+   with eve's static allow/block filter.
+4. Re-enable eve's built-in web tools and give the captain `agent-browser`
+   with its full action set, hosted by the runner. Accepted.
 
 ## Decision
 
@@ -70,11 +75,21 @@ search rather than answer from memory when the tool is absent.
 actually protecting, and it is unchanged.
 
 **`agent-browser` becomes Clankie's browser, not a worker's tool.** The runner
-hosts it as a stdio MCP server (`agent-browser mcp --tools all`) on a dedicated
-headless profile — never the operator's logged-in one — and the captain reaches
-it through the control plane like every other capability. It is registered in
-the operator-authored MCP registry with one risk class per tool, so it is
-governed by the same doctrine vocabulary as every other connector.
+hosts it as a stdio MCP server (`agent-browser mcp --tools all`) and the
+captain reaches it through the control plane like every other capability. It
+is registered in the operator-authored MCP registry with one risk class per
+tool, so it is governed by the same doctrine vocabulary as every other
+connector.
+
+**The profile is his, and it persists.** A browser that forgets every session
+turns each lookup behind a login into a password request, which is the
+opposite of the capability being added. The profile therefore lives in the
+runner's private state root and is reused across runs
+(`AGENT_BROWSER_RESTORE_SAVE=always`, the deliberate opposite of the Codex
+projection's `never`). It is Clankie's own profile, never the operator's
+browser. The accumulated credentials are precisely why `auth`, `set_cookies`,
+and `eval` are approval-class: the profile gets more valuable to an attacker
+over time, so the verbs that could exfiltrate it stay behind a human.
 
 Unlike the Codex projection, the captain's browser carries **the full action
 set**. The read-only policy that gates the Codex shell (`navigate`, `snapshot`,
@@ -116,12 +131,15 @@ flowchart TB
   character with one bank was always supposed to mean.
 - **A full-action browser sits behind `ask_clankie`, so untrusted room text can
   reach it.** This is the real cost of the decision and it is accepted
-  deliberately. Three things bound it: the browser runs on a dedicated profile
-  holding none of the operator's sessions, every credential- or
-  script-bearing verb (`eval`, `auth`, `set_cookies`) is approval-class and
-  stops for a human, and the registry stays a closed list so an undeclared
-  tool is never projected. Room speech still never carries approval authority
-  ([ADR 0050](0050-voice-presence-authority-tier.md)).
+  deliberately. Three things bound it: the browser runs on Clankie's own
+  profile rather than the operator's, every credential- or script-bearing verb
+  (`eval`, `auth`, `set_cookies`) is approval-class and stops for a human, and
+  the registry stays a closed list so an undeclared tool is never projected.
+  Room speech still never carries approval authority
+  ([ADR 0050](0050-voice-presence-authority-tier.md)). The persistent profile
+  raises the stakes over time rather than lowering them, which is the reason
+  the approval gate is enforced at the control plane on every call instead of
+  by a step-scoped hook that a replayed turn could skip.
 - Risk classes follow agent-browser's own tool profiles rather than being
   enumerated per command, so new commands land in an existing class instead of
   requiring a doctrine edit per release.
@@ -136,12 +154,22 @@ flowchart TB
 
 ## Status of the work
 
-Landed: web reach restored to the bank with the instruction that governs it;
-`projectCaptainMcpToolGrants` and its tests; the `agent_browser` registry entry
-with all thirty-three tools classified.
+Landed end to end: web reach restored to the bank with the instruction that
+governs it; `projectCaptainMcpToolGrants`; the `agent_browser` registry entry
+with all thirty-three tools classified; the runner's stdio MCP host and
+loopback browser gateway; the control-plane `/v1/browser/tools` and
+`/v1/browser/call` routes with the approval gate; and the captain's
+`defineDynamic` tool set. `CLANKIE_BROWSER_ENABLED` plus a compiled doctrine
+profile and a registry are all required, so the fail-closed rule governing
+every other MCP projection governs this one.
 
-Not yet landed: the runner's stdio MCP host and loopback gateway, the
-control-plane routes, and the captain's dynamic tool set that turns the
-projection into callable tools. Until those land the registry entry is
-inert — the contract-first shape this repository already uses, where a
-declared surface precedes its wiring.
+Not yet landed: the free-play mind still has no route to the bank. The obvious
+fix — an `ask_captain` field on the player's decision — is the one
+[ADR 0056](0056-voice-is-a-separate-agent-from-the-player.md) measured as
+harmful: loading a second job onto the player's single call is what suppressed
+speech (0 of 12 across four prompt revisions) until speech became its own
+agent. The right shape is therefore to route an interjection to the existing
+`gameplay` captain lane rather than to widen the player's schema. In a voice
+room the question already reaches the captain through `ask_clankie`, so the
+gap is narrower than it looks: it is interjections delivered straight into the
+loop.

@@ -53,6 +53,7 @@ import {
 } from "@clankie/memory-store";
 import {
   AdoptWorkerRequestSchema,
+  CallBrowserToolRequestSchema,
   DirectAdoptedWorkerRequestSchema,
   ApprovalDecisionInputSchema,
   ApprovalRequestRecordSchema,
@@ -192,6 +193,7 @@ import {
 } from "./tracker-ceremony.ts";
 import type { WorkerTranscriptReadPort } from "./worker-transcripts.ts";
 import type { ActivityObservationReadPort } from "./activity-observations.ts";
+import type { BrowserToolPort } from "./browser-tools.ts";
 import type { AgentCensusReadPort } from "./agent-census.ts";
 import { MissionEventFeed, type MissionEventFeedTailRead } from "./mission-event-feed.ts";
 
@@ -385,6 +387,8 @@ export interface ControlPlaneDependencies {
   workerTranscripts?: WorkerTranscriptReadPort;
   /** Injected runner-owned activity reader. The control plane never persists activity content. */
   activityObservations?: ActivityObservationReadPort;
+  /** Clankie's runner-hosted browser (ADR 0082); absent leaves the routes 503. */
+  browserTools?: BrowserToolPort;
   /** Runner-owned view of agents this control plane did not start (ADR 0078). */
   agentCensus?: AgentCensusReadPort;
 }
@@ -3442,6 +3446,90 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
    * owner should never have to authorize. The control plane proxies the runner
    * and stores nothing: a cached census would be a second, staler authority.
    */
+  /**
+   * Clankie's browser ([ADR 0082](../../../docs/adr/0082-clankie-holds-the-browser.md)).
+   * The catalog is already doctrine-projected by the runner, so this plane
+   * only mediates: it never widens what the captain may call.
+   */
+  app.get("/v1/browser/tools", async (context) => {
+    const authorization = await authenticateAgentCensusPrincipal(context);
+    if ("denial" in authorization) return authorization.denial;
+    if (dependencies.browserTools === undefined) {
+      return context.json({ error: "browser_unavailable" }, 503);
+    }
+    try {
+      return context.json({ catalog: await dependencies.browserTools.catalog(context.req.raw.signal) }, 200, {
+        "cache-control": "no-store",
+      });
+    } catch {
+      return context.json({ error: "browser_upstream_failure" }, 502);
+    }
+  });
+
+  /**
+   * An approval-class tool needs an operator bearer, exactly as a `directed`
+   * adoption does. A captain token alone comes back `refused` rather than
+   * throwing, because being told no is a normal outcome he relays in words —
+   * and it is the boundary that keeps a prompt-injected page from reaching
+   * `eval` or `auth` through a voice channel.
+   */
+  app.post("/v1/browser/call", async (context) => {
+    const authorization = await authenticateAgentCensusPrincipal(context);
+    if ("denial" in authorization) return authorization.denial;
+    if (dependencies.browserTools === undefined) {
+      return context.json({ error: "browser_unavailable" }, 503);
+    }
+    let body: unknown;
+    try {
+      body = await context.req.json();
+    } catch {
+      return context.json({ error: "invalid_browser_call" }, 400);
+    }
+    const parsed = CallBrowserToolRequestSchema.safeParse(body);
+    if (!parsed.success) return context.json({ error: "invalid_browser_call" }, 400);
+
+    let catalog;
+    try {
+      catalog = await dependencies.browserTools.catalog(context.req.raw.signal);
+    } catch {
+      return context.json({ error: "browser_upstream_failure" }, 502);
+    }
+    const descriptor = catalog.tools.find((tool) => tool.name === parsed.data.tool);
+    if (descriptor === undefined) {
+      return context.json(
+        { result: { outcome: "refused", tool: parsed.data.tool, reason: "unknown_tool" } },
+        200,
+      );
+    }
+    if (descriptor.requiresApproval) {
+      const operator = await authenticateOperator(context.req.raw, dependencies);
+      if (operator === "unavailable") {
+        return context.json({ error: "browser_authentication_unavailable" }, 503);
+      }
+      if (!operator) {
+        return context.json(
+          {
+            result: {
+              outcome: "refused",
+              tool: parsed.data.tool,
+              reason: "approval_required",
+              detail: `${parsed.data.tool} is ${descriptor.riskClass}-class and needs an operator approval`,
+            },
+          },
+          200,
+        );
+      }
+    }
+    try {
+      return context.json(
+        { result: await dependencies.browserTools.call(parsed.data, context.req.raw.signal) },
+        200,
+      );
+    } catch {
+      return context.json({ error: "browser_upstream_failure" }, 502);
+    }
+  });
+
   app.get("/v1/agents/census", async (context) => {
     const authorization = await authenticateAgentCensusPrincipal(context);
     if ("denial" in authorization) return authorization.denial;

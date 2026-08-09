@@ -1,5 +1,10 @@
 import {
   AdoptWorkerResultSchema,
+  BrowserToolCatalogSchema,
+  CallBrowserToolResultSchema,
+  type BrowserToolCatalog,
+  type CallBrowserToolRequest,
+  type CallBrowserToolResult,
   AgentCensusSchema,
   DirectAdoptedWorkerResultSchema,
   ApprovalRequestRecordSchema,
@@ -859,6 +864,32 @@ export class ClankieApiClient {
    * fleet did not start. `transportAvailable: false` means he could not look —
    * never that the machine is quiet.
    */
+  /**
+   * The doctrine-projected catalog of Clankie's own browser (ADR 0082).
+   * `available: false` means the host could not be reached — never that he has
+   * no browser.
+   */
+  public async listBrowserTools(): Promise<BrowserToolCatalog> {
+    const body = await this.request<{ catalog: unknown }>("/v1/browser/tools", {
+      headers: this.activityReadHeaders(),
+    });
+    return BrowserToolCatalogSchema.parse(body.catalog);
+  }
+
+  /**
+   * Drive one browser tool. An approval-class tool called with only a captain
+   * token comes back `refused` with `approval_required`, which he relays
+   * rather than treats as a failure.
+   */
+  public async callBrowserTool(request: CallBrowserToolRequest): Promise<CallBrowserToolResult> {
+    const body = await this.request<{ result: unknown }>("/v1/browser/call", {
+      method: "POST",
+      headers: this.activityReadHeaders(),
+      body: JSON.stringify(request),
+    });
+    return CallBrowserToolResultSchema.parse(body.result);
+  }
+
   public async getAgentCensus(): Promise<AgentCensus> {
     const body = await this.request<{ census: unknown }>("/v1/agents/census", {
       headers: this.activityReadHeaders(),

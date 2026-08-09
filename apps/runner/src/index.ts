@@ -44,6 +44,8 @@ import {
 } from "./herdr-session-discovery.ts";
 import { AgentCensusService } from "./agent-census.ts";
 import { AGENT_CENSUS_GATEWAY_PORT, createAgentCensusGateway } from "./agent-census-gateway.ts";
+import { BROWSER_GATEWAY_PORT, createBrowserGateway } from "./browser-gateway.ts";
+import { createBrowserHost } from "./browser-host.ts";
 import { WorkerAdoptionStore } from "./worker-adoptions.ts";
 import { CompositeTerminalSourceProvider, type TerminalSourceProvider } from "./terminal-source.ts";
 import {
@@ -386,6 +388,50 @@ if (!repoPath) {
       }
     }
   }
+  // Clankie's own browser (ADR 0082). Off unless the operator enables it and
+  // doctrine plus a registry are both present, so the fail-closed rule that
+  // governs every other MCP projection governs this one too.
+  if (
+    runnerToken &&
+    doctrine &&
+    mcpRegistry &&
+    /^(1|true|yes|on)$/iu.test(process.env.CLANKIE_BROWSER_ENABLED?.trim() ?? "")
+  ) {
+    try {
+      const browserHost = await createBrowserHost({
+        registry: mcpRegistry,
+        doctrine,
+        runnerStateRoot,
+        logger,
+        environment: process.env,
+      });
+      const browserGateway = await createBrowserGateway({
+        host: browserHost,
+        token: runnerToken,
+        port: Number(process.env.CLANKIE_BROWSER_PORT ?? BROWSER_GATEWAY_PORT),
+      });
+      const closeBrowser = () => {
+        void browserGateway.close().catch(() => undefined);
+        void browserHost.close().catch(() => undefined);
+      };
+      process.once("SIGINT", closeBrowser);
+      process.once("SIGTERM", closeBrowser);
+      logger.info(
+        {
+          event: "browser.gateway.enabled",
+          host: browserGateway.address.host,
+          port: browserGateway.address.port,
+        },
+        "runner-owned browser gateway enabled",
+      );
+    } catch (error) {
+      logger.error(
+        { err: error instanceof Error ? error.message : String(error) },
+        "browser host failed to start; Clankie has no browser this run",
+      );
+    }
+  }
+
   const providerSandbox = new ShellSandbox({
     events: runnerEvents,
     decideEscalation: (request) =>

@@ -64,18 +64,28 @@ flowchart LR
   P["Free-play mind<br/>no tools, no handoff"] -.->|gap| C
 ```
 
-Reach is chosen by cost rather than by lane. `web_search` and `web_fetch`
-answer a question at conversational cost, so a lookup asked in voice is served
-on the same path as one asked in the TUI. Bounded investigation, anything
-needing a real browser, and anything touching a worktree goes to a governed
-worker. `web_search` is provider-backed and absent on models with no native
-backend; the captain is instructed to say so rather than answer from memory.
+Reach is chosen by cost rather than by lane
+([ADR 0082](adr/0082-clankie-holds-the-browser.md)). `web_search` and
+`web_fetch` answer a question at conversational cost, so a lookup asked in
+voice is served on the same path as one asked in the TUI. `web_search` is
+provider-backed and absent on models with no native backend; the captain is
+instructed to say so rather than answer from memory.
+
+Pages that need a real browser go to `agent_browser__*`. The runner owns an
+`agent-browser` MCP server on Clankie's own persistent profile — so a site he
+logged into once stays logged in — and projects each tool through doctrine
+before the captain sees it. Reads run unattended; credential- and
+script-bearing verbs (`auth`, `set_cookies`, `eval`) are approval-class and the
+control plane refuses them without an operator bearer. Undeclared tools are
+never projected, so a new agent-browser release cannot widen his reach without
+an operator editing the registry. Bounded investigation and anything touching a
+worktree still goes to a governed worker.
 
 The free-play mind is the one branch that satisfies neither half of the rule:
-it is a structured-output loop with no tools and no handoff, so a question put
-to Clankie mid-playthrough is answered without lookup or memory. Closing that,
-and giving the captain a doctrine-gated browser, are
-[ADR 0082](adr/0082-clankie-holds-the-browser.md)'s remaining work.
+it is a structured-output loop with no tools and no handoff, so an interjection
+delivered straight into the loop is answered without lookup or memory. In a
+voice room the question already reaches the captain through `ask_clankie`, so
+the gap is narrower than it looks.
 
 Shell and filesystem framework tools stay disabled for the captain. A seat that
 can write files is a seat that can edit the doctrine it is judged against, so

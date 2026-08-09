@@ -34,6 +34,7 @@ import { createCredentialBackedOperatorAuthenticator } from "./operator-auth.ts"
 import { FileWorkerSteeringStore } from "./worker-steering.ts";
 import { RunnerWorkerTranscriptClient } from "./worker-transcripts.ts";
 import { RunnerActivityObservationClient } from "./activity-observations.ts";
+import { RunnerBrowserToolClient } from "./browser-tools.ts";
 import { RunnerAgentCensusClient } from "./agent-census.ts";
 
 const logger = createLogger({ service: "clankie-control-plane", version: "0.1.0" });
@@ -226,6 +227,10 @@ const app = await createControlPlane({
         }),
         agentCensus: new RunnerAgentCensusClient({
           baseUrl: process.env.CLANKIE_AGENT_CENSUS_URL ?? "http://127.0.0.1:4315",
+          token: runnerToken,
+        }),
+        browserTools: new RunnerBrowserToolClient({
+          baseUrl: process.env.CLANKIE_BROWSER_URL ?? "http://127.0.0.1:4316",
           token: runnerToken,
         }),
       }

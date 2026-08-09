@@ -3655,6 +3655,70 @@ export const CAPTAIN_AUTHORED_TOOL_NAMES = [
 ] as const;
 
 // ---------------------------------------------------------------------------
+// Clankie's browser (ADR 0082).
+//
+// The captain drives a runner-hosted `agent-browser` MCP server. Descriptors
+// are projected through doctrine before they reach him, so `requiresApproval`
+// is a decided fact carried on the wire rather than something the captain or
+// the model re-derives.
+// ---------------------------------------------------------------------------
+
+export const BrowserToolNameSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[A-Za-z][A-Za-z0-9_-]*$/u, "Browser tool names are alphanumerics with underscores or dashes");
+
+export const BrowserToolDescriptorSchema = z.object({
+  name: BrowserToolNameSchema,
+  description: z.string().max(4_000),
+  /** JSON Schema for the tool's arguments, verbatim from the MCP server. */
+  inputSchema: z.record(z.string(), z.unknown()),
+  riskClass: z.enum(["read", "reversible-write", "irreversible-write", "publish-external", "destructive"]),
+  /** Doctrine returned `require_approval`; the call needs an approval envelope. */
+  requiresApproval: z.boolean(),
+});
+export type BrowserToolDescriptor = z.infer<typeof BrowserToolDescriptorSchema>;
+
+export const BrowserToolCatalogSchema = z.object({
+  schemaVersion: z.literal(1),
+  /** `false` means the host could not be reached — never that no tools exist. */
+  available: z.boolean(),
+  reason: z.string().max(200).optional(),
+  tools: z.array(BrowserToolDescriptorSchema).max(256),
+});
+export type BrowserToolCatalog = z.infer<typeof BrowserToolCatalogSchema>;
+
+export const CallBrowserToolRequestSchema = z.object({
+  schemaVersion: z.literal(1),
+  tool: BrowserToolNameSchema,
+  arguments: z.record(z.string(), z.unknown()).default({}),
+});
+export type CallBrowserToolRequest = z.infer<typeof CallBrowserToolRequestSchema>;
+
+/**
+ * A refusal is a normal outcome, not an exception: doctrine may deny the tool
+ * and an approval may be outstanding. Both come back as results the captain
+ * can relay in words rather than errors he has to interpret.
+ */
+export const CallBrowserToolResultSchema = z.discriminatedUnion("outcome", [
+  z.object({
+    outcome: z.literal("ok"),
+    tool: BrowserToolNameSchema,
+    /** Text blocks from the MCP result, already bounded by the host. */
+    content: z.string().max(200_000),
+    isError: z.boolean().default(false),
+  }),
+  z.object({
+    outcome: z.literal("refused"),
+    tool: BrowserToolNameSchema,
+    reason: z.enum(["doctrine_denied", "approval_required", "unknown_tool", "browser_unavailable"]),
+    detail: z.string().max(500).optional(),
+  }),
+]);
+export type CallBrowserToolResult = z.infer<typeof CallBrowserToolResultSchema>;
+
+// ---------------------------------------------------------------------------
 // Captain episodes (ADR 0054).
 //
 // The second memory trust class. A `MemoryFact` is a claim about the world and
