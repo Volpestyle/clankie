@@ -6,6 +6,10 @@ images and named the conditions for extending it, and carves one narrow lane
 through the `publish-external` gate that
 [ADR 0024](0024-discord-dual-plane-presence.md) put in front of attachments.
 
+The attachable-media boundary here is widened by [ADR 0088](0088-a-screenshot-is-something-he-showed-you.md): browser
+screenshots ride a reply on the same provenance argument. Everything else
+under the attachment root keeps `send_attachment` and its approval.
+
 ## Context
 
 `@clankie/media-connector` has existed since ADR 0029 with adapters for three

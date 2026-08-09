@@ -2157,20 +2157,30 @@ export const CAPTAIN_SILENT_REPLY_SENTINEL = "[[stay-silent]]";
  * Generation writes a local artifact and publishes nothing, so it is read-class
  * (ADR 0029). What makes the picture *conversational* is where it was written:
  * only the control plane's generator writes beneath `GENERATED_MEDIA_DIRECTORY`,
- * and nothing the captain holds can write there — `write_file` is disabled, and
- * any shell he is granted must be sandboxed to a writable root outside the
- * attachment root. So a ref under that directory is provably something he made
- * rather than any file that happens to sit under the attachment root, and that
- * is the whole of the distinction. Everything else — browser screenshots,
- * repository files — keeps `send_attachment` and its `publish-external`
- * approval.
+ * and only the runner's browser host writes beneath
+ * `BROWSER_ARTIFACT_DIRECTORY`. Nothing the captain holds can write to either —
+ * `write_file` is disabled, and any shell he is granted must be sandboxed to a
+ * writable root outside the attachment root (the shell host refuses to start
+ * otherwise). So a ref under one of those directories is provably something a
+ * governed tool of his produced rather than any file that happens to sit under
+ * the attachment root, and that is the whole of the distinction. Everything
+ * else — repository files, support bundles — keeps `send_attachment` and its
+ * `publish-external` approval (ADR 0088).
  */
 
 /** Sole write target of the media generator, relative to the attachment root. */
 export const GENERATED_MEDIA_DIRECTORY = "generated";
 
+/** Sole write target of the runner's browser host, relative to the attachment root. */
+export const BROWSER_ARTIFACT_DIRECTORY = "browser";
+
 const GENERATED_MEDIA_REF_PATTERN = new RegExp(
   `^sha256:[0-9a-f]{64}:${GENERATED_MEDIA_DIRECTORY}/[A-Za-z0-9._-]+$`,
+  "u",
+);
+
+const BROWSER_ARTIFACT_REF_PATTERN = new RegExp(
+  `^sha256:[0-9a-f]{64}:${BROWSER_ARTIFACT_DIRECTORY}/[A-Za-z0-9._-]+$`,
   "u",
 );
 
@@ -2188,6 +2198,31 @@ export function isGeneratedMediaRef(artifactRef: string): boolean {
 }
 
 /**
+ * Whether a reference names a screenshot the runner's browser host minted.
+ *
+ * Same argument as generated media, same shape: one safe segment under one
+ * fixed directory that only the browser host writes. He cannot forge it, cannot
+ * traverse out of it, and cannot dress an arbitrary file up as one — the ref is
+ * hash-bound and the resolver re-verifies containment and digest.
+ */
+export function isBrowserArtifactRef(artifactRef: string): boolean {
+  return BROWSER_ARTIFACT_REF_PATTERN.test(artifactRef);
+}
+
+/**
+ * Whether a reference may ride his reply without an approval (ADR 0088).
+ *
+ * Both directories are written only by a governed runner-side host, so what he
+ * shows a room is always something a tool of his actually produced. The
+ * distinction this preserves is against *arbitrary* files under the attachment
+ * root — a repository file, a support bundle — which keep `send_attachment`
+ * and its `publish-external` approval.
+ */
+export function isAttachableTurnMediaRef(artifactRef: string): boolean {
+  return isGeneratedMediaRef(artifactRef) || isBrowserArtifactRef(artifactRef);
+}
+
+/**
  * A picture he made during the turn, harvested from the turn's own tool results
  * rather than from anything he wrote (ADR 0085).
  *
@@ -2198,7 +2233,9 @@ export function isGeneratedMediaRef(artifactRef: string): boolean {
  */
 export const CaptainTurnMediaSchema = z
   .object({
-    artifactRef: z.string().refine(isGeneratedMediaRef, "expected a generated-media artifact reference"),
+    artifactRef: z
+      .string()
+      .refine(isAttachableTurnMediaRef, "expected a generated-media or browser artifact reference"),
     filename: z.string().min(1).max(200),
   })
   .strict();
@@ -2324,8 +2361,9 @@ export const DiscordPresenceActionSchema = z.enum([
    * A separate action rather than an optional field on `reply` so the frozen
    * risk-class table below states the truth about what may carry bytes into a
    * channel. It is narrative-write because the payload can only reference media
-   * the generator minted — see `isGeneratedMediaRef`. Any other artifact is
-   * still `send_attachment`, still publish-external, still approval-gated.
+   * a governed runner-side host minted — the generator or the browser host, see
+   * `isAttachableTurnMediaRef`. Any other artifact is still `send_attachment`,
+   * still publish-external, still approval-gated.
    */
   "discord.presence.reply_with_media",
   "discord.presence.react",
@@ -2573,7 +2611,9 @@ export const DiscordPresenceActionRequestSchema = z.discriminatedUnion("kind", [
       channelId: z.string().min(1),
       messageId: z.string().min(1),
       content: z.string().min(1).max(2_000),
-      artifactRef: z.string().refine(isGeneratedMediaRef, "expected a generated-media artifact reference"),
+      artifactRef: z
+        .string()
+        .refine(isAttachableTurnMediaRef, "expected a generated-media or browser artifact reference"),
       filename: z.string().min(1).max(200),
     })
     .strict(),

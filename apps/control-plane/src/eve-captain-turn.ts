@@ -202,7 +202,7 @@ export class EveCaptainChannelTurnPort implements CaptainChannelTurnPort {
           turnId,
         });
       }
-      const media = findGeneratedMedia(events);
+      const media = findTurnMedia(events);
       return CaptainChannelTurnResultSchema.parse({
         state: "settled",
         captainSessionId: posted.sessionId,
@@ -580,39 +580,55 @@ function findCompletedMessage(events: readonly unknown[]): string | undefined {
 }
 
 /**
- * A picture he made during this turn, read from the turn's own tool results
- * (ADR 0085).
+ * A picture he produced during this turn, read from the turn's own tool results
+ * (ADR 0085, widened to browser screenshots by ADR 0088).
  *
  * Harvested rather than asked for. The alternative — a field he fills in, or a
  * reference he pastes into his reply — would make attaching media something a
  * prompt-injected turn could aim, and would put a `sha256:…` string in front of
  * a model that has every reason to say it out loud. A tool result is a record
  * of what the control plane actually did, so it cannot name an artifact that
- * was never generated.
+ * was never produced.
+ *
+ * Two shapes arrive here: the generator returns one `artifactRef` at the top of
+ * its result, and a browser call returns an `artifacts` array (a screenshot is
+ * the usual single entry). The schema refine is the authority check either way
+ * — a ref outside the two governed directories is simply not media.
  *
  * The last one wins: asked for three tries at a picture, the one he settled on
  * is the one that goes in the channel.
  */
-function findGeneratedMedia(events: readonly unknown[]): CaptainTurnMedia | undefined {
+function findTurnMedia(events: readonly unknown[]): CaptainTurnMedia | undefined {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
     if (eventType(event) !== "action.result" || !isRecord(event) || !isRecord(event.data)) continue;
     if (event.data.status === "failed") continue;
     const result = event.data.result;
     if (!isRecord(result) || result.kind !== "tool-result" || result.isError === true) continue;
-    if (!MEDIA_TOOL_NAMES.has(String(result.toolName))) continue;
     const output = result.output;
     if (!isRecord(output) || output.outcome !== "ok") continue;
-    const media = CaptainTurnMediaSchema.safeParse({
-      artifactRef: output.artifactRef,
-      filename: output.filename,
-    });
-    if (media.success) return media.data;
+    for (const candidate of mediaCandidates(output)) {
+      const media = CaptainTurnMediaSchema.safeParse(candidate);
+      if (media.success) return media.data;
+    }
   }
   return undefined;
 }
 
-const MEDIA_TOOL_NAMES = new Set(["generate_image", "generate_video"]);
+/** The generator's single ref, then any artifacts a browser call parked. */
+function mediaCandidates(output: Record<string, unknown>): Array<Record<string, unknown>> {
+  const candidates: Array<Record<string, unknown>> = [
+    { artifactRef: output.artifactRef, filename: output.filename },
+  ];
+  if (Array.isArray(output.artifacts)) {
+    for (const artifact of output.artifacts) {
+      if (isRecord(artifact)) {
+        candidates.push({ artifactRef: artifact.artifactRef, filename: artifact.filename });
+      }
+    }
+  }
+  return candidates;
+}
 
 function renderInputRequests(
   events: readonly unknown[],

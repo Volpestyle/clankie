@@ -90,8 +90,12 @@ plane holds the doctrine projection and the provider credential and writes the
 artifact into `generated/` beneath the Discord attachment root, so the thing he
 just made is born attachable. In a channel it rides his own reply as one
 message, without an approval, on the strength of nothing he holds being able to
-write there. Any other artifact under that root — a browser screenshot, a
-repository file — still needs `send_attachment` and an owner approval. Which
+write there. A browser screenshot rides his reply on the same terms
+([ADR 0088](adr/0088-a-screenshot-is-something-he-showed-you.md)): only the
+runner's browser host writes `browser/`, so the ref is as unforgeable as a
+generated one, and his shell's scratchpad sits outside the attachment root so it
+stays that way. Any *other* artifact under that root — a repository file, a
+support bundle — still needs `send_attachment` and an owner approval. Which
 model draws is operator config (`/image-model`, `/video-model`), never a choice
 the turn makes.
 

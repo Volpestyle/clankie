@@ -23,7 +23,7 @@
  */
 import { spawn } from "node:child_process";
 import { mkdir, readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { createConnectorActionClassifier, decideAction, type CompiledDoctrine } from "@clankie/doctrine";
 import type { EventStore } from "@clankie/event-store";
 import type {
@@ -66,7 +66,7 @@ export interface CaptainShellHostOptions {
   logger: CaptainShellLogger;
   events?: EventStore;
   environment?: NodeJS.ProcessEnv;
-  /** Overrides the scratchpad location; defaults under the runner state root. */
+  /** Overrides the scratchpad location; must sit outside the attachment root. */
   scratchRoot?: string;
   sandbox?: ShellSandbox;
   spawnImpl?: typeof spawn;
@@ -86,7 +86,19 @@ export async function createCaptainShellHost(
   options: CaptainShellHostOptions,
 ): Promise<CaptainShellHost> {
   const environment = options.environment ?? process.env;
-  const scratchPath = options.scratchRoot ?? join(options.runnerStateRoot, "scratch");
+  // Beside the runner state root, never inside it. The attachment root defaults
+  // to the runner state root, and `isGeneratedMediaRef`'s whole argument for
+  // letting a picture ride a reply without an approval is that nothing the
+  // captain holds can write beneath that root. A scratchpad nested inside it
+  // would quietly retire that argument.
+  const scratchPath = options.scratchRoot ?? join(dirname(options.runnerStateRoot), "captain-scratch");
+  const attachmentRoot = environment.CLANKIE_DISCORD_ATTACHMENT_ROOT?.trim() || options.runnerStateRoot;
+  if (isWithin(scratchPath, attachmentRoot)) {
+    throw new Error(
+      "captain scratchpad must live outside the Discord attachment root; " +
+        "a writable path beneath it would make anything he writes a candidate attachment",
+    );
+  }
   await mkdir(scratchPath, { recursive: true, mode: 0o700 });
   const sandbox = options.sandbox ?? new ShellSandbox();
   const spawnImpl = options.spawnImpl ?? spawn;
@@ -248,6 +260,12 @@ export async function createCaptainShellHost(
       }
     },
   };
+}
+
+/** Lexical containment: enough to catch a nested default, not a symlink attack. */
+function isWithin(path: string, root: string): boolean {
+  const rel = relative(resolve(root), resolve(path));
+  return rel === "" || (!rel.startsWith(`..${sep}`) && rel !== "..");
 }
 
 interface BoundedStream {

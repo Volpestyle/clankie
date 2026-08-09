@@ -410,13 +410,40 @@ describe("a picture he made on the turn (ADR 0085)", () => {
     expect(port.replies[0]).toMatchObject({ action: "discord.presence.reply", payload: { kind: "reply" } });
   });
 
-  it("refuses to post an artifact that is not generated media", async () => {
+  it("posts a screenshot the browser host minted", async () => {
+    // Same provenance argument as a generated picture (ADR 0088): only the
+    // runner's browser host writes `browser/`, so the ref cannot be forged.
+    const artifactRef = `sha256:${"a".repeat(64)}:browser/${"a".repeat(64)}.png`;
     const port = new RecordingPort((request) =>
       Promise.resolve({
         ...settled(request.deliveryId),
-        // A browser screenshot lives under the same attachment root, and
-        // posting one is `send_attachment` with an approval — never this path.
-        media: { artifactRef: `sha256:${"a".repeat(64)}:browser/private-page.png`, filename: "shot.png" },
+        media: { artifactRef, filename: "screenshot-aaaaaaaa.png" },
+      } as CaptainChannelTurnResult),
+    );
+    const ingress = new DiscordTextIngress(port, config(), () => undefined);
+
+    await ingress.handle({
+      id: "message-1",
+      channelId: "dm-1",
+      authorId: "james",
+      authorIsBot: false,
+      mentionsBot: false,
+      body: "post that screenshot",
+    });
+
+    expect(port.replies[0]).toMatchObject({
+      action: "discord.presence.reply_with_media",
+      payload: { kind: "reply_with_media", artifactRef },
+    });
+  });
+
+  it("refuses to post an artifact neither governed host minted", async () => {
+    const port = new RecordingPort((request) =>
+      Promise.resolve({
+        ...settled(request.deliveryId),
+        // Under the same attachment root, but written by neither the generator
+        // nor the browser host: still `send_attachment`, still approval-gated.
+        media: { artifactRef: `sha256:${"a".repeat(64)}:evidence/support-bundle.png`, filename: "x.png" },
       } as CaptainChannelTurnResult),
     );
     const ingress = new DiscordTextIngress(port, config(), () => undefined);
@@ -428,7 +455,7 @@ describe("a picture he made on the turn (ADR 0085)", () => {
         authorId: "james",
         authorIsBot: false,
         mentionsBot: false,
-        body: "post that screenshot",
+        body: "post that file",
       }),
     ).resolves.toMatchObject({ state: "failed" });
     expect(port.replies).toHaveLength(0);

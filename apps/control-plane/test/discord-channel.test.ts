@@ -695,15 +695,52 @@ describe("media he made during the turn", () => {
     expect(await submitWith(events)).not.toHaveProperty("media");
   });
 
-  it("ignores a reference that is not generated media", async () => {
-    const result = await submitWith([
-      toolResult({}, { outcome: "ok", artifactRef: `sha256:${"a".repeat(64)}:browser/shot.png` }),
-    ]);
-    expect(result).not.toHaveProperty("media");
+  /**
+   * A screenshot rides the reply on the same terms as a picture he drew
+   * (ADR 0088): only the runner's browser host writes `browser/`, so the ref is
+   * as unforgeable as a generated one. It arrives in an `artifacts` array
+   * rather than at the top of the result, which is the only real difference.
+   */
+  it("carries a screenshot the browser host minted", async () => {
+    const shot = `sha256:${"c".repeat(64)}:browser/${"c".repeat(64)}.png`;
+    await expect(
+      submitWith([
+        toolResult(
+          { toolName: "browser__agent_browser_screenshot" },
+          { outcome: "ok", content: "", artifacts: [{ artifactRef: shot, filename: "screenshot-cccccccc.png" }] },
+        ),
+      ]),
+    ).resolves.toMatchObject({ media: { artifactRef: shot, filename: "screenshot-cccccccc.png" } });
   });
 
-  it("ignores a tool that is not the media generator", async () => {
-    const result = await submitWith([toolResult({ toolName: "call_browser_tool" })]);
+  /**
+   * The boundary that survived the widening: two governed directories, not any
+   * file that happens to sit under the attachment root. His scratchpad lives
+   * outside that root precisely so this stays true.
+   */
+  it("ignores a reference outside the two governed directories", async () => {
+    for (const artifactRef of [
+      `sha256:${"a".repeat(64)}:captain-scratch/notes.png`,
+      `sha256:${"a".repeat(64)}:repo/secrets.png`,
+      `sha256:${"a".repeat(64)}:browser/nested/shot.png`,
+      `sha256:${"a".repeat(64)}:generated/../browser/shot.png`,
+    ]) {
+      const result = await submitWith([toolResult({}, { outcome: "ok", artifactRef, filename: "x.png" })]);
+      expect(result, artifactRef).not.toHaveProperty("media");
+    }
+  });
+
+  it("ignores an artifacts array carrying an ungoverned reference", async () => {
+    const result = await submitWith([
+      toolResult(
+        { toolName: "browser__agent_browser_screenshot" },
+        {
+          outcome: "ok",
+          content: "",
+          artifacts: [{ artifactRef: `sha256:${"a".repeat(64)}:elsewhere/shot.png`, filename: "shot.png" }],
+        },
+      ),
+    ]);
     expect(result).not.toHaveProperty("media");
   });
 });

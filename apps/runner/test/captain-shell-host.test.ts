@@ -128,6 +128,23 @@ describe("captain shell host", () => {
     expect(result.truncated).toBe(true);
   });
 
+  /**
+   * `isGeneratedMediaRef`'s argument for letting a picture ride a reply without
+   * an approval is that nothing the captain holds can write beneath the
+   * attachment root. A scratchpad nested inside it would retire that argument
+   * silently, so the shell refuses to start rather than start unsound.
+   */
+  it("refuses to start with a scratchpad inside the attachment root", async () => {
+    await expect(
+      createCaptainShellHost({
+        doctrine: compileDoctrine([await loadDoctrineFile(doctrinePath)]),
+        runnerStateRoot: stateRoot,
+        logger,
+        scratchRoot: join(stateRoot, "nested-scratch"),
+      }),
+    ).rejects.toThrow(/outside the Discord attachment root/);
+  });
+
   it("refuses a directory rather than throwing", async () => {
     const result = await host.read({ schemaVersion: 1, path: stateRoot });
     expect(result).toMatchObject({ outcome: "refused", reason: "path_unreadable" });

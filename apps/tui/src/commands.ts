@@ -327,9 +327,10 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           const observation = await activityClient.getCurrentActivityObservation();
           shell.insertCommandResult(
             "/activity",
-            formatActivityObservation(observation, {
-              ...(activityWatchUrl === undefined ? {} : { watchUrl: activityWatchUrl }),
-            }),
+            formatActivityObservation(
+              observation,
+              activityWatchUrl === undefined ? {} : { watchUrl: activityWatchUrl },
+            ),
             "success",
           );
         } catch (error) {
