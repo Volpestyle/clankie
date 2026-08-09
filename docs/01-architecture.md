@@ -32,6 +32,51 @@ thread, a Discord channel, and a Slack thread each continue their own
 conversation ([ADR 0080](adr/0080-slack-is-a-channel-not-a-second-captain.md)).
 An instruction may arrive on any of them; an approval may not.
 
+The Captain / Eve boundary is where the framework stops. [Eve](https://eve.dev/docs)
+owns durable conversation execution — sessions, checkpointed steps, replay,
+compaction — plus the authored instructions, tools, skills, and channels under
+`apps/captain-eve/`. Everything below the line is Clankie's: mission scheduling,
+doctrine, policy, runner state, and the versioned worker protocol stay outside
+the framework so clients and workers never couple to a beta API. See
+[`apps/captain-eve/README.md`](../apps/captain-eve/README.md) and the
+[glossary](GLOSSARY.md).
+
+## One tool bank
+
+Every ability Clankie has lives in one place: the captain's tool bank at
+`apps/captain-eve/agent/tools/`, whose authored inventory is pinned by
+`CAPTAIN_AUTHORED_TOOL_NAMES` in `@clankie/protocol` and checked at launch by
+the TUI. A branch of Clankie never grows its own tools. It either **is** a
+captain lane, or it gets a **one-tool handoff** into one.
+
+Discord voice is the strict case: the realtime model's entire tool surface is
+`ask_clankie`, one function taking one string, so room audio cannot reach a
+privileged tool no matter what it says ([ADR 0057](adr/0057-realtime-voice-with-captain-handoff.md)).
+
+```mermaid
+flowchart LR
+  T[TUI] --> C
+  D[Discord text] --> C
+  S[Slack · Linear] --> C
+  V["Discord voice<br/>ask_clankie"] --> C
+  P["Free-play mind<br/>ask_captain"] --> C
+  C["Captain — the one tool bank"] --> L["look it up<br/>web_search · web_fetch"]
+  C --> B["browse<br/>agent_browser__*"]
+  C --> W["delegate<br/>governed workers"]
+```
+
+The bank holds three tiers of reach, chosen by cost rather than by lane
+([ADR 0082](adr/0082-clankie-holds-the-browser.md)). `web_search` and
+`web_fetch` answer a question at conversational cost. The runner-hosted
+`agent-browser` profile handles pages that need a real browser, with each tool
+carrying a doctrine risk class — reads run unattended, credential- and
+script-bearing verbs stop for an approval envelope. Bounded investigation and
+anything touching a worktree still goes to a governed worker.
+
+Shell and filesystem framework tools stay disabled for the captain. A seat that
+can write files is a seat that can edit the doctrine it is judged against, so
+execution keeps belonging to workers that own a worktree and a sandbox.
+
 ## Trust boundaries
 
 ### Untrusted/model-controlled

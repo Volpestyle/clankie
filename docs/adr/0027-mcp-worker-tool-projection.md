@@ -1,6 +1,9 @@
 # ADR 0027: Doctrine-projected MCP worker tools and native web research
 
-Status: accepted (James, 2026-07-12).
+Status: accepted (James, 2026-07-12). The captain's exclusion from web reach is
+amended by [ADR 0082](0082-clankie-holds-the-browser.md); the MCP registry, the
+risk-class vocabulary, the worker projection, and the shell/filesystem
+exclusion remain authoritative here.
 
 ## Context
 

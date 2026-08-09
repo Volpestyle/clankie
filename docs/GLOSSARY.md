@@ -1,6 +1,8 @@
 # Glossary
 
 - **Captain/Lead:** persistent agent responsible for mission leadership and synthesis.
+- **Eve:** the filesystem-first Apache-2.0 framework the captain runs on ([eve.dev](https://eve.dev/docs), pinned in `apps/captain-eve/package.json`). It supplies durable sessions with checkpointed steps and parked work, filesystem-authored instructions, typed tools with approval gating, load-on-demand skills, channels, connections, bounded subagents, schedules, a sandbox, and evals. Clankie keeps mission scheduling, action policy, runner state, and the versioned worker protocol outside Eve so clients and workers never couple to a beta framework API; the captain's built-in shell, filesystem, and web tools stay disabled ([`apps/captain-eve/README.md`](../apps/captain-eve/README.md)).
+- **Lane:** one durable Eve session for a single conversation, addressed by channel rather than transport, so a TUI conversation, a Discord channel, a Slack thread, a Linear thread, and gameplay each continue independently. Lanes share the authored agent definition, soul, and a versioned character projection — never continuation tokens or copied transcripts. A private registry owns each lane's session and continuation token; a token observed in a second lane fails closed.
 - **Mission:** goal, doctrine, budget, success criteria, task graph, approvals, and artifacts.
 - **Task:** bounded unit with dependencies, role, execution class, scope, and evidence contract.
 - **Worker:** provider-native agent or process capable of executing a task.
