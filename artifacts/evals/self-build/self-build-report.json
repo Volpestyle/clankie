@@ -1,8 +1,8 @@
 {
   "version": "1",
-  "missionId": "self-build-heterogeneous-7a84fbb6",
+  "missionId": "self-build-heterogeneous-bf68b3ae",
   "doctrineHash": "4835cb125d1c352d",
-  "generatedAt": "2026-08-08T03:45:07.255Z",
+  "generatedAt": "2026-08-09T04:10:08.283Z",
   "overallScore": 1,
   "passed": true,
   "threshold": 0.85,
