@@ -70,8 +70,11 @@ describe("ensureCaptainService", () => {
     const stale = captainInfo() as {
       tools: { available: Array<{ name: string }>; disabledFramework: string[] };
     };
-    stale.tools.available.push({ name: "bash" });
-    stale.tools.disabledFramework = stale.tools.disabledFramework.filter((name) => name !== "bash");
+    // `write_file` rather than `bash`: authored `bash` is part of the bank
+    // since ADR 0086, so the exemplar has to be a name still on the disabled
+    // list for this to test what it claims to.
+    stale.tools.available.push({ name: "write_file" });
+    stale.tools.disabledFramework = stale.tools.disabledFramework.filter((name) => name !== "write_file");
     expect(isCaptainInfo(stale)).toBe(false);
   });
 
@@ -129,11 +132,7 @@ describe("ensureCaptainService", () => {
       expect(handle.owned).toBe(true);
       expect(handle.generation).toBe(TEST_GENERATION);
       expect(unreffed).toBe(1);
-      expect(statuses).toEqual([
-        "Checking for a running Clankie…",
-        "Building Clankie…",
-        "Starting Clankie…",
-      ]);
+      expect(statuses).toEqual(["Checking for a running Clankie…", "Building Clankie…", "Starting Clankie…"]);
       expect(calls).toEqual([
         {
           command: "pnpm",

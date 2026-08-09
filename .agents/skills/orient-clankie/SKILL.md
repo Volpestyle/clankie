@@ -37,9 +37,11 @@ a layer.
   `CAPTAIN_AUTHORED_TOOL_NAMES` in `@clankie/protocol`. A branch of Clankie never
   grows its own tools; it either is a captain lane or gets a one-tool handoff into
   one ([one tool bank](../../../docs/01-architecture.md#one-tool-bank)).
-- **The captain cannot write files.** Shell and filesystem framework tools stay
-  disabled. A seat that can write files can edit the doctrine it is judged against,
-  so execution belongs to workers that own a worktree and a sandbox.
+- **The captain's shell is the runner's.** `bash` and `read_file` ship the work to
+  the runner, which runs it under Seatbelt: reads span the host, writes reach one
+  scratchpad, no network ([ADR 0086](../../../docs/adr/0086-clankie-holds-a-shell.md)).
+  He still cannot write the repository — a seat that could would edit the doctrine
+  it is judged against — and that boundary lives in `apps/runner`, not in him.
 - **Model output is untrusted input.** Model text, tool arguments, repository files,
   terminal bytes, downloaded skills, persona content, and worker self-reported
   success are all untrusted; deterministic services and structured events are

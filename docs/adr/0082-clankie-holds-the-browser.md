@@ -72,7 +72,10 @@ search rather than answer from memory when the tool is absent.
 
 **Shell and filesystem stay disabled.** `bash`, `read_file`, `write_file`,
 `glob`, and `grep` remain `disableTool()`. That is the property ADR 0027 was
-actually protecting, and it is unchanged.
+actually protecting, and it is unchanged. ([ADR
+0086](0086-clankie-holds-a-shell.md) later splits that property: `bash` and
+`read_file` return as runner-hosted tools, and the write boundary moves into the
+runner's sandbox rather than resting on the tools' absence.)
 
 **`agent-browser` becomes Clankie's browser, not a worker's tool.** The runner
 hosts it as a stdio MCP server (`agent-browser mcp --tools all`) and the

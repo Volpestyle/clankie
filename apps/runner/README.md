@@ -18,7 +18,7 @@ state, prompts, action payloads, and gameplay continuation authority cannot be
 represented.
 
 The exact-loopback gateway listens on
-`CLANKIE_ACTIVITY_OBSERVATION_PORT` (default `4314`) and authenticates with the
+the shared loopback plane (`CLANKIE_RUNNER_LOOPBACK_PORT`, default `4313`) and authenticates with the
 runner bearer. It serves only the current snapshot and returns not-found before
 the first settled turn or after the matching session clears. The durable journal
 remains the historical debugging artifact; the projection is present-tense and
@@ -52,8 +52,8 @@ Herdr's `agent.prompt`, and reserves the whole bound workspace from new mission
 write tasks. A foreign adopted process is not an executable worker and never
 receives a mission assignment or acts as verifier of record.
 
-The exact-loopback gateway listens on `CLANKIE_AGENT_CENSUS_PORT` (default
-`4315`) with the runner bearer and serves `/v1/agents/census`, `/v1/agents/adopt`,
+The shared exact-loopback plane (`CLANKIE_RUNNER_LOOPBACK_PORT`, default `4313`)
+carries the runner bearer and serves `/v1/agents/census`, `/v1/agents/adopt`,
 `/v1/agents/direct`, and `/v1/agents/release`. Direction re-verifies the binding
 against the live transport immediately before delivering, and records that
 direction happened and how long it was — never what was said.
@@ -94,7 +94,7 @@ never enter the store. `CLANKIE_WORKER_TRANSCRIPT_MAX_ENTRIES` defaults to 500
 entries per run.
 
 The loopback-only transcript gateway listens on
-`CLANKIE_WORKER_TRANSCRIPT_PORT` (default `4313`) and uses the configured runner
+`CLANKIE_RUNNER_LOOPBACK_PORT` (default `4313`) and uses the configured runner
 bearer credential. It exposes internal snapshot and NDJSON-tail routes for the
 control-plane injected reader. Cursors survive restart and yield typed
 retention-expired or worker-run-replaced recovery instead of guessing a replay

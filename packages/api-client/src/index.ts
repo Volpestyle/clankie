@@ -2,10 +2,18 @@ import {
   AdoptWorkerResultSchema,
   BrowserToolCatalogSchema,
   CallBrowserToolResultSchema,
+  CAPTAIN_SHELL_READ_PATH,
+  CAPTAIN_SHELL_RUN_PATH,
+  CaptainFileReadResultSchema,
+  CaptainShellRunResultSchema,
   GenerateImageResultSchema,
   GenerateVideoResultSchema,
   MEDIA_IMAGE_GENERATION_PATH,
   MEDIA_VIDEO_GENERATION_PATH,
+  type CaptainFileReadRequest,
+  type CaptainFileReadResult,
+  type CaptainShellRunRequest,
+  type CaptainShellRunResult,
   type GenerateImageRequest,
   type GenerateImageResult,
   type GenerateVideoRequest,
@@ -896,6 +904,29 @@ export class ClankieApiClient {
       body: JSON.stringify(request),
     });
     return CallBrowserToolResultSchema.parse(body.result);
+  }
+
+  /**
+   * Run one command in his scratchpad (ADR 0086). Writes reach the scratchpad
+   * and nothing else, and the runner — not this client — is what enforces that.
+   */
+  public async runCaptainShell(request: CaptainShellRunRequest): Promise<CaptainShellRunResult> {
+    const body = await this.request<{ result: unknown }>(CAPTAIN_SHELL_RUN_PATH, {
+      method: "POST",
+      headers: this.activityReadHeaders(),
+      body: JSON.stringify(request),
+    });
+    return CaptainShellRunResultSchema.parse(body.result);
+  }
+
+  /** Read one file anywhere the runner account can reach (ADR 0086). */
+  public async readCaptainFile(request: CaptainFileReadRequest): Promise<CaptainFileReadResult> {
+    const body = await this.request<{ result: unknown }>(CAPTAIN_SHELL_READ_PATH, {
+      method: "POST",
+      headers: this.activityReadHeaders(),
+      body: JSON.stringify(request),
+    });
+    return CaptainFileReadResultSchema.parse(body.result);
   }
 
   /**

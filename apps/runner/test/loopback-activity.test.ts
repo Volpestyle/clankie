@@ -1,15 +1,25 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  createActivityObservationGateway,
-  type ActivityObservationGateway,
-} from "../src/activity-observation-gateway.ts";
+  activityObservationCapability,
+  createLoopbackGateway,
+  type LoopbackGateway,
+} from "../src/loopback-gateway.ts";
 import { ActivityObservationProjection } from "../src/activity-observation.ts";
 
-const gateways: ActivityObservationGateway[] = [];
+const gateways: LoopbackGateway[] = [];
 
 afterEach(async () => {
   await Promise.all(gateways.splice(0).map((gateway) => gateway.close()));
 });
+
+async function openGateway(
+  projection: ActivityObservationProjection,
+  token: string,
+): Promise<LoopbackGateway> {
+  const gateway = await createLoopbackGateway({ token, port: 0 });
+  gateway.register(activityObservationCapability(projection));
+  return gateway;
+}
 
 describe("activity observation gateway", () => {
   it("is exact-loopback, bearer-gated, latest-only, and no-store", async () => {
@@ -29,7 +39,7 @@ describe("activity observation gateway", () => {
         framebufferSha256: null,
       },
     });
-    const gateway = await createActivityObservationGateway({ projection, token: "secret", port: 0 });
+    const gateway = await openGateway(projection, "secret");
     gateways.push(gateway);
     const url = `http://${gateway.address.host}:${String(gateway.address.port)}/v1/activity-observations/current`;
 
@@ -41,11 +51,7 @@ describe("activity observation gateway", () => {
   });
 
   it("returns not found instead of a stale or fabricated snapshot", async () => {
-    const gateway = await createActivityObservationGateway({
-      projection: new ActivityObservationProjection(),
-      token: "secret",
-      port: 0,
-    });
+    const gateway = await openGateway(new ActivityObservationProjection(), "secret");
     gateways.push(gateway);
     const response = await fetch(
       `http://${gateway.address.host}:${String(gateway.address.port)}/v1/activity-observations/current`,

@@ -3722,6 +3722,7 @@ export type DiscordPersonMemoryDeleteResult = z.infer<typeof DiscordPersonMemory
 export const CAPTAIN_AUTHORED_TOOL_NAMES = [
   "add_recovery",
   "adopt_agent",
+  "bash",
   "create_mission",
   "decide_action",
   "direct_agent",
@@ -3730,6 +3731,7 @@ export const CAPTAIN_AUTHORED_TOOL_NAMES = [
   "get_mission",
   "get_self_state",
   "observe_current_activity",
+  "read_file",
   "remember_episode",
   "start_mission",
   "start_play",
@@ -3786,6 +3788,25 @@ export type CallBrowserToolRequest = z.infer<typeof CallBrowserToolRequestSchema
  * and an approval may be outstanding. Both come back as results the captain
  * can relay in words rather than errors he has to interpret.
  */
+/**
+ * A non-text result the browser produced, parked as bytes on the runner.
+ *
+ * Screenshots come back as base64 image blocks, and base64 pixels are the one
+ * thing that must never enter a captain turn: a single screenshot is tens of
+ * kilobytes of tokens that say nothing a model can read. The bytes are written
+ * where the Discord attachment resolver can already find them and only the
+ * hash-bound reference travels, which is the same shape every other artifact
+ * in this system uses.
+ */
+export const BrowserArtifactSchema = z.object({
+  /** `sha256:<hex>:<path-relative-to-the-attachment-root>`, as the resolver expects. */
+  artifactRef: z.string().regex(/^sha256:[0-9a-f]{64}:.+$/u),
+  filename: z.string().min(1).max(200),
+  mimeType: z.string().min(1).max(100),
+  byteLength: z.number().int().nonnegative(),
+});
+export type BrowserArtifact = z.infer<typeof BrowserArtifactSchema>;
+
 export const CallBrowserToolResultSchema = z.discriminatedUnion("outcome", [
   z.object({
     outcome: z.literal("ok"),
@@ -3793,6 +3814,8 @@ export const CallBrowserToolResultSchema = z.discriminatedUnion("outcome", [
     /** Text blocks from the MCP result, already bounded by the host. */
     content: z.string().max(200_000),
     isError: z.boolean().default(false),
+    /** Images and other bytes the call produced; empty for most tools. */
+    artifacts: z.array(BrowserArtifactSchema).max(8).default([]),
   }),
   z.object({
     outcome: z.literal("refused"),
@@ -3804,6 +3827,89 @@ export const CallBrowserToolResultSchema = z.discriminatedUnion("outcome", [
 export type CallBrowserToolResult = z.infer<typeof CallBrowserToolResultSchema>;
 
 // ---------------------------------------------------------------------------
+// Clankie's own shell (ADR 0086).
+//
+// One bash seat and one file read, both executed by the runner and neither by
+// the captain's own process. Reads span the host; writes reach exactly one
+// scratch directory, confined by the same macOS Seatbelt profile that holds a
+// mission worker. The captain never opens a file descriptor — he asks, and a
+// process he does not own answers.
+// ---------------------------------------------------------------------------
+
+export const CAPTAIN_SHELL_RUN_PATH = "/v1/shell/run";
+export const CAPTAIN_SHELL_READ_PATH = "/v1/shell/read";
+
+export const CaptainShellRunRequestSchema = z.object({
+  schemaVersion: z.literal(1),
+  command: z.string().trim().min(1).max(4_000),
+  /** Bounded by the host regardless; a command that outlives it comes back `timed_out`. */
+  timeoutMs: z.number().int().min(1_000).max(600_000).optional(),
+});
+export type CaptainShellRunRequest = z.infer<typeof CaptainShellRunRequestSchema>;
+
+export const CaptainFileReadRequestSchema = z.object({
+  schemaVersion: z.literal(1),
+  path: z.string().trim().min(1).max(4_096),
+  /** 1-based first line to return. */
+  offset: z.number().int().min(1).optional(),
+  limit: z.number().int().min(1).max(5_000).optional(),
+});
+export type CaptainFileReadRequest = z.infer<typeof CaptainFileReadRequestSchema>;
+
+/**
+ * Every one of these is a sentence he can say out loud. A refusal is a normal
+ * outcome he relays, not an exception he has to invent an explanation for.
+ */
+export const CaptainShellRefusalReasonSchema = z.enum([
+  "doctrine_denied",
+  "approval_required",
+  "shell_unavailable",
+  "sandbox_unavailable",
+  "path_unreadable",
+  "timed_out",
+]);
+export type CaptainShellRefusalReason = z.infer<typeof CaptainShellRefusalReasonSchema>;
+
+export const CaptainShellRunResultSchema = z.discriminatedUnion("outcome", [
+  z.object({
+    outcome: z.literal("ok"),
+    exitCode: z.number().int(),
+    stdout: z.string().max(200_000),
+    stderr: z.string().max(200_000),
+    truncated: z.boolean().default(false),
+    /**
+     * Seatbelt or proxy refusals observed while the command ran. A write
+     * outside the scratchpad lands here rather than silently succeeding, so he
+     * can tell "I was stopped" from "it worked".
+     */
+    denials: z.array(z.string().max(200)).max(16).default([]),
+  }),
+  z.object({
+    outcome: z.literal("refused"),
+    reason: CaptainShellRefusalReasonSchema,
+    detail: z.string().max(500).optional(),
+  }),
+]);
+export type CaptainShellRunResult = z.infer<typeof CaptainShellRunResultSchema>;
+
+export const CaptainFileReadResultSchema = z.discriminatedUnion("outcome", [
+  z.object({
+    outcome: z.literal("ok"),
+    path: z.string().max(4_096),
+    content: z.string().max(200_000),
+    truncated: z.boolean().default(false),
+    /** 1-based line number of the first returned line. */
+    firstLine: z.number().int().min(1),
+    totalLines: z.number().int().nonnegative(),
+  }),
+  z.object({
+    outcome: z.literal("refused"),
+    reason: CaptainShellRefusalReasonSchema,
+    detail: z.string().max(500).optional(),
+  }),
+]);
+export type CaptainFileReadResult = z.infer<typeof CaptainFileReadResultSchema>;
+
 // ---------------------------------------------------------------------------
 // Making a picture (ADR 0085).
 //

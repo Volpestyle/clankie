@@ -4,18 +4,28 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WorkerTranscriptProjection } from "../src/worker-transcript.ts";
 import {
-  createWorkerTranscriptGateway,
-  type WorkerTranscriptGateway,
-} from "../src/worker-transcript-gateway.ts";
+  createLoopbackGateway,
+  workerTranscriptCapability,
+  type LoopbackGateway,
+} from "../src/loopback-gateway.ts";
 
 const roots: string[] = [];
-const gateways: WorkerTranscriptGateway[] = [];
+const gateways: LoopbackGateway[] = [];
 const key = { missionId: "mission-gateway", taskId: "task-gateway", workerRunId: "run-gateway" };
 
 afterEach(async () => {
   await Promise.all(gateways.splice(0).map((gateway) => gateway.close()));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
+
+async function openTranscriptGateway(
+  projection: WorkerTranscriptProjection,
+  token: string,
+): Promise<LoopbackGateway> {
+  const gateway = await createLoopbackGateway({ token, port: 0 });
+  gateway.register(workerTranscriptCapability(projection));
+  return gateway;
+}
 
 describe("runner worker transcript gateway", () => {
   it("requires bearer authority for snapshots and streams replay as NDJSON", async () => {
@@ -33,7 +43,7 @@ describe("runner worker transcript gateway", () => {
       kind: "status",
       data: { state: "working" },
     });
-    const gateway = await createWorkerTranscriptGateway({ projection, token: "runner-secret", port: 0 });
+    const gateway = await openTranscriptGateway(projection, "runner-secret");
     gateways.push(gateway);
     const base = `http://${gateway.address.host}:${gateway.address.port}`;
     const path = "/v1/missions/mission-gateway/tasks/task-gateway/workers/run-gateway/transcript";

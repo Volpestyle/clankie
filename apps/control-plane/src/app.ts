@@ -58,6 +58,10 @@ import {
   GenerateVideoRequestSchema,
   MEDIA_IMAGE_GENERATION_PATH,
   MEDIA_VIDEO_GENERATION_PATH,
+  CAPTAIN_SHELL_READ_PATH,
+  CAPTAIN_SHELL_RUN_PATH,
+  CaptainFileReadRequestSchema,
+  CaptainShellRunRequestSchema,
   DirectAdoptedWorkerRequestSchema,
   ApprovalDecisionInputSchema,
   ApprovalRequestRecordSchema,
@@ -195,11 +199,14 @@ import {
   isProjectionEventStore,
   type WorkspaceBindingResolver,
 } from "./tracker-ceremony.ts";
-import type { WorkerTranscriptReadPort } from "./worker-transcripts.ts";
-import type { ActivityObservationReadPort } from "./activity-observations.ts";
-import type { BrowserToolPort } from "./browser-tools.ts";
+import type {
+  ActivityObservationReadPort,
+  AgentCensusReadPort,
+  BrowserToolPort,
+  CaptainShellPort,
+  WorkerTranscriptReadPort,
+} from "./runner-loopback.ts";
 import type { MediaGeneratorPort } from "./media-generation.ts";
-import type { AgentCensusReadPort } from "./agent-census.ts";
 import { MissionEventFeed, type MissionEventFeedTailRead } from "./mission-event-feed.ts";
 
 const logger = createLogger({ service: "clankie-control-plane", version: "0.1.0" });
@@ -394,6 +401,8 @@ export interface ControlPlaneDependencies {
   activityObservations?: ActivityObservationReadPort;
   /** Clankie's runner-hosted browser (ADR 0082); absent leaves the routes 503. */
   browserTools?: BrowserToolPort;
+  /** Clankie's runner-hosted shell (ADR 0086); absent leaves the routes 503. */
+  captainShell?: CaptainShellPort;
   /** Image and video generation (ADR 0085); absent leaves the routes 503. */
   mediaGenerator?: MediaGeneratorPort;
   /** Runner-owned view of agents this control plane did not start (ADR 0078). */
@@ -3541,6 +3550,49 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       return context.json({ error: "browser_upstream_failure" }, 502);
     }
   });
+
+  /**
+   * Clankie's shell ([ADR 0086](../../../docs/adr/0086-clankie-holds-a-shell.md)).
+   *
+   * The runner decides and confines; this plane mediates, exactly as it does
+   * for the browser above. A doctrine refusal comes back 200 with a reason he
+   * can say out loud, because being told no is a normal outcome he relays in
+   * words — only an unconfigured plane or a malformed body is an error status.
+   */
+  const shellRoute = <Request>(
+    path: string,
+    schema: { safeParse(value: unknown): { success: true; data: Request } | { success: false } },
+    run: (shell: CaptainShellPort, request: Request, signal: AbortSignal) => Promise<unknown>,
+  ): void => {
+    app.post(path, async (context) => {
+      const authorization = await authenticateAgentCensusPrincipal(context);
+      if ("denial" in authorization) return authorization.denial;
+      if (dependencies.captainShell === undefined) {
+        return context.json({ error: "shell_unavailable" }, 503);
+      }
+      let body: unknown;
+      try {
+        body = await context.req.json();
+      } catch {
+        return context.json({ error: "invalid_shell_request" }, 400);
+      }
+      const parsed = schema.safeParse(body);
+      if (!parsed.success) return context.json({ error: "invalid_shell_request" }, 400);
+      try {
+        const result = await run(dependencies.captainShell, parsed.data, context.req.raw.signal);
+        return context.json({ result }, 200, { "cache-control": "no-store" });
+      } catch {
+        return context.json({ error: "shell_upstream_failure" }, 502);
+      }
+    });
+  };
+
+  shellRoute(CAPTAIN_SHELL_RUN_PATH, CaptainShellRunRequestSchema, (shell, request, signal) =>
+    shell.run(request, signal),
+  );
+  shellRoute(CAPTAIN_SHELL_READ_PATH, CaptainFileReadRequestSchema, (shell, request, signal) =>
+    shell.read(request, signal),
+  );
 
   /**
    * Making a picture or a clip (ADR 0085).

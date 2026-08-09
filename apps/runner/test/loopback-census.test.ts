@@ -1,12 +1,13 @@
 import type { AgentCensus } from "@clankie/protocol";
 import { afterEach, describe, expect, it } from "vitest";
+import type { AgentCensusPort } from "../src/agent-census.ts";
 import {
-  createAgentCensusGateway,
-  type AgentCensusGateway,
-  type AgentCensusPort,
-} from "../src/agent-census-gateway.ts";
+  agentCensusCapability,
+  createLoopbackGateway,
+  type LoopbackGateway,
+} from "../src/loopback-gateway.ts";
 
-const gateways: AgentCensusGateway[] = [];
+const gateways: LoopbackGateway[] = [];
 
 afterEach(async () => {
   await Promise.all(gateways.splice(0).map((gateway) => gateway.close()));
@@ -38,7 +39,8 @@ function stubPort(overrides: Partial<AgentCensusPort> = {}): AgentCensusPort & {
 }
 
 async function openGateway(agents: AgentCensusPort): Promise<string> {
-  const gateway = await createAgentCensusGateway({ agents, token: "secret", port: 0 });
+  const gateway = await createLoopbackGateway({ token: "secret", port: 0 });
+  gateway.register(agentCensusCapability(agents));
   gateways.push(gateway);
   return `http://${gateway.address.host}:${String(gateway.address.port)}`;
 }
@@ -46,7 +48,7 @@ async function openGateway(agents: AgentCensusPort): Promise<string> {
 describe("agent census gateway", () => {
   it("refuses to bind anything but exact loopback", async () => {
     await expect(
-      createAgentCensusGateway({ agents: stubPort(), token: "secret", host: "0.0.0.0", port: 0 }),
+      createLoopbackGateway({ token: "secret", bindHost: "0.0.0.0", port: 0 }),
     ).rejects.toThrow(/exact loopback/);
   });
 

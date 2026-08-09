@@ -49,8 +49,8 @@ The execution boundary is fail-closed: `CLANKIE_CAPTAIN_TOKEN` authenticates sta
 `GET /v1/embodiment/sessions/live/activity` is the authenticated captain/operator
 read for Clankie's present activity ([ADR 0077](../../docs/adr/0077-current-activity-is-a-runner-owned-self-observation.md)).
 The injected `RunnerActivityObservationClient` reads the runner's exact-loopback
-gateway at `CLANKIE_ACTIVITY_OBSERVATION_URL` (default
-`http://127.0.0.1:4314`) with the runner credential. The control plane never
+runner loopback plane at `CLANKIE_RUNNER_LOOPBACK_URL` (default
+`http://127.0.0.1:4313`) with the runner credential. The control plane never
 persists or reconstructs the snapshot. It returns `not_playing` when there is no
 live embodiment session, `pending` before that session's first settled turn,
 and `snapshot` only when runner and control-plane session/environment identities
@@ -60,7 +60,7 @@ match. Upstream failure and stale identity fail closed.
 
 Four authenticated captain/operator routes proxy the runner's census gateway
 ([ADR 0078](../../docs/adr/0078-adopted-workers.md)) at
-`CLANKIE_AGENT_CENSUS_URL` (default `http://127.0.0.1:4315`):
+`CLANKIE_RUNNER_LOOPBACK_URL` (default `http://127.0.0.1:4313`):
 
 | Route                     | Purpose                                   | Authority                        |
 | ------------------------- | ----------------------------------------- | -------------------------------- |
@@ -96,7 +96,7 @@ replacement return `409` with typed recovery data.
 
 `WorkerTranscriptReadPort` is injected. Production uses
 `RunnerWorkerTranscriptClient` against the exact loopback origin configured by
-`CLANKIE_WORKER_TRANSCRIPT_URL` (default `http://127.0.0.1:4313`) and authenticates
+`CLANKIE_RUNNER_LOOPBACK_URL` (default `http://127.0.0.1:4313`) and authenticates
 with the runner credential. The control plane never owns, reconstructs, or
 persists transcript entries and rejects upstream mission/task/run identity
 mismatches before forwarding data.

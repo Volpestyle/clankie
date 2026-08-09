@@ -101,9 +101,17 @@ delivered straight into the loop is answered without lookup or memory. In a
 voice room the question already reaches the captain through `ask_clankie`, so
 the gap is narrower than it looks.
 
-Shell and filesystem framework tools stay disabled for the captain. A seat that
-can write files is a seat that can edit the doctrine it is judged against, so
-execution keeps belonging to workers that own a worktree and a sandbox.
+The captain's shell is runner-hosted, never his own process
+([ADR 0086](adr/0086-clankie-holds-a-shell.md)). `bash` and `read_file` ship one
+command or one path to the runner, which runs it under the same Seatbelt
+sandbox that confines a mission worker: reads span the host, writes reach one
+scratchpad, and there is no network. `write_file`, `glob`, and `grep` stay
+disabled, since `bash` covers them.
+
+A seat that can write files anywhere is a seat that can edit the doctrine it is
+judged against, so mission execution keeps belonging to workers that own a
+worktree and a sandbox — and the scratchpad boundary that keeps the captain out
+of the tree is enforced in `apps/runner`, not in the captain.
 
 ## Trust boundaries
 

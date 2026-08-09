@@ -54,15 +54,7 @@ import {
   startTerminalGatewayDevHandoff,
 } from "./terminal-gateway-dev-handoff.ts";
 import { WorkerTranscriptProjection } from "./worker-transcript.ts";
-import {
-  createWorkerTranscriptGateway,
-  WORKER_TRANSCRIPT_GATEWAY_PORT,
-} from "./worker-transcript-gateway.ts";
 import { ActivityObservationProjection } from "./activity-observation.ts";
-import {
-  ACTIVITY_OBSERVATION_GATEWAY_PORT,
-  createActivityObservationGateway,
-} from "./activity-observation-gateway.ts";
 
 export {
   createRunnerEnvironmentLifecycle,
@@ -118,7 +110,6 @@ function repoConfigPath(value: string | undefined): string | undefined {
   if (trimmed === undefined || trimmed.length === 0) return undefined;
   return resolve(repoRoot, trimmed);
 }
-
 
 if (process.argv.includes("--recovery-probe")) {
   const { runRecoveryProbeFromCli } = await import("./recovery-probe.ts");
@@ -314,61 +305,38 @@ try {
   );
 }
 
+// One plane for every capability the control plane reads (ADR 0087). A port
+// already in use must not take the runner down with it: missions execute over
+// the control-plane connection, not over this, so a collision costs Clankie his
+// census and his browser rather than his ability to work.
+let loopback: Awaited<ReturnType<typeof createLoopbackGateway>> | undefined;
 if (runnerToken) {
-  const transcriptGateway = await createWorkerTranscriptGateway({
-    projection: transcriptProjection,
-    token: runnerToken,
-    port: Number(process.env.CLANKIE_WORKER_TRANSCRIPT_PORT ?? WORKER_TRANSCRIPT_GATEWAY_PORT),
-  });
-  const closeTranscriptGateway = () => void transcriptGateway.close().catch(() => undefined);
-  process.once("SIGINT", closeTranscriptGateway);
-  process.once("SIGTERM", closeTranscriptGateway);
-  logger.info(
-    {
-      event: "worker_transcript.gateway.enabled",
-      host: transcriptGateway.address.host,
-      port: transcriptGateway.address.port,
-    },
-    "runner-owned worker transcript gateway enabled",
-  );
-}
-
-if (runnerToken) {
-  const censusGateway = await createAgentCensusGateway({
-    agents: agentCensus,
-    token: runnerToken,
-    port: Number(process.env.CLANKIE_AGENT_CENSUS_PORT ?? AGENT_CENSUS_GATEWAY_PORT),
-  });
-  const closeCensusGateway = () => void censusGateway.close().catch(() => undefined);
-  process.once("SIGINT", closeCensusGateway);
-  process.once("SIGTERM", closeCensusGateway);
-  logger.info(
-    {
-      event: "agent_census.gateway.enabled",
-      host: censusGateway.address.host,
-      port: censusGateway.address.port,
-    },
-    "runner-owned agent census gateway enabled",
-  );
-}
-
-if (runnerToken) {
-  const activityGateway = await createActivityObservationGateway({
-    projection: activityObservationProjection,
-    token: runnerToken,
-    port: Number(process.env.CLANKIE_ACTIVITY_OBSERVATION_PORT ?? ACTIVITY_OBSERVATION_GATEWAY_PORT),
-  });
-  const closeActivityGateway = () => void activityGateway.close().catch(() => undefined);
-  process.once("SIGINT", closeActivityGateway);
-  process.once("SIGTERM", closeActivityGateway);
-  logger.info(
-    {
-      event: "activity_observation.gateway.enabled",
-      host: activityGateway.address.host,
-      port: activityGateway.address.port,
-    },
-    "runner-owned activity observation gateway enabled",
-  );
+  try {
+    loopback = await createLoopbackGateway({
+      token: runnerToken,
+      port: Number(process.env.CLANKIE_RUNNER_LOOPBACK_PORT ?? LOOPBACK_GATEWAY_PORT),
+    });
+    loopback.register(workerTranscriptCapability(transcriptProjection));
+    loopback.register(agentCensusCapability(agentCensus));
+    loopback.register(activityObservationCapability(activityObservationProjection));
+    const closeLoopback = () => void loopback?.close().catch(() => undefined);
+    process.once("SIGINT", closeLoopback);
+    process.once("SIGTERM", closeLoopback);
+    logger.info(
+      {
+        event: "runner.loopback.enabled",
+        host: loopback.address.host,
+        port: loopback.address.port,
+        capabilities: ["worker_transcript", "agent_census", "activity_observation"],
+      },
+      "runner loopback gateway enabled",
+    );
+  } catch (error) {
+    logger.error(
+      { event: "runner.loopback.disabled", err: error instanceof Error ? error.message : String(error) },
+      "runner loopback gateway failed to start; mission execution continues without it",
+    );
+  }
 }
 
 // Asked embodiment (ADR 0063): the play host shares this process because it
@@ -442,12 +410,7 @@ if (!repoPath) {
   // Clankie's own browser (ADR 0082). Off unless the operator enables it and
   // doctrine plus a registry are both present, so the fail-closed rule that
   // governs every other MCP projection governs this one too.
-  if (
-    runnerToken &&
-    doctrine &&
-    mcpRegistry &&
-    browserEnabled(process.env.CLANKIE_BROWSER_ENABLED)
-  ) {
+  if (loopback && doctrine && mcpRegistry && browserEnabled(process.env.CLANKIE_BROWSER_ENABLED)) {
     try {
       const browserHost = await createBrowserHost({
         registry: mcpRegistry,
@@ -456,29 +419,43 @@ if (!repoPath) {
         logger,
         environment: process.env,
       });
-      const browserGateway = await createBrowserGateway({
-        host: browserHost,
-        token: runnerToken,
-        port: Number(process.env.CLANKIE_BROWSER_PORT ?? BROWSER_GATEWAY_PORT),
-      });
-      const closeBrowser = () => {
-        void browserGateway.close().catch(() => undefined);
-        void browserHost.close().catch(() => undefined);
-      };
+      loopback.register(browserCapability(browserHost));
+      const closeBrowser = () => void browserHost.close().catch(() => undefined);
       process.once("SIGINT", closeBrowser);
       process.once("SIGTERM", closeBrowser);
-      logger.info(
-        {
-          event: "browser.gateway.enabled",
-          host: browserGateway.address.host,
-          port: browserGateway.address.port,
-        },
-        "runner-owned browser gateway enabled",
-      );
+      logger.info({ event: "browser.capability.enabled" }, "runner-owned browser registered");
     } catch (error) {
       logger.error(
         { err: error instanceof Error ? error.message : String(error) },
         "browser host failed to start; Clankie has no browser this run",
+      );
+    }
+  }
+
+  // Clankie's own shell (ADR 0086). Doctrine decides what running one costs, so
+  // the gate is present whenever doctrine is; without it there is nothing to
+  // project and the capability stays off rather than defaulting open.
+  if (loopback && doctrine) {
+    try {
+      const shellHost = await createCaptainShellHost({
+        doctrine,
+        runnerStateRoot,
+        logger,
+        events: runnerEvents,
+        environment: process.env,
+        ...(process.env.CLANKIE_CAPTAIN_SCRATCH?.trim()
+          ? { scratchRoot: process.env.CLANKIE_CAPTAIN_SCRATCH.trim() }
+          : {}),
+      });
+      loopback.register(captainShellCapability(shellHost));
+      logger.info(
+        { event: "captain.shell.enabled", scratchPath: shellHost.scratchPath },
+        "runner-owned captain shell registered",
+      );
+    } catch (error) {
+      logger.error(
+        { err: error instanceof Error ? error.message : String(error) },
+        "captain shell failed to start; Clankie has no shell this run",
       );
     }
   }
@@ -599,8 +576,7 @@ if (!repoPath) {
         return (await workerAdoptions.active())
           .filter(
             (adoption) =>
-              adoption.grade === "directed" &&
-              adoption.binding.workspace.root === canonicalRepoRoot,
+              adoption.grade === "directed" && adoption.binding.workspace.root === canonicalRepoRoot,
           )
           .map((adoption) => ({
             id: adoption.adoptionId,

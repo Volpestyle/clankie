@@ -12,16 +12,23 @@ export { CAPTAIN_AUTHORED_TOOL_NAMES };
 /**
  * The framework tools the captain deliberately does not have.
  *
- * Shell and filesystem stay disabled: execution belongs in governed workers
- * that own a worktree and a sandbox, and a captain that can write files is a
- * captain that can edit the doctrine it is judged against.
+ * `write_file`, `glob`, and `grep` stay disabled because the authored `bash`
+ * covers all three, and three more surfaces would be three more things to
+ * reason about. What matters is that eve's *framework* versions stay off: they
+ * target eve's own container sandbox, not this machine, and nothing about them
+ * crosses a process boundary where doctrine could see it.
  *
- * Web reach is deliberately *not* on this list ([ADR 0082](../../../../docs/adr/0082-clankie-holds-the-browser.md)).
+ * Shell and filesystem reach is deliberately *not* absent from the bank
+ * ([ADR 0086](../../../../docs/adr/0086-clankie-holds-a-shell.md)). Authored
+ * `bash` and `read_file` ship the work to the runner, which confines writes to
+ * one scratchpad under Seatbelt — so the boundary lives in a process the
+ * captain does not own rather than in the absence of the tool.
+ *
+ * Web reach is likewise part of the bank ([ADR 0082](../../../../docs/adr/0082-clankie-holds-the-browser.md)).
  * Looking something up is what every lane asks him for and no lane could do,
- * so `web_fetch` and `web_search` are part of the bank rather than a reason to
- * spawn a research worker.
+ * so `web_fetch` and `web_search` are not a reason to spawn a research worker.
  */
-export const CAPTAIN_DISABLED_FRAMEWORK_TOOL_NAMES = ["bash", "glob", "grep", "read_file", "write_file"] as const;
+export const CAPTAIN_DISABLED_FRAMEWORK_TOOL_NAMES = ["glob", "grep", "write_file"] as const;
 
 export function assertLoopbackCaptainHost(host: string): URL {
   const url = new URL(host);

@@ -32,11 +32,12 @@ import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
 import { EveCaptainChannelTurnPort } from "./eve-captain-turn.ts";
 import { createCredentialBackedOperatorAuthenticator } from "./operator-auth.ts";
 import { FileWorkerSteeringStore } from "./worker-steering.ts";
-import { RunnerWorkerTranscriptClient } from "./worker-transcripts.ts";
-import { RunnerActivityObservationClient } from "./activity-observations.ts";
-import { RunnerBrowserToolClient } from "./browser-tools.ts";
+import {
+  DEFAULT_RUNNER_LOOPBACK_URL,
+  RunnerLoopback,
+  runnerPorts,
+} from "./runner-loopback.ts";
 import { ConfiguredMediaGenerator } from "./media-generation.ts";
-import { RunnerAgentCensusClient } from "./agent-census.ts";
 
 const logger = createLogger({ service: "clankie-control-plane", version: "0.1.0" });
 
@@ -241,22 +242,12 @@ const app = await createControlPlane({
   ...(runnerToken
     ? {
         authenticateRunner: createBearerAuthenticator(runnerToken, { runnerId }),
-        workerTranscripts: new RunnerWorkerTranscriptClient({
-          baseUrl: process.env.CLANKIE_WORKER_TRANSCRIPT_URL ?? "http://127.0.0.1:4313",
-          token: runnerToken,
-        }),
-        activityObservations: new RunnerActivityObservationClient({
-          baseUrl: process.env.CLANKIE_ACTIVITY_OBSERVATION_URL ?? "http://127.0.0.1:4314",
-          token: runnerToken,
-        }),
-        agentCensus: new RunnerAgentCensusClient({
-          baseUrl: process.env.CLANKIE_AGENT_CENSUS_URL ?? "http://127.0.0.1:4315",
-          token: runnerToken,
-        }),
-        browserTools: new RunnerBrowserToolClient({
-          baseUrl: process.env.CLANKIE_BROWSER_URL ?? "http://127.0.0.1:4316",
-          token: runnerToken,
-        }),
+        ...runnerPorts(
+          new RunnerLoopback({
+            baseUrl: process.env.CLANKIE_RUNNER_LOOPBACK_URL ?? DEFAULT_RUNNER_LOOPBACK_URL,
+            token: runnerToken,
+          }),
+        ),
       }
     : {}),
   authenticateCaptain: async (request) =>

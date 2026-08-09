@@ -11,7 +11,7 @@ import {
 import type { Hono } from "hono";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createControlPlane, type TrustedOperatorIdentity } from "../src/app.ts";
-import type { WorkerTranscriptReadPort, WorkerTranscriptTailRead } from "../src/worker-transcripts.ts";
+import type { WorkerTranscriptReadPort, WorkerTranscriptTailRead } from "../src/runner-loopback.ts";
 
 const DEVICE_KEY = Uint8Array.from(Buffer.alloc(32, 9));
 const OPERATOR = { authorization: "Bearer operator-secret" };

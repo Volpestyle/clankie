@@ -10,7 +10,7 @@ import type {
 } from "@clankie/protocol";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createControlPlane, type TrustedOperatorIdentity } from "../src/app.ts";
-import type { AgentCensusReadPort } from "../src/agent-census.ts";
+import type { AgentCensusReadPort } from "../src/runner-loopback.ts";
 
 const OPERATOR_HEADERS = { authorization: "Bearer operator-secret" };
 const CAPTAIN_HEADERS = { authorization: "Bearer captain-secret" };

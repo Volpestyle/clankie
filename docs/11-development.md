@@ -31,7 +31,7 @@ worker harnesses; `pnpm doctor` reports both, redacted.
 ## Local service ports
 
 - control plane: `4310`
-- runner current-activity gateway: `4314`
+- runner loopback plane (transcripts, census, activity, browser, shell): `4313`
 - activity watch surface / development relay: `4320`
 - captain Eve session API: `4321`
 - OTLP HTTP: `4318`

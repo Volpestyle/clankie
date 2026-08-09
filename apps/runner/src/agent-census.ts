@@ -13,11 +13,18 @@ import {
   type AgentObservation,
   type WorkerAdoption,
 } from "@clankie/protocol";
-import type { AgentCensusPort } from "./agent-census-gateway.ts";
 import type { ProcessLease } from "./process-leases.ts";
 import type { ReconcileAdoptionsReport, WorkerAdoptionStore } from "./worker-adoptions.ts";
 
 const logger = createLogger({ service: "clankie-runner-agent-census", version: "0.1.0" });
+
+/** What the loopback plane calls into. Owned here, where it is implemented (ADR 0078). */
+export interface AgentCensusPort {
+  census(): Promise<AgentCensus>;
+  adopt(request: unknown): Promise<unknown>;
+  release(request: unknown): Promise<void>;
+  direct(request: unknown): Promise<unknown>;
+}
 
 export interface TakeAgentCensusInput {
   runnerId: string;
