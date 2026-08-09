@@ -59,19 +59,23 @@ flowchart LR
   D[Discord text] --> C
   S[Slack · Linear] --> C
   V["Discord voice<br/>ask_clankie"] --> C
-  P["Free-play mind<br/>ask_captain"] --> C
   C["Captain — the one tool bank"] --> L["look it up<br/>web_search · web_fetch"]
-  C --> B["browse<br/>agent_browser__*"]
   C --> W["delegate<br/>governed workers"]
+  P["Free-play mind<br/>no tools, no handoff"] -.->|gap| C
 ```
 
-The bank holds three tiers of reach, chosen by cost rather than by lane
-([ADR 0082](adr/0082-clankie-holds-the-browser.md)). `web_search` and
-`web_fetch` answer a question at conversational cost. The runner-hosted
-`agent-browser` profile handles pages that need a real browser, with each tool
-carrying a doctrine risk class — reads run unattended, credential- and
-script-bearing verbs stop for an approval envelope. Bounded investigation and
-anything touching a worktree still goes to a governed worker.
+Reach is chosen by cost rather than by lane. `web_search` and `web_fetch`
+answer a question at conversational cost, so a lookup asked in voice is served
+on the same path as one asked in the TUI. Bounded investigation, anything
+needing a real browser, and anything touching a worktree goes to a governed
+worker. `web_search` is provider-backed and absent on models with no native
+backend; the captain is instructed to say so rather than answer from memory.
+
+The free-play mind is the one branch that satisfies neither half of the rule:
+it is a structured-output loop with no tools and no handoff, so a question put
+to Clankie mid-playthrough is answered without lookup or memory. Closing that,
+and giving the captain a doctrine-gated browser, are
+[ADR 0082](adr/0082-clankie-holds-the-browser.md)'s remaining work.
 
 Shell and filesystem framework tools stay disabled for the captain. A seat that
 can write files is a seat that can edit the doctrine it is judged against, so
