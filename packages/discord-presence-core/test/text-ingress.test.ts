@@ -538,7 +538,7 @@ describe("typing while he composes", () => {
     }
   });
 
-  it("never shows him typing over a message that merely passed him by", async () => {
+  it("shows him typing on a live follow-up that never repeats his name", async () => {
     const port = new RecordingPort();
     const ingress = new DiscordTextIngress(port, {
       ...config(),
@@ -554,17 +554,51 @@ describe("typing while he composes", () => {
     });
     expect(port.typing).toHaveLength(1);
 
-    // Reading the room is not composing: an unprompted turn he may well
-    // decline must not broadcast that he might speak.
-    port.silent = true;
+    // The back-and-forth is where the indicator matters most: he is composing
+    // an answer to someone already waiting on one, and having to re-say his
+    // name to see it is not how a conversation works.
+    await ingress.handle({
+      ...guildMessage("message-followup"),
+      channelId: "channel-live",
+      mentionsBot: false,
+      body: "did it though?",
+    });
+    expect(port.typing).toHaveLength(2);
+    expect(port.typing[1]).toMatchObject({
+      idempotencyKey: "message-followup:typing:0",
+      payload: { kind: "typing_start", channelId: "channel-live" },
+    });
+  });
+
+  it("stays invisible while he catches up on a backlog nobody is waiting on", async () => {
+    const port = new RecordingPort();
+    const ingress = new DiscordTextIngress(port, {
+      ...config(),
+      channelIds: new Set(),
+      replyPolicy: "addressed",
+      characterNames: ["clankie"],
+      liveMessageWindow: 0,
+    });
+    await ingress.handle({
+      ...guildMessage("message-asked"),
+      channelId: "channel-live",
+      mentionsBot: false,
+      body: "clankie how did the run go?",
+    });
+    expect(port.typing).toHaveLength(1);
+
     await expect(
       ingress.handle({
-        ...guildMessage("message-overheard"),
+        ...guildMessage("message-later"),
         channelId: "channel-live",
         mentionsBot: false,
-        body: "did it though?",
+        body: "any update?",
       }),
-    ).resolves.toMatchObject({ state: "declined" });
+    ).resolves.toEqual({ state: "buffered" });
+
+    // Checking in on a channel minutes later is him reading, not the room
+    // waiting on him; a timer must never light the channel up.
+    await expect(ingress.catchUp()).resolves.toMatchObject([{ state: "settled" }]);
     expect(port.typing).toHaveLength(1);
   });
 

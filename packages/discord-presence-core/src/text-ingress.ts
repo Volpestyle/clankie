@@ -502,14 +502,23 @@ export class DiscordTextIngress {
   }
 
   /**
-   * He is composing an answer to someone who actually asked him, so the
-   * channel shows him typing while the turn is in flight — the reply itself
-   * then clears the indicator, exactly as it does for a person.
+   * Somebody just said something he is reading live, so the channel shows him
+   * typing while the turn is in flight — the reply itself then clears the
+   * indicator, exactly as it does for a person.
    *
-   * Only an addressed message (a DM, a mention, or one of his names) earns
-   * this. An unprompted turn is him reading, and a room where he visibly
-   * started typing after every message he read — usually followed by silence —
-   * would advertise attention he mostly declines to use.
+   * Every live turn earns this, not only the ones that repeat his name. A
+   * follow-up inside a conversation he is already in ("did it pass?") is the
+   * case where the indicator matters most, and gating on being re-addressed
+   * made him answer a back-and-forth with no sign he was there. He may still
+   * choose silence, which reads as someone starting a reply and thinking
+   * better of it — the honest cost of not knowing his answer before he gives
+   * it. Nothing here can know earlier: the captain turn returns his decision
+   * and his words together (`CAPTAIN_SILENT_REPLY_SENTINEL`), with no
+   * mid-turn signal to wait for.
+   *
+   * A catch-up turn is the exception. Reading a backlog minutes later is him
+   * checking in, not answering a room that is waiting on him, and a channel
+   * that lights up on a timer advertises presence nobody asked for.
    *
    * The indicator is cosmetic, so it must never delay or fail the turn: posts
    * are fire-and-forget, and the first failure stops the refresh instead of
@@ -517,7 +526,7 @@ export class DiscordTextIngress {
    * control plane's narrative ledger like every other presence write.
    */
   private showTyping(message: DiscordInboundMessage, identity: DiscordPresenceWrite["identity"]): () => void {
-    if (message.guildId !== undefined && this.unprompted(message)) return () => undefined;
+    if (message.catchingUp === true) return () => undefined;
     let sequence = 0;
     const stop = (): void => {
       clearInterval(timer);
