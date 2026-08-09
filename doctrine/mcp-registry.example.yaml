@@ -27,60 +27,88 @@ servers:
       - { name: fetch_content, riskClass: read }
 
   # Clankie's own browser (ADR 0082). Hosted by the runner as a stdio MCP
-  # server on a dedicated profile, headless, never the operator's logged-in
-  # one. Unlike the worker projection, the captain receives approval-class
-  # tools gated rather than withheld, so `navigate` is unattended while
-  # `eval` and `set_cookies` stop for a human.
+  # server on Clankie's own persistent profile, headless, never the operator's
+  # browser. Unlike the worker projection, the captain receives approval-class
+  # tools gated rather than withheld, so reading a page is unattended while
+  # eval, credentials, and the CDP escape hatch stop for a human.
   #
-  # Risk classes follow agent-browser's own tool profiles: reads and
-  # observations are `read`, page interaction is `reversible-write`, anything
-  # that submits or persists is `irreversible-write` or `publish-external`,
-  # and arbitrary script execution is `destructive` because it can do all of
-  # the above at once.
+  # Names are verbatim from `agent-browser mcp --tools all` (v0.33.2, 64
+  # tools). They must match exactly: the host drops anything the registry does
+  # not declare, so a typo silently removes a capability rather than failing.
   - name: agent_browser
     description: Clankie's headless browser
     transport: { type: stdio, command: agent-browser, args: [mcp, --tools, all] }
     tools:
-      # core — navigation and observation
-      - { name: navigate, riskClass: read }
-      - { name: snapshot, riskClass: read }
-      - { name: screenshot, riskClass: read }
-      - { name: read, riskClass: read }
-      - { name: get, riskClass: read }
-      - { name: wait, riskClass: read }
-      - { name: scroll, riskClass: read }
-      - { name: back, riskClass: read }
-      - { name: forward, riskClass: read }
-      # core — page interaction
-      - { name: click, riskClass: reversible-write }
-      - { name: fill, riskClass: reversible-write }
-      - { name: type, riskClass: reversible-write }
-      - { name: press, riskClass: reversible-write }
-      - { name: select, riskClass: reversible-write }
-      - { name: hover, riskClass: reversible-write }
-      - { name: upload, riskClass: irreversible-write }
-      # tabs and frames
-      - { name: tabs, riskClass: read }
-      - { name: frames, riskClass: read }
-      - { name: dialog, riskClass: reversible-write }
-      - { name: close, riskClass: reversible-write }
-      # debug and audit
-      - { name: console, riskClass: read }
-      - { name: errors, riskClass: read }
-      - { name: a11y_audit, riskClass: read }
-      # network — inspection reads; interception rewrites what he is looking at
-      - { name: network_requests, riskClass: read }
-      - { name: har, riskClass: read }
-      - { name: intercept, riskClass: irreversible-write }
-      - { name: set_headers, riskClass: irreversible-write }
-      # state — identity and persistence; these carry credentials
-      - { name: cookies, riskClass: read }
-      - { name: set_cookies, riskClass: publish-external }
-      - { name: storage, riskClass: read }
-      - { name: auth, riskClass: publish-external }
-      - { name: profile, riskClass: irreversible-write }
-      # arbitrary script execution subsumes every class above
-      - { name: eval, riskClass: destructive }
+      # observation and navigation — no page mutation
+      - { name: agent_browser_back, riskClass: read }
+      - { name: agent_browser_find, riskClass: read }
+      - { name: agent_browser_forward, riskClass: read }
+      - { name: agent_browser_get_attr, riskClass: read }
+      - { name: agent_browser_get_box, riskClass: read }
+      - { name: agent_browser_get_count, riskClass: read }
+      - { name: agent_browser_get_html, riskClass: read }
+      - { name: agent_browser_get_styles, riskClass: read }
+      - { name: agent_browser_get_text, riskClass: read }
+      - { name: agent_browser_get_title, riskClass: read }
+      - { name: agent_browser_get_url, riskClass: read }
+      - { name: agent_browser_get_value, riskClass: read }
+      - { name: agent_browser_is_checked, riskClass: read }
+      - { name: agent_browser_is_enabled, riskClass: read }
+      - { name: agent_browser_is_visible, riskClass: read }
+      - { name: agent_browser_open, riskClass: read }
+      - { name: agent_browser_pdf, riskClass: read }
+      - { name: agent_browser_read, riskClass: read }
+      - { name: agent_browser_reload, riskClass: read }
+      - { name: agent_browser_screenshot, riskClass: read }
+      - { name: agent_browser_scroll, riskClass: read }
+      - { name: agent_browser_scroll_into_view, riskClass: read }
+      - { name: agent_browser_snapshot, riskClass: read }
+      - { name: agent_browser_tools_profiles, riskClass: read }
+      - { name: agent_browser_wait_for_function, riskClass: read }
+      - { name: agent_browser_wait_for_load, riskClass: read }
+      - { name: agent_browser_wait_for_selector, riskClass: read }
+      - { name: agent_browser_wait_for_text, riskClass: read }
+      - { name: agent_browser_wait_for_url, riskClass: read }
+      - { name: agent_browser_wait_ms, riskClass: read }
+      # page interaction — undone by reloading
+      - { name: agent_browser_check, riskClass: reversible-write }
+      - { name: agent_browser_click, riskClass: reversible-write }
+      - { name: agent_browser_close, riskClass: reversible-write }
+      - { name: agent_browser_dblclick, riskClass: reversible-write }
+      - { name: agent_browser_drag, riskClass: reversible-write }
+      - { name: agent_browser_fill, riskClass: reversible-write }
+      - { name: agent_browser_focus, riskClass: reversible-write }
+      - { name: agent_browser_hover, riskClass: reversible-write }
+      - { name: agent_browser_keyboard_insert_text, riskClass: reversible-write }
+      - { name: agent_browser_keyboard_type, riskClass: reversible-write }
+      - { name: agent_browser_keydown, riskClass: reversible-write }
+      - { name: agent_browser_keyup, riskClass: reversible-write }
+      - { name: agent_browser_mouse_down, riskClass: reversible-write }
+      - { name: agent_browser_mouse_move, riskClass: reversible-write }
+      - { name: agent_browser_mouse_up, riskClass: reversible-write }
+      - { name: agent_browser_mouse_wheel, riskClass: reversible-write }
+      - { name: agent_browser_press, riskClass: reversible-write }
+      - { name: agent_browser_select, riskClass: reversible-write }
+      - { name: agent_browser_type, riskClass: reversible-write }
+      - { name: agent_browser_uncheck, riskClass: reversible-write }
+      # leaves the page: transfers, and emulation that changes what he is shown
+      - { name: agent_browser_download, riskClass: irreversible-write }
+      - { name: agent_browser_network_route, riskClass: irreversible-write }
+      - { name: agent_browser_network_unroute, riskClass: irreversible-write }
+      - { name: agent_browser_set_device, riskClass: irreversible-write }
+      - { name: agent_browser_set_geo, riskClass: irreversible-write }
+      - { name: agent_browser_set_headers, riskClass: irreversible-write }
+      - { name: agent_browser_set_media, riskClass: irreversible-write }
+      - { name: agent_browser_set_offline, riskClass: irreversible-write }
+      - { name: agent_browser_set_viewport, riskClass: irreversible-write }
+      - { name: agent_browser_upload, riskClass: irreversible-write }
+      - { name: agent_browser_wait_for_download, riskClass: irreversible-write }
+      # carries credentials off the machine
+      - { name: agent_browser_set_credentials, riskClass: publish-external }
+      # subsumes every class above: arbitrary script, and a CDP URL that hands
+      # full browser control to anything that can reach it
+      - { name: agent_browser_eval, riskClass: destructive }
+      - { name: agent_browser_get_cdp_url, riskClass: destructive }
 
   # Work tracker. Read tools flow to workers; mutations stay approval-gated
   # (doctrine already requires approval for tracker authority mutations).

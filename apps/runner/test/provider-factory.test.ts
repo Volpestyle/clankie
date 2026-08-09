@@ -762,9 +762,26 @@ describe("agent-browser projection", () => {
     "self-build-lab.yaml",
   );
 
-  it("projects no browser capability while the operator flag is off", async () => {
+  // The flag defaults on (ADR 0082): a browser nobody remembers to enable is a
+  // capability Clankie truthfully denies having. Enabling is still not
+  // granting — the two cases below show doctrine deciding what he may call.
+  it("projects browser capability when the operator flag is unset", async () => {
     const fleet = await createReadyProviderFleet({
       environment: {},
+      workerEnvironment: { PATH: process.env.PATH, HOME: "/synthetic/home" },
+      runnerStateRoot: await mkdtemp(join(tmpdir(), "clankie-browser-default-")),
+      doctrine: compileDoctrine([await loadDoctrineFile(doctrinePath)]),
+      probes: {
+        executable: () => Promise.resolve("agent-browser-1.0.0"),
+        browserDaemon: () => Promise.resolve(true),
+      },
+    });
+    expect(fleet.browser).toMatchObject({ status: "ready" });
+  });
+
+  it("projects no browser capability when the operator turns it off explicitly", async () => {
+    const fleet = await createReadyProviderFleet({
+      environment: { CLANKIE_BROWSER_ENABLED: "false" },
       workerEnvironment: { PATH: process.env.PATH, HOME: "/synthetic/home" },
       runnerStateRoot: await mkdtemp(join(tmpdir(), "clankie-browser-off-")),
       doctrine: compileDoctrine([await loadDoctrineFile(doctrinePath)]),

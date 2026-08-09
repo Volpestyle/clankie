@@ -45,7 +45,7 @@ import {
 import { AgentCensusService } from "./agent-census.ts";
 import { AGENT_CENSUS_GATEWAY_PORT, createAgentCensusGateway } from "./agent-census-gateway.ts";
 import { BROWSER_GATEWAY_PORT, createBrowserGateway } from "./browser-gateway.ts";
-import { createBrowserHost } from "./browser-host.ts";
+import { browserEnabled, createBrowserHost } from "./browser-host.ts";
 import { WorkerAdoptionStore } from "./worker-adoptions.ts";
 import { CompositeTerminalSourceProvider, type TerminalSourceProvider } from "./terminal-source.ts";
 import {
@@ -68,6 +68,57 @@ export {
   createRunnerEnvironmentLifecycle,
   createRunnerMinecraftEnvironmentLifecycle,
 } from "./environment-lifecycle.ts";
+
+/**
+ * The repository root, and the `.env.local` sitting in it.
+ *
+ * The launcher starts the runner with `pnpm --filter @clankie/runner start`,
+ * so it inherits whatever shell ran `clankie` and nothing else. Eve loads the
+ * repo-root `.env.local` for the captain, which made that file look like the
+ * place to configure every service while the runner silently ignored it — a
+ * setting written there took effect for one process and vanished for the other.
+ *
+ * Absent keys only: anything the launcher or the shell set deliberately wins,
+ * so this can never overwrite a token that was passed in on purpose.
+ */
+const repoRoot = resolve(import.meta.dirname, "..", "..", "..");
+function loadRepoEnvFile(): void {
+  let contents: string;
+  try {
+    contents = readFileSync(join(repoRoot, ".env.local"), "utf8");
+  } catch {
+    return;
+  }
+  for (const line of contents.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0 || trimmed.startsWith("#")) continue;
+    const separator = trimmed.indexOf("=");
+    if (separator <= 0) continue;
+    const key = trimmed.slice(0, separator).trim();
+    if (key.length === 0 || process.env[key] !== undefined) continue;
+    const raw = trimmed.slice(separator + 1).trim();
+    const unquoted =
+      (raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))
+        ? raw.slice(1, -1)
+        : raw;
+    process.env[key] = unquoted;
+  }
+}
+loadRepoEnvFile();
+
+/**
+ * Config paths are written relative to the repository root, because that is
+ * where the file holding them lives — but the runner's cwd is its own package
+ * directory, so resolving them against cwd looks for `apps/runner/doctrine/`
+ * and fails closed with a "doctrine failed to compile" line that names a path
+ * nobody wrote.
+ */
+function repoConfigPath(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (trimmed === undefined || trimmed.length === 0) return undefined;
+  return resolve(repoRoot, trimmed);
+}
+
 
 if (process.argv.includes("--recovery-probe")) {
   const { runRecoveryProbeFromCli } = await import("./recovery-probe.ts");
@@ -359,8 +410,8 @@ if (!repoPath) {
   const verificationChecks = parseVerificationChecks(process.env.CLANKIE_VERIFICATION_CHECKS);
   let doctrine: CompiledDoctrine | undefined;
   let mcpRegistry: McpRegistry | undefined;
-  const doctrinePath = process.env.CLANKIE_DOCTRINE?.trim();
-  const mcpRegistryPath = process.env.CLANKIE_MCP_REGISTRY?.trim();
+  const doctrinePath = repoConfigPath(process.env.CLANKIE_DOCTRINE);
+  const mcpRegistryPath = repoConfigPath(process.env.CLANKIE_MCP_REGISTRY);
   if (doctrinePath) {
     try {
       doctrine = compileDoctrine([await loadDoctrineFile(doctrinePath)]);
@@ -395,7 +446,7 @@ if (!repoPath) {
     runnerToken &&
     doctrine &&
     mcpRegistry &&
-    /^(1|true|yes|on)$/iu.test(process.env.CLANKIE_BROWSER_ENABLED?.trim() ?? "")
+    browserEnabled(process.env.CLANKIE_BROWSER_ENABLED)
   ) {
     try {
       const browserHost = await createBrowserHost({

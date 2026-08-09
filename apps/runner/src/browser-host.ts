@@ -41,6 +41,22 @@ import {
 /** The registry server name this host drives. Declared in the MCP registry. */
 export const BROWSER_SERVER_NAME = "agent_browser";
 
+/**
+ * Whether the browser is switched on, defaulting to **yes**.
+ *
+ * Opt-in was the wrong default: a browser nobody remembers to enable is a
+ * capability Clankie truthfully denies having, which is the failure this whole
+ * change set exists to remove. Enabling it is still not the same as granting
+ * it — doctrine and the registry decide what he may actually call, and a
+ * missing binary degrades to a logged unavailability rather than a boot
+ * failure. Only an explicit falsey value turns it off.
+ */
+export function browserEnabled(value: string | undefined): boolean {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === undefined || normalized.length === 0) return true;
+  return !["0", "false", "no", "off"].includes(normalized);
+}
+
 /** One tool result is capped well below the protocol's ceiling so a page dump cannot flood a turn. */
 const MAX_RESULT_CHARACTERS = 100_000;
 const REQUEST_TIMEOUT_MS = 60_000;

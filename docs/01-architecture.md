@@ -71,11 +71,12 @@ voice is served on the same path as one asked in the TUI. `web_search` is
 provider-backed and absent on models with no native backend; the captain is
 instructed to say so rather than answer from memory.
 
-Pages that need a real browser go to `agent_browser__*`. The runner owns an
+Pages that need a real browser go to `browser__agent_browser_*`. The runner owns an
 `agent-browser` MCP server on Clankie's own persistent profile — so a site he
 logged into once stays logged in — and projects each tool through doctrine
 before the captain sees it. Reads run unattended; credential- and
-script-bearing verbs (`auth`, `set_cookies`, `eval`) are approval-class and the
+script-bearing verbs (`set_credentials`, `eval`, `get_cdp_url`) are
+approval-class and the
 control plane refuses them without an operator bearer. Undeclared tools are
 never projected, so a new agent-browser release cannot widen his reach without
 an operator editing the registry. Bounded investigation and anything touching a

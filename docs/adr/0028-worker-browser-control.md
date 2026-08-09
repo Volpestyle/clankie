@@ -20,7 +20,7 @@ Options weighed:
 
 ## Decision
 
-The capability is opt-in through `CLANKIE_BROWSER_ENABLED=true` and is projected as `web.browse`, a
+The capability is gated by `CLANKIE_BROWSER_ENABLED` (opt-out since [ADR 0082](0082-clankie-holds-the-browser.md); opt-in when this was decided) and is projected as `web.browse`, a
 read-class connector action. Projection requires a compiled doctrine profile and an exact `allow`.
 The runner also probes the configured `agent-browser` executable (`CLANKIE_AGENT_BROWSER_EXECUTABLE`,
 default `agent-browser`) and starts its daemon with a private runner-created tool-state directory. Any missing

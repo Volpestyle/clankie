@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createBrowserHost, type BrowserHost } from "../src/browser-host.ts";
+import { browserEnabled, createBrowserHost, type BrowserHost } from "../src/browser-host.ts";
 
 const doctrinePath = join(import.meta.dirname, "..", "..", "..", "doctrine", "profiles", "self-build-lab.yaml");
 
@@ -76,6 +76,23 @@ function fakeServer(options: {
   });
   return child;
 }
+
+describe("browserEnabled", () => {
+  it("defaults on so an unconfigured runner still has a browser", () => {
+    expect(browserEnabled(undefined)).toBe(true);
+    expect(browserEnabled("")).toBe(true);
+    expect(browserEnabled("   ")).toBe(true);
+  });
+
+  it("stays off only when the operator says so", () => {
+    for (const value of ["0", "false", "no", "off", "FALSE", " Off "]) {
+      expect(browserEnabled(value), value).toBe(false);
+    }
+    for (const value of ["1", "true", "yes", "on", "TRUE"]) {
+      expect(browserEnabled(value), value).toBe(true);
+    }
+  });
+});
 
 describe("browser host", () => {
   let stateRoot: string;

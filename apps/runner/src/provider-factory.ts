@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import type { CompiledDoctrine } from "@clankie/doctrine";
 import type { CredentialStore } from "@clankie/credential-broker";
+import { browserEnabled } from "./browser-host.ts";
 import {
   projectBrowserToolGrant,
   projectMcpToolGrants,
@@ -154,7 +155,7 @@ interface PreparedBrowserControl {
 async function prepareBrowserControl(
   options: ProviderFactoryOptions,
 ): Promise<PreparedBrowserControl | undefined> {
-  if (!enabled(options.environment.CLANKIE_BROWSER_ENABLED)) return undefined;
+  if (!browserEnabled(options.environment.CLANKIE_BROWSER_ENABLED)) return undefined;
   if (!options.doctrine) {
     return { report: { action: "web.browse", status: "withheld", reason: "compiled_doctrine_required" } };
   }

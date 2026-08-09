@@ -87,8 +87,9 @@ opposite of the capability being added. The profile therefore lives in the
 runner's private state root and is reused across runs
 (`AGENT_BROWSER_RESTORE_SAVE=always`, the deliberate opposite of the Codex
 projection's `never`). It is Clankie's own profile, never the operator's
-browser. The accumulated credentials are precisely why `auth`, `set_cookies`,
-and `eval` are approval-class: the profile gets more valuable to an attacker
+browser. The accumulated credentials are precisely why
+`agent_browser_set_credentials`, `agent_browser_eval`, and
+`agent_browser_get_cdp_url` are approval-class: the profile gets more valuable to an attacker
 over time, so the verbs that could exfiltrate it stay behind a human.
 
 Unlike the Codex projection, the captain's browser carries **the full action
@@ -113,14 +114,13 @@ flowchart TB
   DT[Discord text] --> C
   SL[Slack / Linear] --> C
   V["Discord voice<br/>sole tool: ask_clankie"] --> C
-  P["Free-play mind<br/>ask_captain"] -.-> C
   C["Captain — the one tool bank"]
   C --> W["web_search · web_fetch<br/>reflex lookup"]
-  C --> B["agent_browser__*<br/>full action set"]
+  C --> B["browser__agent_browser_*<br/>full action set"]
   C --> D["delegate → workers<br/>bounded investigation"]
   B --> G{"doctrine risk class"}
-  G -->|allow| R["runs unattended<br/>navigate · snapshot · read"]
-  G -->|require_approval| A["approval envelope<br/>eval · auth · set_cookies"]
+  G -->|allow| R["runs unattended<br/>open · screenshot · click · fill"]
+  G -->|require_approval| A["approval envelope<br/>eval · set_credentials · get_cdp_url"]
   G -->|deny| X[absent]
 ```
 
@@ -133,16 +133,21 @@ flowchart TB
   reach it.** This is the real cost of the decision and it is accepted
   deliberately. Three things bound it: the browser runs on Clankie's own
   profile rather than the operator's, every credential- or script-bearing verb
-  (`eval`, `auth`, `set_cookies`) is approval-class and stops for a human, and
+  (`eval`, `set_credentials`, `get_cdp_url`) is approval-class and stops for a
+  human, and
   the registry stays a closed list so an undeclared tool is never projected.
   Room speech still never carries approval authority
   ([ADR 0050](0050-voice-presence-authority-tier.md)). The persistent profile
   raises the stakes over time rather than lowering them, which is the reason
   the approval gate is enforced at the control plane on every call instead of
   by a step-scoped hook that a replayed turn could skip.
-- Risk classes follow agent-browser's own tool profiles rather than being
-  enumerated per command, so new commands land in an existing class instead of
-  requiring a doctrine edit per release.
+- Risk classes are assigned per tool against the names `agent-browser mcp
+  --tools all` actually advertises (64 at v0.33.2), not against the CLI's
+  documented command groups. An earlier draft classified thirty-three guessed
+  names and would have projected nothing at all, because the host drops
+  anything the registry does not declare — a typo silently removes a
+  capability rather than failing loudly. Verify against a live `tools/list`
+  when upgrading agent-browser.
 - The high-assurance overlay's exact `web.search` / `web.fetch` denials still
   bind, and an overlay can deny any `mcp.agent_browser.*` action outright.
 - `web_search`'s provider dependence is a known seam. Because eve documents
@@ -156,12 +161,26 @@ flowchart TB
 
 Landed end to end: web reach restored to the bank with the instruction that
 governs it; `projectCaptainMcpToolGrants`; the `agent_browser` registry entry
-with all thirty-three tools classified; the runner's stdio MCP host and
+with all sixty-four tools classified; the runner's stdio MCP host and
 loopback browser gateway; the control-plane `/v1/browser/tools` and
 `/v1/browser/call` routes with the approval gate; and the captain's
-`defineDynamic` tool set. `CLANKIE_BROWSER_ENABLED` plus a compiled doctrine
-profile and a registry are all required, so the fail-closed rule governing
-every other MCP projection governs this one.
+`defineDynamic` tool set.
+
+Proven live against agent-browser 0.33.2 and Chrome 151: 64 tools projected,
+14 approval-gated (every irreversible-write, publish-external, and destructive
+class under `self-build-lab`), with `agent_browser_open` and
+`agent_browser_get_title` returning a real page title. Reads and page
+interaction — including `click`, `fill`, and `screenshot` — run unattended.
+
+`CLANKIE_BROWSER_ENABLED` **defaults on**, and only an explicit falsey value
+turns it off. Opt-in was the wrong default for the same reason the disabled
+web tools were: a browser nobody remembers to enable is a capability he
+truthfully denies having, which is the failure this change set exists to
+remove. Enabling is not granting — a compiled doctrine profile and a registry
+are still both required, and a missing binary degrades to a logged
+unavailability rather than a boot failure. Those two stay explicit on purpose:
+the profile decides what he may actually call, so defaulting it would silently
+choose a permissive lab profile on someone's behalf.
 
 Not yet landed: the free-play mind still has no route to the bank. The obvious
 fix — an `ask_captain` field on the player's decision — is the one
