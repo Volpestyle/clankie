@@ -129,9 +129,9 @@ export function selectRoom(rooms: readonly CaptainRoom[], query: string): Captai
   );
 }
 
-/** One thing he did in that room. */
+/** One thing that happened in that room. */
 export interface RoomEntry {
-  readonly kind: "said" | "tool" | "tool_result" | "turn";
+  readonly kind: "heard" | "said" | "tool" | "tool_result" | "turn";
   readonly text: string;
 }
 
@@ -263,9 +263,21 @@ async function readSessionTail(
   return events;
 }
 
-/** His own side of one event, bounded. Reasoning is deliberately not carried. */
+/**
+ * One event of that room, bounded. Reasoning is deliberately not carried.
+ *
+ * Both sides, not just his. A room read that returned only his own replies
+ * answered "what did you say there" and not "what is going on there" — asked
+ * the latter in the console, he could see his own words and still had to say he
+ * did not know what people were saying. What he was given is what he heard, and
+ * a conversation with one side missing is not a conversation.
+ */
 function renderEvent(event: HandleMessageStreamEvent): RoomEntry[] {
   switch (event.type) {
+    case "message.received": {
+      const text = truncate(event.data.message ?? "", MESSAGE_MAX);
+      return text.length === 0 ? [] : [{ kind: "heard", text }];
+    }
     case "message.completed": {
       const text = truncate(event.data.message ?? "", MESSAGE_MAX);
       return text.length === 0 ? [] : [{ kind: "said", text }];

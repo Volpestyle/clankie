@@ -73,11 +73,18 @@ is not it. Reading a room therefore cannot become resuming it.
 
 **`observe_room` is the read.** It lists his rooms and, given one, replays its
 sessions newest-first off the public loopback `/eve/v1/session/:id/stream` and
-renders **his own side**: what he said, which tools he called with what
-arguments, and what came back. Reasoning is deliberately not carried — that is
-his deliberation, not something he did in that room — and neither is what other
-people said there, which the result states outright so he cannot imply he read
-it.
+renders **both sides of that room**: what people said to him (`heard`), what he
+said back (`said`), which tools he called with what arguments, and what came
+back. Reasoning is deliberately not carried — that is his deliberation, not
+something he did in that room.
+
+The first cut of this rendered his own side only, and it answered the wrong
+question. Asked in the console what was going on in Discord text, he could read
+his own replies and still had to say he did not know what people were saying
+there — which is the same continuity break this ADR exists to close, moved one
+step along. What a room said to him is what he heard; a conversation with one
+side missing is not a conversation. The inbound event was already in the stream
+(`message.received`) and simply was not rendered.
 
 **Reach runs down-chain, never sideways.** The tool is resolved per session and
 is offered **in the operator lane only**. The supervising seat reads every room;

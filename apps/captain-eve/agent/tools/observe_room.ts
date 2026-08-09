@@ -40,12 +40,13 @@ export default defineDynamic({
       return defineTool({
         description:
           "Look in on one of your own other rooms — a Discord server or channel, voice, gameplay, " +
-          "another operator conversation — and read what you did there: what you said, which tools " +
-          "you called with what arguments, and what came back. Use it whenever you are asked about " +
-          'something you did somewhere else ("did you use your browser in Discord?", "what did you ' +
-          'tell them in #general?") instead of saying you cannot see that room. Call it with no ' +
-          "room to list the rooms you can read. This is your own side of that room; it does not " +
-          "carry what other people said there, so do not describe their words as if you had read them.",
+          "another operator conversation — and read what is going on there: what people said to you, " +
+          "what you said back, which tools you called with what arguments, and what came back. Use it " +
+          'whenever you are asked about anywhere else ("what is going on in text?", "did you use your ' +
+          'browser in Discord?", "what did you tell them in #general?") instead of saying you cannot ' +
+          "see that room — you can, so look before you answer. Call it with no room to list the rooms " +
+          "you can read. Entries are marked by kind: `heard` is what someone said to you there, `said` " +
+          "is your own reply. It is a read and only a read; looking into a room never speaks in it.",
         inputSchema: z.object({
           room: z
             .string()

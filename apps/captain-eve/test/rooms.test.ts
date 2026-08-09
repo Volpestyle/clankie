@@ -88,6 +88,7 @@ describe("reading what he did in another room", () => {
     const { client } = reader({
       "turn-2": [
         event("session.started", {}),
+        event("message.received", { message: "hey clankie, can you check example.test?" }),
         event("reasoning.completed", { reasoning: "private deliberation" }),
         event("actions.requested", {
           actions: [{ callId: "c1", toolName: "browser__navigate", input: { url: "https://example.test" } }],
@@ -103,7 +104,10 @@ describe("reading what he did in another room", () => {
     const reading = await readCaptainRoom("111:222", { rooms: ROOMS, client });
 
     expect(reading.room).toBe("discord_presence:111:222");
+    // Both sides: a room read that returned only his own replies answered "what
+    // did you say there" and left him unable to say what was going on there.
     expect(reading.entries).toEqual([
+      { kind: "heard", text: "hey clankie, can you check example.test?" },
       { kind: "tool", text: 'browser__navigate {"url":"https://example.test"}' },
       { kind: "tool_result", text: 'browser__navigate returned {"title":"Example"}' },
       { kind: "said", text: "had a look — it's the example page" },
