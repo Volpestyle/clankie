@@ -48,6 +48,10 @@ actions:
   web.search: { default: deny, rules: [] }
   web.fetch: { default: deny, rules: [] }
   web.browse: { default: deny, rules: [] }
+  # Read-class by risk, but a profile that denies reaching outward at all denies
+  # spending a provider's tokens on a picture too (ADR 0085).
+  media.generate.image: { default: deny, rules: [] }
+  media.generate.video: { default: deny, rules: [] }
   tracker.assignment.mirror: { default: require_approval, rules: [] }
   tracker.assignment.update: { default: require_approval, rules: [] }
   tracker.attention.marker.apply: { default: require_approval, rules: [] }
@@ -56,6 +60,7 @@ actions:
   tracker.acceptance-criteria.update: { default: require_approval, rules: [] }
   tracker.completion.update: { default: require_approval, rules: [] }
   discord.presence.reply: { default: deny, rules: [] }
+  discord.presence.reply_with_media: { default: deny, rules: [] }
   discord.presence.react: { default: deny, rules: [] }
   discord.presence.unreact: { default: deny, rules: [] }
   discord.presence.send_message: { default: deny, rules: [] }

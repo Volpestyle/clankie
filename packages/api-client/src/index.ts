@@ -2,6 +2,14 @@ import {
   AdoptWorkerResultSchema,
   BrowserToolCatalogSchema,
   CallBrowserToolResultSchema,
+  GenerateImageResultSchema,
+  GenerateVideoResultSchema,
+  MEDIA_IMAGE_GENERATION_PATH,
+  MEDIA_VIDEO_GENERATION_PATH,
+  type GenerateImageRequest,
+  type GenerateImageResult,
+  type GenerateVideoRequest,
+  type GenerateVideoResult,
   type BrowserToolCatalog,
   type CallBrowserToolRequest,
   type CallBrowserToolResult,
@@ -888,6 +896,33 @@ export class ClankieApiClient {
       body: JSON.stringify(request),
     });
     return CallBrowserToolResultSchema.parse(body.result);
+  }
+
+  /**
+   * Draw something, or edit something he already drew (ADR 0085). The provider
+   * and model are operator config, so the request only says what to make.
+   */
+  public async generateImage(request: GenerateImageRequest): Promise<GenerateImageResult> {
+    const body = await this.request<{ result: unknown }>(MEDIA_IMAGE_GENERATION_PATH, {
+      method: "POST",
+      headers: this.activityReadHeaders(),
+      body: JSON.stringify(request),
+    });
+    return GenerateImageResultSchema.parse(body.result);
+  }
+
+  /**
+   * Render a clip, or pick up one already rendering. A `pending` result is the
+   * normal shape for a render that outlasts the call's patience: the same
+   * method with its `requestId` resumes rather than paying to render twice.
+   */
+  public async generateVideo(request: GenerateVideoRequest): Promise<GenerateVideoResult> {
+    const body = await this.request<{ result: unknown }>(MEDIA_VIDEO_GENERATION_PATH, {
+      method: "POST",
+      headers: this.activityReadHeaders(),
+      body: JSON.stringify(request),
+    });
+    return GenerateVideoResultSchema.parse(body.result);
   }
 
   public async getAgentCensus(): Promise<AgentCensus> {

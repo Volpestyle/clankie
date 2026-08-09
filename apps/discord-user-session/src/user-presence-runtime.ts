@@ -78,6 +78,29 @@ export class DiscordUserPresenceRuntime {
         });
         return this.result(write, payload.channelId, messageId(message));
       }
+      /** His reply carrying a picture he made this turn (ADR 0085). */
+      case "reply_with_media": {
+        if (this.resolveAttachment === undefined) {
+          throw new Error("discord_presence_attachment_resolver_unavailable");
+        }
+        const file = await this.resolveAttachment(payload.artifactRef);
+        const form = new FormData();
+        form.append(
+          "payload_json",
+          JSON.stringify({
+            content: payload.content,
+            message_reference: { message_id: payload.messageId },
+            allowed_mentions: { parse: [] },
+          }),
+        );
+        const blob =
+          file.contentType === undefined
+            ? new Blob([new Uint8Array(file.data)])
+            : new Blob([new Uint8Array(file.data)], { type: file.contentType });
+        form.append("files[0]", blob, payload.filename);
+        const message = await this.multipart(`/channels/${payload.channelId}/messages`, form);
+        return this.result(write, payload.channelId, messageId(message));
+      }
       case "send_message": {
         const message = await this.post(`/channels/${payload.channelId}/messages`, {
           content: payload.content,

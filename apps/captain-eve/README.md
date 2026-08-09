@@ -24,6 +24,14 @@ credential broker; the TUI sees only Eve session events. The built-in Eve
 shell, filesystem, and web tools are explicitly disabled, leaving the authored
 mission tools plus framework coordination primitives.
 
+That no tool he holds can write beneath the media generator's `generated/`
+directory is load-bearing beyond hygiene: it is what makes an artifact there
+provably something Clankie made rather than any file on the host, which is the
+whole basis for attaching one to a Discord reply without an approval
+([ADR 0085](../../docs/adr/0085-a-picture-he-made-is-something-he-said.md)).
+Granting him any write path — a tool or a sandboxed shell — must keep its
+writable root disjoint from the attachment root.
+
 Run the headless service directly when developing the TUI without the
 `clankie` launcher:
 

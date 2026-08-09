@@ -38,6 +38,8 @@ function contentTypeFor(path: string): string | undefined {
     ".jpg": "image/jpeg",
     ".png": "image/png",
     ".webp": "image/webp",
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
   };
   return types[extname(path).toLowerCase()];
 }

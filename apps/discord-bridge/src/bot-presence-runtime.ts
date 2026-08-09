@@ -80,6 +80,37 @@ export class DiscordBotPresenceRuntime {
         })) as { id?: string };
         return result(write, payload.channelId, message.id);
       }
+      /**
+       * His reply with a picture he made on the same turn (ADR 0085). One
+       * message, not a reply followed by an attachment: two posts would read as
+       * two utterances, and the second could land without the first.
+       *
+       * The resolver is the same one `send_attachment` uses — same containment
+       * check, same hash verification. What differs is upstream: the schema
+       * only admits a generated-media reference here, so this path cannot post
+       * an arbitrary artifact without an approval.
+       */
+      case "reply_with_media": {
+        if (this.resolveAttachment === undefined) {
+          throw new Error("discord_presence_attachment_resolver_unavailable");
+        }
+        const file = await this.resolveAttachment(payload.artifactRef);
+        const message = (await this.rest.post(Routes.channelMessages(payload.channelId), {
+          body: {
+            content: payload.content,
+            message_reference: { message_id: payload.messageId },
+            allowed_mentions: { parse: [] },
+          },
+          files: [
+            {
+              name: payload.filename,
+              data: file.data,
+              ...(file.contentType === undefined ? {} : { contentType: file.contentType }),
+            },
+          ],
+        })) as { id?: string };
+        return result(write, payload.channelId, message.id);
+      }
       case "send_message": {
         const message = (await this.rest.post(Routes.channelMessages(payload.channelId), {
           body: {

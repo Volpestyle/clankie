@@ -477,17 +477,23 @@ export class DiscordTextIngress {
           ? `${result.prompt}\n\nDiscord cannot record privileged approval. Continue on ${this.config.authenticatedSurfaceUrl}`
           : result.prompt,
     );
+    // A picture he made during this turn rides his reply as one message
+    // (ADR 0085). `media` is only ever present on a settled turn, and only
+    // because the control plane saw the generation happen — nothing here trusts
+    // the reply text to name an artifact.
+    const media = result.state === "settled" ? result.media : undefined;
     const write = DiscordPresenceWriteSchema.parse({
       schemaVersion: 1,
       idempotencyKey: `${message.id}:reply`,
-      action: "discord.presence.reply",
+      action: media === undefined ? "discord.presence.reply" : "discord.presence.reply_with_media",
       identity,
       content,
       payload: {
-        kind: "reply",
+        kind: media === undefined ? "reply" : "reply_with_media",
         channelId: message.channelId,
         messageId: message.id,
         content,
+        ...(media === undefined ? {} : { artifactRef: media.artifactRef, filename: media.filename }),
       },
     });
     const reply = await this.port.executeDiscordPresenceAction(write);

@@ -381,6 +381,7 @@ const catalogEntry = (
 /** Frozen educational/lab catalog. Unlisted Discord methods fail closed. */
 export const DISCORD_PRESENCE_CATALOG: readonly DiscordPresenceCatalogEntry[] = [
   catalogEntry("discord.presence.reply", ANY_TRANSPORT, "present"),
+  catalogEntry("discord.presence.reply_with_media", ANY_TRANSPORT, "present"),
   catalogEntry("discord.presence.react", ANY_TRANSPORT, "present"),
   catalogEntry("discord.presence.unreact", ANY_TRANSPORT, "present"),
   catalogEntry("discord.presence.send_message", ANY_TRANSPORT, "present"),

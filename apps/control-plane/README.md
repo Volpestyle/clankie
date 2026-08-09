@@ -412,6 +412,12 @@ advertised presence-lane tool catalog before any later action reaches policy or 
 
 `POST /v1/discord/presence-actions` — ADR 0024 bot-transport presence catalog. The current projected session controls catalog availability before policy evaluation or runtime execution, so disconnect, lease loss, and failure remove act capability immediately. Narrative actions use the shared rate ledger under either real mission attribution or a stable ambient presence-session attribution; non-narrative actions require a mission. Optional `content` is derived from the payload when omitted (emoji, typing sentinel, …). Attachments mint a bounded approval request carrying only the artifact reference and write hash. An authenticated operator decision resumes the exact idempotency key; denial and expiry remain terminal. The broker-backed runtime resolves `sha256:<digest>:<relative-path>` beneath `CLANKIE_DISCORD_ATTACHMENT_ROOT`, verifies the bytes inside the privileged Discord boundary, and never places bytes in control-plane events or logs. Runtime: `CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE` exporting `createDiscordPresenceRuntime()`.
 
+## Media routes
+
+`POST /v1/media/images` and `POST /v1/media/videos` — [ADR 0085](../../docs/adr/0085-a-picture-he-made-is-something-he-said.md). Captain- or operator-authenticated. `ConfiguredMediaGenerator` projects `media.generate.image` / `media.generate.video` through compiled doctrine, resolves the provider and model from the operator's `image_model` / `video_model` config refs (never from the request), and resolves the credential from the broker before falling back to the provider's declared environment variables. Artifacts are written mode-0600 into `generated/` beneath `CLANKIE_DISCORD_ATTACHMENT_ROOT` — the sole write target, and the reason a generated reference is postable on his own reply without an approval. Without that root configured the plane is absent and both routes answer 503.
+
+Refusals are `200` with a reason (`no_model_configured`, `credential_unavailable`, `doctrine_denied`, `provider_failed`, `artifact_too_large`), because the captain has to relay something. A video render that outlasts the route's 90-second patience returns `pending` with a `requestId`; the same route called with that id resumes the render rather than starting a second one.
+
 ## Tracker ceremony routes
 
 - `POST /v1/tracker/issue-drafts/validate` — pure draft validation against the compiled ceremony projection.

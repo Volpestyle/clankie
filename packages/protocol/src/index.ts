@@ -2113,6 +2113,59 @@ export type LinearAgentThreadContext = z.infer<typeof LinearAgentThreadContextSc
  */
 export const CAPTAIN_SILENT_REPLY_SENTINEL = "[[stay-silent]]";
 
+/**
+ * Media he made, and why it is sendable without an approval (ADR 0085).
+ *
+ * Generation writes a local artifact and publishes nothing, so it is read-class
+ * (ADR 0029). What makes the picture *conversational* is where it was written:
+ * only the control plane's generator writes beneath `GENERATED_MEDIA_DIRECTORY`,
+ * and nothing the captain holds can write there — `write_file` is disabled, and
+ * any shell he is granted must be sandboxed to a writable root outside the
+ * attachment root. So a ref under that directory is provably something he made
+ * rather than any file that happens to sit under the attachment root, and that
+ * is the whole of the distinction. Everything else — browser screenshots,
+ * repository files — keeps `send_attachment` and its `publish-external`
+ * approval.
+ */
+
+/** Sole write target of the media generator, relative to the attachment root. */
+export const GENERATED_MEDIA_DIRECTORY = "generated";
+
+const GENERATED_MEDIA_REF_PATTERN = new RegExp(
+  `^sha256:[0-9a-f]{64}:${GENERATED_MEDIA_DIRECTORY}/[A-Za-z0-9._-]+$`,
+  "u",
+);
+
+/**
+ * Whether a reference names media the generator minted.
+ *
+ * Deliberately stricter than the attachment resolver's containment check: one
+ * path segment of safe characters under one fixed directory, so neither
+ * traversal nor a nested path can dress an arbitrary artifact up as generated
+ * media. The resolver still verifies containment and the hash afterwards — this
+ * is the authority check, not the safety one.
+ */
+export function isGeneratedMediaRef(artifactRef: string): boolean {
+  return GENERATED_MEDIA_REF_PATTERN.test(artifactRef);
+}
+
+/**
+ * A picture he made during the turn, harvested from the turn's own tool results
+ * rather than from anything he wrote (ADR 0085).
+ *
+ * He never names it. The surface that renders the turn decides whether it can
+ * show media at all, which is why this rides the result instead of being a
+ * second call he has to remember to make — and why a lane with no way to show a
+ * picture simply ignores it rather than needing him to behave differently there.
+ */
+export const CaptainTurnMediaSchema = z
+  .object({
+    artifactRef: z.string().refine(isGeneratedMediaRef, "expected a generated-media artifact reference"),
+    filename: z.string().min(1).max(200),
+  })
+  .strict();
+export type CaptainTurnMedia = z.infer<typeof CaptainTurnMediaSchema>;
+
 export const CaptainChannelTurnResultSchema = z.discriminatedUnion("state", [
   z
     .object({
@@ -2120,6 +2173,7 @@ export const CaptainChannelTurnResultSchema = z.discriminatedUnion("state", [
       captainSessionId: z.string().min(1),
       turnId: z.string().min(1),
       response: z.string().trim().min(1).max(16_384),
+      media: CaptainTurnMediaSchema.optional(),
     })
     .strict(),
   /** He read it and chose not to answer. Nothing is written to the channel. */
@@ -2226,6 +2280,16 @@ export const DISCORD_TRANSPORT_ACTION_RISK_CLASS: Readonly<
 /** Transport-agnostic Discord presence action names (ADR 0024). No bot/user token fields. */
 export const DiscordPresenceActionSchema = z.enum([
   "discord.presence.reply",
+  /**
+   * His reply, with a picture he made during the same turn (ADR 0085).
+   *
+   * A separate action rather than an optional field on `reply` so the frozen
+   * risk-class table below states the truth about what may carry bytes into a
+   * channel. It is narrative-write because the payload can only reference media
+   * the generator minted — see `isGeneratedMediaRef`. Any other artifact is
+   * still `send_attachment`, still publish-external, still approval-gated.
+   */
+  "discord.presence.reply_with_media",
   "discord.presence.react",
   "discord.presence.unreact",
   "discord.presence.send_message",
@@ -2264,6 +2328,7 @@ export const DISCORD_PRESENCE_ACTION_RISK_CLASS: Readonly<
   Record<DiscordPresenceAction, DiscordPresenceActionRiskClass>
 > = {
   "discord.presence.reply": "narrative-write",
+  "discord.presence.reply_with_media": "narrative-write",
   "discord.presence.react": "narrative-write",
   "discord.presence.unreact": "narrative-write",
   "discord.presence.send_message": "narrative-write",
@@ -2458,6 +2523,22 @@ export const DiscordPresenceActionRequestSchema = z.discriminatedUnion("kind", [
       content: z.string().min(1).max(2_000),
     })
     .strict(),
+  /**
+   * The schema itself refuses anything but generated media, so the narrative
+   * classification cannot be widened by a caller passing a different ref. The
+   * control plane re-checks it at the route: a boundary asserted in one place
+   * is a boundary that moves when someone refactors the other.
+   */
+  z
+    .object({
+      kind: z.literal("reply_with_media"),
+      channelId: z.string().min(1),
+      messageId: z.string().min(1),
+      content: z.string().min(1).max(2_000),
+      artifactRef: z.string().refine(isGeneratedMediaRef, "expected a generated-media artifact reference"),
+      filename: z.string().min(1).max(200),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("react"),
@@ -2546,6 +2627,7 @@ export const DISCORD_PRESENCE_ACTION_PAYLOAD_KIND: Readonly<
   Record<DiscordPresenceAction, DiscordPresenceActionRequest["kind"]>
 > = {
   "discord.presence.reply": "reply",
+  "discord.presence.reply_with_media": "reply_with_media",
   "discord.presence.react": "react",
   "discord.presence.unreact": "unreact",
   "discord.presence.send_message": "send_message",
@@ -2630,6 +2712,7 @@ export function resolveDiscordPresenceLedgerContent(
     case "reply":
     case "send_message":
     case "edit_own_message":
+    case "reply_with_media":
       return payload.content;
     case "react":
     case "unreact":
@@ -3642,6 +3725,8 @@ export const CAPTAIN_AUTHORED_TOOL_NAMES = [
   "create_mission",
   "decide_action",
   "direct_agent",
+  "generate_image",
+  "generate_video",
   "get_mission",
   "get_self_state",
   "observe_current_activity",
@@ -3717,6 +3802,158 @@ export const CallBrowserToolResultSchema = z.discriminatedUnion("outcome", [
   }),
 ]);
 export type CallBrowserToolResult = z.infer<typeof CallBrowserToolResultSchema>;
+
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Making a picture (ADR 0085).
+//
+// The provider and model come from operator config, never from the request: the
+// operator picks with `/image-model`, and a turn chooses only what to draw. See
+// `isGeneratedMediaRef` above for why the artifact this mints is attachable.
+// ---------------------------------------------------------------------------
+
+export const MEDIA_IMAGE_GENERATION_PATH = "/v1/media/images";
+
+/**
+ * Why a request produced nothing. Every one of these is a sentence he can say
+ * out loud, which is the point: "I have no image model set up" is an answer,
+ * where a 500 is something he would have to invent an explanation for.
+ */
+export const MediaRefusalReasonSchema = z.enum([
+  "doctrine_denied",
+  "no_model_configured",
+  "credential_unavailable",
+  "provider_unsupported",
+  "provider_failed",
+  "artifact_too_large",
+  "media_unavailable",
+]);
+export type MediaRefusalReason = z.infer<typeof MediaRefusalReasonSchema>;
+
+export const GenerateImageRequestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    prompt: z.string().trim().min(1).max(4_000),
+    /** Provider-neutral shape hint; the provider and model come from operator config. */
+    aspectRatio: z
+      .string()
+      .trim()
+      .regex(/^\d{1,4}(?:\.\d)?:\d{1,4}(?:\.\d)?$/u)
+      .optional(),
+    /**
+     * Edit this picture instead of drawing a new one.
+     *
+     * Restricted to media he already made: editing reads bytes back off disk,
+     * and the one directory he can cause writes into is the only one safe to
+     * read from without turning "change the sky" into an arbitrary file read.
+     */
+    sourceRef: z
+      .string()
+      .refine(isGeneratedMediaRef, "expected a generated-media artifact reference")
+      .optional(),
+  })
+  .strict();
+export type GenerateImageRequest = z.infer<typeof GenerateImageRequestSchema>;
+
+/**
+ * A refusal is a normal outcome he says out loud, not an exception: no image
+ * model configured, no credential stored, doctrine denied. Only `ok` carries a
+ * reference, so there is no shape in which a failed generation yields something
+ * attachable.
+ */
+export const GenerateImageResultSchema = z.discriminatedUnion("outcome", [
+  z
+    .object({
+      outcome: z.literal("ok"),
+      schemaVersion: z.literal(1),
+      artifactRef: z.string().regex(GENERATED_MEDIA_REF_PATTERN),
+      filename: z.string().min(1).max(200),
+      mimeType: z.string().min(1).max(100),
+      byteLength: z.number().int().positive(),
+      provider: z.string().min(1).max(64),
+      model: z.string().min(1).max(200),
+    })
+    .strict(),
+  z
+    .object({
+      outcome: z.literal("refused"),
+      schemaVersion: z.literal(1),
+      reason: MediaRefusalReasonSchema,
+      detail: z.string().max(500).optional(),
+    })
+    .strict(),
+]);
+export type GenerateImageResult = z.infer<typeof GenerateImageResultSchema>;
+
+// ---------------------------------------------------------------------------
+// Making a video (ADR 0085).
+//
+// A render is a job, not a response: it takes anywhere from seconds to minutes,
+// so the route waits a bounded while and then hands back the job instead of
+// holding a conversation open indefinitely. Passing `requestId` resumes that
+// job rather than paying to render it twice, which is why resuming is the same
+// call rather than a second tool he has to know about.
+// ---------------------------------------------------------------------------
+
+export const MEDIA_VIDEO_GENERATION_PATH = "/v1/media/videos";
+
+export const GenerateVideoRequestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    prompt: z.string().trim().min(1).max(4_000).optional(),
+    aspectRatio: z
+      .string()
+      .trim()
+      .regex(/^\d{1,4}(?:\.\d)?:\d{1,4}(?:\.\d)?$/u)
+      .optional(),
+    durationSeconds: z.number().int().min(1).max(15).optional(),
+    /** Resume an in-flight render started by an earlier call. */
+    requestId: z.string().trim().min(1).max(200).optional(),
+  })
+  .strict()
+  .superRefine((request, context) => {
+    if ((request.prompt === undefined) === (request.requestId === undefined)) {
+      context.addIssue({
+        code: "custom",
+        path: ["prompt"],
+        message: "a video request names either a prompt to start or a requestId to resume, not both",
+      });
+    }
+  });
+export type GenerateVideoRequest = z.infer<typeof GenerateVideoRequestSchema>;
+
+export const GenerateVideoResultSchema = z.discriminatedUnion("outcome", [
+  z
+    .object({
+      outcome: z.literal("ok"),
+      schemaVersion: z.literal(1),
+      artifactRef: z.string().regex(GENERATED_MEDIA_REF_PATTERN),
+      filename: z.string().min(1).max(200),
+      mimeType: z.string().min(1).max(100),
+      byteLength: z.number().int().positive(),
+      provider: z.string().min(1).max(64),
+      model: z.string().min(1).max(200),
+    })
+    .strict(),
+  /** Still rendering. The same call with this `requestId` picks it up. */
+  z
+    .object({
+      outcome: z.literal("pending"),
+      schemaVersion: z.literal(1),
+      requestId: z.string().min(1).max(200),
+      waitedSeconds: z.number().int().nonnegative(),
+    })
+    .strict(),
+  z
+    .object({
+      outcome: z.literal("refused"),
+      schemaVersion: z.literal(1),
+      reason: MediaRefusalReasonSchema,
+      detail: z.string().max(500).optional(),
+    })
+    .strict(),
+]);
+export type GenerateVideoResult = z.infer<typeof GenerateVideoResultSchema>;
 
 // ---------------------------------------------------------------------------
 // Captain episodes (ADR 0054).

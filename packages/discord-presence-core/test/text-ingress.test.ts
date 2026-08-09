@@ -308,17 +308,22 @@ class RecordingPort implements DiscordTextIngressPort {
       transportKind: "bot",
       channelId: "channelId" in write.payload ? write.payload.channelId : undefined,
       // Only a posted message has an id; typing does not, matching the runtime.
-      messageId: write.payload.kind === "reply" ? `reply-${String(this.replies.length)}` : undefined,
+      messageId: isReply(write) ? `reply-${String(this.replies.length)}` : undefined,
     });
   }
 
   public get replies(): DiscordPresenceWrite[] {
-    return this.writes.filter((write) => write.payload.kind === "reply");
+    return this.writes.filter(isReply);
   }
 
   public get typing(): DiscordPresenceWrite[] {
     return this.writes.filter((write) => write.payload.kind === "typing_start");
   }
+}
+
+/** A reply is one message whether or not it carries a picture (ADR 0085). */
+function isReply(write: DiscordPresenceWrite): boolean {
+  return write.payload.kind === "reply" || write.payload.kind === "reply_with_media";
 }
 
 function config(): DiscordTextIngressConfig {
@@ -356,6 +361,79 @@ function settled(deliveryId: string): CaptainChannelTurnResult {
     response: `reply to ${deliveryId}`,
   };
 }
+
+describe("a picture he made on the turn (ADR 0085)", () => {
+  const media = { artifactRef: `sha256:${"a".repeat(64)}:generated/made.png`, filename: "made.png" };
+
+  it("carries it on the same reply rather than a second message", async () => {
+    const port = new RecordingPort((request) => Promise.resolve({ ...settled(request.deliveryId), media }));
+    const ingress = new DiscordTextIngress(port, config(), () => undefined);
+
+    await expect(
+      ingress.handle({
+        id: "message-1",
+        channelId: "dm-1",
+        authorId: "james",
+        authorIsBot: false,
+        mentionsBot: false,
+        body: "draw me a robot",
+      }),
+    ).resolves.toMatchObject({ state: "settled" });
+
+    expect(port.replies).toHaveLength(1);
+    expect(port.replies[0]).toMatchObject({
+      action: "discord.presence.reply_with_media",
+      payload: {
+        kind: "reply_with_media",
+        channelId: "dm-1",
+        messageId: "message-1",
+        content: "reply to message-1",
+        artifactRef: media.artifactRef,
+        filename: "made.png",
+      },
+    });
+  });
+
+  it("stays an ordinary reply when he made nothing", async () => {
+    const port = new RecordingPort();
+    const ingress = new DiscordTextIngress(port, config(), () => undefined);
+
+    await ingress.handle({
+      id: "message-1",
+      channelId: "dm-1",
+      authorId: "james",
+      authorIsBot: false,
+      mentionsBot: false,
+      body: "just talking",
+    });
+
+    expect(port.replies[0]).toMatchObject({ action: "discord.presence.reply", payload: { kind: "reply" } });
+  });
+
+  it("refuses to post an artifact that is not generated media", async () => {
+    const port = new RecordingPort((request) =>
+      Promise.resolve({
+        ...settled(request.deliveryId),
+        // A browser screenshot lives under the same attachment root, and
+        // posting one is `send_attachment` with an approval — never this path.
+        media: { artifactRef: `sha256:${"a".repeat(64)}:browser/private-page.png`, filename: "shot.png" },
+      } as CaptainChannelTurnResult),
+    );
+    const ingress = new DiscordTextIngress(port, config(), () => undefined);
+
+    await expect(
+      ingress.handle({
+        id: "message-1",
+        channelId: "dm-1",
+        authorId: "james",
+        authorIsBot: false,
+        mentionsBot: false,
+        body: "post that screenshot",
+      }),
+    ).resolves.toMatchObject({ state: "failed" });
+    expect(port.replies).toHaveLength(0);
+  });
+});
 
 describe("reading live, then checking in", () => {
   function room(overrides: Partial<DiscordTextIngressConfig> = {}): DiscordTextIngressConfig {

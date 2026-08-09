@@ -534,10 +534,7 @@ function staticArgumentSpec(commandName: string, context: ArgumentContext): Stat
     case "image-model":
       return imageModelArguments(context);
     case "video-model":
-      return values(
-        ["status", "xai", "grok-imagine-video", "unset"],
-        ["/video-model xai grok-imagine-video", "/video-model status"],
-      );
+      return videoModelArguments(context);
     case "vision-model":
       return values(
         ["status", "local", "openai", "unset"],
@@ -615,22 +612,31 @@ function layoutArguments(context: ArgumentContext): StaticArgumentSpec {
   );
 }
 
+/**
+ * Only providers this repository has an adapter for, named by their catalog id
+ * (`google`, not `gemini`) — the id is what `/image-model` writes into the
+ * config ref, so a friendlier alias here would complete to a setting the
+ * control plane cannot resolve.
+ */
 function imageModelArguments(context: ArgumentContext): StaticArgumentSpec {
   const provider = context.args[0]?.toLowerCase();
   if (provider === "openai") return values(["gpt-image-2"], ["/image-model openai gpt-image-2"]);
   if (provider === "xai")
-    return values(
-      ["grok-imagine-image-quality", "grok-imagine-image-fast"],
-      ["/image-model xai grok-imagine-image-quality"],
-    );
-  if (provider === "gemini")
-    return values(
-      ["gemini-3.1-flash-image", "gemini-3-pro-image"],
-      ["/image-model gemini gemini-3.1-flash-image"],
-    );
+    return values(["grok-imagine-image-quality"], ["/image-model xai grok-imagine-image-quality"]);
+  if (provider === "google")
+    return values(["gemini-3.1-flash-image"], ["/image-model google gemini-3.1-flash-image"]);
   return values(
-    ["status", "openai", "xai", "gemini", "unset"],
-    ["/image-model status", "/image-model openai gpt-image-2", "/image-model gemini gemini-3.1-flash-image"],
+    ["status", "openai", "xai", "google", "unset"],
+    ["/image-model status", "/image-model openai gpt-image-2", "/image-model google gemini-3.1-flash-image"],
+  );
+}
+
+function videoModelArguments(context: ArgumentContext): StaticArgumentSpec {
+  if (context.args[0]?.toLowerCase() === "xai")
+    return values(["grok-imagine-video-1.5"], ["/video-model xai grok-imagine-video-1.5"]);
+  return values(
+    ["status", "xai", "unset"],
+    ["/video-model status", "/video-model xai grok-imagine-video-1.5"],
   );
 }
 

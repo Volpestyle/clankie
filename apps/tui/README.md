@@ -181,7 +181,8 @@ src/commands.ts   Console slash commands (/help /mission /doctrine /approvals
                   /eval /layout /clear /new /status /exit).
 src/approval-inbox.ts  Authenticated pending-request review, mission evidence,
                   and typed approve/deny decisions through the control plane.
-src/provider-commands.ts  /auth /provider /model /effort wizards (VUH-760) over
+src/provider-commands.ts  /auth /provider /model /effort wizards (VUH-760) plus
+                  the positional /image-model and /video-model (ADR 0085), over
                   @clankie/model-registry, @clankie/credential-broker, and
                   @clankie/model-provider (clankie.json config).
 src/session/      Durable Eve client cursor, replay-safe stream renderer, and
@@ -223,7 +224,7 @@ src/observation/  Read-only sequenced event source, durable observer cursor,
   another prompt.
 - Mouse: wheel scrolls, drag selects (OSC-52 copy), scrollbar gutter drags, click collapses tool blocks.
 - `/layout` moves the input/status bands, toggles the header, and picks the spinner (`CLANKIE_TUI_*` env vars seed the defaults).
-- `/auth` manages provider credentials (masked API-key entry into the Keychain broker — LLM providers plus the featured `elevenlabs` voice credential — ChatGPT/Codex browser or device OAuth, Claude Pro/Max manual-code OAuth, local credential removal, and harness-login guidance); `/provider` chooses a provider context per model role; `/model` picks an actual model from that provider in the models.dev registry; `/effort` sets reasoning variants. Provider intent stays process-local and is reconstructed from the configured `provider/model` ref after restart, so non-secret config has one authority in `~/.config/clankie/clankie.json`.
+- `/auth` manages provider credentials (masked API-key entry into the Keychain broker — LLM providers plus the featured `elevenlabs` voice credential — ChatGPT/Codex browser or device OAuth, Claude Pro/Max manual-code OAuth, local credential removal, and harness-login guidance); `/provider` chooses a provider context per model role; `/model` picks an actual model from that provider in the models.dev registry; `/effort` sets reasoning variants. `/image-model` and `/video-model` are positional rather than wizards (`/image-model openai gpt-image-2`, `/video-model xai grok-imagine-video-1.5`, plus `status` and `unset`) because each supported provider has one usable model; the control plane reads the resulting ref per request, so a change takes effect without a restart ([ADR 0085](../../docs/adr/0085-a-picture-he-made-is-something-he-said.md)). Provider intent stays process-local and is reconstructed from the configured `provider/model` ref after restart, so non-secret config has one authority in `~/.config/clankie/clankie.json`.
 - OpenAI API-key access is `openai/<model>`; ChatGPT subscription access is the
   explicit `openai-codex/<model>` provider. They never borrow each other's
   credentials. While a subscription credential is stored it supersedes the API

@@ -60,6 +60,7 @@ flowchart LR
   S[Slack · Linear] --> C
   V["Discord voice<br/>ask_clankie"] --> C
   C["Captain — the one tool bank"] --> L["look it up<br/>web_search · web_fetch"]
+  C --> M["make something<br/>generate_image · generate_video"]
   C --> W["delegate<br/>governed workers"]
   P["Free-play mind<br/>no tools, no handoff"] -.->|gap| C
 ```
@@ -81,6 +82,18 @@ control plane refuses them without an operator bearer. Undeclared tools are
 never projected, so a new agent-browser release cannot widen his reach without
 an operator editing the registry. Bounded investigation and anything touching a
 worktree still goes to a governed worker.
+
+Making something — a picture, an edit of a picture, a short clip — goes to
+`generate_image` and `generate_video`
+([ADR 0085](adr/0085-a-picture-he-made-is-something-he-said.md)). The control
+plane holds the doctrine projection and the provider credential and writes the
+artifact into `generated/` beneath the Discord attachment root, so the thing he
+just made is born attachable. In a channel it rides his own reply as one
+message, without an approval, on the strength of nothing he holds being able to
+write there. Any other artifact under that root — a browser screenshot, a
+repository file — still needs `send_attachment` and an owner approval. Which
+model draws is operator config (`/image-model`, `/video-model`), never a choice
+the turn makes.
 
 The free-play mind is the one branch that satisfies neither half of the rule:
 it is a structured-output loop with no tools and no handoff, so an interjection

@@ -1041,6 +1041,15 @@ function payloadFor(action: string): DiscordPresenceWrite["payload"] {
   switch (action) {
     case "discord.presence.reply":
       return { kind: "reply", channelId, messageId, content: "x" };
+    case "discord.presence.reply_with_media":
+      return {
+        kind: "reply_with_media",
+        channelId,
+        messageId,
+        content: "x",
+        artifactRef: `sha256:${"a".repeat(64)}:generated/made.png`,
+        filename: "made.png",
+      };
     case "discord.presence.react":
       return { kind: "react", channelId, messageId, emoji: "👍" };
     case "discord.presence.unreact":

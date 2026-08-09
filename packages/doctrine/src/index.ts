@@ -50,6 +50,7 @@ export const NarrativeWriteKindSchema = z.enum([
   "agent-activity-elicitation",
   "emoji-reaction",
   "discord-reply",
+  "discord-reply-media",
   "discord-react",
   "discord-unreact",
   "discord-send-message",

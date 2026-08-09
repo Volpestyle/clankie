@@ -54,6 +54,10 @@ import {
 import {
   AdoptWorkerRequestSchema,
   CallBrowserToolRequestSchema,
+  GenerateImageRequestSchema,
+  GenerateVideoRequestSchema,
+  MEDIA_IMAGE_GENERATION_PATH,
+  MEDIA_VIDEO_GENERATION_PATH,
   DirectAdoptedWorkerRequestSchema,
   ApprovalDecisionInputSchema,
   ApprovalRequestRecordSchema,
@@ -194,6 +198,7 @@ import {
 import type { WorkerTranscriptReadPort } from "./worker-transcripts.ts";
 import type { ActivityObservationReadPort } from "./activity-observations.ts";
 import type { BrowserToolPort } from "./browser-tools.ts";
+import type { MediaGeneratorPort } from "./media-generation.ts";
 import type { AgentCensusReadPort } from "./agent-census.ts";
 import { MissionEventFeed, type MissionEventFeedTailRead } from "./mission-event-feed.ts";
 
@@ -389,6 +394,8 @@ export interface ControlPlaneDependencies {
   activityObservations?: ActivityObservationReadPort;
   /** Clankie's runner-hosted browser (ADR 0082); absent leaves the routes 503. */
   browserTools?: BrowserToolPort;
+  /** Image and video generation (ADR 0085); absent leaves the routes 503. */
+  mediaGenerator?: MediaGeneratorPort;
   /** Runner-owned view of agents this control plane did not start (ADR 0078). */
   agentCensus?: AgentCensusReadPort;
 }
@@ -798,6 +805,11 @@ const DISCORD_PRESENCE_NARRATIVE_ACTION_METADATA = [
     action: "discord.presence.reply",
     riskClass: "narrative-write" as const,
     narrativeKind: "discord-reply" as const,
+  },
+  {
+    action: "discord.presence.reply_with_media",
+    riskClass: "narrative-write" as const,
+    narrativeKind: "discord-reply-media" as const,
   },
   {
     action: "discord.presence.react",
@@ -3529,6 +3541,50 @@ export async function createControlPlane(dependencies: ControlPlaneDependencies)
       return context.json({ error: "browser_upstream_failure" }, 502);
     }
   });
+
+  /**
+   * Making a picture or a clip (ADR 0085).
+   *
+   * Read-class: it writes a local artifact and publishes nothing. The generator
+   * projects doctrine itself and fails closed, so this route mediates rather
+   * than deciding — the same division as the browser above. A refusal comes
+   * back 200 with a reason he can say out loud; only an unconfigured plane or a
+   * malformed body is an error status.
+   */
+  const mediaRoute = <Request>(
+    path: string,
+    schema: { safeParse(value: unknown): { success: true; data: Request } | { success: false } },
+    run: (generator: MediaGeneratorPort, request: Request, signal: AbortSignal) => Promise<unknown>,
+  ): void => {
+    app.post(path, async (context) => {
+      const authorization = await authenticateAgentCensusPrincipal(context);
+      if ("denial" in authorization) return authorization.denial;
+      if (dependencies.mediaGenerator === undefined) {
+        return context.json({ error: "media_unavailable" }, 503);
+      }
+      let body: unknown;
+      try {
+        body = await context.req.json();
+      } catch {
+        return context.json({ error: "invalid_media_request" }, 400);
+      }
+      const parsed = schema.safeParse(body);
+      if (!parsed.success) return context.json({ error: "invalid_media_request" }, 400);
+      try {
+        const result = await run(dependencies.mediaGenerator, parsed.data, context.req.raw.signal);
+        return context.json({ result }, 200, { "cache-control": "no-store" });
+      } catch {
+        return context.json({ error: "media_upstream_failure" }, 502);
+      }
+    });
+  };
+
+  mediaRoute(MEDIA_IMAGE_GENERATION_PATH, GenerateImageRequestSchema, (generator, request) =>
+    generator.generateImage(request),
+  );
+  mediaRoute(MEDIA_VIDEO_GENERATION_PATH, GenerateVideoRequestSchema, (generator, request, signal) =>
+    generator.generateVideo(request, signal),
+  );
 
   app.get("/v1/agents/census", async (context) => {
     const authorization = await authenticateAgentCensusPrincipal(context);

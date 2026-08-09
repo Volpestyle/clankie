@@ -35,6 +35,7 @@ import { FileWorkerSteeringStore } from "./worker-steering.ts";
 import { RunnerWorkerTranscriptClient } from "./worker-transcripts.ts";
 import { RunnerActivityObservationClient } from "./activity-observations.ts";
 import { RunnerBrowserToolClient } from "./browser-tools.ts";
+import { ConfiguredMediaGenerator } from "./media-generation.ts";
 import { RunnerAgentCensusClient } from "./agent-census.ts";
 
 const logger = createLogger({ service: "clankie-control-plane", version: "0.1.0" });
@@ -183,10 +184,33 @@ const captainChannelTurns = new EveCaptainChannelTurnPort({
     }),
   resolveDiscordAttachments: createDiscordAttachmentResolver(),
 });
+// Media he makes lands under the root the Discord attachment resolver already
+// serves (ADR 0085), so a picture is attachable without a second copy or a
+// second trust boundary. Without that root configured there is nowhere to put
+// an artifact that anything else could read, so the plane stays absent and the
+// routes answer 503 rather than writing somewhere unreachable.
+const attachmentRoot = process.env.CLANKIE_DISCORD_ATTACHMENT_ROOT?.trim();
+const mediaGenerator =
+  attachmentRoot === undefined || attachmentRoot.length === 0
+    ? undefined
+    : new ConfiguredMediaGenerator({
+        doctrine,
+        credentials: operatorCredentialStore,
+        attachmentRoot: resolve(attachmentRoot),
+        configCwd: repoRoot,
+      });
+if (mediaGenerator === undefined) {
+  logger.warn(
+    { event: "media.unavailable" },
+    "CLANKIE_DISCORD_ATTACHMENT_ROOT is unset; image and video generation are unavailable",
+  );
+}
+
 const app = await createControlPlane({
   doctrine,
   eventStore,
   memoryStore,
+  ...(mediaGenerator === undefined ? {} : { mediaGenerator }),
   // Read-only view of the shared body lock (VUH-938): the one authority that
   // sees every suitor for the body, including MCP possessors the embodiment
   // registry never hears about. Observation only — never acquires or releases.

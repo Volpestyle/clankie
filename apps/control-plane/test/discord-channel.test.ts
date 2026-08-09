@@ -619,6 +619,95 @@ describe("showing him an image", () => {
   });
 });
 
+/**
+ * A picture he made during the turn rides the result (ADR 0085), harvested from
+ * the turn's own tool results rather than from anything the model wrote. These
+ * cover the property that matters: the harvest reads what the control plane
+ * actually did, so nothing he says can put an artifact on his reply.
+ */
+describe("media he made during the turn", () => {
+  const artifactRef = `sha256:${"a".repeat(64)}:generated/made.png`;
+
+  const submitWith = async (events: readonly unknown[]) => {
+    const port = new EveCaptainChannelTurnPort({
+      baseUrl: "http://127.0.0.1:4321",
+      fetchImpl: (_input, init) =>
+        init?.method === "POST"
+          ? Promise.resolve(Response.json({ sessionId: "eve-media" }, { status: 202 }))
+          : Promise.resolve(
+              ndjson([
+                { type: "turn.started", data: { turnId: "turn-media" } },
+                ...events,
+                {
+                  type: "message.completed",
+                  data: { turnId: "turn-media", finishReason: "stop", message: "Here you go." },
+                },
+                { type: "session.completed", data: { turnId: "turn-media" } },
+              ]),
+            ),
+    });
+    return port.submit({ request: turnRequest() });
+  };
+
+  const toolResult = (overrides: Record<string, unknown> = {}, output?: unknown) => ({
+    type: "action.result",
+    data: {
+      turnId: "turn-media",
+      status: "completed",
+      result: {
+        kind: "tool-result",
+        callId: "call-1",
+        toolName: "generate_image",
+        output: output ?? { outcome: "ok", artifactRef, filename: "made.png" },
+        ...overrides,
+      },
+    },
+  });
+
+  it("carries a generated picture on the settled result", async () => {
+    await expect(submitWith([toolResult()])).resolves.toMatchObject({
+      state: "settled",
+      media: { artifactRef, filename: "made.png" },
+    });
+  });
+
+  it("carries the last one when he tried more than once", async () => {
+    const second = `sha256:${"b".repeat(64)}:generated/second.png`;
+    await expect(
+      submitWith([
+        toolResult(),
+        toolResult({ callId: "call-2" }, { outcome: "ok", artifactRef: second, filename: "second.png" }),
+      ]),
+    ).resolves.toMatchObject({ media: { artifactRef: second } });
+  });
+
+  it("carries nothing from a refused generation", async () => {
+    const result = await submitWith([
+      toolResult({}, { outcome: "refused", reason: "credential_unavailable" }),
+    ]);
+    expect(result).toMatchObject({ state: "settled" });
+    expect(result).not.toHaveProperty("media");
+  });
+
+  it("carries nothing from a failed tool call", async () => {
+    const events = [toolResult()] as Array<{ data: Record<string, unknown> }>;
+    events[0]!.data.status = "failed";
+    expect(await submitWith(events)).not.toHaveProperty("media");
+  });
+
+  it("ignores a reference that is not generated media", async () => {
+    const result = await submitWith([
+      toolResult({}, { outcome: "ok", artifactRef: `sha256:${"a".repeat(64)}:browser/shot.png` }),
+    ]);
+    expect(result).not.toHaveProperty("media");
+  });
+
+  it("ignores a tool that is not the media generator", async () => {
+    const result = await submitWith([toolResult({ toolName: "call_browser_tool" })]);
+    expect(result).not.toHaveProperty("media");
+  });
+});
+
 function ndjson(events: readonly unknown[]): Response {
   return new Response(events.map((event) => JSON.stringify(event)).join("\n"));
 }

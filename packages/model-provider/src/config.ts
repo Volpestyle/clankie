@@ -79,6 +79,10 @@ export const ClankieConfigSchema = z
     voice_model: z.string().optional(),
     /** Loopback-only local model used for settled terminal-tail classification. */
     settle_classifier_model: z.string().optional(),
+    /** Image generation/editing model as a "providerId/modelId" ref, e.g. "openai/gpt-image-2". */
+    image_model: z.string().optional(),
+    /** Video generation model as a "providerId/modelId" ref, e.g. "xai/grok-imagine-video-1.5". */
+    video_model: z.string().optional(),
     /** Selected variant per model ref, e.g. { "anthropic/claude-opus-4-5": "think-16k" }. */
     variant: z.record(z.string(), z.string()).optional(),
     /** When non-empty, ONLY these providers are enabled. */

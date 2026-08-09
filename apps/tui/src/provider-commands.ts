@@ -13,6 +13,7 @@ import {
   contextWindow,
   createModelRegistry,
   listModels,
+  loadBundledCatalog,
   supportsReasoning,
   type Catalog,
   type ModelEntry,
@@ -154,6 +155,8 @@ export function buildProviderCommands(services: ProviderServices): FaceShellComm
         await runModelWizard(shell, services, role, selectedProviders);
       },
     },
+    mediaModelCommand("image-model", "image_model", services),
+    mediaModelCommand("video-model", "video_model", services),
     {
       name: "effort",
       aliases: ["reasoning"],
@@ -164,6 +167,112 @@ export function buildProviderCommands(services: ProviderServices): FaceShellComm
       },
     },
   ];
+}
+
+// --- /image-model, /video-model ---
+
+/**
+ * Which model Clankie draws and renders with (ADR 0085).
+ *
+ * Positional rather than a wizard, unlike `/model`: there are three providers
+ * and one usable model each, so a two-step picker would be ceremony around a
+ * choice that fits on one line. It writes the same config file `/model` does,
+ * and the control plane reads it per request — no restart.
+ */
+const MEDIA_MODELS: Readonly<Record<"image_model" | "video_model", Readonly<Record<string, string>>>> = {
+  image_model: {
+    openai: "gpt-image-2",
+    google: "gemini-3.1-flash-image",
+    xai: "grok-imagine-image-quality",
+  },
+  video_model: { xai: "grok-imagine-video-1.5" },
+};
+
+function mediaModelCommand(
+  name: "image-model" | "video-model",
+  role: "image_model" | "video_model",
+  services: ProviderServices,
+): FaceShellCommand {
+  const supported = MEDIA_MODELS[role];
+  const providers = Object.keys(supported);
+  const noun = role === "image_model" ? "pictures" : "video";
+  return {
+    name,
+    aliases: [],
+    description: `Choose the model Clankie makes ${noun} with`,
+    argumentHint: `[${providers.join("|")}|status|unset]`,
+    takesArgument: true,
+    async run(argument, shell): Promise<void> {
+      const [providerId, modelId] = argument.trim().toLowerCase().split(/\s+/u).filter(Boolean);
+      const usage = `Usage: /${name} [${providers.join("|")}] [model] · /${name} status · /${name} unset`;
+
+      if (providerId === undefined || providerId === "status") {
+        const { config } = await loadConfig({ env: services.env, cwd: services.cwd });
+        const configured = config[role];
+        const credentialIds = Object.keys(await services.store.list());
+        const parsed = configured === undefined ? undefined : parseModelRef(configured);
+        const connected =
+          parsed !== undefined &&
+          (credentialIds.includes(parsed.providerId) ||
+            providerEnvConnected(parsed.providerId, services.env));
+        shell.insertCommandResult(
+          `/${name} status`,
+          [
+            `${role}: ${configured ?? "unset"}`,
+            ...(parsed === undefined
+              ? []
+              : [
+                  connected
+                    ? "credential: stored"
+                    : `credential: missing — run /auth for ${parsed.providerId}`,
+                ]),
+            "",
+            usage,
+          ].join("\n"),
+          "success",
+        );
+        return;
+      }
+
+      if (providerId === "unset") {
+        const updated = await updateGlobalConfig(
+          (current) => {
+            delete current[role];
+          },
+          { env: services.env },
+        );
+        services.onConfigChanged(updated);
+        shell.insertCommandResult(`/${name} unset`, `${role} cleared.`, "success");
+        return;
+      }
+
+      const fallback = supported[providerId];
+      if (fallback === undefined) {
+        shell.insertCommandResult(`/${name}`, `${providerId} has no media adapter.\n\n${usage}`, "error");
+        return;
+      }
+      // The named model wins so a provider's newer id works the day it ships,
+      // without waiting on a catalog refresh; the default is what this
+      // repository's adapters are known to speak.
+      const ref = `${providerId}/${modelId ?? fallback}`;
+      const updated = await updateGlobalConfig((current) => void (current[role] = ref), {
+        env: services.env,
+      });
+      services.onConfigChanged(updated);
+      const credentialIds = Object.keys(await services.store.list());
+      const needsAuth =
+        !credentialIds.includes(providerId) && !providerEnvConnected(providerId, services.env);
+      shell.insertCommandResult(
+        `/${name}`,
+        `${role} set to ${ref}.${needsAuth ? `\n\nNo credential stored for ${providerId} — run /auth.` : ""}`,
+        "success",
+      );
+    },
+  };
+}
+
+function providerEnvConnected(providerId: string, env: NodeJS.ProcessEnv): boolean {
+  return (loadBundledCatalog()[providerId]?.env ?? []).some((variable) => (env[variable] ?? "") !== "");
 }
 
 // --- /auth ---

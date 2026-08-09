@@ -102,6 +102,17 @@ export function resolveProviders(input: ResolveProvidersInput): ResolvedProvider
 
 export type ModelRole = "model" | "small_model" | "voice_model" | "settle_classifier_model";
 
+/**
+ * Roles that name a media model rather than a language model.
+ *
+ * Kept out of {@link ModelRole} on purpose: `resolveConfiguredLanguageModel`
+ * takes a `ModelRole` and builds an AI SDK language model from it, and
+ * `gpt-image-2` is not one. Widening that type would make the wrong call
+ * typecheck. {@link resolveRole} accepts both because reading which ref a role
+ * points at is the same operation either way.
+ */
+export type MediaModelRole = "image_model" | "video_model";
+
 export interface ResolvedRole {
   providerId: string;
   modelId: string;
@@ -170,7 +181,7 @@ export function subscriptionOverrideFor(
 }
 
 export function resolveRole(
-  role: ModelRole,
+  role: ModelRole | MediaModelRole,
   input: { config: ClankieConfig; catalog: Catalog },
 ): ResolvedRole | undefined {
   const ref = input.config[role];
