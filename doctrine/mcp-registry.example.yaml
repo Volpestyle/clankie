@@ -26,6 +26,62 @@ servers:
       - { name: search, riskClass: read }
       - { name: fetch_content, riskClass: read }
 
+  # Clankie's own browser (ADR 0082). Hosted by the runner as a stdio MCP
+  # server on a dedicated profile, headless, never the operator's logged-in
+  # one. Unlike the worker projection, the captain receives approval-class
+  # tools gated rather than withheld, so `navigate` is unattended while
+  # `eval` and `set_cookies` stop for a human.
+  #
+  # Risk classes follow agent-browser's own tool profiles: reads and
+  # observations are `read`, page interaction is `reversible-write`, anything
+  # that submits or persists is `irreversible-write` or `publish-external`,
+  # and arbitrary script execution is `destructive` because it can do all of
+  # the above at once.
+  - name: agent_browser
+    description: Clankie's headless browser
+    transport: { type: stdio, command: agent-browser, args: [mcp, --tools, all] }
+    tools:
+      # core — navigation and observation
+      - { name: navigate, riskClass: read }
+      - { name: snapshot, riskClass: read }
+      - { name: screenshot, riskClass: read }
+      - { name: read, riskClass: read }
+      - { name: get, riskClass: read }
+      - { name: wait, riskClass: read }
+      - { name: scroll, riskClass: read }
+      - { name: back, riskClass: read }
+      - { name: forward, riskClass: read }
+      # core — page interaction
+      - { name: click, riskClass: reversible-write }
+      - { name: fill, riskClass: reversible-write }
+      - { name: type, riskClass: reversible-write }
+      - { name: press, riskClass: reversible-write }
+      - { name: select, riskClass: reversible-write }
+      - { name: hover, riskClass: reversible-write }
+      - { name: upload, riskClass: irreversible-write }
+      # tabs and frames
+      - { name: tabs, riskClass: read }
+      - { name: frames, riskClass: read }
+      - { name: dialog, riskClass: reversible-write }
+      - { name: close, riskClass: reversible-write }
+      # debug and audit
+      - { name: console, riskClass: read }
+      - { name: errors, riskClass: read }
+      - { name: a11y_audit, riskClass: read }
+      # network — inspection reads; interception rewrites what he is looking at
+      - { name: network_requests, riskClass: read }
+      - { name: har, riskClass: read }
+      - { name: intercept, riskClass: irreversible-write }
+      - { name: set_headers, riskClass: irreversible-write }
+      # state — identity and persistence; these carry credentials
+      - { name: cookies, riskClass: read }
+      - { name: set_cookies, riskClass: publish-external }
+      - { name: storage, riskClass: read }
+      - { name: auth, riskClass: publish-external }
+      - { name: profile, riskClass: irreversible-write }
+      # arbitrary script execution subsumes every class above
+      - { name: eval, riskClass: destructive }
+
   # Work tracker. Read tools flow to workers; mutations stay approval-gated
   # (doctrine already requires approval for tracker authority mutations).
   # - name: linear

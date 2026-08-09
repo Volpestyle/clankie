@@ -183,6 +183,66 @@ export function projectMcpToolGrants(
   return { allowed, withheld };
 }
 
+export interface CaptainMcpToolGrant extends McpToolGrant {
+  /** Whether the captain must carry an approval envelope before this tool executes. */
+  requiresApproval: boolean;
+}
+
+export interface CaptainMcpGrantProjection {
+  /** Tools the captain may call, each flagged for whether approval gates the call. */
+  granted: CaptainMcpToolGrant[];
+  /** Tools doctrine denies outright; the captain never sees these. */
+  denied: CaptainMcpToolGrant[];
+}
+
+/**
+ * The captain's projection of the same registry, which differs from
+ * {@link projectMcpToolGrants} in exactly one way: `require_approval` grants
+ * the tool instead of withholding it.
+ *
+ * The worker rule exists because a worker cannot pause mid-tool for a human,
+ * so an approval-class tool in a worker's set would either execute unapproved
+ * or deadlock. The captain is the seat that *owns* the approval envelope — it
+ * is the surface a human answers through — so withholding approval-class tools
+ * from it would mean no principal could ever perform them
+ * ([ADR 0082](../../../docs/adr/0082-clankie-holds-the-browser.md)).
+ *
+ * `deny` still denies, and an undeclared tool is still never projected: the
+ * registry stays the closed list it always was. What changes is that a
+ * doctrine author can now express "Clankie may do this, with a human in the
+ * loop" instead of only "nobody may do this unattended".
+ */
+export function projectCaptainMcpToolGrants(
+  registry: McpRegistry,
+  doctrine: CompiledDoctrine,
+  input: { principalId: string },
+): CaptainMcpGrantProjection {
+  const classify = createConnectorActionClassifier(mcpConnectorActionMetadata(registry));
+  const granted: CaptainMcpToolGrant[] = [];
+  const denied: CaptainMcpToolGrant[] = [];
+  for (const server of registry.servers) {
+    for (const tool of server.tools) {
+      const action = mcpToolAction(server.name, tool.name);
+      const decision = decideAction(
+        doctrine,
+        projectionRequest(action, input.principalId, doctrine),
+        classify(action),
+      );
+      const grant: CaptainMcpToolGrant = {
+        server: server.name,
+        tool: tool.name,
+        action,
+        riskClass: tool.riskClass,
+        effect: decision.effect,
+        reason: decision.reason,
+        requiresApproval: decision.effect === "require_approval",
+      };
+      (decision.effect === "deny" ? denied : granted).push(grant);
+    }
+  }
+  return { granted, denied };
+}
+
 export const WEB_SEARCH_ACTION = "web.search";
 export const WEB_FETCH_ACTION = "web.fetch";
 export const WEB_BROWSE_ACTION = "web.browse";

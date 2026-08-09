@@ -8,6 +8,7 @@ import {
   mcpConnectorActionMetadata,
   mcpToolAction,
   McpRegistrySchema,
+  projectCaptainMcpToolGrants,
   projectMcpToolGrants,
   projectBrowserToolGrant,
   projectMcpWorkerServers,
@@ -127,6 +128,47 @@ describe("projectMcpToolGrants", () => {
     const metadata = mcpConnectorActionMetadata(registry);
     expect(metadata).toHaveLength(5);
     expect(metadata.map((entry) => entry.action)).toContain(mcpToolAction("tracker", "delete_issue"));
+  });
+});
+
+describe("projectCaptainMcpToolGrants", () => {
+  it("grants an approval-class tool the worker projection withholds", async () => {
+    const doctrine = await compiledDoctrine();
+    const workers = projectMcpToolGrants(registry, doctrine, { principalId: "test-worker" });
+    const captain = projectCaptainMcpToolGrants(registry, doctrine, { principalId: "captain" });
+
+    const action = mcpToolAction("tracker", "delete_issue");
+    // The same tool, the same doctrine, two seats: withheld from a worker that
+    // cannot pause, granted-with-approval to the seat a human answers through.
+    expect(workers.withheld.find((grant) => grant.action === action)?.effect).toBe("require_approval");
+    const granted = captain.granted.find((grant) => grant.action === action);
+    expect(granted).toMatchObject({ effect: "require_approval", requiresApproval: true });
+    expect(captain.denied.map((grant) => grant.action)).not.toContain(action);
+  });
+
+  it("marks plain allows as needing no approval", async () => {
+    const captain = projectCaptainMcpToolGrants(registry, await compiledDoctrine(), {
+      principalId: "captain",
+    });
+    const granted = captain.granted.find((grant) => grant.action === mcpToolAction("tracker", "get_issue"));
+    expect(granted).toMatchObject({ effect: "allow", requiresApproval: false });
+  });
+
+  it("still denies what doctrine denies outright", async () => {
+    const doctrine = compileDoctrine([
+      await loadDoctrineFile(doctrinePath),
+      {
+        schemaVersion: "1",
+        id: "deny-tracker-delete-overlay",
+        description: "Denies tracker deletion.",
+        kind: "overlay",
+        actions: { "mcp.tracker.delete_issue": { default: "deny", rules: [] } },
+      },
+    ]);
+    const captain = projectCaptainMcpToolGrants(registry, doctrine, { principalId: "captain" });
+    const action = mcpToolAction("tracker", "delete_issue");
+    expect(captain.denied.map((grant) => grant.action)).toContain(action);
+    expect(captain.granted.map((grant) => grant.action)).not.toContain(action);
   });
 });
 
