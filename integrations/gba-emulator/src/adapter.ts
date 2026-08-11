@@ -232,7 +232,13 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
       return Promise.reject(
         error instanceof EnvironmentAdapterActionError
           ? error
-          : new EnvironmentAdapterActionError("emulator_rejected", "Emulator rejected the action", false),
+          : new EnvironmentAdapterActionError(
+              "emulator_rejected",
+              // The cause travels with the rejection: a swallowed message once
+              // turned a decodable state bug into a blind "rejected" wall.
+              `Emulator rejected the action: ${boundedSummary(error instanceof Error ? error.message : String(error))}`,
+              false,
+            ),
       );
     }
   }

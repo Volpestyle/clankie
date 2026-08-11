@@ -73,6 +73,20 @@ export interface MgbaFireRedCoreIdentity {
   coreWasmSha256: string;
 }
 
+/**
+ * `gBattleOutcome` → core mode. Only victory (1) and defeat (2, forfeit 9)
+ * are terminal modes; every other engine-defined ending — drew (3), ran (4),
+ * teleported (5, 10), opponent fled (6), caught (7), out of Safari Balls
+ * (8) — leaves exit text on screen with `gMain.inBattle` still set, so the
+ * battle is still "resolving" and its text must stay advanceable. The decoder
+ * has already rejected outcomes above 10 as out of domain.
+ */
+export function battleModeForOutcome(outcome: number): "battle" | "battle_won" | "battle_lost" {
+  if (outcome === 1) return "battle_won";
+  if (outcome === 2 || outcome === 9) return "battle_lost";
+  return "battle";
+}
+
 export class MgbaFireRedCore implements GbaCoreSeam {
   public readonly coreId: string;
   private readonly core: MgbaLibretroCore;
@@ -264,22 +278,7 @@ export class MgbaFireRedCore implements GbaCoreSeam {
         .join(",")}`;
       if (this.priorBattleHp !== null && hpKey !== this.priorBattleHp) this.battleTurn += 1;
       this.priorBattleHp = hpKey;
-      switch (decoded.battle.outcome) {
-        case 0:
-          mode = "battle";
-          break;
-        case 1:
-          mode = "battle_won";
-          break;
-        case 2:
-        case 9:
-          mode = "battle_lost";
-          break;
-        default:
-          throw new Error(
-            `Unsupported FireRed battle outcome ${String(decoded.battle.outcome)}; refusing to infer victory`,
-          );
-      }
+      mode = battleModeForOutcome(decoded.battle.outcome);
       activePartySlot = decoded.battle.activePartySlot;
       battle = {
         battleId: `firered-${this.verifiedIdentity.romSha256.slice(0, 12)}-${String(this.battleSequence)}`,
@@ -324,6 +323,7 @@ export class MgbaFireRedCore implements GbaCoreSeam {
       facing: decoded.overworld.facing,
       surroundings: decoded.surroundings,
       mapSize: decoded.mapSize,
+      exits: decoded.exits,
       dialogLineIndex: 0,
       dialogLines: decoded.dialogLines,
       waitingForDialogAdvance: decoded.waitingForDialogAdvance,
