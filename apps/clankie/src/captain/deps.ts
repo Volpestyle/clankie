@@ -9,6 +9,7 @@ import type {
   CallBrowserToolRequest,
   CallBrowserToolResult,
   DiscordPersonIdentity,
+  DiscordPresenceAttachment,
   EmbodimentIntent,
   EmbodimentSession,
   EmbodimentSubmitResult,
@@ -56,7 +57,7 @@ export interface CaptainDeps {
   };
   /** Resolves Discord attachment references into data URLs at the last hop. */
   readonly resolveDiscordAttachments?: (
-    attachments: readonly unknown[],
+    attachments: readonly DiscordPresenceAttachment[],
   ) => Promise<readonly ResolvedAttachment[]>;
 }
 

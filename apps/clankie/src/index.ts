@@ -20,10 +20,11 @@ import {
 } from "@clankie/credential-broker";
 import { createLogger } from "@clankie/observability";
 import { applyDiscordSettingsToEnvironment, SettingsStore } from "@clankie/settings";
-import { createBearerAuthenticator, createClankieApp } from "./app.ts";
+import { createBearerAuthenticator, createClankieApp, type ClankieApp } from "./app.ts";
 import { ActivityObservationProjection } from "./activity-observation.ts";
 import { browserEnabled, createBrowserHost, type BrowserHost } from "./browser-host.ts";
-import { createStubCaptain } from "./captain/port.ts";
+import { createCaptain } from "./captain/captain.ts";
+import { createDiscordAttachmentResolver } from "./discord-attachment-fetch.ts";
 import { loadOrCreateDeviceSessionKey } from "./device-session.ts";
 import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
 import { ConfiguredMediaGenerator } from "./media-generation.ts";
@@ -196,9 +197,107 @@ const discordUserPresenceRuntime = await loadDiscordPresenceRuntime(
 
 const activityObservations = new ActivityObservationProjection();
 
-// TODO(captain): replace the stub with the pi-based captain implementation
-// (sessions, tools, persona) once it lands behind ./captain/port.ts.
-const captain = createStubCaptain();
+// The captain's tools reach the same in-process authorities the routes use.
+// The app needs the captain and the captain's deps need the app, so the app
+// reference binds late — tools only run inside turns, well after boot.
+let clankieRef: ClankieApp | undefined;
+const boundApp = (): ClankieApp => {
+  if (clankieRef === undefined) throw new Error("clankie service is still booting");
+  return clankieRef;
+};
+
+const captain = createCaptain(
+  {
+    browser: {
+      catalog: () =>
+        browserHost?.catalog() ??
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          available: false,
+          reason: "the browser host is not running",
+          tools: [],
+        }),
+      call: (request) =>
+        browserHost?.call(request) ??
+        Promise.resolve({ outcome: "refused" as const, tool: request.tool, reason: "browser_unavailable" as const }),
+    },
+    media: {
+      generateImage: (request) =>
+        mediaGenerator?.generateImage(request) ??
+        Promise.resolve({ outcome: "refused" as const, schemaVersion: 1 as const, reason: "media_unavailable" as const }),
+      generateVideo: (request) =>
+        mediaGenerator?.generateVideo(request) ??
+        Promise.resolve({ outcome: "refused" as const, schemaVersion: 1 as const, reason: "media_unavailable" as const }),
+    },
+    embodiment: {
+      submitIntent: (intent) => boundApp().embodiment.submit(intent),
+      getSession: (sessionId) => Promise.resolve(boundApp().embodiment.getSession(sessionId)),
+      getLiveSession: () => Promise.resolve(boundApp().embodiment.liveSession()),
+      getPossession: () => {
+        const holder = observeBodyHolder(defaultGbaBodyRootDir(process.env));
+        return Promise.resolve(
+          holder === null
+            ? undefined
+            : { schemaVersion: 1 as const, holderId: holder.holderId, acquiredAt: holder.acquiredAt },
+        );
+      },
+    },
+    activity: {
+      current: async () => {
+        const live = boundApp().embodiment.liveSession();
+        if (live === undefined) return { schemaVersion: 1 as const, outcome: "not_playing" as const };
+        const snapshot = await activityObservations.current();
+        return snapshot === undefined
+          ? {
+              schemaVersion: 1 as const,
+              outcome: "pending" as const,
+              sessionId: live.sessionId,
+              environmentId: live.environmentId,
+              state: live.state,
+              updatedAt: live.updatedAt,
+            }
+          : { schemaVersion: 1 as const, outcome: "snapshot" as const, snapshot };
+      },
+    },
+    presence: {
+      listSessions: () => Promise.resolve(boundApp().presenceSessions()),
+      listVoiceHistory: (limit = 5) => Promise.resolve(boundApp().voiceHistory(limit)),
+    },
+    memory: {
+      appendEpisode: (lane, episode) => {
+        memory.recordEpisode({
+          schemaVersion: 1,
+          episodeId: `ep-${crypto.randomUUID()}`,
+          lane,
+          targetId: "self",
+          summary: episode,
+          visibility: "shareable",
+          provenance: {
+            characterId: "clankie",
+            sessionId: "captain",
+            selfAuthored: true,
+            rawTranscript: false,
+          },
+          occurredAt: new Date().toISOString(),
+        });
+        return Promise.resolve();
+      },
+      recallEpisodes: (lane) => {
+        const card = memory.episodeRecallCard({ lane: lane as never });
+        return Promise.resolve(card.length === 0 ? [] : [card]);
+      },
+      recallDiscordPerson: (identity, options) => {
+        const card = memory.recallDiscordPersonCard(identity, {
+          channelId: options.channelId,
+          query: options.query,
+        });
+        return card.length === 0 ? undefined : card;
+      },
+    },
+    resolveDiscordAttachments: createDiscordAttachmentResolver(),
+  },
+  { repoRoot, stateDir: join(stateRoot, "captain") },
+);
 
 const clankie = await createClankieApp({
   captain,
@@ -237,6 +336,7 @@ const clankie = await createClankieApp({
   }),
   eventLogPath,
 });
+clankieRef = clankie;
 
 // Asked embodiment (ADR 0063): the play host lives in this process now, so its
 // "client" is the embodiment manager itself — the loopback died with the split.

@@ -21,6 +21,7 @@ import {
   resolveDiscordPresencePhaseToolExposure,
   type ActivityObservationSnapshot,
   type DiscordPresenceSessionRecord,
+  type DiscordVoiceStay,
 } from "@clankie/interactive-environment";
 import {
   CallBrowserToolRequestSchema,
@@ -28,6 +29,9 @@ import {
   GenerateVideoRequestSchema,
   MEDIA_IMAGE_GENERATION_PATH,
   MEDIA_VIDEO_GENERATION_PATH,
+  CAPTAIN_LANE_OBSERVATION_PATH,
+  OPERATOR_CONVERSATION_DISPATCH_PATH,
+  OperatorConversationServiceRequestSchema,
   CaptainChannelTurnResultSchema,
   CaptainEpisodeSchema,
   CaptainPresenceReportSchema,
@@ -263,6 +267,9 @@ export interface ClankieApp {
   /** In-process embodiment authority; the play host claims from it directly. */
   embodiment: EmbodimentManager;
   captainPresence: CaptainPresenceManager;
+  /** Read views the captain's get_self_state tool assembles its card from. */
+  presenceSessions: () => DiscordPresenceSessionRecord[];
+  voiceHistory: (limit: number) => DiscordVoiceStay[];
   close(): void;
 }
 
@@ -1594,10 +1601,36 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     });
   });
 
+  // The operator conversation contract (TUI direct, relay in front for
+  // devices) and the lanes view. Both belonged to the captain-eve process;
+  // the captain lives here now, so its HTTP face does too.
+  app.post(OPERATOR_CONVERSATION_DISPATCH_PATH, async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable") {
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    }
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const body = await readJson(context.req.raw);
+    const parsed = OperatorConversationServiceRequestSchema.safeParse(body);
+    if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    return context.json(await dependencies.captain.serveOperatorConversation(parsed.data));
+  });
+
+  app.get(CAPTAIN_LANE_OBSERVATION_PATH, async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable") {
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    }
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    return context.json({ schemaVersion: 1 as const, lanes: await dependencies.captain.observeLanes() });
+  });
+
   return {
     app,
     embodiment,
     captainPresence,
+    presenceSessions: () => discordPresenceSessions.list(),
+    voiceHistory: (limit: number) => deriveDiscordVoiceHistory(storedEvents, limit),
     close: () => captainPresence.close(),
   };
 }
