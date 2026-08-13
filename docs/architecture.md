@@ -89,3 +89,7 @@ runner collapsed into one service. Herdr replaced the worker fleet: visible
 panes beat a lease protocol. What survives of the old rigor is the part worth
 keeping: untrusted input stays fenced, secrets stay in the broker, and Clankie
 reports what actually happened rather than what he intended.
+
+The decision records for the surviving subsystems — play mechanics, voice,
+presence, media, the browser — remain in [`adr/`](adr/); the governance-era
+ADRs live only in git history.
