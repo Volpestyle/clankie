@@ -104,7 +104,6 @@ import {
   type ActivityObservationRead,
 } from "@clankie/interactive-environment";
 
-export * from "./terminal-gateway.ts";
 export type {
   ActivityObservationRead,
   ActivityObservationSnapshot,

@@ -4,8 +4,7 @@
   "private": false,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./terminal-json-websocket": "./src/terminal-json-websocket.ts"
+    ".": "./src/index.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p tsconfig.json",
@@ -15,8 +14,7 @@
   },
   "dependencies": {
     "@clankie/interactive-environment": "workspace:*",
-    "@clankie/protocol": "workspace:*",
-    "@clankie/terminal-protocol": "workspace:*"
+    "@clankie/protocol": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "24.12.4",

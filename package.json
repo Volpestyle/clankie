@@ -2,7 +2,7 @@
   "name": "clankie",
   "version": "0.2.0",
   "private": true,
-  "description": "Clankie: a persistent agent who codes, leads herdr fleets, plays Pokemon and Minecraft, and hangs out in Discord.",
+  "description": "Clankie: a persistent agent who codes, leads herdr fleets, plays games, and hangs out in Discord.",
   "type": "module",
   "scripts": {
     "dev": "turbo run dev --parallel",

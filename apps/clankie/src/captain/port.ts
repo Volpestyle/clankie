@@ -1,0 +1,56 @@
+import type {
+  CaptainChannelTurnResult,
+  DiscordPresenceChannelTurnRequest,
+  OperatorConversationServiceRequest,
+  OperatorConversationServiceResult,
+} from "@clankie/protocol";
+
+/**
+ * The seam between the HTTP app and the pi-based captain. The app layer parses
+ * and authenticates; the captain owns sessions, tools, and persona.
+ */
+export interface CaptainPort {
+  /** One Discord text/voice message becomes one captain turn. */
+  submitDiscordTurn(request: DiscordPresenceChannelTurnRequest): Promise<CaptainChannelTurnResult>;
+  /** Operator conversations (TUI and relay) — same wire contract as before. */
+  serveOperatorConversation(
+    request: OperatorConversationServiceRequest,
+  ): Promise<OperatorConversationServiceResult>;
+  /** Lane transcript snapshots for the TUI lanes view. */
+  observeLanes(): Promise<readonly LaneObservation[]>;
+  /** Prompt fragment describing the voice lane, for the realtime voice briefing. */
+  voiceLaneInstructions(): string;
+  /** Graceful shutdown: waits for in-flight turns. */
+  close(): Promise<void>;
+}
+
+export interface LaneObservationEntry {
+  readonly at: string;
+  readonly kind: "heard" | "said";
+  readonly text: string;
+}
+
+export interface LaneObservation {
+  readonly lane: string;
+  readonly targetId: string;
+  readonly entries: readonly LaneObservationEntry[];
+}
+
+/** Test stand-in so the app layer can be exercised without a model. */
+export function createStubCaptain(overrides: Partial<CaptainPort> = {}): CaptainPort {
+  return {
+    submitDiscordTurn: async () => ({
+      state: "settled",
+      captainSessionId: "stub-session",
+      turnId: "stub-turn",
+      response: "stub response",
+    }),
+    serveOperatorConversation: async () => {
+      throw new Error("stub captain: serveOperatorConversation not overridden");
+    },
+    observeLanes: async () => [],
+    voiceLaneInstructions: () => "You are in a voice room.",
+    close: async () => {},
+    ...overrides,
+  };
+}
