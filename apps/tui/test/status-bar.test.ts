@@ -5,24 +5,14 @@ import {
   formatCaptainPresenceStatus,
   STATUS_BAR_MAX_ROWS,
 } from "../src/shell/status-bar.ts";
-import type { CaptainPresenceSnapshot, CaptainPresenceState } from "../src/observation/mission-observer.ts";
+import type { PresenceSnapshot } from "../src/observation/presence.ts";
 
 describe("captain status bar", () => {
-  it("renders every captain presence state with an explicit label", () => {
-    const states: CaptainPresenceState[] = [
-      "working",
-      "waiting_user",
-      "waiting_dependency",
-      "idle",
-      "offline",
-    ];
-    for (const state of states) {
-      const presence: CaptainPresenceSnapshot = {
-        state,
-        summary: `Clankie ${state}`,
-        updatedAt: "2026-07-16T00:00:00.000Z",
-      };
-      expect(formatCaptainPresenceStatus(presence)).toBe(`clankie: ${state}`);
+  it("renders every presence phase with an explicit label", () => {
+    const phases = ["present", "voice_active", "go_live_active", "off", "no presence session"];
+    for (const phase of phases) {
+      const presence: PresenceSnapshot = { phase };
+      expect(formatCaptainPresenceStatus(presence)).toBe(`clankie: ${phase}`);
     }
     expect(formatCaptainPresenceStatus(undefined)).toBe("clankie: unknown");
   });

@@ -2,9 +2,9 @@
  * Typed captain lane labels for the read-only trace surface.
  *
  * Lane identity is session/event context only — never inferred from model or
- * terminal prose. The live HTTP headless captain path is the authenticated TUI
- * lane per captain-eve channel mapping; other lanes must be supplied as typed
- * session context (CLI/cursor/fixture), not guessed from stream text.
+ * terminal prose. The headless captain path defaults to the TUI lane; other
+ * lanes must be supplied as typed session context (CLI/cursor/fixture), not
+ * guessed from stream text.
  */
 export const TRACE_LANES = ["tui", "discord_voice", "discord_presence", "gameplay"] as const;
 

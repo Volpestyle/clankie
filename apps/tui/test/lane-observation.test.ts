@@ -1,4 +1,3 @@
-import type { Client, HandleMessageStreamEvent, SessionState } from "eve/client";
 import type { ObservableCaptainLane } from "@clankie/protocol";
 import { describe, expect, it } from "vitest";
 import {
@@ -38,30 +37,6 @@ const lanes: readonly ObservableCaptainLane[] = [
     updatedAt: "2026-08-09T08:00:00.000Z",
   },
 ];
-
-function fakeClient(input: {
-  readonly streams: readonly (readonly HandleMessageStreamEvent[])[];
-  readonly onStream?: (state: SessionState, startIndex: number | undefined) => void;
-}): Client {
-  let call = 0;
-  return {
-    session: (state: SessionState = { streamIndex: 0 }) => ({
-      stream: (options?: { signal?: AbortSignal; startIndex?: number }) => {
-        input.onStream?.(state, options?.startIndex);
-        const events = input.streams[call] ?? [];
-        call += 1;
-        return (async function* () {
-          for (const event of events) yield event;
-        })();
-      },
-    }),
-  } as unknown as Client;
-}
-
-const boundary = {
-  type: "session.completed",
-  data: { sessionId: "session-a" },
-} as unknown as HandleMessageStreamEvent;
 
 describe("captain lane listing client", () => {
   it("parses the authenticated listing", async () => {
@@ -126,84 +101,52 @@ describe("lane selection", () => {
 });
 
 describe("followLane", () => {
-  it("renders a room's stream and resumes from the index it reached", async () => {
+  it("reports the followed room's session and state changes in order", async () => {
     const seen: string[] = [];
-    const streamed: { sessionId: string | undefined; startIndex: number | undefined }[] = [];
-    const controller = new AbortController();
-    const client = fakeClient({
-      streams: [[boundary, boundary], [boundary]],
-      onStream: (state, startIndex) => {
-        streamed.push({ sessionId: state.sessionId, startIndex });
-      },
-    });
-    let rounds = 0;
-    await followLane({
-      address: { lane: "discord_presence", targetId: "111:222" },
-      client,
-      lanes: { lanes: async () => lanes },
-      signal: controller.signal,
-      sleep: async () => {
-        rounds += 1;
-        if (rounds >= 2) controller.abort();
-      },
-      render: (event) => {
-        seen.push(event.type);
-      },
-    });
-    expect(seen).toEqual(["session.completed", "session.completed", "session.completed"]);
-    expect(streamed).toEqual([
-      { sessionId: "session-a", startIndex: 0 },
-      { sessionId: "session-a", startIndex: 2 },
-    ]);
-  });
-
-  it("restarts at index 0 and resets the renderer when the room's session rotates", async () => {
-    // A Discord text lane gets a fresh Eve session per turn: the tail must not
-    // resume the new session at the old session's index.
-    const streamed: { sessionId: string | undefined; startIndex: number | undefined }[] = [];
     const rotations: string[] = [];
     const controller = new AbortController();
-    const sessions = ["turn-one", "turn-two"];
+    const sessions = ["turn-one", "turn-one", "turn-two"];
+    const states = ["active", "waiting", "active"];
     let listed = 0;
-    const client = fakeClient({
-      streams: [[boundary], [boundary]],
-      onStream: (state, startIndex) => {
-        streamed.push({ sessionId: state.sessionId, startIndex });
-      },
-    });
     await followLane({
       address: { lane: "discord_presence", targetId: "111:222" },
-      client,
       lanes: {
         lanes: async () => {
-          const sessionId = sessions[Math.min(listed, sessions.length - 1)] as string;
+          const index = Math.min(listed, sessions.length - 1);
           listed += 1;
-          return [{ ...(lanes[0] as ObservableCaptainLane), sessionId }];
+          return [
+            {
+              ...(lanes[0] as ObservableCaptainLane),
+              sessionId: sessions[index] as string,
+              state: states[index] as ObservableCaptainLane["state"],
+            },
+          ];
         },
       },
       signal: controller.signal,
       sleep: async () => {
-        if (listed >= 2) controller.abort();
+        if (listed >= 3) controller.abort();
       },
-      render: () => undefined,
+      render: (line) => {
+        seen.push(line);
+      },
       onSessionRotated: (sessionId) => {
         rotations.push(sessionId);
       },
     });
     expect(rotations).toEqual(["turn-one", "turn-two"]);
-    expect(streamed).toEqual([
-      { sessionId: "turn-one", startIndex: 0 },
-      { sessionId: "turn-two", startIndex: 0 },
+    expect(seen).toEqual([
+      "session turn-one · active · 2026-08-09T10:00:00.000Z",
+      "state waiting · 2026-08-09T10:00:00.000Z",
+      "session turn-two · active · 2026-08-09T10:00:00.000Z",
     ]);
   });
 
   it("waits without rendering while a room has no session yet", async () => {
     const controller = new AbortController();
     let polls = 0;
-    const client = fakeClient({ streams: [[boundary]] });
     await followLane({
       address: { lane: "gameplay", targetId: "firered" },
-      client,
       lanes: { lanes: async () => lanes },
       signal: controller.signal,
       sleep: async () => {
@@ -217,18 +160,19 @@ describe("followLane", () => {
     expect(polls).toBe(3);
   });
 
-  it("backs off while a room stays quiet and snaps back when it speaks", async () => {
-    // A settled room must not be re-opened every two seconds forever.
+  it("backs off while a room stays quiet and snaps back when it changes", async () => {
+    // A settled room must not be re-polled at full cadence forever.
     const waits: number[] = [];
     const controller = new AbortController();
+    const sessions = ["turn-one", "turn-one", "turn-one", "turn-two"];
     let listed = 0;
     await followLane({
       address: { lane: "discord_presence", targetId: "111:222" },
-      client: fakeClient({ streams: [[], [], [boundary], []] }),
       lanes: {
         lanes: async () => {
+          const index = Math.min(listed, sessions.length - 1);
           listed += 1;
-          return lanes;
+          return [{ ...(lanes[0] as ObservableCaptainLane), sessionId: sessions[index] as string }];
         },
       },
       signal: controller.signal,
@@ -239,7 +183,9 @@ describe("followLane", () => {
       },
       render: () => undefined,
     });
-    expect(waits).toEqual([1_000, 2_000, 1_000, 1_000]);
+    // First round is a change (fresh session), then two quiet rounds back off,
+    // then the rotation snaps the cadence back.
+    expect(waits).toEqual([1_000, 1_000, 2_000, 1_000]);
   });
 
   it("caps the quiet backoff", async () => {
@@ -247,8 +193,7 @@ describe("followLane", () => {
     const controller = new AbortController();
     let rounds = 0;
     await followLane({
-      address: { lane: "discord_presence", targetId: "111:222" },
-      client: fakeClient({ streams: [] }),
+      address: { lane: "gameplay", targetId: "firered" },
       lanes: { lanes: async () => lanes },
       signal: controller.signal,
       pollIntervalMs: 4_000,
@@ -268,7 +213,6 @@ describe("followLane", () => {
     let calls = 0;
     await followLane({
       address: { lane: "discord_presence", targetId: "111:222" },
-      client: fakeClient({ streams: [[boundary]] }),
       lanes: {
         lanes: async () => {
           calls += 1;
@@ -294,7 +238,6 @@ describe("followLane", () => {
     let calls = 0;
     await followLane({
       address: { lane: "discord_presence", targetId: "111:222" },
-      client: fakeClient({ streams: [] }),
       lanes: {
         lanes: async () => {
           calls += 1;

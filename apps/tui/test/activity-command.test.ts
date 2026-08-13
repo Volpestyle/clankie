@@ -2,7 +2,6 @@ import type { ActivityObservationRead } from "@clankie/api-client";
 import { describe, expect, it, vi } from "vitest";
 import { formatActivityObservation } from "../src/activity-command.ts";
 import { buildConsoleCommands } from "../src/commands.ts";
-import { createInitialConsoleState } from "../src/session/state.ts";
 import type { ClankieFaceShell } from "../src/shell/shell.ts";
 
 const snapshot: ActivityObservationRead = {
@@ -55,7 +54,6 @@ describe("activity console command", () => {
     const results: Array<{ command: string; text: string; tone: string }> = [];
     const getCurrentActivityObservation = vi.fn(async () => snapshot);
     const commands = buildConsoleCommands({
-      state: createInitialConsoleState(),
       activityClient: { getCurrentActivityObservation },
       activityWatchUrl: "http://127.0.0.1:4320",
     });

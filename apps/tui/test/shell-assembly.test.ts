@@ -5,12 +5,11 @@
  */
 import { describe, expect, it } from "vitest";
 import { buildConsoleCommands } from "../src/commands.ts";
-import { createInitialConsoleState } from "../src/session/state.ts";
 import { ClankieFaceShell } from "../src/shell/shell.ts";
 
 describe("shell assembly", () => {
   it("wires the face shell without starting it", () => {
-    const commands = buildConsoleCommands({ state: createInitialConsoleState() });
+    const commands = buildConsoleCommands({});
     const shell = new ClankieFaceShell({
       commands,
       cwd: process.cwd(),
@@ -23,7 +22,7 @@ describe("shell assembly", () => {
   });
 
   it("builds a console command set with names and descriptions", () => {
-    const commands = buildConsoleCommands({ state: createInitialConsoleState() });
+    const commands = buildConsoleCommands({});
     expect(commands.length).toBeGreaterThanOrEqual(8);
     for (const command of commands) {
       expect(command.name.length).toBeGreaterThan(0);

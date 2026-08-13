@@ -1,14 +1,14 @@
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { SessionState } from "eve/client";
+import type { CaptainSessionState } from "./captain-stream.ts";
 
-export interface CaptainSessionCursor extends SessionState {
+export interface CaptainSessionCursor extends CaptainSessionState {
   readonly version: 2;
   readonly active: boolean;
   readonly generation: string;
 }
 
-export interface LegacyCaptainSessionCursor extends SessionState {
+export interface LegacyCaptainSessionCursor extends CaptainSessionState {
   readonly version: 1;
   readonly active: boolean;
 }

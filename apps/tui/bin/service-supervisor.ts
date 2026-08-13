@@ -16,9 +16,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 /**
  * Generic supervision for the long-lived local services the operator launcher
- * owns. The captain gained this machinery first (see `captain-service.ts`);
- * every rule it encodes was earned by a real failure mode, so the control plane
- * and the Discord bridge reuse it rather than growing a second, weaker copy:
+ * owns. Every rule it encodes was earned by a real failure mode:
  *
  * - a pid record per service, so a later invocation can find what it started;
  * - an ownership check against the live process command before any signal, so a
@@ -26,17 +24,10 @@ import { setTimeout as sleep } from "node:timers/promises";
  * - a health probe gate, so "restarted" means "answered healthy", not "spawned".
  */
 
-export type ServiceId = "captain-eve" | "control-plane" | "discord-bridge" | "activity" | "tunnel" | "runner";
+export type ServiceId = "clankie" | "discord-bridge" | "activity" | "tunnel";
 
 /** Ordered by dependency: each service may only depend on those before it. */
-export const SERVICE_ORDER: readonly ServiceId[] = [
-  "captain-eve",
-  "control-plane",
-  "discord-bridge",
-  "activity",
-  "tunnel",
-  "runner",
-];
+export const SERVICE_ORDER: readonly ServiceId[] = ["clankie", "discord-bridge", "activity", "tunnel"];
 
 export type ServiceState = "healthy" | "unhealthy" | "unreachable";
 

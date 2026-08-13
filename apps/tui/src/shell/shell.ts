@@ -15,7 +15,8 @@ import {
   Loader,
   matchesKey,
   ProcessTerminal,
-  TUI,
+  TuiMainScreen,
+  type TUI,
   type Component,
   type OverlayHandle,
   type OverlayOptions,
@@ -219,7 +220,7 @@ export class ClankieFaceShell {
       unicode: this.theme.capabilities.unicode,
     });
 
-    this.tui = new TUI(new ProcessTerminal());
+    this.tui = new TuiMainScreen(new ProcessTerminal());
     this.tui.setClearOnShrink(true);
     this.banner = new ClankieBannerComponent(
       options.bannerFields,

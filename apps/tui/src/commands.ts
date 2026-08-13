@@ -1,9 +1,9 @@
 /**
  * The operator console's slash commands. Display fields feed the ported
  * typeahead / Ctrl+/ workbench / autocomplete; `run` handlers speak to the
- * shell API and the current live-session/control-plane projections. Command UX follows v1:
- * results land as `done /cmd command` transcript blocks, configurators run as
- * guided SetupFlow wizards.
+ * shell API and the clankie service. Command UX follows v1: results land as
+ * `done /cmd command` transcript blocks, configurators run as guided SetupFlow
+ * wizards.
  */
 import {
   AGENT_SPINNER_CYCLE_NAME,
@@ -11,15 +11,12 @@ import {
   AGENT_SPINNER_PRESET_NAMES,
   normalizeAgentSpinnerSelection,
 } from "./face/agent-spinners.ts";
-import { runApprovalInbox, type ApprovalInboxClient } from "./approval-inbox.ts";
 import {
   parseAgentSpinnerCycleRateMs,
   parseInputPlacement,
   parseStatusPlacement,
 } from "./shell/face-settings.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
-import type { MenuOption } from "./shell/setup-flow.ts";
-import { MissionDashboard } from "./components/mission-dashboard.ts";
 import { formatActivityObservation, type ActivityObservationClient } from "./activity-command.ts";
 import {
   formatLaneListing,
@@ -28,19 +25,20 @@ import {
   type CaptainLaneTraceController,
 } from "./session/lane-observation.ts";
 import type { ObservableCaptainLane } from "@clankie/protocol";
-import type { MissionObserver } from "./observation/mission-observer.ts";
-import { pushTimeline, type ConsoleState, type DoctrineSettings } from "./session/state.ts";
+import type { PresenceSnapshot } from "./observation/presence.ts";
+import type { HerdrRosterSnapshot } from "./observation/herdr-roster.ts";
 
 type StatusTone = "normal" | "active" | "ok" | "warn" | "bad" | "muted";
 
 export interface ConsoleCommandContext {
-  readonly state: ConsoleState;
-  readonly observer?: MissionObserver;
-  readonly approvalClient?: ApprovalInboxClient;
   readonly activityClient?: ActivityObservationClient;
   readonly activityWatchUrl?: string;
   /** Read-only tails onto the lanes the operator is not talking in (ADR 0083). */
   readonly laneTrace?: CaptainLaneTraceController;
+  /** Latest polled presence snapshot for /status. */
+  readonly presence?: () => PresenceSnapshot | undefined;
+  /** Sibling Herdr pane agents, when running inside Herdr. */
+  readonly herdrRoster?: () => HerdrRosterSnapshot | undefined;
   readonly conversations?: {
     readonly conversationId?: string | undefined;
     conversations(): Promise<
@@ -53,27 +51,11 @@ export interface ConsoleCommandContext {
     >;
     select(conversationId: string): Promise<{ readonly conversationId: string; readonly title: string }>;
   };
-  readonly captain?: {
-    readonly connectionState: string;
-    readonly hasActiveTurn: boolean;
-    readonly tokenStatus: string;
-    newSession(): Promise<void>;
-  };
 }
 
 export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellCommand[] {
-  const {
-    state,
-    captain,
-    observer,
-    approvalClient,
-    activityClient,
-    activityWatchUrl,
-    conversations,
-    laneTrace,
-  } = context;
+  const { activityClient, activityWatchUrl, conversations, laneTrace, presence, herdrRoster } = context;
   const commands: FaceShellCommand[] = [];
-  const dashboard = () => observer?.dashboard ?? state.dashboard;
 
   const statusHelpers = (shell: ClankieFaceShell) => {
     const { ansi } = shell.theme;
@@ -168,7 +150,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "trace",
       aliases: [],
-      description: "Watch another lane's reasoning and tool calls (Discord servers, voice, gameplay)",
+      description: "Watch another lane's activity (Discord servers, voice, gameplay)",
       argumentHint: "[<lane>|<guild:channel>|all|off]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
@@ -220,63 +202,6 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       },
     },
     {
-      name: "mission",
-      aliases: ["m"],
-      description: "Observe missions; select by id or move with next/prev",
-      argumentHint: "[list|next|prev|<mission-id>]",
-      takesArgument: true,
-      async run(argument, shell): Promise<void> {
-        const selector = argument.trim();
-        if (selector.length > 0 && selector !== "list") {
-          if (observer === undefined || !(await observer.selectMission(selector))) {
-            shell.insertCommandResult(
-              `/mission ${selector}`,
-              `Unknown mission selector: ${selector}. Use /mission list.`,
-              "error",
-            );
-            return;
-          }
-        }
-        shell.insertCommandComponent(
-          selector.length === 0 ? "/mission" : `/mission ${selector}`,
-          new MissionDashboard(dashboard),
-          "success",
-        );
-        shell.refreshStatusView();
-      },
-    },
-    {
-      name: "doctrine",
-      aliases: ["d"],
-      description: "Guided doctrine setup: granularity, parallelism, assurance, merge, visibility",
-      takesArgument: false,
-      async run(_argument, shell): Promise<void> {
-        await runDoctrineWizard(shell, state);
-      },
-    },
-    {
-      name: "approvals",
-      aliases: ["a", "inbox"],
-      description: "Review pending approvals with evidence and doctrine rationale",
-      takesArgument: false,
-      async run(_argument, shell): Promise<void> {
-        await runApprovalInbox(shell, approvalClient);
-      },
-    },
-    {
-      name: "eval",
-      aliases: [],
-      description: "Show how to refresh the lead-agent proof score",
-      takesArgument: false,
-      run(_argument, shell): void {
-        shell.insertCommandResult(
-          "/eval",
-          "Run `pnpm eval:self-build` from the repo root to refresh the proof report; artifacts land in artifacts/.",
-          "success",
-        );
-      },
-    },
-    {
       name: "layout",
       aliases: ["header", "banner"],
       description: "Configure header, chat input, status bar, and spinner",
@@ -294,18 +219,6 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       takesArgument: false,
       run(_argument, shell): void {
         shell.clearTranscript();
-        shell.refreshStatus("ready");
-      },
-    },
-    {
-      name: "new",
-      aliases: ["n"],
-      description: "Start a fresh Clankie session",
-      takesArgument: false,
-      async run(_argument, shell): Promise<void> {
-        await captain?.newSession();
-        shell.clearTranscript();
-        shell.insertMarkdown("**Notice**\n\nFresh Clankie session. Mission state is unchanged.");
         shell.refreshStatus("ready");
       },
     },
@@ -346,41 +259,42 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "status",
       aliases: [],
-      description: "Show console, mission, and control-plane status",
+      description: "Show console and clankie service status",
       takesArgument: false,
       run(_argument, shell): void {
         const s = statusHelpers(shell);
-        const observed = dashboard();
+        const snapshot = presence?.();
+        const roster = herdrRoster?.();
         shell.insertCommandResult(
           "/status",
           [
             s.title("Console"),
-            s.line("mission", observed.mission, "active"),
-            s.line("doctrine", observed.doctrine, "active"),
-            s.line("workers", String(observed.agents.length), "normal"),
             s.line(
-              "attention",
-              String(observed.attention.length),
-              observed.attention.length > 0 ? "warn" : "ok",
+              "presence",
+              snapshot?.phase ?? "unavailable",
+              snapshot === undefined ? "warn" : "ok",
             ),
+            s.line("conversation", conversations?.conversationId ?? "none selected", "active"),
             s.line(
-              "approvals pending",
-              approvalClient ? "live · /approvals" : "authentication unavailable",
-              approvalClient ? "ok" : "warn",
+              "activity",
+              activityClient === undefined ? "authentication unavailable" : "live · /activity",
+              activityClient === undefined ? "warn" : "ok",
             ),
-            s.line(
-              "clankie",
-              captain?.connectionState ?? "not configured",
-              captain?.connectionState === "live" ? "ok" : "warn",
-            ),
-            ...(captain?.tokenStatus === undefined || captain.tokenStatus.length === 0
+            ...(roster === undefined
               ? []
-              : [s.line("model usage", captain.tokenStatus, "normal")]),
-            s.line(
-              "mission observer",
-              `${observed.connection} · cursor #${observed.cursor.toString()}`,
-              "ok",
-            ),
+              : [
+                  s.line(
+                    "herdr workers",
+                    roster.error === undefined
+                      ? roster.agents.length === 0
+                        ? "none"
+                        : roster.agents
+                            .map((agent) => `${agent.agent} ${agent.status} (${agent.paneId})`)
+                            .join(" · ")
+                      : `roster error: ${roster.error}`,
+                    roster.error === undefined ? "normal" : "warn",
+                  ),
+                ]),
           ].join("\n"),
           "success",
         );
@@ -398,103 +312,6 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
   );
 
   return commands;
-}
-
-const DOCTRINE_AXES: ReadonlyArray<{
-  readonly key: keyof DoctrineSettings;
-  readonly message: string;
-  readonly description: string;
-  readonly options: readonly MenuOption[];
-}> = [
-  {
-    key: "granularity",
-    message: "Change granularity — how aggressively the lead splits reviewable units",
-    description: "How aggressively the lead splits reviewable units.",
-    options: [
-      { value: "Micro", label: "Micro", hint: "many tiny reviewable changes" },
-      { value: "Small", label: "Small", hint: "default; one concern per change" },
-      { value: "Balanced", label: "Balanced" },
-      { value: "Batched", label: "Batched", hint: "fewer, larger changes" },
-    ],
-  },
-  {
-    key: "parallelism",
-    message: "Parallel workers — hard scheduler cap, not a prompt preference",
-    description: "Hard scheduler cap, not a prompt preference.",
-    options: ["1", "2", "3", "4", "6", "8"].map((value) => ({ value, label: value })),
-  },
-  {
-    key: "assurance",
-    message: "Assurance — independent review and evidence requirements",
-    description: "Controls independent review and evidence requirements.",
-    options: [
-      { value: "Fast", label: "Fast", hint: "trust the implementer" },
-      { value: "Standard", label: "Standard" },
-      { value: "Thorough", label: "Thorough", hint: "independent verify on every task" },
-      { value: "Audited", label: "Audited", hint: "verify + review + evidence bundle" },
-    ],
-  },
-  {
-    key: "merge",
-    message: "Lead merge authority — a hard capability policy evaluated outside the model",
-    description: "A hard capability policy evaluated outside the model.",
-    options: [
-      { value: "Deny", label: "Deny", hint: "humans merge everything" },
-      { value: "Approval", label: "Approval", hint: "lead proposes, human approves" },
-      { value: "Conditional", label: "Conditional", hint: "policy-gated automerge" },
-    ],
-  },
-  {
-    key: "visibility",
-    message: "Worker visibility — which runner workers receive visible panes",
-    description: "Controls which runner workers receive visible panes.",
-    options: [
-      { value: "Summary", label: "Summary" },
-      { value: "Write workers", label: "Write workers" },
-      { value: "All workers", label: "All workers" },
-    ],
-  },
-];
-
-async function runDoctrineWizard(shell: ClankieFaceShell, state: ConsoleState): Promise<void> {
-  const flow = shell.setupFlow;
-  flow.begin("doctrine setup");
-  const next: DoctrineSettings = { ...state.doctrine };
-  for (const axis of DOCTRINE_AXES) {
-    const selected = await flow.readSelect({
-      kind: "single",
-      message: axis.message,
-      options: axis.options,
-      currentValue: state.doctrine[axis.key],
-      initialValue: next[axis.key],
-      allowBack: false,
-      required: true,
-    });
-    if (selected === undefined || selected[0] === undefined) {
-      flow.end();
-      shell.insertCommandResult("/doctrine", "Doctrine setup cancelled; nothing changed.", "error");
-      return;
-    }
-    (next[axis.key] as string) = selected[0];
-  }
-  const changes = DOCTRINE_AXES.filter((axis) => state.doctrine[axis.key] !== next[axis.key]).map(
-    (axis) => `${axis.key}: ${state.doctrine[axis.key]} → ${next[axis.key]}`,
-  );
-  Object.assign(state.doctrine, next);
-  flow.end();
-  if (changes.length === 0) {
-    shell.insertCommandResult("/doctrine", "Doctrine unchanged.", "success");
-    return;
-  }
-  for (const change of changes) pushTimeline(state, `doctrine preview changed: ${change}`);
-  shell.insertCommandResult(
-    "/doctrine",
-    [
-      "Doctrine preview updated (persistence lands with the doctrine backend):",
-      ...changes.map((change) => `- ${change}`),
-    ].join("\n"),
-    "success",
-  );
 }
 
 function runLayoutCommand(shell: ClankieFaceShell, argument: string): void {

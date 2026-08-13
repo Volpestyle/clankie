@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// The `clankie` command exposes non-interactive captain controls or attaches
-// the fullscreen face to one healthy shared captain service.
+// The `clankie` command exposes non-interactive controls or attaches the
+// fullscreen face to the one healthy clankie service.
 import { resolve } from "node:path";
-import { ensureOperatorCredential } from "@clankie/credential-broker";
+import { ensureCaptainCredential, ensureOperatorCredential } from "@clankie/credential-broker";
 import { applyDiscordSettingsToEnvironment, SettingsStore } from "@clankie/settings";
-import { ensureCaptainService } from "./captain-service.ts";
 import { isHeadlessCaptainCommand, runHeadlessCaptainCommand } from "./headless-captain.ts";
+import { startOne } from "./services.ts";
 import { parseDirectConversation } from "../src/session/operator-conversations.ts";
 
 const repoRoot = resolve(import.meta.dirname, "../../..");
@@ -57,10 +57,22 @@ async function runOperatorConsole(): Promise<void> {
     if (timer !== undefined) clearInterval(timer);
     if (process.stderr.isTTY) process.stderr.write("\r\u001B[2K");
   };
-  let captain;
   try {
     await ensureOperatorCredential({ env: process.env });
-    captain = await ensureCaptainService({ repoRoot, env: process.env, onStatus: updateStatus });
+    // Half of the shared captain secret; the service's dispatch route
+    // authenticates it. A brokering failure degrades rather than blocks.
+    let captainToken: string | undefined;
+    try {
+      captainToken = (await ensureCaptainCredential({ env: process.env })).token;
+    } catch {
+      captainToken = undefined;
+    }
+    await startOne("clankie", {
+      repoRoot,
+      env: process.env,
+      captainToken,
+      onStatus: updateStatus,
+    });
   } catch (error) {
     stopStatus();
     process.stderr.write(`clankie: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -68,7 +80,5 @@ async function runOperatorConsole(): Promise<void> {
     return;
   }
   stopStatus();
-  process.env.CLANKIE_CAPTAIN_URL = captain.host;
-  if (captain.generation !== undefined) process.env.CLANKIE_CAPTAIN_GENERATION = captain.generation;
   await import("../src/index.ts");
 }

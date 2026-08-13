@@ -70,7 +70,7 @@ interface StubOptions {
 function stubService(options: StubOptions = {}): ManagedService {
   const states = [...(options.states ?? ["healthy"])];
   return {
-    id: options.id ?? "control-plane",
+    id: options.id ?? "clankie",
     label: "Stub service",
     dependsOn: [],
     spawnArgs: ["--filter", "@clankie/stub", "start"],
@@ -101,7 +101,7 @@ async function writeRecord(env: NodeJS.ProcessEnv, id: ServiceId, pid: number): 
 describe("service supervisor", () => {
   it("refuses to signal a recorded pid whose live command is a different process", async () => {
     const env = await stateEnv();
-    await writeRecord(env, "control-plane", 9_001);
+    await writeRecord(env, "clankie", 9_001);
     let signalled = false;
 
     await expect(
@@ -121,7 +121,7 @@ describe("service supervisor", () => {
 
   it("escalates to SIGKILL when a service ignores SIGTERM", async () => {
     const env = await stateEnv();
-    await writeRecord(env, "control-plane", 9_002);
+    await writeRecord(env, "clankie", 9_002);
     const signals: NodeJS.Signals[] = [];
     let alive = true;
 
@@ -142,7 +142,7 @@ describe("service supervisor", () => {
 
   it("clears the record after a successful stop so a restart does not reuse it", async () => {
     const env = await stateEnv();
-    await writeRecord(env, "control-plane", 9_003);
+    await writeRecord(env, "clankie", 9_003);
     let alive = true;
 
     await stopService(stubService(), {
@@ -155,7 +155,7 @@ describe("service supervisor", () => {
       },
     });
 
-    await expect(readFile(serviceStatePath("control-plane", env), "utf8")).rejects.toMatchObject({
+    await expect(readFile(serviceStatePath("clankie", env), "utf8")).rejects.toMatchObject({
       code: "ENOENT",
     });
   });
@@ -211,61 +211,11 @@ describe("service supervisor", () => {
       processIsAliveImpl: () => true,
     });
 
-    expect(status).toMatchObject({ id: "control-plane", state: "healthy", owned: true, pid: 9_100 });
-    const record = JSON.parse(await readFile(serviceStatePath("control-plane", env), "utf8")) as {
+    expect(status).toMatchObject({ id: "clankie", state: "healthy", owned: true, pid: 9_100 });
+    const record = JSON.parse(await readFile(serviceStatePath("clankie", env), "utf8")) as {
       pid: number;
     };
     expect(record.pid).toBe(9_100);
-  });
-
-  it("starts the runner as a launcher-owned service without a manual runner-token env prefix", async () => {
-    const env = await stateEnv();
-    let capturedEnv: NodeJS.ProcessEnv | undefined;
-    const spawnImpl = ((_command: string, _args: readonly string[], options: { env?: NodeJS.ProcessEnv }) => {
-      capturedEnv = options.env;
-      return runningChild(9_150);
-    }) as unknown as typeof spawn;
-
-    const status = await startService(managedService("runner"), {
-      repoRoot: "/repo",
-      env,
-      spawnImpl,
-      processIsAliveImpl: () => true,
-      listProcessCommandsImpl: noProcesses,
-    });
-
-    expect(status).toMatchObject({ id: "runner", state: "healthy", owned: true, pid: 9_150 });
-    expect(capturedEnv).toBeDefined();
-    expect(capturedEnv).not.toHaveProperty("CLANKIE_RUNNER_TOKEN");
-    expect(capturedEnv?.CLANKIE_REPO_PATH).toBe("/repo");
-    expect(JSON.parse(capturedEnv?.CLANKIE_VERIFICATION_CHECKS ?? "[]")).toEqual([
-      { id: "architecture", command: "node", args: ["scripts/check-architecture.mjs"] },
-      { id: "docs-links", command: "node", args: ["scripts/check-doc-links.mjs"] },
-    ]);
-  });
-
-  it("preserves explicit runner repository and verification configuration", async () => {
-    const env = {
-      ...(await stateEnv()),
-      CLANKIE_REPO_PATH: "/operator/repo",
-      CLANKIE_VERIFICATION_CHECKS: '[{"id":"operator-check","command":"node","args":["check.mjs"]}]',
-    };
-    let capturedEnv: NodeJS.ProcessEnv | undefined;
-    const spawnImpl = ((_command: string, _args: readonly string[], options: { env?: NodeJS.ProcessEnv }) => {
-      capturedEnv = options.env;
-      return runningChild(9_151);
-    }) as unknown as typeof spawn;
-
-    await startService(managedService("runner"), {
-      repoRoot: "/repo",
-      env,
-      spawnImpl,
-      processIsAliveImpl: () => true,
-      listProcessCommandsImpl: noProcesses,
-    });
-
-    expect(capturedEnv?.CLANKIE_REPO_PATH).toBe("/operator/repo");
-    expect(capturedEnv?.CLANKIE_VERIFICATION_CHECKS).toBe(env.CLANKIE_VERIFICATION_CHECKS);
   });
 
   it("surfaces the log path when the service exits during startup", async () => {
@@ -275,7 +225,7 @@ describe("service supervisor", () => {
 
     await expect(
       startService(service, { repoRoot: "/repo", env, spawnImpl, processIsAliveImpl: () => true }),
-    ).rejects.toThrow(/exited with code 1.*control-plane\.log/su);
+    ).rejects.toThrow(/exited with code 1.*clankie\.log/su);
   });
 
   it("starts an unowned service whose probe is unhealthy but has no process behind it", async () => {
@@ -344,7 +294,7 @@ describe("service supervisor", () => {
 
   it("restarts by stopping the owned process before starting a replacement", async () => {
     const env = await stateEnv();
-    await writeRecord(env, "control-plane", 9_300);
+    await writeRecord(env, "clankie", 9_300);
     const order: string[] = [];
     let alive = true;
     // stopService takes the owned-record path and never probes, so the first
@@ -377,7 +327,7 @@ describe("service supervisor", () => {
       repoRoot: "/repo",
       env,
     });
-    expect(status).toMatchObject({ id: "control-plane", state: "unreachable", owned: false });
+    expect(status).toMatchObject({ id: "clankie", state: "unreachable", owned: false });
   });
 });
 
@@ -410,8 +360,8 @@ describe("discord bridge health", () => {
   });
 
   it("does not invent a bridge from a presence phase no live process is backing", async () => {
-    // The exact phantom: a fresh control plane replays `present` out of the
-    // event store, but the bridge that published it is gone.
+    // The exact phantom: a fresh service replays `present` out of the event
+    // store, but the bridge that published it is gone.
     const env = await stateEnv();
     const status = await inspectService(managedService("discord-bridge"), {
       repoRoot: "/repo",
@@ -472,9 +422,12 @@ describe("service targets", () => {
     expect(parseServiceTarget(undefined)).toBe("all");
     expect(parseServiceTarget("discord")).toBe("discord-bridge");
     expect(parseServiceTarget("bridge")).toBe("discord-bridge");
-    expect(parseServiceTarget("cp")).toBe("control-plane");
-    expect(parseServiceTarget("eve")).toBe("captain-eve");
-    expect(parseServiceTarget("CAPTAIN")).toBe("captain-eve");
+    // The old three backends are one service now; every old name lands on it.
+    expect(parseServiceTarget("cp")).toBe("clankie");
+    expect(parseServiceTarget("control-plane")).toBe("clankie");
+    expect(parseServiceTarget("eve")).toBe("clankie");
+    expect(parseServiceTarget("CAPTAIN")).toBe("clankie");
+    expect(parseServiceTarget("captain-eve")).toBe("clankie");
   });
 
   it("rejects an unknown target instead of guessing", () => {
@@ -483,22 +436,18 @@ describe("service targets", () => {
 
   it("restarts forwards and stops backwards along the dependency chain", () => {
     expect(resolveTargets("all")).toEqual([
-      "captain-eve",
-      "control-plane",
+      "clankie",
       "discord-bridge",
       "activity",
       // The tunnel fronts the activity surface, so it starts after the thing it
       // publishes and is torn down before it.
       "tunnel",
-      "runner",
     ]);
     expect([...resolveTargets("all")].reverse()).toEqual([
-      "runner",
       "tunnel",
       "activity",
       "discord-bridge",
-      "control-plane",
-      "captain-eve",
+      "clankie",
     ]);
   });
 
@@ -575,20 +524,26 @@ describe("service targets", () => {
 
   it("stops the fan-out at the first failure so downstream errors cannot mask it", async () => {
     const env = await stateEnv();
-    const attempted: string[] = [];
+    const spawned: string[] = [];
 
     const outcomes = await restartTarget("all", {
       repoRoot: "/repo",
       env,
-      restartCaptainImpl: async () => {
-        attempted.push("captain-eve");
-        throw new Error("captain build failed");
-      },
+      listProcessCommandsImpl: noProcesses,
+      processIsAliveImpl: () => true,
+      fetchImpl: (async () => {
+        throw new Error("connection refused");
+      }) as unknown as typeof fetch,
+      spawnImpl: ((_command: string, args: string[]) => {
+        spawned.push(args.join(" "));
+        throw new Error("clankie spawn failed");
+      }) as unknown as typeof spawn,
     });
 
-    expect(attempted).toEqual(["captain-eve"]);
+    expect(spawned).toHaveLength(1);
     expect(outcomes).toHaveLength(1);
-    expect(outcomes[0]).toMatchObject({ id: "captain-eve", ok: false, error: "captain build failed" });
+    expect(outcomes[0]).toMatchObject({ id: "clankie", ok: false });
+    expect(outcomes[0]?.error).toContain("clankie spawn failed");
   });
 
   it("stops in reverse dependency order when nothing is running", async () => {
@@ -605,45 +560,35 @@ describe("service targets", () => {
     });
 
     expect(outcomes.map((outcome) => outcome.id)).toEqual([
-      "runner",
       "tunnel",
       "activity",
       "discord-bridge",
-      "control-plane",
-      "captain-eve",
+      "clankie",
     ]);
     expect(outcomes.every((outcome) => outcome.ok)).toBe(true);
   });
 
   it("keeps stopping the rest after one service refuses, and says which failed", async () => {
     const env = await stateEnv();
-    // A control plane that is up but was started outside the launcher: it must
-    // be reported, not killed, and it must not abort the other stops. The live
-    // process is what makes it unownedly-running, not the health response.
-    const fetchImpl = (async (input: string | URL) => {
-      const url = new URL(String(input));
-      if (url.port === "4310") {
-        return Response.json({ ok: true, service: "clankie-control-plane" });
-      }
-      throw new Error("connection refused");
-    }) as unknown as typeof fetch;
-
+    // A clankie service that is up but was started outside the launcher: it
+    // must be reported, not killed, and it must not abort the other stops. The
+    // live process is what makes it unownedly-running, not the health response.
     const outcomes = await stopTarget("all", {
       repoRoot: "/repo",
       env,
-      fetchImpl,
-      listProcessCommandsImpl: processList("node @clankie/control-plane start"),
+      fetchImpl: (async () => {
+        throw new Error("connection refused");
+      }) as unknown as typeof fetch,
+      listProcessCommandsImpl: processList("node @clankie/clankie start"),
     });
 
     expect(outcomes.map((outcome) => [outcome.id, outcome.ok])).toEqual([
-      ["runner", true],
       ["tunnel", true],
       ["activity", true],
       ["discord-bridge", true],
-      ["control-plane", false],
-      ["captain-eve", true],
+      ["clankie", false],
     ]);
-    expect(outcomes.find((outcome) => outcome.id === "control-plane")?.error).toMatch(
+    expect(outcomes.find((outcome) => outcome.id === "clankie")?.error).toMatch(
       /not started by the clankie launcher/u,
     );
   });
@@ -673,19 +618,19 @@ describe("captain credential injection", () => {
     return { spawnImpl, started: () => launched, envFor: () => captured };
   }
 
-  /** Control-plane health that reports down until the process has been spawned. */
+  /** Service health that reports down until the process has been spawned. */
   function healthAfterStart(started: () => boolean): typeof fetch {
     return (async () => {
       if (!started()) throw new Error("connection refused");
-      return Response.json({ ok: true, service: "clankie-control-plane" });
+      return Response.json({ ok: true, service: "clankie" });
     }) as unknown as typeof fetch;
   }
 
-  it("gives the control plane the shared captain secret", async () => {
+  it("gives the clankie service the shared captain secret and its presence runtime", async () => {
     const env = await stateEnv();
     const { spawnImpl, started, envFor } = capturingSpawn();
 
-    await startService(managedService("control-plane"), {
+    await startService(managedService("clankie"), {
       repoRoot: "/repo",
       env,
       spawnImpl,
@@ -697,13 +642,16 @@ describe("captain credential injection", () => {
 
     expect(started()).toBe(true);
     expect(envFor()?.CLANKIE_CAPTAIN_TOKEN).toBe("clankie_cap_test");
+    expect(envFor()?.CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE).toBe(
+      "/repo/apps/discord-bridge/src/presence-runtime-module.ts",
+    );
   });
 
   it("omits the variable entirely when no credential could be brokered", async () => {
     const env = await stateEnv();
     const { spawnImpl, started, envFor } = capturingSpawn();
 
-    await startService(managedService("control-plane"), {
+    await startService(managedService("clankie"), {
       repoRoot: "/repo",
       env,
       spawnImpl,
@@ -748,18 +696,11 @@ describe("captain credential injection", () => {
 });
 
 describe("restart carries dependents", () => {
-  it("restarts the bridge when the control plane it claims against restarts", () => {
-    // The failure this prevents: the control plane rebuilds presence from the
-    // event store, the still-running bridge keeps a claim for the old revision,
-    // and every reply it posts is rejected `discord_presence_live_claim_stale`.
-    expect(resolveRestartTargets("control-plane")).toEqual(["control-plane", "discord-bridge"]);
-  });
-
-  it("leaves a captain restart targeted, because nothing downstream caches it", () => {
-    // `dependsOn` would have widened this to the whole stack. Restarting the
-    // captain invalidates no dependent's state, and an operator asking for the
-    // captain should get the captain.
-    expect(resolveRestartTargets("captain-eve")).toEqual(["captain-eve"]);
+  it("restarts the bridge when the clankie service it claims against restarts", () => {
+    // The failure this prevents: the service rebuilds presence from its event
+    // store, the still-running bridge keeps a claim for the old revision, and
+    // every reply it posts is rejected `discord_presence_live_claim_stale`.
+    expect(resolveRestartTargets("clankie")).toEqual(["clankie", "discord-bridge"]);
   });
 
   it("leaves a leaf service on its own", () => {
@@ -771,6 +712,6 @@ describe("restart carries dependents", () => {
   });
 
   it("does not widen a stop, which names exactly what it means", () => {
-    expect(resolveTargets("control-plane")).toEqual(["control-plane"]);
+    expect(resolveTargets("clankie")).toEqual(["clankie"]);
   });
 });

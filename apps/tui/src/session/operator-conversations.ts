@@ -16,17 +16,16 @@ import {
   type OperatorConversationServiceDispatch,
   type OperatorConversationStreamEvent,
 } from "@clankie/protocol";
-import { Client } from "eve/client";
 
 /**
  * The TUI's operator conversation client is the shared public
  * {@link OperatorConversationServiceClient}, so the TUI, RN, and macOS all call
- * one identical contract. The TUI carries it over the captain's authenticated
- * route via `Client.fetch`; VUH-864 relays the same route to physical devices.
+ * one identical contract. The TUI carries it over the clankie service's
+ * authenticated route; VUH-864 relays the same route to physical devices.
  */
 export type OperatorConversationClient = OperatorConversationServiceClient;
 
-/** Minimal authenticated fetch surface — satisfied by eve's `Client.fetch`. */
+/** Minimal authenticated fetch surface against the clankie service. */
 export interface CaptainRouteFetcher {
   fetch(path: string, init?: RequestInit): Promise<Response>;
 }
@@ -51,10 +50,9 @@ export async function resolveCaptainRouteToken(
 }
 
 /**
- * Connects the TUI to the captain route with the same optional bearer used by
- * the captain server. An absent or blank token preserves local-dev loopback
- * authentication; a configured token is attached by eve's Client to every
- * route request.
+ * Connects the TUI to the captain route with the same optional bearer the
+ * clankie service authenticates. An absent or blank token preserves local-dev
+ * loopback authentication; a configured token is attached to every request.
  */
 export function createProductionOperatorConversationClient(input: {
   readonly host: string;
@@ -64,20 +62,26 @@ export function createProductionOperatorConversationClient(input: {
 }
 
 /**
- * One authenticated captain client for every console-side captain route —
- * conversation dispatch and the lane listing both ride it, and it also carries
- * the public session stream a lane trace subscribes to.
+ * One authenticated fetcher for every console-side captain route — the
+ * conversation dispatch and the lane listing both ride it. Plain `fetch`
+ * against the single clankie service; no client library in between.
  */
 export function createCaptainRouteClient(input: {
   readonly host: string;
   readonly captainToken?: string;
-}): Client {
+  readonly fetchImpl?: typeof fetch;
+}): CaptainRouteFetcher {
   const captainToken = input.captainToken?.trim();
-  return new Client({
-    host: input.host,
-    redirect: "error",
-    ...(captainToken === undefined || captainToken.length === 0 ? {} : { auth: { bearer: captainToken } }),
-  });
+  const fetchImpl = input.fetchImpl ?? fetch;
+  return {
+    fetch: (path, init) => {
+      const headers = new Headers(init?.headers);
+      if (captainToken !== undefined && captainToken.length > 0) {
+        headers.set("authorization", `Bearer ${captainToken}`);
+      }
+      return fetchImpl(new URL(path, input.host), { redirect: "error", ...init, headers });
+    },
+  };
 }
 
 /**
@@ -297,7 +301,7 @@ interface StoredOperatorConversationTailState {
 /**
  * Durable per-surface tail state. The stable surface id and one opaque cursor
  * per conversation make restart and conversation switching resume the exact
- * server-owned log boundary rather than a process-global Eve session.
+ * server-owned log boundary rather than any process-global session.
  */
 export class OperatorConversationTailStore {
   private readonly path: string;
@@ -428,7 +432,7 @@ export interface OperatorConversationEventSink {
  * Production plain-prompt adapter. It snapshots the selected conversation for
  * each prompt, catches up that surface's durable cursor, sends with the current
  * revision fence, then consumes the typed tail until this accepted run reaches
- * a terminal lifecycle event. No direct/default Eve session exists in this
+ * a terminal lifecycle event. No direct/default local session exists in this
  * path, and aborting observation never cancels the already accepted turn.
  */
 export class OperatorConversationPromptSession {
