@@ -3,10 +3,10 @@
  *
  * `pnpm gba:free-play-live`
  *
- * The product path is the runner's play host serving asked-play intents
+ * The product path is the service's play host serving asked-play intents
  * (ADR 0063); this script drives the exact same execution composition with a
  * locally fabricated session, so a developer can watch a playthrough without
- * a control plane or a Discord ask. One composition point, two entrances.
+ * the running service or a Discord ask. One composition point, two entrances.
  *
  * Start `@clankie/discord-activity` first; without it the sink drops frames
  * and the receipt says so rather than failing the playthrough.

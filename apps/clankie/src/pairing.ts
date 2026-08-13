@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import { type PairingOfferWire } from "@clankie/protocol";
 
-// Device pairing-offer minting and single-use redemption for the control plane.
+// Device pairing-offer minting and single-use redemption for the service.
 // An offer is short-lived display data an operator hands to a device; it is not
 // a grant. Redemption (VUH-727) turns a presented offer secret or typed code
 // into a durable device identity — see devices.ts and the /v1/pairing/* routes.

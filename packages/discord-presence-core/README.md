@@ -10,7 +10,7 @@ what lets both bodies be one character
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | `presence-session`           | Gateway/voice phase lifecycle, typed phase events, act-tool revoke fence                                      |
 | `presence-action-advertiser` | Retains the live catalogue and forwards phase as an execution fence                                           |
-| `text-ingress`               | Normalises gateway messages into bounded, policy-gated Eve turns, images included (ADR 0081)                  |
+| `text-ingress`               | Normalises gateway messages into bounded, allowlist-gated captain turns, images included (ADR 0081)           |
 | `voice-address`              | Phonetic wake and explicit-release detection over `characterNames()` (ADR 0057)                               |
 | `voice-floor`                | The dormant ↔ engaged floor machine: wake, decay, and the volition rate cap                                   |
 | `realtime-session`           | Injectable OpenAI Realtime boundary: transcription + conversation sessions, `ask_clankie` round trips         |
@@ -35,7 +35,7 @@ durations, and typed outcomes, never transcript, prompt, audio, or PCM.
 - **Derive the lane address from `discordPresenceLaneAddress`.** It is keyed by
   where the conversation happens (`discord:<guildId|dm>:<channelId>`), never by
   which transport observed it. A transport-local identifier would fork one
-  conversation into two Eve lanes and split the character in half.
+  conversation into two captain lanes and split the character in half.
 - **`transportKind` is configuration, not inference.** Both ingress paths take
   it from their host process; neither guesses.
 - **Attachments are selected here, never in a bridge.** Both transports map
@@ -44,11 +44,11 @@ durations, and typed outcomes, never transcript, prompt, audio, or PCM.
   body and not the other would be two characters, not one
   ([ADR 0081](../../docs/adr/0081-an-image-is-part-of-what-was-said.md)).
 - **This package never fetches attachment bytes.** It carries references; the
-  control plane resolves them at the last hop before the model.
+  clankie service resolves them at the last hop before the model.
 
 ## Consumers
 
-- `apps/discord-bridge` — official bot: slash commands, mission threads, the
+- `apps/discord-bridge` — official bot: slash commands, voice, the
   activity plane.
 - `apps/discord-user-session` — personal-lab user session, gated by
   [ADR 0048](../../docs/adr/0048-discord-user-session-transport.md).

@@ -32,7 +32,7 @@ import {
 import { effortVariantsFor, variantById, type ModelVariant } from "./variants.ts";
 
 export const CAPTAIN_CODEX_PREAMBLE =
-  "You are Clankie, a durable lead agent. Your complete persona, mission tools, and operating rules are supplied by Eve; follow them exactly.";
+  "You are Clankie, a durable agent. Your complete persona, tools, and operating rules are supplied by your session instructions; follow them exactly.";
 
 export class ConfiguredModelError extends Error {
   public constructor(message: string) {

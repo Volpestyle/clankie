@@ -1,20 +1,20 @@
 import { z } from "zod";
 import { PairingOfferWireSchema, type PairingOfferWire } from "@clankie/protocol";
 
-// Narrow client for the device pairing-offer boundary. `clankie pair` (VUH-878)
-// requests a short-lived, single-use pairing offer from the control plane and
+// Narrow client for the device pairing-offer boundary. `clankie pair`
+// requests a short-lived, single-use pairing offer from the clankie service and
 // renders it; it never mints grants or embeds long-lived credentials locally.
 // The wire shape is the canonical `PairingOfferWireSchema` (VUH-727); a device
 // redeems the rendered offer against `/v1/pairing/redeem` separately.
 
-/** Default control-plane origin; the pairing service is expected to live here (loopback dev). */
+/** Default clankie service origin; the pairing route is expected to live here (loopback dev). */
 export const DEFAULT_CONTROL_PLANE_URL = "http://127.0.0.1:4310";
 
-/** Pairing-offer route on the control plane. */
+/** Pairing-offer route on the clankie service. */
 export const PAIRING_OFFER_PATH = "/v1/pairing/offer";
 
 /**
- * A single-use pairing offer minted by the control plane. `deepLink` and `code`
+ * A single-use pairing offer minted by the clankie service. `deepLink` and `code`
  * are secret-bearing display data: render them, never log or persist them.
  */
 export const PairingOfferSchema = PairingOfferWireSchema;
@@ -49,9 +49,9 @@ export class PairingOfferError extends Error {
 export function pairingFailureMessage(status: PairingOfferStatus): string {
   switch (status) {
     case "unavailable":
-      return "Pairing service unavailable. Start the Clankie control plane (VUH-727 pairing service) and retry.";
+      return "Pairing service unavailable. Start the clankie service and retry.";
     case "unauthorized":
-      return "Operator credential unavailable. Start the control plane once, then retry.";
+      return "Operator credential unavailable. Start the clankie service once, then retry.";
     case "expired":
       return "Pairing offer expired before it could be shown. Run `clankie pair` again for a fresh offer.";
     case "consumed":
@@ -109,7 +109,7 @@ export async function requestPairingOffer(options: RequestPairingOfferOptions = 
     });
   } catch (error) {
     if (options.signal?.aborted === true || isAbortError(error)) throw new PairingOfferError("interrupted");
-    // ECONNREFUSED (no control plane) and other transport faults: fail closed.
+    // ECONNREFUSED (service not running) and other transport faults: fail closed.
     throw new PairingOfferError("unavailable");
   }
 

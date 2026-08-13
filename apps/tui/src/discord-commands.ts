@@ -249,7 +249,7 @@ async function runDiscordWizard(shell: ClankieFaceShell, services: DiscordComman
             value: "core",
             label: "Server, application, and roles",
             hint: "required",
-            description: "Application id, guild id, and the roles allowed to create or steer missions.",
+            description: "Application id, guild id, and the roles granted the ambient command tier.",
           },
           {
             value: "ingress",
@@ -389,7 +389,7 @@ async function editCore(shell: ClankieFaceShell, services: DiscordCommandService
   if (guildId === undefined) return;
 
   const ambient = await flow.readText({
-    message: "Ambient role ids (comma separated) — may create and steer missions",
+    message: "Ambient role ids (comma separated) — the ambient command tier",
     placeholder: current.ambientRoleIds.join(",") || "role id",
     validate: validateSnowflakeList,
   });
@@ -527,8 +527,8 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
   });
   if (channels === undefined) return;
 
-  // Joining a call and spawning a worker have very different blast radii, so
-  // they get separate bindings rather than one shared allowlist.
+  // Joining a call and steering him elsewhere have very different blast radii,
+  // so they get separate bindings rather than one shared allowlist.
   const joinPolicy = await flow.readSelect({
     kind: "single",
     message: "Who may summon Clankie into a call?",
@@ -536,7 +536,7 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
       {
         value: "ambient",
         label: "Ambient tier only",
-        hint: "same people who may create missions",
+        hint: "same people who hold ambient commands",
         description: "Voice stays behind the ambient role and user bindings.",
       },
       {
@@ -544,7 +544,7 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
         label: "Anyone in the allowlisted servers",
         hint: "voice only",
         description:
-          "Any member may start or end a call. Mission creation, steering, and memory stay on the ambient tier.",
+          "Any member may start or end a call. Ambient commands and person memory stay on the ambient tier.",
       },
     ],
     required: true,
@@ -574,7 +574,7 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
     `Saved voice across ${String(guildIds.length)} server${guildIds.length === 1 ? "" : "s"}` +
       (channelIds.length === 0 ? ", admitting every voice channel in them." : ".") +
       (joinPolicyChoice === "guild_members"
-        ? " Any member of those servers may start a call; mission authority is unchanged."
+        ? " Any member of those servers may start a call; ambient authority is unchanged."
         : ""),
     "success",
   );

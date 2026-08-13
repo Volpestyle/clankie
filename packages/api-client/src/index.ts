@@ -204,7 +204,7 @@ export class ClankieApiClient {
     return DiscordPresenceWriteResultSchema.parse(result);
   }
 
-  /** Publishes a bridge-owned gateway/voice phase transition to the semantic control plane. */
+  /** Publishes a bridge-owned gateway/voice phase transition to the service. */
   public async recordDiscordPresencePhase(
     input: DiscordPresencePhaseEvent,
   ): Promise<{ accepted: boolean; session: DiscordPresenceSessionRecord }> {
@@ -319,8 +319,8 @@ export class ClankieApiClient {
   }
 
   /**
-   * The lane is the recall scope, so it must come from the eve channel the
-   * control plane stamped — never from anything the model chose. There is
+   * The lane is the recall scope, so it must come from the channel the
+   * service stamped — never from anything the model chose. There is
    * deliberately no tool wrapping this call.
    */
   public recallCaptainEpisodes(lane: CaptainSessionLaneV2): Promise<{ recallCard: string }> {
@@ -345,7 +345,7 @@ export class ClankieApiClient {
     );
   }
 
-  /** Submit an asked-play intent (ADR 0063); the control plane answers with the typed outcome. */
+  /** Submit an asked-play intent (ADR 0063); the service answers with the typed outcome. */
   public async submitEmbodimentIntent(intent: EmbodimentIntent): Promise<EmbodimentSubmitResult> {
     const result = await this.request<unknown>("/v1/embodiment/intents", {
       method: "POST",
@@ -452,8 +452,8 @@ export class ClankieApiClient {
       headers: this.runnerHeaders(),
       body: JSON.stringify(claim),
       // A claim is one cheap poll on a 1s cadence. Without a bound, one
-      // request hung across a control-plane restart wedges the entire claim
-      // loop silently — the runner looks alive and claims nothing forever.
+      // request hung across a service restart wedges the entire claim
+      // loop silently — the host looks alive and claims nothing forever.
       signal: AbortSignal.timeout(10_000),
     });
     if (response === undefined) return undefined;
@@ -468,7 +468,7 @@ export class ClankieApiClient {
         headers: this.runnerHeaders(),
         body: JSON.stringify(report),
         // Lifecycle reporting is safety-critical, but it cannot wedge the
-        // runner forever when the control plane disappears mid-shutdown.
+        // host forever when the service disappears mid-shutdown.
         signal: AbortSignal.timeout(10_000),
       },
     );

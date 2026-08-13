@@ -37,8 +37,8 @@ if (process.stdin.isTTY !== true || process.stdout.isTTY !== true) {
   process.exit(1);
 }
 
-// One service serves every console-side route: control-plane style operator
-// APIs, the operator conversation dispatch, and the lane listing.
+// One service serves every console-side route: the operator APIs, the
+// operator conversation dispatch, and the lane listing.
 const serviceUrl =
   process.env.CLANKIE_CONTROL_PLANE_URL ?? process.env.CLANKIE_CAPTAIN_URL ?? "http://127.0.0.1:4310";
 

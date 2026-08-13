@@ -1,12 +1,12 @@
 /**
- * Asked embodiment (ADR 0063): the control plane's half of the seam. It holds
+ * Asked embodiment (ADR 0063): the authority half of the seam. It holds
  * intent, authority, and the durable lifecycle record; it never touches the
- * emulator. The runner claims work from here and reports transitions back;
+ * emulator. The play host claims work from here and reports transitions back;
  * the captain tool submits intents and polls the session it was handed.
  *
  * Every state change is an emitted event applied back through `applyEvent`,
  * so restart replay rebuilds exactly the state a live process held. The
- * doctrine policy engine is injected as a verdict function, never bypassed.
+ * verdict is an injected function, never bypassed.
  */
 import {
   canTransitionEmbodimentSession,

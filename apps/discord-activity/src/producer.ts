@@ -16,7 +16,7 @@ import type { RenderedSurfaceHub } from "./frame-hub.ts";
  */
 export interface FrameProducerServerOptions {
   hub: RenderedSurfaceHub;
-  /** Shared secret the runner presents. Absent means the endpoint stays closed. */
+  /** Shared secret the frame producer presents. Absent means the endpoint stays closed. */
   token: string;
   /** Producer frames are bounded by the transport contract; this is the guard. */
   maxPayloadBytes?: number;

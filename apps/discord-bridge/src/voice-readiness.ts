@@ -176,14 +176,14 @@ export async function inspectDiscordVoiceReadiness(
       bridgeToken === undefined
         ? "broker entry clankie_discord_voice_bridge is missing"
         : "present in broker",
-      "Start the control plane once so it can mint the local Discord voice bridge identity.",
+      "Start the clankie service once so it can mint the local Discord voice bridge identity.",
     );
   } catch (error) {
     add(
       "bridge identity",
       false,
       error instanceof Error ? error.message : "stored bridge identity is invalid",
-      "Replace the malformed clankie_discord_voice_bridge broker entry by restarting the control plane.",
+      "Replace the malformed clankie_discord_voice_bridge broker entry by restarting the clankie service.",
     );
   }
 
@@ -260,23 +260,23 @@ export async function inspectDiscordVoiceReadiness(
     const readiness = await options.api.inspectDiscordReadiness();
     const ready = readiness.ready && Object.values(readiness.checks).every(Boolean);
     add(
-      "control-plane composition",
+      "service composition",
       ready,
       ready
         ? "Clankie's lane and event store are ready"
-        : "control-plane Discord dependencies are incomplete",
-      "Start the control plane and Clankie before the bridge.",
+        : "the service's Discord dependencies are incomplete",
+      "Start the clankie service before the bridge.",
     );
   } catch (error) {
     add(
-      "control-plane composition",
+      "service composition",
       false,
-      error instanceof Error ? error.message : "control-plane readiness request failed",
-      "Start the control plane on CLANKIE_API_URL.",
+      error instanceof Error ? error.message : "service readiness request failed",
+      "Start the clankie service on CLANKIE_API_URL.",
     );
   }
 
-  // The briefing path end-to-end (T4→T6): the control plane composes
+  // The briefing path end-to-end (T4→T6): the service composes
   // instructions and a projection for the configured channel with zero
   // consented ids, so nobody's person memory is touched by a readiness run.
   if (guildId !== undefined && channelId !== undefined) {
@@ -290,7 +290,7 @@ export async function inspectDiscordVoiceReadiness(
       add(
         "voice briefing endpoint",
         true,
-        `control plane composed ${String(briefing.instructions.length)} instruction and ` +
+        `the service composed ${String(briefing.instructions.length)} instruction and ` +
           `${String(briefing.briefing.length)} briefing character(s)`,
         "",
       );
@@ -299,7 +299,7 @@ export async function inspectDiscordVoiceReadiness(
         "voice briefing endpoint",
         false,
         error instanceof Error ? error.message : "voice briefing request failed",
-        "Start the control plane with the Discord voice briefing route and a valid voice bridge identity.",
+        "Start the clankie service with the Discord voice briefing route and a valid voice bridge identity.",
       );
     }
   } else {

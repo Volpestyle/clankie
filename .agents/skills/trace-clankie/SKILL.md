@@ -1,47 +1,33 @@
 ---
 name: trace-clankie
-description: Use when tracing what Clankie said, did, or observed after the fact — operator console chat, Discord presence, play sessions, worker activity, or service state — and you need to know which durable trail holds it and how to read it safely.
+description: Use when tracing what Clankie said, did, or observed after the fact — operator console chat, Discord presence, play sessions, or service state — and you need to know which durable trail holds it and how to read it safely.
 ---
 
 # Trace Clankie
 
-Every surface leaves a durable trail. Find the right one, read a copy, never
-the live file.
-
-## Read a copy, not the live database
-
-The SQLite stores are live under WAL. Copy the db **and its `-wal`/`-shm`
-siblings** to a scratch directory, then query the copy:
-
-```bash
-cp <store>.sqlite <store>.sqlite-wal <store>.sqlite-shm /tmp/scratch/ && sqlite3 /tmp/scratch/<store>.sqlite ...
-```
-
-Querying the live file directly can checkpoint or lock the WAL under the
-running service.
+Every surface leaves a durable trail. Find the right one, read it (everything
+is append-only JSONL or plain files now), never write to it.
 
 ## The trail map
 
-| What you want                            | Where it lives                                                                                | Shape                                                                                                                                                                        |
-| ---------------------------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Operator console chat (the TUI dialogue) | `~/.local/state/clankie/captain-lanes/<sha1(root-commit)>.sqlite`                             | `operator_conversations` (id, title, session_state) + `operator_conversation_events` (`body_json` holds role, text, tool phases). Replayable per conversation by `sequence`. |
-| Captain session lifecycle + token usage  | `~/.local/state/clankie/captain-sessions/<same-hash>.sqlite`                                  | Redacted **by design**: turn/session/usage/model events only. No prompts, no text. Don't look for the chat here.                                                             |
-| Authoritative mission/system events      | `artifacts/control-plane/events.db` (override: `CLANKIE_EVENT_STORE`)                         | `events(sequence, event_id, mission_id, type, occurred_at, event)` — hash-chained; `event` is full JSON. Latest sequence matches the TUI footer's "live at sequence N".      |
-| Play sessions (GBA)                      | `~/.local/state/clankie/gba-play/*.jsonl` + the table in `docs/08-observability-debugging.md` | Header / per-turn (monologue, intent, `detail` with position + transcript) / summary.                                                                                        |
-| Discord semantic actions                 | `~/.local/state/clankie/discord-live-receipts.jsonl`                                          | What the bridge actually did.                                                                                                                                                |
-| Service stdout + lifecycle               | `~/.local/state/clankie/<service>.log`, `<service>-service.json`                              | captain-eve, control-plane, discord-bridge, activity, runner, tunnel.                                                                                                        |
-| Worker runs and transcripts              | `~/.clankie/runner/runner-events.db`, `~/.clankie/runner/worker-transcripts/`                 | Runner-spawned workers only (see roster caveat below).                                                                                                                       |
-| Live turn stream                         | `clankie watch` / `clankie trace [--lane]` / `clankie status`                                 | Live only — nothing historical.                                                                                                                                              |
-| What's on the TUI screen right now       | `herdr pane read <pane> --source recent`                                                      | Viewport only — see caveat below.                                                                                                                                            |
-
-The hash naming `captain-lanes`/`captain-sessions` files is the repository
-root commit; when in doubt take the newest file by mtime.
+| What you want                            | Where it lives                                                                 | Shape                                                                                                                                                                     |
+| ---------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Operator console chat (the TUI dialogue) | `~/.clankie/captain/conversations/<conversationId>/`                           | `meta.json` (title, revision, session state) + append-only `events.jsonl` (`message` role/text, `reasoning`, `tool`, `turn` phases). Cursors are zero-padded line counts. |
+| The pi session behind a conversation     | `~/.clankie/captain/conversations/<conversationId>/pi/`                        | pi JSONL session trees; durable voice sessions live under `~/.clankie/captain/voice/<sessionKey>/` the same way.                                                          |
+| What he heard/said per room              | `~/.clankie/captain/lanes/<lane>~<encoded-target>.jsonl`                       | One JSONL file per lane+target; `observe_room` and the TUI lanes view read the same files.                                                                                |
+| Presence + system events                 | `~/.clankie/events.jsonl` (override: `CLANKIE_EVENT_LOG`)                      | One `DomainEvent` per line, full JSON. Heartbeats are not persisted; everything else is. Replayed at boot to rebuild presence.                                            |
+| Play sessions (GBA)                      | `~/.local/state/clankie/gba-play/*.jsonl`                                      | Header / per-turn (monologue, intent, `detail` with position + transcript) / summary.                                                                                     |
+| Who held the GBA body                    | `~/.local/state/clankie/gba-body/possession-events.jsonl` (beside `body.lock`) | Lease transitions: acquired, released, expired, stolen, refused.                                                                                                          |
+| Discord semantic actions                 | `~/.local/state/clankie/discord-live-receipts.jsonl`                           | What the bridge actually did — content-free receipts, never message bodies.                                                                                               |
+| Service stdout + lifecycle               | `~/.local/state/clankie/<id>.log`, `<id>-service.json`                         | Service ids: `clankie`, `discord-bridge`, `activity`, `tunnel`.                                                                                                           |
+| Live status                              | `clankie status` / `clankie trace [--lane]` / `/trace` in the face             | Live only — nothing historical. `clankie trace` currently has no live transport and says so; `/trace` watches lane state via the service.                                 |
+| What's on the TUI screen right now       | `herdr pane read <pane> --source recent`                                       | Viewport only — see caveat below.                                                                                                                                         |
 
 ## Gotchas that cost real time
 
 - **The TUI is fullscreen** — `herdr pane read` returns only the currently
   rendered screen. The chat transcript is _not_ in terminal scrollback; read
-  the `operator_conversation_events` table instead.
+  the conversation's `events.jsonl` instead.
 - **Presence phases are edge-triggered at the event level.** `discord.presence.*`
   and `captain.presence.*` phases persist until the owning process emits the
   next transition, so judge liveness by the **age of the last event** for that
@@ -49,36 +35,28 @@ root commit; when in doubt take the newest file by mtime.
   by bot binding (a successor's first event retires its predecessor's row) and
   stamps each row `· since <t>` — a live phase with an old stamp is a dead
   process that never got a successor.
-- **Mission workers in the AGENT ROSTER come only from control-plane
-  `worker.*` events.** Herdr-hosted agents (panes running claude/codex) never
-  report there; when the console runs inside Herdr it lists them separately
-  from `herdr pane list` as `[<agent> · herdr]` rows. Outside Herdr, an empty
-  roster still only means "no visibility" — check `herdr pane list` yourself.
-- **`worker.turn.settled` is an idle turn; only `worker.settled` is a
-  completed worker.** (Same rule as `docs/08-observability-debugging.md`.)
+- **The agent roster only sees Herdr panes.** Clankie leads coding agents
+  through the herdr CLI; there is no worker protocol reporting to the service.
+  Inside Herdr the console lists panes from `herdr pane list` as
+  `[<agent> · herdr]` rows; outside Herdr an empty roster only means "no
+  visibility" — check `herdr pane list` yourself.
 
 ## Queries that answered real questions
 
-Last N chat messages across conversations:
+Last N chat messages in a conversation:
 
 ```bash
-sqlite3 -json <lanes-copy>.sqlite "SELECT sequence, type, occurred_at, body_json
-  FROM operator_conversation_events ORDER BY sequence DESC LIMIT 40;"
+tail -n 40 ~/.clankie/captain/conversations/<id>/events.jsonl | jq -c '{type, role, text}'
 ```
 
-What happened tonight, minus heartbeat noise:
+What happened tonight, minus presence noise:
 
 ```bash
-sqlite3 <events-copy>.db "SELECT sequence, type, occurred_at FROM events
-  WHERE sequence > <recent> AND type NOT IN
-  ('captain.heartbeat','captain.presence.online','captain.presence.offline')
-  ORDER BY sequence;"
+jq -c 'select(.type | startswith("captain.presence") | not) | {type, occurredAt}' ~/.clankie/events.jsonl | tail -n 60
 ```
 
 Is a presence session real or a ghost:
 
 ```bash
-sqlite3 <events-copy>.db "SELECT sequence, occurred_at,
-  json_extract(event,'$.data.phase'), json_extract(event,'$.data.reason')
-  FROM events WHERE event LIKE '%<session-id-prefix>%' ORDER BY sequence DESC LIMIT 5;"
+grep '<session-id-prefix>' ~/.clankie/events.jsonl | tail -n 5 | jq -c '{occurredAt, phase: .data.phase, reason: .data.reason}'
 ```

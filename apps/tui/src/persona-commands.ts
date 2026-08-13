@@ -9,8 +9,8 @@ export interface PersonaCommandServices {
  * `/persona` edits **who Clankie is**, not what he may do.
  *
  * Character is deliberately owner-authored: the code carries a personality, it
- * does not invent one. Authority lives in doctrine and the policy engine and is
- * unreachable from here — a warmer persona never widens permission.
+ * does not invent one. Authority is unreachable from here — a warmer persona
+ * never widens permission.
  */
 export function buildPersonaCommands(services: PersonaCommandServices): FaceShellCommand[] {
   return [

@@ -3,7 +3,7 @@
  *
  * ## Why this is a port and not an HTTP call
  *
- * The obvious implementation — have the possessor call the control plane's
+ * The obvious implementation — have the possessor call the service's
  * `POST /v1/discord/presence-actions` directly — does not work, and the reason
  * is a deliberate fence rather than an oversight.
  *
@@ -35,8 +35,8 @@ export interface ClankieSpeechPort {
    * precisely because this method used to be called `say`.
    *
    * The implementation is expected to route through the bridge's existing
-   * policy-gated presence path, so doctrine, rate ledger, and the live-session
-   * fence all still apply. It must not accept a channel id from the caller: a
+   * policy-gated presence path, so the rate ledger and the live-session
+   * fence still apply. It must not accept a channel id from the caller: a
    * possessor drives the character, it does not choose new audiences.
    */
   narrate(text: string): Promise<void>;
@@ -53,7 +53,7 @@ export const deniedSpeechPort: ClankieSpeechPort = {
     Promise.reject(
       new Error(
         "clankie_speech_unavailable: no speech port is wired. A possessor cannot speak directly — " +
-          "the control plane's presence action requires a live claim only the Discord bridge can mint.",
+          "the service's presence action requires a live claim only the Discord bridge can mint.",
       ),
     ),
 };

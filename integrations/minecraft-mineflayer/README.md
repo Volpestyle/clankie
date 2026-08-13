@@ -1,6 +1,6 @@
 # @clankie/minecraft-mineflayer
 
-Runner-owned Minecraft Java embodiment for the frozen private Paper laboratory
+Service-owned Minecraft Java embodiment for the frozen private Paper laboratory
 ([ADR 0016](../../docs/adr/0016-versioned-interactive-environment-contract.md),
 [ADR 0044](../../docs/adr/0044-runner-owned-mineflayer-private-paper-gameplay.md)).
 
@@ -14,15 +14,15 @@ remain available while pathfinding or digging is active.
 
 - The server host must be the literal loopback address `127.0.0.1` or `::1`.
   There is no public-server capability or DNS-derived destination.
-- Connection and account configuration is runner-private. Offline auth is
+- Connection and account configuration is service-private. Offline auth is
   accepted only as the explicitly labeled local laboratory mode. Microsoft
-  auth uses an absolute runner-private Mineflayer profile cache; device codes,
+  auth uses an absolute service-private Mineflayer profile cache; device codes,
   tokens, and paths never enter events or receipts.
 - The only advertised motor capabilities are bounded observe, navigate,
   collect, craft, place, and wait. Combat, commands, public chat, verifier
   lifecycle, teleport, creative inventory, and public joins are absent.
 - Navigation targets, dimensions, duration, radius, block changes, and
-  capabilities are checked against the active runner lease before dispatch.
+  capabilities are checked against the active runtime lease before dispatch.
 - Disconnect invalidates the adapter session. Reconnection creates a fresh
   governed session rather than silently reanimating a stale body.
 

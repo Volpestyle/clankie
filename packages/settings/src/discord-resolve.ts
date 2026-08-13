@@ -96,7 +96,7 @@ export function resolveDiscordSettings(
 
 /**
  * Project resolved settings back into the environment shape the bridge and
- * control plane already read, so adopting the store is a composition change
+ * the service already read, so adopting the store is a composition change
  * rather than a rewrite of every call site.
  */
 /**

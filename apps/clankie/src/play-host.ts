@@ -1,11 +1,9 @@
 /**
- * Asked embodiment (ADR 0063): the runner's half of the seam. The host claims
- * play intents from the control plane, owns the free-play session end to end,
- * and reports every lifecycle transition back. It shares a process with the
- * mission worker because they share the trust boundary — the runner is what
- * holds the body and the activity producer credential — but the host never
- * blocks the claim loop: a session runs detached while polling continues, so
- * a stop ask lands while he is mid-playthrough.
+ * Asked embodiment (ADR 0063): the executing half of the seam. The host claims
+ * play intents from the embodiment seam, owns the free-play session end to
+ * end, and reports every lifecycle transition back. The host never blocks the
+ * claim loop: a session runs detached while polling continues, so a stop ask
+ * lands while he is mid-playthrough.
  *
  * The execution itself is one injected function, so every lifecycle path is
  * testable offline with the deterministic core double and a fake execution.
@@ -173,14 +171,14 @@ export class PlayHost {
     if (assignment === undefined) return false;
     if (assignment.kind === "stop") {
       if (!(await this.requestStop(assignment.sessionId, "claim"))) {
-        // A stop for a session this process does not hold: the control plane
+        // A stop for a session this process does not hold: the embodiment seam
         // still believes a dead process is playing. Same truth as reconcile.
         await this.reconcile();
       }
       return false;
     }
     if (this.active !== undefined) {
-      // One body, one driver — the control plane should never double-assign,
+      // One body, one driver — the embodiment seam should never double-assign,
       // but a second start must not silently run beside the first.
       await this.report(assignment.session.sessionId, {
         state: "refused",
@@ -270,7 +268,7 @@ export class PlayHost {
       return { status: "settled", sessionId: active.session.sessionId };
     }
 
-    // The stopping report is inside the deadline. A wedged control-plane
+    // The stopping report is inside the deadline. A wedged report
     // request must not defeat the process-level shutdown bound.
     const deadlineAt = Date.now() + options.deadlineMs;
     const stoppingReported = await settlesWithin(
@@ -432,8 +430,8 @@ export class PlayHost {
         ...partial,
       });
     } catch (error) {
-      // A lost report must not crash the host; the control plane's stale-claim
-      // expiry and the next reconcile are the safety net.
+      // A lost report must not crash the host; the embodiment seam's
+      // stale-claim expiry and the next reconcile are the safety net.
       this.options.logger.warn(
         { sessionId, state: partial.state, errorName: error instanceof Error ? error.name : "Error" },
         "embodiment report failed",

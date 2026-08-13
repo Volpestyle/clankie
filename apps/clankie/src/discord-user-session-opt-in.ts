@@ -7,7 +7,7 @@ import {
 /**
  * Durable owner acceptance of user-session transport risk (ADR 0048).
  *
- * Event-sourced like every other authority in the control plane, so the record
+ * Event-sourced like every other authority in the service, so the record
  * survives restart, is auditable, and cannot be conjured by configuration. At
  * most one opt-in is live at a time: the capability is "is Clankie allowed to
  * wear a human account right now", which is a single yes/no, not a set.

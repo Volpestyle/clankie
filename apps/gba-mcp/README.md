@@ -25,10 +25,6 @@ parallel stack:
 - The ROM/scenario loader is shared with the free-play CLI, so there is one path
   to the core and one place digests are checked.
 
-`@clankie/mcp-registry` is the _consumption_ side — Clankie's workers using
-external servers under doctrine. This is the opposite direction and is
-deliberately a separate package.
-
 ## Running it
 
 ```bash
@@ -243,7 +239,7 @@ turned a six-word quip into seventeen seconds of speech in a live run. The port
 behind this tool is named `narrate` for the same reason.
 
 **A possessor cannot speak directly, and that is a fence rather than an
-oversight.** The control plane's presence action requires a _live presence
+oversight.** The service's presence action requires a _live presence
 claim_ — the session id, phase, and monotonic revision the Discord bridge
 publishes while it holds the gateway ([ADR 0024](../../docs/adr/0024-discord-dual-plane-presence.md)).
 Only the bridge can mint one, which is exactly what stops an action reaching a
@@ -258,7 +254,7 @@ the channel.
 
 ```
 clankie_speech_unavailable: no speech port is wired. A possessor cannot speak
-directly — the control plane's presence action requires a live claim only the
+directly — the service's presence action requires a live claim only the
 Discord bridge can mint.
 ```
 

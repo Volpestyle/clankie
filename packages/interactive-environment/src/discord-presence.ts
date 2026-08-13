@@ -33,7 +33,7 @@ export const DiscordPresenceSessionPhaseSchema = z.enum([
 ]);
 export type DiscordPresenceSessionPhase = z.infer<typeof DiscordPresenceSessionPhaseSchema>;
 
-/** Authenticated bridge-to-control-plane fence carrying immediate gateway truth. */
+/** Authenticated bridge-to-service fence carrying immediate gateway truth. */
 export const DISCORD_PRESENCE_LIVE_PHASE_HEADER = "x-clankie-discord-presence-phase" as const;
 export const DISCORD_PRESENCE_LIVE_SESSION_HEADER = "x-clankie-discord-presence-session" as const;
 export const DISCORD_PRESENCE_LIVE_REVISION_HEADER = "x-clankie-discord-presence-revision" as const;

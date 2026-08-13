@@ -9,7 +9,7 @@ export { createDiscordActivityServer, type DiscordActivityServer } from "./serve
 
 /**
  * Standalone entrypoint. The surface is a rendering client only: it holds no
- * Discord credentials, no mission authority, and no emulator core. The host
+ * Discord credentials, no authority, and no emulator core. The host
  * feeds it frames through the loopback producer endpoint.
  */
 if (import.meta.url === `file://${process.argv[1]}`) {

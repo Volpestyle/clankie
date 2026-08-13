@@ -5,7 +5,7 @@ import type { CaptainDeps } from "./deps.ts";
 import type { LaneLog } from "./lane-log.ts";
 import { startPlay, stopPlay } from "./play.ts";
 
-/** The last attachable thing a turn produced rides the reply (old eve semantic). */
+/** The last attachable thing a turn produced rides the reply. */
 export interface TurnMediaCapture {
   media?: CaptainTurnMedia | undefined;
 }
@@ -15,10 +15,9 @@ function json(value: unknown): { content: [{ type: "text"; text: string }]; deta
 }
 
 /**
- * The captain's authored tool bank, ported from captain-eve. Coding tools
- * (read/bash/edit/write) are pi built-ins and are not defined here; mission
- * ceremony tools did not survive the rewrite. Herdr leadership goes through
- * bash + the herdr skill, not bespoke tools.
+ * The captain's authored tool bank. Coding tools (read/bash/edit/write) are
+ * pi built-ins and are not defined here. Herdr leadership goes through bash +
+ * the herdr skill, not bespoke tools.
  */
 export function captainTools(
   deps: CaptainDeps,
@@ -192,9 +191,9 @@ export function captainTools(
 
 /**
  * The browser, resolved from the live catalog when a session is built (ADR
- * 0082's shape, minus doctrine): the agent-browser host names the tools, this
- * file never enumerates them. When the host is unreachable he gets one honest
- * tool that says so, instead of a silently empty surface.
+ * 0082): the agent-browser host names the tools, this file never enumerates
+ * them. When the host is unreachable he gets one honest tool that says so,
+ * instead of a silently empty surface.
  */
 export async function browserTools(deps: CaptainDeps, capture: TurnMediaCapture): Promise<ToolDefinition[]> {
   const catalog = await deps.browser.catalog();

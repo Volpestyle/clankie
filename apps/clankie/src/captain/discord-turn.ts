@@ -18,10 +18,9 @@ export interface NormalizedDiscordTurn {
 }
 
 /**
- * Ported from the eve captain turn door. The framing is fixed text — untrusted
- * bodies are labelled and fenced, never allowed to author the instructions
- * around them — and silence is offered on every turn: replying with exactly
- * the sentinel sends nothing to the channel.
+ * The framing is fixed text — untrusted bodies are labelled and fenced, never
+ * allowed to author the instructions around them — and silence is offered on
+ * every turn: replying with exactly the sentinel sends nothing to the channel.
  */
 export async function normalizeDiscordTurn(
   request: DiscordPresenceChannelTurnRequest,

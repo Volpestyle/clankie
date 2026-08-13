@@ -8,10 +8,10 @@ selfbot token. Activities are the supported alternative: a web app hosted in an
 iframe inside a voice channel, launched by the bot through an
 `EMBEDDED_APPLICATION` invite. This app is that web app.
 
-It is a **rendering client only**. It holds no Discord credentials, no mission
+It is a **rendering client only**. It holds no Discord credentials, no
 authority, and no emulator core. The host feeds it frames; it draws them.
 Its live lower third keeps Clankie's self-authored objective, intent, and
-monologue separate from the runner-observed effect; spoken output stays on the
+monologue separate from the observed effect; spoken output stays on the
 voice surface rather than being duplicated here.
 
 ```mermaid
@@ -123,14 +123,14 @@ server. A producer path mounted on the tunnelled server would be reachable by
 anyone who can reach the activity, so frame injection is kept off the public
 surface entirely; the bearer token is the second lock rather than the only one.
 
-The activity server owns the listener, so it owns the first-run mint. The runner
-only ever resolves, which avoids two processes minting different tokens. A
-runner with no resolvable credential publishes nothing rather than falling back
-to an unauthenticated connection.
+The activity server owns the listener, so it owns the first-run mint. The
+clankie service only ever resolves, which avoids two processes minting
+different tokens. A producer with no resolvable credential publishes nothing
+rather than falling back to an unauthenticated connection.
 
-The runner dials **out** to this endpoint (`@clankie/rendered-surface-client`)
-rather than accepting an inbound connection, so the trusted runner opens no port
-for an internet-facing surface to connect into.
+The service dials **out** to this endpoint (`@clankie/rendered-surface-client`)
+rather than accepting an inbound connection, so the trusted service opens no
+port for an internet-facing surface to connect into.
 
 ## Bounds
 
@@ -140,7 +140,7 @@ for an internet-facing surface to connect into.
   are unchanged, so an idle overworld costs nothing to publish.
 - A viewer whose socket backlog exceeds `maxBufferedBytes` has frames dropped
   rather than queued. Drops are counted on `droppedFrameCount`, never silent.
-- The runner-side sink drops frames while disconnected rather than buffering
+- The producer-side sink drops frames while disconnected rather than buffering
   them, so a reconnect resumes at the present moment instead of replaying a
   stale playthrough. Those drops are counted too.
 - Producer messages are validated before they reach a viewer: a frame whose
@@ -153,8 +153,8 @@ for an internet-facing surface to connect into.
 ## What this app is not
 
 - Not a recorder. Only the most recent frame and overlay are held, nothing is
-  persisted, and frame bytes never enter a semantic event stream — evidence
-  keeps carrying the framebuffer digest instead.
+  persisted, and frame bytes never enter a semantic event stream — observations
+  carry the framebuffer digest instead.
 - Not an authority surface. Viewer input arriving here is ambient authority and
   cannot approve privileged actions, exactly as voice and text ingress cannot.
 

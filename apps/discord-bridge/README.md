@@ -30,7 +30,7 @@ Voice presence is a separate tier ([ADR 0050](../../docs/adr/0050-voice-presence
 
 Members can also just ask ([ADR 0062](../../docs/adr/0062-voice-join-by-asking.md)). With text ingress and voice both enabled, an admitted guild message that addresses Clankie, comes from someone currently sitting in a voice channel, and looks voice-shaped passes one bounded intent read — join, leave, or none, fail closed; message body only, never logged. A read ask then runs exactly the slash checks (the ADR 0050 presence tier and the voice guild/channel allowlists) before the media session joins the asker's current channel or leaves; the model interprets and never authorizes or picks a channel. An asked join auto-opts-in nobody, the asker included — consent still arrives only through `/clankie voice-consent opt-in` — and the executed outcome is injected into the same captain turn as a content-free note so his reply reflects what actually happened. A join refused only because the asker was not in voice keeps listening: for two minutes the same asker's follow-up in the same text channel ("try now", "im in general") needs no voice-ish word and, once the gateway reports them in a voice channel, earns one retry-framed intent read before the same deterministic checks run — nobody repeats an ask he already heard, and nobody else's chatter can ride the window into a join.
 
-The enforced bridge invariant: the bot does not persist channel transcripts, infer speaker memory, or retain slash-command text after forwarding it. Message-content access is requested only when bounded text ingress is explicitly enabled. The trigger and up to the configured number of preceding messages exist only in the Eve turn request and are excluded from ingress evidence.
+The enforced bridge invariant: the bot does not persist channel transcripts, infer speaker memory, or retain slash-command text after forwarding it. Message-content access is requested only when bounded text ingress is explicitly enabled. The trigger and up to the configured number of preceding messages exist only in the captain turn request and are excluded from ingress evidence.
 
 Required configuration. First store the bot token in the credential broker:
 run `clankie`, then `/auth` → “Add / update API key” → “Other…” → provider id
@@ -51,7 +51,7 @@ DISCORD_GUILD_ID=...          # optional, faster command registration in develop
 DISCORD_AMBIENT_ROLE_IDS=...  # comma-separated roles granted the ambient command tier
 DISCORD_AMBIENT_USER_IDS=...  # comma-separated user ids with the same authority, no role needed
 CLANKIE_API_URL=http://127.0.0.1:4310
-CLANKIE_AUTHENTICATED_SURFACE_URL=http://127.0.0.1:4311/approvals # authenticated operator surface referenced by ingress replies
+CLANKIE_AUTHENTICATED_SURFACE_URL=http://127.0.0.1:4310 # authenticated operator surface referenced by ingress replies
 DISCORD_BRIDGE_RECEIPT_PATH=$HOME/.local/state/clankie/discord-live-receipts.jsonl # optional absolute override
 
 # Optional bounded text ingress (requires Message Content Intent in the Discord developer portal)
@@ -118,14 +118,14 @@ dark is what actually ends the surface.
 An **unverified** activity is launchable only by the app team's developers and
 testers, and only in servers with fewer than 25 members.
 
-`clankie restart` starts the captain, the control plane, and the bridge in
-dependency order and health gates each one; `clankie restart discord` restarts
+`clankie restart` starts the clankie service and the bridge in dependency
+order and health gates each one; `clankie restart discord` restarts
 the bridge alone ([ADR 0055](../../docs/adr/0055-launcher-owned-local-services.md)).
 Use it rather than a hand-rolled kill-and-start sequence — it refuses to signal a
 pid it does not own, and it reads allowlists from settings.json instead of an env
 prefix that can drift from them.
 
-Start the control plane once before the bridge. The control plane mints the
+Start the clankie service once before the bridge. The service mints the
 internal `clankie_discord_bridge` and `clankie_discord_voice_bridge` bearers in
 the credential broker and authenticates them as the `discord_text` and
 `discord_voice` captain lanes. The bridge resolves both directly from the
@@ -141,7 +141,7 @@ The bridge is a channel adapter. It never owns model credentials or merge author
 Run `pnpm discord:readiness` before starting the bridge. It verifies the two
 broker entries, application identity, Message Content Intent, target-guild bot
 membership, ingress/presence allowlist alignment, and the authenticated
-control-plane composition. `--json` emits a content-free machine-readable
+service composition. `--json` emits a content-free machine-readable
 report suitable for an evidence artifact.
 
 The bridge appends mode-0600 JSONL live receipts for gateway readiness, bounded
@@ -155,9 +155,9 @@ receipts cannot pass this gate.
 
 ## Text ingress (ADR 0024 P2)
 
-When `DISCORD_TEXT_INGRESS_ENABLED=true`, owner DMs and messages in the explicit guild/channel allowlists become bounded `DiscordPresenceChannelTurnRequest` values. Discord message IDs are the delivery idempotency keys. Bot/self messages, unallowlisted traffic, empty messages, and conflicting redeliveries stop before an Eve turn and emit content-free ingress evidence. Context history is fetched only after policy admission, capped at 50 messages, framed as untrusted turn-only input, and never written to bridge state or ingress logs.
+When `DISCORD_TEXT_INGRESS_ENABLED=true`, owner DMs and messages in the explicit guild/channel allowlists become bounded `DiscordPresenceChannelTurnRequest` values. Discord message IDs are the delivery idempotency keys. Bot/self messages, unallowlisted traffic, empty messages, and conflicting redeliveries stop before a captain turn and emit content-free ingress evidence. Context history is fetched only after policy admission, capped at 50 messages, framed as untrusted turn-only input, and never written to bridge state or ingress logs.
 
-The control plane authenticates the bridge as the `discord_text` captain source, addresses the `discord_presence` lane, and places trigger/context text only in Eve's ephemeral `clientContext`, which does not enter durable session history. The durable Eve message is a fixed content-free instruction, and the adapter retains no continuation cursor after the result. A settled response becomes a typed `discord.presence.reply` and passes through the existing narrative policy, rate ledger, credential broker, and bot REST runtime.
+The service authenticates the bridge as the `discord_text` captain source and addresses the `discord_presence` lane. Trigger and context text are fenced, labelled untrusted, and carried by the turn request only: text turns are one-shot, so channel history never enters durable session state, and the adapter retains no continuation cursor after the result. A settled response becomes a typed `discord.presence.reply` and passes through the existing narrative policy, rate ledger, credential broker, and bot REST runtime.
 
 While an addressed turn (a DM, a mention, or one of his names) is being composed, the ingress posts policy-gated `discord.presence.typing_start` writes so the channel shows him typing, refreshed until the turn settles; the reply then clears the indicator. Unprompted turns — messages he is merely reading and may decline — never signal typing, and a failed typing post stops the refresh without touching the turn.
 
@@ -167,9 +167,9 @@ transcript, and applies directly, upserted by fact id. Ambient Discord cannot
 export or delete person memory. Recall enforces guild/channel visibility and
 never returns operator-private facts. Run
 `pnpm discord:person-memory-live-proof` after proposing a fact, restarting the
-control plane, and recalling that person from Discord. The gate requires the
-exact generated fact id to be recalled from a different control-plane
-instance, proving the write path and durable restart behavior.
+clankie service, and recalling that person from Discord. The gate requires the
+exact generated fact id to be recalled from a different service instance,
+proving the write path and durable restart behavior.
 
 ## Official-bot group voice
 
@@ -200,7 +200,7 @@ and answers nothing. When the repository-owned floor machine decides he has a
 reason to speak — someone addressed him (the same word-boundary name matching
 as the text plane, with phonetic tolerance for transcription artifacts), or a
 rate-capped volition call decides he has something worth saying — the engaged
-`gpt-realtime-2.1` session opens, is seeded with the control-plane-composed
+`gpt-realtime-2.1` session opens, is seeded with the service-composed
 briefing plus the recent transcript window, and answers with streamed audio.
 `response.create` is always explicit; no utterance is auto-answered. The floor
 releases on an explicit closing phrase or by decay
@@ -218,9 +218,8 @@ machine, `ask_clankie` fence, and receipts are identical in both modes.
 
 The engaged session holds exactly one tool: `ask_clankie`, which routes
 through the unchanged continuing `discord_voice` captain lane and recalls only
-control-plane-approved person memory. Conversation never pays a captain turn;
-anything that touches the world does. Approval-shaped results still come back
-as the authenticated-surface handoff — nothing said in voice can approve
+service-approved person memory. Conversation never pays a captain turn;
+anything that touches the world does. Nothing said in voice can authorize
 privileged work, and the realtime model holds no privileged tool to be talked
 into using.
 
@@ -246,8 +245,8 @@ offered/taken/suppressed counters, so "he talks too much" and "he never speaks
 up" are both falsifiable against a number.
 
 Run `pnpm discord:voice-readiness` before starting. Beyond credentials,
-allowlists, native Opus, and control-plane composition, it validates the
-realtime configuration, exercises the control plane's voice-briefing endpoint
+allowlists, native Opus, and service composition, it validates the
+realtime configuration, exercises the service's voice-briefing endpoint
 with zero consented ids, and runs a live wake-transition probe: a real dormant
 listener session opens, then — with the listener still connected, exactly like
 a wake — a real engaged session must produce a response. Run
@@ -276,7 +275,7 @@ seeds that report into the live conversation session and lets the persona
 compose the words.
 
 Two possessors use this listener, under the same flag and the same fence: an
-external MCP harness, and the runner's asked-play host when Clankie is playing
+external MCP harness, and the service's asked-play host when Clankie is playing
 because someone asked him to
 ([ADR 0067](../../docs/adr/0067-asked-play-speaks-through-the-possessor-seam.md)).
 With the flag off, both stay silent and both keep working.
@@ -310,7 +309,7 @@ rejected by the receipt schema.
 
 ## Presence actions (ADR 0024 P1)
 
-Policy-gated bot presence actions (reply, react, send, …) execute through the control plane:
+Policy-gated bot presence actions (reply, react, send, …) execute through the clankie service:
 
 ```bash
 CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE=$PWD/apps/discord-bridge/src/presence-runtime-module.ts
@@ -325,13 +324,13 @@ See [`ADR 0024`](../../docs/adr/0024-discord-dual-plane-presence.md).
 
 The bridge owns one official-bot presence session keyed by application id. Gateway readiness,
 resume/reconnect/disconnect, invalidation, and the bot's own voice-state updates publish typed
-phase transitions to the control plane over the authenticated captain channel. The control plane
+phase transitions to the service over the authenticated captain channel. The service
 projects that stream before exposing or executing presence actions; `degraded`, `failed`, and
 `off` expose no act tools. Operator status therefore comes from semantic events rather than bot
 log text, and an action payload can never manufacture the phase it requires. Each authenticated
-action carries the live session id, phase, and monotonic revision. The control plane requires that
+action carries the live session id, phase, and monotonic revision. The service requires that
 claim to match its latest validated session record as well as the durable exposure. A loss-phase
 callback synchronously advances the live revision and fences the advertised tool catalog before
 durable publication can await I/O; bounded publication retries then reconcile the durable record.
-After a control-plane restart, act execution remains fail-closed until an authenticated lifecycle
+After a service restart, act execution remains fail-closed until an authenticated lifecycle
 delivery revalidates the live watermark; durable session replay alone restores status only.

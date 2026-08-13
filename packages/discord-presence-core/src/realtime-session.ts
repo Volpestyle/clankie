@@ -128,7 +128,7 @@ const ASK_CLANKIE_TOOL = {
   name: ASK_CLANKIE_TOOL_NAME,
   description:
     "Ask Clankie's captain to act or to look something up. The captain holds every tool and " +
-    "memory; use this for anything beyond conversation — actions, missions, workers, files, or " +
+    "memory; use this for anything beyond conversation — actions, files, or " +
     "facts the briefing does not cover.",
   parameters: {
     type: "object",

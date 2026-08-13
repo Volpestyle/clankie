@@ -116,7 +116,7 @@ const apiUrl = process.env.CLANKIE_API_URL ?? "http://127.0.0.1:4310";
 const bridgeToken = await resolveDiscordBridgeCredential({ store: credentialStore });
 if (!bridgeToken) {
   throw new Error(
-    "The brokered clankie_discord_bridge credential is missing. Start the control plane once before the Discord bridge.",
+    "The brokered clankie_discord_bridge credential is missing. Start the clankie service once before the Discord bridge.",
   );
 }
 const voiceBridgeToken = voiceEnabled
@@ -124,7 +124,7 @@ const voiceBridgeToken = voiceEnabled
   : undefined;
 if (voiceEnabled && voiceBridgeToken === undefined) {
   throw new Error(
-    "The brokered clankie_discord_voice_bridge credential is missing. Restart the control plane before enabling Discord voice.",
+    "The brokered clankie_discord_voice_bridge credential is missing. Restart the clankie service before enabling Discord voice.",
   );
 }
 if (voiceEnabled && process.env.OPENAI_API_KEY) {
@@ -135,8 +135,7 @@ if (voiceEnabled && (process.env.ELEVENLABS_API_KEY ?? process.env.XI_API_KEY)) 
     "ELEVENLABS_API_KEY and XI_API_KEY must not be set. Store the ElevenLabs key under the brokered elevenlabs provider.",
   );
 }
-const authenticatedSurfaceUrl =
-  process.env.CLANKIE_AUTHENTICATED_SURFACE_URL ?? "http://127.0.0.1:4311/approvals";
+const authenticatedSurfaceUrl = process.env.CLANKIE_AUTHENTICATED_SURFACE_URL ?? "http://127.0.0.1:4310";
 const api = new ClankieApiClient({ baseUrl: apiUrl, captainToken: bridgeToken });
 const voiceApi =
   voiceBridgeToken === undefined
@@ -679,8 +678,8 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
       const response = await fetch(new URL("/health", apiUrl));
       await interaction.reply({
         content: response.ok
-          ? "Clankie's control plane is healthy."
-          : `Control plane returned ${response.status}.`,
+          ? "Clankie's service is healthy."
+          : `Clankie's service returned ${response.status}.`,
         ephemeral: true,
       });
       return;

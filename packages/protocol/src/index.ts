@@ -488,7 +488,7 @@ export type SubmitOperatorConversationTurnResult = z.infer<typeof SubmitOperator
 
 // ---------------------------------------------------------------------------
 // Callable service contract (VUH-769). A transport-neutral request/result
-// envelope any authenticated boundary (control plane, VUH-864 relay) mounts and
+// envelope any authenticated boundary (the service, the relay) mounts and
 // any RN/macOS/TUI client calls. This is the callable contract; VUH-864 owns the
 // physical HTTP/NDJSON transport that carries it.
 // ---------------------------------------------------------------------------
@@ -1011,8 +1011,8 @@ export const CAPTAIN_SILENT_REPLY_SENTINEL = "[[stay-silent]]";
  *
  * Generation writes a local artifact and publishes nothing, so it is read-class
  * (ADR 0029). What makes the picture *conversational* is where it was written:
- * only the control plane's generator writes beneath `GENERATED_MEDIA_DIRECTORY`,
- * and only the runner's browser host writes beneath
+ * only the service's generator writes beneath `GENERATED_MEDIA_DIRECTORY`,
+ * and only the service's browser host writes beneath
  * `BROWSER_ARTIFACT_DIRECTORY`. Nothing the captain holds can write to either —
  * `write_file` is disabled, and any shell he is granted must be sandboxed to a
  * writable root outside the attachment root (the shell host refuses to start
@@ -1394,7 +1394,7 @@ export const DiscordPresenceActionRequestSchema = z.discriminatedUnion("kind", [
   /**
    * The schema itself refuses anything but generated media, so the narrative
    * classification cannot be widened by a caller passing a different ref. The
-   * control plane re-checks it at the route: a boundary asserted in one place
+   * service re-checks it at the route: a boundary asserted in one place
    * is a boundary that moves when someone refactors the other.
    */
   z
@@ -1898,8 +1898,8 @@ export const DeviceEventSchema = z.discriminatedUnion("type", [
 export type DeviceEvent = z.infer<typeof DeviceEventSchema>;
 
 // ---------------------------------------------------------------------------
-// Asked embodiment (ADR 0063): the captain asks for play, the control plane
-// holds the intent, the runner owns the session.
+// Asked embodiment (ADR 0063): the captain asks for play, the embodiment
+// authority holds the intent, the play host owns the session.
 //
 // Every schema is a STRICT, content-free wire boundary: ids, enums, counters,
 // and timestamps only. No field may carry free text, model output, frame
@@ -1978,8 +1978,8 @@ export const EmbodimentSessionStateSchema = z.enum([
 export type EmbodimentSessionState = z.infer<typeof EmbodimentSessionStateSchema>;
 
 /**
- * `body_held` is one reason on purpose (ADR 0063): whether the control plane
- * saw a live asked session or the runner's body lock saw an external
+ * `body_held` is one reason on purpose (ADR 0063): whether the service
+ * saw a live asked session or the body lock saw an external
  * possessor, he says the same true thing — someone is already driving.
  */
 export const EmbodimentRefusalReasonSchema = z.enum([
@@ -2012,7 +2012,7 @@ export function canTransitionEmbodimentSession(
   return EMBODIMENT_SESSION_TRANSITIONS[from].includes(to);
 }
 
-/** Durable control-plane record of one asked session, replayed from events. */
+/** Durable service record of one asked session, replayed from events. */
 export const EmbodimentSessionSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -2072,7 +2072,7 @@ export const EmbodimentClaimSchema = z
 export type EmbodimentClaim = z.infer<typeof EmbodimentClaimSchema>;
 
 /**
- * The control plane's answer to a submitted intent. A refused start still
+ * The service's answer to a submitted intent. A refused start still
  * carries the minted session id when one was recorded, so the refusal stays
  * queryable rather than dropped.
  */
@@ -2155,7 +2155,7 @@ export type BodyPossessionRead = z.infer<typeof BodyPossessionReadSchema>;
 export const EmbodimentReportStateSchema = z.enum(["running", "stopping", "stopped", "refused", "failed"]);
 export type EmbodimentReportState = z.infer<typeof EmbodimentReportStateSchema>;
 
-/** One runner→control-plane lifecycle transition for a claimed session. */
+/** One play-host→service lifecycle transition for a claimed session. */
 export const EmbodimentLifecycleReportSchema = z
   .object({
     schemaVersion: z.literal(1),

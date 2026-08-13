@@ -33,7 +33,7 @@ export interface ResolvedDiscordAttachment {
   readonly id: string;
   readonly mediaType: DiscordPresenceAttachment["mediaType"];
   readonly filename?: string;
-  /** `data:<mediaType>;base64,…` — the form Eve forwards as an AI SDK file part. */
+  /** `data:<mediaType>;base64,…` — the form the model receives as an AI SDK file part. */
   readonly dataUrl: string;
 }
 

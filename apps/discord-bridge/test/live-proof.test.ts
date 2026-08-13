@@ -44,7 +44,7 @@ describe("Discord text live proof", () => {
 });
 
 describe("Discord person-memory live proof", () => {
-  it("requires the exact proposed fact to survive a control-plane restart", () => {
+  it("requires the exact proposed fact to survive a service restart", () => {
     const report = evaluateDiscordPersonMemoryLiveProof([
       receipt("discord.person-memory.proposed", {
         guildId: "guild-1",
@@ -94,9 +94,7 @@ describe("Discord person-memory live proof", () => {
       }),
     ]);
 
-    expect(sameBoot.checks.find((check) => check.name === "control-plane restart durability")?.ok).toBe(
-      false,
-    );
+    expect(sameBoot.checks.find((check) => check.name === "service restart durability")?.ok).toBe(false);
     expect(unrelated.checks.find((check) => check.name === "fact recalled")?.ok).toBe(false);
   });
 });

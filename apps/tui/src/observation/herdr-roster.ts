@@ -33,14 +33,14 @@ function defaultRunner(command: string, args: readonly string[]): Promise<{ stdo
 }
 
 /**
- * Sibling workers running in Herdr panes (VUH-946).
+ * Sibling agents running in Herdr panes.
  *
- * Scaffolding-phase workers are external harness sessions hosted in Herdr
- * panes; they never emit control-plane `worker.*` events, so a roster built
- * only from the event store says "no workers" while the workspace is full of
- * them. Herdr already tracks pane agent lifecycle — this reads `herdr pane
- * list` as a second, explicitly observed source so an empty roster means "no
- * one is working", never "no visibility". Inert outside `HERDR_ENV=1`.
+ * Herdr-hosted agent sessions are invisible to the clankie service, so a
+ * roster built only from service state says "nobody is working" while the
+ * workspace is full of them. Herdr already tracks pane agent lifecycle — this
+ * reads `herdr pane list` as a second, explicitly observed source so an empty
+ * roster means "no one is working", never "no visibility". Inert outside
+ * `HERDR_ENV=1`.
  */
 export class HerdrRoster {
   public readonly active: boolean;

@@ -9,7 +9,7 @@
  *
  * The possessor is a **new principal class**. It is deliberately not the ambient
  * tier and not the voice tier: possessing the body is a different consequence
- * from summoning Clankie into a call or asking him to start a mission, and
+ * from summoning Clankie into a call or asking him to do something, and
  * [ADR 0050](../../../docs/adr/0050-voice-presence-authority-tier.md) set the
  * precedent that a different consequence gets its own named, deny-by-default
  * binding rather than being folded into an existing one.

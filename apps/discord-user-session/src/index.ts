@@ -35,8 +35,8 @@ import { DiscordUserVoiceAdapters } from "./voice-adapter.ts";
  * A second, isolated process rather than a mode of the bot bridge: ADR 0024
  * forbids bot and user credentials sharing a gateway, and separate processes
  * are what make that structural instead of a convention. Everything above the
- * transport — ingress shaping, Eve lane addressing, consent, memory — is the
- * shared core, so this body is the same Clankie the bot is.
+ * transport — ingress shaping, captain lane addressing, consent, memory — is
+ * the shared core, so this body is the same Clankie the bot is.
  */
 
 // Fill unset DISCORD_* names from the operator settings file before anything
@@ -70,7 +70,7 @@ const voiceEnabled = process.env.DISCORD_USER_SESSION_VOICE_ENABLED === "true";
 const bridgeToken = await resolveDiscordUserBridgeCredential({ store: credentialStore });
 if (!bridgeToken) {
   throw new Error(
-    "The brokered clankie_discord_user_bridge credential is missing. Start the control plane once before the user-session bridge.",
+    "The brokered clankie_discord_user_bridge credential is missing. Start the clankie service once before the user-session bridge.",
   );
 }
 const voiceBridgeToken = voiceEnabled
@@ -78,7 +78,7 @@ const voiceBridgeToken = voiceEnabled
   : undefined;
 if (voiceEnabled && voiceBridgeToken === undefined) {
   throw new Error(
-    "The brokered clankie_discord_user_voice_bridge credential is missing. Restart the control plane before enabling user-session voice.",
+    "The brokered clankie_discord_user_voice_bridge credential is missing. Restart the clankie service before enabling user-session voice.",
   );
 }
 
@@ -91,8 +91,8 @@ const voiceApi =
 const receipts = new DiscordBridgeReceiptStore({ path: receiptPath() });
 
 // Every gate is checked before a single byte reaches Discord: enablement flag,
-// brokered credential, durable owner opt-in for the doctrine in force, and
-// non-empty allowlists. A refusal is recorded, not merely thrown.
+// brokered credential, durable owner opt-in, and non-empty allowlists. A
+// refusal is recorded, not merely thrown.
 const admission = await assertUserSessionAdmissible({
   env: process.env,
   store: credentialStore,
@@ -149,8 +149,7 @@ const textIngress = new DiscordTextIngress(
     // A user session cannot request bounded history without reading channels
     // wholesale, so ambient context stays off on this plane.
     contextMessageLimit: 0,
-    authenticatedSurfaceUrl:
-      process.env.CLANKIE_AUTHENTICATED_SURFACE_URL ?? "http://127.0.0.1:4311/approvals",
+    authenticatedSurfaceUrl: process.env.CLANKIE_AUTHENTICATED_SURFACE_URL ?? "http://127.0.0.1:4310",
   },
   (event) => {
     console.info(event, "Discord user-session text ingress event");

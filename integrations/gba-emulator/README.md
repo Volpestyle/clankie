@@ -8,7 +8,7 @@ environment profile ([ADR 0039](../../docs/adr/0039-gba-emulator-embodiment-and-
 
 `GbaEmulatorAdapter` is an `EnvironmentAdapter` dispatched through
 `@clankie/environment-runtime`, so every action inherits the runtime's
-register-before-dispatch idempotency, runner leases, pause/cancel, and
+register-before-dispatch idempotency, leases, pause/cancel, and
 emergency-stop fencing — the adapter owns no action loop. It validates the
 strict emulator contract from `@clankie/interactive-environment`, enforces
 per-lease input/frame bounds and capabilities, drives the pinned core, and
@@ -253,14 +253,14 @@ lives in `fixtures/free-play/sample-trace.jsonl`.
 ## Asked play (ADR 0063)
 
 The product entrance to free play is an ask: a captain turn submits an
-embodiment intent, the runner's play host claims it, and this package's
+embodiment intent, the service's play host claims it, and this package's
 composition — body lock, `createFreePlaySession`, `runFreePlay`, checkpoints —
 runs under the host instead of a hand-launched terminal. `RunFreePlayInput`
 takes a `shouldStop` hook so an asked stop or an exhausted duration budget ends
 the playthrough at a turn boundary, and an asked session resumes from the
 newest compatible checkpoint and mints one on the way out (ADR 0060).
 `pnpm gba:free-play-live` remains the development alias of the same composition
-(`apps/runner/src/play-execution.ts`).
+(`apps/clankie/src/play-execution.ts`).
 
 Every run leaves a durable trail (ADR 0068). `openFreePlayJournal` writes one
 append-only JSONL per run — header, every validated `FreePlayTurn`, then a

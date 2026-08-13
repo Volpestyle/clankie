@@ -40,7 +40,7 @@ a stored value is not the effective one. A silent override is the kind of thing
 that costs an hour of debugging.
 
 `discordSettingsToEnvironment(settings)` projects back into the variable names
-the bridge and control plane already read, so adopting the store is a
+the bridge and the clankie service already read, so adopting the store is a
 composition change rather than a rewrite of every call site. Disabled flags are
 omitted rather than emitted as `"false"`, so a stale export cannot accidentally
 enable a plane.

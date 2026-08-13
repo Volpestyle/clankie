@@ -14,7 +14,7 @@ export interface CredentialBackedOperatorAuthenticatorOptions {
 /**
  * Resolves the authoritative operator credential for every request. This keeps
  * rotation atomic across the server and local clients without restarting the
- * control plane. Store failures and invalid credentials fail closed.
+ * service. Store failures and invalid credentials fail closed.
  */
 export function createCredentialBackedOperatorAuthenticator(
   options: CredentialBackedOperatorAuthenticatorOptions,

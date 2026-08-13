@@ -93,11 +93,9 @@ export interface ManagedService {
    * Narrower than {@link ManagedService.dependsOn} on purpose. `dependsOn`
    * describes who calls whom and orders startup; it does not mean a dependency's
    * restart breaks the dependent. The Discord bridge is the case that does: it
-   * stamps every write with a live claim the control plane matches against, and
-   * a control plane that restarts rebuilds presence from the event store, so the
-   * bridge's claim silently becomes unusable. Restarting the captain, by
-   * contrast, breaks nothing downstream and should stay the targeted operation
-   * the operator asked for.
+   * stamps every write with a live claim the clankie service matches against,
+   * and a service that restarts rebuilds presence from its event log, so the
+   * bridge's claim silently becomes unusable.
    */
   readonly restartsWith?: readonly ServiceId[];
   /** Extra environment the service needs, merged over the caller's env. */
@@ -105,9 +103,9 @@ export interface ManagedService {
     readonly env: NodeJS.ProcessEnv;
     readonly repoRoot: string;
     /**
-     * The brokered captain bearer, when one is available. Deliberately handed to
-     * each service rather than merged into the shared env: captain-eve and the
-     * control plane are the two halves of this shared secret, and the Discord
+     * The brokered captain bearer, when one is available. Deliberately handed
+     * to each service rather than merged into the shared env: it is a shared
+     * secret between the service and its trusted clients, and the Discord
      * bridge refuses to start if it sees the variable at all.
      */
     readonly captainToken?: string | undefined;
@@ -200,7 +198,7 @@ export function listProcessCommands(): readonly (readonly [number, string])[] {
  * This exists because process liveness and published state are different
  * questions, and one service answered the first with the second. The Discord
  * bridge serves no HTTP surface, so its probe inferred "a bridge is running"
- * from the control plane's presence phase — but that phase is durable state
+ * from the service's presence phase — but that phase is durable state
  * replayed from the event store, and it is only written on transition, never on
  * a heartbeat. A bridge that exits without publishing `off` leaves a `present`
  * behind forever, and `clankie restart` then refuses to proceed against a

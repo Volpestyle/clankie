@@ -4,13 +4,11 @@ import { createDefaultCredentialStore, type CredentialStore } from "./credential
 /**
  * The captain's local bearer, brokered rather than hand-exported.
  *
- * The control plane mints its captain authenticator from `CLANKIE_CAPTAIN_TOKEN`
- * and captain-eve presents the same value, so it is one shared secret held by
- * two processes. Nothing was generating it: a launcher-started stack had it on
- * neither side, which left `authenticateConfiguredCaptain` undefined and every
- * captain call answering 401 — not only memory, but every mission tool the
- * captain has. Brokering it the way the operator and Discord bridge credentials
- * are already brokered makes a fresh machine work with no shell setup.
+ * The service authenticates captain-scoped requests against
+ * `CLANKIE_CAPTAIN_TOKEN`, and trusted local clients (the launcher, the relay)
+ * present the same value — one shared secret. Brokering it the way the
+ * operator and Discord bridge credentials are brokered makes a fresh machine
+ * work with no shell setup.
  *
  * The Discord bridge deliberately refuses this variable ({@link
  * apps/discord-bridge/src/index.ts}); its identity is `clankie_discord_bridge`.

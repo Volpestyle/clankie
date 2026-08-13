@@ -20,10 +20,8 @@ import type {
 } from "@clankie/protocol";
 
 /**
- * Everything the captain's tools reach in the rest of the service. Shapes
- * mirror the old api-client methods one-for-one, so the tool implementations
- * ported from captain-eve keep their exact semantics — the transport just
- * became a function call.
+ * Everything the captain's tools reach in the rest of the service, as plain
+ * in-process function calls.
  */
 export interface CaptainDeps {
   readonly browser: {

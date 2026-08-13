@@ -68,7 +68,7 @@ export const ActivityObservationSnapshotSchema = z.discriminatedUnion("surface",
 export type ActivityObservationSnapshot = z.infer<typeof ActivityObservationSnapshotSchema>;
 
 /**
- * Public read result from the control plane. `pending` means the runner owns a
+ * Public read result from the service. `pending` means the service owns a
  * live session but no turn has settled yet; it is not permission to guess.
  */
 export const ActivityObservationReadSchema = z.discriminatedUnion("outcome", [

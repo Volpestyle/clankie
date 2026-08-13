@@ -20,8 +20,8 @@ import {
  *   clankie  ->  discord-bridge        (activity stands alone, tunnel fronts it)
  *
  * The clankie service is the single backend: it hosts the captain, the
- * operator conversation dispatch, the lane listing, and every control-plane
- * style route on port 4310. The bridge authenticates to it; the activity
+ * operator conversation dispatch, the lane listing, and every operator API
+ * route on port 4310. The bridge authenticates to it; the activity
  * surface and its tunnel publish what he plays.
  */
 
@@ -228,7 +228,7 @@ const DISCORD_BRIDGE: ManagedService = {
 /**
  * The rendering surface for anything Clankie is playing.
  *
- * It holds no credentials, no gateway, and no mission authority — it draws
+ * It holds no credentials, no gateway, and no authority — it draws
  * frames a producer sends it — so it depends on nothing and nothing depends on
  * it. It is the same app Discord embeds as the activity
  * ([ADR 0047](../../../docs/adr/0047-discord-activity-presence-plane.md)):

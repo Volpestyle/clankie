@@ -6,7 +6,7 @@ import { createFilesystemAttachmentResolver } from "./attachment-resolver.ts";
 import { createDiscordBotPresenceRuntime } from "./bot-presence-runtime.ts";
 
 /**
- * Trusted control-plane load target (CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE).
+ * Trusted service load target (CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE).
  * Loads the official bot token through the credential broker; never from env.
  */
 export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
@@ -35,9 +35,8 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
       const guildIds = "guildId" in write.payload ? [write.payload.guildId] : [];
       const channelIds = "channelId" in write.payload ? [write.payload.channelId] : [];
       const principalId = write.identity.workerRunId ?? write.identity.characterId;
-      // Capability grants predate ambient presence scopes and retain a missionId
-      // field. Keep non-mission grants isolated under the stable presence session;
-      // this value is never promoted to mission state or an approval record.
+      // Capability grants retain a legacy missionId wire slot. Keep presence
+      // grants isolated under the stable presence session id.
       const capabilityScopeId =
         write.identity.missionId ?? `discord-presence:${write.identity.presenceSessionId ?? "unknown"}`;
       const request = {

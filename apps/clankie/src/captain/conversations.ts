@@ -38,9 +38,8 @@ export type ConversationRunner = (
 /**
  * File-backed conversation registry: `meta.json` + append-only `events.jsonl`
  * per conversation. The wire contract (list/get/create/replay/tail/send with
- * revision fencing and cursored pages) is the one the TUI and relay already
- * speak; the captain-runtime package that used to serve it is gone, so this is
- * its lazy successor. Cursors are zero-padded line counts.
+ * revision fencing and cursored pages) is the one the TUI and relay speak.
+ * Cursors are zero-padded line counts.
  */
 export class ConversationStore {
   private readonly metas = new Map<string, ConversationMeta>();

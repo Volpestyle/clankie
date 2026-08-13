@@ -206,7 +206,7 @@ export interface DiscordVoiceRealtimePorts {
 export interface DiscordVoiceBriefingRequest {
   readonly guildId: string;
   readonly channelId: string;
-  /** The current explicit consents; the control plane resolves person memory for exactly these ids. */
+  /** The current explicit consents; the service resolves person memory for exactly these ids. */
   readonly consentedUserIds: readonly string[];
 }
 

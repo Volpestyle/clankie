@@ -64,7 +64,7 @@ export function evaluateDiscordLiveProof(receipts: readonly DiscordBridgeReceipt
 
 /**
  * Requires an explicit proposal to become recallable after a real
- * control-plane restart. Matching a generated fact id proves the store
+ * service restart. Matching a generated fact id proves the store
  * committed that proposal; differing instance ids prove the fact survived
  * durable event/store replay rather than process RAM.
  */
@@ -115,11 +115,11 @@ export function evaluateDiscordPersonMemoryLiveProof(
     recalled !== undefined &&
     recalled.data.controlPlaneInstanceId !== proposal.data.controlPlaneInstanceId;
   check(
-    "control-plane restart durability",
+    "service restart durability",
     restarted,
     restarted
-      ? "the fact was recalled from a different control-plane process instance"
-      : "matching proposal/recall evidence across different control-plane instances is absent",
+      ? "the fact was recalled from a different service process instance"
+      : "matching proposal/recall evidence across different service instances is absent",
   );
 
   return {

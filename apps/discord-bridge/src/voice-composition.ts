@@ -318,9 +318,9 @@ export interface VoiceBriefingApiPort {
 }
 
 /**
- * Maps the media owner's briefing request onto the control plane's endpoint.
+ * Maps the media owner's briefing request onto the service's endpoint.
  * The request carries only ids; persona, lane instructions, self-state, and
- * approved person memory are all control-plane-resolved (T4), so the bridge
+ * approved person memory are all service-resolved (T4), so the bridge
  * can neither supply nor widen any of them.
  */
 export function createVoiceBriefingProvider(

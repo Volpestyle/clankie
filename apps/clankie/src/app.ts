@@ -1612,8 +1612,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   });
 
   // The operator conversation contract (TUI direct, relay in front for
-  // devices) and the lanes view. Both belonged to the captain-eve process;
-  // the captain lives here now, so its HTTP face does too.
+  // devices) and the lanes view — the captain's HTTP face.
   app.post(OPERATOR_CONVERSATION_DISPATCH_PATH, async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
     if (operator === "unavailable") {

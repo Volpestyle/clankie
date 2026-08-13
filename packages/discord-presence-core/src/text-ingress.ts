@@ -479,7 +479,7 @@ export class DiscordTextIngress {
     );
     // A picture he made during this turn rides his reply as one message
     // (ADR 0085). `media` is only ever present on a settled turn, and only
-    // because the control plane saw the generation happen — nothing here trusts
+    // because the service saw the generation happen — nothing here trusts
     // the reply text to name an artifact.
     const media = result.state === "settled" ? result.media : undefined;
     const write = DiscordPresenceWriteSchema.parse({
@@ -529,7 +529,7 @@ export class DiscordTextIngress {
    * The indicator is cosmetic, so it must never delay or fail the turn: posts
    * are fire-and-forget, and the first failure stops the refresh instead of
    * re-hitting a path that is already refusing. Successful posts land in the
-   * control plane's narrative ledger like every other presence write.
+   * service's narrative ledger like every other presence write.
    */
   private showTyping(message: DiscordInboundMessage, identity: DiscordPresenceWrite["identity"]): () => void {
     if (message.catchingUp === true) return () => undefined;

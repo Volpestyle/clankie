@@ -197,7 +197,7 @@ export class ConfiguredMediaGenerator implements MediaGeneratorPort {
 
   /**
    * A resumed render must land somewhere, and the original request carries the
-   * path. Losing it to a control-plane restart is not a failure worth a durable
+   * path. Losing it to a service restart is not a failure worth a durable
    * store: the job is still rendering upstream, and a fresh output path for the
    * same finished bytes is the correct recovery.
    */

@@ -19,7 +19,7 @@ export interface DiscordPresenceActionDeliveryPort {
   ): Promise<DiscordPresenceWriteResult>;
 }
 
-/** Typed local rejection raised before a revoked action can reach the control plane. */
+/** Typed local rejection raised before a revoked action can reach the service. */
 export class DiscordPresenceActToolUnavailableError extends Error {
   public readonly exposure: DiscordPresenceToolExposure;
 

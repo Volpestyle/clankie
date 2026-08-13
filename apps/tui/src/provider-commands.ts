@@ -177,7 +177,7 @@ export function buildProviderCommands(services: ProviderServices): FaceShellComm
  * Positional rather than a wizard, unlike `/model`: there are three providers
  * and one usable model each, so a two-step picker would be ceremony around a
  * choice that fits on one line. It writes the same config file `/model` does,
- * and the control plane reads it per request — no restart.
+ * and the service reads it per request — no restart.
  */
 const MEDIA_MODELS: Readonly<Record<"image_model" | "video_model", Readonly<Record<string, string>>>> = {
   image_model: {

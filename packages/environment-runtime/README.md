@@ -1,6 +1,6 @@
 # @clankie/environment-runtime
 
-Runner-owned lifecycle and lease enforcement for durable interactive
+Service-owned lifecycle and lease enforcement for durable interactive
 environments. Adapters implement provider-neutral start, attach, heartbeat,
 pause, resume, action, cancellation, and stop operations using strict
 provider-profiled contracts from `@clankie/interactive-environment`.
@@ -17,18 +17,18 @@ flowchart LR
 ```
 
 Exactly one unexpired writer lease may own a character/world pair. Capability
-tokens and connection credentials stay in runner memory; durable records hold
+tokens and connection credentials stay in service memory; durable records hold
 only a token fingerprint and the strict credential-free v2 lease. The runtime
 dual-reads legacy v1 Minecraft-shaped sessions, normalizes them once, and
 single-writes v2 records. Every action ID is registered before adapter dispatch,
 so a repeated command or restart
 returns the recorded result instead of repeating an external side effect.
-One live runner owns each state directory; a replacement runner takes ownership
+One live host process owns each state directory; a replacement takes ownership
 through restart reconciliation rather than concurrent file access.
 
 Lease expiry, revocation, pause, timeout, explicit cancellation, and emergency
 stop invalidate pending motor work immediately. Emergency stop is a direct
-runner operation and never waits for a model turn. Restart reconciliation
+runtime operation and never waits for a model turn. Restart reconciliation
 attaches each live recorded session once, fails missing adapter sessions closed,
 and keeps completed action results terminal. An adapter may return a bounded
 synchronous completion for deterministic local work or leave an action running

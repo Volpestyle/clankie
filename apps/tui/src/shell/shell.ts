@@ -4,9 +4,9 @@
  * fullscreen differential-render layout, and owns the central input router,
  * overlay/selection plumbing, guided-flow engine, turn loader, and inline `!`
  * shell escape. Extracted from v1's `scripts/clankie.ts` monolith (clankie
- * snapshot 04734df9) with the eve brain coupling removed: mission data flows
- * in through `FaceShellOptions` (commands, onPrompt, statusExtras) so the
- * control plane stays behind `@clankie/api-client`.
+ * snapshot 04734df9): dynamic data flows in through `FaceShellOptions`
+ * (commands, onPrompt, statusExtras) so the clankie service stays behind
+ * `@clankie/api-client`.
  */
 import type { ChildProcess } from "node:child_process";
 import {
@@ -123,7 +123,7 @@ export interface FaceShellOptions {
   readonly autocomplete?: ClankieAutocompleteOptions;
   /** File that persists editor prompt history across sessions. */
   readonly historyPath?: string;
-  /** Extra status bar segments (model, mission, …) appended after shell state. */
+  /** Extra status bar segments (model, activity, …) appended after shell state. */
   readonly statusExtras?: () => readonly string[];
   /** Handles a plain prompt (not a slash command, not `!`). */
   readonly onPrompt?: (prompt: string, shell: ClankieFaceShell, signal: AbortSignal) => Promise<void>;

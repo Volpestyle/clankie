@@ -619,7 +619,7 @@ function layoutArguments(context: ArgumentContext): StaticArgumentSpec {
  * Only providers this repository has an adapter for, named by their catalog id
  * (`google`, not `gemini`) — the id is what `/image-model` writes into the
  * config ref, so a friendlier alias here would complete to a setting the
- * control plane cannot resolve.
+ * service cannot resolve.
  */
 function imageModelArguments(context: ArgumentContext): StaticArgumentSpec {
   const provider = context.args[0]?.toLowerCase();

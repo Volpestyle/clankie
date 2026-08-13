@@ -98,7 +98,7 @@ describe("Discord text readiness", () => {
       env: {},
       store: new MemoryCredentialStore(),
       api: {
-        inspectDiscordReadiness: () => Promise.reject(new Error("control plane unreachable")),
+        inspectDiscordReadiness: () => Promise.reject(new Error("clankie service unreachable")),
       },
       clock: () => new Date("2026-07-25T16:00:00.000Z"),
     });
@@ -107,9 +107,9 @@ describe("Discord text readiness", () => {
     expect(report.checks.find((check) => check.name === "official bot credential")).toMatchObject({
       ok: false,
     });
-    expect(report.checks.find((check) => check.name === "control-plane composition")).toMatchObject({
+    expect(report.checks.find((check) => check.name === "service composition")).toMatchObject({
       ok: false,
-      detail: "control plane unreachable",
+      detail: "clankie service unreachable",
     });
   });
 });

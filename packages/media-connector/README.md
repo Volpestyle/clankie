@@ -10,19 +10,17 @@ Image adapters cover OpenAI `gpt-image-2`, Google `gemini-3.1-flash-image`, and 
 credential and may inject a transport. The package never reads `process.env`, imports a provider SDK,
 publishes an artifact, or grants itself authority.
 
-The call site is `ConfiguredMediaGenerator` in the control plane, which owns doctrine projection,
-credential resolution, and where artifacts land. Nothing else constructs these adapters.
+The call site is `ConfiguredMediaGenerator` in the clankie service, which owns credential
+resolution and where artifacts land. Nothing else constructs these adapters.
 
 ## Authority and security
 
-Callers project `media.generate.image` or `media.generate.video` through compiled doctrine with
-`projectMediaGenerationGrant()` before invoking an adapter. Both are read-class because they create
-only a caller-selected local artifact, and they are separate actions so an operator can allow
-pictures and deny video without editing this package. Missing doctrine fails closed.
+`media.generate.image` and `media.generate.video` are separate actions, and both create only a
+caller-selected local artifact.
 
-Posting a generated artifact is a separate concern with its own boundary: the one narrow case that
-does not need an approval — his own reply carrying a picture he just made — is decided by the
-control plane and the presence schema, never here. See ADR 0085.
+Posting a generated artifact is a separate concern with its own boundary: his own reply carrying
+a picture he just made is decided by the clankie service and the presence schema, never here. See
+ADR 0085.
 
 Provider responses are untrusted. Adapters validate their response shape, decode the image, write it
 with mode `0600` under a `MEDIA_ARTIFACT_BYTES_MAX` ceiling, and return a validated absolute artifact
