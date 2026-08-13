@@ -32,6 +32,7 @@
     "@earendil-works/pi-coding-agent": "0.84.1",
     "@hono/node-server": "2.0.8",
     "hono": "4.12.28",
+    "typebox": "1.3.7",
     "zod": "4.4.3"
   },
   "devDependencies": {
