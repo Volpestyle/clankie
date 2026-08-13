@@ -23,7 +23,6 @@ import {
   PermissionFlagsBits,
   REST,
   Routes,
-  ThreadAutoArchiveDuration,
   type ChatInputCommandInteraction,
   type Guild,
   type Message,
@@ -33,7 +32,6 @@ import {
   authorizeVoicePresenceCommand,
   parseDiscordVoiceJoinPolicy,
   parseRoleIds,
-  refuseAmbientApproval,
   type DiscordCommandPrincipal,
   type DiscordRoleBindings,
 } from "./authority.ts";
@@ -79,14 +77,7 @@ import {
   type VoicePresenceAskOptions,
   type VoicePresenceMember,
 } from "./voice-intent.ts";
-import { projectBoundMissionRecord, renderMissionSummary, sanitizeDiscordText } from "./mission-state.ts";
-import { MissionThreadProjector } from "./projector.ts";
-import {
-  issueMissionSteering,
-  renderMissionSteeringReply,
-  workerSteerIntentForDiscordChoice,
-} from "./steering.ts";
-import { MissionThreadRegistry, ZERO_RETENTION_STATUS, threadNameForMission } from "./thread-registry.ts";
+import { sanitizeDiscordText } from "./text.ts";
 
 // Fill unset DISCORD_* names from the operator settings file before anything
 // reads them, so TUI-configured deployments need no .env. Deliberately ahead of
@@ -177,7 +168,6 @@ const presenceSession = new DiscordPresenceSession({
 const roleBindings: DiscordRoleBindings = {
   ambientRoleIds: parseRoleIds(process.env.DISCORD_AMBIENT_ROLE_IDS),
   ambientUserIds: parseRoleIds(process.env.DISCORD_AMBIENT_USER_IDS),
-  approvalRoleIds: parseRoleIds(process.env.DISCORD_APPROVAL_ROLE_IDS),
 };
 const voiceJoinPolicy = parseDiscordVoiceJoinPolicy(process.env.DISCORD_VOICE_JOIN_POLICY);
 const receipts = new DiscordBridgeReceiptStore({
@@ -379,9 +369,6 @@ const voicePresenceAsk: VoicePresenceAskOptions | undefined =
         // Content-free by construction (ids, booleans, enums — never the body).
         onTrace: (trace) => console.info(trace, "Discord voice presence ask"),
       };
-const registry = new MissionThreadRegistry({
-  statePath: bridgeStatePath(),
-});
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -392,24 +379,6 @@ const client = new Client({
   ],
   partials: textIngressEnabled ? [Partials.Channel] : [],
 });
-const projector = new MissionThreadProjector(
-  registry,
-  api,
-  {
-    async send(threadId, message) {
-      const channel = await client.channels.fetch(threadId);
-      const binding = registry.bindings().find((candidate) => candidate.threadId === threadId);
-      if (!channel?.isThread() || !binding || channel.guildId !== binding.guildId) {
-        throw new Error(`Discord mission thread ${threadId} is unavailable or outside its trusted guild`);
-      }
-      await channel.send({ content: message, allowedMentions: { parse: [] } });
-    },
-  },
-  pollInterval(),
-  (error, missionId) => {
-    console.error({ missionId, error }, "Discord mission projection refresh failed");
-  },
-);
 
 // The gateway is the authority on which servers he is in and how much of each
 // he can see; the presence record is how that knowledge reaches the captain.
@@ -494,27 +463,10 @@ client.once("ready", async () => {
     }
   }
 
-  for (const binding of registry.bindings()) {
-    const channel = await client.channels.fetch(binding.threadId).catch(() => undefined);
-    if (!channel?.isThread() || channel.guildId !== binding.guildId) {
-      console.error(
-        { missionId: binding.missionId, threadId: binding.threadId, guildId: binding.guildId },
-        "Persisted Discord mission binding does not match an active guild thread",
-      );
-      continue;
-    }
-    await recordReceipt("discord.mission.restored", {
-      missionId: binding.missionId,
-      threadId: binding.threadId,
-      guildId: binding.guildId,
-    });
-  }
-  projector.start();
   await recordReceipt("discord.bridge.ready", {
     // The registered command count is always 1 now; the useful number for an
     // operator checking what landed is how many subcommands it carries.
     commandCount: DISCORD_SUBCOMMANDS.length,
-    restoredMissionCount: registry.entries().length,
     textIngressEnabled,
     voiceEnabled,
     settingsFilledCount: settingsFilledNames.length,
@@ -525,7 +477,7 @@ client.once("ready", async () => {
     console.info({ names: settingsFilledNames }, "Discord configuration filled from operator settings");
   }
   console.log(
-    `Discord bot ready as ${client.user?.tag ?? "unknown"}; registered /${DISCORD_COMMAND_NAME} with ${DISCORD_SUBCOMMANDS.length} subcommands, restored ${registry.entries().length} mission thread(s), text ingress ${textIngressEnabled ? "enabled" : "disabled"}, voice ${voiceEnabled ? "enabled" : "disabled"}.`,
+    `Discord bot ready as ${client.user?.tag ?? "unknown"}; registered /${DISCORD_COMMAND_NAME} with ${DISCORD_SUBCOMMANDS.length} subcommands, text ingress ${textIngressEnabled ? "enabled" : "disabled"}, voice ${voiceEnabled ? "enabled" : "disabled"}.`,
   );
 });
 
@@ -724,197 +676,13 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   }
   switch (interaction.options.getSubcommand()) {
     case "status": {
-      const missionId = missionIdForInteraction(interaction);
-      if (missionId) {
-        await interaction.deferReply();
-        const mission = projectBoundMissionRecord(await api.getMission(missionId), missionId);
-        await interaction.editReply({
-          content: renderMissionSummary(mission),
-          allowedMentions: { parse: [] },
-        });
-        return;
-      }
       const response = await fetch(new URL("/health", apiUrl));
       await interaction.reply({
         content: response.ok
-          ? "Clankie's control plane is healthy. Run this command inside a Clankie mission thread for mission state."
+          ? "Clankie's control plane is healthy."
           : `Control plane returned ${response.status}.`,
         ephemeral: true,
       });
-      return;
-    }
-    case "mission": {
-      const authority = authorizeAmbientCommand(commandPrincipal(interaction), roleBindings);
-      if (!authority.allowed) {
-        await interaction.reply(authority.message);
-        return;
-      }
-      if (!interaction.inGuild() || interaction.channel?.isThread()) {
-        await interaction.reply("Create missions from a top-level guild text channel.");
-        return;
-      }
-      await interaction.deferReply();
-      const goal = interaction.options.getString("goal", true);
-      const doctrineId = interaction.options.getString("doctrine") ?? "structured";
-      const previousCreation = registry.creationForInteraction(interaction.guildId, interaction.id);
-      const previousMissionId = previousCreation?.missionId;
-      if (previousCreation && !previousCreation.missionId) {
-        await interaction.editReply(
-          "A prior delivery of this Discord interaction may have created a mission but did not receive its id. " +
-            "The retry is refused to avoid creating a duplicate mission; inspect the control plane before retrying with a new command.",
-        );
-        return;
-      }
-      if (!previousCreation) registry.beginCreation(interaction.guildId, interaction.id);
-      const missionId = previousMissionId
-        ? previousMissionId
-        : (
-            await api.createMission({
-              goal,
-              doctrineId,
-              context: {
-                channel: "discord",
-                authorityTier: "ambient",
-                guildId: interaction.guildId,
-                requestedBy: interaction.user.id,
-                transcriptRetention: "off",
-                discordInteractionId: interaction.id,
-              },
-            })
-          ).missionId;
-      if (!previousCreation) registry.completeCreation(interaction.guildId, interaction.id, missionId);
-
-      const existingBinding = registry.bindingForMission(missionId);
-      if (existingBinding) {
-        if (existingBinding.guildId !== interaction.guildId) {
-          await interaction.editReply(
-            "The mission already has a trusted binding in another guild; this retry was refused.",
-          );
-          return;
-        }
-        await interaction.editReply({
-          content: `Mission **${sanitizeDiscordText(missionId)}** already uses <#${existingBinding.threadId}>; no duplicate thread was created.`,
-          allowedMentions: { parse: [] },
-        });
-        return;
-      }
-      await interaction.editReply({
-        content: `Created mission **${sanitizeDiscordText(missionId)}** under doctrine **${sanitizeDiscordText(doctrineId)}**. Creating its lifecycle thread…`,
-        allowedMentions: { parse: [] },
-      });
-      const reply = await interaction.fetchReply();
-      const thread =
-        reply.thread ??
-        (await reply.startThread({
-          name: threadNameForMission(missionId),
-          autoArchiveDuration: ThreadAutoArchiveDuration.OneDay,
-          reason: `Clankie mission ${sanitizeDiscordText(missionId)}`,
-        }));
-      if (thread.guildId !== interaction.guildId) {
-        throw new Error("Discord created the mission thread outside the requesting guild");
-      }
-      const binding = registry.bind(thread.id, missionId, interaction.guildId, interaction.id);
-      if (binding.threadId !== thread.id || binding.guildId !== interaction.guildId) {
-        await thread.setName(`clankie-duplicate-refused-${thread.id}`.slice(0, 100));
-        await thread.setArchived(true, "Duplicate mission thread refused by trusted binding registry");
-        await interaction.editReply({
-          content: `Mission **${sanitizeDiscordText(missionId)}** already has a different trusted thread binding; this retry was refused.`,
-          allowedMentions: { parse: [] },
-        });
-        return;
-      }
-      await recordReceipt("discord.mission.bound", {
-        missionId,
-        threadId: thread.id,
-        guildId: interaction.guildId,
-        interactionId: interaction.id,
-      });
-      await thread.send({ content: ZERO_RETENTION_STATUS, allowedMentions: { parse: [] } });
-      await projector.refresh(thread.id, missionId);
-      return;
-    }
-    case "steer": {
-      const missionId = missionIdForInteraction(interaction);
-      if (!missionId) {
-        await interaction.reply(
-          "Refused visibly: steering is accepted only inside a bound Clankie mission thread.",
-        );
-        return;
-      }
-      const authority = authorizeAmbientCommand(commandPrincipal(interaction), roleBindings);
-      if (!authority.allowed) {
-        await interaction.reply(authority.message);
-        return;
-      }
-      const intent = workerSteerIntentForDiscordChoice(interaction.options.getString("intent", true));
-      if (!intent) {
-        await interaction.reply(
-          "Steering was refused: select one of the registered bounded steering choices.",
-        );
-        return;
-      }
-      await interaction.deferReply();
-      const result = await issueMissionSteering(
-        registry,
-        api,
-        interaction.channelId,
-        intent,
-        interaction.guildId ?? undefined,
-      );
-      await interaction.editReply(renderMissionSteeringReply(result));
-      return;
-    }
-    case "approval": {
-      const approvalId = interaction.options.getString("approval-id", true);
-      const decision = interaction.options.getString("decision", true);
-      const refusal = refuseAmbientApproval(
-        memberRoleIds(interaction),
-        roleBindings,
-        authenticatedSurfaceUrl,
-        approvalId,
-      );
-      await recordReceipt("discord.approval.refused", {
-        approvalId,
-        interactionId: interaction.id,
-        ...(interaction.guildId === null ? {} : { guildId: interaction.guildId }),
-      });
-      await interaction.reply(
-        `${refusal.message} Requested decision **${decision}** was not recorded by Discord.`,
-      );
-      return;
-    }
-    case "memory": {
-      const action = interaction.options.getString("action") ?? "status";
-      if (action === "status") {
-        await interaction.reply(
-          `${ZERO_RETENTION_STATUS} The control-plane event store is authoritative and is not changed by this bridge control.`,
-        );
-        return;
-      }
-      const thread = interaction.channel;
-      if (
-        !thread?.isThread() ||
-        !interaction.guildId ||
-        !registry.missionId(thread.id, interaction.guildId)
-      ) {
-        await interaction.reply(
-          "Nothing was forgotten: this command must run inside a bound Clankie mission thread.",
-        );
-        return;
-      }
-      const authority = authorizeAmbientCommand(commandPrincipal(interaction), roleBindings);
-      if (!authority.allowed) {
-        await interaction.reply(authority.message);
-        return;
-      }
-      await thread.setName(`clankie-forgotten-${thread.id}`.slice(0, 100));
-      registry.forget(thread.id, interaction.guildId);
-      projector.forget(thread.id);
-      await interaction.reply(
-        "Forgot the bridge-owned thread-to-mission correlation and stopped lifecycle projection. " +
-          "Discord history and authoritative Clankie/control-plane memory were not deleted.",
-      );
-      await thread.setArchived(true, "Bridge mission correlation forgotten by explicit command");
       return;
     }
     case "person-memory": {
@@ -993,7 +761,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
       const factId = `discord-person-fact-${randomUUID()}`;
       const proposalId = `discord-person-proposal-${randomUUID()}`;
       const controlPlaneReadiness = await api.inspectDiscordReadiness();
-      const result = await api.proposeDiscordPersonMemory({
+      await api.proposeDiscordPersonMemory({
         schemaVersion: 1,
         proposalId,
         fact: {
@@ -1032,11 +800,8 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
               }),
         },
       });
-      const approvalId = approvalIdFromPersonMemoryProposal(result);
       await interaction.reply({
-        content:
-          `Proposed fact **${sanitizeDiscordText(factId)}** for reviewed long-term memory. ` +
-          `It is not committed until approval **${sanitizeDiscordText(approvalId)}** is decided on ${authenticatedSurfaceUrl}.`,
+        content: `Stored fact **${sanitizeDiscordText(factId)}** in Clankie's long-term person memory.`,
         ephemeral: true,
         allowedMentions: { parse: [] },
       });
@@ -1047,7 +812,6 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
         controlPlaneInstanceId: controlPlaneReadiness.instanceId,
         proposalId,
         factId,
-        approvalId,
       });
       return;
     }
@@ -1145,12 +909,8 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
       const health = await presencePort.getHealth();
       const write = DiscordPresenceWriteSchema.parse({
         schemaVersion: 1,
-        // Deterministic per channel: an operator approval recorded for this
-        // write matches the retried command instead of minting a fresh
-        // approval each attempt, and a repeat within the dedup window returns
-        // the already-posted link rather than piling up invites. The
-        // correlation id must be equally stable — approval matching compares
-        // it, so a per-interaction id would orphan the approval it earned.
+        // Deterministic per channel: a repeat within the dedup window returns
+        // the already-posted link rather than piling up invites.
         idempotencyKey: `activity-start:gba:${channel.id}:v2`,
         action: "discord.presence.activity_start",
         identity: {
@@ -1175,14 +935,10 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
           allowedMentions: { parse: [] },
         });
       } catch (error) {
-        // activity_start is publish-external, so the first use in a channel
-        // typically parks on the authenticated approval surface. Point there
-        // rather than pretending the link went out.
+        // Surface the refusal reason rather than pretending the link went out.
         const message = sanitizeDiscordText(error instanceof Error ? error.message : String(error));
         await interaction.editReply({
-          content:
-            `The launch was not posted: ${message}\n` +
-            "If this is a pending approval, decide it in the clankie TUI (/approvals) and run /clankie watch again.",
+          content: `The launch was not posted: ${message}`,
           allowedMentions: { parse: [] },
         });
       }
@@ -1301,19 +1057,6 @@ function commandPrincipal(interaction: ChatInputCommandInteraction): DiscordComm
   return { userId: interaction.user.id, roleIds: memberRoleIds(interaction) };
 }
 
-function approvalIdFromPersonMemoryProposal(result: Record<string, unknown>): string {
-  const approval = result.approval;
-  if (
-    approval === null ||
-    typeof approval !== "object" ||
-    Array.isArray(approval) ||
-    typeof (approval as Record<string, unknown>).id !== "string"
-  ) {
-    throw new Error("Discord person-memory proposal did not return an approval id");
-  }
-  return (approval as { id: string }).id;
-}
-
 function renderDiscordPersonMemoryProjection(
   facts: readonly { factId: string; kind: string; body: string; confidence: number }[],
   recallCard: string | undefined,
@@ -1328,19 +1071,6 @@ function renderDiscordPersonMemoryProjection(
     )
     .join("\n")
     .slice(0, 1_900);
-}
-
-function missionIdForInteraction(interaction: ChatInputCommandInteraction): string | undefined {
-  const channel = interaction.channel;
-  if (!channel?.isThread() || !interaction.guildId || channel.guildId !== interaction.guildId) {
-    return undefined;
-  }
-  return registry.missionId(channel.id, interaction.guildId);
-}
-
-function pollInterval(): number {
-  const configured = Number(process.env.DISCORD_MISSION_POLL_INTERVAL_MS ?? "5000");
-  return Number.isFinite(configured) && configured >= 1_000 ? configured : 5_000;
 }
 
 function parseContextMessageLimit(value: string | undefined): number {
@@ -1365,24 +1095,6 @@ async function readDiscordContext(
       body: candidate.content,
       createdAt: candidate.createdAt.toISOString(),
     }));
-}
-
-function bridgeStatePath(): string {
-  const configured = process.env.DISCORD_BRIDGE_STATE_PATH;
-  if (configured) {
-    const fromWorkspace = relative(process.cwd(), configured);
-    if (
-      !isAbsolute(configured) ||
-      fromWorkspace === "" ||
-      (!fromWorkspace.startsWith("..") && !isAbsolute(fromWorkspace))
-    ) {
-      throw new Error("DISCORD_BRIDGE_STATE_PATH must be absolute and outside the repository workspace");
-    }
-    return configured;
-  }
-  const stateHome = process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state");
-  if (!isAbsolute(stateHome)) throw new Error("XDG_STATE_HOME must be absolute");
-  return join(stateHome, "clankie", "discord-bridge.json");
 }
 
 function bridgeReceiptPath(): string {
@@ -1446,7 +1158,6 @@ let shutdownPromise: Promise<void> | undefined;
 async function shutdown(signal: NodeJS.Signals): Promise<void> {
   if (shutdownPromise !== undefined) return shutdownPromise;
   shutdownPromise = (async () => {
-    projector.stop();
     voiceIdleAutoLeave?.stop();
     await possessorVoiceListener?.close();
     await voiceSession?.leave();

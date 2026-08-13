@@ -149,7 +149,7 @@ export async function inspectDiscordTextReadiness(
     ambientRoles.size > 0
       ? `${ambientRoles.size.toString()} role binding(s) configured`
       : "no ambient role binding is configured",
-    "Set DISCORD_AMBIENT_ROLE_IDS to the role ids allowed to create and steer missions.",
+    "Set DISCORD_AMBIENT_ROLE_IDS to the role ids granted the ambient command tier.",
   );
   const openAiCredential = voiceEnabled ? await options.store.get("openai") : undefined;
   add(

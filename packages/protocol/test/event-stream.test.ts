@@ -1,12 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  DomainEventSchema,
-  EVENT_STREAM_KINDS,
-  RESERVED_EVENT_STREAM_PREFIXES,
-  classifyEventStream,
-  eventStreamKindForId,
-  isMissionEventStream,
-} from "../src/index.ts";
+import { DomainEventSchema, EVENT_STREAM_KINDS, eventStreamKindForId } from "../src/index.ts";
 
 function envelope(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -46,26 +39,6 @@ describe("event stream identity", () => {
   it("matches an exact namespace without swallowing its siblings", () => {
     expect(eventStreamKindForId("memory:retention")).toBe("memory_retention");
     expect(eventStreamKindForId("memory:retention:extra")).toBe("mission");
-  });
-
-  it("prefers the stamped kind over namespace inference", () => {
-    // A stamped event is authoritative even when its id looks like a mission,
-    // so the namespace table never has to stay in sync with future writers.
-    expect(classifyEventStream({ missionId: "opaque-id", streamKind: "embodiment" })).toBe("embodiment");
-    expect(isMissionEventStream({ missionId: "opaque-id", streamKind: "embodiment" })).toBe(false);
-  });
-
-  it("classifies a legacy event that predates the stamped field", () => {
-    expect(classifyEventStream({ missionId: "discord-presence:discord:bot:x" })).toBe("discord_presence");
-    expect(isMissionEventStream({ missionId: "discord-presence:discord:bot:x" })).toBe(false);
-    expect(isMissionEventStream({ missionId: "mission-1" })).toBe(true);
-  });
-
-  it("exposes reserved prefixes so a mission id can never collide", () => {
-    expect(RESERVED_EVENT_STREAM_PREFIXES).toContain("discord-presence:");
-    for (const prefix of RESERVED_EVENT_STREAM_PREFIXES) {
-      expect(eventStreamKindForId(`${prefix}anything`)).not.toBe("mission");
-    }
   });
 
   it("declares every kind the namespace table can produce", () => {

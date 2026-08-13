@@ -54,40 +54,6 @@ export function evaluateDiscordLiveProof(receipts: readonly DiscordBridgeReceipt
       : "no admitted delivery has both settled ingress and reply receipts",
   );
 
-  const binding = receipts.find((receipt) => receipt.type === "discord.mission.bound");
-  const stoppedAfterBinding =
-    binding === undefined
-      ? undefined
-      : receipts
-          .slice(receipts.indexOf(binding) + 1)
-          .find((receipt) => receipt.type === "discord.bridge.stopped");
-  const restored =
-    binding === undefined || stoppedAfterBinding === undefined
-      ? undefined
-      : receipts
-          .slice(receipts.indexOf(stoppedAfterBinding) + 1)
-          .find(
-            (receipt) =>
-              receipt.type === "discord.mission.restored" &&
-              receipt.data.missionId === binding.data.missionId &&
-              receipt.data.threadId === binding.data.threadId &&
-              receipt.data.guildId === binding.data.guildId,
-          );
-  check(
-    "mission restart restoration",
-    binding !== undefined && stoppedAfterBinding !== undefined && restored !== undefined,
-    restored
-      ? "the same mission/thread binding was restored after a graceful bridge restart"
-      : "no mission binding has a matching stop-and-restore sequence",
-  );
-
-  const approvalRefusal = receipts.find((receipt) => receipt.type === "discord.approval.refused");
-  check(
-    "ambient approval denial",
-    approvalRefusal !== undefined,
-    approvalRefusal ? "Discord approval refusal receipt observed" : "no Discord approval refusal receipt",
-  );
-
   return {
     schemaVersion: 1,
     passed: checks.every((entry) => entry.ok),
@@ -97,10 +63,10 @@ export function evaluateDiscordLiveProof(receipts: readonly DiscordBridgeReceipt
 }
 
 /**
- * Requires an explicit reviewed proposal to become recallable after a real
- * control-plane restart. Matching a generated fact id proves that the
- * approval-only store boundary committed that proposal; differing instance ids
- * prove the fact survived durable event/store replay rather than process RAM.
+ * Requires an explicit proposal to become recallable after a real
+ * control-plane restart. Matching a generated fact id proves the store
+ * committed that proposal; differing instance ids prove the fact survived
+ * durable event/store replay rather than process RAM.
  */
 export function evaluateDiscordPersonMemoryLiveProof(
   receipts: readonly DiscordBridgeReceipt[],
@@ -114,14 +80,13 @@ export function evaluateDiscordPersonMemoryLiveProof(
       receipt.type === "discord.person-memory.proposed" &&
       typeof receipt.data.proposalId === "string" &&
       typeof receipt.data.factId === "string" &&
-      typeof receipt.data.approvalId === "string" &&
       typeof receipt.data.controlPlaneInstanceId === "string",
   );
   check(
-    "reviewed proposal delivered",
+    "proposal delivered",
     proposal !== undefined,
     proposal
-      ? "Discord delivered a proposal acknowledgement with an operator approval id"
+      ? "Discord delivered a person-memory proposal acknowledgement"
       : "no complete person-memory proposal receipt",
   );
 
@@ -138,10 +103,10 @@ export function evaluateDiscordPersonMemoryLiveProof(
               receipt.data.factId === proposal.data.factId,
           );
   check(
-    "approved fact recalled",
+    "fact recalled",
     recalled !== undefined,
     recalled
-      ? "the exact proposed fact id became visible through governed Discord recall"
+      ? "the exact proposed fact id became visible through Discord recall"
       : "the proposed fact id has not been recalled from Discord",
   );
 
@@ -153,7 +118,7 @@ export function evaluateDiscordPersonMemoryLiveProof(
     "control-plane restart durability",
     restarted,
     restarted
-      ? "the approved fact was recalled from a different control-plane process instance"
+      ? "the fact was recalled from a different control-plane process instance"
       : "matching proposal/recall evidence across different control-plane instances is absent",
   );
 

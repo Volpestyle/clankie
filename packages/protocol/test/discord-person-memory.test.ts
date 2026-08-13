@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  ApprovedDiscordPersonMemoryProposalSchema,
-  DiscordPersonMemoryFactSchema,
-  DiscordPersonMemoryProjectionSchema,
-} from "../src/index.ts";
+import { DiscordPersonMemoryFactSchema, DiscordPersonMemoryProjectionSchema } from "../src/index.ts";
 
 const fact = {
   schemaVersion: 1,
@@ -36,26 +32,13 @@ describe("Discord person-memory protocol", () => {
     expect(() => DiscordPersonMemoryFactSchema.parse({ ...fact, body: "x".repeat(2_049) })).toThrow();
   });
 
-  it("enforces correction chronology and identity-safe approved envelopes", () => {
+  it("enforces correction chronology", () => {
     expect(() =>
       DiscordPersonMemoryFactSchema.parse({
         ...fact,
         supersedesFactId: fact.factId,
       }),
     ).toThrow();
-    expect(
-      ApprovedDiscordPersonMemoryProposalSchema.parse({
-        schemaVersion: 1,
-        proposalId: "proposal-1",
-        approval: {
-          approvalId: "approval-1",
-          status: "approved",
-          approvedAt: "2026-07-25T00:01:00.000Z",
-          approvedBy: "operator",
-        },
-        fact,
-      }).fact.subject,
-    ).toEqual(fact.subject);
   });
 
   it("bounds public projection collections and recall cards", () => {

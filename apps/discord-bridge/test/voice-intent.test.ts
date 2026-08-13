@@ -76,7 +76,6 @@ function executionConfig(
     bindings: {
       ambientRoleIds: new Set(["ambient-role"]),
       ambientUserIds: new Set(),
-      approvalRoleIds: new Set(),
     },
     joinPolicy: "ambient",
     voiceGuildIds: new Set(["guild-1"]),

@@ -6,11 +6,9 @@ import { DISCORD_SUBCOMMANDS } from "../src/commands.ts";
 /**
  * Authority is called inline inside each `case` of the dispatch switch rather
  * than driven by a table, because several subcommands gate *after* a
- * precondition — `memory status` is ungated while `memory forget` is not, and
- * `steer` resolves its mission thread first. A blanket pre-switch gate would
- * change those behaviours.
+ * precondition. A blanket pre-switch gate would change those behaviours.
  *
- * That inline shape is exactly where a mechanical rewrite of ten cases can
+ * That inline shape is exactly where a mechanical rewrite of the cases can
  * silently drop one authority call, and the failure is invisible: the
  * subcommand keeps working, it just stops being gated. The ADR 0050 tier split
  * would be quietly undone.
@@ -33,15 +31,13 @@ function caseBody(subcommand: string): string {
 }
 
 describe("subcommand authority tiers", () => {
-  it("gates mission, steer, memory, and person-memory on the ambient binding only", () => {
-    for (const subcommand of ["mission", "steer", "memory", "person-memory"]) {
-      const body = caseBody(subcommand);
-      expect(body, `/clankie ${subcommand} lost its ambient authority check`).toContain(AMBIENT);
-      // Opening voice to a room must never widen mission authority (ADR 0050).
-      expect(body, `/clankie ${subcommand} must not use the voice presence tier`).not.toContain(
-        VOICE_PRESENCE,
-      );
-    }
+  it("gates person-memory on the ambient binding only", () => {
+    const body = caseBody("person-memory");
+    expect(body, "/clankie person-memory lost its ambient authority check").toContain(AMBIENT);
+    // Opening voice to a room must never widen ambient authority (ADR 0050).
+    expect(body, "/clankie person-memory must not use the voice presence tier").not.toContain(
+      VOICE_PRESENCE,
+    );
   });
 
   it("gates join, leave, and watch on the voice presence tier", () => {
@@ -52,11 +48,6 @@ describe("subcommand authority tiers", () => {
       expect(body, `/clankie ${subcommand} lost its voice presence check`).toContain(VOICE_PRESENCE);
       expect(body, `/clankie ${subcommand} must not fall back to the ambient tier`).not.toContain(AMBIENT);
     }
-  });
-
-  it("keeps approval on the approval-role refusal path", () => {
-    const body = caseBody("approval");
-    expect(body).toContain("refuseAmbientApproval(");
   });
 
   it("leaves status and the voice read/consent surfaces ungated by design", () => {

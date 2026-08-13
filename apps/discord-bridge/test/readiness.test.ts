@@ -36,13 +36,12 @@ class MemoryCredentialStore implements CredentialStore {
 const readyControlPlane: DiscordControlPlaneReadiness = {
   schemaVersion: 1,
   ready: true,
-  service: "clankie-control-plane",
+  service: "clankie",
   instanceId: "control-plane-boot-1",
   profileHash: "profile",
   checks: {
     captainChannelTurns: true,
     discordPresenceRuntime: true,
-    eventStore: true,
   },
 };
 

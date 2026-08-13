@@ -1,4 +1,4 @@
-import type { RenderedSurfaceFrame, RenderedSurfaceOverlay } from "@clankie/interactive-environment";
+import type { RenderedSurfaceFrame, RenderedSurfaceOverlayV2 } from "@clankie/interactive-environment";
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { RenderedSurfaceHub, type RenderedSurfaceViewer } from "../src/frame-hub.ts";
@@ -20,9 +20,9 @@ function frame(sequence: number): RenderedSurfaceFrame {
   };
 }
 
-function overlay(): RenderedSurfaceOverlay {
+function overlay(): RenderedSurfaceOverlayV2 {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     surface: "gba_emulator",
     sequence: 1,
     objective: "reach Pewter City",

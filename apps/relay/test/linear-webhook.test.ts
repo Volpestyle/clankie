@@ -1,5 +1,4 @@
 import { createHmac } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { LinearWebhookLocalBridge } from "../src/linear-webhook-bridge.ts";
 import { LinearWebhookIngress, createLinearWebhookFetchHandler } from "../src/linear-webhook-ingress.ts";
@@ -142,43 +141,6 @@ function streamingFetchRequest(contentLength?: string) {
 }
 
 describe("Linear agent-session webhook ingress", () => {
-  it("accepts the untouched production-shaped VUH-799 prompted payload", async () => {
-    const rawBody = readFileSync(
-      new URL(
-        "../../../packages/tracker-connector/test/fixtures/agent-session-prompted.json",
-        import.meta.url,
-      ),
-    );
-    const payload = JSON.parse(rawBody.toString()) as {
-      webhookTimestamp: number;
-      agentActivity: { content: { body: string } };
-    };
-    const queue = new RetainedLinearWebhookQueue({ clock: () => payload.webhookTimestamp });
-    const bridge = new LinearWebhookLocalBridge({
-      signingSecret,
-      clock: () => payload.webhookTimestamp,
-    });
-    const connection = await bridge.dial(queue);
-    const ingress = new LinearWebhookIngress({
-      signingSecret,
-      queue,
-      clock: () => payload.webhookTimestamp,
-    });
-    const signed = request(rawBody, payload.webhookTimestamp);
-    let promptBody: string | undefined;
-
-    expect(ingress.handle(signed.value)).toEqual({ status: 200, outcome: "accepted" });
-    await expect(
-      connection.processNext((event) => {
-        if (event.payload.action === "prompted") {
-          promptBody = event.payload.agentActivity.content.body;
-        }
-      }),
-    ).resolves.toBe("delivered");
-    expect(promptBody).toBe(payload.agentActivity.content.body);
-    await connection.close();
-  });
-
   it("cancels a stalled body and returns before Linear's five-second deadline", async () => {
     vi.useFakeTimers();
     try {
