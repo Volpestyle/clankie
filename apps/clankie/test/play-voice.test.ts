@@ -1,0 +1,361 @@
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type {
+  EmbodimentAssignment,
+  EmbodimentClaim,
+  EmbodimentLifecycleReport,
+  EmbodimentSession,
+} from "@clankie/protocol";
+import {
+  createPossessorVoiceClient,
+  createPossessorVoiceListener,
+  type PossessorVoiceClient,
+  type PossessorVoiceListenerEvidence,
+} from "@clankie/possessor-voice";
+import { describe, expect, it, vi } from "vitest";
+import { createGbaPlayExecution } from "../src/play-execution.ts";
+import { PlayHost } from "../src/play-host.ts";
+
+/**
+ * Asked play reports events and hears the room (ADR 0067 as amended by
+ * [ADR 0074](../../../docs/adr/0074-the-room-hears-one-voice.md)).
+ *
+ * The seam itself is proven in `@clankie/possessor-voice`; what is under test
+ * here is the wiring, and the wiring is exactly what ADR 0074 changed. These
+ * assertions were inverted rather than relaxed: this file used to require that
+ * his authored asides cross the seam, which is the defect that made a six-word
+ * quip into seventeen seconds of speech. What must cross now is what happened,
+ * and what must never cross is a sentence.
+ */
+
+const silentLogger = { info: () => undefined, warn: () => undefined, error: () => undefined };
+
+/** Records what left the body, and can push what the room said back into it. */
+function fakeVoice(
+  options: { failNarrate?: boolean; roomSaysOnSubscribe?: string; roomListening?: boolean } = {},
+) {
+  const reported: string[] = [];
+  const listeners = new Set<(utterance: string) => void>();
+  let closed = false;
+  const client: PossessorVoiceClient = {
+    narrate(text) {
+      if (options.failNarrate === true) {
+        return Promise.reject(new Error("clankie_speech_unavailable: the Discord bridge is not reachable"));
+      }
+      reported.push(text);
+      return Promise.resolve();
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      // Deterministic stand-in for someone speaking mid-playthrough: delivered
+      // the moment the seam is listening, so the test never races the loop.
+      if (options.roomSaysOnSubscribe !== undefined) listener(options.roomSaysOnSubscribe);
+      return () => listeners.delete(listener);
+    },
+    get roomListening() {
+      return options.roomListening ?? true;
+    },
+    get connected() {
+      return !closed;
+    },
+    close() {
+      closed = true;
+      listeners.clear();
+    },
+  };
+  return {
+    client,
+    reported,
+    isClosed: () => closed,
+    hasListeners: () => listeners.size > 0,
+  };
+}
+
+function fakeClient(
+  assignment: EmbodimentAssignment,
+  onReport?: (report: EmbodimentLifecycleReport) => void | Promise<void>,
+) {
+  const assignments = [assignment];
+  const reports: EmbodimentLifecycleReport[] = [];
+  return {
+    reports,
+    claimEmbodiment(_claim: EmbodimentClaim): Promise<EmbodimentAssignment | undefined> {
+      return Promise.resolve(assignments.shift());
+    },
+    async reportEmbodiment(report: EmbodimentLifecycleReport): Promise<unknown> {
+      reports.push(report);
+      await onReport?.(report);
+      return {};
+    },
+    getLiveEmbodimentSession(): Promise<EmbodimentSession | undefined> {
+      return Promise.resolve(undefined);
+    },
+  };
+}
+
+function session(maxTurns: number): EmbodimentSession {
+  return {
+    schemaVersion: 1,
+    sessionId: "voice-1",
+    environmentId: "pokemon-firered",
+    state: "claimed",
+    intentId: "intent-1",
+    originLane: "discord_presence",
+    requestedBy: "user-1",
+    budget: { maxTurns, maxDurationMs: 60_000 },
+    requestedAt: "2026-07-26T12:00:00.000Z",
+    updatedAt: "2026-07-26T12:00:01.000Z",
+    runnerId: "runner-local",
+  };
+}
+
+async function playEnv(): Promise<NodeJS.ProcessEnv> {
+  const root = await mkdtemp(join(tmpdir(), "clankie-play-voice-"));
+  return {
+    CLANKIE_GBA_BODY_ROOT: join(root, "body"),
+    CLANKIE_GBA_CHECKPOINT_DIR: join(root, "checkpoints"),
+    // Without this override the execution journals into the operator's real
+    // ~/.local/state/clankie/gba-play (ADR 0068) — test runs must not.
+    CLANKIE_GBA_PLAY_JOURNAL_DIR: join(root, "gba-play"),
+    // Deliberately unreachable: watching is not what this file is about.
+    CLANKIE_ACTIVITY_PRODUCER_URL: "ws://127.0.0.1:1/producer",
+  };
+}
+
+/** A mind that says the given line every turn, and echoes what it was told. */
+function talkingMind(speak: string | null) {
+  const heard: (string | null)[] = [];
+  return {
+    heard,
+    create: () =>
+      Promise.resolve({
+        decide: (view: { interjection: string | null }) => {
+          heard.push(view.interjection);
+          return Promise.resolve({
+            monologue: "still going",
+            intent: "press a",
+            objective: "get out of the house",
+            speak,
+            reply: view.interjection === null ? null : `you said ${view.interjection}`,
+            action: { kind: "button_press", button: "a", holdFrames: 2 },
+          });
+        },
+      }),
+  };
+}
+
+async function play(options: {
+  voice?: PossessorVoiceClient;
+  mind: () => Promise<{ decide: (view: { interjection: string | null }) => Promise<unknown> }>;
+  voiceAgent?: () => Promise<{ decide: () => Promise<unknown> } | undefined>;
+  turns?: number;
+  onReport?: (report: EmbodimentLifecycleReport) => void | Promise<void>;
+}) {
+  const client = fakeClient({ kind: "start", session: session(options.turns ?? 2) }, options.onReport);
+  const host = new PlayHost({
+    client,
+    runnerId: "runner-local",
+    environmentIds: ["pokemon-firered"],
+    execute: createGbaPlayExecution({
+      logger: silentLogger,
+      env: await playEnv(),
+      createMind: options.mind as () => Promise<never>,
+      createVoice: () => Promise.resolve(options.voice),
+      ...(options.voiceAgent === undefined
+        ? {}
+        : { createVoiceAgent: options.voiceAgent as () => Promise<never> }),
+    }),
+    logger: silentLogger,
+  });
+  await host.poll();
+  await host.settled();
+  return client;
+}
+
+describe("asked play voice", () => {
+  it("reports what happened, and never a sentence to say", async () => {
+    const voice = fakeVoice();
+    const mind = talkingMind("this desk has beaten me twice now");
+    const client = await play({ voice: voice.client, mind: mind.create });
+
+    // Something crossed the seam...
+    expect(voice.reported.length).toBeGreaterThan(0);
+    // ...and it was never his authored line. The persona in the room composes
+    // the words; handing it finished speech is the ADR 0074 defect.
+    expect(voice.reported).not.toContain("this desk has beaten me twice now");
+    expect(client.reports.map((report) => report.state)).toEqual(["running", "stopped"]);
+  });
+
+  it("stays quiet on the turns his volition passed over", async () => {
+    // The room used to hear every turn's diagnostic — "no visible change — the
+    // frame is identical" — which the 12s narration throttle then sampled at
+    // random. Volition is the judgement of whether a moment is worth a word,
+    // and it is the same judgement whether or not the room holds the pen.
+    const voice = fakeVoice();
+    const mind = talkingMind(null);
+    await play({ voice: voice.client, mind: mind.create });
+
+    expect(voice.reported).toEqual([]);
+  });
+
+  it("names the goal the event served, so the room can react to a moment", async () => {
+    const voice = fakeVoice();
+    const mind = talkingMind("this desk has beaten me twice now");
+    await play({ voice: voice.client, mind: mind.create });
+
+    // The effect line alone is written for his own next decision and reads as
+    // telemetry out of context; the objective is what makes it a moment.
+    expect(voice.reported.join("\n")).toContain("working toward:");
+  });
+
+  it("hears the room, and leaves the answer to the room", async () => {
+    const voice = fakeVoice({ roomSaysOnSubscribe: "how's it going?" });
+    const mind = talkingMind(null);
+    await play({ voice: voice.client, mind: mind.create });
+
+    // What the room said still reaches his turn — the player needs to know it
+    // was spoken to even though it no longer answers out loud (ADR 0074).
+    expect(mind.heard).toContain("how's it going?");
+    // The answer is the realtime session's to compose: it already heard the
+    // same audio, so a reply authored here would be a second answer.
+    expect(voice.reported).not.toContain("you said how's it going?");
+  });
+
+  it("consumes a post-start room transcript on the next turn through the production loopback seam", async () => {
+    const evidence: PossessorVoiceListenerEvidence[] = [];
+    const narrated: string[] = [];
+    const listener = createPossessorVoiceListener({
+      token: "clankie_possessor_voice_loopback_test",
+      narrate: (event) => {
+        narrated.push(event);
+        return Promise.resolve();
+      },
+      room: () => ({ listening: true }),
+      emit: (event) => {
+        evidence.push(event);
+      },
+    });
+    const port = await listener.listen(0);
+    const voice = createPossessorVoiceClient({
+      url: `ws://127.0.0.1:${String(port)}/possessor`,
+      token: "clankie_possessor_voice_loopback_test",
+      reconnectDelayMs: 10,
+    });
+    try {
+      await vi.waitFor(() => {
+        expect(voice.connected).toBe(true);
+        expect(voice.roomListening).toBe(true);
+      });
+      // Volition must fire for anything to reach the room: narration reports
+      // the turns he judged worth a word, not every turn.
+      const mind = talkingMind("that ledge is going to be a problem");
+      let deliveredAfterRunning = false;
+      let acknowledgeTranscript!: () => void;
+      const transcriptDelivered = new Promise<void>((resolve) => {
+        acknowledgeTranscript = resolve;
+      });
+      const stopAcknowledging = voice.subscribe(() => acknowledgeTranscript());
+      await play({
+        voice,
+        mind: mind.create,
+        onReport: async (report) => {
+          if (report.state !== "running" || deliveredAfterRunning) return;
+          deliveredAfterRunning = true;
+          listener.publishUtterance("james: check the path above you");
+          await transcriptDelivered;
+        },
+      });
+      stopAcknowledging();
+
+      expect(deliveredAfterRunning).toBe(true);
+      expect(mind.heard[0]).toBe("james: check the path above you");
+      expect(narrated.length).toBeGreaterThan(0);
+      expect(evidence).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "possessor_transcript_delivery",
+            attachedCount: 1,
+            deliveredCount: 1,
+          }),
+          expect.objectContaining({ type: "possessor_narration_submission", attachedCount: 1 }),
+        ]),
+      );
+      expect(JSON.stringify(evidence)).not.toContain("check the path");
+    } finally {
+      voice.close();
+      await listener.close();
+    }
+  });
+
+  it("does not consult the voice agent while a room is listening", async () => {
+    let consulted = 0;
+    const voice = fakeVoice({ roomListening: true });
+    await play({
+      voice: voice.client,
+      mind: talkingMind(null).create,
+      voiceAgent: () =>
+        Promise.resolve({
+          decide: () => {
+            consulted += 1;
+            return Promise.resolve({ speak: "a second voice in the same room", reply: null });
+          },
+        }),
+    });
+
+    // One author per surface: the room composes, so this half of him is not
+    // asked and its line never reaches the seam.
+    expect(consulted).toBe(0);
+    expect(voice.reported).not.toContain("a second voice in the same room");
+  });
+
+  it("still consults the voice agent when nobody is listening", async () => {
+    let consulted = 0;
+    const voice = fakeVoice({ roomListening: false });
+    await play({
+      voice: voice.client,
+      mind: talkingMind(null).create,
+      voiceAgent: () =>
+        Promise.resolve({
+          decide: () => {
+            consulted += 1;
+            return Promise.resolve({ speak: "talking to the overlay", reply: null });
+          },
+        }),
+    });
+
+    // ADR 0056 keeps its agent and its surfaces; it only loses the room.
+    expect(consulted).toBeGreaterThan(0);
+    // With no room there is nothing to report to, so nothing crosses the seam.
+    expect(voice.reported).toEqual([]);
+  });
+
+  it("keeps playing when the bridge will not take his report", async () => {
+    const voice = fakeVoice({ failNarrate: true });
+    const mind = talkingMind("nobody can hear this");
+    const client = await play({ voice: voice.client, mind: mind.create });
+
+    expect(voice.reported).toEqual([]);
+    // A rejected event is not a failed playthrough: he is watchable, just silent.
+    expect(client.reports.map((report) => report.state)).toEqual(["running", "stopped"]);
+    expect(client.reports[1]?.receipt).toMatchObject({ outcome: "budget_exhausted", turnsTaken: 2 });
+  });
+
+  it("plays silently when the seam was never bootstrapped", async () => {
+    const mind = talkingMind("into the void");
+    const client = await play({ mind: mind.create });
+
+    expect(client.reports.map((report) => report.state)).toEqual(["running", "stopped"]);
+    expect(client.reports[1]?.receipt).toMatchObject({ turnsTaken: 2 });
+  });
+
+  it("lets go of the room when the playthrough ends", async () => {
+    const voice = fakeVoice();
+    const mind = talkingMind(null);
+    await play({ voice: voice.client, mind: mind.create });
+
+    // A session that kept its subscription would hear rooms it is not in.
+    expect(voice.isClosed()).toBe(true);
+    expect(voice.hasListeners()).toBe(false);
+  });
+});
