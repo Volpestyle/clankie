@@ -707,7 +707,11 @@ describe("media he made during the turn", () => {
       submitWith([
         toolResult(
           { toolName: "browser__agent_browser_screenshot" },
-          { outcome: "ok", content: "", artifacts: [{ artifactRef: shot, filename: "screenshot-cccccccc.png" }] },
+          {
+            outcome: "ok",
+            content: "",
+            artifacts: [{ artifactRef: shot, filename: "screenshot-cccccccc.png" }],
+          },
         ),
       ]),
     ).resolves.toMatchObject({ media: { artifactRef: shot, filename: "screenshot-cccccccc.png" } });

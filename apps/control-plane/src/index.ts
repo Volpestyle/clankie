@@ -32,11 +32,7 @@ import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
 import { EveCaptainChannelTurnPort } from "./eve-captain-turn.ts";
 import { createCredentialBackedOperatorAuthenticator } from "./operator-auth.ts";
 import { FileWorkerSteeringStore } from "./worker-steering.ts";
-import {
-  DEFAULT_RUNNER_LOOPBACK_URL,
-  RunnerLoopback,
-  runnerPorts,
-} from "./runner-loopback.ts";
+import { DEFAULT_RUNNER_LOOPBACK_URL, RunnerLoopback, runnerPorts } from "./runner-loopback.ts";
 import { ConfiguredMediaGenerator } from "./media-generation.ts";
 
 const logger = createLogger({ service: "clankie-control-plane", version: "0.1.0" });

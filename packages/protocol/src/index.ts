@@ -3115,7 +3115,7 @@ export type DeviceEvent = z.infer<typeof DeviceEventSchema>;
 // ---------------------------------------------------------------------------
 
 /** Environments the play seam serves; Minecraft joins when its host lands. */
-export const EmbodimentEnvironmentIdSchema = z.enum(["pokemon-firered"]);
+export const EmbodimentEnvironmentIdSchema = z.enum(["pokemon-firered", "pokemon-emerald"]);
 export type EmbodimentEnvironmentId = z.infer<typeof EmbodimentEnvironmentIdSchema>;
 
 export const EmbodimentIntentIdSchema = z.string().min(1).max(200);

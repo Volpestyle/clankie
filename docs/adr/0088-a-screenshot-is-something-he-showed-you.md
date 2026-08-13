@@ -24,7 +24,7 @@ purpose: "Everything else — browser screenshots, repository files — keeps
 `send_attachment` and its `publish-external` approval."
 
 The reasoning behind that line does not actually separate the two cases. ADR
-0085's argument for auto-attaching generated media is about *provenance*, not
+0085's argument for auto-attaching generated media is about _provenance_, not
 content: only the control plane's generator writes beneath `generated/`, nothing
 the captain holds can write there, so a ref under it is provably something a
 governed tool produced rather than any file sitting under the attachment root.
@@ -55,7 +55,7 @@ minted — is still `send_attachment`, still `publish-external`, still gated.
 
 **The scratchpad moved out from under the attachment root.** ADR 0086 defaulted
 it to `$CLANKIE_RUNNER_STATE/scratch`, and the attachment root defaults to
-`$CLANKIE_RUNNER_STATE` — so his one writable directory sat *inside* the root
+`$CLANKIE_RUNNER_STATE` — so his one writable directory sat _inside_ the root
 whose write-exclusivity this whole argument rests on. It now defaults beside it
 (`captain-scratch`), and the shell host refuses to start if it is ever nested
 inside, so the invariant fails loudly instead of quietly.

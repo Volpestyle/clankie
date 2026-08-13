@@ -7,26 +7,30 @@ import startMission from "../tools/start_mission.ts";
 const presence = captainPresenceReporter();
 if (presence !== undefined) void presence.start().catch(logPresenceError);
 
-function occurredAt(event: { readonly meta?: { readonly at: string } }): string {
-  if (event.meta?.at === undefined)
-    throw new Error("Captain presence requires durable event timing metadata");
-  return event.meta.at;
+/**
+ * Timestamp for one presence report from a hook-delivered stream event.
+ *
+ * Eve stamps `meta.at` at the persistence seam, after hooks fire, so a live
+ * hook event legitimately carries no durable timing yet (`meta` is optional on
+ * `HandleMessageStreamEvent`). Hook-fire wall clock is the same moment a few
+ * milliseconds early, and the control plane deduplicates reports by eventId,
+ * so a replayed event can never re-report with a fresher timestamp. Requiring
+ * `meta.at` here silently killed every lifecycle report in production.
+ */
+export function occurredAt(event: { readonly meta?: { readonly at: string } }): string {
+  return event.meta?.at ?? new Date().toISOString();
 }
 
 /**
  * Runs a presence report without ever letting it end the turn.
  *
- * `operation().catch(...)` looks like it does that and does not: the thunks here
- * build their argument with {@link occurredAt}, which throws when an event
- * carries no durable timing, and a *synchronous* throw escapes before `.catch`
- * is ever attached. It then leaves the hook, eve retries the step three times,
+ * `operation().catch(...)` looks like it does that and does not: a
+ * *synchronous* throw while evaluating the thunk escapes before `.catch` is
+ * ever attached. It then leaves the hook, eve retries the step three times,
  * and the session ends `failed` — a Discord message answered with silence
- * because telemetry could not be reported.
- *
- * That path lay dormant while no captain token existed, because the reporter is
- * undefined without one and every handler was a no-op. Brokering the credential
- * woke it up. Starting from a resolved promise puts the thunk's own execution
- * inside the chain, so sync and async failures are both merely logged.
+ * because telemetry could not be reported. Starting from a resolved promise
+ * puts the thunk's own execution inside the chain, so sync and async failures
+ * are both merely logged.
  */
 function safely(operation: (() => Promise<void>) | undefined): Promise<void> {
   if (operation === undefined) return Promise.resolve();

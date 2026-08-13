@@ -10,6 +10,9 @@ iframe inside a voice channel, launched by the bot through an
 
 It is a **rendering client only**. It holds no Discord credentials, no mission
 authority, and no emulator core. The host feeds it frames; it draws them.
+Its live lower third keeps Clankie's self-authored objective, intent, and
+monologue separate from the runner-observed effect; spoken output stays on the
+voice surface rather than being duplicated here.
 
 ```mermaid
 flowchart LR
@@ -143,6 +146,8 @@ for an internet-facing surface to connect into.
 - Producer messages are validated before they reach a viewer: a frame whose
   `byteLength` disagrees with its payload is rejected, not forwarded.
 - Lifecycle messages (`stopped`) are never dropped.
+- Producer disconnect invalidates the latest frame and overlay, so an ended or
+  crashed session cannot remain labelled live for late viewers.
 - Concurrent viewers are bounded; an over-cap viewer is closed, not queued.
 
 ## What this app is not

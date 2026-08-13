@@ -1,5 +1,6 @@
 import type { CaptainPresenceReport } from "@clankie/protocol";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { occurredAt } from "../agent/hooks/captain-presence.ts";
 import { CaptainPresenceReporter } from "../lib/presence/reporter.ts";
 
 function harness() {
@@ -115,6 +116,46 @@ describe("CaptainPresenceReporter", () => {
     await expect(reporter.start()).resolves.toBeUndefined();
     expect(reports).toHaveLength(1);
     expect(reports[0]?.type).toBe("captain.heartbeat");
+  });
+
+  it("keeps the recurring heartbeat alive when the first send fails", async () => {
+    // The regression behind a live captain reading "offline": the timer was
+    // armed only after the first heartbeat succeeded, so a control plane that
+    // was still restarting at captain boot killed the loop permanently.
+    vi.useFakeTimers();
+    try {
+      const reports: CaptainPresenceReport[] = [];
+      let attempts = 0;
+      const reporter = new CaptainPresenceReporter({
+        leaseId: "lease-1",
+        generationId: "generation-1",
+        heartbeatIntervalMs: 1_000,
+        transport: {
+          send(report) {
+            attempts += 1;
+            if (attempts === 1) return Promise.reject(new Error("control plane unavailable"));
+            reports.push(report);
+            return Promise.resolve();
+          },
+        },
+      });
+      await expect(reporter.start()).rejects.toThrow("control plane unavailable");
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(reports.map((report) => report.type)).toEqual(["captain.heartbeat"]);
+      reporter.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("occurredAt", () => {
+  it("prefers durable timing and falls back to hook-fire wall clock", () => {
+    expect(occurredAt({ meta: { at: "2026-07-11T12:00:00.000Z" } })).toBe("2026-07-11T12:00:00.000Z");
+    // Hooks fire before eve stamps meta.at, so an unstamped event must still
+    // produce a report instead of killing presence telemetry.
+    const fallback = occurredAt({});
+    expect(Number.isNaN(Date.parse(fallback))).toBe(false);
   });
 });
 

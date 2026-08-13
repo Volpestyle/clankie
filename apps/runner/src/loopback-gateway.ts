@@ -124,9 +124,7 @@ async function dispatch(
 // ---------------------------------------------------------------------------
 
 /** Bounded worker transcript reads, including the NDJSON tail (ADR 0037). */
-export function workerTranscriptCapability(
-  projection: WorkerTranscriptProjection,
-): LoopbackCapability {
+export function workerTranscriptCapability(projection: WorkerTranscriptProjection): LoopbackCapability {
   return async ({ request, response, url, json: send }) => {
     const route = parseTranscriptRoute(url.pathname);
     if (!route) return false;
@@ -203,9 +201,7 @@ export function agentCensusCapability(agents: AgentCensusPort): LoopbackCapabili
 }
 
 /** What Clankie is looking at right now (ADR 0077). Reads only; never frame bytes. */
-export function activityObservationCapability(
-  projection: ActivityObservationProjection,
-): LoopbackCapability {
+export function activityObservationCapability(projection: ActivityObservationProjection): LoopbackCapability {
   return ({ request, url, json: send }) => {
     if (url.pathname !== "/v1/activity-observations/current") return false;
     if (request.method !== "GET") {

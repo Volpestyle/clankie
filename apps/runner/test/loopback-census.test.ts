@@ -47,9 +47,9 @@ async function openGateway(agents: AgentCensusPort): Promise<string> {
 
 describe("agent census gateway", () => {
   it("refuses to bind anything but exact loopback", async () => {
-    await expect(
-      createLoopbackGateway({ token: "secret", bindHost: "0.0.0.0", port: 0 }),
-    ).rejects.toThrow(/exact loopback/);
+    await expect(createLoopbackGateway({ token: "secret", bindHost: "0.0.0.0", port: 0 })).rejects.toThrow(
+      /exact loopback/,
+    );
   });
 
   it("is bearer-gated and no-store", async () => {

@@ -10,6 +10,7 @@ import {
   parseFreePlayJournal,
   RealGbaRouteScenarioSchema,
   sha256,
+  writeGbaCheckpoint,
   type BootedGbaGame,
   type GbaAdapterScenario,
 } from "@clankie/gba-emulator";
@@ -258,6 +259,144 @@ describe("asked play round trip on the deterministic double", () => {
     // And the mind resumed with the world: seeded from the checkpoint, turn one.
     expect(seenNotes[0]).toBe("the grass is tall here");
     expect(seenObjectives[0]).toBe("win the trainer battle");
+  });
+
+  it("neither resumes nor lists another game's checkpoints sharing the root", async () => {
+    // FireRed running, an Emerald-style receipt in the same shared root: the
+    // load gate refuses the foreign identity, so advertising it in a listing
+    // or trying it on resume is a lie the model then acts on.
+    const require = createRequire(import.meta.url);
+    const emulatorPackage = dirname(require.resolve("@clankie/gba-emulator/package.json"));
+    const repoRoot = resolve(emulatorPackage, "../..");
+    const doubleBytes = readFileSync(
+      join(repoRoot, "scenarios/emulator/verdant-path-trainer-battle/v1/scenario.json"),
+    );
+    const routeScenario = RealGbaRouteScenarioSchema.parse(
+      JSON.parse(
+        readFileSync(join(emulatorPackage, "fixtures/firered-bedroom-route/v1/scenario.json"), "utf8"),
+      ),
+    );
+    const fakeBoot = (): Promise<BootedGbaGame> =>
+      Promise.resolve({
+        scenario: FrozenGbaScenarioSchema.parse(
+          JSON.parse(doubleBytes.toString("utf8")),
+        ) as GbaAdapterScenario,
+        fixtureSha256: sha256(doubleBytes),
+        coreFactory: undefined,
+        checkpoints: {
+          saveState: () => new TextEncoder().encode("firered-bytes"),
+          loadState: () => undefined,
+          bootSavestate: () => new TextEncoder().encode("boot-savestate"),
+          identity: {
+            romSha256: routeScenario.romSha256,
+            savestateSha256: routeScenario.savestateSha256,
+            coreWasmSha256: routeScenario.coreWasmSha256,
+          },
+          scenario: routeScenario,
+        },
+        framePng: () => null,
+        observeFrames: () => undefined,
+        framebufferSha256: () => null,
+        real: false,
+      });
+    const env = await playEnv();
+    let tick = 0;
+    const clock = (): Date => new Date(1_753_500_000_000 + (tick += 10));
+
+    // The first run mints the one compatible checkpoint at its clean stop.
+    const first = fakeClient({ kind: "start", session: session(1) });
+    const firstHost = new PlayHost({
+      client: first,
+      runnerId: "runner-local",
+      environmentIds: ["pokemon-firered"],
+      execute: createGbaPlayExecution({
+        logger: silentLogger,
+        env,
+        clock,
+        createMind: buttonMasher,
+        boot: fakeBoot,
+      }),
+      logger: silentLogger,
+    });
+    await firstHost.poll();
+    await firstHost.settled();
+    const mintedId = first.reports[1]?.receipt?.checkpointId;
+    expect(mintedId).toBeDefined();
+
+    // An Emerald-style checkpoint lands in the same root, newer than anything
+    // FireRed minted, through the real mint gate.
+    writeGbaCheckpoint({
+      rootDir: env["CLANKIE_GBA_CHECKPOINT_DIR"] as string,
+      capability: {
+        saveState: () => new TextEncoder().encode("emerald-bytes"),
+        loadState: () => undefined,
+        bootSavestate: () => new TextEncoder().encode("emerald-boot"),
+        identity: {
+          romSha256: "a".repeat(64),
+          savestateSha256: "b".repeat(64),
+          coreWasmSha256: "c".repeat(64),
+        },
+        scenario: routeScenario,
+      },
+      label: "emerald",
+      position: null,
+      clock: () => new Date(1_753_500_100_000),
+    });
+
+    // The second run lists his checkpoints on turn 0 and reads the effect back
+    // through its own history on turn 1.
+    const histories: string[] = [];
+    const listingMind = (): Promise<FreePlayMind> =>
+      Promise.resolve({
+        decide: (view) => {
+          histories.push(...view.history.map((entry) => entry.effect));
+          return Promise.resolve({
+            monologue: "checking my saves",
+            intent: "list checkpoints",
+            action:
+              view.turn === 0
+                ? { kind: "load_checkpoint" }
+                : { kind: "button_press", button: "a", holdFrames: 2 },
+          });
+        },
+      });
+    const warns: string[] = [];
+    const warningLogger = {
+      info: () => undefined,
+      warn: (_context: Record<string, unknown>, message: string) => {
+        warns.push(message);
+      },
+      error: () => undefined,
+    };
+    const second = fakeClient({ kind: "start", session: session(2) });
+    const secondHost = new PlayHost({
+      client: second,
+      runnerId: "runner-local",
+      environmentIds: ["pokemon-firered"],
+      execute: createGbaPlayExecution({
+        logger: warningLogger,
+        env,
+        clock,
+        createMind: listingMind,
+        boot: fakeBoot,
+      }),
+      logger: silentLogger,
+    });
+    await secondHost.poll();
+    await secondHost.settled();
+
+    // Resume went straight to the compatible checkpoint: the newer foreign one
+    // was never advertised, never tried, never warned about as corruption.
+    expect(second.reports[0]).toMatchObject({
+      state: "running",
+      resumedFromCheckpointId: mintedId,
+    });
+    expect(warns.filter((message) => message.includes("checkpoint skipped"))).toEqual([]);
+    // And the listing effect names only his own game's checkpoints.
+    const listing = histories.find((effect) => effect.includes("your checkpoints"));
+    expect(listing).toBeDefined();
+    expect(listing).toContain(mintedId as string);
+    expect(listing).not.toContain("emerald");
   });
 
   it("banks progress with autosave checkpoints on the configured cadence", async () => {

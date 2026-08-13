@@ -49,6 +49,16 @@ describe("activity observation", () => {
         updatedAt: "2026-08-03T02:09:16.868Z",
       }).outcome,
     ).toBe("pending");
+    expect(
+      ActivityObservationReadSchema.parse({
+        schemaVersion: 1,
+        outcome: "pending",
+        sessionId: "play-2",
+        environmentId: "pokemon-emerald",
+        state: "running",
+        updatedAt: "2026-08-03T02:09:16.868Z",
+      }),
+    ).toMatchObject({ outcome: "pending", environmentId: "pokemon-emerald" });
     expect(ActivityObservationReadSchema.parse({ schemaVersion: 1, outcome: "not_playing" }).outcome).toBe(
       "not_playing",
     );

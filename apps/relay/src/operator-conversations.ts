@@ -28,8 +28,6 @@ export interface OperatorConversationRelayOptions {
   readonly dispatch: OperatorConversationServiceDispatch;
   readonly logger?: RelayConversationLogger;
   readonly clock?: () => number;
-  readonly idempotencyTtlMs?: number;
-  readonly idempotencyMaxEntries?: number;
   readonly tailPollMs?: number;
   /** Bounded test/fixture seam; production leaves the stream unbounded. */
   readonly tailMaxPages?: number;
@@ -41,11 +39,7 @@ export interface OperatorConversationRelayOptions {
  */
 export function createOperatorConversationRelayHandler(options: OperatorConversationRelayOptions) {
   const logger = options.logger ?? silentLogger;
-  const idempotency = new TurnIdempotencyStore({
-    ...(options.clock === undefined ? {} : { clock: options.clock }),
-    ...(options.idempotencyTtlMs === undefined ? {} : { ttlMs: options.idempotencyTtlMs }),
-    ...(options.idempotencyMaxEntries === undefined ? {} : { maxEntries: options.idempotencyMaxEntries }),
-  });
+  const idempotency = new TurnIdempotencyStore(options.clock === undefined ? {} : { clock: options.clock });
   return async (request: IncomingMessage, response: ServerResponse): Promise<boolean> => {
     const path = requestUrl(request).pathname;
     if (isApprovalCompletionPath(path)) {

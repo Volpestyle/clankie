@@ -225,7 +225,47 @@ describe("MissionObserver", () => {
     const { presence, missions } = observer.dashboard;
     expect(missions).toEqual([]);
     expect(presence).toHaveLength(8);
-    expect(presence[0]).toEqual({ sessionId: "discord:bot:app:session-11", phase: "present" });
+    expect(presence[0]).toMatchObject({ sessionId: "discord:bot:app:session-11", phase: "present" });
+  });
+
+  it("retires a ghost session when its successor for the same bot binding reports", async () => {
+    // VUH-945: a killed bridge never emits "off", so its last phase stood
+    // forever. The control plane keys its projection by bot binding; the
+    // observer must do the same so the successor's first event replaces the
+    // ghost instead of rendering beside it as a second online presence.
+    const binding = { characterId: "clankie", credentialRef: "discord_bot", transportKind: "bot" };
+    const source = new FakeEventSource([
+      event(1, "discord.presence.session.phase_changed", {
+        missionId: "discord-presence:discord:bot:ghost",
+        data: {
+          previousPhase: "connecting",
+          phase: "present",
+          reason: "gateway_ready",
+          session: { sessionId: "discord:bot:ghost", ...binding },
+        },
+      }),
+      event(2, "discord.presence.session.phase_changed", {
+        missionId: "discord-presence:discord:bot:successor",
+        data: {
+          previousPhase: "off",
+          phase: "connecting",
+          reason: "process_start",
+          session: { sessionId: "discord:bot:successor", ...binding },
+        },
+      }),
+    ]);
+    const observer = new MissionObserver({
+      source,
+      checkpointPath: await temporaryPath("presence-ghost-observer.json"),
+    });
+    await observer.refresh();
+    expect(observer.dashboard.presence).toEqual([
+      {
+        sessionId: "discord:bot:successor",
+        phase: "connecting",
+        updatedAt: new Date(2_000).toISOString(),
+      },
+    ]);
   });
 
   it("keeps reserved streams out of the mission list and default selection", async () => {

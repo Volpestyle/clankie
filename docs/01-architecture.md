@@ -94,7 +94,7 @@ write there. A browser screenshot rides his reply on the same terms
 ([ADR 0088](adr/0088-a-screenshot-is-something-he-showed-you.md)): only the
 runner's browser host writes `browser/`, so the ref is as unforgeable as a
 generated one, and his shell's scratchpad sits outside the attachment root so it
-stays that way. Any *other* artifact under that root — a repository file, a
+stays that way. Any _other_ artifact under that root — a repository file, a
 support bundle — still needs `send_attachment` and an owner approval. Which
 model draws is operator config (`/image-model`, `/video-model`), never a choice
 the turn makes.
@@ -247,7 +247,7 @@ dialog, danger, action state, and bounded `artifact://` framebuffer/RAM
 references.
 A state-derived driver proves the frozen
 `scenarios/emulator/verdant-path-trainer-battle/v1` scenario with byte-identical
-report, evidence trace, and decision traces across runs. Two cores implement
+report, evidence trace, and decision traces across runs. Three cores implement
 the adapter-facing seam
 ([ADR 0039](adr/0039-gba-emulator-embodiment-and-deterministic-core-boundary.md)):
 the clearly-labeled deterministic core test double that keeps CI ROM-free, and
@@ -266,6 +266,13 @@ victory all pass with byte-identical evidence and zero network attempts. ROM,
 BIOS, and savestate bytes never enter the repository, fixtures, events, or
 reports — only SHA-256 identity digests.
 
+Pokémon Emerald BPEE rev 0 uses the same pinned real mGBA body through a
+framebuffer-only profile ([ADR 0090](adr/0090-emerald-plays-from-the-screen.md)).
+Its operator-local ROM and title savestate are content-pinned. Raw buttons,
+frames, RAM digests, and checkpoints work; decoded observations and composite
+actions refuse until an Emerald RAM profile is independently verified, so no
+FireRed offset is ever interpreted as Emerald state.
+
 Current activity is projected separately from both the rendered frame and the
 durable play journal
 ([ADR 0077](adr/0077-current-activity-is-a-runner-owned-self-observation.md)).
@@ -279,7 +286,7 @@ surface and the gameplay continuation token stays in its lane.
 
 ```mermaid
 flowchart LR
-  G[Settled FireRed turn] --> S[Runner current-activity snapshot]
+  G[Settled GBA turn] --> S[Runner current-activity snapshot]
   G --> J[(Private play journal)]
   R[Framebuffer] --> W[Watch surface]
   R -->|digest only| S

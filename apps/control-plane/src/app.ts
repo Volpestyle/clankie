@@ -5723,6 +5723,7 @@ function renderVoiceBriefingSelfState(
 /** Human names for the environments a body can occupy, for the room's benefit. */
 const EMBODIMENT_ENVIRONMENT_NAMES: Record<EmbodimentEnvironmentId, string> = {
   "pokemon-firered": "Pokémon FireRed on a Game Boy Advance emulator",
+  "pokemon-emerald": "Pokémon Emerald on a Game Boy Advance emulator",
 };
 
 /**

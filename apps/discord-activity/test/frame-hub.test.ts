@@ -25,7 +25,10 @@ function overlay(): RenderedSurfaceOverlay {
     schemaVersion: 1,
     surface: "gba_emulator",
     sequence: 1,
-    lines: ["CHARMANDER  L5  18/18", "chose EMBER — super effective"],
+    objective: "reach Pewter City",
+    intent: "take the north path",
+    monologue: "The path north is clear.",
+    effect: "entered Viridian Forest",
     updatedAt: "2026-07-25T18:00:00.000Z",
   };
 }
@@ -52,6 +55,7 @@ describe("RenderedSurfaceHub", () => {
     const kinds = late.sent.map((payload) => JSON.parse(payload).kind);
     expect(kinds).toEqual(["frame", "overlay"]);
     expect(JSON.parse(late.sent[0] ?? "{}").frame.sequence).toBe(1);
+    expect(JSON.parse(late.sent[1] ?? "{}").overlay.monologue).toBe("The path north is clear.");
   });
 
   it("drops frames for a backed-up viewer but never drops lifecycle messages", () => {
@@ -85,5 +89,6 @@ describe("RenderedSurfaceHub", () => {
 
     // byteLength must describe the payload it ships with.
     expect(() => hub.publishFrame({ ...frame(1), byteLength: 999 })).toThrow();
+    expect(() => hub.publishOverlay({ ...overlay(), monologue: "x".repeat(257) })).toThrow();
   });
 });

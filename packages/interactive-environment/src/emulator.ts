@@ -348,6 +348,57 @@ export const GbaEmulatorObservationSchema = z.discriminatedUnion("kind", [
           })
           .strict()
           .nullish(),
+        /**
+         * Walkability around the player, one character per tile: `@` the
+         * player, `.` open, `#` blocked, `D` a warp tile (door, stairway,
+         * mat). `topLeft` is the map coordinate of the first character of the
+         * first row, so column index plus `topLeft.x` is a tile's x. Same
+         * absence semantics as `surroundings`.
+         */
+        minimap: z
+          .object({
+            topLeft: z
+              .object({
+                x: z.number().int().nonnegative().max(65_535),
+                y: z.number().int().nonnegative().max(65_535),
+              })
+              .strict(),
+            rows: z.array(z.string().min(1).max(64)).min(1).max(32),
+          })
+          .strict()
+          .nullish(),
+        /**
+         * Every way off the loaded map: warp tiles (doors, stairways, mats) in
+         * the same coordinate space as `position`, and edge connections walked
+         * through by leaving the map in their direction. Same absence
+         * semantics as `surroundings`.
+         */
+        exits: z
+          .object({
+            warps: z
+              .array(
+                z
+                  .object({
+                    x: z.number().int().nonnegative().max(65_535),
+                    y: z.number().int().nonnegative().max(65_535),
+                    destination: z.string().min(1).max(128),
+                  })
+                  .strict(),
+              )
+              .max(32),
+            connections: z
+              .array(
+                z
+                  .object({
+                    direction: z.enum(["north", "south", "west", "east"]),
+                    destination: z.string().min(1).max(128),
+                  })
+                  .strict(),
+              )
+              .max(8),
+          })
+          .strict()
+          .nullish(),
         ramStateSha256: Sha256Schema,
       })
       .strict(),
@@ -426,15 +477,14 @@ export const GbaEmulatorObservationSchema = z.discriminatedUnion("kind", [
   /**
    * Which part of the game currently owns the screen, and whether it is
    * accepting input. This is the decoder saying where it stands: `mode` is
-   * "overworld" with `inputReady` false whenever something the decoder does not
-   * model — a scripted sequence, a naming screen, a transition — holds the
-   * controls, which is exactly when the other observations read misleadingly.
+   * "overworld" with `inputReady` false when a supported decoder sees a field
+   * transition, and `unknown` when the cartridge has no semantic profile.
    */
   GbaEmulatorObservationBaseSchema.extend({
     kind: z.literal("scene"),
     data: z
       .object({
-        mode: z.enum(["overworld", "dialog", "battle", "battle_won", "battle_lost"]),
+        mode: z.enum(["unknown", "overworld", "dialog", "battle", "battle_won", "battle_lost"]),
         /** Whether the overworld field is accepting player input right now. */
         inputReady: z.boolean(),
         /** The visible dialog finished printing and is holding for an A/B press. */

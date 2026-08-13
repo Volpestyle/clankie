@@ -148,6 +148,7 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
           ? await options.boot()
           : await bootGbaGame({
               env,
+              environmentId: session.environmentId,
               fixturesDir: path.join(emulatorPackage, "fixtures"),
               doubleScenarioPath: path.join(
                 repoRoot,
@@ -189,13 +190,26 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
     // Resume from the newest compatible checkpoint (ADR 0060). A checkpoint
     // that fails its identity or digest gate is skipped, never trusted.
     const checkpointDir = defaultGbaCheckpointDir(env);
+    // The checkpoint root is shared across games, and the load gate refuses a
+    // foreign ROM or core build — so another game's receipts (routine once
+    // Emerald joined FireRed) are never listed or resumed here, only ones this
+    // running core could actually load.
+    const listCompatibleCheckpoints = () => {
+      const identity = game.checkpoints?.identity;
+      if (identity === undefined) return [];
+      return listGbaCheckpoints(checkpointDir).filter(
+        (receipt) =>
+          receipt.romSha256 === identity.romSha256 &&
+          receipt.coreWasmSha256 === identity.coreWasmSha256,
+      );
+    };
     let resumedFromCheckpointId: string | undefined;
     // What he was thinking when the resumed checkpoint was minted. Restoring
     // the RAM without it resumes a world whose player has forgotten why he is
     // standing where he stands.
     let resumedContinuity: { notes: string | null; objective: string | null } | null = null;
     if (game.checkpoints !== undefined) {
-      for (const candidate of listGbaCheckpoints(checkpointDir)) {
+      for (const candidate of listCompatibleCheckpoints()) {
         try {
           const checkpoint = readGbaCheckpoint({
             rootDir: checkpointDir,
@@ -388,7 +402,7 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
         ? undefined
         : {
             list: () =>
-              listGbaCheckpoints(checkpointDir).map((receipt) => ({
+              listCompatibleCheckpoints().map((receipt) => ({
                 checkpointId: receipt.checkpointId,
                 label: receipt.label,
                 capturedAt: receipt.capturedAt,
@@ -464,19 +478,15 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
           latestTurn = turn;
           sequence += 1;
           if (sink !== undefined) {
-            const lines = [
-              turn.objective === null ? null : `goal: ${turn.objective}`,
-              turn.monologue,
-              turn.effect,
-              turn.speak === null ? null : `“${turn.speak}”`,
-              turn.reply === null ? null : `“${turn.reply}”`,
-            ].filter((line): line is string => line !== null && line.length > 0);
             sink.publishOverlay(
               RenderedSurfaceOverlaySchema.parse({
                 schemaVersion: 1,
                 surface: "gba_emulator",
                 sequence,
-                lines: lines.map((line) => line.slice(0, 256)).slice(0, 16),
+                objective: overlayText(turn.objective),
+                intent: overlayText(turn.intent),
+                monologue: overlayText(turn.monologue),
+                effect: overlayText(turn.effect),
                 updatedAt: clock().toISOString(),
               }),
             );
@@ -629,6 +639,10 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
       freePlay.close();
     }
   }
+}
+
+function overlayText(value: string | null): string | null {
+  return value?.trim().slice(0, 256) || null;
 }
 
 /** Bound on the objective clause, so a rambling goal cannot crowd out the event. */

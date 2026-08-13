@@ -1,12 +1,14 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import type { EmbodimentEnvironmentId } from "@clankie/protocol";
 import { FrozenGbaScenarioSchema } from "./contracts.ts";
 import { sha256 } from "./core-double.ts";
 import type { GbaAdapterScenario, GbaCoreFactory } from "./core-seam.ts";
-import { MgbaFireRedCore, type MgbaFireRedCoreIdentity } from "./firered-core.ts";
+import { MgbaFireRedCore } from "./firered-core.ts";
 import { encodeFramebufferPng } from "./framebuffer-png.ts";
-import { RealGbaRouteScenarioSchema, type RealGbaRouteScenario } from "./real-scenario.ts";
+import { RealGbaRouteScenarioSchema } from "./real-scenario.ts";
+import { MgbaVisualCore, VisualGbaScenarioSchema } from "./visual-core.ts";
 
 /**
  * Resolve which game Clankie is looking at.
@@ -36,10 +38,21 @@ export interface GbaCheckpointCapability {
    */
   bootSavestate: () => Uint8Array;
   /** Digests verified at core creation; a checkpoint must match them to load. */
-  identity: MgbaFireRedCoreIdentity;
-  /** The booted route scenario — the template a checkpoint's companion scenario is minted from. */
-  scenario: RealGbaRouteScenario;
+  identity: GbaCheckpointIdentity;
+  /** The booted scenario — the template a checkpoint's companion scenario is minted from. */
+  scenario: GbaCheckpointScenario;
 }
+
+export interface GbaCheckpointIdentity {
+  readonly romSha256: string;
+  readonly savestateSha256: string;
+  readonly coreWasmSha256: string;
+}
+
+export type GbaCheckpointScenario = GbaAdapterScenario & {
+  readonly romSha256: string;
+  readonly coreWasmSha256: string;
+};
 
 export interface BootedGbaGame {
   scenario: GbaAdapterScenario;
@@ -65,6 +78,7 @@ export interface BootedGbaGame {
 
 export interface BootGbaGameOptions {
   env?: NodeJS.ProcessEnv;
+  environmentId?: EmbodimentEnvironmentId;
   /** Directory holding the ROM-gated fixtures, i.e. the package's own. */
   fixturesDir: string;
   /** Fallback frozen double scenario when no ROM is configured. */
@@ -94,6 +108,51 @@ function defaultedGamePath(configured: string | undefined, fallback: string): st
 export async function bootGbaGame(options: BootGbaGameOptions): Promise<BootedGbaGame> {
   const env = options.env ?? process.env;
   const gameDir = defaultGbaGameDir(env);
+  if ((options.environmentId ?? "pokemon-firered") === "pokemon-emerald") {
+    const romPath = defaultedGamePath(env["CLANKIE_GBA_ROM_PATH"], path.join(gameDir, "emerald.gba"));
+    if (romPath === undefined) {
+      throw new Error(`Pokemon Emerald ROM is not installed at ${path.join(gameDir, "emerald.gba")}`);
+    }
+    const savestatePath = defaultedGamePath(
+      env["CLANKIE_GBA_SAVESTATE_PATH"],
+      path.join(gameDir, "emerald-title.state"),
+    );
+    if (savestatePath === undefined) {
+      throw new Error(
+        `Pokemon Emerald savestate is not installed at ${path.join(gameDir, "emerald-title.state")}`,
+      );
+    }
+    const scenarioPath =
+      env["CLANKIE_GBA_SCENARIO_PATH"] ?? path.join(options.fixturesDir, "emerald-title/v1/scenario.json");
+    const fixtureBytes = readFileSync(scenarioPath);
+    const scenario = VisualGbaScenarioSchema.parse(JSON.parse(fixtureBytes.toString("utf8")));
+    const core = await MgbaVisualCore.create({
+      scenario,
+      romBytes: readFileSync(romPath),
+      savestateBytes: readFileSync(savestatePath),
+    });
+
+    return {
+      scenario,
+      fixtureSha256: sha256(fixtureBytes),
+      coreFactory: () => core,
+      checkpoints: {
+        saveState: () => core.saveState(),
+        loadState: (bytes) => {
+          core.loadState(bytes);
+        },
+        bootSavestate: () => core.bootSavestate(),
+        identity: core.identity(),
+        scenario,
+      },
+      framePng: (scale = 3) => encodeFramebufferPng(core.framebufferSnapshot(), scale),
+      observeFrames: (observer, observeOptions) => {
+        core.observeFrames(observer, observeOptions ?? {});
+      },
+      framebufferSha256: () => core.framebufferSha256(),
+      real: true,
+    };
+  }
   const romPath = defaultedGamePath(env["CLANKIE_GBA_ROM_PATH"], path.join(gameDir, "firered.gba"));
   const savestatePath = defaultedGamePath(
     env["CLANKIE_GBA_SAVESTATE_PATH"],

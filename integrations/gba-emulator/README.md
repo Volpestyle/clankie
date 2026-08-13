@@ -3,7 +3,8 @@
 Governed Game Boy Advance emulator embodiment for the `gba_emulator`
 environment profile ([ADR 0039](../../docs/adr/0039-gba-emulator-embodiment-and-deterministic-core-boundary.md),
 [ADR 0040](../../docs/adr/0040-real-mgba-core-behind-the-emulator-seam.md),
-[ADR 0043](../../docs/adr/0043-version-pinned-firered-gameplay-profile.md)).
+[ADR 0043](../../docs/adr/0043-version-pinned-firered-gameplay-profile.md),
+[ADR 0090](../../docs/adr/0090-emerald-plays-from-the-screen.md)).
 
 `GbaEmulatorAdapter` is an `EnvironmentAdapter` dispatched through
 `@clankie/environment-runtime`, so every action inherits the runtime's
@@ -15,7 +16,7 @@ records a bounded hash-chained evidence trace.
 
 ## The core seam
 
-Two interchangeable cores implement the adapter-facing `GbaCoreSeam` (button
+Three interchangeable cores implement the adapter-facing `GbaCoreSeam` (button
 input consuming frames + typed RAM-derived state + framebuffer/RAM digests):
 
 - `DeterministicGbaCoreDouble` — clearly-labeled **test infrastructure, not a
@@ -34,6 +35,11 @@ input consuming frames + typed RAM-derived state + framebuffer/RAM digests):
   and what is being named), and battle input/outcome from EWRAM, IWRAM, and
   the pinned ROM. An unsupported ROM identity, pointer, checksum, value, menu
   state, or battle outcome fails closed.
+- `MgbaVisualCore` — the same real, pinned mGBA body for Pokémon Emerald
+  BPEE rev 0, booted from an operator-local digest-pinned title savestate. It
+  exposes the real framebuffer, raw buttons, RAM digest, and checkpoints. Until
+  Emerald has its own verified RAM profile, decoded observations and composite
+  actions fail closed; the free-play mind plays from the screen with raw input.
 
 ## Collision
 
@@ -52,11 +58,28 @@ elevation transitions, or NPCs, which occupy tiles without appearing in it. An
 open tile means "not a wall", not "reachable on foot", which is why `walk_to`
 re-checks every step instead of trusting its own plan.
 
-Warp tiles block _and_ transport: the stairs at `(16,9)` in `players-house-2f`
-read as a wall, yet pressing into them from `(17,9)` arrives on
-`players-house-1f`. So `walk_to` routes within a map and crossing between maps
-stays a directional press. Routing through warps would need the map header's
-warp-event list decoded too.
+Warp tiles can block _and_ transport: the stair graphic at `(16,9)` in
+`players-house-2f` reads as a wall, while the warp event beside it at `(17,9)`
+is stood on and pressed toward. `walk_to` still routes within a map and a
+mid-route warp still ends the route, but a `walk_to` aimed at a decoded warp
+tile on blocking collision — an outdoor door — routes to a tile beside it and
+presses in ([ADR 0089](../../docs/adr/0089-the-map-is-his-to-read.md)).
+
+## Exits and the minimap
+
+`gMapHeader` (EWRAM `0x02036DFC`) is decoded for the loaded map's warp events
+and edge connections ([ADR 0089](../../docs/adr/0089-the-map-is-his-to-read.md)),
+verified by the same scan-and-sole-survivor method as the map buffer and
+cross-checked against known doors, stairs, and pallet-town's Route 1 edge. The
+overworld observation reports them as `exits` (each warp in player coordinate
+space with its destination map id, each connection as a direction and
+destination) and renders a `minimap`: a crop of the collision grid around the
+player — `@` player, `.` open, `#` blocked, `D` warp — with `topLeft` naming
+the crop's origin so any cell converts to a `walk_to` target. Refused walks
+classify (`walk_target_outside_map`, `walk_target_impassable`,
+`no_path_to_target`) and name the map's bounds or the nearest reachable open
+tile. Absence stays absence: no loaded map, or a header the decoder cannot
+trust, reports null rather than a guess.
 
 ## Scenarios
 
@@ -79,6 +102,9 @@ digest. Both fixtures are ROM-gated. CI runs the complete
 menu/dialog/battle decision loop against the clearly labeled core double and
 stays green without copyrighted bytes; the rival fixture also produces a
 two-fresh-core, byte-identical live receipt with the network tripwire armed.
+The `fixtures/emerald-title/v1` scenario pins the Emerald ROM, title savestate,
+and core identities. Asked play discovers its operator-local bytes as
+`~/.local/share/clankie/gba/emerald.gba` and `emerald-title.state`.
 
 ```bash
 # one-time: regenerate the pinned bedroom savestate from the ROM

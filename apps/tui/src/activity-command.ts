@@ -19,7 +19,7 @@ export function formatActivityObservation(
   }
   if (read.outcome === "pending") {
     return [
-      "Pokémon FireRed · starting",
+      `${gameName(read.environmentId)} · starting`,
       `session: ${safe(read.sessionId)}`,
       `state: ${safe(read.state)} · waiting for the first settled turn`,
       `updated: ${safe(read.updatedAt)}`,
@@ -35,7 +35,7 @@ export function formatActivityObservation(
   const mapSummary =
     maps.length === 0 ? "none yet" : `${maps.join(", ")}${remainingMaps > 0 ? ` +${remainingMaps}` : ""}`;
   return [
-    "Pokémon FireRed · playing",
+    `${gameName(snapshot.environmentId)} · playing`,
     `latest settled turn: #${snapshot.sequence}`,
     `goal (Clankie-authored): ${present(authored.objective)}`,
     `commentary (Clankie-authored): ${present(authored.commentary)}`,
@@ -47,6 +47,10 @@ export function formatActivityObservation(
     `observed: ${safe(snapshot.observedAt)}`,
     ...watch,
   ].join("\n");
+}
+
+function gameName(environmentId: string): string {
+  return environmentId === "pokemon-emerald" ? "Pokémon Emerald" : "Pokémon FireRed";
 }
 
 function present(value: string | null): string {

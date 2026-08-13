@@ -104,7 +104,10 @@ export class RunnerLoopback {
     this.token = options.token;
   }
 
-  public fetch(path: string, options: { body?: unknown; signal?: AbortSignal | undefined } = {}): Promise<Response> {
+  public fetch(
+    path: string,
+    options: { body?: unknown; signal?: AbortSignal | undefined } = {},
+  ): Promise<Response> {
     const init: RequestInit = {
       headers: {
         authorization: `Bearer ${this.token}`,
@@ -194,13 +197,9 @@ export function agentCensusPort(runner: RunnerLoopback): AgentCensusReadPort {
 export function browserToolPort(runner: RunnerLoopback): BrowserToolPort {
   return {
     catalog: (signal) =>
-      runner.send(
-        "/v1/browser/tools",
-        "catalog",
-        BrowserToolCatalogSchema,
-        "runner_browser_catalog_failed",
-        { signal },
-      ),
+      runner.send("/v1/browser/tools", "catalog", BrowserToolCatalogSchema, "runner_browser_catalog_failed", {
+        signal,
+      }),
     call: (request, signal) =>
       runner.send("/v1/browser/call", "result", CallBrowserToolResultSchema, "runner_browser_call_failed", {
         body: request,
@@ -244,9 +243,12 @@ export function workerTranscriptPort(runner: RunnerLoopback): WorkerTranscriptRe
       return WorkerTranscriptReadOutcomeSchema.parse(value);
     },
     async openTail(key, cursor, signal) {
-      const response = await runner.fetch(`${transcriptRoute(key)}/tail?cursor=${encodeURIComponent(cursor)}`, {
-        signal,
-      });
+      const response = await runner.fetch(
+        `${transcriptRoute(key)}/tail?cursor=${encodeURIComponent(cursor)}`,
+        {
+          signal,
+        },
+      );
       if (response.status === 404) return WorkerTranscriptNotFoundSchema.parse(await response.json());
       if (response.status === 409) {
         const value: unknown = await response.json();

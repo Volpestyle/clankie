@@ -762,6 +762,8 @@ function describeRejection(result: EnvironmentActionResult): string {
  * playthrough actually meets, translated into what to do about them.
  */
 const REJECTION_HINTS: Readonly<Record<string, string>> = {
+  semantic_state_unavailable:
+    "this cartridge has no decoded state profile yet — use raw button presses and the visible screen",
   input_bound_exceeded: "it asked for more button presses than one action may spend",
   frame_bound_exceeded: "it asked for more frames than one action may spend",
   dialog_not_open:
@@ -769,6 +771,8 @@ const REJECTION_HINTS: Readonly<Record<string, string>> = {
     "fanfare is holding it; advance a few frames and look again",
   walk_requires_overworld: "walking needs overworld control — close whatever is open first",
   no_path_to_target: "no walkable route to that tile exists from here",
+  walk_target_outside_map: "that tile is off the loaded map",
+  walk_target_impassable: "that tile is a wall or obstacle, not floor",
   map_grid_unavailable: "no map is loaded to route over — walking waits for the overworld",
   naming_screen_not_open: "no naming screen is open to type on",
   menu_not_open: "no menu is open to select from",
@@ -780,7 +784,13 @@ const REJECTION_HINTS: Readonly<Record<string, string>> = {
 
 function describeRejectionForPlayer(errorCode: string | null, raw: string): string {
   const hint = errorCode === null ? undefined : REJECTION_HINTS[errorCode];
-  return `rejected, nothing ran — ${hint ?? raw}`;
+  if (hint === undefined) return `rejected, nothing ran — ${raw}`;
+  // The adapter appends per-refusal information after an em-dash — the map's
+  // bounds, the nearest reachable tile. The static hint says what went wrong;
+  // that detail is what to do instead, so it rides along.
+  const detailAt = raw.lastIndexOf(" — ");
+  const detail = detailAt === -1 ? "" : `;${raw.slice(detailAt + 2)}`;
+  return `rejected, nothing ran — ${hint}${detail}`;
 }
 
 function bounded(value: unknown): string {

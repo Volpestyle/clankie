@@ -82,19 +82,19 @@ credentials never enter it.
 Probed on macOS 27 against this profile, and the load-bearing cases are pinned
 in `apps/runner/test/captain-shell-host.test.ts`:
 
-| Attempt                                     | Result                                  |
-| ------------------------------------------- | --------------------------------------- |
-| Write outside the scratchpad                | `Killed: 9` (SIGKILL), file unchanged    |
-| Write a script, `chmod +x`, run it           | Runs, and is confined the same way      |
-| Detach a child with `nohup` and write out    | Child killed; confinement is inherited  |
-| `curl` any host                              | `Killed: 9`                             |
-| `open -a Calculator`                         | "Unable to find application" — no launch |
-| `launchctl list`                             | Empty; launchd is unreachable           |
-| `ls ~/.ssh`, `ls ~/.claude`                  | Succeeds — reads are unrestricted       |
+| Attempt                                   | Result                                   |
+| ----------------------------------------- | ---------------------------------------- |
+| Write outside the scratchpad              | `Killed: 9` (SIGKILL), file unchanged    |
+| Write a script, `chmod +x`, run it        | Runs, and is confined the same way       |
+| Detach a child with `nohup` and write out | Child killed; confinement is inherited   |
+| `curl` any host                           | `Killed: 9`                              |
+| `open -a Calculator`                      | "Unable to find application" — no launch |
+| `launchctl list`                          | Empty; launchd is unreachable            |
+| `ls ~/.ssh`, `ls ~/.claude`               | Succeeds — reads are unrestricted        |
 
 Seatbelt is inherited across `fork`/`exec`, so writing a script and running it
-is not an escape: the script is the same shell. The routes to an *already
-running* unsandboxed process are closed by `(deny default)`, which withholds
+is not an escape: the script is the same shell. The routes to an _already
+running_ unsandboxed process are closed by `(deny default)`, which withholds
 `mach-lookup` and so takes LaunchServices and launchd with it.
 
 Not verified: whether AppleScript can drive another application through
@@ -104,8 +104,8 @@ open until someone tests it.
 
 The real path to execution outside this sandbox is not a bypass at all — it is
 `create_mission` and `direct_agent`. Governed workers own worktrees and can
-write the repository by design. This ADR confines his *shell*; what confines his
-*delegation* is doctrine, and that is a separate boundary with separate gates.
+write the repository by design. This ADR confines his _shell_; what confines his
+_delegation_ is doctrine, and that is a separate boundary with separate gates.
 
 ## Consequences
 

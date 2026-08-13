@@ -1,8 +1,8 @@
 # ADR 0077: Current activity is a runner-owned self-observation
 
 Status: accepted (2026-08-02). Builds on
-[ADR 0047](0047-rendered-surface-streaming.md),
-[ADR 0054](0054-captain-episodes-and-self-state.md),
+[ADR 0047](0047-discord-activity-presence-plane.md),
+[ADR 0054](0054-cross-lane-presence-and-episodic-self-memory.md),
 [ADR 0063](0063-asked-embodiment-and-captain-started-play.md), and
 [ADR 0068](0068-a-playthrough-leaves-a-durable-trail.md).
 

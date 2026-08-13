@@ -309,8 +309,9 @@ That overlay schema previously documented itself as carrying "no free-form model
 output", which directly contradicted this decision. **Bounded model text may
 cross** — the monologue is the whole reason the overlay exists — and the comment
 has been corrected rather than the rule bent. What holds is the bound, not an
-absence: capped length, capped line count, still untrusted, and never posted to
-a channel as raw model output.
+absence: typed objective, intent, monologue, and observed-effect fields with
+capped lengths, still untrusted, and never posted to a channel as raw model
+output.
 
 ## Options weighed
 

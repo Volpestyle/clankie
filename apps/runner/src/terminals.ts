@@ -62,8 +62,6 @@ export interface SpawnTerminalOptions {
 
 export interface TerminalManagerOptions {
   maxBufferedBytes?: number;
-  /** Deprecated compatibility option; VT snapshots are complete and never byte-truncated. */
-  maxSnapshotBytes?: number;
   /** Any number is accepted; finite values are floored and clamped to at least 1, while non-finite values normalize to 1. */
   maxObserverQueueFrames?: number;
   maxBufferedFrames?: number;

@@ -8,12 +8,14 @@ import type {
   DashboardState,
   DashboardTask,
 } from "../components/mission-dashboard.ts";
+import type { HerdrRoster } from "./herdr-roster.ts";
 import type { MissionEventSource, ObservedMissionEvent, SequencedMissionEvent } from "./mission-events.ts";
 
-// v2 split reserved streams out of the mission map. The parser rejects other
-// versions and the caller replays from sequence 0, which is how a v1 checkpoint
-// full of phantom presence "missions" clears itself.
-const CHECKPOINT_VERSION = 2;
+// v2 split reserved streams out of the mission map. v3 keys presence rows by
+// bot binding and stamps their last transition time, retiring ghost sessions.
+// The parser rejects other versions and the caller replays from sequence 0,
+// which is how a stale checkpoint clears itself.
+const CHECKPOINT_VERSION = 3;
 const EVENT_TAIL_LENGTH = 12;
 const PRESENCE_SESSION_LIMIT = 8;
 
@@ -33,10 +35,11 @@ type PresenceProjection = {
   sessionId: string;
   phase: string;
   updatedSequence: number;
+  updatedAt: string;
 };
 
 type ObservationCheckpoint = {
-  version: 2;
+  version: 3;
   sourceId: string;
   lastSequence: number;
   selectedMissionId?: string;
@@ -66,6 +69,8 @@ export interface MissionObserverOptions {
   readonly source: MissionEventSource;
   readonly checkpointPath: string;
   readonly pollIntervalMs?: number;
+  /** Sibling Herdr pane agents, merged into the roster as an observed source. */
+  readonly herdrRoster?: Pick<HerdrRoster, "active" | "snapshot">;
 }
 
 export class MissionObserver {
@@ -74,6 +79,7 @@ export class MissionObserver {
   private readonly pollIntervalMs: number;
   private readonly missions = new Map<string, MissionProjection>();
   private readonly presence = new Map<string, PresenceProjection>();
+  private readonly herdrRoster: Pick<HerdrRoster, "active" | "snapshot"> | undefined;
   private selectedMissionId: string | undefined;
   private captain: CaptainPresenceProjection | undefined;
   private lastSequence = 0;
@@ -86,6 +92,7 @@ export class MissionObserver {
     this.source = options.source;
     this.checkpointPath = options.checkpointPath;
     this.pollIntervalMs = options.pollIntervalMs ?? 500;
+    this.herdrRoster = options.herdrRoster;
   }
 
   public get dashboard(): DashboardState {
@@ -112,15 +119,31 @@ export class MissionObserver {
       presence: this.presenceList(),
       tasks: selected?.tasks ?? [],
       agents: selected?.agents ?? [],
+      ...(this.herdrRosterState() ?? {}),
       attention,
       timeline: selected?.timeline ?? [],
+    };
+  }
+
+  private herdrRosterState(): Pick<DashboardState, "herdr"> | undefined {
+    if (this.herdrRoster?.active !== true) return undefined;
+    const { agents, error } = this.herdrRoster.snapshot();
+    return {
+      herdr: {
+        agents: agents.map((agent) => ({ ...agent })),
+        ...(error === undefined ? {} : { error }),
+      },
     };
   }
 
   private presenceList(): DashboardPresence[] {
     return [...this.presence.values()]
       .sort((left, right) => right.updatedSequence - left.updatedSequence)
-      .map((session) => ({ sessionId: session.sessionId, phase: session.phase }));
+      .map((session) => ({
+        sessionId: session.sessionId,
+        phase: session.phase,
+        updatedAt: session.updatedAt,
+      }));
   }
 
   /** Latest authoritative captain state projected from control-plane events. */
@@ -259,12 +282,30 @@ export class MissionObserver {
     if (event.type !== "discord.presence.session.phase_changed") return;
     const session = recordData(event.data, "session");
     const sessionId = stringData(session, "sessionId") ?? event.missionId;
-    const existing = this.presence.get(event.missionId);
+    // One row per bot identity, mirroring the control plane's own projection:
+    // a bridge restart mints a fresh session id for the same
+    // character/credential/transport, and a killed process never says goodbye,
+    // so keying by session id kept dead sessions rendering as online (VUH-945).
+    // The successor's first event retires the ghost. Events without binding
+    // fields keep their own row.
+    const binding = [
+      stringData(session, "transportKind"),
+      stringData(session, "characterId"),
+      stringData(session, "credentialRef"),
+    ];
+    const streamId = binding.every(isDefined)
+      ? `binding:${binding.join(" ")}`
+      : sanitize(event.missionId);
+    const existing = this.presence.get(streamId);
     const projection: PresenceProjection = {
-      streamId: sanitize(event.missionId),
+      streamId,
       sessionId,
-      phase: stringData(event.data, "phase") ?? existing?.phase ?? "unknown",
+      phase:
+        stringData(event.data, "phase") ??
+        (existing?.sessionId === sessionId ? existing.phase : undefined) ??
+        "unknown",
       updatedSequence: entry.sequence,
+      updatedAt: sanitize(event.occurredAt),
     };
     this.presence.set(projection.streamId, projection);
     // Every bridge restart mints a fresh session id, so old sessions would
@@ -586,6 +627,7 @@ function parseCheckpointPresence(value: unknown): PresenceProjection {
     sessionId: checkpointString(record, "sessionId"),
     phase: checkpointString(record, "phase"),
     updatedSequence: Number(record.updatedSequence),
+    updatedAt: checkpointString(record, "updatedAt"),
   };
 }
 

@@ -7,6 +7,7 @@ import type {
 import {
   GBA_EWRAM_BASE,
   GBA_EWRAM_SIZE,
+  decodeFireRedMapExits,
   decodeFireRedMapGrid,
   decodeFireRedOverworld,
   fireRedSurroundings,
@@ -201,6 +202,15 @@ export interface FireRedDecodedState {
    */
   surroundings: FireRedSurroundings | null;
   mapSize: { width: number; height: number } | null;
+  /**
+   * Every way off the loaded map — warp events (doors, stairs, mats) in player
+   * coordinate space and edge connections — or null whenever the grid is,
+   * because both decode from the same loaded-map state.
+   */
+  exits: {
+    warps: { x: number; y: number; destinationMapId: string }[];
+    connections: { direction: "north" | "south" | "west" | "east"; destinationMapId: string }[];
+  } | null;
   mapIdentity: { mapGroup: number; mapNum: number; mapId: string } | null;
   party: GbaCoreState["party"];
   inventory: GbaCoreInventoryEntry[];
@@ -251,11 +261,22 @@ const normalizeThumbPointer = (pointer: number): number => pointer & 0xfffffffe;
 
 const KNOWN_MAP_IDS: Readonly<Record<string, string>> = {
   "3:0": "pallet-town",
+  // Verified in live play: pallet-town's north connection carries 3:19 and
+  // walking through it lands on Route 1.
+  "3:19": "route-1",
   "4:0": "pallet-town/players-house-1f",
   "4:1": "pallet-town/players-house-2f",
   "4:2": "pallet-town/rivals-house",
   "4:3": "pallet-town/professor-oaks-lab",
 };
+
+/** The stable id a map group/number pair is reported as everywhere. */
+export function fireRedMapIdFor(mapGroup: number, mapNum: number): string {
+  return (
+    KNOWN_MAP_IDS[`${String(mapGroup)}:${String(mapNum)}`] ??
+    `firered-map-${String(mapGroup)}-${String(mapNum)}`
+  );
+}
 
 function decodeMapIdentity(ewram: DataView, iwram: DataView): FireRedDecodedState["mapIdentity"] {
   const saveBlock1Address = iwram.getUint32(iwramOffset(G_SAVE_BLOCK1_POINTER_ADDRESS, 4), true);
@@ -266,9 +287,7 @@ function decodeMapIdentity(ewram: DataView, iwram: DataView): FireRedDecodedStat
   return {
     mapGroup,
     mapNum,
-    mapId:
-      KNOWN_MAP_IDS[`${String(mapGroup)}:${String(mapNum)}`] ??
-      `firered-map-${String(mapGroup)}-${String(mapNum)}`,
+    mapId: fireRedMapIdFor(mapGroup, mapNum),
   };
 }
 
@@ -943,13 +962,29 @@ export function decodeFireRedState(
   // so this reports absence rather than propagating the throw.
   let surroundings: FireRedSurroundings | null = null;
   let mapSize: { width: number; height: number } | null = null;
+  let exits: FireRedDecodedState["exits"] = null;
   try {
     const grid = decodeFireRedMapGrid(snapshot.iwram, snapshot.ewram);
     surroundings = fireRedSurroundings(grid, overworld.x, overworld.y, overworld.facing);
     mapSize = { width: grid.mapWidth, height: grid.mapHeight };
+    const rawExits = decodeFireRedMapExits(snapshot.ewram, romBytes, grid);
+    if (rawExits !== null) {
+      exits = {
+        warps: rawExits.warps.map((warp) => ({
+          x: warp.x,
+          y: warp.y,
+          destinationMapId: fireRedMapIdFor(warp.destinationMapGroup, warp.destinationMapNum),
+        })),
+        connections: rawExits.connections.map((connection) => ({
+          direction: connection.direction,
+          destinationMapId: fireRedMapIdFor(connection.destinationMapGroup, connection.destinationMapNum),
+        })),
+      };
+    }
   } catch {
     surroundings = null;
     mapSize = null;
+    exits = null;
   }
   const dialog = decodeDialog(ewram, iwram, battleContext);
   const namingScreen = decodeNamingScreen(ewram, iwram);
@@ -957,6 +992,7 @@ export function decodeFireRedState(
     overworld,
     surroundings,
     mapSize,
+    exits,
     mapIdentity,
     party,
     inventory,

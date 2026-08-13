@@ -49,4 +49,31 @@ describe("MissionDashboard", () => {
     }
     expect(() => dashboard.invalidate()).not.toThrow();
   });
+
+  it("stamps presence rows with their last transition time", () => {
+    const dashboard = new MissionDashboard(() => ({
+      ...state,
+      presence: [{ sessionId: "discord:bot:app", phase: "present", updatedAt: "2026-08-09T23:36:00Z" }],
+    }));
+    expect(dashboard.render(120).join("\n")).toMatch(/discord:bot:app \[present\] · since /u);
+  });
+
+  it("renders observed Herdr pane agents and never claims an empty roster is truth", () => {
+    const dashboard = new MissionDashboard(() => ({
+      ...state,
+      agents: [],
+      herdr: {
+        agents: [
+          { paneId: "w12:p3C", agent: "claude", status: "working" as const, title: "Evaluate gameplay" },
+        ],
+      },
+    }));
+    const rendered = dashboard.render(120).join("\n");
+    expect(rendered).toContain("No mission workers reported.");
+    expect(rendered).toContain("w12:p3C");
+    expect(rendered).toContain("[claude · herdr] · Evaluate gameplay");
+
+    const outsideHerdr = new MissionDashboard(() => ({ ...state, agents: [] }));
+    expect(outsideHerdr.render(120).join("\n")).toContain("No workers observed.");
+  });
 });

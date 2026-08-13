@@ -725,7 +725,7 @@ async function runTrace(args: readonly string[], options: HeadlessCaptainCommand
   await reportHerdrMetadata({
     ...herdrOpts,
     title: "clankie trace",
-    customStatus: `lane=${cursor.lane}`,
+    token: `lane=${cursor.lane}`,
     agent: "clankie-trace",
   });
   await reportHerdrAgent("working", {

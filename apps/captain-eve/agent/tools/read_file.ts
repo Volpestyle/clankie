@@ -20,7 +20,13 @@ export default defineTool({
   inputSchema: z.object({
     path: z.string().trim().min(1).max(4_096).describe("Absolute path of the file to read."),
     offset: z.number().int().min(1).optional().describe("1-based first line to return. Defaults to the top."),
-    limit: z.number().int().min(1).max(5_000).optional().describe("How many lines to return. Defaults to 2000."),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(5_000)
+      .optional()
+      .describe("How many lines to return. Defaults to 2000."),
   }),
   async execute(input) {
     return readHostFile(controlPlaneClient(), input);

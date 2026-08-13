@@ -46,6 +46,32 @@ else above is for afterwards. To follow a run as it happens from a terminal:
 tail -f ~/.local/state/clankie/gba-play/$(ls -t ~/.local/state/clankie/gba-play | head -1)
 ```
 
+## Captain and operator console
+
+The console's chat and the captain's lifecycle leave separate trails, both
+namespaced by the repository root commit hash:
+
+| Artifact                    | Path                                                              | Contents                                                                                                                                              |
+| --------------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Operator conversations      | `~/.local/state/clankie/captain-lanes/<sha1(root-commit)>.sqlite` | `operator_conversations` + `operator_conversation_events`: every operator/captain message, tool phase, and turn boundary, replayable by sequence.     |
+| Captain session projection  | `~/.local/state/clankie/captain-sessions/<same-hash>.sqlite`      | Redacted lifecycle and token metadata only (see `apps/captain-eve/README.md`); prompts, model text, and tool payloads are never written here.          |
+| Control-plane event store   | `artifacts/control-plane/events.db` (`CLANKIE_EVENT_STORE`)       | The authoritative hash-chained record; the console footer's "live at sequence N" is this store's head.                                                |
+| Service logs                | `~/.local/state/clankie/<service>.log`                            | Launcher-supervised stdout per service.                                                                                                               |
+
+These stores are live under WAL; ad hoc inspection copies the database with
+its `-wal`/`-shm` siblings and queries the copy.
+
+Presence projections (`captain.presence.*`, `discord.presence.session.*`) are
+edge-triggered: the stored phase only changes when the owning process emits a
+transition, so a killed process leaves its last phase standing. Liveness
+judgments use the age of the newest event for that session, not the stored
+phase. The console defends against ghosts by keying presence rows per bot
+binding — a successor session's first event retires its predecessor's row —
+and by stamping each row with its last transition time. Inside Herdr the
+console also lists sibling pane agents (`herdr pane list`) under the agent
+roster as an observed source, separate from control-plane mission workers.
+The `trace-clankie` skill carries the working queries.
+
 ## Structured logs
 
 Use `@clankie/observability` and Pino JSON logs. Required context where known:

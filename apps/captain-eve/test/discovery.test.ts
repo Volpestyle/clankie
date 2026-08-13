@@ -74,6 +74,7 @@ describe("captain Eve authored surface", () => {
       "plan-mission",
       "review-change",
       "security-incident",
+      "trace-clankie",
       "verify-independently",
     ]);
     for (const name of skillNames) {

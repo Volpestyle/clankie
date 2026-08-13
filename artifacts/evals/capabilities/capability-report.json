@@ -1,16 +1,16 @@
 {
   "schemaVersion": 1,
   "evaluationId": "clankie-capabilities",
-  "evaluationVersion": "1",
-  "checkedAt": "2026-07-25T18:11:22.343Z",
+  "evaluationVersion": "2",
+  "checkedAt": "2026-08-11T04:41:56.523Z",
   "manifest": {
-    "path": "evals/capabilities/v1/manifest.yaml",
-    "sha256": "5ac481c5a6eeb3672227325300dff13d014ccb9e042679c1e2e8955c886eaaad"
+    "path": "evals/capabilities/v2/manifest.yaml",
+    "sha256": "b8326d39796d889e55156140c6a50ef2722fdeebabdee5bd8e25b39b9d917c0f"
   },
   "passed": false,
   "counts": {
-    "passed": 3,
-    "missing_input": 5,
+    "passed": 2,
+    "missing_input": 6,
     "blocked": 1,
     "failed": 0
   },
@@ -24,20 +24,18 @@
           "id": "readiness",
           "kind": "command",
           "phase": "readiness",
-          "durationMs": 695,
+          "durationMs": 640,
           "exitCode": 1,
-          "stdoutSha256": "69b9d459af1d3de02552ea23865d899eaea165657e3dafacf3284763eacf60a6",
+          "stdoutSha256": "44347483f261d83b5272a97c2f8fa2c2fce31529732a7028da54587f847b235e",
           "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "status": "missing_input",
           "issueCodes": [
             "ambient_roles",
             "application_id",
-            "control_plane_composition",
             "discord_application_identity",
             "discord_guild_membership",
             "ingress_allowlist",
             "message_content_intent",
-            "official_bot_credential",
             "presence_allowlist",
             "target_guild",
             "text_ingress_enabled"
@@ -64,31 +62,31 @@
           "id": "readiness",
           "kind": "command",
           "phase": "readiness",
-          "durationMs": 694,
-          "exitCode": 1,
-          "stdoutSha256": "36458e057a5f1441f8bbd34d6f2546272a50ccca67103f62031fcddbb669a5bf",
+          "durationMs": 5315,
+          "exitCode": 0,
+          "stdoutSha256": "f768b6e4fe92a6da88d6f1f29bfa878d37be36ff2349d61855ac9f0f825eeb2e",
           "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-          "status": "missing_input",
-          "issueCodes": [
-            "application_id",
-            "control_plane_composition",
-            "discord_application_identity",
-            "discord_guild_membership",
-            "official_bot_credential",
-            "target_guild",
-            "target_voice_channel",
-            "voice_enabled"
-          ]
+          "status": "passed",
+          "issueCodes": []
         },
         {
           "id": "three_speaker_live_round_trip",
           "kind": "command",
           "phase": "live",
-          "status": "skipped",
+          "durationMs": 474,
+          "exitCode": 1,
+          "stdoutSha256": "b41b38d723797a87863f9945231bbe4ba853bc96052017585a9840a1054c4ab8",
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "status": "missing_input",
           "issueCodes": [
-            "readiness_not_passed"
-          ],
-          "durationMs": 0
+            "clean_leave",
+            "dave_reconnect",
+            "overlap_and_barge_in",
+            "possessor_two_way_delivery",
+            "speech_round_trips",
+            "three_attributed_speakers",
+            "three_explicit_participants"
+          ]
         }
       ]
     },
@@ -111,18 +109,38 @@
     {
       "id": "firered",
       "label": "Pokémon FireRed",
-      "status": "passed",
+      "status": "missing_input",
       "gates": [
+        {
+          "id": "state_derived_free_play_competence",
+          "kind": "command",
+          "phase": "deterministic",
+          "durationMs": 533,
+          "exitCode": 0,
+          "stdoutSha256": "28791db38bf1ec21e39c393b1faf0426ee0e465c0becd967a9edce6bec98bee2",
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "status": "passed",
+          "issueCodes": []
+        },
         {
           "id": "real_gameplay",
           "kind": "command",
           "phase": "live",
-          "durationMs": 385,
-          "exitCode": 0,
-          "stdoutSha256": "414e93f5a997674cbe93fefc59000e65357d431a3a3424e9c78a9136816bafef",
-          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-          "status": "passed",
-          "issueCodes": []
+          "status": "missing_input",
+          "issueCodes": [
+            "firered_live_receipt_path"
+          ],
+          "durationMs": 0
+        },
+        {
+          "id": "rom_gated_free_play_competence",
+          "kind": "command",
+          "phase": "live",
+          "status": "missing_input",
+          "issueCodes": [
+            "firered_free_play_competence_receipt_path"
+          ],
+          "durationMs": 0
         }
       ]
     },
@@ -135,7 +153,7 @@
           "id": "readiness",
           "kind": "command",
           "phase": "readiness",
-          "durationMs": 450,
+          "durationMs": 420,
           "exitCode": 2,
           "stdoutSha256": "42299a4d9992ecdbf5ce276fe025166df11291956015c5c0ee61d4769a0f570e",
           "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -165,9 +183,9 @@
           "id": "deterministic_boundaries",
           "kind": "command",
           "phase": "deterministic",
-          "durationMs": 900,
+          "durationMs": 965,
           "exitCode": 0,
-          "stdoutSha256": "192b70b7aef343b55bbc5ef47c07b27a086940cb23567199528f08c92a99957a",
+          "stdoutSha256": "3c50a92264a81a5fc45e55d178d257b80d8e71f9e53c2829151417bd622c5175",
           "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "status": "passed",
           "issueCodes": []
@@ -176,9 +194,9 @@
           "id": "live_recall_after_restart",
           "kind": "command",
           "phase": "live",
-          "durationMs": 405,
+          "durationMs": 470,
           "exitCode": 1,
-          "stdoutSha256": "7690e4b5d035b84291d4b5d388539d3f45e62d150ec6d45eb6401ca1de743e90",
+          "stdoutSha256": "568b2a2ac53f6d9581364f86b0a4da473a0ca7d0f30cc12c5bcd068dccdb0726",
           "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "status": "missing_input",
           "issueCodes": [
@@ -198,7 +216,7 @@
           "id": "provider_readiness",
           "kind": "command",
           "phase": "readiness",
-          "durationMs": 177,
+          "durationMs": 136,
           "exitCode": 0,
           "stdoutSha256": "0be8e96eeaae1a244ce587e9245cdf848b1836d61fef6d438b7135ab1b31dc71",
           "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -209,7 +227,7 @@
           "id": "real_provider_mission",
           "kind": "command",
           "phase": "live",
-          "durationMs": 679,
+          "durationMs": 636,
           "exitCode": 0,
           "stdoutSha256": "f33c2de6e51fdf7d811dda86fe38e51ea6308a1c2e3aa82fe6884f8da14b23d1",
           "stderrSha256": "509b6f91aa8771234edb5567ec61f87eb773e7b5164ce968b1b0b520be68507d",
@@ -227,9 +245,9 @@
           "id": "captain_health",
           "kind": "command",
           "phase": "readiness",
-          "durationMs": 509,
+          "durationMs": 925,
           "exitCode": 0,
-          "stdoutSha256": "d53714e2dcedaf4b7d5a5d43fd06824d3252b29385b16d8bde195afbd298cf52",
+          "stdoutSha256": "dfda6881a6dc5c353aaf807ceb6a23a2c59928765c7574000d1ea235d2c13980",
           "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "status": "passed",
           "issueCodes": []
@@ -238,9 +256,9 @@
           "id": "restart_cursor_and_interaction",
           "kind": "command",
           "phase": "deterministic",
-          "durationMs": 1096,
+          "durationMs": 1620,
           "exitCode": 0,
-          "stdoutSha256": "657a0563c5a492bf649bfb492da2936dfd0ba939fcd43ce39db0f51129623877",
+          "stdoutSha256": "c1ce7be98738af698176d88a4835efe1297f88f413b9f4d5d4c6dcda24a0fbf2",
           "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "status": "passed",
           "issueCodes": []
@@ -256,9 +274,9 @@
           "id": "canonical_projection",
           "kind": "command",
           "phase": "deterministic",
-          "durationMs": 735,
+          "durationMs": 788,
           "exitCode": 0,
-          "stdoutSha256": "bf78bd0fd824a922cecf70b148c0b59857e9bcbcd88c3a2aca1bf48b844312f9",
+          "stdoutSha256": "0aa25662d31cc99769ffbe618d624d405406beab1bc51dbda3ea58ee371a596d",
           "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "status": "passed",
           "issueCodes": []

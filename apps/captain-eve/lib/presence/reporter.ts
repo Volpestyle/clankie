@@ -166,15 +166,19 @@ export class CaptainPresenceReporter {
 
   private sendHeartbeat(): Promise<void> {
     const occurredAt = this.clock().toISOString();
-    return this.send({
-      ...this.reportBase(`heartbeat:${occurredAt}`, occurredAt),
-      type: "captain.heartbeat",
-    }).then(() => {
-      if (!this.scheduleHeartbeats || this.heartbeatTimer !== undefined) return;
+    // Arm the recurring timer before the outcome of this send is known. A
+    // control plane that is still restarting when the captain boots must cost
+    // one failed heartbeat, not the loop itself — with no timer the captain
+    // stays "offline" in every projection while it is alive and answering.
+    if (this.scheduleHeartbeats && this.heartbeatTimer === undefined) {
       this.heartbeatTimer = setInterval(() => {
         void this.sendHeartbeat().catch(this.onBackgroundError);
       }, this.heartbeatIntervalMs);
       this.heartbeatTimer.unref();
+    }
+    return this.send({
+      ...this.reportBase(`heartbeat:${occurredAt}`, occurredAt),
+      type: "captain.heartbeat",
     });
   }
 

@@ -167,7 +167,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         schemaVersion: 1,
         surface: "gba_emulator",
         sequence,
-        lines: [monologue.slice(0, 256)],
+        objective: null,
+        intent: null,
+        monologue: monologue.slice(0, 256),
+        effect: null,
         updatedAt: new Date().toISOString(),
       }),
     );

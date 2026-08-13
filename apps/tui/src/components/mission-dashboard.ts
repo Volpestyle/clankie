@@ -1,5 +1,16 @@
 import { truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
-import chalk from "chalk";
+import { styleText } from "node:util";
+
+// node:util ships every style this dashboard uses and strips colour off a
+// non-TTY exactly like chalk did, so the dependency bought us nothing.
+const chalk = {
+  bold: (text: string) => styleText("bold", text),
+  cyan: (text: string) => styleText("cyan", text),
+  dim: (text: string) => styleText("dim", text),
+  green: (text: string) => styleText("green", text),
+  red: (text: string) => styleText("red", text),
+  yellow: (text: string) => styleText("yellow", text),
+};
 
 export interface DashboardAgent {
   id: string;
@@ -26,6 +37,16 @@ export interface DashboardTask {
 export interface DashboardPresence {
   sessionId: string;
   phase: string;
+  /** When the session last changed phase; a live phase with an old stamp is suspect. */
+  updatedAt?: string;
+}
+
+/** A sibling agent observed in a Herdr pane — not a mission worker. */
+export interface DashboardHerdrAgent {
+  paneId: string;
+  agent: string;
+  status: "working" | "idle" | "blocked" | "unknown";
+  title: string;
 }
 
 export interface DashboardState {
@@ -38,6 +59,8 @@ export interface DashboardState {
   presence: DashboardPresence[];
   tasks: DashboardTask[];
   agents: DashboardAgent[];
+  /** Present only when the console runs inside Herdr (VUH-946). */
+  herdr?: { agents: DashboardHerdrAgent[]; error?: string };
   attention: string[];
   timeline: string[];
 }
@@ -62,6 +85,13 @@ function stateIcon(state: DashboardAgent["state"]): string {
   }
 }
 
+function herdrStatusIcon(status: DashboardHerdrAgent["status"]): string {
+  if (status === "working") return chalk.cyan("●");
+  if (status === "blocked") return chalk.yellow("!");
+  if (status === "idle") return chalk.dim("○");
+  return chalk.dim("·");
+}
+
 const LIVE_PRESENCE_PHASES = new Set(["present", "voice_active", "go_live_active"]);
 
 function phaseIcon(phase: string): string {
@@ -74,6 +104,22 @@ function phaseIcon(phase: string): string {
 function phaseLabel(phase: string): string {
   const label = `[${phase}]`;
   return LIVE_PRESENCE_PHASES.has(phase) ? label : chalk.dim(label);
+}
+
+/**
+ * Phase transitions are edge-triggered, so the stamp is the only liveness hint
+ * a reader gets: a "present" row whose last transition is days old is a dead
+ * process the projection never heard say goodbye.
+ */
+function phaseSince(updatedAt: string | undefined, now: Date): string {
+  if (updatedAt === undefined) return "";
+  const at = new Date(updatedAt);
+  if (Number.isNaN(at.getTime())) return "";
+  const sameDay = at.toDateString() === now.toDateString();
+  const stamp = sameDay
+    ? at.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+    : at.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return chalk.dim(` · since ${stamp}`);
 }
 
 export class MissionDashboard implements Component {
@@ -114,9 +160,13 @@ export class MissionDashboard implements Component {
     if (state.presence.length > 0) {
       lines.push("");
       lines.push(pad(chalk.bold(" DISCORD PRESENCE"), width));
+      const now = new Date();
       for (const session of state.presence.slice(0, 3)) {
         lines.push(
-          pad(` ${phaseIcon(session.phase)} ${session.sessionId} ${phaseLabel(session.phase)}`, width),
+          pad(
+            ` ${phaseIcon(session.phase)} ${session.sessionId} ${phaseLabel(session.phase)}${phaseSince(session.updatedAt, now)}`,
+            width,
+          ),
         );
       }
     }
@@ -135,7 +185,16 @@ export class MissionDashboard implements Component {
     }
     lines.push("");
     lines.push(pad(chalk.bold(" AGENT ROSTER"), width));
-    if (state.agents.length === 0) lines.push(pad(chalk.dim(" No workers observed."), width));
+    // Distinguish "no mission workers" from "no visibility": inside Herdr the
+    // pane roster is a second observed source, so an empty section is a claim.
+    if (state.agents.length === 0) {
+      lines.push(
+        pad(
+          chalk.dim(state.herdr === undefined ? " No workers observed." : " No mission workers reported."),
+          width,
+        ),
+      );
+    }
     for (const agent of state.agents) {
       lines.push(
         pad(
@@ -143,6 +202,19 @@ export class MissionDashboard implements Component {
           width,
         ),
       );
+    }
+    if (state.herdr !== undefined) {
+      for (const pane of state.herdr.agents) {
+        lines.push(
+          pad(
+            ` ${herdrStatusIcon(pane.status)} ${chalk.bold(pane.paneId)} ${chalk.dim(`[${pane.agent} · herdr]`)} · ${pane.title}`,
+            width,
+          ),
+        );
+      }
+      if (state.herdr.error !== undefined) {
+        lines.push(pad(chalk.dim(` herdr roster unavailable: ${state.herdr.error}`), width));
+      }
     }
     lines.push("");
     lines.push(pad(chalk.bold(" ATTENTION"), width));

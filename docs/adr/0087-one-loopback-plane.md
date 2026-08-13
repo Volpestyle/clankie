@@ -41,7 +41,7 @@ gateway used to be.
 
 **One transport on the control-plane side.** `RunnerLoopback` validates the
 loopback origin and holds the bearer; `runnerPorts()` builds all five ports from
-it. The five *interfaces* stay, because they are the injection seam a test uses
+it. The five _interfaces_ stay, because they are the injection seam a test uses
 to hand `app.ts` a fake census without standing up a runner. What collapsed is
 the five implementations behind them.
 

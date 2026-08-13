@@ -32,6 +32,7 @@ import { CaptainLaneTraceController, createCaptainLaneClient } from "./session/l
 import { runRecoveryProbe } from "./recovery-probe.ts";
 import { MissionDashboard } from "./components/mission-dashboard.ts";
 import { SqliteMissionEventSource } from "./observation/mission-events.ts";
+import { HerdrRoster } from "./observation/herdr-roster.ts";
 import { MissionObserver } from "./observation/mission-observer.ts";
 import { formatCaptainPresenceStatus } from "./shell/status-bar.ts";
 
@@ -44,11 +45,13 @@ if (process.stdin.isTTY !== true || process.stdout.isTTY !== true) {
   process.exit(1);
 }
 
+const herdrRoster = new HerdrRoster();
 const missionObserver = new MissionObserver({
   source: new SqliteMissionEventSource(
     resolve(process.env.CLANKIE_EVENT_STORE ?? join(repoRoot, "artifacts", "control-plane", "events.db")),
   ),
   checkpointPath: join(repoRoot, ".data", "tui", "mission-observer.json"),
+  herdrRoster,
 });
 await missionObserver.restore();
 try {
@@ -211,6 +214,7 @@ const shell = new ClankieFaceShell({
   interruptMode: "detach",
   onExit: () => {
     missionObserver.stop();
+    herdrRoster.stop();
   },
 });
 
@@ -252,6 +256,9 @@ process.on("unhandledRejection", (reason) => {
 });
 
 shell.start();
+herdrRoster.start(() => {
+  shell.requestRender();
+});
 missionObserver.start(
   () => {
     shell.requestRender();

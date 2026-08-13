@@ -57,8 +57,16 @@ const FreePlayWireDecisionSchema = z
     button: z.enum(["up", "down", "left", "right", "a", "b", "start", "select", "l", "r"]).nullable(),
     holdFrames: z.number().int().nullable(),
     repeat: z.number().int().nullable(),
-    x: z.number().int().nullable().describe("Target tile x for walk_to, as reported in position."),
-    y: z.number().int().nullable().describe("Target tile y for walk_to, as reported in position."),
+    x: z
+      .number()
+      .int()
+      .nullable()
+      .describe("Target tile x for walk_to, in the coordinate space of position and the minimap."),
+    y: z
+      .number()
+      .int()
+      .nullable()
+      .describe("Target tile y for walk_to, in the coordinate space of position and the minimap."),
     text: z.string().nullable().describe("The name to type for enter_text, 1-10 characters."),
     entryId: z
       .string()
@@ -144,11 +152,11 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   // (ADR 0051), which is owner-authored and shared with every other surface. A
   // second "You are Clankie…" here would be a competing definition of the
   // character — and this is the one an audience hears.
-  "You are playing Pokémon FireRed yourself.",
-  "Each turn you see the actual game screen and the decoded state, and you",
+  "You are playing the Pokémon game shown on your Game Boy Advance yourself.",
+  "Each turn you see the actual game screen and any decoded state available, and you",
   "choose one action. Look at the screen: it shows walls, furniture, doors,",
   "stairs, NPCs, and text that the decoded state does not describe. The decoded",
-  "state is for exact values — position, HP, PP, legal moves.",
+  "state, when present, is for exact values — position, HP, PP, legal moves.",
   "",
   "Play the way you actually want to play. You are not following a script and",
   "nobody has given you a route. Form your own goals, change your mind, be",
@@ -194,6 +202,10 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   '    {"kind":"load_checkpoint","checkpointId":"ID or null to list"}',
   '    {"kind":"restart_game"}',
   "",
+  "If scene mode is unknown, play from the screen with button_press and",
+  "frame_advance. Decoded helpers such as walk_to and advance_dialog will refuse",
+  "until that cartridge has a verified state profile.",
+  "",
   "Always give holdFrames on a button press — 16 is a reliable step; a short",
   "hold only turns you. repeat presses the same button that many times in ONE",
   "action (max 16), which",
@@ -203,9 +215,19 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   "To cross a room, prefer walk_to: give it a tile on the current map and it",
   "routes around walls and furniture using the game's own collision, walking",
   "the whole way in one action. It stops early and says so if the way is",
-  "blocked mid-route or a script interrupts. Coordinates come from position in",
-  "the decoded state; d-pad presses are for fine adjustment, doorways, and",
-  "when you want to feel your way.",
+  "blocked mid-route or a script interrupts. d-pad presses are for fine",
+  "adjustment and when you want to feel your way.",
+  "",
+  "The overworld view carries a minimap of the tiles around you — @ is you,",
+  ". is open floor, # is blocked, D is a door, stairway, or warp mat — and",
+  "topLeft gives the map coordinate of its first character, so a tile's",
+  "coordinates are topLeft plus its column and row. Pick walk_to targets from",
+  "it rather than estimating coordinates off the screenshot. The view also",
+  "lists exits: every door and stairway with where it leads, and the map edges",
+  "that connect to neighbouring maps. walk_to aimed at a listed door or",
+  "stairway walks up and steps in, even when the tile itself reads blocked.",
+  "A refused walk tells you why — off the map, a wall, or unreachable — and",
+  "names the nearest tile you can actually reach.",
   "",
   "When text is on screen, use advance_dialog rather than pressing A box by box.",
   "It reads the whole conversation in one action and hands you the transcript,",

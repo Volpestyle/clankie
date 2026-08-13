@@ -23,7 +23,7 @@ export const GbaActivityObservationSnapshotSchema = z
     schemaVersion: z.literal(ACTIVITY_OBSERVATION_SCHEMA_VERSION),
     surface: z.literal("gba_emulator"),
     sessionId: EnvironmentSessionIdSchema,
-    environmentId: z.literal("pokemon-firered"),
+    environmentId: EmbodimentEnvironmentIdSchema,
     /** Monotonic settled free-play turn within this activity session. */
     sequence: z.number().int().nonnegative(),
     observedAt: z.string().datetime(),

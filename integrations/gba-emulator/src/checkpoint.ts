@@ -6,8 +6,6 @@ import { Sha256Schema } from "./contracts.ts";
 import { canonicalJson, sha256 } from "./core-double.ts";
 import { FREE_PLAY_NOTES_MAX, FREE_PLAY_OBJECTIVE_MAX } from "./free-play-bounds.ts";
 import type { GbaCheckpointCapability } from "./free-play-boot.ts";
-import type { MgbaFireRedCoreIdentity } from "./firered-core.ts";
-import { RealGbaRouteScenarioSchema } from "./real-scenario.ts";
 
 /**
  * Progress that outlives the process, as minted checkpoints (ADR 0060).
@@ -114,11 +112,11 @@ export function writeGbaCheckpoint(input: WriteGbaCheckpointInput): WrittenGbaCh
   // fail-closed loader, pointed at the minted savestate identity. Route fields
   // carry over from the booted fixture — they describe the original route, not
   // where he stands now; the receipt records that.
-  const scenario = RealGbaRouteScenarioSchema.parse({
+  const scenario = {
     ...input.capability.scenario,
     savestateId: `checkpoint:${checkpointId}`,
     savestateSha256,
-  });
+  };
   const receipt = GbaCheckpointReceiptSchema.parse({
     schemaVersion: GBA_CHECKPOINT_SCHEMA_VERSION,
     checkpointId,
@@ -167,7 +165,7 @@ export interface ReadGbaCheckpointInput {
   rootDir: string;
   checkpointId: string;
   /** The running core's verified identity; another ROM or core build is refused. */
-  identity: MgbaFireRedCoreIdentity;
+  identity: GbaCheckpointCapability["identity"];
 }
 
 export function readGbaCheckpoint(input: ReadGbaCheckpointInput): {

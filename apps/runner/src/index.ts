@@ -352,12 +352,12 @@ if (runnerToken) {
       runnerId: process.env.CLANKIE_RUNNER_ID ?? "local",
     }),
     runnerId: process.env.CLANKIE_RUNNER_ID ?? "local",
-    environmentIds: ["pokemon-firered"],
+    environmentIds: ["pokemon-firered", "pokemon-emerald"],
     execute: createConfiguredPlayExecution(),
     logger,
   });
   playHostForShutdown = playHost;
-  logger.info({ environmentIds: ["pokemon-firered"] }, "embodiment play host started");
+  logger.info({ environmentIds: ["pokemon-firered", "pokemon-emerald"] }, "embodiment play host started");
   void playHost.runForever(runnerAbort.signal).catch((error: unknown) => {
     logger.error(
       { err: error instanceof Error ? error.message : String(error) },

@@ -107,7 +107,10 @@ describe("captain shell host", () => {
   it("carries no runner credentials into the command environment", async () => {
     process.env.CLANKIE_SHELL_HOST_SECRET_PROBE = "leaked";
     try {
-      const result = await host.run({ schemaVersion: 1, command: "echo ${CLANKIE_SHELL_HOST_SECRET_PROBE:-absent}" });
+      const result = await host.run({
+        schemaVersion: 1,
+        command: "echo ${CLANKIE_SHELL_HOST_SECRET_PROBE:-absent}",
+      });
       expect(result.outcome).toBe("ok");
       if (result.outcome === "ok") expect(result.stdout.trim()).toBe("absent");
     } finally {

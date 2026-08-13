@@ -8,7 +8,9 @@ describe("free-play system prompt", () => {
     // would be a second definition of Clankie — and this is the one an audience
     // hears while he is on stream.
     expect(FREE_PLAY_SYSTEM_PROMPT).not.toMatch(/You are Clankie/u);
-    expect(FREE_PLAY_SYSTEM_PROMPT).toContain("You are playing Pokémon FireRed yourself.");
+    expect(FREE_PLAY_SYSTEM_PROMPT).toContain(
+      "You are playing the Pokémon game shown on your Game Boy Advance yourself.",
+    );
   });
 
   it("still carries the rules of the surface", () => {

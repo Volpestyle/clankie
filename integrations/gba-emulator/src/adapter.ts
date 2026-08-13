@@ -287,8 +287,19 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
       return activeMember;
     };
     const observation = (() => {
+      if (
+        state.mode === "unknown" &&
+        kind !== "scene" &&
+        kind !== "frame_reference" &&
+        kind !== "danger" &&
+        kind !== "action"
+      ) {
+        throw closed("semantic_state_unavailable");
+      }
       switch (kind) {
-        case "overworld":
+        case "overworld": {
+          const grid = this.core.mapGrid?.() ?? null;
+          const exits = state.exits ?? null;
           return {
             ...base,
             kind,
@@ -297,9 +308,26 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
               facing: state.facing,
               surroundings: state.surroundings ?? null,
               mapSize: state.mapSize ?? null,
+              minimap:
+                grid === null ? null : renderWalkabilityMinimap(grid, state.position, exits?.warps ?? []),
+              exits:
+                exits === null
+                  ? null
+                  : {
+                      warps: exits.warps.map((warp) => ({
+                        x: warp.x,
+                        y: warp.y,
+                        destination: warp.destinationMapId,
+                      })),
+                      connections: exits.connections.map((connection) => ({
+                        direction: connection.direction,
+                        destination: connection.destinationMapId,
+                      })),
+                    },
               ramStateSha256: this.core.ramStateSha256(),
             },
           };
+        }
         case "menu": {
           const menu = state.menu;
           if (!menu) throw closed("menu_not_open");
@@ -384,9 +412,8 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
           };
         }
         case "scene":
-          // Honest even when the decoder is out of its depth: an undecoded
-          // screen (naming, scripted sequence, transition) reads as mode
-          // "overworld" with inputReady false, which is the signal itself.
+          // A framebuffer-only cartridge reports `unknown`; callers can still
+          // look and press raw buttons without receiving invented game state.
           return {
             ...base,
             kind,
@@ -499,6 +526,13 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
       this.markStateUncertain("Bounded evidence capacity was exceeded");
       throw closed("evidence_bound_exceeded");
     }
+    if (
+      this.core.gameState().mode === "unknown" &&
+      action.kind !== "button_press" &&
+      action.kind !== "frame_advance"
+    ) {
+      throw closed("semantic_state_unavailable");
+    }
     switch (action.kind) {
       case "button_press": {
         // Every repeat is an input and every hold is frames, so a burst is
@@ -523,6 +557,16 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
             ? `Pressed ${action.button} for ${String(action.holdFrames)} frames`
             : `Pressed ${action.button} ${String(repeat)}x for ${String(action.holdFrames)} frames`,
         );
+        if (state.mode === "unknown") {
+          return {
+            button: action.button,
+            holdFrames: action.holdFrames,
+            repeat,
+            frame: state.frame,
+            mode: state.mode,
+            ramStateSha256: this.core.ramStateSha256(),
+          };
+        }
         return {
           button: action.button,
           holdFrames: action.holdFrames,
@@ -553,11 +597,46 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
         if (grid === null) throw closed("map_grid_unavailable");
         const start = this.core.gameState();
         if (start.mode !== "overworld") throw closed("walk_requires_overworld");
-        const path = planWalk(grid, start.position, { x: action.x, y: action.y });
-        if (path === null) throw closed("no_path_to_target");
+        const target = { x: action.x, y: action.y };
+        // Each refusal says what would have to be different, because the tile
+        // was chosen by a model reading a screenshot: a bare "no" turns into
+        // another guess, a named bound or nearest tile turns into a route.
+        if (target.x < grid.minX || target.y < grid.minY || target.x >= grid.maxX || target.y >= grid.maxY) {
+          throw closed(
+            "walk_target_outside_map",
+            `the loaded map spans x ${String(grid.minX)}..${String(grid.maxX - 1)}, ` +
+              `y ${String(grid.minY)}..${String(grid.maxY - 1)}`,
+          );
+        }
+        const warp =
+          start.exits?.warps.find((candidate) => candidate.x === target.x && candidate.y === target.y) ??
+          null;
+        /** The press that steps into a blocked warp tile once beside it. */
+        let throughWarp: GbaButton | null = null;
+        let path: PlannedWalkStep[];
+        if (warp !== null && !grid.isPassable(target.x, target.y)) {
+          // A door pressed into rather than stepped onto: route to a tile
+          // beside it, then press toward it. The warp event is what makes this
+          // an entrance rather than a wall, so plain walls keep refusing.
+          const approach = planWalkBeside(grid, start.position, target);
+          if (approach === null) {
+            throw closed("no_path_to_target", nearestReachableDetail(grid, start.position, target));
+          }
+          path = approach.path;
+          throughWarp = approach.press;
+        } else if (!grid.isPassable(target.x, target.y)) {
+          throw closed("walk_target_impassable", nearestReachableDetail(grid, start.position, target));
+        } else {
+          const planned = planWalk(grid, start.position, target);
+          if (planned === null) {
+            throw closed("no_path_to_target", nearestReachableDetail(grid, start.position, target));
+          }
+          path = planned;
+        }
+        const plannedSteps = path.length + (throughWarp === null ? 0 : 1);
         // A route is a burst of presses, so it draws on the same budget one.
-        if (path.length > limits.maxInputs) throw closed("input_bound_exceeded");
-        if (path.length * WALK_HOLD_FRAMES > limits.maxFrames) throw closed("frame_bound_exceeded");
+        if (plannedSteps > limits.maxInputs) throw closed("input_bound_exceeded");
+        if (plannedSteps * WALK_HOLD_FRAMES > limits.maxFrames) throw closed("frame_bound_exceeded");
 
         let taken = 0;
         let blockedAt: { x: number; y: number } | null = null;
@@ -581,19 +660,37 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
           }
           taken += 1;
         }
+        if (throughWarp !== null && !warped && blockedAt === null) {
+          const before = this.core.gameState();
+          this.core.pressButton(throughWarp, WALK_HOLD_FRAMES);
+          const after = this.core.gameState();
+          taken += 1;
+          if (after.position.mapId !== before.position.mapId) {
+            warped = true;
+          } else {
+            // The door did not open — a locked entrance, or a script holding
+            // the field. Reported as the blocked tile it behaved as.
+            blockedAt = { x: target.x, y: target.y };
+          }
+        }
 
         const state = this.core.gameState();
         this.record(
           actionId,
           "walk_to",
-          `Walked ${String(taken)}/${String(path.length)} steps toward (${String(action.x)}, ${String(action.y)})`,
+          `Walked ${String(taken)}/${String(plannedSteps)} steps toward (${String(action.x)}, ${String(action.y)})`,
         );
         return {
-          target: { x: action.x, y: action.y },
-          plannedSteps: path.length,
+          target,
+          plannedSteps,
           steps: taken,
+          // Stepping through the targeted warp is arrival: the walk ends where
+          // the door leads. A warp taken mid-route is still an interrupted plan.
           arrived:
-            !warped && blockedAt === null && state.position.x === action.x && state.position.y === action.y,
+            blockedAt === null &&
+            (warped
+              ? taken === plannedSteps
+              : state.position.x === action.x && state.position.y === action.y),
           blockedAt,
           warped,
           frame: state.frame,
@@ -1021,6 +1118,14 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
         this.core.advanceFrames(action.frames);
         const state = this.core.gameState();
         this.record(actionId, "frame_advance", `Advanced ${String(action.frames)} frames`);
+        if (state.mode === "unknown") {
+          return {
+            frames: action.frames,
+            frame: state.frame,
+            mode: state.mode,
+            ramStateSha256: this.core.ramStateSha256(),
+          };
+        }
         return {
           frames: action.frames,
           frame: state.frame,
@@ -1147,8 +1252,14 @@ function logicalTimestamp(sequence: number): string {
   return new Date(Date.UTC(2026, 6, 19, 0, 0, 0, 0) + sequence * 1_000).toISOString();
 }
 
-function closed(code: string): EnvironmentAdapterActionError {
-  return new EnvironmentAdapterActionError(code, `GBA emulator failed closed: ${code}`, false);
+function closed(code: string, detail?: string): EnvironmentAdapterActionError {
+  return new EnvironmentAdapterActionError(
+    code,
+    // The em-dash separator is load-bearing: the free-play effect line splits
+    // on it to carry this detail to the model alongside the static hint.
+    `GBA emulator failed closed: ${code}${detail === undefined ? "" : ` — ${detail}`}`,
+    false,
+  );
 }
 
 function boundedSummary(value: string): string {
@@ -1293,4 +1404,128 @@ export function planWalk(
     frontier = next;
   }
   return null;
+}
+
+/**
+ * A route to a passable tile beside `target`, plus the press from there into
+ * it. For a warp on blocking collision — an outdoor door — this is how the
+ * tile is entered: FireRed's own players-house-2f stairs behave the same way,
+ * stood beside and pressed toward. Null when no adjacent tile is reachable.
+ */
+export function planWalkBeside(
+  grid: GbaCoreMapGrid,
+  from: { x: number; y: number },
+  target: { x: number; y: number },
+): { path: PlannedWalkStep[]; press: "up" | "down" | "left" | "right" } | null {
+  let best: { path: PlannedWalkStep[]; press: "up" | "down" | "left" | "right" } | null = null;
+  for (const step of WALK_STEPS) {
+    const beside = { x: target.x + step.dx, y: target.y + step.dy };
+    if (!grid.isPassable(beside.x, beside.y)) continue;
+    const path = planWalk(grid, from, beside);
+    if (path === null) continue;
+    // The press walks the opposite of the offset that produced this neighbour.
+    const press =
+      step.button === "up"
+        ? "down"
+        : step.button === "down"
+          ? "up"
+          : step.button === "left"
+            ? "right"
+            : "left";
+    if (best === null || path.length < best.path.length) best = { path, press };
+  }
+  return best;
+}
+
+/**
+ * The reachable passable tile closest to an unattainable target, phrased for
+ * the refusal that names it. The walk was refused because the exact question
+ * had no answer; this is the nearest answerable one, offered as information
+ * rather than walked to — the caller still chooses.
+ */
+export function nearestReachableDetail(
+  grid: GbaCoreMapGrid,
+  from: { x: number; y: number },
+  target: { x: number; y: number },
+): string {
+  const inside = (x: number, y: number): boolean =>
+    x >= grid.minX && y >= grid.minY && x < grid.maxX && y < grid.maxY;
+  const key = (x: number, y: number): string => `${String(x)},${String(y)}`;
+  const distance = (x: number, y: number): number => Math.abs(x - target.x) + Math.abs(y - target.y);
+  const seen = new Set<string>([key(from.x, from.y)]);
+  let frontier = [{ x: from.x, y: from.y }];
+  let best = { x: from.x, y: from.y, distance: distance(from.x, from.y) };
+  let explored = 0;
+  while (frontier.length > 0 && explored <= MAX_WALK_SEARCH_TILES) {
+    const next: { x: number; y: number }[] = [];
+    for (const tile of frontier) {
+      if (distance(tile.x, tile.y) < best.distance) {
+        best = { x: tile.x, y: tile.y, distance: distance(tile.x, tile.y) };
+      }
+      for (const step of WALK_STEPS) {
+        const x = tile.x + step.dx;
+        const y = tile.y + step.dy;
+        const id = key(x, y);
+        if (seen.has(id) || !inside(x, y) || !grid.isPassable(x, y)) continue;
+        seen.add(id);
+        next.push({ x, y });
+        explored += 1;
+      }
+    }
+    frontier = next;
+  }
+  return best.x === from.x && best.y === from.y
+    ? `no open tile nearer (${String(target.x)},${String(target.y)}) than where you stand is reachable`
+    : `nearest reachable open tile is (${String(best.x)},${String(best.y)})`;
+}
+
+/**
+ * Tiles the minimap crop extends from the player in each direction. 12 keeps
+ * the whole of any indoor map and most of a town in one view while staying a
+ * few hundred prompt tokens.
+ */
+const MINIMAP_RADIUS = 12;
+
+export interface WalkabilityMinimap {
+  topLeft: { x: number; y: number };
+  rows: string[];
+}
+
+/**
+ * The collision grid around the player as one character per tile: `@` the
+ * player, `.` open, `#` blocked, `D` a warp tile (door, stairway, mat).
+ *
+ * This is the map handed to the player rather than kept for the pathfinder.
+ * Without it, targets are chosen by reading a screenshot — measured on
+ * 2026-08-10 at a quarter of walk actions aimed at tiles the grid already knew
+ * were unreachable, each refusal answered with another guess.
+ */
+export function renderWalkabilityMinimap(
+  grid: GbaCoreMapGrid,
+  player: { x: number; y: number },
+  warps: readonly { x: number; y: number }[],
+): WalkabilityMinimap | null {
+  const left = Math.max(grid.minX, player.x - MINIMAP_RADIUS);
+  const right = Math.min(grid.maxX - 1, player.x + MINIMAP_RADIUS);
+  const top = Math.max(grid.minY, player.y - MINIMAP_RADIUS);
+  const bottom = Math.min(grid.maxY - 1, player.y + MINIMAP_RADIUS);
+  // A player outside the loaded map (mid-transition) has no meaningful crop.
+  if (left > right || top > bottom) return null;
+  const warpKeys = new Set(warps.map((warp) => `${String(warp.x)},${String(warp.y)}`));
+  const rows: string[] = [];
+  for (let y = top; y <= bottom; y += 1) {
+    let row = "";
+    for (let x = left; x <= right; x += 1) {
+      row +=
+        x === player.x && y === player.y
+          ? "@"
+          : warpKeys.has(`${String(x)},${String(y)}`)
+            ? "D"
+            : grid.isPassable(x, y)
+              ? "."
+              : "#";
+    }
+    rows.push(row);
+  }
+  return { topLeft: { x: left, y: top }, rows };
 }

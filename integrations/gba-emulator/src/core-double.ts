@@ -81,7 +81,7 @@ export interface GbaCoreSurroundings {
 }
 
 export interface GbaCoreState {
-  mode: "overworld" | "dialog" | "battle" | "battle_won" | "battle_lost";
+  mode: "unknown" | "overworld" | "dialog" | "battle" | "battle_won" | "battle_lost";
   /**
    * Whether an otherwise idle overworld is accepting player input. Real
    * cores set this false during menu/field callback transitions; test doubles
@@ -127,6 +127,17 @@ export interface GbaCoreState {
   surroundings?: GbaCoreSurroundings | null;
   /** Walkable map dimensions, when the core knows them. */
   mapSize?: { width: number; height: number } | null;
+  /**
+   * Every way off the loaded map, when the core decodes them: warp events
+   * (doors, stairs, mats) in player coordinate space, and edge connections.
+   * Same absence semantics as `surroundings`.
+   */
+  exits?: GbaCoreMapExits | null;
+}
+
+export interface GbaCoreMapExits {
+  warps: { x: number; y: number; destinationMapId: string }[];
+  connections: { direction: "north" | "south" | "west" | "east"; destinationMapId: string }[];
 }
 
 const DIRECTIONS: Record<
@@ -216,6 +227,7 @@ export class DeterministicGbaCoreDouble {
         return;
       case "battle_won":
       case "battle_lost":
+      case "unknown":
         return;
     }
   }

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { WebSocket } from "ws";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { RenderedSurfaceHub } from "../src/frame-hub.ts";
 import { createFrameProducerServer, type FrameProducerServer } from "../src/producer.ts";
 
@@ -63,9 +63,13 @@ describe("frame producer server", () => {
     producer.send(frameMessage(1));
     await new Promise((done) => setTimeout(done, 50));
     producer.close();
+    await new Promise((done) => producer.once("close", done));
+    await vi.waitFor(() => expect(hub.viewerCount).toBe(0));
 
-    expect(sent).toHaveLength(1);
+    expect(sent).toHaveLength(2);
     expect(JSON.parse(sent[0] ?? "{}")).toMatchObject({ kind: "frame", frame: { sequence: 1 } });
+    expect(JSON.parse(sent[1] ?? "{}")).toEqual({ kind: "stopped", reason: "session_ended" });
+    expect(hub.viewerCount).toBe(0);
   });
 
   it("rejects an unauthenticated or wrong-token producer", async () => {
@@ -93,8 +97,10 @@ describe("frame producer server", () => {
     producer.send(frameMessage(2).replace('"byteLength":5', '"byteLength":999'));
     await new Promise((done) => setTimeout(done, 50));
     producer.close();
+    await new Promise((done) => producer.once("close", done));
+    await vi.waitFor(() => expect(hub.viewerCount).toBe(0));
 
-    expect(sent).toHaveLength(0);
+    expect(sent.map((payload) => JSON.parse(payload).kind)).toEqual(["stopped"]);
   });
 
   it("binds loopback only so the producer is unreachable through the Discord proxy", async () => {

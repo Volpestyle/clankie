@@ -4,7 +4,7 @@
 **Score:** 12.0%  
 **Threshold:** 85%  
 **Doctrine hash:** `4835cb125d1c352d`<br>
-**Generated:** 2026-07-18T22:14:51.630Z
+**Generated:** 2026-08-11T04:41:38.156Z
 
 The run does not yet demonstrate the lead-agent thesis; inspect critical failures before expanding scope.
 

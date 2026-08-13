@@ -56,9 +56,6 @@ export interface CodexMcpServer {
 export interface CodexAppServerOptions {
   command?: string;
   model?: string;
-  clientName?: string;
-  clientTitle?: string;
-  clientVersion?: string;
   environment?: NodeJS.ProcessEnv;
   /** Environment exposed to model-invoked shell tools, never the provider parent environment. */
   toolEnvironment?: NodeJS.ProcessEnv;
@@ -118,11 +115,7 @@ export class CodexAppServerClient implements CodexTurnClient {
     await this.rpc.request({
       method: "initialize",
       params: {
-        clientInfo: {
-          name: this.options.clientName ?? "clankie_agent_os",
-          title: this.options.clientTitle ?? "Clankie",
-          version: this.options.clientVersion ?? "0.1.0",
-        },
+        clientInfo: { name: "clankie_agent_os", title: "Clankie", version: "0.1.0" },
         capabilities: { experimentalApi: true },
       },
     });

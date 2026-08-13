@@ -43,6 +43,14 @@ describe("activity console command", () => {
     expect(output).not.toContain("\u001b");
   });
 
+  it("names Emerald from the runner-owned environment id", () => {
+    const emerald: ActivityObservationRead = {
+      ...snapshot,
+      snapshot: { ...snapshot.snapshot, environmentId: "pokemon-emerald" },
+    };
+    expect(formatActivityObservation(emerald)).toContain("Pokémon Emerald · playing");
+  });
+
   it("reads through the authenticated client when /activity runs", async () => {
     const results: Array<{ command: string; text: string; tone: string }> = [];
     const getCurrentActivityObservation = vi.fn(async () => snapshot);

@@ -1,7 +1,7 @@
 import { RenderedSurfaceMessageSchema } from "@clankie/interactive-environment";
 import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server } from "node:http";
-import { WebSocketServer } from "ws";
+import { WebSocketServer, type WebSocket } from "ws";
 import type { RenderedSurfaceHub } from "./frame-hub.ts";
 
 /**
@@ -45,6 +45,11 @@ export function createFrameProducerServer(options: FrameProducerServerOptions): 
     response.writeHead(404).end();
   });
 
+  // The newest authenticated producer owns the session. A runner reconnect
+  // can race its dying socket's close, so a superseded socket must be unable
+  // to stop or mutate the session it no longer owns.
+  let current: WebSocket | null = null;
+
   server.on("upgrade", (request, socket, head) => {
     const path = new URL(request.url ?? "/", "http://localhost").pathname;
     if (path !== "/producer" || !authorized(request, token)) {
@@ -52,7 +57,11 @@ export function createFrameProducerServer(options: FrameProducerServerOptions): 
       return;
     }
     wss.handleUpgrade(request, socket, head, (ws) => {
+      const previous = current;
+      current = ws;
+      previous?.close();
       ws.on("message", (raw) => {
+        if (current !== ws) return;
         // The producer is trusted but still validated: a malformed frame must
         // not reach viewers, and byteLength/digest are checked by the schema.
         const parsed = RenderedSurfaceMessageSchema.safeParse(safeJson(raw.toString()));
@@ -60,6 +69,14 @@ export function createFrameProducerServer(options: FrameProducerServerOptions): 
         if (parsed.data.kind === "frame") hub.publishFrame(parsed.data.frame);
         else if (parsed.data.kind === "overlay") hub.publishOverlay(parsed.data.overlay);
         else hub.stop(parsed.data.reason);
+      });
+      // A live-only surface must not relabel its last frame as current after
+      // the producer exits or crashes. Disconnect invalidates the snapshot —
+      // but only when the closing socket still owns the session.
+      ws.on("close", () => {
+        if (current !== ws) return;
+        current = null;
+        hub.stop("session_ended");
       });
     });
   });

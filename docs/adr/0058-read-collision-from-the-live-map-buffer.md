@@ -3,7 +3,11 @@
 Status: accepted (James, 2026-07-25). The map-grid decoder, the enriched action
 outcome, the adjacency observation, and the `walk_to` action are implemented and
 covered by tests; the ROM-gated ones assert against collision that was first
-established by hand.
+established by hand. Narrowed by
+[ADR 0089](0089-the-map-is-his-to-read.md): the warp-event list this ADR
+deferred is now decoded, the grid is rendered into the player's own view, and a
+`walk_to` aimed at a decoded warp on blocking collision walks beside it and
+presses in — routing _through_ warps mid-route stays refused.
 
 ## Context
 

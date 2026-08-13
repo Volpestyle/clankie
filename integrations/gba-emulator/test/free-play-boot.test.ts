@@ -1,14 +1,15 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { bootGbaGame, defaultGbaGameDir } from "../src/free-play-boot.ts";
 
-const FIXTURES_DIR = path.resolve(import.meta.dirname, "fixtures");
+const FIXTURES_DIR = path.resolve(import.meta.dirname, "../fixtures");
 const DOUBLE_SCENARIO = path.resolve(
   import.meta.dirname,
   "../../../scenarios/emulator/verdant-path-trainer-battle/v1/scenario.json",
 );
+const EMERALD_ROM = path.join(defaultGbaGameDir({}), "emerald.gba");
 
 function bootOptions(env: NodeJS.ProcessEnv) {
   return { env, fixturesDir: FIXTURES_DIR, doubleScenarioPath: DOUBLE_SCENARIO };
@@ -25,6 +26,16 @@ describe("game path resolution", () => {
     const emptyHome = mkdtempSync(path.join(tmpdir(), "gba-home-"));
     const game = await bootGbaGame(bootOptions({ XDG_DATA_HOME: emptyHome }));
     expect(game.real).toBe(false);
+  });
+
+  it("refuses Emerald when its operator-local ROM is absent", async () => {
+    const emptyHome = mkdtempSync(path.join(tmpdir(), "gba-home-"));
+    await expect(
+      bootGbaGame({
+        ...bootOptions({ XDG_DATA_HOME: emptyHome }),
+        environmentId: "pokemon-emerald",
+      }),
+    ).rejects.toThrow(/Emerald ROM is not installed/u);
   });
 
   it("discovers an operator's game in the game home without any env", async () => {
@@ -49,5 +60,26 @@ describe("game path resolution", () => {
         }),
       ),
     ).rejects.toThrow();
+  });
+});
+
+describe.skipIf(!existsSync(EMERALD_ROM))("Emerald visual core (ROM-gated)", () => {
+  it("boots the pinned title screen and accepts a real button press", async () => {
+    const game = await bootGbaGame({
+      ...bootOptions({ CLANKIE_GBA_ROM_PATH: EMERALD_ROM }),
+      environmentId: "pokemon-emerald",
+    });
+    expect(game).toMatchObject({
+      real: true,
+      scenario: { scenarioId: "emerald-title-vision-v1" },
+    });
+    expect(game.framePng(1)).not.toBeNull();
+    const titleFrame = game.framebufferSha256();
+    expect(titleFrame).toMatch(/^[0-9a-f]{64}$/u);
+
+    const core = game.coreFactory?.(game.scenario);
+    expect(core?.gameState().mode).toBe("unknown");
+    core?.pressButton("start", 1);
+    expect(game.framebufferSha256()).not.toBe(titleFrame);
   });
 });

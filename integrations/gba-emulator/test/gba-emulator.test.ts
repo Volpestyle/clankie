@@ -14,6 +14,7 @@ import { EnvironmentRuntime } from "@clankie/environment-runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   FrozenGbaScenarioSchema,
+  DeterministicGbaCoreDouble,
   GbaEmulatorAdapter,
   GbaScenarioBindingSchema,
   GbaScenarioReportSchema,
@@ -23,6 +24,7 @@ import {
   validateGbaEmulatorTrace,
   type FrozenGbaScenario,
   type GbaDriverView,
+  type GbaCoreFactory,
   type GbaEmulatorAdapterOptions,
 } from "../src/index.ts";
 
@@ -54,17 +56,33 @@ const allCapabilities = [
 async function harness(options?: {
   mutateScenario?: (scenario: FrozenGbaScenario) => FrozenGbaScenario;
   adapterOptions?: GbaEmulatorAdapterOptions;
+  visualOnly?: boolean;
 }) {
   const frozen = await fixture();
   frozen.scenario = options?.mutateScenario?.(frozen.scenario) ?? frozen.scenario;
   const rootDir = await mkdtemp(join(tmpdir(), "gba-emulator-test-"));
   roots.push(rootDir);
-  const adapter = new GbaEmulatorAdapter(
-    frozen.scenario,
-    frozen.fixtureSha256,
-    undefined,
-    options?.adapterOptions,
-  );
+  const coreFactory: GbaCoreFactory | undefined = options?.visualOnly
+    ? () => {
+        const core = new DeterministicGbaCoreDouble(frozen.scenario);
+        return {
+          coreId: core.coreId,
+          pressButton: (button, holdFrames) => {
+            core.pressButton(button, holdFrames);
+          },
+          advanceFrames: (frames) => {
+            core.advanceFrames(frames);
+          },
+          gameState: () => ({ ...core.gameState(), mode: "unknown" as const, inputReady: false }),
+          ramStateSha256: () => core.ramStateSha256(),
+          framebufferSha256: () => core.framebufferSha256(),
+        };
+      }
+    : undefined;
+  const adapter =
+    coreFactory === undefined
+      ? new GbaEmulatorAdapter(frozen.scenario, frozen.fixtureSha256, undefined, options?.adapterOptions)
+      : new GbaEmulatorAdapter(frozen.scenario, frozen.fixtureSha256, coreFactory, options?.adapterOptions);
   const events: EnvironmentEvent[] = [];
   const now = { value: new Date("2026-07-19T00:00:00.000Z") };
   const runtime = new EnvironmentRuntime({
@@ -340,6 +358,33 @@ describe("GBA emulator embodiment", () => {
     expect(adapter.session(spec.sessionId).trace().events).toHaveLength(1);
   });
 
+  it("keeps framebuffer-only cartridges playable without inventing semantic state", async () => {
+    const { adapter, command, grant, runtime, spec } = await harness({ visualOnly: true });
+    const session = adapter.session(spec.sessionId);
+    expect(session.observe("scene")).toMatchObject({ data: { mode: "unknown", inputReady: false } });
+    expect(() => session.observe("overworld")).toThrow(/semantic_state_unavailable/u);
+
+    const press = await runtime.startAction(
+      grant.token,
+      command("visual-press", { kind: "button_press", button: "start", holdFrames: 1 }),
+    );
+    expect(press).toMatchObject({ status: "completed", outcome: { mode: "unknown" } });
+    expect(press).not.toHaveProperty("outcome.position");
+
+    const advanced = await runtime.startAction(
+      grant.token,
+      command("visual-advance", { kind: "frame_advance", frames: 1 }),
+    );
+    expect(advanced).toMatchObject({ status: "completed", outcome: { mode: "unknown" } });
+    expect(advanced).not.toHaveProperty("outcome.position");
+
+    const routed = await runtime.startAction(
+      grant.token,
+      command("visual-walk", { kind: "walk_to", x: 1, y: 1 }),
+    );
+    expect(routed).toMatchObject({ status: "failed", errorCode: "semantic_state_unavailable" });
+  });
+
   it("walks a planned route and reports where it ended up", async () => {
     const { adapter, command, grant, runtime, spec } = await harness();
     const result = await runtime.startAction(grant.token, command("walk", { kind: "walk_to", x: 3, y: 1 }));
@@ -367,18 +412,37 @@ describe("GBA emulator embodiment", () => {
     });
   });
 
-  it("refuses an unreachable target instead of walking as close as it can", async () => {
+  it("refuses an unattainable target and says what would have to be different", async () => {
     const { command, grant, runtime } = await harness();
+    // A wall is refused as a wall, with the nearest tile that is floor.
     const blocked = await runtime.startAction(
       grant.token,
       command("into-wall", { kind: "walk_to", x: 2, y: 2 }),
     );
-    expect(blocked).toMatchObject({ status: "failed", errorCode: "no_path_to_target" });
+    expect(blocked).toMatchObject({ status: "failed", errorCode: "walk_target_impassable" });
+    expect((blocked as { message: string }).message).toContain("nearest reachable open tile is (");
+    // An off-map tile is refused with the bounds coordinates actually span.
     const offMap = await runtime.startAction(
       grant.token,
       command("off-map", { kind: "walk_to", x: 99, y: 99 }),
     );
-    expect(offMap).toMatchObject({ status: "failed", errorCode: "no_path_to_target" });
+    expect(offMap).toMatchObject({ status: "failed", errorCode: "walk_target_outside_map" });
+    expect((offMap as { message: string }).message).toContain("the loaded map spans");
+  });
+
+  it("hands the player the walkability minimap the pathfinder already had", async () => {
+    const { adapter, spec } = await harness();
+    const observation = adapter.session(spec.sessionId).observe("overworld");
+    if (observation.kind !== "overworld") throw new Error("expected an overworld observation");
+    const minimap = observation.data.minimap;
+    expect(minimap).not.toBeNull();
+    // The double's map is small enough for the crop to carry all of it.
+    expect(minimap?.topLeft).toEqual({ x: 0, y: 0 });
+    // The player renders where the double placed them, walls where it blocks.
+    expect(minimap?.rows[1]?.[0]).toBe("@");
+    expect(minimap?.rows[2]?.[2]).toBe("#");
+    // The double decodes no warp events, and absence is reported as absence.
+    expect(observation.data.exits).toBeNull();
   });
 
   it("draws a route from the same input budget a burst of presses draws from", async () => {

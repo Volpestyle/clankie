@@ -69,7 +69,7 @@ carried by a filesystem fact rather than a judgement:
 State the second point as a property, not as an inventory. Written as "he has no
 filesystem tool at all" it was true when this was drafted and stopped being true
 within the hour, in a parallel change that had no reason to look at media code.
-Written as "nothing he holds can write *there*", it survives a shell — provided
+Written as "nothing he holds can write _there_", it survives a shell — provided
 whoever grants one keeps the writable root out of the attachment root.
 
 `discord.presence.reply_with_media` is a new presence action classified

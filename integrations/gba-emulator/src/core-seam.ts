@@ -6,7 +6,7 @@ import type { GbaCoreState } from "./core-double.ts";
  * `GbaEmulatorSession` drives exactly this surface and nothing else, so the
  * deterministic CI test double (`DeterministicGbaCoreDouble`) and the real
  * headless mGBA core (`MgbaFireRedCore`) are interchangeable behind it:
- * button input consuming frames, a typed RAM-derived state view, and
+ * button input consuming frames, an honest typed state view (or `unknown`), and
  * RAM/framebuffer digests for hash-chained evidence.
  */
 /**

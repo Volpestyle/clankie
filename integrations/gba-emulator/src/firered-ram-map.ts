@@ -221,6 +221,157 @@ export function fireRedSurroundings(
 }
 
 /**
+ * EWRAM offset of `gMapHeader` — the loaded map's header, whose `events` and
+ * `connections` pointers name every way off this map.
+ *
+ * Derived by the same method as the offsets above: propose the community
+ * pokefirered decompilation's address (0x02036DFC), then scan every 4-byte-
+ * aligned EWRAM offset for a competing struct whose layout pointer names a ROM
+ * `MapLayout` matching the live `gBackupMapLayout` dimensions, whose event and
+ * script pointers address the ROM, and whose decoded warp coordinates all land
+ * inside the map. Exactly one candidate survived across three savestates on
+ * three different maps (players-house-2f, players-house-1f, pallet-town), and
+ * its decoded warps reproduced independently known ground truth: the 2f stairs
+ * event at map-local (10,2) targeting players-house-1f, the 1f door mats at
+ * (4,8)/(5,8) targeting pallet-town, and pallet-town's doors targeting the two
+ * houses and Oak's lab.
+ */
+export const FIRERED_MAP_HEADER_OFFSET = 0x36dfc;
+/** GBA cartridge ROM bus base address; map event data lives in ROM. */
+export const GBA_ROM_BASE = 0x08000000;
+
+/**
+ * Connection direction byte values, verified against live play: pallet-town's
+ * direction-2 connection is Route 1 (3:19), which the player enters by walking
+ * north off the map, and its direction-1 connection is the water route to the
+ * south. They match the GBA CONNECTION_SOUTH/NORTH/WEST/EAST constants.
+ */
+const CONNECTION_DIRECTION_BY_VALUE: Record<number, "south" | "north" | "west" | "east"> = {
+  1: "south",
+  2: "north",
+  3: "west",
+  4: "east",
+};
+
+/** One way off this map through a warp event: a door, stairway, or mat. */
+export interface FireRedWarpEvent {
+  /** Warp tile coords in the border-inclusive space player coords use. */
+  x: number;
+  y: number;
+  destinationMapGroup: number;
+  destinationMapNum: number;
+}
+
+/** One way off this map by walking over an edge into the adjacent map. */
+export interface FireRedMapConnection {
+  direction: "north" | "south" | "west" | "east";
+  destinationMapGroup: number;
+  destinationMapNum: number;
+}
+
+export interface FireRedMapExits {
+  warps: FireRedWarpEvent[];
+  connections: FireRedMapConnection[];
+}
+
+/** Bounds far above any real FireRed map's event tables; beyond them we fail closed. */
+const MAX_WARP_EVENTS = 32;
+const MAX_MAP_CONNECTIONS = 8;
+
+/**
+ * Decode every exit from the loaded map: warp events (doors, stairs, mats) and
+ * edge connections. Returns null rather than guessing when the header is not
+ * in a decodable state — mid-warp, or a wrong-version layout — mirroring how a
+ * missing map grid reports absence.
+ */
+export function decodeFireRedMapExits(
+  ewram: Uint8Array,
+  romBytes: Uint8Array,
+  grid: FireRedMapGrid,
+): FireRedMapExits | null {
+  if (ewram.length !== GBA_EWRAM_SIZE) {
+    throw new Error(`Expected a ${String(GBA_EWRAM_SIZE)}-byte EWRAM snapshot`);
+  }
+  const romU8 = (address: number): number | null => {
+    const offset = address - GBA_ROM_BASE;
+    if (offset < 0 || offset >= romBytes.length) return null;
+    return romBytes[offset] ?? null;
+  };
+  const romU32 = (address: number): number | null => {
+    const b0 = romU8(address);
+    const b1 = romU8(address + 1);
+    const b2 = romU8(address + 2);
+    const b3 = romU8(address + 3);
+    if (b0 === null || b1 === null || b2 === null || b3 === null) return null;
+    return (b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)) >>> 0;
+  };
+  const romS16 = (address: number): number | null => {
+    const b0 = romU8(address);
+    const b1 = romU8(address + 1);
+    if (b0 === null || b1 === null) return null;
+    return ((b0 | (b1 << 8)) << 16) >> 16;
+  };
+  const isRomPointer = (value: number): boolean =>
+    value >= GBA_ROM_BASE && value < GBA_ROM_BASE + romBytes.length;
+
+  // struct MapHeader { MapLayout *mapLayout; MapEvents *events; u8 *mapScripts;
+  //                    MapConnections *connections; ... }
+  const eventsPointer = readU32(ewram, FIRERED_MAP_HEADER_OFFSET + 4);
+  const connectionsPointer = readU32(ewram, FIRERED_MAP_HEADER_OFFSET + 12);
+  if (!isRomPointer(eventsPointer)) return null;
+  if (connectionsPointer !== 0 && !isRomPointer(connectionsPointer)) return null;
+
+  // struct MapEvents { u8 objectEventCount, warpCount, coordEventCount,
+  //                    bgEventCount; ...; WarpEvent *warps; ... }
+  const warpCount = romU8(eventsPointer + 1);
+  const warpsPointer = romU32(eventsPointer + 8);
+  if (warpCount === null || warpCount > MAX_WARP_EVENTS) return null;
+  if (warpCount > 0 && (warpsPointer === null || !isRomPointer(warpsPointer))) return null;
+  const warps: FireRedWarpEvent[] = [];
+  for (let index = 0; index < warpCount; index += 1) {
+    // struct WarpEvent { s16 x, y; u8 elevation, warpId, mapNum, mapGroup; }
+    const base = (warpsPointer ?? 0) + index * 8;
+    const x = romS16(base);
+    const y = romS16(base + 2);
+    const mapNum = romU8(base + 6);
+    const mapGroup = romU8(base + 7);
+    if (x === null || y === null || mapNum === null || mapGroup === null) return null;
+    // Event coords are map-local; a coordinate outside the live map means the
+    // header and the loaded layout disagree, so nothing here is trustworthy.
+    if (x < 0 || x >= grid.mapWidth || y < 0 || y >= grid.mapHeight) return null;
+    warps.push({
+      x: x + FIRERED_MAP_BORDER_OFFSET,
+      y: y + FIRERED_MAP_BORDER_OFFSET,
+      destinationMapGroup: mapGroup,
+      destinationMapNum: mapNum,
+    });
+  }
+
+  const connections: FireRedMapConnection[] = [];
+  if (connectionsPointer !== 0) {
+    // struct MapConnections { s32 count; MapConnection *connections; }
+    const count = romU32(connectionsPointer);
+    const listPointer = romU32(connectionsPointer + 4);
+    if (count === null || count > MAX_MAP_CONNECTIONS) return null;
+    if (count > 0 && (listPointer === null || !isRomPointer(listPointer))) return null;
+    for (let index = 0; index < count; index += 1) {
+      // struct MapConnection { u8 direction; s32 offset; u8 mapGroup, mapNum; }
+      const base = (listPointer ?? 0) + index * 12;
+      const directionValue = romU8(base);
+      const mapGroup = romU8(base + 8);
+      const mapNum = romU8(base + 9);
+      if (directionValue === null || mapGroup === null || mapNum === null) return null;
+      const direction = CONNECTION_DIRECTION_BY_VALUE[directionValue];
+      // Dive/emerge connections (5/6) exist in the format; only edges are exits.
+      if (direction === undefined) continue;
+      connections.push({ direction, destinationMapGroup: mapGroup, destinationMapNum: mapNum });
+    }
+  }
+
+  return { warps, connections };
+}
+
+/**
  * Facing byte values observed by turning the player in place (3-frame taps):
  * 1=south, 2=north, 3=west, 4=east (GBA DIR_SOUTH/NORTH/WEST/EAST).
  */

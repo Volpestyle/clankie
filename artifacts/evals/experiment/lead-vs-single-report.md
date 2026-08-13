@@ -4,7 +4,7 @@
 **Doctrine hash:** `4835cb125d1c352d`  
 **Evaluator digest (sha256):** `9e46b95bc04105b5e3dad9e2f86a74af7e00d6d972a625dbfbb2f0af2249f514` · threshold 85%  
 **Seeds (2):** `lead-vs-single-v1:injected-retry-defect:0001`, `lead-vs-single-v1:injected-retry-defect:0002`  
-**Generated:** 2026-07-18T22:14:51.630Z
+**Generated:** 2026-08-11T04:41:38.156Z
 
 ## Verdict
 

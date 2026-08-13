@@ -513,6 +513,7 @@ describe("clankie trace command", () => {
     });
     expect(herdrCalls.some((args) => args.includes("report-agent"))).toBe(true);
     expect(herdrCalls.some((args) => args.includes("report-metadata"))).toBe(true);
+    expect(herdrCalls.some((args) => args.includes("--token") && args.includes("lane=tui"))).toBe(true);
 
     const inertCalls: string[][] = [];
     await runHeadlessCaptainCommand(["trace"], {

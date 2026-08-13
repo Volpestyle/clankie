@@ -3,16 +3,24 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <link rel="icon" href="data:," />
     <title>Clankie plays</title>
     <style>
       :root {
-        --slate: #242a2e;
-        --edge: #333c42;
-        --text: #e8eef0;
-        --muted: #8fa3ab;
+        --page: #232a2e;
+        --stage: #101416;
+        --panel: #111619;
+        --edge: #354047;
+        --text: #edf1f2;
+        --muted: #8799a1;
+        --accent: #e2ad47;
+        --live: #75cf84;
       }
       * {
         box-sizing: border-box;
+      }
+      [hidden] {
+        display: none !important;
       }
       html,
       body {
@@ -20,111 +28,258 @@
         width: 100%;
         height: 100%;
         overflow: hidden;
-        background: var(--slate);
+        background: var(--page);
         color: var(--text);
         font:
-          14px/1.45 ui-monospace,
+          13px/1.45 ui-monospace,
           SFMono-Regular,
           Menlo,
           monospace;
       }
       #app {
-        display: flex;
-        flex-direction: row;
+        display: grid;
+        grid-template-rows: minmax(0, 1fr) minmax(238px, 29dvh);
         width: 100%;
         height: 100%;
         min-width: 0;
         min-height: 0;
         overflow: hidden;
-        gap: 12px;
-        padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right))
-          max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+        padding: max(18px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right))
+          max(18px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
       }
       #stage {
-        flex: 1 1 0;
+        position: relative;
         display: grid;
         place-items: center;
         min-width: 0;
         min-height: 0;
         overflow: hidden;
+        background: var(--stage);
+        border: 1px solid var(--edge);
+        border-bottom: 0;
+        border-radius: 5px 5px 0 0;
       }
       canvas {
-        /* Fill the stage while the replaced canvas content keeps its own ratio. */
         display: block;
         image-rendering: pixelated;
-        width: 100%;
+        width: auto;
         height: 100%;
+        max-width: 100%;
+        aspect-ratio: 3 / 2;
         object-fit: contain;
-        border: 1px solid var(--edge);
-        border-radius: 4px;
         background: #000;
       }
-      #side {
-        flex: 0 0 260px;
+      #empty {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-content: center;
+        gap: 6px;
+        padding: 24px;
+        text-align: center;
+        background: var(--stage);
+      }
+      #empty strong {
+        font-size: clamp(16px, 1.5vw, 19px);
+        font-weight: 600;
+      }
+      #empty span {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      #lower-third {
+        display: grid;
+        grid-template-columns: minmax(230px, 25%) minmax(0, 1fr);
         min-width: 0;
         min-height: 0;
-        overflow-y: auto;
-        overscroll-behavior: contain;
-        border-left: 1px solid var(--edge);
-        padding-left: 12px;
+        overflow: hidden;
+        background: var(--panel);
+        border: 1px solid var(--edge);
+        border-radius: 0 0 5px 5px;
       }
-      #side h2 {
-        margin: 0 0 8px;
-        font-size: 12px;
+      #objective-block,
+      #thought-block {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        padding: clamp(18px, 2.2vw, 30px);
+      }
+      #objective-block {
+        border-right: 1px solid var(--edge);
+      }
+      .label {
+        margin: 0 0 10px;
+        color: var(--muted);
+        font-size: 10px;
+        font-weight: 700;
         letter-spacing: 0.08em;
         text-transform: uppercase;
-        color: var(--muted);
       }
-      #lines li {
-        margin-bottom: 6px;
-        list-style: none;
+      #thought-label {
+        color: var(--accent);
       }
-      #lines {
+      #objective,
+      #thought,
+      .detail-value {
         margin: 0;
-        padding: 0;
+        overflow-wrap: anywhere;
+      }
+      #objective {
+        max-width: 28ch;
+        font-size: clamp(16px, 1.35vw, 20px);
+        line-height: 1.2;
+        text-transform: uppercase;
+      }
+      #thought {
+        max-width: 70ch;
+        font-size: clamp(16px, 1.55vw, 21px);
+        line-height: 1.36;
+      }
+      .placeholder {
+        color: var(--muted);
       }
       #status {
-        margin-top: 12px;
+        margin-top: auto;
+        padding-top: 18px;
         color: var(--muted);
-        font-size: 12px;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
       }
-      /* Discord renders activities narrow on phones; stack rather than squeeze. */
-      @media (max-width: 640px) {
+      #status[data-tone="live"] {
+        color: var(--live);
+      }
+      #turn-details {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 24px;
+        margin-top: auto;
+        padding-top: 16px;
+        border-top: 1px solid var(--edge);
+      }
+      .detail {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 10px;
+        min-width: 0;
+      }
+      .detail-label {
+        color: var(--muted);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      .detail-value {
+        color: #c8d0d3;
+        font-size: 11px;
+      }
+      @media (max-width: 720px) {
         #app {
-          flex-direction: column;
+          grid-template-rows: auto minmax(0, 1fr);
+          padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right))
+            max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
         }
-        #side {
-          flex: 0 1 auto;
-          max-height: 35dvh;
-          border-left: none;
-          border-top: 1px solid var(--edge);
-          padding: 12px 0 0;
+        #stage {
+          aspect-ratio: 3 / 2;
+        }
+        canvas {
+          width: 100%;
+          height: auto;
+        }
+        #lower-third {
+          grid-template-columns: minmax(0, 1fr);
+          grid-template-rows: auto minmax(0, 1fr);
+          overflow-y: auto;
+          overscroll-behavior: contain;
+        }
+        #objective-block,
+        #thought-block {
+          padding: 16px;
+        }
+        #objective-block {
+          border-right: 0;
+          border-bottom: 1px solid var(--edge);
+        }
+        #objective {
+          font-size: 16px;
+        }
+        #status {
+          margin-top: 12px;
+          padding-top: 0;
+        }
+        #thought {
+          font-size: 16px;
+        }
+        #turn-details {
+          grid-template-columns: minmax(0, 1fr);
+          gap: 10px;
+          margin-top: 18px;
+        }
+        .detail {
+          grid-template-columns: 72px minmax(0, 1fr);
         }
       }
     </style>
   </head>
   <body>
-    <div id="app">
-      <div id="stage"><canvas id="screen" width="240" height="160"></canvas></div>
-      <aside id="side">
-        <h2>What Clankie sees</h2>
-        <ul id="lines"></ul>
-        <div id="status">connecting…</div>
-      </aside>
-    </div>
+    <main id="app">
+      <section id="stage" aria-label="What Clankie sees">
+        <canvas
+          id="screen"
+          width="240"
+          height="160"
+          role="img"
+          aria-label="Clankie's live game view"
+        ></canvas>
+        <div id="empty">
+          <strong id="empty-title">Waiting for Clankie</strong>
+          <span id="empty-copy">Gameplay appears here when a session starts.</span>
+        </div>
+      </section>
+      <section id="lower-third" aria-label="What Clankie is thinking">
+        <div id="objective-block">
+          <p class="label">Objective</p>
+          <p id="objective" class="placeholder">No standing goal yet</p>
+          <div id="status" role="status" aria-live="polite">Connecting</div>
+        </div>
+        <div id="thought-block">
+          <p id="thought-label" class="label">Thought</p>
+          <p id="thought" class="placeholder" aria-live="polite">Waiting for the next decision.</p>
+          <div id="turn-details">
+            <div class="detail">
+              <span class="detail-label">Next</span>
+              <span id="intent" class="detail-value placeholder">No next move yet</span>
+            </div>
+            <div class="detail">
+              <span class="detail-label">Observed</span>
+              <span id="effect" class="detail-value placeholder">Waiting for a result</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
     <script type="module">
       const canvas = document.getElementById("screen");
       const context = canvas.getContext("2d");
       const status = document.getElementById("status");
-      const lines = document.getElementById("lines");
+      const empty = document.getElementById("empty");
+      const emptyTitle = document.getElementById("empty-title");
+      const emptyCopy = document.getElementById("empty-copy");
+      const objective = document.getElementById("objective");
+      const thought = document.getElementById("thought");
+      const intent = document.getElementById("intent");
+      const effect = document.getElementById("effect");
       context.imageSmoothingEnabled = false;
 
-      let lastSequence = 0;
+      let lastFrameSequence = -1;
+      let lastOverlaySequence = -1;
+      let sessionEnded = false;
 
       function render(frame) {
-        // Out-of-order frames are stale by definition on a live surface.
-        if (frame.sequence <= lastSequence) return;
-        lastSequence = frame.sequence;
+        if (frame.sequence <= lastFrameSequence) return;
+        lastFrameSequence = frame.sequence;
         if (canvas.width !== frame.width || canvas.height !== frame.height) {
           canvas.width = frame.width;
           canvas.height = frame.height;
@@ -132,39 +287,88 @@
         }
         const image = new Image();
         image.addEventListener("load", () => {
+          if (frame.sequence !== lastFrameSequence) return;
           context.drawImage(image, 0, 0);
-          URL.revokeObjectURL(image.src);
+          empty.hidden = true;
+          setStatus("Live view", "live");
         });
+        image.addEventListener("error", () => setStatus("Frame unavailable", "idle"));
         image.src = `data:image/png;base64,${frame.data}`;
       }
 
       function renderOverlay(overlay) {
-        lines.replaceChildren(
-          ...overlay.lines.map((line) => {
-            const item = document.createElement("li");
-            item.textContent = line;
-            return item;
-          }),
-        );
+        if (overlay.sequence <= lastOverlaySequence) return;
+        lastOverlaySequence = overlay.sequence;
+        // A v1 producer sends free-form `lines`; show them in the thought slot
+        // so a rolling upgrade never blanks the lower third.
+        const v1 = Array.isArray(overlay.lines);
+        setField(objective, v1 ? null : overlay.objective, "No standing goal yet");
+        setField(thought, v1 ? overlay.lines.join(" — ") : overlay.monologue, "Waiting for the next decision.");
+        setField(intent, v1 ? null : overlay.intent, "No next move yet");
+        setField(effect, v1 ? null : overlay.effect, "Waiting for a result");
+        setStatus("Live view", "live");
+      }
+
+      function setField(element, value, fallback) {
+        const present = typeof value === "string" && value.trim().length > 0;
+        element.textContent = present ? value : fallback;
+        element.classList.toggle("placeholder", !present);
+      }
+
+      function setStatus(label, tone) {
+        status.textContent = label;
+        status.dataset.tone = tone;
+      }
+
+      function showEmpty(title, copy) {
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        emptyTitle.textContent = title;
+        emptyCopy.textContent = copy;
+        empty.hidden = false;
+      }
+
+      function clearOverlay() {
+        setField(objective, null, "No standing goal yet");
+        setField(thought, null, "Waiting for the next decision.");
+        setField(intent, null, "No next move yet");
+        setField(effect, null, "Waiting for a result");
       }
 
       function connect() {
+        sessionEnded = false;
+        lastFrameSequence = -1;
+        lastOverlaySequence = -1;
+        setStatus("Connecting", "idle");
         // All activity traffic is proxied through discordsays.com; the /.proxy
         // prefix is required or the request is refused as blocked:csp.
         const scheme = location.protocol === "https:" ? "wss" : "ws";
         const socket = new WebSocket(`${scheme}://${location.host}/.proxy/frames`);
 
         socket.addEventListener("open", () => {
-          status.textContent = "live";
+          setStatus("Waiting for session", "idle");
         });
         socket.addEventListener("message", (event) => {
-          const message = JSON.parse(event.data);
+          let message;
+          try {
+            message = JSON.parse(event.data);
+          } catch {
+            return;
+          }
           if (message.kind === "frame") render(message.frame);
           else if (message.kind === "overlay") renderOverlay(message.overlay);
-          else if (message.kind === "stopped") status.textContent = `stopped (${message.reason})`;
+          else if (message.kind === "stopped") {
+            sessionEnded = true;
+            clearOverlay();
+            showEmpty("Session ended", "Waiting for Clankie to play again.");
+            setStatus("Session ended", "idle");
+          }
         });
         socket.addEventListener("close", () => {
-          status.textContent = "reconnecting…";
+          if (!sessionEnded) {
+            clearOverlay();
+            showEmpty("Reconnecting", "The live view will resume automatically.");
+            setStatus("Reconnecting", "idle");
+          }
           setTimeout(connect, 1_000);
         });
         socket.addEventListener("error", () => socket.close());

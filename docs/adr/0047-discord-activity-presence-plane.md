@@ -147,6 +147,9 @@ concrete wire with a deliberate direction and exposure:
   disconnected instead of buffering them, so a reconnect resumes at the present
   moment rather than replaying a stale playthrough; the hub drops frames for a
   backed-up viewer rather than growing a queue. Both count their drops.
+- The latest frame and overlay are valid only while their producer is connected.
+  Producer disconnect emits `stopped` and clears both values, so a late viewer
+  never receives a finished playthrough labelled as live.
 
 ### Eligibility and constraints, stated plainly
 

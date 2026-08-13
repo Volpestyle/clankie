@@ -82,9 +82,7 @@ export interface CaptainShellHost {
   read(request: CaptainFileReadRequest): Promise<CaptainFileReadResult>;
 }
 
-export async function createCaptainShellHost(
-  options: CaptainShellHostOptions,
-): Promise<CaptainShellHost> {
+export async function createCaptainShellHost(options: CaptainShellHostOptions): Promise<CaptainShellHost> {
   const environment = options.environment ?? process.env;
   // Beside the runner state root, never inside it. The attachment root defaults
   // to the runner state root, and `isGeneratedMediaRef`'s whole argument for
@@ -154,7 +152,9 @@ export async function createCaptainShellHost(
     }
   };
 
-  const refusalFor = (decision: ActionDecision): { reason: "doctrine_denied" | "approval_required"; detail: string } =>
+  const refusalFor = (
+    decision: ActionDecision,
+  ): { reason: "doctrine_denied" | "approval_required"; detail: string } =>
     decision.effect === "require_approval"
       ? { reason: "approval_required", detail: decision.reason }
       : { reason: "doctrine_denied", detail: decision.reason };
@@ -195,12 +195,20 @@ export async function createCaptainShellHost(
       } catch (error) {
         const detail =
           error instanceof SandboxPreparationError ? error.denial.reason : "sandbox preparation failed";
-        options.logger.warn({ event: "captain.shell.sandbox_unavailable", detail }, "captain shell sandbox unavailable");
+        options.logger.warn(
+          { event: "captain.shell.sandbox_unavailable", detail },
+          "captain shell sandbox unavailable",
+        );
         return { outcome: "refused", reason: "sandbox_unavailable", detail };
       }
 
       try {
-        const outcome = await execute(spawnImpl, prepared, scratchPath, request.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+        const outcome = await execute(
+          spawnImpl,
+          prepared,
+          scratchPath,
+          request.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        );
         if (outcome.timedOut) {
           return {
             outcome: "refused",
@@ -215,7 +223,9 @@ export async function createCaptainShellHost(
           stdout: outcome.stdout.text,
           stderr: outcome.stderr.text,
           truncated: outcome.stdout.truncated || outcome.stderr.truncated,
-          denials: denials.slice(0, 16).map((denial) => `${denial.operation}: ${denial.reason}`.slice(0, 200)),
+          denials: denials
+            .slice(0, 16)
+            .map((denial) => `${denial.operation}: ${denial.reason}`.slice(0, 200)),
         };
       } finally {
         await prepared.close();
