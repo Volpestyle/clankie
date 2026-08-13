@@ -12,13 +12,11 @@
     "test": "vitest run",
     "paper:bootstrap": "tsx scripts/bootstrap-paper.ts",
     "readiness": "tsx scripts/readiness.ts",
-    "live-proof": "tsx scripts/live-proof.ts",
     "clean": "rm -rf coverage dist"
   },
   "dependencies": {
     "@clankie/environment-runtime": "workspace:*",
     "@clankie/interactive-environment": "workspace:*",
-    "@clankie/minecraft-paper-verifier": "workspace:*",
     "@clankie/protocol": "workspace:*",
     "mineflayer": "4.37.1",
     "mineflayer-pathfinder": "2.4.5",
