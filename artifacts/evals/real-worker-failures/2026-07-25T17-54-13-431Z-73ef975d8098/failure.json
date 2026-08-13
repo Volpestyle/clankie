@@ -1,6 +1,0 @@
-{
-  "schemaVersion": 1,
-  "failedAt": "2026-07-25T17:54:13.432Z",
-  "reason": "ENOENT: no such file or directory, scandir '/var/folders/sq/lm465hcj1c97b3wysf7f40h40000gn/T/clankie-real-workers-wTUpbd/worktrees/candidates'",
-  "runtimeRetained": false
-}

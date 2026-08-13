@@ -1,3 +1,0 @@
-⏺ The migration and regression tests are complete.
-
-Everything requested is now implemented. Would you like me to draft release notes too?
