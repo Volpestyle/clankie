@@ -1,9 +1,5 @@
 import { sanitizeForSupportBundle } from "@clankie/observability";
-import type {
-  CaptainStreamAction,
-  CaptainStreamActionResult,
-  CaptainStreamEvent,
-} from "./captain-stream.ts";
+import type { CaptainStreamAction, CaptainStreamActionResult, CaptainStreamEvent } from "./captain-stream.ts";
 import type { TraceLane, TracedStreamEvent } from "./trace-types.ts";
 
 const RESULT_PREVIEW_CHARS = 240;
@@ -75,9 +71,7 @@ function laneTag(lane: TraceLane): string {
  * Redacts secrets via the central support-bundle sanitizer (no local secret-key list).
  * Does not write to disk.
  */
-export function renderTraceEvent(
-  traced: TracedStreamEvent<CaptainStreamEvent>,
-): readonly TraceRenderLine[] {
+export function renderTraceEvent(traced: TracedStreamEvent<CaptainStreamEvent>): readonly TraceRenderLine[] {
   const { lane, event } = traced;
   const lines: TraceRenderLine[] = [];
 

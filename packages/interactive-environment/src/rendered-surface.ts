@@ -92,7 +92,9 @@ export const RenderedSurfaceOverlayV2Schema = z
     // and a structured overlay labelled 1 never reaches the wire, because both
     // producers publish the output of this parse. Drop the tolerance for 1
     // once every producer stamps 2 itself.
-    schemaVersion: z.union([z.literal(1), z.literal(2)]).transform(() => RENDERED_SURFACE_OVERLAY_SCHEMA_VERSION),
+    schemaVersion: z
+      .union([z.literal(1), z.literal(2)])
+      .transform(() => RENDERED_SURFACE_OVERLAY_SCHEMA_VERSION),
     surface: DiscordActivitySurfaceSchema,
     sequence: z.number().int().nonnegative(),
     /** Clankie's standing goal, authored by the mind and carried across turns. */

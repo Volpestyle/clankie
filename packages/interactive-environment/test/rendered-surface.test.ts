@@ -42,9 +42,7 @@ describe("rendered surface overlay versioning", () => {
 
   it("rejects shapes that lie about their version", () => {
     // lines is a v1-only shape; it cannot claim v2.
-    expect(() =>
-      RenderedSurfaceOverlaySchema.parse({ ...BASE, schemaVersion: 2, lines: ["a"] }),
-    ).toThrow();
+    expect(() => RenderedSurfaceOverlaySchema.parse({ ...BASE, schemaVersion: 2, lines: ["a"] })).toThrow();
     // The structured shape has no version 3.
     expect(() => RenderedSurfaceOverlaySchema.parse({ ...STRUCTURED, schemaVersion: 3 })).toThrow();
   });

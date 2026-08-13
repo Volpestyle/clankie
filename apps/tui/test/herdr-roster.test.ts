@@ -71,7 +71,12 @@ describe("HerdrRoster", () => {
               workspace_id: "w12",
               terminal_title_stripped: "elsewhere",
             },
-            { pane_id: "w13:p3", agent: "codex", agent_status: "idle", terminal_title_stripped: "no workspace field" },
+            {
+              pane_id: "w13:p3",
+              agent: "codex",
+              agent_status: "idle",
+              terminal_title_stripped: "no workspace field",
+            },
           ]),
         );
       },

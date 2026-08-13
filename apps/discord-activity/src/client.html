@@ -303,7 +303,11 @@
         // so a rolling upgrade never blanks the lower third.
         const v1 = Array.isArray(overlay.lines);
         setField(objective, v1 ? null : overlay.objective, "No standing goal yet");
-        setField(thought, v1 ? overlay.lines.join(" — ") : overlay.monologue, "Waiting for the next decision.");
+        setField(
+          thought,
+          v1 ? overlay.lines.join(" — ") : overlay.monologue,
+          "Waiting for the next decision.",
+        );
         setField(intent, v1 ? null : overlay.intent, "No next move yet");
         setField(effect, v1 ? null : overlay.effect, "Waiting for a result");
         setStatus("Live view", "live");

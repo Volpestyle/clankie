@@ -204,7 +204,8 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
   const artifactRoot = environment.CLANKIE_DISCORD_ATTACHMENT_ROOT?.trim() || options.runnerStateRoot;
   await mkdir(join(artifactRoot, ARTIFACT_SUBDIRECTORY), { recursive: true, mode: 0o700 });
 
-  const command = environment.CLANKIE_AGENT_BROWSER_EXECUTABLE?.trim() || options.command || DEFAULT_BROWSER_COMMAND;
+  const command =
+    environment.CLANKIE_AGENT_BROWSER_EXECUTABLE?.trim() || options.command || DEFAULT_BROWSER_COMMAND;
   const child = (options.spawnImpl ?? spawn)(command, [...(options.args ?? DEFAULT_BROWSER_ARGS)], {
     stdio: ["pipe", "pipe", "pipe"],
     env: {

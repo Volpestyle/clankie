@@ -44,14 +44,19 @@ export function captainTools(
         "means there is no API key stored for it. A refusal is something to mention, not retry.",
       parameters: Type.Object({
         prompt: Type.String({ minLength: 1, maxLength: 4000 }),
-        aspectRatio: Type.Optional(Type.String({ description: "Shape like 16:9 or 1:1. Omit to let the model choose." })),
+        aspectRatio: Type.Optional(
+          Type.String({ description: "Shape like 16:9 or 1:1. Omit to let the model choose." }),
+        ),
         sourceRef: Type.Optional(
-          Type.String({ description: "artifactRef from an earlier generate_image result, to edit that picture." }),
+          Type.String({
+            description: "artifactRef from an earlier generate_image result, to edit that picture.",
+          }),
         ),
       }),
       execute: async (_id, params) => {
         const result = await deps.media.generateImage({ schemaVersion: 1, ...params });
-        if (result.outcome === "ok") capture.media = { artifactRef: result.artifactRef, filename: result.filename };
+        if (result.outcome === "ok")
+          capture.media = { artifactRef: result.artifactRef, filename: result.filename };
         return json(result);
       },
     }),
@@ -68,7 +73,8 @@ export function captainTools(
       }),
       execute: async (_id, params) => {
         const result = await deps.media.generateVideo({ schemaVersion: 1, ...params });
-        if (result.outcome === "ok") capture.media = { artifactRef: result.artifactRef, filename: result.filename };
+        if (result.outcome === "ok")
+          capture.media = { artifactRef: result.artifactRef, filename: result.filename };
         return json(result);
       },
     }),
@@ -85,7 +91,11 @@ export function captainTools(
         environmentId: Type.Union([Type.Literal("pokemon-firered"), Type.Literal("pokemon-emerald")], {
           default: "pokemon-firered",
         }),
-        requestedBy: Type.String({ minLength: 1, maxLength: 200, description: "The asker's id; 'owner' for the operator." }),
+        requestedBy: Type.String({
+          minLength: 1,
+          maxLength: 200,
+          description: "The asker's id; 'owner' for the operator.",
+        }),
       }),
       execute: async (_id, params) =>
         json(
@@ -125,13 +135,17 @@ export function captainTools(
         "said to you there, 'said' is your own reply. Say when a room has been quiet rather than inventing " +
         "activity, and never describe a room you did not actually read. Call with no arguments to list rooms.",
       parameters: Type.Object({
-        lane: Type.Optional(Type.String({ description: "Room lane, e.g. discord_presence, discord_voice, operator." })),
+        lane: Type.Optional(
+          Type.String({ description: "Room lane, e.g. discord_presence, discord_voice, operator." }),
+        ),
         targetId: Type.Optional(Type.String({ description: "The room's target id as listed." })),
       }),
       execute: async (_id, params) => {
         if (params.lane === undefined || params.targetId === undefined) {
           const lanes = await laneLog.list(5);
-          return json(lanes.map(({ lane, targetId, entries }) => ({ lane, targetId, recent: entries.length })));
+          return json(
+            lanes.map(({ lane, targetId, entries }) => ({ lane, targetId, recent: entries.length })),
+          );
         }
         return json(await laneLog.read(params.lane, params.targetId));
       },
@@ -150,7 +164,12 @@ export function captainTools(
           deps.embodiment.getPossession(),
           deps.presence.listVoiceHistory(5),
         ]);
-        return json({ liveSession: live, presenceSessions: sessions, bodyPossession: possession, voiceHistory });
+        return json({
+          liveSession: live,
+          presenceSessions: sessions,
+          bodyPossession: possession,
+          voiceHistory,
+        });
       },
     }),
     defineTool({
@@ -188,7 +207,8 @@ export async function browserTools(deps: CaptainDeps, capture: TurnMediaCapture)
           "Report why your browser is not reachable right now. If this is the only browser tool you have, " +
           "say you cannot browse and why, rather than implying you chose not to.",
         parameters: Type.Object({}),
-        execute: async () => json({ available: false, reason: catalog.reason ?? "the browser host reported no tools" }),
+        execute: async () =>
+          json({ available: false, reason: catalog.reason ?? "the browser host reported no tools" }),
       }),
     ];
   }

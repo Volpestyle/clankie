@@ -107,11 +107,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return laneSession;
   }
 
-  function durableSession(
-    key: string,
-    lane: CaptainSessionLaneV2,
-    dir: string,
-  ): Promise<LaneSession> {
+  function durableSession(key: string, lane: CaptainSessionLaneV2, dir: string): Promise<LaneSession> {
     const existing = sessions.get(key);
     if (existing !== undefined) return existing;
     const created = (async () => {
@@ -194,7 +190,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       }
       const message = lane.lastAssistantText.trim();
       if (message.length === 0) {
-        return { state: "failed", captainSessionId: normalized.sessionKey, turnId, code: "captain_response_missing" };
+        return {
+          state: "failed",
+          captainSessionId: normalized.sessionKey,
+          turnId,
+          code: "captain_response_missing",
+        };
       }
       // Matched on the trimmed whole message, never a substring: a reply that
       // merely quotes the sentinel is still a reply, and silencing it would let

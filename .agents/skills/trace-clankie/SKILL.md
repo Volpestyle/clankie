@@ -22,17 +22,17 @@ running service.
 
 ## The trail map
 
-| What you want | Where it lives | Shape |
-| --- | --- | --- |
-| Operator console chat (the TUI dialogue) | `~/.local/state/clankie/captain-lanes/<sha1(root-commit)>.sqlite` | `operator_conversations` (id, title, session_state) + `operator_conversation_events` (`body_json` holds role, text, tool phases). Replayable per conversation by `sequence`. |
-| Captain session lifecycle + token usage | `~/.local/state/clankie/captain-sessions/<same-hash>.sqlite` | Redacted **by design**: turn/session/usage/model events only. No prompts, no text. Don't look for the chat here. |
-| Authoritative mission/system events | `artifacts/control-plane/events.db` (override: `CLANKIE_EVENT_STORE`) | `events(sequence, event_id, mission_id, type, occurred_at, event)` — hash-chained; `event` is full JSON. Latest sequence matches the TUI footer's "live at sequence N". |
-| Play sessions (GBA) | `~/.local/state/clankie/gba-play/*.jsonl` + the table in `docs/08-observability-debugging.md` | Header / per-turn (monologue, intent, `detail` with position + transcript) / summary. |
-| Discord semantic actions | `~/.local/state/clankie/discord-live-receipts.jsonl` | What the bridge actually did. |
-| Service stdout + lifecycle | `~/.local/state/clankie/<service>.log`, `<service>-service.json` | captain-eve, control-plane, discord-bridge, activity, runner, tunnel. |
-| Worker runs and transcripts | `~/.clankie/runner/runner-events.db`, `~/.clankie/runner/worker-transcripts/` | Runner-spawned workers only (see roster caveat below). |
-| Live turn stream | `clankie watch` / `clankie trace [--lane]` / `clankie status` | Live only — nothing historical. |
-| What's on the TUI screen right now | `herdr pane read <pane> --source recent` | Viewport only — see caveat below. |
+| What you want                            | Where it lives                                                                                | Shape                                                                                                                                                                        |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Operator console chat (the TUI dialogue) | `~/.local/state/clankie/captain-lanes/<sha1(root-commit)>.sqlite`                             | `operator_conversations` (id, title, session_state) + `operator_conversation_events` (`body_json` holds role, text, tool phases). Replayable per conversation by `sequence`. |
+| Captain session lifecycle + token usage  | `~/.local/state/clankie/captain-sessions/<same-hash>.sqlite`                                  | Redacted **by design**: turn/session/usage/model events only. No prompts, no text. Don't look for the chat here.                                                             |
+| Authoritative mission/system events      | `artifacts/control-plane/events.db` (override: `CLANKIE_EVENT_STORE`)                         | `events(sequence, event_id, mission_id, type, occurred_at, event)` — hash-chained; `event` is full JSON. Latest sequence matches the TUI footer's "live at sequence N".      |
+| Play sessions (GBA)                      | `~/.local/state/clankie/gba-play/*.jsonl` + the table in `docs/08-observability-debugging.md` | Header / per-turn (monologue, intent, `detail` with position + transcript) / summary.                                                                                        |
+| Discord semantic actions                 | `~/.local/state/clankie/discord-live-receipts.jsonl`                                          | What the bridge actually did.                                                                                                                                                |
+| Service stdout + lifecycle               | `~/.local/state/clankie/<service>.log`, `<service>-service.json`                              | captain-eve, control-plane, discord-bridge, activity, runner, tunnel.                                                                                                        |
+| Worker runs and transcripts              | `~/.clankie/runner/runner-events.db`, `~/.clankie/runner/worker-transcripts/`                 | Runner-spawned workers only (see roster caveat below).                                                                                                                       |
+| Live turn stream                         | `clankie watch` / `clankie trace [--lane]` / `clankie status`                                 | Live only — nothing historical.                                                                                                                                              |
+| What's on the TUI screen right now       | `herdr pane read <pane> --source recent`                                                      | Viewport only — see caveat below.                                                                                                                                            |
 
 The hash naming `captain-lanes`/`captain-sessions` files is the repository
 root commit; when in doubt take the newest file by mtime.
@@ -40,7 +40,7 @@ root commit; when in doubt take the newest file by mtime.
 ## Gotchas that cost real time
 
 - **The TUI is fullscreen** — `herdr pane read` returns only the currently
-  rendered screen. The chat transcript is *not* in terminal scrollback; read
+  rendered screen. The chat transcript is _not_ in terminal scrollback; read
   the `operator_conversation_events` table instead.
 - **Presence phases are edge-triggered at the event level.** `discord.presence.*`
   and `captain.presence.*` phases persist until the owning process emits the

@@ -679,10 +679,15 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       dmPolicy: parsed.data.dmPolicy,
       recordedAt,
     });
-    const event = recordEvent(DISCORD_USER_SESSION_OPT_IN_RECORDED, DISCORD_USER_SESSION_OPT_IN_MISSION_ID, recordedAt, {
-      optIn,
-      operatorId: operator.operatorId,
-    });
+    const event = recordEvent(
+      DISCORD_USER_SESSION_OPT_IN_RECORDED,
+      DISCORD_USER_SESSION_OPT_IN_MISSION_ID,
+      recordedAt,
+      {
+        optIn,
+        operatorId: operator.operatorId,
+      },
+    );
     discordUserSessionOptIns.apply(event);
     return context.json({ schemaVersion: 1, optIn }, 201);
   });
@@ -698,11 +703,16 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json({ error: "discord_user_session_opt_in_not_active" }, 409);
     }
     const revokedAt = clock().toISOString();
-    const event = recordEvent(DISCORD_USER_SESSION_OPT_IN_REVOKED, DISCORD_USER_SESSION_OPT_IN_MISSION_ID, revokedAt, {
-      optInId: existing.optInId,
+    const event = recordEvent(
+      DISCORD_USER_SESSION_OPT_IN_REVOKED,
+      DISCORD_USER_SESSION_OPT_IN_MISSION_ID,
       revokedAt,
-      operatorId: operator.operatorId,
-    });
+      {
+        optInId: existing.optInId,
+        revokedAt,
+        operatorId: operator.operatorId,
+      },
+    );
     discordUserSessionOptIns.apply(event);
     return context.json({ schemaVersion: 1, optIn: discordUserSessionOptIns.resolve() });
   });

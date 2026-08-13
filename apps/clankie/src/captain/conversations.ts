@@ -57,7 +57,9 @@ export class ConversationStore {
     for (const entry of readdirSync(root, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       try {
-        const meta = JSON.parse(readFileSync(join(root, entry.name, "meta.json"), "utf8")) as ConversationMeta;
+        const meta = JSON.parse(
+          readFileSync(join(root, entry.name, "meta.json"), "utf8"),
+        ) as ConversationMeta;
         // A crash mid-run leaves "active"; on boot nothing is running.
         if (meta.sessionState === "active") meta.sessionState = "waiting";
         this.metas.set(meta.conversationId, meta);
@@ -67,7 +69,9 @@ export class ConversationStore {
     }
   }
 
-  public async serve(request: OperatorConversationServiceRequest): Promise<OperatorConversationServiceResult> {
+  public async serve(
+    request: OperatorConversationServiceRequest,
+  ): Promise<OperatorConversationServiceResult> {
     switch (request.op) {
       case "list": {
         const conversations = [...this.metas.values()]
@@ -105,7 +109,7 @@ export class ConversationStore {
   }
 
   public async close(): Promise<void> {
-    await Promise.allSettled([...this.runs.values()]);
+    await Promise.allSettled(this.runs.values());
   }
 
   private create(scope: OperatorConversationScope, title: string): OperatorConversation {
@@ -299,7 +303,9 @@ export class ConversationStore {
 }
 
 function sameScope(a: OperatorConversationScope, b: OperatorConversationScope): boolean {
-  return a.kind === b.kind && (a.kind !== "workspace" || b.kind !== "workspace" || a.workspaceId === b.workspaceId);
+  return (
+    a.kind === b.kind && (a.kind !== "workspace" || b.kind !== "workspace" || a.workspaceId === b.workspaceId)
+  );
 }
 
 function publicConversation(meta: ConversationMeta): OperatorConversation {

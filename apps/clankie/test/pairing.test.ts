@@ -15,9 +15,7 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
-async function makeApp(
-  options: Omit<Parameters<typeof createClankieApp>[0], "captain"> = {},
-): Promise<Hono> {
+async function makeApp(options: Omit<Parameters<typeof createClankieApp>[0], "captain"> = {}): Promise<Hono> {
   return (await createClankieApp({ captain: createStubCaptain(), ...options })).app;
 }
 

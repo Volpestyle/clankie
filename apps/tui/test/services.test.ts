@@ -443,12 +443,7 @@ describe("service targets", () => {
       // publishes and is torn down before it.
       "tunnel",
     ]);
-    expect([...resolveTargets("all")].reverse()).toEqual([
-      "tunnel",
-      "activity",
-      "discord-bridge",
-      "clankie",
-    ]);
+    expect([...resolveTargets("all")].reverse()).toEqual(["tunnel", "activity", "discord-bridge", "clankie"]);
   });
 
   it("calls a tunnel with a dead edge unhealthy even while cloudflared runs", async () => {

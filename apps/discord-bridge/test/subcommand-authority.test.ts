@@ -35,9 +35,7 @@ describe("subcommand authority tiers", () => {
     const body = caseBody("person-memory");
     expect(body, "/clankie person-memory lost its ambient authority check").toContain(AMBIENT);
     // Opening voice to a room must never widen ambient authority (ADR 0050).
-    expect(body, "/clankie person-memory must not use the voice presence tier").not.toContain(
-      VOICE_PRESENCE,
-    );
+    expect(body, "/clankie person-memory must not use the voice presence tier").not.toContain(VOICE_PRESENCE);
   });
 
   it("gates join, leave, and watch on the voice presence tier", () => {

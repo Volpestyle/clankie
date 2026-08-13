@@ -269,11 +269,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           "/status",
           [
             s.title("Console"),
-            s.line(
-              "presence",
-              snapshot?.phase ?? "unavailable",
-              snapshot === undefined ? "warn" : "ok",
-            ),
+            s.line("presence", snapshot?.phase ?? "unavailable", snapshot === undefined ? "warn" : "ok"),
             s.line("conversation", conversations?.conversationId ?? "none selected", "active"),
             s.line(
               "activity",

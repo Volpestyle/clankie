@@ -15,10 +15,7 @@ export interface HerdrRosterSnapshot {
   readonly error?: string;
 }
 
-export type HerdrRosterRunner = (
-  command: string,
-  args: readonly string[],
-) => Promise<{ stdout: string }>;
+export type HerdrRosterRunner = (command: string, args: readonly string[]) => Promise<{ stdout: string }>;
 
 export interface HerdrRosterOptions {
   readonly env?: NodeJS.ProcessEnv;
@@ -89,9 +86,7 @@ export class HerdrRoster {
     const before = JSON.stringify([this.agents, this.error]);
     try {
       const args =
-        this.workspaceId === undefined
-          ? ["pane", "list"]
-          : ["pane", "list", "--workspace", this.workspaceId];
+        this.workspaceId === undefined ? ["pane", "list"] : ["pane", "list", "--workspace", this.workspaceId];
       const { stdout } = await this.runCommand("herdr", args);
       this.agents = this.parse(stdout);
       this.error = undefined;

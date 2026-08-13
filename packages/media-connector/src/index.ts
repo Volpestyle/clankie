@@ -420,7 +420,6 @@ const GoogleResponseSchema = z.object({
     .min(1),
 });
 
-
 export function assertAllowedOutputPath(path: string): void {
   const normalized = resolve(path).toLowerCase();
   const components = normalized.split(sep);

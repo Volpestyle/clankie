@@ -219,15 +219,27 @@ const captain = createCaptain(
         }),
       call: (request) =>
         browserHost?.call(request) ??
-        Promise.resolve({ outcome: "refused" as const, tool: request.tool, reason: "browser_unavailable" as const }),
+        Promise.resolve({
+          outcome: "refused" as const,
+          tool: request.tool,
+          reason: "browser_unavailable" as const,
+        }),
     },
     media: {
       generateImage: (request) =>
         mediaGenerator?.generateImage(request) ??
-        Promise.resolve({ outcome: "refused" as const, schemaVersion: 1 as const, reason: "media_unavailable" as const }),
+        Promise.resolve({
+          outcome: "refused" as const,
+          schemaVersion: 1 as const,
+          reason: "media_unavailable" as const,
+        }),
       generateVideo: (request) =>
         mediaGenerator?.generateVideo(request) ??
-        Promise.resolve({ outcome: "refused" as const, schemaVersion: 1 as const, reason: "media_unavailable" as const }),
+        Promise.resolve({
+          outcome: "refused" as const,
+          schemaVersion: 1 as const,
+          reason: "media_unavailable" as const,
+        }),
     },
     embodiment: {
       submitIntent: (intent) => boundApp().embodiment.submit(intent),

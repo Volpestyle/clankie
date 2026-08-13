@@ -199,8 +199,7 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
       if (identity === undefined) return [];
       return listGbaCheckpoints(checkpointDir).filter(
         (receipt) =>
-          receipt.romSha256 === identity.romSha256 &&
-          receipt.coreWasmSha256 === identity.coreWasmSha256,
+          receipt.romSha256 === identity.romSha256 && receipt.coreWasmSha256 === identity.coreWasmSha256,
       );
     };
     let resumedFromCheckpointId: string | undefined;

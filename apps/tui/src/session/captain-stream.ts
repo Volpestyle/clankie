@@ -43,11 +43,28 @@ export interface CaptainStreamUsage {
  * through the `other` branch, so the union stays permissive on purpose.
  */
 export type CaptainStreamEvent =
-  | { readonly type: "reasoning.appended"; readonly data: { readonly reasoningDelta: string; readonly reasoningSoFar?: string; readonly turnId?: string; readonly stepIndex?: number } }
+  | {
+      readonly type: "reasoning.appended";
+      readonly data: {
+        readonly reasoningDelta: string;
+        readonly reasoningSoFar?: string;
+        readonly turnId?: string;
+        readonly stepIndex?: number;
+      };
+    }
   | { readonly type: "reasoning.completed"; readonly data?: unknown }
-  | { readonly type: "actions.requested"; readonly data: { readonly actions: readonly CaptainStreamAction[] } }
-  | { readonly type: "action.result"; readonly data: { readonly status: string; readonly result: CaptainStreamActionResult } }
-  | { readonly type: "message.appended"; readonly data: { readonly messageDelta: string; readonly messageSoFar?: string } }
+  | {
+      readonly type: "actions.requested";
+      readonly data: { readonly actions: readonly CaptainStreamAction[] };
+    }
+  | {
+      readonly type: "action.result";
+      readonly data: { readonly status: string; readonly result: CaptainStreamActionResult };
+    }
+  | {
+      readonly type: "message.appended";
+      readonly data: { readonly messageDelta: string; readonly messageSoFar?: string };
+    }
   | { readonly type: "message.completed"; readonly data?: unknown }
   | { readonly type: "step.completed"; readonly data: { readonly usage?: CaptainStreamUsage } }
   | { readonly type: "turn.started"; readonly data?: unknown }

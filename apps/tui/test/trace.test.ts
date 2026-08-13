@@ -474,9 +474,7 @@ describe("clankie trace command", () => {
       host,
       clientFactory: () =>
         fakeClient({
-          events: [
-            { type: "session.waiting", data: { wait: "next-user-message" } },
-          ] as CaptainStreamEvent[],
+          events: [{ type: "session.waiting", data: { wait: "next-user-message" } }] as CaptainStreamEvent[],
         }),
       stdout: outputBuffer().stream,
       traceOnce: true,
@@ -497,9 +495,7 @@ describe("clankie trace command", () => {
       host,
       clientFactory: () =>
         fakeClient({
-          events: [
-            { type: "session.waiting", data: { wait: "next-user-message" } },
-          ] as CaptainStreamEvent[],
+          events: [{ type: "session.waiting", data: { wait: "next-user-message" } }] as CaptainStreamEvent[],
         }),
       stdout: outputBuffer().stream,
       traceOnce: true,
