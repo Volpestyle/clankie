@@ -50,4 +50,4 @@ The Linear webhook components are exported from `src/linear-webhook.ts`:
 - `RetainedLinearWebhookQueue` provides delivery-ID dedupe, bounded backpressure, retention, retry, and an outbound-dial transport contract.
 - `LinearWebhookLocalBridge` dials that transport and independently verifies the original bytes before emitting a typed agent-session event.
 
-The ingress keeps the webhook signing secret but no Linear OAuth credential. The local bridge opens the connection; the hosted side never opens a listener on the local machine. See [`../../docs/linear-agent-webhook-ingress.md`](../../docs/linear-agent-webhook-ingress.md) for the trust boundary, response behavior, dev tunnel, and production limits.
+The ingress keeps the webhook signing secret but no Linear OAuth credential. The local bridge opens the connection; the hosted side never opens a listener on the local machine. See `../../docs/linear-agent-webhook-ingress.md` for the trust boundary, response behavior, dev tunnel, and production limits.
