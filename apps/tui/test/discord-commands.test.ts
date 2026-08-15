@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  DISCORD_BOT_INVITE_PERMISSIONS,
   describeEmptyAllowlist,
   describeRedactedCredential,
+  discordBotInviteUrl,
   resolveGuildList,
   resolveIdList,
 } from "../src/discord-commands.ts";
@@ -73,6 +75,11 @@ describe("Discord server allowlist resolution", () => {
     expect(resolveGuildList("", [], "999999999999999999")).toEqual(["999999999999999999"]);
     // Commands registered globally and nothing configured yet: nothing to admit.
     expect(resolveGuildList("", [], undefined)).toEqual([]);
+  });
+
+  it("builds a bot invite that does not use a signed 32-bit shift", () => {
+    expect(DISCORD_BOT_INVITE_PERMISSIONS).toBe(2_184_301_632);
+    expect(discordBotInviteUrl("123456789012345678")).toContain("client_id=123456789012345678");
   });
 
   it("tolerates spacing and stray separators in typed input", () => {

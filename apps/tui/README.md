@@ -11,7 +11,10 @@ activity). `CLANKIE_CONTROL_PLANE_URL` overrides the base URL (default
 `http://127.0.0.1:4310`; `CLANKIE_CAPTAIN_URL` is honored as a legacy alias).
 Plain prompts ride the selected server-owned conversation over the dispatch
 route with a durable per-surface replay cursor; there is no local scheduler and
-no state inference from terminal text.
+no state inference from terminal text. Type `$` at a token boundary to search
+Clankie's available skills, then complete `$skill-name` before the task. When
+Clankie loads a skill, the transcript records one compact `skill loaded` receipt
+instead of exposing the underlying `SKILL.md` read as a generic tool call.
 
 Run after installing with Node 24. The fullscreen face requires a TTY; the
 control subcommands are non-interactive:
@@ -129,6 +132,8 @@ src/shell/   The face shell: layout assembly, central input router, overlay +
              loader, prompt history. Extracted from v1's scripts/clankie.ts.
 src/commands.ts   Console slash commands (/help /conversation /trace /activity
                   /layout /clear /status /exit).
+src/connect-commands.ts  /connect (alias /integrations) for Linear, email, and
+                  Discord ([ADR 0093](../../docs/adr/0093-owner-authored-service-connections.md)).
 src/provider-commands.ts  /auth /provider /model /effort wizards (VUH-760) plus
                   the positional /image-model and /video-model (ADR 0085), over
                   @clankie/model-registry, @clankie/credential-broker, and
@@ -165,8 +170,9 @@ bin/              The clankie launcher, service registry/supervisor, and the
 - `!` on an empty input enters the inline shell escape (Esc exits; Ctrl+C kills the running command).
 - Esc detaches from an in-flight turn; the durable server-side turn continues
   and the face re-tails the conversation before sending another prompt.
-- Mouse: wheel scrolls, drag selects (OSC-52 copy), scrollbar gutter drags, click collapses tool blocks.
+- Mouse: wheel scrolls, drag selects (OSC-52 copy), scrollbar gutter drags, and clicking a tool block toggles its full arguments or result. With the keyboard, `Ctrl+T` focuses the transcript and Enter/Space toggles the selected block; Alt+Enter does the same without moving focus.
 - `/layout` moves the input/status bands, toggles the header, and picks the spinner (`CLANKIE_TUI_*` env vars seed the defaults).
+- `/connect` is how an owner gives him Linear, email, and Discord. Linear signs in with Linear's MCP OAuth (browser, no API key); an API key is an advanced fallback. Email takes IMAP/SMTP plus an app password (Gmail/iCloud/Fastmail/Outlook presets). Mail stays at the console. Discord is still a body: `/connect discord` opens `/discord`, which now includes a portal primer and `/discord invite`. `/auth mcp` redirects here ([ADR 0093](../../docs/adr/0093-owner-authored-service-connections.md)).
 - `/auth` manages provider credentials (masked API-key entry into the Keychain broker — LLM providers plus the featured `elevenlabs` voice credential — ChatGPT/Codex browser or device OAuth, Claude Pro/Max manual-code OAuth, local credential removal, and harness-login guidance); `/provider` chooses a provider context per model role; `/model` picks an actual model from that provider in the models.dev registry; `/effort` sets reasoning variants. `/image-model` and `/video-model` are positional rather than wizards (`/image-model openai gpt-image-2`, `/video-model xai grok-imagine-video-1.5`, plus `status` and `unset`) because each supported provider has one usable model; the service reads the resulting ref per request, so a change takes effect without a restart ([ADR 0085](../../docs/adr/0085-a-picture-he-made-is-something-he-said.md)). Provider intent stays process-local and is reconstructed from the configured `provider/model` ref after restart, so non-secret config has one authority in `~/.config/clankie/clankie.json`.
 - OpenAI API-key access is `openai/<model>`; ChatGPT subscription access is the
   explicit `openai-codex/<model>` provider. They never borrow each other's

@@ -108,8 +108,17 @@ export function buildProviderCommands(services: ProviderServices): FaceShellComm
       argumentHint: "[status]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
-        if (argument.trim() === "status") {
+        const selector = argument.trim().toLowerCase();
+        if (selector === "status") {
           await showAuthStatus(shell, services);
+          return;
+        }
+        if (selector === "mcp" || selector.startsWith("mcp ")) {
+          shell.insertCommandResult(
+            "/auth mcp",
+            "Service connections moved to /connect (linear, email, discord). /auth stays provider keys and subscriptions.",
+            "success",
+          );
           return;
         }
         await runAuthWizard(shell, services);

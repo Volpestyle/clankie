@@ -107,7 +107,7 @@ function renderTitle(title: string, tone: TranscriptBlockTone, theme: ClankieTra
   if (skill !== null) {
     const name = skill[1] ?? "skill";
     const status = skill[2] ?? "";
-    const label = status.toLowerCase() === "running" ? "loading skill" : "skill";
+    const label = ["running", "started"].includes(status.toLowerCase()) ? "loading skill" : "skill";
     return `${skillStatusGlyph(status, theme)} ${theme.bold(name)} ${theme.yellow(label)} ${theme.dim(status)}`;
   }
   const tool = /^Tool: (.+?) - (.+)$/u.exec(title);
@@ -252,8 +252,9 @@ function subagentStatusGlyph(status: string, theme: ClankieTranscriptBlockTheme)
 
 function skillStatusGlyph(status: string, theme: ClankieTranscriptBlockTheme): string {
   const normalized = status.toLowerCase();
-  if (normalized === "completed" || normalized === "done") return theme.green("✦");
-  if (normalized === "failed" || normalized === "error") return theme.red("✦");
+  if (normalized === "completed" || normalized === "done" || normalized === "loaded") return theme.green("✦");
+  if (normalized === "failed" || normalized === "error" || normalized.startsWith("failed "))
+    return theme.red("✦");
   if (normalized === "rejected" || normalized === "denied") return theme.yellow("✦");
   return theme.yellow("✦");
 }

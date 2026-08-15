@@ -61,7 +61,8 @@ tails. Conversations are files under `~/.clankie/captain/`.
   Authored tools: browser (catalog resolved live from the agent-browser MCP
   host), `generate_image` / `generate_video`, `start_play` / `stop_play`,
   `observe_room`, `observe_current_activity`, `get_self_state`,
-  `remember_episode`.
+  `remember_episode`. Linear search/create/comment after `/connect linear`.
+  Mail list/read/send after `/connect email` — operator console only.
 - **Leading agents.** Clankie leads coding agents through the herdr CLI over
   bash, guided by skills — there is no worker protocol. Agents coordinate
   through herdr and plain files.
@@ -74,6 +75,8 @@ tails. Conversations are files under `~/.clankie/captain/`.
   (Keychain), written by the TUI `/auth` flow and read by pi through a
   credential-store bridge. Persona is owner-authored in
   `~/.config/clankie/settings.json` and can never be set by a caller.
+  `/connect` stores Linear and mailbox credentials the same way; Discord
+  remains a body configured by `/discord` ([ADR 0093](adr/0093-owner-authored-service-connections.md)).
 
 ## Decisions that shaped this tree
 

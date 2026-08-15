@@ -20,6 +20,12 @@ export type ClankieAutocompleteOptions = {
   readonly listMcpConnectionNames?: () => Awaitable<readonly string[]>;
   readonly listMcpServerNames?: () => Awaitable<readonly string[]>;
   readonly listIntegrationConnectionNames?: () => Awaitable<readonly string[]>;
+  readonly listSkills?: () => Awaitable<readonly ClankieAutocompleteSkill[]>;
+};
+
+export type ClankieAutocompleteSkill = {
+  readonly name: string;
+  readonly description: string;
 };
 
 type ArgumentContext = {
@@ -149,7 +155,7 @@ export function clankieCommandCompletion(command: ClankieAutocompleteCommand): s
 }
 
 class ClankieAutocompleteProvider implements AutocompleteProvider {
-  readonly triggerCharacters: string[] = [];
+  readonly triggerCharacters: string[] = ["$"];
   private readonly commands: readonly ClankieAutocompleteCommand[];
   private readonly delegate: CombinedAutocompleteProvider;
   private readonly options: ClankieAutocompleteOptions;
@@ -172,6 +178,20 @@ class ClankieAutocompleteProvider implements AutocompleteProvider {
   ): Promise<AutocompleteSuggestions | null> {
     const currentLine = lines[cursorLine] ?? "";
     const textBeforeCursor = currentLine.slice(0, cursorCol);
+    const skillPrefix = skillMentionPrefix(textBeforeCursor);
+    if (skillPrefix !== undefined) {
+      const skills = await this.options.listSkills?.();
+      const items = fuzzyFilter(
+        [...(skills ?? [])],
+        skillPrefix.slice(1),
+        (skill) => `${skill.name} ${skill.description}`,
+      ).map((skill) => ({
+        value: skill.name,
+        label: `$${skill.name}`,
+        description: skill.description,
+      }));
+      return items.length === 0 ? null : { items, prefix: skillPrefix };
+    }
     if (!textBeforeCursor.trimStart().startsWith("/")) {
       return await this.delegate.getSuggestions(lines, cursorLine, cursorCol, options);
     }
@@ -197,6 +217,13 @@ class ClankieAutocompleteProvider implements AutocompleteProvider {
   ): { lines: string[]; cursorLine: number; cursorCol: number } {
     const currentLine = lines[cursorLine] ?? "";
     const textBeforeCursor = currentLine.slice(0, cursorCol);
+    if (prefix.startsWith("$")) {
+      const beforePrefix = currentLine.slice(0, Math.max(0, cursorCol - prefix.length));
+      const completed = `${beforePrefix}$${item.value} `;
+      const nextLines = [...lines];
+      nextLines[cursorLine] = completed + currentLine.slice(cursorCol).replace(/^\s+/u, "");
+      return { lines: nextLines, cursorLine, cursorCol: completed.length };
+    }
     if (!textBeforeCursor.trimStart().startsWith("/")) {
       return this.delegate.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
     }
@@ -215,6 +242,7 @@ class ClankieAutocompleteProvider implements AutocompleteProvider {
   shouldTriggerFileCompletion(lines: string[], cursorLine: number, cursorCol: number): boolean {
     const currentLine = lines[cursorLine] ?? "";
     const textBeforeCursor = currentLine.slice(0, cursorCol);
+    if (skillMentionPrefix(textBeforeCursor) !== undefined) return true;
     if (textBeforeCursor.trimStart().startsWith("/")) return true;
     return this.delegate.shouldTriggerFileCompletion?.(lines, cursorLine, cursorCol) ?? false;
   }
@@ -290,6 +318,10 @@ class ClankieAutocompleteProvider implements AutocompleteProvider {
       ...namesToItems(names ?? [], "connection"),
     ];
   }
+}
+
+function skillMentionPrefix(textBeforeCursor: string): string | undefined {
+  return /(?:^|\s)(\$[a-z0-9-]*)$/iu.exec(textBeforeCursor)?.[1];
 }
 
 function parseSlashInput(text: string): {
@@ -412,14 +444,16 @@ function commandCategory(commandName: string): string {
     ].includes(commandName)
   )
     return "runtime";
-  if (["mcp", "integrations", "browser"].includes(commandName)) return "tools";
-  if (["discord-token", "discord-scope", "voice"].includes(commandName)) return "discord";
+  if (["mcp", "integrations", "browser", "connect"].includes(commandName)) return "tools";
+  if (["discord-token", "discord-scope", "voice", "discord"].includes(commandName)) return "discord";
   if (commandName === "pet") return "desktop";
   return "command";
 }
 
 function staticArgumentSpec(commandName: string, context: ArgumentContext): StaticArgumentSpec {
   switch (commandName) {
+    case "discord":
+      return values(["status", "invite"], ["/discord status", "/discord invite"]);
     case "discord-token":
       return values(["status", "--user-token", "--voice"], ["/discord-token status"]);
     case "model":
@@ -520,6 +554,8 @@ function staticArgumentSpec(commandName: string, context: ArgumentContext): Stat
       return layoutArguments(context);
     case "mcp":
       return mcpArguments(context);
+    case "connect":
+      return connectArguments(context);
     case "voice":
       return voiceArguments(context);
     case "harness":
@@ -640,6 +676,14 @@ function videoModelArguments(context: ArgumentContext): StaticArgumentSpec {
   return values(
     ["status", "xai", "unset"],
     ["/video-model status", "/video-model xai grok-imagine-video-1.5"],
+  );
+}
+
+function connectArguments(context: ArgumentContext): StaticArgumentSpec {
+  if (context.args[0]?.toLowerCase() === "status") return { values: [], examples: ["/connect status"] };
+  return values(
+    ["status", "linear", "email", "discord"],
+    ["/connect status", "/connect linear", "/connect email", "/connect discord"],
   );
 }
 

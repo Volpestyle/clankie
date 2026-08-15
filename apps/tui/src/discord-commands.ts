@@ -69,11 +69,16 @@ export function buildDiscordCommands(services: DiscordCommandServices): FaceShel
       name: "discord",
       aliases: [],
       description: "Configure Discord ids, allowlists, and the activity plane",
-      argumentHint: "[status]",
+      argumentHint: "[status|invite]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
-        if (argument.trim() === "status") {
+        const selector = argument.trim().toLowerCase();
+        if (selector === "status") {
           await showDiscordStatus(shell, services);
+          return;
+        }
+        if (selector === "invite") {
+          await showDiscordInvite(shell, services);
           return;
         }
         await runDiscordWizard(shell, services);
@@ -81,6 +86,29 @@ export function buildDiscordCommands(services: DiscordCommandServices): FaceShel
     },
   ];
 }
+
+/**
+ * Bot invite permissions: View Channel, Send Messages, Embed Links, Attach
+ * Files, Read Message History, Add Reactions, Connect, Speak, Use VAD, Use
+ * Application Commands. Message Content is a privileged *intent*, not a bit
+ * here — the primer tells the owner to flip it in the portal.
+ */
+export const DISCORD_BOT_INVITE_PERMISSIONS = 2_184_301_632;
+
+export function discordBotInviteUrl(applicationId: string): string {
+  return (
+    `https://discord.com/oauth2/authorize?client_id=${applicationId}` +
+    `&permissions=${String(DISCORD_BOT_INVITE_PERMISSIONS)}&scope=bot%20applications.commands`
+  );
+}
+
+export const DISCORD_BOT_PRIMER = [
+  "1. Open https://discord.com/developers/applications and click New Application.",
+  "2. Bot → Add Bot → Reset Token. Paste that token under Tokens.",
+  "3. Privileged Gateway Intents: enable Message Content (required for text).",
+  "4. Copy the Application ID from General Information, then /discord invite.",
+  "5. Open the invite link, pick your server, and come back to set allowlists.",
+].join("\n");
 
 const SNOWFLAKE = /^\d{5,32}$/u;
 
@@ -230,7 +258,10 @@ function describeSettings(settings: DiscordSettings): string[] {
   ];
 }
 
-async function runDiscordWizard(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
+export async function runDiscordWizard(
+  shell: ClankieFaceShell,
+  services: DiscordCommandServices,
+): Promise<void> {
   const flow = shell.setupFlow;
   flow.begin("discord");
   try {
@@ -239,6 +270,17 @@ async function runDiscordWizard(shell: ClankieFaceShell, services: DiscordComman
         kind: "single",
         message: "Discord configuration",
         options: [
+          {
+            value: "primer",
+            label: "How to create the bot",
+            hint: "Discord developer portal",
+            description: "Any user can do this: create an application, copy the token, invite him.",
+          },
+          {
+            value: "invite",
+            label: "Invite link",
+            hint: "needs an application id",
+          },
           {
             value: "credentials",
             label: "Tokens",
@@ -274,6 +316,14 @@ async function runDiscordWizard(shell: ClankieFaceShell, services: DiscordComman
       if (choice === undefined || choice === "done") break;
       if (choice === "status") {
         await showDiscordStatus(shell, services);
+        continue;
+      }
+      if (choice === "primer") {
+        shell.insertCommandResult("/discord", DISCORD_BOT_PRIMER, "success");
+        continue;
+      }
+      if (choice === "invite") {
+        await showDiscordInvite(shell, services);
         continue;
       }
       if (choice === "export") {
@@ -595,6 +645,31 @@ async function editActivity(shell: ClankieFaceShell, services: DiscordCommandSer
   }));
   flow.renderLine(
     "Saved. An unverified activity is launchable only by app-team testers in servers under 25 members.",
+    "success",
+  );
+}
+
+export async function showDiscordInvite(
+  shell: ClankieFaceShell,
+  services: DiscordCommandServices,
+): Promise<void> {
+  const applicationId = (await services.settings.load()).discord.applicationId;
+  if (applicationId === undefined) {
+    shell.insertCommandResult(
+      "/discord invite",
+      `No application id stored yet.\n\n${DISCORD_BOT_PRIMER}`,
+      "error",
+    );
+    return;
+  }
+  shell.insertCommandResult(
+    "/discord invite",
+    [
+      "Open this as the Discord user who can add bots to the server:",
+      discordBotInviteUrl(applicationId),
+      "",
+      "Then enable text/voice under /discord. Message Content is a portal intent, not this link.",
+    ].join("\n"),
     "success",
   );
 }

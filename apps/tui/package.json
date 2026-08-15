@@ -24,6 +24,7 @@
     "@clankie/settings": "workspace:*",
     "@earendil-works/pi-tui": "0.84.1",
     "qrcode": "1.5.4",
+    "yaml": "catalog:",
     "zod": "4.4.3"
   },
   "devDependencies": {

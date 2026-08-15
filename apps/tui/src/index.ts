@@ -4,13 +4,18 @@
  */
 import { join, resolve } from "node:path";
 import { ClankieApiClient } from "@clankie/api-client";
-import { resolveOperatorCredential } from "@clankie/credential-broker";
+import {
+  resolveOperatorCredential,
+  runLinearBrowserLogin,
+  type ProviderCredential,
+} from "@clankie/credential-broker";
 import { loadConfig, type ClankieConfig } from "@clankie/model-provider";
 import { SettingsStore } from "@clankie/settings";
 import { ClankieFaceShell } from "./shell/shell.ts";
 import { buildConsoleCommands } from "./commands.ts";
 import { buildProviderCommands, createProviderServices } from "./provider-commands.ts";
-import { buildDiscordCommands } from "./discord-commands.ts";
+import { buildConnectCommands } from "./connect-commands.ts";
+import { buildDiscordCommands, runDiscordWizard, showDiscordInvite } from "./discord-commands.ts";
 import { buildPersonaCommands } from "./persona-commands.ts";
 import { buildVoiceCommands } from "./voice-commands.ts";
 import {
@@ -29,8 +34,10 @@ import { CaptainLaneTraceController, createCaptainLaneClient } from "./session/l
 import { HerdrRoster } from "./observation/herdr-roster.ts";
 import { PresencePoller } from "./observation/presence.ts";
 import { formatCaptainPresenceStatus } from "./shell/status-bar.ts";
+import { discoverClankieSkills } from "./skill-catalog.ts";
 
 const repoRoot = resolve(import.meta.dirname, "..", "..", "..");
+const skillCatalog = discoverClankieSkills(repoRoot);
 
 if (process.stdin.isTTY !== true || process.stdout.isTTY !== true) {
   process.stderr.write("clankie: the operator console requires a TTY\n");
@@ -112,6 +119,15 @@ const conversationsContext = {
   },
 };
 
+const settingsStore = new SettingsStore();
+const brokeredCommands = {
+  settings: settingsStore,
+  listCredentials: () => services.store.list(),
+  setCredential: (providerId: string, key: string) => services.store.set(providerId, { type: "api", key }),
+  storeProviderCredential: (providerId: string, credential: ProviderCredential) =>
+    services.store.set(providerId, credential),
+  removeCredential: (providerId: string) => services.store.delete(providerId),
+};
 const commands = [
   ...buildConsoleCommands({
     conversations: conversationsContext,
@@ -126,19 +142,15 @@ const commands = [
       : {}),
   }),
   ...buildProviderCommands(services),
-  ...buildDiscordCommands({
-    settings: new SettingsStore(),
-    listCredentials: () => services.store.list(),
-    setCredential: (providerId, key) => services.store.set(providerId, { type: "api", key }),
-    removeCredential: (providerId) => services.store.delete(providerId),
+  ...buildConnectCommands({
+    ...brokeredCommands,
+    runDiscordWizard,
+    showDiscordInvite,
+    runLinearOauth: () => runLinearBrowserLogin(),
   }),
-  ...buildPersonaCommands({ settings: new SettingsStore() }),
-  ...buildVoiceCommands({
-    settings: new SettingsStore(),
-    listCredentials: () => services.store.list(),
-    setCredential: (providerId, key) => services.store.set(providerId, { type: "api", key }),
-    removeCredential: (providerId) => services.store.delete(providerId),
-  }),
+  ...buildDiscordCommands(brokeredCommands),
+  ...buildPersonaCommands({ settings: settingsStore }),
+  ...buildVoiceCommands(brokeredCommands),
 ];
 
 function stageFromEnv(): { label?: string; value?: string } {
@@ -166,6 +178,7 @@ const baseBannerFields = {
 const shell = new ClankieFaceShell({
   commands,
   cwd: repoRoot,
+  autocomplete: { listSkills: () => skillCatalog },
   bannerFields: baseBannerFields,
   historyPath: join(repoRoot, ".data", "tui", "prompt-history.jsonl"),
   statusExtras: () => [

@@ -146,6 +146,13 @@ const commands: ClankieAutocompleteCommand[] = [
     takesArgument: true,
   },
   {
+    name: "connect",
+    aliases: ["integrations"],
+    description: "Connect Linear, email, and Discord so Clankie can use them",
+    argumentHint: "[status|linear|email|discord]",
+    takesArgument: true,
+  },
+  {
     name: "mcp",
     aliases: [],
     description: "Manage dynamic MCPs and curated MCP connection auth",
@@ -191,6 +198,10 @@ const commands: ClankieAutocompleteCommand[] = [
 const provider = createClankieAutocompleteProvider(commands, process.cwd(), {
   listMcpConnectionNames: () => ["linear", "figma"],
   listMcpServerNames: () => ["local-tools", "browser-tools"],
+  listSkills: () => [
+    { name: "herdr", description: "Lead coding agents in visible panes" },
+    { name: "trace-clankie", description: "Read Clankie's durable trails" },
+  ],
 });
 
 const signal = new AbortController().signal;
@@ -298,6 +309,12 @@ describe("argument suggestions", () => {
     expect((await items("/layout status b", 16)).some((item) => item.value === "below")).toBe(true);
   });
 
+  it("completes /connect catalog arguments", async () => {
+    expect((await items("/connect li", 11)).some((item) => item.value === "linear")).toBe(true);
+    expect((await items("/connect em", 11)).some((item) => item.value === "email")).toBe(true);
+    expect((await items("/connect d", 10)).some((item) => item.value === "discord")).toBe(true);
+  });
+
   it("completes integrations, browser, and spawn arguments", async () => {
     expect((await items("/integrations st", 16)).some((item) => item.value === "status")).toBe(true);
     expect((await items("/integrations ver", 17)).some((item) => item.value === "version-control")).toBe(
@@ -333,6 +350,29 @@ describe("argument suggestions", () => {
     );
 
     expect((await items("/mcp remove loc", 15)).some((item) => item.value === "local-tools")).toBe(true);
+  });
+});
+
+describe("skill suggestions", () => {
+  it("completes a $ skill mention at a token boundary", async () => {
+    expect(provider.triggerCharacters).toEqual(["$"]);
+    const suggestions = required(
+      await provider.getSuggestions(["Use $her"], 0, 8, { signal }),
+      "skill suggestions",
+    );
+    expect(suggestions.prefix).toBe("$her");
+    expect(suggestions.items[0]).toMatchObject({
+      value: "herdr",
+      label: "$herdr",
+      description: "Lead coding agents in visible panes",
+    });
+    expect(
+      provider.applyCompletion(["Use $her"], 0, 8, suggestions.items[0]!, suggestions.prefix),
+    ).toMatchObject({ lines: ["Use $herdr "], cursorLine: 0, cursorCol: 11 });
+  });
+
+  it("does not treat a dollar sign inside a token as a skill mention", async () => {
+    expect(await provider.getSuggestions(["price$her"], 0, 9, { signal })).toBeNull();
   });
 });
 

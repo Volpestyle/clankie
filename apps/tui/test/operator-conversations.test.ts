@@ -613,6 +613,23 @@ describe("TUI selected-conversation prompt path", () => {
       clickToggle: true,
       collapsed: true,
     });
+    const detailedTool = { ...shortTool, phase: "started" as const, detail: '{\n  "path": "README.md"\n}' };
+    expect(renderOperatorConversationEvent(detailedTool)).toContain("Arguments:\n\n```json");
+    expect(optionsFor(detailedTool)).toEqual({ clickToggle: true, collapsed: true });
+    expect(renderOperatorConversationEvent({ ...shortTool, detail: "line one\nline two" })).toContain(
+      "Result:\n\n```\nline one\nline two\n```",
+    );
+    const skillTool: OperatorConversationStreamEvent = {
+      ...shortTool,
+      name: "read",
+      skillName: "herdr-lead",
+    };
+    expect(renderOperatorConversationEvent({ ...skillTool, phase: "started" })).toBeUndefined();
+    expect(renderOperatorConversationEvent(skillTool)).toBe("**Skill: herdr-lead - loaded**");
+    expect(renderOperatorConversationEvent({ ...skillTool, phase: "failed" })).toBe(
+      "**Skill: herdr-lead - failed to load**",
+    );
+    expect(optionsFor(skillTool)).toBeUndefined();
     expect(
       optionsFor({
         ...base,
@@ -636,7 +653,7 @@ describe("TUI selected-conversation prompt path", () => {
     });
     sink.event({ ...shortTool, summary: "a\nb" });
     expect(inserted).toEqual([
-      ["**Tool completed**\n\nread_file · a\nb", { clickToggle: true, collapsed: true }],
+      ["**Tool: read_file - completed**\n\na\nb", { clickToggle: true, collapsed: true }],
     ]);
   });
 });
