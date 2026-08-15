@@ -73,8 +73,17 @@ export function normalizeProviderId(providerId: string): string {
   return normalized;
 }
 
-function isMinecraftProviderId(providerId: string): boolean {
-  return providerId === "minecraft" || providerId.startsWith("minecraft/");
+/**
+ * Provider namespaces whose secrets are licensed-account material (Minecraft and the
+ * Microsoft/Xbox identity chain that mints its tokens). These never touch the plaintext
+ * file fallback; matching is separator-insensitive so `minecraft.java`, `minecraft_java`,
+ * and `MinecraftJava` all classify. Over-matching fails closed into the Keychain path.
+ */
+const KEYCHAIN_ONLY_PROVIDER_ROOTS = ["minecraft", "microsoft", "mojang", "msa", "xbox", "xbl"];
+
+function isKeychainOnlyProviderId(providerId: string): boolean {
+  const collapsed = providerId.replace(/[^a-z0-9]/g, "");
+  return KEYCHAIN_ONLY_PROVIDER_ROOTS.some((root) => collapsed === root || collapsed.startsWith(root));
 }
 
 /** An entry in the credential file that failed schema validation and was skipped on read. */
@@ -121,10 +130,10 @@ export class FileCredentialStore implements CredentialStore {
 
   public set(providerId: string, credential: ProviderCredential): Promise<void> {
     const id = normalizeProviderId(providerId);
-    if (isMinecraftProviderId(id)) {
+    if (isKeychainOnlyProviderId(id)) {
       throw new CredentialOperationError(
         "unsupported_platform",
-        "Licensed Minecraft credentials require the runner-owned macOS Keychain store.",
+        "Licensed Minecraft/Microsoft account credentials require the runner-owned macOS Keychain store.",
       );
     }
     const parsed = ProviderCredentialSchema.parse(credential);
@@ -195,10 +204,10 @@ export class FileCredentialStore implements CredentialStore {
         issues.push({ providerId: id, message: String(error) });
         continue;
       }
-      if (isMinecraftProviderId(normalizedId)) {
+      if (isKeychainOnlyProviderId(normalizedId)) {
         issues.push({
           providerId: id,
-          message: "Licensed Minecraft credentials are not loaded from plaintext files.",
+          message: "Licensed Minecraft/Microsoft account credentials are not loaded from plaintext files.",
         });
         continue;
       }

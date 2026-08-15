@@ -25,8 +25,10 @@ This runner-only factory accepts the dedicated macOS Keychain service and has
 no file fallback or environment override. Its operation failures are reduced
 to `redactCredentialError()` summaries before entering events or support data;
 raw Microsoft/Minecraft authentication responses remain local secret material.
-The generic file store refuses to write or load `minecraft` provider IDs, so a
-caller cannot accidentally route a licensed account through the CI fallback.
+The generic file store refuses to write or load the licensed-account identity
+namespace — `minecraft`, `microsoft`, `mojang`, `msa`, `xbox`, and `xbl` roots,
+matched separator-insensitively — so a caller cannot accidentally route a
+licensed account through the CI fallback under any natural provider name.
 
 The Keychain implementation invokes `/usr/bin/security` through `execFile`, not
 a shell. Secret JSON is passed as a single argv value because the CLI has no
