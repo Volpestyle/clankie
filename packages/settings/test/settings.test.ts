@@ -166,6 +166,24 @@ describe("discord settings resolution", () => {
     expect(overridden.overriddenByEnvironment).toContain("CLANKIE_POSSESSOR_VOICE_ENABLED");
   });
 
+  it("carries the Discord system-actor allowlist and lets the environment override it", () => {
+    expect(DiscordSettingsSchema.parse({}).systemActorUserIds).toEqual([]);
+    expect(discordSettingsToEnvironment(stored)["DISCORD_SYSTEM_ACTOR_USER_IDS"]).toBeUndefined();
+
+    const allowlisted = DiscordSettingsSchema.parse({
+      systemActorUserIds: ["555555555555555555"],
+    });
+    expect(discordSettingsToEnvironment(allowlisted)["DISCORD_SYSTEM_ACTOR_USER_IDS"]).toBe(
+      "555555555555555555",
+    );
+
+    const overridden = resolveDiscordSettings(allowlisted, {
+      DISCORD_SYSTEM_ACTOR_USER_IDS: "111111111111111111,222222222222222222",
+    } as NodeJS.ProcessEnv);
+    expect(overridden.settings.systemActorUserIds).toEqual(["111111111111111111", "222222222222222222"]);
+    expect(overridden.overriddenByEnvironment).toContain("DISCORD_SYSTEM_ACTOR_USER_IDS");
+  });
+
   it("carries the voice consent policy, defaulting to explicit opt-in", () => {
     // Presence-as-consent is an owner decision (ADR 0045's boundary made
     // configurable); the default preserves the explicit policy exactly.

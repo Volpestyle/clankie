@@ -58,14 +58,18 @@ tails. Conversations are files under `~/.clankie/captain/`.
 ## Where things run
 
 - **Captain tools.** Coding tools (read/bash/edit/write) are pi built-ins.
-  Authored tools: browser (catalog resolved live from the agent-browser MCP
-  host), `generate_image` / `generate_video`, `start_play` / `stop_play`,
-  `observe_room`, `observe_current_activity`, `get_self_state`,
-  `remember_episode`. Linear search/create/comment after `/connect linear`.
-  Mail list/read/send after `/connect email` — operator console only.
+  They attach to the operator console and to Discord text turns whose actor
+  is on `discord.systemActorUserIds` ([ADR 0095](adr/0095-discord-system-actors.md)).
+  Voice never gets them. Authored tools: browser (catalog resolved live from
+  the agent-browser MCP host), `generate_image` / `generate_video`,
+  `start_play` / `stop_play`, `observe_room`, `observe_current_activity`,
+  `get_self_state`, `remember_episode`. Linear search/create/comment after
+  `/connect linear`. Mail list/read/send after `/connect email` — operator
+  console only.
 - **Leading agents.** Clankie leads coding agents through the herdr CLI over
-  bash, guided by skills — there is no worker protocol. Agents coordinate
-  through herdr and plain files.
+  bash, guided by skills — there is no worker protocol. He is a service, not
+  a herdr pane; `herdr` talks to the local socket. Agents coordinate through
+  herdr and plain files.
 - **Game bodies.** `integrations/gba-emulator` and
   `integrations/minecraft-mineflayer`, booted and leased inside the service;
   `body-lock` keeps one writer on the emulator across processes (the free-play
@@ -77,6 +81,8 @@ tails. Conversations are files under `~/.clankie/captain/`.
   `~/.config/clankie/settings.json` and can never be set by a caller.
   `/connect` stores Linear and mailbox credentials the same way; Discord
   remains a body configured by `/discord` ([ADR 0093](adr/0093-owner-authored-service-connections.md)).
+  Who may ask him to drive this machine from Discord is
+  `discord.systemActorUserIds` ([ADR 0095](adr/0095-discord-system-actors.md)).
 
 ## Decisions that shaped this tree
 

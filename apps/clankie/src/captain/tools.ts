@@ -31,8 +31,9 @@ function json(value: unknown): { content: [{ type: "text"; text: string }]; deta
 
 /**
  * The captain's authored tool bank. Coding tools (read/bash/edit/write) are
- * pi built-ins and are not defined here. Herdr leadership goes through bash +
- * the herdr skill, not bespoke tools.
+ * pi built-ins and are not defined here. They attach to the operator console
+ * and to Discord text turns whose actor is on `systemActorUserIds`. Herdr
+ * leadership goes through bash + the herdr skill, not bespoke tools.
  */
 export function captainTools(
   deps: CaptainDeps,

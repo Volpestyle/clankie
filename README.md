@@ -32,8 +32,10 @@ herdr panes you can watch.
 - **Makes things.** Image and video generation behind one provider-neutral
   seam (OpenAI, Google, Grok); a browser via the agent-browser MCP host.
 - **Codes and leads.** The same pi coding tools every agent has, plus the
-  herdr CLI for fanning work out to visible agent panes. No mission protocol —
-  he delegates, watches, and reports what actually happened.
+  herdr CLI for fanning work out to visible agent panes — from the console,
+  and from Discord when the person asking is on the system-actor allowlist.
+  No mission protocol — he delegates, watches, and reports what actually
+  happened.
 - **One Clankie everywhere.** The TUI, Discord, voice, and gameplay are rooms,
   not separate agents: he can read his other rooms, and his persona is
   owner-authored settings, never caller input.

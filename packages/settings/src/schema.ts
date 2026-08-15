@@ -27,6 +27,15 @@ export const DiscordSettingsSchema = z
     ambientUserIds: SnowflakeListSchema,
     approvalRoleIds: SnowflakeListSchema,
     ownerUserId: SnowflakeSchema.optional(),
+    /**
+     * Discord users whose text turns get the operator's machine tools
+     * (bash, read, write, edit — and therefore herdr). Empty means nobody:
+     * Discord stays social. The operator console is always privileged and
+     * does not consult this list. Distinct from `ownerUserId` (DM policy)
+     * and `ambientUserIds` (slash-command tier) so those policies can move
+     * without handing out a shell.
+     */
+    systemActorUserIds: SnowflakeListSchema,
 
     textIngressEnabled: z.boolean().default(false),
     ingressGuildIds: SnowflakeListSchema,

@@ -53,3 +53,7 @@ ids, a Linear default team, an IMAP host and username — write here.
 
 `/discord status` prints the effective configuration, whether `discord_bot` is
 present in the broker, and any environment overrides in effect.
+
+`discord.systemActorUserIds` is the Discord users whose text turns get bash,
+files, and herdr. Empty means nobody — Discord stays social. It is not
+`ownerUserId` (DM policy) and not `ambientUserIds` (slash commands).

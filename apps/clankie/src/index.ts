@@ -325,7 +325,7 @@ const captain = createCaptain(
     },
     resolveDiscordAttachments: createDiscordAttachmentResolver(),
   },
-  { repoRoot, stateDir: join(stateRoot, "captain") },
+  { repoRoot, stateDir: join(stateRoot, "captain"), settings: connectionSettings },
 );
 
 const clankie = await createClankieApp({

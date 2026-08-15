@@ -239,6 +239,7 @@ function describeSettings(settings: DiscordSettings): string[] {
     showList("ambient users", settings.ambientUserIds),
     showList("approval roles", settings.approvalRoleIds),
     show("owner user id", settings.ownerUserId),
+    showList("system actors", settings.systemActorUserIds),
     "",
     `text ingress: ${settings.textIngressEnabled ? "enabled" : "disabled"}`,
     showList("  ingress guilds", settings.ingressGuildIds),
@@ -294,6 +295,13 @@ export async function runDiscordWizard(
             description: "Application id, guild id, and the roles granted the ambient command tier.",
           },
           {
+            value: "system",
+            label: "Machine control from Discord",
+            hint: "who may ask him to drive herdr / the shell",
+            description:
+              "Discord users whose text turns get bash, files, and herdr. Empty means nobody — Discord stays social. The operator console is always privileged.",
+          },
+          {
             value: "ingress",
             label: "Text chat",
             hint: "channels Clankie reads",
@@ -332,6 +340,7 @@ export async function runDiscordWizard(
       }
       if (choice === "credentials") await editCredentials(shell, services);
       else if (choice === "core") await editCore(shell, services);
+      else if (choice === "system") await editSystemActors(shell, services);
       else if (choice === "ingress") await editIngress(shell, services);
       else if (choice === "voice") await editVoice(shell, services);
       else if (choice === "activity") await editActivity(shell, services);
@@ -463,6 +472,29 @@ async function editCore(shell: ClankieFaceShell, services: DiscordCommandService
     ...(ambientUsers.trim() ? { ambientUserIds: splitList(ambientUsers) } : {}),
   }));
   flow.renderLine("Saved server, application, and roles.", "success");
+}
+
+async function editSystemActors(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
+  const flow = shell.setupFlow;
+  const current = (await services.settings.load()).discord;
+
+  const typed = await flow.readText({
+    message:
+      "Discord user ids who may ask him to control this machine (comma separated) — bash, files, herdr. Blank keeps the current list. Empty list means nobody; Discord stays social.",
+    placeholder:
+      current.systemActorUserIds.join(",") || current.ownerUserId || "your Discord user id",
+    validate: validateSnowflakeList,
+  });
+  if (typed === undefined) return;
+
+  const systemActorUserIds = resolveIdList(typed, current.systemActorUserIds);
+  await apply(services, (discord) => ({ ...discord, systemActorUserIds }));
+  flow.renderLine(
+    systemActorUserIds.length === 0
+      ? "Saved machine-control allowlist (empty — Discord stays social)."
+      : `Saved machine-control allowlist (${String(systemActorUserIds.length)} user${systemActorUserIds.length === 1 ? "" : "s"}).`,
+    "success",
+  );
 }
 
 async function editIngress(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
