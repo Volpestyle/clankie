@@ -31,10 +31,10 @@ input consuming frames + typed RAM-derived state + framebuffer/RAM digests):
   the SHA-256 digests pinned in the selected fixture. The gameplay decoder is
   pinned to FireRed US v1.0 and derives overworld position/facing, the live map
   collision grid, encrypted party records and legal moves, inventory pockets,
-  dialog, start/party/bag menus, the naming screen (typed text, keyboard page,
-  and what is being named), and battle input/outcome from EWRAM, IWRAM, and
-  the pinned ROM. An unsupported ROM identity, pointer, checksum, value, menu
-  state, or battle outcome fails closed.
+  dialog, start/party/bag menus, the HELP overlay, the naming screen (typed
+  text, keyboard page, and what is being named), and battle input/outcome from
+  EWRAM, IWRAM, and the pinned ROM. An unsupported ROM identity, pointer,
+  checksum, value, menu state, or battle outcome fails closed.
 - `MgbaVisualCore` — the same real, pinned mGBA body for Pokémon Emerald
   BPEE rev 0, booted from an operator-local digest-pinned title savestate. It
   exposes the real framebuffer, raw buttons, RAM digest, and checkpoints. Until
@@ -208,7 +208,7 @@ his notes ride across the jump — the world rewinds, the mind does not.
 Failure is a turn outcome, never an exception: `rejected_by_adapter`,
 `invalid_decision`, and `mind_failed` are all recorded and the run continues —
 and the refusal reason is the turn's effect line, so a rejected action reads
-as the refusal it was, never as a fabricated result (ADR 0072). A `scene`
+as the refusal it is, never as a fabricated result (ADR 0072). A `scene`
 observation carries `mode`, `inputReady`, and `waitingForDialogAdvance`, so a
 scripted hold or an undecoded screen announces itself instead of masquerading
 as a stuck overworld.

@@ -294,6 +294,14 @@ describe("version-pinned FireRed state decoder", () => {
       cursor: 0,
       entries: [{ id: "cancel" }],
     });
+
+    // HELP intercepts input without replacing the bag's callback or open flag.
+    memory.ewramView.setUint8(ewramOffset(0x0203f177), 1);
+    expect(decodeFireRedState(memory, rom).menu).toEqual({
+      menuId: "help-system",
+      cursor: 0,
+      entries: [],
+    });
   });
 
   it("decodes the naming screen instead of leaving the overworld to lie", () => {
@@ -366,6 +374,9 @@ describe("version-pinned FireRed state decoder", () => {
     const rom = syntheticRom();
     memory.iwramView.setUint32(iwramOffset(0x030030f4), 0x080565b5, true);
     expect(decodeFireRedState(memory, rom).fieldInputReady).toBe(true);
+    memory.ewramView.setUint8(ewramOffset(0x0203f177), 1);
+    expect(decodeFireRedState(memory, rom).fieldInputReady).toBe(false);
+    memory.ewramView.setUint8(ewramOffset(0x0203f177), 0);
     memory.iwramView.setUint8(iwramOffset(0x03000f9c), 1);
     expect(decodeFireRedState(memory, rom).fieldInputReady).toBe(false);
   });

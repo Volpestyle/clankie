@@ -135,6 +135,38 @@ describe("free play", () => {
     expect(JSON.stringify(result.turns)).not.toContain("data:image");
   });
 
+  it("blames the action for what the action changed, not for idling while he thought", async () => {
+    // The console keeps running between the screen he decided on and the moment
+    // the action dispatches (ADR 0047), so a digest sampled at observation
+    // drifts with ambient animation across the whole decision. Diffing from it
+    // told him a fruitless A press had changed the screen, and cost him the
+    // next turn to work out that it had not.
+    //
+    // The three samples are: what he was shown, what stood there when the
+    // action went in, and what stood there after. The last two match, because
+    // the press did nothing — so the honest answer is "nothing happened".
+    const digests = ["a".repeat(64), "b".repeat(64), "b".repeat(64)];
+    let sample = 0;
+    const still = overworld(100);
+    const result = await runFreePlay({
+      io: {
+        observe: (kind) => {
+          if (kind !== "overworld") throw new Error(`no ${kind} view`);
+          return still;
+        },
+        act: () => Promise.resolve(completed()),
+        pause: () => Promise.resolve(),
+        resume: () => Promise.resolve(),
+      },
+      mind: mind([press("a", "talk to the kid")]),
+      turns: 1,
+      framebufferSha256: () => digests[Math.min(sample++, digests.length - 1)] ?? null,
+    });
+
+    expect(result.turns[0]?.effect).toContain("no visible change");
+    expect(result.turns[0]?.effect).not.toContain("ambient animation");
+  });
+
   it("survives an adapter rejection and keeps playing", async () => {
     const act = vi
       .fn<() => Promise<EnvironmentActionResult>>()

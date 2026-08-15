@@ -56,6 +56,18 @@ function firstOfKind(
   return observations.find((observation) => observation.kind === kind) ?? null;
 }
 
+function heldScreenOf(observations: readonly GbaEmulatorObservation[]): "battle" | "transition" | null {
+  const data = (
+    firstOfKind(observations, "scene") as unknown as {
+      data?: { mode?: string; inputReady?: boolean };
+    } | null
+  )?.data;
+  if (data === undefined) return null;
+  if (data.mode === "battle" || data.mode === "battle_won" || data.mode === "battle_lost") return "battle";
+  if (data.inputReady === false) return "transition";
+  return null;
+}
+
 const DIRECTIONS = new Set(["up", "down", "left", "right"]);
 
 /** The direction a button press attempted, or null for a non-directional action. */
@@ -81,6 +93,8 @@ const DIALOG_ENDINGS: Readonly<Record<string, string>> = {
   script_holding: "a script still holds the screen with no readable box — it may need more time",
   input_bound_reached: "the input budget ran out; more text remains",
   frame_bound_reached: "the frame budget ran out; more text remains",
+  choice_unlisted:
+    "the box did not advance — a Yes/No or list the decoder does not list is probably waiting; look at the frame and press A, not select_menu_entry",
 };
 
 function describeDialogAdvance(outcome: Record<string, unknown> | undefined): string {
@@ -99,6 +113,15 @@ function describeDialogAdvance(outcome: Record<string, unknown> | undefined): st
   return `read: "${text.slice(0, DIALOG_TRANSCRIPT_LIMIT)}" — ${reason}`;
 }
 
+function walkStopReason(outcome: Record<string, unknown>): "battle" | "transition" | "npc" {
+  const named = outcome["blockedBecause"];
+  if (named === "battle" || named === "transition" || named === "npc") return named;
+  const mode = outcome["mode"];
+  if (mode === "battle" || mode === "battle_won" || mode === "battle_lost") return "battle";
+  if (outcome["inputReady"] === false) return "transition";
+  return "npc";
+}
+
 /** Bounded walk summary from the adapter's own account of the route. */
 function describeWalk(
   action: { x: number; y: number },
@@ -115,9 +138,23 @@ function describeWalk(
     return `walked ${steps} steps and arrived at (${String(action.x)},${String(action.y)})`;
   }
   if (blocked != null && typeof blocked.x === "number" && typeof blocked.y === "number") {
+    const at = `(${String(blocked.x)},${String(blocked.y)})`;
+    const reason = walkStopReason(outcome);
+    if (reason === "battle") {
+      return (
+        `walked ${steps} of ${planned} steps, then a battle started at ${at} — ` +
+        "use advance_dialog to read the intro; it stops at the command menu"
+      );
+    }
+    if (reason === "transition") {
+      return (
+        `walked ${steps} of ${planned} steps, then a transition held the screen at ${at} — ` +
+        "wait it out rather than stepping again"
+      );
+    }
     return (
       `walked ${steps} of ${planned} steps, then the way was blocked at ` +
-      `(${String(blocked.x)},${String(blocked.y)}) by something the map does not show — an NPC, ` +
+      `${at} by something the map does not show — an NPC, ` +
       "probably; step around it or talk to it"
     );
   }
@@ -286,8 +323,21 @@ export function observeEffect(input: {
           enteredMap: false,
         };
       }
-      // Already facing that way and still did not move: a real obstacle.
+      // Already facing that way and still did not move: a real obstacle —
+      // unless the scene says the screen left the overworld.
       if (facingAfter === null || facingAfter === FACING_FOR_BUTTON[direction]) {
+        const held = heldScreenOf(input.after);
+        if (held === "battle") {
+          return { summary: "a battle started", refused: null, position: after, enteredMap: false };
+        }
+        if (held === "transition") {
+          return {
+            summary: "a transition is holding the screen — wait it out rather than pressing into it",
+            refused: null,
+            position: after,
+            enteredMap: false,
+          };
+        }
         return {
           summary: `position unchanged — ${direction} is blocked from (${String(before.x)},${String(before.y)})`,
           refused: { position: before, direction },

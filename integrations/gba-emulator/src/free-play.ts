@@ -509,6 +509,18 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     let rejection: string | null = null;
     /** Set only by an accepted body action, whose effect no diff can read. */
     let bodySummary: string | null = null;
+    /**
+     * The screen as it stands the instant before the action, which is not the
+     * screen he was shown when he decided.
+     *
+     * `record.framebufferSha256` is sampled at observation, and the console now
+     * keeps running while he thinks (ADR 0047) — so diffing from it attributes
+     * every drop of ambient animation across a ten-second decision to whatever
+     * he did at the end of it. On 2026-08-15 that told him a fruitless A press
+     * had changed the screen, and cost him the next turn to work out it had
+     * not. Sampling here narrows the window back to the action itself.
+     */
+    const frameBefore = input.framebufferSha256?.() ?? null;
     if (chosen.kind === "load_checkpoint" || chosen.kind === "restart_game") {
       // The body's saved time, not the emulator (ADR 0075): dispatched to the
       // injected checkpoint port, never to io.act — the frozen catalog does
@@ -562,9 +574,9 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     }
 
     // Re-observe and diff, so the turn records what changed rather than only
-    // that the adapter took the button. The frame digest is sampled digest-to-
-    // digest around the action — the core only runs frames the action asked
-    // for, so the comparison spans exactly what this turn did to the screen.
+    // that the adapter took the button. The frame digest is sampled from just
+    // before the action to just after it, so the comparison spans what this
+    // turn did to the screen and not the idling the console did meanwhile.
     //
     // A rejected action never ran, so diffing around it would invent an effect
     // — the worst case was a refused advance_dialog reading as "read no new
@@ -588,10 +600,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
               after: afterObservations,
               action: chosen as GbaEmulatorAction,
               outcome: actionOutcome,
-              screenChanged:
-                record.framebufferSha256 !== null && frameAfter !== null
-                  ? frameAfter !== record.framebufferSha256
-                  : null,
+              screenChanged: frameBefore !== null && frameAfter !== null ? frameAfter !== frameBefore : null,
             });
     progress.record(effect, accepted);
     record.effect = effect.summary.slice(0, 200);

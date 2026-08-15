@@ -157,6 +157,24 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
   private readonly pendingWaits = new Set<string>();
   private readonly evidence: GbaEmulatorEvidenceEvent[] = [];
   private readonly evidencePolicy: GbaEvidencePolicy;
+  /**
+   * Tiles that stopped a route this session, keyed by the map they are on.
+   *
+   * Tile collision does not include NPCs, so the planner routes straight
+   * through one and the walk dies on it. Without this the next plan picks the
+   * same shortest route and dies on the same tile: on 2026-08-15 four
+   * consecutive routes to Viridian's Pokémon Center were funnelled into the
+   * old man at (29,17), and the fourth planned 44 steps for a 4-tile trip to
+   * get back to him. He read four identical failures as a wrong destination
+   * and spent 40 turns searching buildings.
+   *
+   * Remembered rather than timed out because an NPC that has moved costs one
+   * unnecessary detour, while an NPC that has not costs the whole route again.
+   * The forgetting is the fallback in `walk_to`: a target only reachable
+   * through a remembered tile re-plans against the raw grid, so this can slow
+   * a route down but can never make a reachable tile unreachable.
+   */
+  private readonly blockedTiles = new Map<string, Set<string>>();
   private rolledWindows = 0;
   private droppedEvidenceEvents = 0;
   private observationCount = 0;
@@ -193,7 +211,7 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
     return Promise.resolve();
   }
 
-  public startAction(
+  public async startAction(
     commandInput: EnvironmentStartActionCommand,
   ): Promise<EnvironmentAdapterActionCompletion | void> {
     const parsed = GbaEmulatorStartActionCommandSchema.safeParse(commandInput);
@@ -224,7 +242,7 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
         this.pendingWaits.add(command.actionId);
         return Promise.resolve();
       }
-      const outcome = this.apply(command.actionId, command.action.action, command.action.limits);
+      const outcome = await this.apply(command.actionId, command.action.action, command.action.limits);
       const completion: EnvironmentAdapterActionCompletion = { status: "completed", outcome };
       this.completed.set(command.actionId, completion);
       return Promise.resolve(structuredClone(completion));
@@ -517,11 +535,37 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
     });
   }
 
-  private apply(
+  /**
+   * Note that something the collision grid cannot see stopped a route here.
+   *
+   * Bounded per map because these are guesses about a world that moves: a long
+   * session in one town would otherwise accumulate an avoid-list that routes
+   * around NPCs who wandered off an hour ago. Insertion order is the eviction
+   * order, so the set holds the most recent obstructions.
+   */
+  private rememberBlocked(mapId: string, tile: { x: number; y: number }): void {
+    let tiles = this.blockedTiles.get(mapId);
+    if (tiles === undefined) {
+      tiles = new Set<string>();
+      this.blockedTiles.set(mapId, tiles);
+    }
+    const id = `${String(tile.x)},${String(tile.y)}`;
+    // Re-inserted rather than kept in place, so a tile that keeps blocking
+    // stays the freshest entry instead of aging out under quieter ones.
+    tiles.delete(id);
+    tiles.add(id);
+    while (tiles.size > MAX_REMEMBERED_BLOCKED_TILES) {
+      const oldest = tiles.values().next();
+      if (oldest.done === true) break;
+      tiles.delete(oldest.value);
+    }
+  }
+
+  private async apply(
     actionId: string,
     action: Exclude<GbaEmulatorAction, { kind: "wait" }>,
     limits: GbaEmulatorActionLimits,
-  ): Record<string, unknown> {
+  ): Promise<Record<string, unknown>> {
     if (this.evidence.length >= this.scenario.maxEvidenceEvents && !this.rollEvidenceWindow()) {
       this.markStateUncertain("Bounded evidence capacity was exceeded");
       throw closed("evidence_bound_exceeded");
@@ -547,7 +591,7 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
         // bump animation is itself a state change.
         const before = this.core.gameState();
         for (let press = 0; press < repeat; press += 1) {
-          this.core.pressButton(action.button, action.holdFrames);
+          await this.core.pressButton(action.button, action.holdFrames);
         }
         const state = this.core.gameState();
         this.record(
@@ -611,6 +655,12 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
         const warp =
           start.exits?.warps.find((candidate) => candidate.x === target.x && candidate.y === target.y) ??
           null;
+        // Planned against a grid that also treats tiles which already stopped a
+        // route here as closed, so a second attempt goes around the NPC rather
+        // than back into it. Refusals below keep reading the raw grid: an
+        // avoided tile is occupied, not a wall, and reporting it as one would
+        // teach him a wrong fact about the map.
+        const avoiding = avoidingGrid(grid, this.blockedTiles.get(start.position.mapId));
         /** The press that steps into a blocked warp tile once beside it. */
         let throughWarp: GbaButton | null = null;
         let path: PlannedWalkStep[];
@@ -618,7 +668,8 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
           // A door pressed into rather than stepped onto: route to a tile
           // beside it, then press toward it. The warp event is what makes this
           // an entrance rather than a wall, so plain walls keep refusing.
-          const approach = planWalkBeside(grid, start.position, target);
+          const approach =
+            planWalkBeside(avoiding, start.position, target) ?? planWalkBeside(grid, start.position, target);
           if (approach === null) {
             throw closed("no_path_to_target", nearestReachableDetail(grid, start.position, target));
           }
@@ -627,7 +678,11 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
         } else if (!grid.isPassable(target.x, target.y)) {
           throw closed("walk_target_impassable", nearestReachableDetail(grid, start.position, target));
         } else {
-          const planned = planWalk(grid, start.position, target);
+          // The raw-grid retry is what keeps the memory from walling him off:
+          // when the only route runs through a tile that blocked him before,
+          // he walks it again and finds out whether whoever stood there moved.
+          const planned =
+            planWalk(avoiding, start.position, target) ?? planWalk(grid, start.position, target);
           if (planned === null) {
             throw closed("no_path_to_target", nearestReachableDetail(grid, start.position, target));
           }
@@ -640,10 +695,11 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
 
         let taken = 0;
         let blockedAt: { x: number; y: number } | null = null;
+        let blockedBecause: WalkBlockReason | null = null;
         let warped = false;
         for (const step of path) {
           const before = this.core.gameState();
-          this.core.pressButton(step.button, WALK_HOLD_FRAMES);
+          await this.core.pressButton(step.button, WALK_HOLD_FRAMES);
           const after = this.core.gameState();
           if (after.position.mapId !== before.position.mapId) {
             // A warp tile ends the route: the plan was made against a map that
@@ -655,22 +711,27 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
           if (after.position.x === before.position.x && after.position.y === before.position.y) {
             // Tile collision does not include NPCs, so a planned tile can be
             // occupied. Stop and say where, rather than mashing a dead route.
+            // A wild encounter and a warp fade look the same from coordinates
+            // — do not remember those as furniture.
             blockedAt = { x: step.x, y: step.y };
+            blockedBecause = walkBlockReason(after);
+            if (blockedBecause === "npc") this.rememberBlocked(before.position.mapId, blockedAt);
             break;
           }
           taken += 1;
         }
         if (throughWarp !== null && !warped && blockedAt === null) {
           const before = this.core.gameState();
-          this.core.pressButton(throughWarp, WALK_HOLD_FRAMES);
+          await this.core.pressButton(throughWarp, WALK_HOLD_FRAMES);
           const after = this.core.gameState();
           taken += 1;
           if (after.position.mapId !== before.position.mapId) {
             warped = true;
           } else {
-            // The door did not open — a locked entrance, or a script holding
-            // the field. Reported as the blocked tile it behaved as.
+            // The door did not open — a locked entrance, a fade, or a fight.
             blockedAt = { x: target.x, y: target.y };
+            blockedBecause = walkBlockReason(after);
+            if (blockedBecause === "npc") this.rememberBlocked(before.position.mapId, blockedAt);
           }
         }
 
@@ -692,9 +753,11 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
               ? taken === plannedSteps
               : state.position.x === action.x && state.position.y === action.y),
           blockedAt,
+          ...(blockedBecause === null ? {} : { blockedBecause }),
           warped,
           frame: state.frame,
           mode: state.mode,
+          inputReady: state.inputReady ?? true,
           position: state.position,
           facing: state.facing,
           surroundings: state.surroundings ?? null,
@@ -757,7 +820,7 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
             : current.cursor < targetIndex
               ? "down"
               : "up";
-          this.core.pressButton(button, MENU_HOLD_FRAMES);
+          await this.core.pressButton(button, MENU_HOLD_FRAMES);
           presses += 1;
           framesSpent += MENU_HOLD_FRAMES;
           const after = this.core.gameState().menu;
@@ -773,7 +836,7 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
         }
         let confirmed = false;
         if (endedBecause === "selected") {
-          this.core.pressButton("a", MENU_HOLD_FRAMES);
+          await this.core.pressButton("a", MENU_HOLD_FRAMES);
           presses += 1;
           framesSpent += MENU_HOLD_FRAMES;
           confirmed = true;
@@ -846,7 +909,8 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
           | "script_released"
           | "script_holding"
           | "input_bound_reached"
-          | "frame_bound_reached";
+          | "frame_bound_reached"
+          | "choice_unlisted";
         for (;;) {
           const during = this.core.gameState();
           if (!isReadableText(during)) {
@@ -862,7 +926,7 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
                 endedBecause = sawText ? "frame_bound_reached" : "script_holding";
                 break;
               }
-              this.core.advanceFrames(DIALOG_PRINT_WAIT_FRAMES);
+              await this.core.advanceFrames(DIALOG_PRINT_WAIT_FRAMES);
               framesSpent += DIALOG_PRINT_WAIT_FRAMES;
               heldFrames += DIALOG_PRINT_WAIT_FRAMES;
               continue;
@@ -901,11 +965,28 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
               endedBecause = "frame_bound_reached";
               break;
             }
+            const beforeLines = (during.dialogLines ?? []).join("\n");
             capture(during.dialogLines);
-            this.core.pressButton("a", DIALOG_HOLD_FRAMES);
+            await this.core.pressButton("a", DIALOG_HOLD_FRAMES);
             presses += 1;
             framesSpent += DIALOG_HOLD_FRAMES;
             idleFrames = 0;
+            const afterPress = this.core.gameState();
+            // FireRed Yes/No and some lists keep the same box string while a
+            // choice the decoder does not list is waiting. Another A answers it.
+            // A battle the conversation just started is a different ending —
+            // leave that to the next loop's mode check.
+            if (
+              (afterPress.dialogLines ?? []).join("\n") === beforeLines &&
+              afterPress.menu == null &&
+              isReadableText(afterPress) &&
+              afterPress.mode !== "battle" &&
+              afterPress.mode !== "battle_won" &&
+              afterPress.mode !== "battle_lost"
+            ) {
+              endedBecause = "choice_unlisted";
+              break;
+            }
             continue;
           }
           // Text is still printing (or battle text is flowing on its own
@@ -921,13 +1002,13 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
           // would otherwise be gone before the next capture.
           capture(during.dialogLines);
           if (this.core.advanceFramesHolding === undefined) {
-            this.core.advanceFrames(DIALOG_PRINT_WAIT_FRAMES);
+            await this.core.advanceFrames(DIALOG_PRINT_WAIT_FRAMES);
           } else {
             // Waiting with A held: FireRed reads a held A/B as "zero the
             // per-character delay" — the fast-read every human does — and a
             // held button can never register as the fresh press a waiting box
             // requires, so this cannot answer a prompt or skip a box.
-            this.core.advanceFramesHolding("a", DIALOG_PRINT_WAIT_FRAMES);
+            await this.core.advanceFramesHolding("a", DIALOG_PRINT_WAIT_FRAMES);
           }
           framesSpent += DIALOG_PRINT_WAIT_FRAMES;
           idleFrames += DIALOG_PRINT_WAIT_FRAMES;
@@ -984,10 +1065,10 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
           }
           return true;
         };
-        const press = (button: GbaButton, settleFrames: number): boolean => {
+        const press = async (button: GbaButton, settleFrames: number): Promise<boolean> => {
           if (!budgetLeft(NAMING_HOLD_FRAMES + settleFrames)) return false;
-          this.core.pressButton(button, NAMING_HOLD_FRAMES);
-          this.core.advanceFrames(settleFrames);
+          await this.core.pressButton(button, NAMING_HOLD_FRAMES);
+          await this.core.advanceFrames(settleFrames);
           presses += 1;
           framesSpent += NAMING_HOLD_FRAMES + settleFrames;
           return true;
@@ -995,13 +1076,13 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
         // A press the page-swap animation ate is retried once; a press that
         // still changes nothing means the decoded state and the screen have
         // parted ways, and honesty beats persistence.
-        const pressVerified = (
+        const pressVerified = async (
           button: GbaButton,
           settleFrames: number,
           changed: () => boolean,
-        ): "changed" | "unchanged" | "budget" => {
+        ): Promise<"changed" | "unchanged" | "budget"> => {
           for (let attempt = 0; attempt < 2; attempt += 1) {
-            if (!press(button, settleFrames)) return "budget";
+            if (!(await press(button, settleFrames))) return "budget";
             if (changed()) return "changed";
           }
           endedBecause = "input_not_registered";
@@ -1019,7 +1100,9 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
           // a budget-interrupted entry resumes with the same action repeated.
           if (!desired.startsWith(state.text)) {
             const before = state.text;
-            if (pressVerified("b", NAMING_SETTLE_FRAMES, () => naming()?.text !== before) !== "changed") {
+            if (
+              (await pressVerified("b", NAMING_SETTLE_FRAMES, () => naming()?.text !== before)) !== "changed"
+            ) {
               break;
             }
             continue;
@@ -1031,7 +1114,7 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
           if (key.page !== state.page) {
             const before = state.page;
             if (
-              pressVerified("select", NAMING_PAGE_SETTLE_FRAMES, () => naming()?.page !== before) !==
+              (await pressVerified("select", NAMING_PAGE_SETTLE_FRAMES, () => naming()?.page !== before)) !==
               "changed"
             ) {
               break;
@@ -1045,14 +1128,17 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
               const now = naming();
               return now !== null && (now.row !== before.row || now.column !== before.column);
             };
-            if (pressVerified(step, NAMING_SETTLE_FRAMES, moved) !== "changed") break;
+            if ((await pressVerified(step, NAMING_SETTLE_FRAMES, moved)) !== "changed") break;
             continue;
           }
           // On the key: type it, then check the byte that actually landed.
           const lengthBefore = state.text.length;
           if (
-            pressVerified("a", NAMING_SETTLE_FRAMES, () => (naming()?.text.length ?? 0) !== lengthBefore) !==
-            "changed"
+            (await pressVerified(
+              "a",
+              NAMING_SETTLE_FRAMES,
+              () => (naming()?.text.length ?? 0) !== lengthBefore,
+            )) !== "changed"
           ) {
             break;
           }
@@ -1060,7 +1146,7 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
           if (state !== null && state.text !== desired.slice(0, state.text.length)) {
             // The cell typed something else (a transcribed-only key that was
             // wrong): erase it and stop honestly rather than confirm a typo.
-            press("b", NAMING_SETTLE_FRAMES);
+            await press("b", NAMING_SETTLE_FRAMES);
             endedBecause = "input_not_registered";
             break;
           }
@@ -1073,17 +1159,17 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
           // only, so a symbols-page entry cycles back to the upper page first.
           if (naming()?.page === "symbols") {
             const before = naming()?.page;
-            pressVerified("select", NAMING_PAGE_SETTLE_FRAMES, () => naming()?.page !== before);
+            await pressVerified("select", NAMING_PAGE_SETTLE_FRAMES, () => naming()?.page !== before);
           }
           const onOk = () => {
             const now = naming();
             return now !== null && now.row === OK_ROW && now.column === BUTTON_COLUMN[now.page];
           };
-          if (!onOk()) pressVerified("start", NAMING_SETTLE_FRAMES, onOk);
-          if (onOk() && press("a", NAMING_SETTLE_FRAMES)) {
+          if (!onOk()) await pressVerified("start", NAMING_SETTLE_FRAMES, onOk);
+          if (onOk() && (await press("a", NAMING_SETTLE_FRAMES))) {
             // The close runs a callback chain about 37 frames long.
             for (let waited = 0; naming() !== null && waited < NAMING_CLOSE_WAIT_FRAMES;) {
-              this.core.advanceFrames(NAMING_SETTLE_FRAMES);
+              await this.core.advanceFrames(NAMING_SETTLE_FRAMES);
               framesSpent += NAMING_SETTLE_FRAMES;
               waited += NAMING_SETTLE_FRAMES;
             }
@@ -1115,7 +1201,7 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
       }
       case "frame_advance": {
         if (action.frames > limits.maxFrames) throw closed("frame_bound_exceeded");
-        this.core.advanceFrames(action.frames);
+        await this.core.advanceFrames(action.frames);
         const state = this.core.gameState();
         this.record(actionId, "frame_advance", `Advanced ${String(action.frames)} frames`);
         if (state.mode === "unknown") {
@@ -1252,6 +1338,17 @@ function logicalTimestamp(sequence: number): string {
   return new Date(Date.UTC(2026, 6, 19, 0, 0, 0, 0) + sequence * 1_000).toISOString();
 }
 
+/** Why a planned walk step did not change the tile. */
+type WalkBlockReason = "npc" | "battle" | "transition";
+
+function walkBlockReason(state: GbaCoreState): WalkBlockReason {
+  if (state.mode === "battle" || state.mode === "battle_won" || state.mode === "battle_lost") {
+    return "battle";
+  }
+  if (!(state.inputReady ?? true)) return "transition";
+  return "npc";
+}
+
 function closed(code: string, detail?: string): EnvironmentAdapterActionError {
   return new EnvironmentAdapterActionError(
     code,
@@ -1338,6 +1435,32 @@ const NAMING_CLOSE_WAIT_FRAMES = 120;
 
 /** Ceiling on tiles explored while planning, so a large map cannot stall a turn. */
 const MAX_WALK_SEARCH_TILES = 4_096;
+
+/**
+ * How many obstructions one map remembers. Roughly the number of NPCs a
+ * FireRed town holds, so a route can learn a whole street without the list
+ * outliving the people on it.
+ */
+const MAX_REMEMBERED_BLOCKED_TILES = 16;
+
+/**
+ * The same grid with `avoid`'s tiles closed, for planning only.
+ *
+ * A wrapper rather than a parameter on every planner: `planWalk`,
+ * `planWalkBeside`, and `nearestReachableDetail` all read passability through
+ * this one method, so closing a tile here reaches each of them without a
+ * signature any caller has to thread through.
+ */
+export function avoidingGrid(grid: GbaCoreMapGrid, avoid: ReadonlySet<string> | undefined): GbaCoreMapGrid {
+  if (avoid === undefined || avoid.size === 0) return grid;
+  return {
+    minX: grid.minX,
+    minY: grid.minY,
+    maxX: grid.maxX,
+    maxY: grid.maxY,
+    isPassable: (x, y) => !avoid.has(`${String(x)},${String(y)}`) && grid.isPassable(x, y),
+  };
+}
 
 const WALK_STEPS = [
   { button: "up", dx: 0, dy: -1 },

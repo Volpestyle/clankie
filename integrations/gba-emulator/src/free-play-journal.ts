@@ -42,6 +42,17 @@ export const FreePlayJournalTurnSchema = z
     /** When the turn settled. The turn record itself is deliberately clock-free. */
     at: z.string().datetime(),
     turn: FreePlayTurnSchema,
+    /**
+     * Join key for the possessor-voice delivery of this turn's room report.
+     * Absent when the turn was not worth reporting. Same id as the voice
+     * submission / response / suppressed receipts.
+     */
+    speechDeliveryId: z
+      .string()
+      .min(1)
+      .max(128)
+      .regex(/^\S+$/u)
+      .optional(),
   })
   .strict();
 export type FreePlayJournalTurn = z.infer<typeof FreePlayJournalTurnSchema>;
@@ -125,7 +136,7 @@ export interface OpenFreePlayJournalInput {
 
 export interface FreePlayJournal {
   readonly path: string;
-  turn(turn: FreePlayTurn): void;
+  turn(turn: FreePlayTurn, extras?: { readonly speechDeliveryId?: string }): void;
   summary(input: {
     outcome: string;
     result: FreePlayResult;
@@ -172,13 +183,14 @@ export function openFreePlayJournal(input: OpenFreePlayJournalInput): FreePlayJo
 
   return {
     path: journalPath,
-    turn: (turn) =>
+    turn: (turn, extras) =>
       append(
         FreePlayJournalTurnSchema.parse({
           kind: "turn",
           schemaVersion: 1,
           at: clock().toISOString(),
           turn,
+          ...(extras?.speechDeliveryId === undefined ? {} : { speechDeliveryId: extras.speechDeliveryId }),
         }),
       ),
     summary: ({ outcome, result, durationMs, framesPublished, framesDropped, checkpointId }) =>

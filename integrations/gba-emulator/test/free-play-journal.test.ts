@@ -64,6 +64,7 @@ describe("free-play journal", () => {
       resumedFromCheckpointId: "2026-07-26T15-55-24-710Z-oaks-lab-starter-menu",
     });
     expect(lines[1]).toMatchObject({ turn: { turn: 0, monologue: "thinking about turn 0" } });
+    expect("speechDeliveryId" in (lines[1] ?? {})).toBe(false);
     expect(lines[3]).toMatchObject({
       outcome: "stopped",
       turnsTaken: 2,
@@ -104,5 +105,23 @@ describe("free-play journal", () => {
     rmSync(rootDir, { recursive: true, force: true });
     journal.turn(turn(0));
     expect(errors).toHaveLength(1);
+  });
+
+  it("joins a reported turn to the voice delivery id without rewriting old lines", () => {
+    const rootDir = mkdtempSync(path.join(tmpdir(), "play-journal-speech-"));
+    const journal = openFreePlayJournal({
+      rootDir,
+      runId: "run",
+      environmentSessionId: "session",
+      scenarioId: "scenario",
+      clock: () => new Date("2026-08-15T21:00:00.000Z"),
+    });
+    journal.turn(turn(0), { speechDeliveryId: "play-turn-1" });
+    const lines = parseFreePlayJournal(readFileSync(journal.path, "utf8"));
+    expect(lines[1]).toMatchObject({
+      kind: "turn",
+      speechDeliveryId: "play-turn-1",
+      turn: { turn: 0 },
+    });
   });
 });

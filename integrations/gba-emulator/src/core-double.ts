@@ -208,7 +208,7 @@ export class DeterministicGbaCoreDouble {
     };
   }
 
-  public pressButton(button: GbaButton, holdFrames: number): void {
+  public async pressButton(button: GbaButton, holdFrames: number): Promise<void> {
     this.state.frame += holdFrames + 1; // hold plus release edge
     this.state.inputCount += 1;
     if (this.state.mode === "overworld" && this.state.menu) {
@@ -232,12 +232,12 @@ export class DeterministicGbaCoreDouble {
     }
   }
 
-  public advanceFrames(frames: number): void {
+  public async advanceFrames(frames: number): Promise<void> {
     this.state.frame += frames;
   }
 
   /** Advance frames with `button` held: no input spent, printing accelerated. */
-  public advanceFramesHolding(button: GbaButton, frames: number): void {
+  public async advanceFramesHolding(button: GbaButton, frames: number): Promise<void> {
     this.state.frame += frames;
     if (this.state.mode === "dialog" && (button === "a" || button === "b")) {
       // Each held frame counts multiply toward the box becoming ready — the

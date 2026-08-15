@@ -141,7 +141,7 @@ class DoorwayCoreStub implements GbaCoreSeam {
     this.doorOpens = doorOpens;
   }
 
-  public pressButton(button: GbaButton, holdFrames: number): void {
+  public async pressButton(button: GbaButton, holdFrames: number): Promise<void> {
     this.frame += holdFrames;
     this.inputCount += 1;
     if (this.position.mapId !== "map-a") return;
@@ -165,7 +165,7 @@ class DoorwayCoreStub implements GbaCoreSeam {
     this.position = { ...this.position, ...next };
   }
 
-  public advanceFrames(frames: number): void {
+  public async advanceFrames(frames: number): Promise<void> {
     this.frame += frames;
   }
 

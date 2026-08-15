@@ -88,7 +88,7 @@ class ScriptedNamingCore implements GbaCoreSeam {
     this.buffer = prefilled;
   }
 
-  public pressButton(button: GbaButton, holdFrames: number): void {
+  public async pressButton(button: GbaButton, holdFrames: number): Promise<void> {
     this.pressed.push(button);
     this.inputCount += 1;
     this.frame += holdFrames;
@@ -141,7 +141,7 @@ class ScriptedNamingCore implements GbaCoreSeam {
     }
   }
 
-  public advanceFrames(frames: number): void {
+  public async advanceFrames(frames: number): Promise<void> {
     this.frame += frames;
   }
 

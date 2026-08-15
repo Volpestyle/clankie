@@ -53,32 +53,97 @@ const allCapabilities = [
   "emulator.gba.wait",
 ] as const;
 
+const DIRECTION_STEPS = {
+  up: { dx: 0, dy: -1 },
+  down: { dx: 0, dy: 1 },
+  left: { dx: -1, dy: 0 },
+  right: { dx: 1, dy: 0 },
+} as const;
+
 async function harness(options?: {
   mutateScenario?: (scenario: FrozenGbaScenario) => FrozenGbaScenario;
   adapterOptions?: GbaEmulatorAdapterOptions;
   visualOnly?: boolean;
+  /**
+   * Tiles an unseen body stands on: open in the collision grid, refused by a
+   * step into them. The double models walls, which appear in both — an NPC is
+   * the case where the two disagree, which is the whole reason a planned route
+   * can die mid-walk.
+   */
+  occupied?: readonly { x: number; y: number }[];
+  /**
+   * Tiles that start a battle when stepped on. Same swallow as `occupied`,
+   * plus the post-step state reports `mode: "battle"`.
+   */
+  encounter?: readonly { x: number; y: number }[];
+  /**
+   * Tiles that start a fade or warp hold. Same swallow, plus `inputReady: false`.
+   */
+  transition?: readonly { x: number; y: number }[];
 }) {
   const frozen = await fixture();
   frozen.scenario = options?.mutateScenario?.(frozen.scenario) ?? frozen.scenario;
   const rootDir = await mkdtemp(join(tmpdir(), "gba-emulator-test-"));
   roots.push(rootDir);
+  const occupied = new Set((options?.occupied ?? []).map((tile) => `${String(tile.x)},${String(tile.y)}`));
+  const encounters = new Set((options?.encounter ?? []).map((tile) => `${String(tile.x)},${String(tile.y)}`));
+  const transitions = new Set(
+    (options?.transition ?? []).map((tile) => `${String(tile.x)},${String(tile.y)}`),
+  );
+  const occupiedFactory: GbaCoreFactory | undefined =
+    occupied.size === 0 && encounters.size === 0 && transitions.size === 0
+      ? undefined
+      : () => {
+          const core = new DeterministicGbaCoreDouble(frozen.scenario);
+          let overlay: { mode?: "battle"; inputReady?: boolean } = {};
+          return {
+            coreId: core.coreId,
+            pressButton: async (button, holdFrames) => {
+              const step = button in DIRECTION_STEPS ? DIRECTION_STEPS[button as "up"] : undefined;
+              if (step !== undefined) {
+                const { x, y } = core.gameState().position;
+                const next = `${String(x + step.dx)},${String(y + step.dy)}`;
+                // Swallowed rather than passed through: the body in the way
+                // absorbs the step, so the player stays put on a tile the grid
+                // still calls open.
+                if (occupied.has(next)) return;
+                if (encounters.has(next)) {
+                  overlay = { mode: "battle", inputReady: false };
+                  return;
+                }
+                if (transitions.has(next)) {
+                  overlay = { inputReady: false };
+                  return;
+                }
+              }
+              await core.pressButton(button, holdFrames);
+            },
+            advanceFrames: async (frames) => {
+              await core.advanceFrames(frames);
+            },
+            gameState: () => ({ ...core.gameState(), ...overlay }),
+            mapGrid: () => core.mapGrid(),
+            ramStateSha256: () => core.ramStateSha256(),
+            framebufferSha256: () => core.framebufferSha256(),
+          };
+        };
   const coreFactory: GbaCoreFactory | undefined = options?.visualOnly
     ? () => {
         const core = new DeterministicGbaCoreDouble(frozen.scenario);
         return {
           coreId: core.coreId,
-          pressButton: (button, holdFrames) => {
-            core.pressButton(button, holdFrames);
+          pressButton: async (button, holdFrames) => {
+            await core.pressButton(button, holdFrames);
           },
-          advanceFrames: (frames) => {
-            core.advanceFrames(frames);
+          advanceFrames: async (frames) => {
+            await core.advanceFrames(frames);
           },
           gameState: () => ({ ...core.gameState(), mode: "unknown" as const, inputReady: false }),
           ramStateSha256: () => core.ramStateSha256(),
           framebufferSha256: () => core.framebufferSha256(),
         };
       }
-    : undefined;
+    : occupiedFactory;
   const adapter =
     coreFactory === undefined
       ? new GbaEmulatorAdapter(frozen.scenario, frozen.fixtureSha256, undefined, options?.adapterOptions)
@@ -401,6 +466,78 @@ describe("GBA emulator embodiment", () => {
     });
     // One action, so one evidence event — a route is not three presses of trace.
     expect(adapter.session(spec.sessionId).trace().events).toHaveLength(1);
+  });
+
+  it("routes around a tile that already stopped a walk instead of replanning into it", async () => {
+    // (1,1) is open collision with somebody standing on it — the shape that
+    // funnelled four consecutive routes into Viridian's old man on 2026-08-15.
+    const { command, grant, runtime } = await harness({ occupied: [{ x: 1, y: 1 }] });
+    const first = await runtime.startAction(grant.token, command("walk-1", { kind: "walk_to", x: 3, y: 1 }));
+    expect(first).toMatchObject({
+      outcome: {
+        plannedSteps: 3,
+        steps: 0,
+        arrived: false,
+        blockedAt: { x: 1, y: 1 },
+        position: { x: 0, y: 1 },
+      },
+    });
+
+    // The same ask, and this time the plan goes over the top row around him.
+    const second = await runtime.startAction(grant.token, command("walk-2", { kind: "walk_to", x: 3, y: 1 }));
+    expect(second).toMatchObject({
+      outcome: { plannedSteps: 5, steps: 5, arrived: true, blockedAt: null, position: { x: 3, y: 1 } },
+    });
+  });
+
+  it("names a grass encounter instead of remembering it as an NPC", async () => {
+    const { command, grant, runtime } = await harness({ encounter: [{ x: 1, y: 1 }] });
+    const first = await runtime.startAction(grant.token, command("walk-1", { kind: "walk_to", x: 3, y: 1 }));
+    expect(first).toMatchObject({
+      outcome: {
+        plannedSteps: 3,
+        steps: 0,
+        arrived: false,
+        blockedAt: { x: 1, y: 1 },
+        blockedBecause: "battle",
+        mode: "battle",
+      },
+    });
+  });
+
+  it("does not remember a fade as a blocked tile, so the next walk is not detoured", async () => {
+    const { command, grant, runtime } = await harness({ transition: [{ x: 1, y: 1 }] });
+    const first = await runtime.startAction(grant.token, command("walk-1", { kind: "walk_to", x: 3, y: 1 }));
+    expect(first).toMatchObject({
+      outcome: {
+        plannedSteps: 3,
+        steps: 0,
+        blockedAt: { x: 1, y: 1 },
+        blockedBecause: "transition",
+      },
+    });
+    // Still the short route — a remembered NPC would have gone around in 5.
+    const second = await runtime.startAction(grant.token, command("walk-2", { kind: "walk_to", x: 3, y: 1 }));
+    expect(second).toMatchObject({ outcome: { plannedSteps: 3, blockedAt: { x: 1, y: 1 } } });
+  });
+
+  it("walks a remembered tile again when it is the only way through", async () => {
+    // (1,1) blocks, and the detour is walled off, so avoiding it would strand a
+    // reachable target. The memory must slow a route down, never close one.
+    const { command, grant, runtime } = await harness({
+      occupied: [{ x: 1, y: 1 }],
+      mutateScenario: (scenario) => ({
+        ...scenario,
+        map: { ...scenario.map, blocked: [...scenario.map.blocked, { x: 0, y: 0 }, { x: 0, y: 2 }] },
+      }),
+    });
+    const first = await runtime.startAction(grant.token, command("walk-1", { kind: "walk_to", x: 3, y: 1 }));
+    expect(first).toMatchObject({ outcome: { blockedAt: { x: 1, y: 1 }, steps: 0 } });
+
+    // Replanned against the raw grid: the same doomed route rather than a
+    // refusal, because whoever stands there may well have moved on.
+    const second = await runtime.startAction(grant.token, command("walk-2", { kind: "walk_to", x: 3, y: 1 }));
+    expect(second).toMatchObject({ outcome: { plannedSteps: 3, blockedAt: { x: 1, y: 1 } } });
   });
 
   it("reports adjacency so a wall is known before it is walked into", async () => {

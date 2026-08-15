@@ -52,6 +52,7 @@ const S_START_MENU_CURSOR_ADDRESS = 0x020370f4;
 const S_START_MENU_COUNT_ADDRESS = 0x020370f5;
 const S_START_MENU_ORDER_ADDRESS = 0x020370f6;
 const G_BAG_MENU_STATE_ADDRESS = 0x0203acfc;
+const S_IN_HELP_SYSTEM_ADDRESS = 0x0203f177;
 const G_PARTY_MENU_ADDRESS = 0x0203b0a0;
 const G_SAVE_BLOCK1_POINTER_ADDRESS = 0x03005008;
 const G_SAVE_BLOCK2_POINTER_ADDRESS = 0x0300500c;
@@ -857,6 +858,13 @@ function decodeStartMenu(ewram: DataView, iwram: DataView): GbaCoreMenuState | n
   return { menuId: "start-menu", cursor, entries };
 }
 
+function decodeHelpSystem(ewram: DataView): GbaCoreMenuState | null {
+  const open = ewram.getUint8(ewramOffset(S_IN_HELP_SYSTEM_ADDRESS));
+  if (open === 0) return null;
+  if (open !== 1) throw new Error(`FireRed help-system flag ${String(open)} is invalid`);
+  return { menuId: "help-system", cursor: 0, entries: [] };
+}
+
 function decodePartyMenu(
   ewram: DataView,
   iwram: DataView,
@@ -988,6 +996,7 @@ export function decodeFireRedState(
   }
   const dialog = decodeDialog(ewram, iwram, battleContext);
   const namingScreen = decodeNamingScreen(ewram, iwram);
+  const helpSystem = decodeHelpSystem(ewram);
   return {
     overworld,
     surroundings,
@@ -1000,8 +1009,11 @@ export function decodeFireRedState(
     dialogLines: dialog.lines,
     waitingForDialogAdvance: dialog.waitingForAdvance,
     naming: namingScreen?.state ?? null,
-    menu: namingScreen?.menu ?? decodeMenu(ewram, iwram, party, inventory, battleContext),
+    // HELP overlays whichever callback/menu was active, so its own flag has
+    // priority over the stale underlying screen state.
+    menu: helpSystem ?? namingScreen?.menu ?? decodeMenu(ewram, iwram, party, inventory, battleContext),
     fieldInputReady:
+      helpSystem === null &&
       mainCallback2(iwram) === CB2_OVERWORLD &&
       iwram.getUint8(iwramOffset(S_LOCK_FIELD_CONTROLS_ADDRESS)) === 0,
   };

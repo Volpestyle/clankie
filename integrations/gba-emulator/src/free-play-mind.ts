@@ -227,7 +227,8 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   "that connect to neighbouring maps. walk_to aimed at a listed door or",
   "stairway walks up and steps in, even when the tile itself reads blocked.",
   "A refused walk tells you why — off the map, a wall, or unreachable — and",
-  "names the nearest tile you can actually reach.",
+  "names the nearest tile you can actually reach. If your notes already mark a",
+  "tile or NPC as story-locked, do not walk_to it again.",
   "",
   "When text is on screen, use advance_dialog rather than pressing A box by box.",
   "It reads the whole conversation in one action and hands you the transcript,",
@@ -235,13 +236,18 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   "turn on the decision, not on the reading. It never answers a choice for you.",
   "It also works when a scripted moment is holding the box (a fanfare, a jingle",
   "— it waits the script out) and during battles, where it reads the battle",
-  "text and stops at your action menu.",
+  "text and stops at your action menu. If scene mode is battle and input is not",
+  "ready, use advance_dialog — not frame_advance — even when the box looks empty.",
+  "If advance_dialog says a choice is on screen but no menu view lists ids, press",
+  "A; do not select_menu_entry until the menu view actually names the entries.",
   "",
   "In a menu — the battle command list, your moves, the start menu — use",
   "select_menu_entry with the id shown in the menu view: it walks the cursor",
   "to that entry and confirms it in one action. Which entry to pick is still",
   "entirely your decision; this only saves you the cursor presses. It stops",
   "and says so if the menu closes or the cursor will not move.",
+  "In FireRed's Bag, switch pockets with d-pad left/right. L/R opens the HELP",
+  "system; when menuId is help-system, press B until that menu closes.",
   "",
   "On a naming screen, use enter_text with the whole name (letters, digits,",
   "space, basic punctuation; 10 characters max): it drives the keyboard, types",
@@ -367,6 +373,8 @@ export function renderView(view: FreePlayView): string {
   for (const observation of view.observations) {
     lines.push(`  ${observation.kind}: ${JSON.stringify(stripEnvelope(observation))}`);
   }
+  const held = heldScreenAdvice(view.observations);
+  if (held !== null) lines.push("", held);
   if (view.audience !== null && view.audience.length > 0) {
     lines.push("", `Watching you right now: ${view.audience}.`);
   }
@@ -417,6 +425,28 @@ export function renderView(view: FreePlayView): string {
   }
   lines.push("", "Choose your next action.");
   return lines.join("\n");
+}
+
+function heldScreenAdvice(observations: FreePlayView["observations"]): string | null {
+  if (observations.some((observation) => observation.kind === "menu")) return null;
+  const scene = observations.find((observation) => observation.kind === "scene") as
+    | { data?: { mode?: string; inputReady?: boolean } }
+    | undefined;
+  const data = scene?.data;
+  if (data === undefined) return null;
+  if (data.mode === "battle" && data.inputReady === false) {
+    return (
+      "Scene is a battle and input is not ready — use advance_dialog, not frame_advance. " +
+      "It waits out the intro and stops at the command menu."
+    );
+  }
+  if (data.mode === "overworld" && data.inputReady === false) {
+    return (
+      "A script is holding the screen — use advance_dialog to wait it out, " +
+      "or frame_advance only if you want to watch a long cutscene."
+    );
+  }
+  return null;
 }
 
 /** Drop transport fields the model has no use for and would only pay tokens on. */
