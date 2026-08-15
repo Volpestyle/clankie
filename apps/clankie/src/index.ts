@@ -283,7 +283,9 @@ const captain = createCaptain(
           lane,
           targetId: "self",
           summary: episode,
-          visibility: "shareable",
+          // What he remembers at the console stays at the console; the
+          // shareable/private gate in recall is only real if writes honor it.
+          visibility: lane === "operator" ? "operator_private" : "shareable",
           provenance: {
             characterId: "clankie",
             sessionId: "captain",

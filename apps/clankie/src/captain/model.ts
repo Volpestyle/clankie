@@ -17,6 +17,10 @@ export class CaptainModelError extends Error {}
  */
 class BrokerCredentialStore {
   private readonly broker: ClankieCredentialStore;
+  // pi runs OAuth refresh inside modify() and relies on writes being
+  // serialized; two lanes refreshing one provider concurrently would rotate
+  // the token twice and strand the second. In-process chain per provider.
+  private readonly locks = new Map<string, Promise<unknown>>();
 
   public constructor(broker: ClankieCredentialStore) {
     this.broker = broker;
@@ -38,19 +42,26 @@ class BrokerCredentialStore {
     }));
   }
 
-  public async modify(
+  public modify(
     providerId: string,
     fn: (current: Credential | undefined) => Promise<Credential | undefined> | Credential | undefined,
   ): Promise<Credential | undefined> {
-    const current = toPiCredential(await this.broker.get(providerId));
-    const next = await fn(current);
-    if (next === undefined) {
-      await this.broker.delete(providerId);
-      return undefined;
-    }
-    const mapped = fromPiCredential(next);
-    if (mapped !== undefined) await this.broker.set(providerId, mapped);
-    return next;
+    const run = (this.locks.get(providerId) ?? Promise.resolve()).then(async () => {
+      const stored = await this.broker.get(providerId);
+      const next = await fn(toPiCredential(stored));
+      if (next === undefined) {
+        await this.broker.delete(providerId);
+        return undefined;
+      }
+      const mapped = fromPiCredential(next, stored);
+      if (mapped !== undefined) await this.broker.set(providerId, mapped);
+      return next;
+    });
+    this.locks.set(
+      providerId,
+      run.catch(() => undefined),
+    );
+    return run;
   }
 }
 
@@ -69,8 +80,14 @@ function toPiCredential(credential: ProviderCredential | undefined): Credential 
   return { type: "api_key", key: credential.token };
 }
 
-function fromPiCredential(credential: Credential): ProviderCredential | undefined {
+function fromPiCredential(
+  credential: Credential,
+  stored: ProviderCredential | undefined,
+): ProviderCredential | undefined {
   if (credential.type === "api_key") {
+    // A wellknown credential surfaces to pi as an api key; never let that
+    // round-trip overwrite the stored wellknown pair with a plain api entry.
+    if (stored?.type === "wellknown" && credential.key === stored.token) return stored;
     return credential.key === undefined ? undefined : { type: "api", key: credential.key };
   }
   return {

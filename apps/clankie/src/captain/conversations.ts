@@ -60,11 +60,31 @@ export class ConversationStore {
           readFileSync(join(root, entry.name, "meta.json"), "utf8"),
         ) as ConversationMeta;
         // A crash mid-run leaves "active"; on boot nothing is running.
-        if (meta.sessionState === "active") meta.sessionState = "waiting";
+        if (meta.sessionState === "active") {
+          meta.sessionState = "waiting";
+          this.failOrphanedRuns(meta);
+        }
         this.metas.set(meta.conversationId, meta);
       } catch {
         // An unreadable conversation is skipped, never fatal to boot.
       }
+    }
+  }
+
+  /**
+   * A turn accepted before a crash never got its terminal event, and a client
+   * mid-tail would wait on it forever. Close each orphan out as failed.
+   */
+  private failOrphanedRuns(meta: ConversationMeta): void {
+    const terminal = new Set<string>();
+    const accepted: string[] = [];
+    for (const event of this.readEvents(meta.conversationId)) {
+      if (event.type !== "turn") continue;
+      if (event.phase === "accepted") accepted.push(event.runId);
+      else terminal.add(event.runId);
+    }
+    for (const runId of accepted.filter((id) => !terminal.has(id))) {
+      this.append(meta, { type: "turn", runId, phase: "failed", reasonCode: "service_restarted" });
     }
   }
 
@@ -144,8 +164,8 @@ export class ConversationStore {
     }
     const events = this.readEvents(meta.conversationId);
     const safeCursor = events.length === 0 ? ZERO_CURSOR : events[events.length - 1]!.cursor;
-    const from = request.cursor ?? ZERO_CURSOR;
-    if (!/^\d+$/u.test(from) || from.length > CURSOR_WIDTH) {
+    const rawFrom = request.cursor ?? ZERO_CURSOR;
+    if (!/^\d+$/u.test(rawFrom) || rawFrom.length > CURSOR_WIDTH) {
       return {
         schemaVersion: 1,
         status: "recover",
@@ -156,8 +176,11 @@ export class ConversationStore {
         message: "That cursor is not from this conversation; replay from the start.",
       };
     }
+    // Cursors compare lexically, so a short numeric cursor pads first.
+    const from = rawFrom.padStart(CURSOR_WIDTH, "0");
     const limit = request.limit ?? 200;
-    const page = events.filter((event) => event.cursor > from).slice(0, limit);
+    const remaining = events.filter((event) => event.cursor > from);
+    const page = remaining.slice(0, limit);
     return {
       schemaVersion: 1,
       status: "page",
@@ -167,7 +190,7 @@ export class ConversationStore {
       retainedFromCursor: ZERO_CURSOR,
       nextCursor: page.length === 0 ? from : page[page.length - 1]!.cursor,
       safeCursor,
-      hasMore: page.length < events.filter((event) => event.cursor > from).length,
+      hasMore: page.length < remaining.length,
     };
   }
 

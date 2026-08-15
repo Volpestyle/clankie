@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { OPERATOR_CONVERSATION_DISPATCH_PATH } from "@clankie/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
@@ -23,7 +24,16 @@ describe("clankie app smoke", () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-smoke-"));
     roots.push(root);
     const clankie = await createClankieApp({
-      captain: createStubCaptain(),
+      captain: createStubCaptain({
+        serveOperatorConversation: (request) =>
+          Promise.resolve(
+            request.op === "list"
+              ? { op: "list", schemaVersion: 1, conversations: [] }
+              : (() => {
+                  throw new Error(`smoke stub only lists (got ${request.op})`);
+                })(),
+          ),
+      }),
       memory: createFileMemory({ dataDir: join(root, "memory") }),
       eventLogPath: join(root, "events.jsonl"),
       authenticateCaptain: (request) =>
@@ -97,6 +107,24 @@ describe("clankie app smoke", () => {
     expect(recalled.status).toBe(200);
     const card = (await recalled.json()) as { recallCard: string };
     expect(card.recallCard).toContain("Said hello to James");
+
+    // The TUI and relay both reach the conversation contract with the shared
+    // captain token; this route once checked the operator credential instead
+    // and 401'd every real caller. Pin the fix.
+    const dispatch = await app.request(OPERATOR_CONVERSATION_DISPATCH_PATH, {
+      method: "POST",
+      headers: captain,
+      body: JSON.stringify({ op: "list", schemaVersion: 1 }),
+    });
+    expect(dispatch.status).toBe(200);
+    await expect(dispatch.json()).resolves.toMatchObject({ op: "list" });
+
+    const unauthenticated = await app.request(OPERATOR_CONVERSATION_DISPATCH_PATH, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ op: "list", schemaVersion: 1 }),
+    });
+    expect(unauthenticated.status).toBe(401);
 
     clankie.close();
   });

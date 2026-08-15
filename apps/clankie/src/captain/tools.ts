@@ -140,11 +140,24 @@ export function captainTools(
         targetId: Type.Optional(Type.String({ description: "The room's target id as listed." })),
       }),
       execute: async (_id, params) => {
+        // The operator's room is private. From any other lane it does not
+        // exist: not listed, not readable — a Discord room must never be able
+        // to talk him into repeating what was said at the console.
+        const visible = (roomLane: string): boolean => lane === "operator" || roomLane !== "operator";
         if (params.lane === undefined || params.targetId === undefined) {
           const lanes = await laneLog.list(5);
           return json(
-            lanes.map(({ lane, targetId, entries }) => ({ lane, targetId, recent: entries.length })),
+            lanes
+              .filter((room) => visible(room.lane))
+              .map(({ lane: roomLane, targetId, entries }) => ({
+                lane: roomLane,
+                targetId,
+                recent: entries.length,
+              })),
           );
+        }
+        if (!visible(params.lane)) {
+          return json({ refused: "that room is not readable from here" });
         }
         return json(await laneLog.read(params.lane, params.targetId));
       },

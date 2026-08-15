@@ -1612,13 +1612,12 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   });
 
   // The operator conversation contract (TUI direct, relay in front for
-  // devices) and the lanes view — the captain's HTTP face.
+  // devices) and the lanes view — the captain's HTTP face. Both clients send
+  // the shared captain token, the same credential the channel-turn door takes.
   app.post(OPERATOR_CONVERSATION_DISPATCH_PATH, async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable") {
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    }
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") return context.json({ error: "captain_execution_unavailable" }, 503);
+    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
     const body = await readJson(context.req.raw);
     const parsed = OperatorConversationServiceRequestSchema.safeParse(body);
     if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
@@ -1626,11 +1625,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   });
 
   app.get(CAPTAIN_LANE_OBSERVATION_PATH, async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable") {
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    }
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") return context.json({ error: "captain_execution_unavailable" }, 503);
+    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
     return context.json({ schemaVersion: 1 as const, lanes: await dependencies.captain.observeLanes() });
   });
 

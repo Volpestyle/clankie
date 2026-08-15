@@ -97,6 +97,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       customTools: [...captainTools(deps, capture, laneLog, lane), ...(await browserTools(deps, capture))],
       resourceLoader: loader,
       sessionManager,
+      // Coding tools (read/bash/edit/write) run unsandboxed as the service
+      // user. Only the operator's own lane gets them; a lane fed by untrusted
+      // Discord input keeps the authored tool bank and nothing that touches
+      // the filesystem — the framing labels untrusted text, but a tools list
+      // is a boundary and a prompt is not.
+      ...(lane === "operator" ? {} : { noTools: "builtin" as const }),
     });
     const laneSession: LaneSession = { session, capture, lastAssistantText: "", turnCounter: 0 };
     session.subscribe((event) => {
@@ -160,61 +166,84 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
   );
 
+  // One turn at a time per durable session: a second voice message in the
+  // same channel queues behind the first instead of racing pi's prompt() and
+  // cross-wiring lastAssistantText/capture between overlapping turns.
+  const turnChains = new Map<string, Promise<unknown>>();
+
+  async function runDiscordTurn(
+    lane: LaneSession,
+    normalized: Awaited<ReturnType<typeof normalizeDiscordTurn>>,
+    deliveryId: string,
+  ): Promise<CaptainChannelTurnResult> {
+    lane.capture.media = undefined;
+    lane.turnCounter += 1;
+    const turnId = `turn-${lane.turnCounter}-${deliveryId}`;
+    await laneLog.append(normalized.lane, normalized.targetId, {
+      at: new Date().toISOString(),
+      kind: "heard",
+      text: normalized.heard,
+    });
+    try {
+      await lane.session.prompt(normalized.prompt, {
+        expandPromptTemplates: false,
+        images: normalized.images.map(toImageContent),
+      });
+    } catch {
+      return { state: "failed", turnId, code: "captain_session_failed" };
+    } finally {
+      if (!normalized.durable) lane.session.dispose();
+    }
+    const message = lane.lastAssistantText.trim();
+    if (message.length === 0) {
+      return {
+        state: "failed",
+        captainSessionId: normalized.sessionKey,
+        turnId,
+        code: "captain_response_missing",
+      };
+    }
+    // Matched on the trimmed whole message, never a substring: a reply that
+    // merely quotes the sentinel is still a reply, and silencing it would let
+    // anyone who says the token in a channel mute him.
+    if (message === CAPTAIN_SILENT_REPLY_SENTINEL) {
+      return { state: "silent", captainSessionId: normalized.sessionKey, turnId };
+    }
+    await laneLog.append(normalized.lane, normalized.targetId, {
+      at: new Date().toISOString(),
+      kind: "said",
+      text: message,
+    });
+    return {
+      state: "settled",
+      captainSessionId: normalized.sessionKey,
+      turnId,
+      response: message,
+      ...(lane.capture.media === undefined ? {} : { media: lane.capture.media }),
+    };
+  }
+
   return {
     async submitDiscordTurn(request: DiscordPresenceChannelTurnRequest): Promise<CaptainChannelTurnResult> {
       const normalized = await normalizeDiscordTurn(request, deps);
-      const lane = normalized.durable
-        ? await durableSession(
-            normalized.sessionKey,
-            normalized.lane,
-            join(options.stateDir, "voice", encodeURIComponent(normalized.sessionKey)),
-          )
-        : await buildSession(normalized.lane, SessionManager.inMemory(options.repoRoot));
-      lane.capture.media = undefined;
-      lane.turnCounter += 1;
-      const turnId = `turn-${lane.turnCounter}-${request.deliveryId}`;
-      await laneLog.append(normalized.lane, normalized.targetId, {
-        at: new Date().toISOString(),
-        kind: "heard",
-        text: normalized.heard,
+      if (!normalized.durable) {
+        const lane = await buildSession(normalized.lane, SessionManager.inMemory(options.repoRoot));
+        return runDiscordTurn(lane, normalized, request.deliveryId);
+      }
+      const key = normalized.sessionKey;
+      const run = (turnChains.get(key) ?? Promise.resolve()).then(async () => {
+        const lane = await durableSession(
+          key,
+          normalized.lane,
+          join(options.stateDir, "voice", encodeURIComponent(key)),
+        );
+        return runDiscordTurn(lane, normalized, request.deliveryId);
       });
-      try {
-        await lane.session.prompt(normalized.prompt, {
-          expandPromptTemplates: false,
-          images: normalized.images.map(toImageContent),
-        });
-      } catch {
-        return { state: "failed", turnId, code: "captain_session_failed" };
-      } finally {
-        if (!normalized.durable) lane.session.dispose();
-      }
-      const message = lane.lastAssistantText.trim();
-      if (message.length === 0) {
-        return {
-          state: "failed",
-          captainSessionId: normalized.sessionKey,
-          turnId,
-          code: "captain_response_missing",
-        };
-      }
-      // Matched on the trimmed whole message, never a substring: a reply that
-      // merely quotes the sentinel is still a reply, and silencing it would let
-      // anyone who says the token in a channel mute him.
-      if (message === CAPTAIN_SILENT_REPLY_SENTINEL) {
-        return { state: "silent", captainSessionId: normalized.sessionKey, turnId };
-      }
-      await laneLog.append(normalized.lane, normalized.targetId, {
-        at: new Date().toISOString(),
-        kind: "said",
-        text: message,
-      });
-      return {
-        state: "settled",
-        captainSessionId: normalized.sessionKey,
-        turnId,
-        response: message,
-        ...(lane.capture.media === undefined ? {} : { media: lane.capture.media }),
-      };
+      turnChains.set(
+        key,
+        run.catch(() => undefined),
+      );
+      return run;
     },
 
     serveOperatorConversation(
