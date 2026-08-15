@@ -135,4 +135,6 @@ export interface ResolvedAttachment {
   readonly dataUrl: string;
   readonly mediaType: string;
   readonly filename?: string;
+  readonly frameIndex?: number;
+  readonly frameCount?: number;
 }

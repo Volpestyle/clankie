@@ -758,19 +758,25 @@ describe("images are part of what was said", () => {
   });
 
   it("turns a Discord GIF-picker embed into a proxied image", () => {
-    const selection = selectInboundImageAttachments([], [
-      {
-        type: "gifv",
-        url: "https://klipy.com/gifs/greetings-PSr",
-        thumbnailUrl: "https://static.klipy.com/greeting.webp",
-        thumbnailProxyUrl: "https://images-ext-1.discordapp.net/external/greeting.webp",
-      },
-    ]);
+    const selection = selectInboundImageAttachments(
+      [],
+      [
+        {
+          type: "gifv",
+          url: "https://klipy.com/gifs/greetings-PSr",
+          thumbnailUrl: "https://static.klipy.com/greeting.webp",
+          thumbnailProxyUrl: "https://images-ext-1.discordapp.net/external/greeting.webp",
+          videoUrl: "https://static.klipy.com/greeting.mp4",
+          videoProxyUrl: "https://images-ext-1.discordapp.net/external/greeting.mp4",
+        },
+      ],
+    );
 
     expect(selection.attachments).toEqual([
       {
         id: expect.stringMatching(/^embed-[0-9a-f]{24}$/u),
         url: "https://images-ext-1.discordapp.net/external/greeting.webp",
+        motionUrl: "https://images-ext-1.discordapp.net/external/greeting.mp4",
         mediaType: "image/webp",
       },
     ]);

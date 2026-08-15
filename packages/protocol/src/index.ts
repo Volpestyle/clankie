@@ -1323,6 +1323,8 @@ export type DiscordPresenceAttachmentMediaType = (typeof DISCORD_PRESENCE_ATTACH
  * already more than a person takes in from one message.
  */
 export const DISCORD_PRESENCE_TRIGGER_ATTACHMENTS_MAX = 4;
+/** A moving embed becomes at most four chronological image parts for image-only vision models. */
+export const DISCORD_PRESENCE_MOTION_FRAMES_MAX = 4;
 /** Per-image ceiling. Enforced at ingress on Discord's stated size and again on the bytes actually read. */
 export const DISCORD_PRESENCE_ATTACHMENT_BYTES_MAX = 8 * 1024 * 1024;
 
@@ -1339,6 +1341,8 @@ export const DiscordPresenceAttachmentSchema = z
   .object({
     id: z.string().min(1),
     url: z.string().url(),
+    /** Discord-proxied MP4 for a gifv embed; absent for ordinary images. */
+    motionUrl: z.string().url().optional(),
     mediaType: z.enum(DISCORD_PRESENCE_ATTACHMENT_MEDIA_TYPES),
     filename: z.string().min(1).max(256).optional(),
     /** Discord uploads declare a size; proxied embed previews are bounded only when fetched. */
@@ -1428,7 +1432,7 @@ export const DiscordPresenceChannelTurnRequestSchema = z
       )
       .max(DISCORD_PRESENCE_CONTEXT_MESSAGES_MAX)
       .default([]),
-    /** The newest visual in the bounded context, never more than one image. */
+    /** The newest visual source in bounded context; motion may expand it into sampled frames. */
     contextVisual: z
       .object({
         sourceMessageId: z.string().min(1),

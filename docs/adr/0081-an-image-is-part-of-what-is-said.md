@@ -29,10 +29,10 @@ Five consequences fix the layers in order:
    body reads as "they say nothing", which is false for an image-only message.
 
 2. **Images cross the Clankie service as references, not bytes.** The trigger
-   carries `{ id, url, mediaType, filename?, byteSize? }`. Base64 in the request
-   would put multi-megabyte payloads into every turn body, idempotency
-   fingerprint, and receipt hash on the path. Bytes are fetched exactly once,
-   at the last hop before the model.
+   carries `{ id, url, motionUrl?, mediaType, filename?, byteSize? }`. Base64 in
+   the request would put multi-megabyte payloads into every turn body,
+   idempotency fingerprint, and receipt hash on the path. Bytes are fetched
+   exactly once, at the last hop before the model.
 
 3. **One fetch boundary, bounded on every axis.** The URL arrives on an
    untrusted gateway payload, so `discord-attachment-fetch` is the only place
@@ -46,12 +46,12 @@ Five consequences fix the layers in order:
    many attachments he cannot see — wrong type, oversized, or failed to load —
    and answers anyway. He is told a count, never a filename or a guess.
 
-5. **Discord GIF-picker embeds are visual messages.** A picker post is a page
-   URL plus a `gifv` embed, not a Discord attachment. Ingress carries the
-   embed's Discord-proxied WebP preview through the same reference and fetch
-   boundary. The captain sees the visual preview without browser-scraping the
-   provider page; understanding motion remains outside the image-only model
-   boundary.
+5. **Discord GIF-picker embeds are moving visual messages.** A picker post is a
+   page URL plus a `gifv` embed, not a Discord attachment. Ingress carries the
+   embed's Discord-proxied WebP preview and MP4 through the same reference and
+   fetch boundary. The captain model accepts images rather than video, so the
+   service uses the installed `ffmpeg` to produce chronological PNG samples;
+   if video fetch or sampling fails, the WebP preview remains the fallback.
 
 ### Where the untrusted bytes sit
 
@@ -72,11 +72,15 @@ count he sees; and a turn with no images remains a plain text prompt.
 Four images per message (Discord permits ten), 8 MB each, and
 `image/png|jpeg|gif|webp` — the intersection of what Discord serves and what
 vision models accept. Anything else is left out at ingress and counted.
+Moving embeds produce at most four chronological frames, scaled inside
+1024×1024. Their proxied video is subject to the same 8 MB fetch ceiling, a
+60-second duration ceiling, bounded process time, and temporary files removed
+after each extraction.
 
-Context carries only the newest visual in the bounded message window, and only
-one image from that message. This covers an image followed by a bare wake and
-references such as "that screenshot" without fetching images for up to fifty
-prior messages on every turn.
+Context carries only the newest visual source in the bounded message window;
+a moving source expands into chronological frames. This covers a visual
+followed by a bare wake and references such as "that screenshot" without
+fetching images for up to fifty prior messages on every turn.
 
 ## Consequences
 

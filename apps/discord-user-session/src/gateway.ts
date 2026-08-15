@@ -43,7 +43,7 @@ export interface DiscordGatewayMessage {
   readonly content: string;
   /** Raw `attachments` from the dispatch; ingress policy decides which he is shown. */
   readonly attachments: readonly DiscordRawAttachment[];
-  /** Raw visual embeds from the dispatch; only gifv previews are admitted. */
+  /** Raw visual embeds from the dispatch; only bounded gifv media are admitted. */
   readonly embeds: readonly DiscordRawEmbed[];
 }
 
@@ -474,12 +474,15 @@ function readEmbeds(value: unknown): readonly DiscordRawEmbed[] {
     const embed = record(entry);
     if (embed === undefined) return [];
     const thumbnail = record(embed.thumbnail);
+    const video = record(embed.video);
     return [
       {
         ...(typeof embed.type === "string" ? { type: embed.type } : {}),
         ...(typeof embed.url === "string" ? { url: embed.url } : {}),
         ...(typeof thumbnail?.url === "string" ? { thumbnailUrl: thumbnail.url } : {}),
         ...(typeof thumbnail?.proxy_url === "string" ? { thumbnailProxyUrl: thumbnail.proxy_url } : {}),
+        ...(typeof video?.url === "string" ? { videoUrl: video.url } : {}),
+        ...(typeof video?.proxy_url === "string" ? { videoProxyUrl: video.proxy_url } : {}),
       },
     ];
   });

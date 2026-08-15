@@ -1139,10 +1139,12 @@ function selectDiscordMessageImages(message: Message) {
       size: attachment.size,
     })),
     message.embeds.map((embed) => ({
-      type: embed.type,
-      url: embed.url,
-      thumbnailUrl: embed.thumbnail?.url,
-      thumbnailProxyUrl: embed.thumbnail?.proxyURL,
+      ...(embed.data.type === undefined ? {} : { type: embed.data.type }),
+      ...(embed.url === null ? {} : { url: embed.url }),
+      ...(embed.thumbnail === null ? {} : { thumbnailUrl: embed.thumbnail.url }),
+      ...(embed.thumbnail?.proxyURL === undefined ? {} : { thumbnailProxyUrl: embed.thumbnail.proxyURL }),
+      ...(embed.video === null ? {} : { videoUrl: embed.video.url }),
+      ...(embed.video?.proxyURL === undefined ? {} : { videoProxyUrl: embed.video.proxyURL }),
     })),
   );
 }

@@ -59,6 +59,48 @@ describe("resolving a Discord attachment into bytes", () => {
     ).resolves.toMatchObject({ mediaType: "image/webp" });
   });
 
+  it("expands a GIF-picker video into chronological image frames", async () => {
+    const motion = Buffer.from("bounded-mp4");
+    const first = Buffer.from("frame-one");
+    const second = Buffer.from("frame-two");
+    const resolve = createDiscordAttachmentResolver({
+      fetchImpl: () =>
+        Promise.resolve(
+          respond(motion, { "content-type": "video/mp4", "content-length": String(motion.byteLength) }),
+        ),
+      extractMotionFrames: (bytes, count) => {
+        expect(bytes).toEqual(motion);
+        expect(count).toBe(4);
+        return Promise.resolve([first, second]);
+      },
+    });
+
+    await expect(
+      resolve([
+        attachment({
+          url: "https://images-ext-1.discordapp.net/external/greeting.webp",
+          motionUrl: "https://images-ext-1.discordapp.net/external/greeting.mp4",
+          mediaType: "image/webp",
+        }),
+      ]),
+    ).resolves.toEqual([
+      {
+        id: "att-1",
+        mediaType: "image/png",
+        frameIndex: 1,
+        frameCount: 2,
+        dataUrl: `data:image/png;base64,${first.toString("base64")}`,
+      },
+      {
+        id: "att-1",
+        mediaType: "image/png",
+        frameIndex: 2,
+        frameCount: 2,
+        dataUrl: `data:image/png;base64,${second.toString("base64")}`,
+      },
+    ]);
+  });
+
   it("refuses any host outside Discord's CDN", async () => {
     const calls: string[] = [];
     const fetchImpl = (input: URL | RequestInfo) => {

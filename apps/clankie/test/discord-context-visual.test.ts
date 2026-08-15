@@ -1,5 +1,6 @@
 import type { DiscordPresenceChannelTurnRequest } from "@clankie/protocol";
 import { describe, expect, it } from "vitest";
+import type { ResolvedAttachment } from "../src/captain/deps.ts";
 import { normalizeDiscordTurn } from "../src/captain/discord-turn.ts";
 
 describe("Discord context visuals", () => {
@@ -34,7 +35,10 @@ describe("Discord context visuals", () => {
       ],
       contextVisual: {
         sourceMessageId: "gif-message",
-        attachment: image("gif-preview"),
+        attachment: {
+          ...image("gif-preview"),
+          motionUrl: "https://images-ext-1.discordapp.net/external/gif-preview.mp4",
+        },
       },
     };
 
@@ -43,18 +47,38 @@ describe("Discord context visuals", () => {
         appendEpisode: () => Promise.resolve(),
         recallEpisodeCard: () => Promise.resolve(""),
       },
-      resolveDiscordAttachments: (attachments) =>
-        Promise.resolve(
-          attachments.map((attachment) => ({
-            id: attachment.id,
-            mediaType: attachment.mediaType,
-            dataUrl: `data:${attachment.mediaType};base64,cGl4ZWxz`,
-          })),
-        ),
+      resolveDiscordAttachments: (attachments): Promise<readonly ResolvedAttachment[]> => {
+        const resolved: ResolvedAttachment[] = [];
+        for (const attachment of attachments) {
+          if (attachment.motionUrl === undefined) {
+            resolved.push({
+              id: attachment.id,
+              mediaType: attachment.mediaType,
+              dataUrl: `data:${attachment.mediaType};base64,cGl4ZWxz`,
+            });
+            continue;
+          }
+          resolved.push(
+            ...[1, 2].map((frameIndex) => ({
+              id: attachment.id,
+              mediaType: "image/png",
+              frameIndex,
+              frameCount: 2,
+              dataUrl: "data:image/png;base64,cGl4ZWxz",
+            })),
+          );
+        }
+        return Promise.resolve(resolved);
+      },
     });
 
-    expect(normalized.images.map((attachment) => attachment.id)).toEqual(["trigger", "gif-preview"]);
-    expect(normalized.prompt).toContain("final image");
+    expect(normalized.images.map((attachment) => attachment.id)).toEqual([
+      "trigger",
+      "gif-preview",
+      "gif-preview",
+    ]);
+    expect(normalized.prompt).toContain("chronological samples from early to late");
+    expect(normalized.prompt).toContain("final 2 image parts");
     expect(normalized.prompt).toContain("earlier context message gif-message");
     expect(normalized.prompt).toContain("[newest context visual]");
   });

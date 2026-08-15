@@ -122,6 +122,8 @@ export interface DiscordRawEmbed {
   readonly url?: string | null;
   readonly thumbnailUrl?: string | null;
   readonly thumbnailProxyUrl?: string | null;
+  readonly videoUrl?: string | null;
+  readonly videoProxyUrl?: string | null;
 }
 
 export interface DiscordInboundAttachmentSelection {
@@ -199,24 +201,30 @@ function selectAttachment(candidate: DiscordRawAttachment): DiscordPresenceAttac
 
 function selectEmbed(candidate: DiscordRawEmbed): DiscordPresenceAttachment | undefined {
   // Discord GIF pickers post a page URL plus a gifv embed, not an attachment.
-  // ponytail: vision accepts images, so use Discord's preview; sample the MP4 only if motion semantics matter.
+  // Carry Discord's preview for fallback and its proxy video for bounded frame sampling.
   const url = candidate.thumbnailProxyUrl ?? candidate.thumbnailUrl;
-  if (url === undefined) return undefined;
+  if (url == null) return undefined;
   const mediaType = imageMediaTypeFromUrl(candidate.thumbnailUrl ?? url);
   if (mediaType === undefined) return undefined;
-  try {
-    if (new URL(url).protocol !== "https:") return undefined;
-  } catch {
-    return undefined;
-  }
+  if (!isHttpsUrl(url)) return undefined;
+  const motionUrl = candidate.videoProxyUrl ?? candidate.videoUrl;
   return {
     id: `embed-${createHash("sha256")
       .update(candidate.url ?? url)
       .digest("hex")
       .slice(0, 24)}`,
     url,
+    ...(motionUrl == null || !isHttpsUrl(motionUrl) ? {} : { motionUrl }),
     mediaType,
   };
+}
+
+function isHttpsUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 function imageMediaTypeFromUrl(value: string): DiscordPresenceAttachment["mediaType"] | undefined {
@@ -694,7 +702,9 @@ export class DiscordTextIngress {
           body: message.body,
           createdAt: new Date(this.clock()).toISOString(),
           attachments: message.attachments ?? [],
-          ...(message.attachmentsOmitted === undefined ? {} : { attachmentsOmitted: message.attachmentsOmitted }),
+          ...(message.attachmentsOmitted === undefined
+            ? {}
+            : { attachmentsOmitted: message.attachmentsOmitted }),
         })),
         ...(trigger.contextMessages ?? []),
       ],
