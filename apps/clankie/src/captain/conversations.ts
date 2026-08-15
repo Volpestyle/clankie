@@ -21,7 +21,7 @@ interface ConversationMeta {
   readonly conversationId: string;
   readonly scope: OperatorConversationScope;
   readonly title: string;
-  readonly isDefault: boolean;
+  isDefault: boolean;
   readonly createdAt: string;
   updatedAt: string;
   revision: number;
@@ -69,6 +69,37 @@ export class ConversationStore {
         // An unreadable conversation is skipped, never fatal to boot.
       }
     }
+    this.ensureDefaultGlobalConversation();
+  }
+
+  /**
+   * The TUI selects THE default global conversation at startup and refuses to
+   * guess among zero or several, so the store guarantees exactly one — same
+   * contract the old registry enforced with a partial unique index.
+   */
+  private ensureDefaultGlobalConversation(): void {
+    const defaults = [...this.metas.values()]
+      .filter((meta) => meta.scope.kind === "global" && meta.isDefault)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    for (const demoted of defaults.slice(1)) {
+      demoted.isDefault = false;
+      this.saveMeta(demoted);
+    }
+    if (defaults.length > 0) return;
+    const now = new Date().toISOString();
+    const meta: ConversationMeta = {
+      conversationId: "global-default",
+      scope: { kind: "global" },
+      title: "Clankie",
+      isDefault: true,
+      createdAt: now,
+      updatedAt: now,
+      revision: 0,
+      sessionState: "unbound",
+    };
+    mkdirSync(join(this.root, meta.conversationId), { recursive: true });
+    this.metas.set(meta.conversationId, meta);
+    this.saveMeta(meta);
   }
 
   /**
@@ -137,7 +168,8 @@ export class ConversationStore {
       conversationId: `conv-${randomUUID()}`,
       scope,
       title,
-      isDefault: this.metas.size === 0,
+      // The boot-seeded global conversation owns default; created ones never do.
+      isDefault: false,
       createdAt: now,
       updatedAt: now,
       revision: 0,
