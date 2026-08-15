@@ -40,8 +40,22 @@ export function createFrameProducerServer(options: FrameProducerServerOptions): 
     maxPayload: options.maxPayloadBytes ?? DEFAULT_MAX_PAYLOAD_BYTES,
   });
 
-  const server = createServer((_request, response) => {
-    // The producer listener serves no content at all.
+  const server = createServer((request, response) => {
+    const path = new URL(request.url ?? "/", "http://localhost").pathname;
+    if (request.method === "GET" && path === "/snapshot") {
+      if (!authorized(request, token)) {
+        response.writeHead(401).end();
+        return;
+      }
+      const frame = hub.snapshot();
+      if (frame === null) {
+        response.writeHead(404).end();
+        return;
+      }
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(frame));
+      return;
+    }
     response.writeHead(404).end();
   });
 

@@ -13,20 +13,29 @@ import {
   DiscordTextIngress,
   DiscordVoiceIngress,
   DiscordVoiceSession,
+  dispatchVoiceMusicChat,
   openRealtimeConversationSession,
   openRealtimeTranscriptionSession,
   parseDiscordDmPolicy,
   parseDiscordIdSet,
   selectInboundImageAttachments,
+  VoiceMusicQueue,
   type DiscordBridgeReceipt,
 } from "@clankie/discord-presence-core";
 import type { DiscordVoiceEvidence } from "@clankie/protocol";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
-import { applyDiscordSettingsToEnvironment, characterNames, SettingsStore } from "@clankie/settings";
+import {
+  applyDiscordSettingsToEnvironment,
+  characterNames,
+  isDiscordBodyActive,
+  SettingsStore,
+} from "@clankie/settings";
+import { createServer } from "node:http";
 import { DiscordUserGateway } from "./gateway.ts";
 import { assertUserSessionAdmissible } from "./readiness.ts";
+import { startStreamWatch } from "./stream-watch.ts";
 import { DiscordUserVoiceAdapters } from "./voice-adapter.ts";
 
 /**
@@ -34,17 +43,16 @@ import { DiscordUserVoiceAdapters } from "./voice-adapter.ts";
  *
  * A second, isolated process rather than a mode of the bot bridge: ADR 0024
  * forbids bot and user credentials sharing a gateway, and separate processes
- * are what make that structural instead of a convention. Everything above the
+ * are what make that structural instead of a convention. The launcher starts
+ * this process only when it is the active body. Everything above the
  * transport — ingress shaping, captain lane addressing, consent, memory — is
  * the shared core, so this body is the same Clankie the bot is.
  */
 
 // Fill unset DISCORD_* names from the operator settings file before anything
-// reads them. The settings schema currently carries no `DISCORD_USER_SESSION_*`
-// fields, so today this supplies only the shared `DISCORD_OWNER_USER_ID` that
-// the default `owner_only` DM policy needs; the plane's own allowlists still
-// come from the environment and remain ceilinged by the recorded opt-in.
-// Ahead of the token guards on purpose — see the bot bridge for the reasoning.
+// reads them. `/discord` Lab user body writes the user-session allowlists into
+// that file; they still cannot exceed the recorded opt-in. Ahead of the token
+// guards on purpose — see the bot bridge for the reasoning.
 const storedSettings = await new SettingsStore().load();
 const settingsFilledNames = applyDiscordSettingsToEnvironment(storedSettings.discord);
 
@@ -175,6 +183,30 @@ if (voiceEnabled && openAiCredential?.type !== "api") {
 // Minimal parallel of the bot bridge's realtime wiring (ADR 0057). Same env
 // names, same defaults, same always-explicit truncation.
 const voiceConfig = voiceEnabled ? parseUserSessionVoiceRealtimeEnv(process.env) : undefined;
+
+const goLiveMusic = {
+  play: (_url: string): boolean => false,
+  pause: (_paused: boolean): void => undefined,
+  stop: (): void => undefined,
+};
+const music = new VoiceMusicQueue({
+  sinkKind: "video",
+  sink: {
+    play(url) {
+      if (!goLiveMusic.play(url)) throw new Error("discord_music_not_in_voice");
+    },
+    pause() {
+      goLiveMusic.pause(true);
+    },
+    resume() {
+      goLiveMusic.pause(false);
+    },
+    stop() {
+      goLiveMusic.stop();
+    },
+  },
+});
+
 const voiceSession =
   openAiCredential?.type !== "api" || voiceApi === undefined || voiceConfig === undefined
     ? undefined
@@ -224,21 +256,31 @@ const voiceSession =
           });
           return { instructions: briefing.instructions, briefing: briefing.briefing };
         },
+        lookAtScreen: async () => {
+          const still = await voiceApi.fetchPlayStill();
+          if (still.outcome === "still") {
+            return { outcome: "still" as const, pngBase64: still.pngBase64, mimeType: "image/png" as const };
+          }
+          if (still.outcome === "pending") return { outcome: "pending" as const };
+          return { outcome: "not_playing" as const };
+        },
+        music,
         floor: {
           names: characterNames(storedSettings.persona),
           replyPolicy: storedSettings.persona.replyPolicy,
           chattiness: storedSettings.persona.chattiness,
           decayWindowMs: voiceConfig.decayWindowMs,
         },
-        // Deliberately no volitionDecider: the personal-lab body is a secondary
-        // presence and must not interject on its own. Every volition offer is
-        // suppressed — still accounted, so the counters stay honest.
+        // When this process is the mouth, the floor still answers when
+        // addressed. Unprompted volition uses the same decider as the bot
+        // once that helper lives in presence-core.
         presenceSessionId: () => presenceSession.record.sessionId,
         emit: recordVoiceEvidence,
       });
 
 gateway.on("ready", (identity) => {
   void presenceSession.gatewayReady().catch(reportPhaseFailure);
+  streamWatch.publish();
   void recordReceipt("discord.user_session.ready", {
     userId: identity.userId,
     optInId: admission.optIn.optInId,
@@ -265,7 +307,18 @@ gateway.on("failed", (reason) => {
 gateway.on("messageCreate", (message) => {
   void (async () => {
     try {
-      const selection = selectInboundImageAttachments(message.attachments);
+      const selection = selectInboundImageAttachments(message.attachments, message.embeds);
+      const musicReply = await dispatchVoiceMusicChat({
+        body: message.content,
+        authorId: message.authorId,
+        names: characterNames(storedSettings.persona),
+        addressed: message.mentionsSelf,
+        queue: music,
+      });
+      if (musicReply !== undefined) {
+        await gateway.sendMessage(message.channelId, musicReply);
+        return;
+      }
       const result = await textIngress.handle({
         id: message.id,
         ...(message.guildId === undefined ? {} : { guildId: message.guildId }),
@@ -306,6 +359,42 @@ gateway.on("messageCreate", (message) => {
   })();
 });
 
+const streamWatch = startStreamWatch({
+  gateway,
+  api,
+  joinMuted: !isDiscordBodyActive("user_session"),
+  allowlisted: (guildId, channelId) =>
+    (guildIds.size === 0 || guildIds.has(guildId)) &&
+    (channelIds.size === 0 || channelIds.has(channelId) || voiceChannelIds.has(channelId)),
+  onWatchEvent: (type, data) => {
+    void recordReceipt(`discord.stream.${type}`, data);
+  },
+  onPublishEvent: (type, data) => {
+    void recordReceipt(`discord.stream.${type}`, data);
+  },
+});
+
+goLiveMusic.play = (url) => {
+  if (streamWatch.playSource(url)) return true;
+  const status = voiceSession?.status();
+  const guildId = status?.guildId ?? [...guildIds][0];
+  const channelId = status?.channelId ?? [...voiceChannelIds][0];
+  if (guildId === undefined || channelId === undefined || guildId.length === 0 || channelId.length === 0) {
+    return false;
+  }
+  return streamWatch.requestPublish({ guildId, channelId, sourceUrl: url });
+};
+goLiveMusic.pause = (paused) => {
+  streamWatch.setPublishPaused(paused);
+};
+goLiveMusic.stop = () => {
+  streamWatch.stopPublish();
+};
+
+gateway.on("raw", (packet) => {
+  streamWatch.handleRaw(packet);
+});
+
 gateway.on("voiceStateUpdate", (state) => {
   if (state.guildId === undefined) return;
   voiceSession?.memberChannelChanged(state.guildId, state.userId, state.channelId);
@@ -313,6 +402,8 @@ gateway.on("voiceStateUpdate", (state) => {
   void presenceSession
     .voiceStateChanged(state.guildId, state.channelId !== undefined)
     .catch(reportPhaseFailure);
+  // A watch join just got a session id — retry connecting ClankVox.
+  streamWatch.publish();
 });
 
 /**
@@ -509,10 +600,13 @@ function reportPhaseFailure(error: unknown): void {
 }
 
 let shutdownPromise: Promise<void> | undefined;
+let controlServer: ReturnType<typeof createServer> | undefined;
 async function shutdown(signal: NodeJS.Signals): Promise<void> {
   if (shutdownPromise !== undefined) return shutdownPromise;
   shutdownPromise = (async () => {
     stopVoiceIdleTimer();
+    streamWatch.close();
+    controlServer?.close();
     await voiceSession?.leave();
     voiceAdapters.destroyAll();
     gateway.close();
@@ -521,6 +615,58 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   })();
   return shutdownPromise;
 }
+
+const controlPort = Number.parseInt(process.env.CLANKIE_USER_SESSION_CONTROL_PORT ?? "4312", 10);
+const server = createServer((request, response) => {
+  const url = request.url ?? "/";
+  if (request.method === "GET" && (url === "/" || url === "/health")) {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ ok: true, service: "discord-user-session" }));
+    return;
+  }
+  if (request.method === "POST" && url === "/go-live/start") {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      try {
+        const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+          guildId?: string;
+          channelId?: string;
+          sourceUrl?: string;
+        };
+        if (typeof body.guildId !== "string" || typeof body.channelId !== "string") {
+          response.writeHead(400);
+          response.end(JSON.stringify({ error: "guildId_and_channelId_required" }));
+          return;
+        }
+        const started = streamWatch.requestPublish({
+          guildId: body.guildId,
+          channelId: body.channelId,
+          ...(typeof body.sourceUrl === "string" ? { sourceUrl: body.sourceUrl } : {}),
+        });
+        response.writeHead(started ? 202 : 503);
+        response.end(JSON.stringify({ ok: started }));
+      } catch {
+        response.writeHead(400);
+        response.end(JSON.stringify({ error: "invalid_json" }));
+      }
+    });
+    return;
+  }
+  if (request.method === "POST" && url === "/go-live/stop") {
+    streamWatch.stopPublish();
+    response.writeHead(202);
+    response.end(JSON.stringify({ ok: true }));
+    return;
+  }
+  response.writeHead(404);
+  response.end();
+});
+controlServer = server;
+await new Promise<void>((resolve, reject) => {
+  server.once("error", reject);
+  server.listen(controlPort, "127.0.0.1", () => resolve());
+});
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {

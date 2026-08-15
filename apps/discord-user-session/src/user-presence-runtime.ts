@@ -30,6 +30,8 @@ export interface DiscordUserRestOptions {
    * something this executor knows about.
    */
   readonly resolveGoLiveSource?: (input: { guildId: string; channelId: string }) => Readable;
+  /** Injectable loopback fetch for the user-session control port. */
+  readonly controlFetch?: typeof globalThis.fetch;
 }
 
 /**
@@ -46,6 +48,7 @@ export class DiscordUserPresenceRuntime {
   private readonly resolveAttachment: DiscordUserRestOptions["resolveAttachment"];
   private readonly goLiveMedia: GoLiveMediaPublisher | undefined;
   private readonly resolveGoLiveSource: DiscordUserRestOptions["resolveGoLiveSource"];
+  private readonly controlFetch: typeof globalThis.fetch;
 
   public constructor(options: DiscordUserRestOptions) {
     if (options.token.trim().length === 0) throw new Error("discord_user_session_token_required");
@@ -55,6 +58,7 @@ export class DiscordUserPresenceRuntime {
     this.resolveAttachment = options.resolveAttachment;
     this.goLiveMedia = options.goLiveMedia;
     this.resolveGoLiveSource = options.resolveGoLiveSource;
+    this.controlFetch = options.controlFetch ?? globalThis.fetch;
   }
 
   public async execute(
@@ -179,28 +183,36 @@ export class DiscordUserPresenceRuntime {
         // op 4 directly; routing it through REST would desynchronise the two.
         throw new Error("discord_presence_voice_via_media_session_only");
       case "go_live_start": {
-        // Failing closed is correct when media is unconfigured: silently
-        // succeeding would report a stream nobody can watch.
-        if (this.goLiveMedia === undefined || this.resolveGoLiveSource === undefined) {
-          throw new Error("discord_presence_go_live_media_unavailable");
-        }
-        await this.goLiveMedia.start({
-          guildId: payload.guildId,
-          channelId: payload.channelId,
-          source: this.resolveGoLiveSource({
+        if (this.goLiveMedia !== undefined && this.resolveGoLiveSource !== undefined) {
+          await this.goLiveMedia.start({
             guildId: payload.guildId,
             channelId: payload.channelId,
-          }),
-        });
+            source: this.resolveGoLiveSource({
+              guildId: payload.guildId,
+              channelId: payload.channelId,
+            }),
+          });
+          return this.result(write, payload.channelId);
+        }
+        await postUserSessionControl(
+          "/go-live/start",
+          {
+            guildId: payload.guildId,
+            channelId: payload.channelId,
+            ...("sourceUrl" in payload && typeof payload.sourceUrl === "string"
+              ? { sourceUrl: payload.sourceUrl }
+              : {}),
+          },
+          this.controlFetch,
+        );
         return this.result(write, payload.channelId);
       }
       case "go_live_stop": {
-        if (this.goLiveMedia === undefined) {
-          throw new Error("discord_presence_go_live_media_unavailable");
+        if (this.goLiveMedia !== undefined) {
+          await this.goLiveMedia.stop(payload.guildId);
+          return this.result(write);
         }
-        // Stopping an inactive stream is not an error: the operator's intent is
-        // "not live", and an encoder that already died leaves it inactive.
-        await this.goLiveMedia.stop(payload.guildId);
+        await postUserSessionControl("/go-live/stop", { guildId: payload.guildId }, this.controlFetch);
         return this.result(write);
       }
       case "activity_start":
@@ -274,6 +286,29 @@ function messageId(value: unknown): string | undefined {
   if (value === null || typeof value !== "object") return undefined;
   const id = (value as { id?: unknown }).id;
   return typeof id === "string" ? id : undefined;
+}
+
+async function postUserSessionControl(
+  path: string,
+  body: Record<string, string>,
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  const port = process.env.CLANKIE_USER_SESSION_CONTROL_PORT?.trim() || "4312";
+  try {
+    const response = await fetchImpl(`http://127.0.0.1:${port}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      throw new Error(`discord_presence_go_live_media_unavailable:user_session_control_${String(response.status)}`);
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("discord_presence_go_live_media_unavailable")) {
+      throw error;
+    }
+    throw new Error("discord_presence_go_live_media_unavailable");
+  }
 }
 
 /** Encode a reaction for the Discord REST path (unicode or name:id custom). */

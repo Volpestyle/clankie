@@ -13,6 +13,7 @@ import {
   DiscordTextIngress,
   selectInboundImageAttachments,
   TYPING_REFRESH_MS,
+  TYPING_MAX_DURATION_MS,
   type DiscordTextIngressConfig,
   type DiscordTextIngressEvidence,
   type DiscordTextIngressPort,
@@ -731,6 +732,23 @@ describe("typing while he composes", () => {
       vi.useRealTimers();
     }
   });
+
+  it("stops refreshing after the cosmetic deadline even when the captain never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const port = new RecordingPort(() => new Promise<CaptainChannelTurnResult>(() => undefined));
+      const ingress = new DiscordTextIngress(port, config());
+
+      void ingress.handle(guildMessage("message-typing-wedged"));
+      await vi.advanceTimersByTimeAsync(TYPING_MAX_DURATION_MS);
+      const writesAtDeadline = port.typing.length;
+
+      await vi.advanceTimersByTimeAsync(TYPING_REFRESH_MS * 4);
+      expect(port.typing).toHaveLength(writesAtDeadline);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("images are part of what was said", () => {
@@ -767,6 +785,78 @@ describe("images are part of what was said", () => {
       },
     ]);
     expect(selection.omitted).toBe(4);
+  });
+
+  it("turns a Discord GIF-picker embed into a proxied image", () => {
+    const selection = selectInboundImageAttachments([], [
+      {
+        type: "gifv",
+        url: "https://klipy.com/gifs/greetings-PSr",
+        thumbnailUrl: "https://static.klipy.com/greeting.webp",
+        thumbnailProxyUrl: "https://images-ext-1.discordapp.net/external/greeting.webp",
+      },
+    ]);
+
+    expect(selection.attachments).toEqual([
+      {
+        id: expect.stringMatching(/^embed-[0-9a-f]{24}$/u),
+        url: "https://images-ext-1.discordapp.net/external/greeting.webp",
+        mediaType: "image/webp",
+      },
+    ]);
+    expect(selection.omitted).toBe(0);
+  });
+
+  it("carries only the newest visual from bounded context", async () => {
+    const port = new RecordingPort();
+    const ingress = new DiscordTextIngress(port, config());
+    const image = (id: string) => ({
+      id,
+      url: `https://cdn.discordapp.com/${id}.png`,
+      mediaType: "image/png" as const,
+      byteSize: 1_024,
+    });
+
+    await ingress.handle({
+      id: "message-context-image",
+      channelId: "dm-1",
+      authorId: "james",
+      authorIsBot: false,
+      mentionsBot: false,
+      body: "what screenshot is that?",
+      contextMessages: [
+        {
+          id: "outside-bound",
+          authorId: "james",
+          body: "old",
+          createdAt: "2026-07-12T19:00:00.000Z",
+          attachments: [image("old")],
+        },
+        {
+          id: "recent-text",
+          authorId: "friend",
+          body: "recent",
+          createdAt: "2026-07-12T19:01:00.000Z",
+        },
+        {
+          id: "latest-visual",
+          authorId: "clankie",
+          body: "here",
+          createdAt: "2026-07-12T19:02:00.000Z",
+          attachments: [image("shown"), image("bounded-away")],
+        },
+      ],
+    });
+
+    expect(port.turns[0]?.contextMessages.map((message) => message.id)).toEqual([
+      "recent-text",
+      "latest-visual",
+    ]);
+    expect(port.turns[0]?.contextVisual).toEqual({
+      sourceMessageId: "latest-visual",
+      attachment: image("shown"),
+      attachmentsOmitted: 1,
+    });
   });
 
   it("caps how many images one message may carry and counts the overflow", () => {

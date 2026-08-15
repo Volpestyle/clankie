@@ -161,7 +161,7 @@ async function openTranscription(overrides: Partial<RealtimeTranscriptionSession
 }
 
 describe("realtime conversation session", () => {
-  it("opens with VAD that can neither create nor interrupt a response, and exactly one tool", async () => {
+  it("opens with VAD that can neither create nor interrupt a response, and the local tool set", async () => {
     const { socket } = await openConversation();
     const update = frames(socket)[0];
     expect(update).toMatchObject({
@@ -193,8 +193,18 @@ describe("realtime conversation session", () => {
       },
     });
     const tools = (update as { session?: { tools?: { name?: string }[] } } | undefined)?.session?.tools;
-    expect(tools).toHaveLength(1);
-    expect(tools?.[0]).toMatchObject({ type: "function", name: "ask_clankie" });
+    expect(tools?.map((tool) => tool.name)).toEqual([
+      "ask_clankie",
+      "look_at_screen",
+      "youtube_search",
+      "music_play",
+      "music_queue",
+      "music_skip",
+      "music_pause",
+      "music_resume",
+      "music_stop",
+      "music_now",
+    ]);
   });
 
   // Required mission evidence: no server event — speech boundaries, committed
@@ -302,6 +312,19 @@ describe("realtime conversation session", () => {
       },
     });
     expect(tail[1]).toMatchObject({ type: "response.create" });
+  });
+
+  it("seeds a play still as an input_image item", async () => {
+    const { session, socket } = await openConversation();
+    session.createImageItem("abc");
+    expect(frames(socket).at(-1)).toMatchObject({
+      type: "conversation.item.create",
+      item: {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_image", image_url: "data:image/png;base64,abc" }],
+      },
+    });
   });
 
   it("truncates deliberately with the given item id and audio offset", async () => {

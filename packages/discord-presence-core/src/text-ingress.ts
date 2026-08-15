@@ -98,6 +98,9 @@ export interface DiscordInboundContextMessage {
   readonly authorId: string;
   readonly body: string;
   readonly createdAt: string;
+  /** Candidate visuals stay internal until the bounded newest one is selected. */
+  readonly attachments?: readonly DiscordPresenceAttachment[];
+  readonly attachmentsOmitted?: number;
 }
 
 /**
@@ -112,6 +115,14 @@ export interface DiscordRawAttachment {
   readonly contentType?: string | null;
   readonly filename?: string | null;
   readonly size?: number | null;
+}
+
+/** The visual subset of a Discord link embed; rich cards are not images. */
+export interface DiscordRawEmbed {
+  readonly type?: string | null;
+  readonly url?: string | null;
+  readonly thumbnailUrl?: string | null;
+  readonly thumbnailProxyUrl?: string | null;
 }
 
 export interface DiscordInboundAttachmentSelection {
@@ -134,6 +145,7 @@ export interface DiscordInboundAttachmentSelection {
  */
 export function selectInboundImageAttachments(
   raw: readonly DiscordRawAttachment[],
+  embeds: readonly DiscordRawEmbed[] = [],
 ): DiscordInboundAttachmentSelection {
   const attachments: DiscordPresenceAttachment[] = [];
   let omitted = 0;
@@ -143,6 +155,16 @@ export function selectInboundImageAttachments(
       continue;
     }
     const selected = selectAttachment(candidate);
+    if (selected === undefined) omitted += 1;
+    else attachments.push(selected);
+  }
+  for (const candidate of embeds) {
+    if (candidate.type !== "gifv") continue;
+    if (attachments.length >= DISCORD_PRESENCE_TRIGGER_ATTACHMENTS_MAX) {
+      omitted += 1;
+      continue;
+    }
+    const selected = selectEmbed(candidate);
     if (selected === undefined) omitted += 1;
     else attachments.push(selected);
   }
@@ -174,6 +196,42 @@ function selectAttachment(candidate: DiscordRawAttachment): DiscordPresenceAttac
     ...(filename === undefined || filename.length === 0 ? {} : { filename }),
     byteSize,
   };
+}
+
+function selectEmbed(candidate: DiscordRawEmbed): DiscordPresenceAttachment | undefined {
+  // Discord GIF pickers post a page URL plus a gifv embed, not an attachment.
+  // ponytail: vision accepts images, so use Discord's preview; sample the MP4 only if motion semantics matter.
+  const url = candidate.thumbnailProxyUrl ?? candidate.thumbnailUrl;
+  if (url === undefined) return undefined;
+  const mediaType = imageMediaTypeFromUrl(candidate.thumbnailUrl ?? url);
+  if (mediaType === undefined) return undefined;
+  try {
+    if (new URL(url).protocol !== "https:") return undefined;
+  } catch {
+    return undefined;
+  }
+  return {
+    id: `embed-${createHash("sha256")
+      .update(candidate.url ?? url)
+      .digest("hex")
+      .slice(0, 24)}`,
+    url,
+    mediaType,
+  };
+}
+
+function imageMediaTypeFromUrl(value: string): DiscordPresenceAttachment["mediaType"] | undefined {
+  let pathname: string;
+  try {
+    pathname = new URL(value).pathname.toLowerCase();
+  } catch {
+    return undefined;
+  }
+  if (pathname.endsWith(".png")) return "image/png";
+  if (pathname.endsWith(".jpg") || pathname.endsWith(".jpeg")) return "image/jpeg";
+  if (pathname.endsWith(".gif")) return "image/gif";
+  if (pathname.endsWith(".webp")) return "image/webp";
+  return undefined;
 }
 
 function isSupportedMediaType(value: string): value is DiscordPresenceAttachment["mediaType"] {
@@ -246,6 +304,8 @@ const DEFAULT_DELIVERY_RETENTION_MS = 7 * 60 * 60 * 1_000;
 const DEFAULT_MAX_RETAINED_DELIVERIES = 50_000;
 /** Discord shows "typing…" for about ten seconds per post; a turn that thinks longer re-posts to stay visible. */
 export const TYPING_REFRESH_MS = 8_000;
+/** Cosmetic presence must settle even if the captain service or its HTTP request wedges. */
+export const TYPING_MAX_DURATION_MS = 60_000;
 /** Roughly how long a conversation stays "the one you are in" before you drift off. */
 const DEFAULT_LIVE_MESSAGE_WINDOW = 5;
 const DEFAULT_MAX_PENDING_PER_CHANNEL = 20;
@@ -412,6 +472,7 @@ export class DiscordTextIngress {
   ): Promise<DiscordTextIngressOutcome> {
     const health = await this.port.getHealth();
     const contextMessages = message.contextMessages ?? (await message.loadContextMessages?.()) ?? [];
+    const context = boundedContext(contextMessages, this.config.contextMessageLimit);
     const identity = {
       presenceSessionId,
       correlationId,
@@ -441,7 +502,8 @@ export class DiscordTextIngress {
         ...(this.unprompted(message) ? { unprompted: true } : {}),
         ...(message.voicePresenceNote === undefined ? {} : { voicePresenceNote: message.voicePresenceNote }),
       },
-      contextMessages: boundedContext(contextMessages, this.config.contextMessageLimit),
+      contextMessages: context.messages,
+      ...(context.visual === undefined ? {} : { contextVisual: context.visual }),
     });
     event("accepted");
     const stopTyping = this.showTyping(message, identity);
@@ -536,6 +598,7 @@ export class DiscordTextIngress {
     let sequence = 0;
     const stop = (): void => {
       clearInterval(timer);
+      clearTimeout(deadline);
     };
     const post = (): void => {
       const write = DiscordPresenceWriteSchema.parse({
@@ -550,6 +613,8 @@ export class DiscordTextIngress {
     };
     const timer = setInterval(post, TYPING_REFRESH_MS);
     timer.unref?.();
+    const deadline = setTimeout(stop, TYPING_MAX_DURATION_MS);
+    deadline.unref?.();
     post();
     return stop;
   }
@@ -637,6 +702,8 @@ export class DiscordTextIngress {
           authorId: message.authorId,
           body: message.body,
           createdAt: new Date(this.clock()).toISOString(),
+          attachments: message.attachments ?? [],
+          ...(message.attachmentsOmitted === undefined ? {} : { attachmentsOmitted: message.attachmentsOmitted }),
         })),
         ...(trigger.contextMessages ?? []),
       ],
@@ -739,12 +806,41 @@ function presenceSessionIdFor(message: DiscordInboundMessage): string {
 function boundedContext(
   messages: readonly DiscordInboundContextMessage[],
   limit: number,
-): readonly DiscordInboundContextMessage[] {
-  if (limit === 0) return [];
-  return messages.slice(-limit).map((message) => ({
-    ...message,
-    body: message.body.slice(0, DISCORD_PRESENCE_TRIGGER_BODY_MAX),
-  }));
+): {
+  readonly messages: readonly Pick<DiscordInboundContextMessage, "id" | "authorId" | "body" | "createdAt">[];
+  readonly visual?: {
+    readonly sourceMessageId: string;
+    readonly attachment?: DiscordPresenceAttachment;
+    readonly attachmentsOmitted?: number;
+  };
+} {
+  if (limit === 0) return { messages: [] };
+  const bounded = messages.slice(-limit);
+  const source = [...bounded]
+    .reverse()
+    .find((message) => (message.attachments?.length ?? 0) > 0 || (message.attachmentsOmitted ?? 0) > 0);
+  const attachment = source?.attachments?.[0];
+  const omitted =
+    source === undefined
+      ? 0
+      : (source.attachmentsOmitted ?? 0) + Math.max(0, (source.attachments?.length ?? 0) - 1);
+  return {
+    messages: bounded.map((message) => ({
+      id: message.id,
+      authorId: message.authorId,
+      body: message.body.slice(0, DISCORD_PRESENCE_TRIGGER_BODY_MAX),
+      createdAt: message.createdAt,
+    })),
+    ...(source === undefined
+      ? {}
+      : {
+          visual: {
+            sourceMessageId: source.id,
+            ...(attachment === undefined ? {} : { attachment }),
+            ...(omitted === 0 ? {} : { attachmentsOmitted: omitted }),
+          },
+        }),
+  };
 }
 
 function boundedReply(value: string): string {

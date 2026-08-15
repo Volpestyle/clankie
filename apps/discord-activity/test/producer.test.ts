@@ -72,6 +72,25 @@ describe("frame producer server", () => {
     expect(hub.viewerCount).toBe(0);
   });
 
+  it("serves the latest frame on GET /snapshot to the producer bearer", async () => {
+    const hub = new RenderedSurfaceHub();
+    server = createFrameProducerServer({ hub, token: TOKEN });
+    const port = await server.listen(0);
+    const producer = await dial(port, TOKEN);
+    producer.send(frameMessage(3));
+    await vi.waitFor(() => expect(hub.snapshot()?.sequence).toBe(3));
+
+    const denied = await fetch(`http://127.0.0.1:${String(port)}/snapshot`);
+    expect(denied.status).toBe(401);
+
+    const ok = await fetch(`http://127.0.0.1:${String(port)}/snapshot`, {
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    expect(ok.status).toBe(200);
+    await expect(ok.json()).resolves.toMatchObject({ sequence: 3, encoding: "png", width: 240, height: 160 });
+    producer.close();
+  });
+
   it("rejects an unauthenticated or wrong-token producer", async () => {
     server = createFrameProducerServer({ hub: new RenderedSurfaceHub(), token: TOKEN });
     const port = await server.listen(0);

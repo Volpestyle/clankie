@@ -55,6 +55,16 @@ describe("DiscordUserGateway", () => {
         content: "hey clankie",
         author: { id: "human-1" },
         mentions: [{ id: "self-1" }],
+        embeds: [
+          {
+            type: "gifv",
+            url: "https://klipy.com/gifs/greetings-PSr",
+            thumbnail: {
+              url: "https://static.klipy.com/greeting.webp",
+              proxy_url: "https://images-ext-1.discordapp.net/external/greeting.webp",
+            },
+          },
+        ],
       },
     });
     expect(messages).toEqual([
@@ -67,6 +77,14 @@ describe("DiscordUserGateway", () => {
         mentionsSelf: true,
         content: "hey clankie",
         attachments: [],
+        embeds: [
+          {
+            type: "gifv",
+            url: "https://klipy.com/gifs/greetings-PSr",
+            thumbnailUrl: "https://static.klipy.com/greeting.webp",
+            thumbnailProxyUrl: "https://images-ext-1.discordapp.net/external/greeting.webp",
+          },
+        ],
       },
     ]);
 
@@ -77,6 +95,16 @@ describe("DiscordUserGateway", () => {
       d: { guild_id: "guild-1", token: "voice-token", endpoint: "voice.discord.gg" },
     });
     expect(servers).toEqual([{ guildId: "guild-1", token: "voice-token", endpoint: "voice.discord.gg" }]);
+
+    const raw: string[] = [];
+    gateway.on("raw", (packet) => raw.push(packet.t));
+    socket.deliver({
+      op: 0,
+      s: 4,
+      t: "STREAM_CREATE",
+      d: { stream_key: "guild:guild-1:voice-1:human-1" },
+    });
+    expect(raw).toContain("STREAM_CREATE");
     gateway.close();
   });
 

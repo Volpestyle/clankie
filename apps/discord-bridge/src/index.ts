@@ -43,7 +43,9 @@ import {
   DiscordTextIngress,
   DiscordVoiceIngress,
   DiscordVoiceSession,
+  dispatchVoiceMusicChat,
   parseDiscordDmPolicy,
+  parseMusicIntent,
   parseDiscordIdSet,
   selectInboundImageAttachments,
   type DiscordBridgeReceipt,
@@ -59,6 +61,7 @@ import {
 import { commands, DISCORD_COMMAND_NAME, DISCORD_SUBCOMMANDS } from "./commands.ts";
 import {
   createVoiceBriefingProvider,
+  createVoiceLookAtScreenProvider,
   createVoiceRealtimePorts,
   createVoiceVolitionDecider,
   describeVoiceResponse,
@@ -77,6 +80,7 @@ import {
   type VoicePresenceAskOptions,
   type VoicePresenceMember,
 } from "./voice-intent.ts";
+import { possessorRoomText } from "./possessor-text.ts";
 import { sanitizeDiscordText } from "./text.ts";
 
 // Fill unset DISCORD_* names from the operator settings file before anything
@@ -275,6 +279,7 @@ const voiceSession =
           config: voiceRealtimeConfig,
         }),
         briefing: createVoiceBriefingProvider(voiceApi),
+        lookAtScreen: createVoiceLookAtScreenProvider(voiceApi),
         floor: {
           // Persona owns who he is and when he speaks; the bridge only carries it.
           names: characterNames(storedSettings.persona),
@@ -317,8 +322,13 @@ const possessorVoiceListener =
         // The bridge owns the listener, so the bridge owns the mint; a
         // possessor only ever resolves.
         token: await ensurePossessorVoiceCredential(),
-        narrate: (text) => voiceSession.narrate(text),
-        emit: (evidence) => recordVoiceEvidence(evidence),
+        narrate: (text, options) => voiceSession.narrate(text, options),
+        emit: (evidence) => {
+          const stayId = voiceSession.status().stayId;
+          return recordVoiceEvidence(
+            stayId === undefined || evidence.stayId !== undefined ? evidence : { ...evidence, stayId },
+          );
+        },
         // Read at attach time so a play loop that starts mid-call learns the
         // room immediately instead of waiting for the next join or leave.
         room: () => ({ listening: voiceSession.status().active }),
@@ -331,11 +341,27 @@ if (possessorVoiceListener !== undefined && voiceSession !== undefined) {
   // Hearing is push-only, so the bridge starts retaining nothing new: lines
   // that already passed the consent boundary are handed on as they happen.
   voiceSession.subscribeTranscript((line) => possessorVoiceListener.publishUtterance(line));
+  // Text lands on the same seam (see `messageCreate`), so the room can steer a
+  // playthrough without anyone opting into voice capture.
   console.info(
     { port, path: POSSESSOR_VOICE_PATH },
     "Discord bridge possessor voice seam listening on loopback",
   );
 }
+/** Hand a text message to a running playthrough as a line from the room. */
+const publishRoomTextToPossessor = (message: Message): void => {
+  if (possessorVoiceListener === undefined) return;
+  const line = possessorRoomText(
+    { ingressGuildIds, ingressChannelIds },
+    {
+      guildId: message.guildId,
+      channelId: message.channelId,
+      authorIsBot: message.author.bot || message.author.id === client.user?.id,
+      body: message.content,
+    },
+  );
+  if (line !== null) possessorVoiceListener.publishUtterance(line);
+};
 // Asked voice presence (ADR 0062): "clankie hop in vc" in an admitted text
 // channel moves him under exactly the slash tier, executed here at the ingress
 // boundary before the same message's captain turn. Composed only when both
@@ -520,7 +546,44 @@ client.on("invalidated", () => {
   void presenceSession.fail().catch(reportPresencePhaseFailure);
 });
 
+const observedStreams = new Map<string, { guildId: string; channelId: string; userId: string }>();
+
+function reportObservedStreams(): void {
+  const streams = [...observedStreams.values()].map((stream) => ({
+    schemaVersion: 1 as const,
+    streamKey: `guild:${stream.guildId}:${stream.channelId}:${stream.userId}`,
+    kind: "guild" as const,
+    guildId: stream.guildId,
+    channelId: stream.channelId,
+    userId: stream.userId,
+    watching: false,
+    hasFrame: false,
+    updatedAt: new Date().toISOString(),
+  }));
+  void api
+    .reportDiscordStreamWatch({ schemaVersion: 1, source: "bot", streams, decoder: "idle" })
+    .catch((error: unknown) => {
+      console.warn(
+        { error: error instanceof Error ? error.message : String(error) },
+        "Discord stream-watch metadata report failed",
+      );
+    });
+}
+
 client.on("voiceStateUpdate", (previous, current) => {
+  if (previous.streaming !== current.streaming) {
+    const key = `${current.guild.id}:${current.id}`;
+    if (current.streaming && current.channelId !== null) {
+      observedStreams.set(key, {
+        guildId: current.guild.id,
+        channelId: current.channelId,
+        userId: current.id,
+      });
+    } else {
+      observedStreams.delete(key);
+    }
+    reportObservedStreams();
+  }
   voiceSession?.memberChannelChanged(current.guild.id, current.id, current.channelId ?? undefined);
   if (current.id === client.user?.id) {
     // Names and occupants ride the presence record (VUH-939): this is the one
@@ -563,15 +626,7 @@ client.on("voiceStateUpdate", (previous, current) => {
 client.on("messageCreate", async (message) => {
   if (!textIngress) return;
   try {
-    const selection = selectInboundImageAttachments(
-      [...message.attachments.values()].map((attachment) => ({
-        id: attachment.id,
-        url: attachment.url,
-        contentType: attachment.contentType,
-        filename: attachment.name,
-        size: attachment.size,
-      })),
-    );
+    const selection = selectDiscordMessageImages(message);
     const inbound = {
       id: message.id,
       ...(message.guildId === null ? {} : { guildId: message.guildId }),
@@ -583,6 +638,40 @@ client.on("messageCreate", async (message) => {
       attachments: selection.attachments,
       attachmentsOmitted: selection.omitted,
     };
+    if (voiceSession !== undefined) {
+      const musicIntent = parseMusicIntent(inbound.body, {
+        names: characterNames(storedSettings.persona),
+        hasCurrent: voiceSession.music.snapshot().current !== undefined,
+      });
+      if (musicIntent !== undefined) {
+        const needsChannel =
+          musicIntent.kind === "play" ||
+          musicIntent.kind === "queue" ||
+          musicIntent.kind === "pick" ||
+          musicIntent.kind === "skip" ||
+          musicIntent.kind === "pause" ||
+          musicIntent.kind === "resume" ||
+          musicIntent.kind === "stop";
+        const reply =
+          needsChannel && !voiceSession.status().active
+            ? "I'm not in a voice channel."
+            : await dispatchVoiceMusicChat({
+                body: inbound.body,
+                authorId: inbound.authorId,
+                names: characterNames(storedSettings.persona),
+                addressed: inbound.mentionsBot,
+                queue: voiceSession.music,
+              });
+        if (reply !== undefined && message.channel.isSendable()) {
+          await message.channel.send({ content: reply, allowedMentions: { parse: [] } });
+        }
+        return;
+      }
+    }
+    // Before the ask and the captain turn, both of which await model calls: a
+    // playthrough is mid-turn right now and the point of an interjection is
+    // that it reaches the next decision, not the one after the reply.
+    publishRoomTextToPossessor(message);
     // One context fetch per message at most, shared by the ask's decider and
     // the captain turn — whichever reads first pays for both.
     let contextRead: Promise<readonly DiscordInboundContextMessage[]> | undefined;
@@ -856,18 +945,27 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
       // anyone else. The residency disclosure goes privately to the invoker
       // here and to every other participant in their own opt-in reply.
       await interaction.deferReply({ ephemeral: true });
-      const status = await voiceSession.join({
-        channelId: channel.id,
-        guildId: interaction.guild.id,
-        adapterCreator: interaction.guild.voiceAdapterCreator,
-        invokingUserId: interaction.user.id,
-      });
+      const current = voiceSession.status();
+      // Joining the room Clankie already occupies is an opt-in, not a new
+      // media session. Rebuilding here used to erase every other participant's
+      // consent, transcript context, and floor state when a second person ran
+      // the same command.
+      const status =
+        current.active && current.guildId === interaction.guild.id && current.channelId === channel.id
+          ? await voiceSession.setConsent(interaction.guild.id, channel.id, interaction.user.id, true)
+          : await voiceSession.join({
+              channelId: channel.id,
+              guildId: interaction.guild.id,
+              adapterCreator: interaction.guild.voiceAdapterCreator,
+              invokingUserId: interaction.user.id,
+            });
       await interaction.editReply({
         // Live-session audio residency (ADR 0057): the wording must never
         // promise per-turn discard.
         content: renderVoiceJoinDisclosure(
           status.daveProtocolVersion,
           voiceRealtimeConfig?.ttsProvider ?? "openai",
+          voiceConsentPolicy,
         ),
         allowedMentions: { parse: [] },
       });
@@ -983,6 +1081,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
           consented,
           status.consentedParticipantCount,
           voiceRealtimeConfig?.ttsProvider ?? "openai",
+          voiceConsentPolicy,
         ),
         ephemeral: true,
         allowedMentions: { parse: [] },
@@ -991,7 +1090,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     }
     case "voice-status": {
       await interaction.reply({
-        content: renderVoiceStatusReply(voiceSession?.status(), voiceEnabled),
+        content: renderVoiceStatusReply(voiceSession?.status(), voiceEnabled, voiceConsentPolicy),
         ephemeral: true,
         allowedMentions: { parse: [] },
       });
@@ -1088,12 +1187,35 @@ async function readDiscordContext(
   const messages = await message.channel.messages.fetch({ before: message.id, limit });
   return [...messages.values()]
     .sort((left, right) => left.createdTimestamp - right.createdTimestamp)
-    .map((candidate) => ({
-      id: candidate.id,
-      authorId: candidate.author.id,
-      body: candidate.content,
-      createdAt: candidate.createdAt.toISOString(),
-    }));
+    .map((candidate) => {
+      const selection = selectDiscordMessageImages(candidate);
+      return {
+        id: candidate.id,
+        authorId: candidate.author.id,
+        body: candidate.content,
+        createdAt: candidate.createdAt.toISOString(),
+        attachments: selection.attachments,
+        ...(selection.omitted === 0 ? {} : { attachmentsOmitted: selection.omitted }),
+      };
+    });
+}
+
+function selectDiscordMessageImages(message: Message) {
+  return selectInboundImageAttachments(
+    [...message.attachments.values()].map((attachment) => ({
+      id: attachment.id,
+      url: attachment.url,
+      contentType: attachment.contentType,
+      filename: attachment.name,
+      size: attachment.size,
+    })),
+    message.embeds.map((embed) => ({
+      type: embed.type,
+      url: embed.url,
+      thumbnailUrl: embed.thumbnail?.url,
+      thumbnailProxyUrl: embed.thumbnail?.proxyURL,
+    })),
+  );
 }
 
 function bridgeReceiptPath(): string {

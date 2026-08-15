@@ -72,6 +72,43 @@ describe("DiscordUserPresenceRuntime", () => {
     ).rejects.toThrow(/discord_presence_action_unavailable_for_user_session/u);
   });
 
+  it("starts Go Live through the lab process control port, including a source URL", async () => {
+    const goLiveSession = DiscordPresenceSessionRecordSchema.parse({
+      ...present,
+      phase: "voice_active",
+      voiceGuildIds: ["guild-1"],
+    });
+    const controlFetch = vi.fn(() =>
+      Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 202 })),
+    ) as unknown as typeof fetch & { mock: { calls: unknown[][] } };
+    const withControl = new DiscordUserPresenceRuntime({
+      token: "user-token",
+      fetch: jsonFetch({}),
+      controlFetch,
+    });
+    await expect(
+      withControl.execute(
+        write({
+          action: "discord.presence.go_live_start",
+          payload: {
+            kind: "go_live_start",
+            guildId: "guild-1",
+            channelId: "voice-1",
+            sourceUrl: "https://example.com/clip.mp4",
+          },
+        }),
+        goLiveSession,
+      ),
+    ).resolves.toMatchObject({ action: "discord.presence.go_live_start", transportKind: "user_session" });
+    const [url, init] = controlFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:4312/go-live/start");
+    expect(JSON.parse(String(init.body))).toEqual({
+      guildId: "guild-1",
+      channelId: "voice-1",
+      sourceUrl: "https://example.com/clip.mp4",
+    });
+  });
+
   it("fails loudly rather than reporting a Go Live nobody can watch", async () => {
     const goLiveSession = DiscordPresenceSessionRecordSchema.parse({
       ...present,

@@ -234,13 +234,13 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
       adapterCreator: (() => ({ sendPayload: () => true, destroy: () => undefined })) as never,
     });
 
-    // The dormant listener opened with the call, over the brokered key, as a
-    // transcription-intent session on the configured model.
+    // Join probes the transcription boundary over the brokered key. Actual
+    // listeners are then opened per authenticated Discord speaker.
     expect(sockets).toHaveLength(1);
-    const listener = sockets[0] as FakeRealtimeSocket;
-    expect(listener.headers.authorization).toBe("Bearer brokered-openai-key");
-    expect(listener.url).toContain("intent=transcription");
-    const listenerUpdate = listener.frames()[0] as {
+    const probe = sockets[0] as FakeRealtimeSocket;
+    expect(probe.headers.authorization).toBe("Bearer brokered-openai-key");
+    expect(probe.url).toContain("intent=transcription");
+    const listenerUpdate = probe.frames()[0] as {
       type: string;
       session: { type: string; audio: { input: { transcription: { model: string } } } };
     };
@@ -252,6 +252,8 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
     // streams into the listener, then the final transcript addresses him.
     const connection = voiceMock.connections[voiceMock.connections.length - 1] as MockConnection;
     connection.receiver.speaking.emit("start", OWNER);
+    await flush();
+    const listener = sockets[1] as FakeRealtimeSocket;
     const capture = connection.captures[connection.captures.length - 1];
     capture?.stream.write(Buffer.alloc(3_840, 1));
     await flush();
@@ -266,8 +268,8 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
     await flush();
 
     // The wake opened the engaged session on the conversation model...
-    expect(sockets).toHaveLength(2);
-    const engaged = sockets[1] as FakeRealtimeSocket;
+    expect(sockets).toHaveLength(3);
+    const engaged = sockets[2] as FakeRealtimeSocket;
     expect(engaged.headers.authorization).toBe("Bearer brokered-openai-key");
     expect(engaged.url).toContain("model=gpt-realtime-2.1");
     const frames = engaged.frames();
@@ -287,8 +289,19 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
     // ...group-room turn-taking (no auto-response, no auto-interrupt)...
     expect(sessionUpdate.session.audio.input.turn_detection.create_response).toBe(false);
     expect(sessionUpdate.session.audio.input.turn_detection.interrupt_response).toBe(false);
-    // ...ask_clankie as the entire tool surface...
-    expect(sessionUpdate.session.tools.map((tool) => tool.name)).toEqual(["ask_clankie"]);
+    // ...ask_clankie stays the privileged tool; music tools are local to the call...
+    expect(sessionUpdate.session.tools.map((tool) => tool.name)).toEqual([
+      "ask_clankie",
+      "look_at_screen",
+      "youtube_search",
+      "music_play",
+      "music_queue",
+      "music_skip",
+      "music_pause",
+      "music_resume",
+      "music_stop",
+      "music_now",
+    ]);
     // ...and the explicitly configured truncation, never unbounded defaults.
     expect(sessionUpdate.session.truncation).toEqual({
       type: "retention_ratio",
@@ -301,19 +314,19 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
       { schemaVersion: 1, guildId: GUILD, channelId: CHANNEL, consentedUserIds: [OWNER] },
     ]);
 
-    // Seeding order: overheard transcript ring, briefing projection, speaker
-    // attribution item — then the explicit response decision.
+    // Seeding order: the gateway-attributed transcript ring, then the briefing
+    // projection and explicit response decision.
     const textItems = frames
       .filter((frame) => frame.type === "conversation.item.create")
       .map((frame) => (frame as { item: { content: { text: string }[] } }).item.content[0]?.text ?? "");
-    expect(textItems[0]).toContain("Recent room transcript:");
-    expect(textItems[0]).toContain(`${OWNER}: clankie, you there?`);
+    expect(textItems[0]).toContain("Recent room transcript (JSONL;");
+    expect(textItems[0]).toContain(JSON.stringify({ speakerId: OWNER, text: "clankie, you there?" }));
     expect(textItems[1]).toBe("Right now: tending the garden.");
-    expect(textItems[2]).toBe(`Speaker: ${OWNER}`);
+    expect(textItems).toHaveLength(2);
     expect(frames.some((frame) => frame.type === "response.create")).toBe(true);
 
     // The wake is receipt-visible: floor evidence reports engaged/addressed.
-    expect(evidence.filter((event) => event.type === "floor")).toEqual([
+    expect(evidence.filter((event) => event.type === "floor")).toMatchObject([
       { type: "floor", guildId: GUILD, channelId: CHANNEL, state: "engaged", reason: "addressed" },
     ]);
 
@@ -386,7 +399,8 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
     // Wake him with an addressed transcript.
     const connection = voiceMock.connections[voiceMock.connections.length - 1] as MockConnection;
     connection.receiver.speaking.emit("start", OWNER);
-    const listener = sockets[0] as FakeRealtimeSocket;
+    await flush();
+    const listener = sockets[1] as FakeRealtimeSocket;
     listener.serverEvent({
       type: "conversation.item.input_audio_transcription.completed",
       item_id: "item_1",
@@ -396,9 +410,9 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
 
     // The engaged pair opened: text-modality realtime ears plus the
     // ElevenLabs mouth, each over its own brokered key.
-    expect(sockets).toHaveLength(3);
-    const engaged = sockets[1] as FakeRealtimeSocket;
-    const mouth = sockets[2] as FakeRealtimeSocket;
+    expect(sockets).toHaveLength(4);
+    const engaged = sockets[2] as FakeRealtimeSocket;
+    const mouth = sockets[3] as FakeRealtimeSocket;
     expect(engaged.headers.authorization).toBe("Bearer brokered-openai-key");
     expect(engaged.url).toContain("model=gpt-realtime-2.1");
     const engagedUpdate = engaged.frames().find((frame) => frame.type === "session.update") as {

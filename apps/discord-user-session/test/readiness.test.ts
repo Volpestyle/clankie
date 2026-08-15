@@ -52,6 +52,11 @@ describe("user-session admission (ADR 0048)", () => {
         input({ env: { ...env(), DISCORD_USER_SESSION_CHANNEL_IDS: "channel-1,channel-99" } }),
       ),
     ).rejects.toMatchObject({ code: "discord_user_session_opt_in_scope_mismatch" });
+    await expect(
+      assertUserSessionAdmissible(
+        input({ env: { ...env(), DISCORD_USER_SESSION_VOICE_CHANNEL_IDS: "voice-99" } }),
+      ),
+    ).rejects.toMatchObject({ code: "discord_user_session_opt_in_scope_mismatch" });
   });
 
   it("allows configuration that narrows the recorded scope", async () => {

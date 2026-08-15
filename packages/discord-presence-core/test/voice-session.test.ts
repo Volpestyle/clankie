@@ -21,6 +21,7 @@ import {
   DiscordVoiceSession,
   ENGAGED_HOLD_MS,
   ENGAGED_TICK_MS,
+  SPEAKER_TRANSCRIPTION_IDLE_MS,
   type DiscordVoiceBriefingRequest,
   type JoinDiscordVoiceInput,
   type VoiceConversationOpenInput,
@@ -80,6 +81,11 @@ vi.mock("@discordjs/voice", async () => {
 
     public stop(_force?: boolean): boolean {
       if (this.state.status !== "idle") this.setStatus("idle");
+      return true;
+    }
+
+    public pause(_interpolate?: boolean): boolean {
+      if (this.state.status === "playing") this.setStatus("paused");
       return true;
     }
 
@@ -220,6 +226,7 @@ class FakeConversation implements VoiceConversationPort {
   public isOpen = true;
   public readonly appended: Buffer[] = [];
   public readonly textItems: string[] = [];
+  public readonly imageItems: string[] = [];
   public responseCreates = 0;
   public readonly truncations: { itemId: string; audioEndMs: number }[] = [];
   public readonly functionResults: { callId: string; output: string }[] = [];
@@ -241,6 +248,11 @@ class FakeConversation implements VoiceConversationPort {
   public createTextItem(text: string): void {
     this.assertOpen();
     this.textItems.push(text);
+  }
+
+  public createImageItem(pngBase64: string, _mimeType?: "image/png"): void {
+    this.assertOpen();
+    this.imageItems.push(pngBase64);
   }
 
   public createResponse(): void {
@@ -346,6 +358,8 @@ interface HarnessOptions {
   readonly volitionDecider?: (roomText: string) => Promise<boolean>;
   readonly floorOverrides?: Partial<VoiceFloorOptions>;
   readonly captain?: (request: DiscordPresenceChannelTurnRequest) => Promise<CaptainChannelTurnResult>;
+  readonly lookAtScreen?: () => Promise<import("../src/voice-session.ts").LookAtScreenResult>;
+  readonly speakerTranscriptionGate?: Promise<void>;
 }
 
 function buildHarness(options: HarnessOptions = {}) {
@@ -353,19 +367,25 @@ function buildHarness(options: HarnessOptions = {}) {
   const timers = new TestTimers();
   const evidence: DiscordVoiceEvidence[] = [];
   const transcriptions: FakeTranscription[] = [];
+  const speakerTranscriptions = new Map<string, FakeTranscription>();
   const conversations: FakeConversation[] = [];
   const briefingCalls: DiscordVoiceBriefingRequest[] = [];
   const submitCalls: DiscordPresenceChannelTurnRequest[] = [];
   const ports = {
     failTranscriptionOpens: 0,
-    openTranscription: (handlers: VoiceTranscriptionHandlers): Promise<VoiceTranscriptionPort> => {
+    openTranscription: async (handlers: VoiceTranscriptionHandlers): Promise<VoiceTranscriptionPort> => {
       if (ports.failTranscriptionOpens > 0) {
         ports.failTranscriptionOpens -= 1;
-        return Promise.reject(new Error("listener open refused"));
+        throw new Error("listener open refused");
+      }
+      // The first open is join's fail-fast probe. Tests can hold later,
+      // speaker-bound opens across a consent transition.
+      if (transcriptions.length > 0 && options.speakerTranscriptionGate !== undefined) {
+        await options.speakerTranscriptionGate;
       }
       const transcription = new FakeTranscription(handlers);
       transcriptions.push(transcription);
-      return Promise.resolve(transcription);
+      return transcription;
     },
     openConversation: (input: VoiceConversationOpenInput): Promise<VoiceConversationPort> => {
       const conversation = new FakeConversation(input);
@@ -394,6 +414,7 @@ function buildHarness(options: HarnessOptions = {}) {
         briefing: "Right now: tending the garden.",
       });
     },
+    ...(options.lookAtScreen === undefined ? {} : { lookAtScreen: options.lookAtScreen }),
     floor: {
       names: ["clankie"],
       replyPolicy: "addressed",
@@ -430,6 +451,11 @@ function buildHarness(options: HarnessOptions = {}) {
     connection: (): MockConnection => at(voiceMock.connections, -1),
     player: (): MockPlayer => at(voiceMock.players, -1),
     transcription: (): FakeTranscription => at(transcriptions, -1),
+    transcriptionFor: (userId: string): FakeTranscription => {
+      const transcription = speakerTranscriptions.get(userId);
+      if (transcription === undefined) throw new Error(`No transcription session for ${userId}`);
+      return transcription;
+    },
     conversation: (): FakeConversation => at(conversations, -1),
     ofType: <T extends DiscordVoiceEvidence["type"]>(type: T): Extract<DiscordVoiceEvidence, { type: T }>[] =>
       evidence.filter((event): event is Extract<DiscordVoiceEvidence, { type: T }> => event.type === type),
@@ -449,22 +475,25 @@ function buildHarness(options: HarnessOptions = {}) {
     },
     startCapture: (userId: string): { userId: string; stream: PassThrough } => {
       harness.connection().receiver.speaking.emit("start", userId);
+      if (speakerTranscriptions.get(userId)?.isOpen !== true) {
+        speakerTranscriptions.set(userId, at(transcriptions, -1));
+      }
       return at(harness.connection().captures, -1);
     },
-    transcribe: (text: string): void => {
+    transcribe: (userId: string, text: string): void => {
       itemSequence += 1;
       harness
-        .transcription()
+        .transcriptionFor(userId)
         .handlers.onTranscript({ itemId: `item_${itemSequence.toString()}`, text, final: true });
     },
     /** One short spoken utterance: capture opens, PCM flows, capture ends, the transcript lands. */
     say: async (userId: string, text: string): Promise<void> => {
       const capture = harness.startCapture(userId);
-      capture.stream.write(stereoPcm(3_840));
+      capture.stream.write(stereoPcm(BARGE_IN_SOURCE_BYTES));
       await flush();
       capture.stream.end();
       await flush();
-      harness.transcribe(text);
+      harness.transcribe(userId, text);
       await flush();
     },
   };
@@ -612,6 +641,36 @@ describe("consent boundary", () => {
     expect(harness.ofType("failed")).toHaveLength(0);
   });
 
+  it("does not install a speaker listener that resolves after consent is revoked", async () => {
+    let openSpeaker: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      openSpeaker = resolve;
+    });
+    const harness = await joinedHarness({ speakerTranscriptionGate: gate });
+    await harness.consent(ALICE);
+    const capture = harness.startCapture(ALICE);
+    capture.stream.on("error", () => undefined);
+
+    await harness.session.setConsent(GUILD, CHANNEL, ALICE, false);
+    openSpeaker?.();
+    await flush();
+
+    expect(harness.transcriptions).toHaveLength(2);
+    expect(at(harness.transcriptions, -1).isOpen).toBe(false);
+    expect(harness.session.status().activeCaptureCount).toBe(0);
+    expect(at(harness.ofType("failed"), -1)).toMatchObject({
+      stage: "transcription_session",
+      code: "voice_listener_open_failed",
+    });
+
+    // A later opt-in opens a new listener rather than reviving the invalid one.
+    await harness.consent(ALICE);
+    harness.startCapture(ALICE);
+    await flush();
+    expect(harness.transcriptions).toHaveLength(3);
+    expect(at(harness.transcriptions, -1).isOpen).toBe(true);
+  });
+
   it("leaving the channel revokes consent and destroys the capture", async () => {
     const harness = await joinedHarness();
     await harness.consent(BOB);
@@ -621,6 +680,24 @@ describe("consent boundary", () => {
     await flush();
     expect(capture.stream.destroyed).toBe(true);
     expect(harness.session.status().consentedParticipantCount).toBe(1);
+  });
+
+  it("refreshes the shared briefing for a newly permitted participant and purges it on opt-out", async () => {
+    const harness = await engagedHarness();
+    const conversation = harness.conversation();
+
+    await harness.consent(BOB);
+    await flush();
+    expect(harness.conversations).toHaveLength(1);
+    expect(at(harness.briefingCalls, -1).consentedUserIds).toEqual([OWNER, ALICE, BOB]);
+    expect(at(conversation.textItems, -1)).toBe(
+      "Room participant briefing refresh:\nRight now: tending the garden.",
+    );
+
+    await harness.session.setConsent(GUILD, CHANNEL, BOB, false);
+    await flush();
+    expect(conversation.isOpen).toBe(false);
+    expect(harness.session.status().engaged).toBe(false);
   });
 });
 
@@ -660,33 +737,41 @@ describe("audio path", () => {
     ]);
   });
 
-  it("feeds the engaged conversation a copy of the room audio, but not during the hold window", async () => {
+  it("keeps room audio in speaker-bound transcription and sends attributed text to the conversation", async () => {
     const harness = await engagedHarness();
     const conversation = harness.conversation();
     const heardWhileEngaged = conversation.appended.length;
     const capture = harness.startCapture(ALICE);
     capture.stream.write(stereoPcm(3_840, 4));
     await flush();
-    expect(conversation.appended.length).toBe(heardWhileEngaged + 1);
-    expect(at(conversation.appended, -1).equals(at(harness.transcription().appended, -1))).toBe(true);
+    expect(conversation.appended.length).toBe(heardWhileEngaged);
+    expect(at(harness.transcriptionFor(ALICE).appended, -1).byteLength).toBeGreaterThan(0);
     capture.stream.end();
     await flush();
+    harness.transcribe(ALICE, "one more detail");
+    await flush();
+    expect(at(conversation.textItems, -1)).toBe(
+      `Room utterance (authenticated Discord speaker): ${JSON.stringify({
+        speakerId: ALICE,
+        text: "one more detail",
+      })}`,
+    );
     // Release the floor; the session stays warm but stops hearing the room.
     await harness.say(ALICE, "thanks clankie");
     const heardAtRelease = conversation.appended.length;
-    const listenerHeard = harness.transcription().appended.length;
+    const listenerHeard = harness.transcriptionFor(ALICE).appended.length;
     const idleCapture = harness.startCapture(ALICE);
     idleCapture.stream.write(stereoPcm(3_840, 5));
     await flush();
     expect(conversation.appended.length).toBe(heardAtRelease);
-    expect(harness.transcription().appended.length).toBe(listenerHeard + 1);
+    expect(harness.transcriptionFor(ALICE).appended.length).toBe(listenerHeard + 1);
   });
 });
 
 describe("floor decisions", () => {
-  it("an addressed wake briefs, opens, seeds ring then briefing, announces the speaker, and responds", async () => {
+  it("an addressed wake briefs, opens, seeds an attributed ring, and responds", async () => {
     const harness = await engagedHarness();
-    expect(harness.ofType("floor")).toEqual([
+    expect(harness.ofType("floor")).toMatchObject([
       { type: "floor", guildId: GUILD, channelId: CHANNEL, state: "engaged", reason: "addressed" },
     ]);
     expect(harness.briefingCalls).toEqual([
@@ -695,12 +780,26 @@ describe("floor decisions", () => {
     const conversation = harness.conversation();
     expect(conversation.input.instructions).toBe("Be Clankie, in the social register.");
     expect(conversation.textItems).toEqual([
-      `Recent room transcript:\n${ALICE}: hey clankie you there`,
+      `Recent room transcript (JSONL; speakerId is gateway-authenticated):\n${JSON.stringify({
+        speakerId: ALICE,
+        text: "hey clankie you there",
+      })}`,
       "Right now: tending the garden.",
-      `Speaker: ${ALICE}`,
     ]);
     expect(conversation.responseCreates).toBe(1);
     expect(harness.session.status()).toMatchObject({ floorState: "engaged", engaged: true });
+  });
+
+  it("bounds a large room briefing without preventing later speakers from being heard", async () => {
+    const harness = await joinedHarness();
+    const participants = Array.from({ length: 30 }, (_, index) => String(10_000 + index));
+    for (const participant of participants) await harness.consent(participant);
+
+    const speaker = at(participants, -1);
+    await harness.say(speaker, "clankie can you hear the back of the room");
+    expect(at(harness.briefingCalls, 0).consentedUserIds).toHaveLength(25);
+    expect(at(harness.briefingCalls, 0).consentedUserIds[0]).toBe(speaker);
+    expect(at(harness.conversation().textItems, 0)).toContain(`"speakerId":"${speaker}"`);
   });
 
   it("the floor holder continuing gets another response without reopening or re-briefing", async () => {
@@ -719,7 +818,7 @@ describe("floor decisions", () => {
     await harness.say(BOB, "nice weather this weekend maybe");
     expect(harness.conversations).toHaveLength(0);
     // Volition still accounts the suppressed offer (no decider configured).
-    expect(harness.ofType("volition")).toEqual([
+    expect(harness.ofType("volition")).toMatchObject([
       { type: "volition", guildId: GUILD, channelId: CHANNEL, offered: 1, taken: 0, suppressed: 1 },
     ]);
     expect(harness.ofType("floor")).toHaveLength(0);
@@ -746,6 +845,8 @@ describe("floor decisions", () => {
     expect(harness.conversations).toHaveLength(1);
     expect(harness.briefingCalls).toHaveLength(1);
     expect(harness.conversation().responseCreates).toBe(2);
+    expect(at(harness.conversation().textItems, -1)).toContain("clankie actually one more thing");
+    expect(at(harness.conversation().textItems, -1)).toContain(`"speakerId":"${ALICE}"`);
     expect(at(harness.ofType("floor"), -1)).toMatchObject({ state: "engaged", reason: "addressed" });
   });
 
@@ -765,22 +866,24 @@ describe("floor decisions", () => {
 describe("volition", () => {
   it("a taken offer engages on the provoking speaker and is accounted", async () => {
     const decider = vi.fn((roomText: string) => {
-      expect(roomText).toContain(`${BOB}: the garden bot has been quiet`);
+      expect(roomText).toContain(JSON.stringify({ speakerId: BOB, text: "the garden bot has been quiet" }));
       return Promise.resolve(true);
     });
     const harness = await joinedHarness({ volitionDecider: decider });
     await harness.consent(BOB);
     await harness.say(BOB, "the garden bot has been quiet");
     expect(decider).toHaveBeenCalledTimes(1);
-    expect(harness.ofType("floor")).toEqual([
+    expect(harness.ofType("floor")).toMatchObject([
       { type: "floor", guildId: GUILD, channelId: CHANNEL, state: "engaged", reason: "volition" },
     ]);
-    expect(harness.ofType("volition")).toEqual([
+    expect(harness.ofType("volition")).toMatchObject([
       { type: "volition", guildId: GUILD, channelId: CHANNEL, offered: 1, taken: 1, suppressed: 0 },
     ]);
     expect(harness.conversations).toHaveLength(1);
     expect(harness.conversation().responseCreates).toBe(1);
-    expect(harness.conversation().textItems).toContain(`Speaker: ${BOB}`);
+    expect(at(harness.conversation().textItems, 0)).toContain(
+      JSON.stringify({ speakerId: BOB, text: "the garden bot has been quiet" }),
+    );
   });
 
   it("a decider error counts as suppressed and does not crash the session", async () => {
@@ -789,7 +892,7 @@ describe("volition", () => {
     });
     await harness.consent(BOB);
     await harness.say(BOB, "someone should check the deploy");
-    expect(harness.ofType("volition")).toEqual([
+    expect(harness.ofType("volition")).toMatchObject([
       { type: "volition", guildId: GUILD, channelId: CHANNEL, offered: 1, taken: 0, suppressed: 1 },
     ]);
     expect(harness.conversations).toHaveLength(0);
@@ -801,12 +904,12 @@ describe("volition", () => {
 });
 
 describe("speaker attribution", () => {
-  it("attributes transcripts to the most recent active gateway span and announces speaker changes", async () => {
+  it("keeps overlapping transcripts bound to their authenticated Discord streams", async () => {
     const harness = await joinedHarness();
     await harness.consent(ALICE);
     await harness.consent(BOB);
-    // Alice spoke and finished; bob is still talking when the transcript
-    // lands, so bob is the span holder overlapping its arrival.
+    // Both streams overlap. Alice's final arrives while Bob is still active,
+    // but her dedicated transcriber keeps it attached to Alice.
     const alice = harness.startCapture(ALICE);
     alice.stream.write(stereoPcm(3_840));
     await flush();
@@ -814,13 +917,18 @@ describe("speaker attribution", () => {
     await flush();
     harness.startCapture(BOB).stream.write(stereoPcm(3_840));
     await flush();
-    harness.transcribe("hey clankie what do you think");
+    harness.transcribe(ALICE, "hey clankie what do you think");
     await flush();
-    expect(harness.conversation().textItems).toContain(`Speaker: ${BOB}`);
-    // A new speaker opening a capture while engaged is announced out of band.
-    harness.startCapture(ALICE);
+    expect(at(harness.conversation().textItems, 0)).toContain(
+      JSON.stringify({ speakerId: ALICE, text: "hey clankie what do you think" }),
+    );
+
+    // Bob's transcript comes from Bob's listener and moves the floor only when
+    // it addresses Clankie; merely opening a stream creates no model input.
+    harness.transcribe(BOB, "clankie, I have a different question");
     await flush();
-    expect(at(harness.conversation().textItems, -1)).toBe(`Speaker: ${ALICE}`);
+    expect(at(harness.conversation().textItems, -1)).toContain(`"speakerId":"${BOB}"`);
+    expect(at(harness.conversation().textItems, -1)).toContain("I have a different question");
   });
 });
 
@@ -885,6 +993,28 @@ describe("fast path responses", () => {
 });
 
 describe("ability path", () => {
+  it("keeps the triggering speaker immutable when another participant takes the floor", async () => {
+    const harness = await joinedHarness();
+    await harness.consent(ALICE);
+    await harness.consent(BOB);
+
+    await harness.say(ALICE, "clankie check the deploy");
+    const conversation = harness.conversation();
+    await harness.say(BOB, "clankie, before that, check the runner");
+    conversation.input.onFunctionCall({
+      callId: "call_alice",
+      name: "ask_clankie",
+      argumentsJson: '{"request":"check the deploy"}',
+    });
+    await flush();
+
+    expect(at(harness.submitCalls, 0).trigger).toMatchObject({
+      kind: "voice_event",
+      actorId: ALICE,
+      body: "check the deploy",
+    });
+  });
+
   // Required mission evidence: two ask_clankie calls serialize on the turn
   // queue, and their spoken results never talk over each other.
   it("serializes ask_clankie through the unchanged captain lane with evidence", async () => {
@@ -957,6 +1087,11 @@ describe("ability path", () => {
     await flush();
     const responses = harness.ofType("response");
     expect(responses.map((event) => event.turnId)).toEqual(["turn-1", "turn-2"]);
+    const utterance = at(
+      harness.ofType("utterance").filter((event) => event.userId === ALICE),
+      0,
+    );
+    expect(responses[0]).toMatchObject({ deliveryId: utterance.deliveryId, userId: ALICE });
     expect(responses[0]).toMatchObject({ fastPath: false, state: "settled", wake: "waking", handoffMs: 200 });
     // Both calls came from the same waking response, so both spoken results
     // carry that decision's wake classification.
@@ -1029,7 +1164,7 @@ describe("ability path", () => {
     });
     await flush();
     expect(at(conversation.functionResults, 0).output).toBe(CAPTAIN_UNREACHABLE_TEXT);
-    expect(harness.ofType("failed")).toEqual([
+    expect(harness.ofType("failed")).toMatchObject([
       {
         type: "failed",
         guildId: GUILD,
@@ -1046,6 +1181,32 @@ describe("ability path", () => {
     });
     await flush();
     expect(at(conversation.functionResults, 1)).toEqual({ callId: "call_2", output: "Back online." });
+  });
+
+  it("look_at_screen seeds a still and does not call the captain", async () => {
+    const harness = await engagedHarness({
+      lookAtScreen: () => Promise.resolve({ outcome: "still", pngBase64: "aaa", mimeType: "image/png" }),
+    });
+    const conversation = harness.conversation();
+    conversation.input.onFunctionCall({ callId: "look_1", name: "look_at_screen", argumentsJson: "{}" });
+    await flush();
+    expect(harness.submitCalls).toHaveLength(0);
+    expect(conversation.imageItems).toEqual(["aaa"]);
+    expect(at(conversation.functionResults, 0)).toMatchObject({
+      callId: "look_1",
+      output: expect.stringContaining("looking at your own screen"),
+    });
+  });
+
+  it("look_at_screen says so when he is not playing", async () => {
+    const harness = await engagedHarness({
+      lookAtScreen: () => Promise.resolve({ outcome: "not_playing" }),
+    });
+    const conversation = harness.conversation();
+    conversation.input.onFunctionCall({ callId: "look_1", name: "look_at_screen", argumentsJson: "{}" });
+    await flush();
+    expect(conversation.imageItems).toEqual([]);
+    expect(at(conversation.functionResults, 0).output).toContain("not playing");
   });
 
   it("rejects malformed ask_clankie arguments without hanging", async () => {
@@ -1150,7 +1311,7 @@ describe("barge-in", () => {
     await flush();
     expect(conversation.truncations).toEqual([{ itemId: "item_play", audioEndMs: 400 }]);
     expect(harness.player().state.status).toBe("idle");
-    expect(harness.ofType("interrupted")).toEqual([
+    expect(harness.ofType("interrupted")).toMatchObject([
       { type: "interrupted", guildId: GUILD, channelId: CHANNEL, userId: ALICE, phase: "playing" },
     ]);
   });
@@ -1162,7 +1323,7 @@ describe("barge-in", () => {
     const capture = harness.startCapture(BOB);
     capture.stream.write(stereoPcm(3_840));
     await flush();
-    harness.transcribe("clankie hold on a second");
+    harness.transcribe(BOB, "clankie hold on a second");
     await flush();
     expect(conversation.truncations).toEqual([{ itemId: "item_play", audioEndMs: 250 }]);
     expect(at(harness.ofType("interrupted"), 0)).toMatchObject({ userId: BOB });
@@ -1177,7 +1338,7 @@ describe("barge-in", () => {
     const capture = harness.startCapture(BOB);
     capture.stream.write(stereoPcm(BARGE_IN_SOURCE_BYTES));
     await flush();
-    harness.transcribe("no I meant the blue one");
+    harness.transcribe(BOB, "no I meant the blue one");
     await flush();
     expect(conversation.truncations).toHaveLength(0);
     expect(harness.ofType("interrupted")).toHaveLength(0);
@@ -1187,10 +1348,47 @@ describe("barge-in", () => {
 });
 
 describe("reconnect", () => {
+  it("drops pending delivery ids when a listener is lost so the next capture realigns", async () => {
+    const harness = await joinedHarness();
+    await harness.consent(ALICE);
+
+    const first = harness.startCapture(ALICE);
+    first.stream.write(stereoPcm(BARGE_IN_SOURCE_BYTES));
+    await flush();
+    first.stream.end();
+    await flush();
+    const firstDeliveryId = at(harness.ofType("utterance"), -1).deliveryId;
+
+    // No final transcript arrives for the first capture.
+    harness.transcriptionFor(ALICE).lose("socket");
+    harness.timers.fire(1_000);
+    await flush();
+
+    await harness.say(ALICE, "clankie check the realigned turn");
+    const secondDeliveryId = at(harness.ofType("utterance"), -1).deliveryId;
+    expect(secondDeliveryId).not.toBe(firstDeliveryId);
+    const conversation = harness.conversation();
+    conversation.input.onFunctionCall({
+      callId: "call_realigned",
+      name: "ask_clankie",
+      argumentsJson: '{"request":"check the realigned turn"}',
+    });
+    await flush();
+
+    expect(at(harness.submitCalls, -1).deliveryId).toBe(secondDeliveryId);
+  });
+
   it("a lost listener emits failed evidence and reopens with bounded backoff, resetting on success", async () => {
     const harness = await joinedHarness();
-    harness.transcription().lose("socket");
-    expect(harness.ofType("failed")).toEqual([
+    await harness.consent(ALICE);
+    const capture = harness.startCapture(ALICE);
+    capture.stream.write(stereoPcm(3_840));
+    await flush();
+    capture.stream.end();
+    await flush();
+    harness.transcribe(ALICE, "background chatter");
+    harness.transcriptionFor(ALICE).lose("socket");
+    expect(harness.ofType("failed")).toMatchObject([
       {
         type: "failed",
         guildId: GUILD,
@@ -1204,18 +1402,17 @@ describe("reconnect", () => {
     harness.ports.failTranscriptionOpens = 1;
     harness.timers.fire(1_000);
     await flush();
-    expect(harness.transcriptions).toHaveLength(1);
+    expect(harness.transcriptions).toHaveLength(2);
     expect(harness.timers.pending().map((timer) => timer.delayMs)).toContain(2_000);
     harness.timers.fire(2_000);
     await flush();
-    expect(harness.transcriptions).toHaveLength(2);
+    expect(harness.transcriptions).toHaveLength(3);
     // The new listener is his ears again.
-    await harness.consent(ALICE);
     harness.startCapture(ALICE).stream.write(stereoPcm(3_840));
     await flush();
-    expect(harness.transcription().appended).toHaveLength(1);
+    expect(harness.transcriptionFor(ALICE).appended).toHaveLength(1);
     // Success reset the backoff: a later loss starts back at one second.
-    harness.transcription().lose("error");
+    harness.transcriptionFor(ALICE).lose("error");
     expect(harness.timers.pending().map((timer) => timer.delayMs)).toContain(1_000);
   });
 
@@ -1236,6 +1433,37 @@ describe("reconnect", () => {
   });
 });
 
+describe("speaker listener bounds", () => {
+  it("closes an inactive speaker listener and reopens it on their next utterance", async () => {
+    const harness = await joinedHarness({ floorOverrides: { volition: { maxPerHour: 0 } } });
+    await harness.consent(ALICE);
+    await harness.say(ALICE, "background chatter");
+    const first = harness.transcriptionFor(ALICE);
+
+    harness.timers.fire(SPEAKER_TRANSCRIPTION_IDLE_MS);
+    await flush();
+    expect(first.isOpen).toBe(false);
+
+    await harness.say(ALICE, "more background chatter");
+    expect(harness.transcriptionFor(ALICE)).not.toBe(first);
+    expect(harness.transcriptionFor(ALICE).isOpen).toBe(true);
+  });
+
+  it("caps retained speaker listeners by evicting the least recently active idle speaker", async () => {
+    const harness = await joinedHarness({ floorOverrides: { volition: { maxPerHour: 0 } } });
+    const participants = Array.from({ length: 26 }, (_, index) => String(20_000 + index));
+    for (const participant of participants) {
+      await harness.consent(participant);
+      harness.clock.now += 1;
+      await harness.say(participant, `background-${participant}`);
+    }
+
+    expect(harness.transcriptions.filter((transcription) => transcription.isOpen)).toHaveLength(25);
+    expect(harness.transcriptionFor(at(participants, 0)).isOpen).toBe(false);
+    expect(harness.transcriptionFor(at(participants, -1)).isOpen).toBe(true);
+  });
+});
+
 describe("transcript ring", () => {
   it("caps the seed to the recent window", async () => {
     const harness = await joinedHarness({ floorOverrides: { volition: { maxPerHour: 0 } } });
@@ -1245,7 +1473,7 @@ describe("transcript ring", () => {
     }
     await harness.say(ALICE, "hey clankie summarize that");
     const seed = at(harness.conversation().textItems, 0);
-    expect(seed.startsWith("Recent room transcript:\n")).toBe(true);
+    expect(seed.startsWith("Recent room transcript (JSONL;")).toBe(true);
     expect(seed).toContain("line-34");
     expect(seed).not.toContain("line-0 ");
     expect(seed.split("\n")).toHaveLength(31);
@@ -1357,5 +1585,64 @@ describe("possessor narration bursts (ADR 0064)", () => {
     const conversation = harness.conversation();
     expect(conversation.textItems.filter((item) => item.startsWith("While playing,"))).toHaveLength(3);
     expect(conversation.responseCreates).toBe(1);
+    const suppressed = harness.ofType("possessor_narration_suppressed");
+    expect(suppressed).toHaveLength(2);
+    expect(suppressed.every((event) => event.reason === "rate_limited")).toBe(true);
+    expect(new Set(suppressed.map((event) => event.deliveryId)).size).toBe(2);
+  });
+});
+
+describe("voice stay correlation", () => {
+  it("stamps one stay id from join through leave and joins suppressed narration to the caller's delivery id", async () => {
+    const harness = await joinedHarness({ narrationMinIntervalMs: 10_000 });
+    const stayId = harness.session.status().stayId;
+    expect(stayId).toEqual(expect.any(String));
+    expect(at(harness.ofType("joined"), 0).stayId).toBe(stayId);
+
+    await harness.session.narrate("left the lab", { deliveryId: "play-turn-1" });
+    await flush();
+    await harness.session.narrate("took one step north", { deliveryId: "play-turn-2" });
+    await flush();
+
+    expect(harness.ofType("possessor_narration_suppressed")).toMatchObject([
+      { deliveryId: "play-turn-2", reason: "rate_limited", stayId },
+    ]);
+
+    await harness.session.leave();
+    expect(at(harness.ofType("left"), 0)).toMatchObject({
+      stayId,
+      spokenCount: 0,
+      narrationSuppressed: 1,
+    });
+  });
+
+  it("carries realtime token counts onto the spoken response receipt", async () => {
+    const harness = await joinedHarness();
+    await harness.session.narrate("walked into a wall");
+    await flush();
+    const conversation = harness.conversation();
+    conversation.input.onAudioDelta(pcmDelta(480), "item_play");
+    await flush();
+    conversation.input.onResponseDone({
+      responseId: "resp_play",
+      status: "completed",
+      audioBytes: 480,
+      textCharacters: 0,
+      inputTokens: 640,
+      outputTokens: 80,
+    });
+    await flush();
+    expect(at(harness.ofType("response"), 0)).toMatchObject({
+      trigger: "narration",
+      inputTokens: 640,
+      outputTokens: 80,
+      stayId: harness.session.status().stayId,
+    });
+    await harness.session.leave();
+    expect(at(harness.ofType("left"), 0)).toMatchObject({
+      spokenCount: 1,
+      inputTokens: 640,
+      outputTokens: 80,
+    });
   });
 });

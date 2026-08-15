@@ -196,6 +196,14 @@ describe("voice evidence receipts and the response line", () => {
       voiceEvidenceReceiptType({ type: "volition", ...scope, offered: 3, taken: 1, suppressed: 2 }),
     ).toBe("discord.voice.volition");
     expect(voiceEvidenceReceiptType({ type: "left", ...scope })).toBe("discord.voice.left");
+    expect(
+      voiceEvidenceReceiptType({
+        type: "possessor_narration_suppressed",
+        ...scope,
+        deliveryId: "play-turn-2",
+        reason: "rate_limited",
+      }),
+    ).toBe("discord.voice.possessor_narration_suppressed");
   });
 
   it("flattens evidence into scalar receipt data without undefined slots", () => {
@@ -489,5 +497,37 @@ describe("voice disclosure and status wording (ADR 0057 audio residency)", () =>
     ).toContain("listening dormant");
     expect(renderVoiceStatusReply(undefined, true)).toBe("Voice is enabled but not connected.");
     expect(renderVoiceStatusReply(undefined, false)).toBe("Voice is disabled.");
+  });
+
+  it("does not demand per-session opt-in when the owner chose presence consent", () => {
+    const disclosure = renderVoiceJoinDisclosure(1, "openai", "presence");
+    expect(disclosure).toContain("Anyone in this voice channel can talk to me");
+    expect(disclosure).toContain("being here is consent");
+    expect(disclosure).toContain("/clankie voice-consent opt-out");
+    expect(disclosure).not.toContain("/clankie voice-consent opt-in");
+    expect(disclosure).not.toContain("Only you are opted in");
+
+    const optIn = renderVoiceConsentReply(true, 1, "elevenlabs", "presence");
+    expect(optIn).toContain("you do not need to opt in each session");
+    expect(optIn).toContain("Anyone in this voice channel can talk");
+    expect(optIn).toContain("your audio is never sent to ElevenLabs");
+    expect(optIn).not.toContain("You are opted in for this voice session");
+
+    const status = renderVoiceStatusReply(
+      {
+        active: true,
+        guildId: "1",
+        channelId: "2",
+        daveProtocolVersion: 1,
+        consentedParticipantCount: 1,
+        activeCaptureCount: 0,
+        floorState: "dormant",
+        engaged: false,
+      },
+      true,
+      "presence",
+    );
+    expect(status).toContain("anyone in this channel can talk");
+    expect(status).not.toContain("opted in");
   });
 });

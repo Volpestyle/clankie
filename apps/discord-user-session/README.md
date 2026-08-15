@@ -7,6 +7,10 @@ text and voice as the _same_ character the official bot is
 > **Discord forbids automating normal user accounts.** This plane is off by
 > default and reachable only after the owner records a durable acceptance of
 > the account and ToS risk. That risk is the account owner's.
+>
+> `/discord` Active body chooses which process is the mouth. The launcher
+> starts only that one. This process talks, watches, and Go Lives only when
+> it is active.
 
 ## Why a second process
 
@@ -73,10 +77,9 @@ at acceptance, and a mismatch invalidates it.
 | `CLANKIE_DISCORD_USER_PRESENCE_RUNTIME_MODULE` | Service load target for `src/presence-runtime-module.ts` |
 
 At startup the plane fills unset `DISCORD_*` names from the operator settings
-file (`@clankie/settings`, configured with `/discord` in the TUI). That schema
-carries no `DISCORD_USER_SESSION_*` fields yet, so today it supplies only the
-shared `DISCORD_OWNER_USER_ID`; this plane's allowlists still come from the
-environment and remain ceilinged by the recorded opt-in either way.
+file (`@clankie/settings`, configured with `/discord` in the TUI), including
+the lab-body allowlists. Configuration may narrow the recorded opt-in, never
+widen it.
 
 ## Capability differences from the bot plane
 
@@ -87,46 +90,57 @@ environment and remain ceilinged by the recorded opt-in either way.
 | Slash commands               | ✅  | ❌           | A user account cannot register them                                                               |
 | Ambient context messages     | ✅  | ❌           | Would require reading channels wholesale                                                          |
 | Embedded activities          | ✅  | ❌           | Owned by the bot application ([ADR 0047](../../docs/adr/0047-discord-activity-presence-plane.md)) |
-| Go Live                      | ❌  | ✅\*         | Requires the optional GPL selfbot stack — see below                                               |
+| Watch a screen share         | ❌  | ✅           | Only when this body is active; OP20 + ClankVox stills                                             |
+| Go Live                      | ❌  | ✅           | Only when this body is active; OP18/OP22 + ClankVox                                               |
 
-\* Implemented, but inert until an operator installs the optional stack.
+## Watching screen shares
 
-## Go Live media (VUH-841)
-
-Discord blocks video from bot accounts, so publishing a stream requires a
-**selfbot** transport. `discord.js-selfbot-v13` is **GPL-3.0**; this repository
-is Apache-2.0, and [ADR 0045](../../docs/adr/0045-official-bot-dave-group-voice.md)
-already refused an AGPL import on exactly that basis.
-
-The dependency is therefore **not declared in this workspace**. `go-live-media.ts`
-imports it dynamically at runtime, so the Apache-2.0 dependency graph, the
-committed lockfile, and CI stay free of copyleft transport, and the capability
-stays as opt-in as ADR 0024 requires. Tests inject a fake module pair, so the
-whole publication path is exercised without ever importing it.
-
-To enable it, deliberately:
+The official bot cannot receive Go Live video. This process can. When someone
+in an allowlisted channel hits Share Screen, the lab body joins muted/deafened,
+sends OP20 `STREAM_WATCH`, and — if a ClankVox binary is configured — decodes
+sampled JPEGs. The captain looks with `observe_share`. The bot keeps talking.
 
 ```bash
-pnpm --filter @clankie/discord-user-session add \
-  @dank074/discord-video-stream discord.js-selfbot-v13
+# Build ClankVox from its own AGPL tree, then:
+cp /path/to/clankvox ~/.clankie/bin/clankvox
+# or
+export CLANKVOX_BIN=/path/to/clankvox
 ```
 
-Then allow the native build scripts in `pnpm-workspace.yaml`, or the stream
-fails at runtime with no useful error:
+Enable the body in `/discord` → Lab user body (token, allowlists that include
+the voice channel, ToS opt-in), then `clankie restart`. After a real share:
 
-```yaml
-allowBuilds:
-  node-av: true
-  node-datachannel: true
+```bash
+pnpm --filter @clankie/discord-user-session live-proof
+# or wait up to two minutes while someone shares:
+pnpm --filter @clankie/discord-user-session live-proof -- --wait=120
 ```
 
-Without the install, `go_live_start` throws
-`discord_presence_go_live_media_unavailable` with the install hint. Failing
-closed is deliberate: silently succeeding would report a stream nobody can
-watch.
+The gate requires a ready receipt, `watch_connected` with `decoder=ready`, and
+one decoded still of that same user after the watch. Deterministic tests cannot
+mint those receipts.
+
+## Go Live publish
+
+`go_live_start` is refused on the official bot. On this process it:
+
+1. Joins the target voice channel muted and deafened
+2. Sends OP18 `STREAM_CREATE`, then OP22 unpause
+3. Hands stream-server credentials to ClankVox
+4. Plays an optional `sourceUrl`, or pumps the live activity PNG snapshot
+   (`GET 127.0.0.1:4322/snapshot`) when he is already on the activity plane
+
+Chat and voice share one desk: `play migos next` searches YouTube (`yt-dlp`),
+lists numbered results, and a number / "the second one" queues or plays.
+Bare URLs and skip/pause still work with no model. On this body the sink is
+Go Live video. On the official bot the same desk plays audio in voice. The
+voice agent also has `youtube_search` / `music_play` tools when he is already
+talking. One track never uses both sinks.
+
+A leftover optional GPL selfbot publisher (`go-live-media.ts`) can still be
+injected in tests. Production uses ClankVox. Without a running lab process,
+`go_live_start` throws `discord_presence_go_live_media_unavailable`.
 
 **Account risk.** Automating a normal Discord account violates Discord's terms
-and can get the account permanently terminated. The library also tracks a
-reverse-engineered protocol and breaks when Discord changes it. That risk is
-the owner's to accept, which is why the plane stays behind the recorded
-opt-in.
+and can get the account permanently terminated. That risk is the owner's to
+accept, which is why the plane stays behind the recorded opt-in.

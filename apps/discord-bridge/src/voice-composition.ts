@@ -23,7 +23,9 @@ import {
   type DiscordVoiceBriefing,
   type DiscordVoiceBriefingRequest,
   type DiscordVoiceRealtimePorts,
+  type DiscordVoiceConsentPolicy,
   type DiscordVoiceSessionStatus,
+  type LookAtScreenResult,
   type RealtimeSocketFactory,
   type RealtimeTimers,
   type VoiceConversationOpenInput,
@@ -323,6 +325,27 @@ export interface VoiceBriefingApiPort {
  * approved person memory are all service-resolved (T4), so the bridge
  * can neither supply nor widen any of them.
  */
+export interface VoiceLookAtScreenApiPort {
+  fetchPlayStill(): Promise<{
+    readonly outcome: "not_playing" | "pending" | "still";
+    readonly pngBase64?: string;
+    readonly mimeType?: "image/png";
+  }>;
+}
+
+export function createVoiceLookAtScreenProvider(
+  api: VoiceLookAtScreenApiPort,
+): () => Promise<LookAtScreenResult> {
+  return async () => {
+    const still = await api.fetchPlayStill();
+    if (still.outcome === "still" && still.pngBase64 !== undefined) {
+      return { outcome: "still", pngBase64: still.pngBase64, mimeType: "image/png" };
+    }
+    if (still.outcome === "pending") return { outcome: "pending" };
+    return { outcome: "not_playing" };
+  };
+}
+
 export function createVoiceBriefingProvider(
   api: VoiceBriefingApiPort,
 ): (request: DiscordVoiceBriefingRequest) => Promise<DiscordVoiceBriefing> {
@@ -604,7 +627,18 @@ export function describeVoiceResponse(evidence: DiscordVoiceResponseEvidence): s
 export function renderVoiceJoinDisclosure(
   daveProtocolVersion: number | undefined,
   ttsProvider: VoiceTtsProvider = DEFAULT_VOICE_TTS_PROVIDER,
+  consentPolicy: DiscordVoiceConsentPolicy = "explicit",
 ): string {
+  if (consentPolicy === "presence") {
+    return (
+      `Joined with DAVE protocol ${String(daveProtocolVersion)}. Anyone in this voice channel can talk to me — ` +
+      `being here is consent. **/clankie voice-consent opt-out** refuses for the rest of this call. ` +
+      `Room audio feeds a live OpenAI realtime session that keeps this call's conversation ` +
+      `on OpenAI's servers for as long as the call lasts. I listen continuously but speak only ` +
+      `when addressed, or briefly on my own initiative. ${describeSpokenReplies(ttsProvider)} ` +
+      `Nothing said in voice can ever approve privileged actions.`
+    );
+  }
   return (
     `Joined with DAVE protocol ${String(daveProtocolVersion)}. Only you are opted in — ` +
     `audio from anyone who has not explicitly consented is never streamed anywhere. ` +
@@ -643,9 +677,19 @@ export function renderVoiceConsentReply(
   consented: boolean,
   participantCount: number,
   ttsProvider: VoiceTtsProvider = DEFAULT_VOICE_TTS_PROVIDER,
+  consentPolicy: DiscordVoiceConsentPolicy = "explicit",
 ): string {
   if (!consented) {
     return "Your voice consent is revoked and any active capture for you was discarded.";
+  }
+  if (consentPolicy === "presence") {
+    return (
+      `This server already treats being in the call as consent — you do not need to opt in each session. ` +
+      `Anyone in this voice channel can talk. **/clankie voice-consent opt-out** refuses for the rest of this call. ` +
+      `Room audio feeds a live OpenAI realtime session that keeps this call's conversation ` +
+      `on OpenAI's servers for as long as the call lasts. ${describeSpokenReplies(ttsProvider)} ` +
+      `Nothing said in voice can ever approve privileged actions.`
+    );
   }
   return (
     `You are opted in for this voice session. ${String(participantCount)} participant(s) are now opted in. ` +
@@ -660,14 +704,19 @@ export function renderVoiceConsentReply(
 export function renderVoiceStatusReply(
   status: DiscordVoiceSessionStatus | undefined,
   voiceEnabled: boolean,
+  consentPolicy: DiscordVoiceConsentPolicy = "explicit",
 ): string {
   if (status?.active !== true) {
     return `Voice is ${voiceEnabled ? "enabled but not connected" : "disabled"}.`;
   }
   const posture = status.floorState === "engaged" ? "engaged in conversation" : "listening dormant";
+  const who =
+    consentPolicy === "presence"
+      ? "anyone in this channel can talk (opt-out still binds)"
+      : `${String(status.consentedParticipantCount)} participant(s) opted in`;
   return (
     `Voice is active with DAVE protocol ${String(status.daveProtocolVersion)}; ` +
-    `${String(status.consentedParticipantCount)} participant(s) opted in, ` +
+    `${who}, ` +
     `${String(status.activeCaptureCount)} bounded capture(s) active, currently ${posture}. ` +
     `I hold a short bounded transcript window in memory, and the live OpenAI realtime session ` +
     `keeps this call's conversation server-side for the duration of the call.`

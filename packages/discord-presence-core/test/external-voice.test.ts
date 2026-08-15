@@ -28,6 +28,8 @@ class FakeRealtimePort implements ExternalVoiceRealtimePort {
     this.textItems.push(text);
   }
 
+  public createImageItem(_pngBase64: string, _mimeType?: "image/png"): void {}
+
   public createResponse(): void {
     this.responseCreates += 1;
   }

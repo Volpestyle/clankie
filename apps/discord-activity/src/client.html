@@ -277,8 +277,20 @@
       let lastOverlaySequence = -1;
       let sessionEnded = false;
 
+      /**
+       * Frame accounting, because a dropped frame is otherwise invisible here.
+       *
+       * `sequence` is assigned by the runner when it publishes, so a gap counts
+       * everything lost upstream of this canvas — the producer socket, the hub's
+       * per-viewer backpressure, the Discord proxy. `decodeSkipped` counts what
+       * this client itself throws away: a frame still decoding when a newer one
+       * lands is abandoned, which is the browser telling us it cannot keep up.
+       */
+      const stats = { drawn: 0, lostUpstream: 0, decodeSkipped: 0, fps: 0, drawnAtSample: 0 };
+
       function render(frame) {
         if (frame.sequence <= lastFrameSequence) return;
+        if (lastFrameSequence >= 0) stats.lostUpstream += frame.sequence - lastFrameSequence - 1;
         lastFrameSequence = frame.sequence;
         if (canvas.width !== frame.width || canvas.height !== frame.height) {
           canvas.width = frame.width;
@@ -287,14 +299,33 @@
         }
         const image = new Image();
         image.addEventListener("load", () => {
-          if (frame.sequence !== lastFrameSequence) return;
+          if (frame.sequence !== lastFrameSequence) {
+            stats.decodeSkipped += 1;
+            return;
+          }
           context.drawImage(image, 0, 0);
+          stats.drawn += 1;
           empty.hidden = true;
-          setStatus("Live view", "live");
+          setStatus(liveLabel(), "live");
         });
         image.addEventListener("error", () => setStatus("Frame unavailable", "idle"));
         image.src = `data:image/png;base64,${frame.data}`;
       }
+
+      /** What the status line says while frames are arriving. */
+      function liveLabel() {
+        const lost = stats.lostUpstream > 0 ? ` · ${stats.lostUpstream} lost` : "";
+        const skipped = stats.decodeSkipped > 0 ? ` · ${stats.decodeSkipped} slow` : "";
+        return `Live view · ${stats.fps} fps${lost}${skipped}`;
+      }
+
+      // Sampled once a second rather than derived per frame, so the readout
+      // cannot itself become the reason a frame misses its slot.
+      setInterval(() => {
+        stats.fps = stats.drawn - stats.drawnAtSample;
+        stats.drawnAtSample = stats.drawn;
+        if (status.dataset.tone === "live") setStatus(liveLabel(), "live");
+      }, 1000);
 
       function renderOverlay(overlay) {
         if (overlay.sequence <= lastOverlaySequence) return;
@@ -310,7 +341,7 @@
         );
         setField(intent, v1 ? null : overlay.intent, "No next move yet");
         setField(effect, v1 ? null : overlay.effect, "Waiting for a result");
-        setStatus("Live view", "live");
+        setStatus(liveLabel(), "live");
       }
 
       function setField(element, value, fallback) {
