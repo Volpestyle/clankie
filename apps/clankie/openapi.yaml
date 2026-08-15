@@ -1,0 +1,953 @@
+openapi: 3.1.0
+info:
+  title: Clankie
+  version: "0.2.0"
+  description: |
+    Local `apps/clankie` service on `http://127.0.0.1:4310`. There is no HTML
+    index: `/` is 404 and `GET /health` is the public probe.
+
+    All other routes take a `Authorization: Bearer <token>` header. Tokens live
+    in the credential broker (Keychain service `bot.clankie.credentials`):
+
+    | Principal | Keychain account | Typical use |
+    | --- | --- | --- |
+    | Operator | `clankie_operator` | TUI operator reads/writes, pairing, devices, play stop |
+    | Captain | `clankie_captain` (also `CLANKIE_CAPTAIN_TOKEN`) | `/operator/v1/dispatch`, `/captain/v1/lanes` |
+    | Discord text | `clankie_discord_bridge` | Discord channel turns, presence, person memory |
+    | Discord voice | `clankie_discord_voice_bridge` | Voice briefing; voice-lane channel turns |
+    | Runner | `clankie_runner` | Embodiment claim/report |
+    | Device | minted at pairing complete | `/v1/devices/self*` |
+
+    Discord-lane routes 403 if the bearer is the console captain token (steer
+    source `api`). Import this file in Yaak (Settings → Import/Export) or run
+    `apps/clankie/scripts/setup-yaak.py`.
+servers:
+  - url: http://127.0.0.1:4310
+    description: Local service
+tags:
+  - name: Health
+  - name: Operator
+  - name: Captain
+  - name: Discord
+  - name: Memory
+  - name: Embodiment
+  - name: Browser
+  - name: Media
+  - name: Pairing
+  - name: Devices
+security: []
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      operationId: getHealth
+      summary: Public liveness
+      security: []
+      responses:
+        "200":
+          description: Service is up
+          content:
+            application/json:
+              example: { ok: true, service: clankie }
+
+  /v1/discord/presence-status:
+    get:
+      tags: [Operator, Discord]
+      operationId: getDiscordPresenceStatus
+      summary: Operator presence snapshot
+      description: Phase and counts only. What `clankie status` reads.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200":
+          description: Present-tense presence
+          content:
+            application/json:
+              example:
+                schemaVersion: 1
+                sessions:
+                  - phase: present
+                    gatewayConnected: true
+                    transportKind: bot
+                    voiceGuildCount: 0
+                    activityCount: 0
+                    updatedAt: "2026-08-15T20:05:32.899Z"
+
+  /v1/discord/user-session/opt-in:
+    get:
+      tags: [Discord]
+      operationId: getDiscordUserSessionOptIn
+      summary: Current user-session opt-in
+      security: [{ captainBearer: [] }]
+      responses:
+        "200":
+          description: Opt-in or null
+    post:
+      tags: [Operator, Discord]
+      operationId: postDiscordUserSessionOptIn
+      summary: Record user-session ToS acceptance
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              schemaVersion: 1
+              characterId: clankie
+              acknowledgement: I accept Discord user-session transport risk on my account.
+              guildIds: ["123456789012345678"]
+              channelIds: ["123456789012345678"]
+              dmPolicy: deny
+      responses:
+        "201":
+          description: Recorded
+    delete:
+      tags: [Operator, Discord]
+      operationId: deleteDiscordUserSessionOptIn
+      summary: Revoke the active user-session opt-in
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200":
+          description: Revoked
+        "409":
+          description: Nothing active to revoke
+
+  /v1/discord/stream-watch:
+    get:
+      tags: [Operator, Discord]
+      operationId: getDiscordStreamWatch
+      summary: Latest observed Discord screen shares
+      description: Metadata plus an optional still. Raw video is never stored.
+      security: [{ captainBearer: [] }, { operatorBearer: [] }]
+      responses:
+        "200":
+          description: Current share projection
+    post:
+      tags: [Discord]
+      operationId: postDiscordStreamWatch
+      summary: Bridge report of shares and optional stills
+      security: [{ captainBearer: [] }]
+      responses:
+        "200":
+          description: Updated projection
+
+  /v1/discord/readiness:
+    get:
+      tags: [Discord]
+      operationId: getDiscordReadiness
+      summary: Discord captain readiness
+      description: Requires a Discord text or voice bridge bearer.
+      security: [{ discordTextBearer: [] }, { discordVoiceBearer: [] }]
+      responses:
+        "200":
+          description: Ready
+        "503":
+          description: A required check is down
+
+  /v1/discord/voice-briefing:
+    post:
+      tags: [Discord]
+      operationId: postDiscordVoiceBriefing
+      summary: Compose the realtime voice briefing
+      description: Voice-bridge bearer only. Request carries ids; persona is owner-authored.
+      security: [{ discordVoiceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              schemaVersion: 1
+              guildId: "123456789012345678"
+              channelId: "123456789012345679"
+              consentedUserIds: ["123456789012345680"]
+      responses:
+        "200":
+          description: Bounded instructions + briefing
+
+  /v1/discord/presence-session-events:
+    post:
+      tags: [Discord]
+      operationId: postDiscordPresenceSessionEvents
+      summary: Apply a Discord presence phase event
+      security: [{ discordTextBearer: [] }, { discordVoiceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Accepted or idempotent replay
+
+  /v1/discord/presence-sessions:
+    get:
+      tags: [Discord]
+      operationId: getDiscordPresenceSessions
+      summary: Full presence session records
+      security: [{ captainBearer: [] }]
+      responses:
+        "200":
+          description: Session list
+
+  /v1/discord/voice-history:
+    get:
+      tags: [Discord]
+      operationId: getDiscordVoiceHistory
+      summary: Completed voice stays
+      security: [{ captainBearer: [] }]
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 32, default: 5 }
+      responses:
+        "200":
+          description: Recent stays
+
+  /v1/discord/presence-actions:
+    post:
+      tags: [Discord]
+      operationId: postDiscordPresenceActions
+      summary: Execute a policy-gated Discord action
+      description: |
+        Needs a live-session claim in headers:
+        `x-clankie-discord-presence-session`,
+        `x-clankie-discord-presence-phase`,
+        `x-clankie-discord-presence-revision`.
+      security: [{ discordTextBearer: [] }, { discordVoiceBearer: [] }]
+      parameters:
+        - in: header
+          name: x-clankie-discord-presence-session
+          required: true
+          schema: { type: string }
+        - in: header
+          name: x-clankie-discord-presence-phase
+          required: true
+          schema: { type: string }
+        - in: header
+          name: x-clankie-discord-presence-revision
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              schemaVersion: 1
+              idempotencyKey: yaak-typing-1
+              action: discord.presence.typing_start
+              identity:
+                presenceSessionId: replace-me
+                correlationId: yaak-1
+                profileHash: unversioned
+                characterId: clankie
+                credentialRef: discord_bot
+                transportKind: bot
+              payload:
+                kind: typing_start
+                channelId: "123456789012345679"
+      responses:
+        "200":
+          description: Action result
+        "409":
+          description: Stale live claim or action unavailable
+
+  /v1/captain/channel-turns:
+    post:
+      tags: [Captain, Discord]
+      operationId: postCaptainChannelTurns
+      summary: One Discord message becomes one captain turn
+      security: [{ discordTextBearer: [] }, { discordVoiceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              schemaVersion: 1
+              deliveryId: yaak-delivery-1
+              identity:
+                presenceSessionId: replace-me
+                correlationId: yaak-1
+                profileHash: unversioned
+                characterId: clankie
+                credentialRef: discord_bot
+                transportKind: bot
+              trigger:
+                kind: message
+                id: "1"
+                channelId: "123456789012345679"
+                actorId: "123456789012345680"
+                body: hello from Yaak
+      responses:
+        "200":
+          description: Settled turn
+
+  /v1/captain/presence:
+    post:
+      tags: [Captain]
+      operationId: postCaptainPresence
+      summary: Report captain lease heartbeat
+      security: [{ captainBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              schemaVersion: 1
+              type: captain.heartbeat
+              eventId: yaak-hb-1
+              leaseId: replace-me
+              generationId: replace-me
+              occurredAt: "2026-08-15T20:00:00.000Z"
+      responses:
+        "202":
+          description: Accepted
+
+  /operator/v1/dispatch:
+    post:
+      tags: [Captain]
+      operationId: postOperatorDispatch
+      summary: Operator conversation contract
+      description: |
+        One route, discriminated `op`: `list`, `get`, `create`, `send`,
+        `replay`, `tail`. The TUI and relay both speak this.
+      security: [{ captainBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            examples:
+              list:
+                summary: List conversations
+                value: { op: list, schemaVersion: 1 }
+              create:
+                summary: Create a global conversation
+                value:
+                  op: create
+                  schemaVersion: 1
+                  scope: { kind: global }
+                  title: Yaak probe
+              get:
+                summary: Get one conversation
+                value:
+                  op: get
+                  schemaVersion: 1
+                  conversationId: replace-me
+              send:
+                summary: Send a message turn
+                value:
+                  op: send
+                  schemaVersion: 1
+                  turn:
+                    schemaVersion: 1
+                    kind: message
+                    conversationId: replace-me
+                    surfaceClientId: yaak
+                    expectedRevision: 0
+                    message: ping from Yaak
+              replay:
+                summary: Replay a page
+                value:
+                  op: replay
+                  schemaVersion: 1
+                  replay:
+                    schemaVersion: 1
+                    conversationId: replace-me
+                    surfaceClientId: yaak
+                    limit: 50
+      responses:
+        "200":
+          description: Discriminated result
+
+  /captain/v1/lanes:
+    get:
+      tags: [Captain]
+      operationId: getCaptainLanes
+      summary: Observable captain lanes
+      security: [{ captainBearer: [] }]
+      responses:
+        "200":
+          description: Lane listing
+
+  /v1/memory:
+    get:
+      tags: [Memory, Operator]
+      operationId: getOperatorMemoryCatalog
+      summary: Browse every captain episode and Discord person fact
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200":
+          description: Complete operator-only memory catalog
+
+  /v1/memory/discord-people/proposals:
+    post:
+      tags: [Memory, Discord]
+      operationId: postDiscordPersonMemoryProposal
+      summary: Upsert a Discord person fact
+      security: [{ discordTextBearer: [] }, { discordVoiceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              schemaVersion: 1
+              proposalId: yaak-proposal-1
+              fact:
+                schemaVersion: 1
+                factId: yaak-fact-1
+                subject: { guildId: "123456789012345678", userId: "123456789012345680" }
+                kind: person-fact
+                body: Prefers short replies.
+                visibility: { scope: guild }
+                provenance:
+                  correlationId: yaak-1
+                  sourceEventId: yaak-src-1
+                  sourceSurface: discord_text
+                  rawTranscript: false
+                confidence: 0.8
+                createdAt: "2026-08-15T20:00:00.000Z"
+                updatedAt: "2026-08-15T20:00:00.000Z"
+      responses:
+        "201":
+          description: Stored
+
+  /v1/memory/discord-people/{guildId}/{userId}:
+    get:
+      tags: [Memory, Discord]
+      operationId: getDiscordPersonMemory
+      summary: Recall Discord person facts
+      security: [{ discordTextBearer: [] }, { discordVoiceBearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/guildId"
+        - $ref: "#/components/parameters/userId"
+        - in: query
+          name: channelId
+          schema: { type: string }
+        - in: query
+          name: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Facts and optional recall card
+    delete:
+      tags: [Memory, Operator]
+      operationId: deleteDiscordPersonMemory
+      summary: Delete every fact for a Discord person
+      security: [{ operatorBearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/guildId"
+        - $ref: "#/components/parameters/userId"
+      responses:
+        "200":
+          description: Deleted ids
+
+  /v1/memory/discord-people/{guildId}/{userId}/export:
+    get:
+      tags: [Memory, Operator]
+      operationId: exportDiscordPersonMemory
+      summary: Operator export of a Discord person
+      security: [{ operatorBearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/guildId"
+        - $ref: "#/components/parameters/userId"
+      responses:
+        "200":
+          description: Export bundle
+
+  /v1/memory/discord-people/{guildId}/{userId}/{factId}:
+    patch:
+      tags: [Memory, Operator]
+      operationId: patchDiscordPersonMemoryFact
+      summary: Edit one Discord person fact without changing its identity or provenance
+      security: [{ operatorBearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/guildId"
+        - $ref: "#/components/parameters/userId"
+        - in: path
+          name: factId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              body: Prefers concise replies.
+              confidence: 0.9
+      responses:
+        "200":
+          description: Updated fact
+        "404":
+          description: Fact not found
+    delete:
+      tags: [Memory, Operator]
+      operationId: deleteDiscordPersonMemoryFact
+      summary: Forget one Discord person fact
+      security: [{ operatorBearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/guildId"
+        - $ref: "#/components/parameters/userId"
+        - in: path
+          name: factId
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: Forgotten
+
+  /v1/memory/captain-episodes:
+    get:
+      tags: [Memory, Captain]
+      operationId: getCaptainEpisodes
+      summary: Recall episodes for a lane
+      security: [{ captainBearer: [] }]
+      parameters:
+        - in: query
+          name: lane
+          required: true
+          schema:
+            type: string
+            enum: [operator, discord_voice, discord_presence, gameplay]
+      responses:
+        "200":
+          description: Recall card
+    post:
+      tags: [Memory, Captain]
+      operationId: postCaptainEpisode
+      summary: Record a self-authored episode
+      security: [{ captainBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              schemaVersion: 1
+              episodeId: yaak-ep-1
+              lane: operator
+              targetId: self
+              summary: Tried the HTTP API from Yaak.
+              visibility: operator_private
+              provenance:
+                characterId: clankie
+                sessionId: captain
+                selfAuthored: true
+                rawTranscript: false
+              occurredAt: "2026-08-15T20:00:00.000Z"
+      responses:
+        "200":
+          description: Recorded id
+
+  /v1/memory/captain-episodes/{lane}/{episodeId}:
+    patch:
+      tags: [Memory, Operator]
+      operationId: patchCaptainEpisode
+      summary: Edit one episode's note or visibility
+      security: [{ operatorBearer: [] }]
+      parameters:
+        - in: path
+          name: lane
+          required: true
+          schema:
+            type: string
+            enum: [operator, discord_voice, discord_presence, gameplay]
+        - in: path
+          name: episodeId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              summary: Corrected note about what happened.
+              visibility: operator_private
+      responses:
+        "200":
+          description: Updated episode
+        "404":
+          description: Episode not found
+    delete:
+      tags: [Memory, Operator]
+      operationId: deleteCaptainEpisode
+      summary: Forget one captain episode
+      security: [{ operatorBearer: [] }]
+      parameters:
+        - in: path
+          name: lane
+          required: true
+          schema:
+            type: string
+            enum: [operator, discord_voice, discord_presence, gameplay]
+        - in: path
+          name: episodeId
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: Forgotten
+
+  /v1/embodiment/intents:
+    post:
+      tags: [Embodiment]
+      operationId: postEmbodimentIntent
+      summary: Ask to start or stop play
+      security: [{ captainBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            examples:
+              start:
+                value:
+                  kind: start
+                  schemaVersion: 1
+                  intentId: yaak-start-1
+                  originLane: operator
+                  requestedBy: local-operator
+                  requestedAt: "2026-08-15T20:00:00.000Z"
+                  environmentId: pokemon-firered
+                  budget: {}
+              stop:
+                value:
+                  kind: stop
+                  schemaVersion: 1
+                  intentId: yaak-stop-1
+                  originLane: operator
+                  requestedBy: local-operator
+                  requestedAt: "2026-08-15T20:00:00.000Z"
+                  sessionId: replace-me
+      responses:
+        "200":
+          description: Accepted, refused, or stop requested
+
+  /v1/embodiment/sessions/live:
+    get:
+      tags: [Embodiment]
+      operationId: getLiveEmbodimentSession
+      summary: Live play session
+      description: Captain, runner, or operator.
+      security: [{ operatorBearer: [] }, { captainBearer: [] }, { runnerBearer: [] }]
+      responses:
+        "200":
+          description: "`{ session }` or `{ session: null }`"
+
+  /v1/embodiment/sessions/live/stop:
+    post:
+      tags: [Embodiment, Operator]
+      operationId: stopLiveEmbodimentSession
+      summary: Operator kill-switch (ordinary stop intent)
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200":
+          description: Stop submitted
+        "404":
+          description: Not playing
+
+  /v1/embodiment/sessions/live/activity:
+    get:
+      tags: [Embodiment]
+      operationId: getLiveActivity
+      summary: Present-tense self-observation
+      security: [{ operatorBearer: [] }, { captainBearer: [] }]
+      responses:
+        "200":
+          description: not_playing, pending, or snapshot
+
+  /v1/embodiment/sessions/live/still:
+    get:
+      tags: [Embodiment]
+      operationId: getLivePlayStill
+      summary: One still of the live play screen
+      description: Read-only glance. PNG as base64. No controller.
+      security: [{ operatorBearer: [] }, { captainBearer: [] }, { discordVoiceBearer: [] }]
+      responses:
+        "200":
+          description: not_playing, pending, or still
+
+  /v1/embodiment/sessions/live/story:
+    get:
+      tags: [Embodiment]
+      operationId: getLivePlayStory
+      summary: Bounded story of this playthrough
+      description: Journal projection — objective, maps, last notable moments. Not the raw log.
+      security: [{ operatorBearer: [] }, { captainBearer: [] }, { discordVoiceBearer: [] }]
+      responses:
+        "200":
+          description: not_playing, pending, or card
+
+  /v1/embodiment/sessions/{id}:
+    get:
+      tags: [Embodiment]
+      operationId: getEmbodimentSession
+      summary: One embodiment session
+      security: [{ captainBearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/sessionId"
+      responses:
+        "200":
+          description: Session
+        "404":
+          description: Unknown
+
+  /v1/embodiment/sessions/{id}/report:
+    post:
+      tags: [Embodiment]
+      operationId: postEmbodimentReport
+      summary: Runner lifecycle report
+      security: [{ runnerBearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/sessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              schemaVersion: 1
+              sessionId: replace-me
+              runnerId: local
+              state: running
+              reportedAt: "2026-08-15T20:00:00.000Z"
+      responses:
+        "200":
+          description: Accepted
+
+  /v1/embodiment/possession:
+    get:
+      tags: [Embodiment]
+      operationId: getBodyPossession
+      summary: Who holds the body right now
+      security: [{ captainBearer: [] }]
+      responses:
+        "200":
+          description: Possession or null
+
+  /v1/embodiment/claims:
+    post:
+      tags: [Embodiment]
+      operationId: postEmbodimentClaim
+      summary: Runner poll for start/stop work
+      security: [{ runnerBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              schemaVersion: 1
+              claimId: yaak-claim-1
+              runnerId: local
+              environmentIds: [pokemon-firered, pokemon-emerald]
+      responses:
+        "200":
+          description: Assignment
+        "204":
+          description: Nothing to claim
+
+  /v1/browser/tools:
+    get:
+      tags: [Browser]
+      operationId: getBrowserTools
+      summary: Live browser tool catalog
+      security: [{ operatorBearer: [] }, { captainBearer: [] }]
+      responses:
+        "200":
+          description: Catalog
+        "503":
+          description: Browser host unavailable
+
+  /v1/browser/call:
+    post:
+      tags: [Browser]
+      operationId: postBrowserCall
+      summary: Call a browser tool
+      description: Approval-required tools refuse unless the bearer is the operator.
+      security: [{ operatorBearer: [] }, { captainBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              schemaVersion: 1
+              tool: browser_snapshot
+              arguments: {}
+      responses:
+        "200":
+          description: Result or typed refusal
+
+  /v1/media/images:
+    post:
+      tags: [Media]
+      operationId: postGenerateImage
+      summary: Generate or edit an image
+      security: [{ operatorBearer: [] }, { captainBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              schemaVersion: 1
+              prompt: a small robot sitting at a terminal
+              aspectRatio: "1:1"
+      responses:
+        "200":
+          description: ok or refused
+        "503":
+          description: Media plane unconfigured
+
+  /v1/media/videos:
+    post:
+      tags: [Media]
+      operationId: postGenerateVideo
+      summary: Start or resume a video render
+      security: [{ operatorBearer: [] }, { captainBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              schemaVersion: 1
+              prompt: a small robot waving
+              durationSeconds: 6
+      responses:
+        "200":
+          description: ok, pending, or refused
+
+  /v1/pairing/offer:
+    post:
+      tags: [Pairing]
+      operationId: postPairingOffer
+      summary: Mint a one-time pairing offer
+      description: The offer secret appears once in the response. Do not log it.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200":
+          description: Offer wire (deep link + code)
+
+  /v1/pairing/redeem:
+    post:
+      tags: [Pairing]
+      operationId: postPairingRedeem
+      summary: Redeem an offer into a pending device
+      description: Unauthenticated. The offer secret or typed code is the capability.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              code: "123-456"
+              device: { name: Yaak, platform: macos }
+      responses:
+        "200":
+          description: Pending device + completion token
+
+  /v1/pairing/complete:
+    post:
+      tags: [Pairing]
+      operationId: postPairingComplete
+      summary: Activate a pending device
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              completionToken: replace-me
+              acceptedGrants:
+                chat: true
+                steer: true
+                terminalObserve: true
+                terminalControl: false
+      responses:
+        "200":
+          description: Device token issued
+
+  /v1/devices:
+    get:
+      tags: [Devices, Operator]
+      operationId: listDevices
+      summary: List paired devices
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200":
+          description: Secret-free device rows
+
+  /v1/devices/{id}/revoke:
+    post:
+      tags: [Devices, Operator]
+      operationId: revokeDevice
+      summary: Revoke a device
+      security: [{ operatorBearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/deviceId"
+      responses:
+        "200":
+          description: Revoked row
+        "404":
+          description: Unknown
+
+  /v1/devices/self:
+    get:
+      tags: [Devices]
+      operationId: getDeviceSelf
+      summary: Device reads its own registration
+      security: [{ deviceBearer: [] }]
+      responses:
+        "200":
+          description: Self row
+
+  /v1/devices/self/session/refresh:
+    post:
+      tags: [Devices]
+      operationId: refreshDeviceSession
+      summary: Renew a device session token
+      security: [{ deviceBearer: [] }]
+      responses:
+        "200":
+          description: New token
+
+components:
+  parameters:
+    guildId:
+      in: path
+      name: guildId
+      required: true
+      schema: { type: string }
+    userId:
+      in: path
+      name: userId
+      required: true
+      schema: { type: string }
+    sessionId:
+      in: path
+      name: id
+      required: true
+      schema: { type: string }
+    deviceId:
+      in: path
+      name: id
+      required: true
+      schema: { type: string }
+  securitySchemes:
+    operatorBearer:
+      type: http
+      scheme: bearer
+      description: Keychain `clankie_operator`
+    captainBearer:
+      type: http
+      scheme: bearer
+      description: Keychain `clankie_captain` / `CLANKIE_CAPTAIN_TOKEN`
+    discordTextBearer:
+      type: http
+      scheme: bearer
+      description: Keychain `clankie_discord_bridge`
+    discordVoiceBearer:
+      type: http
+      scheme: bearer
+      description: Keychain `clankie_discord_voice_bridge`
+    runnerBearer:
+      type: http
+      scheme: bearer
+      description: Keychain `clankie_runner`
+    deviceBearer:
+      type: http
+      scheme: bearer
+      description: Device session token from pairing complete

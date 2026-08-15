@@ -22,7 +22,9 @@ import { createLogger } from "@clankie/observability";
 import { applyDiscordSettingsToEnvironment, SettingsStore } from "@clankie/settings";
 import { createBearerAuthenticator, createClankieApp, type ClankieApp } from "./app.ts";
 import { ActivityObservationProjection } from "./activity-observation.ts";
+import { PlaySightProjection } from "./play-sight.ts";
 import { browserEnabled, createBrowserHost, type BrowserHost } from "./browser-host.ts";
+import { createTldrawHost, tldrawEnabled, type TldrawHost } from "./tldraw-host.ts";
 import { createCaptain } from "./captain/captain.ts";
 import { createEmailPort } from "./email.ts";
 import { createLinearPort } from "./linear.ts";
@@ -186,6 +188,15 @@ if (browserEnabled(process.env.CLANKIE_BROWSER_ENABLED)) {
   }
 }
 
+// His drawing hand (ADR 0096). The tldraw desktop app is a GUI app on the
+// operator's Mac, so "not open" is the normal absent case and stays a refusal
+// he says out loud; nothing here reaches the app until he draws something.
+let tldrawHost: TldrawHost | undefined;
+if (tldrawEnabled(process.env.CLANKIE_TLDRAW_ENABLED)) {
+  tldrawHost = await createTldrawHost({ runnerStateRoot, logger, environment: process.env });
+  logger.info({ event: "tldraw.capability.enabled" }, "diagram host ready");
+}
+
 const discordPresenceRuntime = await loadDiscordPresenceRuntime(
   process.env.CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE,
   "createDiscordPresenceRuntime",
@@ -198,6 +209,7 @@ const discordUserPresenceRuntime = await loadDiscordPresenceRuntime(
 );
 
 const activityObservations = new ActivityObservationProjection();
+const playSight = new PlaySightProjection();
 
 // The captain's tools reach the same in-process authorities the routes use.
 // The app needs the captain and the captain's deps need the app, so the app
@@ -256,6 +268,7 @@ const captain = createCaptain(
         }),
       finishedRenders: (room) => mediaGenerator?.finishedRenders(room) ?? Promise.resolve([]),
     },
+    ...(tldrawHost === undefined ? {} : { diagrams: tldrawHost }),
     embodiment: {
       submitIntent: (intent) => boundApp().embodiment.submit(intent),
       getSession: (sessionId) => Promise.resolve(boundApp().embodiment.getSession(sessionId)),
@@ -286,21 +299,29 @@ const captain = createCaptain(
           : { schemaVersion: 1 as const, outcome: "snapshot" as const, snapshot };
       },
     },
+    playSight: {
+      still: () => Promise.resolve(playSight.still()),
+      story: () => Promise.resolve(playSight.story()),
+    },
+    streamWatch: {
+      current: () => Promise.resolve(boundApp().streamWatch()),
+    },
     presence: {
       listSessions: () => Promise.resolve(boundApp().presenceSessions()),
       listVoiceHistory: (limit = 5) => Promise.resolve(boundApp().voiceHistory(limit)),
+      listRecentVoiceSpeech: (limit = 12) => boundApp().recentVoiceSpeech(limit),
     },
     memory: {
-      appendEpisode: (lane, episode) => {
+      appendEpisode: (input) => {
         memory.recordEpisode({
           schemaVersion: 1,
           episodeId: `ep-${crypto.randomUUID()}`,
-          lane,
-          targetId: "self",
-          summary: episode,
+          lane: input.lane,
+          targetId: input.targetId,
+          summary: input.summary,
           // What he remembers at the console stays at the console; the
           // shareable/private gate in recall is only real if writes honor it.
-          visibility: lane === "operator" ? "operator_private" : "shareable",
+          visibility: input.visibility ?? (input.lane === "operator" ? "operator_private" : "shareable"),
           provenance: {
             characterId: "clankie",
             sessionId: "captain",
@@ -311,10 +332,7 @@ const captain = createCaptain(
         });
         return Promise.resolve();
       },
-      recallEpisodes: (lane) => {
-        const card = memory.episodeRecallCard({ lane: lane as never });
-        return Promise.resolve(card.length === 0 ? [] : [card]);
-      },
+      recallEpisodeCard: (lane) => Promise.resolve(memory.episodeRecallCard({ lane })),
       recallDiscordPerson: (identity, options) => {
         const card = memory.recallDiscordPersonCard(identity, {
           channelId: options.channelId,
@@ -338,6 +356,7 @@ const clankie = await createClankieApp({
   activityObservations: {
     current: (_signal) => Promise.resolve(activityObservations.current()),
   },
+  playSight,
   // Read-only view of the shared body lock (VUH-938); observation only.
   bodyPossession: () => {
     const holder = observeBodyHolder(defaultGbaBodyRootDir(process.env));
@@ -437,7 +456,7 @@ process.on("SIGINT", () => requestShutdown("SIGINT"));
 process.on("SIGTERM", () => requestShutdown("SIGTERM"));
 
 function createConfiguredPlayExecution(): PlayExecution {
-  return createGbaPlayExecution({ logger, activityObservations });
+  return createGbaPlayExecution({ logger, activityObservations, playSight });
 }
 
 function parseCaptainSteerSourceLane(value: string): "discord_text" | "discord_voice" | "api" {

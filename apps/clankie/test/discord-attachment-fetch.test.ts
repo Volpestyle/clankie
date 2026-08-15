@@ -44,6 +44,21 @@ describe("resolving a Discord attachment into bytes", () => {
     expect(seen[0]?.redirect).toBe("error");
   });
 
+  it("accepts Discord's image proxy for GIF-picker previews", async () => {
+    await expect(
+      fetchDiscordAttachment(
+        attachment({
+          url: "https://images-ext-1.discordapp.net/external/greeting.webp",
+          mediaType: "image/webp",
+        }),
+        {
+          fetchImpl: () =>
+            Promise.resolve(respond(PNG, { "content-type": "image/webp", "content-length": "8" })),
+        },
+      ),
+    ).resolves.toMatchObject({ mediaType: "image/webp" });
+  });
+
   it("refuses any host outside Discord's CDN", async () => {
     const calls: string[] = [];
     const fetchImpl = (input: URL | RequestInfo) => {
@@ -54,6 +69,7 @@ describe("resolving a Discord attachment into bytes", () => {
     for (const url of [
       "https://evil.example.com/shot.png",
       "https://cdn.discordapp.com.evil.example.com/shot.png",
+      "https://images-ext-1.discordapp.net.evil.example.com/shot.png",
       "http://169.254.169.254/latest/meta-data/",
       "http://cdn.discordapp.com/shot.png",
     ]) {

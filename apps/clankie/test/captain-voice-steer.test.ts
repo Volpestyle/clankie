@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { runDurableTurn } from "../src/captain/captain.ts";
+import { describe, expect, it, vi } from "vitest";
+import { runDurableTurn, runOneShotDiscordTurn } from "../src/captain/captain.ts";
 
 /**
  * The durable-lane dispatch (ADR 0091): an idle lane runs, a streaming lane
@@ -131,5 +131,27 @@ describe("runDurableTurn", () => {
     session.settleRun();
     await expect(first).resolves.toBe("ran");
     await expect(second).resolves.toBe("absorbed");
+  });
+});
+
+describe("runOneShotDiscordTurn", () => {
+  it("aborts a Discord text run that exceeds its deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const abort = vi.fn(() => Promise.resolve());
+      const run = runOneShotDiscordTurn(
+        { abort, prompt: () => new Promise<void>(() => undefined) },
+        "hello",
+        [],
+        50,
+      );
+
+      await vi.advanceTimersByTimeAsync(50);
+
+      await expect(run).resolves.toBe(false);
+      expect(abort).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

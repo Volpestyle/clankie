@@ -1,4 +1,4 @@
-import type { ActivityObservationSnapshot } from "@clankie/interactive-environment";
+import type { ActivityObservationSnapshot, PlayStillRead, PlayStoryRead } from "@clankie/interactive-environment";
 import type { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { createClankieApp, type TrustedOperatorIdentity } from "../src/app.ts";
@@ -7,7 +7,10 @@ import { createStubCaptain } from "../src/captain/port.ts";
 const OPERATOR = { authorization: "Bearer operator-secret" };
 const CAPTAIN = { authorization: "Bearer captain-secret" };
 
-async function makeApp(activity?: () => ActivityObservationSnapshot | undefined): Promise<Hono> {
+async function makeApp(
+  activity?: () => ActivityObservationSnapshot | undefined,
+  playSight?: { still(): PlayStillRead; story(): PlayStoryRead },
+): Promise<Hono> {
   const { app } = await createClankieApp({
     captain: createStubCaptain(),
     authenticateOperator: (request: Request): Promise<TrustedOperatorIdentity | undefined> =>
@@ -23,6 +26,7 @@ async function makeApp(activity?: () => ActivityObservationSnapshot | undefined)
           : undefined,
       ),
     activityObservations: { current: () => Promise.resolve(activity?.()) },
+    ...(playSight === undefined ? {} : { playSight }),
   });
   return app;
 }
@@ -160,5 +164,52 @@ describe("operator play controls", () => {
     const response = await app.request("/v1/embodiment/sessions/live/activity", { headers: OPERATOR });
     expect(response.status).toBe(502);
     expect(await response.json()).toEqual({ error: "activity_observation_identity_mismatch" });
+  });
+
+  it("lets captain and operator pull a live still and a journal story", async () => {
+    let sessionId = "";
+    const sight = {
+      still: (): PlayStillRead => ({
+        schemaVersion: 1,
+        outcome: "still",
+        sessionId,
+        environmentId: "pokemon-firered",
+        mimeType: "image/png",
+        width: 240,
+        height: 160,
+        sha256: "a".repeat(64),
+        capturedAt: "2026-08-15T20:00:00.000Z",
+        pngBase64: "aa==",
+      }),
+      story: (): PlayStoryRead => ({
+        schemaVersion: 1,
+        outcome: "card",
+        card: {
+          schemaVersion: 1,
+          sessionId,
+          environmentId: "pokemon-firered",
+          scenarioId: "firered-bedroom-route",
+          startedAt: "2026-08-15T20:00:00.000Z",
+          turnsTaken: 3,
+          objective: "leave the lab",
+          maps: ["oaks-lab"],
+          moments: [{ at: "2026-08-15T20:00:01.000Z", effect: "bumped Oak", toward: "leave the lab" }],
+        },
+      }),
+    };
+    const app = await makeApp(undefined, sight);
+    const started = await submitStart(app);
+    sessionId = ((await started.json()) as { session: { sessionId: string } }).session.sessionId;
+
+    expect((await app.request("/v1/embodiment/sessions/live/still")).status).toBe(401);
+    const still = await app.request("/v1/embodiment/sessions/live/still", { headers: OPERATOR });
+    expect(still.status).toBe(200);
+    expect(await still.json()).toMatchObject({ outcome: "still", sessionId, pngBase64: "aa==" });
+    const story = await app.request("/v1/embodiment/sessions/live/story", { headers: CAPTAIN });
+    expect(story.status).toBe(200);
+    expect(await story.json()).toMatchObject({
+      outcome: "card",
+      card: { sessionId, objective: "leave the lab", moments: [{ effect: "bumped Oak" }] },
+    });
   });
 });

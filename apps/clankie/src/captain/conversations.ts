@@ -3,6 +3,7 @@ import { appendFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } f
 import { join } from "node:path";
 import type {
   OperatorConversation,
+  OperatorConversationContextUsage,
   OperatorConversationEventBody,
   OperatorConversationScope,
   OperatorConversationServiceRequest,
@@ -26,6 +27,12 @@ interface ConversationMeta {
   updatedAt: string;
   revision: number;
   sessionState: OperatorConversation["sessionState"];
+  contextUsage?: OperatorConversationContextUsage;
+}
+
+/** Optional seat for a turn that arrived from a herdr-hosted console. */
+export interface ConversationTurnSeat {
+  readonly herdrPaneId: string;
 }
 
 /** Runs one accepted operator turn against the captain's model session. */
@@ -33,6 +40,7 @@ export type ConversationRunner = (
   conversationId: string,
   message: string,
   publish: (event: OperatorConversationEventBody) => void,
+  seat?: ConversationTurnSeat,
 ) => Promise<void>;
 
 /**
@@ -265,9 +273,14 @@ export class ConversationStore {
     const previous = this.chains.get(meta.conversationId) ?? Promise.resolve();
     const run = previous
       .then(() =>
-        this.runner(meta.conversationId, turn.message, (event) => {
-          this.append(meta, event);
-        }),
+        this.runner(
+          meta.conversationId,
+          turn.message,
+          (event) => {
+            this.append(meta, event);
+          },
+          turn.herdrPaneId === undefined ? undefined : { herdrPaneId: turn.herdrPaneId },
+        ),
       )
       .then(() => {
         this.append(meta, { type: "turn", runId, phase: "completed" });
@@ -311,6 +324,10 @@ export class ConversationStore {
     } as OperatorConversationStreamEvent;
     appendFileSync(this.eventsPath(meta.conversationId), `${JSON.stringify(event)}\n`, "utf8");
     this.counts.set(meta.conversationId, this.eventCount(meta.conversationId) + 1);
+    if (body.type === "context") {
+      meta.contextUsage = body.usage;
+      this.saveMeta(meta);
+    }
   }
 
   private readonly counts = new Map<string, number>();
@@ -373,5 +390,6 @@ function publicConversation(meta: ConversationMeta): OperatorConversation {
     updatedAt: meta.updatedAt,
     sessionState: meta.sessionState,
     revision: meta.revision,
+    ...(meta.contextUsage === undefined ? {} : { contextUsage: meta.contextUsage }),
   };
 }

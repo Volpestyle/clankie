@@ -135,6 +135,102 @@ describe("Discord person-memory routes", () => {
     ).toBe(403);
     expect((await app.request("/v1/memory/discord-people/guild-1/user-1")).status).toBe(403);
   });
+
+  it("lets only the operator browse, edit, and forget individual memories", async () => {
+    const { app, memory } = await harness();
+    memory.storeDiscordPersonFact(proposal().fact);
+    memory.recordEpisode({
+      schemaVersion: 1,
+      episodeId: "episode-1",
+      lane: "operator",
+      targetId: "self",
+      summary: "Original note",
+      visibility: "operator_private",
+      provenance: {
+        characterId: "clankie",
+        sessionId: "session-1",
+        selfAuthored: true,
+        rawTranscript: false,
+      },
+      occurredAt: "2026-07-25T11:00:00.000Z",
+    });
+
+    expect((await app.request("/v1/memory")).status).toBe(401);
+    const browsed = await app.request("/v1/memory", {
+      headers: { authorization: "Bearer operator" },
+    });
+    await expect(browsed.json()).resolves.toMatchObject({
+      discordPeople: [{ facts: [{ factId: "fact-1" }] }],
+      captainEpisodes: [{ episodeId: "episode-1" }],
+    });
+
+    const editedFact = await app.request("/v1/memory/discord-people/guild-1/user-1/fact-1", {
+      method: "PATCH",
+      headers: { authorization: "Bearer operator", "content-type": "application/json" },
+      body: JSON.stringify({ body: "Now prefers Squirtle", confidence: 0.75 }),
+    });
+    expect(editedFact.status).toBe(200);
+    await expect(editedFact.json()).resolves.toMatchObject({
+      body: "Now prefers Squirtle",
+      confidence: 0.75,
+      provenance: { sourceSurface: "discord_text" },
+    });
+
+    const editedEpisode = await app.request("/v1/memory/captain-episodes/operator/episode-1", {
+      method: "PATCH",
+      headers: { authorization: "Bearer operator", "content-type": "application/json" },
+      body: JSON.stringify({ summary: "Corrected note", visibility: "shareable" }),
+    });
+    expect(editedEpisode.status).toBe(200);
+    await expect(editedEpisode.json()).resolves.toMatchObject({
+      summary: "Corrected note",
+      visibility: "shareable",
+      provenance: { selfAuthored: true },
+    });
+
+    expect(
+      (
+        await app.request("/v1/memory/discord-people/guild-1/user-1/fact-1", {
+          method: "DELETE",
+          headers: { authorization: "Bearer operator" },
+        })
+      ).status,
+    ).toBe(204);
+    expect(
+      (
+        await app.request("/v1/memory/captain-episodes/operator/episode-1", {
+          method: "DELETE",
+          headers: { authorization: "Bearer operator" },
+        })
+      ).status,
+    ).toBe(204);
+    expect(memory.catalog()).toMatchObject({ discordPeople: [], captainEpisodes: [] });
+  });
+
+  it("keeps one global ring bounded to the 128 newest episodes", async () => {
+    const { memory } = await harness();
+    for (let index = 0; index < 130; index += 1) {
+      memory.recordEpisode({
+        schemaVersion: 1,
+        episodeId: `episode-${String(index)}`,
+        lane: index % 2 === 0 ? "operator" : "gameplay",
+        targetId: "self",
+        summary: `Note ${String(index)}`,
+        visibility: "operator_private",
+        provenance: {
+          characterId: "clankie",
+          sessionId: "session-1",
+          selfAuthored: true,
+          rawTranscript: false,
+        },
+        occurredAt: new Date(Date.UTC(2026, 6, 25, 0, 0, index)).toISOString(),
+      });
+    }
+    const episodes = memory.catalog().captainEpisodes;
+    expect(episodes).toHaveLength(128);
+    expect(episodes[0]?.episodeId).toBe("episode-2");
+    expect(episodes.at(-1)?.episodeId).toBe("episode-129");
+  });
 });
 
 function proposal() {

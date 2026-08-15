@@ -14,7 +14,7 @@
  *   (ADR 0068): a full disk costs the record, never the play, and the log
  *   says so.
  */
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import path from "node:path";
 import {
@@ -51,9 +51,46 @@ import { createBrokeredActivityFrameSink } from "@clankie/rendered-surface-clien
 import { personaInstructions, SettingsStore } from "@clankie/settings";
 import type { ActivityObservationWritePort } from "./activity-observation.ts";
 import type { PlayExecution } from "./play-host.ts";
+import type { PlaySightProjection } from "./play-sight.ts";
 
-const FRAME_WIDTH = 240 * 3;
-const FRAME_HEIGHT = 160 * 3;
+/**
+ * The stream carries the native screen; the model's own view stays upscaled.
+ *
+ * The activity canvas is CSS-sized with `image-rendering: pixelated` and its
+ * own default is 240x160, so a 3x nearest-neighbour upscale added ~9x the
+ * pixels for a picture the viewer cannot tell apart — and spent the hub's
+ * per-viewer backpressure budget (`RenderedSurfaceHub`, 512KB) doing it, which
+ * is what turned a paced walk into a teleport.
+ */
+const STREAM_SCALE = 1;
+const FRAME_WIDTH = 240 * STREAM_SCALE;
+const FRAME_HEIGHT = 160 * STREAM_SCALE;
+
+/**
+ * Idle emulation between turns, in frames per tick and milliseconds per tick.
+ *
+ * The core advances only while an action is dispatching, so the screen freezes
+ * for as long as he thinks — two thirds of the wall clock on the 2026-08-15
+ * run. Ticking it with nothing held is what standing still in FireRed looks
+ * like: NPCs walk their routes, water animates, his sprite bobs.
+ */
+const IDLE_CHUNK_FRAMES = 1;
+const IDLE_TICK_MS = Math.round(1_000 / 59.7275);
+
+/**
+ * How long one decision may take before the turn is abandoned.
+ *
+ * The deadline exists to stop a wedged request hanging the playthrough, not to
+ * keep turns snappy — the loop has nothing else to do while it waits, and since
+ * the console keeps idling the screen stays alive through a slow one. Too tight
+ * a bound is therefore strictly worse than a slow turn: it converts a late
+ * answer into no answer, and the journal records `mind_failed` instead of a
+ * move. 60s was that, once his vision model slowed down: measured 2026-08-15,
+ * a *trivial* "describe this screen in ten words" call to grok-4.6 took 20-25s,
+ * and a full decision — system prompt, rendered view, screenshot, structured
+ * action out — ran past the minute and lost three turns in a row.
+ */
+const PLAY_MODEL_REQUEST_TIMEOUT_MS = 180_000;
 
 /** Autosave cadence in turns. Unset or unparseable falls back to 50; 0 disables. */
 const DEFAULT_AUTOSAVE_TURNS = 50;
@@ -82,6 +119,8 @@ export interface GbaPlayExecutionOptions {
   onTurn?: (turn: FreePlayTurn) => void;
   /** Latest-only self-observation for captain and authenticated operator reads. */
   activityObservations?: ActivityObservationWritePort;
+  /** Pull-when-he-wants still and journal story (ADR 0099). */
+  playSight?: PlaySightProjection;
   /** Test/dev injection; production resolves the configured model. */
   createMind?: () => Promise<FreePlayMind>;
   /**
@@ -165,7 +204,10 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
         // register — not a second character defined by this file's prompt.
         const character = personaInstructions((await new SettingsStore().load()).persona, "gameplay");
         const providerOptions = configured.modelOptions?.providerOptions ?? {};
-        const requestTimeoutMs = positiveIntegerOr(env["CLANKIE_PLAY_MODEL_REQUEST_TIMEOUT_MS"], 60_000);
+        const requestTimeoutMs = positiveIntegerOr(
+          env["CLANKIE_PLAY_MODEL_REQUEST_TIMEOUT_MS"],
+          PLAY_MODEL_REQUEST_TIMEOUT_MS,
+        );
         mind = createModelFreePlayMind({
           model: configured.model,
           character,
@@ -241,14 +283,22 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
     let framesPublished = 0;
     let framesDroppedWithoutSink = 0;
     let sequence = 0;
+    let lastFrameDigest: string | null = null;
     const publishFrame = (frame: number): void => {
-      const png = game.framePng();
+      const png = game.framePng(STREAM_SCALE);
       if (png === null) return;
       if (sink === undefined) {
         framesDroppedWithoutSink += 1;
         return;
       }
       const bytes = Buffer.from(png);
+      const digest = createHash("sha256").update(bytes).digest("hex");
+      // An unchanged screen — an open menu, a dialog box nobody is advancing —
+      // otherwise costs a moving frame's bandwidth, and the frames that get
+      // dropped downstream for it are the ones carrying the motion. The hub
+      // replays its latest frame to every joiner, so nothing goes blank.
+      if (digest === lastFrameDigest) return;
+      lastFrameDigest = digest;
       sequence += 1;
       framesPublished += 1;
       sink.publishFrame({
@@ -261,7 +311,7 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
         encoding: "png",
         data: bytes.toString("base64"),
         byteLength: bytes.byteLength,
-        sha256: createHash("sha256").update(bytes).digest("hex"),
+        sha256: digest,
         capturedAt: clock().toISOString(),
       });
     };
@@ -297,13 +347,13 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
      * is how six words became seventeen seconds of speech in the 2026-08-01
      * run. What crosses here is the turn's own effect line.
      */
-    const reportToRoom = (event: string | null): void => {
-      if (event === null || event.length === 0 || voice === undefined) return;
+    const reportToRoom = (event: string, deliveryId: string): void => {
+      if (event.length === 0 || voice === undefined) return;
       // No room, nothing to report to. Without this the bridge rejects every
       // event with "not in a channel" and the one-shot failure log below would
       // report a broken seam when the truth is an empty room.
       if (!voice.roomListening) return;
-      void voice.narrate(event).catch((error: unknown) => {
+      void voice.narrate(event, { deliveryId }).catch((error: unknown) => {
         if (speechFailureLogged) return;
         speechFailureLogged = true;
         options.logger.info(
@@ -439,11 +489,38 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
           };
 
     const startedAt = clock().getTime();
+    let idleTick: NodeJS.Timeout | undefined;
     try {
       await onRunning(resumedFromCheckpointId);
+      const glanceScale = 3;
+      options.playSight?.attach({
+        sessionId: session.sessionId,
+        environmentId: session.environmentId,
+        scenarioId: game.scenario.scenarioId,
+        startedAt: clock().toISOString(),
+        ...(journal === undefined ? {} : { journalPath: journal.path }),
+        capture: () => {
+          const png = game.framePng(glanceScale);
+          if (png === null) return undefined;
+          return { png: Buffer.from(png), width: 240 * glanceScale, height: 160 * glanceScale };
+        },
+      });
       // One publish per action shows a teleport, not a step; paced so the
       // motion reads as gameplay (same rule as the MCP and live paths).
-      game.observeFrames(() => publishFrame(sequence), { pace: true });
+      const observer = (): void => publishFrame(sequence);
+      game.observeFrames(observer, { pace: true });
+
+      // Dispatch drives the core, so between turns the game is stopped, not
+      // idle, and the watcher gets a still image for the whole thinking gap.
+      // This interval is the console's clock while he thinks; `idleFrames`
+      // stands off on its own whenever an action holds the core.
+      const idleCore = game.coreFactory?.(game.scenario);
+      if (idleCore?.idleFrames !== undefined) {
+        idleTick = setInterval(() => {
+          idleCore.idleFrames?.(IDLE_CHUNK_FRAMES);
+        }, IDLE_TICK_MS);
+        idleTick.unref();
+      }
 
       const result = await runFreePlay({
         io: freePlay.io,
@@ -499,8 +576,10 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
           // `speak` is the gate that already reads the whole moment; reusing it
           // keeps one judgement of "is this worth saying" rather than a second
           // list of notable-looking effects that would drift from the first.
-          reportToRoom(roomEvent(turn));
-          journal?.turn(turn);
+          const event = roomEvent(turn);
+          const speechDeliveryId = event === null ? undefined : randomUUID();
+          if (event !== null && speechDeliveryId !== undefined) reportToRoom(event, speechDeliveryId);
+          journal?.turn(turn, speechDeliveryId === undefined ? {} : { speechDeliveryId });
           if (
             autosaveEvery > 0 &&
             game.checkpoints !== undefined &&
@@ -565,6 +644,10 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
               },
             }),
           );
+          options.playSight?.noteProgress({
+            maps: event.progress.maps.slice(-16),
+            objective: event.turn.objective,
+          });
         },
       });
 
@@ -632,7 +715,9 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
         },
       };
     } finally {
+      if (idleTick !== undefined) clearInterval(idleTick);
       options.activityObservations?.clear(session.sessionId);
+      options.playSight?.detach(session.sessionId);
       sink?.close();
       unsubscribe?.();
       voice?.close();

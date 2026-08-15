@@ -40,8 +40,9 @@ function deps(overrides: { linear?: Partial<LinearPort>; email?: Partial<EmailPo
     media: { generateImage: unused, generateVideo: unused, finishedRenders: unused },
     embodiment: { submitIntent: unused, getSession: unused, getLiveSession: unused, getPossession: unused },
     activity: { current: unused },
-    presence: { listSessions: unused, listVoiceHistory: unused },
-    memory: { appendEpisode: unused, recallEpisodes: unused },
+    streamWatch: { current: unused },
+    presence: { listSessions: unused, listVoiceHistory: unused, listRecentVoiceSpeech: unused },
+    memory: { appendEpisode: unused, recallEpisodeCard: unused },
   };
 }
 

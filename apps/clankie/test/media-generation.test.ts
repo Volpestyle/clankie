@@ -95,6 +95,45 @@ describe("making a picture", () => {
     expect(seenAuthorization).toBe("Bearer from-environment");
   });
 
+  it("uses a SuperGrok subscription over a metered xAI key for pictures", async () => {
+    const workspace = await workspaceWith({ image_model: "xai/grok-imagine-image-quality" });
+    const pixels = Buffer.from("subscription-image");
+    let seenAuthorization: string | undefined;
+    const credentials: CredentialStore = {
+      get: (providerId) =>
+        Promise.resolve(
+          providerId === "xai"
+            ? {
+                type: "oauth",
+                access: "supergrok-access",
+                refresh: "supergrok-refresh",
+                expires: Date.now() + 600_000,
+              }
+            : undefined,
+        ),
+      set: () => Promise.resolve(),
+      delete: () => Promise.resolve(false),
+      list: () => Promise.resolve({} as Record<string, RedactedCredential>),
+    };
+    const generator = new ConfiguredMediaGenerator({
+      credentials,
+      attachmentRoot: workspace.attachmentRoot,
+      configCwd: workspace.configCwd,
+      environment: { ...workspace.environment, XAI_API_KEY: "metered-must-not-win" },
+      fetchImpl: (_input, init) => {
+        seenAuthorization = new Headers(init?.headers).get("authorization") ?? undefined;
+        return Promise.resolve(Response.json({ data: [{ b64_json: pixels.toString("base64") }] }));
+      },
+    });
+
+    expect(await generator.generateImage({ schemaVersion: 1, prompt: "a garden robot" })).toMatchObject({
+      outcome: "ok",
+      provider: "xai",
+      model: "grok-imagine-image-quality",
+    });
+    expect(seenAuthorization).toBe("Bearer supergrok-access");
+  });
+
   it("edits only media it made, and reads those bytes back as the source", async () => {
     const workspace = await workspaceWith({ image_model: "openai/gpt-image-2" });
     const original = Buffer.from("the-first-picture");

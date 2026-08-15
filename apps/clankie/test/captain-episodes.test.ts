@@ -131,6 +131,33 @@ describe("captain episode routes", () => {
     close();
   });
 
+  it("recalls shareable episodes across rooms while keeping operator notes private", async () => {
+    const { memory, close } = await harness("api");
+    memory.recordEpisode(
+      JSON.parse(
+        episodeBody({
+          episodeId: "game-1",
+          lane: "gameplay",
+          targetId: "pokemon-emerald",
+          summary: "Beat Roxanne on the second attempt.",
+          visibility: "shareable",
+          occurredAt: "2026-07-25T18:00:00.000Z",
+        }),
+      ),
+    );
+    memory.recordEpisode(JSON.parse(episodeBody()));
+
+    const discord = memory.episodeRecallCard({ lane: "discord_presence" });
+    expect(discord).toContain("gameplay · pokemon-emerald");
+    expect(discord).toContain("Beat Roxanne");
+    expect(discord).not.toContain("credential rotation");
+
+    const operator = memory.episodeRecallCard({ lane: "operator" });
+    expect(operator).toContain("Beat Roxanne");
+    expect(operator).toContain("credential rotation");
+    close();
+  });
+
   it("keeps an operator-private episode out of a shareable lane's recall, even in its own lane", async () => {
     const { app, close } = await harness("api");
     await app.request("/v1/memory/captain-episodes", {

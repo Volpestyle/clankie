@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
@@ -26,8 +27,11 @@ import {
   getAgentDir,
   SessionManager,
   type AgentSession,
+  type InlineExtension,
 } from "@earendil-works/pi-coding-agent";
 import { ConversationStore } from "./conversations.ts";
+import { readHerdrSessionCensus, type HerdrSessionCensus } from "./herdr-census.ts";
+import { operatorPromptWithHerdrSeat } from "./herdr-seat.ts";
 import type { CaptainDeps, ResolvedAttachment } from "./deps.ts";
 import { normalizeDiscordTurn } from "./discord-turn.ts";
 import { LaneLog } from "./lane-log.ts";
@@ -45,6 +49,21 @@ const REGISTER_FOR_LANE: Readonly<Record<CaptainSessionLaneV2, PersonaRegister>>
 };
 
 const TOOL_DETAIL_TRUNCATED = "\n… truncated";
+export const DISCORD_TEXT_TURN_TIMEOUT_MS = 60_000;
+
+/** Refresh bounded episodic recall as trusted context for every Pi run. */
+export function captainMemoryExtension(memory: CaptainDeps["memory"], lane: CaptainSessionLaneV2) {
+  return {
+    name: "captain-memory",
+    hidden: true,
+    factory(pi) {
+      pi.on("before_agent_start", async (event) => {
+        const card = await memory.recallEpisodeCard(lane).catch(() => "");
+        return card.length === 0 ? undefined : { systemPrompt: `${event.systemPrompt}\n\n${card}` };
+      });
+    },
+  } satisfies InlineExtension;
+}
 
 function boundOperatorToolDetail(detail: string): string {
   if (detail.length <= OPERATOR_CONVERSATION_TOOL_DETAIL_MAX) return detail;
@@ -91,6 +110,25 @@ export function operatorSkillName(toolName: string, args: unknown): string | und
   if (typeof path !== "string" || basename(path) !== "SKILL.md") return undefined;
   const name = basename(dirname(path));
   return /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(name) && name.length <= 64 ? name : undefined;
+}
+
+export function resolveOperatorPrompt(
+  message: string,
+  skills: readonly { readonly disableModelInvocation: boolean; readonly name: string }[],
+  herdrPaneId?: string,
+  census?: HerdrSessionCensus,
+): { readonly prompt: string; readonly skillName?: string } {
+  const match = /^\/(\S+)(?:\s+([\s\S]*))?$/u.exec(message);
+  const token = match?.[1]?.toLowerCase();
+  if (token === undefined) return { prompt: operatorPromptWithHerdrSeat(message, herdrPaneId, census) };
+  const name = token.startsWith("skill:") ? token.slice("skill:".length) : token;
+  const skill = skills.find((candidate) => candidate.name === name && !candidate.disableModelInvocation);
+  if (skill === undefined) return { prompt: operatorPromptWithHerdrSeat(message, herdrPaneId, census) };
+  const args = operatorPromptWithHerdrSeat(match?.[2]?.trim() ?? "", herdrPaneId, census).trim();
+  return {
+    prompt: `/skill:${skill.name}${args.length === 0 ? "" : ` ${args}`}`,
+    skillName: skill.name,
+  };
 }
 
 export interface CaptainOptions {
@@ -162,6 +200,29 @@ export async function runDurableTurn(
   }
 }
 
+/** Abort a one-shot Discord text session instead of holding its HTTP request and typing indicator forever. */
+export async function runOneShotDiscordTurn(
+  session: Pick<AgentSession, "abort" | "prompt">,
+  prompt: string,
+  images: ImageContent[],
+  timeoutMs = DISCORD_TEXT_TURN_TIMEOUT_MS,
+): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const completed = await Promise.race([
+      session.prompt(prompt, { expandPromptTemplates: false, images }).then(() => true),
+      new Promise<false>((resolve) => {
+        timer = setTimeout(resolve, timeoutMs, false);
+        timer.unref?.();
+      }),
+    ]);
+    if (!completed) void session.abort().catch(() => undefined);
+    return completed;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 /**
  * The captain on pi. Sessions are pi's: durable JSONL trees for the operator
  * conversations and voice channels, one-shot in-memory sessions for bounded
@@ -186,7 +247,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       ? [
           "",
           "# This turn",
-          "You have a shell and filesystem tools this turn. `herdr pane list` talks to the local herdr socket from this service — you are not inside a herdr pane, and that is fine.",
+          "You have a shell and filesystem tools this turn. `herdr` talks to the local socket from this service. When a turn names your herdr pane, you have joined that session: the agents in `<herdr_session>` are yours to lead, route, and harvest. When it names none, you are on the socket only. Never run bare `herdr-lead` from this shell — that starts a TUI in-process and hangs.",
         ].join("\n")
       : [
           "",
@@ -208,6 +269,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       agentDir: getAgentDir(),
       systemPrompt: await systemPrompt(lane, systemTools),
       noExtensions: true,
+      extensionFactories: [captainMemoryExtension(deps.memory, lane)],
       noPromptTemplates: true,
       additionalSkillPaths: [join(options.repoRoot, ".agents", "skills")],
     });
@@ -263,7 +325,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   const conversations = new ConversationStore(
     join(options.stateDir, "conversations"),
-    async (conversationId, message, publish) => {
+    async (conversationId, message, publish, seat) => {
       const lane = await durableSession(
         `operator:${conversationId}`,
         "operator",
@@ -272,6 +334,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       );
       lane.capture.media = undefined;
       lane.capture.room = roomKey("operator", conversationId);
+      lane.capture.targetId = conversationId;
       const skillCalls = new Map<string, string>();
       const unsubscribe = lane.session.subscribe((event) => {
         if (event.type === "tool_execution_start") {
@@ -296,6 +359,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             detail: formatOperatorToolResult(event.result),
             ...(skillName === undefined ? {} : { skillName }),
           });
+        } else if (
+          (event.type === "message_end" && event.message.role === "assistant") ||
+          event.type === "compaction_end"
+        ) {
+          const usage = lane.session.getContextUsage();
+          if (usage !== undefined) {
+            publish({
+              type: "context",
+              usage: { tokens: usage.tokens, contextWindow: usage.contextWindow },
+            });
+          }
         }
       });
       try {
@@ -304,7 +378,28 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           kind: "heard",
           text: message,
         });
-        await lane.session.prompt(message, { expandPromptTemplates: false });
+        const census =
+          seat?.herdrPaneId === undefined ? undefined : await readHerdrSessionCensus(seat.herdrPaneId);
+        const prompt = resolveOperatorPrompt(
+          message,
+          lane.session.resourceLoader.getSkills().skills,
+          seat?.herdrPaneId,
+          census,
+        );
+        if (prompt.skillName !== undefined) {
+          publish({
+            type: "tool",
+            toolCallId: `skill-${randomUUID()}`,
+            name: "skill",
+            phase: "completed",
+            skillName: prompt.skillName,
+          });
+        }
+        // The resource loader disables discovered extensions and prompt templates;
+        // exact, loaded operator skills are the only input allowed to reach Pi expansion.
+        await lane.session.prompt(prompt.prompt, {
+          expandPromptTemplates: prompt.skillName !== undefined,
+        });
         const text = lane.lastAssistantText.trim();
         publish({ type: "message", role: "captain", text, streaming: false });
         await laneLog.append("operator", conversationId, {
@@ -325,6 +420,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   ): Promise<CaptainChannelTurnResult> {
     lane.turnCounter += 1;
     lane.capture.room = roomKey(normalized.lane, normalized.targetId);
+    lane.capture.targetId = normalized.targetId;
     const turnId = `turn-${lane.turnCounter}-${deliveryId}`;
     await laneLog.append(normalized.lane, normalized.targetId, {
       at: new Date().toISOString(),
@@ -336,10 +432,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (normalized.durable) {
         role = await runDurableTurn(lane, normalized.prompt, normalized.images.map(toImageContent));
       } else {
-        await lane.session.prompt(normalized.prompt, {
-          expandPromptTemplates: false,
-          images: normalized.images.map(toImageContent),
-        });
+        const completed = await runOneShotDiscordTurn(
+          lane.session,
+          normalized.prompt,
+          normalized.images.map(toImageContent),
+        );
+        if (!completed) {
+          return {
+            state: "failed",
+            captainSessionId: normalized.sessionKey,
+            turnId,
+            code: "captain_turn_timeout",
+          };
+        }
       }
     } catch {
       return { state: "failed", turnId, code: "captain_session_failed" };
@@ -418,7 +523,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
     voiceLaneInstructions(): string {
       return (
-        "You are present in a Discord voice channel. You hear only opted-in participants and you speak " +
+        "You are present in a Discord voice channel. You hear only participants permitted by the room's consent policy and you speak " +
         "aloud: keep replies short, conversational, and free of markdown, links, file paths, or anything " +
         "that only makes sense on a screen. You are a participant in the room, not an assistant on call."
       );

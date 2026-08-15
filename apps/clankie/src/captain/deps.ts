@@ -1,15 +1,24 @@
 import type {
   ActivityObservationRead,
+  PlayStillRead,
+  PlayStoryRead,
   DiscordPresenceSessionRecord,
   DiscordVoiceStay,
 } from "@clankie/interactive-environment";
+import type { VoiceSpeechSnapshot } from "../voice-receipt-activity.ts";
 import type {
   BodyPossession,
   BrowserToolCatalog,
   CallBrowserToolRequest,
   CallBrowserToolResult,
+  CaptainEpisodeVisibility,
+  CaptainSessionLaneV2,
   DiscordPersonIdentity,
   DiscordPresenceAttachment,
+  DiscordStreamWatchObservation,
+  DrawDiagramResult,
+  DrawErDiagramRequest,
+  DrawSequenceDiagramRequest,
   EmbodimentIntent,
   EmbodimentSession,
   EmbodimentSubmitResult,
@@ -40,6 +49,14 @@ export interface CaptainDeps {
     /** Renders this room started that outlived the call and have since landed. */
     finishedRenders(room: string): Promise<readonly FinishedRender[]>;
   };
+  /**
+   * His drawing hand (ADR 0096). Absent when the capability is switched off;
+   * the tools then say so rather than disappearing.
+   */
+  readonly diagrams?: {
+    drawErDiagram(request: DrawErDiagramRequest): Promise<DrawDiagramResult>;
+    drawSequenceDiagram(request: DrawSequenceDiagramRequest): Promise<DrawDiagramResult>;
+  };
   readonly embodiment: {
     submitIntent(intent: EmbodimentIntent): Promise<EmbodimentSubmitResult>;
     getSession(sessionId: string): Promise<EmbodimentSession | undefined>;
@@ -49,13 +66,27 @@ export interface CaptainDeps {
   readonly activity: {
     current(): Promise<ActivityObservationRead>;
   };
+  /** Live still and journal story. Absent reads as not playing. */
+  readonly playSight?: {
+    still(): Promise<PlayStillRead>;
+    story(): Promise<PlayStoryRead>;
+  };
+  readonly streamWatch: {
+    current(): Promise<DiscordStreamWatchObservation>;
+  };
   readonly presence: {
     listSessions(): Promise<DiscordPresenceSessionRecord[]>;
     listVoiceHistory(limit?: number): Promise<DiscordVoiceStay[]>;
+    listRecentVoiceSpeech(limit?: number): Promise<VoiceSpeechSnapshot>;
   };
   readonly memory: {
-    appendEpisode(lane: string, episode: string): Promise<void>;
-    recallEpisodes(lane: string, limit: number): Promise<readonly string[]>;
+    appendEpisode(input: {
+      readonly lane: CaptainSessionLaneV2;
+      readonly targetId: string;
+      readonly summary: string;
+      readonly visibility?: CaptainEpisodeVisibility;
+    }): Promise<void>;
+    recallEpisodeCard(lane: CaptainSessionLaneV2): Promise<string>;
     recallDiscordPerson?(
       identity: DiscordPersonIdentity,
       options: { readonly channelId: string; readonly query: string },
@@ -68,6 +99,7 @@ export interface CaptainDeps {
 }
 
 export interface ResolvedAttachment {
+  readonly id: string;
   readonly dataUrl: string;
   readonly mediaType: string;
   readonly filename?: string;

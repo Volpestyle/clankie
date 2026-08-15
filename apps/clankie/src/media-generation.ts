@@ -17,7 +17,14 @@ import {
   type VideoJob,
 } from "@clankie/media-connector";
 import { loadBundledCatalog } from "@clankie/model-registry";
-import { loadConfig, resolveRole, type MediaModelRole } from "@clankie/model-provider";
+import {
+  createXaiFetch,
+  loadConfig,
+  OAUTH_PLACEHOLDER_API_KEY,
+  resolveRole,
+  XAI_PROVIDER_ID,
+  type MediaModelRole,
+} from "@clankie/model-provider";
 import {
   GENERATED_MEDIA_DIRECTORY,
   GenerateImageResultSchema,
@@ -136,6 +143,7 @@ interface ResolvedMediaModel {
   readonly provider: MediaProvider;
   readonly modelId: string;
   readonly apiKey: string;
+  readonly fetch?: MediaFetch;
 }
 
 /** One video render, tracked past the call that started it. */
@@ -217,10 +225,7 @@ export class ConfiguredMediaGenerator implements MediaGeneratorPort {
     try {
       const model = await this.resolveModel("video_model", "video");
       if (model.provider !== "grok") return;
-      const adapter = new GrokVideoAdapter({
-        apiKey: model.apiKey,
-        ...(this.options.fetchImpl === undefined ? {} : { fetch: this.options.fetchImpl }),
-      });
+      const adapter = new GrokVideoAdapter(this.adapterConfig(model));
       const job = await adapter.poll(record.requestId);
       if (job.status === "pending") return;
       if (job.status !== "done") throw new MediaRefusal("provider_failed", job.error ?? job.status);
@@ -289,10 +294,7 @@ export class ConfiguredMediaGenerator implements MediaGeneratorPort {
       if (model.provider !== "grok") {
         throw new MediaRefusal("provider_unsupported", `${model.providerId} has no video adapter`);
       }
-      const adapter = new GrokVideoAdapter({
-        apiKey: model.apiKey,
-        ...(this.options.fetchImpl === undefined ? {} : { fetch: this.options.fetchImpl }),
-      });
+      const adapter = new GrokVideoAdapter(this.adapterConfig(model));
       const generation = await this.videoGenerationRequest(request, model);
       let job: VideoJob = request.requestId
         ? await adapter.poll(request.requestId)
@@ -404,10 +406,7 @@ export class ConfiguredMediaGenerator implements MediaGeneratorPort {
   }
 
   private imageAdapter(model: ResolvedMediaModel): MediaGenerationAdapter {
-    const config = {
-      apiKey: model.apiKey,
-      ...(this.options.fetchImpl === undefined ? {} : { fetch: this.options.fetchImpl }),
-    };
+    const config = this.adapterConfig(model);
     switch (model.provider) {
       case "openai":
         return new OpenAiImageAdapter(config);
@@ -416,6 +415,16 @@ export class ConfiguredMediaGenerator implements MediaGeneratorPort {
       case "grok":
         return new GrokImageAdapter(config);
     }
+  }
+
+  private adapterConfig(model: ResolvedMediaModel): {
+    apiKey: string;
+    fetch?: MediaFetch;
+  } {
+    return {
+      apiKey: model.apiKey,
+      ...(model.fetch === undefined ? {} : { fetch: model.fetch }),
+    };
   }
 
   private async resolveModel(role: MediaModelRole, kind: "image" | "video"): Promise<ResolvedMediaModel> {
@@ -431,22 +440,49 @@ export class ConfiguredMediaGenerator implements MediaGeneratorPort {
     if (provider === undefined) {
       throw new MediaRefusal("provider_unsupported", `${resolved.providerId} has no media adapter`);
     }
-    const apiKey = await this.apiKey(resolved.providerId);
-    return { providerId: resolved.providerId, provider, modelId: resolved.modelId, apiKey };
+    return {
+      providerId: resolved.providerId,
+      provider,
+      modelId: resolved.modelId,
+      ...(await this.mediaAuth(resolved.providerId)),
+    };
   }
 
   /**
    * The stored credential first, the provider's declared environment variables
    * second — the same two connections `/auth` reports, in the same order, so a
    * provider the TUI calls connected is one this can actually use.
+   *
+   * SuperGrok OAuth on `xai` outranks a metered `XAI_API_KEY`: the fetch
+   * adapter refreshes and injects the live Bearer, so pictures and video ride
+   * the subscription the same way captain turns do.
    */
-  private async apiKey(providerId: string): Promise<string> {
+  private async mediaAuth(providerId: string): Promise<{ apiKey: string; fetch?: MediaFetch }> {
     const stored = await this.options.credentials.get(providerId);
-    if (stored?.type === "api" && stored.key.trim().length > 0) return stored.key;
+    if (providerId === XAI_PROVIDER_ID && stored?.type === "oauth") {
+      return {
+        apiKey: OAUTH_PLACEHOLDER_API_KEY,
+        fetch: createXaiFetch({
+          store: this.options.credentials,
+          ...(this.options.fetchImpl === undefined ? {} : { fetchImpl: this.options.fetchImpl }),
+        }),
+      };
+    }
+    if (stored?.type === "api" && stored.key.trim().length > 0) {
+      return {
+        apiKey: stored.key,
+        ...(this.options.fetchImpl === undefined ? {} : { fetch: this.options.fetchImpl }),
+      };
+    }
     const environment = this.options.environment ?? process.env;
     for (const name of loadBundledCatalog()[providerId]?.env ?? []) {
       const value = environment[name]?.trim();
-      if (value) return value;
+      if (value) {
+        return {
+          apiKey: value,
+          ...(this.options.fetchImpl === undefined ? {} : { fetch: this.options.fetchImpl }),
+        };
+      }
     }
     throw new MediaRefusal("credential_unavailable", `store one with /auth for ${providerId}`);
   }

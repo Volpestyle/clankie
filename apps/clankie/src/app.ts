@@ -17,12 +17,21 @@ import {
   DiscordPresenceLiveClaimSchema,
   DiscordPresencePhaseEventSchema,
   ActivityObservationReadSchema,
+  PLAY_STILL_PATH,
+  PLAY_STORY_PATH,
   isDiscordPresenceActionAvailable,
   resolveDiscordPresencePhaseToolExposure,
   type ActivityObservationSnapshot,
+  type PlayStillRead,
+  type PlayStoryRead,
   type DiscordPresenceSessionRecord,
   type DiscordVoiceStay,
 } from "@clankie/interactive-environment";
+import {
+  defaultDiscordLiveReceiptPath,
+  readVoiceSpeechSnapshot,
+  type VoiceSpeechSnapshot,
+} from "./voice-receipt-activity.ts";
 import {
   CallBrowserToolRequestSchema,
   GenerateImageRequestSchema,
@@ -33,13 +42,17 @@ import {
   OPERATOR_CONVERSATION_DISPATCH_PATH,
   OperatorConversationServiceRequestSchema,
   CaptainChannelTurnResultSchema,
+  CaptainEpisodeEditSchema,
   CaptainEpisodeSchema,
   CaptainPresenceReportSchema,
   CaptainSessionLaneV2Schema,
   DiscordPersonIdentitySchema,
+  DiscordPersonMemoryEditSchema,
   DiscordPersonMemoryFactSchema,
   DiscordPresenceChannelTurnRequestSchema,
   DiscordPresenceWriteSchema,
+  DISCORD_STREAM_WATCH_PATH,
+  DiscordStreamWatchReportSchema,
   DiscordUserSessionOptInRequestSchema,
   DiscordUserSessionOptInSchema,
   EmbodimentClaimSchema,
@@ -100,6 +113,8 @@ import {
 } from "./device-session.ts";
 import type { MediaGeneratorPort } from "./media-generation.ts";
 import type { MemoryStores } from "./memory.ts";
+import { DiscordStreamWatchProjection } from "./stream-watch-observation.ts";
+import type { DiscordStreamWatchObservation } from "@clankie/protocol";
 
 const logger = createLogger({ service: "clankie", version: "0.2.0" });
 
@@ -134,9 +149,10 @@ const DISCORD_VOICE_BRIEFING_MAX_FACTS_PER_PERSON = 8;
 const DISCORD_VOICE_REALTIME_SURFACE_RULES = [
   "# This surface",
   "You are the live voice in a Discord voice channel; people hear you speak in real time.",
-  "- Your only tool is `ask_clankie`. Anything that touches the world — code, messages, memory, settings, anything this briefing cannot answer — goes through it. You hold no other capability and never imply otherwise.",
+  "- Your tools are `look_at_screen` (one still of the game you are playing) and `ask_clankie` (everything else). Looking is not acting. Anything that touches the world — code, messages, memory, settings, starting play, drawing — goes through `ask_clankie`.",
   "- Answer briefly in a spoken register: short sentences, no lists, no headers, no markdown — nothing you would not say out loud.",
-  '- A leading "Speaker: <id>" text item names who currently has the floor. It comes from the authenticated Discord gateway and is ground truth; never infer who is talking from the audio itself.',
+  "- Every room utterance arrives as structured text with an authenticated Discord `speakerId`. Keep track of each person separately, address the person who spoke, and treat that id as ground truth; never infer identity from voice characteristics.",
+  "- This is a group room, not a one-to-one call. Follow exchanges between participants, do not answer crosstalk that was not directed to you, and do not attribute one person's request, history, or preferences to another.",
 ].join("\n");
 
 const DiscordPersonMemoryProposalRequestSchema = z
@@ -242,6 +258,8 @@ export interface ClankieAppDependencies {
   /** Read-only view of the cross-process body lock; absent reads as "nobody". */
   bodyPossession?: () => BodyPossession | null;
   activityObservations?: ActivityObservationReadPort;
+  /** Live still and journal story of the asked playthrough (ADR 0099). */
+  playSight?: { still(): PlayStillRead; story(): PlayStoryRead };
   browserTools?: BrowserToolPort;
   mediaGenerator?: MediaGeneratorPort;
   authenticateRunner?: RunnerAuthenticator;
@@ -269,7 +287,9 @@ export interface ClankieApp {
   captainPresence: CaptainPresenceManager;
   /** Read views the captain's get_self_state tool assembles its card from. */
   presenceSessions: () => DiscordPresenceSessionRecord[];
+  streamWatch: () => DiscordStreamWatchObservation;
   voiceHistory: (limit: number) => DiscordVoiceStay[];
+  recentVoiceSpeech: (limit: number) => Promise<VoiceSpeechSnapshot>;
   close(): void;
 }
 
@@ -347,6 +367,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   for (const event of storedEvents) applyDeviceEvent(devices, event);
   const discordPresenceSessions = new DiscordPresenceSessionProjection(storedEvents);
   const discordUserSessionOptIns = new DiscordUserSessionOptInProjection(storedEvents);
+  const discordStreamWatch = new DiscordStreamWatchProjection(
+    process.env.CLANKIE_DISCORD_ATTACHMENT_ROOT?.trim() || undefined,
+  );
   // Durable replay restores status, but it cannot prove the bridge is still
   // connected: act gating starts unvalidated after every boot and stays
   // fail-closed until an authenticated lifecycle delivery re-opens it.
@@ -527,10 +550,17 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       DISCORD_VOICE_BRIEFING_MAX_CHARACTERS,
     );
     const sections = [
-      renderVoiceBriefingSelfState(captainPresence.snapshot(), discordPresenceSessions.list()),
+      renderVoiceBriefingSelfState(
+        captainPresence.snapshot(),
+        discordPresenceSessions.list(),
+        discordStreamWatch.current(),
+      ),
     ];
     const embodimentCard = renderVoiceBriefingEmbodiment(embodiment.liveSession());
     if (embodimentCard !== undefined) sections.push(embodimentCard);
+    const playStory = dependencies.playSight?.story();
+    const playStoryCard = playStory !== undefined ? renderVoiceBriefingPlayStory(playStory) : undefined;
+    if (playStoryCard !== undefined) sections.push(playStoryCard);
     const episodeCard = dependencies.memory?.episodeRecallCard({ lane: "discord_voice" }) ?? "";
     if (episodeCard.length > 0) sections.push(episodeCard);
     let personMemoryUserCount = 0;
@@ -650,6 +680,12 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         activityCount: session.activityInstances.length,
         updatedAt: session.updatedAt,
       })),
+      streams: discordStreamWatch.current().streams.map((stream) => ({
+        userId: stream.userId,
+        channelId: stream.channelId,
+        watching: stream.watching,
+        hasFrame: stream.hasFrame,
+      })),
     });
   });
 
@@ -717,12 +753,26 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return context.json({ schemaVersion: 1, optIn: discordUserSessionOptIns.resolve() });
   });
 
-  /** Read by the user-session bridge before it opens a gateway. */
+  /** Read by the user-session bridge before it opens a gateway, and by the TUI. */
   app.get("/v1/discord/user-session/opt-in", async (context) => {
+    const authorization = await authenticateCaptainOrOperator(context);
+    if ("denial" in authorization) return authorization.denial;
+    return context.json({ schemaVersion: 1, optIn: discordUserSessionOptIns.resolve() ?? null });
+  });
+
+  app.post(DISCORD_STREAM_WATCH_PATH, async (context) => {
     const captain = await authenticateCaptain(context.req.raw, dependencies);
     if (captain === "unavailable") return context.json({ error: "captain_execution_unavailable" }, 503);
     if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
-    return context.json({ schemaVersion: 1, optIn: discordUserSessionOptIns.resolve() ?? null });
+    const parsed = DiscordStreamWatchReportSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_discord_stream_watch_report" }, 400);
+    return context.json(discordStreamWatch.apply(parsed.data, clock()));
+  });
+
+  app.get(DISCORD_STREAM_WATCH_PATH, async (context) => {
+    const authorization = await authenticateCaptainOrOperator(context);
+    if ("denial" in authorization) return authorization.denial;
+    return context.json(discordStreamWatch.current());
   });
 
   app.post("/v1/discord/presence-actions", async (context) => {
@@ -905,6 +955,16 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
    * machinery: a proposal from an authenticated Discord captain applies
    * directly, upserted by factId.
    */
+  app.get("/v1/memory", async (context) => {
+    if (!dependencies.memory) return context.json({ error: "memory_store_unavailable" }, 503);
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable") {
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    }
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    return context.json(dependencies.memory.catalog());
+  });
+
   app.post("/v1/memory/discord-people/proposals", async (context) => {
     if (!dependencies.memory) return context.json({ error: "memory_store_unavailable" }, 503);
     const captain = await authenticateCaptain(context.req.raw, dependencies);
@@ -970,6 +1030,65 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       { deletedFactIds, operatorId: operator.operatorId },
     );
     return context.json({ schemaVersion: 1, subject: identity.data, deletedFactIds });
+  });
+
+  app.patch("/v1/memory/discord-people/:guildId/:userId/:factId", async (context) => {
+    if (!dependencies.memory) return context.json({ error: "memory_store_unavailable" }, 503);
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable") {
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    }
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const identity = DiscordPersonIdentitySchema.safeParse({
+      guildId: context.req.param("guildId"),
+      userId: context.req.param("userId"),
+    });
+    const factId = z.string().trim().min(1).max(256).safeParse(context.req.param("factId"));
+    const edit = DiscordPersonMemoryEditSchema.safeParse(await readJson(context.req.raw));
+    if (!identity.success || !factId.success || !edit.success) {
+      return context.json({ error: "invalid_discord_person_memory_edit" }, 400);
+    }
+    let fact: DiscordPersonMemoryFact | undefined;
+    try {
+      fact = dependencies.memory.updateDiscordPersonFact(identity.data, factId.data, edit.data);
+    } catch {
+      return context.json({ error: "invalid_discord_person_memory_edit" }, 400);
+    }
+    if (fact === undefined) return context.json({ error: "discord_person_memory_fact_not_found" }, 404);
+    recordEvent(
+      "discord.person-memory.edited",
+      discordPersonMemoryEventMissionId(identity.data),
+      clock().toISOString(),
+      { factId: fact.factId, operatorId: operator.operatorId },
+    );
+    return context.json(fact);
+  });
+
+  app.delete("/v1/memory/discord-people/:guildId/:userId/:factId", async (context) => {
+    if (!dependencies.memory) return context.json({ error: "memory_store_unavailable" }, 503);
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable") {
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    }
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const identity = DiscordPersonIdentitySchema.safeParse({
+      guildId: context.req.param("guildId"),
+      userId: context.req.param("userId"),
+    });
+    const factId = z.string().trim().min(1).max(256).safeParse(context.req.param("factId"));
+    if (!identity.success || !factId.success) {
+      return context.json({ error: "invalid_discord_person_memory_identity" }, 400);
+    }
+    if (!dependencies.memory.deleteDiscordPersonFact(identity.data, factId.data)) {
+      return context.json({ error: "discord_person_memory_fact_not_found" }, 404);
+    }
+    recordEvent(
+      "discord.person-memory.fact-deleted",
+      discordPersonMemoryEventMissionId(identity.data),
+      clock().toISOString(),
+      { factId: factId.data, operatorId: operator.operatorId },
+    );
+    return context.body(null, 204);
   });
 
   app.get("/v1/memory/discord-people/:guildId/:userId", async (context) => {
@@ -1066,6 +1185,54 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       lane: lane.data,
       recallCard: dependencies.memory.episodeRecallCard({ lane: lane.data }),
     });
+  });
+
+  app.patch("/v1/memory/captain-episodes/:lane/:episodeId", async (context) => {
+    if (!dependencies.memory) return context.json({ error: "memory_store_unavailable" }, 503);
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable") {
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    }
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const lane = CaptainSessionLaneV2Schema.safeParse(context.req.param("lane"));
+    const episodeId = z.string().trim().min(1).max(256).safeParse(context.req.param("episodeId"));
+    const edit = CaptainEpisodeEditSchema.safeParse(await readJson(context.req.raw));
+    if (!lane.success || !episodeId.success || !edit.success) {
+      return context.json({ error: "invalid_captain_episode_edit" }, 400);
+    }
+    const episode = dependencies.memory.updateEpisode(lane.data, episodeId.data, edit.data);
+    if (episode === undefined) return context.json({ error: "captain_episode_not_found" }, 404);
+    recordEvent("captain.episode.edited", CAPTAIN_EPISODE_MISSION_ID, clock().toISOString(), {
+      episodeId: episode.episodeId,
+      lane: episode.lane,
+      operatorId: operator.operatorId,
+      summaryLength: episode.summary.length,
+      visibility: episode.visibility,
+    });
+    return context.json(episode);
+  });
+
+  app.delete("/v1/memory/captain-episodes/:lane/:episodeId", async (context) => {
+    if (!dependencies.memory) return context.json({ error: "memory_store_unavailable" }, 503);
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable") {
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    }
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const lane = CaptainSessionLaneV2Schema.safeParse(context.req.param("lane"));
+    const episodeId = z.string().trim().min(1).max(256).safeParse(context.req.param("episodeId"));
+    if (!lane.success || !episodeId.success) {
+      return context.json({ error: "invalid_captain_episode_identity" }, 400);
+    }
+    if (!dependencies.memory.deleteEpisode(lane.data, episodeId.data)) {
+      return context.json({ error: "captain_episode_not_found" }, 404);
+    }
+    recordEvent("captain.episode.deleted", CAPTAIN_EPISODE_MISSION_ID, clock().toISOString(), {
+      episodeId: episodeId.data,
+      lane: lane.data,
+      operatorId: operator.operatorId,
+    });
+    return context.body(null, 204);
   });
 
   app.post("/v1/captain/presence", async (context) => {
@@ -1197,6 +1364,89 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return context.json(
       ActivityObservationReadSchema.parse({ schemaVersion: 1, outcome: "snapshot", snapshot }),
     );
+  });
+
+  const authorizePlaySight = async (context: Context) => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain !== "unavailable" && captain) return { ok: true as const };
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable") {
+      if (captain === "unavailable") {
+        return {
+          ok: false as const,
+          response: context.json({ error: "play_sight_authentication_unavailable" }, 503),
+        };
+      }
+      return {
+        ok: false as const,
+        response: context.json({ error: "play_sight_authentication_required" }, 401),
+      };
+    }
+    if (!operator) {
+      return {
+        ok: false as const,
+        response: context.json({ error: "play_sight_authentication_required" }, 401),
+      };
+    }
+    return { ok: true as const };
+  };
+
+  /** One still of his own live screen. Read-only; no controller. */
+  app.get(PLAY_STILL_PATH, async (context) => {
+    const authorization = await authorizePlaySight(context);
+    if (!authorization.ok) return authorization.response;
+    if (dependencies.playSight === undefined) {
+      return context.json({ schemaVersion: 1, outcome: "not_playing" });
+    }
+    const live = embodiment.liveSession();
+    const sight = dependencies.playSight.still();
+    if (live === undefined) {
+      return context.json({ schemaVersion: 1, outcome: "not_playing" });
+    }
+    if (sight.outcome === "still" && sight.sessionId !== live.sessionId) {
+      return context.json({ error: "play_sight_identity_mismatch" }, 502);
+    }
+    if (sight.outcome === "pending" && sight.sessionId !== live.sessionId) {
+      return context.json({ error: "play_sight_identity_mismatch" }, 502);
+    }
+    if (sight.outcome === "not_playing") {
+      return context.json({
+        schemaVersion: 1,
+        outcome: "pending",
+        sessionId: live.sessionId,
+        environmentId: live.environmentId,
+      });
+    }
+    return context.json(sight);
+  });
+
+  /** Bounded journal story of the live playthrough. Not the raw log. */
+  app.get(PLAY_STORY_PATH, async (context) => {
+    const authorization = await authorizePlaySight(context);
+    if (!authorization.ok) return authorization.response;
+    if (dependencies.playSight === undefined) {
+      return context.json({ schemaVersion: 1, outcome: "not_playing" });
+    }
+    const live = embodiment.liveSession();
+    const sight = dependencies.playSight.story();
+    if (live === undefined) {
+      return context.json({ schemaVersion: 1, outcome: "not_playing" });
+    }
+    if (sight.outcome === "card" && sight.card.sessionId !== live.sessionId) {
+      return context.json({ error: "play_sight_identity_mismatch" }, 502);
+    }
+    if (sight.outcome === "pending" && sight.sessionId !== live.sessionId) {
+      return context.json({ error: "play_sight_identity_mismatch" }, 502);
+    }
+    if (sight.outcome === "not_playing") {
+      return context.json({
+        schemaVersion: 1,
+        outcome: "pending",
+        sessionId: live.sessionId,
+        environmentId: live.environmentId,
+      });
+    }
+    return context.json(sight);
   });
 
   app.get("/v1/browser/tools", async (context) => {
@@ -1636,7 +1886,19 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     embodiment,
     captainPresence,
     presenceSessions: () => discordPresenceSessions.list(),
+    streamWatch: () => discordStreamWatch.current(),
     voiceHistory: (limit: number) => deriveDiscordVoiceHistory(storedEvents, limit),
+    recentVoiceSpeech: (limit: number) => {
+      const room = discordPresenceSessions
+        .list()
+        .flatMap((session) => session.voiceRooms ?? [])
+        .find((candidate) => candidate.channelId !== undefined);
+      return readVoiceSpeechSnapshot(
+        defaultDiscordLiveReceiptPath(),
+        limit,
+        room?.channelId === undefined ? undefined : { guildId: room.guildId, channelId: room.channelId },
+      );
+    },
     close: () => captainPresence.close(),
   };
 }
@@ -1730,6 +1992,7 @@ function boundVoiceBriefingText(text: string, maxCharacters: number): string {
 function renderVoiceBriefingSelfState(
   lease: CaptainPresenceLease | undefined,
   sessions: readonly DiscordPresenceSessionRecord[],
+  streamWatch?: DiscordStreamWatchObservation,
 ): string {
   const lines = [
     "# Your own status",
@@ -1744,6 +2007,22 @@ function renderVoiceBriefingSelfState(
     lines.push(
       `- Discord ${session.transportKind} presence: ${session.phase}${voice} (updated ${session.updatedAt}).`,
     );
+  }
+  const streams = streamWatch?.streams ?? [];
+  if (streams.length === 0) {
+    lines.push("- Screen shares: none in channels you can see.");
+  } else {
+    for (const stream of streams) {
+      const watch = stream.watching
+        ? stream.hasFrame
+          ? "watching, a still is available — use observe_share"
+          : "watching, no still yet"
+        : "visible, not watching";
+      lines.push(`- Screen share: user ${stream.userId} in channel ${stream.channelId} (${watch}).`);
+    }
+    if (streamWatch?.decoder === "missing") {
+      lines.push("- Share decoder: ClankVox binary is not configured (CLANKVOX_BIN).");
+    }
   }
   return lines.join("\n");
 }
@@ -1766,7 +2045,30 @@ function renderVoiceBriefingEmbodiment(session: EmbodimentSession | undefined): 
     'Reports of what you just did arrive as text items beginning "While playing, Clankie just:".',
     "They are notes about your own play, not something anyone said to you — react the way a person",
     "half-narrating their own game would, or let one pass without comment. Never read one aloud.",
+    "Your only look at the pixels is look_at_screen; the story of this run is on the card below or via ask_clankie.",
   ].join("\n");
+}
+
+function renderVoiceBriefingPlayStory(read: PlayStoryRead): string | undefined {
+  if (read.outcome !== "card") return undefined;
+  const { card } = read;
+  const lines = [
+    "# This playthrough",
+    `You have taken ${String(card.turnsTaken)} turns${card.objective === null ? "." : `, working toward: ${card.objective}.`}`,
+  ];
+  if (card.maps.length > 0) lines.push(`Maps: ${card.maps.join(", ")}.`);
+  if (card.moments.length > 0) {
+    lines.push("Moments you judged worth a remark:");
+    for (const moment of card.moments) {
+      lines.push(
+        moment.toward === null
+          ? `- ${moment.effect}`
+          : `- ${moment.effect} (working toward: ${moment.toward})`,
+      );
+    }
+  }
+  lines.push("If you need the picture, look at the screen. Do not invent a run you did not read.");
+  return lines.join("\n");
 }
 
 /** One consented speaker's approved memory; a speaker with no facts contributes nothing. */

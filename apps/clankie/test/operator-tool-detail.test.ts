@@ -4,6 +4,7 @@ import {
   formatOperatorToolDetail,
   formatOperatorToolResult,
   operatorSkillName,
+  resolveOperatorPrompt,
 } from "../src/captain/captain.ts";
 
 describe("operator tool detail", () => {
@@ -38,5 +39,24 @@ describe("operator tool detail", () => {
     );
     expect(operatorSkillName("read", { path: "README.md" })).toBeUndefined();
     expect(operatorSkillName("bash", { path: "/tmp/fake/SKILL.md" })).toBeUndefined();
+  });
+
+  it("translates only exact, model-invocable operator slash skills", () => {
+    const skills = [
+      { name: "ponytail", disableModelInvocation: false },
+      { name: "hidden", disableModelInvocation: true },
+    ];
+
+    expect(resolveOperatorPrompt("/ponytail fix this", skills)).toEqual({
+      prompt: "/skill:ponytail fix this",
+      skillName: "ponytail",
+    });
+    expect(resolveOperatorPrompt("/skill:ponytail fix this", skills).prompt).toBe("/skill:ponytail fix this");
+    expect(resolveOperatorPrompt("/pony fix this", skills).skillName).toBeUndefined();
+    expect(resolveOperatorPrompt("/hidden", skills).skillName).toBeUndefined();
+    const seatedPrompt = resolveOperatorPrompt("/ponytail fix this", skills, "w3:p2J").prompt;
+    expect(seatedPrompt).toMatch(/^\/skill:ponytail /u);
+    expect(seatedPrompt).toContain("w3:p2J");
+    expect(seatedPrompt.endsWith("fix this")).toBe(true);
   });
 });

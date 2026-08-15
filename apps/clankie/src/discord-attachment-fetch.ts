@@ -10,7 +10,7 @@ import {
  * This is the only place in the system that turns an untrusted URL into
  * content, so every bound lives here rather than being spread across callers:
  *
- * - **Host allowlist.** Discord's CDN only. The URL arrives on an untrusted
+ * - **Host allowlist.** Discord's CDN and image proxy only. The URL arrives on an untrusted
  *   gateway payload, and an unbounded fetch driven by attacker-chosen URLs is
  *   an SSRF primitive regardless of what the schema says about it.
  * - **Size ceiling twice.** Once on the declared `Content-Length` and again on
@@ -27,6 +27,7 @@ import {
  */
 
 const ALLOWED_HOSTS = new Set(["cdn.discordapp.com", "media.discordapp.net"]);
+const DISCORD_IMAGE_PROXY_HOST = /^images-ext-\d+\.discordapp\.net$/u;
 const DEFAULT_TIMEOUT_MS = 10_000;
 
 export interface ResolvedDiscordAttachment {
@@ -76,7 +77,9 @@ export async function fetchDiscordAttachment(
 ): Promise<ResolvedDiscordAttachment> {
   const url = new URL(attachment.url);
   if (url.protocol !== "https:") throw new Error("discord_attachment_scheme_unsupported");
-  if (!ALLOWED_HOSTS.has(url.hostname)) throw new Error("discord_attachment_host_not_allowlisted");
+  if (!ALLOWED_HOSTS.has(url.hostname) && !DISCORD_IMAGE_PROXY_HOST.test(url.hostname)) {
+    throw new Error("discord_attachment_host_not_allowlisted");
+  }
 
   const fetchImpl = options.fetchImpl ?? fetch;
   const controller = new AbortController();

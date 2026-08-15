@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
   acquireBodyLock,
+  DeterministicGbaCoreDouble,
   FrozenGbaScenarioSchema,
   listGbaCheckpoints,
   parseFreePlayJournal,
@@ -14,7 +15,7 @@ import {
   type BootedGbaGame,
   type GbaAdapterScenario,
 } from "@clankie/gba-emulator";
-import type { FreePlayMind } from "@clankie/gba-emulator";
+import type { FreePlayMind, GbaCoreSeam } from "@clankie/gba-emulator";
 import type {
   EmbodimentAssignment,
   EmbodimentClaim,
@@ -581,5 +582,82 @@ describe("asked play round trip on the deterministic double", () => {
     } finally {
       lock.release();
     }
+  });
+
+  it("keeps the game running while he thinks, so the watched screen never freezes", async () => {
+    // The core advances only when dispatch drives it, which left the activity
+    // surface a still image for the whole thinking gap — two thirds of the wall
+    // clock on the 2026-08-15 run. What is under test is that idle frames run
+    // between turns, and that they never land inside a dispatch.
+    const doubleBytes = readFileSync(
+      join(
+        resolve(
+          dirname(createRequire(import.meta.url).resolve("@clankie/gba-emulator/package.json")),
+          "../..",
+        ),
+        "scenarios/emulator/verdant-path-trainer-battle/v1/scenario.json",
+      ),
+    );
+    const doubleScenario = FrozenGbaScenarioSchema.parse(JSON.parse(doubleBytes.toString("utf8")));
+
+    // Only the wiring is under test here: that the runner installs a console
+    // clock and ticks it while he thinks. Standing off during an action is the
+    // core's own guard, covered against a real core in the emulator package.
+    let idled = 0;
+    const core = new DeterministicGbaCoreDouble(doubleScenario);
+    const countingCore: GbaCoreSeam = {
+      coreId: core.coreId,
+      pressButton: (button, holdFrames) => core.pressButton(button, holdFrames),
+      advanceFrames: (frames) => core.advanceFrames(frames),
+      idleFrames: (frames) => {
+        idled += frames;
+      },
+      gameState: () => core.gameState(),
+      mapGrid: () => core.mapGrid(),
+      ramStateSha256: () => core.ramStateSha256(),
+      framebufferSha256: () => core.framebufferSha256(),
+    };
+
+    // A mind slow enough to be idled through: ~10 ticks per decision.
+    const thinkingMind = (): Promise<FreePlayMind> =>
+      Promise.resolve({
+        decide: async () => {
+          await new Promise((done) => setTimeout(done, 180));
+          return {
+            monologue: "thinking it over",
+            intent: "press a",
+            action: { kind: "button_press", button: "a", holdFrames: 2 },
+          };
+        },
+      });
+
+    const client = fakeClient({ kind: "start", session: session() });
+    const host = new PlayHost({
+      client,
+      runnerId: "runner-local",
+      environmentIds: ["pokemon-firered"],
+      execute: createGbaPlayExecution({
+        logger: silentLogger,
+        env: await playEnv(),
+        createMind: thinkingMind,
+        boot: () =>
+          Promise.resolve({
+            scenario: doubleScenario as GbaAdapterScenario,
+            fixtureSha256: sha256(doubleBytes),
+            coreFactory: () => countingCore,
+            checkpoints: undefined,
+            framePng: () => null,
+            observeFrames: () => undefined,
+            framebufferSha256: () => null,
+            real: true,
+          } satisfies BootedGbaGame),
+      }),
+      logger: silentLogger,
+    });
+    expect(await host.poll()).toBe(true);
+    await host.settled();
+
+    // Two turns at ~180ms of thinking each, ticked at hardware rate.
+    expect(idled).toBeGreaterThan(10);
   });
 });

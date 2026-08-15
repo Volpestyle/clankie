@@ -52,6 +52,22 @@ describe("the render notice on a Discord turn", () => {
     const unwired = await normalizeDiscordTurn(turnRequest(), { memory: memoryStub() });
     expect(unwired.prompt).not.toContain("finished rendering");
   });
+
+  it("projects approved person memory into ordinary text turns", async () => {
+    const normalized = await normalizeDiscordTurn(turnRequest(), {
+      memory: {
+        ...memoryStub(),
+        recallDiscordPerson: (identity, options) => {
+          expect(identity).toEqual({ guildId: "guild-1", userId: "user-1" });
+          expect(options).toEqual({ channelId: "channel-1", query: "" });
+          return "- preference (0.90): Prefers Bulbasaur";
+        },
+      },
+    });
+
+    expect(normalized.prompt).toContain("What you remember about this person");
+    expect(normalized.prompt).toContain("Prefers Bulbasaur");
+  });
 });
 
 function mediaStub(asked: string[], renders: FinishedRender[]) {
@@ -72,7 +88,7 @@ function mediaStub(asked: string[], renders: FinishedRender[]) {
 function memoryStub() {
   return {
     appendEpisode: () => Promise.resolve(),
-    recallEpisodes: () => Promise.resolve([]),
+    recallEpisodeCard: () => Promise.resolve(""),
   };
 }
 
