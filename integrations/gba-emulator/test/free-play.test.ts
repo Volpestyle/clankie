@@ -6,6 +6,7 @@ import {
   FREE_PLAY_INTERJECTION_MAX,
   FREE_PLAY_MONOLOGUE_MAX,
   FREE_PLAY_NOTES_MAX,
+  FREE_PLAY_REPEAT_TURNS,
   FREE_PLAY_REPLY_MAX,
   FREE_PLAY_STALL_TURNS,
   InterjectionQueue,
@@ -30,6 +31,22 @@ function overworld(frame: number, x = 5): GbaEmulatorObservation {
       facing: "south",
       ramStateSha256: "b".repeat(64),
     },
+  } as unknown as GbaEmulatorObservation;
+}
+
+/** A battle view, where there is no position to be stalled at. */
+function battle(): GbaEmulatorObservation {
+  return {
+    schemaVersion: 1,
+    kind: "battle",
+    observationId: "obs-battle",
+    sessionId: "gba-emulator:test",
+    characterId: "clankie",
+    worldId: "gba-emulator-lab-v1",
+    goalVersion: 0,
+    capturedAt: "2026-07-25T18:00:00.000Z",
+    frame: 100,
+    data: { inBattle: true, kind: "wild" },
   } as unknown as GbaEmulatorObservation;
 }
 
@@ -398,6 +415,59 @@ describe("stall visibility", () => {
     expect(stalls[FREE_PLAY_STALL_TURNS - 1]).toBeNull();
     expect(stalls[FREE_PLAY_STALL_TURNS]).toBe(FREE_PLAY_STALL_TURNS);
     expect(stalls[FREE_PLAY_STALL_TURNS + 2]).toBe(FREE_PLAY_STALL_TURNS + 2);
+  });
+
+  it("tells him when the same action keeps producing the same result, wherever he is", async () => {
+    // The wedge the tile counter cannot see: a refusal repeating forever with
+    // no position to be stuck at (a battle, a menu, a script). Run-from-battle
+    // froze a whole session this way while every progress counter stayed calm.
+    const repeats: (number | null)[] = [];
+    const battleIo: GbaDriverIo = {
+      // No overworld view at all, so `stalledForTurns` is structurally null.
+      observe: (kind) => {
+        if (kind !== "battle") throw new Error(`no ${kind} view`);
+        return battle();
+      },
+      act: () => Promise.resolve(failed("action_unavailable")),
+      pause: () => Promise.resolve(),
+      resume: () => Promise.resolve(),
+    };
+    const result = await runFreePlay({
+      io: battleIo,
+      mind: {
+        decide: (view) => {
+          repeats.push(view.repeatingForTurns);
+          expect(view.stalledForTurns).toBeNull();
+          return Promise.resolve(press("b", "run"));
+        },
+      },
+      turns: FREE_PLAY_REPEAT_TURNS + 2,
+    });
+
+    // Quiet below the threshold — the first two identical turns are just play.
+    expect(repeats[0]).toBeNull();
+    expect(repeats[FREE_PLAY_REPEAT_TURNS - 1]).toBeNull();
+    expect(repeats[FREE_PLAY_REPEAT_TURNS]).toBe(FREE_PLAY_REPEAT_TURNS);
+    expect(result.longestUnchangedRun).toBe(FREE_PLAY_REPEAT_TURNS + 2);
+  });
+
+  it("stays quiet while the same action keeps changing something", async () => {
+    // Walking a corridor repeats the action every turn and is not a wedge:
+    // the effect names a new tile each time, so nothing is reported.
+    const repeats: (number | null)[] = [];
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: {
+        decide: (view) => {
+          repeats.push(view.repeatingForTurns);
+          return Promise.resolve(press("up", "up"));
+        },
+      },
+      turns: FREE_PLAY_REPEAT_TURNS + 3,
+    });
+
+    expect(repeats.every((value) => value === null)).toBe(true);
+    expect(result.longestUnchangedRun).toBe(1);
   });
 });
 

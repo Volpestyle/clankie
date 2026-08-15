@@ -77,6 +77,9 @@ export const FreePlayJournalSummarySchema = z
       })
       .strict(),
     coherence: z.number().min(0).max(1).nullable(),
+    // Defaulted for the same reason the volition skip count is: journals
+    // written before the repeat counter existed must keep parsing.
+    longestUnchangedRun: z.number().int().nonnegative().default(0),
   })
   .strict();
 export type FreePlayJournalSummary = z.infer<typeof FreePlayJournalSummarySchema>;
@@ -194,6 +197,7 @@ export function openFreePlayJournal(input: OpenFreePlayJournalInput): FreePlayJo
           progress: result.progress,
           volition: result.volition,
           coherence: result.coherence,
+          longestUnchangedRun: result.longestUnchangedRun,
         }),
       ),
   };

@@ -30,6 +30,7 @@ const result = (turns: FreePlayTurn[]): FreePlayResult => ({
   progress: { distinctTiles: 3, maps: ["pallet-town/house-1f"], turnsSinceNewTile: 0, actionsPerNewTile: 1 },
   volition: { offered: turns.length, taken: 1, suppressed: 0, skipped: 0 },
   coherence: 0.5,
+  longestUnchangedRun: 1,
 });
 
 describe("free-play journal", () => {

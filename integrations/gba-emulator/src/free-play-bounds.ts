@@ -54,3 +54,22 @@ export const FREE_PLAY_SPEAK_MAX = 400;
  * to invite him.
  */
 export const FREE_PLAY_SPEAK_COOLDOWN_TURNS = 4;
+
+/**
+ * How many consecutive identical action-and-effect turns pass before the view
+ * says so.
+ *
+ * The tile-stall signal answers "am I getting anywhere" and is deliberately
+ * suppressed wherever he has no position — mid-battle, mid-menu, mid-warp — so
+ * the loop that ate a whole session (Run refused from a wild battle, chosen
+ * again every turn against the same refusal) was invisible to every counter the
+ * loop kept. Identical action *and* identical effect is the state-independent
+ * shape of that failure: a different effect means something moved, and a
+ * different action means he tried something else.
+ *
+ * Three is where a repeat stops reading as persistence. Legitimately repeated
+ * actions change their effect line — each `advance_dialog` reads new text, each
+ * step reports a new tile — so a genuine third identical result is already the
+ * exception rather than the rhythm of play.
+ */
+export const FREE_PLAY_REPEAT_TURNS = 3;

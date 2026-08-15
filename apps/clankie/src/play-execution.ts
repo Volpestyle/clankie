@@ -612,6 +612,7 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
           volitionTaken: result.volition.taken,
           volitionOffered: result.volition.offered,
           coherence: result.coherence,
+          longestUnchangedRun: result.longestUnchangedRun,
           ...(checkpointId === undefined ? {} : { checkpointId }),
           ...(journal === undefined ? {} : { journalPath: journal.path }),
         },

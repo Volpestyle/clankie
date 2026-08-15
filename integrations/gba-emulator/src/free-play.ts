@@ -13,6 +13,7 @@ import {
   FREE_PLAY_MONOLOGUE_MAX,
   FREE_PLAY_NOTES_MAX,
   FREE_PLAY_OBJECTIVE_MAX,
+  FREE_PLAY_REPEAT_TURNS,
   FREE_PLAY_REPLY_MAX,
   FREE_PLAY_SPEAK_COOLDOWN_TURNS,
   FREE_PLAY_SPEAK_MAX,
@@ -139,6 +140,17 @@ export interface FreePlayView {
    * stalls it legitimately, and what to do about it stays his call.
    */
   stalledForTurns: number | null;
+  /**
+   * How many turns in a row he has now taken the same action and got back the
+   * same effect, surfaced only once it is long enough to mean something.
+   *
+   * The counterpart to `stalledForTurns` for everywhere he has no position: a
+   * battle menu, a naming screen, a script that will not release. Information
+   * on the same terms as the rest of this view — a repeat can be persistence
+   * (a script that needs more time) or a wedge (an action refused identically
+   * forever), and which one it is stays his read, not the loop's.
+   */
+  repeatingForTurns: number | null;
   /** The notes he wrote on the previous turn, verbatim. */
   notes: string | null;
   /** His standing objective, carried until he changes it. */
@@ -236,6 +248,18 @@ export interface FreePlayResult {
   volition: FreePlayVolition;
   /** Turns whose action the adapter accepted. */
   accepted: number;
+  /**
+   * The longest run of consecutive turns whose action and effect were both
+   * identical. Measured so a wedge is a number in the summary rather than a
+   * shape someone has to notice by reading the whole journal.
+   *
+   * Not the benchmark's `longestRepeatedInputRun`, which counts identical
+   * *accepted* actions whatever they did — that one scores whether a run was
+   * button-mashing, and legitimately fires while walking a corridor. This one
+   * requires the result to be identical too, and counts refusals, because the
+   * failure it exists for is an action refused the same way forever.
+   */
+  longestUnchangedRun: number;
   /**
    * Fraction of scoreable turns where the previous turn's intent referenced the
    * action actually taken. A heuristic and a lower bound — see
@@ -395,6 +419,12 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
   const recentlySaid: string[] = [];
   const progress = new FreePlayProgressTracker();
   progress.seed(positionOf(observe(input.io)));
+  // Consecutive turns whose action and effect were both identical. A turn that
+  // never reached an action — the model errored, or its decision did not parse
+  // — leaves this untouched rather than resetting it: a transient failure in
+  // the middle of a wedge is not evidence the wedge broke.
+  let repeat: { signature: string; turns: number } | null = null;
+  let longestUnchangedRun = 0;
 
   for (let turn = 0; turn < input.turns; turn += 1) {
     if (input.shouldStop?.() === true) break;
@@ -435,6 +465,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
         // the tile counter stalls for reasons that need no telling.
         stalledForTurns:
           sinceNewTile >= FREE_PLAY_STALL_TURNS && positionOf(observations) !== null ? sinceNewTile : null,
+        repeatingForTurns: repeat !== null && repeat.turns >= FREE_PLAY_REPEAT_TURNS ? repeat.turns : null,
         notes,
         objective,
         interjection,
@@ -565,6 +596,16 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     progress.record(effect, accepted);
     record.effect = effect.summary.slice(0, 200);
 
+    // Same action, same result: the state-independent stuck signal. The stored
+    // effect is the bounded one he is actually shown, so the comparison is
+    // between the two lines he read, not between two fuller strings he did not.
+    const signature = canonicalJson({ action: chosen, effect: record.effect });
+    // Annotated: without it the loop-carried assignment below makes this
+    // variable's type depend on itself.
+    const priorRepeats: number = repeat !== null && repeat.signature === signature ? repeat.turns : 0;
+    repeat = { signature, turns: priorRepeats + 1 };
+    longestUnchangedRun = Math.max(longestUnchangedRun, repeat.turns);
+
     // Whether the rate gate could let an unprompted remark through this turn.
     // Computed before Voice is consulted, because a consultation whose only
     // possible aside would be dropped by this same gate is a model call bought
@@ -666,6 +707,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     accepted: turns.filter((t) => t.outcome === "accepted").length,
     progress: progress.snapshot(),
     volition,
+    longestUnchangedRun,
     ...coherence(turns),
   };
 }

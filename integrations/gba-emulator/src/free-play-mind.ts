@@ -399,6 +399,15 @@ export function renderView(view: FreePlayView): string {
     // A fact, not a nudge: what to do about standing still is his call.
     lines.push("", `You have not stepped onto a new tile in ${String(view.stalledForTurns)} turns.`);
   }
+  if (view.repeatingForTurns !== null) {
+    // The same fact for the states a tile counter cannot see. Deliberately not
+    // "try something else": a script that needs more time and a wedge look
+    // identical from here, and only he can tell them apart.
+    lines.push(
+      "",
+      `The last ${String(view.repeatingForTurns)} turns were the same action with the same result.`,
+    );
+  }
   if (view.history.length > 0) {
     lines.push("", "Recently:");
     for (const entry of view.history) {
