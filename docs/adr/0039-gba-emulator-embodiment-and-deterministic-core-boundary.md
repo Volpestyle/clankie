@@ -40,19 +40,7 @@ flows through `EnvironmentRuntime.startAction`, and each dispatch is verified
 by re-observation before the next decision. Uncertain or stale observations
 pause the session and fail closed rather than replaying input.
 
-```mermaid
-flowchart LR
-  G[Gameplay lane] --> R[EnvironmentRuntime]
-  R --> A[GBA emulator adapter]
-  D[State-derived driver] -->|observe / decide / act once / verify| R
-  F[Frozen scenario + SHA-256] --> A
-  A --> C[Pinned deterministic core]
-  C -. this slice: core test double / next slice: libmgba .- C
-  A --> T[Hash-chained evidence trace]
-  D --> P[Decision trace]
-  A --> V[Bounded artifact:// frame references]
-  N[Any networked service] -. no capability exists .-> X[Denied]
-```
+![ADR 0039: GBA emulator embodiment and the deterministic core boundary](../diagrams/0039-gba-emulator-embodiment-and-deterministic-core-boundary.jpg)
 
 ### What this slice does and does not do
 

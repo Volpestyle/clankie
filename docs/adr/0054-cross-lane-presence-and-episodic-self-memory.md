@@ -2,18 +2,17 @@
 
 Status: accepted (James, 2026-07-25). Amended by
 [ADR 0084](0084-the-head-can-read-his-branches.md), which lifts the transcript
-half of the fence in the operator lane only: the supervising seat reads what he
-did in any of his rooms, and every ambient lane keeps this ADR's fence intact.
+half of the fence in the operator lane only: the supervising seat reads his
+activity in any room, and every ambient lane keeps this ADR's fence intact.
 
 ## Context
 
-Asked in the TUI whether he had just joined a Discord channel, Clankie said he
-had no presence or channel-join visibility in that lane. He was obeying his
-instructions. The only thing ever said to him about other lanes was the fence in
-`captainLaneInstructions` — never infer, request, copy, or reuse another lane's
-token or transcript — and standing alone, that reads as total isolation.
+Clankie's TUI lane needs visibility into his Discord presence without receiving
+another lane's token or transcript. `captainLaneInstructions` forbids inferring,
+requesting, copying, or reusing those private values, and the presence projection
+preserves that isolation.
 
-Three properties of "one Clankie across every channel" were already true:
+Three properties define "one Clankie across every channel":
 
 | Property                                 | Mechanism                                                                                                    |
 | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
@@ -21,10 +20,9 @@ Three properties of "one Clankie across every channel" were already true:
 | Lanes do not block each other            | `CaptainAdmissionController`, capacity 2, per-lane queue                                                     |
 | Each lane owns its own session and token | `CaptainLaneRegistry` ([ADR 0032](0032-conversation-scoped-operator-lanes.md))                               |
 
-The fourth was missing. Nothing ever told him what his other surfaces were
-doing. The registry already knew — `list()` returns every lane for the character
-— and nothing read it back into his context. The system was not bottlenecked;
-it was amnesiac, and those are different problems.
+The fourth property is shared awareness of his own presence. The registry knows
+it — `list()` returns every lane for the character — and the bounded projection
+reads it into his context. This is an awareness problem, not a throughput one.
 
 The obvious fix is to widen memory across lanes, and the obvious way to do that
 is `publicToPrivatePropagation`, which already exists in doctrine and is already
@@ -45,18 +43,18 @@ as an instruction on every turn and available from `get_self_state`:
 
 1. the operator conversation registry;
 2. the captain lane registry;
-3. the live asked-play session ([ADR 0063](0063-asked-embodiment-and-captain-started-play.md));
+3. the live asked-play session ([ADR 0063](0063-a-play-request-starts-embodiment.md));
 4. the bridge-owned Discord presence sessions, whose records carry the voice
    rooms' guild/channel names and occupant display names captured at join
    (VUH-939);
-5. the body lock, read through the control plane (VUH-938), because a
+5. the body lock, read through the Clankie service (VUH-938), because a
    possessor drives his body without any embodiment session existing
    ([ADR 0053](0053-mcp-possession-of-clankies-body.md)) — the mutex lives in
    `@clankie/body-lock` so reading it never crosses the ADR 0063 fence that
-   keeps environment bodies out of the control plane;
-6. recently completed voice stays (VUH-940), a read-side projection over the
-   durable phase stream, so "were you just in VC — who was there?" is
-   answerable in the past tense with the company captured at join time.
+   keeps environment bodies out of the Clankie service;
+6. recent voice stays (VUH-940), a read-side projection over the durable phase
+   stream, so questions about a recent call include the company captured at
+   join time.
 
 The presence-session source exists because the body in a Discord voice channel
 is the bridge's realtime agent ([ADR 0056](0056-voice-is-a-separate-agent-from-the-player.md)),
@@ -87,7 +85,7 @@ not cover: other rooms' contents, not his own whereabouts.
 | Entry point | `applyApprovedProposal`                                            | `recordEpisode`                                  |
 | Gate        | approval envelope + `publicToPrivatePropagation` + `inferredFacts` | bounded length, `selfAuthored`, visibility scope |
 | Lifetime    | capped per category, retention-pruned                              | ring of 128, oldest fall off                     |
-| Recall      | `recallCard`, by query                                             | `episodeRecallCard`, by lane                     |
+| Recall      | `recallCard`, by person and room                                   | `episodeRecallCard`, by destination lane         |
 
 An episode makes no claim about the world, so it does not need the gate that
 exists to stop untrusted input becoming durable belief. `selfAuthored: true` and
@@ -100,22 +98,7 @@ rejected outright.
 
 ### Recall is scoped by lane, and the lane is never the model's to choose
 
-```mermaid
-flowchart TB
-  subgraph write["Writing a note"]
-    T["remember_episode tool<br/>model composes summary only"] --> H["captain-episodes hook<br/>stamps lane + target from ctx.channel"]
-    H --> R[("captain_episodes<br/>ring of 128")]
-  end
-  subgraph read["Recalling notes"]
-    R --> Q{"visibility"}
-    Q -->|shareable| OP["Operator lane"]
-    Q -->|shareable| DC["Discord + gameplay lanes"]
-    Q -->|operator_private| OP
-    Q -.->|never| DC
-  end
-  I["episodes instruction<br/>lane from stamped channel"] --> R
-  style DC stroke-dasharray: 4 4
-```
+![ADR 0054: Presence is shared, world-facts stay fenced](../diagrams/0054-cross-lane-presence-and-episodic-self-memory.jpg)
 
 The leak direction people forget is the dangerous one. Untrusted Discord text
 reaching the operator is the risk everyone names; something from a private
@@ -126,26 +109,38 @@ lane, and an episode written there defaults to it.
 Two structural reasons the model cannot aim recall at the operator lane:
 
 1. **Recall is an instruction, never a tool.** A tool could be argued into
-   asking for `operator`. The instruction reads the lane from the eve channel
-   the control plane stamped in `normalizeSubmission`, which no Discord user
-   controls.
-2. **The write tool cannot name its own room.** `remember_episode` returns a
-   note; the `captain-episodes` hook stamps lane and target from `ctx.channel`,
-   the same `action.result` pattern `captain-presence` already uses. A tool
-   executor receives the AI SDK's options rather than the session context, so it
-   could not see its lane even if it were trusted to.
+   asking for `operator`. A hidden Pi `before_agent_start` extension reads the
+   destination lane captured when the host builds the session. User input never
+   supplies it. The extension refreshes the card on every model run without
+   copying recall cards into the durable transcript.
+2. **The write tool cannot name its own room.** `remember_episode` accepts a
+   bounded summary and optional visibility. The tool closure stamps the lane
+   from its host-built session and the target from `TurnContext`, which the
+   operator and Discord turn paths set before Pi can call a tool.
 
 At the HTTP boundary a Discord-scoped bearer asking for `lane=operator` is
 refused outright. That check does not cover the in-process case — a Discord turn
-and an operator turn inside captain-eve authenticate with the same process
+and an operator turn inside `apps/clankie` authenticate with the same process
 credential, so the server cannot derive the lane from the bearer — which is why
 the fences above are the ones that carry the weight.
+
+### The owner can inspect and curate the durable projection
+
+The TUI's `/memory` browser reads one operator-only catalog containing the
+global bounded episode ring and every Discord person fact. It may edit an episode's summary
+or visibility and may forget an episode. It cannot move the episode to another
+room or rewrite its origin provenance. The provenance remains the origin of the
+note; the content-free `captain.episode.edited` event records the later operator
+curation without copying the note into the event log.
+
+Ambient captain routes still receive only their lane's bounded recall card.
+They cannot enumerate the catalog or use its mutation routes.
 
 ## Options weighed
 
 **Flip `publicToPrivatePropagation`.** One line, and it buys the continuity. It
 also admits every public-sourced world-fact into private memory, which is far
-more than was asked for and removes the only thing standing between a public
+more than is asked for and removes the only thing standing between a public
 channel and durable private belief.
 
 **Share transcripts across lanes.** Simplest to imagine and worst in practice.
@@ -158,15 +153,15 @@ notes nobody chose to keep. The scratchpad in "Let Clankie keep his own notes"
 already established the opposite grain: memory he chose to keep, not a summary
 the harness imposed.
 
-**Presence only, no memory.** Genuinely fixes the reported symptom and nothing
-else. Rejected as a stopping point, not as a step — it shipped first, on its own.
+**Presence only, no memory.** Fixes presence awareness and nothing else. Rejected
+as a stopping point because the product also requires bounded episodic memory.
 
 ## Consequences
 
-He can say where he is, and he remembers what he has been doing, without any
+He can say where he is, and he remembers what he is doing, without any
 world-fact fence moving.
 
-An episode written during a Discord turn was composed with untrusted text in
+An episode written during a Discord turn is composed with untrusted text in
 context, so a determined user can influence what he writes about himself. The
 residual risk is accepted and bounded rather than eliminated: 512 characters, no
 authority, rendered under a header that names the room it came from and marks it
@@ -178,6 +173,5 @@ Lane targets surface as raw Discord snowflakes. The bridge knows the friendly
 channel names and the captain does not; wiring that through is worth doing and
 is not done here.
 
-Recall adds one loopback request per turn. It fails open to silence — an
-instruction hook that throws takes the whole turn down, and a missing memory is
-a far smaller failure than a dead conversation.
+Recall adds one bounded in-process file read per Pi run. It fails open to an
+empty card — a missing memory is a far smaller failure than a dead conversation.

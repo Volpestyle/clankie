@@ -5,7 +5,6 @@ Status: accepted (2026-07-26). Extends the catalogued-composite-action pattern
 `walk_to`, inside the bounds
 [ADR 0053](0053-mcp-possession-of-clankies-body.md) and
 [ADR 0049](0049-free-play-agency-and-non-deterministic-evidence.md) already set.
-Numbering: 0066 follows 0065, the highest ADR present when this is authored.
 
 ## Context
 
@@ -14,23 +13,23 @@ time and waits for an A press to continue, so a single NPC conversation is five
 to ten presses, and the important part — a choice, a battle, a received item —
 only arrives at the end.
 
-Before this, both drivers spent one full decision per box:
+Without a composite action, both drivers spend one full decision per box:
 
 - The resident free-play mind (`free-play-mind.ts`, the driver behind asked play
   from Discord) could only choose `button_press`, so every box cost a model turn
   with a screenshot attached — seconds of wall clock and a decision's worth of
-  tokens to read one sentence it had no choice about.
+  tokens to read one sentence it cannot choose.
 - The MCP surface could press with `repeat`, but a blind mash cannot see where
   it is going: past the last box the next A re-engages the NPC and reopens the
   conversation, and through a yes/no prompt it answers for the player. So a
-  careful possessor did not use it, and pressed one box at a time, paying an
-  extra `gba_emulator_observe` round trip per box to read what the box said.
+  careful possessor avoids it and presses one box at a time, paying an
+  extra `gba_emulator_observe` round trip per box to read what the box says.
 
-The result was a body that looked slow and hesitant during exactly the moments
-the game is telling the player something, and it was the first thing an
+The result is a body that looked slow and hesitant during exactly the moments
+the game is telling the player something, and it is the first thing an
 audience noticed on the watch surface.
 
-The decoder already knew when the game was ready for the next box.
+The decoder already knew when the game is ready for the next box.
 `decodeDialog` computed `waitingForDialogAdvance` — the field script parked on
 the wait-for-A/B native — and threw it away after using it as a visibility
 heuristic.
@@ -40,25 +39,14 @@ heuristic.
 Add `advance_dialog` to the catalogued action set: one action that reads the
 open conversation to its next real decision point.
 
-```mermaid
-flowchart TB
-  S["advance_dialog"] --> C{"text still readable?"}
-  C -->|no| E1["dialog_closed / battle_started / battle_ended"]
-  C -->|yes| M{"menu open?"}
-  M -->|yes| E2["choice_open<br/>never answered here"]
-  M -->|no| R{"waitingForDialogAdvance?"}
-  R -->|no| W["advance frames<br/>text is still printing"] --> C
-  R -->|yes| B{"budget left?"}
-  B -->|no| E3["input/frame_bound_reached<br/>text remains"]
-  B -->|yes| P["capture box · press A"] --> C
-```
+![ADR 0066: Dialog is one action, not one press per box](../diagrams/0066-dialog-is-one-action-not-one-press-per-box.jpg)
 
 Three properties make it a catalogued action rather than a caller-side loop,
-which is the same argument `walk_to` made about collision:
+which is the same argument that supports `walk_to` for collision:
 
 - **Termination is a live-state question.** Only the core knows the box closed,
   and only the state _between_ presses distinguishes "more text" from "you are
-  now talking to this NPC again". A caller-side loop cannot check it without
+  talking to this NPC again". A caller-side loop cannot check it without
   paying the round trip the loop exists to avoid.
 - **It stops where judgement is actually required.** A choice, a battle, or a
   closed box ends the action. It never answers a prompt: `menu` open is a full
@@ -106,7 +94,7 @@ loop renders it into the turn's observed effect. Without that, the one action
 that reads the story would be the one action whose result he cannot remember —
 he would advance through Oak's introduction and know only that "dialog changed".
 
-A `button_press` outcome now also carries any resulting `dialogLines`/`menu`,
+A `button_press` outcome also carries any resulting `dialogLines`/`menu`,
 for the same reason it already carries position and `moved`: reading back what
 a press produced should not cost a second round trip.
 
@@ -125,7 +113,7 @@ a press produced should not cost a second round trip.
   box becoming ready, the shape of a zeroed per-character delay against MID's
   four frames per character.
 - The stall threshold is a heuristic about a real game's text engine. If a box
-  type is found that neither parks on the native nor accelerates, it will show
+  type appears that neither parks on the native nor accelerates, it shows
   up as wasted presses in the transcript rather than as a hang.
 
 ## Alternatives considered
@@ -148,5 +136,5 @@ The held fast-read makes `advance_dialog` largely independent of the in-game
 Text Speed option. Setting it to FAST and minting a checkpoint
 ([ADR 0060](0060-progress-as-minted-checkpoints.md)) still helps the text this
 action does not drive — battle strings scroll on their own clock — and costs
-nothing. Worth doing once, but no longer the difference between watchable and
+nothing. Worth doing once, but not the difference between watchable and
 glacial dialog.

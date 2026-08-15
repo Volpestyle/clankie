@@ -1,8 +1,8 @@
 # ADR 0094: A render that outlives the turn comes back to the room
 
-Status: proposed (2026-08-15). Extends
-[ADR 0085](0085-a-picture-he-made-is-something-he-said.md) (media he made rides
-his reply) and [ADR 0088](0088-a-screenshot-is-something-he-showed-you.md).
+Status: accepted (2026-08-15). Extends
+[ADR 0085](0085-a-picture-he-makes-is-something-he-says.md) (media he makes rides
+his reply) and [ADR 0088](0088-a-screenshot-is-something-he-shows-you.md).
 
 ## Context
 
@@ -15,13 +15,13 @@ one-shot by design — the channel history arrives with each request, so there i
 no durable transcript to duplicate — and it is disposed the moment the turn
 ends. The `requestId` dies with it. He tells the channel "it's rendering, I'll
 have it shortly", the render finishes into a file nobody will ever ask for, and
-the only record that it existed is a log line. The voice lane keeps its session
+the only record of the job is a log line. The voice lane keeps its session
 and could in principle remember, but nothing prompts him to look.
 
 The prior art here is opencode's background jobs, which finish out of band and
 inject the result into the parent session as a synthetic message. Injection
 needs something clankie deliberately does not have: a way for him to speak into
-a Discord channel unprompted. Every outbound write today answers a turn, and
+a Discord channel unprompted. Every outbound write answers a turn, and
 `send_attachment` carries a `publish-external` approval that no captain tool
 requests. Building that path is a decision about what he may do to a room
 without anyone asking, and it is not this ADR's to make.
@@ -58,14 +58,14 @@ same terms as every other fact the harness hands him.
 
 ## Consequences
 
-- A slow render reaches the room that asked for it, on the next thing said
-  there, instead of being lost with the session that started it.
+- A slow render reaches the requesting room with the next reply there instead
+  of disappearing with the originating session.
 - The delivery is only as prompt as the conversation. A render that lands in a
   room nobody speaks in again is never mentioned — which is the honest
   behaviour available without an unprompted-publish path, and the ceiling this
   design accepts.
-- Records live in memory. A restart loses them; the `requestId` in the earlier
-  `pending` reply is still the recovery, exactly as before.
+- Records live in memory. A restart loses them; the `requestId` in the
+  originating `pending` reply is the recovery path.
 - If the room should hear about a finished render without being spoken to
   first, that needs an unprompted outbound write and the approval decision that
   comes with it. This ADR deliberately stops short of it.

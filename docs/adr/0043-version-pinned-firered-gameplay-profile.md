@@ -47,16 +47,7 @@ state, chooses one bounded action, executes it through `EnvironmentRuntime`,
 and verifies that frames and expected state advance. It carries no input
 transcript.
 
-```mermaid
-flowchart LR
-  MM[mGBA EWRAM and IWRAM maps] --> D[FireRed US v1.0 decoder]
-  ROM[Pinned ROM identity and move table] --> D
-  D --> O[Typed overworld, party, inventory, dialog, menu, battle observations]
-  O --> C[Observe, decide, act once, verify]
-  C --> R[EnvironmentRuntime and governed adapter]
-  R --> MM
-  C --> E[Hash-chained events, decision trace, frame reference]
-```
+![ADR 0043: FireRed gameplay uses a version-pinned decoded state profile](../diagrams/0043-version-pinned-firered-gameplay-profile.jpg)
 
 The controller opens the start menu, observes party and bag data, closes
 menus, waits through callback-locked field transitions using bounded frame

@@ -4,23 +4,17 @@ Status: accepted (2026-08-15).
 
 ## Context
 
-Clankie is one agent per machine, configured by the person who runs him. Discord
-already works that way: `/discord` writes a bot token to the credential broker
-and allowlists to `settings.json`. Linear and email did not. The TUI still
-autocompleted `/auth mcp linear` from the pre-pi port, but no command stored a
-credential and the captain had no tools that would use one.
+Clankie is one agent per machine, configured by the person who runs him. An
+owner opens the console, connects Discord, Linear, or email, and the agent uses
+that owner-authored connection within the service's lane and authority bounds.
 
-So "give him access to my Linear / my mail / my Discord servers" was a product
-claim without a path. The expected comparison is Claude Code or Codex: an owner
-opens the console, connects a service, and the agent can use it.
-
-Three unlike things were being asked for under one word, "access":
+Three unlike things are being asked for under one word, "access":
 
 | Service | What access means here                | Existing path                             |
 | ------- | ------------------------------------- | ----------------------------------------- |
 | Discord | He is present in the owner's servers  | `/discord` — first-class body, not a tool |
-| Linear  | He can search and file issues         | none                                      |
-| Email   | He can read and send the owner's mail | none                                      |
+| Linear  | He can search and file issues         | `/connect linear`                         |
+| Email   | He can read and send the owner's mail | `/connect email`                          |
 
 Options weighed:
 
@@ -39,19 +33,7 @@ Options weighed:
 **`/connect` is the catalog.** Aliased as `/integrations`. `/auth` stays
 provider keys and subscriptions; typing `/auth mcp` redirects here.
 
-```mermaid
-flowchart LR
-  tui["TUI /connect"]
-  broker["credential broker"]
-  settings["settings.json"]
-  captain["captain tools"]
-
-  tui -->|"linear / email / discord_bot secrets"| broker
-  tui -->|"team id, IMAP host, username"| settings
-  tui -->|"Discord body"| discord["/discord wizard"]
-  broker --> captain
-  settings --> captain
-```
+![ADR 0093: Owner-authored service connections](../diagrams/0093-owner-authored-service-connections.jpg)
 
 **Discord remains a body.** `/connect discord` opens the existing wizard and
 adds a portal primer plus an invite URL derived from the application id. Any

@@ -32,14 +32,7 @@ frame advance, RAM/framebuffer digests, and checkpoints. It reports scene mode
 actions (`walk_to`, dialog, naming, and menu selection) with
 `semantic_state_unavailable`; raw buttons and frame advance remain available.
 
-```mermaid
-flowchart LR
-  E[environment id] --> B[GBA boot]
-  B --> F[FireRed core<br/>verified semantic profile]
-  B --> M[Emerald visual core<br/>screen + raw input]
-  F --> A[shared adapter and runtime]
-  M --> A
-```
+![ADR 0090: Emerald plays from the screen](../diagrams/0090-emerald-plays-from-the-screen.jpg)
 
 ## Options weighed
 
@@ -54,7 +47,7 @@ flowchart LR
 
 - Clankie can start, watch, control, checkpoint, resume, and stop Emerald
   through the same asked-play lifecycle as FireRed.
-- Emerald play initially spends more decisions on raw navigation and reads text
+- Emerald play spends more decisions on raw navigation and reads text
   from the framebuffer. Composite actions become available only as verified
   Emerald decoders land.
 - CI remains ROM-free. A ROM-gated test boots the operator-local pinned state,

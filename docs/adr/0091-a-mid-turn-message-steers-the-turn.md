@@ -1,17 +1,14 @@
-# ADR 0091: A message heard mid-turn steers the turn
+# ADR 0091: A mid-turn message steers the turn
 
-Status: proposed (2026-08-15). Replaces the per-key turn chain added by the
-review fix in `3042090` for durable Discord lanes.
+Status: accepted (2026-08-15). Defines interruption semantics for durable
+Discord lanes.
 
 ## Context
 
-The durable Discord voice lane is one pi session per channel. When a second
-utterance arrived while a turn was still running, pi's `prompt()` threw
-("Agent is already processing"), the bare catch turned that into a failed
-turn, and the utterance was dropped. The review fix serialized turns behind a
-per-session-key promise chain, which stopped the drop but gave the lane
-strict queue semantics: the second speaker waits for the whole first run —
-tools and all — and then gets a separate reply to a moment that has passed.
+The durable Discord voice lane is one pi session per channel. A second utterance
+during an active turn enters that turn instead of failing or waiting behind
+strict queue semantics. The second speaker reaches the thought in progress and
+the room receives one merged reply.
 
 In a live voice room, words arriving mid-reply are the normal case, not an
 edge case. The conversationally right behavior is interruption: fold the new
@@ -38,17 +35,17 @@ both believe the lane is idle and start racing runs.
 - A lane already streaming gets the message steered into the live run, and
   the caller reports `absorbed` once the merged run settles. An absorbed turn
   returns `state: "silent"` — voice ingress already speaks nothing for
-  silent, so the runner's merged reply answers everything heard, exactly
+  silent, so the run owner's merged reply answers everything heard, exactly
   once, with no protocol change.
 - The idle check and the `prompt()` call share one synchronous stretch (with
   template expansion off, pi reaches its own streaming check without
   awaiting), so the state observed is the state pi acts on. The window where
   a run is accepted but not yet streaming is covered by the recorded
   settlement promise: an arrival there waits it out and re-decides.
-- A steered turn whose run fails reports failed, not silent: the words were
+- A steered turn whose run fails reports failed, not silent: the words are
   never actually heard.
 
-Only the runner resets the turn's media capture; a steerer never clobbers a
+Only the run owner resets the turn's media capture; a steerer never clobbers a
 live run's captured media. The lane log stays honest under merging: two
 `heard` entries, one `said`.
 
@@ -59,7 +56,7 @@ live run's captured media. The lane log stays honest under merging: two
   ticket queue.
 - The reply rides the first caller's HTTP response; later callers get
   `silent`. Nothing downstream distinguishes "chose silence" from "absorbed",
-  which is fine while the only consumer speaks or stays quiet.
+  which is sufficient while the only consumer speaks or stays quiet.
 - A message arriving during auto-compaction still fails its turn (pi refuses
   prompts mid-compaction). Rare, and no worse than before; a retry inside
   `runDurableTurn` is the upgrade path if it shows up in lane logs.

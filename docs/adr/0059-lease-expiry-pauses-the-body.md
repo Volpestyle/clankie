@@ -6,30 +6,20 @@ covered by tests.
 
 ## Context
 
-An external harness played FireRed through the MCP surface
-([ADR 0053](0053-mcp-possession-of-clankies-body.md)) and hit a wall that had
-nothing to do with the game: it stopped to read map code between moves, and when
-it came back the session was dead — permanently.
+Possession-driven play includes long periods of thinking between actions. Lease
+machinery must release an absent holder without destroying the in-memory game
+world. Three properties define the boundary:
 
-Three properties of the lease machinery compounded into that:
+- **Nothing renews the environment lease.** `createFreePlaySession` takes one
+  5-minute lease, and every authorized dispatch extends it.
+- **Expiry runs the stop path.** An expired lease revokes the record and stops
+  the adapter session only for explicit revocation. Expiry pauses the healthy
+  core and preserves RAM progress.
+- **The MCP server creates its session once at startup**, so recovery renews the
+  same lapsed session rather than reloading the pinned savestate.
 
-- **Nothing renewed the environment lease.** `createFreePlaySession` took one
-  5-minute lease and no dispatch path ever extended it, so every session carried
-  a fixed-length fuse regardless of activity. The composer even carried a
-  comment naming the constraint and deferring it.
-- **Expiry ran the stop path.** An expired lease revoked the record and stopped
-  the adapter session, exactly like an explicit stop — while the core, its RAM,
-  and the game's progress sat healthy in the same process. Every later call,
-  including a fresh possession, authorized against the revoked record and was
-  refused.
-- **The MCP server creates its session once at startup**, so the only recovery
-  was restarting the process, which reloads the pinned savestate and loses the
-  world.
-
-The possession layer had the milder form of the same bug — a fixed TTL that
-`assertMayAct` never slid — and the tool surface had a one-way valve:
-`gba_emulator_pause` existed with no resume, so a stated-reason pause also
-bricked acting for a possessor.
+The possession lease slides in `assertMayAct`, and the tool surface exposes both
+`gba_emulator_pause` and possession-gated `gba_emulator_resume`.
 
 A driver that thinks between moves is not an anomaly to tolerate; it is the
 normal shape of possession-driven play. The lease design has to survive it.
@@ -38,10 +28,10 @@ normal shape of possession-driven play. The lease design has to survive it.
 
 ### A lease expires for the holder, not the world
 
-Lease expiry is a statement that the **holder** went away — it says nothing
+Lease expiry is a statement that the **holder** is absent — it says nothing
 about the session's world, which may hold hours of unreplayable progress
 ([ADR 0049](0049-free-play-agency-and-non-deterministic-evidence.md)). So the
-runtime now separates the two consequences that were previously fused:
+runtime separates the two consequences:
 
 - **Expiry pauses.** A lapsed lease cancels in-flight actions and pauses the
   adapter session in place, records the lapse once (`leaseLapse`), and emits
@@ -72,7 +62,7 @@ one-writer rule as `start`:
 
 The free-play composer makes recovery invisible at the driving seam: on
 `EnvironmentLeaseExpiredError` (typed, so it can never be confused with
-revocation) it renews and retries the dispatch once. A rejected dispatch was
+revocation) it renews and retries the dispatch once. A rejected dispatch is
 never registered, so the retry cannot duplicate an action.
 
 ### Pausing is free, resuming is driving
@@ -90,12 +80,12 @@ acting.
   observable rather than silent.
 - The lease still does its containment job. An idle holder frees the body for
   the next writer, emergency stop remains unrecoverable, and a vanished
-  _process_ is still handled where it always was — body-lock liveness and
+  _process_ is still handled where it always is — body-lock liveness and
   `reconcile`.
-- `ReconcileEnvironmentReport.stoppedExpired` is now `expired`: a runner restart
-  over a lapsed record pauses it rather than killing it. World state still does
+- `ReconcileEnvironmentReport.expired` records a service restart over a lapsed
+  record and pauses it rather than killing it. World state still does
   not survive process death — the GBA adapter cannot reattach an in-memory core
-  — and durable progress across restarts remains a separate, undecided concern.
-- The frozen fail-closed tests changed meaning deliberately: lease loss now
-  asserts `expired` plus successful recovery, in both the GBA and PokeMMO
-  suites. The emergency-stop assertions are untouched.
+  — and [ADR 0060](0060-progress-as-minted-checkpoints.md) provides durable
+  progress across restarts.
+- Fail-closed tests assert `expired` plus successful recovery in the GBA and
+  PokeMMO suites. Separate assertions keep emergency stop terminal.

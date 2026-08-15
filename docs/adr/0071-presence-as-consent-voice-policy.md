@@ -14,8 +14,8 @@ right default for a deployment whose participants are strangers.
 In practice this deployment is one private server whose participants are known
 to the owner (the same trade ADR 0053 records for unannounced possession). The
 explicit ceremony had real costs there: every bridge restart silently
-un-consented everyone, the most common symptom was "he talks but never replies
-to me," diagnosing it required reading receipts, and the fix was command
+un-consented everyone, the most common symptom is "he talks but never replies
+to me," diagnosing it required reading receipts, and the fix is command
 liturgy retyped in chat after every session.
 
 ## Decision
@@ -43,7 +43,7 @@ Two guardrails hold under either policy:
 - On this deployment, anyone in the channel with him can talk to him — in
   conversation and mid-playthrough through the possessor seam — with no
   per-session ceremony, and chat carries no consent commands.
-- The disclosure work the opt-in reply used to do now falls on the owner:
+- The owner handles disclosure:
   participants of a `presence`-policy room should know he transcribes while he
   is in it. The trade rests on the deployment being private and its
   participants known, and it should be revisited if that stops being true —

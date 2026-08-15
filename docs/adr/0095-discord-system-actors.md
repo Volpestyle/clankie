@@ -1,6 +1,6 @@
 # ADR 0095: Discord system actors
 
-Status: accepted (James, 2026-08-15). Extends the Discord authority split in
+Status: accepted (James, 2026-08-15). Defines the Discord authority split with
 [ADR 0050](0050-voice-presence-authority-tier.md) and the operator-only coding
 tools in the pi captain.
 
@@ -14,9 +14,9 @@ the other rooms — and nothing that touches the filesystem. The framing
 labels that text as untrusted, but a tools list is a boundary and a prompt
 is not.
 
-That is why a Discord "can you see what we're doing in herdr?" was answered
+That is why a Discord "can you see what we're doing in herdr?" is answered
 honestly with no. The herdr socket is reachable from the service
-(`herdr pane list` works without `HERDR_ENV=1`); the tools were simply not
+(`herdr pane list` works without `HERDR_ENV=1`); the tools are simply not
 on the session.
 
 The owner still wants to drive herdr from Discord — but only when *they*
@@ -43,14 +43,7 @@ whose **text** turns get the operator's machine tools.
 - Mail stays operator-console only. Dumping an inbox into Discord is a
   disclosure, not a machine-control grant.
 
-```mermaid
-flowchart TD
-  T[Discord text turn] --> A{actorId in systemActorUserIds?}
-  A -->|yes| S[session with bash / read / write / edit]
-  A -->|no| N[authored tools only]
-  V[Discord voice turn] --> N
-  O[operator console] --> S
-```
+![ADR 0095: Discord system actors](../diagrams/0095-discord-system-actors.jpg)
 
 The herdr skill's `HERDR_ENV=1` stop is for agents sitting in a pane. The
 captain is a service. His instructions say so, and `herdr` talks to
@@ -67,8 +60,8 @@ captain is a service. His instructions say so, and `herdr` talks to
 - **Builtins on every Discord turn, refuse at execution.** Rejected: the
   model would still see bash. The tools list is the boundary.
 - **Builtins on voice when the current speaker is allowlisted.** Rejected
-  for now. Voice sessions are built once and shared; swapping the tool
-  bank per utterance is a later change, not this one.
+  because voice sessions are built once and shared; per-utterance tool banks
+  require a different session boundary.
 
 ## Consequences
 

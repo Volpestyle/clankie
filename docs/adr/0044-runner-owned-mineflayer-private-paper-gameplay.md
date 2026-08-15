@@ -36,24 +36,14 @@ advertises only observe, navigate, collect, craft, place, and wait. Each action
 is checked against lease capabilities, allowed dimensions, origin radius,
 duration, block-change quota, and no-combat policy.
 
-```mermaid
-flowchart LR
-  C[Gameplay-lane command] --> R[Runner EnvironmentRuntime]
-  R --> A[Mineflayer adapter]
-  A --> M[Mineflayer motor]
-  M --> P[Loopback private Paper server]
-  P --> V[Console-only frozen verifier]
-  V --> E[Hash-chained events and report]
-  E --> G[minecraft.goal.verified or failed]
-  M -. cannot submit success .-> G
-```
+![ADR 0044: The runner owns Mineflayer while Paper owns Minecraft success](../diagrams/0044-runner-owned-mineflayer-private-paper-gameplay.jpg)
 
 ### Interruptible adapter settlement
 
 An adapter may return `{status: "running", completion}`. The runtime records
 the running action and watches its completion outside the serialized mutation
 queue. Final settlement re-enters the queue and is ignored if cancellation,
-revocation, lease loss, or emergency stop already made the action terminal.
+revocation, lease loss, or emergency stop makes the action terminal.
 Existing immediate and externally finished adapters remain compatible.
 
 Mineflayer cancellation clears its pathfinder goal, all control states, and

@@ -17,32 +17,28 @@ retention.
 
 ## Decision
 
-`@clankie/memory-store` owns a separate
-`discord_person_memory_facts` projection keyed by `(guildId, userId)`. Display
-names are presentation only. Facts carry a bounded kind, confidence,
-guild/channel/operator-private visibility, optional expiry, correction
-lineage, and content-free provenance. The provenance schema requires
-`rawTranscript: false`; text and voice can propose an explicit fact but cannot
-store audio or a transcript through this boundary.
+The Clankie service owns a separate file-backed person-memory projection keyed
+by `(guildId, userId)`. Display names are presentation only. Facts carry a
+bounded kind, confidence, guild/channel/operator-private visibility, optional
+expiry, correction lineage, and content-free provenance. The provenance schema
+requires `rawTranscript: false`; text and voice can propose an explicit fact
+but cannot store audio or a transcript through this boundary.
 
-```mermaid
-flowchart LR
-  T[Discord text or voice] --> P[explicit bounded proposal]
-  P --> A[authenticated operator approval]
-  A --> S[(guildId + userId projection)]
-  S --> G[guild-visible recall]
-  S --> C[channel-visible recall]
-  S --> O[operator export/delete]
-  X[expiry maintenance] --> S
-  R[approved correction] --> S
-```
+![ADR 0042: Discord person memory is a separate governed identity projection](../diagrams/0042-discord-person-memory-projection.jpg)
 
-The existing `memory.profile.write` doctrine action remains the write gate.
-The control plane persists the proposal and ordinary approval request, rebuilds
-the exact approved envelope, and only then calls
-`applyApprovedDiscordPersonProposal`. Replay is idempotent. Discord may propose
-and recall visible facts, but export and deletion require the authenticated
-operator surface. Deletion returns fact ids and emits a semantic receipt.
+An authenticated Discord captain may propose and recall visible facts; a
+proposal applies directly and upserts by `factId`. The authenticated operator
+may browse every person and fact, export or delete a person's projection, and
+edit or forget one fact from the TUI. An edit can change bounded content, kind,
+visibility, confidence, or expiry, but never identity or source provenance.
+Mutation events record ids and the operator identity without copying
+memory content into the event log.
+
+Every guild text and captain-handoff voice turn receives up to eight of that
+speaker's newest visible facts as host-authored context. Direct messages have no
+guild identity and receive no person-memory projection. Guild and channel
+visibility filtering happens before prompt construction; operator-private facts
+never reach Discord.
 
 ## Options weighed
 
@@ -54,8 +50,9 @@ operator surface. Deletion returns fact ids and emits a semantic receipt.
 - **Persist raw text or voice transcripts and extract later** — rejected
   because it expands retention and disclosure risk. Only explicit bounded
   proposals enter the durable approval flow.
-- **Allow Discord to commit/delete directly** — rejected because Discord is an
-  ambient authority surface.
+- **Allow Discord to delete or curate facts** — rejected because Discord is an
+  ambient authority surface. Its authenticated captain may only upsert a fact
+  it explicitly proposes and recall facts visible to that room.
 
 ## Consequences
 

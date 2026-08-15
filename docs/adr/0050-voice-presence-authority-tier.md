@@ -22,7 +22,7 @@ that whole room mission creation — unattended code execution against the
 operator's machine. An operator who refuses that must instead lock voice down to
 role holders, which defeats the social purpose of the voice body in ADR 0045.
 
-A second gap compounded it: the binding was role-shaped only. A
+A second gap compounded it: the binding is role-shaped only. A
 single-operator deployment has no one to hand a role to, so expressing "only me"
 required inventing a role whose membership drifts the first time it is edited in
 the Discord UI.
@@ -48,25 +48,14 @@ room execution authority.
 The policy decides _who_ inside an allowlisted guild may move Clankie between
 calls; it never decides _which_ guild. `DISCORD_VOICE_GUILD_IDS` remains
 required and is checked first, so an open policy cannot reach a server the owner
-did not choose. `/clankie leave` additionally refuses when the active session is
+does not choose. `/clankie leave` additionally refuses when the active session is
 in a different guild than the caller's, so an open policy in one server cannot
 hang up a call in another.
 
 Unrecognized and absent policy values resolve to `ambient`. The open policy is
 reachable only by writing it exactly.
 
-```mermaid
-flowchart TD
-  I[slash command] --> K{which command?}
-  K -->|mission · steer · memory| A[ambient binding<br/>roles + user ids]
-  K -->|join · leave| G{guild on voice allowlist?}
-  G -->|no| D[refuse]
-  G -->|yes| P{DISCORD_VOICE_JOIN_POLICY}
-  P -->|ambient| A
-  P -->|guild_members| Y[allow]
-  A -->|match| Y
-  A -->|no match| D
-```
+![ADR 0050: Voice presence is a separate authority tier from ambient commands](../diagrams/0050-voice-presence-authority-tier.jpg)
 
 ## Options weighed
 
@@ -84,7 +73,7 @@ flowchart TD
 
 ## Consequences
 
-- ADR 0045's description of `/clankie join` as role-gated is superseded: it is
+- `/clankie join` uses this actor-tier policy rather than a Discord-role gate: it is
   gated by the voice presence tier, which defaults to the ambient binding.
 - Voice remains off by default, guild-allowlisted, and per-participant
   consented. `guild_members` changes who may _start_ a call, never who is
