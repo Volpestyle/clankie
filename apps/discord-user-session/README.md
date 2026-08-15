@@ -137,6 +137,14 @@ Go Live video. On the official bot the same desk plays audio in voice. The
 voice agent also has `youtube_search` / `music_play` tools when he is already
 talking. One track never uses both sinks.
 
+Voice presence is agentic too ([ADR 0062](../../docs/adr/0062-voice-join-by-asking.md)).
+The captain's argument-free `voice_join` / `voice_leave` tools POST to this
+process on `/voice/*`; the gateway supplies the owner's current channel. Only
+`DISCORD_OWNER_USER_ID` may move the lab body, and the recorded guild/channel
+allowlists still bind the result. A new join auto-opts that authenticated owner
+into live speaker-attributed transcription, which the captain discloses in his
+reply.
+
 A leftover optional GPL selfbot publisher (`go-live-media.ts`) can still be
 injected in tests. Production uses ClankVox. Without a running lab process,
 `go_live_start` throws `discord_presence_go_live_media_unavailable`.

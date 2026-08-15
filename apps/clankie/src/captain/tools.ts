@@ -28,6 +28,10 @@ export interface TurnContext {
   room?: string | undefined;
   /** Host-stamped room target; models never choose episode provenance. */
   targetId?: string | undefined;
+  /** Discord actor who triggered this turn. Host-stamped; models never choose it. */
+  actorId?: string | undefined;
+  /** Discord guild for this turn. Host-stamped; absent in DMs and non-Discord rooms. */
+  guildId?: string | undefined;
 }
 
 /** Room key, stable across a room's turns and distinct across rooms. */
@@ -133,6 +137,7 @@ export function captainTools(
           }),
         ),
     }),
+    ...discordVoicePresenceTools(deps, turn, lane),
     defineTool({
       name: "stop_play",
       label: "Stop playing",
@@ -331,6 +336,47 @@ export function captainTools(
         });
         return json({ remembered: true });
       },
+    }),
+  ];
+}
+
+function discordVoicePresenceTools(
+  deps: CaptainDeps,
+  turn: TurnContext,
+  lane: CaptainSessionLaneV2,
+): ToolDefinition[] {
+  if (lane === "operator") return [];
+  const voice = deps.discordVoicePresence;
+  const call = async (action: "join" | "leave") => {
+    const guildId = turn.guildId;
+    const actorId = turn.actorId;
+    if (voice === undefined || guildId === undefined || actorId === undefined) {
+      return json({ action: action === "join" ? "join_refused" : "leave_refused", reason: "failed" });
+    }
+    return json(await voice[action]({ guildId, actorId }));
+  };
+  return [
+    defineTool({
+      name: "voice_join",
+      label: "Join voice",
+      description:
+        "Join the Discord voice channel the person speaking to you is in now. Use this when they ask you to " +
+        "join, hop in, come talk, or otherwise enter their call. The live Discord body—not you—resolves the " +
+        "channel and enforces authority and allowlists. A refusal reason is a fact to explain, not a reason to retry. " +
+        "On success, actorAutoOptedIn says whether the speaker was opted into live speaker-attributed capture. " +
+        "If false, tell them to use /clankie voice-consent opt-in before you can hear them; if true, plainly disclose " +
+        "that their audio is transcribed live and may remain with the configured provider for this call.",
+      parameters: Type.Object({}),
+      execute: () => call("join"),
+    }),
+    defineTool({
+      name: "voice_leave",
+      label: "Leave voice",
+      description:
+        "Leave your active Discord voice channel when someone asks you to leave, hang up, or dip. The live " +
+        "Discord body enforces authority and prevents one server from ending a call in another.",
+      parameters: Type.Object({}),
+      execute: () => call("leave"),
     }),
   ];
 }

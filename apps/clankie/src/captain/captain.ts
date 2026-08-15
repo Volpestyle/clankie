@@ -421,6 +421,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     lane.turnCounter += 1;
     lane.capture.room = roomKey(normalized.lane, normalized.targetId);
     lane.capture.targetId = normalized.targetId;
+    lane.capture.actorId = normalized.actorId;
+    lane.capture.guildId = normalized.guildId;
     const turnId = `turn-${lane.turnCounter}-${deliveryId}`;
     await laneLog.append(normalized.lane, normalized.targetId, {
       at: new Date().toISOString(),

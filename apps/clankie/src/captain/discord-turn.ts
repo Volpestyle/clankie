@@ -1,8 +1,4 @@
-import {
-  CAPTAIN_SILENT_REPLY_SENTINEL,
-  type DiscordPresenceChannelTurnRequest,
-  type DiscordVoicePresenceNote,
-} from "@clankie/protocol";
+import { CAPTAIN_SILENT_REPLY_SENTINEL, type DiscordPresenceChannelTurnRequest } from "@clankie/protocol";
 import type { FinishedRender } from "../media-generation.ts";
 import type { CaptainDeps, ResolvedAttachment } from "./deps.ts";
 import { roomKey } from "./tools.ts";
@@ -17,6 +13,8 @@ export interface NormalizedDiscordTurn {
   readonly images: readonly ResolvedAttachment[];
   /** What was heard, for the lane log — the sender's words, not our framing. */
   readonly heard: string;
+  readonly actorId: string;
+  readonly guildId?: string;
 }
 
 /**
@@ -34,6 +32,7 @@ export async function normalizeDiscordTurn(
   const presenceSessionId = request.identity.presenceSessionId ?? request.identity.missionId;
   if (presenceSessionId === undefined) throw new Error("Discord channel turn attribution is unavailable");
   const targetId = `${request.trigger.guildId ?? "dm"}:${request.trigger.channelId}`;
+  const actorId = request.trigger.actorId;
   const voice = request.trigger.kind === "voice_event";
   const lane = voice ? "discord_voice" : "discord_presence";
 
@@ -113,11 +112,6 @@ export async function normalizeDiscordTurn(
           ),
         ];
 
-  const noteBlock =
-    request.trigger.voicePresenceNote === undefined
-      ? []
-      : [renderVoicePresenceNote(request.trigger.voicePresenceNote)];
-
   const memoryBlock =
     approvedPersonMemory === undefined
       ? []
@@ -126,8 +120,8 @@ export async function normalizeDiscordTurn(
         ];
 
   // A render that outlived the turn that started it (ADR 0094). Trusted text
-  // about his own work, like the voice presence note — the room never authors
-  // it, and only this room's renders are named.
+  // about his own work — the room never authors it, and only this room's
+  // renders are named.
   const renderBlock = renderNote(await (deps.media?.finishedRenders(roomKey(lane, targetId)) ?? []));
 
   const triggerBlock = [
@@ -135,14 +129,7 @@ export async function normalizeDiscordTurn(
     body.length === 0 ? "(no text — only images)" : body,
   ];
 
-  const prompt = [
-    framing,
-    ...noteBlock,
-    ...memoryBlock,
-    ...renderBlock,
-    ...contextBlock,
-    ...triggerBlock,
-  ].join("\n\n");
+  const prompt = [framing, ...memoryBlock, ...renderBlock, ...contextBlock, ...triggerBlock].join("\n\n");
 
   return {
     sessionKey: voice
@@ -154,6 +141,8 @@ export async function normalizeDiscordTurn(
     prompt,
     images: [...resolved, ...(resolvedContext === undefined ? [] : [resolvedContext])],
     heard: body.length === 0 ? `(sent ${String(attachments.length)} image(s))` : body,
+    actorId,
+    ...(request.trigger.guildId === undefined ? {} : { guildId: request.trigger.guildId }),
   };
 }
 
@@ -189,37 +178,4 @@ function renderNote(renders: readonly FinishedRender[]): string[] {
       "Bring one up if it still fits the conversation; nobody is waiting on it if it does not.",
     ].join("\n"),
   ];
-}
-
-const VOICE_PRESENCE_REFUSAL_PHRASES: Readonly<
-  Record<NonNullable<DiscordVoicePresenceNote["reason"]>, string>
-> = {
-  authority: "the asker does not hold the voice presence tier here",
-  allowlist: "that voice channel is outside the configured voice allowlist",
-  not_in_voice: "the asker is not in a voice channel in this server",
-  voice_disabled: "voice participation is disabled",
-  other_guild: "your active voice session is in another server",
-  failed: "the attempt failed",
-};
-
-/** One neutral factual line about what the bridge just did with voice presence. */
-function renderVoicePresenceNote(note: DiscordVoicePresenceNote): string {
-  const channel = note.channelId === undefined ? "the voice channel" : `voice channel ${note.channelId}`;
-  switch (note.action) {
-    case "joined":
-      return (
-        `You just joined ${channel} in this server. Nobody is opted in until they use ` +
-        `/clankie voice-consent opt-in, and you only ever hear opted-in participants.`
-      );
-    case "left":
-      return `You just left ${channel} in this server.`;
-    case "join_refused":
-      return `You could not join voice: ${voicePresenceReasonPhrase(note.reason)}.`;
-    case "leave_refused":
-      return `You could not leave voice: ${voicePresenceReasonPhrase(note.reason)}.`;
-  }
-}
-
-function voicePresenceReasonPhrase(reason: DiscordVoicePresenceNote["reason"]): string {
-  return reason === undefined ? "the attempt failed" : VOICE_PRESENCE_REFUSAL_PHRASES[reason];
 }

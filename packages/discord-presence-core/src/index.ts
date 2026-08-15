@@ -86,6 +86,12 @@ export {
   type VoiceMusicTrack,
 } from "./voice-music.ts";
 export {
+  parseVoicePresenceControlPath,
+  tryHandleVoicePresenceControlRequest,
+  type VoicePresenceControlAction,
+  type VoicePresenceControlInput,
+} from "./voice-control.ts";
+export {
   DiscordVoiceConsentRegistry,
   type DiscordVoiceConsentPolicy,
   type DiscordVoiceConsentSession,

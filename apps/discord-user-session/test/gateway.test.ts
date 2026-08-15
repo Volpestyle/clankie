@@ -164,6 +164,36 @@ describe("DiscordUserGateway", () => {
     });
     gateway.close();
   });
+
+  it("tracks current member voice channels from gateway state", () => {
+    const socket = new FakeSocket();
+    const gateway = new DiscordUserGateway({ token: "user-token", connect: () => socket.asWebSocket() });
+    gateway.open();
+    socket.deliver({ op: 10, d: { heartbeat_interval: 45_000 } });
+    socket.deliver({
+      op: 0,
+      s: 1,
+      t: "GUILD_CREATE",
+      d: { id: "guild-1", voice_states: [{ user_id: "human-1", channel_id: "voice-1" }] },
+    });
+    expect(gateway.voiceChannelFor("guild-1", "human-1")).toBe("voice-1");
+
+    socket.deliver({
+      op: 0,
+      s: 2,
+      t: "VOICE_STATE_UPDATE",
+      d: { guild_id: "guild-1", user_id: "human-1", channel_id: "voice-2" },
+    });
+    expect(gateway.voiceChannelFor("guild-1", "human-1")).toBe("voice-2");
+    socket.deliver({
+      op: 0,
+      s: 3,
+      t: "VOICE_STATE_UPDATE",
+      d: { guild_id: "guild-1", user_id: "human-1", channel_id: null },
+    });
+    expect(gateway.voiceChannelFor("guild-1", "human-1")).toBeUndefined();
+    gateway.close();
+  });
 });
 
 interface Frame {

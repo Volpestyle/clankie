@@ -448,55 +448,6 @@ describe("protocol", () => {
     ).toBe("discord:dm:dm1");
   });
 
-  it("carries a content-free bridge voice presence note on Discord turn triggers", () => {
-    const base = {
-      schemaVersion: 1,
-      deliveryId: "d-note",
-      identity: {
-        presenceSessionId: "discord:guild-1:channel-1",
-        correlationId: "c-note",
-        profileHash: "p1",
-        characterId: "clankie",
-        credentialRef: "broker:discord_bot:lab",
-        transportKind: "bot",
-      },
-    };
-    const trigger = {
-      kind: "mention",
-      id: "m-note",
-      guildId: "guild-1",
-      channelId: "channel-1",
-      actorId: "u1",
-      body: "clankie hop in vc",
-    };
-    const joined = DiscordPresenceChannelTurnRequestSchema.parse({
-      ...base,
-      trigger: { ...trigger, voicePresenceNote: { action: "joined", channelId: "voice-1" } },
-    });
-    expect(joined.trigger.voicePresenceNote).toEqual({ action: "joined", channelId: "voice-1" });
-    const refused = DiscordPresenceChannelTurnRequestSchema.parse({
-      ...base,
-      trigger: { ...trigger, voicePresenceNote: { action: "join_refused", reason: "authority" } },
-    });
-    expect(refused.trigger.voicePresenceNote?.reason).toBe("authority");
-    // Content-free discipline: enums and ids only, never a free-text side channel.
-    expect(() =>
-      DiscordPresenceChannelTurnRequestSchema.parse({
-        ...base,
-        trigger: { ...trigger, voicePresenceNote: { action: "joined", note: "free text" } },
-      }),
-    ).toThrow();
-    expect(() =>
-      DiscordPresenceChannelTurnRequestSchema.parse({
-        ...base,
-        trigger: {
-          ...trigger,
-          voicePresenceNote: { action: "join_refused", reason: "because I said so" },
-        },
-      }),
-    ).toThrow();
-  });
-
   it("validates additive captain-domain presence and lifecycle events", () => {
     const base = {
       id: "captain-status-1",

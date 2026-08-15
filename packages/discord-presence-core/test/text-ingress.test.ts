@@ -112,36 +112,6 @@ describe("DiscordTextIngress", () => {
     expect(evidence.every((event) => event.outcome === "dropped")).toBe(true);
   });
 
-  it("passes the bridge's voice presence note through into the turn trigger unchanged", async () => {
-    const port = new RecordingPort();
-    const ingress = new DiscordTextIngress(port, config(), () => {});
-
-    await ingress.handle({
-      id: "message-noted",
-      guildId: "guild-1",
-      channelId: "channel-1",
-      authorId: "friend",
-      authorIsBot: false,
-      mentionsBot: true,
-      body: "clankie hop in vc",
-      voicePresenceNote: { action: "joined", channelId: "voice-9" },
-      loadContextMessages: () => Promise.resolve([]),
-    });
-    await ingress.handle({
-      id: "message-plain",
-      guildId: "guild-1",
-      channelId: "channel-1",
-      authorId: "friend",
-      authorIsBot: false,
-      mentionsBot: true,
-      body: "hello again",
-      loadContextMessages: () => Promise.resolve([]),
-    });
-
-    expect(port.turns[0]?.trigger.voicePresenceNote).toEqual({ action: "joined", channelId: "voice-9" });
-    expect(port.turns[1]?.trigger.voicePresenceNote).toBeUndefined();
-  });
-
   it("admits every channel in an allowlisted guild when no channel list is configured", async () => {
     const port = new RecordingPort();
     // `replyPolicy: "all"` isolates channel admission from the addressed gate.

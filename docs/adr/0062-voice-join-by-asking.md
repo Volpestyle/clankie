@@ -1,153 +1,89 @@
-# ADR 0062: Voice join by asking
+# ADR 0062: Voice presence is a captain tool
 
-Status: accepted (2026-07-26). Includes the pending-join retry. Builds on
-[ADR 0050](0050-voice-presence-authority-tier.md) (the voice presence authority
-tier) and [ADR 0057](0057-realtime-voice-with-captain-handoff.md) (the realtime
-voice architecture and its consent disclosures), neither of which changes here.
+Status: accepted (2026-08-15). Builds on
+[ADR 0050](0050-voice-presence-authority-tier.md) (voice presence authority)
+and [ADR 0057](0057-realtime-voice-with-captain-handoff.md) (the realtime voice
+body).
 
 ## Context
 
-`/clankie join` and `/clankie leave` exist and work, but a slash command is how
-you operate a bot, not how you talk to a member. In a room where Clankie is
-already a social presence, "clankie hop in vc" typed into the text channel is
-the natural ask — and the owner explicitly rejected slash-only presence as
-bot-like. The official bot should move in and out of voice the way a person
-does: because someone asked them to, in words.
+Clankie is the agent. Natural language interpretation and the decision to act
+belong to his captain unless a separate decider is required by a different
+trust boundary. Joining voice does not require one: the captain already reads
+the admitted Discord turn and already decides when to use every other ability.
 
-Two facts shape where that decision can live:
-
-- Join authority already sits in the bridge (ADR 0050's presence tier, the
-  deny-by-default guild allowlist, the optional channel allowlist), beside the
-  gateway voice-state cache and the media-owning `DiscordVoiceSession`.
-- The captain has no presence-action tool, and no service→bridge command
-  transport exists. The protocol's catalogued `discord.presence.voice_join`
-  action is still refused by the service-hosted runtime.
+The live Discord body still owns the facts and effects the captain must not
+invent: the authenticated speaker, their current voice channel, roles, gateway
+adapter, allowlists, consent session, and media connection.
 
 ## Decision
 
-The decision lives at the bridge's text ingress boundary, in the pattern this
-repository already uses twice (the text reply policy of ADR 0051, the voice
-volition call of ADR 0057): a cheap mechanical gate, a bounded model call that
-only interprets, deterministic authority and execution, and a captain who is
-informed rather than asked.
+The captain owns the join/leave decision through `voice_join` and
+`voice_leave`. The active Discord body owns authorization, target resolution,
+and execution.
 
-![ADR 0062: Voice join by asking](../diagrams/0062-voice-join-by-asking.jpg)
+```mermaid
+sequenceDiagram
+    participant Human
+    participant Body as Discord body
+    participant Captain
+    participant Policy as Authority + allowlists
+    participant Voice as Media session
 
-- **Gate (free).** Runs only on inbound guild messages that already pass the
-  ingress admission text ingress applies and that speak to him the way text
-  ingress itself reads "spoken to" — an explicit mention/name
-  (`mentionsBot`/`addressesCharacter`) **or** a message inside a conversation
-  he is actively answering (`DiscordTextIngress.engagedInChannel`, the same
-  live-message window that keeps him replying to follow-ups). Never a second
-  matcher: live evidence proves that a narrower per-message name test
-  makes him answer "hop in vc and play" in text while the voice seam pretends
-  nobody spoke to him. The body must also match a deliberately loose
-  voice-token regex — **or** name him explicitly while the asker is already in
-  a voice channel: current live evidence shows the word list misses natural
-  asks ("clankie i wanna talk to you" from inside vc), and the asker's gateway
-  voice-state is a stronger mechanical ask signal than any word. The wordless
-  door requires the explicit mention/name, not merely an engaged conversation,
-  so an engaged channel whose members sit in voice does not pay a decider read
-  per message. Whether the asker is in voice never _closes_ the gate — that is
-  voice state, and execution owns it, so an early worded ask earns an honest
-  refusal instead of silence. Closed means zero added cost and an untouched
-  turn.
-- **Intent decider (one bounded call).** The brokered OpenAI key and
-  `CLANKIE_VOICE_VOLITION_MODEL` — the same cost tier as the volition call, not
-  a new knob — at temperature 0 with a hard timeout, asked one question: does
-  this message ask Clankie to join the speaker's voice channel, to leave voice,
-  or neither? Anything but a clear answer is "none" (fail closed). It reads the
-  message body plus a few bounded recent channel lines, attributed only as
-  Clankie / the sender / another member — natural addressing means the ask
-  often names nobody, and without the surrounding lines the decider cannot
-  tell an ask to Clankie from an ask to another member. Never room audio,
-  never transcripts, and none of the text is ever logged. A failed context
-  read degrades to a body-only decision rather than dropping the ask.
-- **Deterministic execution.** The model authorizes nothing. A read ask runs
-  exactly the slash checks — `authorizeVoicePresenceCommand` under
-  `DISCORD_VOICE_JOIN_POLICY`, the `DISCORD_VOICE_GUILD_IDS` /
-  `DISCORD_VOICE_CHANNEL_IDS` allowlists, and slash leave's cross-guild bound —
-  then joins the asker's _current_ voice channel, read from the gateway cache
-  at execution time. An asker who is not in a voice channel gets
-  `join_refused: not_in_voice` — the note that lets his reply say "hop in a
-  channel and ask again" instead of enthusiasm followed by nothing. A leave
-  ask requires no voice presence from the asker. The model returns an intent
-  enum and nothing else, so a prompt-injected body can never steer _where_ he
-  joins. If he is already in exactly the asked channel, nothing is rejoined: a
-  rejoin resets the consent registry, and silently un-consenting a room is
-  worse than doing nothing.
-- **The honest refusal keeps listening.** `join_refused: not_in_voice` opens a
-  pending retry window — ids and a deadline only (two minutes), bound to
-  exactly that guild, text channel, and asker, capped in count, consumed by
-  the next executed decision for its key. His reply says "hop in a channel and
-  ask again", and the window is him actually listening for that: while it is
-  open, the same asker's follow-up in the same channel counts as spoken-to,
-  and once the gateway reports them in a voice channel it earns one bounded
-  read with no voice-ish word — current live evidence includes "try now" and
-  "im in general" exiting unread while his reply improvised that he still
-  could not see voice. That read uses a retry framing (the standing prompt
-  judges the message alone, and "try now" alone asks nothing): does this
-  message renew the already-asked join, ask a leave, or neither. The framing
-  instructs the model to classify unrelated chatter as "none", and anything
-  malformed or unclear fails closed to "none" — but that filtering is model
-  semantics, not a deterministic guarantee, and it is the deterministic
-  bounds that contain a misread: the window binds exactly one asker in one
-  text channel under its TTL and capacity cap, and a renewed join still runs
-  the unchanged deterministic execution — same tier, same allowlists, target
-  channel only from a fresh gateway read. The worst misread therefore
-  executes the join this same asker asked for moments earlier, in their own
-  current channel. A retry that finds the asker gone again reopens the window
-  instead of eating the follow-up. Another member, another channel, or a late
-  message can never ride an old refusal into a join.
-- **Consent is never granted by asking.** An asked join opts in nobody — the
-  asker included. Everyone consents through `/clankie voice-consent opt-in`,
-  which already carries the residency disclosure ephemerally. The slash join
-  keeps auto-opting-in its invoker, who sees that disclosure in the ephemeral
-  reply; an asked join has no such reply, so it has no basis to opt anyone in.
-- **The captain is informed, not authorizing.** The executed outcome travels
-  into the same message's captain turn as `voicePresenceNote` — a strict
-  enums-and-ids object (`joined` / `join_refused` / `left` / `leave_refused`
-  plus a bounded reason), rendered by the Clankie service as one neutral factual
-  line of ephemeral thread context. His conversational reply reflects what
-  actually happened: he is the voice, the bridge is the actor.
+    Human->>Body: “clankie, hop in vc”
+    Body->>Captain: admitted turn + host-stamped actor/guild
+    Captain->>Captain: decide whether joining fits the conversation
+    Captain->>Body: voice_join(actor/guild from host context)
+    Body->>Body: read actor roles + current voice channel
+    Body->>Policy: authorize actor and channel
+    Policy-->>Body: allow / refuse
+    Body->>Voice: join resolved current channel
+    Voice-->>Captain: typed result
+    Captain-->>Human: reply from what actually happened
+```
+
+- **Agent-owned intent.** No phrase matcher, voice-token gate, classifier model,
+  or pending-retry state runs ahead of the captain. An admitted message reaches
+  the same agent that handles the rest of the conversation; that agent decides
+  whether to call a tool. Follow-ups such as “try now” use normal channel
+  context and engagement.
+- **Argument-free tools.** The model supplies no user, guild, or channel id.
+  The service stamps the authenticated turn actor and guild into mutable tool
+  context. The live body reads the actor's current gateway voice state when the
+  tool executes, so text and prompt injection cannot pick a destination.
+- **Body-owned execution.** The captain calls the active body's loopback
+  control surface. The official bot applies ADR 0050's voice tier plus the
+  voice guild/channel allowlists. The lab user-session body admits only the
+  configured owner and its explicit guild/channel allowlists. Both prevent one
+  guild from ending a call in another and treat joining the current channel as
+  idempotent so consent state is not reset.
+- **Typed truth.** The tool returns `joined`, `join_refused`, `left`, or
+  `leave_refused` with a bounded reason. A successful join also says whether
+  this operation auto-opted the speaker into capture, so the captain can give
+  the required consent guidance in his own reply.
+- **Consent remains separate.** An official-bot asked join opts in nobody;
+  participants use `/clankie voice-consent opt-in`. The owner-only lab body
+  auto-opts its authenticated owner when it creates the media session, and the
+  captain discloses live speaker-attributed transcription in the reply.
 
 ## Options weighed
 
-- **A captain presence-action tool plus a service→bridge command
-  transport** — rejected. It requires building two new infrastructures to move
-  a decision away from the place that already holds its authority (ADR 0050),
-  its data (the gateway voice-state cache), and its executor (the media-owning
-  session) — and the execution plumbing would still end up in the bridge. The
-  catalogued `discord.presence.voice_join` action stays as-is for a possible
-  future captain-initiated surface.
-- **A pure phrase matcher, no model** — rejected. Brittle rule-per-trigger:
-  every new way of asking ("come hang", "you can dip") becomes a code change,
-  and the repository's settled pattern is one cheap mechanism where the model
-  interprets and never authorizes.
-- **Do nothing (slash only)** — rejected by the owner. A member you must
-  slash-command into a call is a bot; ADR 0045 defines social presence instead.
+- **A second model at text ingress** — rejected. It duplicates the captain's
+  language understanding, adds a second personality-free decision path, and
+  needs its own matcher, context shaping, retry state, prompt, timeout, and
+  traces. None of those enforce authority; the body must still do that after
+  the model returns.
+- **Let the captain choose guild/channel ids** — rejected. Agency decides
+  _whether_ to act, not which authenticated facts are true. The host and
+  gateway provide identity and destination.
+- **Keep slash commands only** — rejected. Slash commands remain a deterministic
+  operator fallback, but ordinary conversation is the primary product surface.
 
 ## Consequences
 
-- Gated messages cost one cheap model call; everything else costs nothing. The
-  gate is deliberately loose because a false positive is one bounded call and a
-  false negative is a missed convenience — and live evidence shows the
-  false negatives are the expensive side: they cost a debugging session, not a
-  model call. Mid-conversation admission means a busy engaged channel spends a
-  few more decider reads on stray "come"/"out" tokens; each is one bounded
-  call that fails closed. An explicitly named wordless message from an asker
-  inside voice also costs one read — rare, and the strongest ask signal there
-  is.
-- The intent decider is untrusted-input-facing, but it returns only an enum:
-  a hostile body (or hostile context lines) can at most ask him to join the
-  channel its author is sitting in, under the asker's own authority.
-- The join surface widens from slash to natural speech within the same
-  authority tier — who may move him is unchanged; only the phrasing is.
-- An asked join starts with zero consented participants, so he sits in the
-  channel hearing nobody until people opt in. That is the consent model working
-  as designed, and the injected note tells him so, so he can say it.
-- A pending retry window spends at most one bounded read per follow-up message
-  from its one asker for its two minutes, and each read fails closed. The
-  content-free ask trace carries a `pendingRetry` flag, so whether a refused
-  join is still listening when a follow-up arrives is a recorded fact rather
-  than an inference from his reply.
+- One admitted Discord turn makes one captain decision instead of a captain
+  call plus a separate intent call.
+- Voice presence behaves like play, music, browser, and media abilities: the
+  captain chooses a typed tool, while the owning subsystem validates and acts.
+- Tool-call history is the durable explanation of why Clankie moved. The body
+  logs only content-free actor/guild/result metadata.

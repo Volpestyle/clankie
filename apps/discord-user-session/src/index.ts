@@ -20,9 +20,12 @@ import {
   parseDiscordIdSet,
   selectInboundImageAttachments,
   VoiceMusicQueue,
+  tryHandleVoicePresenceControlRequest,
   type DiscordBridgeReceipt,
+  type VoicePresenceControlAction,
+  type VoicePresenceControlInput,
 } from "@clankie/discord-presence-core";
-import type { DiscordVoiceEvidence } from "@clankie/protocol";
+import type { DiscordVoiceEvidence, DiscordVoicePresenceResult } from "@clankie/protocol";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
@@ -74,6 +77,7 @@ const credentialStore = createDefaultCredentialStore();
 const apiUrl = process.env.CLANKIE_API_URL ?? "http://127.0.0.1:4310";
 const characterId = process.env.CLANKIE_CHARACTER_ID ?? "clankie";
 const voiceEnabled = process.env.DISCORD_USER_SESSION_VOICE_ENABLED === "true";
+const ownerUserId = process.env.DISCORD_OWNER_USER_ID?.trim();
 
 const bridgeToken = await resolveDiscordUserBridgeCredential({ store: credentialStore });
 if (!bridgeToken) {
@@ -150,9 +154,7 @@ const textIngress = new DiscordTextIngress(
     guildIds,
     channelIds,
     dmPolicy: parseDiscordDmPolicy(process.env.DISCORD_USER_SESSION_DM_POLICY),
-    ...(process.env.DISCORD_OWNER_USER_ID === undefined
-      ? {}
-      : { ownerUserId: process.env.DISCORD_OWNER_USER_ID }),
+    ...(ownerUserId === undefined ? {} : { ownerUserId }),
     dmUserIds: parseDiscordIdSet(process.env.DISCORD_USER_SESSION_DM_USER_IDS),
     // A user session cannot request bounded history without reading channels
     // wholesale, so ambient context stays off on this plane.
@@ -430,6 +432,43 @@ export async function joinUserSessionVoice(input: {
   });
 }
 
+async function executeCaptainVoicePresence(
+  action: VoicePresenceControlAction,
+  input: VoicePresenceControlInput,
+): Promise<DiscordVoicePresenceResult> {
+  const refused = action === "join" ? ("join_refused" as const) : ("leave_refused" as const);
+  if (ownerUserId === undefined || input.actorId !== ownerUserId) {
+    return { action: refused, reason: "authority" };
+  }
+  if (voiceSession === undefined) return { action: refused, reason: "voice_disabled" };
+  const active = voiceSession.status();
+  if (active.active && active.guildId !== input.guildId) {
+    return { action: refused, reason: "other_guild" };
+  }
+  if (action === "leave") {
+    try {
+      await voiceSession.leave();
+    } catch {
+      return { action: "leave_refused", reason: "failed" };
+    }
+    return { action: "left", ...(active.channelId === undefined ? {} : { channelId: active.channelId }) };
+  }
+  const channelId = gateway.voiceChannelFor(input.guildId, input.actorId);
+  if (channelId === undefined) return { action: "join_refused", reason: "not_in_voice" };
+  if (!guildIds.has(input.guildId) || !voiceChannelIds.has(channelId)) {
+    return { action: "join_refused", reason: "allowlist" };
+  }
+  if (active.active && active.channelId === channelId) {
+    return { action: "joined", channelId, actorAutoOptedIn: false };
+  }
+  try {
+    await joinUserSessionVoice({ guildId: input.guildId, channelId, invokingUserId: input.actorId });
+  } catch {
+    return { action: "join_refused", reason: "failed" };
+  }
+  return { action: "joined", channelId, actorAutoOptedIn: true };
+}
+
 function receiptPath(): string {
   const configured = process.env.DISCORD_USER_SESSION_RECEIPT_PATH;
   if (configured) {
@@ -659,6 +698,7 @@ const server = createServer((request, response) => {
     response.end(JSON.stringify({ ok: true }));
     return;
   }
+  if (tryHandleVoicePresenceControlRequest(request, response, executeCaptainVoicePresence)) return;
   response.writeHead(404);
   response.end();
 });

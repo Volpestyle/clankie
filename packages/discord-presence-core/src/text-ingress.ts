@@ -14,7 +14,6 @@ import {
   type DiscordPresenceWrite,
   type DiscordPresenceWriteResult,
   type DiscordTransportKind,
-  type DiscordVoicePresenceNote,
 } from "@clankie/protocol";
 
 export type DiscordDmPolicy = "deny" | "owner_only" | "allowlist";
@@ -252,13 +251,6 @@ export interface DiscordInboundMessage {
   readonly attachmentsOmitted?: number;
   readonly contextMessages?: readonly DiscordInboundContextMessage[];
   readonly loadContextMessages?: () => Promise<readonly DiscordInboundContextMessage[]>;
-  /**
-   * Set by the bridge when this message asked him into or out of voice and the
-   * bridge already executed the decision at its ingress boundary (ADR 0062).
-   * Passed through into the turn trigger unchanged so his reply reflects what
-   * actually happened.
-   */
-  readonly voicePresenceNote?: DiscordVoicePresenceNote;
   /** Set only by {@link DiscordTextIngress.catchUp}; he is looking at a backlog. */
   readonly catchingUp?: boolean;
 }
@@ -500,7 +492,6 @@ export class DiscordTextIngress {
           ? {}
           : { attachmentsOmitted: message.attachmentsOmitted }),
         ...(this.unprompted(message) ? { unprompted: true } : {}),
-        ...(message.voicePresenceNote === undefined ? {} : { voicePresenceNote: message.voicePresenceNote }),
       },
       contextMessages: context.messages,
       ...(context.visual === undefined ? {} : { contextVisual: context.visual }),
@@ -733,9 +724,8 @@ export class DiscordTextIngress {
 
   /**
    * Is he mid-conversation in this channel right now — reading it live because
-   * he spoke there recently? Public so seams at the same ingress boundary (the
-   * asked voice presence gate, ADR 0062) share this exact notion of being
-   * spoken to instead of growing a second, narrower matcher.
+   * he spoke there recently? Public for ingress-adjacent observers that need
+   * the same notion of being spoken to instead of a second matcher.
    */
   public engagedInChannel(channelId: string): boolean {
     const activity = this.channels.get(channelId);

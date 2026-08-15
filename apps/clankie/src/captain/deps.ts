@@ -16,6 +16,7 @@ import type {
   DiscordPersonIdentity,
   DiscordPresenceAttachment,
   DiscordStreamWatchObservation,
+  DiscordVoicePresenceResult,
   DrawDiagramResult,
   DrawErDiagramRequest,
   DrawSequenceDiagramRequest,
@@ -73,6 +74,11 @@ export interface CaptainDeps {
   };
   readonly streamWatch: {
     current(): Promise<DiscordStreamWatchObservation>;
+  };
+  /** Voice membership on the active Discord body; the body resolves and authorizes the target. */
+  readonly discordVoicePresence?: {
+    join(input: { guildId: string; actorId: string }): Promise<DiscordVoicePresenceResult>;
+    leave(input: { guildId: string; actorId: string }): Promise<DiscordVoicePresenceResult>;
   };
   readonly presence: {
     listSessions(): Promise<DiscordPresenceSessionRecord[]>;

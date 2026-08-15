@@ -1347,7 +1347,7 @@ export const DiscordPresenceAttachmentSchema = z
   .strict();
 export type DiscordPresenceAttachment = z.infer<typeof DiscordPresenceAttachmentSchema>;
 
-export const DiscordVoicePresenceNoteReasonSchema = z.enum([
+export const DiscordVoicePresenceResultReasonSchema = z.enum([
   "authority",
   "allowlist",
   "not_in_voice",
@@ -1355,23 +1355,27 @@ export const DiscordVoicePresenceNoteReasonSchema = z.enum([
   "other_guild",
   "failed",
 ]);
-export type DiscordVoicePresenceNoteReason = z.infer<typeof DiscordVoicePresenceNoteReasonSchema>;
+export type DiscordVoicePresenceResultReason = z.infer<typeof DiscordVoicePresenceResultReasonSchema>;
 
 /**
- * What the bridge just did about voice presence for this message: a member
- * asked him into or out of voice in text chat, and the bridge decided and
- * executed at its ingress boundary before the captain turn (ADR 0062). Enums
- * and ids only, never free text, so a prompt-injected body can never author
- * what he is told happened.
+ * What the live Discord body did when the captain used a voice-presence tool.
+ * The body resolves the asker's current channel and enforces authority; the
+ * model supplies neither ids nor an explanation of the result.
  */
-export const DiscordVoicePresenceNoteSchema = z
-  .object({
-    action: z.enum(["joined", "join_refused", "left", "leave_refused"]),
-    channelId: z.string().min(1).optional(),
-    reason: DiscordVoicePresenceNoteReasonSchema.optional(),
-  })
-  .strict();
-export type DiscordVoicePresenceNote = z.infer<typeof DiscordVoicePresenceNoteSchema>;
+export const DiscordVoicePresenceResultSchema = z.discriminatedUnion("action", [
+  z
+    .object({
+      action: z.literal("joined"),
+      channelId: z.string().min(1),
+      /** Whether this join explicitly opted the authenticated speaker into capture. */
+      actorAutoOptedIn: z.boolean(),
+    })
+    .strict(),
+  z.object({ action: z.literal("join_refused"), reason: DiscordVoicePresenceResultReasonSchema }).strict(),
+  z.object({ action: z.literal("left"), channelId: z.string().min(1).optional() }).strict(),
+  z.object({ action: z.literal("leave_refused"), reason: DiscordVoicePresenceResultReasonSchema }).strict(),
+]);
+export type DiscordVoicePresenceResult = z.infer<typeof DiscordVoicePresenceResultSchema>;
 
 export const DiscordPresenceChannelTurnRequestSchema = z
   .object({
@@ -1409,13 +1413,6 @@ export const DiscordPresenceChannelTurnRequestSchema = z
          * stay silent on any turn — but he should know whether he was asked.
          */
         unprompted: z.boolean().optional(),
-        /**
-         * Set by the bridge when this message asked him into or out of voice
-         * and the bridge already executed the decision (ADR 0062). His reply
-         * must reflect what actually happened: he is the voice, the bridge is
-         * the actor.
-         */
-        voicePresenceNote: DiscordVoicePresenceNoteSchema.optional(),
       })
       .strict(),
     contextMessages: z
@@ -2384,7 +2381,7 @@ export const EmbodimentLifecycleReportSchema = z
 export type EmbodimentLifecycleReport = z.infer<typeof EmbodimentLifecycleReportSchema>;
 
 /**
- * The captain tool's typed outcome, mirroring DiscordVoicePresenceNote: the
+ * The captain tool's typed outcome, like DiscordVoicePresenceResult: the
  * reply reflects what actually happened, and a refusal names a reason he can
  * say out loud. `pending` means the bounded wait elapsed before the runner
  * answered — the request stands, and he must not claim to be playing yet.

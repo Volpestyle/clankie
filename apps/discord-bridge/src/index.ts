@@ -13,6 +13,7 @@ import {
 } from "@clankie/possessor-voice";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
+import { createServer } from "node:http";
 import { isAbsolute, join, relative } from "node:path";
 import {
   ChannelType,
@@ -48,8 +49,11 @@ import {
   parseMusicIntent,
   parseDiscordIdSet,
   selectInboundImageAttachments,
+  tryHandleVoicePresenceControlRequest,
   type DiscordBridgeReceipt,
   type DiscordInboundContextMessage,
+  type VoicePresenceControlAction,
+  type VoicePresenceControlInput,
 } from "@clankie/discord-presence-core";
 import { DiscordPresenceWriteSchema, type DiscordVoiceEvidence } from "@clankie/protocol";
 import {
@@ -73,13 +77,7 @@ import {
   voiceEvidenceReceiptData,
   voiceEvidenceReceiptType,
 } from "./voice-composition.ts";
-import {
-  createVoicePresenceIntentDecider,
-  handleVoicePresenceAsk,
-  VoicePresenceRetryWindow,
-  type VoicePresenceAskOptions,
-  type VoicePresenceMember,
-} from "./voice-intent.ts";
+import { executeVoicePresenceIntent } from "./voice-presence.ts";
 import { possessorRoomText } from "./possessor-text.ts";
 import { sanitizeDiscordText } from "./text.ts";
 
@@ -362,38 +360,6 @@ const publishRoomTextToPossessor = (message: Message): void => {
   );
   if (line !== null) possessorVoiceListener.publishUtterance(line);
 };
-// Asked voice presence (ADR 0062): "clankie hop in vc" in an admitted text
-// channel moves him under exactly the slash tier, executed here at the ingress
-// boundary before the same message's captain turn. Composed only when both
-// text ingress and brokered realtime voice exist — without voice there is no
-// decider budget and nothing to execute, so the gate machinery never runs.
-const voicePresenceAsk: VoicePresenceAskOptions | undefined =
-  textIngress === undefined || openAiCredential?.type !== "api" || voiceRealtimeConfig === undefined
-    ? undefined
-    : {
-        gate: {
-          ingressGuildIds,
-          ingressChannelIds,
-          characterNames: characterNames(storedSettings.persona),
-        },
-        decider: createVoicePresenceIntentDecider({
-          apiKey: openAiCredential.key,
-          model: voiceRealtimeConfig.volitionModel,
-        }),
-        execution: {
-          bindings: roleBindings,
-          joinPolicy: voiceJoinPolicy,
-          voiceGuildIds,
-          voiceChannelIds,
-          voiceSession,
-        },
-        // A refused not-in-voice join listens briefly for the asker's
-        // follow-up, so "try now" from inside voice retries instead of
-        // making them repeat the ask.
-        retry: new VoicePresenceRetryWindow(),
-        // Content-free by construction (ids, booleans, enums — never the body).
-        onTrace: (trace) => console.info(trace, "Discord voice presence ask"),
-      };
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -668,43 +634,14 @@ client.on("messageCreate", async (message) => {
         return;
       }
     }
-    // Before the ask and the captain turn, both of which await model calls: a
-    // playthrough is mid-turn right now and the point of an interjection is
-    // that it reaches the next decision, not the one after the reply.
+    // Before the captain turn: a playthrough is mid-turn right now and the
+    // point of an interjection is that it reaches the next decision, not the
+    // one after the reply.
     publishRoomTextToPossessor(message);
-    // One context fetch per message at most, shared by the ask's decider and
-    // the captain turn — whichever reads first pays for both.
     let contextRead: Promise<readonly DiscordInboundContextMessage[]> | undefined;
     const loadContextOnce = () => (contextRead ??= readDiscordContext(message, textIngressContextLimit));
-    // Decided and executed before the turn, and awaited, so his reply in the
-    // same exchange reflects reality: he is the voice, the bridge is the
-    // actor (ADR 0062). A closed gate resolves immediately at no cost.
-    const voicePresenceNote =
-      voicePresenceAsk === undefined
-        ? undefined
-        : await handleVoicePresenceAsk(
-            voicePresenceAsk,
-            {
-              ...inbound,
-              // Read before the ingress turn touches its counters, so this is
-              // his engagement as of when the message arrived.
-              engagedInChannel: textIngress.engagedInChannel(message.channelId),
-              loadContext: async () =>
-                (await loadContextOnce()).map((line) => ({
-                  speaker:
-                    line.authorId === client.user?.id
-                      ? ("clankie" as const)
-                      : line.authorId === message.author.id
-                        ? ("asker" as const)
-                        : ("other" as const),
-                  body: line.body,
-                })),
-            },
-            () => resolveVoiceMember(message),
-          );
     const result = await textIngress.handle({
       ...inbound,
-      ...(voicePresenceNote === undefined ? {} : { voicePresenceNote }),
       loadContextMessages: loadContextOnce,
     });
     if (result.state === "failed") {
@@ -1127,22 +1064,45 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   }
 }
 
-/**
- * The asker as the gateway cache sees them right now: roles for the authority
- * check, their current voice channel as the only possible join target, and the
- * guild's voice adapter. Read at gate time and again at execution time so a
- * decider in flight never acts on a stale channel.
- */
-function resolveVoiceMember(message: Message): VoicePresenceMember | undefined {
-  const guild = message.guild;
-  if (guild === null) return undefined;
-  const member = message.member ?? guild.members.cache.get(message.author.id);
-  if (!member) return undefined;
-  return {
-    roleIds: new Set(member.roles.cache.keys()),
-    voiceChannelId: member.voice.channelId ?? undefined,
-    adapterCreator: guild.voiceAdapterCreator,
-  };
+async function executeCaptainVoicePresence(
+  action: VoicePresenceControlAction,
+  input: VoicePresenceControlInput,
+) {
+  const guild = client.guilds.cache.get(input.guildId);
+  const member =
+    guild === undefined
+      ? undefined
+      : (guild.members.cache.get(input.actorId) ??
+        (await guild.members.fetch(input.actorId).catch(() => undefined)));
+  if (guild === undefined || member === undefined) {
+    return {
+      action: action === "join" ? ("join_refused" as const) : ("leave_refused" as const),
+      reason: "failed" as const,
+    };
+  }
+  const result = await executeVoicePresenceIntent(
+    { bindings: roleBindings, joinPolicy: voiceJoinPolicy, voiceGuildIds, voiceChannelIds, voiceSession },
+    {
+      intent: action,
+      guildId: input.guildId,
+      principal: { userId: input.actorId, roleIds: new Set(member.roles.cache.keys()) },
+      memberVoiceChannelId: member.voice.channelId ?? undefined,
+      adapterCreator: guild.voiceAdapterCreator,
+    },
+  );
+  console.info(
+    {
+      action,
+      guildId: input.guildId,
+      actorId: input.actorId,
+      outcome: result.action,
+      ...(result.action === "join_refused" || result.action === "leave_refused"
+        ? { reason: result.reason }
+        : {}),
+    },
+    "Captain voice presence tool",
+  );
+  return result;
 }
 
 function memberRoleIds(interaction: ChatInputCommandInteraction): ReadonlySet<string> {
@@ -1276,10 +1236,12 @@ function reportPresencePhaseFailure(error: unknown): void {
 }
 
 let shutdownPromise: Promise<void> | undefined;
+let discordControlServer: ReturnType<typeof createServer> | undefined;
 async function shutdown(signal: NodeJS.Signals): Promise<void> {
   if (shutdownPromise !== undefined) return shutdownPromise;
   shutdownPromise = (async () => {
     voiceIdleAutoLeave?.stop();
+    discordControlServer?.close();
     await possessorVoiceListener?.close();
     await voiceSession?.leave();
     client.destroy();
@@ -1328,6 +1290,24 @@ if (textIngress !== undefined) {
   }, CATCH_UP_INTERVAL_MS[storedSettings.persona.chattiness]);
   catchUpTimer.unref();
 }
+
+const discordControlPort = Number.parseInt(process.env.CLANKIE_DISCORD_BRIDGE_CONTROL_PORT ?? "4313", 10);
+const controlServer = createServer((request, response) => {
+  const url = request.url ?? "/";
+  if (request.method === "GET" && (url === "/" || url === "/health")) {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ ok: true, service: "discord-bridge" }));
+    return;
+  }
+  if (tryHandleVoicePresenceControlRequest(request, response, executeCaptainVoicePresence)) return;
+  response.writeHead(404);
+  response.end();
+});
+discordControlServer = controlServer;
+await new Promise<void>((resolve, reject) => {
+  controlServer.once("error", reject);
+  controlServer.listen(discordControlPort, "127.0.0.1", () => resolve());
+});
 
 await presenceSession.start().catch(reportPresencePhaseFailure);
 await client.login(token);

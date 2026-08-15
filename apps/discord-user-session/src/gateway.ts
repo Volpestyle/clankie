@@ -104,6 +104,7 @@ export class DiscordUserGateway {
   private resumeUrl: string | undefined;
   private selfUserId: string | undefined;
   private selfVoiceSessionId: string | undefined;
+  private readonly voiceChannels = new Map<string, string>();
   private reconnectAttempts = 0;
   private acked = true;
   private closed = false;
@@ -122,6 +123,11 @@ export class DiscordUserGateway {
   /** Discord voice session id for this user, once they have joined a channel. */
   public get voiceSessionId(): string | undefined {
     return this.selfVoiceSessionId;
+  }
+
+  /** Fresh gateway voice state for an actor; channel ids never come from model input. */
+  public voiceChannelFor(guildId: string, userId: string): string | undefined {
+    return this.voiceChannels.get(`${guildId}:${userId}`);
   }
 
   public on<E extends keyof DiscordGatewayEvents>(event: E, listener: Listener<E>): void {
@@ -240,6 +246,7 @@ export class DiscordUserGateway {
     switch (type) {
       case "READY": {
         this.reconnectAttempts = 0;
+        this.voiceChannels.clear();
         const user = record(payload.user);
         this.sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined;
         this.resumeUrl =
@@ -257,6 +264,22 @@ export class DiscordUserGateway {
         this.reconnectAttempts = 0;
         this.emit("resumed");
         return;
+      case "GUILD_CREATE": {
+        if (typeof payload.id !== "string" || !Array.isArray(payload.voice_states)) return;
+        for (const value of payload.voice_states) {
+          const state = record(value);
+          if (typeof state?.user_id !== "string" || typeof state.channel_id !== "string") continue;
+          this.voiceChannels.set(`${payload.id}:${state.user_id}`, state.channel_id);
+        }
+        return;
+      }
+      case "GUILD_DELETE": {
+        if (typeof payload.id !== "string") return;
+        const prefix = `${payload.id}:`;
+        for (const key of this.voiceChannels.keys())
+          if (key.startsWith(prefix)) this.voiceChannels.delete(key);
+        return;
+      }
       case "MESSAGE_CREATE": {
         const author = record(payload.author);
         if (typeof payload.id !== "string" || typeof payload.channel_id !== "string") return;
@@ -279,6 +302,11 @@ export class DiscordUserGateway {
       }
       case "VOICE_STATE_UPDATE": {
         if (typeof payload.user_id !== "string") return;
+        if (typeof payload.guild_id === "string") {
+          const key = `${payload.guild_id}:${payload.user_id}`;
+          if (typeof payload.channel_id === "string") this.voiceChannels.set(key, payload.channel_id);
+          else this.voiceChannels.delete(key);
+        }
         if (payload.user_id === this.selfUserId && typeof payload.session_id === "string") {
           this.selfVoiceSessionId = payload.session_id;
         }
