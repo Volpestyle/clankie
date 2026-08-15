@@ -27,9 +27,14 @@ export const DiscordBridgeReceiptSchema = z
       "discord.voice.joined",
       "discord.voice.consent",
       "discord.voice.utterance",
+      "discord.voice.transcription",
+      "discord.voice.floor_decision",
       // ADR 0057: the floor machine and the volition gate are receipt-visible
       // so wake/release and offered/taken/suppressed are numbers, not vibes.
       "discord.voice.floor",
+      "discord.voice.model_response",
+      "discord.voice.realtime_tool",
+      "discord.voice.music",
       "discord.voice.response",
       "discord.voice.volition",
       "discord.voice.overlap",

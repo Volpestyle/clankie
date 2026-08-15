@@ -227,10 +227,10 @@ context per response, flushed when the response's text completes, closed early
 on barge-in — whose 24 kHz PCM feeds the same playback path. The ears, floor
 machine, `ask_clankie` fence, and receipts are identical in both modes.
 
-The engaged session holds exactly one tool: `ask_clankie`, which routes
-through the unchanged continuing `discord_voice` captain lane and recalls only
-service-approved person memory. Conversation never pays a captain turn;
-anything that touches the world does. Nothing said in voice can authorize
+The engaged session uses `ask_clankie` for the unchanged continuing
+`discord_voice` captain lane and bounded local tools for YouTube search and
+music transport. Conversation and music control never pay a captain turn;
+anything else that touches the world does. Nothing said in voice can authorize
 privileged work, and the realtime model holds no privileged tool to be talked
 into using.
 
@@ -246,11 +246,12 @@ after `CLANKIE_VOICE_IDLE_LEAVE_MS` with no conversational sign of life.
 
 Barge-in is deliberate: the floor holder speaking over him, or a re-address,
 truncates playback, while crosstalk between other people lets him finish.
-Every transition emits a content-free receipt (`discord.voice.joined`,
-`consent`, `utterance`, `floor`, `response`, `volition`, `overlap`,
-`interrupted`, `failed`, `left`) carrying only ids, counts, durations, DAVE
-version, and typed outcomes. One `stayId` stamps every receipt from join to
-leave. `discord.voice.response` reports first-audio latency separately for
+Every transition emits a content-free receipt carrying only ids, counts,
+durations, exit codes, DAVE version, and typed outcomes. A delivery id now
+joins utterance, transcription outcome, floor decision, realtime response,
+tool call/result, music queue, `yt-dlp`/FFmpeg, and player checkpoints without
+storing the transcript, query, URL, model text, or audio. One `stayId` stamps
+every receipt from join to leave. `discord.voice.response` reports first-audio latency separately for
 waking and continuing turns, captain handoff latency, whether the turn took
 the fast path, and realtime token counts when the provider sends them;
 `discord.voice.volition` reports the offered/taken/suppressed counters, so "he

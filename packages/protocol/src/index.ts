@@ -3042,6 +3042,89 @@ export type DiscordVoiceResponseState = z.infer<typeof DiscordVoiceResponseState
 export const DiscordVoiceResponseTriggerSchema = z.enum(["room", "narration"]);
 export type DiscordVoiceResponseTrigger = z.infer<typeof DiscordVoiceResponseTriggerSchema>;
 
+/** Content-free checkpoints between captured audio and a spoken response. */
+export const DiscordVoiceTranscriptionOutcomeSchema = z.enum(["accepted", "empty"]);
+export type DiscordVoiceTranscriptionOutcome = z.infer<typeof DiscordVoiceTranscriptionOutcomeSchema>;
+
+export const DiscordVoiceFloorDecisionActionSchema = z.enum([
+  "wake",
+  "hold",
+  "release",
+  "volition_gate_open",
+  "ignore",
+]);
+export type DiscordVoiceFloorDecisionAction = z.infer<typeof DiscordVoiceFloorDecisionActionSchema>;
+
+export const DiscordVoiceFloorDecisionReasonSchema = z.enum([
+  "addressed",
+  "reply_policy_all",
+  "volition",
+  "explicit",
+  "decay",
+]);
+export type DiscordVoiceFloorDecisionReason = z.infer<typeof DiscordVoiceFloorDecisionReasonSchema>;
+
+export const DiscordVoiceModelResponsePhaseSchema = z.enum(["requested", "completed", "failed"]);
+export type DiscordVoiceModelResponsePhase = z.infer<typeof DiscordVoiceModelResponsePhaseSchema>;
+export const DiscordVoiceModelResponseOutcomeSchema = z.enum(["audio", "tool", "silent"]);
+export type DiscordVoiceModelResponseOutcome = z.infer<typeof DiscordVoiceModelResponseOutcomeSchema>;
+
+export const DiscordVoiceRealtimeToolNameSchema = z.enum([
+  "ask_clankie",
+  "look_at_screen",
+  "youtube_search",
+  "music_play",
+  "music_queue",
+  "music_skip",
+  "music_pause",
+  "music_resume",
+  "music_stop",
+  "music_now",
+]);
+export type DiscordVoiceRealtimeToolName = z.infer<typeof DiscordVoiceRealtimeToolNameSchema>;
+export const DiscordVoiceRealtimeToolPhaseSchema = z.enum(["called", "completed", "failed", "dropped"]);
+export type DiscordVoiceRealtimeToolPhase = z.infer<typeof DiscordVoiceRealtimeToolPhaseSchema>;
+
+export const DiscordVoiceMusicOperationSchema = z.enum([
+  "search",
+  "play",
+  "queue",
+  "skip",
+  "pause",
+  "resume",
+  "stop",
+  "now",
+  "ended",
+  "duck",
+  "unduck",
+]);
+export type DiscordVoiceMusicOperation = z.infer<typeof DiscordVoiceMusicOperationSchema>;
+export const DiscordVoiceMusicComponentSchema = z.enum(["queue", "yt_dlp", "ffmpeg", "pipeline", "player"]);
+export type DiscordVoiceMusicComponent = z.infer<typeof DiscordVoiceMusicComponentSchema>;
+export const DiscordVoiceMusicOutcomeSchema = z.enum([
+  "offered",
+  "empty",
+  "rejected",
+  "started",
+  "queued",
+  "skipped",
+  "paused",
+  "resumed",
+  "stopped",
+  "reported",
+  "ended",
+  "ducked",
+  "unducked",
+  "spawned",
+  "first_audio",
+  "exited",
+  "failed",
+  "submitted",
+  "playing",
+  "idle",
+]);
+export type DiscordVoiceMusicOutcome = z.infer<typeof DiscordVoiceMusicOutcomeSchema>;
+
 /** The realtime pipeline's failure stages. The cascade stages left with the cascade. */
 export const DiscordVoiceFailureStageSchema = z.enum([
   "capture",
@@ -3091,10 +3174,77 @@ export const DiscordVoiceEvidenceSchema = z
       .strict(),
     z
       .object({
+        type: z.literal("transcription"),
+        ...discordVoiceChannelScope,
+        userId: DiscordVoiceGatewayIdSchema,
+        deliveryId: DiscordVoiceLocalIdSchema,
+        outcome: DiscordVoiceTranscriptionOutcomeSchema,
+        /** Character count only; transcript content remains unrepresentable. */
+        characters: DiscordVoiceCounterSchema,
+        latencyMs: DiscordVoiceDurationMsSchema,
+        addressed: z.boolean(),
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("floor_decision"),
+        ...discordVoiceChannelScope,
+        userId: DiscordVoiceGatewayIdSchema,
+        deliveryId: DiscordVoiceLocalIdSchema,
+        action: DiscordVoiceFloorDecisionActionSchema,
+        reason: DiscordVoiceFloorDecisionReasonSchema.optional(),
+        state: DiscordVoiceFloorStateSchema,
+      })
+      .strict(),
+    z
+      .object({
         type: z.literal("floor"),
         ...discordVoiceChannelScope,
         state: DiscordVoiceFloorStateSchema,
         reason: DiscordVoiceFloorReasonSchema,
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("model_response"),
+        ...discordVoiceChannelScope,
+        deliveryId: DiscordVoiceLocalIdSchema,
+        userId: DiscordVoiceGatewayIdSchema.optional(),
+        phase: DiscordVoiceModelResponsePhaseSchema,
+        outcome: DiscordVoiceModelResponseOutcomeSchema.optional(),
+        responseId: DiscordVoiceLocalIdSchema.optional(),
+        audioBytes: DiscordVoiceCounterSchema.optional(),
+        textCharacters: DiscordVoiceCounterSchema.optional(),
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("realtime_tool"),
+        ...discordVoiceChannelScope,
+        deliveryId: DiscordVoiceLocalIdSchema.optional(),
+        userId: DiscordVoiceGatewayIdSchema.optional(),
+        callId: DiscordVoiceLocalIdSchema,
+        name: DiscordVoiceRealtimeToolNameSchema,
+        phase: DiscordVoiceRealtimeToolPhaseSchema,
+        code: DiscordVoiceFailureCodeSchema.optional(),
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("music"),
+        ...discordVoiceChannelScope,
+        deliveryId: DiscordVoiceLocalIdSchema.optional(),
+        callId: DiscordVoiceLocalIdSchema.optional(),
+        source: z.enum(["realtime", "control"]),
+        operation: DiscordVoiceMusicOperationSchema,
+        component: DiscordVoiceMusicComponentSchema,
+        outcome: DiscordVoiceMusicOutcomeSchema,
+        current: z.boolean().optional(),
+        queuedCount: DiscordVoiceCounterSchema.optional(),
+        paused: z.boolean().optional(),
+        resultCount: DiscordVoiceCounterSchema.optional(),
+        exitCode: DiscordVoiceCounterSchema.optional(),
+        code: DiscordVoiceFailureCodeSchema.optional(),
       })
       .strict(),
     z

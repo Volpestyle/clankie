@@ -15,7 +15,8 @@ stays on the fast path; anything that acts crosses one `ask_clankie` handoff.
 
 `gpt-realtime-2.1` owns the ears, the mouth, and turn-taking in a Discord voice
 channel. The captain owns everything Clankie can _do_. The realtime session
-reaches it through exactly one tool.
+reaches it through `ask_clankie`; local music playback stays on the voice plane
+through bounded search and transport tools that carry no machine authority.
 
 ![ADR 0057: Realtime voice speaks; the captain still acts](../diagrams/0057-realtime-voice-with-captain-handoff.jpg)
 
@@ -56,8 +57,8 @@ Voice and Captain.
 ### Fencing the controller is a safety improvement
 
 Spoken input cannot approve privileged work. The realtime agent holds **no
-privileged tool at all** — `ask_clankie`
-is its entire surface. A realtime model that is charmed, confused, or
+privileged tool at all** — only `ask_clankie` and bounded local music controls.
+A realtime model that is charmed, confused, or
 prompt-injected by room audio cannot execute anything, because it has nothing to
 execute with. Privileged requests still land in the captain lane and still come
 back as `waiting_user` with the authenticated-surface handoff.
@@ -326,12 +327,13 @@ the failure it is written to prevent.
   him, which is a worse social failure than a stray interjection. Readiness and
   the live gate must exercise the transition, not just a single-session round
   trip.
-- **Receipts contain content-free realtime fields:** first-audio latency,
-  handoff latency, whether the turn uses the fast path, a stay id from join to
-  leave, and the realtime session's input/output token counts when the provider
-  sends them — and the receipt store's rejection of transcript, response,
-  prompt, audio, and PCM fields is unchanged. A `left` receipt rolls up spoken
-  count, narration suppressions, and tokens for that stay.
+- **Receipts contain a content-free correlated trace:** one delivery id joins
+  utterance, transcription outcome, floor decision, realtime response, and
+  tool call/result. Music adds the queue transition, `yt-dlp`/FFmpeg lifecycle,
+  first PCM, and Discord player state under the same call id. The fields remain
+  ids, phases, counts, durations, and exit codes; transcript, search query, URL,
+  model text, prompt, audio, and PCM remain unrepresentable. A `left` receipt
+  rolls up spoken count, narration suppressions, and tokens for that stay.
 - **Fast-path speech is model text that no captain reviewed.** It is bounded
   untrusted output reaching people through the presence contract, the same
   status free-play speech has under ADR 0056. What it must never be is a route

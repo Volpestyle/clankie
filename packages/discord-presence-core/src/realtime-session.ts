@@ -144,7 +144,8 @@ const ASK_CLANKIE_TOOL = {
   description:
     "Ask Clankie's captain to act or to look something up. The captain holds every tool and " +
     "memory; use this for anything beyond conversation — actions, files, the story of this " +
-    "playthrough, or facts the briefing does not cover. Do not use it just to look at your screen.",
+    "playthrough, or facts the briefing does not cover. Do not use it just to look at your screen. " +
+    "Do not use it for songs or YouTube — those are youtube_search and music_play.",
   parameters: {
     type: "object",
     properties: {
@@ -173,7 +174,8 @@ const YOUTUBE_SEARCH_TOOL = {
   name: YOUTUBE_SEARCH_TOOL_NAME,
   description:
     "Search YouTube for a song or video to play in this call. Returns numbered results. " +
-    "Read them to the room and wait for a number, or call music_play / music_queue with an index or url.",
+    "Read them to the room. A reply like '1 please' or 'the second one' is music_play or music_queue " +
+    "with that index — do not ask_clankie and do not treat a song as a game.",
   parameters: {
     type: "object",
     properties: {
@@ -196,7 +198,9 @@ const MUSIC_URL_PROPERTIES = {
 const MUSIC_PLAY_TOOL = {
   type: "function",
   name: MUSIC_PLAY_TOOL_NAME,
-  description: "Play a YouTube track now, replacing whatever is playing.",
+  description:
+    "Play a YouTube track now, replacing whatever is playing. Use index from the last youtube_search " +
+    "for this speaker ('1 please' → index 1), or a url.",
   parameters: { type: "object", properties: MUSIC_URL_PROPERTIES, additionalProperties: false },
 } as const;
 

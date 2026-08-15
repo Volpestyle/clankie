@@ -48,13 +48,15 @@ is append-only JSONL or plain files now), never write to it.
   `discord_voice` is only captain `ask_clankie` handoffs (`heard`/`said` in
   `~/.clankie/captain/lanes/discord_voice~…jsonl` and the matching
   `~/.clankie/captain/voice/<sessionKey>/` tree) — not the Discord conversation.
-  Ambient speech is content-free by design (`discord.voice.utterance` /
-  `discord.voice.response` / `possessor_narration_suppressed` in
-  `discord-live-receipts.jsonl`: who, duration, trigger, latency, stay id;
-  never text or PCM). Join a play turn to audio with `speechDeliveryId` on the
-  GBA journal line and the same `deliveryId` on the submission / response /
-  suppressed receipts. Fast-path realtime replies and human words live only in
-  the bridge's in-memory window and the live OpenAI call.
+  Ambient speech is content-free by design. The same `deliveryId` joins the
+  utterance, transcription outcome, floor decision, realtime response, and
+  tool call/result; music continues under `callId` through queue, `yt-dlp`,
+  FFmpeg, first-audio, and player checkpoints. These receipts contain ids,
+  counts, phases, timings, and exit codes — never the transcript, search query,
+  URL, model text, or PCM. Join a play turn to audio with `speechDeliveryId` on
+  the GBA journal line and the same `deliveryId` on the submission / response /
+  suppressed receipts. Human words and fast-path model text live only in the
+  bridge's in-memory window and the live OpenAI call.
 
 ## Queries that answered real questions
 
@@ -86,4 +88,10 @@ Did he speak this stay, and are play reports dropped:
 
 ```bash
 jq -c 'select(.type == "discord.voice.response" or .type == "discord.voice.possessor_narration_suppressed" or .type == "discord.voice.left") | {type, at: .occurredAt, stayId: .data.stayId, deliveryId: .data.deliveryId, trigger: .data.trigger, reason: .data.reason, spoken: .data.spokenCount, suppressed: .data.narrationSuppressed, tokens: {in: .data.inputTokens, out: .data.outputTokens}}' ~/.local/state/clankie/discord-live-receipts.jsonl | tail -n 40
+```
+
+Where did one voice/music turn stop:
+
+```bash
+jq -c --arg id '<delivery-or-call-id>' 'select(.data.deliveryId == $id or .data.callId == $id) | {type, at: .occurredAt, data: .data}' ~/.local/state/clankie/discord-live-receipts.jsonl
 ```

@@ -26,6 +26,7 @@ import { PlaySightProjection } from "./play-sight.ts";
 import { browserEnabled, createBrowserHost, type BrowserHost } from "./browser-host.ts";
 import { createTldrawHost, tldrawEnabled, type TldrawHost } from "./tldraw-host.ts";
 import { createCaptain } from "./captain/captain.ts";
+import { createDiscordMusicClient } from "./discord-music.ts";
 import { createDiscordVoicePresenceClient } from "./discord-voice-presence.ts";
 import { createEmailPort } from "./email.ts";
 import { createLinearPort } from "./linear.ts";
@@ -307,6 +308,7 @@ const captain = createCaptain(
     streamWatch: {
       current: () => Promise.resolve(boundApp().streamWatch()),
     },
+    discordMusic: createDiscordMusicClient(),
     discordVoicePresence: createDiscordVoicePresenceClient(),
     presence: {
       listSessions: () => Promise.resolve(boundApp().presenceSessions()),

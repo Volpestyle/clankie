@@ -46,7 +46,7 @@ that same store through operator-only routes.
   is on `discord.systemActorUserIds` ([ADR 0095](adr/0095-discord-system-actors.md)).
   Voice never gets them. Authored tools: browser (catalog resolved live from
   the agent-browser MCP host), `generate_image` / `generate_video`,
-  `voice_join` / `voice_leave`,
+  `voice_join` / `voice_leave`, `youtube_search` and the `music_*` controls,
   `start_play` / `stop_play`, `observe_room`, `observe_current_activity`,
   `recall_play`,
   `observe_share`, `get_self_state`, `remember_episode`. Linear search/create/comment after

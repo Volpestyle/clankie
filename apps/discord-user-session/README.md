@@ -130,12 +130,11 @@ mint those receipts.
 4. Plays an optional `sourceUrl`, or pumps the live activity PNG snapshot
    (`GET 127.0.0.1:4322/snapshot`) when he is already on the activity plane
 
-Chat and voice share one desk: `play migos next` searches YouTube (`yt-dlp`),
-lists numbered results, and a number / "the second one" queues or plays.
-Bare URLs and skip/pause still work with no model. On this body the sink is
-Go Live video. On the official bot the same desk plays audio in voice. The
-voice agent also has `youtube_search` / `music_play` tools when he is already
-talking. One track never uses both sinks.
+Songs go through the model, not a chat parser. Text uses the captain's
+`youtube_search` / `music_play` tools (they POST to this process on
+`/music/*`); voice uses the same tool names on the realtime session. Both
+hit one queue. On this body the sink is Go Live video. On the official bot
+the same queue plays audio in voice. One track never uses both sinks.
 
 Voice presence is agentic too ([ADR 0062](../../docs/adr/0062-voice-join-by-asking.md)).
 The captain's argument-free `voice_join` / `voice_leave` tools POST to this

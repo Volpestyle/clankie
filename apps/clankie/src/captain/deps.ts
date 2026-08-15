@@ -75,6 +75,32 @@ export interface CaptainDeps {
   readonly streamWatch: {
     current(): Promise<DiscordStreamWatchObservation>;
   };
+  /**
+   * Discord DJ desk on the active body (search / play / queue). Absent when
+   * the live Discord process is not accepting music.
+   */
+  readonly discordMusic?: {
+    search(input: {
+      query: string;
+      next?: boolean;
+      authorId: string;
+    }): Promise<{ ok: boolean; message: string }>;
+    play(input: {
+      url?: string;
+      index?: number;
+      authorId: string;
+    }): Promise<{ ok: boolean; message: string }>;
+    queue(input: {
+      url?: string;
+      index?: number;
+      authorId: string;
+    }): Promise<{ ok: boolean; message: string }>;
+    skip(): Promise<{ ok: boolean; message: string }>;
+    pause(): Promise<{ ok: boolean; message: string }>;
+    resume(): Promise<{ ok: boolean; message: string }>;
+    stop(): Promise<{ ok: boolean; message: string }>;
+    now(): Promise<{ ok: boolean; message: string }>;
+  };
   /** Voice membership on the active Discord body; the body resolves and authorizes the target. */
   readonly discordVoicePresence?: {
     join(input: { guildId: string; actorId: string }): Promise<DiscordVoicePresenceResult>;

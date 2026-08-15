@@ -13,8 +13,8 @@
  * when `response.create` is issued: no utterance is ever auto-answered.
  *
  * The captain never sits on the conversational critical path. The engaged
- * session's only tool is `ask_clankie`, which serializes on the turn queue and
- * routes through the unchanged `discord_voice` captain lane
+ * session's only ability tool is `ask_clankie`, which serializes on the turn
+ * queue and routes through the unchanged `discord_voice` captain lane
  * ({@link DiscordVoiceIngress}); approval-shaped results still come back as the
  * authenticated-surface handoff, so ambient voice cannot approve privileged
  * work.
@@ -46,7 +46,12 @@ import { randomUUID } from "node:crypto";
 import { PassThrough } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { opus } from "prism-media";
-import type { DiscordVoiceEvidence, DiscordVoiceResponseTrigger, DiscordVoiceWake } from "@clankie/protocol";
+import type {
+  DiscordVoiceEvidence,
+  DiscordVoiceRealtimeToolName,
+  DiscordVoiceResponseTrigger,
+  DiscordVoiceWake,
+} from "@clankie/protocol";
 import {
   ASK_CLANKIE_TOOL_NAME,
   LOOK_AT_SCREEN_TOOL_NAME,
@@ -78,6 +83,8 @@ import {
   VoiceMusicQueue,
   type VoiceMusicCommand,
   type VoiceMusicSink,
+  type VoiceMusicTraceContext,
+  type VoiceMusicTraceEvent,
 } from "./voice-music.ts";
 
 /** Shorter than this is noise, not an utterance; it earns no receipt. */
@@ -325,12 +332,15 @@ interface PendingVoiceResponse {
   outputTokens?: number;
   /** Set when the server finished the response this decision produced. */
   done: boolean;
+  /** Set synchronously when this response chose a function instead of speech. */
+  toolCalled?: boolean;
 }
 
 /** One gateway capture waiting for its speaker-bound final transcript. */
 interface PendingTranscriptTurn {
   readonly userId: string;
   readonly deliveryId: string;
+  readonly startedAtMs: number;
 }
 
 /** One response's streamed playback: a raw-PCM stream fed by deltas, played in order. */
@@ -440,19 +450,23 @@ export class DiscordVoiceSession {
     this.player = createAudioPlayer({
       behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
     });
+    const traceMusic = (event: VoiceMusicTraceEvent): void => this.handleMusicTrace(event);
     this.music =
       options.music ??
       new VoiceMusicQueue({
         sinkKind: options.musicVideo === undefined ? "audio" : "video",
+        trace: traceMusic,
         sink:
           options.musicVideo ??
           createYoutubeAudioSink({
             player: this.player,
+            trace: traceMusic,
             onEnded: () => {
               void this.music.ended();
             },
           }),
       });
+    this.music.setTrace(traceMusic);
   }
 
   public async join(input: JoinDiscordVoiceInput): Promise<DiscordVoiceSessionStatus> {
@@ -711,10 +725,24 @@ export class DiscordVoiceSession {
         decidedAtMs: this.clock(),
         done: false,
       });
+      void this.emitSafely({
+        type: "model_response",
+        guildId,
+        channelId,
+        deliveryId,
+        phase: "requested",
+      });
       try {
         conversation.createResponse();
       } catch {
         this.pendingResponses.pop();
+        void this.emitSafely({
+          type: "model_response",
+          guildId,
+          channelId,
+          deliveryId,
+          phase: "failed",
+        });
       }
     });
     this.conversationOps = queued.catch(() => undefined);
@@ -774,6 +802,7 @@ export class DiscordVoiceSession {
     const turn: PendingTranscriptTurn = {
       userId,
       deliveryId: randomUUID(),
+      startedAtMs: this.clock(),
     };
     const transcriptTurns = this.transcriptTurns.get(userId) ?? [];
     transcriptTurns.push(turn);
@@ -896,35 +925,37 @@ export class DiscordVoiceSession {
     const turn = this.transcriptTurns.get(userId)?.shift();
     if (turn === undefined) return;
     const text = event.text.trim();
+    const addressed = voiceAddressesCharacter(text, this.options.floor.names);
+    void this.emitSafely({
+      type: "transcription",
+      guildId,
+      channelId,
+      userId,
+      deliveryId: turn.deliveryId,
+      outcome: text.length === 0 ? "empty" : "accepted",
+      characters: text.length,
+      latencyMs: Math.max(0, Math.round(this.clock() - turn.startedAtMs)),
+      addressed,
+    });
     if (text.length === 0) return;
     // Barge-in (b): being re-addressed while playing truncates deliberately,
     // whichever consented speaker says it.
-    if (this.isPlaying() && voiceAddressesCharacter(text, this.options.floor.names)) {
+    if (this.isPlaying() && addressed) {
       this.truncatePlayback(userId);
     }
-    void this.routeTranscript(userId, turn, text, guildId, channelId);
-  }
-
-  private async routeTranscript(
-    userId: string,
-    turn: PendingTranscriptTurn,
-    text: string,
-    guildId: string,
-    channelId: string,
-  ): Promise<void> {
     this.lastTranscriptUserId = userId;
-    const musicReply = await this.music.handleUtterance(
-      text,
-      userId,
-      this.options.floor.names,
-      voiceAddressesCharacter(text, this.options.floor.names),
-    );
     this.pushTranscriptLine(userId, text);
-    if (musicReply !== undefined) {
-      this.speakDeskReply(turn, musicReply, guildId, channelId);
-      return;
-    }
     const decision = this.floor.observeTranscript({ speakerId: userId, text, atMs: this.clock() });
+    void this.emitSafely({
+      type: "floor_decision",
+      guildId,
+      channelId,
+      userId,
+      deliveryId: turn.deliveryId,
+      action: decision.action,
+      ...("reason" in decision ? { reason: decision.reason } : {}),
+      state: this.floor.state,
+    });
     this.applyFloorDecision(decision, turn, text, guildId, channelId);
   }
 
@@ -1069,10 +1100,26 @@ export class DiscordVoiceSession {
           decidedAtMs: this.clock(),
           done: false,
         });
+        void this.emitSafely({
+          type: "model_response",
+          guildId,
+          channelId,
+          deliveryId: turn.deliveryId,
+          userId: turn.userId,
+          phase: "requested",
+        });
         try {
           this.conversation.createResponse();
         } catch {
           this.pendingResponses.pop();
+          void this.emitSafely({
+            type: "model_response",
+            guildId,
+            channelId,
+            deliveryId: turn.deliveryId,
+            userId: turn.userId,
+            phase: "failed",
+          });
         }
       })
       .catch(() => undefined);
@@ -1210,69 +1257,36 @@ export class DiscordVoiceSession {
   // The ability path: ask_clankie → the unchanged captain lane.
   // ------------------------------------------------------------------
 
-  private speakDeskReply(
-    turn: PendingTranscriptTurn,
-    reply: string,
-    guildId: string,
-    channelId: string,
-  ): void {
-    const generation = this.sessionGeneration;
-    this.cancelHold();
-    this.armTick();
-    this.conversationOps = this.conversationOps
-      .then(async () => {
-        if (generation !== this.sessionGeneration) return;
-        if (this.conversation === undefined) {
-          await this.openConversationNow(guildId, channelId, turn.userId);
-          if (generation !== this.sessionGeneration || this.conversation === undefined) return;
-        }
-        this.pendingResponses.push({
-          deliveryId: turn.deliveryId,
-          wake: "continuing",
-          fastPath: true,
-          trigger: "room",
-          speakerId: turn.userId,
-          state: "settled",
-          handoffMs: 0,
-          decidedAtMs: this.clock(),
-          done: false,
-        });
-        try {
-          this.conversation.createTextItem(
-            `DJ desk. Speak this to the room. Do not invent other tracks or search again:\n${reply}`,
-          );
-          this.conversation.createResponse();
-        } catch {
-          this.pendingResponses.pop();
-        }
-      })
-      .catch(() => undefined);
-  }
-
   private handleFunctionCall(call: RealtimeFunctionCall, guildId: string, channelId: string): void {
+    if (!this.isRealtimeTool(call.name)) return;
+    const exchange = this.pendingResponses.find((candidate) => !candidate.done);
+    if (exchange !== undefined) exchange.toolCalled = true;
+    this.emitRealtimeTool(call, exchange, "called", guildId, channelId);
     if (this.isMusicTool(call.name)) {
       const generation = this.sessionGeneration;
       this.turnQueue = this.turnQueue
-        .then(() => this.handleMusicTool(call, generation))
-        .catch(() => undefined);
+        .then(() => this.handleMusicTool(call, exchange, generation, guildId, channelId))
+        .catch(() => this.emitRealtimeTool(call, exchange, "failed", guildId, channelId, "handler_failed"));
       return;
     }
     if (call.name === LOOK_AT_SCREEN_TOOL_NAME) {
       const generation = this.sessionGeneration;
       this.turnQueue = this.turnQueue
-        .then(() => this.handleLookAtScreen(call, generation, guildId, channelId))
-        .catch(() => undefined);
+        .then(() => this.handleLookAtScreen(call, exchange, generation, guildId, channelId))
+        .catch(() => this.emitRealtimeTool(call, exchange, "failed", guildId, channelId, "handler_failed"));
       return;
     }
-    if (call.name !== ASK_CLANKIE_TOOL_NAME) return;
     // The decision that produced this call carries the wake classification;
     // the spoken result belongs to the same exchange.
-    const exchange = this.pendingResponses.find((candidate) => !candidate.done);
     const wake = exchange?.wake ?? "continuing";
     const generation = this.sessionGeneration;
     this.turnQueue = this.turnQueue
       .then(() => this.handleAskClankie(call, exchange, wake, generation, guildId, channelId))
-      .catch(() => undefined);
+      .catch(() => this.emitRealtimeTool(call, exchange, "failed", guildId, channelId, "handler_failed"));
+  }
+
+  private isRealtimeTool(name: string): name is DiscordVoiceRealtimeToolName {
+    return name === ASK_CLANKIE_TOOL_NAME || name === LOOK_AT_SCREEN_TOOL_NAME || this.isMusicTool(name);
   }
 
   private isMusicTool(name: string): boolean {
@@ -1288,60 +1302,119 @@ export class DiscordVoiceSession {
     );
   }
 
-  private async handleMusicTool(call: RealtimeFunctionCall, generation: number): Promise<void> {
-    if (generation !== this.sessionGeneration) return;
-    const speakerId =
-      this.pendingResponses.find((candidate) => !candidate.done)?.speakerId ?? this.lastTranscriptUserId;
+  private async handleMusicTool(
+    call: RealtimeFunctionCall,
+    exchange: PendingVoiceResponse | undefined,
+    generation: number,
+    guildId: string,
+    channelId: string,
+  ): Promise<void> {
+    if (generation !== this.sessionGeneration) {
+      this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
+      return;
+    }
+    const speakerId = exchange?.speakerId ?? this.lastTranscriptUserId;
+    const trace: VoiceMusicTraceContext = {
+      source: "realtime",
+      callId: call.callId,
+      ...(exchange === undefined ? {} : { deliveryId: exchange.deliveryId }),
+    };
     const parsed = parseMusicToolArguments(call.name, call.argumentsJson);
     let reply: string;
+    let failed = false;
     try {
       if (parsed.kind === "search") {
         if (speakerId === undefined) {
           reply = "I need to know who asked before I search.";
         } else {
-          reply = await this.music.searchAndOffer(speakerId, parsed.query, parsed.queue ? "queue" : "play");
+          reply = await this.music.searchAndOffer(
+            speakerId,
+            parsed.query,
+            parsed.queue ? "queue" : "play",
+            trace,
+          );
         }
       } else if (parsed.kind === "select") {
         if (speakerId === undefined) {
           reply = "I need to know who asked.";
         } else if (parsed.index !== undefined) {
-          reply = await this.music.pick(speakerId, parsed.index);
+          reply = await this.music.pick(speakerId, parsed.index, parsed.action, trace);
         } else if (parsed.url !== undefined) {
           reply =
             parsed.action === "queue"
-              ? await this.music.enqueue(parsed.url, speakerId)
-              : await this.music.play(parsed.url, speakerId);
+              ? await this.music.enqueue(parsed.url, speakerId, trace)
+              : await this.music.play(parsed.url, speakerId, trace);
         } else {
           reply = "Give me a YouTube URL or a result number.";
         }
       } else {
-        reply = await this.music.handle({ kind: parsed.kind }, speakerId);
+        reply = await this.music.handle({ kind: parsed.kind }, speakerId, trace);
       }
     } catch {
+      failed = true;
       reply = "I couldn't do that just now.";
     }
-    if (generation !== this.sessionGeneration) return;
-    this.submitFunctionResultSafely(call.callId, reply);
+    if (generation !== this.sessionGeneration) {
+      this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
+      return;
+    }
+    const submitted = this.submitLocalFunctionResult(call.callId, reply, exchange, guildId, channelId);
+    this.emitRealtimeTool(
+      call,
+      exchange,
+      failed ? "failed" : submitted ? "completed" : "dropped",
+      guildId,
+      channelId,
+      failed ? "music_tool_failed" : submitted ? undefined : "result_not_submitted",
+    );
   }
 
   private async handleLookAtScreen(
     call: RealtimeFunctionCall,
+    exchange: PendingVoiceResponse | undefined,
     generation: number,
     guildId: string,
     channelId: string,
   ): Promise<void> {
-    if (generation !== this.sessionGeneration) return;
+    if (generation !== this.sessionGeneration) {
+      this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
+      return;
+    }
     const look = this.options.lookAtScreen;
     if (look === undefined) {
-      this.submitFunctionResultSafely(call.callId, "You are not playing. There is no screen to look at.");
+      const submitted = this.submitLocalFunctionResult(
+        call.callId,
+        "You are not playing. There is no screen to look at.",
+        exchange,
+        guildId,
+        channelId,
+      );
+      this.emitRealtimeTool(
+        call,
+        exchange,
+        submitted ? "completed" : "dropped",
+        guildId,
+        channelId,
+        submitted ? undefined : "result_not_submitted",
+      );
       return;
     }
     let result: LookAtScreenResult;
     try {
       result = await look();
     } catch {
-      if (generation !== this.sessionGeneration) return;
-      this.submitFunctionResultSafely(call.callId, "I couldn't see the screen just now.");
+      if (generation !== this.sessionGeneration) {
+        this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
+        return;
+      }
+      this.submitLocalFunctionResult(
+        call.callId,
+        "I couldn't see the screen just now.",
+        exchange,
+        guildId,
+        channelId,
+      );
+      this.emitRealtimeTool(call, exchange, "failed", guildId, channelId, "look_at_screen_failed");
       await this.emitSafely({
         type: "failed",
         guildId,
@@ -1351,13 +1424,30 @@ export class DiscordVoiceSession {
       });
       return;
     }
-    if (generation !== this.sessionGeneration) return;
+    if (generation !== this.sessionGeneration) {
+      this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
+      return;
+    }
     if (result.outcome === "not_playing") {
-      this.submitFunctionResultSafely(call.callId, "You are not playing. There is no screen to look at.");
+      const submitted = this.submitLocalFunctionResult(
+        call.callId,
+        "You are not playing. There is no screen to look at.",
+        exchange,
+        guildId,
+        channelId,
+      );
+      this.emitRealtimeTool(call, exchange, submitted ? "completed" : "dropped", guildId, channelId);
       return;
     }
     if (result.outcome === "pending") {
-      this.submitFunctionResultSafely(call.callId, "The game is starting; the screen is not ready yet.");
+      const submitted = this.submitLocalFunctionResult(
+        call.callId,
+        "The game is starting; the screen is not ready yet.",
+        exchange,
+        guildId,
+        channelId,
+      );
+      this.emitRealtimeTool(call, exchange, submitted ? "completed" : "dropped", guildId, channelId);
       return;
     }
     const conversation = this.conversation;
@@ -1365,13 +1455,24 @@ export class DiscordVoiceSession {
     try {
       conversation.createImageItem(result.pngBase64, result.mimeType);
     } catch {
-      this.submitFunctionResultSafely(call.callId, "I couldn't see the screen just now.");
+      this.submitLocalFunctionResult(
+        call.callId,
+        "I couldn't see the screen just now.",
+        exchange,
+        guildId,
+        channelId,
+      );
+      this.emitRealtimeTool(call, exchange, "failed", guildId, channelId, "look_at_screen_failed");
       return;
     }
-    this.submitFunctionResultSafely(
+    const submitted = this.submitLocalFunctionResult(
       call.callId,
       "You are looking at your own screen. Talk about what you see. Do not read this caption aloud.",
+      exchange,
+      guildId,
+      channelId,
     );
+    this.emitRealtimeTool(call, exchange, submitted ? "completed" : "dropped", guildId, channelId);
   }
 
   private async handleAskClankie(
@@ -1382,10 +1483,14 @@ export class DiscordVoiceSession {
     guildId: string,
     channelId: string,
   ): Promise<void> {
-    if (generation !== this.sessionGeneration) return;
+    if (generation !== this.sessionGeneration) {
+      this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
+      return;
+    }
     const request = parseAskClankieRequest(call.argumentsJson);
     if (request === undefined) {
       this.submitFunctionResultSafely(call.callId, CAPTAIN_UNREACHABLE_TEXT);
+      this.emitRealtimeTool(call, exchange, "failed", guildId, channelId, "arguments_invalid");
       await this.emitSafely({
         type: "failed",
         guildId,
@@ -1401,6 +1506,7 @@ export class DiscordVoiceSession {
     const userId = exchange?.speakerId;
     if (userId === undefined) {
       this.submitFunctionResultSafely(call.callId, CAPTAIN_UNREACHABLE_TEXT);
+      this.emitRealtimeTool(call, exchange, "failed", guildId, channelId, "speaker_unknown");
       await this.emitSafely({
         type: "failed",
         guildId,
@@ -1425,8 +1531,12 @@ export class DiscordVoiceSession {
     } catch {
       // The session must not hang on a captain failure: a short fixed
       // sentence goes back so the model can close the exchange.
-      if (generation !== this.sessionGeneration) return;
+      if (generation !== this.sessionGeneration) {
+        this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
+        return;
+      }
       this.submitFunctionResultSafely(call.callId, CAPTAIN_UNREACHABLE_TEXT);
+      this.emitRealtimeTool(call, exchange, "failed", guildId, channelId, "captain_handoff_failed");
       await this.emitSafely({
         type: "failed",
         guildId,
@@ -1437,9 +1547,13 @@ export class DiscordVoiceSession {
       return;
     }
     const handoffMs = this.clock() - startedAtMs;
-    if (generation !== this.sessionGeneration) return;
+    if (generation !== this.sessionGeneration) {
+      this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
+      return;
+    }
     if (outcome.state === "failed") {
       this.submitFunctionResultSafely(call.callId, CAPTAIN_UNREACHABLE_TEXT);
+      this.emitRealtimeTool(call, exchange, "failed", guildId, channelId, sanitizeFailureCode(outcome.code));
       await this.emitSafely({
         type: "failed",
         guildId,
@@ -1455,6 +1569,7 @@ export class DiscordVoiceSession {
       // function call is left unresolved rather than provoking a response
       // whose audio would only be dropped, because deciding to stay quiet
       // must not cost a response (ADR 0051 via ADR 0057).
+      this.emitRealtimeTool(call, exchange, "completed", guildId, channelId, "captain_declined");
       return;
     }
     // waiting_user keeps DiscordVoiceIngress's authenticated-surface handoff
@@ -1474,7 +1589,89 @@ export class DiscordVoiceSession {
     });
     if (!this.submitFunctionResultSafely(call.callId, outcome.response)) {
       this.pendingResponses.pop();
+      this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "result_not_submitted");
+      return;
     }
+    void this.emitSafely({
+      type: "model_response",
+      guildId,
+      channelId,
+      deliveryId,
+      userId,
+      phase: "requested",
+    });
+    this.emitRealtimeTool(call, exchange, "completed", guildId, channelId);
+  }
+
+  private submitLocalFunctionResult(
+    callId: string,
+    output: string,
+    exchange: PendingVoiceResponse | undefined,
+    guildId: string,
+    channelId: string,
+  ): boolean {
+    const pending =
+      exchange === undefined
+        ? undefined
+        : {
+            deliveryId: exchange.deliveryId,
+            wake: exchange.wake,
+            fastPath: true,
+            trigger: exchange.trigger,
+            ...(exchange.speakerId === undefined ? {} : { speakerId: exchange.speakerId }),
+            state: "settled" as const,
+            handoffMs: 0,
+            decidedAtMs: this.clock(),
+            done: false,
+          };
+    if (pending !== undefined) this.pendingResponses.push(pending);
+    if (!this.submitFunctionResultSafely(callId, output)) {
+      if (pending !== undefined) {
+        this.pendingResponses = this.pendingResponses.filter((candidate) => candidate !== pending);
+        void this.emitSafely({
+          type: "model_response",
+          guildId,
+          channelId,
+          deliveryId: pending.deliveryId,
+          ...(pending.speakerId === undefined ? {} : { userId: pending.speakerId }),
+          phase: "failed",
+        });
+      }
+      return false;
+    }
+    if (pending !== undefined) {
+      void this.emitSafely({
+        type: "model_response",
+        guildId,
+        channelId,
+        deliveryId: pending.deliveryId,
+        ...(pending.speakerId === undefined ? {} : { userId: pending.speakerId }),
+        phase: "requested",
+      });
+    }
+    return true;
+  }
+
+  private emitRealtimeTool(
+    call: RealtimeFunctionCall,
+    exchange: PendingVoiceResponse | undefined,
+    phase: "called" | "completed" | "failed" | "dropped",
+    guildId: string,
+    channelId: string,
+    code?: string,
+  ): void {
+    if (!this.isRealtimeTool(call.name)) return;
+    void this.emitSafely({
+      type: "realtime_tool",
+      guildId,
+      channelId,
+      ...(exchange === undefined ? {} : { deliveryId: exchange.deliveryId }),
+      ...(exchange?.speakerId === undefined ? {} : { userId: exchange.speakerId }),
+      callId: call.callId,
+      name: call.name,
+      phase,
+      ...(code === undefined ? {} : { code }),
+    });
   }
 
   private submitFunctionResultSafely(callId: string, output: string): boolean {
@@ -1537,6 +1734,23 @@ export class DiscordVoiceSession {
     settled.done = true;
     if (meta?.inputTokens !== undefined) settled.inputTokens = meta.inputTokens;
     if (meta?.outputTokens !== undefined) settled.outputTokens = meta.outputTokens;
+    const guildId = this.guildId;
+    const channelId = this.channelId;
+    if (guildId !== undefined && channelId !== undefined) {
+      void this.emitSafely({
+        type: "model_response",
+        guildId,
+        channelId,
+        deliveryId: settled.deliveryId,
+        ...(settled.speakerId === undefined ? {} : { userId: settled.speakerId }),
+        phase: meta === undefined || meta.status === "completed" ? "completed" : "failed",
+        outcome:
+          (meta?.audioBytes ?? 0) > 0 ? "audio" : settled.toolCalled === true ? "tool" : "silent",
+        ...(meta?.responseId === undefined ? {} : { responseId: meta.responseId }),
+        ...(meta?.audioBytes === undefined ? {} : { audioBytes: meta.audioBytes }),
+        ...(meta?.textCharacters === undefined ? {} : { textCharacters: meta.textCharacters }),
+      });
+    }
     if (settled.firstAudioAtMs === undefined) {
       // The response spoke nothing: a function-call round trip (whose
       // follow-up response carries the speech) or a model that chose
@@ -1923,6 +2137,13 @@ export class DiscordVoiceSession {
   private addStayTokens(pending: Pick<PendingVoiceResponse, "inputTokens" | "outputTokens">): void {
     this.stayInputTokens += pending.inputTokens ?? 0;
     this.stayOutputTokens += pending.outputTokens ?? 0;
+  }
+
+  private handleMusicTrace(event: VoiceMusicTraceEvent): void {
+    const guildId = this.guildId;
+    const channelId = this.channelId;
+    if (guildId === undefined || channelId === undefined) return;
+    void this.emitSafely({ type: "music", guildId, channelId, ...event });
   }
 
   /**

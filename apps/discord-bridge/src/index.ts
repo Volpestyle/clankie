@@ -44,11 +44,10 @@ import {
   DiscordTextIngress,
   DiscordVoiceIngress,
   DiscordVoiceSession,
-  dispatchVoiceMusicChat,
   parseDiscordDmPolicy,
-  parseMusicIntent,
   parseDiscordIdSet,
   selectInboundImageAttachments,
+  tryHandleMusicControlRequest,
   tryHandleVoicePresenceControlRequest,
   type DiscordBridgeReceipt,
   type DiscordInboundContextMessage,
@@ -604,36 +603,6 @@ client.on("messageCreate", async (message) => {
       attachments: selection.attachments,
       attachmentsOmitted: selection.omitted,
     };
-    if (voiceSession !== undefined) {
-      const musicIntent = parseMusicIntent(inbound.body, {
-        names: characterNames(storedSettings.persona),
-        hasCurrent: voiceSession.music.snapshot().current !== undefined,
-      });
-      if (musicIntent !== undefined) {
-        const needsChannel =
-          musicIntent.kind === "play" ||
-          musicIntent.kind === "queue" ||
-          musicIntent.kind === "pick" ||
-          musicIntent.kind === "skip" ||
-          musicIntent.kind === "pause" ||
-          musicIntent.kind === "resume" ||
-          musicIntent.kind === "stop";
-        const reply =
-          needsChannel && !voiceSession.status().active
-            ? "I'm not in a voice channel."
-            : await dispatchVoiceMusicChat({
-                body: inbound.body,
-                authorId: inbound.authorId,
-                names: characterNames(storedSettings.persona),
-                addressed: inbound.mentionsBot,
-                queue: voiceSession.music,
-              });
-        if (reply !== undefined && message.channel.isSendable()) {
-          await message.channel.send({ content: reply, allowedMentions: { parse: [] } });
-        }
-        return;
-      }
-    }
     // Before the captain turn: a playthrough is mid-turn right now and the
     // point of an interjection is that it reaches the next decision, not the
     // one after the reply.
@@ -1236,12 +1205,12 @@ function reportPresencePhaseFailure(error: unknown): void {
 }
 
 let shutdownPromise: Promise<void> | undefined;
-let discordControlServer: ReturnType<typeof createServer> | undefined;
+let musicControlServer: ReturnType<typeof createServer> | undefined;
 async function shutdown(signal: NodeJS.Signals): Promise<void> {
   if (shutdownPromise !== undefined) return shutdownPromise;
   shutdownPromise = (async () => {
     voiceIdleAutoLeave?.stop();
-    discordControlServer?.close();
+    musicControlServer?.close();
     await possessorVoiceListener?.close();
     await voiceSession?.leave();
     client.destroy();
@@ -1291,22 +1260,23 @@ if (textIngress !== undefined) {
   catchUpTimer.unref();
 }
 
-const discordControlPort = Number.parseInt(process.env.CLANKIE_DISCORD_BRIDGE_CONTROL_PORT ?? "4313", 10);
-const controlServer = createServer((request, response) => {
+const musicControlPort = Number.parseInt(process.env.CLANKIE_DISCORD_BRIDGE_CONTROL_PORT ?? "4313", 10);
+const musicServer = createServer((request, response) => {
   const url = request.url ?? "/";
   if (request.method === "GET" && (url === "/" || url === "/health")) {
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify({ ok: true, service: "discord-bridge" }));
     return;
   }
+  if (tryHandleMusicControlRequest(request, response, voiceSession?.music)) return;
   if (tryHandleVoicePresenceControlRequest(request, response, executeCaptainVoicePresence)) return;
   response.writeHead(404);
   response.end();
 });
-discordControlServer = controlServer;
+musicControlServer = musicServer;
 await new Promise<void>((resolve, reject) => {
-  controlServer.once("error", reject);
-  controlServer.listen(discordControlPort, "127.0.0.1", () => resolve());
+  musicServer.once("error", reject);
+  musicServer.listen(musicControlPort, "127.0.0.1", () => resolve());
 });
 
 await presenceSession.start().catch(reportPresencePhaseFailure);

@@ -16,6 +16,7 @@ import {
 import { discordPcmToRealtimePcm, openAiPcmToDiscordPcm } from "../src/voice-audio.ts";
 import type { VoiceFloorOptions } from "../src/voice-floor.ts";
 import { DiscordVoiceIngress } from "../src/voice-ingress.ts";
+import { VoiceMusicQueue } from "../src/voice-music.ts";
 import {
   CAPTAIN_UNREACHABLE_TEXT,
   DiscordVoiceSession,
@@ -359,6 +360,7 @@ interface HarnessOptions {
   readonly floorOverrides?: Partial<VoiceFloorOptions>;
   readonly captain?: (request: DiscordPresenceChannelTurnRequest) => Promise<CaptainChannelTurnResult>;
   readonly lookAtScreen?: () => Promise<import("../src/voice-session.ts").LookAtScreenResult>;
+  readonly music?: VoiceMusicQueue;
   readonly speakerTranscriptionGate?: Promise<void>;
 }
 
@@ -415,6 +417,7 @@ function buildHarness(options: HarnessOptions = {}) {
       });
     },
     ...(options.lookAtScreen === undefined ? {} : { lookAtScreen: options.lookAtScreen }),
+    ...(options.music === undefined ? {} : { music: options.music }),
     floor: {
       names: ["clankie"],
       replyPolicy: "addressed",
@@ -771,6 +774,22 @@ describe("audio path", () => {
 describe("floor decisions", () => {
   it("an addressed wake briefs, opens, seeds an attributed ring, and responds", async () => {
     const harness = await engagedHarness();
+    const deliveryId = at(harness.ofType("utterance"), 0).deliveryId;
+    expect(harness.ofType("transcription")).toMatchObject([
+      {
+        userId: ALICE,
+        deliveryId,
+        outcome: "accepted",
+        addressed: true,
+        characters: 21,
+      },
+    ]);
+    expect(harness.ofType("floor_decision")).toMatchObject([
+      { userId: ALICE, deliveryId, action: "wake", reason: "addressed", state: "engaged" },
+    ]);
+    expect(harness.ofType("model_response")).toMatchObject([
+      { deliveryId, userId: ALICE, phase: "requested" },
+    ]);
     expect(harness.ofType("floor")).toMatchObject([
       { type: "floor", guildId: GUILD, channelId: CHANNEL, state: "engaged", reason: "addressed" },
     ]);
@@ -1181,6 +1200,54 @@ describe("ability path", () => {
     });
     await flush();
     expect(at(conversation.functionResults, 1)).toEqual({ callId: "call_2", output: "Back online." });
+  });
+
+  it("correlates a realtime music tool through its queue and spoken result", async () => {
+    const music = new VoiceMusicQueue({
+      sinkKind: "audio",
+      sink: { play: () => undefined, pause: () => undefined, resume: () => undefined, stop: () => undefined },
+      search: async () => [
+        { videoId: "video-1", url: "https://youtu.be/video-1", title: "Private title" },
+      ],
+    });
+    const harness = await engagedHarness({ music });
+    const conversation = harness.conversation();
+    const deliveryId = at(harness.ofType("utterance"), 0).deliveryId;
+    conversation.input.onFunctionCall({
+      callId: "music-call-1",
+      name: "youtube_search",
+      argumentsJson: '{"query":"private query"}',
+    });
+    conversation.input.onResponseDone({
+      responseId: "music-function-response",
+      status: "completed",
+      audioBytes: 0,
+      textCharacters: 0,
+    });
+    await flush();
+    expect(harness.ofType("realtime_tool")).toMatchObject([
+      { deliveryId, callId: "music-call-1", name: "youtube_search", phase: "called" },
+      { deliveryId, callId: "music-call-1", name: "youtube_search", phase: "completed" },
+    ]);
+    expect(harness.ofType("music")).toMatchObject([
+      {
+        deliveryId,
+        callId: "music-call-1",
+        source: "realtime",
+        operation: "search",
+        component: "queue",
+        outcome: "offered",
+        resultCount: 1,
+      },
+    ]);
+    expect(at(harness.ofType("model_response"), 1)).toMatchObject({
+      deliveryId,
+      phase: "completed",
+      outcome: "tool",
+    });
+    expect(at(harness.ofType("model_response"), -1)).toMatchObject({ deliveryId, phase: "requested" });
+    expect(JSON.stringify(harness.evidence)).not.toContain("private query");
+    expect(JSON.stringify(harness.evidence)).not.toContain("Private title");
   });
 
   it("look_at_screen seeds a still and does not call the captain", async () => {

@@ -1,11 +1,14 @@
+import { createServer } from "node:http";
 import { describe, expect, it } from "vitest";
 import {
   VoiceMusicQueue,
+  applyMusicControl,
   isAllowedMusicUrl,
-  parseMusicIntent,
-  parseVoiceMusicCommand,
+  parseMusicControlPath,
   parseYtDlpSearchJson,
+  tryHandleMusicControlRequest,
   type VoiceMusicSink,
+  type VoiceMusicTraceEvent,
 } from "../src/voice-music.ts";
 
 function recordingSink(): VoiceMusicSink & { calls: string[] } {
@@ -27,97 +30,121 @@ function recordingSink(): VoiceMusicSink & { calls: string[] } {
   };
 }
 
-describe("voice music commands", () => {
-  it("parses natural-language play-next as a search, then a numbered pick", async () => {
+const hits = [
+  {
+    videoId: "aaa",
+    url: "https://www.youtube.com/watch?v=aaa",
+    title: "Migos - Bad and Boujee",
+    channel: "Migos",
+  },
+  {
+    videoId: "bbb",
+    url: "https://www.youtube.com/watch?v=bbb",
+    title: "Migos - MotorSport",
+  },
+] as const;
+
+describe("music control (model tools)", () => {
+  it("searches, then plays a numbered pick", async () => {
     const sink = recordingSink();
     const queue = new VoiceMusicQueue({
       sink,
       sinkKind: "audio",
-      search: async () => [
-        {
-          videoId: "aaa",
-          url: "https://www.youtube.com/watch?v=aaa",
-          title: "Migos - Bad and Boujee",
-          channel: "Migos",
-        },
-        {
-          videoId: "bbb",
-          url: "https://www.youtube.com/watch?v=bbb",
-          title: "Migos - MotorSport",
-        },
-      ],
+      search: async () => [...hits],
     });
-    const offer = await queue.handleUtterance("clankie play migos next", "u1", ["clankie"]);
-    expect(offer).toContain("1. Migos - Bad and Boujee");
-    expect(offer).toContain("Say a number to queue it.");
-    await expect(queue.handleUtterance("the second one", "u1", ["clankie"])).resolves.toContain(
-      "https://www.youtube.com/watch?v=bbb",
-    );
+    const offer = await applyMusicControl(queue, "search", { query: "migos", authorId: "u1" });
+    expect(offer.ok).toBe(true);
+    expect(offer.message).toContain("1. Migos - Bad and Boujee");
+    expect(offer.message).toContain("Say a number to play it.");
+    await expect(applyMusicControl(queue, "play", { index: 2, authorId: "u1" })).resolves.toMatchObject({
+      ok: true,
+      message: expect.stringContaining("https://www.youtube.com/watch?v=bbb"),
+    });
     expect(sink.calls).toContain("play:https://www.youtube.com/watch?v=bbb");
   });
 
-  it("parses play, queue, transport verbs, and a bare YouTube URL", () => {
-    expect(parseVoiceMusicCommand("play https://www.youtube.com/watch?v=abc")).toEqual({
-      kind: "play",
-      url: "https://www.youtube.com/watch?v=abc",
-    });
-    expect(parseVoiceMusicCommand("clankie skip", { names: ["clankie"] })).toEqual({ kind: "skip" });
-    expect(parseVoiceMusicCommand("!pause")).toEqual({ kind: "pause" });
-    expect(parseVoiceMusicCommand("https://youtu.be/xyz")).toEqual({
-      kind: "play",
-      url: "https://youtu.be/xyz",
-    });
-    expect(parseVoiceMusicCommand("https://youtu.be/xyz", { hasCurrent: true })).toEqual({
-      kind: "queue",
-      url: "https://youtu.be/xyz",
-    });
-    expect(parseVoiceMusicCommand("play https://example.com/x")).toBeUndefined();
-    expect(parseMusicIntent("clankie play migos next", { names: ["clankie"] })).toEqual({
-      kind: "queue_search",
-      query: "migos",
-    });
-    expect(parseMusicIntent("can u come and play bad and boujee")).toEqual({
-      kind: "play_search",
-      query: "bad and boujee",
-    });
-    expect(parseMusicIntent("play pokemon")).toBeUndefined();
-    expect(parseMusicIntent("the second one")).toEqual({ kind: "pick", index: 2 });
-    expect(parseMusicIntent("the song")).toEqual({ kind: "song_clarify" });
-    expect(parseMusicIntent("i mean the song")).toEqual({ kind: "song_clarify" });
-  });
-
-  it("treats 'the song' as confirming a previous play request", async () => {
+  it("queues a pick when the search or play tool says next", async () => {
     const sink = recordingSink();
     const queue = new VoiceMusicQueue({
       sink,
       sinkKind: "audio",
-      search: async () => [
-        { videoId: "x", url: "https://www.youtube.com/watch?v=x", title: "Bad and Boujee" },
-      ],
+      search: async () => [...hits],
     });
-    await queue.handleUtterance("can u come and play bad and boujee", "u1", ["clankie"]);
-    await expect(queue.handleUtterance("the song", "u1", ["clankie"])).resolves.toContain(
-      "https://www.youtube.com/watch?v=x",
-    );
-    expect(sink.calls).toContain("play:https://www.youtube.com/watch?v=x");
+    await applyMusicControl(queue, "play", { url: "https://youtu.be/now", authorId: "u1" });
+    await applyMusicControl(queue, "search", { query: "migos", authorId: "u1" });
+    const queued = await applyMusicControl(queue, "queue", { index: 1, authorId: "u1" });
+    expect(queued.message).toContain("Queued");
+    expect(queue.snapshot().queued).toHaveLength(1);
   });
 
-  it("treats a directed play request as a search even without a leading name", async () => {
+  it("plays a url and refuses a missing pick", async () => {
+    const sink = recordingSink();
+    const queue = new VoiceMusicQueue({ sink, sinkKind: "audio" });
+    await expect(
+      applyMusicControl(queue, "play", { url: "https://www.youtube.com/watch?v=abc", authorId: "u1" }),
+    ).resolves.toMatchObject({ ok: true, message: expect.stringContaining("Playing") });
+    await expect(applyMusicControl(queue, "play", { index: 1, authorId: "u1" })).resolves.toMatchObject({
+      ok: true,
+      message: "I don't have a search waiting. Ask me to play something first.",
+    });
+    await expect(applyMusicControl(queue, "play", { authorId: "u1" })).resolves.toEqual({
+      ok: false,
+      message: "Need a YouTube URL or a result number.",
+    });
+  });
+
+  it("parses /music/* control paths", () => {
+    expect(parseMusicControlPath("/music/search")).toBe("search");
+    expect(parseMusicControlPath("/music/play?x=1")).toBe("play");
+    expect(parseMusicControlPath("/music/nope")).toBeUndefined();
+    expect(parseMusicControlPath("/go-live/start")).toBeUndefined();
+  });
+
+  it("serves search then pick over loopback HTTP", async () => {
     const sink = recordingSink();
     const queue = new VoiceMusicQueue({
       sink,
       sinkKind: "audio",
-      search: async (query) => [
-        { videoId: "x", url: "https://www.youtube.com/watch?v=x", title: query },
-      ],
+      search: async () => [...hits],
     });
-    const offer = await queue.handleUtterance("can u come and play bad and boujee", "u1", ["clankie"]);
-    expect(offer).toContain("1. bad and boujee");
-    expect(offer).toContain("Say a number to play it.");
+    const server = createServer((request, response) => {
+      if (!tryHandleMusicControlRequest(request, response, queue)) {
+        response.writeHead(404);
+        response.end();
+      }
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", () => resolve());
+    });
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("expected port");
+      const base = `http://127.0.0.1:${String(address.port)}`;
+      const search = await fetch(`${base}/music/search`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ query: "bad and boujee", authorId: "u1" }),
+      });
+      const searchBody = (await search.json()) as { ok: boolean; message: string };
+      expect(searchBody.ok).toBe(true);
+      expect(searchBody.message).toContain("1. Migos - Bad and Boujee");
+      const play = await fetch(`${base}/music/play`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ index: 1, authorId: "u1" }),
+      });
+      const playBody = (await play.json()) as { ok: boolean; message: string };
+      expect(playBody.ok).toBe(true);
+      expect(sink.calls).toContain("play:https://www.youtube.com/watch?v=aaa");
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
   });
 
   it("parses yt-dlp search JSON into hits", () => {
-    const hits = parseYtDlpSearchJson(
+    const parsed = parseYtDlpSearchJson(
       JSON.stringify({
         entries: [
           { id: "aaa", title: "Bad and Boujee", uploader: "Migos", duration_string: "4:23" },
@@ -125,7 +152,7 @@ describe("voice music commands", () => {
         ],
       }),
     );
-    expect(hits).toEqual([
+    expect(parsed).toEqual([
       {
         videoId: "aaa",
         url: "https://www.youtube.com/watch?v=aaa",
@@ -144,6 +171,25 @@ describe("voice music commands", () => {
 });
 
 describe("voice music queue", () => {
+  it("correlates search and playback without logging the query or URL", async () => {
+    const events: VoiceMusicTraceEvent[] = [];
+    const queue = new VoiceMusicQueue({
+      sink: recordingSink(),
+      sinkKind: "audio",
+      search: async () => [...hits],
+      trace: (event) => events.push(event),
+    });
+    const trace = { source: "realtime", deliveryId: "delivery-1", callId: "call-1" } as const;
+    await queue.searchAndOffer("u1", "private query", "play", trace);
+    await queue.pick("u1", 1, "play", trace);
+    expect(events).toMatchObject([
+      { ...trace, operation: "search", component: "queue", outcome: "offered", resultCount: 2 },
+      { ...trace, operation: "play", component: "queue", outcome: "started", current: true },
+    ]);
+    expect(JSON.stringify(events)).not.toContain("private query");
+    expect(JSON.stringify(events)).not.toContain("youtu.be");
+  });
+
   it("plays immediately and queues the next track", async () => {
     const sink = recordingSink();
     const queue = new VoiceMusicQueue({ sink, sinkKind: "audio" });

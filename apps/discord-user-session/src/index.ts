@@ -13,13 +13,13 @@ import {
   DiscordTextIngress,
   DiscordVoiceIngress,
   DiscordVoiceSession,
-  dispatchVoiceMusicChat,
   openRealtimeConversationSession,
   openRealtimeTranscriptionSession,
   parseDiscordDmPolicy,
   parseDiscordIdSet,
   selectInboundImageAttachments,
   VoiceMusicQueue,
+  tryHandleMusicControlRequest,
   tryHandleVoicePresenceControlRequest,
   type DiscordBridgeReceipt,
   type VoicePresenceControlAction,
@@ -310,17 +310,6 @@ gateway.on("messageCreate", (message) => {
   void (async () => {
     try {
       const selection = selectInboundImageAttachments(message.attachments, message.embeds);
-      const musicReply = await dispatchVoiceMusicChat({
-        body: message.content,
-        authorId: message.authorId,
-        names: characterNames(storedSettings.persona),
-        addressed: message.mentionsSelf,
-        queue: music,
-      });
-      if (musicReply !== undefined) {
-        await gateway.sendMessage(message.channelId, musicReply);
-        return;
-      }
       const result = await textIngress.handle({
         id: message.id,
         ...(message.guildId === undefined ? {} : { guildId: message.guildId }),
@@ -698,6 +687,7 @@ const server = createServer((request, response) => {
     response.end(JSON.stringify({ ok: true }));
     return;
   }
+  if (tryHandleMusicControlRequest(request, response, music)) return;
   if (tryHandleVoicePresenceControlRequest(request, response, executeCaptainVoicePresence)) return;
   response.writeHead(404);
   response.end();

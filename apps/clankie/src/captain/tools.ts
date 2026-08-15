@@ -113,11 +113,11 @@ export function captainTools(
       name: "start_play",
       label: "Start playing",
       description:
-        "Start playing a game on your own body, live on the activity watch surface. Currently playable: " +
-        "pokemon-firered and pokemon-emerald. The session resumes from your latest checkpoint and keeps going " +
-        "until someone asks you to stop; people can watch. 'started' means you are playing; 'start_refused' names " +
-        "a reason you can say out loud (body_held means someone else is already driving your body); 'pending' " +
-        "means it is still spinning up — say so, never claim to be playing yet.",
+        "Start playing a GAME on your own body (Pokemon FireRed or Emerald), live on the activity watch surface. " +
+        "Not for songs or YouTube — those are youtube_search / music_play. The session resumes from your latest " +
+        "checkpoint and keeps going until someone asks you to stop; people can watch. 'started' means you are " +
+        "playing; 'start_refused' names a reason you can say out loud (body_held means someone else is already " +
+        "driving your body); 'pending' means it is still spinning up — say so, never claim to be playing yet.",
       parameters: Type.Object({
         environmentId: Type.Union([Type.Literal("pokemon-firered"), Type.Literal("pokemon-emerald")], {
           default: "pokemon-firered",
@@ -138,6 +138,7 @@ export function captainTools(
         ),
     }),
     ...discordVoicePresenceTools(deps, turn, lane),
+    ...discordMusicTools(deps, turn),
     defineTool({
       name: "stop_play",
       label: "Stop playing",
@@ -390,6 +391,116 @@ function discordVoicePresenceTools(
  * lane rather than only the ones that hold a shell. The design system is fixed,
  * so his attention goes to what the diagram says.
  */
+function discordMusicTools(deps: CaptainDeps, turn: TurnContext): ToolDefinition[] {
+  const music = deps.discordMusic;
+  const author = (): string => turn.actorId?.trim() || "unknown";
+  const unavailable = () =>
+    json({
+      ok: false,
+      message: "The live Discord body is not accepting music right now. I need to be in a voice channel.",
+    });
+  return [
+    defineTool({
+      name: "youtube_search",
+      label: "Search YouTube",
+      description:
+        "Search YouTube for a song or video to play in Discord voice. Returns numbered results. " +
+        "Read them to the room and ask which one, then music_play or music_queue with that url or index. " +
+        "Use this when someone wants a song, a track, or YouTube — not start_play (that is Pokemon).",
+      parameters: Type.Object({
+        query: Type.String({ minLength: 1, maxLength: 200 }),
+        next: Type.Optional(Type.Boolean({ description: "True if they asked to play it next / queue it." })),
+      }),
+      execute: async (_id, params) => {
+        if (music === undefined) return unavailable();
+        return json(
+          await music.search({ query: params.query, next: params.next === true, authorId: author() }),
+        );
+      },
+    }),
+    defineTool({
+      name: "music_play",
+      label: "Play a track",
+      description:
+        "Play a YouTube track now in the active Discord body. Pass a url from youtube_search, or the " +
+        "1-based index of the last search you ran for this person.",
+      parameters: Type.Object({
+        url: Type.Optional(Type.String({ maxLength: 2000 })),
+        index: Type.Optional(Type.Integer({ minimum: 1, maximum: 5 })),
+      }),
+      execute: async (_id, params) => {
+        if (music === undefined) return unavailable();
+        return json(
+          await music.play({
+            ...(typeof params.url === "string" ? { url: params.url } : {}),
+            ...(typeof params.index === "number" ? { index: params.index } : {}),
+            authorId: author(),
+          }),
+        );
+      },
+    }),
+    defineTool({
+      name: "music_queue",
+      label: "Queue a track",
+      description: "Queue a YouTube track after the current one. Same arguments as music_play.",
+      parameters: Type.Object({
+        url: Type.Optional(Type.String({ maxLength: 2000 })),
+        index: Type.Optional(Type.Integer({ minimum: 1, maximum: 5 })),
+      }),
+      execute: async (_id, params) => {
+        if (music === undefined) return unavailable();
+        return json(
+          await music.queue({
+            ...(typeof params.url === "string" ? { url: params.url } : {}),
+            ...(typeof params.index === "number" ? { index: params.index } : {}),
+            authorId: author(),
+          }),
+        );
+      },
+    }),
+    defineTool({
+      name: "music_skip",
+      label: "Skip track",
+      description: "Skip the current Discord track.",
+      parameters: Type.Object({}),
+      execute: async () =>
+        json(music === undefined ? { ok: false, message: "no music body" } : await music.skip()),
+    }),
+    defineTool({
+      name: "music_pause",
+      label: "Pause track",
+      description: "Pause Discord music.",
+      parameters: Type.Object({}),
+      execute: async () =>
+        json(music === undefined ? { ok: false, message: "no music body" } : await music.pause()),
+    }),
+    defineTool({
+      name: "music_resume",
+      label: "Resume track",
+      description: "Resume paused Discord music.",
+      parameters: Type.Object({}),
+      execute: async () =>
+        json(music === undefined ? { ok: false, message: "no music body" } : await music.resume()),
+    }),
+    defineTool({
+      name: "music_stop",
+      label: "Stop music",
+      description: "Stop Discord music and clear the queue.",
+      parameters: Type.Object({}),
+      execute: async () =>
+        json(music === undefined ? { ok: false, message: "no music body" } : await music.stop()),
+    }),
+    defineTool({
+      name: "music_now",
+      label: "Now playing",
+      description: "What is playing and what is queued in Discord voice.",
+      parameters: Type.Object({}),
+      execute: async () =>
+        json(music === undefined ? { ok: false, message: "no music body" } : await music.now()),
+    }),
+  ];
+}
+
 function diagramTools(deps: CaptainDeps, turn: TurnContext): ToolDefinition[] {
   const diagrams = deps.diagrams;
   if (diagrams === undefined) return [];
