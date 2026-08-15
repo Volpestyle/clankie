@@ -3,7 +3,9 @@ import {
   type DiscordPresenceChannelTurnRequest,
   type DiscordVoicePresenceNote,
 } from "@clankie/protocol";
+import type { FinishedRender } from "../media-generation.ts";
 import type { CaptainDeps, ResolvedAttachment } from "./deps.ts";
+import { roomKey } from "./tools.ts";
 
 export interface NormalizedDiscordTurn {
   /** Voice turns continue a durable session per channel; text turns are one-shot. */
@@ -24,7 +26,7 @@ export interface NormalizedDiscordTurn {
  */
 export async function normalizeDiscordTurn(
   request: DiscordPresenceChannelTurnRequest,
-  deps: Pick<CaptainDeps, "memory" | "resolveDiscordAttachments">,
+  deps: Pick<CaptainDeps, "memory" | "resolveDiscordAttachments"> & Partial<Pick<CaptainDeps, "media">>,
 ): Promise<NormalizedDiscordTurn> {
   const body = request.trigger.body?.trim() ?? "";
   const attachments = request.trigger.attachments;
@@ -32,6 +34,7 @@ export async function normalizeDiscordTurn(
   if (presenceSessionId === undefined) throw new Error("Discord channel turn attribution is unavailable");
   const targetId = `${request.trigger.guildId ?? "dm"}:${request.trigger.channelId}`;
   const voice = request.trigger.kind === "voice_event";
+  const lane = voice ? "discord_voice" : "discord_presence";
 
   const approvedPersonMemory =
     voice && request.trigger.guildId !== undefined
@@ -94,24 +97,70 @@ export async function normalizeDiscordTurn(
           `What you remember about this person (your own approved notes on <${request.trigger.actorId}>):\n${approvedPersonMemory}`,
         ];
 
+  // A render that outlived the turn that started it (ADR 0094). Trusted text
+  // about his own work, like the voice presence note — the room never authors
+  // it, and only this room's renders are named.
+  const renderBlock = renderNote(await (deps.media?.finishedRenders(roomKey(lane, targetId)) ?? []));
+
   const triggerBlock = [
     `Trigger message from <${request.trigger.actorId}>${request.trigger.unprompted ? " (you were not addressed)" : ""}:`,
     body.length === 0 ? "(no text — only images)" : body,
   ];
 
-  const prompt = [framing, ...noteBlock, ...memoryBlock, ...contextBlock, ...triggerBlock].join("\n\n");
+  const prompt = [
+    framing,
+    ...noteBlock,
+    ...memoryBlock,
+    ...renderBlock,
+    ...contextBlock,
+    ...triggerBlock,
+  ].join("\n\n");
 
   return {
     sessionKey: voice
       ? `discord-voice:${request.identity.characterId}:${targetId}`
       : `discord:${request.identity.characterId}:${presenceSessionId}`,
     durable: voice,
-    lane: voice ? "discord_voice" : "discord_presence",
+    lane,
     targetId,
     prompt,
     images: resolved,
     heard: body.length === 0 ? `(sent ${String(attachments.length)} image(s))` : body,
   };
+}
+
+/** How many landed renders a single turn names before it counts the rest. */
+const RENDER_NOTE_LIMIT = 3;
+
+/**
+ * The line that tells him a render he started here has landed.
+ *
+ * Says the video is ready and how to hand it over — not what to say about it,
+ * and not that he must. A render that finished while the conversation moved on
+ * is his to mention or leave, exactly like anything else he knows.
+ */
+function renderNote(renders: readonly FinishedRender[]): string[] {
+  if (renders.length === 0) return [];
+  const shown = renders.slice(0, RENDER_NOTE_LIMIT).map((render) => {
+    const took = `${String(render.tookSeconds)}s`;
+    return render.outcome === "ok"
+      ? `"${render.prompt.slice(0, 200)}" is ready after ${took} — call generate_video with requestId ${render.requestId} to attach it.`
+      : `"${render.prompt.slice(0, 200)}" failed after ${took} — call generate_video with requestId ${render.requestId} for the reason.`;
+  });
+  const more =
+    renders.length > RENDER_NOTE_LIMIT
+      ? [`And ${String(renders.length - RENDER_NOTE_LIMIT)} more finished renders waiting.`]
+      : [];
+  return [
+    [
+      renders.length === 1
+        ? "A video you started in this room has finished rendering since you last spoke here:"
+        : "Videos you started in this room have finished rendering since you last spoke here:",
+      ...shown,
+      ...more,
+      "Bring one up if it still fits the conversation; nobody is waiting on it if it does not.",
+    ].join("\n"),
+  ];
 }
 
 const VOICE_PRESENCE_REFUSAL_PHRASES: Readonly<

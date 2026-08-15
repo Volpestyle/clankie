@@ -34,6 +34,24 @@ export {
   type RedactedCredential,
 } from "./credential-store.ts";
 export {
+  LINEAR_AUTHORIZE_ENDPOINT,
+  LINEAR_MCP_RESOURCE,
+  LINEAR_OAUTH_ISSUER,
+  LINEAR_OAUTH_SCOPES,
+  LINEAR_PROVIDER_ID,
+  LINEAR_REGISTER_ENDPOINT,
+  LINEAR_TOKEN_ENDPOINT,
+  buildLinearAuthorizeUrl,
+  exchangeLinearAuthorizationCode,
+  generateLinearPkce,
+  linearCredentialFromTokens,
+  linearOauthNeedsRefresh,
+  refreshLinearOauth,
+  registerLinearOauthClient,
+  runLinearBrowserLogin,
+  type LinearBrowserLoginOptions,
+} from "./linear-oauth.ts";
+export {
   DISCORD_BOT_PROVIDER_ID,
   DISCORD_PRESENCE_CAPABILITIES,
   DiscordBotCredentialProvider,

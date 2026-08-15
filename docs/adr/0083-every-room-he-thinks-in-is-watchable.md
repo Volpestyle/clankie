@@ -16,10 +16,11 @@ one of those sessions: the one it is talking in.
 
 For every other room the operator could see the outcome and nothing else. The
 Discord bridge posts his reply; the presence stream reports which channel he is
-in; the durable transcript projection records message and tool _names_ for
-operator conversations only. What he was thinking when he answered a stranger in
-someone else's server, which tool he reached for, and what came back were
-visible on the machine but not from the seat that supervises him. That inverts
+in; the durable transcript projection records messages plus redacted, bounded
+tool arguments and results for operator conversations only. What he was thinking
+when he answered a stranger in someone else's server, which tool he reached for,
+and what came back were visible on the machine but not from the seat that
+supervises him. That inverts
 the standing rule that the head sees what the branches do, and it is the exact
 case where seeing matters most: the rooms the operator is not in are the ones
 he cannot otherwise check.
@@ -47,10 +48,10 @@ Options weighed:
    and tool payloads are high-volume conversational data, and the event store is
    the deterministic authority for mission facts. Pushing one into the other
    would make every future trace consumer read a mission log.
-3. Extend the durable operator-conversation projection to every lane. Rejected as
-   insufficient: that projection deliberately drops tool arguments and results,
-   which is most of what "look into what he did" means. It remains the right
-   shape for durable scrollback, not for live inspection.
+3. Extend the durable operator-conversation projection to every lane. Rejected:
+   its redacted, bounded tool arguments and results make operator conversations
+   inspectable, but copying every room into that durable chat projection would
+   conflate live supervision with conversation scrollback.
 4. Publish an authenticated, identity-only lane listing and let the console
    subscribe to the public session stream itself. Accepted.
 

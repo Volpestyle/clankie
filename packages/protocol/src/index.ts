@@ -90,6 +90,7 @@ export type CaptainLaneListing = z.infer<typeof CaptainLaneListingSchema>;
 export const OPERATOR_CONVERSATION_TITLE_MAX = 256;
 export const OPERATOR_CONVERSATION_TEXT_MAX = 16_384;
 export const OPERATOR_CONVERSATION_SUMMARY_MAX = 512;
+export const OPERATOR_CONVERSATION_TOOL_DETAIL_MAX = OPERATOR_CONVERSATION_TEXT_MAX;
 /** A submitted message is durably logged as a `message` event, so it shares that bound. */
 export const OPERATOR_CONVERSATION_MESSAGE_MAX = OPERATOR_CONVERSATION_TEXT_MAX;
 export const OPERATOR_CONVERSATION_CODE_MAX = 128;
@@ -240,6 +241,10 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
     name: z.string().trim().min(1).max(OPERATOR_CONVERSATION_CODE_MAX),
     phase: z.enum(["started", "completed", "failed"]),
     summary: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
+    /** Present when Pi's read tool is loading a named SKILL.md resource. */
+    skillName: z.string().trim().min(1).max(OPERATOR_CONVERSATION_CODE_MAX).optional(),
+    /** Redacted, serialized arguments or result; bounded before it enters the durable log. */
+    detail: z.string().max(OPERATOR_CONVERSATION_TOOL_DETAIL_MAX).optional(),
   }).strict(),
   OperatorConversationEventEnvelopeSchema.extend({
     type: z.literal("input_requested"),

@@ -174,6 +174,47 @@ export const VoiceSettingsSchema = z
   });
 export type VoiceSettings = z.infer<typeof VoiceSettingsSchema>;
 
+/**
+ * Linear is a tool connector, not a body: the API key lives in the credential
+ * broker under provider id `linear`. This file only holds the public default
+ * team so creating an issue does not ask every time.
+ */
+export const LinearSettingsSchema = z
+  .object({
+    /** Linear team UUID (not the ENG-style key). */
+    defaultTeamId: z.string().min(1).max(64).optional(),
+  })
+  .strict();
+export type LinearSettings = z.infer<typeof LinearSettingsSchema>;
+
+const HostnameSchema = z
+  .string()
+  .min(1)
+  .max(253)
+  .regex(
+    /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$/u,
+    {
+      message: "must be a hostname",
+    },
+  );
+
+/**
+ * Mailbox coordinates. The password is broker-owned under provider id `email`.
+ * Hosts and the username are public identifiers an operator wants to read back.
+ */
+export const EmailSettingsSchema = z
+  .object({
+    imapHost: HostnameSchema.optional(),
+    imapPort: z.number().int().min(1).max(65535).default(993),
+    smtpHost: HostnameSchema.optional(),
+    smtpPort: z.number().int().min(1).max(65535).default(587),
+    username: z.string().min(1).max(320).optional(),
+    /** IMAP implicit TLS (usually port 993). SMTP uses its own port to pick STARTTLS vs implicit. */
+    secure: z.boolean().default(true),
+  })
+  .strict();
+export type EmailSettings = z.infer<typeof EmailSettingsSchema>;
+
 export const ClankieSettingsSchema = z
   .object({
     schemaVersion: z.literal(SETTINGS_SCHEMA_VERSION),
@@ -182,6 +223,8 @@ export const ClankieSettingsSchema = z
     discord: DiscordSettingsSchema.default(() => DiscordSettingsSchema.parse({})),
     persona: PersonaSettingsSchema.default(() => PersonaSettingsSchema.parse({})),
     voice: VoiceSettingsSchema.default(() => VoiceSettingsSchema.parse({})),
+    linear: LinearSettingsSchema.default(() => LinearSettingsSchema.parse({})),
+    email: EmailSettingsSchema.default(() => EmailSettingsSchema.parse({})),
   })
   .strict();
 export type ClankieSettings = z.infer<typeof ClankieSettingsSchema>;

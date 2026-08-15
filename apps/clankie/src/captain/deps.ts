@@ -18,19 +18,27 @@ import type {
   GenerateVideoRequest,
   GenerateVideoResult,
 } from "@clankie/protocol";
+import type { EmailPort } from "../email.ts";
+import type { LinearPort } from "../linear.ts";
+import type { FinishedRender } from "../media-generation.ts";
 
 /**
  * Everything the captain's tools reach in the rest of the service, as plain
  * in-process function calls.
  */
 export interface CaptainDeps {
+  readonly linear: LinearPort;
+  readonly email: EmailPort;
   readonly browser: {
     catalog(): Promise<BrowserToolCatalog>;
     call(request: CallBrowserToolRequest): Promise<CallBrowserToolResult>;
   };
   readonly media: {
     generateImage(request: GenerateImageRequest): Promise<GenerateImageResult>;
-    generateVideo(request: GenerateVideoRequest): Promise<GenerateVideoResult>;
+    /** `room` tags the render so the room that asked is told when it lands. */
+    generateVideo(request: GenerateVideoRequest, room?: string): Promise<GenerateVideoResult>;
+    /** Renders this room started that outlived the call and have since landed. */
+    finishedRenders(room: string): Promise<readonly FinishedRender[]>;
   };
   readonly embodiment: {
     submitIntent(intent: EmbodimentIntent): Promise<EmbodimentSubmitResult>;

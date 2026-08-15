@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   DiscordSettingsSchema,
+  EmailSettingsSchema,
+  LinearSettingsSchema,
   VoiceSettingsSchema,
   applyDiscordSettingsToEnvironment,
   applyVoiceSettingsToEnvironment,
@@ -231,5 +233,41 @@ describe("voice settings resolution", () => {
     } as NodeJS.ProcessEnv);
     expect(resolved.settings.elevenLabsVoiceId).toBe("voice_from_shell");
     expect(resolved.overriddenByEnvironment).toEqual(["CLANKIE_VOICE_ELEVENLABS_VOICE_ID"]);
+  });
+});
+
+describe("linear and email settings", () => {
+  it("defaults to disconnected and accepts a public team id", () => {
+    expect(LinearSettingsSchema.parse({})).toEqual({});
+    expect(
+      LinearSettingsSchema.parse({ defaultTeamId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" }).defaultTeamId,
+    ).toBe("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+  });
+
+  it("defaults mail ports and refuses a credential-shaped hostname", () => {
+    const parsed = EmailSettingsSchema.parse({});
+    expect(parsed.imapPort).toBe(993);
+    expect(parsed.smtpPort).toBe(587);
+    expect(parsed.secure).toBe(true);
+    expect(() => EmailSettingsSchema.parse({ imapHost: "user:pass@mail.example" })).toThrow(/hostname/);
+  });
+
+  it("loads a pre-connection settings file without the new keys", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "clankie-settings-"));
+    const path = join(directory, "settings.json");
+    await writeFile(
+      path,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        discord: DiscordSettingsSchema.parse({}),
+        persona: { displayName: "Clankie" },
+        voice: {},
+      })}\n`,
+      "utf8",
+    );
+    const loaded = await new SettingsStore(path).load();
+    expect(loaded.linear).toEqual({});
+    expect(loaded.email.imapPort).toBe(993);
+    expect(loaded.email.username).toBeUndefined();
   });
 });

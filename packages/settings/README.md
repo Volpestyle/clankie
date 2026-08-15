@@ -47,9 +47,9 @@ enable a plane.
 
 ## Editing
 
-Use `/discord` in the Clankie TUI. It writes to **both stores**: its **Tokens**
-step stores secrets in the credential broker (same destination as `/auth`), and
-every other step writes here.
+Use `/discord` or `/connect` in the Clankie TUI. Tokens and API keys go to the
+credential broker (same destination as `/auth`). Public identifiers — Discord
+ids, a Linear default team, an IMAP host and username — write here.
 
 `/discord status` prints the effective configuration, whether `discord_bot` is
 present in the broker, and any environment overrides in effect.

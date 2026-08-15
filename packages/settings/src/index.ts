@@ -1,6 +1,8 @@
 export {
   ClankieSettingsSchema,
   DiscordSettingsSchema,
+  EmailSettingsSchema,
+  LinearSettingsSchema,
   PersonaSettingsSchema,
   SETTINGS_SCHEMA_VERSION,
   VoiceSettingsSchema,
@@ -8,6 +10,8 @@ export {
   emptySettings,
   type ClankieSettings,
   type DiscordSettings,
+  type EmailSettings,
+  type LinearSettings,
   type PersonaSettings,
   type VoiceSettings,
 } from "./schema.ts";

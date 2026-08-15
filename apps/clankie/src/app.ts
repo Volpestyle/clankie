@@ -1308,7 +1308,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     generator.generateImage(request),
   );
   mediaRoute(MEDIA_VIDEO_GENERATION_PATH, GenerateVideoRequestSchema, (generator, request, signal) =>
-    generator.generateVideo(request, signal),
+    generator.generateVideo(request, { signal }),
   );
 
   app.get("/v1/embodiment/sessions/:id", async (context) => {

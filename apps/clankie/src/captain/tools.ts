@@ -5,9 +5,24 @@ import type { CaptainDeps } from "./deps.ts";
 import type { LaneLog } from "./lane-log.ts";
 import { startPlay, stopPlay } from "./play.ts";
 
-/** The last attachable thing a turn produced rides the reply. */
-export interface TurnMediaCapture {
+/**
+ * What the running turn is, as its tools need to see it: the last attachable
+ * thing it produced (which rides the reply), and which room it is happening in
+ * (which scopes every room-keyed read and write a tool makes).
+ */
+export interface TurnContext {
   media?: CaptainTurnMedia | undefined;
+  /**
+   * Stable key for the room this turn is in. Sessions are per-room in every
+   * durable case and per-turn otherwise, so this is set once per turn and read
+   * at tool-execution time.
+   */
+  room?: string | undefined;
+}
+
+/** Room key, stable across a room's turns and distinct across rooms. */
+export function roomKey(lane: string, targetId: string): string {
+  return `${lane}:${targetId}`;
 }
 
 function json(value: unknown): { content: [{ type: "text"; text: string }]; details: unknown } {
@@ -21,7 +36,7 @@ function json(value: unknown): { content: [{ type: "text"; text: string }]; deta
  */
 export function captainTools(
   deps: CaptainDeps,
-  capture: TurnMediaCapture,
+  turn: TurnContext,
   laneLog: LaneLog,
   lane: CaptainSessionLaneV2,
 ): ToolDefinition[] {
@@ -55,7 +70,7 @@ export function captainTools(
       execute: async (_id, params) => {
         const result = await deps.media.generateImage({ schemaVersion: 1, ...params });
         if (result.outcome === "ok")
-          capture.media = { artifactRef: result.artifactRef, filename: result.filename };
+          turn.media = { artifactRef: result.artifactRef, filename: result.filename };
         return json(result);
       },
     }),
@@ -64,16 +79,17 @@ export function captainTools(
       label: "Make a video",
       description:
         "Make a short video from a prompt. A result of 'pending' is normal — it is still rendering; say so, and " +
-        "pick it up later by calling again with the same requestId. Never start a second render of the same idea. " +
-        "In a Discord channel a finished video attaches itself to your reply, like a picture does.",
+        "know that it keeps rendering after you answer. You will be told in this room when it lands, and calling " +
+        "again with the same requestId then hands you the finished video. Never start a second render of the " +
+        "same idea. In a Discord channel a finished video attaches itself to your reply, like a picture does.",
       parameters: Type.Object({
         prompt: Type.String({ minLength: 1, maxLength: 4000 }),
         requestId: Type.Optional(Type.String({ description: "Resume a render that came back pending." })),
       }),
       execute: async (_id, params) => {
-        const result = await deps.media.generateVideo({ schemaVersion: 1, ...params });
+        const result = await deps.media.generateVideo({ schemaVersion: 1, ...params }, turn.room);
         if (result.outcome === "ok")
-          capture.media = { artifactRef: result.artifactRef, filename: result.filename };
+          turn.media = { artifactRef: result.artifactRef, filename: result.filename };
         return json(result);
       },
     }),
@@ -170,17 +186,21 @@ export function captainTools(
         "your body, recent voice stays. Read it before answering questions about yourself.",
       parameters: Type.Object({}),
       execute: async () => {
-        const [live, sessions, possession, voiceHistory] = await Promise.all([
+        const [live, sessions, possession, voiceHistory, renders] = await Promise.all([
           deps.embodiment.getLiveSession(),
           deps.presence.listSessions(),
           deps.embodiment.getPossession(),
           deps.presence.listVoiceHistory(5),
+          // Only this room's renders: what he was asked to make elsewhere is
+          // not this room's business, same rule as `observe_room`.
+          turn.room === undefined ? [] : deps.media.finishedRenders(turn.room),
         ]);
         return json({
           liveSession: live,
           presenceSessions: sessions,
           bodyPossession: possession,
           voiceHistory,
+          finishedRenders: renders,
         });
       },
     }),
@@ -208,7 +228,7 @@ export function captainTools(
  * them. When the host is unreachable he gets one honest tool that says so,
  * instead of a silently empty surface.
  */
-export async function browserTools(deps: CaptainDeps, capture: TurnMediaCapture): Promise<ToolDefinition[]> {
+export async function browserTools(deps: CaptainDeps, turn: TurnContext): Promise<ToolDefinition[]> {
   const catalog = await deps.browser.catalog();
   if (!catalog.available || catalog.tools.length === 0) {
     return [
@@ -241,7 +261,7 @@ export async function browserTools(deps: CaptainDeps, capture: TurnMediaCapture)
         if (result.outcome === "ok" && result.artifacts.length > 0) {
           const artifact = result.artifacts.at(-1);
           if (artifact !== undefined) {
-            capture.media = { artifactRef: artifact.artifactRef, filename: artifact.filename };
+            turn.media = { artifactRef: artifact.artifactRef, filename: artifact.filename };
           }
         }
         return json(result);

@@ -38,7 +38,37 @@ import {
 export interface MediaGeneratorPort {
   generateImage(request: GenerateImageRequest): Promise<GenerateImageResult>;
   /** `signal` abandons the wait on a hung-up caller; the render itself continues upstream. */
-  generateVideo(request: GenerateVideoRequest, signal?: AbortSignal): Promise<GenerateVideoResult>;
+  generateVideo(request: GenerateVideoRequest, options?: GenerateVideoOptions): Promise<GenerateVideoResult>;
+  /**
+   * Renders this room started that outlived the call and have since landed,
+   * and that he has not collected yet (ADR 0094).
+   *
+   * Checks the outstanding ones as it goes: the turn is the clock, so a render
+   * is only ever asked about when someone is there to be told. Scoped by room
+   * for the same reason `observe_room` is — what he was asked to make in one
+   * channel is not another channel's business.
+   */
+  finishedRenders(room: string): Promise<readonly FinishedRender[]>;
+}
+
+export interface GenerateVideoOptions {
+  /** Abandons the wait on a hung-up caller; the render itself continues. */
+  readonly signal?: AbortSignal | undefined;
+  /**
+   * Opaque key for the room that asked, stored and compared verbatim — the
+   * generator never parses it. Absent means nobody is told when it lands.
+   */
+  readonly room?: string | undefined;
+}
+
+/** A render that outlived its call, waiting to be collected. */
+export interface FinishedRender {
+  readonly requestId: string;
+  /** What he asked for, so the reminder names the right video. */
+  readonly prompt: string;
+  readonly outcome: "ok" | "refused";
+  /** Seconds between starting the render and it landing. */
+  readonly tookSeconds: number;
 }
 
 export interface ConfiguredMediaGeneratorOptions {
@@ -55,6 +85,10 @@ export interface ConfiguredMediaGeneratorOptions {
   readonly pollIntervalMs?: number;
   readonly sleep?: (ms: number) => Promise<void>;
   readonly now?: () => number;
+  /** How long a render may keep going after its call gave up waiting. */
+  readonly backgroundRenderMs?: number;
+  /** How long a finished, uncollected render keeps reminding him it exists. */
+  readonly renderRetentionMs?: number;
 }
 
 /** Catalog provider id → the connector's provider enum. */
@@ -66,6 +100,21 @@ const PROVIDERS: Readonly<Record<string, MediaProvider>> = {
 
 const DEFAULT_VIDEO_WAIT_MS = 90_000;
 const DEFAULT_POLL_INTERVAL_MS = 3_000;
+/**
+ * How long a render keeps going once nobody is waiting on the call.
+ *
+ * Generous, because the whole point is that a slow render still lands: the
+ * failure this replaces is a render that finished upstream while the only
+ * thing that knew its id — a one-shot Discord session — had already been
+ * disposed.
+ */
+const DEFAULT_BACKGROUND_RENDER_MS = 1_800_000;
+/**
+ * How long a finished, uncollected render stays worth mentioning. Past this he
+ * stops being told about it: a video nobody came back for in an hour is a video
+ * the conversation has moved on from.
+ */
+const DEFAULT_RENDER_RETENTION_MS = 3_600_000;
 
 /** Extension by provider default, so the adapter's format negotiation and the filename agree. */
 const IMAGE_EXTENSION = "png";
@@ -89,14 +138,32 @@ interface ResolvedMediaModel {
   readonly apiKey: string;
 }
 
+/** One video render, tracked past the call that started it. */
+interface RenderRecord {
+  readonly requestId: string;
+  readonly prompt: string;
+  readonly room: string | undefined;
+  readonly startedAt: number;
+  status: "rendering" | "finished";
+  /** The answer to give when he comes back for it: the `ok` or the `refused`. */
+  result: GenerateVideoResult | undefined;
+  finishedAt: number | undefined;
+  /** Set once he has been handed the result, so it stops being mentioned. */
+  collected: boolean;
+}
+
 export class ConfiguredMediaGenerator implements MediaGeneratorPort {
   private readonly options: ConfiguredMediaGeneratorOptions;
   private readonly videoWaitMs: number;
   private readonly pollIntervalMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly now: () => number;
+  private readonly backgroundRenderMs: number;
+  private readonly renderRetentionMs: number;
   /** Live renders, so a resumed call knows which request it is picking up. */
   private readonly videoJobs = new Map<string, VideoGenerationRequest>();
+  /** Every render this process started, until it is collected or ages out. */
+  private readonly renders = new Map<string, RenderRecord>();
 
   public constructor(options: ConfiguredMediaGeneratorOptions) {
     this.options = options;
@@ -104,6 +171,73 @@ export class ConfiguredMediaGenerator implements MediaGeneratorPort {
     this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
     this.sleep = options.sleep ?? ((ms) => new Promise((done) => setTimeout(done, ms)));
     this.now = options.now ?? (() => Date.now());
+    this.backgroundRenderMs = options.backgroundRenderMs ?? DEFAULT_BACKGROUND_RENDER_MS;
+    this.renderRetentionMs = options.renderRetentionMs ?? DEFAULT_RENDER_RETENTION_MS;
+  }
+
+  public async finishedRenders(room: string): Promise<readonly FinishedRender[]> {
+    // Deleting during iteration is safe here: entries are only ever removed,
+    // never added, so a dropped record is simply one this pass skips.
+    for (const record of this.renders.values()) {
+      if (record.room !== room) continue;
+      this.forgetIfStale(record);
+      if (record.status === "rendering") await this.checkRender(record);
+    }
+    const now = this.now();
+    const ready: FinishedRender[] = [];
+    for (const record of this.renders.values()) {
+      if (record.room !== room) continue;
+      if (record.status !== "finished" || record.collected || record.result === undefined) continue;
+      ready.push({
+        requestId: record.requestId,
+        prompt: record.prompt,
+        outcome: record.result.outcome === "ok" ? "ok" : "refused",
+        tookSeconds: Math.round(((record.finishedAt ?? now) - record.startedAt) / 1_000),
+      });
+    }
+    return ready;
+  }
+
+  /**
+   * Ask the provider once whether an outstanding render has landed, and finish
+   * it if it has.
+   *
+   * One call per outstanding render per turn at most, and only for the room
+   * being asked about. A render that has outrun its window stops being checked
+   * — the requestId still works, so a job that is somehow still going remains
+   * reachable by asking for it directly.
+   */
+  private async checkRender(record: RenderRecord): Promise<void> {
+    if (this.now() - record.startedAt > this.backgroundRenderMs) {
+      this.renders.delete(record.requestId);
+      return;
+    }
+    const generation = this.videoJobs.get(record.requestId);
+    if (generation === undefined) return;
+    try {
+      const model = await this.resolveModel("video_model", "video");
+      if (model.provider !== "grok") return;
+      const adapter = new GrokVideoAdapter({
+        apiKey: model.apiKey,
+        ...(this.options.fetchImpl === undefined ? {} : { fetch: this.options.fetchImpl }),
+      });
+      const job = await adapter.poll(record.requestId);
+      if (job.status === "pending") return;
+      if (job.status !== "done") throw new MediaRefusal("provider_failed", job.error ?? job.status);
+      this.settleRender(record, await this.retrieveRender(adapter, job, generation, model), false);
+    } catch (error) {
+      this.settleRender(
+        record,
+        GenerateVideoResultSchema.parse({ outcome: "refused", schemaVersion: 1, ...refusal(error) }),
+        false,
+      );
+    }
+  }
+
+  /** A landed render nobody came back for eventually stops being mentioned. */
+  private forgetIfStale(record: RenderRecord): void {
+    if (record.finishedAt === undefined) return;
+    if (this.now() - record.finishedAt > this.renderRetentionMs) this.renders.delete(record.requestId);
   }
 
   public async generateImage(request: GenerateImageRequest): Promise<GenerateImageResult> {
@@ -141,8 +275,15 @@ export class ConfiguredMediaGenerator implements MediaGeneratorPort {
 
   public async generateVideo(
     request: GenerateVideoRequest,
-    signal?: AbortSignal,
+    options?: GenerateVideoOptions,
   ): Promise<GenerateVideoResult> {
+    // A render the background finished already: hand back the answer it landed
+    // on rather than paying the provider to retrieve the same bytes twice.
+    const collected = request.requestId === undefined ? undefined : this.renders.get(request.requestId);
+    if (collected?.status === "finished" && collected.result !== undefined) {
+      collected.collected = true;
+      return collected.result;
+    }
     try {
       const model = await this.resolveModel("video_model", "video");
       if (model.provider !== "grok") {
@@ -157,21 +298,25 @@ export class ConfiguredMediaGenerator implements MediaGeneratorPort {
         ? await adapter.poll(request.requestId)
         : await adapter.start(generation);
       this.videoJobs.set(job.requestId, generation);
+      const record = this.rememberRender(job.requestId, generation.prompt, options?.room);
 
       // A caller that hung up stops the polling but never the render: the job
-      // keeps going upstream and the next call resumes it by id, so abandoning
-      // the wait costs nothing but the wait.
+      // keeps going upstream, and either the background finishes it or the next
+      // call resumes it by id, so abandoning the wait costs nothing but the wait.
       const deadline = this.now() + this.videoWaitMs;
       const startedAt = this.now();
-      while (job.status === "pending" && this.now() < deadline && signal?.aborted !== true) {
+      while (job.status === "pending" && this.now() < deadline && options?.signal?.aborted !== true) {
         await this.sleep(this.pollIntervalMs);
         job = await adapter.poll(job.requestId);
       }
       if (job.status === "failed" || job.status === "expired") {
-        this.videoJobs.delete(job.requestId);
         throw new MediaRefusal("provider_failed", job.error ?? job.status);
       }
       if (job.status !== "done") {
+        // The render outlives this call: the record keeps it, and the next turn
+        // in this room checks on it (ADR 0094). He is handed the requestId
+        // regardless — the record is in memory, so asking by id stays the
+        // recovery that survives a restart.
         return GenerateVideoResultSchema.parse({
           outcome: "pending",
           schemaVersion: 1,
@@ -179,28 +324,67 @@ export class ConfiguredMediaGenerator implements MediaGeneratorPort {
           waitedSeconds: Math.round((this.now() - startedAt) / 1_000),
         });
       }
-      const result = await adapter.retrieve(job, generation);
-      this.videoJobs.delete(job.requestId);
-      return GenerateVideoResultSchema.parse({
-        outcome: "ok",
-        schemaVersion: 1,
-        ...this.reference(result.artifactPath, result.sha256),
-        mimeType: result.mimeType,
-        byteLength: result.bytes,
-        provider: model.providerId,
-        model: model.modelId,
-      });
+      const settled = await this.retrieveRender(adapter, job, generation, model);
+      this.settleRender(record, settled, true);
+      return settled;
     } catch (error) {
-      return GenerateVideoResultSchema.parse({ outcome: "refused", schemaVersion: 1, ...refusal(error) });
+      const refused = GenerateVideoResultSchema.parse({
+        outcome: "refused",
+        schemaVersion: 1,
+        ...refusal(error),
+      });
+      // A record only exists once the job was accepted upstream; a failure
+      // before that has nothing to settle and nothing to tell the room about.
+      const started = request.requestId === undefined ? undefined : this.renders.get(request.requestId);
+      if (started !== undefined) this.settleRender(started, refused, true);
+      return refused;
     }
   }
 
-  /**
-   * A resumed render must land somewhere, and the original request carries the
-   * path. Losing it to a service restart is not a failure worth a durable
-   * store: the job is still rendering upstream, and a fresh output path for the
-   * same finished bytes is the correct recovery.
-   */
+  private async retrieveRender(
+    adapter: GrokVideoAdapter,
+    job: VideoJob,
+    generation: VideoGenerationRequest,
+    model: ResolvedMediaModel,
+  ): Promise<GenerateVideoResult> {
+    const result = await adapter.retrieve(job, generation);
+    return GenerateVideoResultSchema.parse({
+      outcome: "ok",
+      schemaVersion: 1,
+      ...this.reference(result.artifactPath, result.sha256),
+      mimeType: result.mimeType,
+      byteLength: result.bytes,
+      provider: model.providerId,
+      model: model.modelId,
+    });
+  }
+
+  private rememberRender(requestId: string, prompt: string, room: string | undefined): RenderRecord {
+    const existing = this.renders.get(requestId);
+    if (existing !== undefined) return existing;
+    const record: RenderRecord = {
+      requestId,
+      prompt,
+      room,
+      startedAt: this.now(),
+      status: "rendering",
+      result: undefined,
+      finishedAt: undefined,
+      collected: false,
+    };
+    this.renders.set(requestId, record);
+    return record;
+  }
+
+  /** `collected` is true when a caller is holding the answer as it settles. */
+  private settleRender(record: RenderRecord, result: GenerateVideoResult, collected: boolean): void {
+    this.videoJobs.delete(record.requestId);
+    record.status = "finished";
+    record.result = result;
+    record.finishedAt = this.now();
+    if (collected) record.collected = true;
+  }
+
   private async videoGenerationRequest(
     request: GenerateVideoRequest,
     model: ResolvedMediaModel,

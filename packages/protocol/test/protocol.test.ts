@@ -31,6 +31,7 @@ import {
   IntentContextSchema,
   createOperatorConversationServiceClient,
   OPERATOR_CONVERSATION_REF_MAX,
+  OPERATOR_CONVERSATION_TOOL_DETAIL_MAX,
   OperatorConversationAttachmentSchema,
   OperatorConversationInputResponseSchema,
   OperatorConversationRecoverySchema,
@@ -131,6 +132,27 @@ describe("protocol", () => {
         ...base,
         type: "provider.private-capability",
         data: { continuationToken: "secret", credential: "sk-live" },
+      }),
+    ).toThrow();
+    expect(
+      OperatorConversationStreamEventSchema.parse({
+        ...base,
+        type: "tool",
+        toolCallId: "call-1",
+        name: "read",
+        phase: "started",
+        skillName: "herdr-lead",
+        detail: '{\n  "path": "README.md"\n}',
+      }),
+    ).toMatchObject({ type: "tool", skillName: "herdr-lead", detail: expect.stringContaining("README.md") });
+    expect(() =>
+      OperatorConversationStreamEventSchema.parse({
+        ...base,
+        type: "tool",
+        toolCallId: "call-1",
+        name: "read",
+        phase: "completed",
+        detail: "x".repeat(OPERATOR_CONVERSATION_TOOL_DETAIL_MAX + 1),
       }),
     ).toThrow();
     expect(() =>

@@ -53,7 +53,8 @@ clankie              # start the service and open the TUI
 Secrets live in the credential broker (macOS Keychain, or a mode-0600 file
 store elsewhere) — there is no `.env` file. Configure from inside the TUI:
 `/auth` for provider keys or OAuth, `/model` for the captain model,
-`/image-model` for generation, `/persona` for who he is.
+`/image-model` for generation, `/persona` for who he is, `/connect` for
+Linear, email, and Discord.
 
 ## Apps
 

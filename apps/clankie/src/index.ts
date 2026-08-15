@@ -24,6 +24,8 @@ import { createBearerAuthenticator, createClankieApp, type ClankieApp } from "./
 import { ActivityObservationProjection } from "./activity-observation.ts";
 import { browserEnabled, createBrowserHost, type BrowserHost } from "./browser-host.ts";
 import { createCaptain } from "./captain/captain.ts";
+import { createEmailPort } from "./email.ts";
+import { createLinearPort } from "./linear.ts";
 import { createDiscordAttachmentResolver } from "./discord-attachment-fetch.ts";
 import { loadOrCreateDeviceSessionKey } from "./device-session.ts";
 import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
@@ -206,8 +208,20 @@ const boundApp = (): ClankieApp => {
   return clankieRef;
 };
 
+const connectionSettings = new SettingsStore();
+const linear = createLinearPort({
+  credentials: operatorCredentialStore,
+  settings: connectionSettings,
+});
+const email = createEmailPort({
+  credentials: operatorCredentialStore,
+  settings: connectionSettings,
+});
+
 const captain = createCaptain(
   {
+    linear,
+    email,
     browser: {
       catalog: () =>
         browserHost?.catalog() ??
@@ -233,13 +247,14 @@ const captain = createCaptain(
           schemaVersion: 1 as const,
           reason: "media_unavailable" as const,
         }),
-      generateVideo: (request) =>
-        mediaGenerator?.generateVideo(request) ??
+      generateVideo: (request, room) =>
+        mediaGenerator?.generateVideo(request, { room }) ??
         Promise.resolve({
           outcome: "refused" as const,
           schemaVersion: 1 as const,
           reason: "media_unavailable" as const,
         }),
+      finishedRenders: (room) => mediaGenerator?.finishedRenders(room) ?? Promise.resolve([]),
     },
     embodiment: {
       submitIntent: (intent) => boundApp().embodiment.submit(intent),

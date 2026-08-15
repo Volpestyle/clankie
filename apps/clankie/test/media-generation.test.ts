@@ -205,6 +205,173 @@ describe("rendering a clip", () => {
   });
 });
 
+/**
+ * A render that outlives its call (ADR 0094). The turn is the clock: nothing
+ * polls in the background, so each of these drives the check the way a turn in
+ * that room would.
+ */
+describe("a render that outlives the call that started it", () => {
+  it("lands on a later turn in the room that asked, and only that room", async () => {
+    const workspace = await workspaceWith({ video_model: "xai/grok-imagine-video-1.5" });
+    const clip = Buffer.from("rendered-clip");
+    let status = "pending";
+    const generator = new ConfiguredMediaGenerator({
+      credentials: store({ xai: "xai-secret" }),
+      attachmentRoot: workspace.attachmentRoot,
+      configCwd: workspace.configCwd,
+      environment: workspace.environment,
+      videoWaitMs: 10,
+      pollIntervalMs: 1,
+      sleep: () => Promise.resolve(),
+      fetchImpl: (input) => {
+        const url = input.toString();
+        if (url.endsWith("video.mp4")) return Promise.resolve(new Response(clip, { status: 200 }));
+        return Promise.resolve(
+          Response.json({
+            request_id: "job-1",
+            status,
+            ...(status === "done" ? { video: { url: "https://vidgen.x.ai/job-1/video.mp4" } } : {}),
+          }),
+        );
+      },
+    });
+
+    const pending = await generator.generateVideo(
+      { schemaVersion: 1, prompt: "a robot waving" },
+      { room: "discord_presence:guild:general" },
+    );
+    expect(pending).toMatchObject({ outcome: "pending", requestId: "job-1" });
+
+    // Still rendering: a turn in the room is told nothing.
+    expect(await generator.finishedRenders("discord_presence:guild:general")).toEqual([]);
+
+    status = "done";
+    // Another room's turn never learns about it, and never collects it.
+    expect(await generator.finishedRenders("discord_presence:guild:other")).toEqual([]);
+
+    const landed = await generator.finishedRenders("discord_presence:guild:general");
+    expect(landed).toHaveLength(1);
+    expect(landed[0]).toMatchObject({ requestId: "job-1", prompt: "a robot waving", outcome: "ok" });
+  });
+
+  it("hands the finished video over without re-downloading it, then stops mentioning it", async () => {
+    const workspace = await workspaceWith({ video_model: "xai/grok-imagine-video-1.5" });
+    const clip = Buffer.from("rendered-clip");
+    const downloads: string[] = [];
+    let status = "pending";
+    const generator = new ConfiguredMediaGenerator({
+      credentials: store({ xai: "xai-secret" }),
+      attachmentRoot: workspace.attachmentRoot,
+      configCwd: workspace.configCwd,
+      environment: workspace.environment,
+      videoWaitMs: 10,
+      pollIntervalMs: 1,
+      sleep: () => Promise.resolve(),
+      fetchImpl: (input) => {
+        const url = input.toString();
+        if (url.endsWith("video.mp4")) {
+          downloads.push(url);
+          return Promise.resolve(new Response(clip, { status: 200 }));
+        }
+        return Promise.resolve(
+          Response.json({
+            request_id: "job-1",
+            status,
+            ...(status === "done" ? { video: { url: "https://vidgen.x.ai/job-1/video.mp4" } } : {}),
+          }),
+        );
+      },
+    });
+
+    await generator.generateVideo({ schemaVersion: 1, prompt: "a robot waving" }, { room: "room-a" });
+    status = "done";
+    expect(await generator.finishedRenders("room-a")).toHaveLength(1);
+    expect(downloads).toHaveLength(1);
+
+    // Collecting it by id returns the stored answer, so the bytes are fetched
+    // once however many times he comes back for them.
+    const collected = await generator.generateVideo({ schemaVersion: 1, requestId: "job-1" });
+    expect(collected).toMatchObject({ outcome: "ok", mimeType: "video/mp4" });
+    expect(downloads).toHaveLength(1);
+
+    // And once he has it, the room stops being told it is waiting.
+    expect(await generator.finishedRenders("room-a")).toEqual([]);
+  });
+
+  it("reports a render that failed after the call gave up, rather than losing it", async () => {
+    const workspace = await workspaceWith({ video_model: "xai/grok-imagine-video-1.5" });
+    let status = "pending";
+    const generator = new ConfiguredMediaGenerator({
+      credentials: store({ xai: "xai-secret" }),
+      attachmentRoot: workspace.attachmentRoot,
+      configCwd: workspace.configCwd,
+      environment: workspace.environment,
+      videoWaitMs: 10,
+      pollIntervalMs: 1,
+      sleep: () => Promise.resolve(),
+      fetchImpl: () =>
+        Promise.resolve(
+          Response.json({
+            request_id: "job-1",
+            status,
+            ...(status === "failed" ? { error: { message: "moderation" } } : {}),
+          }),
+        ),
+    });
+
+    await generator.generateVideo({ schemaVersion: 1, prompt: "something" }, { room: "room-a" });
+    status = "failed";
+    expect(await generator.finishedRenders("room-a")).toMatchObject([
+      { requestId: "job-1", outcome: "refused" },
+    ]);
+    expect(await generator.generateVideo({ schemaVersion: 1, requestId: "job-1" })).toMatchObject({
+      outcome: "refused",
+      reason: "provider_failed",
+      detail: "moderation",
+    });
+  });
+
+  it("stops mentioning a landed render nobody came back for", async () => {
+    const workspace = await workspaceWith({ video_model: "xai/grok-imagine-video-1.5" });
+    const clip = Buffer.from("rendered-clip");
+    let now = 1_000;
+    let status = "pending";
+    const generator = new ConfiguredMediaGenerator({
+      credentials: store({ xai: "xai-secret" }),
+      attachmentRoot: workspace.attachmentRoot,
+      configCwd: workspace.configCwd,
+      environment: workspace.environment,
+      videoWaitMs: 10,
+      pollIntervalMs: 1,
+      renderRetentionMs: 60_000,
+      // A fake clock only bounds the waits if sleeping actually moves it.
+      sleep: (ms) => {
+        now += ms;
+        return Promise.resolve();
+      },
+      now: () => now,
+      fetchImpl: (input) => {
+        const url = input.toString();
+        if (url.endsWith("video.mp4")) return Promise.resolve(new Response(clip, { status: 200 }));
+        return Promise.resolve(
+          Response.json({
+            request_id: "job-1",
+            status,
+            ...(status === "done" ? { video: { url: "https://vidgen.x.ai/job-1/video.mp4" } } : {}),
+          }),
+        );
+      },
+    });
+
+    await generator.generateVideo({ schemaVersion: 1, prompt: "a robot waving" }, { room: "room-a" });
+    status = "done";
+    expect(await generator.finishedRenders("room-a")).toHaveLength(1);
+
+    now += 60_001;
+    expect(await generator.finishedRenders("room-a")).toEqual([]);
+  });
+});
+
 interface Workspace {
   readonly attachmentRoot: string;
   readonly configCwd: string;

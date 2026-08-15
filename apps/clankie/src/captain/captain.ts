@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import {
   personaInstructions,
   SettingsStore,
@@ -8,6 +9,7 @@ import {
 } from "@clankie/settings";
 import {
   CAPTAIN_SILENT_REPLY_SENTINEL,
+  OPERATOR_CONVERSATION_TOOL_DETAIL_MAX,
   type CaptainChannelTurnResult,
   type CaptainSessionLaneV2,
   type DiscordPresenceChannelTurnRequest,
@@ -15,6 +17,7 @@ import {
   type OperatorConversationServiceRequest,
   type OperatorConversationServiceResult,
 } from "@clankie/protocol";
+import { sanitizeForSupportBundle } from "@clankie/observability";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import {
   createAgentSession,
@@ -29,7 +32,8 @@ import { normalizeDiscordTurn } from "./discord-turn.ts";
 import { LaneLog } from "./lane-log.ts";
 import { createCaptainModelRuntime, type CaptainModelRuntime } from "./model.ts";
 import type { CaptainPort, LaneObservation } from "./port.ts";
-import { browserTools, captainTools, type TurnMediaCapture } from "./tools.ts";
+import { connectionTools } from "./connect-tools.ts";
+import { browserTools, captainTools, roomKey, type TurnContext } from "./tools.ts";
 
 const REGISTER_FOR_LANE: Readonly<Record<CaptainSessionLaneV2, PersonaRegister>> = {
   operator: "operator",
@@ -37,6 +41,55 @@ const REGISTER_FOR_LANE: Readonly<Record<CaptainSessionLaneV2, PersonaRegister>>
   discord_presence: "social",
   gameplay: "gameplay",
 };
+
+const TOOL_DETAIL_TRUNCATED = "\n… truncated";
+
+function boundOperatorToolDetail(detail: string): string {
+  if (detail.length <= OPERATOR_CONVERSATION_TOOL_DETAIL_MAX) return detail;
+  return `${detail.slice(0, OPERATOR_CONVERSATION_TOOL_DETAIL_MAX - TOOL_DETAIL_TRUNCATED.length)}${TOOL_DETAIL_TRUNCATED}`;
+}
+
+/** Serialize a tool payload without letting diagnostics fail the turn that produced it. */
+export function formatOperatorToolDetail(value: unknown): string {
+  let detail: string;
+  try {
+    const sanitized = sanitizeForSupportBundle(value);
+    detail = JSON.stringify(sanitized, null, 2) ?? String(sanitized);
+  } catch {
+    return "[tool detail could not be serialized]";
+  }
+  return boundOperatorToolDetail(detail);
+}
+
+/** Prefer the result text Pi gave the model over dumping Pi's transport envelope. */
+export function formatOperatorToolResult(result: unknown): string {
+  if (typeof result !== "object" || result === null) return formatOperatorToolDetail(result);
+  const content = (result as { readonly content?: unknown }).content;
+  if (!Array.isArray(content)) return formatOperatorToolDetail(result);
+  const visible = content.flatMap((block): string[] => {
+    if (typeof block !== "object" || block === null) return [];
+    const entry = block as { readonly mimeType?: unknown; readonly text?: unknown; readonly type?: unknown };
+    if (entry.type === "text" && typeof entry.text === "string") return [entry.text];
+    if (entry.type === "image") {
+      return [`[image${typeof entry.mimeType === "string" ? `: ${entry.mimeType}` : ""}]`];
+    }
+    return [];
+  });
+  // ponytail: show model-visible content; add tool-specific renderers if structured details need their own UI.
+  return visible.length === 0
+    ? formatOperatorToolDetail(result)
+    : boundOperatorToolDetail(stripVTControlCharacters(visible.join("\n\n")));
+}
+
+/** Pi loads a skill through the ordinary read tool; retain that meaning for the operator UI. */
+export function operatorSkillName(toolName: string, args: unknown): string | undefined {
+  if (toolName !== "read" || typeof args !== "object" || args === null) return undefined;
+  const fields = args as { readonly file_path?: unknown; readonly path?: unknown };
+  const path = typeof fields.path === "string" ? fields.path : fields.file_path;
+  if (typeof path !== "string" || basename(path) !== "SKILL.md") return undefined;
+  const name = basename(dirname(path));
+  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(name) && name.length <= 64 ? name : undefined;
+}
 
 export interface CaptainOptions {
   /** Repo root: instructions.md lives here, skills are discovered here. */
@@ -47,9 +100,62 @@ export interface CaptainOptions {
 
 interface LaneSession {
   readonly session: AgentSession;
-  readonly capture: TurnMediaCapture;
+  readonly capture: TurnContext;
   lastAssistantText: string;
   turnCounter: number;
+  /** Settlement of the in-flight run, while one is active: true if it succeeded. */
+  running?: Promise<boolean> | undefined;
+}
+
+/**
+ * One turn against a durable lane (ADR 0091). An idle lane starts the run and
+ * carries the final reply. A lane already mid-run gets the message steered
+ * into the live run — pi delivers it at the next turn boundary and keeps the
+ * loop alive until the queue drains — and the caller reports "absorbed" once
+ * the merged run settles: the runner's reply answers everything heard, so an
+ * absorbed turn must stay silent rather than double-speak.
+ */
+export async function runDurableTurn(
+  lane: {
+    readonly session: Pick<AgentSession, "isStreaming" | "prompt">;
+    readonly capture: TurnContext;
+    running?: Promise<boolean> | undefined;
+  },
+  prompt: string,
+  images: ImageContent[],
+): Promise<"ran" | "absorbed"> {
+  for (;;) {
+    const running = lane.running;
+    if (running === undefined) {
+      // The idle check and the prompt() call share one synchronous stretch —
+      // with template expansion off pi reaches its own streaming check without
+      // awaiting — so the state observed here is the state it acts on.
+      lane.capture.media = undefined;
+      const run = lane.session.prompt(prompt, { expandPromptTemplates: false, images });
+      lane.running = run
+        .then(
+          () => true,
+          () => false,
+        )
+        .finally(() => {
+          lane.running = undefined;
+        });
+      await run;
+      return "ran";
+    }
+    if (lane.session.isStreaming) {
+      await lane.session.prompt(prompt, {
+        expandPromptTemplates: false,
+        streamingBehavior: "steer",
+        images,
+      });
+      if (!(await running)) throw new Error("The run this turn was steered into failed");
+      return "absorbed";
+    }
+    // A run is accepted but not streaming yet, or is winding down: wait for it
+    // to settle and decide again.
+    await running;
+  }
 }
 
 /**
@@ -79,7 +185,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     lane: CaptainSessionLaneV2,
     sessionManager: SessionManager,
   ): Promise<LaneSession> {
-    const capture: TurnMediaCapture = {};
+    const capture: TurnContext = {};
     const { runtime: models, resolveModel } = await runtime();
     const loader = new DefaultResourceLoader({
       cwd: options.repoRoot,
@@ -94,7 +200,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       cwd: options.repoRoot,
       model: await resolveModel(),
       modelRuntime: models,
-      customTools: [...captainTools(deps, capture, laneLog, lane), ...(await browserTools(deps, capture))],
+      customTools: [
+        ...captainTools(deps, capture, laneLog, lane),
+        ...connectionTools(deps, lane),
+        ...(await browserTools(deps, capture)),
+      ],
       resourceLoader: loader,
       sessionManager,
       // Coding tools (read/bash/edit/write) run unsandboxed as the service
@@ -139,11 +249,31 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         join(options.stateDir, "conversations", conversationId, "pi"),
       );
       lane.capture.media = undefined;
+      lane.capture.room = roomKey("operator", conversationId);
+      const skillCalls = new Map<string, string>();
       const unsubscribe = lane.session.subscribe((event) => {
         if (event.type === "tool_execution_start") {
-          publish({ type: "tool", toolCallId: event.toolCallId, name: event.toolName, phase: "started" });
+          const skillName = operatorSkillName(event.toolName, event.args);
+          if (skillName !== undefined) skillCalls.set(event.toolCallId, skillName);
+          publish({
+            type: "tool",
+            toolCallId: event.toolCallId,
+            name: event.toolName,
+            phase: "started",
+            detail: formatOperatorToolDetail(event.args),
+            ...(skillName === undefined ? {} : { skillName }),
+          });
         } else if (event.type === "tool_execution_end") {
-          publish({ type: "tool", toolCallId: event.toolCallId, name: event.toolName, phase: "completed" });
+          const skillName = skillCalls.get(event.toolCallId);
+          skillCalls.delete(event.toolCallId);
+          publish({
+            type: "tool",
+            toolCallId: event.toolCallId,
+            name: event.toolName,
+            phase: event.isError ? "failed" : "completed",
+            detail: formatOperatorToolResult(event.result),
+            ...(skillName === undefined ? {} : { skillName }),
+          });
         }
       });
       try {
@@ -166,33 +296,38 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
   );
 
-  // One turn at a time per durable session: a second voice message in the
-  // same channel queues behind the first instead of racing pi's prompt() and
-  // cross-wiring lastAssistantText/capture between overlapping turns.
-  const turnChains = new Map<string, Promise<unknown>>();
-
   async function runDiscordTurn(
     lane: LaneSession,
     normalized: Awaited<ReturnType<typeof normalizeDiscordTurn>>,
     deliveryId: string,
   ): Promise<CaptainChannelTurnResult> {
-    lane.capture.media = undefined;
     lane.turnCounter += 1;
+    lane.capture.room = roomKey(normalized.lane, normalized.targetId);
     const turnId = `turn-${lane.turnCounter}-${deliveryId}`;
     await laneLog.append(normalized.lane, normalized.targetId, {
       at: new Date().toISOString(),
       kind: "heard",
       text: normalized.heard,
     });
+    let role: "ran" | "absorbed" = "ran";
     try {
-      await lane.session.prompt(normalized.prompt, {
-        expandPromptTemplates: false,
-        images: normalized.images.map(toImageContent),
-      });
+      if (normalized.durable) {
+        role = await runDurableTurn(lane, normalized.prompt, normalized.images.map(toImageContent));
+      } else {
+        await lane.session.prompt(normalized.prompt, {
+          expandPromptTemplates: false,
+          images: normalized.images.map(toImageContent),
+        });
+      }
     } catch {
       return { state: "failed", turnId, code: "captain_session_failed" };
     } finally {
       if (!normalized.durable) lane.session.dispose();
+    }
+    if (role === "absorbed") {
+      // Heard inside another turn's live run; that run's reply answers it, so
+      // this delivery sends nothing of its own.
+      return { state: "silent", captainSessionId: normalized.sessionKey, turnId };
     }
     const message = lane.lastAssistantText.trim();
     if (message.length === 0) {
@@ -230,20 +365,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         const lane = await buildSession(normalized.lane, SessionManager.inMemory(options.repoRoot));
         return runDiscordTurn(lane, normalized, request.deliveryId);
       }
-      const key = normalized.sessionKey;
-      const run = (turnChains.get(key) ?? Promise.resolve()).then(async () => {
-        const lane = await durableSession(
-          key,
-          normalized.lane,
-          join(options.stateDir, "voice", encodeURIComponent(key)),
-        );
-        return runDiscordTurn(lane, normalized, request.deliveryId);
-      });
-      turnChains.set(
-        key,
-        run.catch(() => undefined),
+      const lane = await durableSession(
+        normalized.sessionKey,
+        normalized.lane,
+        join(options.stateDir, "voice", encodeURIComponent(normalized.sessionKey)),
       );
-      return run;
+      return runDiscordTurn(lane, normalized, request.deliveryId);
     },
 
     serveOperatorConversation(
