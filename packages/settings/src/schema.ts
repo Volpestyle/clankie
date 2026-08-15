@@ -74,6 +74,32 @@ export const DiscordSettingsSchema = z
      */
     possessorVoiceEnabled: z.boolean().default(false),
 
+    /**
+     * Which Discord body is the mouth. The launcher starts only this process.
+     * Both tokens stay stored; only one gateway is live. `user_session` still
+     * requires enablement, allowlists, and the durable opt-in.
+     */
+    activeBody: z.enum(["bot", "user_session"]).default("bot"),
+
+    /**
+     * Personal-lab user-session body (ADR 0048). Off by default. Storing a
+     * user token is not enough — this flag, the allowlists, the durable
+     * opt-in, and `activeBody=user_session` must all be set before the
+     * launcher starts that process.
+     */
+    userSessionEnabled: z.boolean().default(false),
+    userSessionGuildIds: SnowflakeListSchema,
+    userSessionChannelIds: SnowflakeListSchema,
+    /**
+     * Whether the lab body may join voice as a participant (talk). Watch
+     * joins a channel muted on its own when a share starts and does not
+     * require this flag.
+     */
+    userSessionVoiceEnabled: z.boolean().default(false),
+    userSessionVoiceChannelIds: SnowflakeListSchema,
+    userSessionDmPolicy: z.enum(["deny", "owner_only", "allowlist"]).default("owner_only"),
+    userSessionDmUserIds: SnowflakeListSchema,
+
     /** Activity plane (ADR 0047): surface → embedded application id. */
     activityApplicationIdGba: SnowflakeSchema.optional(),
     /**

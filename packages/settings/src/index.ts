@@ -20,7 +20,11 @@ export { SettingsStore, defaultSettingsPath } from "./store.ts";
 export {
   applyDiscordSettingsToEnvironment,
   discordSettingsToEnvironment,
+  isDiscordBodyActive,
+  parseDiscordActiveBody,
+  resolveDiscordActiveBody,
   resolveDiscordSettings,
+  type DiscordActiveBody,
   type ResolvedDiscordSettings,
 } from "./discord-resolve.ts";
 export {

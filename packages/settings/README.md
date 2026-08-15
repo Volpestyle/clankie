@@ -54,6 +54,15 @@ ids, a Linear default team, an IMAP host and username — write here.
 `/discord status` prints the effective configuration, whether `discord_bot` is
 present in the broker, and any environment overrides in effect.
 
+`discord.activeBody` is which Discord process is the mouth (`bot` or
+`user_session`, default `bot`). Both tokens stay stored; the launcher starts
+only the active one.
+
+`discord.userSessionEnabled` is the lab user body that can watch shares and
+Go Live. It is off by default and still needs a stored `discord_user_session`
+token, allowlists, the durable opt-in, and `activeBody=user_session` before
+the launcher starts it.
+
 `discord.systemActorUserIds` is the Discord users whose text turns get bash,
 files, and herdr. Empty means nobody — Discord stays social. It is not
 `ownerUserId` (DM policy) and not `ambientUserIds` (slash commands).

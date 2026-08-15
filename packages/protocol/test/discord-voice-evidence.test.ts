@@ -42,7 +42,7 @@ describe("Discord voice evidence (ADR 0057)", () => {
       { type: "overlap", ...scope, userId: "user-2", activeCaptureCount: 2 },
       { type: "interrupted", ...scope, userId: "user-1", phase: "playing" },
       { type: "failed", ...scope, stage: "captain_handoff", code: "voice_captain_turn_failed" },
-      { type: "left", ...scope },
+      { type: "left", ...scope, stayId: "stay-1", inputTokens: 120, outputTokens: 40, spokenCount: 2, narrationSuppressed: 5 },
       { type: "possessor_connection", phase: "attached", attachedCount: 1 },
       { type: "possessor_room", listening: true, attachedCount: 1, deliveredCount: 1 },
       {
@@ -52,6 +52,13 @@ describe("Discord voice evidence (ADR 0057)", () => {
         deliveredCount: 1,
       },
       { type: "possessor_narration_submission", deliveryId: "possessor-delivery-2", attachedCount: 1 },
+      {
+        type: "possessor_narration_suppressed",
+        ...scope,
+        stayId: "stay-1",
+        deliveryId: "possessor-delivery-4",
+        reason: "rate_limited",
+      },
       {
         type: "possessor_refusal",
         deliveryId: "possessor-delivery-3",
@@ -138,6 +145,17 @@ describe("Discord voice evidence (ADR 0057)", () => {
     for (const code of ["Playback Timeout", "playback-timeout", "PLAYBACK", "x".repeat(65), ""]) {
       expect(() => DiscordVoiceEvidenceSchema.parse({ ...failed, code })).toThrow();
     }
+  });
+
+  it("keeps stay ids and token counts optional on responses", () => {
+    expect(
+      DiscordVoiceEvidenceSchema.parse({
+        ...fastPathResponse,
+        stayId: "stay-1",
+        inputTokens: 800,
+        outputTokens: 120,
+      }),
+    ).toMatchObject({ stayId: "stay-1", inputTokens: 800, outputTokens: 120 });
   });
 
   it("rejects numbers a receipt cannot carry", () => {

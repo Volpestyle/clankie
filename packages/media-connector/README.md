@@ -1,7 +1,7 @@
 # Media connector
 
 `@clankie/media-connector` is the versioned, provider-neutral boundary for local media generation.
-Schema version 2 ([ADR 0085](../../docs/adr/0085-a-picture-he-made-is-something-he-said.md)) covers
+Schema version 2 ([ADR 0085](../../docs/adr/0085-a-picture-he-makes-is-something-he-says.md)) covers
 images, image editing, and video; requests are a discriminated union on `kind`, so video's duration
 and resolution never appear on an image request.
 

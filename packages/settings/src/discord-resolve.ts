@@ -85,6 +85,20 @@ export function resolveDiscordSettings(
   takeString("voiceConsentPolicy", "DISCORD_VOICE_CONSENT_POLICY");
   takeBoolean("possessorVoiceEnabled", "CLANKIE_POSSESSOR_VOICE_ENABLED");
 
+  const activeBody = env.DISCORD_ACTIVE_BODY?.trim();
+  if (activeBody === "bot" || activeBody === "user_session") {
+    merged.activeBody = activeBody;
+    overridden.push("DISCORD_ACTIVE_BODY");
+  }
+
+  takeBoolean("userSessionEnabled", "DISCORD_USER_SESSION_ENABLED");
+  takeList("userSessionGuildIds", "DISCORD_USER_SESSION_GUILD_IDS");
+  takeList("userSessionChannelIds", "DISCORD_USER_SESSION_CHANNEL_IDS");
+  takeBoolean("userSessionVoiceEnabled", "DISCORD_USER_SESSION_VOICE_ENABLED");
+  takeList("userSessionVoiceChannelIds", "DISCORD_USER_SESSION_VOICE_CHANNEL_IDS");
+  takeString("userSessionDmPolicy", "DISCORD_USER_SESSION_DM_POLICY");
+  takeList("userSessionDmUserIds", "DISCORD_USER_SESSION_DM_USER_IDS");
+
   takeString("activityApplicationIdGba", "DISCORD_ACTIVITY_APPLICATION_ID_GBA");
   takeString("activityTunnelName", "CLANKIE_ACTIVITY_TUNNEL_NAME");
   takeString("activityTunnelHostname", "CLANKIE_ACTIVITY_TUNNEL_HOSTNAME");
@@ -95,11 +109,23 @@ export function resolveDiscordSettings(
   };
 }
 
-/**
- * Project resolved settings back into the environment shape the bridge and
- * the service already read, so adopting the store is a composition change
- * rather than a rewrite of every call site.
- */
+export type DiscordActiveBody = DiscordSettings["activeBody"];
+
+export function parseDiscordActiveBody(value: string | undefined): DiscordActiveBody {
+  return value === "user_session" ? "user_session" : "bot";
+}
+
+export function resolveDiscordActiveBody(env: NodeJS.ProcessEnv = process.env): DiscordActiveBody {
+  return parseDiscordActiveBody(env.DISCORD_ACTIVE_BODY);
+}
+
+export function isDiscordBodyActive(
+  body: DiscordActiveBody,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return resolveDiscordActiveBody(env) === body;
+}
+
 /**
  * Fill unset environment variables from stored settings.
  *
@@ -159,6 +185,15 @@ export function discordSettingsToEnvironment(settings: DiscordSettings): Record<
   put("DISCORD_VOICE_JOIN_POLICY", settings.voiceJoinPolicy);
   put("DISCORD_VOICE_CONSENT_POLICY", settings.voiceConsentPolicy);
   if (settings.possessorVoiceEnabled) env["CLANKIE_POSSESSOR_VOICE_ENABLED"] = "true";
+
+  env["DISCORD_ACTIVE_BODY"] = settings.activeBody;
+  if (settings.userSessionEnabled) env["DISCORD_USER_SESSION_ENABLED"] = "true";
+  putList("DISCORD_USER_SESSION_GUILD_IDS", settings.userSessionGuildIds);
+  putList("DISCORD_USER_SESSION_CHANNEL_IDS", settings.userSessionChannelIds);
+  if (settings.userSessionVoiceEnabled) env["DISCORD_USER_SESSION_VOICE_ENABLED"] = "true";
+  putList("DISCORD_USER_SESSION_VOICE_CHANNEL_IDS", settings.userSessionVoiceChannelIds);
+  put("DISCORD_USER_SESSION_DM_POLICY", settings.userSessionDmPolicy);
+  putList("DISCORD_USER_SESSION_DM_USER_IDS", settings.userSessionDmUserIds);
 
   put("DISCORD_ACTIVITY_APPLICATION_ID_GBA", settings.activityApplicationIdGba);
   put("CLANKIE_ACTIVITY_TUNNEL_NAME", settings.activityTunnelName);

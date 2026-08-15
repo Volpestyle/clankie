@@ -184,6 +184,44 @@ describe("discord settings resolution", () => {
     expect(overridden.overriddenByEnvironment).toContain("DISCORD_SYSTEM_ACTOR_USER_IDS");
   });
 
+  it("defaults the active body to the official bot and can switch to the lab body", () => {
+    expect(DiscordSettingsSchema.parse({}).activeBody).toBe("bot");
+    expect(discordSettingsToEnvironment(stored)["DISCORD_ACTIVE_BODY"]).toBe("bot");
+
+    const labMouth = DiscordSettingsSchema.parse({ activeBody: "user_session" });
+    expect(discordSettingsToEnvironment(labMouth)["DISCORD_ACTIVE_BODY"]).toBe("user_session");
+
+    const overridden = resolveDiscordSettings(stored, {
+      DISCORD_ACTIVE_BODY: "user_session",
+    } as NodeJS.ProcessEnv);
+    expect(overridden.settings.activeBody).toBe("user_session");
+    expect(overridden.overriddenByEnvironment).toContain("DISCORD_ACTIVE_BODY");
+  });
+
+  it("projects the lab user-session body only when the owner enables it", () => {
+    expect(DiscordSettingsSchema.parse({}).userSessionEnabled).toBe(false);
+    expect(discordSettingsToEnvironment(stored)["DISCORD_USER_SESSION_ENABLED"]).toBeUndefined();
+
+    const lab = DiscordSettingsSchema.parse({
+      userSessionEnabled: true,
+      userSessionGuildIds: ["111111111111111111"],
+      userSessionChannelIds: ["222222222222222222"],
+      userSessionVoiceEnabled: true,
+    });
+    const env = discordSettingsToEnvironment(lab);
+    expect(env["DISCORD_USER_SESSION_ENABLED"]).toBe("true");
+    expect(env["DISCORD_USER_SESSION_GUILD_IDS"]).toBe("111111111111111111");
+    expect(env["DISCORD_USER_SESSION_CHANNEL_IDS"]).toBe("222222222222222222");
+    expect(env["DISCORD_USER_SESSION_VOICE_ENABLED"]).toBe("true");
+    expect(env["DISCORD_USER_SESSION_DM_POLICY"]).toBe("owner_only");
+
+    const overridden = resolveDiscordSettings(lab, {
+      DISCORD_USER_SESSION_ENABLED: "false",
+    } as NodeJS.ProcessEnv);
+    expect(overridden.settings.userSessionEnabled).toBe(false);
+    expect(overridden.overriddenByEnvironment).toContain("DISCORD_USER_SESSION_ENABLED");
+  });
+
   it("carries the voice consent policy, defaulting to explicit opt-in", () => {
     // Presence-as-consent is an owner decision (ADR 0045's boundary made
     // configurable); the default preserves the explicit policy exactly.

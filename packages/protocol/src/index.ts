@@ -134,6 +134,16 @@ export const OperatorConversationSessionStateSchema = z.enum([
 ]);
 export type OperatorConversationSessionState = z.infer<typeof OperatorConversationSessionStateSchema>;
 
+/** Current model-context occupancy, independent of provider-specific token metadata. */
+export const OperatorConversationContextUsageSchema = z
+  .object({
+    /** Unknown immediately after compaction until the next model response. */
+    tokens: z.number().int().nonnegative().nullable(),
+    contextWindow: z.number().int().positive(),
+  })
+  .strict();
+export type OperatorConversationContextUsage = z.infer<typeof OperatorConversationContextUsageSchema>;
+
 /** Public registry record. Provider credentials and continuation capabilities are impossible by schema. */
 export const OperatorConversationSchema = z
   .object({
@@ -146,6 +156,7 @@ export const OperatorConversationSchema = z
     updatedAt: z.string().datetime(),
     sessionState: OperatorConversationSessionStateSchema,
     revision: z.number().int().nonnegative(),
+    contextUsage: OperatorConversationContextUsageSchema.optional(),
   })
   .strict();
 export type OperatorConversation = z.infer<typeof OperatorConversationSchema>;
@@ -210,10 +221,11 @@ export type OperatorConversationAttachment = z.infer<typeof OperatorConversation
 
 /**
  * Strict discriminated public event union. Every app-renderable VUH-745 session
- * event (message, reasoning, tool, typed input, auth/session lifecycle, turn
- * lifecycle, redacted worker transcript) is a named bounded variant. Raw model,
- * provider, continuation, and credential payloads are impossible by schema; the
- * captain redacts to these shapes before publishing to the durable log/tail.
+ * event (message, reasoning, context occupancy, tool, typed input, auth/session
+ * lifecycle, turn lifecycle, redacted worker transcript) is a named bounded
+ * variant. Raw model, provider, continuation, and credential payloads are
+ * impossible by schema; the captain redacts to these shapes before publishing
+ * to the durable log/tail.
  */
 const OperatorConversationEventEnvelopeSchema = z.object({
   schemaVersion: z.literal(1),
@@ -236,12 +248,16 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
     streaming: z.boolean(),
   }).strict(),
   OperatorConversationEventEnvelopeSchema.extend({
+    type: z.literal("context"),
+    usage: OperatorConversationContextUsageSchema,
+  }).strict(),
+  OperatorConversationEventEnvelopeSchema.extend({
     type: z.literal("tool"),
     toolCallId: OperatorConversationEventRefSchema,
     name: z.string().trim().min(1).max(OPERATOR_CONVERSATION_CODE_MAX),
     phase: z.enum(["started", "completed", "failed"]),
     summary: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
-    /** Present when Pi's read tool is loading a named SKILL.md resource. */
+    /** Present when Pi loads a named skill, directly or through the read tool. */
     skillName: z.string().trim().min(1).max(OPERATOR_CONVERSATION_CODE_MAX).optional(),
     /** Redacted, serialized arguments or result; bounded before it enters the durable log. */
     detail: z.string().max(OPERATOR_CONVERSATION_TOOL_DETAIL_MAX).optional(),
@@ -419,6 +435,12 @@ const SubmitOperatorConversationTurnBaseSchema = z.object({
   conversationId: OperatorConversationIdSchema,
   surfaceClientId: OperatorSurfaceClientIdSchema,
   expectedRevision: z.number().int().nonnegative(),
+  /**
+   * When the operator console is a herdr pane, that pane is Clankie's seat
+   * in the same session as the fleet. Absent on Discord and on a console
+   * outside herdr.
+   */
+  herdrPaneId: z.string().trim().min(1).max(64).regex(/^\S+$/u).optional(),
 });
 
 /**
@@ -1034,6 +1056,12 @@ export const GENERATED_MEDIA_DIRECTORY = "generated";
 /** Sole write target of the runner's browser host, relative to the attachment root. */
 export const BROWSER_ARTIFACT_DIRECTORY = "browser";
 
+/** Sole write target of the runner's diagram host, relative to the attachment root. */
+export const TLDRAW_ARTIFACT_DIRECTORY = "tldraw";
+
+/** Sole write target of Discord stream-watch stills, relative to the attachment root. */
+export const SHARE_ARTIFACT_DIRECTORY = "shares";
+
 const GENERATED_MEDIA_REF_PATTERN = new RegExp(
   `^sha256:[0-9a-f]{64}:${GENERATED_MEDIA_DIRECTORY}/[A-Za-z0-9._-]+$`,
   "u",
@@ -1041,6 +1069,16 @@ const GENERATED_MEDIA_REF_PATTERN = new RegExp(
 
 const BROWSER_ARTIFACT_REF_PATTERN = new RegExp(
   `^sha256:[0-9a-f]{64}:${BROWSER_ARTIFACT_DIRECTORY}/[A-Za-z0-9._-]+$`,
+  "u",
+);
+
+const TLDRAW_ARTIFACT_REF_PATTERN = new RegExp(
+  `^sha256:[0-9a-f]{64}:${TLDRAW_ARTIFACT_DIRECTORY}/[A-Za-z0-9._-]+$`,
+  "u",
+);
+
+const SHARE_ARTIFACT_REF_PATTERN = new RegExp(
+  `^sha256:[0-9a-f]{64}:${SHARE_ARTIFACT_DIRECTORY}/[A-Za-z0-9._-]+$`,
   "u",
 );
 
@@ -1070,16 +1108,44 @@ export function isBrowserArtifactRef(artifactRef: string): boolean {
 }
 
 /**
+ * Whether a reference names a diagram the runner's tldraw host minted.
+ *
+ * Same argument again, and it holds for the same reason: the host is the only
+ * writer beneath `tldraw/`, and the model never authors the canvas code that
+ * produces one — it supplies structured diagram *content* (tables, lanes,
+ * steps) that the host renders through fixed, host-authored script. A
+ * prompt-injected turn can therefore choose what a diagram says and nothing
+ * about what runs.
+ */
+export function isTldrawArtifactRef(artifactRef: string): boolean {
+  return TLDRAW_ARTIFACT_REF_PATTERN.test(artifactRef);
+}
+
+/**
+ * Whether a reference names a still the stream-watch host minted from a
+ * consented Discord share. Same host-minted, hash-bound argument as browser
+ * screenshots: the captain cannot write under `shares/`.
+ */
+export function isShareArtifactRef(artifactRef: string): boolean {
+  return SHARE_ARTIFACT_REF_PATTERN.test(artifactRef);
+}
+
+/**
  * Whether a reference may ride his reply without an approval (ADR 0088).
  *
- * Both directories are written only by a governed runner-side host, so what he
- * shows a room is always something a tool of his actually produced. The
- * distinction this preserves is against *arbitrary* files under the attachment
- * root — a repository file, a support bundle — which keep `send_attachment`
- * and its `publish-external` approval.
+ * Every one of these directories is written only by a governed runner-side
+ * host, so what he shows a room is always something a tool of his actually
+ * produced. The distinction this preserves is against *arbitrary* files under
+ * the attachment root — a repository file, a support bundle — which keep
+ * `send_attachment` and its `publish-external` approval.
  */
 export function isAttachableTurnMediaRef(artifactRef: string): boolean {
-  return isGeneratedMediaRef(artifactRef) || isBrowserArtifactRef(artifactRef);
+  return (
+    isGeneratedMediaRef(artifactRef) ||
+    isBrowserArtifactRef(artifactRef) ||
+    isTldrawArtifactRef(artifactRef) ||
+    isShareArtifactRef(artifactRef)
+  );
 }
 
 /**
@@ -1275,7 +1341,8 @@ export const DiscordPresenceAttachmentSchema = z
     url: z.string().url(),
     mediaType: z.enum(DISCORD_PRESENCE_ATTACHMENT_MEDIA_TYPES),
     filename: z.string().min(1).max(256).optional(),
-    byteSize: z.number().int().positive().max(DISCORD_PRESENCE_ATTACHMENT_BYTES_MAX),
+    /** Discord uploads declare a size; proxied embed previews are bounded only when fetched. */
+    byteSize: z.number().int().positive().max(DISCORD_PRESENCE_ATTACHMENT_BYTES_MAX).optional(),
   })
   .strict();
 export type DiscordPresenceAttachment = z.infer<typeof DiscordPresenceAttachmentSchema>;
@@ -1364,6 +1431,19 @@ export const DiscordPresenceChannelTurnRequestSchema = z
       )
       .max(DISCORD_PRESENCE_CONTEXT_MESSAGES_MAX)
       .default([]),
+    /** The newest visual in the bounded context, never more than one image. */
+    contextVisual: z
+      .object({
+        sourceMessageId: z.string().min(1),
+        attachment: DiscordPresenceAttachmentSchema.optional(),
+        attachmentsOmitted: z.number().int().positive().optional(),
+      })
+      .strict()
+      .refine(
+        (visual) => visual.attachment !== undefined || visual.attachmentsOmitted !== undefined,
+        "A context visual must carry an image or an omitted count",
+      )
+      .optional(),
   })
   .strict()
   .superRefine((request, context) => {
@@ -1372,6 +1452,16 @@ export const DiscordPresenceChannelTurnRequestSchema = z
         code: "custom",
         path: ["identity", "presenceSessionId"],
         message: "Discord channel turns require missionId or presenceSessionId attribution",
+      });
+    }
+    if (
+      request.contextVisual !== undefined &&
+      !request.contextMessages.some((message) => message.id === request.contextVisual?.sourceMessageId)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["contextVisual", "sourceMessageId"],
+        message: "A context visual must belong to a bounded context message",
       });
     }
     // A turn must carry something he can perceive. Text or images both qualify;
@@ -1477,7 +1567,13 @@ export const DiscordPresenceActionRequestSchema = z.discriminatedUnion("kind", [
     .strict(),
   z.object({ kind: z.literal("voice_leave"), guildId: z.string().min(1) }).strict(),
   z
-    .object({ kind: z.literal("go_live_start"), guildId: z.string().min(1), channelId: z.string().min(1) })
+    .object({
+      kind: z.literal("go_live_start"),
+      guildId: z.string().min(1),
+      channelId: z.string().min(1),
+      /** Optional http(s) media URL. Absent, the lab body publishes his live play surface. */
+      sourceUrl: z.string().url().max(2_000).optional(),
+    })
     .strict(),
   z.object({ kind: z.literal("go_live_stop"), guildId: z.string().min(1) }).strict(),
   z
@@ -1667,6 +1763,79 @@ export const DiscordUserSessionOptInRequestSchema = DiscordUserSessionOptInSchem
   .extend({ schemaVersion: z.literal(1) })
   .strict();
 export type DiscordUserSessionOptInRequest = z.infer<typeof DiscordUserSessionOptInRequestSchema>;
+
+/**
+ * A Discord Go Live / screen share the bridges have observed.
+ *
+ * Metadata only: who, where, whether the lab body is watching. Raw video never
+ * enters this record. A still, when one exists, is a host-minted artifact.
+ */
+export const DiscordActiveStreamSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    streamKey: z.string().min(1).max(200),
+    kind: z.enum(["guild", "call"]),
+    guildId: z.string().min(1).optional(),
+    channelId: z.string().min(1),
+    userId: z.string().min(1),
+    watching: z.boolean(),
+    hasFrame: z.boolean(),
+    updatedAt: z.string().datetime(),
+  })
+  .strict();
+export type DiscordActiveStream = z.infer<typeof DiscordActiveStreamSchema>;
+
+export const DiscordStreamWatchFrameSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    streamKey: z.string().min(1).max(200),
+    userId: z.string().min(1),
+    width: z.number().int().positive().max(4096),
+    height: z.number().int().positive().max(4096),
+    jpegBase64: z.string().min(1).max(8_000_000),
+    capturedAt: z.string().datetime(),
+  })
+  .strict();
+export type DiscordStreamWatchFrame = z.infer<typeof DiscordStreamWatchFrameSchema>;
+
+/** What a bridge posts when a share starts, stops, or yields a still. */
+export const DiscordStreamWatchReportSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    source: z.enum(["bot", "user_session"]).default("user_session"),
+    streams: z.array(DiscordActiveStreamSchema).max(16),
+    frame: DiscordStreamWatchFrameSchema.optional(),
+    decoder: z.enum(["ready", "missing", "error", "idle"]).optional(),
+    decoderDetail: z.string().max(400).optional(),
+  })
+  .strict();
+export type DiscordStreamWatchReport = z.infer<typeof DiscordStreamWatchReportSchema>;
+
+/** Captain/operator read of the live share projection. */
+export const DiscordStreamWatchObservationSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    streams: z.array(DiscordActiveStreamSchema).max(16),
+    frame: z
+      .object({
+        streamKey: z.string().min(1),
+        userId: z.string().min(1),
+        width: z.number().int().positive(),
+        height: z.number().int().positive(),
+        jpegBase64: z.string().min(1),
+        artifactRef: z.string().optional(),
+        capturedAt: z.string().datetime(),
+      })
+      .strict()
+      .optional(),
+    decoder: z.enum(["ready", "missing", "error", "idle"]),
+    decoderDetail: z.string().max(400).optional(),
+    updatedAt: z.string().datetime().optional(),
+  })
+  .strict();
+export type DiscordStreamWatchObservation = z.infer<typeof DiscordStreamWatchObservationSchema>;
+
+export const DISCORD_STREAM_WATCH_PATH = "/v1/discord/stream-watch";
 
 // ---------------------------------------------------------------------------
 
@@ -2371,6 +2540,19 @@ export const DiscordPersonMemoryDeleteResultSchema = z
   .strict();
 export type DiscordPersonMemoryDeleteResult = z.infer<typeof DiscordPersonMemoryDeleteResultSchema>;
 
+/** Authenticated owner edits preserve the fact's identity and source provenance. */
+export const DiscordPersonMemoryEditSchema = z
+  .object({
+    body: z.string().trim().min(1).max(2_048).optional(),
+    kind: DiscordPersonMemoryKindSchema.optional(),
+    visibility: DiscordPersonMemoryVisibilitySchema.optional(),
+    confidence: z.number().min(0).max(1).optional(),
+    expiresAt: z.string().datetime().nullable().optional(),
+  })
+  .strict()
+  .refine((edit) => Object.keys(edit).length > 0, "an edit must change at least one field");
+export type DiscordPersonMemoryEdit = z.infer<typeof DiscordPersonMemoryEditSchema>;
+
 // ---------------------------------------------------------------------------
 // Clankie's browser (ADR 0082).
 //
@@ -2455,6 +2637,114 @@ export const CallBrowserToolResultSchema = z.discriminatedUnion("outcome", [
   }),
 ]);
 export type CallBrowserToolResult = z.infer<typeof CallBrowserToolResultSchema>;
+
+// ---------------------------------------------------------------------------
+// Drawing a diagram (ADR 0096).
+//
+// He describes the diagram as data — entities and their fields, lanes and the
+// messages between them — and the host renders it through the tldraw desktop
+// app in a fixed design system. He never authors canvas code: the script that
+// runs is the host's, and the request only fills in what the picture says. See
+// `isTldrawArtifactRef` above for why the artifact this mints is attachable.
+// ---------------------------------------------------------------------------
+
+/** Why a diagram request produced nothing. Each one is sayable out loud. */
+export const DiagramRefusalReasonSchema = z.enum([
+  "canvas_unavailable",
+  "canvas_failed",
+  "diagram_too_large",
+  "artifact_too_large",
+]);
+export type DiagramRefusalReason = z.infer<typeof DiagramRefusalReasonSchema>;
+
+/**
+ * One entity box: a name, the store it lives in, and its fields.
+ *
+ * `columns` is one field per line as `ROLES|field|type`, where roles are any
+ * comma-separated mix of `PK`, `SK` and `FK` — the notation the design system's
+ * table shape already speaks, so the request carries no rendering decisions.
+ */
+export const DiagramTableSchema = z
+  .object({
+    name: z.string().trim().min(1).max(60),
+    /** Where the rows actually live: `postgres`, `memory · hot`, `ewram`, … */
+    engine: z.string().trim().max(60).default(""),
+    tone: z.enum(["black", "grey", "blue", "green", "yellow", "orange", "red", "violet"]).default("black"),
+    columns: z.string().trim().min(1).max(4_000),
+    /** Constraints or lifecycle notes; keep them out of the type cells. */
+    footer: z.string().trim().max(600).default(""),
+  })
+  .strict();
+export type DiagramTable = z.infer<typeof DiagramTableSchema>;
+
+/** One relationship, pinned to the rows that actually hold the keys. */
+export const DiagramEdgeSchema = z
+  .object({
+    from: z.string().trim().min(1).max(60),
+    fromField: z.string().trim().min(1).max(60),
+    to: z.string().trim().min(1).max(60),
+    toField: z.string().trim().min(1).max(60),
+    label: z.string().trim().max(80).default(""),
+  })
+  .strict();
+export type DiagramEdge = z.infer<typeof DiagramEdgeSchema>;
+
+export const DrawErDiagramRequestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    title: z.string().trim().min(1).max(120),
+    subtitle: z.string().trim().max(240).default(""),
+    tables: z.array(DiagramTableSchema).min(1).max(16),
+    edges: z.array(DiagramEdgeSchema).max(32).default([]),
+  })
+  .strict();
+export type DrawErDiagramRequest = z.infer<typeof DrawErDiagramRequestSchema>;
+
+export const DrawSequenceDiagramRequestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    title: z.string().trim().min(1).max(120),
+    /** One participant per line as `id|Label|sublabel`, left to right. */
+    lanes: z.string().trim().min(1).max(1_200),
+    /**
+     * The exchange, one step per line, in the design system's mini-syntax:
+     * `== phase`, `a->b: message`, `a-->b: reply`, `a->a: self call`,
+     * `note over a,b: aside`. A trailing `[red]` colours one step.
+     */
+    steps: z.string().trim().min(1).max(8_000),
+  })
+  .strict();
+export type DrawSequenceDiagramRequest = z.infer<typeof DrawSequenceDiagramRequestSchema>;
+
+/**
+ * Only `ok` carries a reference, so a diagram that failed to render can never
+ * yield something attachable.
+ */
+export const DrawDiagramResultSchema = z.discriminatedUnion("outcome", [
+  z
+    .object({
+      outcome: z.literal("ok"),
+      artifactRef: z.string().refine(isTldrawArtifactRef, "expected a tldraw artifact reference"),
+      filename: z.string().min(1),
+      width: z.number().int().positive(),
+      height: z.number().int().positive(),
+      /**
+       * Which design system it came out in. Operator-chosen, like the model
+       * behind a picture — reported so he can name the look, not so he can
+       * pick it.
+       */
+      system: z.string().min(1).max(60).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      outcome: z.literal("refused"),
+      reason: DiagramRefusalReasonSchema,
+      detail: z.string().max(500).optional(),
+    })
+    .strict(),
+]);
+export type DrawDiagramResult = z.infer<typeof DrawDiagramResultSchema>;
 
 // ---------------------------------------------------------------------------
 // Making a picture (ADR 0085).
@@ -2651,6 +2941,33 @@ export const CaptainEpisodeSchema = z
   .strict();
 export type CaptainEpisode = z.infer<typeof CaptainEpisodeSchema>;
 
+/** Owner curation may change the note or its reach, but never its room or provenance. */
+export const CaptainEpisodeEditSchema = z
+  .object({
+    summary: z.string().trim().min(1).max(CAPTAIN_EPISODE_SUMMARY_MAX).optional(),
+    visibility: CaptainEpisodeVisibilitySchema.optional(),
+  })
+  .strict()
+  .refine((edit) => Object.keys(edit).length > 0, "an edit must change at least one field");
+export type CaptainEpisodeEdit = z.infer<typeof CaptainEpisodeEditSchema>;
+
+/** Complete owner-only browse view; ambient callers only receive bounded recall cards. */
+export const OperatorMemoryCatalogSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    discordPeople: z.array(
+      z
+        .object({
+          subject: DiscordPersonIdentitySchema,
+          facts: z.array(DiscordPersonMemoryFactSchema).max(128),
+        })
+        .strict(),
+    ),
+    captainEpisodes: z.array(CaptainEpisodeSchema),
+  })
+  .strict();
+export type OperatorMemoryCatalog = z.infer<typeof OperatorMemoryCatalogSchema>;
+
 // ---------------------------------------------------------------------------
 // Discord voice evidence (ADR 0057).
 //
@@ -2684,7 +3001,17 @@ const DiscordVoiceCounterSchema = z.number().int().nonnegative();
 const discordVoiceChannelScope = {
   guildId: DiscordVoiceGatewayIdSchema,
   channelId: DiscordVoiceGatewayIdSchema,
+  /** One id from `joined` to `left`. Optional so records written before stays existed still parse. */
+  stayId: DiscordVoiceLocalIdSchema.optional(),
 } as const;
+
+/**
+ * Why a possessor report was seeded but not spoken. Play loops report constantly;
+ * answering each one is a monologue. The drop must be receipt-visible or
+ * "why didn't he commentate that turn?" is unanswerable.
+ */
+export const DiscordVoiceNarrationSuppressReasonSchema = z.enum(["playing", "rate_limited"]);
+export type DiscordVoiceNarrationSuppressReason = z.infer<typeof DiscordVoiceNarrationSuppressReasonSchema>;
 
 /** Whether Clankie holds the floor (engaged realtime session) or only listens (dormant transcription). */
 export const DiscordVoiceFloorStateSchema = z.enum(["engaged", "dormant"]);
@@ -2724,6 +3051,7 @@ export const DiscordVoiceFailureStageSchema = z.enum([
   "transcription_session",
   "conversation_session",
   "captain_handoff",
+  "look_at_screen",
   "playback",
 ]);
 export type DiscordVoiceFailureStage = z.infer<typeof DiscordVoiceFailureStageSchema>;
@@ -2777,6 +3105,8 @@ export const DiscordVoiceEvidenceSchema = z
         type: z.literal("response"),
         ...discordVoiceChannelScope,
         deliveryId: DiscordVoiceLocalIdSchema,
+        /** Gateway speaker whose immutable utterance id caused this response. */
+        userId: DiscordVoiceGatewayIdSchema.optional(),
         /** Captain turn id — only the `ask_clankie` path has one. */
         turnId: DiscordVoiceLocalIdSchema.optional(),
         state: DiscordVoiceResponseStateSchema,
@@ -2789,6 +3119,9 @@ export const DiscordVoiceEvidenceSchema = z
         /** Captain round trip inside `ask_clankie`; 0 on the fast path. */
         handoffMs: DiscordVoiceDurationMsSchema,
         playbackMs: DiscordVoiceDurationMsSchema,
+        /** Realtime `response.done` usage; omitted when the provider sent none. */
+        inputTokens: DiscordVoiceCounterSchema.optional(),
+        outputTokens: DiscordVoiceCounterSchema.optional(),
       })
       .strict(),
     z
@@ -2826,12 +3159,22 @@ export const DiscordVoiceEvidenceSchema = z
         code: DiscordVoiceFailureCodeSchema,
       })
       .strict(),
-    z.object({ type: z.literal("left"), ...discordVoiceChannelScope }).strict(),
+    z
+      .object({
+        type: z.literal("left"),
+        ...discordVoiceChannelScope,
+        inputTokens: DiscordVoiceCounterSchema.optional(),
+        outputTokens: DiscordVoiceCounterSchema.optional(),
+        spokenCount: DiscordVoiceCounterSchema.optional(),
+        narrationSuppressed: DiscordVoiceCounterSchema.optional(),
+      })
+      .strict(),
     z
       .object({
         type: z.literal("possessor_connection"),
         phase: DiscordVoicePossessorConnectionPhaseSchema,
         attachedCount: DiscordVoiceCounterSchema,
+        stayId: DiscordVoiceLocalIdSchema.optional(),
       })
       .strict(),
     z
@@ -2840,6 +3183,7 @@ export const DiscordVoiceEvidenceSchema = z
         listening: z.boolean(),
         attachedCount: DiscordVoiceCounterSchema,
         deliveredCount: DiscordVoiceCounterSchema,
+        stayId: DiscordVoiceLocalIdSchema.optional(),
       })
       .strict(),
     z
@@ -2848,6 +3192,7 @@ export const DiscordVoiceEvidenceSchema = z
         deliveryId: DiscordVoiceLocalIdSchema,
         attachedCount: DiscordVoiceCounterSchema,
         deliveredCount: DiscordVoiceCounterSchema,
+        stayId: DiscordVoiceLocalIdSchema.optional(),
       })
       .strict(),
     z
@@ -2855,6 +3200,15 @@ export const DiscordVoiceEvidenceSchema = z
         type: z.literal("possessor_narration_submission"),
         deliveryId: DiscordVoiceLocalIdSchema,
         attachedCount: DiscordVoiceCounterSchema,
+        stayId: DiscordVoiceLocalIdSchema.optional(),
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("possessor_narration_suppressed"),
+        ...discordVoiceChannelScope,
+        deliveryId: DiscordVoiceLocalIdSchema,
+        reason: DiscordVoiceNarrationSuppressReasonSchema,
       })
       .strict(),
     z
@@ -2863,6 +3217,7 @@ export const DiscordVoiceEvidenceSchema = z
         deliveryId: DiscordVoiceLocalIdSchema.optional(),
         attachedCount: DiscordVoiceCounterSchema,
         reason: DiscordVoiceFailureCodeSchema,
+        stayId: DiscordVoiceLocalIdSchema.optional(),
       })
       .strict(),
   ])

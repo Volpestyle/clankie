@@ -18,7 +18,11 @@ import {
   DiscordPresenceChannelTurnRequestSchema,
   DiscordPresenceWriteResultSchema,
   DiscordPresenceWriteSchema,
+  DiscordStreamWatchObservationSchema,
+  DiscordStreamWatchReportSchema,
+  DiscordUserSessionOptInRequestSchema,
   DiscordUserSessionOptInSchema,
+  DISCORD_STREAM_WATCH_PATH,
   EmbodimentAssignmentSchema,
   EmbodimentSessionSchema,
   EmbodimentSubmitResultSchema,
@@ -29,13 +33,19 @@ import {
   type DiscordPresenceWriteResult,
   type DiscordPresenceChannelTurnRequest,
   type CaptainEpisode,
+  type CaptainEpisodeEdit,
   type CaptainSessionLaneV2,
   type DiscordPersonIdentity,
+  type DiscordPersonMemoryEdit,
   type DiscordPersonMemoryDeleteResult,
   type DiscordPersonMemoryExport,
   type DiscordPersonMemoryProjection,
   type DiscordPersonMemoryProposal,
+  type OperatorMemoryCatalog,
+  type DiscordStreamWatchObservation,
+  type DiscordStreamWatchReport,
   type DiscordUserSessionOptIn,
+  type DiscordUserSessionOptInRequest,
   type EmbodimentAssignment,
   type EmbodimentClaim,
   type EmbodimentIntent,
@@ -49,6 +59,10 @@ import {
   DISCORD_PRESENCE_LIVE_SESSION_HEADER,
   DiscordPresenceLiveClaimSchema,
   ActivityObservationReadSchema,
+  PLAY_STILL_PATH,
+  PLAY_STORY_PATH,
+  PlayStillReadSchema,
+  PlayStoryReadSchema,
   DiscordPresencePhaseEventSchema,
   DiscordPresenceSessionRecordSchema,
   type DiscordPresenceLiveClaim,
@@ -57,6 +71,8 @@ import {
   DiscordVoiceHistorySchema,
   type DiscordVoiceStay,
   type ActivityObservationRead,
+  type PlayStillRead,
+  type PlayStoryRead,
 } from "@clankie/interactive-environment";
 
 export type {
@@ -232,11 +248,52 @@ export class ClankieApiClient {
    */
   public async inspectDiscordUserSessionOptIn(): Promise<DiscordUserSessionOptIn | undefined> {
     const result = await this.request<{ optIn: unknown | null }>("/v1/discord/user-session/opt-in", {
-      headers: this.captainHeaders(),
+      headers: this.activityReadHeaders(),
     });
     return result.optIn === null || result.optIn === undefined
       ? undefined
       : DiscordUserSessionOptInSchema.parse(result.optIn);
+  }
+
+  public async recordDiscordUserSessionOptIn(
+    request: DiscordUserSessionOptInRequest,
+  ): Promise<DiscordUserSessionOptIn> {
+    const body = DiscordUserSessionOptInRequestSchema.parse(request);
+    const result = await this.request<{ optIn: unknown }>("/v1/discord/user-session/opt-in", {
+      method: "POST",
+      headers: this.operatorHeaders(),
+      body: JSON.stringify(body),
+    });
+    return DiscordUserSessionOptInSchema.parse(result.optIn);
+  }
+
+  public async revokeDiscordUserSessionOptIn(): Promise<DiscordUserSessionOptIn | undefined> {
+    const result = await this.request<{ optIn: unknown | null }>("/v1/discord/user-session/opt-in", {
+      method: "DELETE",
+      headers: this.operatorHeaders(),
+    });
+    return result.optIn === null || result.optIn === undefined
+      ? undefined
+      : DiscordUserSessionOptInSchema.parse(result.optIn);
+  }
+
+  public async reportDiscordStreamWatch(
+    report: DiscordStreamWatchReport,
+  ): Promise<DiscordStreamWatchObservation> {
+    const body = DiscordStreamWatchReportSchema.parse(report);
+    const result = await this.request<unknown>(DISCORD_STREAM_WATCH_PATH, {
+      method: "POST",
+      headers: this.captainHeaders(),
+      body: JSON.stringify(body),
+    });
+    return DiscordStreamWatchObservationSchema.parse(result);
+  }
+
+  public async inspectDiscordStreamWatch(): Promise<DiscordStreamWatchObservation> {
+    const result = await this.request<unknown>(DISCORD_STREAM_WATCH_PATH, {
+      headers: this.activityReadHeaders(),
+    });
+    return DiscordStreamWatchObservationSchema.parse(result);
   }
 
   public async listDiscordPresenceSessions(): Promise<DiscordPresenceSessionRecord[]> {
@@ -286,6 +343,18 @@ export class ClankieApiClient {
       throw new Error("Clankie API returned a malformed Discord voice briefing");
     }
     return briefing;
+  }
+
+  public fetchPlayStill(): Promise<PlayStillRead> {
+    return this.request(PLAY_STILL_PATH, { headers: this.activityReadHeaders() }).then((body) =>
+      PlayStillReadSchema.parse(body),
+    );
+  }
+
+  public fetchPlayStory(): Promise<PlayStoryRead> {
+    return this.request(PLAY_STORY_PATH, { headers: this.activityReadHeaders() }).then((body) =>
+      PlayStoryReadSchema.parse(body),
+    );
   }
 
   public proposeDiscordPersonMemory(input: DiscordPersonMemoryProposal): Promise<Record<string, unknown>> {
@@ -341,6 +410,46 @@ export class ClankieApiClient {
   ): Promise<DiscordPersonMemoryDeleteResult> {
     return this.request(
       `/v1/memory/discord-people/${encodeURIComponent(identity.guildId)}/${encodeURIComponent(identity.userId)}`,
+      { method: "DELETE", headers: this.operatorHeaders() },
+    );
+  }
+
+  public inspectMemory(): Promise<OperatorMemoryCatalog> {
+    return this.request("/v1/memory", { headers: this.operatorHeaders() });
+  }
+
+  public updateDiscordPersonMemoryFact(
+    identity: DiscordPersonIdentity,
+    factId: string,
+    edit: DiscordPersonMemoryEdit,
+  ): Promise<DiscordPersonMemoryExport["facts"][number]> {
+    return this.request(
+      `/v1/memory/discord-people/${encodeURIComponent(identity.guildId)}/${encodeURIComponent(identity.userId)}/${encodeURIComponent(factId)}`,
+      { method: "PATCH", headers: this.operatorHeaders(), body: JSON.stringify(edit) },
+    );
+  }
+
+  public deleteDiscordPersonMemoryFact(identity: DiscordPersonIdentity, factId: string): Promise<void> {
+    return this.request(
+      `/v1/memory/discord-people/${encodeURIComponent(identity.guildId)}/${encodeURIComponent(identity.userId)}/${encodeURIComponent(factId)}`,
+      { method: "DELETE", headers: this.operatorHeaders() },
+    );
+  }
+
+  public updateCaptainEpisode(
+    lane: CaptainSessionLaneV2,
+    episodeId: string,
+    edit: CaptainEpisodeEdit,
+  ): Promise<CaptainEpisode> {
+    return this.request(
+      `/v1/memory/captain-episodes/${encodeURIComponent(lane)}/${encodeURIComponent(episodeId)}`,
+      { method: "PATCH", headers: this.operatorHeaders(), body: JSON.stringify(edit) },
+    );
+  }
+
+  public deleteCaptainEpisode(lane: CaptainSessionLaneV2, episodeId: string): Promise<void> {
+    return this.request(
+      `/v1/memory/captain-episodes/${encodeURIComponent(lane)}/${encodeURIComponent(episodeId)}`,
       { method: "DELETE", headers: this.operatorHeaders() },
     );
   }

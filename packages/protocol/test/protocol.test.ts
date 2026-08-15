@@ -24,6 +24,8 @@ import {
   CaptainLaneSchema,
   CaptainSessionLaneV2Schema,
   DISCORD_PRESENCE_ACTION_RISK_CLASS,
+  isShareArtifactRef,
+  isAttachableTurnMediaRef,
   DiscordPresenceActionSchema,
   DiscordPresenceChannelTurnRequestSchema,
   DiscordPresenceWriteSchema,
@@ -64,6 +66,7 @@ describe("protocol", () => {
       updatedAt: "2026-07-12T00:00:00.000Z",
       sessionState: "active",
       revision: 7,
+      contextUsage: { tokens: 72_400, contextWindow: 200_000 },
     });
     expect(
       OperatorConversationAttachmentSchema.parse({
@@ -84,6 +87,28 @@ describe("protocol", () => {
       }),
     ).toMatchObject({ kind: "message", expectedRevision: 7 });
     expect(
+      SubmitOperatorConversationTurnSchema.parse({
+        schemaVersion: 1,
+        kind: "message",
+        conversationId: conversation.conversationId,
+        surfaceClientId: "tui-1",
+        expectedRevision: 7,
+        message: "what's in flight",
+        herdrPaneId: "w3:p2J",
+      }),
+    ).toMatchObject({ herdrPaneId: "w3:p2J" });
+    expect(() =>
+      SubmitOperatorConversationTurnSchema.parse({
+        schemaVersion: 1,
+        kind: "message",
+        conversationId: conversation.conversationId,
+        surfaceClientId: "tui-1",
+        expectedRevision: 7,
+        message: "what's in flight",
+        herdrPaneId: "not a pane",
+      }),
+    ).toThrow();
+    expect(
       OperatorConversationRevisionConflictSchema.parse({
         schemaVersion: 1,
         status: "revision_conflict",
@@ -94,6 +119,7 @@ describe("protocol", () => {
       }),
     ).toMatchObject({ status: "revision_conflict", currentRevision: 7 });
     expect(JSON.stringify(conversation)).not.toMatch(/provider|continuation|credential/iu);
+    expect(conversation.contextUsage).toEqual({ tokens: 72_400, contextWindow: 200_000 });
   });
 
   it("rejects private-capability fields, unknown keys, and unbounded payloads at the public boundary", () => {
@@ -145,6 +171,20 @@ describe("protocol", () => {
         detail: '{\n  "path": "README.md"\n}',
       }),
     ).toMatchObject({ type: "tool", skillName: "herdr-lead", detail: expect.stringContaining("README.md") });
+    expect(
+      OperatorConversationStreamEventSchema.parse({
+        ...base,
+        type: "context",
+        usage: { tokens: null, contextWindow: 200_000 },
+      }),
+    ).toMatchObject({ type: "context", usage: { tokens: null, contextWindow: 200_000 } });
+    expect(() =>
+      OperatorConversationStreamEventSchema.parse({
+        ...base,
+        type: "context",
+        usage: { tokens: -1, contextWindow: 0 },
+      }),
+    ).toThrow();
     expect(() =>
       OperatorConversationStreamEventSchema.parse({
         ...base,
@@ -328,6 +368,10 @@ describe("protocol", () => {
       }),
     ).toMatchObject({ sourceLane: "discord_presence" });
     expect(DiscordPresenceActionSchema.options).toContain("discord.presence.go_live_start");
+    const shareRef = `sha256:${"a".repeat(64)}:shares/frame.jpg`;
+    expect(isShareArtifactRef(shareRef)).toBe(true);
+    expect(isAttachableTurnMediaRef(shareRef)).toBe(true);
+    expect(isAttachableTurnMediaRef(`sha256:${"a".repeat(64)}:tmp/frame.jpg`)).toBe(false);
     expect(DISCORD_PRESENCE_ACTION_RISK_CLASS["discord.presence.react"]).toBe("narrative-write");
     const write = DiscordPresenceWriteSchema.parse({
       schemaVersion: 1,

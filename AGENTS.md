@@ -3,15 +3,17 @@
 Clankie is a persistent agent with a personality: he chats in Discord (text
 and voice), plays Pokemon and Minecraft on stream, makes images and videos,
 browses the web, codes, and leads fleets of coding agents through the herdr
-CLI. This repo is his body: one service (`apps/clankie`) plus the surfaces
-that reach it.
+CLI. His happy seat is a herdr pane in the same session as that fleet; the
+herdr-lead board is the companion dashboard. This repo is his body: one
+service (`apps/clankie`) plus the surfaces that reach it.
 
 ## Map
 
 - `apps/clankie` — the service: pi-based captain (sessions, tools, persona),
   HTTP API, game bodies, browser host, media generation, presence, memory.
 - `apps/tui` — the operator console (`clankie` launcher lives here).
-- `apps/discord-bridge`, `apps/discord-user-session` — his Discord bodies.
+- `apps/discord-bridge`, `apps/discord-user-session` — his Discord bodies
+  (one active mouth; `/discord` picks which process the launcher starts).
 - `apps/discord-activity` — the watch-me-play surface.
 - `apps/gba-mcp` — his GBA body as an MCP server for external agents.
 - `apps/relay` — remote access for the phone/desktop app.

@@ -62,7 +62,7 @@ Linear, email, and Discord.
 
 | App                         | What it is                                       |
 | --------------------------- | ------------------------------------------------ |
-| `apps/clankie`              | The service: captain, tools, bodies, API (:4310) |
+| `apps/clankie`              | The service: captain, tools, bodies, API (:4310). Catalog: `apps/clankie/openapi.yaml` |
 | `apps/tui`                  | Operator console and the `clankie` launcher      |
 | `apps/discord-bridge`       | Official bot: text, voice, attachments           |
 | `apps/discord-user-session` | Personal-lab user-session body (off by default)  |

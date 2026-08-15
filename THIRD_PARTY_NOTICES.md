@@ -2,11 +2,10 @@
 
 Vendored code:
 
-- `apps/tui/src/face/agent-spinners.ts` — spinner frame data ported from expo-agent-spinners (MIT © eronred), carried over from the v1 clankie face.
+- `apps/tui/src/face/agent-spinners.ts` — spinner frame data from expo-agent-spinners (MIT © eronred).
 
-The initial architecture is designed around, but does not vendor, the following projects:
+The architecture uses or interoperates with, but does not vendor, the following projects:
 
-- Vercel Eve — Apache-2.0.
 - `@earendil-works/pi-tui` and Pi packages — MIT.
 - React Native and React Native for macOS — MIT.
 - React Native Skia — MIT.
