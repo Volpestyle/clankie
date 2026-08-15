@@ -5,7 +5,12 @@ import { redactCredential, type CredentialStore, type ProviderCredential } from 
 import { CatalogSchema, type Catalog, type ModelRegistry, type RefreshResult } from "@clankie/model-registry";
 import { loadConfig, updateGlobalConfig } from "@clankie/model-provider";
 import { afterEach, describe, expect, it } from "vitest";
-import { buildProviderCommands, validateApiKey, type ProviderServices } from "../src/provider-commands.ts";
+import {
+  buildProviderCommands,
+  formatAuthStatus,
+  validateApiKey,
+  type ProviderServices,
+} from "../src/provider-commands.ts";
 import type { MenuOption, SetupFlow } from "../src/shell/setup-flow.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "../src/shell/shell.ts";
 
@@ -235,12 +240,78 @@ describe("auth command", () => {
 
     await command(buildProviderCommands(services), "auth").run("status", view.shell);
 
-    expect(rendered(view)).toContain("openai · api key sk-l…");
-    expect(rendered(view)).toContain("openai-codex · oauth (account-safe-summary)");
-    expect(rendered(view)).toContain("anthropic · oauth (claude-account-summary)");
-    expect(rendered(view)).not.toContain("sk-live-secret-value");
-    expect(rendered(view)).not.toContain(oauthCredential.access);
-    expect(rendered(view)).not.toContain(oauthCredential.refresh);
+    const text = rendered(view);
+    expect(text).toContain("providers:");
+    expect(text).toMatch(/openai\s+API key/);
+    expect(text).toMatch(/openai-codex\s+ChatGPT subscription/);
+    expect(text).toContain("(account-safe-summary)");
+    expect(text).toMatch(/anthropic\s+Claude subscription \(claude-account-summary\)/);
+    expect(text).not.toContain("sk-l…");
+    expect(text).not.toContain("sk-live-secret-value");
+    expect(text).not.toContain(oauthCredential.access);
+    expect(text).not.toContain(oauthCredential.refresh);
+  });
+
+  it("groups owner credentials and omits auto-minted local identities", () => {
+    const now = Date.UTC(2026, 7, 15, 12, 0, 0);
+    const text = formatAuthStatus(
+      {
+        anthropic: { type: "api", key: "sk-a…" },
+        clankie_activity_producer: { type: "api", key: "clan…" },
+        clankie_captain: { type: "api", key: "clan…" },
+        clankie_discord_bridge: { type: "api", key: "clan…" },
+        clankie_discord_user_bridge: { type: "api", key: "clan…" },
+        clankie_discord_user_voice_bridge: { type: "api", key: "clan…" },
+        clankie_discord_voice_bridge: { type: "api", key: "clan…" },
+        clankie_operator: { type: "api", key: "clan…" },
+        clankie_possessor_voice: { type: "api", key: "clan…" },
+        clankie_runner: { type: "api", key: "clan…" },
+        discord_bot: { type: "api", key: "MTUz…" },
+        elevenlabs: { type: "api", key: "sk_0…" },
+        openai: { type: "api", key: "sk-p…" },
+        "openai-codex": {
+          type: "oauth",
+          accountId: "0f892112-c0d9-4221-b57b-38181aa63f4c",
+          expires: now + 3 * 60 * 60 * 1000,
+        },
+        xai: { type: "api", key: "xai-…" },
+      },
+      { now },
+    );
+
+    expect(text).toBe(
+      [
+        "providers:",
+        "  anthropic     API key",
+        "  openai        API key",
+        "  openai-codex  ChatGPT subscription · refreshes in 3h",
+        "  xai           API key",
+        "",
+        "services:",
+        "  discord_bot  bot token",
+        "  elevenlabs   API key",
+        "",
+        "Worker harnesses keep their own logins (`codex login`, `claude login`).",
+      ].join("\n"),
+    );
+    expect(text).not.toContain("sk-a…");
+    expect(text).not.toContain("clan…");
+    expect(text).not.toContain("0f892112-c0d9-4221-b57b-38181aa63f4c");
+    expect(text).not.toContain("clankie_");
+    expect(text).not.toContain("local identities");
+    expect(text).not.toContain("auto-minted");
+  });
+
+  it("does not offer auto-minted local identities for removal", async () => {
+    const fixture = await testServices();
+    fixture.credentials.set("openai", { type: "api", key: "sk-live-secret-value" });
+    fixture.credentials.set("clankie_operator", { type: "api", key: "clankie_op_local-only" });
+    const view = testShell([["remove"], undefined]);
+
+    await command(buildProviderCommands(fixture.services), "auth").run("", view.shell);
+
+    expect(view.selects[0]?.message).toBe("Provider auth (1 credential stored)");
+    expect(view.selects[1]?.options.map((option) => option.value)).toEqual(["openai"]);
   });
 
   it("validates API keys through masked input and stores only through the broker", async () => {

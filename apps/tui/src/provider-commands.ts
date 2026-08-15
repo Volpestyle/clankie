@@ -6,6 +6,9 @@
  */
 import {
   createDefaultCredentialStore,
+  DISCORD_BOT_PROVIDER_ID,
+  DISCORD_USER_SESSION_PROVIDER_ID,
+  LINEAR_PROVIDER_ID,
   type CredentialStore,
   type RedactedCredential,
 } from "@clankie/credential-broker";
@@ -87,6 +90,15 @@ const FEATURED_SERVICE_PROVIDERS: readonly MenuOption[] = [
     description: "Voice TTS for Discord (ADR 0070); pick the voice itself with /voice.",
   },
 ];
+
+/** Owner-authored non-LLM credentials that share the broker with /auth. */
+const SERVICE_CREDENTIAL_IDS = new Set([
+  DISCORD_BOT_PROVIDER_ID,
+  DISCORD_USER_SESSION_PROVIDER_ID,
+  "elevenlabs",
+  "email",
+  LINEAR_PROVIDER_ID,
+]);
 
 const MODEL_ROLES = {
   "": "model",
@@ -286,29 +298,104 @@ function providerEnvConnected(providerId: string, env: NodeJS.ProcessEnv): boole
 
 // --- /auth ---
 
-function describeRedacted(id: string, redacted: RedactedCredential): string {
-  if (redacted.type === "api") return `${id} · api key ${redacted.key}`;
-  if (redacted.type === "oauth") {
-    const expiry =
-      redacted.expires === 0
-        ? "no expiry"
-        : redacted.expires > Date.now()
-          ? `refreshes ${new Date(redacted.expires).toLocaleTimeString()}`
-          : "expired (auto-refreshes on use)";
-    return `${id} · oauth${redacted.accountId === undefined ? "" : ` (${redacted.accountId})`} · ${expiry}`;
+/** Broker-minted local bearers (`clankie_operator`, bridges, …). Not operator-authored. */
+function isLocalIdentity(providerId: string): boolean {
+  return providerId.startsWith("clankie_");
+}
+
+function isServiceCredential(providerId: string): boolean {
+  return SERVICE_CREDENTIAL_IDS.has(providerId);
+}
+
+function ownerCredentialEntries(
+  listed: Record<string, RedactedCredential>,
+): Array<[string, RedactedCredential]> {
+  return Object.entries(listed)
+    .filter(([id]) => !isLocalIdentity(id))
+    .sort(([left], [right]) => left.localeCompare(right));
+}
+
+/**
+ * Operator-facing /auth status. Groups provider keys and service tokens, omits
+ * auto-minted `clankie_*` process identities, and never reprints secret prefixes.
+ */
+export function formatAuthStatus(
+  listed: Record<string, RedactedCredential>,
+  options: { now?: number } = {},
+): string {
+  const now = options.now ?? Date.now();
+  const entries = Object.entries(listed).sort(([left], [right]) => left.localeCompare(right));
+  const providers = entries.filter(([id]) => !isLocalIdentity(id) && !isServiceCredential(id));
+  const services = entries.filter(([id]) => isServiceCredential(id));
+  const lines: string[] = [];
+
+  if (providers.length === 0 && services.length === 0) {
+    lines.push("No provider keys or subscriptions stored. Run /auth to add one.");
+  } else {
+    if (providers.length > 0) {
+      lines.push("providers:", ...alignCredentialRows(providers, now));
+    }
+    if (services.length > 0) {
+      if (lines.length > 0) lines.push("");
+      lines.push("services:", ...alignCredentialRows(services, now));
+    }
   }
-  return `${id} · wellknown`;
+
+  lines.push("", "Worker harnesses keep their own logins (`codex login`, `claude login`).");
+  return lines.join("\n");
+}
+
+function alignCredentialRows(rows: ReadonlyArray<[string, RedactedCredential]>, now: number): string[] {
+  const width = Math.max(...rows.map(([id]) => id.length));
+  return rows.map(([id, redacted]) => `  ${id.padEnd(width)}  ${describeCredentialKind(id, redacted, now)}`);
+}
+
+function describeCredentialKind(
+  id: string,
+  redacted: RedactedCredential,
+  now: number = Date.now(),
+): string {
+  if (redacted.type === "wellknown") return "well-known";
+  if (redacted.type === "api") {
+    if (id === DISCORD_BOT_PROVIDER_ID) return "bot token";
+    if (id === DISCORD_USER_SESSION_PROVIDER_ID) return "user token";
+    if (id === "email") return "app password";
+    return "API key";
+  }
+  const account = formatOauthAccount(redacted.accountId);
+  const expiry = formatOauthExpiry(redacted.expires, now);
+  if (id === CODEX_PROVIDER_ID) return `ChatGPT subscription${account} · ${expiry}`;
+  if (id === ANTHROPIC_PROVIDER_ID) return `Claude subscription${account} · ${expiry}`;
+  return `OAuth${account} · ${expiry}`;
+}
+
+function formatOauthAccount(accountId: string | undefined): string {
+  if (accountId === undefined || accountId.length === 0 || isOpaqueAccountId(accountId)) return "";
+  return ` (${accountId})`;
+}
+
+function isOpaqueAccountId(accountId: string): boolean {
+  return (
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(accountId) ||
+    /^acct[_-]/iu.test(accountId)
+  );
+}
+
+function formatOauthExpiry(expires: number, now: number): string {
+  if (expires === 0) return "no expiry";
+  const delta = expires - now;
+  if (delta <= 0) return "expired (refreshes on use)";
+  if (delta < 60_000) return "refreshes soon";
+  const minutes = Math.round(delta / 60_000);
+  if (minutes < 90) return `refreshes in ${String(minutes)}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 36) return `refreshes in ${String(hours)}h`;
+  return `refreshes in ${String(Math.round(hours / 24))}d`;
 }
 
 async function showAuthStatus(shell: ClankieFaceShell, services: ProviderServices): Promise<void> {
   const listed = await services.store.list();
-  const ids = Object.keys(listed).sort();
-  const lines =
-    ids.length === 0
-      ? ["No credentials stored. Run /auth to add one."]
-      : ids.map((id) => describeRedacted(id, listed[id] as RedactedCredential));
-  lines.push("", "Worker harnesses authenticate natively: `codex login`, `claude login` (ADR 0006).");
-  shell.insertCommandResult("/auth status", lines.join("\n"), "success");
+  shell.insertCommandResult("/auth status", formatAuthStatus(listed), "success");
 }
 
 async function runAuthWizard(shell: ClankieFaceShell, services: ProviderServices): Promise<void> {
@@ -316,10 +403,10 @@ async function runAuthWizard(shell: ClankieFaceShell, services: ProviderServices
   flow.begin("auth");
   for (;;) {
     const listed = await services.store.list();
-    const count = Object.keys(listed).length;
+    const ownerCount = ownerCredentialEntries(listed).length;
     const action = await flow.readSelect({
       kind: "single",
-      message: `Provider auth (${count} credential${count === 1 ? "" : "s"} stored)`,
+      message: `Provider auth (${ownerCount} credential${ownerCount === 1 ? "" : "s"} stored)`,
       options: [
         { value: "api", label: "Add / update API key", hint: "anthropic, openai, xai, google, …" },
         {
@@ -335,7 +422,7 @@ async function runAuthWizard(shell: ClankieFaceShell, services: ProviderServices
           description: "Manual-code PKCE sign-in; tokens stay in the credential broker.",
         },
         { value: "harness", label: "Worker harness logins", hint: "codex / claude CLIs" },
-        ...(count > 0 ? [{ value: "remove", label: "Remove a credential" }] : []),
+        ...(ownerCount > 0 ? [{ value: "remove", label: "Remove a credential" }] : []),
         { value: "status", label: "Show status" },
         { value: "done", label: "Done" },
       ],
@@ -577,10 +664,10 @@ function renderOauthFailure(flow: SetupFlow, provider: string): void {
 async function removeCredentialFlow(shell: ClankieFaceShell, services: ProviderServices): Promise<void> {
   const flow = shell.setupFlow;
   const listed = await services.store.list();
-  const options = Object.entries(listed).map(([id, redacted]) => ({
+  const options = ownerCredentialEntries(listed).map(([id, redacted]) => ({
     value: id,
     label: id,
-    hint: describeRedacted(id, redacted).slice(id.length + 3),
+    hint: describeCredentialKind(id, redacted),
   }));
   if (options.length === 0) return;
   const picked = await flow.readSelect({
