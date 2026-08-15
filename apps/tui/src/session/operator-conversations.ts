@@ -439,16 +439,20 @@ export class OperatorConversationPromptSession {
   private readonly client: OperatorConversationClient;
   private readonly selection: OperatorConversationSelection;
   private readonly tails: OperatorConversationTailStore;
+  private readonly herdrPaneId: () => string | undefined;
   private readonly restores = new Map<string, Promise<boolean>>();
 
   public constructor(input: {
     readonly client: OperatorConversationClient;
     readonly selection: OperatorConversationSelection;
     readonly tails: OperatorConversationTailStore;
+    /** When the console is a herdr pane, that pane is Clankie's seat this turn. */
+    readonly herdrPaneId?: () => string | undefined;
   }) {
     this.client = input.client;
     this.selection = input.selection;
     this.tails = input.tails;
+    this.herdrPaneId = input.herdrPaneId ?? (() => undefined);
   }
 
   public async initialize(): Promise<void> {
@@ -518,6 +522,7 @@ export class OperatorConversationPromptSession {
     if (conversation === undefined) {
       throw new OperatorConversationClientError("Selected operator conversation no longer exists");
     }
+    const herdrPaneId = this.herdrPaneId();
     const accepted = await this.client.send({
       schemaVersion: 1,
       kind: "message",
@@ -525,6 +530,7 @@ export class OperatorConversationPromptSession {
       surfaceClientId: this.tails.surfaceClientId,
       expectedRevision: conversation.revision,
       message,
+      ...(herdrPaneId === undefined ? {} : { herdrPaneId }),
     });
     if (accepted.status === "revision_conflict") {
       throw new OperatorConversationClientError(

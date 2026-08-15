@@ -24,10 +24,16 @@ import { setTimeout as sleep } from "node:timers/promises";
  * - a health probe gate, so "restarted" means "answered healthy", not "spawned".
  */
 
-export type ServiceId = "clankie" | "discord-bridge" | "activity" | "tunnel";
+export type ServiceId = "clankie" | "discord-bridge" | "discord-user-session" | "activity" | "tunnel";
 
 /** Ordered by dependency: each service may only depend on those before it. */
-export const SERVICE_ORDER: readonly ServiceId[] = ["clankie", "discord-bridge", "activity", "tunnel"];
+export const SERVICE_ORDER: readonly ServiceId[] = [
+  "clankie",
+  "discord-bridge",
+  "discord-user-session",
+  "activity",
+  "tunnel",
+];
 
 export type ServiceState = "healthy" | "unhealthy" | "unreachable";
 
@@ -411,7 +417,12 @@ export async function startService(
 
   // A service the operator has not configured is not a failure to report or a
   // process to spawn; its probe explains itself and `all` walks past it.
-  if (service.enabled?.(env) === false) return await inspectService(service, options);
+  // Stop a leftover process so switching the active Discord body cannot leave
+  // two mouths up.
+  if (service.enabled?.(env) === false) {
+    await stopService(service, options);
+    return await inspectService(service, options);
+  }
 
   const existing = await inspectService(service, options);
   if (existing.state === "healthy") return existing;

@@ -428,6 +428,22 @@ describe("service targets", () => {
     expect(parseServiceTarget("eve")).toBe("clankie");
     expect(parseServiceTarget("CAPTAIN")).toBe("clankie");
     expect(parseServiceTarget("captain-eve")).toBe("clankie");
+    expect(parseServiceTarget("lab")).toBe("discord-user-session");
+    expect(parseServiceTarget("user-session")).toBe("discord-user-session");
+  });
+
+  it("starts only the active Discord body", () => {
+    expect(managedService("discord-bridge").enabled?.({})).toBe(true);
+    expect(managedService("discord-bridge").enabled?.({ DISCORD_ACTIVE_BODY: "user_session" })).toBe(false);
+    expect(managedService("discord-user-session").enabled?.({ DISCORD_USER_SESSION_ENABLED: "true" })).toBe(
+      false,
+    );
+    expect(
+      managedService("discord-user-session").enabled?.({
+        DISCORD_USER_SESSION_ENABLED: "true",
+        DISCORD_ACTIVE_BODY: "user_session",
+      }),
+    ).toBe(true);
   });
 
   it("rejects an unknown target instead of guessing", () => {
@@ -438,12 +454,19 @@ describe("service targets", () => {
     expect(resolveTargets("all")).toEqual([
       "clankie",
       "discord-bridge",
+      "discord-user-session",
       "activity",
       // The tunnel fronts the activity surface, so it starts after the thing it
       // publishes and is torn down before it.
       "tunnel",
     ]);
-    expect([...resolveTargets("all")].reverse()).toEqual(["tunnel", "activity", "discord-bridge", "clankie"]);
+    expect([...resolveTargets("all")].reverse()).toEqual([
+      "tunnel",
+      "activity",
+      "discord-user-session",
+      "discord-bridge",
+      "clankie",
+    ]);
   });
 
   it("calls a tunnel with a dead edge unhealthy even while cloudflared runs", async () => {
@@ -557,6 +580,7 @@ describe("service targets", () => {
     expect(outcomes.map((outcome) => outcome.id)).toEqual([
       "tunnel",
       "activity",
+      "discord-user-session",
       "discord-bridge",
       "clankie",
     ]);
@@ -580,6 +604,7 @@ describe("service targets", () => {
     expect(outcomes.map((outcome) => [outcome.id, outcome.ok])).toEqual([
       ["tunnel", true],
       ["activity", true],
+      ["discord-user-session", true],
       ["discord-bridge", true],
       ["clankie", false],
     ]);
@@ -640,6 +665,9 @@ describe("captain credential injection", () => {
     expect(envFor()?.CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE).toBe(
       "/repo/apps/discord-bridge/src/presence-runtime-module.ts",
     );
+    expect(envFor()?.CLANKIE_DISCORD_USER_PRESENCE_RUNTIME_MODULE).toBe(
+      "/repo/apps/discord-user-session/src/presence-runtime-module.ts",
+    );
   });
 
   it("omits the variable entirely when no credential could be brokered", async () => {
@@ -695,7 +723,7 @@ describe("restart carries dependents", () => {
     // The failure this prevents: the service rebuilds presence from its event
     // store, the still-running bridge keeps a claim for the old revision, and
     // every reply it posts is rejected `discord_presence_live_claim_stale`.
-    expect(resolveRestartTargets("clankie")).toEqual(["clankie", "discord-bridge"]);
+    expect(resolveRestartTargets("clankie")).toEqual(["clankie", "discord-bridge", "discord-user-session"]);
   });
 
   it("leaves a leaf service on its own", () => {

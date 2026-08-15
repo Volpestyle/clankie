@@ -12,7 +12,7 @@ import type {
   CaptainSessionState,
   CaptainStreamEvent,
 } from "../src/session/captain-stream.ts";
-import { reportHerdrAgent, reportHerdrMetadata } from "../src/session/herdr-report.ts";
+import { herdrPaneIdFromEnv, reportHerdrAgent, reportHerdrMetadata } from "../src/session/herdr-report.ts";
 import { CaptainSessionCursorStore } from "../src/session/session-cursor.ts";
 import { headlessCaptainCursorPath } from "../bin/headless-captain.ts";
 import { renderTraceEvent, renderTraceEvents } from "../src/session/trace-renderer.ts";
@@ -436,6 +436,8 @@ describe("clankie trace command", () => {
       return { stdout: "", stderr: "" };
     };
 
+    expect(herdrPaneIdFromEnv({})).toBeUndefined();
+    expect(herdrPaneIdFromEnv({ HERDR_ENV: "1", HERDR_PANE_ID: "w3:p2J" })).toBe("w3:p2J");
     expect(
       await reportHerdrAgent("working", {
         env: {},

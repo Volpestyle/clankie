@@ -65,6 +65,18 @@ function catalog(): Catalog {
         },
       },
     },
+    xai: {
+      id: "xai",
+      name: "xAI",
+      env: ["XAI_API_KEY"],
+      models: {
+        "grok-test": {
+          id: "grok-test",
+          name: "Grok Test",
+          limit: { context: 128_000, output: 16_000 },
+        },
+      },
+    },
   });
 }
 
@@ -206,6 +218,9 @@ async function testServices(
         async codexDevice() {
           throw new Error("unexpected Codex device OAuth call");
         },
+        async xaiDevice() {
+          throw new Error("unexpected xAI device OAuth call");
+        },
       },
       store: credentials.store,
     },
@@ -274,7 +289,10 @@ describe("auth command", () => {
           accountId: "0f892112-c0d9-4221-b57b-38181aa63f4c",
           expires: now + 3 * 60 * 60 * 1000,
         },
-        xai: { type: "api", key: "xai-…" },
+        xai: {
+          type: "oauth",
+          expires: now + 3 * 60 * 60 * 1000,
+        },
       },
       { now },
     );
@@ -285,11 +303,15 @@ describe("auth command", () => {
         "  anthropic     API key",
         "  openai        API key",
         "  openai-codex  ChatGPT subscription · refreshes in 3h",
-        "  xai           API key",
+        "  xai           SuperGrok subscription · refreshes in 3h",
+        "  google        missing",
+        "  openrouter    missing",
+        "  groq          missing",
+        "  mistral       missing",
         "",
         "services:",
-        "  discord_bot  bot token",
         "  elevenlabs   API key",
+        "  discord_bot  bot token",
         "",
         "Worker harnesses keep their own logins (`codex login`, `claude login`).",
       ].join("\n"),
@@ -300,6 +322,22 @@ describe("auth command", () => {
     expect(text).not.toContain("clankie_");
     expect(text).not.toContain("local identities");
     expect(text).not.toContain("auto-minted");
+  });
+
+  it("shows first-class slots as missing when nothing is stored", () => {
+    const text = formatAuthStatus({});
+    expect(text).toContain("  anthropic     missing");
+    expect(text).toContain("  openai        missing");
+    expect(text).toContain("  openai-codex  missing");
+    expect(text).toContain("  elevenlabs   missing");
+    expect(text).toContain("  discord_bot  missing");
+    expect(text).not.toContain("No provider keys");
+  });
+
+  it("treats a featured provider present only in the environment as connected", () => {
+    const text = formatAuthStatus({}, { envConnected: ["openai"] });
+    expect(text).toContain("  openai        env");
+    expect(text).toContain("  anthropic     missing");
   });
 
   it("does not offer auto-minted local identities for removal", async () => {
@@ -460,6 +498,31 @@ describe("auth command", () => {
     expect(fixture.credentials.size).toBe(0);
   });
 
+  it("stores SuperGrok device OAuth through the broker without retaining codes", async () => {
+    const fixture = await testServices();
+    const services: ProviderServices = {
+      ...fixture.services,
+      oauth: {
+        ...fixture.services.oauth,
+        xaiDevice: async (options) => {
+          options.onUserCode("WXYZ-1234", "https://auth.x.ai/activate");
+          return oauthCredential;
+        },
+      },
+    };
+    const view = testShell([["xai-oauth"], ["done"]]);
+
+    await command(buildProviderCommands(services), "auth").run("", view.shell);
+
+    expect(view.statuses).toContain(
+      "Visit https://auth.x.ai/activate and enter code WXYZ-1234 (/cancel to abort)",
+    );
+    expect(view.results.every((result) => !result.text.includes("WXYZ-1234"))).toBe(true);
+    expect(fixture.credentials.get("xai")).toEqual(oauthCredential);
+    expect(rendered(view)).toContain("SuperGrok / X Premium connected");
+    expect(rendered(view)).not.toContain(oauthCredential.access);
+  });
+
   it("removes only the local broker credential and explains remote revocation", async () => {
     const fixture = await testServices();
     fixture.credentials.set("anthropic", oauthCredential);
@@ -485,7 +548,7 @@ describe("provider and model commands", () => {
     expect(view.results.at(-1)?.text).toContain("Run /model to choose the actual model");
 
     await command(commands, "provider").run("status", view.shell);
-    expect(view.results.at(-1)?.text).toContain("beta (pending /model; configured unset)");
+    expect(view.results.at(-1)?.text).toContain("beta · needs /auth (pending /model; configured unset)");
 
     await command(commands, "model").run("", view.shell);
 
@@ -494,6 +557,21 @@ describe("provider and model commands", () => {
     expect(view.selects[1]?.options.map((option) => option.value)).toEqual(["beta-one", "beta-two"]);
     expect((await loadConfig({ cwd: services.cwd, env })).config.model).toBe("beta/beta-two");
     expect(changed).toEqual(["beta/beta-two"]);
+  });
+
+  it("labels xAI as SuperGrok or API key instead of a bare connected", async () => {
+    const fixture = await testServices();
+    fixture.credentials.set("xai", oauthCredential);
+    const commands = buildProviderCommands(fixture.services);
+    const view = testShell([["xai"]]);
+
+    await command(commands, "provider").run("", view.shell);
+
+    expect(view.selects[0]?.options.find((option) => option.value === "xai")?.hint).toMatch(
+      /^SuperGrok subscription/,
+    );
+    expect(view.results.at(-1)?.text).toContain("set to xai (SuperGrok subscription");
+    expect(view.results.at(-1)?.text).not.toContain("connected");
   });
 
   it("derives provider context from the configured model after restart", async () => {

@@ -98,6 +98,7 @@ describe("headless clankie commands", () => {
     expect(services.map((service) => [service.id, service.state, service.owned])).toEqual([
       ["clankie", "healthy", false],
       ["discord-bridge", "unreachable", false],
+      ["discord-user-session", "healthy", false],
       // The surfaces an audience actually reaches are reported too — health
       // used to stop at the bridge, which is how a dead tunnel stayed invisible.
       ["activity", "healthy", false],
@@ -203,6 +204,7 @@ describe("headless clankie commands", () => {
       services: [
         { id: "clankie", ok: true },
         { id: "discord-bridge", ok: true },
+        { id: "discord-user-session", ok: true },
       ],
     });
     // Progress narration must stay off stdout so it remains a JSON document.

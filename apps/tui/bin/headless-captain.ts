@@ -135,8 +135,8 @@ function commandHelp(): string {
     "  play status              Show the live embodiment (asked play) session",
     "  play stop                Stop the live playthrough cleanly (mints its checkpoint)",
     "",
-    "Services for restart/down: all (default), clankie, discord, activity, tunnel",
-    "Aliases: captain, eve, cp, control-plane, bridge, watch, viewer, cloudflared",
+    "Services for restart/down: all (default), clankie, discord, user-session, activity, tunnel",
+    "Aliases: captain, eve, cp, control-plane, bridge, lab, watch, viewer, cloudflared",
     "",
     "With no command, clankie opens the fullscreen operator console and requires a TTY.",
   ].join("\n");

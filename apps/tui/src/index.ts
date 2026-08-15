@@ -11,6 +11,7 @@ import {
 } from "@clankie/credential-broker";
 import { loadConfig, type ClankieConfig } from "@clankie/model-provider";
 import { SettingsStore } from "@clankie/settings";
+import type { OperatorConversationContextUsage } from "@clankie/protocol";
 import { ClankieFaceShell } from "./shell/shell.ts";
 import { buildConsoleCommands } from "./commands.ts";
 import { buildProviderCommands, createProviderServices } from "./provider-commands.ts";
@@ -18,6 +19,7 @@ import { buildConnectCommands } from "./connect-commands.ts";
 import { buildDiscordCommands, runDiscordWizard, showDiscordInvite } from "./discord-commands.ts";
 import { buildPersonaCommands } from "./persona-commands.ts";
 import { buildVoiceCommands } from "./voice-commands.ts";
+import { buildMemoryCommands } from "./memory-commands.ts";
 import {
   createCaptainRouteClient,
   createCaptainOperatorConversationClient,
@@ -32,12 +34,14 @@ import {
 import { createOperatorConversationShellSink } from "./session/operator-conversation-renderer.ts";
 import { CaptainLaneTraceController, createCaptainLaneClient } from "./session/lane-observation.ts";
 import { HerdrRoster } from "./observation/herdr-roster.ts";
+import { ensureHerdLeadCompanion, formatHerdLeadCompanionResult } from "./observation/herd-lead-companion.ts";
+import { herdrPaneIdFromEnv, reportHerdrAgent, reportHerdrMetadata } from "./session/herdr-report.ts";
 import { PresencePoller } from "./observation/presence.ts";
-import { formatCaptainPresenceStatus } from "./shell/status-bar.ts";
+import { formatCaptainContextStatus, formatCaptainPresenceStatus } from "./shell/status-bar.ts";
 import { discoverClankieSkills } from "./skill-catalog.ts";
 
 const repoRoot = resolve(import.meta.dirname, "..", "..", "..");
-const skillCatalog = discoverClankieSkills(repoRoot);
+const skillCatalog = await discoverClankieSkills(repoRoot);
 
 if (process.stdin.isTTY !== true || process.stdout.isTTY !== true) {
   process.stderr.write("clankie: the operator console requires a TTY\n");
@@ -86,10 +90,12 @@ const conversationSelectionStore = new OperatorConversationSelectionStore(
   join(repoRoot, ".data", "tui", "operator-conversation.json"),
 );
 const conversationSelection = new OperatorConversationSelection(conversationClient);
+let currentContextUsage: OperatorConversationContextUsage | undefined;
 const conversationPrompt = new OperatorConversationPromptSession({
   client: conversationClient,
   selection: conversationSelection,
   tails: new OperatorConversationTailStore(join(repoRoot, ".data", "tui", "operator-conversation-tail.json")),
+  herdrPaneId: () => herdrPaneIdFromEnv(),
 });
 await conversationPrompt.initialize();
 let conversationNotice: string | undefined;
@@ -100,7 +106,8 @@ try {
     store: conversationSelectionStore,
     ...(directConversationId === undefined ? {} : { directConversationId }),
   });
-  await conversationSelection.select(initial.conversationId);
+  const selected = await conversationSelection.select(initial.conversationId);
+  currentContextUsage = selected.contextUsage;
 } catch (error) {
   // The service may not be ready yet, or the store is corrupt; surface it and
   // keep the console usable (the /conversation command re-checks on demand).
@@ -114,7 +121,9 @@ const conversationsContext = {
   conversations: () => conversationSelection.conversations(),
   select: async (conversationId: string) => {
     const conversation = await conversationSelection.select(conversationId);
+    currentContextUsage = conversation.contextUsage;
     await conversationSelectionStore.write(conversation.conversationId);
+    shell.refreshStatusView();
     return conversation;
   },
 };
@@ -127,12 +136,14 @@ const brokeredCommands = {
   storeProviderCredential: (providerId: string, credential: ProviderCredential) =>
     services.store.set(providerId, credential),
   removeCredential: (providerId: string) => services.store.delete(providerId),
+  ...(operatorClient === undefined ? {} : { userSessionOptIn: operatorClient }),
 };
 const commands = [
   ...buildConsoleCommands({
     conversations: conversationsContext,
     laneTrace,
     presence: () => presence.snapshot,
+    contextUsage: () => currentContextUsage,
     herdrRoster: () => (herdrRoster.active ? herdrRoster.snapshot() : undefined),
     ...(operatorClient
       ? {
@@ -151,6 +162,7 @@ const commands = [
   ...buildDiscordCommands(brokeredCommands),
   ...buildPersonaCommands({ settings: settingsStore }),
   ...buildVoiceCommands(brokeredCommands),
+  ...buildMemoryCommands(operatorClient === undefined ? {} : { client: operatorClient }),
 ];
 
 function stageFromEnv(): { label?: string; value?: string } {
@@ -179,23 +191,38 @@ const shell = new ClankieFaceShell({
   commands,
   cwd: repoRoot,
   autocomplete: { listSkills: () => skillCatalog },
+  skills: skillCatalog,
   bannerFields: baseBannerFields,
   historyPath: join(repoRoot, ".data", "tui", "prompt-history.jsonl"),
   statusExtras: () => [
     currentModelRef ?? "model unset — /provider then /model",
+    formatCaptainContextStatus(currentContextUsage),
     formatCaptainPresenceStatus(presence.snapshot),
   ],
   // The selected server-owned conversation is the only production prompt path.
-  onPrompt: (prompt, activeShell, signal) =>
-    conversationPrompt.prompt(
-      prompt,
-      createOperatorConversationShellSink(activeShell, { localEchoText: prompt }),
-      signal,
-    ),
+  onPrompt: async (prompt, activeShell, signal) => {
+    await reportHerdrAgent("working", { source: "clankie", agent: "clankie", message: "turn" });
+    try {
+      await conversationPrompt.prompt(
+        prompt,
+        createOperatorConversationShellSink(activeShell, {
+          localEchoText: prompt,
+          onContextUsage: (usage) => {
+            currentContextUsage = usage;
+            activeShell.refreshStatusView();
+          },
+        }),
+        signal,
+      );
+    } finally {
+      await reportHerdrAgent("idle", { source: "clankie", agent: "clankie" });
+    }
+  },
   interruptMode: "detach",
-  onExit: () => {
+  onExit: async () => {
     presence.stop();
     herdrRoster.stop();
+    await reportHerdrAgent("idle", { source: "clankie", agent: "clankie" });
   },
 });
 
@@ -232,6 +259,8 @@ process.on("unhandledRejection", (reason) => {
 });
 
 shell.start();
+void reportHerdrMetadata({ source: "clankie", agent: "clankie", title: "Clankie" });
+void reportHerdrAgent("idle", { source: "clankie", agent: "clankie", message: "operator console" });
 herdrRoster.start(() => {
   shell.requestRender();
 });
@@ -249,18 +278,32 @@ shell.insertMarkdown(
       ? []
       : [`Conversation: ${conversationSelection.conversationId} · /conversation to list or switch.`]),
     ...(conversationNotice === undefined ? [] : [conversationNotice]),
-    "Try /auth, /provider, /model, /status — or type a prompt.",
+    "Try /auth, /provider, /model, /status, /board — or type a prompt.",
   ].join("\n"),
 );
 shell.refreshStatus("ready");
 if (conversationSelection.conversationId !== undefined) {
-  void conversationPrompt.restore(createOperatorConversationShellSink(shell)).catch(() => {
-    shell.insertMarkdown(
-      "**Conversation restore unavailable**\n\nThe durable transcript could not be restored. No prompt was sent.",
-    );
-    shell.refreshStatus("conversation restore unavailable");
-  });
+  void conversationPrompt
+    .restore(
+      createOperatorConversationShellSink(shell, {
+        onContextUsage: (usage) => {
+          currentContextUsage = usage;
+          shell.refreshStatusView();
+        },
+      }),
+    )
+    .catch(() => {
+      shell.insertMarkdown(
+        "**Conversation restore unavailable**\n\nThe durable transcript could not be restored. No prompt was sent.",
+      );
+      shell.refreshStatus("conversation restore unavailable");
+    });
 }
+void ensureHerdLeadCompanion().then((result) => {
+  if (result.outcome === "skipped") return;
+  const formatted = formatHerdLeadCompanionResult(result, "open");
+  shell.insertMarkdown(`**Herd lead**\n\n${formatted.text} \`/board\` reopens.`);
+});
 void loadConfig({ env: process.env, cwd: repoRoot })
   .then(({ config }) => {
     applyModelDisplay(config);

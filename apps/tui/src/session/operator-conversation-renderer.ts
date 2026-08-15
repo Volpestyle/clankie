@@ -1,4 +1,8 @@
-import type { OperatorConversationRecovery, OperatorConversationStreamEvent } from "@clankie/protocol";
+import type {
+  OperatorConversationContextUsage,
+  OperatorConversationRecovery,
+  OperatorConversationStreamEvent,
+} from "@clankie/protocol";
 import type { OperatorConversationEventSink } from "./operator-conversations.ts";
 
 /**
@@ -54,6 +58,8 @@ export function renderOperatorConversationEvent(event: OperatorConversationStrea
       return `**${event.role === "operator" ? "You" : "Clankie"}**\n\n${event.text}`;
     case "reasoning":
       return `**Reasoning**\n\n${event.text}`;
+    case "context":
+      return undefined;
     case "tool": {
       if (event.skillName !== undefined) {
         if (event.phase === "started") return undefined;
@@ -109,6 +115,7 @@ export interface OperatorConversationShellSinkOptions {
    * or a repeated identical prompt — still render.
    */
   readonly localEchoText?: string;
+  readonly onContextUsage?: (usage: OperatorConversationContextUsage) => void;
 }
 
 export function createOperatorConversationShellSink(
@@ -133,6 +140,7 @@ export function createOperatorConversationShellSink(
         }
       }
       if (event.type === "turn") shell.refreshStatus(`conversation turn ${event.phase}`);
+      if (event.type === "context") options.onContextUsage?.(event.usage);
     },
     recovery(recovery): void {
       shell.insertMarkdown(renderOperatorConversationRecovery(recovery));

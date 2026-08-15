@@ -5,6 +5,7 @@ import {
   createClankieAutocompleteProvider,
   describeClankieCommand,
   formatClankieCommandInspector,
+  resolveClankieCommand,
   searchClankieCommands,
   type ClankieAutocompleteCommand,
 } from "../src/face/clankie-autocomplete.ts";
@@ -17,6 +18,7 @@ import {
   moveClankieCommandTypeaheadSelection,
   renderClankieCommandTypeahead,
   selectedClankieCommandTypeahead,
+  typeaheadSelectionDelta,
 } from "../src/face/clankie-command-ui.ts";
 
 function expectFits(lines: readonly string[], width: number): void {
@@ -229,6 +231,94 @@ describe("command typeahead", () => {
     const exactAliasState = required(clankieCommandTypeaheadFor(commands, "/token"), "exact alias state");
     expect(selectedClankieCommandTypeahead(exactAliasState)?.name).toBe("discord-token");
     expect(inlineClankieCommandHint(exactAliasState)).toBe("[status|<token>] [--user-token] [--voice]");
+  });
+
+  it("keeps a space between aliases and the description when the invocation column is full", () => {
+    const colliding: ClankieAutocompleteCommand[] = [
+      {
+        name: "auth",
+        aliases: ["login", "connect"],
+        description: "Manage API keys, subscription OAuth, and harness logins",
+        takesArgument: true,
+      },
+      {
+        name: "connect",
+        aliases: ["integrations"],
+        description: "Connect Linear, email, and Discord so Clankie can use them",
+        takesArgument: true,
+      },
+    ];
+    const state = moveClankieCommandTypeaheadSelection(
+      required(clankieCommandTypeaheadFor(colliding, "/con"), "prefix typeahead"),
+      1,
+    );
+    const rows = renderClankieCommandTypeahead(state, theme, 48);
+    const selected = rows.find((line) => stripAnsi(line).includes("/auth"));
+    expect(stripAnsi(selected ?? "")).not.toMatch(/\)[A-Za-z]/u);
+    expect(stripAnsi(selected ?? "")).toMatch(/\/auth \(.*\) Manage/u);
+  });
+
+  it("prefers /connect over /conversation for the /con prefix", () => {
+    const colliding: ClankieAutocompleteCommand[] = [
+      {
+        name: "conversation",
+        aliases: ["chat"],
+        description: "List or select a conversation",
+        takesArgument: true,
+      },
+      {
+        name: "connect",
+        aliases: ["integrations"],
+        description: "Connect Linear, email, and Discord",
+        argumentHint: "[status|linear|email|discord]",
+        takesArgument: true,
+      },
+    ];
+    const state = required(clankieCommandTypeaheadFor(colliding, "/con"), "con prefix");
+    expect(state.matches.map((command) => command.name)).toEqual(["connect", "conversation"]);
+    expect(selectedClankieCommandTypeahead(state)?.name).toBe("connect");
+  });
+
+  it("does not treat a Kitty key-release as another typeahead move", () => {
+    expect(typeaheadSelectionDelta("\x1b[B")).toBe(1);
+    expect(typeaheadSelectionDelta("\x1b[A")).toBe(-1);
+    expect(typeaheadSelectionDelta("\x1b[1;1:3B")).toBeUndefined();
+    expect(typeaheadSelectionDelta("\x1b[1;1:3A")).toBeUndefined();
+  });
+
+  it("prefers a real /connect command over /auth's leftover connect alias", () => {
+    const colliding: ClankieAutocompleteCommand[] = [
+      {
+        name: "auth",
+        aliases: ["login", "connect"],
+        description: "Manage API keys",
+        argumentHint: "[status]",
+        takesArgument: true,
+      },
+      {
+        name: "connect",
+        aliases: ["integrations"],
+        description: "Connect Linear, email, and Discord",
+        argumentHint: "[status|linear|email|discord]",
+        takesArgument: true,
+      },
+    ];
+
+    expect(resolveClankieCommand(colliding, "connect")?.command.name).toBe("connect");
+    expect(resolveClankieCommand(colliding, "login")?.command.name).toBe("auth");
+
+    const state = required(clankieCommandTypeaheadFor(colliding, "/connect"), "connect typeahead");
+    expect(selectedClankieCommandTypeahead(state)?.name).toBe("connect");
+    expect(inlineClankieCommandHint(state)).toBe("[status|linear|email|discord]");
+    expect(state.matches.map((command) => command.name)).toEqual(["connect", "auth"]);
+
+    const prefix = required(clankieCommandTypeaheadFor(colliding, "/con"), "connect prefix");
+    expect(selectedClankieCommandTypeahead(prefix)?.name).toBe("connect");
+    const moved = moveClankieCommandTypeaheadSelection(prefix, 1);
+    expect(selectedClankieCommandTypeahead(moved)?.name).toBe("auth");
+    expect(selectedClankieCommandTypeahead(clankieCommandTypeaheadFor(colliding, "/con", moved))?.name).toBe(
+      "auth",
+    );
   });
 
   it("keeps /n as its own command", () => {

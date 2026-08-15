@@ -17,6 +17,13 @@ export interface HerdrReportOptions {
   readonly agent?: string;
 }
 
+/** Pane id of this console when it is sitting in herdr; undefined otherwise. */
+export function herdrPaneIdFromEnv(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  if (env.HERDR_ENV !== "1") return undefined;
+  const paneId = env.HERDR_PANE_ID?.trim();
+  return paneId === undefined || paneId.length === 0 ? undefined : paneId;
+}
+
 function defaultRunner(
   command: string,
   args: readonly string[],

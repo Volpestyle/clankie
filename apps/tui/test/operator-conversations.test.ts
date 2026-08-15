@@ -333,12 +333,56 @@ describe("TUI selected-conversation prompt path", () => {
         };
       },
     };
-    const session = new OperatorConversationPromptSession({ client: routed, selection, tails: store });
+    const session = new OperatorConversationPromptSession({
+      client: routed,
+      selection,
+      tails: store,
+    });
     await session.initialize();
     await session.prompt("to A", recordingSink().sink);
     await selection.select("workspace-1");
     await session.prompt("to B", recordingSink().sink);
     expect(sends).toEqual(["global-default", "workspace-1"]);
+  });
+
+  it("sends the herdr pane as his seat when the console is in herdr", async () => {
+    const { store } = await tempTailStore();
+    const selection = new OperatorConversationSelection(client([WORKSPACE]));
+    await selection.select("global-default");
+    const panes: Array<string | undefined> = [];
+    const routed: OperatorConversationClient = {
+      ...client([WORKSPACE]),
+      send: async (turn) => {
+        panes.push(turn.herdrPaneId);
+        return {
+          schemaVersion: 1,
+          status: "accepted",
+          conversationId: turn.conversationId,
+          runId: "run-seat",
+          revision: turn.expectedRevision + 1,
+          safeCursor: "global-default:accepted",
+        };
+      },
+      tail: async function* () {
+        yield {
+          kind: "event",
+          event: streamEvent("global-default", "global-default:done", {
+            type: "turn",
+            runId: "run-seat",
+            phase: "completed",
+          }),
+        };
+      },
+    };
+    const session = new OperatorConversationPromptSession({
+      client: routed,
+      selection,
+      tails: store,
+      herdrPaneId: () => "w3:p2J",
+    });
+    await session.initialize();
+    await session.prompt("what's in flight", recordingSink().sink);
+    expect(panes).toEqual(["w3:p2J"]);
   });
 
   it("resumes the persisted selection and exact per-surface tail cursor after restart", async () => {
@@ -558,6 +602,31 @@ describe("TUI selected-conversation prompt path", () => {
     expect(inserted).toEqual(["**You**\n\nfrom the phone", "**You**\n\nhi", "**Clankie**\n\nhello"]);
     // Turn lifecycle still drives the status line even when not rendered.
     expect(statuses).toEqual(["conversation turn accepted"]);
+  });
+
+  it("routes context snapshots to the status surface without transcript noise", () => {
+    const inserted: string[] = [];
+    const usages: { tokens: number | null; contextWindow: number }[] = [];
+    const sink = createOperatorConversationShellSink(
+      {
+        insertMarkdown: (markdown: string) => inserted.push(markdown),
+        refreshStatus: () => undefined,
+      },
+      { onContextUsage: (usage) => usages.push(usage) },
+    );
+
+    sink.event({
+      schemaVersion: 1,
+      conversationId: "global-default",
+      cursor: "global-default:context",
+      revision: 1,
+      occurredAt: "2026-07-12T00:00:00.000Z",
+      type: "context",
+      usage: { tokens: 72_400, contextWindow: 200_000 },
+    });
+
+    expect(inserted).toEqual([]);
+    expect(usages).toEqual([{ tokens: 72_400, contextWindow: 200_000 }]);
   });
 
   it("renders operator history as You when no local echo is pending (restore path)", () => {

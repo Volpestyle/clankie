@@ -2,7 +2,11 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import { discoverClankieSkills } from "../src/skill-catalog.ts";
+import {
+  clankieSlashSkillSuffix,
+  discoverClankieSkills,
+  resolveClankieSlashSkill,
+} from "../src/skill-catalog.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -16,6 +20,19 @@ async function skill(directory: string, frontmatter: string): Promise<void> {
 }
 
 describe("skill catalog", () => {
+  it("offers an append-only slash suffix and resolves only exact skill names", () => {
+    const skills = [
+      { name: "ponytail", description: "" },
+      { name: "ponytail-review", description: "" },
+    ];
+
+    expect(clankieSlashSkillSuffix("/pony", skills)).toBe("tail");
+    expect(clankieSlashSkillSuffix("/ponytail ", skills)).toBeUndefined();
+    expect(resolveClankieSlashSkill("/pony fix this", skills)).toBeUndefined();
+    expect(resolveClankieSlashSkill("/ponytail fix this", skills)?.name).toBe("ponytail");
+    expect(resolveClankieSlashSkill("/skill:ponytail fix this", skills)?.name).toBe("ponytail");
+  });
+
   it("discovers project and user skills, follows links, and hides non-model skills", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-skills-"));
     temporaryDirectories.push(root);

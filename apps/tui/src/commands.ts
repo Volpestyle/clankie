@@ -24,9 +24,17 @@ import {
   selectLanes,
   type CaptainLaneTraceController,
 } from "./session/lane-observation.ts";
-import type { ObservableCaptainLane } from "@clankie/protocol";
+import type { ObservableCaptainLane, OperatorConversationContextUsage } from "@clankie/protocol";
 import type { PresenceSnapshot } from "./observation/presence.ts";
 import type { HerdrRosterSnapshot } from "./observation/herdr-roster.ts";
+import {
+  closeHerdLeadCompanion,
+  ensureHerdLeadCompanion,
+  focusHerdLeadCompanion,
+  formatHerdLeadCompanionResult,
+  type HerdLeadCompanionResult,
+} from "./observation/herd-lead-companion.ts";
+import { formatCaptainContextUsage } from "./shell/status-bar.ts";
 
 type StatusTone = "normal" | "active" | "ok" | "warn" | "bad" | "muted";
 
@@ -37,8 +45,16 @@ export interface ConsoleCommandContext {
   readonly laneTrace?: CaptainLaneTraceController;
   /** Latest polled presence snapshot for /status. */
   readonly presence?: () => PresenceSnapshot | undefined;
+  /** Latest durable context occupancy for the selected conversation. */
+  readonly contextUsage?: () => OperatorConversationContextUsage | undefined;
   /** Sibling Herdr pane agents, when running inside Herdr. */
   readonly herdrRoster?: () => HerdrRosterSnapshot | undefined;
+  /** herdr-lead board: companion dashboard beside this console. */
+  readonly herdLead?: {
+    ensure(): Promise<HerdLeadCompanionResult>;
+    focus(): Promise<HerdLeadCompanionResult>;
+    close(): Promise<HerdLeadCompanionResult>;
+  };
   readonly conversations?: {
     readonly conversationId?: string | undefined;
     conversations(): Promise<
@@ -54,7 +70,19 @@ export interface ConsoleCommandContext {
 }
 
 export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellCommand[] {
-  const { activityClient, activityWatchUrl, conversations, laneTrace, presence, herdrRoster } = context;
+  const {
+    activityClient,
+    activityWatchUrl,
+    conversations,
+    laneTrace,
+    presence,
+    contextUsage,
+    herdrRoster,
+    herdLead,
+  } = context;
+  const openBoard = herdLead?.ensure ?? (() => ensureHerdLeadCompanion());
+  const focusBoard = herdLead?.focus ?? (() => focusHerdLeadCompanion());
+  const closeBoard = herdLead?.close ?? (() => closeHerdLeadCompanion());
   const commands: FaceShellCommand[] = [];
 
   const statusHelpers = (shell: ClankieFaceShell) => {
@@ -257,6 +285,21 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       },
     },
     {
+      name: "board",
+      aliases: ["herdr-lead", "herd-lead"],
+      description: "Open, focus, or close the herdr-lead companion board",
+      argumentHint: "[focus|close]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        const token = argument.trim().toLowerCase();
+        const verb = token === "focus" || token === "close" ? token : "open";
+        const result =
+          verb === "focus" ? await focusBoard() : verb === "close" ? await closeBoard() : await openBoard();
+        const formatted = formatHerdLeadCompanionResult(result, verb);
+        shell.insertCommandResult("/board", formatted.text, formatted.tone);
+      },
+    },
+    {
       name: "status",
       aliases: [],
       description: "Show console and clankie service status",
@@ -264,6 +307,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       run(_argument, shell): void {
         const s = statusHelpers(shell);
         const snapshot = presence?.();
+        const currentContextUsage = contextUsage?.();
         const roster = herdrRoster?.();
         shell.insertCommandResult(
           "/status",
@@ -271,6 +315,11 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
             s.title("Console"),
             s.line("presence", snapshot?.phase ?? "unavailable", snapshot === undefined ? "warn" : "ok"),
             s.line("conversation", conversations?.conversationId ?? "none selected", "active"),
+            s.line(
+              "context",
+              formatCaptainContextUsage(currentContextUsage),
+              currentContextUsage === undefined ? "warn" : "normal",
+            ),
             s.line(
               "activity",
               activityClient === undefined ? "authentication unavailable" : "live · /activity",

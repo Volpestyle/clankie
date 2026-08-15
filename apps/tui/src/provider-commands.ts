@@ -24,6 +24,7 @@ import {
 import {
   ANTHROPIC_PROVIDER_ID,
   CODEX_PROVIDER_ID,
+  XAI_PROVIDER_ID,
   effortVariantsFor,
   formatModelRef,
   loadConfig,
@@ -34,6 +35,7 @@ import {
   runAnthropicBrowserLogin,
   runCodexBrowserLogin,
   runCodexDeviceLogin,
+  runXaiDeviceLogin,
   subscriptionRefFor,
   updateGlobalConfig,
   type ClankieConfig,
@@ -50,6 +52,7 @@ export interface ProviderServices {
     readonly anthropicBrowser: typeof runAnthropicBrowserLogin;
     readonly codexBrowser: typeof runCodexBrowserLogin;
     readonly codexDevice: typeof runCodexDeviceLogin;
+    readonly xaiDevice: typeof runXaiDeviceLogin;
   };
   /** Called after config changes so the shell can refresh banner/status. */
   readonly onConfigChanged: (config: ClankieConfig) => void;
@@ -70,6 +73,7 @@ export function createProviderServices(options: {
       anthropicBrowser: runAnthropicBrowserLogin,
       codexBrowser: runCodexBrowserLogin,
       codexDevice: runCodexDeviceLogin,
+      xaiDevice: runXaiDeviceLogin,
     },
     onConfigChanged: options.onConfigChanged ?? (() => {}),
   };
@@ -100,6 +104,15 @@ const SERVICE_CREDENTIAL_IDS = new Set([
   LINEAR_PROVIDER_ID,
 ]);
 
+/** First-class /auth slots always shown on status, stored or missing. */
+const AUTH_STATUS_PROVIDER_IDS: readonly string[] = FEATURED_PROVIDERS.flatMap((id) =>
+  id === "openai" ? [id, CODEX_PROVIDER_ID] : [id],
+);
+const AUTH_STATUS_SERVICE_IDS: readonly string[] = [
+  ...FEATURED_SERVICE_PROVIDERS.map((option) => option.value),
+  DISCORD_BOT_PROVIDER_ID,
+];
+
 const MODEL_ROLES = {
   "": "model",
   default: "model",
@@ -115,7 +128,7 @@ export function buildProviderCommands(services: ProviderServices): FaceShellComm
   return [
     {
       name: "auth",
-      aliases: ["login", "connect"],
+      aliases: ["login"],
       description: "Manage API keys, subscription OAuth, and harness logins",
       argumentHint: "[status]",
       takesArgument: true,
@@ -296,6 +309,19 @@ function providerEnvConnected(providerId: string, env: NodeJS.ProcessEnv): boole
   return (loadBundledCatalog()[providerId]?.env ?? []).some((variable) => (env[variable] ?? "") !== "");
 }
 
+/** Same wording as `/auth status`, so `/provider` shows SuperGrok vs API key. */
+function providerConnectionHint(
+  id: string,
+  listed: Record<string, RedactedCredential>,
+  env: NodeJS.ProcessEnv,
+  now: number = Date.now(),
+): string {
+  const redacted = listed[id];
+  if (redacted !== undefined) return describeCredentialKind(id, redacted, now);
+  if (providerEnvConnected(id, env)) return "env";
+  return "needs /auth";
+}
+
 // --- /auth ---
 
 /** Broker-minted local bearers (`clankie_operator`, bridges, …). Not operator-authored. */
@@ -316,38 +342,55 @@ function ownerCredentialEntries(
 }
 
 /**
- * Operator-facing /auth status. Groups provider keys and service tokens, omits
+ * Operator-facing /auth status. Lists first-class slots even when empty, omits
  * auto-minted `clankie_*` process identities, and never reprints secret prefixes.
  */
 export function formatAuthStatus(
   listed: Record<string, RedactedCredential>,
-  options: { now?: number } = {},
+  options: { now?: number; envConnected?: ReadonlySet<string> | readonly string[] } = {},
 ): string {
   const now = options.now ?? Date.now();
-  const entries = Object.entries(listed).sort(([left], [right]) => left.localeCompare(right));
-  const providers = entries.filter(([id]) => !isLocalIdentity(id) && !isServiceCredential(id));
-  const services = entries.filter(([id]) => isServiceCredential(id));
-  const lines: string[] = [];
-
-  if (providers.length === 0 && services.length === 0) {
-    lines.push("No provider keys or subscriptions stored. Run /auth to add one.");
-  } else {
-    if (providers.length > 0) {
-      lines.push("providers:", ...alignCredentialRows(providers, now));
-    }
-    if (services.length > 0) {
-      if (lines.length > 0) lines.push("");
-      lines.push("services:", ...alignCredentialRows(services, now));
-    }
-  }
-
-  lines.push("", "Worker harnesses keep their own logins (`codex login`, `claude login`).");
-  return lines.join("\n");
+  const envConnected = new Set(options.envConnected ?? []);
+  const listedIds = Object.keys(listed);
+  const providers = checklistIds(AUTH_STATUS_PROVIDER_IDS, listedIds, (id) => {
+    return !isLocalIdentity(id) && !isServiceCredential(id);
+  });
+  const services = checklistIds(AUTH_STATUS_SERVICE_IDS, listedIds, isServiceCredential);
+  return [
+    "providers:",
+    ...alignStatusRows(providers.map((id) => ({ id, detail: statusDetail(id, listed, envConnected, now) }))),
+    "",
+    "services:",
+    ...alignStatusRows(services.map((id) => ({ id, detail: statusDetail(id, listed, envConnected, now) }))),
+    "",
+    "Worker harnesses keep their own logins (`codex login`, `claude login`).",
+  ].join("\n");
 }
 
-function alignCredentialRows(rows: ReadonlyArray<[string, RedactedCredential]>, now: number): string[] {
-  const width = Math.max(...rows.map(([id]) => id.length));
-  return rows.map(([id, redacted]) => `  ${id.padEnd(width)}  ${describeCredentialKind(id, redacted, now)}`);
+function checklistIds(
+  expected: readonly string[],
+  listedIds: readonly string[],
+  belong: (id: string) => boolean,
+): string[] {
+  const extras = listedIds.filter((id) => belong(id) && !expected.includes(id)).sort();
+  return [...expected, ...extras];
+}
+
+function statusDetail(
+  id: string,
+  listed: Record<string, RedactedCredential>,
+  envConnected: ReadonlySet<string>,
+  now: number,
+): string {
+  const redacted = listed[id];
+  if (redacted !== undefined) return describeCredentialKind(id, redacted, now);
+  if (envConnected.has(id)) return "env";
+  return "missing";
+}
+
+function alignStatusRows(rows: ReadonlyArray<{ id: string; detail: string }>): string[] {
+  const width = Math.max(...rows.map((row) => row.id.length));
+  return rows.map((row) => `  ${row.id.padEnd(width)}  ${row.detail}`);
 }
 
 function describeCredentialKind(
@@ -366,6 +409,7 @@ function describeCredentialKind(
   const expiry = formatOauthExpiry(redacted.expires, now);
   if (id === CODEX_PROVIDER_ID) return `ChatGPT subscription${account} · ${expiry}`;
   if (id === ANTHROPIC_PROVIDER_ID) return `Claude subscription${account} · ${expiry}`;
+  if (id === XAI_PROVIDER_ID) return `SuperGrok subscription${account} · ${expiry}`;
   return `OAuth${account} · ${expiry}`;
 }
 
@@ -395,7 +439,9 @@ function formatOauthExpiry(expires: number, now: number): string {
 
 async function showAuthStatus(shell: ClankieFaceShell, services: ProviderServices): Promise<void> {
   const listed = await services.store.list();
-  shell.insertCommandResult("/auth status", formatAuthStatus(listed), "success");
+  const catalog = await services.registry.catalog();
+  const envConnected = Object.keys(catalog).filter((id) => providerEnvConnected(id, services.env));
+  shell.insertCommandResult("/auth status", formatAuthStatus(listed, { envConnected }), "success");
 }
 
 async function runAuthWizard(shell: ClankieFaceShell, services: ProviderServices): Promise<void> {
@@ -420,6 +466,12 @@ async function runAuthWizard(shell: ClankieFaceShell, services: ProviderServices
           label: "Connect Claude Pro/Max subscription",
           hint: "Anthropic OAuth",
           description: "Manual-code PKCE sign-in; tokens stay in the credential broker.",
+        },
+        {
+          value: "xai-oauth",
+          label: "Connect SuperGrok / X Premium",
+          hint: "xAI device code",
+          description: "Uses your Grok or X Premium plan for turns, pictures, and video. Stored as xai.",
         },
         { value: "harness", label: "Worker harness logins", hint: "codex / claude CLIs" },
         ...(ownerCount > 0 ? [{ value: "remove", label: "Remove a credential" }] : []),
@@ -458,6 +510,10 @@ async function runAuthWizard(shell: ClankieFaceShell, services: ProviderServices
     }
     if (choice === "anthropic-oauth") {
       await anthropicOauthFlow(shell, services);
+      continue;
+    }
+    if (choice === "xai-oauth") {
+      await xaiOauthFlow(shell, services);
       continue;
     }
     if (choice === "remove") {
@@ -638,6 +694,37 @@ async function anthropicOauthFlow(shell: ClankieFaceShell, services: ProviderSer
   }
 }
 
+async function xaiOauthFlow(shell: ClankieFaceShell, services: ProviderServices): Promise<void> {
+  const flow = shell.setupFlow;
+  const interrupt = flow.waitForInterrupt();
+  try {
+    flow.setStatus("requesting SuperGrok device code…");
+    const credential = await Promise.race([
+      services.oauth.xaiDevice({
+        onUserCode: (code, url) => {
+          flow.setStatus(`Visit ${url} and enter code ${code} (/cancel to abort)`);
+        },
+      }),
+      interrupt.promise.then(() => undefined),
+    ]);
+    if (credential === undefined) {
+      flow.renderLine("Sign-in cancelled.", "warning");
+      return;
+    }
+    await services.store.set(XAI_PROVIDER_ID, credential);
+    flow.renderLine("SuperGrok / X Premium connected.", "success");
+    shell.insertCommandResult(
+      "/auth",
+      `SuperGrok / X Premium connected (stored as ${XAI_PROVIDER_ID}). Pictures and video use this credential over an API key.`,
+      "success",
+    );
+  } catch {
+    renderOauthFailure(flow, "SuperGrok / X Premium");
+  } finally {
+    interrupt.dispose();
+  }
+}
+
 export function validateApiKey(value: string): string | undefined {
   const trimmed = value.trim();
   if (trimmed.length < 8) return "That doesn't look like an API key.";
@@ -762,6 +849,7 @@ async function showProviderStatus(
   selectedProviders: ReadonlyMap<RoleKey, string>,
 ): Promise<void> {
   const { config } = await loadConfig({ env: services.env, cwd: services.cwd });
+  const listed = await services.store.list();
   const lines = (["model", "small_model", "voice_model"] as const).map((role) => {
     const configured = config[role] === undefined ? undefined : parseModelRef(config[role]);
     const selected = selectedProviders.get(role) ?? configured?.providerId;
@@ -769,7 +857,9 @@ async function showProviderStatus(
       selected !== undefined && selected !== configured?.providerId
         ? ` (pending /model; configured ${configured?.providerId ?? "unset"})`
         : "";
-    return `${role}: ${selected ?? "unset — run /provider"}${pending}`;
+    const kind =
+      selected === undefined ? "" : ` · ${providerConnectionHint(selected, listed, services.env)}`;
+    return `${role}: ${selected ?? "unset — run /provider"}${kind}${pending}`;
   });
   shell.insertCommandResult("/provider status", lines.join("\n"), "success");
 }
@@ -786,7 +876,8 @@ async function runProviderWizard(
     for (;;) {
       const catalog = await services.registry.catalog();
       const { config } = await loadConfig({ env: services.env, cwd: services.cwd });
-      const credentialIds = Object.keys(await services.store.list());
+      const listed = await services.store.list();
+      const credentialIds = Object.keys(listed);
       const providers = resolveProviders({ config, catalog, credentialIds, env: services.env });
       const configured = config[role] === undefined ? undefined : parseModelRef(config[role]);
       const currentProvider = selectedProviders.get(role) ?? configured?.providerId;
@@ -796,7 +887,7 @@ async function runProviderWizard(
         options: providers.map((provider) => ({
           value: provider.id,
           label: provider.name,
-          hint: provider.connected ? "connected" : "needs /auth",
+          hint: providerConnectionHint(provider.id, listed, services.env),
         })),
         statusActions: [{ value: "__refresh__", label: "refresh registry (models.dev)" }],
         ...(currentProvider === undefined ? {} : { currentValue: currentProvider }),
@@ -817,11 +908,12 @@ async function runProviderWizard(
       }
       selectedProviders.set(role, providerId);
       const provider = providers.find((candidate) => candidate.id === providerId);
+      const hint = providerConnectionHint(providerId, listed, services.env);
       flow.end();
       shell.insertCommandResult(
         "/provider",
         [
-          `Provider for ${roleLabel(role)} set to ${providerId}. Run /model to choose the actual model.`,
+          `Provider for ${roleLabel(role)} set to ${providerId} (${hint}). Run /model to choose the actual model.`,
           ...(provider !== undefined && !provider.connected
             ? [`Note: ${providerId} has no credential yet — run /auth before real Clankie turns.`]
             : []),

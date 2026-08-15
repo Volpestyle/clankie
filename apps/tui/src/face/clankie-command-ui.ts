@@ -2,6 +2,7 @@ import {
   CURSOR_MARKER,
   Key,
   decodeKittyPrintable,
+  isKeyRelease,
   matchesKey,
   truncateToWidth,
   visibleWidth,
@@ -13,6 +14,7 @@ import {
   clankieCommandCompletion,
   describeClankieCommand,
   listClankieCommands,
+  resolveClankieCommand,
   searchClankieCommands,
   type ClankieAutocompleteCommand,
   type ClankieCommandDetail,
@@ -55,17 +57,18 @@ export function clankieCommandTypeaheadFor(
   if (query === undefined) return undefined;
 
   const token = query.slice(1).toLowerCase();
-  const matches = commands.filter((command) =>
-    [command.name, ...command.aliases].some((name) => name.startsWith(token)),
+  const matches = rankTypeaheadMatches(
+    commands.filter((command) => [command.name, ...command.aliases].some((name) => name.startsWith(token))),
+    token,
   );
+  const exactNameIndex = token.length === 0 ? -1 : matches.findIndex((command) => command.name === token);
   const previousSelected = previous?.matches[previous.selectedIndex];
-  const selectedIndex =
+  const previousIndex =
     previousSelected === undefined
-      ? 0
-      : Math.max(
-          0,
-          matches.findIndex((command) => command.name === previousSelected.name),
-        );
+      ? -1
+      : matches.findIndex((command) => command.name === previousSelected.name);
+  const selectedIndex =
+    exactNameIndex >= 0 ? exactNameIndex : previousIndex >= 0 ? previousIndex : 0;
   return {
     query,
     matches,
@@ -83,6 +86,18 @@ export function moveClankieCommandTypeaheadSelection(
     ...state,
     selectedIndex: wrapIndex(state.selectedIndex + delta, state.matches.length),
   };
+}
+
+/**
+ * Kitty key-release sequences still match `Key.up` / `Key.down`. Listeners run
+ * before pi-tui drops releases, so treating a release as another move wraps a
+ * two-item list back to the first row.
+ */
+export function typeaheadSelectionDelta(data: string): number | undefined {
+  if (isKeyRelease(data)) return undefined;
+  if (matchesKey(data, Key.up)) return -1;
+  if (matchesKey(data, Key.down)) return 1;
+  return undefined;
 }
 
 export function dismissClankieCommandTypeahead(
@@ -111,12 +126,11 @@ export function isExactClankieCommandTypeahead(state: ClankieCommandTypeaheadSta
 }
 
 export function inlineClankieCommandHint(state: ClankieCommandTypeaheadState): string | undefined {
-  if (state.dismissed || state.matches.length !== 1) return undefined;
-  const command = state.matches[0];
-  if (command === undefined) return undefined;
+  if (state.dismissed) return undefined;
   const token = state.query.slice(1).toLowerCase();
-  if (![command.name, ...command.aliases].includes(token)) return undefined;
-  return command.argumentHint ?? "";
+  const exact = exactTypeaheadCommand(state.matches, token);
+  if (exact === undefined) return undefined;
+  return exact.argumentHint ?? "";
 }
 
 export function clankieCommandFilterFromText(text: string): string {
@@ -181,11 +195,14 @@ export function renderClankieCommandTypeahead(
     const aliases =
       command.aliases.length === 0 ? "" : ` ${command.aliases.map((alias) => `(/${alias})`).join(" ")}`;
     const commandText = selected ? theme.cyan(`${pointer}${canonical}`) : `${pointer}${canonical}`;
-    const left = padVisible(fit(`${commandText}${theme.dim(aliases)}`, invocationWidth), invocationWidth);
+    const left = padVisible(
+      fit(`${commandText}${theme.dim(aliases)}`, Math.max(1, invocationWidth)),
+      invocationWidth,
+    );
     const description = selected
       ? (theme.selectedDescription ?? theme.dim)(command.description)
       : theme.dim(command.description);
-    return fit(`${left}${description}`, usableWidth);
+    return fit(`${left} ${description}`, usableWidth);
   });
   return withTypeaheadTopSpacing([...selectedDetailLines, ...rows], visibleRows);
 }
@@ -412,7 +429,7 @@ function renderArgumentDetail(
   if (maxVisibleRows <= 0) return [];
   const parsed = parseSlashText(text);
   if (parsed === undefined || !parsed.hasArgumentText) return [];
-  const command = findCommand(commands, parsed.commandToken);
+  const command = resolveClankieCommand(commands, parsed.commandToken)?.command;
   if (command === undefined) return [theme.dim(fit(`Unknown command "/${parsed.commandToken}".`, width))];
   const detail = describeClankieCommand(command, parsed.argumentText);
   return renderCommandDetail(detail, theme, width, false).slice(0, clampVisibleRows(maxVisibleRows, 4));
@@ -474,11 +491,32 @@ function commandTokenQuery(text: string): string | undefined {
   return trimmed;
 }
 
-function findCommand(
-  commands: readonly ClankieAutocompleteCommand[],
+function rankTypeaheadMatches(
+  matches: readonly ClankieAutocompleteCommand[],
+  token: string,
+): ClankieAutocompleteCommand[] {
+  if (token.length === 0) return [...matches];
+  return [...matches].sort((left, right) => typeaheadRank(left, token) - typeaheadRank(right, token));
+}
+
+function typeaheadRank(command: ClankieAutocompleteCommand, token: string): number {
+  if (command.name === token) return 0;
+  if (command.aliases.includes(token)) return 1;
+  if (command.name.startsWith(token)) return 10 + (command.name.length - token.length);
+  const alias = command.aliases.find((name) => name.startsWith(token));
+  return alias === undefined ? 10_000 : 1_000 + (alias.length - token.length);
+}
+
+function exactTypeaheadCommand(
+  matches: readonly ClankieAutocompleteCommand[],
   token: string,
 ): ClankieAutocompleteCommand | undefined {
-  return commands.find((command) => command.name === token || command.aliases.includes(token));
+  if (token.length === 0) return undefined;
+  const named = matches.find((command) => command.name === token);
+  if (named !== undefined) return named;
+  if (matches.length !== 1) return undefined;
+  const command = matches[0];
+  return command !== undefined && command.aliases.includes(token) ? command : undefined;
 }
 
 function commandInvocationWithAliases(command: ClankieAutocompleteCommand): string {

@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { resolveDiscordActiveBody } from "@clankie/settings";
 import { z } from "zod";
 import { DEFAULT_CONTROL_PLANE_URL } from "./pairing-offer.ts";
 import {
@@ -17,7 +18,9 @@ import {
  * The long-lived processes that make Clankie present, and the order they
  * depend on each other in:
  *
- *   clankie  ->  discord-bridge        (activity stands alone, tunnel fronts it)
+ *   clankie  ->  discord-bridge          (active body = bot)
+ *            ->  discord-user-session    (active body = user_session)
+ *   activity stands alone, tunnel fronts it
  *
  * The clankie service is the single backend: it hosts the captain, the
  * operator conversation dispatch, the lane listing, and every operator API
@@ -46,6 +49,9 @@ const TARGET_ALIASES: Readonly<Record<string, ServiceTarget>> = {
   cloudflared: "tunnel",
   "discord-bridge": "discord-bridge",
   bridge: "discord-bridge",
+  "user-session": "discord-user-session",
+  "discord-user-session": "discord-user-session",
+  lab: "discord-user-session",
 };
 
 export function parseServiceTarget(raw: string | undefined): ServiceTarget {
@@ -53,7 +59,7 @@ export function parseServiceTarget(raw: string | undefined): ServiceTarget {
   const target = TARGET_ALIASES[raw.toLowerCase()];
   if (target === undefined) {
     throw new Error(
-      `Unknown service "${raw}". Expected one of: all, clankie, discord, activity, tunnel (aliases: captain, eve, cp, control-plane, bridge, watch, viewer, cloudflared).`,
+      `Unknown service "${raw}". Expected one of: all, clankie, discord, user-session, activity, tunnel (aliases: captain, eve, cp, control-plane, bridge, lab, watch, viewer, cloudflared).`,
     );
   }
   return target;
@@ -166,6 +172,9 @@ const CLANKIE: ManagedService = {
     CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE:
       env.CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE ??
       join(repoRoot, "apps", "discord-bridge", "src", "presence-runtime-module.ts"),
+    CLANKIE_DISCORD_USER_PRESENCE_RUNTIME_MODULE:
+      env.CLANKIE_DISCORD_USER_PRESENCE_RUNTIME_MODULE ??
+      join(repoRoot, "apps", "discord-user-session", "src", "presence-runtime-module.ts"),
     ...(captainToken === undefined ? {} : { CLANKIE_CAPTAIN_TOKEN: captainToken }),
   }),
   probe: async ({ env, fetchImpl }) => {
@@ -187,6 +196,7 @@ const DISCORD_BRIDGE: ManagedService = {
   dependsOn: ["clankie"],
   spawnArgs: ["--filter", "@clankie/discord-bridge", "start"],
   commandMatches: (command) => command.includes("@clankie/discord-bridge"),
+  enabled: (env) => resolveDiscordActiveBody(env) === "bot",
   // Its live presence claim is only valid against the service instance that
   // issued it, so a clankie restart requires a bridge restart.
   restartsWith: ["clankie"],
@@ -207,6 +217,9 @@ const DISCORD_BRIDGE: ManagedService = {
    * a credential is available, and never downgrade health on its absence.
    */
   probe: async ({ env, fetchImpl, operatorToken, record, matchingPids }) => {
+    if (resolveDiscordActiveBody(env) !== "bot") {
+      return { state: "healthy", detail: "inactive — lab user body is the mouth" };
+    }
     const presence = await readPresenceDetail({ env, fetchImpl, operatorToken });
     if (record !== undefined) {
       return { state: "healthy", ...(presence === undefined ? {} : { detail: presence }) };
@@ -222,6 +235,55 @@ const DISCORD_BRIDGE: ManagedService = {
     return presence === undefined || presence === "no presence session"
       ? { state: "healthy", detail: "started outside the launcher" }
       : { state: "healthy", detail: `${presence} (started outside the launcher)` };
+  },
+};
+
+/**
+ * Personal-lab user-session body (ADR 0048). Off unless the owner enabled it
+ * in `/discord` and made it the active body. Only one Discord process is the
+ * mouth; the official bot stays down while this one is up.
+ */
+const DISCORD_USER_SESSION: ManagedService = {
+  id: "discord-user-session",
+  label: "Discord lab body",
+  dependsOn: ["clankie"],
+  spawnArgs: ["--filter", "@clankie/discord-user-session", "start"],
+  commandMatches: (command) => command.includes("@clankie/discord-user-session"),
+  restartsWith: ["clankie"],
+  enabled: (env) =>
+    env.DISCORD_USER_SESSION_ENABLED === "true" && resolveDiscordActiveBody(env) === "user_session",
+  serviceEnv: ({ env, repoRoot }) => {
+    const {
+      CLANKIE_CAPTAIN_TOKEN: _captain,
+      DISCORD_BOT_TOKEN: _bot,
+      DISCORD_USER_TOKEN: _user,
+      ...rest
+    } = env;
+    return {
+      ...rest,
+      CLANKIE_DISCORD_USER_PRESENCE_RUNTIME_MODULE:
+        env.CLANKIE_DISCORD_USER_PRESENCE_RUNTIME_MODULE ??
+        join(repoRoot, "apps", "discord-user-session", "src", "presence-runtime-module.ts"),
+    };
+  },
+  probe: async ({ env, fetchImpl, record, matchingPids }) => {
+    if (env.DISCORD_USER_SESSION_ENABLED !== "true") {
+      return { state: "healthy", detail: "lab body off" };
+    }
+    if (resolveDiscordActiveBody(env) !== "user_session") {
+      return { state: "healthy", detail: "inactive — official bot is the mouth" };
+    }
+    const port = env.CLANKIE_USER_SESSION_CONTROL_PORT ?? "4312";
+    try {
+      const response = await fetchImpl(`http://127.0.0.1:${port}/health`, {
+        redirect: "error",
+        signal: AbortSignal.timeout(750),
+      });
+      return response.ok ? { state: "healthy", detail: "user session connected" } : { state: "unhealthy" };
+    } catch {
+      if (record !== undefined || matchingPids.length > 0) return { state: "unhealthy" };
+      return { state: "unreachable" };
+    }
   },
 };
 
@@ -319,6 +381,7 @@ const TUNNEL: ManagedService = {
 const SERVICES: Readonly<Record<ServiceId, ManagedService>> = {
   clankie: CLANKIE,
   "discord-bridge": DISCORD_BRIDGE,
+  "discord-user-session": DISCORD_USER_SESSION,
   activity: ACTIVITY,
   tunnel: TUNNEL,
 };

@@ -2,6 +2,8 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 import {
   ClankieStatusBarComponent,
+  formatCaptainContextStatus,
+  formatCaptainContextUsage,
   formatCaptainPresenceStatus,
   STATUS_BAR_MAX_ROWS,
 } from "../src/shell/status-bar.ts";
@@ -15,6 +17,14 @@ describe("captain status bar", () => {
       expect(formatCaptainPresenceStatus(presence)).toBe(`clankie: ${phase}`);
     }
     expect(formatCaptainPresenceStatus(undefined)).toBe("clankie: unknown");
+  });
+
+  it("shows current context tokens out of the model window", () => {
+    expect(formatCaptainContextStatus({ tokens: 72_400, contextWindow: 200_000 })).toBe(
+      "context: 72.4k / 200k",
+    );
+    expect(formatCaptainContextUsage({ tokens: null, contextWindow: 1_000_000 })).toBe("? / 1m");
+    expect(formatCaptainContextStatus(undefined)).toBe("context: unavailable");
   });
 
   it("keeps ANSI-styled and wrapped status rows within the supplied width", () => {

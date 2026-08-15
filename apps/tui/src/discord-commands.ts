@@ -6,7 +6,21 @@ import {
   type DiscordSettings,
 } from "@clankie/settings";
 import type { RedactedCredential } from "@clankie/credential-broker";
+import type { DiscordUserSessionOptIn } from "@clankie/protocol";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
+
+export interface DiscordUserSessionOptInClient {
+  inspectDiscordUserSessionOptIn(): Promise<DiscordUserSessionOptIn | undefined>;
+  recordDiscordUserSessionOptIn(request: {
+    schemaVersion: 1;
+    characterId: string;
+    acknowledgement: string;
+    guildIds: string[];
+    channelIds: string[];
+    dmPolicy: "deny" | "owner_only" | "allowlist";
+  }): Promise<DiscordUserSessionOptIn>;
+  revokeDiscordUserSessionOptIn(): Promise<DiscordUserSessionOptIn | undefined>;
+}
 
 export interface DiscordCommandServices {
   settings: SettingsStore;
@@ -21,6 +35,8 @@ export interface DiscordCommandServices {
    * otherwise require typing the provider id by hand.
    */
   setCredential: (providerId: string, key: string) => Promise<void>;
+  /** Operator API, when the console is authenticated to the clankie service. */
+  userSessionOptIn?: DiscordUserSessionOptInClient;
 }
 
 /** Discord secrets, all broker-owned. Never stored in settings.json. */
@@ -250,10 +266,23 @@ function describeSettings(settings: DiscordSettings): string[] {
     showList("presence guilds", settings.presenceGuildIds),
     showList("presence channels", settings.presenceChannelIds),
     "",
+    `active body: ${settings.activeBody === "user_session" ? "lab user" : "official bot"}`,
+    `lab user body: ${settings.userSessionEnabled ? "enabled" : "disabled"}`,
+    showList("  lab guilds", settings.userSessionGuildIds),
+    showList("  lab channels", settings.userSessionChannelIds),
+    showList("  lab voice channels", settings.userSessionVoiceChannelIds),
+    `  lab voice: ${settings.userSessionVoiceEnabled ? "enabled" : "disabled"}`,
+    `  lab DMs: ${settings.userSessionDmPolicy}`,
+    "",
     `voice: ${settings.voiceEnabled ? "enabled" : "disabled"}`,
     showList("  voice guilds", settings.voiceGuildIds),
     showList("  voice channels", settings.voiceChannelIds),
     `  who may summon: ${settings.voiceJoinPolicy === "guild_members" ? "any member of those servers" : "ambient tier only"}`,
+    `  who he hears: ${
+      settings.voiceConsentPolicy === "presence"
+        ? "anyone in his active voice channel (one-time owner switch)"
+        : "only people who opt in each call"
+    }`,
     "",
     show("activity application id (gba)", settings.activityApplicationIdGba),
   ];
@@ -267,6 +296,7 @@ export async function runDiscordWizard(
   flow.begin("discord");
   try {
     for (;;) {
+      const settings = (await services.settings.load()).discord;
       const action = await flow.readSelect({
         kind: "single",
         message: "Discord configuration",
@@ -309,6 +339,20 @@ export async function runDiscordWizard(
           },
           { value: "voice", label: "Voice", hint: "group voice allowlists" },
           {
+            value: "active",
+            label: "Active body",
+            hint: settings.activeBody === "user_session" ? "lab user" : "official bot",
+            description:
+              "One mouth. The launcher starts only this process. Switch and `clankie restart`.",
+          },
+          {
+            value: "lab",
+            label: "Lab user body",
+            hint: "user token, watch, Go Live",
+            description:
+              "Optional normal-account body. Make it active to talk, watch shares, and Go Live. The bot stays down while it is.",
+          },
+          {
             value: "activity",
             label: "Activity plane",
             hint: "Fire Red surface",
@@ -343,6 +387,8 @@ export async function runDiscordWizard(
       else if (choice === "system") await editSystemActors(shell, services);
       else if (choice === "ingress") await editIngress(shell, services);
       else if (choice === "voice") await editVoice(shell, services);
+      else if (choice === "active") await editActiveBody(shell, services);
+      else if (choice === "lab") await editLabBody(shell, services);
       else if (choice === "activity") await editActivity(shell, services);
     }
   } finally {
@@ -634,6 +680,29 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
   const joinPolicyChoice = joinPolicy?.[0];
   if (joinPolicyChoice === undefined) return;
 
+  const consentPolicy = await flow.readSelect({
+    kind: "single",
+    message: "Who may Clankie hear in a call?",
+    options: [
+      {
+        value: "explicit",
+        label: "Each person opts in each call",
+        hint: "default",
+        description: "Session-bound. Restart, leave, or rejoin clears consent.",
+      },
+      {
+        value: "presence",
+        label: "Anyone in the call",
+        hint: "one-time switch",
+        description:
+          "Being in his active voice channel is consent. Opt-out still binds for that call. Best for a private server.",
+      },
+    ],
+    required: true,
+  });
+  const consentPolicyChoice = consentPolicy?.[0];
+  if (consentPolicyChoice === undefined) return;
+
   const guildIds = resolveGuildList(guilds, current.voiceGuildIds, current.guildId);
   const channelIds = resolveIdList(channels, current.voiceChannelIds);
   if (enabledChoice === "true") {
@@ -647,6 +716,7 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
     ...discord,
     voiceEnabled: enabledChoice === "true",
     voiceJoinPolicy: joinPolicyChoice as DiscordSettings["voiceJoinPolicy"],
+    voiceConsentPolicy: consentPolicyChoice as DiscordSettings["voiceConsentPolicy"],
     ...(channels.trim()
       ? { voiceChannelIds: splitList(channels), voiceChannelId: splitList(channels)[0] }
       : {}),
@@ -657,9 +727,184 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
       (channelIds.length === 0 ? ", admitting every voice channel in them." : ".") +
       (joinPolicyChoice === "guild_members"
         ? " Any member of those servers may start a call; ambient authority is unchanged."
-        : ""),
+        : "") +
+      (consentPolicyChoice === "presence"
+        ? " Anyone in his active voice channel can talk; opt-out still binds for that call."
+        : " Each person still opts in per call."),
     "success",
   );
+}
+
+const LAB_ACKNOWLEDGEMENT =
+  "I accept Discord ToS and account risk for this personal-lab user-session body.";
+
+async function editActiveBody(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
+  const flow = shell.setupFlow;
+  const current = (await services.settings.load()).discord;
+  const credentials = await services.listCredentials();
+  const picked = await flow.readSelect({
+    kind: "single",
+    message: "Which Discord body is the mouth? Only one process is live.",
+    options: [
+      {
+        value: "bot",
+        label: "Official bot",
+        hint: current.activeBody === "bot" ? "active" : "",
+        description: "Slash commands, embedded activities, group voice. Cannot watch or Go Live.",
+      },
+      {
+        value: "user_session",
+        label: "Lab user body",
+        hint: current.activeBody === "user_session" ? "active" : "",
+        description: "Talk, watch shares, Go Live. No slash commands. Requires the lab body setup.",
+      },
+    ],
+    required: true,
+  });
+  const choice = picked?.[0];
+  if (choice !== "bot" && choice !== "user_session") return;
+
+  if (choice === "user_session") {
+    if (!current.userSessionEnabled) {
+      flow.renderLine("Enable Lab user body first (token, allowlists, ToS opt-in).", "error");
+      return;
+    }
+    if (credentials.discord_user_session === undefined) {
+      flow.renderLine("Store a user token under Tokens before making the lab body active.", "error");
+      return;
+    }
+  }
+
+  await apply(services, (discord) => ({ ...discord, activeBody: choice }));
+  flow.renderLine(
+    choice === "user_session"
+      ? "Lab user body is the mouth. Run `clankie restart` so the official bot stays down."
+      : "Official bot is the mouth. Run `clankie restart` so the lab body stays down.",
+    "success",
+  );
+}
+
+async function editLabBody(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
+  const flow = shell.setupFlow;
+  const current = (await services.settings.load()).discord;
+
+  const enabled = await flow.readSelect({
+    kind: "single",
+    message:
+      "Lab user body — a normal Discord account. Make it the Active body to talk; the official bot stays down while it is.",
+    options: [
+      {
+        value: "true",
+        label: "Enabled",
+        hint: "watch screen shares",
+        description: "Requires a stored user token, allowlists, and a durable ToS opt-in.",
+      },
+      { value: "false", label: "Disabled", hint: "bot only" },
+    ],
+    required: true,
+  });
+  const enabledChoice = enabled?.[0];
+  if (enabledChoice === undefined) return;
+
+  const guilds = await flow.readText({
+    message: "Server ids the lab body may enter (comma separated) — blank uses the command server",
+    placeholder: guildListPlaceholder(current.userSessionGuildIds, current.guildId),
+    validate: validateSnowflakeList,
+  });
+  if (guilds === undefined) return;
+
+  const channels = await flow.readText({
+    message:
+      "Channel ids the lab body may enter (comma separated) — include the voice channel you share in",
+    placeholder: current.userSessionChannelIds.join(",") || "channel id",
+    validate: validateSnowflakeList,
+  });
+  if (channels === undefined) return;
+
+  const voiceChannels = await flow.readText({
+    message: "Voice channel ids to watch shares in (comma separated) — blank uses the list above",
+    placeholder: current.userSessionVoiceChannelIds.join(",") || "voice channel id",
+    validate: validateSnowflakeList,
+  });
+  if (voiceChannels === undefined) return;
+
+  const guildIds = resolveGuildList(guilds, current.userSessionGuildIds, current.guildId);
+  const textChannelIds = resolveIdList(channels, current.userSessionChannelIds);
+  const voiceChannelIds = resolveIdList(voiceChannels, current.userSessionVoiceChannelIds);
+  const channelIds = [...new Set([...textChannelIds, ...voiceChannelIds])];
+  if (enabledChoice === "true") {
+    if (guildIds.length === 0 || channelIds.length === 0) {
+      flow.renderLine("Cannot enable the lab body without both a server and a channel allowlist.", "error");
+      return;
+    }
+  }
+
+  await apply(services, (discord) => ({
+    ...discord,
+    userSessionEnabled: enabledChoice === "true",
+    ...(guildIds.length === 0 ? {} : { userSessionGuildIds: guildIds }),
+    ...(channelIds.length === 0 ? {} : { userSessionChannelIds: channelIds }),
+    ...(voiceChannelIds.length === 0 ? {} : { userSessionVoiceChannelIds: voiceChannelIds }),
+  }));
+
+  if (enabledChoice !== "true") {
+    if (services.userSessionOptIn !== undefined) {
+      try {
+        await services.userSessionOptIn.revokeDiscordUserSessionOptIn();
+      } catch {
+        // Nothing active is fine — disable is the intent.
+      }
+    }
+    flow.renderLine("Lab user body disabled. Restart with `clankie restart` so the process stays down.", "success");
+    return;
+  }
+
+  const credentials = await services.listCredentials();
+  if (credentials.discord_user_session === undefined) {
+    flow.renderLine("Store a user token under Tokens before the lab body can connect.", "warning");
+  }
+
+  if (services.userSessionOptIn === undefined) {
+    flow.renderLine(
+      "Saved allowlists. Record the ToS opt-in once the clankie service is up (`clankie restart`), then rerun this step.",
+      "warning",
+    );
+    return;
+  }
+
+  const accept = await flow.readSelect({
+    kind: "single",
+    message: LAB_ACKNOWLEDGEMENT,
+    options: [
+      { value: "accept", label: "I accept", hint: "records a durable opt-in" },
+      { value: "skip", label: "Skip for now" },
+    ],
+    required: true,
+  });
+  if (accept?.[0] !== "accept") {
+    flow.renderLine("Saved. The lab body will not connect until you record the opt-in.", "warning");
+    return;
+  }
+
+  try {
+    await services.userSessionOptIn.recordDiscordUserSessionOptIn({
+      schemaVersion: 1,
+      characterId: "clankie",
+      acknowledgement: LAB_ACKNOWLEDGEMENT,
+      guildIds,
+      channelIds,
+      dmPolicy: current.userSessionDmPolicy,
+    });
+    flow.renderLine(
+      "Lab user body enabled and opted in. Run `clankie restart` so the launcher starts it. Include the voice channel you share in. Point CLANKVOX_BIN at a ClankVox binary to decode shares.",
+      "success",
+    );
+  } catch (error) {
+    flow.renderLine(
+      `Saved allowlists, but the opt-in failed: ${error instanceof Error ? error.message : String(error)}`,
+      "error",
+    );
+  }
 }
 
 async function editActivity(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {

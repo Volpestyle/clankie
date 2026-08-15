@@ -34,11 +34,6 @@ type ArgumentContext = {
   readonly prefix: string;
 };
 
-type CommandMatch = {
-  readonly command: ClankieAutocompleteCommand;
-  readonly canonical: boolean;
-};
-
 type StaticArgumentSpec = {
   readonly values: readonly AutocompleteItem[];
   readonly examples: readonly string[];
@@ -350,10 +345,21 @@ function splitArgumentTokens(text: string): string[] {
   return text.trim().length === 0 ? [] : text.trim().split(/\s+/u);
 }
 
-function findCommand(
-  commands: readonly ClankieAutocompleteCommand[],
+/**
+ * Resolve a slash token to a command. A real command name always wins over an
+ * earlier command's leftover alias — otherwise `/connect` would open `/auth`.
+ */
+export function resolveClankieCommand<T extends ClankieAutocompleteCommand>(
+  commands: readonly T[],
   token: string,
-): CommandMatch | undefined {
+): { readonly command: T; readonly canonical: boolean } | undefined {
+  return findCommand(commands, token);
+}
+
+function findCommand<T extends ClankieAutocompleteCommand>(
+  commands: readonly T[],
+  token: string,
+): { readonly command: T; readonly canonical: boolean } | undefined {
   const normalized = token.toLowerCase();
   const command = commands.find((entry) => entry.name === normalized);
   if (command !== undefined) return { command, canonical: true };
@@ -438,6 +444,7 @@ function commandCategory(commandName: string): string {
       "trace",
       "layout",
       "status",
+      "board",
       "new",
       "clear",
       "exit",
@@ -452,6 +459,8 @@ function commandCategory(commandName: string): string {
 
 function staticArgumentSpec(commandName: string, context: ArgumentContext): StaticArgumentSpec {
   switch (commandName) {
+    case "board":
+      return values(["focus", "close"], ["/board", "/board focus", "/board close"]);
     case "discord":
       return values(["status", "invite"], ["/discord status", "/discord invite"]);
     case "discord-token":
