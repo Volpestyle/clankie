@@ -591,14 +591,7 @@ class HostedWorldBody implements WorldBody {
         // effect line `free-play-progress` already writes works here unchanged.
         // Dropping it is what made every `advance_dialog` on a hosted world
         // read as "read no new text — the dialog stopped", however much it read.
-        //
-        // Read off the parsed result rather than through its type: `detail`
-        // arrived in world protocol v2, and this file has to compile against
-        // whichever commit `package.json` pins. The read is safe either way —
-        // a v1 host sends no detail, and a v2 host cannot reach a v1 client at
-        // all, because the version is pinned with `z.literal` and a mismatched
-        // join is refused outright.
-        ...detailOf(result.data.outcome),
+        ...result.data.outcome.detail,
       },
     };
     this.lastAction = completed;
@@ -769,12 +762,6 @@ function mapAction(action: GbaEmulatorAction): Action {
     default:
       return ActionSchema.parse(action);
   }
-}
-
-/** The composite action's own account of itself, when the world sent one. */
-function detailOf(outcome: unknown): Record<string, unknown> | undefined {
-  const detail = (outcome as { detail?: unknown }).detail;
-  return typeof detail === "object" && detail !== null ? (detail as Record<string, unknown>) : undefined;
 }
 
 function requireSemanticState(state: FireRedState | undefined): FireRedState {

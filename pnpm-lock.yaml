@@ -105,8 +105,8 @@ importers:
         specifier: 1.29.0
         version: 1.29.0(zod@4.4.3)
       '@pokeagent-mmo/world-protocol':
-        specifier: github:Volpestyle/pokeagent-mmo#bbd7fda4827c3a8257e2bd76c4db3ab6d920b680&path:/packages/world-protocol
-        version: git+ssh://git@github.com/Volpestyle/pokeagent-mmo.git#bbd7fda4827c3a8257e2bd76c4db3ab6d920b680&path:/packages/world-protocol
+        specifier: github:Volpestyle/pokeagent-mmo#6aad5012b22338e87980fadf15c4e1421d0b017e&path:/packages/world-protocol
+        version: git+ssh://git@github.com/Volpestyle/pokeagent-mmo.git#6aad5012b22338e87980fadf15c4e1421d0b017e&path:/packages/world-protocol
       hono:
         specifier: 4.12.28
         version: 4.12.28
@@ -1504,8 +1504,8 @@ packages:
   '@pinojs/redact@0.4.0':
     resolution: {integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==}
 
-  '@pokeagent-mmo/world-protocol@git+ssh://git@github.com/Volpestyle/pokeagent-mmo.git#bbd7fda4827c3a8257e2bd76c4db3ab6d920b680&path:/packages/world-protocol':
-    resolution: {commit: bbd7fda4827c3a8257e2bd76c4db3ab6d920b680, path: /packages/world-protocol, repo: git@github.com:Volpestyle/pokeagent-mmo.git, type: git}
+  '@pokeagent-mmo/world-protocol@git+ssh://git@github.com/Volpestyle/pokeagent-mmo.git#6aad5012b22338e87980fadf15c4e1421d0b017e&path:/packages/world-protocol':
+    resolution: {commit: 6aad5012b22338e87980fadf15c4e1421d0b017e, path: /packages/world-protocol, repo: git@github.com:Volpestyle/pokeagent-mmo.git, type: git}
     version: 0.1.0
 
   '@protobufjs/aspromise@1.1.2':
@@ -3993,7 +3993,7 @@ snapshots:
 
   '@pinojs/redact@0.4.0': {}
 
-  '@pokeagent-mmo/world-protocol@git+ssh://git@github.com/Volpestyle/pokeagent-mmo.git#bbd7fda4827c3a8257e2bd76c4db3ab6d920b680&path:/packages/world-protocol':
+  '@pokeagent-mmo/world-protocol@git+ssh://git@github.com/Volpestyle/pokeagent-mmo.git#6aad5012b22338e87980fadf15c4e1421d0b017e&path:/packages/world-protocol':
     dependencies:
       zod: 4.4.3
 

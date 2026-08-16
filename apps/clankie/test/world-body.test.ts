@@ -349,7 +349,10 @@ function memoryStore(): CredentialStore {
 function joinResult() {
   return {
     ok: true,
-    protocolVersion: 1,
+    // Read from the constant, not a literal: the pinned contract decides what a
+    // real world answers with, and a fake that disagrees fails the join rather
+    // than the thing under test.
+    protocolVersion: WORLD_PROTOCOL_VERSION,
     worldId: WORLD_ID,
     playerId: PLAYER_ID,
     sessionId: SESSION_ID,
@@ -436,21 +439,12 @@ describe("a decoded screen with no semantic state", () => {
     expect(result.outcome).toBe("joined");
     if (result.outcome !== "joined") return;
     const acted = await result.body.io.act({ kind: "advance_dialog" });
-    if (WORLD_PROTOCOL_VERSION >= 2) {
-      // Flat alongside the transport counters, named as the local adapter names
-      // them, so the existing effect describers read it without a translation.
-      expect(acted).toMatchObject({
-        status: "completed",
-        outcome: { transcript: ["Welcome to the world of POKéMON!"], endedBecause: "dialog_closed" },
-      });
-    } else {
-      // `detail` landed in world protocol v2 and the outcome schemas are
-      // strict, so a v1 pin refuses the whole result rather than reading half
-      // of it. That refusal is why the wire change came with a version bump:
-      // a mismatched join is turned away at the handshake, where an operator
-      // can see it, instead of every action failing to parse in the dark.
-      expect(acted).toMatchObject({ status: "failed" });
-    }
+    // Flat alongside the transport counters, named as the local adapter names
+    // them, so the existing effect describers read it without a translation.
+    expect(acted).toMatchObject({
+      status: "completed",
+      outcome: { transcript: ["Welcome to the world of POKéMON!"], endedBecause: "dialog_closed" },
+    });
     await result.body.close();
   });
 
