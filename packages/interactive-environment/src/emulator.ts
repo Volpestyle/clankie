@@ -484,7 +484,26 @@ export const GbaEmulatorObservationSchema = z.discriminatedUnion("kind", [
     kind: z.literal("scene"),
     data: z
       .object({
-        mode: z.enum(["unknown", "overworld", "dialog", "battle", "battle_won", "battle_lost"]),
+        /**
+         * `unknown` means the screen could not be interpreted at all. It does
+         * **not** mean "a screen with no semantic state" — a cutscene, a menu
+         * and a naming keyboard are all fully understood screens that simply
+         * have no position or party to report.
+         *
+         * Collapsing those into `unknown` told a mind that a perfectly ordinary
+         * intro was an unreadable screen, for the several minutes it lasts.
+         */
+        mode: z.enum([
+          "unknown",
+          "overworld",
+          "dialog",
+          "menu",
+          "naming",
+          "cutscene",
+          "battle",
+          "battle_won",
+          "battle_lost",
+        ]),
         /** Whether the overworld field is accepting player input right now. */
         inputReady: z.boolean(),
         /** The visible dialog finished printing and is holding for an A/B press. */
