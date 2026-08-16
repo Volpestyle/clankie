@@ -72,7 +72,6 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
     try {
       joined = await join({
         environmentId: session.environmentId,
-        ...(session.regionId === undefined ? {} : { regionId: session.regionId }),
         env,
       });
     } catch (error) {

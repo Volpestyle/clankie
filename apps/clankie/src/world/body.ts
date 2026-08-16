@@ -101,8 +101,6 @@ export type WorldJoinResult =
 
 export interface WorldJoinOptions {
   environmentId: EmbodimentEnvironmentId;
-  /** Where to land. Absent means the world's default entry region. */
-  regionId?: string;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -135,7 +133,9 @@ export async function joinWorld(options: WorldJoinOptions): Promise<WorldJoinRes
   if (credential === undefined) return { outcome: "refused", reason: "no_credential" };
 
   const socketPath = worldSocketPath(defaultWorldStateDir(env));
-  const gameId = options.regionId ?? gameIdFor(options.environmentId);
+  // `world.join` takes a game, not a region. Regions are reached afterwards
+  // through `world.travel`, gated on badges — so there is nothing to choose here.
+  const gameId = gameIdFor(options.environmentId);
   let rawJoin: Awaited<ReturnType<typeof callHost>>;
   try {
     rawJoin = await callHost(socketPath, {

@@ -106,7 +106,6 @@ export async function startPlay(ports: PlayPorts, input: StartPlayInput): Promis
 
 export interface JoinWorldInput extends PlayAskContext {
   environmentId: EmbodimentEnvironmentId;
-  regionId?: string;
   budget?: EmbodimentBudget;
   waitMs?: number;
   pollMs?: number;
@@ -128,7 +127,6 @@ export async function joinWorld(ports: PlayPorts, input: JoinWorldInput): Promis
     environmentId: input.environmentId,
     budget: input.budget ?? defaultPlayBudget(),
     venue: "world",
-    ...(input.regionId === undefined ? {} : { regionId: input.regionId }),
   });
   if (submitted.outcome === "refused") {
     return {

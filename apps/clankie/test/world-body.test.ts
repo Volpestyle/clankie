@@ -11,7 +11,7 @@ import {
 } from "@clankie/credential-broker";
 import { EnvironmentAdapterActionError } from "@clankie/environment-runtime";
 import { afterEach, describe, expect, it } from "vitest";
-import { joinWorld } from "./body.ts";
+import { joinWorld } from "../src/world/body.ts";
 
 const CREDENTIAL = "clankie-world-test-credential-0000000000000001";
 const TOKEN = "session-token-0000000000000000000000000001";
@@ -255,7 +255,7 @@ describe("hosted world body", () => {
     await result.body.close();
   });
 
-  it("refuses absent credentials and maps an unhosted region honestly", async () => {
+  it("refuses absent credentials, and an unhosted game honestly", async () => {
     const emptyDir = await mkdtemp(join(tmpdir(), "clankie-world-empty-"));
     cleanups.push(() => rm(emptyDir, { recursive: true, force: true }));
     await expect(
@@ -272,7 +272,6 @@ describe("hosted world body", () => {
     await expect(
       joinWorld({
         environmentId: "pokemon-firered",
-        regionId: "johto",
         env: await provisionedEnv(world.stateDir),
       }),
     ).resolves.toEqual({
@@ -280,7 +279,10 @@ describe("hosted world body", () => {
       reason: "region_not_hosted",
       detail: "that game is not hosted here",
     });
-    expect(world.requests[0]?.input).toMatchObject({ gameId: "johto" });
+    // The environment names the game, and nothing else may. `world.join` has no
+    // region parameter at all — regions are reached afterwards through
+    // `world.travel`, gated on badges.
+    expect(world.requests[0]?.input).toMatchObject({ gameId: "firered" });
   });
 });
 

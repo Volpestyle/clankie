@@ -44,11 +44,18 @@ weaken the expectation to make the instrument green.
 
 ## Test discovery gotcha
 
-Before trusting `pnpm test` or `pnpm check`, inspect the root `vitest.config.ts`
-include globs and confirm the new file is listed in the run. Tests outside the
-configured directories are silently absent from an otherwise green suite. If
-the owning directory intentionally keeps tests beside source, leave a scoped
-Vitest config and an explicit runnable command there.
+This repo's root `vitest.config.ts` includes **only** `<package>/test/**/*.test.ts`.
+A test written beside its source is silently absent from an otherwise green
+suite — `pnpm check` passes and reports a total that looks right.
+
+Put the test in the package's `test/` directory. A scoped Vitest config beside
+the source does _not_ fix this: it makes the file runnable by hand while the
+repository gate still never runs it, which is the same hole with a command
+attached to it. Five world-body tests shipped that way and only ran once they
+were moved, taking the suite from 178 files to 179.
+
+Confirm by count, not by exit code. Note **Test Files** and **Tests** before and
+after; if adding tests did not move both, they are not in the run.
 
 ## Hosted FireRed proof
 
@@ -66,6 +73,36 @@ Provision credentials through the credential broker or a temporary injected
 store; never add an environment-secret fallback or print the credential. Keep
 ROMs, saves, RAM, screenshots, and cartridge-derived state out of the repo.
 Receipts may contain schemas, logical observations, and SHA-256 digests.
+
+`WORLD_HOLDERS_FILE` is not optional. Unset, the holder directory is empty and
+identity is deny-by-default, so every join refuses `unauthenticated` — which
+reads as a bad credential and is not one.
+
+### Getting a cold body to the overworld
+
+**A fresh join starts at the intro, every time**, unless the game was saved
+_in-game_. The host restores a cartridge save; walking around does not write
+one, so the position a previous run reached is not where the next run begins.
+Budget for the intro rather than assuming a resume.
+
+**Press A, and only A.** `start` during the intro and naming screens navigates
+away and the sequence never completes. An `a`/`start`/`a` loop ran 1,085 actions
+to frame 62,000 — seventeen emulated minutes — without ever reaching the
+overworld; A alone gets there in about 83 presses (~frame 7,900). This is the
+concrete case of the fixed-button-loop warning above, and it was written by the
+same run that then fell into it.
+
+**Diagnose unpaced, judge paced.** `WORLD_PACE=0` runs flat out, so "is this
+stuck or just slow?" resolves in seconds instead of minutes. Probe the raw
+world with `play.observe` and log `scene.mode` after each press: a plateau names
+the screen you are stuck on. Then take the actual verdict at `WORLD_PACE=1`,
+because pacing is what a watcher sees and what frame delivery is measured under.
+
+**Do not "just check" a running session by joining again.** A second join from
+the same principal _replaces_ the body and destroys the run you were observing.
+To watch a live session, tail its journal instead — one JSON line per action
+with the frame number, under
+`$WORLD_STATE_DIR/players/<hash>/games/<game>/journal/`.
 
 A useful receipt names the code revision and artifact digests, the public path,
 each advertised capability and outcome, exact check commands and exit codes,

@@ -150,19 +150,11 @@ export function captainTools(
         environmentId: Type.Union([Type.Literal("pokemon-firered"), Type.Literal("pokemon-emerald")], {
           default: "pokemon-firered",
         }),
-        regionId: Type.Optional(
-          Type.String({
-            minLength: 1,
-            maxLength: 64,
-            description: "Where to land. Omit for the world's default.",
-          }),
-        ),
       }),
       execute: async (_id, params) =>
         json(
           await joinWorld(playPorts, {
             environmentId: params.environmentId,
-            ...(params.regionId === undefined ? {} : { regionId: params.regionId }),
             originLane: lane,
             requestedBy: turnActor(turn, lane),
           }),

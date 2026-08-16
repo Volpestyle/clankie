@@ -30,10 +30,7 @@ function harness(options: HarnessOptions = {}) {
   };
 }
 
-function startIntent(
-  intentId = "intent-1",
-  extras: { venue?: "local" | "world"; regionId?: string } = {},
-): EmbodimentIntent {
+function startIntent(intentId = "intent-1", extras: { venue?: "local" | "world" } = {}): EmbodimentIntent {
   return {
     kind: "start",
     schemaVersion: 1,
@@ -144,12 +141,10 @@ describe("EmbodimentManager", () => {
 
   it("records a world venue on the session so the runner can dispatch", async () => {
     const test = harness();
-    const submitted = await test.manager.submit(
-      startIntent("intent-1", { venue: "world", regionId: "kanto" }),
-    );
+    const submitted = await test.manager.submit(startIntent("intent-1", { venue: "world" }));
     expect(submitted).toMatchObject({
       outcome: "accepted",
-      session: { venue: "world", regionId: "kanto" },
+      session: { venue: "world" },
     });
   });
 

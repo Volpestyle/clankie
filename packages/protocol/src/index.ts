@@ -2220,8 +2220,6 @@ export const EmbodimentIntentSchema = z.discriminatedUnion("kind", [
        * both valid.
        */
       venue: EmbodimentVenueSchema.optional(),
-      /** World entry region. Meaningless on a local start; ignored there. */
-      regionId: z.string().min(1).max(64).optional(),
     })
     .strict(),
   z
@@ -2292,7 +2290,6 @@ export const EmbodimentSessionSchema = z
     sessionId: EnvironmentSessionIdSchema,
     environmentId: EmbodimentEnvironmentIdSchema,
     venue: EmbodimentVenueSchema.optional(),
-    regionId: z.string().min(1).max(64).optional(),
     state: EmbodimentSessionStateSchema,
     intentId: EmbodimentIntentIdSchema,
     originLane: CaptainSessionLaneV2Schema,

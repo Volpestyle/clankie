@@ -95,9 +95,9 @@ describe("Embodiment intents (ADR 0063)", () => {
     if (parsed.kind !== "start") return;
     expect(parsed.venue).toBeUndefined();
     expect(embodimentVenue(parsed)).toBe("local");
-    expect(EmbodimentIntentSchema.parse({ ...startIntent, venue: "world", regionId: "kanto" })).toMatchObject(
-      { venue: "world", regionId: "kanto" },
-    );
+    expect(EmbodimentIntentSchema.parse({ ...startIntent, venue: "world" })).toMatchObject({
+      venue: "world",
+    });
     expect(EmbodimentIntentSchema.safeParse({ ...startIntent, venue: "mmo" }).success).toBe(false);
   });
 });

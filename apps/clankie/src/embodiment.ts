@@ -63,7 +63,6 @@ const SubmittedDataSchema = z.object({
   requestedBy: z.string().min(1),
   budget: EmbodimentBudgetSchema,
   venue: EmbodimentVenueSchema.optional(),
-  regionId: z.string().min(1).max(64).optional(),
 });
 
 const SessionRefStreamSchema = z.object({ sessionId: z.string().min(1) });
@@ -132,7 +131,6 @@ function submittedEventData(
     requestedBy: intent.requestedBy,
     budget: intent.budget,
     ...(intent.venue === undefined ? {} : { venue: intent.venue }),
-    ...(intent.regionId === undefined ? {} : { regionId: intent.regionId }),
   };
 }
 
@@ -168,7 +166,6 @@ export class EmbodimentManager {
           requestedAt: event.occurredAt,
           updatedAt: event.occurredAt,
           ...(data.data.venue === undefined ? {} : { venue: data.data.venue }),
-          ...(data.data.regionId === undefined ? {} : { regionId: data.data.regionId }),
         });
         if (session.success) this.sessions.set(data.data.sessionId, session.data);
         return;
