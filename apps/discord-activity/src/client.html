@@ -316,7 +316,7 @@
       function liveLabel() {
         const lost = stats.lostUpstream > 0 ? ` · ${stats.lostUpstream} lost` : "";
         const skipped = stats.decodeSkipped > 0 ? ` · ${stats.decodeSkipped} slow` : "";
-        return `Live view · ${stats.fps} fps${lost}${skipped}`;
+        return `${stats.fps} fps${lost}${skipped}`;
       }
 
       // Sampled once a second rather than derived per frame, so the readout

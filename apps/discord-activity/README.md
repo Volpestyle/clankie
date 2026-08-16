@@ -162,7 +162,7 @@ port for an internet-facing surface to connect into.
 - The producer-side sink drops frames while disconnected rather than buffering
   them, so a reconnect resumes at the present moment instead of replaying a
   stale playthrough. Those drops are counted too.
-- The client's status line reads `Live view · <n> fps`, and names loss where it
+- The client's status line reads `<n> fps`, and names loss where it
   happened: `· <n> lost` counts gaps in the producer-assigned `sequence`, so it is
   everything lost before the canvas — producer socket, hub backpressure, Discord
   proxy. `· <n> slow` counts frames this browser abandoned mid-decode because a
