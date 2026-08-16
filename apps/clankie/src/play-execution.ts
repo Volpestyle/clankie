@@ -49,9 +49,12 @@ import { resolveConfiguredLanguageModel } from "@clankie/model-provider";
 import { createBrokeredPossessorVoiceClient, type PossessorVoiceClient } from "@clankie/possessor-voice";
 import { createBrokeredActivityFrameSink } from "@clankie/rendered-surface-client";
 import { personaInstructions, SettingsStore } from "@clankie/settings";
+import { embodimentVenue } from "@clankie/protocol";
 import type { ActivityObservationWritePort } from "./activity-observation.ts";
 import type { PlayExecution } from "./play-host.ts";
 import type { PlaySightProjection } from "./play-sight.ts";
+import { createWorldPlayExecution } from "./play-execution-world.ts";
+import type { WorldJoinOptions, WorldJoinResult } from "./world/body.ts";
 
 /**
  * The stream carries the native screen; the model's own view stays upscaled.
@@ -133,13 +136,22 @@ export interface GbaPlayExecutionOptions {
   boot?: () => Promise<BootedGbaGame>;
   /** Test injection; production resolves the brokered possessor voice seam. */
   createVoice?: () => Promise<PossessorVoiceClient | undefined>;
+  /**
+   * Test injection for a hosted-world join. Production calls `joinWorld`.
+   * Lane A fills the real body; tests supply a fake.
+   */
+  joinWorld?: (options: WorldJoinOptions) => Promise<WorldJoinResult>;
 }
 
 export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayExecution {
   const env = options.env ?? process.env;
   const clock = options.clock ?? (() => new Date());
+  const runWorld = createWorldPlayExecution(options);
 
   return async (session, control, onRunning) => {
+    if (embodimentVenue(session) === "world") {
+      return runWorld(session, control, onRunning);
+    }
     // The body lock comes first: a held body must refuse fast and typed, not
     // after paying a real-core boot whose latency could push the answer past
     // the captain tool's bounded wait.

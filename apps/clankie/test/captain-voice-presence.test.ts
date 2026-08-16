@@ -64,6 +64,20 @@ describe("captain voice presence tools", () => {
     expect(calls).toEqual([
       expect.objectContaining({ originLane: "discord_presence", requestedBy: "user-1" }),
     ]);
+    expect(calls[0]).not.toHaveProperty("venue");
+
+    const join = captainTools(deps, { actorId: "user-1" }, {} as LaneLog, "discord_presence").find(
+      (tool) => tool.name === "join_world",
+    );
+    if (join === undefined) throw new Error("join_world is missing");
+    await join.execute("call-2", { environmentId: "pokemon-firered" }, undefined, undefined, {} as never);
+    expect(calls[1]).toEqual(
+      expect.objectContaining({
+        originLane: "discord_presence",
+        requestedBy: "user-1",
+        venue: "world",
+      }),
+    );
   });
 
   it("grounds social actions in the trigger message", async () => {

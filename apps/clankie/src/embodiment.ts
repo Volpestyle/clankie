@@ -14,6 +14,8 @@ import {
   EmbodimentEnvironmentIdSchema,
   EmbodimentRefusalReasonSchema,
   EmbodimentSessionSchema,
+  EmbodimentVenueSchema,
+  embodimentVenue,
   type EmbodimentAssignment,
   type EmbodimentClaim,
   type EmbodimentIntent,
@@ -60,6 +62,8 @@ const SubmittedDataSchema = z.object({
   originLane: z.string().min(1),
   requestedBy: z.string().min(1),
   budget: EmbodimentBudgetSchema,
+  venue: EmbodimentVenueSchema.optional(),
+  regionId: z.string().min(1).max(64).optional(),
 });
 
 const SessionRefStreamSchema = z.object({ sessionId: z.string().min(1) });
@@ -116,6 +120,22 @@ export interface EmbodimentManagerOptions {
 
 const DEFAULT_CLAIM_WINDOW_MS = 60_000;
 
+function submittedEventData(
+  sessionId: string,
+  intent: EmbodimentIntent & { kind: "start" },
+): Record<string, unknown> {
+  return {
+    sessionId,
+    intentId: intent.intentId,
+    environmentId: intent.environmentId,
+    originLane: intent.originLane,
+    requestedBy: intent.requestedBy,
+    budget: intent.budget,
+    ...(intent.venue === undefined ? {} : { venue: intent.venue }),
+    ...(intent.regionId === undefined ? {} : { regionId: intent.regionId }),
+  };
+}
+
 const TERMINAL_STATES: readonly EmbodimentSessionState[] = ["stopped", "refused", "failed"];
 
 export class EmbodimentManager {
@@ -147,6 +167,8 @@ export class EmbodimentManager {
           budget: data.data.budget,
           requestedAt: event.occurredAt,
           updatedAt: event.occurredAt,
+          ...(data.data.venue === undefined ? {} : { venue: data.data.venue }),
+          ...(data.data.regionId === undefined ? {} : { regionId: data.data.regionId }),
         });
         if (session.success) this.sessions.set(data.data.sessionId, session.data);
         return;
@@ -252,20 +274,17 @@ export class EmbodimentManager {
         // environment is satisfied, not blocked — the embodiment mirror of
         // ADR 0062's never-rejoin. A different environment, or a session
         // already winding down, stays an honest body_held.
-        if (live.environmentId === intent.environmentId && live.state !== "stopping") {
+        if (
+          live.environmentId === intent.environmentId &&
+          embodimentVenue(live) === embodimentVenue(intent) &&
+          live.state !== "stopping"
+        ) {
           return { outcome: "accepted" as const, session: this.mustGet(live.sessionId) };
         }
         return this.refuseStart(intent, "body_held");
       }
       const sessionId = this.options.idFactory();
-      await this.record("embodiment.intent.submitted", sessionId, {
-        sessionId,
-        intentId: intent.intentId,
-        environmentId: intent.environmentId,
-        originLane: intent.originLane,
-        requestedBy: intent.requestedBy,
-        budget: intent.budget,
-      });
+      await this.record("embodiment.intent.submitted", sessionId, submittedEventData(sessionId, intent));
       return { outcome: "accepted" as const, session: this.mustGet(sessionId) };
     });
   }
@@ -359,14 +378,7 @@ export class EmbodimentManager {
     // A refused start still mints a session record: the refusal is queryable
     // product behavior ("someone's already driving"), not a dropped request.
     const sessionId = this.options.idFactory();
-    await this.record("embodiment.intent.submitted", sessionId, {
-      sessionId,
-      intentId: intent.intentId,
-      environmentId: intent.environmentId,
-      originLane: intent.originLane,
-      requestedBy: intent.requestedBy,
-      budget: intent.budget,
-    });
+    await this.record("embodiment.intent.submitted", sessionId, submittedEventData(sessionId, intent));
     await this.record("embodiment.session.refused", sessionId, { sessionId, reason });
     return { outcome: "refused", reason, sessionId };
   }

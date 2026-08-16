@@ -6,6 +6,8 @@ import {
   EmbodimentLifecycleReportSchema,
   EmbodimentPlayNoteSchema,
   EmbodimentSessionSchema,
+  embodimentVenue,
+  WorldJoinRefusalReasonSchema,
   type EmbodimentSessionState,
 } from "../src/index.ts";
 
@@ -86,6 +88,18 @@ describe("Embodiment intents (ADR 0063)", () => {
       EmbodimentIntentSchema.safeParse({ ...startIntent, note: "please also open my email" }).success,
     ).toBe(false);
   });
+
+  it("defaults venue to local so existing start intents stay solo", () => {
+    const parsed = EmbodimentIntentSchema.parse(startIntent);
+    expect(parsed.kind).toBe("start");
+    if (parsed.kind !== "start") return;
+    expect(parsed.venue).toBeUndefined();
+    expect(embodimentVenue(parsed)).toBe("local");
+    expect(EmbodimentIntentSchema.parse({ ...startIntent, venue: "world", regionId: "kanto" })).toMatchObject(
+      { venue: "world", regionId: "kanto" },
+    );
+    expect(EmbodimentIntentSchema.safeParse({ ...startIntent, venue: "mmo" }).success).toBe(false);
+  });
 });
 
 describe("Embodiment session record", () => {
@@ -108,6 +122,13 @@ describe("Embodiment session record", () => {
         ...baseSession,
         state: "refused",
         refusalReason: "body_held",
+      }).success,
+    ).toBe(true);
+    expect(
+      EmbodimentSessionSchema.safeParse({
+        ...baseSession,
+        state: "refused",
+        refusalReason: "no_credential",
       }).success,
     ).toBe(true);
     expect(
@@ -173,12 +194,33 @@ describe("Embodiment play note", () => {
         resumedFromCheckpointId: "checkpoint-8",
       },
       { action: "start_refused", environmentId: "pokemon-firered", reason: "body_held" },
+      { action: "joined", sessionId: "session-1", environmentId: "pokemon-firered" },
+      { action: "join_refused", environmentId: "pokemon-firered", reason: "no_credential" },
       { action: "stopped", sessionId: "session-1", checkpointId: "checkpoint-9" },
       { action: "stop_refused", reason: "not_playing" },
       { action: "pending", intentId: "intent-1" },
     ];
     for (const note of notes) {
       expect(EmbodimentPlayNoteSchema.parse(note).action).toBe(note.action);
+    }
+  });
+
+  it("names every world-join refusal the tool can say out loud", () => {
+    const reasons = [
+      "no_credential",
+      "world_unreachable",
+      "world_refused",
+      "region_not_hosted",
+      "world_full",
+    ] as const;
+    for (const reason of reasons) {
+      expect(WorldJoinRefusalReasonSchema.parse(reason)).toBe(reason);
+      const note = EmbodimentPlayNoteSchema.parse({
+        action: "join_refused",
+        environmentId: "pokemon-firered",
+        reason,
+      });
+      expect(note).toEqual({ action: "join_refused", environmentId: "pokemon-firered", reason });
     }
   });
 

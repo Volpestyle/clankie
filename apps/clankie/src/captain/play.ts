@@ -104,6 +104,66 @@ export async function startPlay(ports: PlayPorts, input: StartPlayInput): Promis
   return outcome ?? { action: "pending", intentId: submitted.session.intentId };
 }
 
+export interface JoinWorldInput extends PlayAskContext {
+  environmentId: EmbodimentEnvironmentId;
+  regionId?: string;
+  budget?: EmbodimentBudget;
+  waitMs?: number;
+  pollMs?: number;
+}
+
+/**
+ * Ask to join a hosted world. Same asked-play seam as `startPlay`; the
+ * venue on the intent is how the runner picks a different body.
+ */
+export async function joinWorld(ports: PlayPorts, input: JoinWorldInput): Promise<EmbodimentPlayNote> {
+  const intentId = `world-${randomUUID()}`;
+  const submitted = await ports.submitEmbodimentIntent({
+    kind: "start",
+    schemaVersion: 1,
+    intentId,
+    originLane: input.originLane,
+    requestedBy: input.requestedBy,
+    requestedAt: new Date().toISOString(),
+    environmentId: input.environmentId,
+    budget: input.budget ?? defaultPlayBudget(),
+    venue: "world",
+    ...(input.regionId === undefined ? {} : { regionId: input.regionId }),
+  });
+  if (submitted.outcome === "refused") {
+    return {
+      action: "join_refused",
+      environmentId: input.environmentId,
+      reason: submitted.reason,
+    };
+  }
+  if (submitted.outcome !== "accepted") {
+    return { action: "pending", intentId };
+  }
+  const sessionId = submitted.session.sessionId;
+  const outcome = await waitForSession(ports, sessionId, input.waitMs, input.pollMs, (session) => {
+    if (session.state === "running") {
+      return { action: "joined" as const, sessionId, environmentId: session.environmentId };
+    }
+    if (session.state === "refused") {
+      return {
+        action: "join_refused" as const,
+        environmentId: session.environmentId,
+        reason: session.refusalReason ?? "world_unreachable",
+      };
+    }
+    if (session.state === "failed") {
+      return {
+        action: "join_refused" as const,
+        environmentId: session.environmentId,
+        reason: "world_unreachable" as const,
+      };
+    }
+    return undefined;
+  });
+  return outcome ?? { action: "pending", intentId: submitted.session.intentId };
+}
+
 export interface StopPlayInput extends PlayAskContext {
   waitMs?: number;
   pollMs?: number;

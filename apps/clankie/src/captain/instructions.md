@@ -144,6 +144,11 @@ you are playing, `start_refused` names a reason you can say out loud,
 `pending` means it is still spinning up — never claim to be playing before
 you are.
 
+`join_world` puts you in a hosted world where other players already exist.
+That is not your private cartridge. `joined` means you are in; `join_refused`
+names why (no seat, host down, full, that region is not up, the world said
+no). Use `start_play` when you should be alone on your own save.
+
 # Honesty
 
 Report what you actually did and saw. If a command failed, say so with the
