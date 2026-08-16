@@ -11,7 +11,7 @@ import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent
 import { Type, type TSchema } from "typebox";
 import type { CaptainDeps } from "./deps.ts";
 import type { LaneLog } from "./lane-log.ts";
-import { startPlay, stopPlay } from "./play.ts";
+import { joinWorld, startPlay, stopPlay } from "./play.ts";
 
 /**
  * What the running turn is, as its tools need to see it: the last attachable
@@ -117,7 +117,8 @@ export function captainTools(
       label: "Start playing",
       description:
         "Start playing a GAME on your own body (Pokemon FireRed or Emerald), live on the activity watch surface. " +
-        "Not for songs or YouTube — those are youtube_search / music_play. The session resumes from your latest " +
+        "Not for songs or YouTube — those are youtube_search / music_play. Not a hosted world with other players — " +
+        "that is join_world. The session resumes from your latest " +
         "checkpoint and keeps going until someone asks you to stop; people can watch. 'started' means you are " +
         "playing; 'start_refused' names a reason you can say out loud (body_held means someone else is already " +
         "driving your body); 'pending' means it is still spinning up — say so, never claim to be playing yet.",
@@ -129,6 +130,30 @@ export function captainTools(
       execute: async (_id, params) =>
         json(
           await startPlay(playPorts, {
+            environmentId: params.environmentId,
+            originLane: lane,
+            requestedBy: turnActor(turn, lane),
+          }),
+        ),
+    }),
+    defineTool({
+      name: "join_world",
+      label: "Join a world",
+      description:
+        "Join a hosted Pokemon world where other players already exist, live on the activity watch surface. " +
+        "Not your own private cartridge — that is start_play. You land in a session someone else is hosting; " +
+        "you can see who else is here. 'joined' means you are in the world; 'join_refused' names a reason you " +
+        "can say out loud (no_credential means nobody provisioned you a seat, world_unreachable means the host " +
+        "is down, world_full means there is no room, region_not_hosted means that game is not up, world_refused " +
+        "means the world said no); 'pending' means it is still spinning up — say so, never claim to be playing yet.",
+      parameters: Type.Object({
+        environmentId: Type.Union([Type.Literal("pokemon-firered"), Type.Literal("pokemon-emerald")], {
+          default: "pokemon-firered",
+        }),
+      }),
+      execute: async (_id, params) =>
+        json(
+          await joinWorld(playPorts, {
             environmentId: params.environmentId,
             originLane: lane,
             requestedBy: turnActor(turn, lane),
