@@ -1,50 +1,9 @@
 # packages/model-provider
 
-`@clankie/model-provider` — turns clankie config
-plus the model-registry catalog and
-credential-broker credentials into ready-to-call
-AI SDK language models. A four-layer pipeline:
-config (load/merge/validate) → resolve (providers,
-roles, subscription precedence) → variants
-(reasoning presets) → instantiate (AI SDK
-factories), with ChatGPT, Claude, and SuperGrok
-subscription OAuth flows alongside.
+Resolves owner model configuration, the model registry, and brokered credentials into AI SDK models and Pi provider declarations. It owns provider-specific OAuth adapters, subscription precedence, reasoning variants, secret rejection, and live Codex capability probing.
 
-Children:
-
-- README.md — full pipeline doc with a mermaid
-  flowchart, the OpenAI effort-ladder tables, and
-  subscription-precedence rules
-- package.json — AI SDK deps + workspace deps on
-  credential-broker and model-registry
-- tsconfig.json — typecheck-only build
-- src/
-  - config.ts — layered clankie.json/.clankie.json
-    loading; secrets rejected by schema
-  - resolve.ts — merged catalog, provider
-    connection states, role resolution,
-    ChatGPT-subscription precedence
-  - variants.ts — per-model reasoning-effort
-    ladders and thinking budgets
-  - instantiate.ts — AI SDK factory selection and
-    variant lowering to providerOptions
-  - configured-model.ts — the top-level
-    `resolveConfiguredLanguageModel` entry point
-  - codex-catalog.ts — the verified Codex
-    subscription model list
-  - codex-model-probe-cli.ts — opt-in backend
-    probe (`pnpm models:codex-probe`)
-  - oauth/ — ChatGPT/Codex, Anthropic Pro/Max,
-    and xAI SuperGrok subscription OAuth + fetch
-    adapters
-- test/ — eight suites across the layers
-
-Invariants: secrets never live in config (schema
-rejects secret-shaped keys, pointing at /auth and
-the broker); construction never throws for
-missing credentials (placeholder keys fail at
-call time); a stored ChatGPT subscription
-supersedes the metered OpenAI key for models the
-Codex backend serves; OAuth-typed Anthropic and
-xAI credentials select their broker-backed fetch
-adapters while API keys keep the normal SDK path.
+- `package.json` — provider dependencies and probe scripts.
+- `README.md` — configuration and resolution architecture.
+- `src/` — config, provider factories, Pi projection, OAuth, variants, and resolution.
+- `test/` — provider, credential, OAuth, and variant tests.
+- `tsconfig.json` — TypeScript configuration.

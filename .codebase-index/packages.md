@@ -1,81 +1,19 @@
 # packages
 
-Shared contracts and adapters consumed by the
-apps. `protocol` depends on nothing but zod;
-everything else layers on it, from durable
-environment lifecycles and Discord presence to
-credentials, settings, models, and media.
+Shared contracts and adapters consumed by the apps. `protocol` is the process-contract base; runtimes and transports layer above it, while security, settings, model, media, and observability packages provide infrastructure.
 
-- `protocol` — every zod schema, frozen table,
-  and type that crosses a process boundary
-  (lanes, operator conversations, presence,
-  voice, embodiment, pairing, memory, media).
-- `api-client` — typed `ClankieApiClient` for
-  the service's API, validating both
-  directions and attaching the right bearer
-  per route.
-- `credential-broker` — the local secret
-  boundary: Keychain/file stores, HMAC
-  capability grants with audited one-time use,
-  every broker-owned internal bearer, and Linear
-  MCP OAuth.
-- `settings` — operator-facing non-secret
-  config in a 0600 settings.json; env
-  overrides win and are reported; Discord,
-  persona, voice, Linear, and email coordinates;
-  token-shaped values are refused.
-- `observability` — pino logger factory with
-  secret redaction, `withSpan` OTel helper,
-  support-bundle sanitization.
-- `model-provider` — config + registry +
-  broker credentials → ready-to-call AI SDK
-  models; provider/role resolution, reasoning
-  variants, subscription OAuth.
-- `model-registry` — models.dev catalog with
-  vendored snapshot, atomic on-disk cache,
-  pure query helpers.
-- `body-lock` — cross-process lockfile mutex:
-  one writer for the GBA body, dead-holder
-  reclaim, read-only observer.
-- `discord-presence-core` — transport-neutral
-  Discord participation for both bodies: text
-  ingress, presence lifecycle, two-tier realtime
-  voice, screen sight, YouTube music, and
-  content-free receipts.
-- `environment-runtime` — durable
-  single-writer lifecycle and lease
-  enforcement for embodied sessions:
-  idempotent dispatch, restart
-  reconciliation, emergency stop.
-- `interactive-environment` — provider-neutral
-  zod contracts for embodied environments:
-  sessions, leases, commands, observations,
-  semantic events, rendered surfaces, and
-  pull-on-demand play still/story reads.
-- `media-connector` — versioned boundary for
-  local image/video generation (OpenAI,
-  Google, Grok adapters), hardened artifact
-  writing, job-style video.
-- `possessor-voice` — loopback WebSocket seam
-  for a body-driving possessor to report
-  events for the persona to voice; bearer-
-  gated, lossy by design.
-- `rendered-surface-client` — dial-out
-  WebSocket sink publishing gameplay frames
-  and the monologue overlay to the activity
-  plane; drops frames rather than replaying
-  stale ones.
-
-## Flow
-
-Contracts (`protocol`,
-`interactive-environment`) are the base;
-runtime enforcement (`environment-runtime`,
-`body-lock`) sits on them; transport adapters
-(`discord-presence-core`, `possessor-voice`,
-`rendered-surface-client`, `media-connector`,
-`api-client`) carry them between processes;
-`credential-broker`, `settings`,
-`model-provider`, `model-registry`, and
-`observability` supply secrets, config,
-models, and logging to all of it.
+- `api-client/` — typed, validating HTTP client for the Clankie service.
+- `body-lock/` — cross-process single-holder GBA lock and observer.
+- `credential-broker/` — Keychain/file secret storage, capability tokens, internal bearers, and OAuth.
+- `discord-presence-core/` — transport-neutral Discord text, presence, voice, music, actions, and receipts.
+- `environment-runtime/` — durable lease and lifecycle enforcement for embodied sessions.
+- `interactive-environment/` — provider-neutral environment, GBA, presence, surface, and play-sight contracts.
+- `media-connector/` — bounded image/video generation adapters and artifact handling.
+- `model-provider/` — settings and credentials to ready-to-call model instances.
+- `model-registry/` — cached models.dev catalog and query helpers.
+- `observability/` — Pino logging, secret redaction, and support-bundle sanitization.
+- `possessor-voice/` — authenticated, lossy gameplay commentary/hearing seam.
+- `protocol/` — dependency-light Zod schemas and cross-process types.
+- `rendered-surface-client/` — dial-out gameplay frame and overlay publisher.
+- `settings/` — owner-authored, non-secret settings and persona configuration.
+- `vox-client/` — Apache TypeScript lifecycle and typed IPC client for AGPL Vox.

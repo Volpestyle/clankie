@@ -1,15 +1,3 @@
 # packages/protocol/test/protocol.test.ts
 
-Broad protocol suite for the shared public
-boundary. It covers operator-conversation
-strictness/bounds, context usage, bounded tool
-detail, herdr pane ids, replay recovery, callable
-dispatch, v1/v2 lane compatibility, authority,
-captain presence, and public type exports.
-
-Discord assertions pin transport-neutral writes,
-ambient attribution, action policy, and governed
-share artifact refs. Private capabilities,
-credentials, unknown keys, invalid pane ids,
-ungoverned media refs, and unbounded payloads are
-rejected at parse time.
+Cross-cutting schema tests for identities, lanes, conversations, service clients, actions, events, pairing/devices, memory, and media. Conversation tests accept only real message submits and accepted/revision-conflict outcomes, and type not-found through the canonical service result union.

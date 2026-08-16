@@ -6,9 +6,7 @@ prerequisites, with a remediation line for each
 failure, and exits nonzero only when a required
 check fails.
 
-Checks: Node >=24 and pnpm >=11 (required), git
-(required), then optional tooling — docker, codex
-CLI, pi CLI, herdr, xcodebuild. Verifies
+Checks: Node >=24, pnpm >=11, Git, Cargo >=1.85, and CMake as required tools; FFmpeg and yt-dlp are optional diagnostics for Vox media playback, followed by Docker, Codex CLI, Pi CLI, Herdr, and xcodebuild. Version comparisons use numeric dotted components rather than only a major number. Verifies
 pnpm-lock.yaml exists, then imports
 packages/credential-broker's credential store
 directly to list stored credential ids (redacted

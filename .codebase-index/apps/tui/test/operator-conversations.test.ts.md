@@ -9,5 +9,4 @@ writes, corrupt-file raising),
 `--chat` parsing, the prompt session (replay before
 send, revision-fence conflicts, tail until the
 accepted run's terminal event, recovery pages), and
-the shell sink's rendering and local-echo
-suppression.
+the shell sink's rendering, local-echo suppression, block collapse options, and one-block tool lifecycle update that preserves arguments beside the terminal result.

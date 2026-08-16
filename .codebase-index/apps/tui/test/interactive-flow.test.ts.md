@@ -1,8 +1,3 @@
 # apps/tui/test/interactive-flow.test.ts
 
-The modal prompt components: text prompt rendering
-(placeholder, error line, sensitive masking and
-buffer clearing), select prompt filtering, selection
-movement, current-value markers, status actions,
-back/cancel paths, and width fitting of every
-rendered line.
+Tests searchable single-select and text prompt rendering, filtering, keyboard/mouse behavior, validation, current values, status actions, and cancellation. Multi-select fixtures are absent because setup flows currently expose only single selection.

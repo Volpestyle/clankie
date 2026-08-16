@@ -1,6 +1,6 @@
 # packages/environment-runtime/src
 
-Two files: `index.ts` re-exports everything from
-`runtime.ts`, which holds the entire
-`EnvironmentRuntime` implementation and its
-adapter/event-sink interfaces.
+Public entrypoint and durable implementation of the generic environment lifecycle. Concrete game-specific action/observation contracts remain in adapters and `@clankie/interactive-environment`.
+
+- `index.ts` — runtime public exports.
+- `runtime.ts` — lease, action, persistence, reconciliation, and event engine.

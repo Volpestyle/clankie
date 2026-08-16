@@ -1,9 +1,3 @@
 # packages/credential-broker/src/index.ts
 
-Barrel file: re-exports every broker module —
-stores and redaction, the capability
-issuer/broker, the Discord bot and user-session
-providers, Linear MCP OAuth helpers, and each
-internal bearer's mint/resolve/ensure trio with
-its provider id and typed error class. No logic
-of its own.
+Public export surface for capability-token signing, credential stores, account providers, Linear OAuth, and all local principal credentials. Runtime issuance policy and evidence belong to callers of `CapabilityTokenIssuer`.

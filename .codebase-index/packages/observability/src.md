@@ -1,6 +1,5 @@
 # packages/observability/src
 
-Single-module source: `index.ts` holds the logger
-factory, span helper, and redaction utilities.
+Single public module providing logger creation and recursive support-bundle sanitization.
 
-- index.ts — the whole package (see its entry)
+- `index.ts` — Pino configuration and secret stripping.

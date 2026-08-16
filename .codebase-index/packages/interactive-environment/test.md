@@ -1,17 +1,10 @@
 # packages/interactive-environment/test
 
-Per-profile contract suites:
+Contract tests for generic lifecycle/event bounds, GBA profile isolation, Discord transport/catalog rules, rendered surfaces, and activity observation. Fixtures use provider-neutral environment vocabulary.
 
-- `fixtures.ts` — shared Minecraft-shaped command/
-  result/lease fixtures
-- `interactive-environment.test.ts` — shared
-  contract + Minecraft profile + Discord presence
-  catalog/exposure
-- `emulator.test.ts` — GBA profile
-- `pokemmo.test.ts` — PokeMMO simulator + live
-  boundary
-- `discord-transport.test.ts` — transport bindings
-  and voice rooms
-- `rendered-surface.test.ts` — overlay versioning
-- `activity-observation.test.ts` — self-observation
-  read contract
+- `activity-observation.test.ts` — self/runner activity boundaries.
+- `discord-transport.test.ts` — bot versus user action support.
+- `emulator.test.ts` — strict GBA profile and tools.
+- `fixtures.ts` — generic environment test values.
+- `interactive-environment.test.ts` — lifecycle/events and Discord presence.
+- `rendered-surface.test.ts` — bounded frame/overlay schemas.

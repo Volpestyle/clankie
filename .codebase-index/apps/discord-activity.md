@@ -1,10 +1,10 @@
 # apps/discord-activity
 
-Credential-free watch-me-play web surface embedded by Discord. A public viewer server renders the latest frame/lower third, while a separate loopback bearer-gated producer server accepts frames and exposes the current PNG for the user-session Go Live source.
+Embedded Discord Activity and local frame hub for watching Clankie's GBA play. The public viewer is credential-free and read-only, while a separate loopback producer/snapshot listener requires the activity-producer bearer.
 
-- `src/` — frame hub, public HTTP/WebSocket viewer, loopback producer, client, entrypoint.
-- `test/` — latest-only fan-out, auth, lifecycle, snapshot, and backpressure coverage.
-- `scripts/viewer-probe.ts` — live evidence probe.
-- `README.md`, `package.json`, `tsconfig.json` — operating and package configuration.
-
-The hub records nothing: it retains only the current frame/overlay, drops lagging viewer frames with counters, and invalidates state when the producer disconnects. Viewer paths work both bare and beneath Discord's `/.proxy/` prefix.
+- `package.json` — Activity scripts and dependencies.
+- `README.md` — deployment, tunnel, security, and frame operating guide.
+- `scripts/` — Activity utility scripts.
+- `src/` — viewer and frame-hub implementation.
+- `test/` — Activity behavior tests.
+- `tsconfig.json` — TypeScript configuration.

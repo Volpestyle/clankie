@@ -1,6 +1,3 @@
 # apps/tui/test/shell-assembly.test.ts
 
-Constructs `ClankieFaceShell` without starting it
-(start() needs a TTY) and asserts the wiring: setup
-flow idle, default layout, spinner resolved, and the
-console command set carrying names and descriptions.
+Smoke test constructing the face shell without a TTY. It verifies idle setup state, default input/status layout, and command wiring without asserting a configurable spinner subsystem.

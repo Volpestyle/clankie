@@ -1,3 +1,3 @@
 # apps/clankie/test/operator-conversation-context.test.ts
 
-Tests operator-conversation context occupancy events. The latest Pi context usage is streamed to clients and persisted into durable replay.
+Exercises operator-conversation context events through the file-backed store. It verifies context occupancy streams and persists into conversation metadata, then confirms stale expected revisions return a typed `revision_conflict` instead of running another turn.

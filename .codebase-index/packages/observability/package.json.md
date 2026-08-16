@@ -1,5 +1,3 @@
 # packages/observability/package.json
 
-Manifest for `@clankie/observability`. ESM,
-exports `./src/index.ts`; depends on
-`@opentelemetry/api` and `pino`.
+Workspace manifest for structured logging and sanitization with Pino as the sole runtime dependency.

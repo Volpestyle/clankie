@@ -1,16 +1,3 @@
 # docs/adr/0063-a-play-request-starts-embodiment.md
 
-A play request becomes a first-class embodiment
-intent: the captain exposes `start_play` /
-`stop_play`, the service records and admits the
-request, and the play host alone boots and owns
-the emulator session.
-
-Read for the ownership split: tools stamp
-`requestedBy` from authenticated context, bounded
-startup waits return started/refused/pending, and
-the cross-process body lock stays the final mutex
-across asked play, MCP possession, and CLIs. A
-missing caller budget means open-ended play under
-the owner's explicit default, with stop and
-checkpoint controls still active.
+Decision that natural captain requests submit typed start/stop embodiment intents to a persistent local play host. The host claims and reports sessions, drives the existing GBA free-play composition, honors bounded stop points, and checkpoints on exit.

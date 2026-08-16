@@ -1,144 +1,68 @@
 # docs/adr
 
-Architecture decision records, 0012–0099: 58 files
-with deliberate numbering gaps and two distinct
-0098 decisions.
-Numbering gaps are deliberate: governance-era ADRs
-were deleted in the 2026-08 pi rewrite and live
-only in git history. What remains documents the
-fun: GBA/Minecraft play, Discord presence and
-voice, media, browser and shell, memory, and the
-supervision plumbing around them.
+Durable architecture decision records plus conventions for interpreting them. Accepted means the rationale was ratified, not that every implementation detail remains current; superseded and historical records stay available while present operations live in the owning README or top-level guide.
 
-Older records retain historical option context;
-their active decisions describe the current pi
-service, launcher, Discord bodies, and play hosts.
+- `0012-provider-auth-model-registry.md` — provider config, model catalog, and brokered authentication.
+- `0016-versioned-interactive-environment-contract.md` — versioned provider-neutral environment contracts.
+- `0024-discord-dual-plane-presence.md` — bot and lab-user transports for one Discord character.
+- `0025-clankvox-placement-and-ipc.md` — superseded early native-media placement proposal.
+- `0029-media-generation-connector.md` — image/video generation connector boundary.
+- `0032-conversation-scoped-operator-lanes.md` — conversation as the operator-lane unit.
+- `0039-gba-emulator-embodiment-and-deterministic-core-boundary.md` — governed GBA adapter and core seam.
+- `0040-real-mgba-core-behind-the-emulator-seam.md` — pinned real headless mGBA core.
+- `0042-discord-person-memory-projection.md` — durable guild/user person facts.
+- `0043-version-pinned-firered-gameplay-profile.md` — FireRed identity and decoded-state profile.
+- `0044-runner-owned-mineflayer-private-paper-gameplay.md` — historical Mineflayer/Paper decision.
+- `0045-official-bot-dave-group-voice.md` — official-bot DAVE consent and media owner.
+- `0047-discord-activity-presence-plane.md` — embedded watch-me-play Activity.
+- `0048-discord-user-session-transport.md` — isolated opt-in lab user account.
+- `0049-free-play-agency-and-non-deterministic-evidence.md` — model-decided GBA free play.
+- `0050-voice-presence-authority-tier.md` — distinct voice authority tier.
+- `0051-layered-character-register-and-reply-policy.md` — persona/register/policy layers.
+- `0052-subscription-precedence-over-metered-api-key.md` — subscription transport precedence.
+- `0053-mcp-possession-of-clankies-body.md` — leased MCP possession and body lock.
+- `0054-cross-lane-presence-and-episodic-self-memory.md` — shared presence and bounded episodes.
+- `0055-launcher-owned-local-services.md` — local service supervision ownership.
+- `0056-voice-is-a-separate-agent-from-the-player.md` — voice/player separation, narrowed later.
+- `0057-realtime-voice-with-captain-handoff.md` — realtime conversation plus bounded captain action.
+- `0058-read-collision-from-the-live-map-buffer.md` — verified live collision and walking.
+- `0059-lease-expiry-pauses-the-body.md` — renewable lapse versus final revocation.
+- `0060-progress-as-minted-checkpoints.md` — immutable sibling checkpoints.
+- `0061-evidence-rolls-for-open-ended-play.md` — rolling evidence windows.
+- `0062-voice-join-by-asking.md` — natural-language voice join.
+- `0063-a-play-request-starts-embodiment.md` — asked-play intent and host ownership.
+- `0064-possessor-voice-seam.md` — event narration and consented room hearing seam.
+- `0066-dialog-is-one-action-not-one-press-per-box.md` — bounded dialogue action.
+- `0067-a-play-request-speaks-through-the-possessor-seam.md` — asked-play commentary path.
+- `0068-a-playthrough-leaves-a-durable-trail.md` — journals, runtime records, and possession logs.
+- `0070-external-voice-via-streaming-tts.md` — optional ElevenLabs mouth.
+- `0071-presence-as-consent-voice-policy.md` — owner-selected presence consent.
+- `0072-the-harness-tells-him-the-truth.md` — honest observed gameplay effects.
+- `0073-a-menu-choice-is-one-action-not-one-press-per-cursor-step.md` — semantic menu selection.
+- `0074-the-room-hears-one-voice.md` — realtime session as sole speech author.
+- `0075-rewinding-is-a-play-choice.md` — checkpoint/restart as model choices.
+- `0081-an-image-is-part-of-what-is-said.md` — inbound Discord image semantics.
+- `0082-clankie-holds-the-browser.md` — service-owned browser tools.
+- `0083-every-room-he-thinks-in-is-watchable.md` — append-only room lane logs.
+- `0084-the-head-can-read-his-branches.md` — visibility-bounded cross-lane observation.
+- `0085-a-picture-he-makes-is-something-he-says.md` — generated media attached to replies.
+- `0086-clankie-holds-a-shell.md` — trusted machine tools by lane.
+- `0088-a-screenshot-is-something-he-shows-you.md` — browser screenshot reply attachment.
+- `0089-the-map-is-his-to-read.md` — decoded exits, minimap, and named walk refusals.
+- `0090-emerald-plays-from-the-screen.md` — visual-only Emerald play.
+- `0091-a-mid-turn-message-steers-the-turn.md` — durable in-turn lane steering.
+- `0092-a-repeat-that-changes-nothing-is-something-he-should-know.md` — visible stuck/repeat signal.
+- `0093-owner-authored-service-connections.md` — `/connect` service ownership.
+- `0094-a-render-that-outlives-the-turn-comes-back-to-the-room.md` — asynchronous render return.
+- `0095-discord-system-actors.md` — Discord machine-tool authority.
+- `0096-a-diagram-is-something-he-draws.md` — governed tldraw diagram creation.
+- `0097-herdr-lead-is-the-companion-dashboard.md` — seated Herdr leadership and board.
+- `0098-the-room-can-type-to-a-playthrough.md` — playthrough room interjections.
+- `0098-user-session-watches-discord-shares.md` — Vox-backed lab-user screen watch.
+- `0099-he-can-look-at-his-own-play.md` — current still and bounded play story.
+- `0100-vox-is-an-owned-native-media-package.md` — owned AGPL media package and Apache process client.
+- `0101-pi-owns-the-captain-model-runtime.md` — Pi-owned captain sessions/models/tools.
+- `0102-pokeagent-mmo-is-an-external-mcp-world.md` — harness-neutral external MMO MCP boundary.
+- `README.md` — ADR status, naming, and diagram conventions.
 
-## Children
-
-- `0012` — provider/auth/model config: registry,
-  credential broker, provider layer
-- `0016` — versioned interactive-environment
-  contract; lane-scoped tool projection
-- `0024` — dual Discord planes (bot + lab user
-  session), one character; presence phases
-- `0025` — ClankVox voice sidecar IPC (superseded
-  by 0045; parser is a compat artifact)
-- `0029` — schema-v2 image/video connector;
-  generation remains separate from publication
-- `0032` — the conversation, not the device, is
-  the operator lane unit
-- `0039` — GBA embodiment; deterministic core
-  double behind the adapter seam
-- `0040` — real headless mGBA WASM core; pinned
-  digests; verified RAM map
-- `0042` — Discord person memory as a separate
-  (guildId, userId) projection
-- `0043` — version-pinned FireRed US v1.0 decoded
-  state profile
-- `0044` — runner-owned Mineflayer; Paper server
-  owns success
-- `0045` — official-bot DAVE group voice; consent
-  model (pipeline superseded by 0057)
-- `0047` — Discord activity plane streams rendered
-  GBA frames into voice channels
-- `0048` — user-session transport: second process,
-  four fail-closed gates
-- `0049` — free play is model-decided; evidence
-  without determinism
-- `0050` — voice presence is its own authority
-  tier
-- `0051` — character / operating contract /
-  register are separate layers
-- `0052` — stored subscription outranks the
-  metered OpenAI API key
-- `0053` — MCP possession of the GBA body under a
-  lease; body lock
-- `0054` — presence shared across lanes; episodes
-  vs world facts
-- `0055` — the launcher supervises every local
-  service
-- `0056` — voice is a separate agent from the
-  player (narrowed by 0074)
-- `0057` — realtime voice speaks; captain acts via
-  one `ask_clankie` tool
-- `0058` — collision read from the live map
-  buffer; `walk_to` (extended by 0089)
-- `0059` — lease expiry pauses the body; only
-  revocation is final
-- `0060` — progress as minted sibling checkpoints
-- `0061` — rolling evidence windows for open-ended
-  play
-- `0062` — voice join by asking in natural text
-- `0063` — asked embodiment: captain
-  `start_play`/`stop_play`, play host owns sessions
-- `0064` — possessor voice seam: events in,
-  persona composes the words
-- `0066` — `advance_dialog`: a conversation is one
-  action
-- `0067` — asked play wired through the possessor
-  seam (outbound half superseded by 0074)
-- `0068` — a playthrough leaves a durable trail
-  (journal, records, possession log)
-- `0070` — external voice via ElevenLabs streaming
-  TTS behind the same port
-- `0071` — presence-as-consent voice policy
-  (owner-configured)
-- `0072` — the harness tells him the truth:
-  honest effects, `scene`, `enter_text`
-- `0073` — `select_menu_entry`: a menu choice is
-  one action
-- `0074` — the room hears one voice: realtime
-  session is sole author
-- `0075` — rewinding is a play choice
-  (`load_checkpoint`, `restart_game`)
-- `0081` — an inbound Discord image is part of
-  what is said
-- `0082` — Clankie holds the browser (web tools +
-  service-hosted agent-browser MCP)
-- `0083` — every room is watchable through one
-  append-only `LaneLog`
-- `0084` — `observe_room` reads visible branches;
-  ambient lanes cannot read operator history
-- `0085` — a generated picture rides his reply
-  without approval; video jobs
-- `0086` — machine tools only in operator and
-  system-actor text rooms
-- `0088` — browser screenshots ride replies on the
-  same provenance argument
-- `0089` — the map is his to read: minimap, warp
-  decode, named refusals
-- `0090` — Emerald plays from the screen (visual
-  core, no semantic decode)
-- `0091` — mid-turn durable-lane messages steer one
-  merged reply
-- `0092` — identical action + effect repeats become
-  a visible stuck signal
-- `0093` — `/connect`: owner-authored Linear, mail,
-  and Discord connections
-- `0094` — slow renders return to their room on a
-  later turn
-- `0095` — Discord `systemActorUserIds` gates
-  machine tools
-- `0096` — governed tldraw ER/sequence diagrams
-  ride replies
-- `0097` — the herdr pane is Clankie's seat; the
-  herdr-lead board is its companion
-- `0098-the-room` — admitted channel text reaches
-  attached playthroughs as interjections
-- `0098-user-session` — the lab user body watches
-  Discord shares through external ClankVox
-- `0099` — live play stills and bounded journal
-  story cards
-
-## Reading notes
-
-The GBA play arc is the longest thread: 0039 →
-0040 → 0043 → 0049 → 0053 → 0058/0059/0060/0061 →
-0066/0072/0073/0075 → 0089/0090 → 0092/0098/0099.
-The voice arc: 0045 → 0057 → 0056 →
-0062/0064/0067 → 0070/0071/0074 → 0091/0098/0099.
-Captain capability growth: 0082 (browser) →
-0085/0088/0094/0096 (media out) → 0083/0084
-(cross-room reads) → 0086/0095/0097 (trusted
-machine and fleet access) → 0093 (connections).
+The long-running decision threads cover GBA embodiment, Discord voice/presence/media, operator conversations and Herdr leadership, model/auth ownership, and generated/browser media. Read linked later ADRs and the current operating guides before treating an older implementation sketch as live topology.

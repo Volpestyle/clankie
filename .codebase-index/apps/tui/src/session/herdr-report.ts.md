@@ -1,11 +1,3 @@
 # apps/tui/src/session/herdr-report.ts
 
-Self-reporting into a Herdr pane, inert outside
-`HERDR_ENV=1` (and without `HERDR_PANE_ID`).
-`reportHerdrAgent` runs `herdr pane report-agent`
-with a state (idle/working/blocked/unknown) and
-optional message; `reportHerdrMetadata` publishes
-title/token via `report-metadata`. Both default the
-source/agent to `clankie-trace` and accept an
-injected command runner for tests. Used by
-`clankie trace` so the pane shows trace status.
+Reports operator-console presence and display metadata through Herdr's socket CLI when the TUI occupies a Herdr pane. `herdrPaneIdFromEnv`, `reportHerdrAgent`, and `reportHerdrMetadata` are inert outside `HERDR_ENV=1`; production callers identify the source/agent as `clankie` and publish turn state plus the `Clankie` pane title.

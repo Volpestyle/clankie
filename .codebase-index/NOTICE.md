@@ -1,8 +1,3 @@
 # NOTICE
 
-Apache-style attribution notice: "Clankie,
-Copyright 2026 Clankie contributors." Notes that
-the repo contains integration scaffolding for
-third-party projects which keep their own
-copyrights and licenses, and points to
-THIRD_PARTY_NOTICES.md before distribution.
+Repository attribution notice: "Clankie, Copyright 2026 Clankie contributors." It states that the repository is Apache-2.0 except the package-local AGPL-3.0-or-later `apps/vox`, preserves third-party copyrights/licenses, and points distributors to `THIRD_PARTY_NOTICES.md`.

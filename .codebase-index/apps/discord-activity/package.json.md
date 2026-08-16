@@ -1,7 +1,3 @@
 # apps/discord-activity/package.json
 
-Private workspace package
-`@clankie/discord-activity`. tsx-run; scripts:
-dev/start, typecheck, vitest, `viewer-probe`.
-Small dependency set: credential-broker,
-interactive-environment, protocol, ws, zod.
+Workspace manifest for the Discord Activity frame hub and viewer. Its scripts build, typecheck, test, and run the local Activity service with brokered producer authentication and shared protocol support.

@@ -1,5 +1,5 @@
 # apps/discord-user-session/src/stream-watch.ts
 
-`startStreamWatch()` owns screen-share watch/publish sessions on the user-account body. It joins the target voice channel without creating a second mouth, sends Go Live watch commands, hands stream-server credentials to ClankVox, and posts decoded stills to the service projection.
+`startStreamWatch()` owns screen-share watch/publish sessions on the user-account body. It creates or accepts a `VoxStreamClient`, joins muted/deafened unless this body is the mouth, sends Discord Go Live opcodes, hands stream-server credentials to Vox, watches one allowlisted remote stream at a time, and posts rate-limited decoded stills to the service projection.
 
-The same controller can publish a URL or pump PNG frames from the local activity surface when this process is the active mouth.
+The same controller publishes a URL or deduplicated local activity PNG snapshots, maps pause/resume/stop to both gateway and native commands, retries connection once a delayed voice session id appears, and emits watch/publish receipts only after native transport readiness.

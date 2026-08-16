@@ -1,14 +1,3 @@
 # apps/discord-bridge/package.json
 
-Private workspace package
-`@clankie/discord-bridge`. tsx-run (no build
-output); scripts: dev/start, `readiness`,
-`live-proof`, `person-memory-live-proof`,
-`voice-readiness`, `voice-live-proof`, typecheck,
-vitest.
-
-Depends on workspace packages (api-client,
-credential-broker, discord-presence-core,
-interactive-environment, possessor-voice,
-protocol, settings) plus discord.js 14,
-@discordjs/voice + opus, prism-media, zod.
+Workspace manifest for the official bot. One `live-proof-cli.ts` now evaluates text, person-memory, or voice evidence by mode, while dependencies retain Discord.js, `@discordjs/voice`, Opus, prism media, and shared Clankie packages without a redundant direct Zod dependency.

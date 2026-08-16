@@ -11,7 +11,7 @@ settings write path rejects token-shaped values.
 
 Wizard sections: Tokens (shows the redacted existing
 credential before offering keep/replace/remove),
-core ids, text ingress, voice, activity plane, an
+core ids, machine-control actors, text ingress, voice, active Discord body, lab user body, activity plane, an
 env-var export view, and status. Exported helpers
 (unit-tested): `resolveGuildList` (typed wins → keep
 existing → fall back to the command guild),
@@ -24,4 +24,4 @@ guild is singular on purpose (blank = global);
 enabling ingress mirrors the presence allowlist to
 match; snowflakes are validated with Developer-Mode
 hints; the user-session credential carries a
-personal-lab-only warning.
+personal-lab-only warning. Successful lab opt-in tells the operator to build the owned `@clankie/vox` package before restarting.

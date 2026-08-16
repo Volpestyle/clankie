@@ -1,20 +1,9 @@
 # packages/protocol/test
 
-Vitest suites, one file per contract area of
-`src/index.ts`. They pin the boundary properties
-(strictness, bounds, frozen tables, refinements)
-rather than re-testing zod.
+Schema tests for Discord person memory and voice evidence, embodiment, event streams, and the broad protocol surface.
 
-- protocol.test.ts — operator conversations, lane
-  compatibility, context/tool detail, governed
-  share refs, presence events, public types
-- event-stream.test.ts — stream-kind namespaces
-  and the DomainEvent envelope
-- embodiment.test.ts — intents, session records,
-  transitions, lifecycle reports, play notes
-- discord-person-memory.test.ts — bounded facts
-  and escape-path rejection
-- discord-voice-evidence.test.ts — voice receipt
-  variants (transcription/tool/music/possessor),
-  optional stay/token counters, and free-text
-  unrepresentability
+- `discord-person-memory.test.ts` — bounded durable person facts.
+- `discord-voice-evidence.test.ts` — content-free voice evidence.
+- `embodiment.test.ts` — play intents/reports and supported environments.
+- `event-stream.test.ts` — event streaming contracts.
+- `protocol.test.ts` — cross-cutting schema invariants and conversation service.

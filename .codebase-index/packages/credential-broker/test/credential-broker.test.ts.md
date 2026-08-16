@@ -1,6 +1,3 @@
 # packages/credential-broker/test/credential-broker.test.ts
 
-Small smoke suite for `CapabilityTokenIssuer`:
-issues bounded, expiring grants that verify and
-answer `allows()` correctly. The deep issuer
-coverage lives in audited-capabilities.test.ts.
+Focused tests for `CapabilityTokenIssuer`. They verify valid issue/verify, lifetime and not-before bounds, canonical encoding, signature failure, exact resource matching, and preserved obligations without depending on runtime audit/replay behavior.

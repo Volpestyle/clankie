@@ -1,7 +1,5 @@
 # .agents/skills/trace-clankie
 
-Repo-owned skill for tracing what Clankie
-said, did, or observed after the fact —
-operator console chat, Discord presence, play
-sessions, service state — by pointing at the
-right durable trail and how to read it safely.
+Repository-owned workflow for tracing what Clankie said, did, or observed after the fact. It maps operator conversations, room lanes, Discord receipts, play journals, memory, body possession, and service state to their durable read-only trails.
+
+- `SKILL.md` — trigger description, trail map, privacy/liveness caveats, and safe queries.

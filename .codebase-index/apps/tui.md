@@ -1,10 +1,10 @@
 # apps/tui
 
-The `clankie` launcher, local service supervisor, and fullscreen operator console. Plain prompts use server-owned operator conversations; slash commands configure providers, connections, Discord, persona, voice, memory, traces, and the Herdr companion board.
+The `clankie` launcher and fullscreen operator console. Headless commands supervise local services, pairing, devices, credentials, and play; the face consumes server-owned operator conversations and bounded room-lane observation, with a fixed lightweight busy indicator.
 
-- `bin/` — launcher, health-gated services, headless status/restart/down/trace/pair/device/play commands.
-- `src/` — face shell, command catalogs, conversation clients, status observations, skill discovery.
-- `test/` — deterministic TTY-free suites with injected process/network seams.
-- `README.md`, `package.json`, `tsconfig.json` — operator guide and type-stripped runtime config.
-
-Secrets go only to the credential broker; settings hold public configuration. Conversation events and replay cursors are service-owned or mode-0600 local checkpoints, and a Herdr-hosted console opens/inherits the labelled `Herd Lead` pane beside it.
+- `README.md` — launcher and console operating guide.
+- `bin/` — CLI entrypoint, service supervision, pairing, and device commands.
+- `package.json` — executable mapping, scripts, and dependencies.
+- `src/` — console UI, commands, observations, conversations, and shell.
+- `test/` — launcher and terminal behavior tests.
+- `tsconfig.json` — TypeScript configuration.

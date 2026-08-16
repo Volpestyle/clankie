@@ -1,6 +1,5 @@
 # .agents/skills
 
-One repo-owned skill survives the pi rewrite:
+Repository-scoped agent workflows that travel with Clankie. The only current child is `trace-clankie/`, which documents safe after-the-fact tracing across durable service trails.
 
-- `trace-clankie/` — how to read Clankie's
-  durable trails after the fact
+- `trace-clankie/` — read-only operational tracing skill.

@@ -1,51 +1,9 @@
 # apps/relay
 
-Remote access for the phone/desktop app:
-a small Node service exposing two
-deliberately separate boundaries for
-remote Apple clients. Operator
-conversations go over authenticated
-HTTP/NDJSON; a legacy loopback-only
-development WebSocket carries opaque
-`control`/`terminal` planes.
+HTTP-only remote operator-conversation boundary for phone and desktop clients. It authorizes every JSON/NDJSON request against the service's live device-session projection and forwards upstream with a separate captain credential; no local-development WebSocket, terminal plane, or PTY tunnel remains.
 
-## Children
-
-- `README.md` — boundary doc with a
-  mermaid flow of the device → relay →
-  service hops and the env config.
-- `package.json` — `@clankie/relay`;
-  deps are just `ws` and `zod`.
-- `src/` — HTTP handler, device auth hop,
-  captain dispatch hop, dev WS hub.
-- `test/` — vitest suites + recorded
-  React Native consumer fixtures.
-- `tsconfig.json` — noEmit typecheck
-  config.
-
-## Architecture
-
-Each conversation request carries a device
-session bearer, verified against the
-clankie service's device projection on
-every request and between/before tail
-pages, so revocation is immediate. The
-relay then uses its own captain service
-credential (`CLANKIE_CAPTAIN_TOKEN`) for
-the upstream hop — device credentials
-never cross it. Responses pass the strict
-public schema plus a credential redactor
-before emission; captain session IDs,
-continuation tokens, and provider secrets
-never reach a device.
-
-Duplicate sends collapse via an in-memory
-idempotency store; tail streams NDJSON
-frames (`event`/`recovery`/`auth_failure`)
-resuming from opaque cursors. Both the
-HTTP router and the legacy tunnel deny
-approval-shaped traffic. Tailscale may
-transport connections but is never relay
-authorization. Listens on
-`CLANKIE_RELAY_HOST` (loopback default),
-port 4320.
+- `package.json` — relay scripts and development toolchain.
+- `README.md` — authorization, redaction, transport, and configuration guide.
+- `src/` — device auth, upstream dispatch, HTTP router, and conversation handler.
+- `test/` — HTTP conversation fixtures and behavior tests.
+- `tsconfig.json` — TypeScript configuration.

@@ -1,8 +1,3 @@
 # packages/interactive-environment/test/fixtures.ts
 
-Shared test fixtures: `baseContext` (gameplay-lane
-captain authority), `validStartActionCommand` (a
-Minecraft collect action), `actionResultFixtures`
-(one per result status: running, stale, denied,
-cancelled, failed), and `validEnvironmentLease`
-(v1 Minecraft-shaped lease).
+Shared valid generic environment commands, results, leases, and context fixtures. Identifiers and capabilities are deliberately provider-neutral.

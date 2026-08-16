@@ -1,5 +1,3 @@
 # apps/tui/src/face/clankie-autocomplete.ts
 
-Slash-command and skill autocomplete/inspection. `createClankieAutocompleteProvider()` wraps Pi TUI completion: command arguments and discovered `/skill` names use static/dynamic catalogs, while ordinary input falls through to file-path completion.
-
-Pure helpers power inline typeahead and the workbench: fuzzy search/list/detail, exact command resolution, append-only completion, argument parsing and warnings/examples. Suggestions are bounded and injected service/MCP/skill name listers keep the renderer independent of discovery.
+Command-token typeahead, argument completion, inline hints, fuzzy search, and Ctrl+/ workbench UI. It reflects the focused server-conversation, lane-observation, connection, Discord, media/model/voice, layout, and companion-board command vocabulary and delegates file/path completion to the underlying provider.

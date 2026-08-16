@@ -1,8 +1,5 @@
 # packages/protocol/src
 
-Single-module source directory: `index.ts` is the
-whole package. All wire schemas, frozen tables,
-and the few runtime helpers are defined and
-exported from that one file.
+Canonical cross-process protocol surface.
 
-- index.ts — every shared contract (see its entry)
+- `index.ts` — all Zod schemas, constants, clients, and inferred types.

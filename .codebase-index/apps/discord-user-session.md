@@ -1,9 +1,9 @@
 # apps/discord-user-session
 
-Opt-in personal-lab Discord user-account body, isolated from the official bot by process and credential. It supplies secondary text/voice presence plus user-only Go Live discovery, watching, and publishing while sharing the same captain ingress and service authority.
+Explicitly opted-in personal-lab Discord user-account body. It isolates the normal-user credential and gateway, shares semantic text/voice policy with the bot body, and owns Vox-backed screen-share watching and Go Live publishing when selected as the one active Discord body.
 
-- `src/` — minimal gateway, admission, presence runtime, realtime voice, stream discovery/watch, ClankVox sidecar, live proof.
-- `test/` — offline gateway/admission/runtime/media suites.
-- `README.md`, `package.json`, `tsconfig.json` — risk gates, optional sidecar stack, and package config.
-
-Startup requires a durable profile-bound owner acknowledgement and scope can only narrow it. The brokered user token is resolved last and never accepted through env; raw user dispatch/media stays in this process, while bounded reports and decoded stills cross to the service.
+- `package.json` — lab-body scripts and dependencies.
+- `README.md` — risk, setup, media, readiness, and proof guide.
+- `src/` — user gateway, semantic adapters, and Vox composition.
+- `test/` — policy, gateway, discovery, and media-boundary tests.
+- `tsconfig.json` — TypeScript configuration.

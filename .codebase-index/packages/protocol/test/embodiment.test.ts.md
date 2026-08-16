@@ -1,10 +1,3 @@
 # packages/protocol/test/embodiment.test.ts
 
-Asked-play contract tests (ADR 0063): start/stop
-intents parse and reject unknown environments and
-free-text smuggling; session records require a
-refusal reason exactly when refused and runner
-attribution after claim; the transition map
-matches the ADR lifecycle; lifecycle reports carry
-receipts exactly on terminal states; every
-`EmbodimentPlayNote` outcome parses.
+Tests asked-play intent/report schemas, lifecycle transitions, bounds, and environment IDs. Unknown-game rejection is generic and the only accepted environments are FireRed and Emerald.

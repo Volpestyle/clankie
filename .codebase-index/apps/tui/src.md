@@ -1,16 +1,18 @@
 # apps/tui/src
 
-Fullscreen operator-face assembly and command modules.
+Fullscreen operator-console implementation: slash commands and typeahead, guided configuration flows, server-owned conversations, lane observation, presence/Herdr views, and layout-aware shell rendering.
 
-- `index.ts` — wires the shell, selected conversation, status sources, skills, and command set.
-- `commands.ts` — help/conversation/trace/layout/status/board/clear/exit commands.
-- `connect-commands.ts` — `/connect` Linear/email credentials and public settings.
-- `memory-commands.ts` — `/memory` catalog and guided edit/delete flows.
-- `provider-commands.ts`, `discord-commands.ts`, `persona-commands.ts`, `voice-commands.ts`, `activity-command.ts` — configuration and status commands.
-- `skill-catalog.ts` — project/user skill discovery and slash completion.
-- `face/` — terminal rendering and input components.
-- `shell/` — stateful layout, routing, SetupFlow, status, history, theme.
-- `session/` — operator conversations, lane traces, rendering, cursors, Herdr reporting.
-- `observation/` — presence/roster polling and Herdr companion-board lifecycle.
-
-Commands implement `FaceShellCommand`; guided setup uses modal `SetupFlow` primitives. Plain prompt output streams from the selected server conversation with local-echo suppression and bounded redacted tool detail.
+- `activity-command.ts` — current gameplay activity formatting.
+- `commands.ts` — core console command catalog.
+- `connect-commands.ts` — service connection wizards.
+- `discord-commands.ts` — Discord setup and status flow.
+- `face/` — terminal components, editor interactions, and layout helpers.
+- `index.ts` — face composition and startup.
+- `memory-commands.ts` — memory inspection commands.
+- `observation/` — presence, Herdr roster, and companion board observers.
+- `persona-commands.ts` — owner persona setup.
+- `provider-commands.ts` — model/provider setup.
+- `session/` — conversations, lane tails, and Herdr reporting.
+- `shell/` — TUI shell, status, prompt flows, history, and theme.
+- `skill-catalog.ts` — visible skill discovery.
+- `voice-commands.ts` — voice provider configuration.

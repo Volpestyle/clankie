@@ -1,18 +1,3 @@
 # apps/tui/src/shell/setup-flow.ts
 
-`createSetupFlow(context)` — the guided-flow engine
-every configurator wizard speaks: `begin`/`end`,
-`renderLine`/`renderOutput`/`setStatus` (summarized
-onto the status bar), `readText`, `readSecret`
-(sensitive modal, validation-with-retry loop),
-`readSelect`, and `waitForInterrupt` (for
-cancellable OAuth waits). Each read renders an
-InteractiveTextPrompt/InteractiveSelectPrompt as a
-centered overlay; `undefined` means cancelled.
-
-The controller adds shell-facing hooks:
-`cancelActivePrompt`, `handleSubmit` (typing
-`/cancel` aborts the active prompt), and
-`isWaitingForInput`. The interface is deliberately
-renderer-agnostic so a remote surface can serialize
-the same flows later.
+Renderer-neutral guided-wizard controller using begin/end, compact status lines, text/secret reads, searchable single-select reads, and interrupt waiting. The shell renders prompts as centered overlays and reports result summaries through status, with `/cancel` restoring editor focus cleanly.

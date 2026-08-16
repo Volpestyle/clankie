@@ -1,15 +1,3 @@
 # apps/tui/package.json
 
-Manifest for `@clankie/tui`. Exposes the `clankie`
-bin pointing straight at `bin/clankie.ts` (runs under
-Node type stripping — no build). Scripts: `dev`/
-`start` run `src/index.ts` via tsx, `build` and
-`typecheck` are both `tsc --noEmit`, `test` is
-vitest.
-
-Depends on the workspace contracts and adapters
-(`@clankie/protocol`, `api-client`,
-`credential-broker`, `model-provider`,
-`model-registry`, `observability`, `settings`), plus
-`@earendil-works/pi-tui` (the differential terminal
-renderer), `qrcode`, and `zod`.
+Workspace manifest and `clankie` executable mapping for the launcher/face. Scripts build, typecheck, test, and run the TUI; dependencies cover shared API/security/settings/protocol packages, Pi TUI components, QR rendering, and terminal helpers without the old stream-trace stack.

@@ -1,9 +1,3 @@
 # .github/pull_request_template.md
 
-PR body skeleton: problem/outcome, approach,
-scope, an evidence checklist (typecheck,
-tests, `pnpm eval:self-build` when
-orchestration/policy/protocol changed,
-screenshots for UI), risk/privacy/security,
-doctrine exceptions, rollback, and agent
-attribution (worker run IDs and session IDs).
+Pull-request body template organized around problem/outcome, alternatives, scope, verification evidence, risk/privacy/security, rollback, and agent attribution. The evidence checklist requires the full `pnpm check` gate plus focused live proof or visual comparison when applicable.

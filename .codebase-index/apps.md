@@ -1,13 +1,12 @@
 # apps
 
-The repository's runnable programs: one authoritative Clankie service plus operator, Discord, activity, game, and remote-access surfaces. Bodies authenticate to `apps/clankie` on port 4310 and keep credentials in the broker; durable state and authority remain in the service.
+Runnable programs surrounding the authoritative Clankie service. Each transport body owns only its gateway or view while durable policy stays in `apps/clankie`; Vox owns deterministic native Discord media mechanics behind a process boundary.
 
-- `clankie/` — Pi captain, HTTP API, memory, connected services, browser/media/drawing, embodiment and play sight.
-- `tui/` — `clankie` launcher, local service supervisor, and fullscreen operator console.
-- `discord-bridge/` — official bot body for text, voice, music, social actions, and activity launch.
-- `discord-user-session/` — opt-in lab user-account body for secondary presence, Go Live, and screen-share watching.
-- `discord-activity/` — credential-free watch-me-play web surface and loopback frame ingress.
-- `gba-mcp/` — possession-gated GBA body exposed as an MCP stdio server.
-- `relay/` — authenticated HTTP/NDJSON boundary for phone and desktop clients.
-
-The service is the mind and policy boundary; apps around it are transport-specific bodies and views. Shared protocol schemas keep their requests narrow, body/possession locks prevent two minds driving one surface, and absent optional capabilities fail closed or degrade honestly.
+- `clankie/` — Pi captain, HTTP API, memory, tools, browser/media/drawing, and GBA play host.
+- `discord-activity/` — credential-free embedded watch-me-play surface and private frame ingress.
+- `discord-bridge/` — official bot body for text, voice, music, social actions, and Activity launch.
+- `discord-user-session/` — opt-in personal-lab body for screen-share watching and Go Live.
+- `gba-mcp/` — possession-gated GBA body exposed through MCP stdio.
+- `relay/` — device-authorized HTTP/NDJSON remote conversation boundary.
+- `tui/` — launcher, service supervisor, and fullscreen operator console.
+- `vox/` — owned AGPL native Discord voice/watch/publish media process.

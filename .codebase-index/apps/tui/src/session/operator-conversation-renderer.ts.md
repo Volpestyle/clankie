@@ -13,8 +13,4 @@ line instead. Operator messages always render as
 blocks (tool, reasoning, worker_transcript)
 click-toggleable, collapsed only when the body
 actually hides detail (multi-line or >160 chars).
-`createOperatorConversationShellSink` adapts a shell:
-suppresses the first operator message matching the
-just-echoed prompt (later identical ones still
-render), inserts everything else, updates the status
-on turn events, and renders recovery notices.
+`createOperatorConversationShellSink` adapts a shell: it suppresses the first operator message matching the just-echoed prompt, records the block handle returned for each started tool call, and rewrites that same block on completion/failure with the original arguments plus result. Terminal events with no observed start still insert normally; turn events update status and recovery notices remain visible.

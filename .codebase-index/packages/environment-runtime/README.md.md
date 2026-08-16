@@ -1,13 +1,3 @@
 # packages/environment-runtime/README.md
 
-Overview of the runtime's model: trusted command
-boundary → EnvironmentRuntime → atomic lease +
-action state, adapter, and semantic events
-(mermaid flowchart included). States the
-invariants — one unexpired writer lease per
-character/world, credential-free durable records,
-register-before-dispatch idempotency, restart
-reconciliation, immediate invalidation on expiry/
-revoke/emergency stop, and the semantic-plane
-rule that raw packets/ticks travel only as opaque
-`artifact://` telemetry references.
+Architecture guide for the service-owned generic environment runtime. It explains one-writer leases, private capability/connection material, legacy-v1 session normalization, idempotent action registration, expiry/revocation/pause/emergency fencing, restart attachment, bounded state retention, and credential-free semantic evidence.

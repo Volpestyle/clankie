@@ -1,26 +1,11 @@
 # packages/interactive-environment/src
 
-- `environment.ts` — the shared foundation: session
-  specs/leases (v1+v2), resource-bounds profiles,
-  commands, action results, semantic events,
-  telemetry references
-- `minecraft.ts` — Minecraft Java profile
-- `pokemmo.ts` — PokeMMO simulator profile + live
-  read-only boundary
-- `emulator.ts` — GBA emulator profile
-- `discord-presence.ts` — Discord presence plane
-- `rendered-surface.ts` — activity frame/overlay
-  transport schemas
-- `activity-observation.ts` — self-observation
-  read contract
-- `play-sight.ts` — read-only live PNG still and
-  bounded play-story card
-- `index.ts` — barrel re-exporting all of the above
+Zod schemas and helpers for interactive surfaces. The generic environment contract profiles GBA and migration-only legacy sessions; external MMO and Minecraft vocabulary is outside the package exports and semantic event enum.
 
-Every profile module follows the same pattern:
-strict command schemas over a shared base,
-discriminated observation unions with `untrusted:
-true` literals on text-bearing kinds, a tool-name
-enum, a phase+lane → tool-set resolver, and an
-exposure schema that superRefines against that
-resolver so forged exposures cannot parse.
+- `activity-observation.ts` — present-tense activity snapshots and reads.
+- `discord-presence.ts` — Discord lifecycle, catalog, claims, rooms, and tool exposure.
+- `emulator.ts` — bounded GBA commands, observations, and tool catalog.
+- `environment.ts` — generic sessions, leases, actions, and semantic/artifact events.
+- `index.ts` — public package exports.
+- `play-sight.ts` — current play still/story reads.
+- `rendered-surface.ts` — frame/overlay transport contracts.

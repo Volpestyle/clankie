@@ -1,10 +1,3 @@
 # packages/discord-presence-core/src/index.ts
 
-Curated barrel for the package: named re-exports
-from every module (presence session, advertiser,
-text ingress, captain/voice/music loopback
-controls, voice ingress/session/consent/address/
-floor/music, realtime session, external voice,
-ElevenLabs TTS, voice audio, receipt store). The
-header comment restates the package rule: nothing
-here may import discord.js.
+Public barrel for transport-neutral Discord presence, text, voice, music, controls, realtime/TTS, audio, and receipt APIs. It now exports shared reaction encoding and the full common voice-composition surface used by both Discord apps.

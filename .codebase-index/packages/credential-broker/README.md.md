@@ -1,13 +1,3 @@
 # packages/credential-broker/README.md
 
-The broker's contract doc: Keychain/file storage
-rules and index consistency, the local operator
-credential lifecycle (mint, resolve, rotate,
-inspect), the Discord provider set (bot and
-user-session tokens, the four mutually exclusive
-bridge bearers, why `transportKind` derives from
-which bearer authenticated), and the capability
-boundary — audited issuance, one-time use
-rehydrated from the event log, SHA-256
-fingerprints instead of caller-controlled strings,
-fail-closed on audit-sink failure.
+Credential-storage and grant model for provider keys, Discord accounts, local operator/captain/runner/body identities, and Linear OAuth. It distinguishes canonical broker storage from explicit compatibility environment fallbacks and describes `CapabilityTokenIssuer` as a signing/verification primitive whose caller owns issuance policy and evidence, not an audited one-time runtime broker.

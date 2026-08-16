@@ -1,16 +1,3 @@
 # docs/adr/0059-lease-expiry-pauses-the-body.md
 
-Lease expiry says the holder went away, not that
-the world should die: a lapsed lease pauses the
-body in place (fenced, world kept); only explicit
-stop, emergency stop, and adapter failure revoke.
-Every authorized call re-arms the expiry, so an
-actively driven session cannot lapse.
-
-Read for the recovery contract: the same token
-`renew`s a lapsed claim (unless another writer
-took the body), renewal resumes only the pause
-the lapse caused (deliberate safety pauses
-survive), and the free-play composer retries a
-lapsed dispatch once. `pause` is lease-free;
-`resume` is driving and lease-gated.
+Decision that an expired environment lease represents an idle holder, so the live body pauses and the same capability may renew it subject to the single-writer rule. Explicit stop, emergency stop, adapter failure, and revocation remain final and cannot renew.

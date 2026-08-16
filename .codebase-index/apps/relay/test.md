@@ -1,11 +1,6 @@
 # apps/relay/test
 
-Vitest suites plus recorded fixtures.
-`operator-conversations.test.ts` covers
-the whole HTTP/NDJSON boundary against
-real local HTTP servers; `hub.test.ts`
-covers the dev-tunnel schemas and the
-approval-completion detector; `fixtures/`
-holds the recorded React Native consumer
-request/response and tail-stream data the
-suite validates.
+HTTP operator-conversation boundary tests and recorded consumer fixtures. The remaining suite covers authenticated JSON/NDJSON behavior, device revocation/grant changes, deduplication, redaction, revision conflicts, and cursor recovery.
+
+- `fixtures/` — recorded JSON and NDJSON consumer examples.
+- `operator-conversations.test.ts` — relay handler behavior.

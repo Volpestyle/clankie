@@ -1,10 +1,5 @@
 # apps/tui/test
 
-Deterministic, TTY-free Vitest suites for the launcher and operator face. Tests use fake shells, injected process/fetch/credential seams, ephemeral servers, and cleaned temp directories.
+Launcher and terminal-console tests covering commands, autocomplete, responsive layout, transcript interaction, setup prompts, server conversations, lane observation, service supervision, pairing/devices, provider/persona/Discord/voice flows, status, and Herdr views.
 
-- Face/shell: banner, spinners, autocomplete/workbench/skills, modal flows, transcript blocks/viewport/routing, layout, bash, status, assembly.
-- Commands: activity, connections, Discord, memory, providers, voice, companion board.
-- Session/observation: operator conversations/context rendering, lane tracing, Herdr report/roster/companion.
-- Launcher/bin: service supervisor/registry, headless captain, devices, pairing, trace.
-
-Coverage pins secret redaction, mode-0600 stores, health/ownership semantics, command routing, and graceful unavailable states without starting the real fullscreen console.
+Focused files include `autocomplete.test.ts`, `face-layout.test.ts`, `interactive-flow.test.ts`, command tests, `operator-conversations.test.ts`, `services.test.ts`, and transcript/status behavior tests.

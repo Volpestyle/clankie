@@ -1,19 +1,19 @@
 # apps/clankie/src/captain
 
-Clankie's mind on Pi: lane-scoped sessions, persona/instructions, trusted memory recall, authored capabilities, and durable operator conversations. Tool availability is the security boundary: operator turns and allowlisted system-actor text turns may receive Pi system tools; voice and ordinary social turns never do.
+Pi-based captain runtime and its durable operator/room seams. It binds service-owned tools and authority to model sessions while keeping lane history, Herdr seat context, and operator conversations explicit.
 
-- `captain.ts` — session construction, durable steering, hard text deadline, skill translation, tool event detail, Herdr seat injection.
-- `port.ts` — `CaptainPort` HTTP seam and test stub.
-- `conversations.ts` — file-backed operator registry/event tails with revision fencing and detached runs.
-- `discord-turn.ts` — fixed framing for untrusted Discord context, images, memory, and async render notices.
-- `tools.ts` — play, sight/share, self-state, Discord social/voice/music, drawing, memory, media, and browser tools.
-- `connect-tools.ts` — Linear/email tools with lane-specific authority.
-- `system-authority.ts` — allowlisted Discord text system-tool decision.
-- `herdr-census.ts`, `herdr-seat.ts`, `herdr-summaries.ts` — live fleet context for seated operator turns.
-- `lane-log.ts` — room transcript JSONL plus lane observation.
-- `deps.ts` — injected ports available to tools.
-- `model.ts` — credential-broker bridge to Pi models.
-- `play.ts` — bounded embodiment start/stop orchestration.
-- `instructions.md` — identity, leadership, connected-work, drawing, music, and honesty rules.
-
-Operator conversations persist model/tool lifecycle, bounded redacted tool details, context occupancy, and media. Discord text is one-shot unless tool-authorized, voice is durable per room and concurrent speech steers into the active run, and episodic recall refreshes as trusted system context before every run.
+- `captain.ts` — captain lifecycle and turn orchestration.
+- `connect-tools.ts` — connected-service tool definitions.
+- `conversations.ts` — file-backed operator conversation registry.
+- `deps.ts` — captain dependency contracts.
+- `discord-turn.ts` — Discord-specific turn shaping.
+- `herdr-census.ts` — live Herdr pane census.
+- `herdr-seat.ts` — originating operator pane context.
+- `herdr-summaries.ts` — bounded pane summaries for context.
+- `instructions.md` — captain system instructions.
+- `lane-log.ts` — durable heard/said lane trails.
+- `model.ts` — model/session construction.
+- `play.ts` — play-related captain tools.
+- `port.ts` — captain port contract.
+- `system-authority.ts` — trusted actor and machine-tool authority.
+- `tools.ts` — core captain tool catalog.
