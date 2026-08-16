@@ -32,6 +32,7 @@ coverage/
 ios/Pods/
 macos/Pods/
 .pnpm-store/
+.codebase-index/
 build/
 .next/
 .output/
