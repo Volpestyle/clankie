@@ -1138,9 +1138,7 @@ async function executeCaptainDiscordAction(
       return { ok: false, message: "I need to be in your admitted voice channel first." };
     }
     action =
-      input.action === "watch_start"
-        ? "discord.presence.activity_start"
-        : "discord.presence.activity_stop";
+      input.action === "watch_start" ? "discord.presence.activity_start" : "discord.presence.activity_stop";
     payload =
       input.action === "watch_start"
         ? { kind: "activity_start", guildId: input.guildId, channelId, surface: "gba_emulator" }

@@ -29,7 +29,7 @@ if (failures.length) {
 async function walk(directory) {
   const output = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
-    if (["node_modules", ".git", ".turbo", "artifacts"].includes(entry.name)) continue;
+    if (["node_modules", ".git", ".turbo", "artifacts", ".codebase-index"].includes(entry.name)) continue;
     const path = resolve(directory, entry.name);
     if (entry.isDirectory()) output.push(...(await walk(path)));
     else output.push(path);

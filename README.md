@@ -60,15 +60,15 @@ Linear, email, and Discord.
 
 ## Apps
 
-| App                         | What it is                                       |
-| --------------------------- | ------------------------------------------------ |
+| App                         | What it is                                                                             |
+| --------------------------- | -------------------------------------------------------------------------------------- |
 | `apps/clankie`              | The service: captain, tools, bodies, API (:4310). Catalog: `apps/clankie/openapi.yaml` |
-| `apps/tui`                  | Operator console and the `clankie` launcher      |
-| `apps/discord-bridge`       | Official bot: text, voice, attachments           |
-| `apps/discord-user-session` | Personal-lab user-session body (off by default)  |
-| `apps/discord-activity`     | The watch-me-play surface                        |
-| `apps/gba-mcp`              | His GBA body as an MCP server                    |
-| `apps/relay`                | Remote access for the phone/desktop app          |
+| `apps/tui`                  | Operator console and the `clankie` launcher                                            |
+| `apps/discord-bridge`       | Official bot: text, voice, attachments                                                 |
+| `apps/discord-user-session` | Personal-lab user-session body (off by default)                                        |
+| `apps/discord-activity`     | The watch-me-play surface                                                              |
+| `apps/gba-mcp`              | His GBA body as an MCP server                                                          |
+| `apps/relay`                | Remote access for the phone/desktop app                                                |
 
 `integrations/` holds the game bodies (gba-emulator, minecraft-mineflayer);
 `packages/` holds the shared contracts. The graphical garden app is a separate

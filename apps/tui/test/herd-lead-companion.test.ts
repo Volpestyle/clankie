@@ -107,7 +107,10 @@ describe("herd-lead companion", () => {
       closeHerdLeadCompanion({
         env: { HERDR_ENV: "1", HERDR_PANE_ID: "w15:p6" },
         runCommand: () =>
-          Promise.resolve({ stdout: JSON.stringify({ result: { panes: [{ pane_id: "w15:p6" }] } }), stderr: "" }),
+          Promise.resolve({
+            stdout: JSON.stringify({ result: { panes: [{ pane_id: "w15:p6" }] } }),
+            stderr: "",
+          }),
       }),
     ).resolves.toEqual({ outcome: "absent" });
   });

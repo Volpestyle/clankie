@@ -186,7 +186,9 @@ describe("xAI SuperGrok refresh and request adaptation", () => {
   });
 
   it("rejects refresh for API-key credentials", async () => {
-    await expect(refreshXaiToken({ type: "api", key: "xai-secret" })).rejects.toThrow("uses oauth credentials");
+    await expect(refreshXaiToken({ type: "api", key: "xai-secret" })).rejects.toThrow(
+      "uses oauth credentials",
+    );
   });
 
   it("replaces the placeholder bearer with the live SuperGrok token", async () => {

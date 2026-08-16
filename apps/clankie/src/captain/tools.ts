@@ -414,8 +414,8 @@ function discordActionTools(
               "Add a reaction to the Discord message you are answering. Use your own social judgment.",
             parameters: Type.Object({ emoji: Type.String({ minLength: 1, maxLength: 64 }) }),
             execute: (callId, params) =>
-              deps.discordActions!
-                .execute({ action: "react", ...context(callId), emoji: params.emoji })
+              deps
+                .discordActions!.execute({ action: "react", ...context(callId), emoji: params.emoji })
                 .then(json),
           }),
           defineTool({
@@ -424,8 +424,8 @@ function discordActionTools(
             description: "Remove one of your reactions from the Discord message you are answering.",
             parameters: Type.Object({ emoji: Type.String({ minLength: 1, maxLength: 64 }) }),
             execute: (callId, params) =>
-              deps.discordActions!
-                .execute({ action: "unreact", ...context(callId), emoji: params.emoji })
+              deps
+                .discordActions!.execute({ action: "unreact", ...context(callId), emoji: params.emoji })
                 .then(json),
           }),
           defineTool({
@@ -435,8 +435,8 @@ function discordActionTools(
               "Start a Discord thread from the message you are answering when the conversation deserves one.",
             parameters: Type.Object({ name: Type.String({ minLength: 1, maxLength: 100 }) }),
             execute: (callId, params) =>
-              deps.discordActions!
-                .execute({ action: "create_thread", ...context(callId), name: params.name })
+              deps
+                .discordActions!.execute({ action: "create_thread", ...context(callId), name: params.name })
                 .then(json),
           }),
           defineTool({
@@ -463,8 +463,8 @@ function discordActionTools(
         if (grounded.guildId === undefined) {
           return Promise.resolve(json({ ok: false, message: "Voice needs a server." }));
         }
-        return deps.discordActions!
-          .execute({ action: "watch_start", ...grounded, guildId: grounded.guildId })
+        return deps
+          .discordActions!.execute({ action: "watch_start", ...grounded, guildId: grounded.guildId })
           .then(json);
       },
     }),
@@ -478,8 +478,8 @@ function discordActionTools(
         if (grounded.guildId === undefined) {
           return Promise.resolve(json({ ok: false, message: "Voice needs a server." }));
         }
-        return deps.discordActions!
-          .execute({ action: "watch_stop", ...grounded, guildId: grounded.guildId })
+        return deps
+          .discordActions!.execute({ action: "watch_stop", ...grounded, guildId: grounded.guildId })
           .then(json);
       },
     }),

@@ -1,4 +1,8 @@
-import type { ActivityObservationSnapshot, PlayStillRead, PlayStoryRead } from "@clankie/interactive-environment";
+import type {
+  ActivityObservationSnapshot,
+  PlayStillRead,
+  PlayStoryRead,
+} from "@clankie/interactive-environment";
 import type { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { createClankieApp, type TrustedOperatorIdentity } from "../src/app.ts";

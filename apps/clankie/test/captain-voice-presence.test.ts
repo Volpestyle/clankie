@@ -52,12 +52,9 @@ describe("captain voice presence tools", () => {
         getLiveSession: () => Promise.resolve(undefined),
       },
     } as unknown as CaptainDeps;
-    const start = captainTools(
-      deps,
-      { actorId: "user-1" },
-      {} as LaneLog,
-      "discord_presence",
-    ).find((tool) => tool.name === "start_play");
+    const start = captainTools(deps, { actorId: "user-1" }, {} as LaneLog, "discord_presence").find(
+      (tool) => tool.name === "start_play",
+    );
     if (start === undefined) throw new Error("start_play is missing");
 
     await start.execute("call-1", { environmentId: "pokemon-firered" }, undefined, undefined, {} as never);

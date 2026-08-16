@@ -1716,8 +1716,7 @@ export const DiscordPresenceWriteSchema = z
           "discord.presence.go_live_stop",
           "discord.presence.activity_start",
           "discord.presence.activity_stop",
-        ].includes(write.action) &&
-        write.identity.presenceSessionId !== undefined
+        ].includes(write.action) && write.identity.presenceSessionId !== undefined
       )
     ) {
       context.addIssue({

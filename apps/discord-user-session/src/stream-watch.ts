@@ -1,10 +1,7 @@
 import type { ClankieApiClient } from "@clankie/api-client";
 import type { DiscordActiveStream, DiscordStreamWatchReport } from "@clankie/protocol";
 import type { DiscordUserGateway } from "./gateway.ts";
-import {
-  createClankvoxSidecar,
-  type ClankvoxSidecar,
-} from "./clankvox-sidecar.ts";
+import { createClankvoxSidecar, type ClankvoxSidecar } from "./clankvox-sidecar.ts";
 import { fetchActivitySnapshot } from "./go-live-source.ts";
 import {
   createDiscordStreamDiscovery,
@@ -21,8 +18,14 @@ export interface StreamWatchControllerOptions {
   readonly fetchActivitySnapshot?: () => Promise<
     { mimeType: "image/png"; data: string; sha256: string } | undefined
   >;
-  readonly onWatchEvent?: (type: "watch_connected" | "frame", data: Record<string, string | number | boolean>) => void;
-  readonly onPublishEvent?: (type: "publish_started" | "publish_stopped", data: Record<string, string | number | boolean>) => void;
+  readonly onWatchEvent?: (
+    type: "watch_connected" | "frame",
+    data: Record<string, string | number | boolean>,
+  ) => void;
+  readonly onPublishEvent?: (
+    type: "publish_started" | "publish_stopped",
+    data: Record<string, string | number | boolean>,
+  ) => void;
   /**
    * When this process is the active mouth, join unmuted so he can talk and
    * play music. Watch-only (bot is the mouth) still joins muted and deafened.
@@ -47,11 +50,13 @@ export function startStreamWatch(options: StreamWatchControllerOptions): {
   close(): void;
 } {
   const now = options.now ?? (() => new Date());
-  const vox = options.clankvox ?? createClankvoxSidecar({
-    onError: (message) => {
-      console.warn({ message }, "ClankVox sidecar");
-    },
-  });
+  const vox =
+    options.clankvox ??
+    createClankvoxSidecar({
+      onError: (message) => {
+        console.warn({ message }, "ClankVox sidecar");
+      },
+    });
   let watching: DiscoveredDiscordStream | undefined;
   let joinedForWatch: { guildId: string; channelId: string } | undefined;
   let lastFrameAt = 0;
@@ -66,15 +71,21 @@ export function startStreamWatch(options: StreamWatchControllerOptions): {
   const joinMuted = options.joinMuted !== false;
 
   const report = (frame?: DiscordStreamWatchReport["frame"]): void => {
-    const streams = discovery.listStreams().filter((stream) =>
-      stream.guildId.length === 0 ? true : options.allowlisted(stream.guildId, stream.channelId),
-    );
+    const streams = discovery
+      .listStreams()
+      .filter((stream) =>
+        stream.guildId.length === 0 ? true : options.allowlisted(stream.guildId, stream.channelId),
+      );
     const hasFrame = lastFrameAt > 0 || frame !== undefined;
     const payload: DiscordStreamWatchReport = {
       schemaVersion: 1,
       source: "user_session",
       streams: streams.map((stream) =>
-        toActive(stream, watching?.streamKey === stream.streamKey, hasFrame && watching?.streamKey === stream.streamKey),
+        toActive(
+          stream,
+          watching?.streamKey === stream.streamKey,
+          hasFrame && watching?.streamKey === stream.streamKey,
+        ),
       ),
       decoder,
       ...(vox.available ? {} : { decoderDetail: vox.detail }),

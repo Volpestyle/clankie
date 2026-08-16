@@ -119,7 +119,10 @@ export async function runXaiDeviceLogin(options: XaiDeviceLoginOptions): Promise
   options.onUserCode(device.userCode, device.verificationUri);
   (options.openUrl ?? openWithDefaultBrowser)(verificationUrl);
 
-  const deadline = Math.min(now() + device.expiresInMs, now() + (options.timeoutMs ?? DEFAULT_LOGIN_TIMEOUT_MS));
+  const deadline = Math.min(
+    now() + device.expiresInMs,
+    now() + (options.timeoutMs ?? DEFAULT_LOGIN_TIMEOUT_MS),
+  );
   let intervalMs = device.intervalMs;
 
   for (;;) {

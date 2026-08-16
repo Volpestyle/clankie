@@ -151,7 +151,9 @@ describe("DiscordBridgeReceiptStore", () => {
       occurredAt: "2026-08-15T16:15:00.000Z",
       type: "discord.stream.frame",
     } as const;
-    expect(() => parseDiscordBridgeReceipt({ ...base, data: { jpeg: "...." } })).toThrow("cannot contain jpeg");
+    expect(() => parseDiscordBridgeReceipt({ ...base, data: { jpeg: "...." } })).toThrow(
+      "cannot contain jpeg",
+    );
     expect(
       parseDiscordBridgeReceipt({ ...base, data: { width: 1280, height: 720, userId: "u1" } }).data,
     ).toMatchObject({ width: 1280, height: 720 });

@@ -37,7 +37,7 @@ with a shell is deliberately not one.
 ## Decision
 
 **A diagram is content he describes, not code he writes.** Two tools —
-`draw_er_diagram` and `draw_sequence_diagram` — take the picture's *substance*:
+`draw_er_diagram` and `draw_sequence_diagram` — take the picture's _substance_:
 entities with their fields and key roles, participants with the messages between
 them. The host holds every line of script that reaches the canvas. Request data
 crosses into that script double-encoded, as a JSON string the snippet parses, so
@@ -72,11 +72,11 @@ model does. Nothing reaches the app at boot; the first diagram opens the board.
 
 ## Switches
 
-| Variable                             | Default                                          | Meaning                                       |
-| ------------------------------------ | ------------------------------------------------ | --------------------------------------------- |
-| `CLANKIE_TLDRAW_ENABLED`             | on                                                | Only an explicit falsey value removes the tools |
-| `CLANKIE_TLDRAW_DESIGN_SYSTEM`       | whatever `systems.js` names                       | Which look he draws in                        |
-| `CLANKIE_TLDRAW_DESIGN_SYSTEM_DIR`   | `~/dev/skills/app-dev/tldraw-design-systems/assets` | Where the systems live                        |
+| Variable                           | Default                                             | Meaning                                         |
+| ---------------------------------- | --------------------------------------------------- | ----------------------------------------------- |
+| `CLANKIE_TLDRAW_ENABLED`           | on                                                  | Only an explicit falsey value removes the tools |
+| `CLANKIE_TLDRAW_DESIGN_SYSTEM`     | whatever `systems.js` names                         | Which look he draws in                          |
+| `CLANKIE_TLDRAW_DESIGN_SYSTEM_DIR` | `~/dev/skills/app-dev/tldraw-design-systems/assets` | Where the systems live                          |
 
 ## Consequences
 

@@ -18,7 +18,9 @@ export interface ActivitySnapshotFrame {
 export async function fetchActivitySnapshot(
   env: NodeJS.ProcessEnv = process.env,
   fetchImpl: typeof fetch = fetch,
-  resolveToken: (input: { env: NodeJS.ProcessEnv }) => Promise<string | undefined> = resolveActivityProducerCredential,
+  resolveToken: (input: {
+    env: NodeJS.ProcessEnv;
+  }) => Promise<string | undefined> = resolveActivityProducerCredential,
 ): Promise<ActivitySnapshotFrame | undefined> {
   const token = await resolveToken({ env });
   if (token === undefined) return undefined;

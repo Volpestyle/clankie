@@ -12,13 +12,13 @@ The single-call player returns an action, a monologue, and an optional `speak`.
 Current benchmark evidence shows that speech remains structurally subordinate
 when the same decision handles navigation:
 
-| Attempt                                         | Spoke                        |
-| ----------------------------------------------- | ---------------------------- |
-| Single-call baseline                            | 0 of 12                      |
-| Prompt-only variants                            | 0 of 12                      |
-| Cold-start fix + named audience                 | 0 of 16                      |
-| Prompt discouragement absent (gate is the cap)  | 1 of 16                      |
-| **Voice as its own agent**                      | **7 of 16 wanted, 2 spoken** |
+| Attempt                                        | Spoke                        |
+| ---------------------------------------------- | ---------------------------- |
+| Single-call baseline                           | 0 of 12                      |
+| Prompt-only variants                           | 0 of 12                      |
+| Cold-start fix + named audience                | 0 of 16                      |
+| Prompt discouragement absent (gate is the cap) | 1 of 16                      |
+| **Voice as its own agent**                     | **7 of 16 wanted, 2 spoken** |
 
 The last row is the decision's evidence: with speech as its own decision he
 _wants_ to speak seven times and the rate gate holds five. The gate governs

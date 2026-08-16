@@ -67,8 +67,7 @@ export function clankieCommandTypeaheadFor(
     previousSelected === undefined
       ? -1
       : matches.findIndex((command) => command.name === previousSelected.name);
-  const selectedIndex =
-    exactNameIndex >= 0 ? exactNameIndex : previousIndex >= 0 ? previousIndex : 0;
+  const selectedIndex = exactNameIndex >= 0 ? exactNameIndex : previousIndex >= 0 ? previousIndex : 0;
   return {
     query,
     matches,

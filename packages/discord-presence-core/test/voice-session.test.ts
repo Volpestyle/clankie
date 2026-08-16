@@ -1257,9 +1257,7 @@ describe("ability path", () => {
     const music = new VoiceMusicQueue({
       sinkKind: "audio",
       sink: { play: () => undefined, pause: () => undefined, resume: () => undefined, stop: () => undefined },
-      search: async () => [
-        { videoId: "video-1", url: "https://youtu.be/video-1", title: "Private title" },
-      ],
+      search: async () => [{ videoId: "video-1", url: "https://youtu.be/video-1", title: "Private title" }],
     });
     const harness = await engagedHarness({ music });
     const conversation = harness.conversation();

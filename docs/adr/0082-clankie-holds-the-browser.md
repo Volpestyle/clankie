@@ -103,7 +103,7 @@ projected.
   the approval gate is enforced by the service on every call instead of
   by a step-scoped hook that a replayed turn could skip.
 - Risk classes are assigned per tool against the names `agent-browser mcp
-  --tools all` advertises (64 at v0.33.2), not against CLI command groups. The
+--tools all` advertises (64 at v0.33.2), not against CLI command groups. The
   host drops anything the registry does not declare, so upgrades verify against
   a live `tools/list`.
 - An overlay can deny any `mcp.agent_browser.*` action outright.

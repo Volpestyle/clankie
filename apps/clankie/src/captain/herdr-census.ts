@@ -23,7 +23,10 @@ export type HerdrSessionCensus =
 const CENSUS_TIMEOUT_MS = 5_000;
 const MAX_AGENTS = 48;
 
-function defaultRunner(command: string, args: readonly string[]): Promise<{ stdout: string; stderr: string }> {
+function defaultRunner(
+  command: string,
+  args: readonly string[],
+): Promise<{ stdout: string; stderr: string }> {
   return execFileAsync(command, [...args], { timeout: CENSUS_TIMEOUT_MS, maxBuffer: 1024 * 1024 }).then(
     ({ stdout, stderr }) => ({ stdout: String(stdout), stderr: String(stderr) }),
   );
@@ -99,7 +102,11 @@ export async function readHerdrSessionCensus(
     const { stdout } = await run("herdr", ["agent", "list"]);
     return {
       outcome: "ok",
-      text: formatHerdrSessionCensus(herdrPaneId, parseHerdrAgentList(stdout), readHerdrSummariesFile().agents),
+      text: formatHerdrSessionCensus(
+        herdrPaneId,
+        parseHerdrAgentList(stdout),
+        readHerdrSummariesFile().agents,
+      ),
     };
   } catch (caught) {
     if (caught instanceof Error && "code" in caught && caught.code === "ENOENT") {

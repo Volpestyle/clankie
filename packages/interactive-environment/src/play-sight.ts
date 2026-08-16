@@ -1,7 +1,4 @@
-import {
-  EmbodimentEnvironmentIdSchema,
-  EnvironmentSessionIdSchema,
-} from "@clankie/protocol";
+import { EmbodimentEnvironmentIdSchema, EnvironmentSessionIdSchema } from "@clankie/protocol";
 import { z } from "zod";
 
 /**

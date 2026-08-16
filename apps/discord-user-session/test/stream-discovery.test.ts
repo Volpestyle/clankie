@@ -76,9 +76,7 @@ describe("Discord stream discovery", () => {
         return true;
       },
     });
-    expect(
-      discovery.requestPublish({ kind: "guild", guildId: "g1", channelId: "c1" }),
-    ).toBe(true);
+    expect(discovery.requestPublish({ kind: "guild", guildId: "g1", channelId: "c1" })).toBe(true);
     expect(sent[0]).toMatchObject({ op: 18, d: { type: "guild", guild_id: "g1", channel_id: "c1" } });
   });
 });

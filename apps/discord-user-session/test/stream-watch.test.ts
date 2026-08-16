@@ -17,7 +17,8 @@ function fakeVox(): ClankvoxSidecar & { commands: Record<string, unknown>[] } {
     streamPublishConnect: (input) => commands.push({ type: "stream_publish_connect", ...input }),
     streamPublishDisconnect: (reason) => commands.push({ type: "stream_publish_disconnect", reason }),
     streamPublishPlay: (url) => commands.push({ type: "stream_publish_play", url }),
-    streamPublishBrowserStart: (mimeType) => commands.push({ type: "stream_publish_browser_start", mimeType }),
+    streamPublishBrowserStart: (mimeType) =>
+      commands.push({ type: "stream_publish_browser_start", mimeType }),
     streamPublishBrowserFrame: (input) => commands.push({ type: "stream_publish_browser_frame", ...input }),
     streamPublishStop: () => commands.push({ type: "stream_publish_stop" }),
     onDecodedFrame() {},

@@ -198,7 +198,8 @@ export async function createTldrawHost(options: TldrawHostOptions): Promise<Tldr
   async function installScript(docId: string): Promise<void> {
     const workspace = (await call("POST", `/api/doc/${docId}/script-workspace`)) as { scriptDir?: unknown };
     const scriptDir = typeof workspace.scriptDir === "string" ? workspace.scriptDir : "";
-    if (scriptDir.length === 0) throw new CanvasRefusal("canvas_failed", "tldraw exposed no script directory");
+    if (scriptDir.length === 0)
+      throw new CanvasRefusal("canvas_failed", "tldraw exposed no script directory");
 
     // What was applied before we wrote anything. A fresh board already reports
     // `applied` for its starter template, so waiting on the state alone hands
@@ -250,7 +251,8 @@ export async function createTldrawHost(options: TldrawHostOptions): Promise<Tldr
     for (;;) {
       const status = (await call("GET", `/api/doc/${docId}/script-status`)) as ScriptStatus;
       if (status.state === "error") {
-        const detail = typeof status.lastApplyError === "string" ? status.lastApplyError : "script apply failed";
+        const detail =
+          typeof status.lastApplyError === "string" ? status.lastApplyError : "script apply failed";
         throw new CanvasRefusal("canvas_failed", detail.slice(0, 400));
       }
       if (
@@ -317,7 +319,8 @@ return { ...(await d.${builder}(editor, helpers, DATA, ${scale})), system: d.act
         throw new CanvasRefusal("canvas_failed", "the canvas produced no image");
       }
       const bytes = Buffer.from(url.slice(comma + 1), "base64");
-      if (bytes.byteLength === 0) throw new CanvasRefusal("canvas_failed", "the canvas produced an empty image");
+      if (bytes.byteLength === 0)
+        throw new CanvasRefusal("canvas_failed", "the canvas produced an empty image");
       if (bytes.byteLength > COMFORTABLE_ARTIFACT_BYTES && scale > 1) {
         scale = 1;
         continue;
@@ -343,10 +346,7 @@ return { ...(await d.${builder}(editor, helpers, DATA, ${scale})), system: d.act
     }
   }
 
-  async function guarded(
-    builder: "buildEr" | "buildSequence",
-    data: unknown,
-  ): Promise<DrawDiagramResult> {
+  async function guarded(builder: "buildEr" | "buildSequence", data: unknown): Promise<DrawDiagramResult> {
     try {
       return await render(builder, data);
     } catch (error) {

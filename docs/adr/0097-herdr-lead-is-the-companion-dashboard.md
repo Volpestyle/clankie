@@ -9,13 +9,13 @@ extends the herdr-as-fleet decision in the pi rewrite
 
 Clankie leads coding agents through the herdr CLI over bash. The service is
 his durable body — Discord, memory, games, sessions that survive a pane
-closing. The operator console is meant to sit *in* a herdr pane, in the
+closing. The operator console is meant to sit _in_ a herdr pane, in the
 same session as the agents he leads. That is the seat where he thrives.
 
 The herdr-lead skill is the lead playbook plus a live board (roster, swarm
 map, worktrees, tickets, library) with a headless digest (`herdr-lead state`)
 and an idempotent `herdr-lead split`. Two things do not fit. The skill
-assumed the lead process *is* the pane (`HERDR_ENV=1`, bare `herdr-lead` in
+assumed the lead process _is_ the pane (`HERDR_ENV=1`, bare `herdr-lead` in
 this process) — his shell still runs in the service. And the console could
 see sibling agents (`HerdrRoster`) but has no persistent picture of the
 fleet sitting next to the conversation.

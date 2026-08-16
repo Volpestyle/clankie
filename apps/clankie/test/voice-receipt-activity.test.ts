@@ -6,11 +6,7 @@ import { readVoiceSpeechSnapshot } from "../src/voice-receipt-activity.ts";
 
 const room = { guildId: "guild-1", channelId: "channel-1" } as const;
 
-function receipt(
-  type: string,
-  occurredAt: string,
-  data: Record<string, string | number | boolean>,
-): string {
+function receipt(type: string, occurredAt: string, data: Record<string, string | number | boolean>): string {
   return JSON.stringify({ schemaVersion: 1, id: occurredAt, occurredAt, type, data });
 }
 

@@ -301,7 +301,9 @@ async function postUserSessionControl(
       body: JSON.stringify(body),
     });
     if (!response.ok) {
-      throw new Error(`discord_presence_go_live_media_unavailable:user_session_control_${String(response.status)}`);
+      throw new Error(
+        `discord_presence_go_live_media_unavailable:user_session_control_${String(response.status)}`,
+      );
     }
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("discord_presence_go_live_media_unavailable")) {

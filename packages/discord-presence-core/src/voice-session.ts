@@ -1803,8 +1803,7 @@ export class DiscordVoiceSession {
         deliveryId: settled.deliveryId,
         ...(settled.speakerId === undefined ? {} : { userId: settled.speakerId }),
         phase: meta === undefined || meta.status === "completed" ? "completed" : "failed",
-        outcome:
-          (meta?.audioBytes ?? 0) > 0 ? "audio" : settled.toolCalled === true ? "tool" : "silent",
+        outcome: (meta?.audioBytes ?? 0) > 0 ? "audio" : settled.toolCalled === true ? "tool" : "silent",
         ...(meta?.responseId === undefined ? {} : { responseId: meta.responseId }),
         ...(meta?.audioBytes === undefined ? {} : { audioBytes: meta.audioBytes }),
         ...(meta?.textCharacters === undefined ? {} : { textCharacters: meta.textCharacters }),
@@ -2250,7 +2249,12 @@ function parseMusicToolArguments(
   const action = name === MUSIC_QUEUE_TOOL_NAME ? "queue" : "play";
   const url = typeof record.url === "string" && isAllowedMusicUrl(record.url) ? record.url : undefined;
   const index = typeof record.index === "number" && Number.isInteger(record.index) ? record.index : undefined;
-  return { kind: "select", action, ...(url === undefined ? {} : { url }), ...(index === undefined ? {} : { index }) };
+  return {
+    kind: "select",
+    action,
+    ...(url === undefined ? {} : { url }),
+    ...(index === undefined ? {} : { index }),
+  };
 }
 
 function parseAskClankieRequest(argumentsJson: string): string | undefined {

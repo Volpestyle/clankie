@@ -487,10 +487,7 @@ async function executeCaptainDiscordAction(
     action = `discord.presence.${input.action}`;
     payload = { kind: input.action, channelId, messageId: input.messageId, emoji: input.emoji };
   } else if (input.action === "create_thread" || input.action === "join_thread") {
-    if (
-      !guildIds.has(input.guildId) ||
-      (channelIds.size > 0 && !channelIds.has(input.channelId))
-    ) {
+    if (!guildIds.has(input.guildId) || (channelIds.size > 0 && !channelIds.has(input.channelId))) {
       return { ok: false, message: "Threads only work in my admitted server channels." };
     }
     action = `discord.presence.${input.action}`;
@@ -515,9 +512,7 @@ async function executeCaptainDiscordAction(
       return { ok: false, message: "I need to be in your admitted voice channel first." };
     }
     action =
-      input.action === "watch_start"
-        ? "discord.presence.go_live_start"
-        : "discord.presence.go_live_stop";
+      input.action === "watch_start" ? "discord.presence.go_live_start" : "discord.presence.go_live_stop";
     payload =
       input.action === "watch_start"
         ? { kind: "go_live_start", guildId: input.guildId, channelId }

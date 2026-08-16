@@ -19,7 +19,7 @@ honestly with no. The herdr socket is reachable from the service
 (`herdr pane list` works without `HERDR_ENV=1`); the tools are simply not
 on the session.
 
-The owner still wants to drive herdr from Discord — but only when *they*
+The owner still wants to drive herdr from Discord — but only when _they_
 ask. Ambient slash-command authority and the DM-policy owner are the wrong
 bindings: ADR 0050 already refused to reuse `ownerUserId` for voice so two
 unrelated policies would not move together, and `ambientUserIds` is the

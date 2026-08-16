@@ -4,7 +4,6 @@ Status: accepted (James, 2026-07-25). The transport, gating, and shared
 participation core are implemented; live Discord evidence remains a deployment
 gate, and Go Live media stays sequenced behind [ADR 0024](0024-discord-dual-plane-presence.md).
 
-
 ## Context
 
 [ADR 0024](0024-discord-dual-plane-presence.md) defines two Discord planes that

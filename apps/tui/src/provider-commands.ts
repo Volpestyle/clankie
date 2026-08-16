@@ -393,11 +393,7 @@ function alignStatusRows(rows: ReadonlyArray<{ id: string; detail: string }>): s
   return rows.map((row) => `  ${row.id.padEnd(width)}  ${row.detail}`);
 }
 
-function describeCredentialKind(
-  id: string,
-  redacted: RedactedCredential,
-  now: number = Date.now(),
-): string {
+function describeCredentialKind(id: string, redacted: RedactedCredential, now: number = Date.now()): string {
   if (redacted.type === "wellknown") return "well-known";
   if (redacted.type === "api") {
     if (id === DISCORD_BOT_PROVIDER_ID) return "bot token";
@@ -857,8 +853,7 @@ async function showProviderStatus(
       selected !== undefined && selected !== configured?.providerId
         ? ` (pending /model; configured ${configured?.providerId ?? "unset"})`
         : "";
-    const kind =
-      selected === undefined ? "" : ` · ${providerConnectionHint(selected, listed, services.env)}`;
+    const kind = selected === undefined ? "" : ` · ${providerConnectionHint(selected, listed, services.env)}`;
     return `${role}: ${selected ?? "unset — run /provider"}${kind}${pending}`;
   });
   shell.insertCommandResult("/provider status", lines.join("\n"), "success");

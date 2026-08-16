@@ -94,7 +94,15 @@ describe("Discord voice evidence (ADR 0057)", () => {
       { type: "overlap", ...scope, userId: "user-2", activeCaptureCount: 2 },
       { type: "interrupted", ...scope, userId: "user-1", phase: "playing" },
       { type: "failed", ...scope, stage: "captain_handoff", code: "voice_captain_turn_failed" },
-      { type: "left", ...scope, stayId: "stay-1", inputTokens: 120, outputTokens: 40, spokenCount: 2, narrationSuppressed: 5 },
+      {
+        type: "left",
+        ...scope,
+        stayId: "stay-1",
+        inputTokens: 120,
+        outputTokens: 40,
+        spokenCount: 2,
+        narrationSuppressed: 5,
+      },
       { type: "possessor_connection", phase: "attached", attachedCount: 1 },
       { type: "possessor_room", listening: true, attachedCount: 1, deliveredCount: 1 },
       {

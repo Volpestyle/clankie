@@ -90,11 +90,13 @@ describe("ClankieTranscriptMarkdownBlock", () => {
       theme,
     );
     expect(skillDoneBlock.render(48)[0]?.trimEnd()).toBe("✦ herdr skill completed");
-    expect(new ClankieTranscriptMarkdownBlock("**Skill: herdr-lead - loaded**", theme).render(48)[0]?.trimEnd()).toBe(
-      "✦ herdr-lead skill loaded",
-    );
     expect(
-      new ClankieTranscriptMarkdownBlock("**Skill: herdr-lead - failed to load**", theme).render(48)[0]?.trimEnd(),
+      new ClankieTranscriptMarkdownBlock("**Skill: herdr-lead - loaded**", theme).render(48)[0]?.trimEnd(),
+    ).toBe("✦ herdr-lead skill loaded");
+    expect(
+      new ClankieTranscriptMarkdownBlock("**Skill: herdr-lead - failed to load**", theme)
+        .render(48)[0]
+        ?.trimEnd(),
     ).toBe("✦ herdr-lead skill failed to load");
   });
 

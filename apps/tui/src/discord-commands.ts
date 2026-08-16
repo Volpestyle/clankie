@@ -342,8 +342,7 @@ export async function runDiscordWizard(
             value: "active",
             label: "Active body",
             hint: settings.activeBody === "user_session" ? "lab user" : "official bot",
-            description:
-              "One mouth. The launcher starts only this process. Switch and `clankie restart`.",
+            description: "One mouth. The launcher starts only this process. Switch and `clankie restart`.",
           },
           {
             value: "lab",
@@ -527,8 +526,7 @@ async function editSystemActors(shell: ClankieFaceShell, services: DiscordComman
   const typed = await flow.readText({
     message:
       "Discord user ids who may ask him to control this machine (comma separated) — bash, files, herdr. Blank keeps the current list. Empty list means nobody; Discord stays social.",
-    placeholder:
-      current.systemActorUserIds.join(",") || current.ownerUserId || "your Discord user id",
+    placeholder: current.systemActorUserIds.join(",") || current.ownerUserId || "your Discord user id",
     validate: validateSnowflakeList,
   });
   if (typed === undefined) return;
@@ -735,8 +733,7 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
   );
 }
 
-const LAB_ACKNOWLEDGEMENT =
-  "I accept Discord ToS and account risk for this personal-lab user-session body.";
+const LAB_ACKNOWLEDGEMENT = "I accept Discord ToS and account risk for this personal-lab user-session body.";
 
 async function editActiveBody(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
   const flow = shell.setupFlow;
@@ -814,8 +811,7 @@ async function editLabBody(shell: ClankieFaceShell, services: DiscordCommandServ
   if (guilds === undefined) return;
 
   const channels = await flow.readText({
-    message:
-      "Channel ids the lab body may enter (comma separated) — include the voice channel you share in",
+    message: "Channel ids the lab body may enter (comma separated) — include the voice channel you share in",
     placeholder: current.userSessionChannelIds.join(",") || "channel id",
     validate: validateSnowflakeList,
   });
@@ -855,7 +851,10 @@ async function editLabBody(shell: ClankieFaceShell, services: DiscordCommandServ
         // Nothing active is fine — disable is the intent.
       }
     }
-    flow.renderLine("Lab user body disabled. Restart with `clankie restart` so the process stays down.", "success");
+    flow.renderLine(
+      "Lab user body disabled. Restart with `clankie restart` so the process stays down.",
+      "success",
+    );
     return;
   }
 

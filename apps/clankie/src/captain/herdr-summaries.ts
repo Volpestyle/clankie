@@ -16,7 +16,10 @@ export interface HerdrSummariesFile {
 export function herdrSummariesPath(env: NodeJS.ProcessEnv = process.env): string {
   return (
     env.HERD_LEAD_SUMMARIES_CACHE?.trim() ||
-    join(env.HERDR_PLUGIN_STATE_DIR?.trim() || join(homedir(), ".local/state/herdr/plugins/herd-lead"), "summaries.json")
+    join(
+      env.HERDR_PLUGIN_STATE_DIR?.trim() || join(homedir(), ".local/state/herdr/plugins/herd-lead"),
+      "summaries.json",
+    )
   );
 }
 

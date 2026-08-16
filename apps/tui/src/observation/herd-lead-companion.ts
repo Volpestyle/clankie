@@ -40,7 +40,12 @@ function companionEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 }
 
 function parseOk(stdout: string, stderr: string): Extract<HerdLeadCompanionResult, { outcome: "ok" }> {
-  const paneId = stdout.trim().split(/\r?\n/u).find((line) => line.trim().length > 0)?.trim() ?? "opened";
+  const paneId =
+    stdout
+      .trim()
+      .split(/\r?\n/u)
+      .find((line) => line.trim().length > 0)
+      ?.trim() ?? "opened";
   return {
     outcome: "ok",
     paneId,
@@ -139,7 +144,10 @@ export function formatHerdLeadCompanionResult(
     return { text: "herdr-lead board is not open. `/board` opens it.", tone: "success" };
   }
   if (result.outcome === "closed") {
-    return { text: `herdr-lead board closed (${result.paneId}). \`/board\` opens it again.`, tone: "success" };
+    return {
+      text: `herdr-lead board closed (${result.paneId}). \`/board\` opens it again.`,
+      tone: "success",
+    };
   }
   const where = result.alreadyOpen ? "already open" : verb === "focus" ? "focused" : "opened";
   return {

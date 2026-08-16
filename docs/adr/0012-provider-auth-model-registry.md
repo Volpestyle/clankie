@@ -13,8 +13,7 @@ The same store owns the host-local `clankie_operator` bearer. First-run bootstra
 mints it with 256 bits of entropy, operator clients auto-load it, and the
 service authorization boundary resolves it per request so one broker rotation
 invalidates prior local credentials immediately. Environment input is an
-explicit CI/test override and health exposes only content-free consistency.
-3. **Provider layer** (`packages/model-provider`) — non-secret config in
+explicit CI/test override and health exposes only content-free consistency. 3. **Provider layer** (`packages/model-provider`) — non-secret config in
 `~/.config/clankie/clankie.json` with a per-repo override, deep-merged and
 zod-validated; provider resolution (credential present ∪ env var declared by
 the registry ∪ config-declared); AI SDK instantiation with

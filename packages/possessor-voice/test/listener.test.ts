@@ -86,7 +86,9 @@ describe("possessor voice listener", () => {
     const socket = await attach(port);
     socket.send(narration("walked into a wall by the lab"));
     await vi.waitFor(() =>
-      expect(narrate).toHaveBeenCalledWith("walked into a wall by the lab", { deliveryId: "accepted-narration" }),
+      expect(narrate).toHaveBeenCalledWith("walked into a wall by the lab", {
+        deliveryId: "accepted-narration",
+      }),
     );
     await vi.waitFor(() =>
       expect(evidence).toContainEqual({

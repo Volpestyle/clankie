@@ -111,7 +111,13 @@ export async function readVoiceSpeechSnapshot(
   }
   return {
     recent,
-    currentStay: { ...(stayId === undefined ? {} : { stayId }), spoken, suppressed, inputTokens, outputTokens },
+    currentStay: {
+      ...(stayId === undefined ? {} : { stayId }),
+      spoken,
+      suppressed,
+      inputTokens,
+      outputTokens,
+    },
   };
 }
 

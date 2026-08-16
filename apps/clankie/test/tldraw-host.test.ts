@@ -27,7 +27,12 @@ function fakeCanvas(scriptDir: string): FakeCanvas {
     scriptDir,
     scriptState: "applied",
     statusReads: 0,
-    execResult: () => ({ url: `data:image/png;base64,${PNG_BASE64}`, width: 800, height: 600, system: "turbopuffer" }),
+    execResult: () => ({
+      url: `data:image/png;base64,${PNG_BASE64}`,
+      width: 800,
+      height: 600,
+      system: "turbopuffer",
+    }),
     fetchImpl: (async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = new URL(String(input)).pathname;
       const body = init?.body === undefined ? undefined : JSON.parse(String(init.body));
@@ -63,7 +68,14 @@ function fakeCanvas(scriptDir: string): FakeCanvas {
 /** The three files the host actually reads out of the design system. */
 async function fakeDesignSystem(directory: string): Promise<void> {
   await mkdir(directory, { recursive: true });
-  for (const file of ["config.js", "tpPanel.js", "tpPanelTool.js", "tpTable.js", "tpSequence.js", "main.js"]) {
+  for (const file of [
+    "config.js",
+    "tpPanel.js",
+    "tpPanelTool.js",
+    "tpTable.js",
+    "tpSequence.js",
+    "main.js",
+  ]) {
     await writeFile(join(directory, file), `// ${file}\n`);
   }
   await writeFile(
@@ -170,7 +182,10 @@ describe("tldraw host", () => {
     // Everything the request contributed lives inside one JSON string literal
     // on the first line, and comes back out as data rather than as statements.
     const literal = preamble.slice(preamble.indexOf("(") + 1, preamble.lastIndexOf(")"));
-    expect(JSON.parse(JSON.parse(literal) as string)).toMatchObject({ title: hostile, tables: [{ name: hostile }] });
+    expect(JSON.parse(JSON.parse(literal) as string)).toMatchObject({
+      title: hostile,
+      tables: [{ name: hostile }],
+    });
 
     // The executable remainder is the host's own, verbatim.
     expect(rest.join("\n")).toBe(

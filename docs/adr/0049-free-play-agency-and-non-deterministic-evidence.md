@@ -37,12 +37,12 @@ a missing capability is refused by the same machinery that refuses a script.
 A model-decided run cannot be replayed, so determinism is unavailable as
 evidence. A different evidence model applies:
 
-| Property           | How it is evidenced                                                                                             |
-| ------------------ | --------------------------------------------------------------------------------------------------------------- |
+| Property           | How it is evidenced                                                                                            |
+| ------------------ | -------------------------------------------------------------------------------------------------------------- |
 | **Legality**       | Every action passed the adapter's catalogue and bounds, or is recorded as `rejected_by_adapter`                |
 | **Causal linkage** | Each turn records the observation digest the decision is made from, the monologue, the action, and the outcome |
-| **Bounds**         | Model text is length-capped; frames and inputs are capped by the session's resource bounds                      |
-| **Progress**       | Distinct tiles, maps entered, turns since a new tile, and accepted actions per new tile                         |
+| **Bounds**         | Model text is length-capped; frames and inputs are capped by the session's resource bounds                     |
+| **Progress**       | Distinct tiles, maps entered, turns since a new tile, and accepted actions per new tile                        |
 
 **The deterministic scenarios are untouched and still pass.** Determinism is not
 weakened to accommodate free play; a second, differently-evidenced mode is added
@@ -230,9 +230,9 @@ weakly positive, and this is stated rather than presented as a win.
 same twenty turns:
 
 | model           | exits the bedroom | tiles | actions per new tile |
-| --------------- | ---------------- | ----- | -------------------- |
-| `gpt-5.5`       | 1 run of 3       | 11-14 | 1.5-2.0              |
-| `gpt-5.6-terra` | **2 runs of 2**  | 14-16 | **1.5**              |
+| --------------- | ----------------- | ----- | -------------------- |
+| `gpt-5.5`       | 1 run of 3        | 11-14 | 1.5-2.0              |
+| `gpt-5.6-terra` | **2 runs of 2**   | 14-16 | **1.5**              |
 
 In one terra run he is downstairs by turn 2 and spent the remainder working out
 the front door — "the front-door mat is visibly down-left of me, not directly
@@ -258,12 +258,12 @@ choosing silence.
 
 What is tried, in order, and what it tells us:
 
-| Attempt                                                      | Result                                      |
-| ------------------------------------------------------------ | ------------------------------------------- |
+| Attempt                                                      | Result                                        |
+| ------------------------------------------------------------ | --------------------------------------------- |
 | Prompt framing: silence is normal                            | 0/12 — over-correction; he takes it literally |
-| Split channels: monologue is reasoning, `speak` is the aside | 0/12                                        |
-| Give him an audience to speak to                             | 0/12                                        |
-| Schema field descriptions, then a concrete example           | 0/12                                        |
+| Split channels: monologue is reasoning, `speak` is the aside | 0/12                                          |
+| Give him an audience to speak to                             | 0/12                                          |
+| Schema field descriptions, then a concrete example           | 0/12                                          |
 
 The likely cause is visible in the transcripts rather than the numbers: **all the
 character is already going into `monologue`** — "I bonked the help sign.

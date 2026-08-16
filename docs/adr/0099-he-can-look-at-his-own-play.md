@@ -11,7 +11,7 @@ one character. People in the call can watch the activity surface. The mouth
 receives pushed `While playing, Clankie just:` notes and a briefing that he is
 at the controls, but neither carries pixels. `observe_current_activity` stays
 digest-only: "frame bytes stay on the rendered-surface media plane."
-`observe_share` returns a JPEG of *someone else's* Discord share.
+`observe_share` returns a JPEG of _someone else's_ Discord share.
 
 Without a direct read seam, a screen description invents pixels or pays a full
 captain turn for a lookup. Dumping the journal into the realtime session breaks

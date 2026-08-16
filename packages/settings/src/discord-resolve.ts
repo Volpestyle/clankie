@@ -119,10 +119,7 @@ export function resolveDiscordActiveBody(env: NodeJS.ProcessEnv = process.env): 
   return parseDiscordActiveBody(env.DISCORD_ACTIVE_BODY);
 }
 
-export function isDiscordBodyActive(
-  body: DiscordActiveBody,
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
+export function isDiscordBodyActive(body: DiscordActiveBody, env: NodeJS.ProcessEnv = process.env): boolean {
   return resolveDiscordActiveBody(env) === body;
 }
 

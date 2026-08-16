@@ -47,12 +47,7 @@ export const FreePlayJournalTurnSchema = z
      * Absent when the turn was not worth reporting. Same id as the voice
      * submission / response / suppressed receipts.
      */
-    speechDeliveryId: z
-      .string()
-      .min(1)
-      .max(128)
-      .regex(/^\S+$/u)
-      .optional(),
+    speechDeliveryId: z.string().min(1).max(128).regex(/^\S+$/u).optional(),
   })
   .strict();
 export type FreePlayJournalTurn = z.infer<typeof FreePlayJournalTurnSchema>;

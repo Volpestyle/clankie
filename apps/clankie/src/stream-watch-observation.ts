@@ -44,7 +44,7 @@ export class DiscordStreamWatchProjection {
         height: parsed.frame.height,
         jpegBase64: parsed.frame.jpegBase64,
         capturedAt: parsed.frame.capturedAt,
-        ...(this.writeShareArtifact(jpeg) ?? {}),
+        ...this.writeShareArtifact(jpeg),
       };
     }
     const merged = mergeStreams(this.bySource);

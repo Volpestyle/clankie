@@ -55,7 +55,7 @@ active. High-assurance and team profiles still deny the transport.
 ## Consequences
 
 - `clankie restart` starts the lab body only after settings + opt-in + token
-  + `activeBody=user_session`, and stops the official bot.
+  - `activeBody=user_session`, and stops the official bot.
 - Without `CLANKVOX_BIN`, shares are listed and he cannot see the picture.
 - Publish (`go_live_start`) joins the voice channel, sends OP18 then OP22
   unpause, connects ClankVox, and plays either an optional `sourceUrl` or

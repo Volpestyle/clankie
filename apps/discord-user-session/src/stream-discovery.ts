@@ -37,11 +37,7 @@ export interface DiscordStreamSender {
 const STREAM_DISCOVERY_TTL_MS = 12 * 60 * 60 * 1000;
 const MAX_DISCOVERED_STREAMS = 128;
 
-export function buildDiscordStreamKey(input: {
-  guildId: string;
-  channelId: string;
-  userId: string;
-}): string {
+export function buildDiscordStreamKey(input: { guildId: string; channelId: string; userId: string }): string {
   return `guild:${input.guildId}:${input.channelId}:${input.userId}`;
 }
 

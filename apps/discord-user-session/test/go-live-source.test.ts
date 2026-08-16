@@ -27,6 +27,8 @@ describe("Go Live activity snapshot source", () => {
   });
 
   it("returns nothing when no producer token exists", async () => {
-    await expect(fetchActivitySnapshot({} as NodeJS.ProcessEnv, fetch, async () => undefined)).resolves.toBeUndefined();
+    await expect(
+      fetchActivitySnapshot({} as NodeJS.ProcessEnv, fetch, async () => undefined),
+    ).resolves.toBeUndefined();
   });
 });
