@@ -7,7 +7,6 @@ export interface DiscordRoleBindings {
    * time the role is edited in the Discord UI.
    */
   readonly ambientUserIds: ReadonlySet<string>;
-  readonly approvalRoleIds: ReadonlySet<string>;
 }
 
 /** Who is asking. Role membership alone cannot identify a specific operator. */
@@ -19,25 +18,16 @@ export interface DiscordCommandPrincipal {
 /**
  * Who may move Clankie in and out of a voice channel.
  *
- * `ambient` keeps voice behind the same binding as mission creation and
- * steering. `guild_members` opens it to every member of a guild that is already
- * on the deny-by-default voice allowlist.
- *
- * The split exists because the ambient tier was gating two very different blast
- * radii through one list. Creating a mission spawns workers that execute and
- * write code; summoning Clankie into a call spends speech budget and makes
- * noise. Forcing both through one allowlist means opening voice to a room also
- * opens code execution to it — so operators either lock voice down harder than
- * they want, or open execution wider than they meant. Neither is the intent
- * ADR 0045 encodes, and `guild_members` never widens anything but voice
- * presence: mission, steering, and memory commands stay on the ambient binding.
+ * `ambient` keeps voice behind the same role binding as the other ambient
+ * commands. `guild_members` opens it to every member of a guild that is
+ * already on the deny-by-default voice allowlist, and never widens anything
+ * but voice presence: person-memory commands stay on the ambient binding.
  */
 export type DiscordVoiceJoinPolicy = "ambient" | "guild_members";
 
 export type DiscordAuthorityDecision =
   | { allowed: true }
-  | { allowed: false; code: "role_not_authorized" | "authenticated_surface_required"; message: string };
-export type DiscordAuthorityRefusal = Extract<DiscordAuthorityDecision, { allowed: false }>;
+  | { allowed: false; code: "role_not_authorized"; message: string };
 
 export function parseRoleIds(value: string | undefined): ReadonlySet<string> {
   return new Set(
@@ -82,32 +72,6 @@ export function authorizeVoicePresenceCommand(
 ): DiscordAuthorityDecision {
   if (policy === "guild_members") return { allowed: true };
   return authorizeAmbientCommand(principal, bindings);
-}
-
-export function refuseAmbientApproval(
-  memberRoleIds: ReadonlySet<string>,
-  bindings: DiscordRoleBindings,
-  authenticatedSurfaceUrl: string,
-  approvalId: string,
-): DiscordAuthorityRefusal {
-  if (!intersects(memberRoleIds, bindings.approvalRoleIds)) {
-    return {
-      allowed: false,
-      code: "role_not_authorized",
-      message:
-        "Refused visibly: none of your Discord roles is mapped to receive approval handoffs for this workspace.",
-    };
-  }
-
-  const destination = new URL(authenticatedSurfaceUrl);
-  destination.searchParams.set("approval", approvalId);
-  return {
-    allowed: false,
-    code: "authenticated_surface_required",
-    message:
-      `Refused on Discord: this is an ambient channel and cannot record approval decisions. ` +
-      `Continue on the authenticated operator surface: ${destination.toString()}`,
-  };
 }
 
 function intersects(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {

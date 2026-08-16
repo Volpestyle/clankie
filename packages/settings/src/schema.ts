@@ -27,6 +27,15 @@ export const DiscordSettingsSchema = z
     ambientUserIds: SnowflakeListSchema,
     approvalRoleIds: SnowflakeListSchema,
     ownerUserId: SnowflakeSchema.optional(),
+    /**
+     * Discord users whose text turns get the operator's machine tools
+     * (bash, read, write, edit — and therefore herdr). Empty means nobody:
+     * Discord stays social. The operator console is always privileged and
+     * does not consult this list. Distinct from `ownerUserId` (DM policy)
+     * and `ambientUserIds` (slash-command tier) so those policies can move
+     * without handing out a shell.
+     */
+    systemActorUserIds: SnowflakeListSchema,
 
     textIngressEnabled: z.boolean().default(false),
     ingressGuildIds: SnowflakeListSchema,
@@ -64,6 +73,32 @@ export const DiscordSettingsSchema = z
      * the way an env-only flag did.
      */
     possessorVoiceEnabled: z.boolean().default(false),
+
+    /**
+     * Which Discord body is the mouth. The launcher starts only this process.
+     * Both tokens stay stored; only one gateway is live. `user_session` still
+     * requires enablement, allowlists, and the durable opt-in.
+     */
+    activeBody: z.enum(["bot", "user_session"]).default("bot"),
+
+    /**
+     * Personal-lab user-session body (ADR 0048). Off by default. Storing a
+     * user token is not enough — this flag, the allowlists, the durable
+     * opt-in, and `activeBody=user_session` must all be set before the
+     * launcher starts that process.
+     */
+    userSessionEnabled: z.boolean().default(false),
+    userSessionGuildIds: SnowflakeListSchema,
+    userSessionChannelIds: SnowflakeListSchema,
+    /**
+     * Whether the lab body may join voice as a participant (talk). Watch
+     * joins a channel muted on its own when a share starts and does not
+     * require this flag.
+     */
+    userSessionVoiceEnabled: z.boolean().default(false),
+    userSessionVoiceChannelIds: SnowflakeListSchema,
+    userSessionDmPolicy: z.enum(["deny", "owner_only", "allowlist"]).default("owner_only"),
+    userSessionDmUserIds: SnowflakeListSchema,
 
     /** Activity plane (ADR 0047): surface → embedded application id. */
     activityApplicationIdGba: SnowflakeSchema.optional(),
@@ -117,12 +152,8 @@ export const PersonaSettingsSchema = z
     characterNotes: z.string().max(4_000).default(""),
     /** How readily he speaks, and how much room he takes when he does. */
     chattiness: z.enum(["quiet", "balanced", "chatty"]).default("balanced"),
-    /**
-     * What earns a reply in an admitted text channel. `addressed` is the
-     * default because an open channel allowlist otherwise means replying to
-     * every message in the server.
-     */
-    replyPolicy: z.enum(["addressed", "all"]).default("addressed"),
+    /** What he perceives in admitted text channels; silence remains his decision. */
+    replyPolicy: z.enum(["addressed", "all"]).default("all"),
     /**
      * How many messages may pass in a channel, after he last replied there,
      * before he stops reading it live and lets it pile up until he next checks
@@ -174,6 +205,47 @@ export const VoiceSettingsSchema = z
   });
 export type VoiceSettings = z.infer<typeof VoiceSettingsSchema>;
 
+/**
+ * Linear is a tool connector, not a body: the API key lives in the credential
+ * broker under provider id `linear`. This file only holds the public default
+ * team so creating an issue does not ask every time.
+ */
+export const LinearSettingsSchema = z
+  .object({
+    /** Linear team UUID (not the ENG-style key). */
+    defaultTeamId: z.string().min(1).max(64).optional(),
+  })
+  .strict();
+export type LinearSettings = z.infer<typeof LinearSettingsSchema>;
+
+const HostnameSchema = z
+  .string()
+  .min(1)
+  .max(253)
+  .regex(
+    /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$/u,
+    {
+      message: "must be a hostname",
+    },
+  );
+
+/**
+ * Mailbox coordinates. The password is broker-owned under provider id `email`.
+ * Hosts and the username are public identifiers an operator wants to read back.
+ */
+export const EmailSettingsSchema = z
+  .object({
+    imapHost: HostnameSchema.optional(),
+    imapPort: z.number().int().min(1).max(65535).default(993),
+    smtpHost: HostnameSchema.optional(),
+    smtpPort: z.number().int().min(1).max(65535).default(587),
+    username: z.string().min(1).max(320).optional(),
+    /** IMAP implicit TLS (usually port 993). SMTP uses its own port to pick STARTTLS vs implicit. */
+    secure: z.boolean().default(true),
+  })
+  .strict();
+export type EmailSettings = z.infer<typeof EmailSettingsSchema>;
+
 export const ClankieSettingsSchema = z
   .object({
     schemaVersion: z.literal(SETTINGS_SCHEMA_VERSION),
@@ -182,6 +254,8 @@ export const ClankieSettingsSchema = z
     discord: DiscordSettingsSchema.default(() => DiscordSettingsSchema.parse({})),
     persona: PersonaSettingsSchema.default(() => PersonaSettingsSchema.parse({})),
     voice: VoiceSettingsSchema.default(() => VoiceSettingsSchema.parse({})),
+    linear: LinearSettingsSchema.default(() => LinearSettingsSchema.parse({})),
+    email: EmailSettingsSchema.default(() => EmailSettingsSchema.parse({})),
   })
   .strict();
 export type ClankieSettings = z.infer<typeof ClankieSettingsSchema>;

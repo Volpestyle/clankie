@@ -6,7 +6,21 @@ import {
   type DiscordSettings,
 } from "@clankie/settings";
 import type { RedactedCredential } from "@clankie/credential-broker";
+import type { DiscordUserSessionOptIn } from "@clankie/protocol";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
+
+export interface DiscordUserSessionOptInClient {
+  inspectDiscordUserSessionOptIn(): Promise<DiscordUserSessionOptIn | undefined>;
+  recordDiscordUserSessionOptIn(request: {
+    schemaVersion: 1;
+    characterId: string;
+    acknowledgement: string;
+    guildIds: string[];
+    channelIds: string[];
+    dmPolicy: "deny" | "owner_only" | "allowlist";
+  }): Promise<DiscordUserSessionOptIn>;
+  revokeDiscordUserSessionOptIn(): Promise<DiscordUserSessionOptIn | undefined>;
+}
 
 export interface DiscordCommandServices {
   settings: SettingsStore;
@@ -21,6 +35,8 @@ export interface DiscordCommandServices {
    * otherwise require typing the provider id by hand.
    */
   setCredential: (providerId: string, key: string) => Promise<void>;
+  /** Operator API, when the console is authenticated to the clankie service. */
+  userSessionOptIn?: DiscordUserSessionOptInClient;
 }
 
 /** Discord secrets, all broker-owned. Never stored in settings.json. */
@@ -69,11 +85,16 @@ export function buildDiscordCommands(services: DiscordCommandServices): FaceShel
       name: "discord",
       aliases: [],
       description: "Configure Discord ids, allowlists, and the activity plane",
-      argumentHint: "[status]",
+      argumentHint: "[status|invite]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
-        if (argument.trim() === "status") {
+        const selector = argument.trim().toLowerCase();
+        if (selector === "status") {
           await showDiscordStatus(shell, services);
+          return;
+        }
+        if (selector === "invite") {
+          await showDiscordInvite(shell, services);
           return;
         }
         await runDiscordWizard(shell, services);
@@ -81,6 +102,29 @@ export function buildDiscordCommands(services: DiscordCommandServices): FaceShel
     },
   ];
 }
+
+/**
+ * Bot invite permissions: View Channel, Send Messages, Embed Links, Attach
+ * Files, Read Message History, Add Reactions, Connect, Speak, Use VAD, Use
+ * Application Commands. Message Content is a privileged *intent*, not a bit
+ * here — the primer tells the owner to flip it in the portal.
+ */
+export const DISCORD_BOT_INVITE_PERMISSIONS = 2_184_301_632;
+
+export function discordBotInviteUrl(applicationId: string): string {
+  return (
+    `https://discord.com/oauth2/authorize?client_id=${applicationId}` +
+    `&permissions=${String(DISCORD_BOT_INVITE_PERMISSIONS)}&scope=bot%20applications.commands`
+  );
+}
+
+export const DISCORD_BOT_PRIMER = [
+  "1. Open https://discord.com/developers/applications and click New Application.",
+  "2. Bot → Add Bot → Reset Token. Paste that token under Tokens.",
+  "3. Privileged Gateway Intents: enable Message Content (required for text).",
+  "4. Copy the Application ID from General Information, then /discord invite.",
+  "5. Open the invite link, pick your server, and come back to set allowlists.",
+].join("\n");
 
 const SNOWFLAKE = /^\d{5,32}$/u;
 
@@ -211,6 +255,7 @@ function describeSettings(settings: DiscordSettings): string[] {
     showList("ambient users", settings.ambientUserIds),
     showList("approval roles", settings.approvalRoleIds),
     show("owner user id", settings.ownerUserId),
+    showList("system actors", settings.systemActorUserIds),
     "",
     `text ingress: ${settings.textIngressEnabled ? "enabled" : "disabled"}`,
     showList("  ingress guilds", settings.ingressGuildIds),
@@ -221,24 +266,52 @@ function describeSettings(settings: DiscordSettings): string[] {
     showList("presence guilds", settings.presenceGuildIds),
     showList("presence channels", settings.presenceChannelIds),
     "",
+    `active body: ${settings.activeBody === "user_session" ? "lab user" : "official bot"}`,
+    `lab user body: ${settings.userSessionEnabled ? "enabled" : "disabled"}`,
+    showList("  lab guilds", settings.userSessionGuildIds),
+    showList("  lab channels", settings.userSessionChannelIds),
+    showList("  lab voice channels", settings.userSessionVoiceChannelIds),
+    `  lab voice: ${settings.userSessionVoiceEnabled ? "enabled" : "disabled"}`,
+    `  lab DMs: ${settings.userSessionDmPolicy}`,
+    "",
     `voice: ${settings.voiceEnabled ? "enabled" : "disabled"}`,
     showList("  voice guilds", settings.voiceGuildIds),
     showList("  voice channels", settings.voiceChannelIds),
     `  who may summon: ${settings.voiceJoinPolicy === "guild_members" ? "any member of those servers" : "ambient tier only"}`,
+    `  who he hears: ${
+      settings.voiceConsentPolicy === "presence"
+        ? "anyone in his active voice channel (one-time owner switch)"
+        : "only people who opt in each call"
+    }`,
     "",
     show("activity application id (gba)", settings.activityApplicationIdGba),
   ];
 }
 
-async function runDiscordWizard(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
+export async function runDiscordWizard(
+  shell: ClankieFaceShell,
+  services: DiscordCommandServices,
+): Promise<void> {
   const flow = shell.setupFlow;
   flow.begin("discord");
   try {
     for (;;) {
+      const settings = (await services.settings.load()).discord;
       const action = await flow.readSelect({
         kind: "single",
         message: "Discord configuration",
         options: [
+          {
+            value: "primer",
+            label: "How to create the bot",
+            hint: "Discord developer portal",
+            description: "Any user can do this: create an application, copy the token, invite him.",
+          },
+          {
+            value: "invite",
+            label: "Invite link",
+            hint: "needs an application id",
+          },
           {
             value: "credentials",
             label: "Tokens",
@@ -249,7 +322,14 @@ async function runDiscordWizard(shell: ClankieFaceShell, services: DiscordComman
             value: "core",
             label: "Server, application, and roles",
             hint: "required",
-            description: "Application id, guild id, and the roles allowed to create or steer missions.",
+            description: "Application id, guild id, and the roles granted the ambient command tier.",
+          },
+          {
+            value: "system",
+            label: "Machine control from Discord",
+            hint: "who may ask him to drive herdr / the shell",
+            description:
+              "Discord users whose text turns get bash, files, and herdr. Empty means nobody — Discord stays social. The operator console is always privileged.",
           },
           {
             value: "ingress",
@@ -258,6 +338,19 @@ async function runDiscordWizard(shell: ClankieFaceShell, services: DiscordComman
             description: "Enable bounded text ingress and set the deny-by-default guild/channel allowlists.",
           },
           { value: "voice", label: "Voice", hint: "group voice allowlists" },
+          {
+            value: "active",
+            label: "Active body",
+            hint: settings.activeBody === "user_session" ? "lab user" : "official bot",
+            description: "One mouth. The launcher starts only this process. Switch and `clankie restart`.",
+          },
+          {
+            value: "lab",
+            label: "Lab user body",
+            hint: "user token, watch, Go Live",
+            description:
+              "Optional normal-account body. Make it active to talk, watch shares, and Go Live. The bot stays down while it is.",
+          },
           {
             value: "activity",
             label: "Activity plane",
@@ -276,14 +369,25 @@ async function runDiscordWizard(shell: ClankieFaceShell, services: DiscordComman
         await showDiscordStatus(shell, services);
         continue;
       }
+      if (choice === "primer") {
+        shell.insertCommandResult("/discord", DISCORD_BOT_PRIMER, "success");
+        continue;
+      }
+      if (choice === "invite") {
+        await showDiscordInvite(shell, services);
+        continue;
+      }
       if (choice === "export") {
         await showEnvironmentExport(shell, services);
         continue;
       }
       if (choice === "credentials") await editCredentials(shell, services);
       else if (choice === "core") await editCore(shell, services);
+      else if (choice === "system") await editSystemActors(shell, services);
       else if (choice === "ingress") await editIngress(shell, services);
       else if (choice === "voice") await editVoice(shell, services);
+      else if (choice === "active") await editActiveBody(shell, services);
+      else if (choice === "lab") await editLabBody(shell, services);
       else if (choice === "activity") await editActivity(shell, services);
     }
   } finally {
@@ -389,7 +493,7 @@ async function editCore(shell: ClankieFaceShell, services: DiscordCommandService
   if (guildId === undefined) return;
 
   const ambient = await flow.readText({
-    message: "Ambient role ids (comma separated) — may create and steer missions",
+    message: "Ambient role ids (comma separated) — the ambient command tier",
     placeholder: current.ambientRoleIds.join(",") || "role id",
     validate: validateSnowflakeList,
   });
@@ -413,6 +517,28 @@ async function editCore(shell: ClankieFaceShell, services: DiscordCommandService
     ...(ambientUsers.trim() ? { ambientUserIds: splitList(ambientUsers) } : {}),
   }));
   flow.renderLine("Saved server, application, and roles.", "success");
+}
+
+async function editSystemActors(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
+  const flow = shell.setupFlow;
+  const current = (await services.settings.load()).discord;
+
+  const typed = await flow.readText({
+    message:
+      "Discord user ids who may ask him to control this machine (comma separated) — bash, files, herdr. Blank keeps the current list. Empty list means nobody; Discord stays social.",
+    placeholder: current.systemActorUserIds.join(",") || current.ownerUserId || "your Discord user id",
+    validate: validateSnowflakeList,
+  });
+  if (typed === undefined) return;
+
+  const systemActorUserIds = resolveIdList(typed, current.systemActorUserIds);
+  await apply(services, (discord) => ({ ...discord, systemActorUserIds }));
+  flow.renderLine(
+    systemActorUserIds.length === 0
+      ? "Saved machine-control allowlist (empty — Discord stays social)."
+      : `Saved machine-control allowlist (${String(systemActorUserIds.length)} user${systemActorUserIds.length === 1 ? "" : "s"}).`,
+    "success",
+  );
 }
 
 async function editIngress(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
@@ -527,8 +653,8 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
   });
   if (channels === undefined) return;
 
-  // Joining a call and spawning a worker have very different blast radii, so
-  // they get separate bindings rather than one shared allowlist.
+  // Joining a call and steering him elsewhere have very different blast radii,
+  // so they get separate bindings rather than one shared allowlist.
   const joinPolicy = await flow.readSelect({
     kind: "single",
     message: "Who may summon Clankie into a call?",
@@ -536,7 +662,7 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
       {
         value: "ambient",
         label: "Ambient tier only",
-        hint: "same people who may create missions",
+        hint: "same people who hold ambient commands",
         description: "Voice stays behind the ambient role and user bindings.",
       },
       {
@@ -544,13 +670,36 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
         label: "Anyone in the allowlisted servers",
         hint: "voice only",
         description:
-          "Any member may start or end a call. Mission creation, steering, and memory stay on the ambient tier.",
+          "Any member may start or end a call. Ambient commands and person memory stay on the ambient tier.",
       },
     ],
     required: true,
   });
   const joinPolicyChoice = joinPolicy?.[0];
   if (joinPolicyChoice === undefined) return;
+
+  const consentPolicy = await flow.readSelect({
+    kind: "single",
+    message: "Who may Clankie hear in a call?",
+    options: [
+      {
+        value: "explicit",
+        label: "Each person opts in each call",
+        hint: "default",
+        description: "Session-bound. Restart, leave, or rejoin clears consent.",
+      },
+      {
+        value: "presence",
+        label: "Anyone in the call",
+        hint: "one-time switch",
+        description:
+          "Being in his active voice channel is consent. Opt-out still binds for that call. Best for a private server.",
+      },
+    ],
+    required: true,
+  });
+  const consentPolicyChoice = consentPolicy?.[0];
+  if (consentPolicyChoice === undefined) return;
 
   const guildIds = resolveGuildList(guilds, current.voiceGuildIds, current.guildId);
   const channelIds = resolveIdList(channels, current.voiceChannelIds);
@@ -565,6 +714,7 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
     ...discord,
     voiceEnabled: enabledChoice === "true",
     voiceJoinPolicy: joinPolicyChoice as DiscordSettings["voiceJoinPolicy"],
+    voiceConsentPolicy: consentPolicyChoice as DiscordSettings["voiceConsentPolicy"],
     ...(channels.trim()
       ? { voiceChannelIds: splitList(channels), voiceChannelId: splitList(channels)[0] }
       : {}),
@@ -574,10 +724,186 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
     `Saved voice across ${String(guildIds.length)} server${guildIds.length === 1 ? "" : "s"}` +
       (channelIds.length === 0 ? ", admitting every voice channel in them." : ".") +
       (joinPolicyChoice === "guild_members"
-        ? " Any member of those servers may start a call; mission authority is unchanged."
-        : ""),
+        ? " Any member of those servers may start a call; ambient authority is unchanged."
+        : "") +
+      (consentPolicyChoice === "presence"
+        ? " Anyone in his active voice channel can talk; opt-out still binds for that call."
+        : " Each person still opts in per call."),
     "success",
   );
+}
+
+const LAB_ACKNOWLEDGEMENT = "I accept Discord ToS and account risk for this personal-lab user-session body.";
+
+async function editActiveBody(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
+  const flow = shell.setupFlow;
+  const current = (await services.settings.load()).discord;
+  const credentials = await services.listCredentials();
+  const picked = await flow.readSelect({
+    kind: "single",
+    message: "Which Discord body is the mouth? Only one process is live.",
+    options: [
+      {
+        value: "bot",
+        label: "Official bot",
+        hint: current.activeBody === "bot" ? "active" : "",
+        description: "Slash commands, embedded activities, group voice. Cannot watch or Go Live.",
+      },
+      {
+        value: "user_session",
+        label: "Lab user body",
+        hint: current.activeBody === "user_session" ? "active" : "",
+        description: "Talk, watch shares, Go Live. No slash commands. Requires the lab body setup.",
+      },
+    ],
+    required: true,
+  });
+  const choice = picked?.[0];
+  if (choice !== "bot" && choice !== "user_session") return;
+
+  if (choice === "user_session") {
+    if (!current.userSessionEnabled) {
+      flow.renderLine("Enable Lab user body first (token, allowlists, ToS opt-in).", "error");
+      return;
+    }
+    if (credentials.discord_user_session === undefined) {
+      flow.renderLine("Store a user token under Tokens before making the lab body active.", "error");
+      return;
+    }
+  }
+
+  await apply(services, (discord) => ({ ...discord, activeBody: choice }));
+  flow.renderLine(
+    choice === "user_session"
+      ? "Lab user body is the mouth. Run `clankie restart` so the official bot stays down."
+      : "Official bot is the mouth. Run `clankie restart` so the lab body stays down.",
+    "success",
+  );
+}
+
+async function editLabBody(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
+  const flow = shell.setupFlow;
+  const current = (await services.settings.load()).discord;
+
+  const enabled = await flow.readSelect({
+    kind: "single",
+    message:
+      "Lab user body — a normal Discord account. Make it the Active body to talk; the official bot stays down while it is.",
+    options: [
+      {
+        value: "true",
+        label: "Enabled",
+        hint: "watch screen shares",
+        description: "Requires a stored user token, allowlists, and a durable ToS opt-in.",
+      },
+      { value: "false", label: "Disabled", hint: "bot only" },
+    ],
+    required: true,
+  });
+  const enabledChoice = enabled?.[0];
+  if (enabledChoice === undefined) return;
+
+  const guilds = await flow.readText({
+    message: "Server ids the lab body may enter (comma separated) — blank uses the command server",
+    placeholder: guildListPlaceholder(current.userSessionGuildIds, current.guildId),
+    validate: validateSnowflakeList,
+  });
+  if (guilds === undefined) return;
+
+  const channels = await flow.readText({
+    message: "Channel ids the lab body may enter (comma separated) — include the voice channel you share in",
+    placeholder: current.userSessionChannelIds.join(",") || "channel id",
+    validate: validateSnowflakeList,
+  });
+  if (channels === undefined) return;
+
+  const voiceChannels = await flow.readText({
+    message: "Voice channel ids to watch shares in (comma separated) — blank uses the list above",
+    placeholder: current.userSessionVoiceChannelIds.join(",") || "voice channel id",
+    validate: validateSnowflakeList,
+  });
+  if (voiceChannels === undefined) return;
+
+  const guildIds = resolveGuildList(guilds, current.userSessionGuildIds, current.guildId);
+  const textChannelIds = resolveIdList(channels, current.userSessionChannelIds);
+  const voiceChannelIds = resolveIdList(voiceChannels, current.userSessionVoiceChannelIds);
+  const channelIds = [...new Set([...textChannelIds, ...voiceChannelIds])];
+  if (enabledChoice === "true") {
+    if (guildIds.length === 0 || channelIds.length === 0) {
+      flow.renderLine("Cannot enable the lab body without both a server and a channel allowlist.", "error");
+      return;
+    }
+  }
+
+  await apply(services, (discord) => ({
+    ...discord,
+    userSessionEnabled: enabledChoice === "true",
+    ...(guildIds.length === 0 ? {} : { userSessionGuildIds: guildIds }),
+    ...(channelIds.length === 0 ? {} : { userSessionChannelIds: channelIds }),
+    ...(voiceChannelIds.length === 0 ? {} : { userSessionVoiceChannelIds: voiceChannelIds }),
+  }));
+
+  if (enabledChoice !== "true") {
+    if (services.userSessionOptIn !== undefined) {
+      try {
+        await services.userSessionOptIn.revokeDiscordUserSessionOptIn();
+      } catch {
+        // Nothing active is fine — disable is the intent.
+      }
+    }
+    flow.renderLine(
+      "Lab user body disabled. Restart with `clankie restart` so the process stays down.",
+      "success",
+    );
+    return;
+  }
+
+  const credentials = await services.listCredentials();
+  if (credentials.discord_user_session === undefined) {
+    flow.renderLine("Store a user token under Tokens before the lab body can connect.", "warning");
+  }
+
+  if (services.userSessionOptIn === undefined) {
+    flow.renderLine(
+      "Saved allowlists. Record the ToS opt-in once the clankie service is up (`clankie restart`), then rerun this step.",
+      "warning",
+    );
+    return;
+  }
+
+  const accept = await flow.readSelect({
+    kind: "single",
+    message: LAB_ACKNOWLEDGEMENT,
+    options: [
+      { value: "accept", label: "I accept", hint: "records a durable opt-in" },
+      { value: "skip", label: "Skip for now" },
+    ],
+    required: true,
+  });
+  if (accept?.[0] !== "accept") {
+    flow.renderLine("Saved. The lab body will not connect until you record the opt-in.", "warning");
+    return;
+  }
+
+  try {
+    await services.userSessionOptIn.recordDiscordUserSessionOptIn({
+      schemaVersion: 1,
+      characterId: "clankie",
+      acknowledgement: LAB_ACKNOWLEDGEMENT,
+      guildIds,
+      channelIds,
+      dmPolicy: current.userSessionDmPolicy,
+    });
+    flow.renderLine(
+      "Lab user body enabled and opted in. Run `clankie restart` so the launcher starts it. Include the voice channel you share in. Point CLANKVOX_BIN at a ClankVox binary to decode shares.",
+      "success",
+    );
+  } catch (error) {
+    flow.renderLine(
+      `Saved allowlists, but the opt-in failed: ${error instanceof Error ? error.message : String(error)}`,
+      "error",
+    );
+  }
 }
 
 async function editActivity(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
@@ -595,6 +921,31 @@ async function editActivity(shell: ClankieFaceShell, services: DiscordCommandSer
   }));
   flow.renderLine(
     "Saved. An unverified activity is launchable only by app-team testers in servers under 25 members.",
+    "success",
+  );
+}
+
+export async function showDiscordInvite(
+  shell: ClankieFaceShell,
+  services: DiscordCommandServices,
+): Promise<void> {
+  const applicationId = (await services.settings.load()).discord.applicationId;
+  if (applicationId === undefined) {
+    shell.insertCommandResult(
+      "/discord invite",
+      `No application id stored yet.\n\n${DISCORD_BOT_PRIMER}`,
+      "error",
+    );
+    return;
+  }
+  shell.insertCommandResult(
+    "/discord invite",
+    [
+      "Open this as the Discord user who can add bots to the server:",
+      discordBotInviteUrl(applicationId),
+      "",
+      "Then enable text/voice under /discord. Message Content is a portal intent, not this link.",
+    ].join("\n"),
     "success",
   );
 }

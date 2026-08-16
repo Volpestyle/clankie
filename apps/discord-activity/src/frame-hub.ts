@@ -80,6 +80,11 @@ export class RenderedSurfaceHub {
     this.viewers.delete(viewer);
   }
 
+  /** Latest PNG, if a producer is connected. Used as the Go Live send source. */
+  public snapshot(): RenderedSurfaceFrame | null {
+    return this.latestFrame;
+  }
+
   public publishFrame(frame: RenderedSurfaceFrame): void {
     const validated = RenderedSurfaceFrameSchema.parse(frame);
     this.latestFrame = validated;

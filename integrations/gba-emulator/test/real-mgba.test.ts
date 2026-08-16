@@ -113,7 +113,7 @@ class RouteStubCore implements GbaCoreSeam {
     this.blocked = new Set(fixture.map.blocked.map((tile) => `${String(tile.x)},${String(tile.y)}`));
   }
 
-  public pressButton(button: GbaButton, holdFrames: number): void {
+  public async pressButton(button: GbaButton, holdFrames: number): Promise<void> {
     this.inputCount += 1;
     if (this.quirks.freezeAt !== this.inputCount) this.frame += holdFrames + 32;
     const deltas: Partial<Record<GbaButton, { dx: number; dy: number; facing: GbaCoreState["facing"] }>> = {
@@ -152,7 +152,7 @@ class RouteStubCore implements GbaCoreSeam {
     this.y = ny;
   }
 
-  public advanceFrames(frames: number): void {
+  public async advanceFrames(frames: number): Promise<void> {
     this.frame += frames;
   }
 
@@ -517,12 +517,12 @@ describe.skipIf(!romAvailable)("watching an action (ROM-gated)", () => {
     // Deterministic scenarios must be unaffected: chunking a run is only
     // emulation-equivalent if the frame count is identical.
     const quiet = await core();
-    quiet.pressButton("up", 16);
+    await quiet.pressButton("up", 16);
     const quietFrame = quiet.gameState().frame;
 
     const watched = await core();
     watched.observeFrames(() => undefined);
-    watched.pressButton("up", 16);
+    await watched.pressButton("up", 16);
     expect(watched.gameState().frame).toBe(quietFrame);
   });
 
@@ -532,8 +532,53 @@ describe.skipIf(!romAvailable)("watching an action (ROM-gated)", () => {
     c.observeFrames(() => {
       observed += 1;
     });
-    c.pressButton("up", 16);
+    await c.pressButton("up", 16);
     // One action used to yield exactly one observable frame.
     expect(observed).toBeGreaterThan(10);
+  });
+
+  it("paces a watched action without blocking the event loop", async () => {
+    // The pacing sleep used to be `Atomics.wait`, which held the thread for the
+    // whole action: measured 0 of ~731 due timer ticks during one 600-frame
+    // action. Nothing else in the process ran, so the frames the watcher was
+    // owed sat unflushed in the socket and arrived as a burst at the end.
+    const c = await core();
+    c.observeFrames(() => undefined, { pace: true });
+    let ticks = 0;
+    const timer = setInterval(() => {
+      ticks += 1;
+    }, 16);
+    try {
+      await c.advanceFrames(60);
+    } finally {
+      clearInterval(timer);
+    }
+    // ~1s of hardware time is ~60 ticks; anything above a handful proves the
+    // loop is free to flush sockets and answer the API mid-action.
+    expect(ticks).toBeGreaterThan(20);
+  });
+
+  it("refuses an idle frame while an action holds the core", async () => {
+    // `idleFrames` releases every button, so one landing between two paced
+    // frames of a press would cut the input short.
+    const c = await core();
+    c.observeFrames(() => undefined, { pace: true });
+    let refusedDuringAction = 0;
+    const timer = setInterval(() => {
+      const before = c.gameState().frame;
+      c.idleFrames(1);
+      if (c.gameState().frame === before) refusedDuringAction += 1;
+    }, 16);
+    try {
+      await c.pressButton("up", 16);
+    } finally {
+      clearInterval(timer);
+    }
+    expect(refusedDuringAction).toBeGreaterThan(0);
+
+    // And it does run once the action lets go, which is the whole point.
+    const idleBefore = c.gameState().frame;
+    c.idleFrames(3);
+    expect(c.gameState().frame).toBe(idleBefore + 3);
   });
 });

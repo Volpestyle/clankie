@@ -14,6 +14,7 @@ import { EnvironmentRuntime } from "@clankie/environment-runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   FrozenGbaScenarioSchema,
+  DeterministicGbaCoreDouble,
   GbaEmulatorAdapter,
   GbaScenarioBindingSchema,
   GbaScenarioReportSchema,
@@ -23,6 +24,7 @@ import {
   validateGbaEmulatorTrace,
   type FrozenGbaScenario,
   type GbaDriverView,
+  type GbaCoreFactory,
   type GbaEmulatorAdapterOptions,
 } from "../src/index.ts";
 
@@ -51,20 +53,101 @@ const allCapabilities = [
   "emulator.gba.wait",
 ] as const;
 
+const DIRECTION_STEPS = {
+  up: { dx: 0, dy: -1 },
+  down: { dx: 0, dy: 1 },
+  left: { dx: -1, dy: 0 },
+  right: { dx: 1, dy: 0 },
+} as const;
+
 async function harness(options?: {
   mutateScenario?: (scenario: FrozenGbaScenario) => FrozenGbaScenario;
   adapterOptions?: GbaEmulatorAdapterOptions;
+  visualOnly?: boolean;
+  /**
+   * Tiles an unseen body stands on: open in the collision grid, refused by a
+   * step into them. The double models walls, which appear in both — an NPC is
+   * the case where the two disagree, which is the whole reason a planned route
+   * can die mid-walk.
+   */
+  occupied?: readonly { x: number; y: number }[];
+  /**
+   * Tiles that start a battle when stepped on. Same swallow as `occupied`,
+   * plus the post-step state reports `mode: "battle"`.
+   */
+  encounter?: readonly { x: number; y: number }[];
+  /**
+   * Tiles that start a fade or warp hold. Same swallow, plus `inputReady: false`.
+   */
+  transition?: readonly { x: number; y: number }[];
 }) {
   const frozen = await fixture();
   frozen.scenario = options?.mutateScenario?.(frozen.scenario) ?? frozen.scenario;
   const rootDir = await mkdtemp(join(tmpdir(), "gba-emulator-test-"));
   roots.push(rootDir);
-  const adapter = new GbaEmulatorAdapter(
-    frozen.scenario,
-    frozen.fixtureSha256,
-    undefined,
-    options?.adapterOptions,
+  const occupied = new Set((options?.occupied ?? []).map((tile) => `${String(tile.x)},${String(tile.y)}`));
+  const encounters = new Set((options?.encounter ?? []).map((tile) => `${String(tile.x)},${String(tile.y)}`));
+  const transitions = new Set(
+    (options?.transition ?? []).map((tile) => `${String(tile.x)},${String(tile.y)}`),
   );
+  const occupiedFactory: GbaCoreFactory | undefined =
+    occupied.size === 0 && encounters.size === 0 && transitions.size === 0
+      ? undefined
+      : () => {
+          const core = new DeterministicGbaCoreDouble(frozen.scenario);
+          let overlay: { mode?: "battle"; inputReady?: boolean } = {};
+          return {
+            coreId: core.coreId,
+            pressButton: async (button, holdFrames) => {
+              const step = button in DIRECTION_STEPS ? DIRECTION_STEPS[button as "up"] : undefined;
+              if (step !== undefined) {
+                const { x, y } = core.gameState().position;
+                const next = `${String(x + step.dx)},${String(y + step.dy)}`;
+                // Swallowed rather than passed through: the body in the way
+                // absorbs the step, so the player stays put on a tile the grid
+                // still calls open.
+                if (occupied.has(next)) return;
+                if (encounters.has(next)) {
+                  overlay = { mode: "battle", inputReady: false };
+                  return;
+                }
+                if (transitions.has(next)) {
+                  overlay = { inputReady: false };
+                  return;
+                }
+              }
+              await core.pressButton(button, holdFrames);
+            },
+            advanceFrames: async (frames) => {
+              await core.advanceFrames(frames);
+            },
+            gameState: () => ({ ...core.gameState(), ...overlay }),
+            mapGrid: () => core.mapGrid(),
+            ramStateSha256: () => core.ramStateSha256(),
+            framebufferSha256: () => core.framebufferSha256(),
+          };
+        };
+  const coreFactory: GbaCoreFactory | undefined = options?.visualOnly
+    ? () => {
+        const core = new DeterministicGbaCoreDouble(frozen.scenario);
+        return {
+          coreId: core.coreId,
+          pressButton: async (button, holdFrames) => {
+            await core.pressButton(button, holdFrames);
+          },
+          advanceFrames: async (frames) => {
+            await core.advanceFrames(frames);
+          },
+          gameState: () => ({ ...core.gameState(), mode: "unknown" as const, inputReady: false }),
+          ramStateSha256: () => core.ramStateSha256(),
+          framebufferSha256: () => core.framebufferSha256(),
+        };
+      }
+    : occupiedFactory;
+  const adapter =
+    coreFactory === undefined
+      ? new GbaEmulatorAdapter(frozen.scenario, frozen.fixtureSha256, undefined, options?.adapterOptions)
+      : new GbaEmulatorAdapter(frozen.scenario, frozen.fixtureSha256, coreFactory, options?.adapterOptions);
   const events: EnvironmentEvent[] = [];
   const now = { value: new Date("2026-07-19T00:00:00.000Z") };
   const runtime = new EnvironmentRuntime({
@@ -340,6 +423,33 @@ describe("GBA emulator embodiment", () => {
     expect(adapter.session(spec.sessionId).trace().events).toHaveLength(1);
   });
 
+  it("keeps framebuffer-only cartridges playable without inventing semantic state", async () => {
+    const { adapter, command, grant, runtime, spec } = await harness({ visualOnly: true });
+    const session = adapter.session(spec.sessionId);
+    expect(session.observe("scene")).toMatchObject({ data: { mode: "unknown", inputReady: false } });
+    expect(() => session.observe("overworld")).toThrow(/semantic_state_unavailable/u);
+
+    const press = await runtime.startAction(
+      grant.token,
+      command("visual-press", { kind: "button_press", button: "start", holdFrames: 1 }),
+    );
+    expect(press).toMatchObject({ status: "completed", outcome: { mode: "unknown" } });
+    expect(press).not.toHaveProperty("outcome.position");
+
+    const advanced = await runtime.startAction(
+      grant.token,
+      command("visual-advance", { kind: "frame_advance", frames: 1 }),
+    );
+    expect(advanced).toMatchObject({ status: "completed", outcome: { mode: "unknown" } });
+    expect(advanced).not.toHaveProperty("outcome.position");
+
+    const routed = await runtime.startAction(
+      grant.token,
+      command("visual-walk", { kind: "walk_to", x: 1, y: 1 }),
+    );
+    expect(routed).toMatchObject({ status: "failed", errorCode: "semantic_state_unavailable" });
+  });
+
   it("walks a planned route and reports where it ended up", async () => {
     const { adapter, command, grant, runtime, spec } = await harness();
     const result = await runtime.startAction(grant.token, command("walk", { kind: "walk_to", x: 3, y: 1 }));
@@ -358,6 +468,78 @@ describe("GBA emulator embodiment", () => {
     expect(adapter.session(spec.sessionId).trace().events).toHaveLength(1);
   });
 
+  it("routes around a tile that already stopped a walk instead of replanning into it", async () => {
+    // (1,1) is open collision with somebody standing on it — the shape that
+    // funnelled four consecutive routes into Viridian's old man on 2026-08-15.
+    const { command, grant, runtime } = await harness({ occupied: [{ x: 1, y: 1 }] });
+    const first = await runtime.startAction(grant.token, command("walk-1", { kind: "walk_to", x: 3, y: 1 }));
+    expect(first).toMatchObject({
+      outcome: {
+        plannedSteps: 3,
+        steps: 0,
+        arrived: false,
+        blockedAt: { x: 1, y: 1 },
+        position: { x: 0, y: 1 },
+      },
+    });
+
+    // The same ask, and this time the plan goes over the top row around him.
+    const second = await runtime.startAction(grant.token, command("walk-2", { kind: "walk_to", x: 3, y: 1 }));
+    expect(second).toMatchObject({
+      outcome: { plannedSteps: 5, steps: 5, arrived: true, blockedAt: null, position: { x: 3, y: 1 } },
+    });
+  });
+
+  it("names a grass encounter instead of remembering it as an NPC", async () => {
+    const { command, grant, runtime } = await harness({ encounter: [{ x: 1, y: 1 }] });
+    const first = await runtime.startAction(grant.token, command("walk-1", { kind: "walk_to", x: 3, y: 1 }));
+    expect(first).toMatchObject({
+      outcome: {
+        plannedSteps: 3,
+        steps: 0,
+        arrived: false,
+        blockedAt: { x: 1, y: 1 },
+        blockedBecause: "battle",
+        mode: "battle",
+      },
+    });
+  });
+
+  it("does not remember a fade as a blocked tile, so the next walk is not detoured", async () => {
+    const { command, grant, runtime } = await harness({ transition: [{ x: 1, y: 1 }] });
+    const first = await runtime.startAction(grant.token, command("walk-1", { kind: "walk_to", x: 3, y: 1 }));
+    expect(first).toMatchObject({
+      outcome: {
+        plannedSteps: 3,
+        steps: 0,
+        blockedAt: { x: 1, y: 1 },
+        blockedBecause: "transition",
+      },
+    });
+    // Still the short route — a remembered NPC would have gone around in 5.
+    const second = await runtime.startAction(grant.token, command("walk-2", { kind: "walk_to", x: 3, y: 1 }));
+    expect(second).toMatchObject({ outcome: { plannedSteps: 3, blockedAt: { x: 1, y: 1 } } });
+  });
+
+  it("walks a remembered tile again when it is the only way through", async () => {
+    // (1,1) blocks, and the detour is walled off, so avoiding it would strand a
+    // reachable target. The memory must slow a route down, never close one.
+    const { command, grant, runtime } = await harness({
+      occupied: [{ x: 1, y: 1 }],
+      mutateScenario: (scenario) => ({
+        ...scenario,
+        map: { ...scenario.map, blocked: [...scenario.map.blocked, { x: 0, y: 0 }, { x: 0, y: 2 }] },
+      }),
+    });
+    const first = await runtime.startAction(grant.token, command("walk-1", { kind: "walk_to", x: 3, y: 1 }));
+    expect(first).toMatchObject({ outcome: { blockedAt: { x: 1, y: 1 }, steps: 0 } });
+
+    // Replanned against the raw grid: the same doomed route rather than a
+    // refusal, because whoever stands there may well have moved on.
+    const second = await runtime.startAction(grant.token, command("walk-2", { kind: "walk_to", x: 3, y: 1 }));
+    expect(second).toMatchObject({ outcome: { plannedSteps: 3, blockedAt: { x: 1, y: 1 } } });
+  });
+
   it("reports adjacency so a wall is known before it is walked into", async () => {
     const { command, grant, runtime } = await harness();
     // (2,2) and (2,3) are blocked, so standing at (2,1) the tile south is a wall.
@@ -367,18 +549,37 @@ describe("GBA emulator embodiment", () => {
     });
   });
 
-  it("refuses an unreachable target instead of walking as close as it can", async () => {
+  it("refuses an unattainable target and says what would have to be different", async () => {
     const { command, grant, runtime } = await harness();
+    // A wall is refused as a wall, with the nearest tile that is floor.
     const blocked = await runtime.startAction(
       grant.token,
       command("into-wall", { kind: "walk_to", x: 2, y: 2 }),
     );
-    expect(blocked).toMatchObject({ status: "failed", errorCode: "no_path_to_target" });
+    expect(blocked).toMatchObject({ status: "failed", errorCode: "walk_target_impassable" });
+    expect((blocked as { message: string }).message).toContain("nearest reachable open tile is (");
+    // An off-map tile is refused with the bounds coordinates actually span.
     const offMap = await runtime.startAction(
       grant.token,
       command("off-map", { kind: "walk_to", x: 99, y: 99 }),
     );
-    expect(offMap).toMatchObject({ status: "failed", errorCode: "no_path_to_target" });
+    expect(offMap).toMatchObject({ status: "failed", errorCode: "walk_target_outside_map" });
+    expect((offMap as { message: string }).message).toContain("the loaded map spans");
+  });
+
+  it("hands the player the walkability minimap the pathfinder already had", async () => {
+    const { adapter, spec } = await harness();
+    const observation = adapter.session(spec.sessionId).observe("overworld");
+    if (observation.kind !== "overworld") throw new Error("expected an overworld observation");
+    const minimap = observation.data.minimap;
+    expect(minimap).not.toBeNull();
+    // The double's map is small enough for the crop to carry all of it.
+    expect(minimap?.topLeft).toEqual({ x: 0, y: 0 });
+    // The player renders where the double placed them, walls where it blocks.
+    expect(minimap?.rows[1]?.[0]).toBe("@");
+    expect(minimap?.rows[2]?.[2]).toBe("#");
+    // The double decodes no warp events, and absence is reported as absence.
+    expect(observation.data.exits).toBeNull();
   });
 
   it("draws a route from the same input budget a burst of presses draws from", async () => {

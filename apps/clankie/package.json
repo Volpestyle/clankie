@@ -1,0 +1,47 @@
+{
+  "name": "@clankie/clankie",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "start": "tsx src/index.ts",
+    "build": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --passWithNoTests",
+    "free-play-live": "tsx scripts/free-play-live.ts",
+    "clean": "rm -rf dist coverage"
+  },
+  "dependencies": {
+    "@clankie/body-lock": "workspace:*",
+    "@clankie/credential-broker": "workspace:*",
+    "@clankie/environment-runtime": "workspace:*",
+    "@clankie/gba-emulator": "workspace:*",
+    "@clankie/interactive-environment": "workspace:*",
+    "@clankie/media-connector": "workspace:*",
+    "@clankie/minecraft-mineflayer": "workspace:*",
+    "@clankie/model-provider": "workspace:*",
+    "@clankie/model-registry": "workspace:*",
+    "@clankie/observability": "workspace:*",
+    "@clankie/possessor-voice": "workspace:*",
+    "@clankie/protocol": "workspace:*",
+    "@clankie/rendered-surface-client": "workspace:*",
+    "@clankie/settings": "workspace:*",
+    "@earendil-works/pi-agent-core": "0.84.2",
+    "@earendil-works/pi-ai": "0.84.2",
+    "@earendil-works/pi-coding-agent": "0.84.2",
+    "@hono/node-server": "2.0.8",
+    "hono": "4.12.28",
+    "imapflow": "1.6.6",
+    "nodemailer": "7.0.11",
+    "typebox": "1.3.7",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "@types/nodemailer": "7.0.4",
+    "tsx": "4.23.0",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

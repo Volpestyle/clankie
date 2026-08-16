@@ -40,16 +40,29 @@ a stored value is not the effective one. A silent override is the kind of thing
 that costs an hour of debugging.
 
 `discordSettingsToEnvironment(settings)` projects back into the variable names
-the bridge and control plane already read, so adopting the store is a
+the bridge and the clankie service already read, so adopting the store is a
 composition change rather than a rewrite of every call site. Disabled flags are
 omitted rather than emitted as `"false"`, so a stale export cannot accidentally
 enable a plane.
 
 ## Editing
 
-Use `/discord` in the Clankie TUI. It writes to **both stores**: its **Tokens**
-step stores secrets in the credential broker (same destination as `/auth`), and
-every other step writes here.
+Use `/discord` or `/connect` in the Clankie TUI. Tokens and API keys go to the
+credential broker (same destination as `/auth`). Public identifiers — Discord
+ids, a Linear default team, an IMAP host and username — write here.
 
 `/discord status` prints the effective configuration, whether `discord_bot` is
 present in the broker, and any environment overrides in effect.
+
+`discord.activeBody` is which Discord process is the mouth (`bot` or
+`user_session`, default `bot`). Both tokens stay stored; the launcher starts
+only the active one.
+
+`discord.userSessionEnabled` is the lab user body that can watch shares and
+Go Live. It is off by default and still needs a stored `discord_user_session`
+token, allowlists, the durable opt-in, and `activeBody=user_session` before
+the launcher starts it.
+
+`discord.systemActorUserIds` is the Discord users whose text turns get bash,
+files, and herdr. Empty means nobody — Discord stays social. It is not
+`ownerUserId` (DM policy) and not `ambientUserIds` (slash commands).

@@ -4,8 +4,8 @@
  *
  * Two session kinds, one discipline:
  *
- * - **Transcription** — the dormant tier. It hears the consented mix on
- *   `gpt-realtime-whisper`, surfaces transcript deltas and completions, and is
+ * - **Transcription** — the dormant tier. Each instance hears one consented
+ *   Discord speaker on `gpt-realtime-whisper`, surfaces transcript deltas and completions, and is
  *   structurally incapable of answering: the class has no response path at
  *   all, so "hears everything, answers nothing" is a property of the type
  *   rather than a promise of the caller.
@@ -71,6 +71,12 @@ export const MAX_REALTIME_AUDIO_APPEND_BYTES = REALTIME_AUDIO_SAMPLE_RATE * PCM_
 export const MAX_REALTIME_TEXT_ITEM_CHARACTERS = 8_000;
 
 /**
+ * A 720×480 GBA PNG (3× native) is single-digit kilobytes; this cap is a
+ * leak fence, not a typical frame size.
+ */
+export const MAX_REALTIME_IMAGE_CHARACTERS = 400_000;
+
+/**
  * Instructions are persona + lane + realtime surface rules, composed from the
  * same sources the captain uses. Three authored layers fit well under this;
  * beyond it something other than identity is being smuggled into instructions.
@@ -115,21 +121,31 @@ export const DEFAULT_REALTIME_TRUNCATION_RETENTION_RATIO = 0.7;
 export const DEFAULT_REALTIME_POST_INSTRUCTIONS_TOKEN_LIMIT = 12_000;
 
 export const ASK_CLANKIE_TOOL_NAME = "ask_clankie";
+/** Read-only glance at his own live play screen. Not a controller (ADR 0099). */
+export const LOOK_AT_SCREEN_TOOL_NAME = "look_at_screen";
+export const YOUTUBE_SEARCH_TOOL_NAME = "youtube_search";
+export const MUSIC_PLAY_TOOL_NAME = "music_play";
+export const MUSIC_QUEUE_TOOL_NAME = "music_queue";
+export const MUSIC_SKIP_TOOL_NAME = "music_skip";
+export const MUSIC_PAUSE_TOOL_NAME = "music_pause";
+export const MUSIC_RESUME_TOOL_NAME = "music_resume";
+export const MUSIC_STOP_TOOL_NAME = "music_stop";
+export const MUSIC_NOW_TOOL_NAME = "music_now";
 
 const REALTIME_PCM_FORMAT = { type: "audio/pcm", rate: REALTIME_AUDIO_SAMPLE_RATE } as const;
 
 /**
- * The engaged session's entire tool surface. One function, one string
- * argument, resolved by the captain lane — ADR 0057's structural guarantee
- * that room audio can never reach a privileged tool.
+ * Privileged actions still go through `ask_clankie` (ADR 0057). Music and
+ * looking at his own screen are local to this call and never reach a shell.
  */
 const ASK_CLANKIE_TOOL = {
   type: "function",
   name: ASK_CLANKIE_TOOL_NAME,
   description:
     "Ask Clankie's captain to act or to look something up. The captain holds every tool and " +
-    "memory; use this for anything beyond conversation — actions, missions, workers, files, or " +
-    "facts the briefing does not cover.",
+    "memory; use this for anything beyond conversation — actions, files, the story of this " +
+    "playthrough, or facts the briefing does not cover. Do not use it just to look at your screen. " +
+    "Do not use it for songs or YouTube — those are youtube_search and music_play.",
   parameters: {
     type: "object",
     properties: {
@@ -142,6 +158,83 @@ const ASK_CLANKIE_TOOL = {
     additionalProperties: false,
   },
 } as const;
+
+const LOOK_AT_SCREEN_TOOL = {
+  type: "function",
+  name: LOOK_AT_SCREEN_TOOL_NAME,
+  description:
+    "Look at your own live game screen. Returns one still of what is on the emulator right now. " +
+    "Read-only — it does not press buttons or change the game. Use it when someone asks what is " +
+    "on screen, what you see, or you need the picture to talk about the play.",
+  parameters: { type: "object", properties: {}, additionalProperties: false },
+} as const;
+
+const YOUTUBE_SEARCH_TOOL = {
+  type: "function",
+  name: YOUTUBE_SEARCH_TOOL_NAME,
+  description:
+    "Search YouTube for a song or video to play in this call. Returns numbered results. " +
+    "Read them to the room. A reply like '1 please' or 'the second one' is music_play or music_queue " +
+    "with that index — do not ask_clankie and do not treat a song as a game.",
+  parameters: {
+    type: "object",
+    properties: {
+      query: { type: "string", description: "What to search for, e.g. Migos Bad and Boujee." },
+      queue: {
+        type: "boolean",
+        description: "True if they asked to play it next / queue it instead of starting it now.",
+      },
+    },
+    required: ["query"],
+    additionalProperties: false,
+  },
+} as const;
+
+const MUSIC_URL_PROPERTIES = {
+  url: { type: "string", description: "A youtube.com or youtu.be URL." },
+  index: { type: "integer", description: "1-based index from the last youtube_search for this speaker." },
+} as const;
+
+const MUSIC_PLAY_TOOL = {
+  type: "function",
+  name: MUSIC_PLAY_TOOL_NAME,
+  description:
+    "Play a YouTube track now, replacing whatever is playing. Use index from the last youtube_search " +
+    "for this speaker ('1 please' → index 1), or a url.",
+  parameters: { type: "object", properties: MUSIC_URL_PROPERTIES, additionalProperties: false },
+} as const;
+
+const MUSIC_QUEUE_TOOL = {
+  type: "function",
+  name: MUSIC_QUEUE_TOOL_NAME,
+  description: "Queue a YouTube track to play after the current one.",
+  parameters: { type: "object", properties: MUSIC_URL_PROPERTIES, additionalProperties: false },
+} as const;
+
+const emptyMusicTool = (name: string, description: string) =>
+  ({
+    type: "function",
+    name,
+    description,
+    parameters: { type: "object", properties: {}, additionalProperties: false },
+  }) as const;
+
+const MUSIC_SKIP_TOOL = emptyMusicTool(MUSIC_SKIP_TOOL_NAME, "Skip the current track.");
+const MUSIC_PAUSE_TOOL = emptyMusicTool(MUSIC_PAUSE_TOOL_NAME, "Pause the current track.");
+const MUSIC_RESUME_TOOL = emptyMusicTool(MUSIC_RESUME_TOOL_NAME, "Resume a paused track.");
+const MUSIC_STOP_TOOL = emptyMusicTool(MUSIC_STOP_TOOL_NAME, "Stop playback and clear the queue.");
+const MUSIC_NOW_TOOL = emptyMusicTool(MUSIC_NOW_TOOL_NAME, "What is playing and what is queued.");
+
+const MUSIC_TOOLS = [
+  YOUTUBE_SEARCH_TOOL,
+  MUSIC_PLAY_TOOL,
+  MUSIC_QUEUE_TOOL,
+  MUSIC_SKIP_TOOL,
+  MUSIC_PAUSE_TOOL,
+  MUSIC_RESUME_TOOL,
+  MUSIC_STOP_TOOL,
+  MUSIC_NOW_TOOL,
+] as const;
 
 /** Minimal transport seam. Production wraps a WebSocket; tests inject a fake. */
 export interface RealtimeSocket {
@@ -444,8 +537,8 @@ abstract class RealtimeSessionCore {
 }
 
 /**
- * The dormant tier: a `"type": "transcription"` session that hears the
- * consented mix and surfaces transcripts. It never produces a response of any
+ * The dormant tier: a `"type": "transcription"` session that hears one
+ * caller-bound speaker input and surfaces transcripts. It never produces a response of any
  * kind — there is no method on this class that can emit `response.create` or
  * `conversation.item.create`, which is the structural form of "answers
  * nothing".
@@ -571,7 +664,7 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
               }
             : {}),
         },
-        tools: [ASK_CLANKIE_TOOL],
+        tools: [ASK_CLANKIE_TOOL, LOOK_AT_SCREEN_TOOL, ...MUSIC_TOOLS],
         tool_choice: "auto",
         truncation: {
           type: "retention_ratio",
@@ -600,6 +693,26 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
         type: "message",
         role: "user",
         content: [{ type: "input_text", text: bounded }],
+      },
+    });
+  }
+
+  /**
+   * One still of his own play. PNG base64, no data-URL prefix — this method
+   * wraps it. Throws rather than silently clipping; a truncated picture is
+   * worse than making the caller bound the capture.
+   */
+  public createImageItem(pngBase64: string, mimeType: "image/png" = "image/png"): void {
+    const data = nonEmpty(pngBase64, "Realtime image");
+    if (data.length > MAX_REALTIME_IMAGE_CHARACTERS) {
+      throw new Error("Realtime image exceeds the still bound");
+    }
+    this.sendFrame({
+      type: "conversation.item.create",
+      item: {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_image", image_url: `data:${mimeType};base64,${data}` }],
       },
     });
   }

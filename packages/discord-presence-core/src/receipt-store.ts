@@ -16,19 +16,25 @@ export const DiscordBridgeReceiptSchema = z
       "discord.user_session.ready",
       "discord.user_session.stopped",
       "discord.user_session.refused",
+      "discord.stream.watch_connected",
+      "discord.stream.frame",
+      "discord.stream.publish_started",
+      "discord.stream.publish_stopped",
       "discord.text.ingress",
       "discord.text.reply",
-      "discord.mission.bound",
-      "discord.mission.restored",
-      "discord.approval.refused",
       "discord.person-memory.proposed",
       "discord.person-memory.recalled",
       "discord.voice.joined",
       "discord.voice.consent",
       "discord.voice.utterance",
+      "discord.voice.transcription",
+      "discord.voice.floor_decision",
       // ADR 0057: the floor machine and the volition gate are receipt-visible
       // so wake/release and offered/taken/suppressed are numbers, not vibes.
       "discord.voice.floor",
+      "discord.voice.model_response",
+      "discord.voice.realtime_tool",
+      "discord.voice.music",
       "discord.voice.response",
       "discord.voice.volition",
       "discord.voice.overlap",
@@ -39,6 +45,7 @@ export const DiscordBridgeReceiptSchema = z
       "discord.voice.possessor_room",
       "discord.voice.possessor_transcript_delivery",
       "discord.voice.possessor_narration_submission",
+      "discord.voice.possessor_narration_suppressed",
       "discord.voice.possessor_refusal",
     ]),
     data: z
@@ -56,6 +63,19 @@ export const DiscordBridgeReceiptSchema = z
   .superRefine((receipt, context) => {
     // Prefix match: every discord.voice.* type — including ADR 0057's floor
     // and volition receipts — inherits the content fence.
+    if (receipt.type.startsWith("discord.stream.")) {
+      const forbidden = new Set(["jpeg", "frame", "image", "video", "png", "base64", "pixels"]);
+      for (const key of Object.keys(receipt.data)) {
+        if (forbidden.has(key.toLowerCase())) {
+          context.addIssue({
+            code: "custom",
+            path: ["data", key],
+            message: `Discord stream receipts cannot contain ${key}`,
+          });
+        }
+      }
+      return;
+    }
     if (!receipt.type.startsWith("discord.voice.")) return;
     const forbidden = new Set([
       "transcript",

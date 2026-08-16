@@ -35,7 +35,7 @@ Model refs are `"providerId/modelId"` strings; `parseModelRef` splits on the **f
 
 `mergedCatalog(config, catalog)` overlays config-declared providers/models onto the registry catalog via `applyCustomProviders`. Only catalog-shaped data crosses over (name/env/npm/models); `options` such as `baseURL` are connection config and stay config-side.
 
-`withCodexSubscriptionProvider(catalog)` (codex-catalog.ts) adds `openai-codex` beside `openai` with the models verified against the streamed Codex backend — `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini` — at zero cost and the backend's own 272k-input/128k-output window rather than the larger API-key window models.dev reports. The backend addresses gpt-5.6 by size slug, so the bare `gpt-5.6` alias stays API-only. First-party Codex client visibility is not evidence that a third-party `originator` may call a model ([ADR 0014](../../docs/adr/0014-live-eve-captain-session-boundary.md)), so the list expands only after a streamed subscription request proves the model.
+`withCodexSubscriptionProvider(catalog)` (codex-catalog.ts) adds `openai-codex` beside `openai` with the models verified against the streamed Codex backend — `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini` — at zero cost and the backend's own 272k-input/128k-output window rather than the larger API-key window models.dev reports. The backend addresses gpt-5.6 by size slug, so the bare `gpt-5.6` alias stays API-only. First-party Codex client visibility is not evidence that a third-party `originator` may call a model ([ADR 0052](../../docs/adr/0052-subscription-precedence-over-metered-api-key.md)), so the list expands only after a streamed subscription request proves the model.
 
 `resolveProviders({config, catalog, credentialIds, env})` returns each provider with its connection state — `"credential"` (broker holds one), `"env"` (a declared env var is set), or `"none"` — after dropping `disabled_providers` and applying a non-empty `enabled_providers` allowlist. Connected providers sort first, then by name.
 
@@ -59,7 +59,7 @@ This is not credential borrowing: the resolved provider identity becomes `openai
 | google                                            | `think-8k` `think-16k` `think-24k`          | `{thinkingConfig: {includeThoughts, thinkingBudget}}` |
 | other reasoning providers                         | `low` `medium` `high`                       | `{reasoning_effort}`                                  |
 
-The OpenAI ladder is per model, because the family disagrees with itself — `minimal` survives only on gpt-5, `none` replaced it from gpt-5.1 on, `pro` models expose a narrower ladder than their base sibling, and only gpt-5.6 reaches `max`. First matching pattern wins:
+The OpenAI ladder is per model, because the family disagrees with itself — `minimal` belongs only to gpt-5, gpt-5.1 and newer use `none`, `pro` models expose a narrower ladder than their base sibling, and only gpt-5.6 reaches `max`. First matching pattern wins:
 
 | model                                      | ladder                                     |
 | ------------------------------------------ | ------------------------------------------ |
@@ -94,7 +94,7 @@ Both modules are re-exported from the package root alongside the four layers abo
 
 ## codex-model-probe-cli.ts — subscription evidence
 
-`pnpm models:codex-probe` streams one throwaway turn per model/effort pair through the real path (broker credential → codex fetch adapter → Responses transport) and prints the backend's own verdict. It is the check ADR 0014 requires before `CODEX_SUBSCRIPTION_MODEL_IDS` grows, and it is opt-in and credential-bearing, so it never runs in CI.
+`pnpm models:codex-probe` streams one throwaway turn per model/effort pair through the real path (broker credential → codex fetch adapter → Responses transport) and prints the backend's own verdict. It is the check ADR 0052 requires before `CODEX_SUBSCRIPTION_MODEL_IDS` grows, and it is opt-in and credential-bearing, so it never runs in CI.
 
 ```bash
 pnpm models:codex-probe                       # exposed models at their top tier
@@ -102,4 +102,4 @@ pnpm models:codex-probe gpt-5.7-x@max         # a candidate before exposing it
 pnpm models:codex-probe --all-efforts --json  # full ladder sweep
 ```
 
-A candidate need not be exposed yet: each probe declares its target into a throwaway config, so an unexposed id still reaches the backend and returns the reason it was refused.
+A candidate need not be exposed yet: each probe declares its target into a throwaway config, so an unexposed id still reaches the backend and returns the reason it is refused.

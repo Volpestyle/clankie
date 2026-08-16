@@ -38,7 +38,7 @@ separate package rather than an extension of it.
 the hard way.**
 
 The obvious implementation of "let the possessor speak" is a direct call to the
-control plane's `POST /v1/discord/presence-actions`. It does not work. That
+Clankie service's `POST /v1/discord/presence-actions`. It does not work. That
 endpoint requires a **live presence claim** — the session id, phase, and
 monotonic revision the Discord bridge publishes while it holds the gateway
 ([ADR 0024](0024-discord-dual-plane-presence.md)) — and only the bridge can mint
@@ -75,7 +75,7 @@ unavailable and only observation works.
 ### Hearing is push, and downstream of consent
 
 `clankie_listen` is an egress path, so it sits downstream of
-`/captain-voice-consent`: a possessor hears exactly what Clankie was already
+`/captain-voice-consent`: a possessor hears exactly what Clankie is already
 permitted to hear, transcripts only, never raw PCM. Asking as a possessor grants
 no additional access.
 
@@ -85,7 +85,7 @@ deliberately retains none — PCM buffers are zeroed after use and the bot does
 not persist channel transcripts ([ADR 0045](0045-official-bot-dave-group-voice.md)).
 A pull-shaped port would have quietly forced whoever implemented it to break
 that invariant. Utterances are pushed to a live subscriber; the bounded window
-lives on the possessor's side and is cleared on release, so what was heard does
+lives on the possessor's side and is cleared on release, so what is heard does
 not outlive the possession that heard it.
 
 ### Possession is not disclosed to the room
@@ -94,10 +94,9 @@ not outlive the possession that heard it.
 visible operator-side — every lease transition is logged — and the room is not
 told that a guest is driving.
 
-This is a deliberate reversal of the disclosure paragraph in
-[ADR 0051](0051-layered-character-register-and-reply-policy.md), which argued
-that undisclosed guest speech is a deception the room cannot detect. The
-counter-argument accepted here is deployment-shaped rather than principled: the
+This is the deployment-specific disclosure rule alongside
+[ADR 0051](0051-layered-character-register-and-reply-policy.md). The boundary is
+deployment-shaped rather than universal: the
 lab server is private and small, its participants are known to the owner, and
 they already know Clankie is a machine the owner drives. Two extra messages per
 session buy nothing those particular people do not already have.
@@ -120,28 +119,24 @@ be revisited rather than inherited.
   behaviour would have to be reimplemented rather than inherited.
 - **Let both the possessor and the free-play loop drive, arbitrating on
   `goalVersion`** — rejected; see the lease section.
-- **Speech as a direct control-plane call** — believed workable and recorded as
-  such in an earlier coordination message. It is not: the live-claim fence
-  forbids it. The corrected reading is kept here because the mistaken one is the
-  intuitive reading and the next person will have it too.
-- **No listening seam at all** — argued for on the grounds that it would be a
-  third capability definition. That was wrong: a port interface is a seam, not a
-  capability, and the speech port had already set the pattern. Omitting it made
-  the surface asymmetric for no principled reason.
+- **Speech as a direct Clankie service call** — rejected: the live-claim fence
+  forbids it.
+- **No listening seam at all** — rejected: a port interface is a seam, not a
+  third capability definition, and omitting it makes the surface asymmetric.
 
 ## Consequences
 
 - **Two locks, two jobs.** The possession lease decides which harness drives a
   running loop; a lockfile in the shared body root decides which _process_ owns
-  the body at all. `EnvironmentRuntime`'s one-writer rule turned out not to close
-  the second gap: every entrypoint constructs its own runtime, so the rule was
+  the body at all. `EnvironmentRuntime`'s one-writer rule does not close
+  the second gap: every entrypoint constructs its own runtime, so the rule is
   in-memory and invisible across processes — the MCP server and the free-play CLI
-  could each hold what they believed was the only body. `acquireBodyLock` makes
+  could each hold what they believed is the only body. `acquireBodyLock` makes
   that a refusal naming the holding process, verified across two real processes.
   It expires by liveness (`kill(pid, 0)`) rather than by time, so a crash cannot
   brick the body and a long playthrough cannot be evicted mid-turn. The MCP
   server takes it **on possession, not at startup**: clients launch stdio servers
-  freely, so locking at process start made the first server win and every later
+  freely, so locking at process start makes the first server win and every later
   one fail to connect at all. Looking is not driving, and the lock follows
   driving. Consequently
   the body is a **single-machine** resource; `CLANKIE_GBA_BODY_ROOT` is the

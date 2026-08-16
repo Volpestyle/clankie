@@ -14,7 +14,6 @@ import {
   type DiscordPresenceWrite,
   type DiscordPresenceWriteResult,
   type DiscordTransportKind,
-  type DiscordVoicePresenceNote,
 } from "@clankie/protocol";
 
 export type DiscordDmPolicy = "deny" | "owner_only" | "allowlist";
@@ -32,13 +31,9 @@ export interface DiscordTextIngressConfig {
   readonly contextMessageLimit: number;
   readonly authenticatedSurfaceUrl: string;
   /**
-   * What earns a reply in an admitted channel. `addressed` (the default)
-   * answers a mention or a message that uses one of his names; `all` answers
-   * every admitted message.
-   *
-   * This is evaluated *before* the captain turn on purpose. Deciding to stay
-   * quiet must not cost a model call, or an open channel allowlist bills for
-   * every message in the server.
+   * What Clankie gets to perceive in an admitted channel. `all` (the default)
+   * lets the captain decide whether to answer; `addressed` is the explicit
+   * cost-saving mode that only wakes on a mention or one of his names.
    */
   readonly replyPolicy?: DiscordReplyPolicy;
   /** Lowercased names he answers to. Only consulted by the `addressed` policy. */
@@ -62,9 +57,9 @@ export interface DiscordTextIngressConfig {
 
 export type DiscordReplyPolicy = "addressed" | "all";
 
-/** Unknown values fall back to the quiet policy, never the noisy one. */
+/** Unknown values preserve the agent-first default. */
 export function parseDiscordReplyPolicy(value: string | undefined): DiscordReplyPolicy {
-  return value?.trim() === "all" ? "all" : "addressed";
+  return value?.trim() === "addressed" ? "addressed" : "all";
 }
 
 /**
@@ -98,6 +93,9 @@ export interface DiscordInboundContextMessage {
   readonly authorId: string;
   readonly body: string;
   readonly createdAt: string;
+  /** Candidate visuals stay internal until the bounded newest one is selected. */
+  readonly attachments?: readonly DiscordPresenceAttachment[];
+  readonly attachmentsOmitted?: number;
 }
 
 /**
@@ -112,6 +110,16 @@ export interface DiscordRawAttachment {
   readonly contentType?: string | null;
   readonly filename?: string | null;
   readonly size?: number | null;
+}
+
+/** The visual subset of a Discord link embed; rich cards are not images. */
+export interface DiscordRawEmbed {
+  readonly type?: string | null;
+  readonly url?: string | null;
+  readonly thumbnailUrl?: string | null;
+  readonly thumbnailProxyUrl?: string | null;
+  readonly videoUrl?: string | null;
+  readonly videoProxyUrl?: string | null;
 }
 
 export interface DiscordInboundAttachmentSelection {
@@ -134,6 +142,7 @@ export interface DiscordInboundAttachmentSelection {
  */
 export function selectInboundImageAttachments(
   raw: readonly DiscordRawAttachment[],
+  embeds: readonly DiscordRawEmbed[] = [],
 ): DiscordInboundAttachmentSelection {
   const attachments: DiscordPresenceAttachment[] = [];
   let omitted = 0;
@@ -143,6 +152,16 @@ export function selectInboundImageAttachments(
       continue;
     }
     const selected = selectAttachment(candidate);
+    if (selected === undefined) omitted += 1;
+    else attachments.push(selected);
+  }
+  for (const candidate of embeds) {
+    if (candidate.type !== "gifv") continue;
+    if (attachments.length >= DISCORD_PRESENCE_TRIGGER_ATTACHMENTS_MAX) {
+      omitted += 1;
+      continue;
+    }
+    const selected = selectEmbed(candidate);
     if (selected === undefined) omitted += 1;
     else attachments.push(selected);
   }
@@ -176,6 +195,48 @@ function selectAttachment(candidate: DiscordRawAttachment): DiscordPresenceAttac
   };
 }
 
+function selectEmbed(candidate: DiscordRawEmbed): DiscordPresenceAttachment | undefined {
+  // Discord GIF pickers post a page URL plus a gifv embed, not an attachment.
+  // Carry Discord's preview for fallback and its proxy video for bounded frame sampling.
+  const url = candidate.thumbnailProxyUrl ?? candidate.thumbnailUrl;
+  if (url == null) return undefined;
+  const mediaType = imageMediaTypeFromUrl(candidate.thumbnailUrl ?? url);
+  if (mediaType === undefined) return undefined;
+  if (!isHttpsUrl(url)) return undefined;
+  const motionUrl = candidate.videoProxyUrl ?? candidate.videoUrl;
+  return {
+    id: `embed-${createHash("sha256")
+      .update(candidate.url ?? url)
+      .digest("hex")
+      .slice(0, 24)}`,
+    url,
+    ...(motionUrl == null || !isHttpsUrl(motionUrl) ? {} : { motionUrl }),
+    mediaType,
+  };
+}
+
+function isHttpsUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function imageMediaTypeFromUrl(value: string): DiscordPresenceAttachment["mediaType"] | undefined {
+  let pathname: string;
+  try {
+    pathname = new URL(value).pathname.toLowerCase();
+  } catch {
+    return undefined;
+  }
+  if (pathname.endsWith(".png")) return "image/png";
+  if (pathname.endsWith(".jpg") || pathname.endsWith(".jpeg")) return "image/jpeg";
+  if (pathname.endsWith(".gif")) return "image/gif";
+  if (pathname.endsWith(".webp")) return "image/webp";
+  return undefined;
+}
+
 function isSupportedMediaType(value: string): value is DiscordPresenceAttachment["mediaType"] {
   return (DISCORD_PRESENCE_ATTACHMENT_MEDIA_TYPES as readonly string[]).includes(value);
 }
@@ -194,13 +255,6 @@ export interface DiscordInboundMessage {
   readonly attachmentsOmitted?: number;
   readonly contextMessages?: readonly DiscordInboundContextMessage[];
   readonly loadContextMessages?: () => Promise<readonly DiscordInboundContextMessage[]>;
-  /**
-   * Set by the bridge when this message asked him into or out of voice and the
-   * bridge already executed the decision at its ingress boundary (ADR 0062).
-   * Passed through into the turn trigger unchanged so his reply reflects what
-   * actually happened.
-   */
-  readonly voicePresenceNote?: DiscordVoicePresenceNote;
   /** Set only by {@link DiscordTextIngress.catchUp}; he is looking at a backlog. */
   readonly catchingUp?: boolean;
 }
@@ -246,6 +300,8 @@ const DEFAULT_DELIVERY_RETENTION_MS = 7 * 60 * 60 * 1_000;
 const DEFAULT_MAX_RETAINED_DELIVERIES = 50_000;
 /** Discord shows "typing…" for about ten seconds per post; a turn that thinks longer re-posts to stay visible. */
 export const TYPING_REFRESH_MS = 8_000;
+/** Cosmetic presence must settle even if the captain service or its HTTP request wedges. */
+export const TYPING_MAX_DURATION_MS = 60_000;
 /** Roughly how long a conversation stays "the one you are in" before you drift off. */
 const DEFAULT_LIVE_MESSAGE_WINDOW = 5;
 const DEFAULT_MAX_PENDING_PER_CHANNEL = 20;
@@ -412,6 +468,7 @@ export class DiscordTextIngress {
   ): Promise<DiscordTextIngressOutcome> {
     const health = await this.port.getHealth();
     const contextMessages = message.contextMessages ?? (await message.loadContextMessages?.()) ?? [];
+    const context = boundedContext(contextMessages, this.config.contextMessageLimit);
     const identity = {
       presenceSessionId,
       correlationId,
@@ -439,9 +496,9 @@ export class DiscordTextIngress {
           ? {}
           : { attachmentsOmitted: message.attachmentsOmitted }),
         ...(this.unprompted(message) ? { unprompted: true } : {}),
-        ...(message.voicePresenceNote === undefined ? {} : { voicePresenceNote: message.voicePresenceNote }),
       },
-      contextMessages: boundedContext(contextMessages, this.config.contextMessageLimit),
+      contextMessages: context.messages,
+      ...(context.visual === undefined ? {} : { contextVisual: context.visual }),
     });
     event("accepted");
     const stopTyping = this.showTyping(message, identity);
@@ -479,7 +536,7 @@ export class DiscordTextIngress {
     );
     // A picture he made during this turn rides his reply as one message
     // (ADR 0085). `media` is only ever present on a settled turn, and only
-    // because the control plane saw the generation happen — nothing here trusts
+    // because the service saw the generation happen — nothing here trusts
     // the reply text to name an artifact.
     const media = result.state === "settled" ? result.media : undefined;
     const write = DiscordPresenceWriteSchema.parse({
@@ -529,13 +586,14 @@ export class DiscordTextIngress {
    * The indicator is cosmetic, so it must never delay or fail the turn: posts
    * are fire-and-forget, and the first failure stops the refresh instead of
    * re-hitting a path that is already refusing. Successful posts land in the
-   * control plane's narrative ledger like every other presence write.
+   * service's narrative ledger like every other presence write.
    */
   private showTyping(message: DiscordInboundMessage, identity: DiscordPresenceWrite["identity"]): () => void {
     if (message.catchingUp === true) return () => undefined;
     let sequence = 0;
     const stop = (): void => {
       clearInterval(timer);
+      clearTimeout(deadline);
     };
     const post = (): void => {
       const write = DiscordPresenceWriteSchema.parse({
@@ -550,6 +608,8 @@ export class DiscordTextIngress {
     };
     const timer = setInterval(post, TYPING_REFRESH_MS);
     timer.unref?.();
+    const deadline = setTimeout(stop, TYPING_MAX_DURATION_MS);
+    deadline.unref?.();
     post();
     return stop;
   }
@@ -575,7 +635,7 @@ export class DiscordTextIngress {
       return "channel_not_allowlisted";
     }
     // A DM is already addressed to him by construction; a guild channel is not.
-    if ((this.config.replyPolicy ?? "addressed") === "addressed") {
+    if ((this.config.replyPolicy ?? "all") === "addressed") {
       const addressed =
         message.mentionsBot || addressesCharacter(message.body, this.config.characterNames ?? []);
       // Whether he is *reading* is decided in `handle`, which can buffer for a
@@ -637,6 +697,10 @@ export class DiscordTextIngress {
           authorId: message.authorId,
           body: message.body,
           createdAt: new Date(this.clock()).toISOString(),
+          attachments: message.attachments ?? [],
+          ...(message.attachmentsOmitted === undefined
+            ? {}
+            : { attachmentsOmitted: message.attachmentsOmitted }),
         })),
         ...(trigger.contextMessages ?? []),
       ],
@@ -651,7 +715,7 @@ export class DiscordTextIngress {
     // A DM is addressed to him by construction, and `all` means he reads the
     // room by policy. Neither drifts.
     if (message.guildId === undefined) return true;
-    if ((this.config.replyPolicy ?? "addressed") === "all") return true;
+    if ((this.config.replyPolicy ?? "all") === "all") return true;
     if (message.mentionsBot || addressesCharacter(message.body, this.config.characterNames ?? [])) {
       return true;
     }
@@ -666,9 +730,8 @@ export class DiscordTextIngress {
 
   /**
    * Is he mid-conversation in this channel right now — reading it live because
-   * he spoke there recently? Public so seams at the same ingress boundary (the
-   * asked voice presence gate, ADR 0062) share this exact notion of being
-   * spoken to instead of growing a second, narrower matcher.
+   * he spoke there recently? Public for ingress-adjacent observers that need
+   * the same notion of being spoken to instead of a second matcher.
    */
   public engagedInChannel(channelId: string): boolean {
     const activity = this.channels.get(channelId);
@@ -739,12 +802,41 @@ function presenceSessionIdFor(message: DiscordInboundMessage): string {
 function boundedContext(
   messages: readonly DiscordInboundContextMessage[],
   limit: number,
-): readonly DiscordInboundContextMessage[] {
-  if (limit === 0) return [];
-  return messages.slice(-limit).map((message) => ({
-    ...message,
-    body: message.body.slice(0, DISCORD_PRESENCE_TRIGGER_BODY_MAX),
-  }));
+): {
+  readonly messages: readonly Pick<DiscordInboundContextMessage, "id" | "authorId" | "body" | "createdAt">[];
+  readonly visual?: {
+    readonly sourceMessageId: string;
+    readonly attachment?: DiscordPresenceAttachment;
+    readonly attachmentsOmitted?: number;
+  };
+} {
+  if (limit === 0) return { messages: [] };
+  const bounded = messages.slice(-limit);
+  const source = [...bounded]
+    .reverse()
+    .find((message) => (message.attachments?.length ?? 0) > 0 || (message.attachmentsOmitted ?? 0) > 0);
+  const attachment = source?.attachments?.[0];
+  const omitted =
+    source === undefined
+      ? 0
+      : (source.attachmentsOmitted ?? 0) + Math.max(0, (source.attachments?.length ?? 0) - 1);
+  return {
+    messages: bounded.map((message) => ({
+      id: message.id,
+      authorId: message.authorId,
+      body: message.body.slice(0, DISCORD_PRESENCE_TRIGGER_BODY_MAX),
+      createdAt: message.createdAt,
+    })),
+    ...(source === undefined
+      ? {}
+      : {
+          visual: {
+            sourceMessageId: source.id,
+            ...(attachment === undefined ? {} : { attachment }),
+            ...(omitted === 0 ? {} : { attachmentsOmitted: omitted }),
+          },
+        }),
+  };
 }
 
 function boundedReply(value: string): string {

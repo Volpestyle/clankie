@@ -49,6 +49,11 @@ interface ScriptedBeat {
   battle?: GbaCoreState["battle"];
   /** The beat ends on its own after this many frames — a fanfare, a jingle. */
   releaseAfterFrames?: number;
+  /**
+   * A stays on this beat. Models a Yes/No sitting under the same box string
+   * after the advance that opened it.
+   */
+  holdBeat?: boolean;
 }
 
 /**
@@ -73,22 +78,23 @@ class ScriptedDialogCore implements GbaCoreSeam {
 
   private beatEnteredAt = 0;
 
-  public pressButton(button: GbaButton, holdFrames: number): void {
+  public async pressButton(button: GbaButton, holdFrames: number): Promise<void> {
     this.pressed.push(button);
     this.frame += holdFrames;
     this.inputCount += 1;
     if (button !== "a") return;
+    if (this.beats[this.index]?.holdBeat === true) return;
     this.index += 1;
     this.printedAt = this.frame;
     this.beatEnteredAt = this.frame;
   }
 
-  public advanceFrames(frames: number): void {
+  public async advanceFrames(frames: number): Promise<void> {
     this.frame += frames;
     this.settleTimedBeats();
   }
 
-  public advanceFramesHolding(button: GbaButton, frames: number): void {
+  public async advanceFramesHolding(button: GbaButton, frames: number): Promise<void> {
     this.held.push(button);
     this.frame += frames;
     // A held A/B fast-reads the printer, mirroring the real core: each held
@@ -253,6 +259,38 @@ describe("advance_dialog", () => {
     expect(core.pressed).toEqual(["a", "a", "a"]);
     // Three boxes, one decision, one evidence event.
     expect(adapter.session(spec.sessionId).trace().events).toHaveLength(1);
+  });
+
+  it("stops when A does not change the box and no menu was decoded", async () => {
+    // Nurse Joy and the Trainer School list: the question stays in the dialog
+    // buffer while a Yes/No the decoder does not list is waiting. Another A
+    // would answer it.
+    const core = new ScriptedDialogCore([
+      {
+        lines: ["Would you like me to heal your POKéMON back to perfect health?"],
+        holdBeat: true,
+      },
+    ]);
+    const { command, grant, runtime } = await harness(core);
+    const result = await runtime.startAction(grant.token, command("heal", advance()));
+
+    expect(result).toMatchObject({
+      status: "completed",
+      outcome: {
+        endedBecause: "choice_unlisted",
+        presses: 1,
+        transcript: ["Would you like me to heal your POKéMON back to perfect health?"],
+      },
+    });
+    expect(core.pressed).toEqual(["a"]);
+    expect(
+      observeEffect({
+        before: [],
+        after: [],
+        action: advance(),
+        outcome: (result as { outcome: Record<string, unknown> }).outcome,
+      }).summary,
+    ).toContain("press A, not select_menu_entry");
   });
 
   it("stops at a choice instead of answering it", async () => {

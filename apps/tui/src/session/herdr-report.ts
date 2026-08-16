@@ -17,6 +17,13 @@ export interface HerdrReportOptions {
   readonly agent?: string;
 }
 
+/** Pane id of this console when it is sitting in herdr; undefined otherwise. */
+export function herdrPaneIdFromEnv(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  if (env.HERDR_ENV !== "1") return undefined;
+  const paneId = env.HERDR_PANE_ID?.trim();
+  return paneId === undefined || paneId.length === 0 ? undefined : paneId;
+}
+
 function defaultRunner(
   command: string,
   args: readonly string[],
@@ -52,13 +59,13 @@ export async function reportHerdrAgent(
 }
 
 /**
- * Publish display metadata (title / custom status) via `herdr pane report-metadata`.
+ * Publish display metadata (title / token) via `herdr pane report-metadata`.
  * Inert outside Herdr.
  */
 export async function reportHerdrMetadata(
   options: HerdrReportOptions & {
     readonly title?: string;
-    readonly customStatus?: string;
+    readonly token?: string;
   } = {},
 ): Promise<boolean> {
   const env = options.env ?? process.env;
@@ -70,7 +77,7 @@ export async function reportHerdrMetadata(
   const args = ["pane", "report-metadata", paneId, "--source", source];
   if (options.agent !== undefined) args.push("--agent", options.agent);
   if (options.title !== undefined) args.push("--title", options.title);
-  if (options.customStatus !== undefined) args.push("--custom-status", options.customStatus);
+  if (options.token !== undefined) args.push("--token", options.token);
   const run = options.runCommand ?? defaultRunner;
   await run("herdr", args);
   return true;

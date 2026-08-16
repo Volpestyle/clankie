@@ -9,7 +9,7 @@ export { createDiscordActivityServer, type DiscordActivityServer } from "./serve
 
 /**
  * Standalone entrypoint. The surface is a rendering client only: it holds no
- * Discord credentials, no mission authority, and no emulator core. The host
+ * Discord credentials, no authority, and no emulator core. The host
  * feeds it frames through the loopback producer endpoint.
  */
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -33,8 +33,25 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const producerBound = await producer.listen(producerPort);
   process.stdout.write(`clankie activity producer listening on 127.0.0.1:${String(producerBound)}\n`);
 
+  // The hub has always counted the frames it drops for a backed-up viewer, and
+  // nothing ever read the counter — so viewer-side loss was invisible exactly
+  // when someone was asking why the picture stuttered. Reported on change only:
+  // a healthy stream stays silent, and a bad one names itself.
+  let reportedDrops = 0;
+  const dropWatch = setInterval(() => {
+    const dropped = hub.droppedFrameCount;
+    if (dropped === reportedDrops) return;
+    process.stdout.write(
+      `activity: dropped ${String(dropped - reportedDrops)} frames for backpressure ` +
+        `(${String(dropped)} total, ${String(hub.viewerCount)} viewers)\n`,
+    );
+    reportedDrops = dropped;
+  }, 5_000);
+  dropWatch.unref();
+
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.once(signal, () => {
+      clearInterval(dropWatch);
       void Promise.all([activity.close(), producer.close()]).then(() => process.exit(0));
     });
   }

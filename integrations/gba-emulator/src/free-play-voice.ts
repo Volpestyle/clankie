@@ -76,7 +76,7 @@ export interface ClankieVoice {
 }
 
 export const VOICE_SYSTEM_PROMPT = [
-  "You are the voice of a character who is playing Pokémon FireRed right now.",
+  "You are the voice of a character who is playing Pokémon on a Game Boy Advance right now.",
   "",
   "Another part of you is playing the game. You are not playing it — you cannot",
   "press buttons and you do not choose where he goes. You decide, this moment,",

@@ -13,6 +13,7 @@ import {
   FREE_PLAY_MONOLOGUE_MAX,
   FREE_PLAY_NOTES_MAX,
   FREE_PLAY_OBJECTIVE_MAX,
+  FREE_PLAY_REPEAT_TURNS,
   FREE_PLAY_REPLY_MAX,
   FREE_PLAY_SPEAK_COOLDOWN_TURNS,
   FREE_PLAY_SPEAK_MAX,
@@ -139,6 +140,17 @@ export interface FreePlayView {
    * stalls it legitimately, and what to do about it stays his call.
    */
   stalledForTurns: number | null;
+  /**
+   * How many turns in a row he has now taken the same action and got back the
+   * same effect, surfaced only once it is long enough to mean something.
+   *
+   * The counterpart to `stalledForTurns` for everywhere he has no position: a
+   * battle menu, a naming screen, a script that will not release. Information
+   * on the same terms as the rest of this view — a repeat can be persistence
+   * (a script that needs more time) or a wedge (an action refused identically
+   * forever), and which one it is stays his read, not the loop's.
+   */
+  repeatingForTurns: number | null;
   /** The notes he wrote on the previous turn, verbatim. */
   notes: string | null;
   /** His standing objective, carried until he changes it. */
@@ -236,6 +248,18 @@ export interface FreePlayResult {
   volition: FreePlayVolition;
   /** Turns whose action the adapter accepted. */
   accepted: number;
+  /**
+   * The longest run of consecutive turns whose action and effect were both
+   * identical. Measured so a wedge is a number in the summary rather than a
+   * shape someone has to notice by reading the whole journal.
+   *
+   * Not the benchmark's `longestRepeatedInputRun`, which counts identical
+   * *accepted* actions whatever they did — that one scores whether a run was
+   * button-mashing, and legitimately fires while walking a corridor. This one
+   * requires the result to be identical too, and counts refusals, because the
+   * failure it exists for is an action refused the same way forever.
+   */
+  longestUnchangedRun: number;
   /**
    * Fraction of scoreable turns where the previous turn's intent referenced the
    * action actually taken. A heuristic and a lower bound — see
@@ -395,6 +419,12 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
   const recentlySaid: string[] = [];
   const progress = new FreePlayProgressTracker();
   progress.seed(positionOf(observe(input.io)));
+  // Consecutive turns whose action and effect were both identical. A turn that
+  // never reached an action — the model errored, or its decision did not parse
+  // — leaves this untouched rather than resetting it: a transient failure in
+  // the middle of a wedge is not evidence the wedge broke.
+  let repeat: { signature: string; turns: number } | null = null;
+  let longestUnchangedRun = 0;
 
   for (let turn = 0; turn < input.turns; turn += 1) {
     if (input.shouldStop?.() === true) break;
@@ -435,6 +465,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
         // the tile counter stalls for reasons that need no telling.
         stalledForTurns:
           sinceNewTile >= FREE_PLAY_STALL_TURNS && positionOf(observations) !== null ? sinceNewTile : null,
+        repeatingForTurns: repeat !== null && repeat.turns >= FREE_PLAY_REPEAT_TURNS ? repeat.turns : null,
         notes,
         objective,
         interjection,
@@ -478,6 +509,18 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     let rejection: string | null = null;
     /** Set only by an accepted body action, whose effect no diff can read. */
     let bodySummary: string | null = null;
+    /**
+     * The screen as it stands the instant before the action, which is not the
+     * screen he was shown when he decided.
+     *
+     * `record.framebufferSha256` is sampled at observation, and the console now
+     * keeps running while he thinks (ADR 0047) — so diffing from it attributes
+     * every drop of ambient animation across a ten-second decision to whatever
+     * he did at the end of it. On 2026-08-15 that told him a fruitless A press
+     * had changed the screen, and cost him the next turn to work out it had
+     * not. Sampling here narrows the window back to the action itself.
+     */
+    const frameBefore = input.framebufferSha256?.() ?? null;
     if (chosen.kind === "load_checkpoint" || chosen.kind === "restart_game") {
       // The body's saved time, not the emulator (ADR 0075): dispatched to the
       // injected checkpoint port, never to io.act — the frozen catalog does
@@ -531,9 +574,9 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     }
 
     // Re-observe and diff, so the turn records what changed rather than only
-    // that the adapter took the button. The frame digest is sampled digest-to-
-    // digest around the action — the core only runs frames the action asked
-    // for, so the comparison spans exactly what this turn did to the screen.
+    // that the adapter took the button. The frame digest is sampled from just
+    // before the action to just after it, so the comparison spans what this
+    // turn did to the screen and not the idling the console did meanwhile.
     //
     // A rejected action never ran, so diffing around it would invent an effect
     // — the worst case was a refused advance_dialog reading as "read no new
@@ -557,13 +600,20 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
               after: afterObservations,
               action: chosen as GbaEmulatorAction,
               outcome: actionOutcome,
-              screenChanged:
-                record.framebufferSha256 !== null && frameAfter !== null
-                  ? frameAfter !== record.framebufferSha256
-                  : null,
+              screenChanged: frameBefore !== null && frameAfter !== null ? frameAfter !== frameBefore : null,
             });
     progress.record(effect, accepted);
     record.effect = effect.summary.slice(0, 200);
+
+    // Same action, same result: the state-independent stuck signal. The stored
+    // effect is the bounded one he is actually shown, so the comparison is
+    // between the two lines he read, not between two fuller strings he did not.
+    const signature = canonicalJson({ action: chosen, effect: record.effect });
+    // Annotated: without it the loop-carried assignment below makes this
+    // variable's type depend on itself.
+    const priorRepeats: number = repeat !== null && repeat.signature === signature ? repeat.turns : 0;
+    repeat = { signature, turns: priorRepeats + 1 };
+    longestUnchangedRun = Math.max(longestUnchangedRun, repeat.turns);
 
     // Whether the rate gate could let an unprompted remark through this turn.
     // Computed before Voice is consulted, because a consultation whose only
@@ -666,6 +716,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     accepted: turns.filter((t) => t.outcome === "accepted").length,
     progress: progress.snapshot(),
     volition,
+    longestUnchangedRun,
     ...coherence(turns),
   };
 }
@@ -762,6 +813,8 @@ function describeRejection(result: EnvironmentActionResult): string {
  * playthrough actually meets, translated into what to do about them.
  */
 const REJECTION_HINTS: Readonly<Record<string, string>> = {
+  semantic_state_unavailable:
+    "this cartridge has no decoded state profile yet — use raw button presses and the visible screen",
   input_bound_exceeded: "it asked for more button presses than one action may spend",
   frame_bound_exceeded: "it asked for more frames than one action may spend",
   dialog_not_open:
@@ -769,6 +822,8 @@ const REJECTION_HINTS: Readonly<Record<string, string>> = {
     "fanfare is holding it; advance a few frames and look again",
   walk_requires_overworld: "walking needs overworld control — close whatever is open first",
   no_path_to_target: "no walkable route to that tile exists from here",
+  walk_target_outside_map: "that tile is off the loaded map",
+  walk_target_impassable: "that tile is a wall or obstacle, not floor",
   map_grid_unavailable: "no map is loaded to route over — walking waits for the overworld",
   naming_screen_not_open: "no naming screen is open to type on",
   menu_not_open: "no menu is open to select from",
@@ -780,7 +835,13 @@ const REJECTION_HINTS: Readonly<Record<string, string>> = {
 
 function describeRejectionForPlayer(errorCode: string | null, raw: string): string {
   const hint = errorCode === null ? undefined : REJECTION_HINTS[errorCode];
-  return `rejected, nothing ran — ${hint ?? raw}`;
+  if (hint === undefined) return `rejected, nothing ran — ${raw}`;
+  // The adapter appends per-refusal information after an em-dash — the map's
+  // bounds, the nearest reachable tile. The static hint says what went wrong;
+  // that detail is what to do instead, so it rides along.
+  const detailAt = raw.lastIndexOf(" — ");
+  const detail = detailAt === -1 ? "" : `;${raw.slice(detailAt + 2)}`;
+  return `rejected, nothing ran — ${hint}${detail}`;
 }
 
 function bounded(value: unknown): string {

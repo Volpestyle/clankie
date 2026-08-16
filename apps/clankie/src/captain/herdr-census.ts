@@ -1,0 +1,117 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { readHerdrSummariesFile, type HerdrAgentSummary } from "./herdr-summaries.ts";
+
+const execFileAsync = promisify(execFile);
+
+export type HerdrCensusRunner = (
+  command: string,
+  args: readonly string[],
+) => Promise<{ stdout: string; stderr: string }>;
+
+export interface HerdrCensusAgent {
+  readonly paneId: string;
+  readonly agent: string;
+  readonly status: string;
+  readonly title: string;
+}
+
+export type HerdrSessionCensus =
+  | { readonly outcome: "ok"; readonly text: string }
+  | { readonly outcome: "unavailable"; readonly error: string };
+
+const CENSUS_TIMEOUT_MS = 5_000;
+const MAX_AGENTS = 48;
+
+function defaultRunner(
+  command: string,
+  args: readonly string[],
+): Promise<{ stdout: string; stderr: string }> {
+  return execFileAsync(command, [...args], { timeout: CENSUS_TIMEOUT_MS, maxBuffer: 1024 * 1024 }).then(
+    ({ stdout, stderr }) => ({ stdout: String(stdout), stderr: String(stderr) }),
+  );
+}
+
+function titleOf(pane: Record<string, unknown>): string {
+  for (const key of ["title", "terminal_title_stripped", "terminal_title"] as const) {
+    const value = pane[key];
+    if (typeof value === "string" && value.trim().length > 0) return value.trim();
+  }
+  return "";
+}
+
+export function parseHerdrAgentList(stdout: string): HerdrCensusAgent[] {
+  const parsed = JSON.parse(stdout) as { result?: { agents?: unknown } };
+  const rows = Array.isArray(parsed.result?.agents) ? parsed.result.agents : [];
+  const agents: HerdrCensusAgent[] = [];
+  for (const value of rows) {
+    if (value === null || typeof value !== "object") continue;
+    const pane = value as Record<string, unknown>;
+    const paneId = typeof pane.pane_id === "string" ? pane.pane_id : undefined;
+    const agent = typeof pane.agent === "string" ? pane.agent : undefined;
+    if (paneId === undefined || agent === undefined) continue;
+    agents.push({
+      paneId,
+      agent,
+      status: typeof pane.agent_status === "string" ? pane.agent_status : "unknown",
+      title: titleOf(pane),
+    });
+  }
+  return agents;
+}
+
+export function formatHerdrSessionCensus(
+  herdrPaneId: string,
+  agents: readonly HerdrCensusAgent[],
+  summaries: Readonly<Record<string, HerdrAgentSummary>> = {},
+): string {
+  const counts = new Map<string, number>();
+  const lines = [`HERDR SESSION (joined as ${herdrPaneId})`];
+  const shown = agents.slice(0, MAX_AGENTS);
+  for (const entry of shown) {
+    counts.set(entry.status, (counts.get(entry.status) ?? 0) + 1);
+    const mark = entry.paneId === herdrPaneId ? "  <- YOU" : "";
+    const title = entry.title.length <= 60 ? entry.title : `${entry.title.slice(0, 59)}…`;
+    lines.push(`  ${entry.paneId}  ${entry.agent}  ${entry.status}  ${title}${mark}`);
+    const written = summaries[entry.paneId];
+    if (written) {
+      lines.push(`        summary: ${written.summary}`);
+      if (written.next) lines.push(`        next: ${written.next}`);
+    }
+  }
+  if (agents.length > shown.length) lines.push(`  … ${agents.length - shown.length} more agents not listed`);
+  const summary = [...counts.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([status, count]) => `${count} ${status}`)
+    .join(", ");
+  lines.push(`  ${agents.length} agents${summary.length === 0 ? "" : ` — ${summary}`}`);
+  const done = counts.get("done") ?? 0;
+  const blocked = counts.get("blocked") ?? 0;
+  if (done > 0) lines.push(`  ${done} done — finished work nobody has read. Harvest first.`);
+  if (blocked > 0) lines.push(`  ${blocked} blocked — waiting on a human. Surface those before dispatching.`);
+  return lines.join("\n");
+}
+
+/** Live agent census for a seated turn. Fail-soft: a down socket is not a failed turn. */
+export async function readHerdrSessionCensus(
+  herdrPaneId: string,
+  options: { readonly runCommand?: HerdrCensusRunner } = {},
+): Promise<HerdrSessionCensus> {
+  const run = options.runCommand ?? defaultRunner;
+  try {
+    const { stdout } = await run("herdr", ["agent", "list"]);
+    return {
+      outcome: "ok",
+      text: formatHerdrSessionCensus(
+        herdrPaneId,
+        parseHerdrAgentList(stdout),
+        readHerdrSummariesFile().agents,
+      ),
+    };
+  } catch (caught) {
+    if (caught instanceof Error && "code" in caught && caught.code === "ENOENT") {
+      return { outcome: "unavailable", error: "herdr is not on PATH" };
+    }
+    return { outcome: "unavailable", error: caught instanceof Error ? caught.message : String(caught) };
+  }
+}

@@ -4,68 +4,46 @@ Status: accepted (James, 2026-07-25). The transport, gating, and shared
 participation core are implemented; live Discord evidence remains a deployment
 gate, and Go Live media stays sequenced behind [ADR 0024](0024-discord-dual-plane-presence.md).
 
-Numbering: 0048 follows 0047, the highest ADR present when this is authored.
-
 ## Context
 
-[ADR 0024](0024-discord-dual-plane-presence.md) established two Discord planes
-sharing one character and reserved `user_session` as a transport binding, but
-left it a follow-up (VUH-836). Until now the reservation was only a schema
-value: `DiscordPresenceWriteSchema` pinned `transportKind` to the literal
-`"bot"`, the control plane rejected anything else, the credential broker
-documented `discord_user_session` as "a reserved provider identifier only", and
-both bridge processes refused to start if `DISCORD_USER_TOKEN` was set.
+[ADR 0024](0024-discord-dual-plane-presence.md) defines two Discord planes that
+share one character and reserves `user_session` as a transport binding. This
+ADR makes that binding operational across the presence schema, credential
+broker, Clankie service, and bridge processes.
 
-That left a real capability gap. A bot cannot Go Live, cannot appear as a member
+A real capability gap remains. A bot cannot Go Live, cannot appear as a member
 of a friend's server the owner has not administered, and is visibly a bot in
 social contexts where the point is presence rather than service. Meanwhile the
-things that make Clankie _himself_ — the Eve lane, person memory, consent rules,
+things that make Clankie _himself_ — the pi lane, person memory, consent rules,
 receipts — are not properties of a Discord connection at all.
 
 Discord forbids automating normal user accounts. ADR 0024 already weighed that
 and placed the capability in an explicitly enabled personal lab, denied by
 high-assurance and team profiles. This ADR does not reopen that decision; it
-implements it, and adds the enforcement the earlier ADR only described.
+implements that enforcement.
 
 ## Decision
 
 ### Transport is a runtime binding, not a fork of the character
 
-```mermaid
-flowchart TB
-  subgraph shared["@clankie/discord-presence-core · transport-neutral"]
-    TI[Text ingress<br/>bounded turns]
-    VI[Voice ingress]
-    VS[Voice session<br/>consent · capture · barge-in]
-    PS[Presence lifecycle<br/>phase events]
-    RC[(Content-free receipts)]
-  end
-
-  subgraph bot["apps/discord-bridge · official bot"]
-    BG[discord.js gateway]
-    BR[REST executor<br/>+ activity plane]
-  end
-
-  subgraph user["apps/discord-user-session · personal lab"]
-    UG[raw ws gateway<br/>bare user token]
-    UR[fetch REST executor]
-    UA[voice adapter]
-  end
-
-  BG --> shared
-  UG --> shared
-  UA -->|"@discordjs/voice"| VS
-  shared --> CP[Control plane<br/>doctrine · policy · projection]
-  CP --> EVE[One Eve lane per channel<br/>discord:guild:channel]
-  CP --> MEM[(Approved person memory<br/>guild · user · channel)]
-  CP -->|policy-allowed writes| BR
-  CP -->|policy-allowed writes| UR
-```
+![ADR 0048: One character, two Discord bodies](../diagrams/0048-discord-user-session-transport.jpg)
 
 `DiscordTransportKind` is the single place bot-versus-user is named. Action
 schemas stay transport-agnostic, and each catalogue entry declares a
 `transports` list rather than a pair of booleans, so "which bodies can do this?"
-has exactly one answer per action:
+has exactly one answer per action.
+
+**Exactly one body is live.** `discord.activeBody` (`bot` | `user_session`,
+default `bot`) is the mouth. Both credentials stay in the broker; the
+launcher starts only the active process and stops the other on
+`clankie restart`. Voice, music, and speech attach to that one connection,
+so they are implemented once. The lab user body may also Go Live the same
+YouTube URL (video + audio on the stream) instead of mixing audio into
+voice — one sink per track, so the room does not hear it twice. Switching
+bodies is an operator action in `/discord`, not a runtime radio the model
+can flip.
+
+`DiscordTransportKind` still names which credential opened the gateway:
 
 | Action family                                                                             | Transports            |
 | ----------------------------------------------------------------------------------------- | --------------------- |
@@ -77,15 +55,15 @@ has exactly one answer per action:
 
 `discordPresenceLaneAddress` derives the bounded-turn scope from _where the
 conversation happens_ — `discord:<guildId|dm>:<channelId>` — never from which
-transport observed it. Both bridges must derive it there. A channel Clankie was
+transport observed it. Both bridges must derive it there. A channel Clankie is
 speaking in as the bot is the same lane he continues in as the user session, so
-switching bodies mid-thread keeps one continuing Eve lane, one character, and
+switching bodies mid-thread keeps one continuing pi lane, one character, and
 one person-memory projection. A transport-local identifier would silently fork
 the conversation into two streams of consciousness, which is the failure this
 decision exists to prevent.
 
-Person memory needed no change: it was already keyed by guild, user, and
-channel, and the control plane — not the bridge — retrieves it.
+Person memory needed no change: it is already keyed by guild, user, and
+channel, and the Clankie service — not the bridge — retrieves it.
 
 ### Isolation is structural, not conventional
 
@@ -115,7 +93,7 @@ Configuration alone cannot reach a user token.
    cannot record an opt-in and therefore can never start the plane.
 3. **Durable owner opt-in** — an operator-authenticated, event-sourced record
    bound to the doctrine profile hash in force. Recompiling doctrine invalidates
-   it: an acceptance must not survive a policy change it was never weighed
+   it: an acceptance must not survive a policy change it is never weighed
    against. Configuration may narrow the recorded guild/channel scope, never
    widen it. Revocation stops the next action rather than waiting for grant
    expiry.
@@ -126,7 +104,7 @@ Configuration alone cannot reach a user token.
 
 ### Transport is proven by authentication
 
-The control plane binds `transportKind` to the authenticated bearer, never to
+The Clankie service binds `transportKind` to the authenticated bearer, never to
 the request body. Four broker-owned local bearers exist —
 `clankie_discord_bridge`, `clankie_discord_voice_bridge`,
 `clankie_discord_user_bridge`, `clankie_discord_user_voice_bridge` — with
@@ -162,7 +140,7 @@ somehow authenticated.
 
 ## Consequences
 
-- `packages/discord-presence-core` now owns the transport-neutral participation
+- `packages/discord-presence-core` owns the transport-neutral participation
   stack. `apps/discord-bridge` keeps only bot-shaped concerns: slash commands,
   mission threads, the projector, and the activity plane.
 - `DiscordPresenceWriteSchema` and `DiscordPresenceWriteResultSchema` accept
@@ -178,5 +156,5 @@ somehow authenticated.
 - Account and ToS risk is the owner's, is recorded in the opt-in
   acknowledgement, and is denied outright by high-assurance and team profiles.
 - Live evidence — a real account, a real guild, and a spoken round trip through
-  the same Eve lane the bot uses — remains a deployment gate that deterministic
+  the same pi lane the bot uses — remains a deployment gate that deterministic
   tests cannot substitute for.

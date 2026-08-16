@@ -334,6 +334,7 @@ function viewWith(observations: GbaEmulatorObservation[]): FreePlayView {
     framePng: null,
     refusedHere: [],
     stalledForTurns: null,
+    repeatingForTurns: null,
     notes: null,
     objective: null,
     turnsSinceSpoke: null,

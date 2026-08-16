@@ -28,7 +28,7 @@ import { z } from "zod";
  * This package holds the mutex alone — no emulator, no runtime — so that
  * observability planes may *read* who holds the body (VUH-938) without
  * crossing the ADR 0063 fence that keeps environment bodies out of the
- * captain and control plane.
+ * captain's hands.
  */
 export const BODY_LOCK_FILENAME = "body.lock";
 

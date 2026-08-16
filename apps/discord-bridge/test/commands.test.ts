@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { commands, DISCORD_COMMAND_NAME, DISCORD_SUBCOMMANDS } from "../src/commands.ts";
-import { DISCORD_WORKER_STEER_CHOICES } from "../src/steering.ts";
 
 /**
  * Everything lives under one `/clankie` namespace. Bare names would put
- * `/join`, `/leave`, `/status`, and `/memory` in direct collision with
- * essentially every music and utility bot in a shared server.
+ * `/join`, `/leave`, and `/status` in direct collision with essentially every
+ * music and utility bot in a shared server.
  */
 const clankie = commands.find((command) => command.name === DISCORD_COMMAND_NAME);
 
@@ -42,14 +41,8 @@ describe("Discord commands", () => {
     expect(choiceValues("voice-consent", "action")).toEqual(["opt-in", "opt-out"]);
   });
 
-  it("offers only the three user-facing ceremony presets", () => {
-    expect(choiceValues("mission", "doctrine")).toEqual(["rawdog", "structured", "fine-control"]);
-  });
-
-  it("exposes mission steering, ambient approval handoff, and memory controls", () => {
-    for (const name of ["steer", "approval", "memory", "person-memory"]) {
-      expect(subcommand(name), `missing /clankie ${name}`).toBeDefined();
-    }
+  it("exposes person-memory controls", () => {
+    expect(subcommand("person-memory")).toBeDefined();
   });
 
   it("keeps person-memory mutation proposal-only and excludes ambient export/delete", () => {
@@ -57,16 +50,6 @@ describe("Discord commands", () => {
     expect(values).toEqual(["propose", "recall"]);
     expect(values).not.toContain("delete");
     expect(values).not.toContain("export");
-  });
-
-  it("makes arbitrary steering text impossible in the registered command schema", () => {
-    const intent = options("steer")?.find((option) => option.name === "intent");
-    const choices = intent && "choices" in intent ? intent.choices : undefined;
-
-    expect(options("steer")?.map((option) => option.name)).toEqual(["intent"]);
-    expect(choices).toEqual(DISCORD_WORKER_STEER_CHOICES.map(({ name, value }) => ({ name, value })));
-    expect(choices).toHaveLength(8);
-    expect(intent && "max_length" in intent ? intent.max_length : undefined).toBeUndefined();
   });
 
   it("stays under Discord's per-command subcommand cap", () => {

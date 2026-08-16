@@ -1,2 +1,0 @@
-Implemented the requested parser and added regression coverage.
-All targeted checks pass, and the working tree contains only the owned files.

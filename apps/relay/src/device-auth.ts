@@ -20,7 +20,7 @@ export interface ControlPlaneDeviceAuthorizerOptions {
 }
 
 /**
- * Reuses the control-plane's VUH-727 device-session boundary. `/v1/devices/self`
+ * Reuses the service's device-session boundary. `/v1/devices/self`
  * verifies the HMAC session token and reads the durable device projection, so
  * revocation takes effect on the next relay request or tail poll.
  */

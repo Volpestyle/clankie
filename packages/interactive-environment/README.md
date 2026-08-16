@@ -16,7 +16,7 @@ Boundaries dual-read the frozen Minecraft-shaped v1 contract, normalize it, and
 single-write v2; PokeMMO fields never reuse dimensions, block quotas, or
 Minecraft combat policy. Action/result/event contracts remain v1.
 
-The control plane and runner remain authoritative. Models receive no
+The clankie service remains authoritative. Models receive no
 credentials, cannot mint leases, and cannot expand the action catalog. A
 dormant embodied session exposes only lifecycle tools. Minecraft and PokeMMO
 simulator gameplay tools appear only in the active `gameplay` captain lane; TUI
@@ -29,8 +29,9 @@ stable protocol boundary those adapters implement.
 
 `ActivityObservationSnapshotSchema` defines present-tense self-observation for
 active activities. The first `gba_emulator` variant separates bounded
-`selfAuthored` objective/intent/commentary from `runnerObserved` settled
-outcome/effect/progress and admits only a framebuffer digest, never frame bytes.
+`selfAuthored` objective/intent/commentary from the `runnerObserved` settled
+outcome/effect/progress the service records, and admits only a framebuffer
+digest, never frame bytes.
 `ActivityObservationReadSchema` distinguishes a matching snapshot, a live
 session whose first turn is still pending, and no live activity. This is a read
 contract, not an environment command or capability projection.

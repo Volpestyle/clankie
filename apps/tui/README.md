@@ -2,201 +2,129 @@
 
 The operator console wears the v1 clankie face: a fullscreen `@earendil-works/pi-tui` layout (differential renderer, scrollback preserved) with the banner, transcript viewport, status bar, slash-command typeahead, Ctrl+/ command workbench, guided modal flows, and the agent-spinners loader — ported verbatim from clankie snapshot `04734df9` (VUH-755).
 
-The TUI is an Eve session client for captain conversation and a semantic
-control-plane client for authoritative mission data. It must not become a
-second scheduler or infer task state by scraping terminal text; `arch:check`
-forbids importing `@clankie/mission-engine`.
+The TUI talks to **one backend**: the clankie service on port `4310`
+(`apps/clankie`), which hosts the captain, the operator conversation dispatch
+(`POST /operator/v1/dispatch`, the shared `OperatorConversationService*`
+contract in `@clankie/protocol`), the lane listing (`GET /captain/v1/lanes`),
+and the operator APIs (health, devices, pairing, presence, embodiment,
+activity, memory). The HTTP catalog is `apps/clankie/openapi.yaml`. `CLANKIE_CONTROL_PLANE_URL` overrides the base URL (default
+`http://127.0.0.1:4310`; `CLANKIE_CAPTAIN_URL` is honored as a legacy alias).
+Plain prompts ride the selected server-owned conversation over the dispatch
+route with a durable per-surface replay cursor; there is no local scheduler and
+no state inference from terminal text. Type `/skill-name` at the start of the
+input for inline suffix completion and direct skill invocation, or type `$` at
+a token boundary to search the full skill picker and mention `$skill-name`. When
+Clankie loads a skill, the transcript records one compact `skill loaded` receipt
+instead of exposing the underlying `SKILL.md` read as a generic tool call.
+Inside Herdr the face _is_ his seat: it reports this pane as `clankie` and
+opens the herdr-lead board beside itself (one board per session; `/board`
+opens, `/board focus` jumps, `/board close` dismisses). Joining the session
+attaches a live agent
+census to each prompt so he can lead, route, and harvest. The board is the
+companion dashboard — `herdr-lead state` is the same picture with worktrees.
 
-The mission observer is read-only. It replays the control plane's authoritative
-local SQLite event log by global sequence, projects the mission list/task tree/
-worker roster/event tail and captain presence for the status bar, and saves a
-sanitized mode-0600 cursor checkpoint at `.data/tui/mission-observer.json`. The SQLite connection is opened with
-`readOnly` and `PRAGMA query_only`; the observer exposes only mission selection
-and next/previous navigation. `CLANKIE_EVENT_STORE` overrides the default
-`artifacts/control-plane/events.db` path.
-
-The log is partitioned by `missionId`, but reserved streams share it — presence
-sessions, embodiment sessions, devices, triggers. The observer routes on
-`streamKind` ([ADR 0065](../../docs/adr/0065-event-streams-declare-their-kind.md)),
-so only real missions reach the mission list and its default selection. Discord
-presence gets its own section showing the newest sessions and their phase; a
-bridge restart mints a new session id, so older ones age out rather than
-accumulating. Other reserved kinds are not rendered. The checkpoint is version 2;
-an older checkpoint is rejected and replayed from sequence 0.
-
-Run after installing with Node 24. The fullscreen face requires a TTY; captain
+Run after installing with Node 24. The fullscreen face requires a TTY; the
 control subcommands are non-interactive:
 
 ```bash
-clankie                        # via the bin/clankie.ts launcher (~/.local/bin symlink)
+clankie                         # via the bin/clankie.ts launcher (~/.local/bin symlink)
 clankie --chat <conversationId> # select an existing server-owned conversation
-clankie status                 # captain probe plus every launcher-owned service
-clankie restart                # restart all three services in dependency order
-clankie restart discord        # restart one (captain | control-plane | discord)
-clankie down                   # stop them in reverse dependency order
-clankie msg "status report"    # submit on the isolated headless session
-clankie watch --timeout 600    # JSONL events until the turn settles
-clankie wait --timeout 600     # final boundary only
-clankie trace                  # live reasoning/tool stream; stays across turns
-clankie trace --json           # machine-readable NDJSON (redacted)
-clankie trace --lane gameplay  # typed session-context lane label
-pnpm --filter @clankie/tui dev # from the repo
+clankie status                  # service probe plus every launcher-owned service
+clankie restart                 # restart every service in dependency order
+clankie restart captain         # restart the clankie service (+ the bodies that claim against it)
+clankie down                    # stop them in reverse dependency order
+clankie trace                   # render-only reasoning/tool stream (transport pending)
+clankie pair                    # one-time QR + code to pair a device
+clankie devices                 # list paired devices (revoke <id> to revoke)
+clankie operator-credential rotate
+clankie play status|stop        # live embodiment session controls
+pnpm --filter @clankie/tui dev  # from the repo
 ```
 
-`clankie` attaches to a healthy captain at `CLANKIE_CAPTAIN_URL` (default
-`http://127.0.0.1:4321`) or builds and starts one shared `eve start` process. The
-built runtime keeps durable sessions independent of hot-reload snapshot cleanup. Captain
-logs stay out of the fullscreen terminal at
-`${XDG_STATE_HOME:-~/.local/state}/clankie/captain-eve.log`. The service remains
-available when one TUI face exits, so sibling Herdr panes do not disconnect one
-another. Before the fullscreen face opens, the launcher displays its current
-startup stage. An occupied but unhealthy endpoint fails immediately with
-recovery guidance instead of waiting for the startup deadline. Direct
-`pnpm --filter @clankie/tui dev` expects the captain service to be started
-separately.
-
-The same executable has a non-interactive `--recovery-probe` mode for the M1
-crash/reconnect gate. It reads mission state through `@clankie/api-client`,
-consumes sequenced terminal replay from the runner's semantic boundary, writes
-an atomic cursor checkpoint, and remains alive so the drill can crash the real
-TUI process. This is a CI proof surface, not an alternate operator interface.
+`clankie` starts the clankie service when it is not already answering
+`GET /health`, then opens the face. The service stays up when one TUI face
+exits, so sibling Herdr panes do not disconnect one another. Service logs stay
+out of the fullscreen terminal at
+`${XDG_STATE_HOME:-~/.local/state}/clankie/clankie.log`. Direct
+`pnpm --filter @clankie/tui dev` expects the service to be started separately.
 
 ## Supervised local services
 
-`clankie` owns the three long-lived processes that put Clankie in Discord, and
-restarts them in dependency order ([ADR 0055](../../docs/adr/0055-launcher-owned-local-services.md)):
+`clankie` owns the long-lived local processes and restarts them in dependency
+order ([ADR 0055](../../docs/adr/0055-launcher-owned-local-services.md)):
 
 ```mermaid
 flowchart LR
-  captain["captain-eve :4321"] --> cp["control-plane :4310"] --> bridge["discord-bridge"]
+  clankie["clankie :4310"] --> bridge["discord-bridge"]
+  clankie --> lab["discord-user-session"]
+  activity["discord-activity :4320"] --> tunnel["cloudflared tunnel"]
 ```
 
 `restart` walks that order and stops at the first failure; `down` walks the
 reverse. Each service keeps an atomic mode-0600 pid record at
 `${XDG_STATE_HOME:-~/.local/state}/clankie/<id>-service.json` and logs to
-`<id>.log` beside it. Before signalling, the launcher re-reads the recorded pid's
-live command and refuses if it no longer looks like the service it started, so a
-stale record can never kill a process that inherited the pid.
-
-### Restarting a captain the launcher did not start
-
-`clankie restart` adopts an unowned **captain** rather than refusing it, because
-refusing left the operator unable to restart Clankie's own captain whenever it
-had been started by hand or outlived the run that spawned it — the remedy was a
-manual `lsof` and `kill`. Adoption never trusts the endpoint's word for it: the
-listening pid is read from the port, and its live command must contain the
-`appRoot` that captain itself reported (or match the launcher's own start
-command) before anything is signalled. A listener that cannot be proven to be
-this checkout's captain-eve is still reported and never killed. The other
-services are unchanged — reported, never adopted.
-
-### Identity and currency are different questions
-
-A captain is inspected for two things, and they have opposite remedies:
-
-| Question                        | Answered by                   | When it fails                                         |
-| ------------------------------- | ----------------------------- | ----------------------------------------------------- |
-| Is this Clankie's captain?      | agent name + ready eve health | `unhealthy` — a stranger on the port, never signalled |
-| Is it built from this checkout? | authored tool inventory       | `stale` — ours, rebuilt by `clankie restart`          |
-
-Keeping the tool inventory out of the identity check is load-bearing. While it
-was part of identity, adding any captain tool made the running captain fail to
-identify as the authored captain, and `restart` refused to touch it — a captain
-that had merely fallen behind read as an intruder. A `stale` inspection names
-which tools drifted, so the message says what is old rather than that something
-is wrong.
+`<id>.log` beside it. Before signalling, the launcher re-reads the recorded
+pid's live command and refuses if it no longer looks like the service it
+started, so a stale record can never kill a process that inherited the pid.
 
 Start is health gated: it returns when the service's probe reports healthy, not
-when the child spawns. The captain probes `/eve/v1/health` and `/eve/v1/info`,
-the control plane probes `GET /health`, and the bridge — which serves no HTTP —
-reports process state enriched with the presence phase it publishes to the
-control plane via the operator-readable `GET /v1/discord/presence-status`.
+when the child spawns. The clankie service probes `GET /health`; the bridge —
+which serves no HTTP — reports process state enriched with the presence phase it
+publishes via the operator-readable `GET /v1/discord/presence-status`; the
+tunnel probe is end-to-end against the public hostname. `clankie restart
+captain` (compatibility aliases: `clankie`, `eve`, `cp`, `control-plane`) restarts the single
+service and carries the Discord bridge with it, because the bridge's live
+presence claim is only valid against the service instance that issued it.
 
 Guild and channel allowlists come from `~/.config/clankie/settings.json`, not an
-env prefix; the launcher supplies only `CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE`,
-which is a repository path rather than a preference.
-
-The headless captain commands are a supported operator surface, not a recovery
-fixture. `health`/`status` never start a service and never probe the nonexistent
-`GET /health` route on the captain. `msg` does not echo message content; `watch` and `wait`
-consume the Eve semantic stream from a private mode-0600 cursor under
-`${XDG_STATE_HOME:-~/.local/state}/clankie/`, separate from the fullscreen
-face's `.data/tui/captain-session.json` cursor.
+env prefix; the launcher supplies only `CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE`
+(a repository path rather than a preference) and the brokered
+`CLANKIE_CAPTAIN_TOKEN` half of the dispatch-auth secret — which is stripped
+from the bridge's env, whose identity is brokered separately.
 
 ### `clankie trace` (read-only live thinking surface)
 
-`clankie trace` is a **render-only** subscriber of the live Eve `/eve/v1/session`
-NDJSON stream (same source as `watch`). It is not a second control surface: no
-steering, no scheduling, no mission-engine imports, and no state inference from
-terminal text.
+`clankie trace` is a **render-only** stream renderer with lane tags, redaction,
+and an identity-only cursor. The pi-based clankie service does not expose a
+per-event captain session stream, so the command has no live
+transport and reports that plainly; the rendering pipeline (`processTraceStream`,
+`src/session/trace-renderer.ts`) is kept as the seam a future stream plugs into.
 
-- **Stays across turns.** Unlike `watch`/`wait`, a turn boundary
-  (`session.waiting` / `session.completed`) does not exit the process. The
-  client reconnects with its identity-only cursor so consecutive turns keep
-  streaming in one pane.
 - **Lane tags from typed context only.** Every rendered line is prefixed with a
-  typed captain lane (`tui`, `discord_voice`, `discord_presence`, `gameplay`).
-  Lane labels come from session context (default HTTP headless path → `tui` per
-  captain-eve channel mapping, or an explicit `--lane` value). They are never
-  inferred from model/reasoning prose. The public Eve stream event body does not
-  stamp lane per event, so the CLI still follows the headless session; the
-  session→lane map that resolves any other room is
-  `GET /captain/v1/lanes`, and the fullscreen face's `/trace` consumes it
-  ([ADR 0083](../../docs/adr/0083-every-room-he-thinks-in-is-watchable.md)).
+  typed captain lane (`tui`, `discord_voice`, `discord_presence`, `gameplay`),
+  from session context or an explicit `--lane` — never inferred from prose.
 - **No payload persistence.** The mode-0600 checkpoint at
   `${XDG_STATE_HOME:-~/.local/state}/clankie/captain-trace-session.json` holds
-  only sanitized continuation identity (`generation`, `sessionId`, `streamIndex`,
-  `lane`, `active`). Reasoning text, prompts, tool inputs, and tool outputs are
-  never written to disk by the trace client.
+  only sanitized continuation identity (`generation`, `sessionId`,
+  `streamIndex`, `lane`, `active`).
 - **Render-time redaction.** Tool inputs/outputs pass through
   `@clankie/observability`'s `sanitizeForSupportBundle` so secrets such as
-  `Authorization` headers render as `[REDACTED]` (same central key list as
-  support bundles — no forked redaction table).
-- **`--json`.** Emits one redacted JSON object per renderable event for machine
-  consumers; human mode dims reasoning and prints `name(args-summary)` tool
-  lines.
+  `Authorization` headers render as `[REDACTED]`.
+- **`--json`.** One redacted JSON object per renderable event; human mode dims
+  reasoning and prints `name(args-summary)` tool lines.
 - **Herdr pane.** Inside Herdr (`HERDR_ENV=1`), the process calls
-  `herdr pane report-agent` / `report-metadata` so the pane shows captain-trace
-  status and siblings can wait on it. Outside Herdr those calls are inert.
-
-Dedicated Herdr pane (from a sibling pane):
-
-```bash
-NEW=$(herdr pane split --direction right --no-focus | python3 -c 'import sys,json; print(json.load(sys.stdin)["result"]["pane"]["pane_id"])')
-herdr pane run "$NEW" "clankie trace"
-```
+  `herdr pane report-agent` / `report-metadata` so the pane shows trace status.
 
 ### `/trace` (watching the rooms you are not in)
 
-`/trace` in the fullscreen face tails any other captain lane — each Discord
-server and channel he answers in, voice, gameplay — into the transcript
+`/trace` in the fullscreen face watches any other captain lane — each Discord
+server and channel he answers in, voice, gameplay
 ([ADR 0083](../../docs/adr/0083-every-room-he-thinks-in-is-watchable.md)).
 
 ```text
-/trace                      list every room, its state, and which are watched
+/trace                      list every room, recent activity, and which are watched
 /trace discord_presence     watch a whole lane
 /trace 1234:5678            watch one room by guild:channel (or any substring)
 /trace all                  watch every room except this conversation
 /trace off                  stop watching
 ```
 
-Rooms come from `GET /captain/v1/lanes`, the captain's authenticated
-identity-only listing over `CaptainLaneRegistry`: lane, target id, bound session
-id, state, and last update — no message, reasoning, tool, or continuation field.
-Events come from the same public `/eve/v1/session/:id/stream` this console uses
-for its own conversation, so a watched room renders his reasoning, tool calls
-with arguments, and tool results as the same blocks, tagged with the room.
-
-Watching is a subscription and nothing else: no send, no continuation token, no
-steering. A watched room never drives the turn loader or status bar, and its tool
-payloads pass through `sanitizeForSupportBundle`. Because a Discord text lane
-starts a fresh session per turn, a tail re-reads the listing when a stream ends
-and resets on rotation, so consecutive turns keep rendering in one feed.
-
-The listing is a live map, not a history: attaching backfills the session in
-progress and follows forward, and cannot reconstruct a text room's earlier turns.
-
-The `clankie` command runs `bin/clankie.ts` under Node's native type stripping, so the whole dependency graph stays erasable TypeScript (no enums, namespaces, or constructor parameter properties) — enforced repo-wide by `erasableSyntaxOnly` in `tsconfig.base.json`.
+Rooms come from `GET /captain/v1/lanes`, the service's authenticated
+bounded lane log: lane, target id, and recent `heard`/`said` entries — no
+reasoning, tool, private pi session state, or continuation field. A watched room
+is polled for appended entries and renders them as room-tagged transcript lines.
+Watching is a subscription and nothing else: no send, no steering, and a
+watched room never drives the turn loader or status bar.
 
 ## Layout
 
@@ -208,40 +136,50 @@ src/face/    Ported v1 face components (theme, banner, spinners, outline,
 src/shell/   The face shell: layout assembly, central input router, overlay +
              selection plumbing, SetupFlow wizard engine, status bar, turn
              loader, prompt history. Extracted from v1's scripts/clankie.ts.
-src/commands.ts   Console slash commands (/help /mission /doctrine /approvals
-                  /eval /layout /clear /new /status /exit).
-src/approval-inbox.ts  Authenticated pending-request review, mission evidence,
-                  and typed approve/deny decisions through the control plane.
+src/commands.ts   Console slash commands (/help /conversation /trace /activity
+                  /layout /clear /status /exit).
+src/connect-commands.ts  /connect (alias /integrations) for Linear, email, and
+                  Discord ([ADR 0093](../../docs/adr/0093-owner-authored-service-connections.md)).
 src/provider-commands.ts  /auth /provider /model /effort wizards (VUH-760) plus
                   the positional /image-model and /video-model (ADR 0085), over
                   @clankie/model-registry, @clankie/credential-broker, and
                   @clankie/model-provider (clankie.json config).
-src/session/      Durable Eve client cursor, replay-safe stream renderer, and
-                  console state outside the read-only mission observer.
-src/observation/  Read-only sequenced event source, durable observer cursor,
-                  and mission/task/worker projections.
+src/memory-commands.ts  /memory browser/editor for captain episodes and Discord
+                  person facts over the operator-only memory API.
+src/session/      Operator conversation client (dispatch wire contract over
+                  plain fetch), conversation renderer, lane observation,
+                  trace renderer + cursors, herdr reporting.
+src/observation/  Presence poller for the status bar and the Herdr pane roster.
+bin/              The clankie launcher, service registry/supervisor, and the
+                  headless commands (health, restart, down, trace, pair,
+                  devices, operator-credential, play).
 ```
 
 ## Interactions
 
 - Type `/` for the command typeahead; Tab completes, Enter runs.
-- `/conversation` lists the injected server registry and
+- A slash skill uses an inline dim suffix instead of the command list; Tab
+  accepts the suffix and Enter invokes an exact skill name. `/skill:name` is the
+  explicit form. Local console commands win when names overlap.
+- `/conversation` lists the server-owned conversation registry and
   `/conversation <conversationId>` selects an existing conversation. Each face
   keeps an independent replay cursor; selection never creates a local chat ID.
-- `/mission` opens the live observer; `/mission list`, `/mission next`,
-  `/mission prev`, and `/mission <id>` provide read-only selection/navigation.
-- `/approvals` loads pending requests from the control plane, shows the policy
-  rationale plus plan/check/diff/artifact evidence, and records an approve or
-  deny reason. The launcher and TUI load the broker-owned local operator
-  credential automatically; first control-plane start creates it when absent.
-  `CLANKIE_OPERATOR_TOKEN` is an explicit CI/test override.
-  `CLANKIE_CONTROL_PLANE_URL` defaults to `http://127.0.0.1:4310`. The console
-  records decisions only—connector execution returns through the policy path.
 - `/activity` reads Clankie's authenticated current-activity projection. It
   labels model-authored goal/commentary/intent separately from runner-observed
   outcome/effect/progress and prints the loopback watch URL for live frames.
   `CLANKIE_ACTIVITY_PORT` selects the viewer port (default `4320`). The command
   neither reads the gameplay transcript nor controls the emulator.
+- `/memory` opens the operator-only browser for Clankie's self-authored episodes
+  and approved Discord person facts. Selecting a record edits its bounded
+  content/visibility or forgets it after confirmation. `/memory status` prints
+  the complete catalog into the transcript. The TUI never reads or rewrites the
+  backing JSON/JSONL files directly.
+- The persistent status bar and `/status` show the selected conversation's live
+  model context as current tokens out of the total context window. The value
+  comes from Pi's compaction-aware session estimate; immediately after
+  compaction the current side is `?` until the next model response.
+- `/status` also shows the polled presence phase, the selected conversation,
+  activity availability, and — inside Herdr — the sibling pane worker roster.
 - `clankie health` reports operator-credential presence and env/store
   consistency without fingerprints or secret content. A mismatch fails the
   health command while the explicit env value remains the runtime override.
@@ -250,23 +188,23 @@ src/observation/  Read-only sequenced event source, durable observer cursor,
   `CLANKIE_OPERATOR_TOKEN` override before rotating.
 - `Ctrl+/` opens the fuzzy command workbench; `Ctrl+T` toggles transcript focus.
 - `!` on an empty input enters the inline shell escape (Esc exits; Ctrl+C kills the running command).
-- Esc detaches from an in-flight captain turn. Eve has no server-side cancel
-  route, so the durable turn continues and the TUI reconnects before sending
-  another prompt.
-- Mouse: wheel scrolls, drag selects (OSC-52 copy), scrollbar gutter drags, click collapses tool blocks.
+- Esc detaches from an in-flight turn; the durable server-side turn continues
+  and the face re-tails the conversation before sending another prompt.
+- Mouse: wheel scrolls, drag selects (OSC-52 copy), scrollbar gutter drags, and clicking a tool block toggles its full arguments or result. With the keyboard, `Ctrl+T` focuses the transcript and Enter/Space toggles the selected block; Alt+Enter does the same without moving focus.
 - `/layout` moves the input/status bands, toggles the header, and picks the spinner (`CLANKIE_TUI_*` env vars seed the defaults).
-- `/auth` manages provider credentials (masked API-key entry into the Keychain broker — LLM providers plus the featured `elevenlabs` voice credential — ChatGPT/Codex browser or device OAuth, Claude Pro/Max manual-code OAuth, local credential removal, and harness-login guidance); `/provider` chooses a provider context per model role; `/model` picks an actual model from that provider in the models.dev registry; `/effort` sets reasoning variants. `/image-model` and `/video-model` are positional rather than wizards (`/image-model openai gpt-image-2`, `/video-model xai grok-imagine-video-1.5`, plus `status` and `unset`) because each supported provider has one usable model; the control plane reads the resulting ref per request, so a change takes effect without a restart ([ADR 0085](../../docs/adr/0085-a-picture-he-made-is-something-he-said.md)). Provider intent stays process-local and is reconstructed from the configured `provider/model` ref after restart, so non-secret config has one authority in `~/.config/clankie/clankie.json`.
+- `/connect` is how an owner gives him Linear, email, and Discord. Linear signs in with Linear's MCP OAuth (browser, no API key); an API key is an advanced fallback. Email takes IMAP/SMTP plus an app password (Gmail/iCloud/Fastmail/Outlook presets). Mail stays at the console. Discord is still a body: `/connect discord` opens `/discord`, which includes a portal primer and `/discord invite`. `/auth mcp` redirects here ([ADR 0093](../../docs/adr/0093-owner-authored-service-connections.md)).
+- `/auth` manages provider credentials (masked API-key entry into the Keychain broker — LLM providers plus the featured `elevenlabs` voice credential — ChatGPT/Codex browser or device OAuth, Claude Pro/Max manual-code OAuth, local credential removal, and harness-login guidance). `/auth status` lists first-class owner slots (stored, env, or missing) — auto-minted `clankie_*` process identities stay out of this surface — and does not reprint redacted secret prefixes. `/provider` chooses a provider context per model role; `/model` picks an actual model from that provider in the models.dev registry; `/effort` sets reasoning variants. `/image-model` and `/video-model` are positional rather than wizards (`/image-model openai gpt-image-2`, `/video-model xai grok-imagine-video-1.5`, plus `status` and `unset`) because each supported provider has one usable model; the service reads the resulting ref per request, so a change takes effect without a restart ([ADR 0085](../../docs/adr/0085-a-picture-he-makes-is-something-he-says.md)). Provider intent stays process-local and is reconstructed from the configured `provider/model` ref after restart, so non-secret config has one authority in `~/.config/clankie/clankie.json`.
 - OpenAI API-key access is `openai/<model>`; ChatGPT subscription access is the
   explicit `openai-codex/<model>` provider. They never borrow each other's
   credentials. While a subscription credential is stored it supersedes the API
   key for the models the Codex backend serves: `/model` and `/model status`
   show the redirect (`openai/gpt-5.5 → openai-codex/gpt-5.5`), and `/auth`
   logout is what restores metered access.
-- The Eve cursor is stored atomically with mode 0600 under
-  `.data/tui/captain-session.json`. It is capability-like local state and is
-  excluded from mission events and support bundles. Its hashed build generation
-  prevents a cursor from crossing incompatible captain artifacts: settled
-  conversations reset visibly, while active turns require explicit `/new`
-  abandonment after mission-state inspection.
+- The conversation selection and tail cursors are stored atomically with mode
+  0600 under `.data/tui/operator-conversation*.json`. They are capability-like
+  local state and are excluded from support bundles; a corrupt store raises
+  rather than silently attaching the operator to the wrong conversation.
 
-Known gap from the v1 port: drag-and-drop attachment paste rewriting stayed behind (`tui-attachments.ts` is coupled to the v1 brain's attachment pipeline); it returns with the control-plane attachment path.
+The `clankie` command runs `bin/clankie.ts` under Node's native type stripping, so the whole dependency graph stays erasable TypeScript (no enums, namespaces, or constructor parameter properties) — enforced repo-wide by `erasableSyntaxOnly` in `tsconfig.base.json`.
+
+Known gap from the v1 port: drag-and-drop attachment paste rewriting stayed behind (`tui-attachments.ts` is coupled to the v1 brain's attachment pipeline); it returns with the service-side attachment path.

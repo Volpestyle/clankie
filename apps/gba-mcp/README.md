@@ -25,10 +25,6 @@ parallel stack:
 - The ROM/scenario loader is shared with the free-play CLI, so there is one path
   to the core and one place digests are checked.
 
-`@clankie/mcp-registry` is the _consumption_ side — Clankie's workers using
-external servers under doctrine. This is the opposite direction and is
-deliberately a separate package.
-
 ## Running it
 
 ```bash
@@ -243,7 +239,7 @@ turned a six-word quip into seventeen seconds of speech in a live run. The port
 behind this tool is named `narrate` for the same reason.
 
 **A possessor cannot speak directly, and that is a fence rather than an
-oversight.** The control plane's presence action requires a _live presence
+oversight.** The service's presence action requires a _live presence
 claim_ — the session id, phase, and monotonic revision the Discord bridge
 publishes while it holds the gateway ([ADR 0024](../../docs/adr/0024-discord-dual-plane-presence.md)).
 Only the bridge can mint one, which is exactly what stops an action reaching a
@@ -258,7 +254,7 @@ the channel.
 
 ```
 clankie_speech_unavailable: no speech port is wired. A possessor cannot speak
-directly — the control plane's presence action requires a live claim only the
+directly — the service's presence action requires a live claim only the
 Discord bridge can mint.
 ```
 
@@ -282,7 +278,7 @@ the gateway _and_ the consent registry, so a possessor cannot subscribe to voice
 itself.
 
 Consent is not re-litigated at this boundary. A possessor hears exactly what
-Clankie was already permitted to hear under
+Clankie is already permitted to hear under
 [ADR 0045](../../docs/adr/0045-official-bot-dave-group-voice.md) — asking as a
 possessor grants no additional access — and **raw audio never crosses**:
 transcripts only.
@@ -295,7 +291,7 @@ quietly forced whoever implemented it to break that.
 
 So the bridge pushes each utterance to a live subscriber and keeps nothing.
 `PossessorHearing` holds a small bounded window on the _possessor's_ side, and
-`gba_emulator_release` clears it: what was heard does not outlive the possession
+`gba_emulator_release` clears it: what is heard does not outlive the possession
 that heard it. Subscription is lazy, so a possessor that never calls
 `clankie_listen` causes no capture at all.
 
@@ -334,7 +330,7 @@ supplies the **event**, the persona supplies the **words**. A report crosses the
 seam as context for his live voice session, so what third parties hear is
 Clankie's account carrying _Clankie's_ voice, describing what a guest driver
 just did. The possessor still needs no persona plumbing — it never composes a
-line — and a run that should sound like him now does, without one.
+line — and a run that should sound like him does, without one.
 
 The trade this accepts is the mirror image: a possessor **cannot** make him say
 a specific sentence. Anything needing verbatim output belongs on the
@@ -346,7 +342,7 @@ stolen, refused) writes the server's stderr **and** appends durably to
 `possession-events.jsonl` beside `body.lock` in the shared body root
 ([ADR 0068](../../docs/adr/0068-a-playthrough-leaves-a-durable-trail.md)), so
 who held the body survives the process that granted it — and the room is not
-told a guest is driving. That trade rests on the deployment being private and
+informed that a guest is driving. That trade rests on the deployment being private and
 its participants known to the owner, and ADR 0053 records the trigger for
 revisiting it.
 
@@ -363,10 +359,10 @@ different moments. A loop that starts driving immediately takes it at startup.
 releases it on release.
 
 That distinction is load-bearing. An MCP client starts stdio servers freely:
-`claude mcp list`, every session, every retry. Locking at process start meant the
+`claude mcp list`, every session, every retry. Locking at process start makes the
 first server won the body and every later one died with `BodyBusyError` before it
 could serve a single tool call — contention over _existing_, not over the body.
-Observation is not driving, so several servers can now coexist and look, while
+Observation is not driving, so several servers can coexist and look, while
 only one of them can ever act.
 A second one is refused with the holder's name and pid:
 

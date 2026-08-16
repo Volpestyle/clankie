@@ -47,6 +47,10 @@ const receipt = {
 describe("Embodiment intents (ADR 0063)", () => {
   it("parses a start intent and a stop intent", () => {
     expect(EmbodimentIntentSchema.parse(startIntent).kind).toBe("start");
+    expect(EmbodimentIntentSchema.parse({ ...startIntent, environmentId: "pokemon-emerald" })).toMatchObject({
+      kind: "start",
+      environmentId: "pokemon-emerald",
+    });
     const stop = EmbodimentIntentSchema.parse({
       kind: "stop",
       schemaVersion: 1,

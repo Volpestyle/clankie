@@ -7,6 +7,7 @@ import type {
 import {
   GBA_EWRAM_BASE,
   GBA_EWRAM_SIZE,
+  decodeFireRedMapExits,
   decodeFireRedMapGrid,
   decodeFireRedOverworld,
   fireRedSurroundings,
@@ -51,6 +52,7 @@ const S_START_MENU_CURSOR_ADDRESS = 0x020370f4;
 const S_START_MENU_COUNT_ADDRESS = 0x020370f5;
 const S_START_MENU_ORDER_ADDRESS = 0x020370f6;
 const G_BAG_MENU_STATE_ADDRESS = 0x0203acfc;
+const S_IN_HELP_SYSTEM_ADDRESS = 0x0203f177;
 const G_PARTY_MENU_ADDRESS = 0x0203b0a0;
 const G_SAVE_BLOCK1_POINTER_ADDRESS = 0x03005008;
 const G_SAVE_BLOCK2_POINTER_ADDRESS = 0x0300500c;
@@ -201,6 +203,15 @@ export interface FireRedDecodedState {
    */
   surroundings: FireRedSurroundings | null;
   mapSize: { width: number; height: number } | null;
+  /**
+   * Every way off the loaded map — warp events (doors, stairs, mats) in player
+   * coordinate space and edge connections — or null whenever the grid is,
+   * because both decode from the same loaded-map state.
+   */
+  exits: {
+    warps: { x: number; y: number; destinationMapId: string }[];
+    connections: { direction: "north" | "south" | "west" | "east"; destinationMapId: string }[];
+  } | null;
   mapIdentity: { mapGroup: number; mapNum: number; mapId: string } | null;
   party: GbaCoreState["party"];
   inventory: GbaCoreInventoryEntry[];
@@ -251,11 +262,22 @@ const normalizeThumbPointer = (pointer: number): number => pointer & 0xfffffffe;
 
 const KNOWN_MAP_IDS: Readonly<Record<string, string>> = {
   "3:0": "pallet-town",
+  // Verified in live play: pallet-town's north connection carries 3:19 and
+  // walking through it lands on Route 1.
+  "3:19": "route-1",
   "4:0": "pallet-town/players-house-1f",
   "4:1": "pallet-town/players-house-2f",
   "4:2": "pallet-town/rivals-house",
   "4:3": "pallet-town/professor-oaks-lab",
 };
+
+/** The stable id a map group/number pair is reported as everywhere. */
+export function fireRedMapIdFor(mapGroup: number, mapNum: number): string {
+  return (
+    KNOWN_MAP_IDS[`${String(mapGroup)}:${String(mapNum)}`] ??
+    `firered-map-${String(mapGroup)}-${String(mapNum)}`
+  );
+}
 
 function decodeMapIdentity(ewram: DataView, iwram: DataView): FireRedDecodedState["mapIdentity"] {
   const saveBlock1Address = iwram.getUint32(iwramOffset(G_SAVE_BLOCK1_POINTER_ADDRESS, 4), true);
@@ -266,9 +288,7 @@ function decodeMapIdentity(ewram: DataView, iwram: DataView): FireRedDecodedStat
   return {
     mapGroup,
     mapNum,
-    mapId:
-      KNOWN_MAP_IDS[`${String(mapGroup)}:${String(mapNum)}`] ??
-      `firered-map-${String(mapGroup)}-${String(mapNum)}`,
+    mapId: fireRedMapIdFor(mapGroup, mapNum),
   };
 }
 
@@ -838,6 +858,13 @@ function decodeStartMenu(ewram: DataView, iwram: DataView): GbaCoreMenuState | n
   return { menuId: "start-menu", cursor, entries };
 }
 
+function decodeHelpSystem(ewram: DataView): GbaCoreMenuState | null {
+  const open = ewram.getUint8(ewramOffset(S_IN_HELP_SYSTEM_ADDRESS));
+  if (open === 0) return null;
+  if (open !== 1) throw new Error(`FireRed help-system flag ${String(open)} is invalid`);
+  return { menuId: "help-system", cursor: 0, entries: [] };
+}
+
 function decodePartyMenu(
   ewram: DataView,
   iwram: DataView,
@@ -943,20 +970,38 @@ export function decodeFireRedState(
   // so this reports absence rather than propagating the throw.
   let surroundings: FireRedSurroundings | null = null;
   let mapSize: { width: number; height: number } | null = null;
+  let exits: FireRedDecodedState["exits"] = null;
   try {
     const grid = decodeFireRedMapGrid(snapshot.iwram, snapshot.ewram);
     surroundings = fireRedSurroundings(grid, overworld.x, overworld.y, overworld.facing);
     mapSize = { width: grid.mapWidth, height: grid.mapHeight };
+    const rawExits = decodeFireRedMapExits(snapshot.ewram, romBytes, grid);
+    if (rawExits !== null) {
+      exits = {
+        warps: rawExits.warps.map((warp) => ({
+          x: warp.x,
+          y: warp.y,
+          destinationMapId: fireRedMapIdFor(warp.destinationMapGroup, warp.destinationMapNum),
+        })),
+        connections: rawExits.connections.map((connection) => ({
+          direction: connection.direction,
+          destinationMapId: fireRedMapIdFor(connection.destinationMapGroup, connection.destinationMapNum),
+        })),
+      };
+    }
   } catch {
     surroundings = null;
     mapSize = null;
+    exits = null;
   }
   const dialog = decodeDialog(ewram, iwram, battleContext);
   const namingScreen = decodeNamingScreen(ewram, iwram);
+  const helpSystem = decodeHelpSystem(ewram);
   return {
     overworld,
     surroundings,
     mapSize,
+    exits,
     mapIdentity,
     party,
     inventory,
@@ -964,8 +1009,11 @@ export function decodeFireRedState(
     dialogLines: dialog.lines,
     waitingForDialogAdvance: dialog.waitingForAdvance,
     naming: namingScreen?.state ?? null,
-    menu: namingScreen?.menu ?? decodeMenu(ewram, iwram, party, inventory, battleContext),
+    // HELP overlays whichever callback/menu was active, so its own flag has
+    // priority over the stale underlying screen state.
+    menu: helpSystem ?? namingScreen?.menu ?? decodeMenu(ewram, iwram, party, inventory, battleContext),
     fieldInputReady:
+      helpSystem === null &&
       mainCallback2(iwram) === CB2_OVERWORLD &&
       iwram.getUint8(iwramOffset(S_LOCK_FIELD_CONTROLS_ADDRESS)) === 0,
   };

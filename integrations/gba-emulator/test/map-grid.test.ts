@@ -6,7 +6,10 @@ import {
   FrozenGbaScenarioSchema,
   MgbaFireRedCore,
   RealGbaRouteScenarioSchema,
+  nearestReachableDetail,
   planWalk,
+  planWalkBeside,
+  renderWalkabilityMinimap,
   FIRERED_MAP_BORDER_OFFSET,
 } from "../src/index.ts";
 import type { GbaCoreMapGrid } from "../src/core-seam.ts";
@@ -64,6 +67,76 @@ describe("planWalk", () => {
   it("refuses a target walled off from the start", () => {
     const grid = gridFrom([".#."]);
     expect(planWalk(grid, { x: 0, y: 0 }, { x: 2, y: 0 })).toBeNull();
+  });
+});
+
+describe("planWalkBeside", () => {
+  it("routes to the nearest open neighbour and presses into the target", () => {
+    //   0123
+    // 0 ...#   target (3,0) is blocked; its only open neighbour is (2,0).
+    // 1 ....
+    const grid = gridFrom(["...#", "...."]);
+    const approach = planWalkBeside(grid, { x: 0, y: 0 }, { x: 3, y: 0 });
+    expect(approach).not.toBeNull();
+    expect(approach?.path.at(-1)).toMatchObject({ x: 2, y: 0 });
+    expect(approach?.press).toBe("right");
+  });
+
+  it("returns an empty route when already beside the target", () => {
+    const grid = gridFrom(["..#"]);
+    const approach = planWalkBeside(grid, { x: 1, y: 0 }, { x: 2, y: 0 });
+    expect(approach).toEqual({ path: [], press: "right" });
+  });
+
+  it("returns null when no neighbour of the target is reachable", () => {
+    //   012345
+    // 0 ..#.#.   the target (4,0)'s neighbours sit beyond the wall at (2,0).
+    const grid = gridFrom(["..#.#."]);
+    expect(planWalkBeside(gridFrom(["..#.#."]), { x: 0, y: 0 }, { x: 4, y: 0 })).toBeNull();
+    expect(grid.isPassable(3, 0)).toBe(true);
+  });
+});
+
+describe("nearestReachableDetail", () => {
+  it("names the reachable open tile closest to the refused target", () => {
+    //   0123
+    // 0 ..#.   (3,0) is open but walled off; nearest reachable is (1,0).
+    const grid = gridFrom(["..#."]);
+    expect(nearestReachableDetail(grid, { x: 0, y: 0 }, { x: 3, y: 0 })).toBe(
+      "nearest reachable open tile is (1,0)",
+    );
+  });
+
+  it("says so when nowhere reachable is nearer than where you stand", () => {
+    const grid = gridFrom([".#."]);
+    expect(nearestReachableDetail(grid, { x: 0, y: 0 }, { x: 2, y: 0 })).toBe(
+      "no open tile nearer (2,0) than where you stand is reachable",
+    );
+  });
+});
+
+describe("renderWalkabilityMinimap", () => {
+  it("renders the player, walls, floor, and warp tiles in place", () => {
+    const grid = gridFrom(["....", ".#..", "...."]);
+    const minimap = renderWalkabilityMinimap(grid, { x: 0, y: 1 }, [{ x: 3, y: 0 }]);
+    expect(minimap).toEqual({
+      topLeft: { x: 0, y: 0 },
+      rows: ["...D", "@#..", "...."],
+    });
+  });
+
+  it("crops around the player and reports the crop's origin", () => {
+    // A 40-wide corridor: the crop is bounded by the radius, not the map.
+    const grid = gridFrom([".".repeat(40)]);
+    const minimap = renderWalkabilityMinimap(grid, { x: 20, y: 0 }, []);
+    expect(minimap?.topLeft).toEqual({ x: 8, y: 0 });
+    expect(minimap?.rows[0]?.length).toBe(25);
+    expect(minimap?.rows[0]?.[20 - 8]).toBe("@");
+  });
+
+  it("reports absence for a player standing outside the loaded map", () => {
+    const grid = gridFrom(["...."]);
+    expect(renderWalkabilityMinimap(grid, { x: 99, y: 99 }, [])).toBeNull();
   });
 });
 

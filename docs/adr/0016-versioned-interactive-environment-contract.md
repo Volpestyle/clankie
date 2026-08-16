@@ -6,7 +6,7 @@ current provider-profiled v2 session and lease shape.
 ## Context
 
 Minecraft introduces a durable external body whose motor loop outlives any one
-model turn. TUI, Discord voice, and gameplay reasoning use separate Eve
+model turn. Operator, Discord voice, and gameplay reasoning use separate pi
 sessions but present one Clankie identity. A global Minecraft tool catalog or a
 blocking tool call would couple those sessions, waste model context, and let a
 stale background decision override a newer foreground command.
@@ -32,26 +32,7 @@ completion and failure arrive as later results and semantic events.
 
 Tool exposure is a deterministic projection of session phase and lane:
 
-```mermaid
-stateDiagram-v2
-  [*] --> Off
-  Off --> Starting: minecraft_join
-  Starting --> Active: lease + connection ready
-  Starting --> Off: cancel/failure
-  Active --> Paused: pause
-  Paused --> Active: resume
-  Active --> Stopping: disconnect/lease loss
-  Paused --> Stopping: disconnect/lease loss
-  Stopping --> Off: process stopped
-
-  note right of Off
-    join + status only
-  end note
-  note right of Active
-    gameplay tools only in gameplay lane
-    TUI/voice retain supervision tools
-  end note
-```
+![ADR 0016: Versioned interactive-environment contract and lane-scoped tools](../diagrams/0016-versioned-interactive-environment-contract.jpg)
 
 The runner owns the lease, credentials, connection, and cancellation. Lease
 schemas name server, world, character, quotas, and capabilities but reject
@@ -72,13 +53,13 @@ translators rather than reinterpretation.
 - **Expose every Minecraft MCP tool to every captain session** — rejected
   because dormant TUI and voice turns do not need motor schemas, and ambient
   channels must not gain gameplay authority.
-- **Use one Eve session for TUI, voice, and gameplay** — rejected because a
+- **Use one pi session for operator, voice, and gameplay** — rejected because a
   long voice or gameplay turn would block foreground TUI work and mingle
   continuation-token authority.
 - **Represent long actions as blocking tool calls** — rejected because model
   and channel availability would inherit pathfinding and server latency.
 - **Adopt Mineflayer objects as the protocol** — rejected because adapter and
-  Minecraft-version changes would become control-plane breaking changes.
+  Minecraft-version changes would become service breaking changes.
 - **Place raw tick and packet data in domain events** — rejected because it
   makes replay, privacy, and support bundles unbounded.
 

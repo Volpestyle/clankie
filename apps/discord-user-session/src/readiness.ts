@@ -96,9 +96,11 @@ export async function assertUserSessionAdmissible(input: {
   // it. Otherwise editing an env var would silently extend a recorded consent.
   const optInGuilds = new Set(optIn.guildIds);
   const optInChannels = new Set(optIn.channelIds);
+  const voiceIds = idSet(input.env.DISCORD_USER_SESSION_VOICE_CHANNEL_IDS);
   const widened = [
     ...[...guildIds].filter((id) => !optInGuilds.has(id)).map((id) => `guild:${id}`),
     ...[...channelIds].filter((id) => !optInChannels.has(id)).map((id) => `channel:${id}`),
+    ...[...voiceIds].filter((id) => !optInChannels.has(id)).map((id) => `channel:${id}`),
   ];
   if (widened.length > 0) {
     throw new DiscordUserSessionRefused(

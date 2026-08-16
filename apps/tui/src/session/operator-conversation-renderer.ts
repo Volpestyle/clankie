@@ -1,4 +1,8 @@
-import type { OperatorConversationRecovery, OperatorConversationStreamEvent } from "@clankie/protocol";
+import type {
+  OperatorConversationContextUsage,
+  OperatorConversationRecovery,
+  OperatorConversationStreamEvent,
+} from "@clankie/protocol";
 import type { OperatorConversationEventSink } from "./operator-conversations.ts";
 
 /**
@@ -31,6 +35,7 @@ export function operatorConversationBlockOptions(
   event: OperatorConversationStreamEvent,
   markdown: string,
 ): OperatorConversationBlockOptions | undefined {
+  if (event.type === "tool" && event.skillName !== undefined) return undefined;
   if (event.type !== "tool" && event.type !== "reasoning" && event.type !== "worker_transcript") {
     return undefined;
   }
@@ -53,8 +58,21 @@ export function renderOperatorConversationEvent(event: OperatorConversationStrea
       return `**${event.role === "operator" ? "You" : "Clankie"}**\n\n${event.text}`;
     case "reasoning":
       return `**Reasoning**\n\n${event.text}`;
-    case "tool":
-      return `**Tool ${event.phase}**\n\n${event.name}${event.summary === undefined ? "" : ` · ${event.summary}`}`;
+    case "context":
+      return undefined;
+    case "tool": {
+      if (event.skillName !== undefined) {
+        if (event.phase === "started") return undefined;
+        return `**Skill: ${event.skillName} - ${event.phase === "completed" ? "loaded" : "failed to load"}**`;
+      }
+      const summary = event.summary === undefined ? "" : event.summary;
+      const detail =
+        event.detail === undefined
+          ? ""
+          : `${event.phase === "started" ? "Arguments" : "Result"}:\n\n\`\`\`${event.phase === "started" ? "json" : ""}\n${event.detail}\n\`\`\``;
+      const body = [summary, detail].filter((part) => part.length > 0).join("\n\n");
+      return `**Tool: ${event.name} - ${event.phase}**${body.length === 0 ? "" : `\n\n${body}`}`;
+    }
     case "input_requested":
       return `**Input requested**\n\n${event.prompt}${
         event.options.length === 0 ? "" : `\n\n${event.options.map((option) => `- ${option}`).join("\n")}`
@@ -97,6 +115,7 @@ export interface OperatorConversationShellSinkOptions {
    * or a repeated identical prompt — still render.
    */
   readonly localEchoText?: string;
+  readonly onContextUsage?: (usage: OperatorConversationContextUsage) => void;
 }
 
 export function createOperatorConversationShellSink(
@@ -121,6 +140,7 @@ export function createOperatorConversationShellSink(
         }
       }
       if (event.type === "turn") shell.refreshStatus(`conversation turn ${event.phase}`);
+      if (event.type === "context") options.onContextUsage?.(event.usage);
     },
     recovery(recovery): void {
       shell.insertMarkdown(renderOperatorConversationRecovery(recovery));

@@ -57,8 +57,16 @@ const FreePlayWireDecisionSchema = z
     button: z.enum(["up", "down", "left", "right", "a", "b", "start", "select", "l", "r"]).nullable(),
     holdFrames: z.number().int().nullable(),
     repeat: z.number().int().nullable(),
-    x: z.number().int().nullable().describe("Target tile x for walk_to, as reported in position."),
-    y: z.number().int().nullable().describe("Target tile y for walk_to, as reported in position."),
+    x: z
+      .number()
+      .int()
+      .nullable()
+      .describe("Target tile x for walk_to, in the coordinate space of position and the minimap."),
+    y: z
+      .number()
+      .int()
+      .nullable()
+      .describe("Target tile y for walk_to, in the coordinate space of position and the minimap."),
     text: z.string().nullable().describe("The name to type for enter_text, 1-10 characters."),
     entryId: z
       .string()
@@ -144,11 +152,11 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   // (ADR 0051), which is owner-authored and shared with every other surface. A
   // second "You are Clankie…" here would be a competing definition of the
   // character — and this is the one an audience hears.
-  "You are playing Pokémon FireRed yourself.",
-  "Each turn you see the actual game screen and the decoded state, and you",
+  "You are playing the Pokémon game shown on your Game Boy Advance yourself.",
+  "Each turn you see the actual game screen and any decoded state available, and you",
   "choose one action. Look at the screen: it shows walls, furniture, doors,",
   "stairs, NPCs, and text that the decoded state does not describe. The decoded",
-  "state is for exact values — position, HP, PP, legal moves.",
+  "state, when present, is for exact values — position, HP, PP, legal moves.",
   "",
   "Play the way you actually want to play. You are not following a script and",
   "nobody has given you a route. Form your own goals, change your mind, be",
@@ -194,6 +202,10 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   '    {"kind":"load_checkpoint","checkpointId":"ID or null to list"}',
   '    {"kind":"restart_game"}',
   "",
+  "If scene mode is unknown, play from the screen with button_press and",
+  "frame_advance. Decoded helpers such as walk_to and advance_dialog will refuse",
+  "until that cartridge has a verified state profile.",
+  "",
   "Always give holdFrames on a button press — 16 is a reliable step; a short",
   "hold only turns you. repeat presses the same button that many times in ONE",
   "action (max 16), which",
@@ -203,9 +215,20 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   "To cross a room, prefer walk_to: give it a tile on the current map and it",
   "routes around walls and furniture using the game's own collision, walking",
   "the whole way in one action. It stops early and says so if the way is",
-  "blocked mid-route or a script interrupts. Coordinates come from position in",
-  "the decoded state; d-pad presses are for fine adjustment, doorways, and",
-  "when you want to feel your way.",
+  "blocked mid-route or a script interrupts. d-pad presses are for fine",
+  "adjustment and when you want to feel your way.",
+  "",
+  "The overworld view carries a minimap of the tiles around you — @ is you,",
+  ". is open floor, # is blocked, D is a door, stairway, or warp mat — and",
+  "topLeft gives the map coordinate of its first character, so a tile's",
+  "coordinates are topLeft plus its column and row. Pick walk_to targets from",
+  "it rather than estimating coordinates off the screenshot. The view also",
+  "lists exits: every door and stairway with where it leads, and the map edges",
+  "that connect to neighbouring maps. walk_to aimed at a listed door or",
+  "stairway walks up and steps in, even when the tile itself reads blocked.",
+  "A refused walk tells you why — off the map, a wall, or unreachable — and",
+  "names the nearest tile you can actually reach. If your notes already mark a",
+  "tile or NPC as story-locked, do not walk_to it again.",
   "",
   "When text is on screen, use advance_dialog rather than pressing A box by box.",
   "It reads the whole conversation in one action and hands you the transcript,",
@@ -213,13 +236,18 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   "turn on the decision, not on the reading. It never answers a choice for you.",
   "It also works when a scripted moment is holding the box (a fanfare, a jingle",
   "— it waits the script out) and during battles, where it reads the battle",
-  "text and stops at your action menu.",
+  "text and stops at your action menu. If scene mode is battle and input is not",
+  "ready, use advance_dialog — not frame_advance — even when the box looks empty.",
+  "If advance_dialog says a choice is on screen but no menu view lists ids, press",
+  "A; do not select_menu_entry until the menu view actually names the entries.",
   "",
   "In a menu — the battle command list, your moves, the start menu — use",
   "select_menu_entry with the id shown in the menu view: it walks the cursor",
   "to that entry and confirms it in one action. Which entry to pick is still",
   "entirely your decision; this only saves you the cursor presses. It stops",
   "and says so if the menu closes or the cursor will not move.",
+  "In FireRed's Bag, switch pockets with d-pad left/right. L/R opens the HELP",
+  "system; when menuId is help-system, press B until that menu closes.",
   "",
   "On a naming screen, use enter_text with the whole name (letters, digits,",
   "space, basic punctuation; 10 characters max): it drives the keyboard, types",
@@ -345,6 +373,8 @@ export function renderView(view: FreePlayView): string {
   for (const observation of view.observations) {
     lines.push(`  ${observation.kind}: ${JSON.stringify(stripEnvelope(observation))}`);
   }
+  const held = heldScreenAdvice(view.observations);
+  if (held !== null) lines.push("", held);
   if (view.audience !== null && view.audience.length > 0) {
     lines.push("", `Watching you right now: ${view.audience}.`);
   }
@@ -377,6 +407,15 @@ export function renderView(view: FreePlayView): string {
     // A fact, not a nudge: what to do about standing still is his call.
     lines.push("", `You have not stepped onto a new tile in ${String(view.stalledForTurns)} turns.`);
   }
+  if (view.repeatingForTurns !== null) {
+    // The same fact for the states a tile counter cannot see. Deliberately not
+    // "try something else": a script that needs more time and a wedge look
+    // identical from here, and only he can tell them apart.
+    lines.push(
+      "",
+      `The last ${String(view.repeatingForTurns)} turns were the same action with the same result.`,
+    );
+  }
   if (view.history.length > 0) {
     lines.push("", "Recently:");
     for (const entry of view.history) {
@@ -386,6 +425,28 @@ export function renderView(view: FreePlayView): string {
   }
   lines.push("", "Choose your next action.");
   return lines.join("\n");
+}
+
+function heldScreenAdvice(observations: FreePlayView["observations"]): string | null {
+  if (observations.some((observation) => observation.kind === "menu")) return null;
+  const scene = observations.find((observation) => observation.kind === "scene") as
+    | { data?: { mode?: string; inputReady?: boolean } }
+    | undefined;
+  const data = scene?.data;
+  if (data === undefined) return null;
+  if (data.mode === "battle" && data.inputReady === false) {
+    return (
+      "Scene is a battle and input is not ready — use advance_dialog, not frame_advance. " +
+      "It waits out the intro and stops at the command menu."
+    );
+  }
+  if (data.mode === "overworld" && data.inputReady === false) {
+    return (
+      "A script is holding the screen — use advance_dialog to wait it out, " +
+      "or frame_advance only if you want to watch a long cutscene."
+    );
+  }
+  return null;
 }
 
 /** Drop transport fields the model has no use for and would only pay tokens on. */

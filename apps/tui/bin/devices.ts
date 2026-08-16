@@ -28,9 +28,9 @@ export class DevicesCommandError extends Error {
 export function devicesFailureMessage(status: DevicesCommandStatus): string {
   switch (status) {
     case "unavailable":
-      return "Device service unavailable. Start the Clankie control plane and retry.";
+      return "Device service unavailable. Start the clankie service and retry.";
     case "unauthorized":
-      return "Operator credential unavailable. Start the control plane once, then retry.";
+      return "Operator credential unavailable. Start the clankie service once, then retry.";
     case "not_found":
       return "No such device. Run `clankie devices` to list current devices.";
     case "malformed":

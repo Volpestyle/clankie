@@ -21,6 +21,7 @@ import {
 } from "./instantiate.ts";
 import { CODEX_PROVIDER_ID, createCodexFetch } from "./oauth/openai-codex.ts";
 import { ANTHROPIC_PROVIDER_ID, createAnthropicFetch } from "./oauth/anthropic.ts";
+import { XAI_PROVIDER_ID, createXaiFetch } from "./oauth/xai.ts";
 import {
   mergedCatalog,
   resolveRole,
@@ -32,7 +33,7 @@ import {
 import { effortVariantsFor, variantById, type ModelVariant } from "./variants.ts";
 
 export const CAPTAIN_CODEX_PREAMBLE =
-  "You are Clankie, a durable lead agent. Your complete persona, mission tools, and operating rules are supplied by Eve; follow them exactly.";
+  "You are Clankie, a durable agent. Your complete persona, tools, and operating rules are supplied by your session instructions; follow them exactly.";
 
 export class ConfiguredModelError extends Error {
   public constructor(message: string) {
@@ -69,6 +70,19 @@ function configuredBaseUrl(config: ClankieConfig, providerId: string): string | 
 
 function hasEnvironmentCredential(provider: ProviderEntry, env: NodeJS.ProcessEnv): boolean {
   return provider.env.some((name) => (env[name] ?? "").length > 0);
+}
+
+function subscriptionFetch(
+  providerId: string,
+  credential: ProviderCredential | undefined,
+  store: CredentialStore,
+  fetchImpl: typeof fetch | undefined,
+): typeof fetch | undefined {
+  if (credential?.type !== "oauth") return undefined;
+  const options = { store, ...(fetchImpl === undefined ? {} : { fetchImpl }) };
+  if (providerId === ANTHROPIC_PROVIDER_ID) return createAnthropicFetch(options);
+  if (providerId === XAI_PROVIDER_ID) return createXaiFetch(options);
+  return undefined;
 }
 
 function selectedVariant(
@@ -143,6 +157,8 @@ export async function resolveConfiguredLanguageModel(
   const family = providerFamilyFor(provider, baseURL);
   const modelOptions = variantProviderOptions(variant, family);
   const ref = `${resolved.providerId}/${resolved.modelId}`;
+  const fetchImpl =
+    subscriptionFetch(resolved.providerId, credential, store, options.fetchImpl) ?? options.fetchImpl;
   const model =
     resolved.providerId === CODEX_PROVIDER_ID
       ? createCodexLanguageModel({
@@ -160,16 +176,7 @@ export async function resolveConfiguredLanguageModel(
           ...(credential === undefined ? {} : { credential: credential as ProviderCredential }),
           ...(baseURL === undefined ? {} : { baseURL }),
           env,
-          ...(resolved.providerId === ANTHROPIC_PROVIDER_ID && credential?.type === "oauth"
-            ? {
-                fetchImpl: createAnthropicFetch({
-                  store,
-                  ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
-                }),
-              }
-            : options.fetchImpl === undefined
-              ? {}
-              : { fetchImpl: options.fetchImpl }),
+          ...(fetchImpl === undefined ? {} : { fetchImpl }),
           ...(variant === undefined ? {} : { variant }),
         });
   const context = resolved.model.limit.context;

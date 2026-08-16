@@ -40,27 +40,32 @@ export type CaptainLane = z.infer<typeof CaptainLaneCompatibilitySchema>;
 // ---------------------------------------------------------------------------
 // Captain lane observation (ADR 0083).
 //
-// The read-only session→lane listing an operator surface needs before it can
-// watch a lane it is not talking in. Identity only: which room, which durable
-// session, what state. No message, reasoning, tool, or continuation-token field
-// appears here — the events themselves come from the Eve session stream.
+// The bounded room history an operator surface reads to watch a lane it is not
+// talking in. This is heard/said conversation only: no reasoning, tool, private
+// pi session state, or continuation-token field appears here.
 // ---------------------------------------------------------------------------
 
 /** The authenticated captain route that lists observable lanes. */
 export const CAPTAIN_LANE_OBSERVATION_PATH = "/captain/v1/lanes";
 
-export const CaptainLaneSessionStateSchema = z.enum(["active", "waiting", "completed", "failed"]);
-export type CaptainLaneSessionState = z.infer<typeof CaptainLaneSessionStateSchema>;
+export const CAPTAIN_LANE_ENTRIES_MAX = 40;
+export const CAPTAIN_LANE_TEXT_MAX = 16_384;
+
+export const CaptainLaneObservationEntrySchema = z
+  .object({
+    at: z.string().datetime(),
+    kind: z.enum(["heard", "said"]),
+    text: z.string().max(CAPTAIN_LANE_TEXT_MAX),
+  })
+  .strict();
+export type CaptainLaneObservationEntry = z.infer<typeof CaptainLaneObservationEntrySchema>;
 
 export const ObservableCaptainLaneSchema = z
   .object({
-    lane: CaptainLaneCompatibilitySchema,
+    lane: CaptainSessionLaneV2Schema,
     /** The room address: `guildId:channelId` for Discord, conversation-shaped elsewhere. */
     targetId: z.string().trim().min(1).max(512),
-    /** Absent until the lane has run a turn; rotates when a lane starts a fresh session. */
-    sessionId: z.string().trim().min(1).max(512).optional(),
-    state: CaptainLaneSessionStateSchema,
-    updatedAt: z.string().datetime(),
+    entries: z.array(CaptainLaneObservationEntrySchema).max(CAPTAIN_LANE_ENTRIES_MAX),
   })
   .strict();
 export type ObservableCaptainLane = z.infer<typeof ObservableCaptainLaneSchema>;
@@ -90,6 +95,7 @@ export type CaptainLaneListing = z.infer<typeof CaptainLaneListingSchema>;
 export const OPERATOR_CONVERSATION_TITLE_MAX = 256;
 export const OPERATOR_CONVERSATION_TEXT_MAX = 16_384;
 export const OPERATOR_CONVERSATION_SUMMARY_MAX = 512;
+export const OPERATOR_CONVERSATION_TOOL_DETAIL_MAX = OPERATOR_CONVERSATION_TEXT_MAX;
 /** A submitted message is durably logged as a `message` event, so it shares that bound. */
 export const OPERATOR_CONVERSATION_MESSAGE_MAX = OPERATOR_CONVERSATION_TEXT_MAX;
 export const OPERATOR_CONVERSATION_CODE_MAX = 128;
@@ -133,6 +139,16 @@ export const OperatorConversationSessionStateSchema = z.enum([
 ]);
 export type OperatorConversationSessionState = z.infer<typeof OperatorConversationSessionStateSchema>;
 
+/** Current model-context occupancy, independent of provider-specific token metadata. */
+export const OperatorConversationContextUsageSchema = z
+  .object({
+    /** Unknown immediately after compaction until the next model response. */
+    tokens: z.number().int().nonnegative().nullable(),
+    contextWindow: z.number().int().positive(),
+  })
+  .strict();
+export type OperatorConversationContextUsage = z.infer<typeof OperatorConversationContextUsageSchema>;
+
 /** Public registry record. Provider credentials and continuation capabilities are impossible by schema. */
 export const OperatorConversationSchema = z
   .object({
@@ -145,6 +161,7 @@ export const OperatorConversationSchema = z
     updatedAt: z.string().datetime(),
     sessionState: OperatorConversationSessionStateSchema,
     revision: z.number().int().nonnegative(),
+    contextUsage: OperatorConversationContextUsageSchema.optional(),
   })
   .strict();
 export type OperatorConversation = z.infer<typeof OperatorConversationSchema>;
@@ -209,10 +226,11 @@ export type OperatorConversationAttachment = z.infer<typeof OperatorConversation
 
 /**
  * Strict discriminated public event union. Every app-renderable VUH-745 session
- * event (message, reasoning, tool, typed input, auth/session lifecycle, turn
- * lifecycle, redacted worker transcript) is a named bounded variant. Raw model,
- * provider, continuation, and credential payloads are impossible by schema; the
- * captain redacts to these shapes before publishing to the durable log/tail.
+ * event (message, reasoning, context occupancy, tool, typed input, auth/session
+ * lifecycle, turn lifecycle, redacted worker transcript) is a named bounded
+ * variant. Raw model, provider, continuation, and credential payloads are
+ * impossible by schema; the captain redacts to these shapes before publishing
+ * to the durable log/tail.
  */
 const OperatorConversationEventEnvelopeSchema = z.object({
   schemaVersion: z.literal(1),
@@ -235,11 +253,19 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
     streaming: z.boolean(),
   }).strict(),
   OperatorConversationEventEnvelopeSchema.extend({
+    type: z.literal("context"),
+    usage: OperatorConversationContextUsageSchema,
+  }).strict(),
+  OperatorConversationEventEnvelopeSchema.extend({
     type: z.literal("tool"),
     toolCallId: OperatorConversationEventRefSchema,
     name: z.string().trim().min(1).max(OPERATOR_CONVERSATION_CODE_MAX),
     phase: z.enum(["started", "completed", "failed"]),
     summary: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
+    /** Present when Pi loads a named skill, directly or through the read tool. */
+    skillName: z.string().trim().min(1).max(OPERATOR_CONVERSATION_CODE_MAX).optional(),
+    /** Redacted, serialized arguments or result; bounded before it enters the durable log. */
+    detail: z.string().max(OPERATOR_CONVERSATION_TOOL_DETAIL_MAX).optional(),
   }).strict(),
   OperatorConversationEventEnvelopeSchema.extend({
     type: z.literal("input_requested"),
@@ -414,6 +440,12 @@ const SubmitOperatorConversationTurnBaseSchema = z.object({
   conversationId: OperatorConversationIdSchema,
   surfaceClientId: OperatorSurfaceClientIdSchema,
   expectedRevision: z.number().int().nonnegative(),
+  /**
+   * When the operator console is a herdr pane, that pane is Clankie's seat
+   * in the same session as the fleet. Absent on Discord and on a console
+   * outside herdr.
+   */
+  herdrPaneId: z.string().trim().min(1).max(64).regex(/^\S+$/u).optional(),
 });
 
 /**
@@ -488,7 +520,7 @@ export type SubmitOperatorConversationTurnResult = z.infer<typeof SubmitOperator
 
 // ---------------------------------------------------------------------------
 // Callable service contract (VUH-769). A transport-neutral request/result
-// envelope any authenticated boundary (control plane, VUH-864 relay) mounts and
+// envelope any authenticated boundary (the service, the relay) mounts and
 // any RN/macOS/TUI client calls. This is the callable contract; VUH-864 owns the
 // physical HTTP/NDJSON transport that carries it.
 // ---------------------------------------------------------------------------
@@ -762,318 +794,6 @@ export const InteractiveEnvironmentBindingSchema = z.object({
 });
 export type InteractiveEnvironmentBinding = z.infer<typeof InteractiveEnvironmentBindingSchema>;
 
-export const CharacterSnapshotSchema = z.object({
-  schemaVersion: z.literal(1),
-  characterId: CharacterIdSchema,
-  goalVersion: z.number().int().nonnegative(),
-  activeWorldId: WorldIdSchema.optional(),
-  activeEnvironmentSessionId: EnvironmentSessionIdSchema.optional(),
-  activeMissionId: MissionIdSchema.optional(),
-  goal: z
-    .object({
-      kind: z.string().min(1),
-      summary: z.string().min(1),
-    })
-    .optional(),
-  activeActionId: ActionIdSchema.optional(),
-  sharedMemoryRefs: z.array(z.string().min(1)).default([]),
-  updatedAt: z.string().datetime(),
-});
-export type CharacterSnapshot = z.infer<typeof CharacterSnapshotSchema>;
-
-export const IntentCommandSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    intentId: z.string().min(1),
-    characterId: CharacterIdSchema,
-    context: IntentContextSchema,
-    type: z.enum(["set_goal", "steer", "pause", "resume", "stop", "disconnect"]),
-    goal: z
-      .object({
-        kind: z.string().min(1),
-        summary: z.string().min(1),
-      })
-      .optional(),
-    createdAt: z.string().datetime(),
-  })
-  .superRefine((command, context) => {
-    if (command.type === "set_goal" && !command.goal) {
-      context.addIssue({ code: "custom", path: ["goal"], message: "set_goal requires a goal" });
-    }
-  });
-export type IntentCommand = z.infer<typeof IntentCommandSchema>;
-
-export const RiskSchema = z.enum(["low", "medium", "high", "critical"]);
-export type Risk = z.infer<typeof RiskSchema>;
-
-export const TaskKindSchema = z.enum([
-  "context",
-  "planning",
-  "research",
-  "design",
-  "implementation",
-  "debugging",
-  "verification",
-  "review",
-  "integration",
-  "deployment",
-  "evaluation",
-]);
-export type TaskKind = z.infer<typeof TaskKindSchema>;
-
-export const TaskRoleSchema = z.enum([
-  "planner",
-  "implementer",
-  "verifier",
-  "reviewer",
-  "debugger",
-  "evaluator",
-]);
-export type TaskRole = z.infer<typeof TaskRoleSchema>;
-
-export const ExecutionClassSchema = z.enum([
-  "eve_subagent",
-  "runner_visible",
-  "runner_headless",
-  "human_owned",
-  "automatic",
-]);
-export type ExecutionClass = z.infer<typeof ExecutionClassSchema>;
-
-export const HarnessSchema = z.enum(["codex", "claude", "pi", "local", "shell", "simulated"]);
-export type Harness = z.infer<typeof HarnessSchema>;
-
-export const TaskStateSchema = z.enum([
-  "draft",
-  "queued",
-  "leased",
-  "running",
-  "waiting_dependency",
-  "waiting_user",
-  "blocked",
-  "verifying",
-  "succeeded",
-  "failed",
-  "cancelled",
-]);
-export type TaskState = z.infer<typeof TaskStateSchema>;
-
-export const MissionStateSchema = z.enum([
-  "draft",
-  "awaiting_approval",
-  "running",
-  "blocked",
-  "verifying",
-  "succeeded",
-  "failed",
-  "cancelled",
-]);
-export type MissionState = z.infer<typeof MissionStateSchema>;
-
-export const EvidenceSchema = z.object({
-  kind: z.enum(["command", "test_report", "diff", "review", "screenshot", "artifact", "log"]),
-  label: z.string().min(1),
-  uri: z.string().min(1).optional(),
-  summary: z.string().min(1),
-});
-export type Evidence = z.infer<typeof EvidenceSchema>;
-
-export const TaskSpecSchema = z.object({
-  id: TaskIdSchema,
-  title: z.string().min(1),
-  objective: z.string().min(1),
-  kind: TaskKindSchema,
-  role: TaskRoleSchema,
-  dependsOn: z.array(TaskIdSchema).default([]),
-  preferredHarness: HarnessSchema.optional(),
-  executionClass: ExecutionClassSchema.default("automatic"),
-  risk: RiskSchema.default("low"),
-  writeScope: z.array(z.string()).default([]),
-  successCriteria: z.array(z.string().min(1)).min(1),
-  evidenceRequirements: z.array(z.string().min(1)).min(1),
-  estimatedChangedLines: z.number().int().nonnegative().optional(),
-  estimatedDurationMinutes: z.number().int().positive().optional(),
-  estimatedCostUsd: z.number().nonnegative().optional(),
-  maxAttempts: z.number().int().positive().default(1),
-  environmentBinding: InteractiveEnvironmentBindingSchema.optional(),
-  metadata: z.record(z.string(), z.unknown()).default({}),
-});
-export type TaskSpec = z.infer<typeof TaskSpecSchema>;
-
-export const ActionResourceSchema = z.object({
-  type: z.string().min(1),
-  id: z.string().min(1),
-  repository: z.string().optional(),
-  environment: z.string().optional(),
-});
-export type ActionResource = z.infer<typeof ActionResourceSchema>;
-
-export const PlannedActionSchema = z.object({
-  id: z.string().min(1),
-  taskId: TaskIdSchema.optional(),
-  action: z.string().min(1),
-  resource: ActionResourceSchema,
-  rationale: z.string().min(1),
-});
-export type PlannedAction = z.infer<typeof PlannedActionSchema>;
-
-export const MissionPlanSchema = z
-  .object({
-    missionId: MissionIdSchema,
-    goal: z.string().min(1),
-    rationale: z.string().min(1),
-    tasks: z.array(TaskSpecSchema).min(1),
-    successCriteria: z.array(z.string().min(1)).min(1),
-    assumptions: z.array(z.string().min(1)).default([]),
-    risks: z.array(z.string().min(1)).default([]),
-    humanDecisionsRequired: z.array(z.string().min(1)).default([]),
-    plannedActions: z.array(PlannedActionSchema).default([]),
-    environmentBindings: z.array(InteractiveEnvironmentBindingSchema).default([]),
-    profileHash: z.string().min(1),
-  })
-  .superRefine((plan, context) => {
-    const taskIds = new Set(plan.tasks.map((task) => task.id));
-    const actionIds = new Set<string>();
-    for (const action of plan.plannedActions) {
-      if (actionIds.has(action.id)) {
-        context.addIssue({
-          code: "custom",
-          message: `Planned action id ${action.id} is duplicated`,
-          path: ["plannedActions"],
-        });
-      }
-      actionIds.add(action.id);
-      if (action.taskId && !taskIds.has(action.taskId)) {
-        context.addIssue({
-          code: "custom",
-          message: `Planned action ${action.id} references unknown task ${action.taskId}`,
-          path: ["plannedActions"],
-        });
-      }
-    }
-    for (const [taskIndex, task] of plan.tasks.entries()) {
-      const binding = task.environmentBinding;
-      if (!binding) continue;
-      const declaredByMission = plan.environmentBindings.some(
-        (missionBinding) =>
-          missionBinding.environmentKind === binding.environmentKind &&
-          missionBinding.characterId === binding.characterId &&
-          missionBinding.worldId === binding.worldId,
-      );
-      if (!declaredByMission) {
-        context.addIssue({
-          code: "custom",
-          message: `Task ${task.id} environment binding is not declared by the mission`,
-          path: ["tasks", taskIndex, "environmentBinding"],
-        });
-      }
-    }
-  });
-export type MissionPlan = z.infer<typeof MissionPlanSchema>;
-
-/**
- * Runner-authored fact for a trusted verification check that failed.
- * Populated only from real check execution at the runner trust boundary —
- * never from provider prose, diagnosis text, or model-reported identities.
- * The mission-engine static failure-evidence bridge consumes this directly
- * (command + exitCode) without parsing free-form strings.
- */
-export const FailedCheckSchema = z.object({
-  command: z.string().min(1),
-  exitCode: z.number().int(),
-});
-export type FailedCheck = z.infer<typeof FailedCheckSchema>;
-
-export const WorkerResultSchema = z.object({
-  status: z.enum(["succeeded", "failed", "blocked"]),
-  summary: z.string().min(1),
-  evidence: z.array(EvidenceSchema).default([]),
-  outputs: z.record(z.string(), z.unknown()).default({}),
-  diagnosis: z.string().optional(),
-  /** Optional structured failed-check carrier (VUH-828); additive and runner-authored only. */
-  failedCheck: FailedCheckSchema.optional(),
-});
-export type WorkerResult = z.infer<typeof WorkerResultSchema>;
-
-export const ActionEffectSchema = z.enum(["allow", "deny", "require_approval"]);
-export type ActionEffect = z.infer<typeof ActionEffectSchema>;
-
-export const ActionRequestSchema = z.object({
-  id: z.string().min(1),
-  principal: z.object({
-    kind: z.enum(["captain", "worker", "human", "system"]),
-    id: z.string().min(1),
-    role: z.string().optional(),
-  }),
-  action: z.string().min(1),
-  resource: ActionResourceSchema,
-  context: z.object({
-    missionId: MissionIdSchema,
-    taskId: TaskIdSchema.optional(),
-    risk: RiskSchema,
-    checksPassed: z.boolean().optional(),
-    humanApprovals: z.number().int().nonnegative().optional(),
-    changedLines: z.number().int().nonnegative().optional(),
-    changedPaths: z.array(z.string()).optional(),
-    costSoFarUsd: z.number().nonnegative().optional(),
-    profileHash: z.string().min(1),
-  }),
-});
-export type ActionRequest = z.infer<typeof ActionRequestSchema>;
-
-export const ActionDecisionSchema = z.object({
-  effect: ActionEffectSchema,
-  reason: z.string().min(1),
-  matchedPolicyIds: z.array(z.string()),
-  obligations: z.array(z.string()).default([]),
-});
-export type ActionDecision = z.infer<typeof ActionDecisionSchema>;
-
-export const ApprovalRequestStatusSchema = z.enum(["pending", "approved", "denied"]);
-export type ApprovalRequestStatus = z.infer<typeof ApprovalRequestStatusSchema>;
-
-export const ApprovalRequestRecordSchema = z
-  .object({
-    id: z.string().min(1),
-    missionId: MissionIdSchema,
-    taskId: TaskIdSchema.optional(),
-    workerRunId: WorkerRunIdSchema.optional(),
-    action: z.string().min(1),
-    resource: ActionResourceSchema,
-    rationale: ActionDecisionSchema,
-    requestedAt: z.string().datetime(),
-    status: ApprovalRequestStatusSchema,
-    decidedAt: z.string().datetime().optional(),
-    decidedBy: z.string().min(1).optional(),
-    reason: z.string().min(1).optional(),
-    correlationId: z.string().min(1),
-    profileHash: z.string().min(1),
-  })
-  .superRefine((record, context) => {
-    const decisionFields = [record.decidedAt, record.decidedBy, record.reason];
-    if (record.status === "pending" && decisionFields.some((field) => field !== undefined)) {
-      context.addIssue({
-        code: "custom",
-        message: "Pending approval requests cannot contain decision fields",
-        path: ["status"],
-      });
-    }
-    if (record.status !== "pending" && decisionFields.some((field) => field === undefined)) {
-      context.addIssue({
-        code: "custom",
-        message: "Decided approval requests require decidedAt, decidedBy, and reason",
-        path: ["status"],
-      });
-    }
-  });
-export type ApprovalRequestRecord = z.infer<typeof ApprovalRequestRecordSchema>;
-
-export const ApprovalDecisionInputSchema = z.object({
-  decision: z.enum(["approve", "deny"]),
-  reason: z.string().trim().min(1),
-});
-export type ApprovalDecisionInput = z.infer<typeof ApprovalDecisionInputSchema>;
-
 // ---------------------------------------------------------------------------
 // Event stream identity.
 //
@@ -1136,11 +856,6 @@ const RESERVED_EVENT_STREAM_NAMESPACES: readonly {
   { match: "media-readiness", exact: true, kind: "diagnostic" },
 ];
 
-/** The reserved prefixes a freshly minted mission id may not start with. */
-export const RESERVED_EVENT_STREAM_PREFIXES: readonly string[] = RESERVED_EVENT_STREAM_NAMESPACES.filter(
-  (entry) => !entry.exact,
-).map((entry) => entry.match);
-
 /**
  * The kind a stream id declares by its namespace. Writers call this so the kind
  * is stamped once, at append time, rather than re-derived by every reader.
@@ -1150,27 +865,6 @@ export function eventStreamKindForId(streamId: string): EventStreamKind {
     if (entry.exact ? streamId === entry.match : streamId.startsWith(entry.match)) return entry.kind;
   }
   return "mission";
-}
-
-/**
- * What kind of stream an event belongs to. The stamped `streamKind` is
- * authoritative; namespace inference is the compatibility path for events
- * appended before the field existed, and for the handful of foreign writers
- * (worker adapters, runner diagnostics) that copy a stream id verbatim.
- */
-export function classifyEventStream(event: {
-  readonly missionId: string;
-  readonly streamKind?: EventStreamKind | undefined;
-}): EventStreamKind {
-  return event.streamKind ?? eventStreamKindForId(event.missionId);
-}
-
-/** True when the event belongs to a real mission rather than a reserved stream. */
-export function isMissionEventStream(event: {
-  readonly missionId: string;
-  readonly streamKind?: EventStreamKind | undefined;
-}): boolean {
-  return classifyEventStream(event) === "mission";
 }
 
 const EventBaseSchema = z.object({
@@ -1193,686 +887,6 @@ export const DomainEventSchema = EventBaseSchema.extend({
   data: z.record(z.string(), z.unknown()).default({}),
 });
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
-
-// ---------------------------------------------------------------------------
-// Authenticated mission-event feed (VUH-909).
-//
-// DomainEvent is the internal append-only authority and intentionally supports
-// additive event data. It is not safe as an app wire contract. The schemas
-// below are a closed, bounded read projection that preserves canonical event
-// identity and event-store sequence metadata while making raw/provider/private
-// payload fields unrepresentable.
-// ---------------------------------------------------------------------------
-
-export const MISSION_EVENT_FEED_SCHEMA_VERSION = 1 as const;
-export const MISSION_EVENT_FEED_RETENTION_MAX = 1_024;
-export const MISSION_EVENT_FEED_SNAPSHOT_MAX = 512;
-export const MISSION_EVENT_FEED_CURSOR_MAX = 2_048;
-export const MISSION_EVENT_FEED_ID_MAX = 512;
-
-const MissionEventFeedIdSchema = z.string().trim().min(1).max(MISSION_EVENT_FEED_ID_MAX);
-export const MissionEventFeedCursorSchema = z.string().trim().min(1).max(MISSION_EVENT_FEED_CURSOR_MAX);
-export type MissionEventFeedCursor = z.infer<typeof MissionEventFeedCursorSchema>;
-
-const MissionFeedEventEnvelope = {
-  schemaVersion: z.literal(MISSION_EVENT_FEED_SCHEMA_VERSION),
-  eventId: MissionEventFeedIdSchema,
-  sourceSequence: z.number().int().positive(),
-  previousSourceSequence: z.number().int().nonnegative(),
-  occurredAt: z.string().datetime(),
-  missionId: MissionEventFeedIdSchema,
-  taskId: MissionEventFeedIdSchema.optional(),
-  workerRunId: MissionEventFeedIdSchema.optional(),
-  correlationId: MissionEventFeedIdSchema,
-  causationId: MissionEventFeedIdSchema.optional(),
-  profileHash: MissionEventFeedIdSchema,
-};
-
-const MissionFeedWorkerIdentityDataSchema = z
-  .object({
-    workerId: MissionEventFeedIdSchema,
-    harness: HarnessSchema,
-    taskKind: TaskKindSchema,
-    attempt: z.number().int().positive(),
-  })
-  .strict();
-
-const MissionFeedSummaryDataSchema = z
-  .object({ summary: z.enum(["Working", "Waiting for a dependency", "User input required"]) })
-  .strict();
-
-const MissionFeedArtifactIdSchema = z.string().regex(/^artifact:\/\/[A-Za-z0-9._~:/-]{1,1000}$/u);
-
-/** Closed canonical event variants consumed by the Garden mission projection. */
-export const MissionFeedEventSchema = z.discriminatedUnion("type", [
-  z
-    .object({
-      ...MissionFeedEventEnvelope,
-      type: z.literal("mission.execution.started"),
-      data: z.object({}).strict(),
-    })
-    .strict(),
-  z
-    .object({
-      ...MissionFeedEventEnvelope,
-      type: z.literal("worker.started"),
-      taskId: MissionEventFeedIdSchema,
-      workerRunId: MissionEventFeedIdSchema,
-      data: MissionFeedWorkerIdentityDataSchema,
-    })
-    .strict(),
-  z
-    .object({
-      ...MissionFeedEventEnvelope,
-      type: z.literal("worker.leased"),
-      taskId: MissionEventFeedIdSchema,
-      workerRunId: MissionEventFeedIdSchema,
-      data: MissionFeedWorkerIdentityDataSchema,
-    })
-    .strict(),
-  z
-    .object({
-      ...MissionFeedEventEnvelope,
-      type: z.literal("worker.turn.started"),
-      taskId: MissionEventFeedIdSchema,
-      workerRunId: MissionEventFeedIdSchema,
-      data: z.object({ state: z.literal("working") }).strict(),
-    })
-    .strict(),
-  z
-    .object({
-      ...MissionFeedEventEnvelope,
-      type: z.literal("worker.turn.settled"),
-      taskId: MissionEventFeedIdSchema,
-      workerRunId: MissionEventFeedIdSchema,
-      data: z.object({ state: z.literal("idle") }).strict(),
-    })
-    .strict(),
-  z
-    .object({
-      ...MissionFeedEventEnvelope,
-      type: z.literal("worker.waiting_user"),
-      taskId: MissionEventFeedIdSchema,
-      workerRunId: MissionEventFeedIdSchema,
-      data: MissionFeedSummaryDataSchema,
-    })
-    .strict(),
-  z
-    .object({
-      ...MissionFeedEventEnvelope,
-      type: z.enum(["worker.waiting_dependency", "task.waiting_dependency"]),
-      taskId: MissionEventFeedIdSchema,
-      workerRunId: MissionEventFeedIdSchema,
-      data: MissionFeedSummaryDataSchema,
-    })
-    .strict(),
-  z
-    .object({
-      ...MissionFeedEventEnvelope,
-      type: z.literal("worker.progress"),
-      taskId: MissionEventFeedIdSchema,
-      workerRunId: MissionEventFeedIdSchema,
-      data: z.object({ summary: z.literal("Working") }).strict(),
-    })
-    .strict(),
-  z
-    .object({
-      ...MissionFeedEventEnvelope,
-      type: z.literal("worker.status.resolved"),
-      taskId: MissionEventFeedIdSchema,
-      workerRunId: MissionEventFeedIdSchema,
-      data: z
-        .object({
-          state: z.enum([
-            "unknown",
-            "working",
-            "idle",
-            "waiting_dependency",
-            "waiting_user",
-            "blocked",
-            "failed",
-            "completed",
-            "offline",
-          ]),
-          tier: z.union([z.literal(0), z.literal(1), z.literal(2)]),
-          confidence: z.number().min(0).max(1),
-          observedAt: z.string().datetime(),
-          attentionRaised: z.boolean(),
-        })
-        .strict(),
-    })
-    .strict(),
-  z
-    .object({
-      ...MissionFeedEventEnvelope,
-      type: z.enum(["task.failed", "worker.crashed"]),
-      taskId: MissionEventFeedIdSchema,
-      workerRunId: MissionEventFeedIdSchema,
-      data: z.object({ summary: z.literal("Task failed") }).strict(),
-    })
-    .strict(),
-  z
-    .object({
-      ...MissionFeedEventEnvelope,
-      type: z.literal("task.blocked"),
-      taskId: MissionEventFeedIdSchema,
-      workerRunId: MissionEventFeedIdSchema,
-      data: z.object({ summary: z.literal("Task blocked") }).strict(),
-    })
-    .strict(),
-  z
-    .object({
-      ...MissionFeedEventEnvelope,
-      type: z.literal("task.succeeded"),
-      taskId: MissionEventFeedIdSchema,
-      workerRunId: MissionEventFeedIdSchema,
-      data: z.object({ summary: z.literal("Task completed") }).strict(),
-    })
-    .strict(),
-  z
-    .object({
-      ...MissionFeedEventEnvelope,
-      type: z.literal("worker.settled"),
-      taskId: MissionEventFeedIdSchema,
-      workerRunId: MissionEventFeedIdSchema,
-      data: z
-        .object({
-          result: z.enum(["succeeded", "failed", "blocked"]),
-          artifactIds: z.array(MissionFeedArtifactIdSchema).max(100),
-        })
-        .strict(),
-    })
-    .strict(),
-  z
-    .object({
-      ...MissionFeedEventEnvelope,
-      type: z.literal("worker.completed"),
-      taskId: MissionEventFeedIdSchema,
-      workerRunId: MissionEventFeedIdSchema,
-      data: z.object({ result: z.enum(["succeeded", "failed", "blocked"]) }).strict(),
-    })
-    .strict(),
-  z
-    .object({
-      ...MissionFeedEventEnvelope,
-      type: z.literal("mission.succeeded"),
-      data: z.object({ summary: z.literal("Mission completed") }).strict(),
-    })
-    .strict(),
-  z
-    .object({
-      ...MissionFeedEventEnvelope,
-      type: z.literal("mission.failed"),
-      data: z.object({ summary: z.literal("Mission failed") }).strict(),
-    })
-    .strict(),
-]);
-export type MissionFeedEvent = z.infer<typeof MissionFeedEventSchema>;
-
-export const ActiveMissionDescriptorSchema = z
-  .object({
-    schemaVersion: z.literal(MISSION_EVENT_FEED_SCHEMA_VERSION),
-    missionId: MissionEventFeedIdSchema,
-    generation: MissionEventFeedIdSchema,
-    startedAt: z.string().datetime(),
-    profileHash: MissionEventFeedIdSchema,
-  })
-  .strict();
-export type ActiveMissionDescriptor = z.infer<typeof ActiveMissionDescriptorSchema>;
-
-export const ActiveMissionSelectionSchema = z
-  .object({
-    schemaVersion: z.literal(MISSION_EVENT_FEED_SCHEMA_VERSION),
-    activeMission: ActiveMissionDescriptorSchema.nullable(),
-  })
-  .strict();
-export type ActiveMissionSelection = z.infer<typeof ActiveMissionSelectionSchema>;
-
-export const MissionEventSnapshotSchema = z
-  .object({
-    schemaVersion: z.literal(MISSION_EVENT_FEED_SCHEMA_VERSION),
-    outcome: z.literal("snapshot"),
-    mission: ActiveMissionDescriptorSchema,
-    replayAfterSourceSequenceFloor: z.number().int().nonnegative(),
-    resumeAfterSourceSequence: z.number().int().nonnegative(),
-    nextCursor: MissionEventFeedCursorSchema,
-    compacted: z.boolean(),
-    omittedEventCount: z.number().int().nonnegative(),
-    events: z.array(MissionFeedEventSchema).max(MISSION_EVENT_FEED_SNAPSHOT_MAX),
-  })
-  .strict();
-export type MissionEventSnapshot = z.infer<typeof MissionEventSnapshotSchema>;
-
-export const MissionEventCursorExpiredSchema = z
-  .object({
-    schemaVersion: z.literal(MISSION_EVENT_FEED_SCHEMA_VERSION),
-    outcome: z.literal("cursor_expired"),
-    mission: ActiveMissionDescriptorSchema,
-    replayAfterSourceSequenceFloor: z.number().int().nonnegative(),
-    snapshotCursor: MissionEventFeedCursorSchema,
-  })
-  .strict();
-export type MissionEventCursorExpired = z.infer<typeof MissionEventCursorExpiredSchema>;
-
-export const MissionEventCursorInvalidSchema = z
-  .object({
-    schemaVersion: z.literal(MISSION_EVENT_FEED_SCHEMA_VERSION),
-    outcome: z.literal("cursor_invalid"),
-    missionId: MissionEventFeedIdSchema,
-  })
-  .strict();
-export type MissionEventCursorInvalid = z.infer<typeof MissionEventCursorInvalidSchema>;
-
-export const MissionEventMissionReplacedSchema = z
-  .object({
-    schemaVersion: z.literal(MISSION_EVENT_FEED_SCHEMA_VERSION),
-    outcome: z.literal("mission_replaced"),
-    requestedMissionId: MissionEventFeedIdSchema,
-    replacementMission: ActiveMissionDescriptorSchema.nullable(),
-  })
-  .strict();
-export type MissionEventMissionReplaced = z.infer<typeof MissionEventMissionReplacedSchema>;
-
-export const MissionEventRecoverySchema = z.discriminatedUnion("outcome", [
-  MissionEventCursorExpiredSchema,
-  MissionEventCursorInvalidSchema,
-  MissionEventMissionReplacedSchema,
-]);
-export type MissionEventRecovery = z.infer<typeof MissionEventRecoverySchema>;
-
-export const MissionEventAuthFailureSchema = z
-  .object({
-    schemaVersion: z.literal(MISSION_EVENT_FEED_SCHEMA_VERSION),
-    outcome: z.literal("auth_failed"),
-    reason: z.enum(["authentication_required", "session_expired", "device_revoked", "permission_denied"]),
-  })
-  .strict();
-export type MissionEventAuthFailure = z.infer<typeof MissionEventAuthFailureSchema>;
-
-export const MissionEventTailEventLineSchema = z
-  .object({
-    schemaVersion: z.literal(MISSION_EVENT_FEED_SCHEMA_VERSION),
-    type: z.literal("mission_event.event"),
-    event: MissionFeedEventSchema,
-    cursor: MissionEventFeedCursorSchema,
-  })
-  .strict();
-export type MissionEventTailEventLine = z.infer<typeof MissionEventTailEventLineSchema>;
-
-export const MissionEventTailRecoveryLineSchema = z
-  .object({
-    schemaVersion: z.literal(MISSION_EVENT_FEED_SCHEMA_VERSION),
-    type: z.literal("mission_event.recovery"),
-    recovery: MissionEventRecoverySchema,
-  })
-  .strict();
-export type MissionEventTailRecoveryLine = z.infer<typeof MissionEventTailRecoveryLineSchema>;
-
-export const MissionEventTailAuthLineSchema = z
-  .object({
-    schemaVersion: z.literal(MISSION_EVENT_FEED_SCHEMA_VERSION),
-    type: z.literal("mission_event.auth_failed"),
-    failure: MissionEventAuthFailureSchema,
-  })
-  .strict();
-export type MissionEventTailAuthLine = z.infer<typeof MissionEventTailAuthLineSchema>;
-
-export const MissionEventTailLineSchema = z.discriminatedUnion("type", [
-  MissionEventTailEventLineSchema,
-  MissionEventTailRecoveryLineSchema,
-  MissionEventTailAuthLineSchema,
-]);
-export type MissionEventTailLine = z.infer<typeof MissionEventTailLineSchema>;
-
-export const MissionTriggerScheduleSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("cron"), expression: z.string().min(1) }).strict(),
-  z.object({ kind: z.literal("once"), at: z.string().datetime() }).strict(),
-]);
-export type MissionTriggerSchedule = z.infer<typeof MissionTriggerScheduleSchema>;
-
-export const MissionTriggerSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    id: z.string().min(1),
-    goal: z.string().min(1),
-    context: z.record(z.string(), z.unknown()).default({}),
-    schedule: MissionTriggerScheduleSchema,
-    misfirePolicy: z.enum(["skip", "run_once_late"]),
-    createdAt: z.string().datetime(),
-    updatedAt: z.string().datetime(),
-    lastEvaluatedAt: z.string().datetime().optional(),
-  })
-  .strict();
-export type MissionTrigger = z.infer<typeof MissionTriggerSchema>;
-
-export const MissionTriggerEventSchema = z.discriminatedUnion("type", [
-  EventBaseSchema.extend({
-    type: z.literal("mission.trigger.created"),
-    data: z.object({ trigger: MissionTriggerSchema }),
-  }),
-  EventBaseSchema.extend({
-    type: z.literal("mission.trigger.updated"),
-    data: z.object({ trigger: MissionTriggerSchema }),
-  }),
-  EventBaseSchema.extend({
-    type: z.literal("mission.trigger.fired"),
-    data: z.object({
-      trigger: MissionTriggerSchema,
-      scheduledAt: z.string().datetime(),
-      missionId: MissionIdSchema,
-    }),
-  }),
-  EventBaseSchema.extend({
-    type: z.literal("mission.trigger.skipped"),
-    data: z.object({ trigger: MissionTriggerSchema, scheduledAt: z.string().datetime() }),
-  }),
-  EventBaseSchema.extend({
-    type: z.literal("mission.trigger.deleted"),
-    data: z.object({ triggerId: z.string().min(1) }),
-  }),
-]);
-export type MissionTriggerEvent = z.infer<typeof MissionTriggerEventSchema>;
-
-export const ApprovalEventSchema = z
-  .discriminatedUnion("type", [
-    EventBaseSchema.extend({
-      type: z.literal("approval.requested"),
-      data: z.object({ approval: ApprovalRequestRecordSchema }),
-    }),
-    EventBaseSchema.extend({
-      type: z.literal("approval.decided"),
-      data: z.object({
-        approval: ApprovalRequestRecordSchema,
-        consumedAt: z.string().datetime().optional(),
-        consumedBy: z.string().min(1).optional(),
-      }),
-    }),
-  ])
-  .superRefine((event, context) => {
-    if (event.type === "approval.requested" && event.data.approval.status !== "pending") {
-      context.addIssue({ code: "custom", message: "approval.requested must be pending" });
-    }
-    if (event.type === "approval.decided" && event.data.approval.status === "pending") {
-      context.addIssue({ code: "custom", message: "approval.decided must be terminal" });
-    }
-    if (
-      event.type === "approval.decided" &&
-      (event.data.consumedAt === undefined) !== (event.data.consumedBy === undefined)
-    ) {
-      context.addIssue({
-        code: "custom",
-        message: "Approval consumption requires consumedAt and consumedBy together",
-      });
-    }
-  });
-export type ApprovalEvent = z.infer<typeof ApprovalEventSchema>;
-
-export const WorkerStatusStateSchema = z.enum([
-  "unknown",
-  "working",
-  "idle",
-  "waiting_dependency",
-  "waiting_user",
-  "blocked",
-  "failed",
-  "completed",
-  "offline",
-]);
-export type WorkerStatusState = z.infer<typeof WorkerStatusStateSchema>;
-
-export const WorkerStatusProvenanceSchema = z.object({
-  source: z.string().min(1),
-  tier: z.union([z.literal(0), z.literal(1), z.literal(2)]),
-  confidence: z.number().min(0).max(1),
-  observedAt: z.string().datetime(),
-});
-export type WorkerStatusProvenance = z.infer<typeof WorkerStatusProvenanceSchema>;
-
-// --- Runner-owned worker transcript projection (VUH-865) ---
-
-export const WORKER_TRANSCRIPT_SCHEMA_VERSION = 1 as const;
-
-export const WorkerTranscriptKeySchema = z
-  .object({
-    missionId: MissionIdSchema,
-    taskId: TaskIdSchema,
-    workerRunId: WorkerRunIdSchema,
-  })
-  .strict();
-export type WorkerTranscriptKey = z.infer<typeof WorkerTranscriptKeySchema>;
-
-export const WorkerTranscriptVisibilitySchema = z.enum(["garden", "operator"]);
-export type WorkerTranscriptVisibility = z.infer<typeof WorkerTranscriptVisibilitySchema>;
-
-export const WorkerTranscriptRedactionClassSchema = z.enum([
-  "authorization",
-  "token",
-  "credential",
-  "private_prompt",
-  "chain_of_thought",
-  "raw_audio",
-  "unbounded_output",
-]);
-export type WorkerTranscriptRedactionClass = z.infer<typeof WorkerTranscriptRedactionClassSchema>;
-
-export const WorkerTranscriptRedactionSchema = z
-  .object({
-    classification: z.enum(["none", "secrets_removed", "private_content_removed", "metadata_only"]),
-    classes: z.array(WorkerTranscriptRedactionClassSchema),
-  })
-  .strict();
-export type WorkerTranscriptRedaction = z.infer<typeof WorkerTranscriptRedactionSchema>;
-
-export const WorkerTranscriptProvenanceSchema = z
-  .object({
-    source: z.enum(["runner_event", "runner_settlement", "worker_summary"]),
-    sourceEventId: z.string().min(1).max(256),
-    trust: z.enum(["runner_observed", "worker_authored"]),
-  })
-  .strict();
-export type WorkerTranscriptProvenance = z.infer<typeof WorkerTranscriptProvenanceSchema>;
-
-const WorkerTranscriptEntryBase = {
-  schemaVersion: z.literal(WORKER_TRANSCRIPT_SCHEMA_VERSION),
-  entryId: z.string().min(1).max(512),
-  missionId: MissionIdSchema,
-  taskId: TaskIdSchema,
-  workerRunId: WorkerRunIdSchema,
-  sequence: z.number().int().positive(),
-  occurredAt: z.string().datetime(),
-  correlationId: z.string().min(1),
-  profileHash: z.string().min(1),
-  visibility: WorkerTranscriptVisibilitySchema,
-  redaction: WorkerTranscriptRedactionSchema,
-  provenance: WorkerTranscriptProvenanceSchema,
-};
-
-export const WorkerTranscriptEntrySchema = z.discriminatedUnion("kind", [
-  z
-    .object({
-      ...WorkerTranscriptEntryBase,
-      kind: z.literal("status"),
-      data: z
-        .object({
-          state: z.enum([
-            "unknown",
-            "working",
-            "idle",
-            "waiting_dependency",
-            "waiting_user",
-            "blocked",
-            "failed",
-            "completed",
-            "offline",
-          ]),
-          summary: z.string().trim().min(1).max(512),
-        })
-        .strict(),
-    })
-    .strict(),
-  z
-    .object({
-      ...WorkerTranscriptEntryBase,
-      kind: z.literal("narrative"),
-      data: z.object({ summary: z.string().trim().min(1).max(512) }).strict(),
-    })
-    .strict(),
-  z
-    .object({
-      ...WorkerTranscriptEntryBase,
-      kind: z.literal("action"),
-      data: z
-        .object({
-          action: z.string().trim().min(1).max(200),
-          result: z.enum(["started", "succeeded", "failed"]),
-          fingerprint: z
-            .string()
-            .regex(/^[a-f0-9]{64}$/u)
-            .optional(),
-        })
-        .strict(),
-    })
-    .strict(),
-  z
-    .object({
-      ...WorkerTranscriptEntryBase,
-      kind: z.literal("artifact"),
-      data: z
-        .object({
-          label: z.string().trim().min(1).max(200),
-          ref: z.string().trim().min(1).max(1_024),
-          summary: z.string().trim().min(1).max(512),
-        })
-        .strict(),
-    })
-    .strict(),
-  z
-    .object({
-      ...WorkerTranscriptEntryBase,
-      kind: z.literal("blocker"),
-      data: z.object({ summary: z.string().trim().min(1).max(512) }).strict(),
-    })
-    .strict(),
-  z
-    .object({
-      ...WorkerTranscriptEntryBase,
-      kind: z.literal("completion"),
-      data: z
-        .object({
-          status: z.enum(["succeeded", "failed", "blocked", "cancelled"]),
-          summary: z.string().trim().min(1).max(512),
-          evidenceRefs: z.array(z.string().trim().min(1).max(1_024)).max(100),
-        })
-        .strict(),
-    })
-    .strict(),
-]);
-export type WorkerTranscriptEntry = z.infer<typeof WorkerTranscriptEntrySchema>;
-
-export const WorkerTranscriptSnapshotSchema = z
-  .object({
-    schemaVersion: z.literal(WORKER_TRANSCRIPT_SCHEMA_VERSION),
-    outcome: z.literal("snapshot"),
-    key: WorkerTranscriptKeySchema,
-    generation: z.string().min(1).max(256),
-    retainedFromSequence: z.number().int().positive(),
-    nextCursor: z.string().min(1).max(2_048),
-    entries: z.array(WorkerTranscriptEntrySchema),
-  })
-  .strict();
-export type WorkerTranscriptSnapshot = z.infer<typeof WorkerTranscriptSnapshotSchema>;
-
-export const WorkerTranscriptCursorExpiredSchema = z
-  .object({
-    schemaVersion: z.literal(WORKER_TRANSCRIPT_SCHEMA_VERSION),
-    outcome: z.literal("cursor_expired"),
-    retainedFromSequence: z.number().int().positive(),
-    snapshotCursor: z.string().min(1).max(2_048),
-  })
-  .strict();
-export type WorkerTranscriptCursorExpired = z.infer<typeof WorkerTranscriptCursorExpiredSchema>;
-
-export const WorkerTranscriptRunReplacedSchema = z
-  .object({
-    schemaVersion: z.literal(WORKER_TRANSCRIPT_SCHEMA_VERSION),
-    outcome: z.literal("run_replaced"),
-    replacementKey: WorkerTranscriptKeySchema,
-    snapshotCursor: z.string().min(1).max(2_048),
-  })
-  .strict();
-export type WorkerTranscriptRunReplaced = z.infer<typeof WorkerTranscriptRunReplacedSchema>;
-
-export const WorkerTranscriptNotFoundSchema = z
-  .object({
-    schemaVersion: z.literal(WORKER_TRANSCRIPT_SCHEMA_VERSION),
-    outcome: z.literal("not_found"),
-  })
-  .strict();
-export type WorkerTranscriptNotFound = z.infer<typeof WorkerTranscriptNotFoundSchema>;
-
-export const WorkerTranscriptReadOutcomeSchema = z.discriminatedUnion("outcome", [
-  WorkerTranscriptSnapshotSchema,
-  WorkerTranscriptRunReplacedSchema,
-  WorkerTranscriptNotFoundSchema,
-]);
-export type WorkerTranscriptReadOutcome = z.infer<typeof WorkerTranscriptReadOutcomeSchema>;
-
-export const WorkerTranscriptTailLineSchema = z
-  .object({
-    schemaVersion: z.literal(WORKER_TRANSCRIPT_SCHEMA_VERSION),
-    type: z.literal("worker_transcript.entry"),
-    entry: WorkerTranscriptEntrySchema,
-    cursor: z.string().min(1).max(2_048),
-  })
-  .strict();
-export type WorkerTranscriptTailLine = z.infer<typeof WorkerTranscriptTailLineSchema>;
-
-export const WorkerTranscriptAuthFailureSchema = z
-  .object({
-    schemaVersion: z.literal(WORKER_TRANSCRIPT_SCHEMA_VERSION),
-    outcome: z.literal("auth_failed"),
-    reason: z.enum(["authentication_required", "session_expired", "device_revoked", "permission_denied"]),
-  })
-  .strict();
-export type WorkerTranscriptAuthFailure = z.infer<typeof WorkerTranscriptAuthFailureSchema>;
-
-export const WorkerTurnStartedDataSchema = WorkerStatusProvenanceSchema.extend({
-  state: z.literal("working"),
-});
-export type WorkerTurnStartedData = z.infer<typeof WorkerTurnStartedDataSchema>;
-
-export const WorkerTurnSettledDataSchema = WorkerStatusProvenanceSchema.extend({
-  state: z.literal("idle"),
-});
-export type WorkerTurnSettledData = z.infer<typeof WorkerTurnSettledDataSchema>;
-
-export const WorkerWaitingUserDataSchema = WorkerStatusProvenanceSchema.extend({
-  state: z.literal("waiting_user"),
-  questionSummary: z.string().trim().min(1),
-});
-export type WorkerWaitingUserData = z.infer<typeof WorkerWaitingUserDataSchema>;
-
-export const WorkerStatusEventSchema = z.discriminatedUnion("type", [
-  EventBaseSchema.extend({
-    type: z.literal("worker.turn.started"),
-    taskId: TaskIdSchema,
-    workerRunId: WorkerRunIdSchema,
-    data: WorkerTurnStartedDataSchema,
-  }),
-  EventBaseSchema.extend({
-    type: z.literal("worker.turn.settled"),
-    taskId: TaskIdSchema,
-    workerRunId: WorkerRunIdSchema,
-    data: WorkerTurnSettledDataSchema,
-  }),
-  EventBaseSchema.extend({
-    type: z.literal("worker.waiting_user"),
-    taskId: TaskIdSchema,
-    workerRunId: WorkerRunIdSchema,
-    data: WorkerWaitingUserDataSchema,
-  }),
-]);
-export type WorkerStatusEvent = z.infer<typeof WorkerStatusEventSchema>;
 
 export const CAPTAIN_PRESENCE_SCHEMA_VERSION = 1 as const;
 export const CAPTAIN_STATUS_SUBJECT_ID = "captain" as const;
@@ -2006,133 +1020,6 @@ export const CaptainPresenceReportSchema = z.union([
 ]);
 export type CaptainPresenceReport = z.infer<typeof CaptainPresenceReportSchema>;
 
-export const ApprovalRecordSchema = z.object({
-  actionRequestId: z.string().min(1),
-  decision: z.enum(["approved", "rejected"]),
-  decidedBy: z.string().min(1),
-  reason: z.string().min(1),
-  decidedAt: z.string().datetime(),
-  expiresAt: z.string().datetime().optional(),
-});
-export type ApprovalRecord = z.infer<typeof ApprovalRecordSchema>;
-
-export function assertValidDag(tasks: TaskSpec[]): void {
-  const ids = new Set(tasks.map((task) => task.id));
-  if (ids.size !== tasks.length) {
-    throw new Error("Task ids must be unique");
-  }
-
-  for (const task of tasks) {
-    for (const dependency of task.dependsOn) {
-      if (!ids.has(dependency)) {
-        throw new Error(`Task ${task.id} depends on unknown task ${dependency}`);
-      }
-    }
-  }
-
-  const visiting = new Set<string>();
-  const visited = new Set<string>();
-  const byId = new Map(tasks.map((task) => [task.id, task]));
-
-  const visit = (id: string): void => {
-    if (visited.has(id)) return;
-    if (visiting.has(id)) throw new Error(`Task dependency cycle detected at ${id}`);
-    visiting.add(id);
-    const task = byId.get(id);
-    if (!task) throw new Error(`Unknown task ${id}`);
-    for (const dependency of task.dependsOn) visit(dependency);
-    visiting.delete(id);
-    visited.add(id);
-  };
-
-  for (const task of tasks) visit(task.id);
-}
-
-export const LinearChannelIdentitySchema = z
-  .object({
-    missionId: MissionIdSchema,
-    taskId: TaskIdSchema,
-    workerRunId: WorkerRunIdSchema,
-    correlationId: z.string().min(1),
-    profileHash: z.string().min(1),
-    workspaceId: z.string().min(1),
-    appUserId: z.string().min(1),
-  })
-  .strict();
-export type LinearChannelIdentity = z.infer<typeof LinearChannelIdentitySchema>;
-
-export const LinearChannelTurnRequestSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    deliveryId: z.string().uuid(),
-    action: z.enum(["created", "prompted"]),
-    identity: LinearChannelIdentitySchema,
-    issue: z
-      .object({
-        id: z.string().min(1),
-        identifier: z.string().min(1),
-        url: z.string().url(),
-      })
-      .strict(),
-    session: z
-      .object({
-        id: z.string().min(1),
-        appUserId: z.string().min(1),
-      })
-      .strict(),
-    trigger: z
-      .object({
-        kind: z.enum(["comment", "activity"]),
-        id: z.string().min(1),
-        rootCommentId: z.string().min(1).nullable(),
-        actorId: z.string().min(1),
-        body: z.string().min(1).max(16_384),
-      })
-      .strict(),
-  })
-  .strict();
-export type LinearChannelTurnRequest = z.infer<typeof LinearChannelTurnRequestSchema>;
-
-export const LINEAR_AGENT_THREAD_MAX_ACTIVITIES = 500;
-
-export const LinearAgentThreadContextSchema = z
-  .object({
-    workspaceId: z.string().min(1),
-    appUserId: z.string().min(1),
-    sessionId: z.string().min(1),
-    issue: z
-      .object({
-        id: z.string().min(1),
-        identifier: z.string().min(1),
-        title: z.string().min(1),
-        url: z.string().url(),
-      })
-      .strict(),
-    rootComment: z
-      .object({
-        id: z.string().min(1),
-        body: z.string().max(65_536),
-        issueId: z.string().min(1),
-      })
-      .strict()
-      .nullable(),
-    activities: z
-      .array(
-        z
-          .object({
-            id: z.string().min(1),
-            userId: z.string().min(1),
-            type: z.string().min(1),
-            body: z.string().max(65_536),
-            createdAt: z.string().datetime(),
-          })
-          .strict(),
-      )
-      .max(LINEAR_AGENT_THREAD_MAX_ACTIVITIES),
-  })
-  .strict();
-export type LinearAgentThreadContext = z.infer<typeof LinearAgentThreadContextSchema>;
-
 /**
  * What he replies with to say nothing at all.
  *
@@ -2156,8 +1043,8 @@ export const CAPTAIN_SILENT_REPLY_SENTINEL = "[[stay-silent]]";
  *
  * Generation writes a local artifact and publishes nothing, so it is read-class
  * (ADR 0029). What makes the picture *conversational* is where it was written:
- * only the control plane's generator writes beneath `GENERATED_MEDIA_DIRECTORY`,
- * and only the runner's browser host writes beneath
+ * only the service's generator writes beneath `GENERATED_MEDIA_DIRECTORY`,
+ * and only the service's browser host writes beneath
  * `BROWSER_ARTIFACT_DIRECTORY`. Nothing the captain holds can write to either —
  * `write_file` is disabled, and any shell he is granted must be sandboxed to a
  * writable root outside the attachment root (the shell host refuses to start
@@ -2174,6 +1061,12 @@ export const GENERATED_MEDIA_DIRECTORY = "generated";
 /** Sole write target of the runner's browser host, relative to the attachment root. */
 export const BROWSER_ARTIFACT_DIRECTORY = "browser";
 
+/** Sole write target of the runner's diagram host, relative to the attachment root. */
+export const TLDRAW_ARTIFACT_DIRECTORY = "tldraw";
+
+/** Sole write target of Discord stream-watch stills, relative to the attachment root. */
+export const SHARE_ARTIFACT_DIRECTORY = "shares";
+
 const GENERATED_MEDIA_REF_PATTERN = new RegExp(
   `^sha256:[0-9a-f]{64}:${GENERATED_MEDIA_DIRECTORY}/[A-Za-z0-9._-]+$`,
   "u",
@@ -2181,6 +1074,16 @@ const GENERATED_MEDIA_REF_PATTERN = new RegExp(
 
 const BROWSER_ARTIFACT_REF_PATTERN = new RegExp(
   `^sha256:[0-9a-f]{64}:${BROWSER_ARTIFACT_DIRECTORY}/[A-Za-z0-9._-]+$`,
+  "u",
+);
+
+const TLDRAW_ARTIFACT_REF_PATTERN = new RegExp(
+  `^sha256:[0-9a-f]{64}:${TLDRAW_ARTIFACT_DIRECTORY}/[A-Za-z0-9._-]+$`,
+  "u",
+);
+
+const SHARE_ARTIFACT_REF_PATTERN = new RegExp(
+  `^sha256:[0-9a-f]{64}:${SHARE_ARTIFACT_DIRECTORY}/[A-Za-z0-9._-]+$`,
   "u",
 );
 
@@ -2210,16 +1113,44 @@ export function isBrowserArtifactRef(artifactRef: string): boolean {
 }
 
 /**
+ * Whether a reference names a diagram the runner's tldraw host minted.
+ *
+ * Same argument again, and it holds for the same reason: the host is the only
+ * writer beneath `tldraw/`, and the model never authors the canvas code that
+ * produces one — it supplies structured diagram *content* (tables, lanes,
+ * steps) that the host renders through fixed, host-authored script. A
+ * prompt-injected turn can therefore choose what a diagram says and nothing
+ * about what runs.
+ */
+export function isTldrawArtifactRef(artifactRef: string): boolean {
+  return TLDRAW_ARTIFACT_REF_PATTERN.test(artifactRef);
+}
+
+/**
+ * Whether a reference names a still the stream-watch host minted from a
+ * consented Discord share. Same host-minted, hash-bound argument as browser
+ * screenshots: the captain cannot write under `shares/`.
+ */
+export function isShareArtifactRef(artifactRef: string): boolean {
+  return SHARE_ARTIFACT_REF_PATTERN.test(artifactRef);
+}
+
+/**
  * Whether a reference may ride his reply without an approval (ADR 0088).
  *
- * Both directories are written only by a governed runner-side host, so what he
- * shows a room is always something a tool of his actually produced. The
- * distinction this preserves is against *arbitrary* files under the attachment
- * root — a repository file, a support bundle — which keep `send_attachment`
- * and its `publish-external` approval.
+ * Every one of these directories is written only by a governed runner-side
+ * host, so what he shows a room is always something a tool of his actually
+ * produced. The distinction this preserves is against *arbitrary* files under
+ * the attachment root — a repository file, a support bundle — which keep
+ * `send_attachment` and its `publish-external` approval.
  */
 export function isAttachableTurnMediaRef(artifactRef: string): boolean {
-  return isGeneratedMediaRef(artifactRef) || isBrowserArtifactRef(artifactRef);
+  return (
+    isGeneratedMediaRef(artifactRef) ||
+    isBrowserArtifactRef(artifactRef) ||
+    isTldrawArtifactRef(artifactRef) ||
+    isShareArtifactRef(artifactRef)
+  );
 }
 
 /**
@@ -2279,55 +1210,6 @@ export const CaptainChannelTurnResultSchema = z.discriminatedUnion("state", [
 ]);
 export type CaptainChannelTurnResult = z.infer<typeof CaptainChannelTurnResultSchema>;
 
-export const TrackerNarrativeActionSchema = z.enum([
-  "tracker.comment.create",
-  "tracker.agent-activity.thought.create",
-  "tracker.agent-activity.response.create",
-  "tracker.agent-activity.elicitation.create",
-  "tracker.reaction.create",
-]);
-export type TrackerNarrativeAction = z.infer<typeof TrackerNarrativeActionSchema>;
-
-export const TrackerNarrativeWriteSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    idempotencyKey: z.string().min(1),
-    action: TrackerNarrativeActionSchema,
-    identity: LinearChannelIdentitySchema,
-    issueId: z.string().min(1),
-    agentSessionId: z.string().min(1),
-    commentId: z.string().min(1).optional(),
-    content: z.string().min(1).max(16_384),
-    ephemeral: z.boolean().optional(),
-  })
-  .strict()
-  .superRefine((write, context) => {
-    if (write.action === "tracker.reaction.create" && write.commentId === undefined) {
-      context.addIssue({
-        code: "custom",
-        message: "Reaction narratives require a comment target",
-        path: ["commentId"],
-      });
-    }
-    if (write.action !== "tracker.agent-activity.thought.create" && write.ephemeral === true) {
-      context.addIssue({
-        code: "custom",
-        message: "Only thought narratives can be ephemeral",
-        path: ["ephemeral"],
-      });
-    }
-  });
-export type TrackerNarrativeWrite = z.infer<typeof TrackerNarrativeWriteSchema>;
-
-export const TrackerNarrativeWriteResultSchema = z
-  .object({
-    id: z.string().min(1),
-    action: TrackerNarrativeActionSchema,
-    appUserId: z.string().min(1),
-  })
-  .strict();
-export type TrackerNarrativeWriteResult = z.infer<typeof TrackerNarrativeWriteResultSchema>;
-
 /**
  * Which Discord connection carries an action (ADR 0024, ADR 0048).
  *
@@ -2337,20 +1219,6 @@ export type TrackerNarrativeWriteResult = z.infer<typeof TrackerNarrativeWriteRe
  */
 export const DiscordTransportKindSchema = z.enum(["bot", "user_session"]);
 export type DiscordTransportKind = z.infer<typeof DiscordTransportKindSchema>;
-
-/**
- * Transport lifecycle actions, kept out of the presence write catalog because
- * they change *which body Clankie is wearing* rather than writing anything to a
- * channel. Doctrine gates the user-session connect exactly (ADR 0048).
- */
-export const DiscordTransportActionSchema = z.enum(["discord.transport.user_session_connect"]);
-export type DiscordTransportAction = z.infer<typeof DiscordTransportActionSchema>;
-
-export const DISCORD_TRANSPORT_ACTION_RISK_CLASS: Readonly<
-  Record<DiscordTransportAction, "publish-external">
-> = {
-  "discord.transport.user_session_connect": "publish-external",
-};
 
 /** Transport-agnostic Discord presence action names (ADR 0024). No bot/user token fields. */
 export const DiscordPresenceActionSchema = z.enum([
@@ -2383,6 +1251,56 @@ export const DiscordPresenceActionSchema = z.enum([
   "discord.presence.activity_stop",
 ]);
 export type DiscordPresenceAction = z.infer<typeof DiscordPresenceActionSchema>;
+
+/** Grounded Discord actions a social captain turn may ask the live body to perform. */
+export const DiscordCaptainActionSchema = z.enum([
+  "react",
+  "unreact",
+  "create_thread",
+  "join_thread",
+  "watch_start",
+  "watch_stop",
+]);
+export type DiscordCaptainAction = z.infer<typeof DiscordCaptainActionSchema>;
+
+const DiscordCaptainActionContextSchema = z.object({
+  callId: z.string().min(1).max(256),
+  actorId: z.string().min(1).max(128),
+  guildId: z.string().min(1).max(128).optional(),
+  channelId: z.string().min(1).max(128),
+  messageId: z.string().min(1).max(128),
+});
+
+/** IDs are host-stamped from the active turn; the model supplies only action content. */
+export const DiscordCaptainActionInputSchema = z.discriminatedUnion("action", [
+  DiscordCaptainActionContextSchema.extend({
+    action: z.literal("react"),
+    emoji: z.string().trim().min(1).max(64),
+  }).strict(),
+  DiscordCaptainActionContextSchema.extend({
+    action: z.literal("unreact"),
+    emoji: z.string().trim().min(1).max(64),
+  }).strict(),
+  DiscordCaptainActionContextSchema.extend({
+    action: z.literal("create_thread"),
+    name: z.string().trim().min(1).max(100),
+  }).strict(),
+  DiscordCaptainActionContextSchema.extend({ action: z.literal("join_thread") }).strict(),
+  DiscordCaptainActionContextSchema.extend({
+    action: z.literal("watch_start"),
+    guildId: z.string().min(1).max(128),
+  }).strict(),
+  DiscordCaptainActionContextSchema.extend({
+    action: z.literal("watch_stop"),
+    guildId: z.string().min(1).max(128),
+  }).strict(),
+]);
+export type DiscordCaptainActionInput = z.infer<typeof DiscordCaptainActionInputSchema>;
+
+export const DiscordCaptainActionResultSchema = z
+  .object({ ok: z.boolean(), message: z.string().min(1).max(1_000) })
+  .strict();
+export type DiscordCaptainActionResult = z.infer<typeof DiscordCaptainActionResultSchema>;
 
 /**
  * Rendered surfaces the activity plane may publish (ADR 0047). Frozen lab
@@ -2460,6 +1378,8 @@ export type DiscordPresenceAttachmentMediaType = (typeof DISCORD_PRESENCE_ATTACH
  * already more than a person takes in from one message.
  */
 export const DISCORD_PRESENCE_TRIGGER_ATTACHMENTS_MAX = 4;
+/** A moving embed becomes at most four chronological image parts for image-only vision models. */
+export const DISCORD_PRESENCE_MOTION_FRAMES_MAX = 4;
 /** Per-image ceiling. Enforced at ingress on Discord's stated size and again on the bytes actually read. */
 export const DISCORD_PRESENCE_ATTACHMENT_BYTES_MAX = 8 * 1024 * 1024;
 
@@ -2476,14 +1396,17 @@ export const DiscordPresenceAttachmentSchema = z
   .object({
     id: z.string().min(1),
     url: z.string().url(),
+    /** Discord-proxied MP4 for a gifv embed; absent for ordinary images. */
+    motionUrl: z.string().url().optional(),
     mediaType: z.enum(DISCORD_PRESENCE_ATTACHMENT_MEDIA_TYPES),
     filename: z.string().min(1).max(256).optional(),
-    byteSize: z.number().int().positive().max(DISCORD_PRESENCE_ATTACHMENT_BYTES_MAX),
+    /** Discord uploads declare a size; proxied embed previews are bounded only when fetched. */
+    byteSize: z.number().int().positive().max(DISCORD_PRESENCE_ATTACHMENT_BYTES_MAX).optional(),
   })
   .strict();
 export type DiscordPresenceAttachment = z.infer<typeof DiscordPresenceAttachmentSchema>;
 
-export const DiscordVoicePresenceNoteReasonSchema = z.enum([
+export const DiscordVoicePresenceResultReasonSchema = z.enum([
   "authority",
   "allowlist",
   "not_in_voice",
@@ -2491,23 +1414,27 @@ export const DiscordVoicePresenceNoteReasonSchema = z.enum([
   "other_guild",
   "failed",
 ]);
-export type DiscordVoicePresenceNoteReason = z.infer<typeof DiscordVoicePresenceNoteReasonSchema>;
+export type DiscordVoicePresenceResultReason = z.infer<typeof DiscordVoicePresenceResultReasonSchema>;
 
 /**
- * What the bridge just did about voice presence for this message: a member
- * asked him into or out of voice in text chat, and the bridge decided and
- * executed at its ingress boundary before the captain turn (ADR 0062). Enums
- * and ids only, never free text, so a prompt-injected body can never author
- * what he is told happened.
+ * What the live Discord body did when the captain used a voice-presence tool.
+ * The body resolves the asker's current channel and enforces authority; the
+ * model supplies neither ids nor an explanation of the result.
  */
-export const DiscordVoicePresenceNoteSchema = z
-  .object({
-    action: z.enum(["joined", "join_refused", "left", "leave_refused"]),
-    channelId: z.string().min(1).optional(),
-    reason: DiscordVoicePresenceNoteReasonSchema.optional(),
-  })
-  .strict();
-export type DiscordVoicePresenceNote = z.infer<typeof DiscordVoicePresenceNoteSchema>;
+export const DiscordVoicePresenceResultSchema = z.discriminatedUnion("action", [
+  z
+    .object({
+      action: z.literal("joined"),
+      channelId: z.string().min(1),
+      /** Whether this join explicitly opted the authenticated speaker into capture. */
+      actorAutoOptedIn: z.boolean(),
+    })
+    .strict(),
+  z.object({ action: z.literal("join_refused"), reason: DiscordVoicePresenceResultReasonSchema }).strict(),
+  z.object({ action: z.literal("left"), channelId: z.string().min(1).optional() }).strict(),
+  z.object({ action: z.literal("leave_refused"), reason: DiscordVoicePresenceResultReasonSchema }).strict(),
+]);
+export type DiscordVoicePresenceResult = z.infer<typeof DiscordVoicePresenceResultSchema>;
 
 export const DiscordPresenceChannelTurnRequestSchema = z
   .object({
@@ -2545,13 +1472,6 @@ export const DiscordPresenceChannelTurnRequestSchema = z
          * stay silent on any turn — but he should know whether he was asked.
          */
         unprompted: z.boolean().optional(),
-        /**
-         * Set by the bridge when this message asked him into or out of voice
-         * and the bridge already executed the decision (ADR 0062). His reply
-         * must reflect what actually happened: he is the voice, the bridge is
-         * the actor.
-         */
-        voicePresenceNote: DiscordVoicePresenceNoteSchema.optional(),
       })
       .strict(),
     contextMessages: z
@@ -2567,6 +1487,19 @@ export const DiscordPresenceChannelTurnRequestSchema = z
       )
       .max(DISCORD_PRESENCE_CONTEXT_MESSAGES_MAX)
       .default([]),
+    /** The newest visual source in bounded context; motion may expand it into sampled frames. */
+    contextVisual: z
+      .object({
+        sourceMessageId: z.string().min(1),
+        attachment: DiscordPresenceAttachmentSchema.optional(),
+        attachmentsOmitted: z.number().int().positive().optional(),
+      })
+      .strict()
+      .refine(
+        (visual) => visual.attachment !== undefined || visual.attachmentsOmitted !== undefined,
+        "A context visual must carry an image or an omitted count",
+      )
+      .optional(),
   })
   .strict()
   .superRefine((request, context) => {
@@ -2575,6 +1508,16 @@ export const DiscordPresenceChannelTurnRequestSchema = z
         code: "custom",
         path: ["identity", "presenceSessionId"],
         message: "Discord channel turns require missionId or presenceSessionId attribution",
+      });
+    }
+    if (
+      request.contextVisual !== undefined &&
+      !request.contextMessages.some((message) => message.id === request.contextVisual?.sourceMessageId)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["contextVisual", "sourceMessageId"],
+        message: "A context visual must belong to a bounded context message",
       });
     }
     // A turn must carry something he can perceive. Text or images both qualify;
@@ -2602,7 +1545,7 @@ export const DiscordPresenceActionRequestSchema = z.discriminatedUnion("kind", [
   /**
    * The schema itself refuses anything but generated media, so the narrative
    * classification cannot be widened by a caller passing a different ref. The
-   * control plane re-checks it at the route: a boundary asserted in one place
+   * service re-checks it at the route: a boundary asserted in one place
    * is a boundary that moves when someone refactors the other.
    */
   z
@@ -2680,7 +1623,13 @@ export const DiscordPresenceActionRequestSchema = z.discriminatedUnion("kind", [
     .strict(),
   z.object({ kind: z.literal("voice_leave"), guildId: z.string().min(1) }).strict(),
   z
-    .object({ kind: z.literal("go_live_start"), guildId: z.string().min(1), channelId: z.string().min(1) })
+    .object({
+      kind: z.literal("go_live_start"),
+      guildId: z.string().min(1),
+      channelId: z.string().min(1),
+      /** Optional http(s) media URL. Absent, the lab body publishes his live play surface. */
+      sourceUrl: z.string().url().max(2_000).optional(),
+    })
     .strict(),
   z.object({ kind: z.literal("go_live_stop"), guildId: z.string().min(1) }).strict(),
   z
@@ -2756,15 +1705,18 @@ export const DiscordPresenceWriteSchema = z
     if (
       DISCORD_PRESENCE_ACTION_RISK_CLASS[write.action] !== "narrative-write" &&
       write.identity.missionId === undefined &&
-      // The activity surface also serves the ambient embodiment plane (ADR
-      // 0063): an asked play session has no mission, so its launch and stop
-      // writes may attribute to the presence session they serve instead. The
-      // publish-external approval gate is unchanged — this widens attribution,
-      // never authority.
+      // Grounded social actions originate in an authenticated ambient turn and
+      // attribute to that presence session. The body supplies every target id;
+      // this widens attribution, never authority.
       !(
-        (write.action === "discord.presence.activity_start" ||
-          write.action === "discord.presence.activity_stop") &&
-        write.identity.presenceSessionId !== undefined
+        [
+          "discord.presence.create_thread",
+          "discord.presence.join_thread",
+          "discord.presence.go_live_start",
+          "discord.presence.go_live_stop",
+          "discord.presence.activity_start",
+          "discord.presence.activity_stop",
+        ].includes(write.action) && write.identity.presenceSessionId !== undefined
       )
     ) {
       context.addIssue({
@@ -2870,6 +1822,79 @@ export const DiscordUserSessionOptInRequestSchema = DiscordUserSessionOptInSchem
   .extend({ schemaVersion: z.literal(1) })
   .strict();
 export type DiscordUserSessionOptInRequest = z.infer<typeof DiscordUserSessionOptInRequestSchema>;
+
+/**
+ * A Discord Go Live / screen share the bridges have observed.
+ *
+ * Metadata only: who, where, whether the lab body is watching. Raw video never
+ * enters this record. A still, when one exists, is a host-minted artifact.
+ */
+export const DiscordActiveStreamSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    streamKey: z.string().min(1).max(200),
+    kind: z.enum(["guild", "call"]),
+    guildId: z.string().min(1).optional(),
+    channelId: z.string().min(1),
+    userId: z.string().min(1),
+    watching: z.boolean(),
+    hasFrame: z.boolean(),
+    updatedAt: z.string().datetime(),
+  })
+  .strict();
+export type DiscordActiveStream = z.infer<typeof DiscordActiveStreamSchema>;
+
+export const DiscordStreamWatchFrameSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    streamKey: z.string().min(1).max(200),
+    userId: z.string().min(1),
+    width: z.number().int().positive().max(4096),
+    height: z.number().int().positive().max(4096),
+    jpegBase64: z.string().min(1).max(8_000_000),
+    capturedAt: z.string().datetime(),
+  })
+  .strict();
+export type DiscordStreamWatchFrame = z.infer<typeof DiscordStreamWatchFrameSchema>;
+
+/** What a bridge posts when a share starts, stops, or yields a still. */
+export const DiscordStreamWatchReportSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    source: z.enum(["bot", "user_session"]).default("user_session"),
+    streams: z.array(DiscordActiveStreamSchema).max(16),
+    frame: DiscordStreamWatchFrameSchema.optional(),
+    decoder: z.enum(["ready", "missing", "error", "idle"]).optional(),
+    decoderDetail: z.string().max(400).optional(),
+  })
+  .strict();
+export type DiscordStreamWatchReport = z.infer<typeof DiscordStreamWatchReportSchema>;
+
+/** Captain/operator read of the live share projection. */
+export const DiscordStreamWatchObservationSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    streams: z.array(DiscordActiveStreamSchema).max(16),
+    frame: z
+      .object({
+        streamKey: z.string().min(1),
+        userId: z.string().min(1),
+        width: z.number().int().positive(),
+        height: z.number().int().positive(),
+        jpegBase64: z.string().min(1),
+        artifactRef: z.string().optional(),
+        capturedAt: z.string().datetime(),
+      })
+      .strict()
+      .optional(),
+    decoder: z.enum(["ready", "missing", "error", "idle"]),
+    decoderDetail: z.string().max(400).optional(),
+    updatedAt: z.string().datetime().optional(),
+  })
+  .strict();
+export type DiscordStreamWatchObservation = z.infer<typeof DiscordStreamWatchObservationSchema>;
+
+export const DISCORD_STREAM_WATCH_PATH = "/v1/discord/stream-watch";
 
 // ---------------------------------------------------------------------------
 
@@ -3106,8 +2131,8 @@ export const DeviceEventSchema = z.discriminatedUnion("type", [
 export type DeviceEvent = z.infer<typeof DeviceEventSchema>;
 
 // ---------------------------------------------------------------------------
-// Asked embodiment (ADR 0063): the captain asks for play, the control plane
-// holds the intent, the runner owns the session.
+// Asked embodiment (ADR 0063): the captain asks for play, the embodiment
+// authority holds the intent, the play host owns the session.
 //
 // Every schema is a STRICT, content-free wire boundary: ids, enums, counters,
 // and timestamps only. No field may carry free text, model output, frame
@@ -3115,7 +2140,7 @@ export type DeviceEvent = z.infer<typeof DeviceEventSchema>;
 // ---------------------------------------------------------------------------
 
 /** Environments the play seam serves; Minecraft joins when its host lands. */
-export const EmbodimentEnvironmentIdSchema = z.enum(["pokemon-firered"]);
+export const EmbodimentEnvironmentIdSchema = z.enum(["pokemon-firered", "pokemon-emerald"]);
 export type EmbodimentEnvironmentId = z.infer<typeof EmbodimentEnvironmentIdSchema>;
 
 export const EmbodimentIntentIdSchema = z.string().min(1).max(200);
@@ -3186,8 +2211,8 @@ export const EmbodimentSessionStateSchema = z.enum([
 export type EmbodimentSessionState = z.infer<typeof EmbodimentSessionStateSchema>;
 
 /**
- * `body_held` is one reason on purpose (ADR 0063): whether the control plane
- * saw a live asked session or the runner's body lock saw an external
+ * `body_held` is one reason on purpose (ADR 0063): whether the service
+ * saw a live asked session or the body lock saw an external
  * possessor, he says the same true thing — someone is already driving.
  */
 export const EmbodimentRefusalReasonSchema = z.enum([
@@ -3220,7 +2245,7 @@ export function canTransitionEmbodimentSession(
   return EMBODIMENT_SESSION_TRANSITIONS[from].includes(to);
 }
 
-/** Durable control-plane record of one asked session, replayed from events. */
+/** Durable service record of one asked session, replayed from events. */
 export const EmbodimentSessionSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -3280,7 +2305,7 @@ export const EmbodimentClaimSchema = z
 export type EmbodimentClaim = z.infer<typeof EmbodimentClaimSchema>;
 
 /**
- * The control plane's answer to a submitted intent. A refused start still
+ * The service's answer to a submitted intent. A refused start still
  * carries the minted session id when one was recorded, so the refusal stays
  * queryable rather than dropped.
  */
@@ -3363,7 +2388,7 @@ export type BodyPossessionRead = z.infer<typeof BodyPossessionReadSchema>;
 export const EmbodimentReportStateSchema = z.enum(["running", "stopping", "stopped", "refused", "failed"]);
 export type EmbodimentReportState = z.infer<typeof EmbodimentReportStateSchema>;
 
-/** One runner→control-plane lifecycle transition for a claimed session. */
+/** One play-host→service lifecycle transition for a claimed session. */
 export const EmbodimentLifecycleReportSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -3418,7 +2443,7 @@ export const EmbodimentLifecycleReportSchema = z
 export type EmbodimentLifecycleReport = z.infer<typeof EmbodimentLifecycleReportSchema>;
 
 /**
- * The captain tool's typed outcome, mirroring DiscordVoicePresenceNote: the
+ * The captain tool's typed outcome, like DiscordVoicePresenceResult: the
  * reply reflects what actually happened, and a refusal names a reason he can
  * say out loud. `pending` means the bounded wait elapsed before the runner
  * answered — the request stands, and he must not claim to be playing yet.
@@ -3461,203 +2486,6 @@ export const EmbodimentPlayNoteSchema = z.discriminatedUnion("action", [
     .strict(),
 ]);
 export type EmbodimentPlayNote = z.infer<typeof EmbodimentPlayNoteSchema>;
-
-// Connector-neutral tracker ceremony (VUH-845)
-// Semantic roles and notification surfaces only — no provider, principal
-// identity, or tracker-vendor nouns.
-// ---------------------------------------------------------------------------
-
-/** Semantic role that may receive human-attention or product-impact asks. */
-export const CeremonyTargetRoleSchema = z.enum([
-  "operator",
-  "captain",
-  "product_steward",
-  "reviewer",
-  "verifier",
-]);
-export type CeremonyTargetRole = z.infer<typeof CeremonyTargetRoleSchema>;
-
-/** Kind of human-attention request (what the captain needs, not how it is delivered). */
-export const HumanAttentionRequestKindSchema = z.enum([
-  "approval_needed",
-  "decision_needed",
-  "clarification_needed",
-  "review_needed",
-  "blocker_resolution",
-]);
-export type HumanAttentionRequestKind = z.infer<typeof HumanAttentionRequestKindSchema>;
-
-/** Surfaces that may carry a notification requirement (connector-neutral). */
-export const CeremonyNotificationSurfaceSchema = z.enum([
-  "captain_lane",
-  "operator_inbox",
-  "workspace_surface",
-]);
-export type CeremonyNotificationSurface = z.infer<typeof CeremonyNotificationSurfaceSchema>;
-
-export const CeremonyAuthorityImpactSchema = z.enum(["none", "narrow", "broad", "doctrine"]);
-export type CeremonyAuthorityImpact = z.infer<typeof CeremonyAuthorityImpactSchema>;
-
-export const CeremonyUrgencySchema = z.enum(["routine", "elevated", "blocking"]);
-export type CeremonyUrgency = z.infer<typeof CeremonyUrgencySchema>;
-
-/** Where the product-impact section sits in a drafted issue body. */
-export const CeremonySectionPlacementSchema = z.enum(["first", "after_summary", "last"]);
-export type CeremonySectionPlacement = z.infer<typeof CeremonySectionPlacementSchema>;
-
-/**
- * Semantic direct-notification mode for human attention (not a provider operation).
- * Connectors map this to delivery policy in VUH-846+.
- */
-export const CeremonyDirectNotificationModeSchema = z.enum(["required", "best_effort", "disabled"]);
-export type CeremonyDirectNotificationMode = z.infer<typeof CeremonyDirectNotificationModeSchema>;
-
-/** Authored text that must be non-empty after trim (asks, rationales, impact summary). */
-export const CeremonyAuthoredTextSchema = z.string().trim().min(1);
-export type CeremonyAuthoredText = z.infer<typeof CeremonyAuthoredTextSchema>;
-
-/**
- * Opaque tracker correlation. Connectors bind `externalRef`; protocol never
- * names a tracker vendor or principal.
- */
-export const TrackerCorrelationRefSchema = z
-  .object({
-    correlationId: z.string().min(1),
-    externalRef: z.string().min(1).optional(),
-  })
-  .strict();
-export type TrackerCorrelationRef = z.infer<typeof TrackerCorrelationRefSchema>;
-
-function refineCorrelationConflict(
-  topLevel: string,
-  trackerRef: { correlationId: string } | undefined,
-  context: z.RefinementCtx,
-): void {
-  if (trackerRef !== undefined && trackerRef.correlationId !== topLevel) {
-    context.addIssue({
-      code: "custom",
-      path: ["trackerRef", "correlationId"],
-      message: "trackerRef.correlationId must match the top-level correlationId when both are present",
-    });
-  }
-}
-
-function refineExpiresAfterCreated(
-  createdAt: string,
-  expiresAt: string | undefined,
-  context: z.RefinementCtx,
-): void {
-  if (expiresAt === undefined) return;
-  // Compare parsed instants numerically — lexical RFC3339 string order rejects
-  // valid fractional-second and equivalent-offset pairs (e.g. Z vs .001Z).
-  const createdMs = Date.parse(createdAt);
-  const expiresMs = Date.parse(expiresAt);
-  if (!Number.isFinite(createdMs) || !Number.isFinite(expiresMs) || expiresMs <= createdMs) {
-    context.addIssue({
-      code: "custom",
-      path: ["expiresAt"],
-      message: "expiresAt must be strictly after createdAt",
-    });
-  }
-}
-
-/** Product-impact facts required on impact-led issue drafts. */
-export const ProductImpactSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    summary: CeremonyAuthoredTextSchema,
-    userVisibleChange: z.boolean(),
-    risk: RiskSchema,
-    authorityImpact: CeremonyAuthorityImpactSchema,
-  })
-  .strict();
-export type ProductImpact = z.infer<typeof ProductImpactSchema>;
-
-/**
- * Connector-neutral draft for a tracker issue. Captains and runtimes validate
- * this shape before any connector delivery (VUH-846+).
- */
-export const TrackerIssueDraftSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    draftId: z.string().min(1),
-    missionId: MissionIdSchema,
-    taskId: TaskIdSchema.optional(),
-    correlationId: z.string().min(1),
-    title: CeremonyAuthoredTextSchema,
-    objective: CeremonyAuthoredTextSchema,
-    productImpact: ProductImpactSchema,
-    acceptanceCriteria: z.array(CeremonyAuthoredTextSchema).min(1),
-    writeScope: z.array(z.string().min(1)).default([]),
-    trackerRef: TrackerCorrelationRefSchema.optional(),
-    createdAt: z.string().datetime(),
-  })
-  .strict()
-  .superRefine((draft, context) => {
-    refineCorrelationConflict(draft.correlationId, draft.trackerRef, context);
-  });
-export type TrackerIssueDraft = z.infer<typeof TrackerIssueDraftSchema>;
-
-/** Request that a human (by semantic role) attend to a mission decision. */
-export const HumanAttentionRequestSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    requestId: z.string().min(1),
-    missionId: MissionIdSchema,
-    taskId: TaskIdSchema.optional(),
-    workerRunId: WorkerRunIdSchema.optional(),
-    correlationId: z.string().min(1),
-    targetRole: CeremonyTargetRoleSchema,
-    requestKind: HumanAttentionRequestKindSchema,
-    actionableAsk: CeremonyAuthoredTextSchema,
-    blocking: z.boolean(),
-    authorityImpact: CeremonyAuthorityImpactSchema,
-    urgency: CeremonyUrgencySchema.default("elevated"),
-    notificationSurfaces: z.array(CeremonyNotificationSurfaceSchema).min(1),
-    /** Semantic direct-notification mode for this request (ceremony default may supply). */
-    directNotification: CeremonyDirectNotificationModeSchema.optional(),
-    /**
-     * When true, the mission must wait for an authoritative HumanAttentionResponse
-     * before proceeding past this attention gate.
-     */
-    waitForAuthoritativeResponse: z.boolean().optional(),
-    trackerRef: TrackerCorrelationRefSchema.optional(),
-    createdAt: z.string().datetime(),
-    expiresAt: z.string().datetime().optional(),
-  })
-  .strict()
-  .superRefine((request, context) => {
-    refineExpiresAfterCreated(request.createdAt, request.expiresAt, context);
-    refineCorrelationConflict(request.correlationId, request.trackerRef, context);
-  });
-export type HumanAttentionRequest = z.infer<typeof HumanAttentionRequestSchema>;
-
-/** Response from the role that attended the request. */
-export const HumanAttentionResponseSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    responseId: z.string().min(1),
-    requestId: z.string().min(1),
-    correlationId: z.string().min(1),
-    actorRole: CeremonyTargetRoleSchema,
-    decision: z.enum(["approve", "deny", "defer", "clarify", "redirect"]),
-    rationale: CeremonyAuthoredTextSchema,
-    trackerRef: TrackerCorrelationRefSchema.optional(),
-    createdAt: z.string().datetime(),
-  })
-  .strict()
-  .superRefine((response, context) => {
-    refineCorrelationConflict(response.correlationId, response.trackerRef, context);
-  });
-export type HumanAttentionResponse = z.infer<typeof HumanAttentionResponseSchema>;
-
-// End connector-neutral tracker ceremony (VUH-845)
-//
-// The ceremony source scan runs between this marker and the section's opening
-// one. Without an explicit end the scan ran to end-of-file, so every schema
-// family appended later inherited the ceremony's connector-noun ban — a
-// provider-shaped field name in an unrelated transport would fail a check that
-// was never about it.
 
 // ---------------------------------------------------------------------------
 // Discord person memory (ADR 0042).
@@ -3742,18 +2570,6 @@ export const DiscordPersonMemoryProposalSchema = z
   .strict();
 export type DiscordPersonMemoryProposal = z.infer<typeof DiscordPersonMemoryProposalSchema>;
 
-export const ApprovedDiscordPersonMemoryProposalSchema = DiscordPersonMemoryProposalSchema.extend({
-  approval: z
-    .object({
-      approvalId: z.string().trim().min(1).max(256),
-      status: z.literal("approved"),
-      approvedAt: z.string().datetime(),
-      approvedBy: z.string().trim().min(1).max(256),
-    })
-    .strict(),
-}).strict();
-export type ApprovedDiscordPersonMemoryProposal = z.infer<typeof ApprovedDiscordPersonMemoryProposalSchema>;
-
 export const DiscordPersonMemoryProjectionSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -3783,41 +2599,18 @@ export const DiscordPersonMemoryDeleteResultSchema = z
   .strict();
 export type DiscordPersonMemoryDeleteResult = z.infer<typeof DiscordPersonMemoryDeleteResultSchema>;
 
-/**
- * The captain's authored tool inventory, and part of its identity.
- *
- * This lives in the protocol because two places must agree on it and they are
- * in different apps: the TUI refuses to adopt or signal a listener on the
- * captain port whose advertised tools do not match exactly, and captain-eve's
- * discovery test asserts what the agent actually compiles to. When those were
- * two hand-maintained lists they drifted the first time a tool was added — the
- * captain came up healthy and the launcher then declined to recognize it, with
- * every unit test still green because each side asserted against its own copy.
- *
- * Adding a tool means adding it here, and the discovery test fails until the
- * compiled agent agrees.
- */
-export const CAPTAIN_AUTHORED_TOOL_NAMES = [
-  "add_recovery",
-  "adopt_agent",
-  "bash",
-  "create_mission",
-  "decide_action",
-  "direct_agent",
-  "generate_image",
-  "generate_video",
-  "get_mission",
-  "get_self_state",
-  "observe_current_activity",
-  "read_file",
-  "remember_episode",
-  "start_mission",
-  "start_play",
-  "steer_worker",
-  "stop_play",
-  "submit_plan",
-  "survey_agents",
-] as const;
+/** Authenticated owner edits preserve the fact's identity and source provenance. */
+export const DiscordPersonMemoryEditSchema = z
+  .object({
+    body: z.string().trim().min(1).max(2_048).optional(),
+    kind: DiscordPersonMemoryKindSchema.optional(),
+    visibility: DiscordPersonMemoryVisibilitySchema.optional(),
+    confidence: z.number().min(0).max(1).optional(),
+    expiresAt: z.string().datetime().nullable().optional(),
+  })
+  .strict()
+  .refine((edit) => Object.keys(edit).length > 0, "an edit must change at least one field");
+export type DiscordPersonMemoryEdit = z.infer<typeof DiscordPersonMemoryEditSchema>;
 
 // ---------------------------------------------------------------------------
 // Clankie's browser (ADR 0082).
@@ -3905,88 +2698,112 @@ export const CallBrowserToolResultSchema = z.discriminatedUnion("outcome", [
 export type CallBrowserToolResult = z.infer<typeof CallBrowserToolResultSchema>;
 
 // ---------------------------------------------------------------------------
-// Clankie's own shell (ADR 0086).
+// Drawing a diagram (ADR 0096).
 //
-// One bash seat and one file read, both executed by the runner and neither by
-// the captain's own process. Reads span the host; writes reach exactly one
-// scratch directory, confined by the same macOS Seatbelt profile that holds a
-// mission worker. The captain never opens a file descriptor — he asks, and a
-// process he does not own answers.
+// He describes the diagram as data — entities and their fields, lanes and the
+// messages between them — and the host renders it through the tldraw desktop
+// app in a fixed design system. He never authors canvas code: the script that
+// runs is the host's, and the request only fills in what the picture says. See
+// `isTldrawArtifactRef` above for why the artifact this mints is attachable.
 // ---------------------------------------------------------------------------
 
-export const CAPTAIN_SHELL_RUN_PATH = "/v1/shell/run";
-export const CAPTAIN_SHELL_READ_PATH = "/v1/shell/read";
-
-export const CaptainShellRunRequestSchema = z.object({
-  schemaVersion: z.literal(1),
-  command: z.string().trim().min(1).max(4_000),
-  /** Bounded by the host regardless; a command that outlives it comes back `timed_out`. */
-  timeoutMs: z.number().int().min(1_000).max(600_000).optional(),
-});
-export type CaptainShellRunRequest = z.infer<typeof CaptainShellRunRequestSchema>;
-
-export const CaptainFileReadRequestSchema = z.object({
-  schemaVersion: z.literal(1),
-  path: z.string().trim().min(1).max(4_096),
-  /** 1-based first line to return. */
-  offset: z.number().int().min(1).optional(),
-  limit: z.number().int().min(1).max(5_000).optional(),
-});
-export type CaptainFileReadRequest = z.infer<typeof CaptainFileReadRequestSchema>;
+/** Why a diagram request produced nothing. Each one is sayable out loud. */
+export const DiagramRefusalReasonSchema = z.enum([
+  "canvas_unavailable",
+  "canvas_failed",
+  "diagram_too_large",
+  "artifact_too_large",
+]);
+export type DiagramRefusalReason = z.infer<typeof DiagramRefusalReasonSchema>;
 
 /**
- * Every one of these is a sentence he can say out loud. A refusal is a normal
- * outcome he relays, not an exception he has to invent an explanation for.
+ * One entity box: a name, the store it lives in, and its fields.
+ *
+ * `columns` is one field per line as `ROLES|field|type`, where roles are any
+ * comma-separated mix of `PK`, `SK` and `FK` — the notation the design system's
+ * table shape already speaks, so the request carries no rendering decisions.
  */
-export const CaptainShellRefusalReasonSchema = z.enum([
-  "doctrine_denied",
-  "approval_required",
-  "shell_unavailable",
-  "sandbox_unavailable",
-  "path_unreadable",
-  "timed_out",
-]);
-export type CaptainShellRefusalReason = z.infer<typeof CaptainShellRefusalReasonSchema>;
+export const DiagramTableSchema = z
+  .object({
+    name: z.string().trim().min(1).max(60),
+    /** Where the rows actually live: `postgres`, `memory · hot`, `ewram`, … */
+    engine: z.string().trim().max(60).default(""),
+    tone: z.enum(["black", "grey", "blue", "green", "yellow", "orange", "red", "violet"]).default("black"),
+    columns: z.string().trim().min(1).max(4_000),
+    /** Constraints or lifecycle notes; keep them out of the type cells. */
+    footer: z.string().trim().max(600).default(""),
+  })
+  .strict();
+export type DiagramTable = z.infer<typeof DiagramTableSchema>;
 
-export const CaptainShellRunResultSchema = z.discriminatedUnion("outcome", [
-  z.object({
-    outcome: z.literal("ok"),
-    exitCode: z.number().int(),
-    stdout: z.string().max(200_000),
-    stderr: z.string().max(200_000),
-    truncated: z.boolean().default(false),
+/** One relationship, pinned to the rows that actually hold the keys. */
+export const DiagramEdgeSchema = z
+  .object({
+    from: z.string().trim().min(1).max(60),
+    fromField: z.string().trim().min(1).max(60),
+    to: z.string().trim().min(1).max(60),
+    toField: z.string().trim().min(1).max(60),
+    label: z.string().trim().max(80).default(""),
+  })
+  .strict();
+export type DiagramEdge = z.infer<typeof DiagramEdgeSchema>;
+
+export const DrawErDiagramRequestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    title: z.string().trim().min(1).max(120),
+    subtitle: z.string().trim().max(240).default(""),
+    tables: z.array(DiagramTableSchema).min(1).max(16),
+    edges: z.array(DiagramEdgeSchema).max(32).default([]),
+  })
+  .strict();
+export type DrawErDiagramRequest = z.infer<typeof DrawErDiagramRequestSchema>;
+
+export const DrawSequenceDiagramRequestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    title: z.string().trim().min(1).max(120),
+    /** One participant per line as `id|Label|sublabel`, left to right. */
+    lanes: z.string().trim().min(1).max(1_200),
     /**
-     * Seatbelt or proxy refusals observed while the command ran. A write
-     * outside the scratchpad lands here rather than silently succeeding, so he
-     * can tell "I was stopped" from "it worked".
+     * The exchange, one step per line, in the design system's mini-syntax:
+     * `== phase`, `a->b: message`, `a-->b: reply`, `a->a: self call`,
+     * `note over a,b: aside`. A trailing `[red]` colours one step.
      */
-    denials: z.array(z.string().max(200)).max(16).default([]),
-  }),
-  z.object({
-    outcome: z.literal("refused"),
-    reason: CaptainShellRefusalReasonSchema,
-    detail: z.string().max(500).optional(),
-  }),
-]);
-export type CaptainShellRunResult = z.infer<typeof CaptainShellRunResultSchema>;
+    steps: z.string().trim().min(1).max(8_000),
+  })
+  .strict();
+export type DrawSequenceDiagramRequest = z.infer<typeof DrawSequenceDiagramRequestSchema>;
 
-export const CaptainFileReadResultSchema = z.discriminatedUnion("outcome", [
-  z.object({
-    outcome: z.literal("ok"),
-    path: z.string().max(4_096),
-    content: z.string().max(200_000),
-    truncated: z.boolean().default(false),
-    /** 1-based line number of the first returned line. */
-    firstLine: z.number().int().min(1),
-    totalLines: z.number().int().nonnegative(),
-  }),
-  z.object({
-    outcome: z.literal("refused"),
-    reason: CaptainShellRefusalReasonSchema,
-    detail: z.string().max(500).optional(),
-  }),
+/**
+ * Only `ok` carries a reference, so a diagram that failed to render can never
+ * yield something attachable.
+ */
+export const DrawDiagramResultSchema = z.discriminatedUnion("outcome", [
+  z
+    .object({
+      outcome: z.literal("ok"),
+      artifactRef: z.string().refine(isTldrawArtifactRef, "expected a tldraw artifact reference"),
+      filename: z.string().min(1),
+      width: z.number().int().positive(),
+      height: z.number().int().positive(),
+      /**
+       * Which design system it came out in. Operator-chosen, like the model
+       * behind a picture — reported so he can name the look, not so he can
+       * pick it.
+       */
+      system: z.string().min(1).max(60).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      outcome: z.literal("refused"),
+      reason: DiagramRefusalReasonSchema,
+      detail: z.string().max(500).optional(),
+    })
+    .strict(),
 ]);
-export type CaptainFileReadResult = z.infer<typeof CaptainFileReadResultSchema>;
+export type DrawDiagramResult = z.infer<typeof DrawDiagramResultSchema>;
 
 // ---------------------------------------------------------------------------
 // Making a picture (ADR 0085).
@@ -4183,6 +3000,33 @@ export const CaptainEpisodeSchema = z
   .strict();
 export type CaptainEpisode = z.infer<typeof CaptainEpisodeSchema>;
 
+/** Owner curation may change the note or its reach, but never its room or provenance. */
+export const CaptainEpisodeEditSchema = z
+  .object({
+    summary: z.string().trim().min(1).max(CAPTAIN_EPISODE_SUMMARY_MAX).optional(),
+    visibility: CaptainEpisodeVisibilitySchema.optional(),
+  })
+  .strict()
+  .refine((edit) => Object.keys(edit).length > 0, "an edit must change at least one field");
+export type CaptainEpisodeEdit = z.infer<typeof CaptainEpisodeEditSchema>;
+
+/** Complete owner-only browse view; ambient callers only receive bounded recall cards. */
+export const OperatorMemoryCatalogSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    discordPeople: z.array(
+      z
+        .object({
+          subject: DiscordPersonIdentitySchema,
+          facts: z.array(DiscordPersonMemoryFactSchema).max(128),
+        })
+        .strict(),
+    ),
+    captainEpisodes: z.array(CaptainEpisodeSchema),
+  })
+  .strict();
+export type OperatorMemoryCatalog = z.infer<typeof OperatorMemoryCatalogSchema>;
+
 // ---------------------------------------------------------------------------
 // Discord voice evidence (ADR 0057).
 //
@@ -4216,7 +3060,17 @@ const DiscordVoiceCounterSchema = z.number().int().nonnegative();
 const discordVoiceChannelScope = {
   guildId: DiscordVoiceGatewayIdSchema,
   channelId: DiscordVoiceGatewayIdSchema,
+  /** One id from `joined` to `left`. Optional so records written before stays existed still parse. */
+  stayId: DiscordVoiceLocalIdSchema.optional(),
 } as const;
+
+/**
+ * Why a possessor report was seeded but not spoken. Play loops report constantly;
+ * answering each one is a monologue. The drop must be receipt-visible or
+ * "why didn't he commentate that turn?" is unanswerable.
+ */
+export const DiscordVoiceNarrationSuppressReasonSchema = z.enum(["playing", "rate_limited"]);
+export type DiscordVoiceNarrationSuppressReason = z.infer<typeof DiscordVoiceNarrationSuppressReasonSchema>;
 
 /** Whether Clankie holds the floor (engaged realtime session) or only listens (dormant transcription). */
 export const DiscordVoiceFloorStateSchema = z.enum(["engaged", "dormant"]);
@@ -4250,12 +3104,96 @@ export type DiscordVoiceResponseState = z.infer<typeof DiscordVoiceResponseState
 export const DiscordVoiceResponseTriggerSchema = z.enum(["room", "narration"]);
 export type DiscordVoiceResponseTrigger = z.infer<typeof DiscordVoiceResponseTriggerSchema>;
 
+/** Content-free checkpoints between captured audio and a spoken response. */
+export const DiscordVoiceTranscriptionOutcomeSchema = z.enum(["accepted", "empty"]);
+export type DiscordVoiceTranscriptionOutcome = z.infer<typeof DiscordVoiceTranscriptionOutcomeSchema>;
+
+export const DiscordVoiceFloorDecisionActionSchema = z.enum([
+  "wake",
+  "hold",
+  "release",
+  "volition_gate_open",
+  "ignore",
+]);
+export type DiscordVoiceFloorDecisionAction = z.infer<typeof DiscordVoiceFloorDecisionActionSchema>;
+
+export const DiscordVoiceFloorDecisionReasonSchema = z.enum([
+  "addressed",
+  "reply_policy_all",
+  "volition",
+  "explicit",
+  "decay",
+]);
+export type DiscordVoiceFloorDecisionReason = z.infer<typeof DiscordVoiceFloorDecisionReasonSchema>;
+
+export const DiscordVoiceModelResponsePhaseSchema = z.enum(["requested", "completed", "failed"]);
+export type DiscordVoiceModelResponsePhase = z.infer<typeof DiscordVoiceModelResponsePhaseSchema>;
+export const DiscordVoiceModelResponseOutcomeSchema = z.enum(["audio", "tool", "silent"]);
+export type DiscordVoiceModelResponseOutcome = z.infer<typeof DiscordVoiceModelResponseOutcomeSchema>;
+
+export const DiscordVoiceRealtimeToolNameSchema = z.enum([
+  "ask_clankie",
+  "look_at_screen",
+  "youtube_search",
+  "music_play",
+  "music_queue",
+  "music_skip",
+  "music_pause",
+  "music_resume",
+  "music_stop",
+  "music_now",
+]);
+export type DiscordVoiceRealtimeToolName = z.infer<typeof DiscordVoiceRealtimeToolNameSchema>;
+export const DiscordVoiceRealtimeToolPhaseSchema = z.enum(["called", "completed", "failed", "dropped"]);
+export type DiscordVoiceRealtimeToolPhase = z.infer<typeof DiscordVoiceRealtimeToolPhaseSchema>;
+
+export const DiscordVoiceMusicOperationSchema = z.enum([
+  "search",
+  "play",
+  "queue",
+  "skip",
+  "pause",
+  "resume",
+  "stop",
+  "now",
+  "ended",
+  "duck",
+  "unduck",
+]);
+export type DiscordVoiceMusicOperation = z.infer<typeof DiscordVoiceMusicOperationSchema>;
+export const DiscordVoiceMusicComponentSchema = z.enum(["queue", "yt_dlp", "ffmpeg", "pipeline", "player"]);
+export type DiscordVoiceMusicComponent = z.infer<typeof DiscordVoiceMusicComponentSchema>;
+export const DiscordVoiceMusicOutcomeSchema = z.enum([
+  "offered",
+  "empty",
+  "rejected",
+  "started",
+  "queued",
+  "skipped",
+  "paused",
+  "resumed",
+  "stopped",
+  "reported",
+  "ended",
+  "ducked",
+  "unducked",
+  "spawned",
+  "first_audio",
+  "exited",
+  "failed",
+  "submitted",
+  "playing",
+  "idle",
+]);
+export type DiscordVoiceMusicOutcome = z.infer<typeof DiscordVoiceMusicOutcomeSchema>;
+
 /** The realtime pipeline's failure stages. The cascade stages left with the cascade. */
 export const DiscordVoiceFailureStageSchema = z.enum([
   "capture",
   "transcription_session",
   "conversation_session",
   "captain_handoff",
+  "look_at_screen",
   "playback",
 ]);
 export type DiscordVoiceFailureStage = z.infer<typeof DiscordVoiceFailureStageSchema>;
@@ -4298,6 +3236,30 @@ export const DiscordVoiceEvidenceSchema = z
       .strict(),
     z
       .object({
+        type: z.literal("transcription"),
+        ...discordVoiceChannelScope,
+        userId: DiscordVoiceGatewayIdSchema,
+        deliveryId: DiscordVoiceLocalIdSchema,
+        outcome: DiscordVoiceTranscriptionOutcomeSchema,
+        /** Character count only; transcript content remains unrepresentable. */
+        characters: DiscordVoiceCounterSchema,
+        latencyMs: DiscordVoiceDurationMsSchema,
+        addressed: z.boolean(),
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("floor_decision"),
+        ...discordVoiceChannelScope,
+        userId: DiscordVoiceGatewayIdSchema,
+        deliveryId: DiscordVoiceLocalIdSchema,
+        action: DiscordVoiceFloorDecisionActionSchema,
+        reason: DiscordVoiceFloorDecisionReasonSchema.optional(),
+        state: DiscordVoiceFloorStateSchema,
+      })
+      .strict(),
+    z
+      .object({
         type: z.literal("floor"),
         ...discordVoiceChannelScope,
         state: DiscordVoiceFloorStateSchema,
@@ -4306,9 +3268,54 @@ export const DiscordVoiceEvidenceSchema = z
       .strict(),
     z
       .object({
+        type: z.literal("model_response"),
+        ...discordVoiceChannelScope,
+        deliveryId: DiscordVoiceLocalIdSchema,
+        userId: DiscordVoiceGatewayIdSchema.optional(),
+        phase: DiscordVoiceModelResponsePhaseSchema,
+        outcome: DiscordVoiceModelResponseOutcomeSchema.optional(),
+        responseId: DiscordVoiceLocalIdSchema.optional(),
+        audioBytes: DiscordVoiceCounterSchema.optional(),
+        textCharacters: DiscordVoiceCounterSchema.optional(),
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("realtime_tool"),
+        ...discordVoiceChannelScope,
+        deliveryId: DiscordVoiceLocalIdSchema.optional(),
+        userId: DiscordVoiceGatewayIdSchema.optional(),
+        callId: DiscordVoiceLocalIdSchema,
+        name: DiscordVoiceRealtimeToolNameSchema,
+        phase: DiscordVoiceRealtimeToolPhaseSchema,
+        code: DiscordVoiceFailureCodeSchema.optional(),
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("music"),
+        ...discordVoiceChannelScope,
+        deliveryId: DiscordVoiceLocalIdSchema.optional(),
+        callId: DiscordVoiceLocalIdSchema.optional(),
+        source: z.enum(["realtime", "control"]),
+        operation: DiscordVoiceMusicOperationSchema,
+        component: DiscordVoiceMusicComponentSchema,
+        outcome: DiscordVoiceMusicOutcomeSchema,
+        current: z.boolean().optional(),
+        queuedCount: DiscordVoiceCounterSchema.optional(),
+        paused: z.boolean().optional(),
+        resultCount: DiscordVoiceCounterSchema.optional(),
+        exitCode: DiscordVoiceCounterSchema.optional(),
+        code: DiscordVoiceFailureCodeSchema.optional(),
+      })
+      .strict(),
+    z
+      .object({
         type: z.literal("response"),
         ...discordVoiceChannelScope,
         deliveryId: DiscordVoiceLocalIdSchema,
+        /** Gateway speaker whose immutable utterance id caused this response. */
+        userId: DiscordVoiceGatewayIdSchema.optional(),
         /** Captain turn id — only the `ask_clankie` path has one. */
         turnId: DiscordVoiceLocalIdSchema.optional(),
         state: DiscordVoiceResponseStateSchema,
@@ -4321,6 +3328,9 @@ export const DiscordVoiceEvidenceSchema = z
         /** Captain round trip inside `ask_clankie`; 0 on the fast path. */
         handoffMs: DiscordVoiceDurationMsSchema,
         playbackMs: DiscordVoiceDurationMsSchema,
+        /** Realtime `response.done` usage; omitted when the provider sent none. */
+        inputTokens: DiscordVoiceCounterSchema.optional(),
+        outputTokens: DiscordVoiceCounterSchema.optional(),
       })
       .strict(),
     z
@@ -4358,12 +3368,22 @@ export const DiscordVoiceEvidenceSchema = z
         code: DiscordVoiceFailureCodeSchema,
       })
       .strict(),
-    z.object({ type: z.literal("left"), ...discordVoiceChannelScope }).strict(),
+    z
+      .object({
+        type: z.literal("left"),
+        ...discordVoiceChannelScope,
+        inputTokens: DiscordVoiceCounterSchema.optional(),
+        outputTokens: DiscordVoiceCounterSchema.optional(),
+        spokenCount: DiscordVoiceCounterSchema.optional(),
+        narrationSuppressed: DiscordVoiceCounterSchema.optional(),
+      })
+      .strict(),
     z
       .object({
         type: z.literal("possessor_connection"),
         phase: DiscordVoicePossessorConnectionPhaseSchema,
         attachedCount: DiscordVoiceCounterSchema,
+        stayId: DiscordVoiceLocalIdSchema.optional(),
       })
       .strict(),
     z
@@ -4372,6 +3392,7 @@ export const DiscordVoiceEvidenceSchema = z
         listening: z.boolean(),
         attachedCount: DiscordVoiceCounterSchema,
         deliveredCount: DiscordVoiceCounterSchema,
+        stayId: DiscordVoiceLocalIdSchema.optional(),
       })
       .strict(),
     z
@@ -4380,6 +3401,7 @@ export const DiscordVoiceEvidenceSchema = z
         deliveryId: DiscordVoiceLocalIdSchema,
         attachedCount: DiscordVoiceCounterSchema,
         deliveredCount: DiscordVoiceCounterSchema,
+        stayId: DiscordVoiceLocalIdSchema.optional(),
       })
       .strict(),
     z
@@ -4387,6 +3409,15 @@ export const DiscordVoiceEvidenceSchema = z
         type: z.literal("possessor_narration_submission"),
         deliveryId: DiscordVoiceLocalIdSchema,
         attachedCount: DiscordVoiceCounterSchema,
+        stayId: DiscordVoiceLocalIdSchema.optional(),
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("possessor_narration_suppressed"),
+        ...discordVoiceChannelScope,
+        deliveryId: DiscordVoiceLocalIdSchema,
+        reason: DiscordVoiceNarrationSuppressReasonSchema,
       })
       .strict(),
     z
@@ -4395,6 +3426,7 @@ export const DiscordVoiceEvidenceSchema = z
         deliveryId: DiscordVoiceLocalIdSchema.optional(),
         attachedCount: DiscordVoiceCounterSchema,
         reason: DiscordVoiceFailureCodeSchema,
+        stayId: DiscordVoiceLocalIdSchema.optional(),
       })
       .strict(),
   ])
@@ -4425,526 +3457,3 @@ export const DiscordVoiceEvidenceSchema = z
   });
 
 export type DiscordVoiceEvidence = z.infer<typeof DiscordVoiceEvidenceSchema>;
-
-// ---------------------------------------------------------------------------
-// Adopted workers (ADR 0078): an agent the runner did not start can be given
-// bounded mission identity. Two grades — `observed` grants knowledge only,
-// `directed` grants the existing operator-parity vocabulary and requires an
-// authenticated approval plus an adopter-declared write scope.
-//
-// Every schema is a STRICT wire boundary. The one free-text field is the
-// agent's own `objective`, which is bounded and lives under `selfDeclared` so
-// no reader can mistake it for something the runner observed.
-// ---------------------------------------------------------------------------
-
-export const WorkerAdoptionIdSchema = z.string().min(1).max(200);
-export type WorkerAdoptionId = z.infer<typeof WorkerAdoptionIdSchema>;
-
-/** Transports that can host an agent this runner did not start. */
-export const AdoptedWorkerTransportSchema = z.enum(["herdr"]);
-export type AdoptedWorkerTransport = z.infer<typeof AdoptedWorkerTransportSchema>;
-
-export const AdoptedWorkerTerminalIdSchema = z.string().min(1).max(200);
-export type AdoptedWorkerTerminalId = z.infer<typeof AdoptedWorkerTerminalIdSchema>;
-
-export const AdoptedAgentSessionIdSchema = z.string().min(1).max(200);
-export type AdoptedAgentSessionId = z.infer<typeof AdoptedAgentSessionIdSchema>;
-
-/** One discoverable Herdr server/session. Names are runner-derived, never pane-authored. */
-export const AgentTransportInstanceIdSchema = z.string().min(1).max(200);
-export type AgentTransportInstanceId = z.infer<typeof AgentTransportInstanceIdSchema>;
-
-/**
- * Workspace identity attached by the runner. `workspaceId` is transport-local;
- * `root` is the canonical checkout/root against which relative scopes resolve.
- */
-export const AgentWorkspaceBindingSchema = z
-  .object({
-    workspaceId: z.string().min(1).max(200),
-    root: z.string().min(1).max(1024),
-  })
-  .strict();
-export type AgentWorkspaceBinding = z.infer<typeof AgentWorkspaceBindingSchema>;
-
-/**
- * Durable binding to the hosted agent. Pane ids are session-local and reusable
- * so they are never stored; the native provider session id is, because it
- * identifies the *agent* rather than its window, and it changes exactly when
- * the agent restarts — which is exactly when an adoption should lapse. The
- * terminal id rides along as the transport handle to re-resolve, never as the
- * identity to trust.
- */
-export const AdoptedWorkerBindingSchema = z
-  .object({
-    transport: AdoptedWorkerTransportSchema,
-    transportInstanceId: AgentTransportInstanceIdSchema,
-    terminalId: AdoptedWorkerTerminalIdSchema,
-    harness: HarnessSchema,
-    agentSessionId: AdoptedAgentSessionIdSchema,
-    workspace: AgentWorkspaceBindingSchema,
-  })
-  .strict();
-export type AdoptedWorkerBinding = z.infer<typeof AdoptedWorkerBindingSchema>;
-
-export const WorkerAdoptionGradeSchema = z.enum(["observed", "directed"]);
-export type WorkerAdoptionGrade = z.infer<typeof WorkerAdoptionGradeSchema>;
-
-export const WorkerAdoptionStateSchema = z.enum(["active", "lapsed", "released"]);
-export type WorkerAdoptionState = z.infer<typeof WorkerAdoptionStateSchema>;
-
-/**
- * A lapse is always a fact about the process, never an inference from silence.
- * An idle agent stays `active`; only a broken binding lapses.
- */
-export const WorkerAdoptionLapseReasonSchema = z.enum([
-  "session_replaced",
-  "workspace_changed",
-  "terminal_gone",
-  "transport_lost",
-]);
-export type WorkerAdoptionLapseReason = z.infer<typeof WorkerAdoptionLapseReasonSchema>;
-
-/** Server-authenticated authority that adopted the agent. */
-export const WorkerAdoptionPrincipalSchema = z
-  .object({
-    kind: z.enum(["operator", "captain"]),
-    id: z.string().min(1).max(200),
-  })
-  .strict();
-export type WorkerAdoptionPrincipal = z.infer<typeof WorkerAdoptionPrincipalSchema>;
-
-/** Durable proof that an authenticated operator authorized directed control. */
-export const WorkerAdoptionApprovalReceiptSchema = z
-  .object({
-    receiptId: z.string().min(1).max(200),
-    approvedBy: WorkerAdoptionPrincipalSchema.refine((principal) => principal.kind === "operator", {
-      message: "Directed adoption approval must come from an operator",
-    }),
-    approvedAt: z.string().datetime(),
-  })
-  .strict();
-export type WorkerAdoptionApprovalReceipt = z.infer<typeof WorkerAdoptionApprovalReceiptSchema>;
-
-/**
- * One durable adoption record. `writeScope` is the adopter's expected scope and
- * is never inferred from a pane title, cwd, or diff. Because the runner cannot
- * sandbox a foreign process, `reservedWriteScope` separately records the
- * conservative scheduler boundary it can enforce on its own workers.
- */
-export const WorkerAdoptionSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    adoptionId: WorkerAdoptionIdSchema,
-    workerRunId: WorkerRunIdSchema,
-    grade: WorkerAdoptionGradeSchema,
-    state: WorkerAdoptionStateSchema,
-    binding: AdoptedWorkerBindingSchema,
-    /** Operator-declared expected writes; useful context, but not a sandbox. */
-    writeScope: z.array(z.string().min(1).max(400)).max(64),
-    /** Enforced scheduler reservation; foreign processes reserve the whole workspace. */
-    reservedWriteScope: z.array(z.string().min(1).max(400)).max(64),
-    adoptedBy: WorkerAdoptionPrincipalSchema,
-    approval: WorkerAdoptionApprovalReceiptSchema.optional(),
-    adoptedAt: z.string().datetime(),
-    updatedAt: z.string().datetime(),
-    lapseReason: WorkerAdoptionLapseReasonSchema.optional(),
-  })
-  .strict()
-  .superRefine((adoption, context) => {
-    if (adoption.grade === "directed" && adoption.writeScope.length === 0) {
-      context.addIssue({
-        code: "custom",
-        path: ["writeScope"],
-        message: "A directed adoption declares its expected write scope",
-      });
-    }
-    if (adoption.grade === "observed" && adoption.writeScope.length > 0) {
-      context.addIssue({
-        code: "custom",
-        path: ["writeScope"],
-        message: "An observed adoption grants no writes and therefore declares no scope",
-      });
-    }
-    if (
-      adoption.grade === "directed" &&
-      (adoption.reservedWriteScope.length !== 1 || adoption.reservedWriteScope[0] !== "**")
-    ) {
-      context.addIssue({
-        code: "custom",
-        path: ["reservedWriteScope"],
-        message: "A directed foreign process reserves its entire workspace",
-      });
-    }
-    if (adoption.grade === "observed" && adoption.reservedWriteScope.length > 0) {
-      context.addIssue({
-        code: "custom",
-        path: ["reservedWriteScope"],
-        message: "An observed adoption reserves no write scope",
-      });
-    }
-    if (adoption.grade === "directed" && adoption.approval === undefined) {
-      context.addIssue({
-        code: "custom",
-        path: ["approval"],
-        message: "A directed adoption carries an authenticated operator approval receipt",
-      });
-    }
-    if (adoption.grade === "observed" && adoption.approval !== undefined) {
-      context.addIssue({
-        code: "custom",
-        path: ["approval"],
-        message: "An observed adoption does not carry a privileged approval receipt",
-      });
-    }
-    if (adoption.state === "lapsed" && adoption.lapseReason === undefined) {
-      context.addIssue({
-        code: "custom",
-        path: ["lapseReason"],
-        message: "A lapsed adoption records the observed cause",
-      });
-    }
-    if (adoption.state !== "lapsed" && adoption.lapseReason !== undefined) {
-      context.addIssue({
-        code: "custom",
-        path: ["lapseReason"],
-        message: "Only a lapsed adoption carries a lapse reason",
-      });
-    }
-  });
-export type WorkerAdoption = z.infer<typeof WorkerAdoptionSchema>;
-
-export const AgentDeclarationStatusSchema = z.enum(["working", "blocked", "waiting_user", "idle", "done"]);
-export type AgentDeclarationStatus = z.infer<typeof AgentDeclarationStatusSchema>;
-
-/**
- * The cooperative half of the census: what an agent says about itself by
- * writing a bounded record into the runner's declaration directory. It is
- * untrusted model-authored content — advisory for contention warnings, never
- * an authority for scope enforcement or completion.
- */
-export const AgentDeclarationSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    transportInstanceId: AgentTransportInstanceIdSchema,
-    terminalId: AdoptedWorkerTerminalIdSchema,
-    workspaceId: z.string().min(1).max(200),
-    status: AgentDeclarationStatusSchema,
-    objective: z.string().min(1).max(500),
-    writeScope: z.array(z.string().min(1).max(400)).max(64),
-    declaredAt: z.string().datetime(),
-  })
-  .strict();
-export type AgentDeclaration = z.infer<typeof AgentDeclarationSchema>;
-
-/**
- * The transport's own heuristic about what a pane is doing. This is a Tier-2
- * signal in the ADR 0015 sense: it may fill `unknown` or raise attention, and
- * it never overrides a Tier-0 protocol fact or a Tier-1 runner lease.
- */
-export const AgentReportedStatusSchema = z.enum(["working", "idle", "done", "blocked", "unknown"]);
-export type AgentReportedStatus = z.infer<typeof AgentReportedStatusSchema>;
-
-/**
- * What the runner itself can attest to about a hosted agent. `label` is the
- * transport's sanitized title and `cwd` its attributed working directory;
- * pane scrollback never appears here, because terminal bytes do not cross into
- * the semantic plane (ADR 0033).
- *
- * `harness` and `agentSessionId` are absent for a pane that is merely a shell.
- * `adoptable` states the consequence directly so no reader re-derives it: an
- * agentless pane can be reported but never adopted.
- */
-export const AgentObservationSchema = z
-  .object({
-    transport: AdoptedWorkerTransportSchema,
-    transportInstanceId: AgentTransportInstanceIdSchema,
-    terminalId: AdoptedWorkerTerminalIdSchema,
-    workspace: AgentWorkspaceBindingSchema,
-    label: z.string().min(1).max(200),
-    reportedStatus: AgentReportedStatusSchema,
-    adoptable: z.boolean(),
-    harness: HarnessSchema.optional(),
-    agentSessionId: AdoptedAgentSessionIdSchema.optional(),
-    cwd: z.string().min(1).max(1024).optional(),
-  })
-  .strict()
-  .superRefine((observation, context) => {
-    const identified = observation.harness !== undefined && observation.agentSessionId !== undefined;
-    if (observation.adoptable !== identified) {
-      context.addIssue({
-        code: "custom",
-        path: ["adoptable"],
-        message: "Adoptable means exactly that the transport identified a native agent session",
-      });
-    }
-  });
-export type AgentObservation = z.infer<typeof AgentObservationSchema>;
-
-/**
- * Intention and execution fact stay in separate sections, the same split
- * ADR 0077 applies to current activity. A reader can always tell what the
- * runner saw from what the agent claimed.
- */
-export const AgentCensusDigestSchema = z
-  .object({
-    runnerObserved: AgentObservationSchema.optional(),
-    /** Last durable binding when the terminal is no longer observable. */
-    adoptionBinding: AdoptedWorkerBindingSchema.optional(),
-    selfDeclared: AgentDeclarationSchema.optional(),
-  })
-  .strict()
-  .refine(
-    (digest) =>
-      digest.runnerObserved !== undefined ||
-      digest.adoptionBinding !== undefined ||
-      digest.selfDeclared !== undefined,
-    { message: "A census digest must contain at least one attributable fact" },
-  );
-export type AgentCensusDigest = z.infer<typeof AgentCensusDigestSchema>;
-
-/**
- * `owned` was spawned by this runner and holds a live process lease.
- * `adopted` carries a valid binding. `lapsed` had one that broke.
- * `unclaimed` is a live agent nobody has taken responsibility for — reported
- * on purpose, and never auto-adopted.
- */
-export const AgentCensusClassificationSchema = z.enum(["owned", "adopted", "lapsed", "unclaimed"]);
-export type AgentCensusClassification = z.infer<typeof AgentCensusClassificationSchema>;
-
-export const AgentCensusEntrySchema = z
-  .object({
-    classification: AgentCensusClassificationSchema,
-    digest: AgentCensusDigestSchema,
-    workerRunId: WorkerRunIdSchema.optional(),
-    adoptionId: WorkerAdoptionIdSchema.optional(),
-    grade: WorkerAdoptionGradeSchema.optional(),
-    missionId: MissionIdSchema.optional(),
-    taskId: TaskIdSchema.optional(),
-    lapseReason: WorkerAdoptionLapseReasonSchema.optional(),
-  })
-  .strict()
-  .superRefine((entry, context) => {
-    if (entry.classification === "unclaimed") {
-      for (const field of ["workerRunId", "adoptionId", "grade"] as const) {
-        if (entry[field] !== undefined) {
-          context.addIssue({
-            code: "custom",
-            path: [field],
-            message: "An unclaimed agent holds no mission identity",
-          });
-        }
-      }
-    }
-    if (entry.classification === "adopted" || entry.classification === "lapsed") {
-      for (const field of ["adoptionId", "grade", "workerRunId"] as const) {
-        if (entry[field] === undefined) {
-          context.addIssue({
-            code: "custom",
-            path: [field],
-            message: "An adopted or lapsed agent carries its adoption identity",
-          });
-        }
-      }
-    }
-    if (entry.classification === "lapsed" && entry.lapseReason === undefined) {
-      context.addIssue({
-        code: "custom",
-        path: ["lapseReason"],
-        message: "A lapsed entry records the observed cause",
-      });
-    }
-    if (entry.classification !== "lapsed" && entry.lapseReason !== undefined) {
-      context.addIssue({
-        code: "custom",
-        path: ["lapseReason"],
-        message: "Only a lapsed entry carries a lapse reason",
-      });
-    }
-  });
-export type AgentCensusEntry = z.infer<typeof AgentCensusEntrySchema>;
-
-export const AGENT_CENSUS_MAX_ENTRIES = 256;
-
-/**
- * The runner's answer to "what is running on this machine?". Counts are
- * carried rather than recomputed so every surface renders the same totals,
- * and `transportAvailable: false` is an explicit state — an empty census with
- * a dead transport must never read as "nothing is running".
- */
-export const AgentCensusSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    runnerId: z.string().min(1).max(200),
-    takenAt: z.string().datetime(),
-    transportAvailable: z.boolean(),
-    entries: z.array(AgentCensusEntrySchema).max(AGENT_CENSUS_MAX_ENTRIES),
-    counts: z
-      .object({
-        owned: z.number().int().nonnegative(),
-        adopted: z.number().int().nonnegative(),
-        lapsed: z.number().int().nonnegative(),
-        unclaimed: z.number().int().nonnegative(),
-      })
-      .strict(),
-    /** Entries beyond the cap, so a truncated census never reads as complete. */
-    truncated: z.number().int().nonnegative(),
-  })
-  .strict();
-export type AgentCensus = z.infer<typeof AgentCensusSchema>;
-
-export const AdoptWorkerRequestSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    transport: AdoptedWorkerTransportSchema,
-    transportInstanceId: AgentTransportInstanceIdSchema,
-    terminalId: AdoptedWorkerTerminalIdSchema,
-    workspaceId: z.string().min(1).max(200),
-    grade: WorkerAdoptionGradeSchema,
-    writeScope: z.array(z.string().min(1).max(400)).max(64).default([]),
-  })
-  .strict();
-export type AdoptWorkerRequest = z.infer<typeof AdoptWorkerRequestSchema>;
-
-/** Trusted control-plane → runner command; never accepted from an app client. */
-export const AdoptWorkerCommandSchema = AdoptWorkerRequestSchema.extend({
-  adoptedBy: WorkerAdoptionPrincipalSchema,
-  approval: WorkerAdoptionApprovalReceiptSchema.optional(),
-}).strict();
-export type AdoptWorkerCommand = z.infer<typeof AdoptWorkerCommandSchema>;
-
-export const WorkerAdoptionRefusalReasonSchema = z.enum([
-  "not_found",
-  "not_an_agent",
-  "already_owned",
-  "already_adopted",
-  "write_scope_required",
-  "write_scope_forbidden",
-  "approval_required",
-  "workspace_mismatch",
-  "transport_unavailable",
-]);
-export type WorkerAdoptionRefusalReason = z.infer<typeof WorkerAdoptionRefusalReasonSchema>;
-
-export const AdoptWorkerResultSchema = z.discriminatedUnion("outcome", [
-  z.object({ outcome: z.literal("adopted"), adoption: WorkerAdoptionSchema }).strict(),
-  z.object({ outcome: z.literal("refused"), reason: WorkerAdoptionRefusalReasonSchema }).strict(),
-]);
-export type AdoptWorkerResult = z.infer<typeof AdoptWorkerResultSchema>;
-
-export const ReleaseWorkerAdoptionRequestSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    adoptionId: WorkerAdoptionIdSchema,
-  })
-  .strict();
-export type ReleaseWorkerAdoptionRequest = z.infer<typeof ReleaseWorkerAdoptionRequestSchema>;
-
-export const ReleaseWorkerAdoptionCommandSchema = ReleaseWorkerAdoptionRequestSchema.extend({
-  releasedBy: WorkerAdoptionPrincipalSchema,
-}).strict();
-export type ReleaseWorkerAdoptionCommand = z.infer<typeof ReleaseWorkerAdoptionCommandSchema>;
-
-/**
- * Bounded direction delivered into an adopted agent (ADR 0078). This is the
- * operator-parity vocabulary a human already has — plain steering text — not a
- * new captain-only control path, and it is deliberately not an approval,
- * credential, or policy channel.
- */
-export const DirectAdoptedWorkerRequestSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    adoptionId: WorkerAdoptionIdSchema,
-    /** Bounded steering text. Matches the worker-steer input ceiling. */
-    text: z.string().min(1).max(20_000),
-  })
-  .strict();
-export type DirectAdoptedWorkerRequest = z.infer<typeof DirectAdoptedWorkerRequestSchema>;
-
-export const DirectAdoptedWorkerCommandSchema = DirectAdoptedWorkerRequestSchema.extend({
-  directedBy: WorkerAdoptionPrincipalSchema,
-}).strict();
-export type DirectAdoptedWorkerCommand = z.infer<typeof DirectAdoptedWorkerCommandSchema>;
-
-export const AdoptedWorkerDirectionRefusalReasonSchema = z.enum([
-  "unknown_adoption",
-  "not_active",
-  "not_directed",
-  "binding_lapsed",
-  "transport_unavailable",
-]);
-export type AdoptedWorkerDirectionRefusalReason = z.infer<typeof AdoptedWorkerDirectionRefusalReasonSchema>;
-
-export const DirectAdoptedWorkerResultSchema = z.discriminatedUnion("outcome", [
-  z
-    .object({
-      outcome: z.literal("delivered"),
-      adoptionId: WorkerAdoptionIdSchema,
-      workerRunId: WorkerRunIdSchema,
-    })
-    .strict(),
-  z.object({ outcome: z.literal("refused"), reason: AdoptedWorkerDirectionRefusalReasonSchema }).strict(),
-]);
-export type DirectAdoptedWorkerResult = z.infer<typeof DirectAdoptedWorkerResultSchema>;
-
-// ---------------------------------------------------------------------------
-// Slack channel turns (ADR 0080). A sibling of the Linear family, never a
-// widening of it: doctrine forbids a provider reusing another provider's field
-// under a new meaning, so Slack carries team/channel/thread identity of its own
-// rather than borrowing `workspaceId` or `issue`.
-// ---------------------------------------------------------------------------
-
-export const SlackChannelIdentitySchema = z
-  .object({
-    correlationId: z.string().min(1).max(160),
-    profileHash: z.string().min(1),
-    /** Slack workspace (team) the event came from. */
-    teamId: z.string().min(1).max(64),
-    /** The bot user this workspace installed; a mismatch is another app's event. */
-    appUserId: z.string().min(1).max(64),
-    missionId: MissionIdSchema.optional(),
-    taskId: TaskIdSchema.optional(),
-    workerRunId: WorkerRunIdSchema.optional(),
-  })
-  .strict();
-export type SlackChannelIdentity = z.infer<typeof SlackChannelIdentitySchema>;
-
-/**
- * A Slack thread is the durable conversation address (ADR 0048's rule applied
- * to a third transport): the lane comes from the channel, not the wire. A
- * top-level message uses its own timestamp as the thread root, so the first
- * reply continues the same conversation instead of forking a second one.
- */
-export const SlackConversationAddressSchema = z
-  .object({
-    channelId: z.string().min(1).max(64),
-    threadTs: z.string().min(1).max(64),
-    isDirectMessage: z.boolean(),
-  })
-  .strict();
-export type SlackConversationAddress = z.infer<typeof SlackConversationAddressSchema>;
-
-/** Only addressed events; the bridge never subscribes to a channel firehose. */
-export const SlackTriggerKindSchema = z.enum(["app_mention", "thread_reply", "direct_message"]);
-export type SlackTriggerKind = z.infer<typeof SlackTriggerKindSchema>;
-
-export const SLACK_TRIGGER_BODY_MAX = 16_384;
-
-export const SlackChannelTurnRequestSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    deliveryId: z.string().uuid(),
-    identity: SlackChannelIdentitySchema,
-    conversation: SlackConversationAddressSchema,
-    trigger: z
-      .object({
-        kind: SlackTriggerKindSchema,
-        /** Slack's `event_id`; the dedupe key for at-least-once delivery. */
-        eventId: z.string().min(1).max(64),
-        messageTs: z.string().min(1).max(64),
-        actorId: z.string().min(1).max(64),
-        body: z.string().min(1).max(SLACK_TRIGGER_BODY_MAX),
-      })
-      .strict(),
-  })
-  .strict();
-export type SlackChannelTurnRequest = z.infer<typeof SlackChannelTurnRequestSchema>;

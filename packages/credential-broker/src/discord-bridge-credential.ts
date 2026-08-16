@@ -39,7 +39,7 @@ interface MintDiscordBridgeCredentialOptions extends DiscordBridgeCredentialOpti
   readonly randomBytes?: (size: number) => Buffer;
 }
 
-/** Mints the local bearer used only between the Discord bridge and control plane. */
+/** Mints the local bearer used only between the Discord bridge and the service. */
 export function mintDiscordBridgeToken(random: (size: number) => Buffer = randomBytes): string {
   return mintToken(DISCORD_BRIDGE_TOKEN_PREFIX, random);
 }
@@ -87,7 +87,7 @@ export async function resolveDiscordBridgeCredential(
 
 /**
  * Control-plane-owned first-run bootstrap. Other processes resolve this credential
- * only after the control plane has created it, which avoids cross-process mint races.
+ * only after the service has created it, which avoids cross-process mint races.
  */
 export async function ensureDiscordBridgeCredential(
   options: MintDiscordBridgeCredentialOptions = {},
@@ -165,7 +165,7 @@ export async function ensureDiscordVoiceBridgeCredential(
 
 /**
  * Reads the user-session plane's text bearer. Kept distinct from the bot
- * bearer so the control plane can bind `transportKind` to *authentication*
+ * bearer so the service can bind `transportKind` to *authentication*
  * rather than trusting a self-declared field on the request body.
  */
 export async function resolveDiscordUserBridgeCredential(

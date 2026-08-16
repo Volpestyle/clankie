@@ -2,21 +2,25 @@
 
 Status: accepted (James, 2026-07-25). The map-grid decoder, the enriched action
 outcome, the adjacency observation, and the `walk_to` action are implemented and
-covered by tests; the ROM-gated ones assert against collision that was first
-established by hand.
+covered by tests; the ROM-gated ones assert against collision that is first
+established by hand. Narrowed by
+[ADR 0089](0089-the-map-is-his-to-read.md): the warp-event list this ADR
+deferred is decoded, the grid is rendered into the player's own view, and a
+`walk_to` aimed at a decoded warp on blocking collision walks beside it and
+presses in — routing _through_ warps mid-route stays refused.
 
 ## Context
 
 An external harness played FireRed through the MCP surface
 ([ADR 0053](0053-mcp-possession-of-clankies-body.md)) and the cost of the first
-six tiles was measured: **14 tool calls — 8 actions and 6 observations** — to
-cross a bedroom and take one staircase. Two of those actions were presses into a
+six tiles is measured: **14 tool calls — 8 actions and 6 observations** — to
+cross a bedroom and take one staircase. Two of those actions are presses into a
 stair banister that returned looking exactly like successes.
 
-Three properties of the surface caused that, and none of them were about the
+Three properties of the surface caused that, and none of them are about the
 model's judgement:
 
-- **The action result did not say where the player ended up.** Every move cost a
+- **The action result omits the player's final position.** Every move costs a
   second call to find out.
 - **Nothing distinguished a step from a bump.** `ramStateSha256` changes on a
   refused move too, because the bump animation is itself a state change, so it
@@ -39,15 +43,15 @@ route around a wall that has not yet been hit.
 `gBackupMapLayout` — FireRed's live map buffer — is decoded from IWRAM
 `0x03005040` as `{ s32 width; s32 height; u16 *map; }`, with each tile a `u16`
 carrying metatile id in bits 0-9, collision in 10-11, and elevation in 12-15.
-The player's coordinates were already in the buffer's border-inclusive space,
+The player's coordinates are already in the buffer's border-inclusive space,
 which is why they read as 13/13 in a room whose real origin is 0/0.
 
-The address was derived the same way `firered-ram-map.ts` documents deriving the
+The address is derived the same way `firered-ram-map.ts` documents deriving the
 others: boot the pinned savestate, scan RAM for a struct whose dimensions and
 EWRAM-resident pointer are plausible, and keep only the candidate whose collision
-bits reproduce tiles a walker had already proved open or blocked by bumping into
+bits reproduce tiles a walker proves open or blocked by bumping into
 them. Exactly one candidate survived, and its grid tracked the 27x23 -> 28x24
-change when the player took the stairs down.
+change when the player takes the stairs down.
 
 Reading beats remembering because the walls are already in RAM. The refused-
 transition memory stays useful for what collision genuinely does not cover.
@@ -68,18 +72,30 @@ appearing in collision at all. An open tile therefore means "not a wall", not
 `walk_to` plans breadth-first over that grid and is a real entry in the action
 catalogue, implemented in the adapter — **not** an MCP-only convenience. The MCP
 README's rule that nothing there invents a capability is what forces this: a
-pathing tool that existed only for the external harness would be a second
+pathing tool that exists only for the external harness would be a second
 definition of what Clankie can do in a game, and his own free-play loop would not
 have it. It maps to the existing `emulator.gba.input` capability, because walking
-is a burst of presses the session was already allowed, and it draws from the same
+is a burst of presses the session is already allowed, and it draws from the same
 input and frame budget such a burst draws from.
 
 **The route is verified every step, because the plan can stop being true while
 it is walked.** Collision has no NPCs in it, so a planned tile can be occupied.
-Each step compares position before and after; if the player did not move, the
+Each step compares position before and after; if the player does not move, the
 action stops and reports `blockedAt` rather than mashing a dead route. A warp
-tile likewise ends the route, because the plan was made against a map that is no
+tile likewise ends the route, because the plan is made against a map that is no
 longer loaded.
+
+**A tile that blocks a route is remembered, per map, and planned around.**
+Reporting `blockedAt` is not enough on its own: the next plan is drawn from the
+same collision that never saw the obstruction, so it picks the same shortest
+route and dies on the same tile. On 2026-08-15 four consecutive routes toward
+Viridian's Pokémon Center are funnelled into one scripted old man — the fourth
+planned 44 steps for a 4-tile trip to reach him — and four identical failures
+read to the player as a wrong destination rather than a blocked route. He spent
+forty turns searching buildings. The memory is bounded per map, and a target
+reachable only through a remembered tile re-plans against the raw grid: it can
+slow a route down, and can never make a reachable tile unreachable, because
+whoever is standing there may well have moved on.
 
 `walk_to` refuses an impassable or unreachable target instead of walking as close
 as it can — answering a different question than the one asked would be worse than
@@ -96,7 +112,7 @@ change; a test pins the current behaviour so that change is deliberate.
 
 ### An action result describes the state it produced
 
-`button_press` and `walk_to` now return the resulting position, facing, `moved`,
+`button_press` and `walk_to` return the resulting position, facing, `moved`,
 `turned`, and the surrounding tiles. This is the change that removes the second
 call per move, and `moved` is what makes a bump legible without one.
 

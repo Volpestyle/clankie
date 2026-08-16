@@ -1,8 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, resolve, sep } from "node:path";
-import { createConnectorActionClassifier, decideAction, type CompiledDoctrine } from "@clankie/doctrine";
-import type { ActionRequest } from "@clankie/protocol";
 import { z } from "zod";
 
 /**
@@ -421,38 +419,6 @@ const GoogleResponseSchema = z.object({
     )
     .min(1),
 });
-
-/**
- * Projects a generation action through compiled doctrine.
- *
- * Both kinds are read-class for the same reason: they create a caller-selected
- * local artifact and mutate no external authority. They are separate actions so
- * an operator can allow pictures and deny video — the cost profiles are nothing
- * alike — without editing this package.
- */
-export function projectMediaGenerationGrant(
-  doctrine: CompiledDoctrine | undefined,
-  input: { principalId: string; kind?: MediaKind },
-): boolean {
-  if (!doctrine) return false;
-  const action = input.kind === "video" ? MEDIA_GENERATE_VIDEO_ACTION : MEDIA_GENERATE_IMAGE_ACTION;
-  const classify = createConnectorActionClassifier([
-    { action: MEDIA_GENERATE_IMAGE_ACTION, riskClass: "read" },
-    { action: MEDIA_GENERATE_VIDEO_ACTION, riskClass: "read" },
-  ]);
-  const request: ActionRequest = {
-    id: `media-projection:${action}`,
-    principal: { kind: "worker", id: input.principalId },
-    action,
-    resource: { type: "media-generation", id: input.kind ?? "image" },
-    context: {
-      missionId: "media-readiness",
-      risk: "low",
-      profileHash: doctrine.profileHash,
-    },
-  };
-  return decideAction(doctrine, request, classify(action)).effect === "allow";
-}
 
 export function assertAllowedOutputPath(path: string): void {
   const normalized = resolve(path).toLowerCase();

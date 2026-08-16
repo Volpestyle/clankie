@@ -6,7 +6,7 @@ free-play session composer, with both policies covered by tests.
 ## Context
 
 A possession-driven FireRed session died mid-starter-selection with
-`severity: high, code: uncertain_state — Bounded evidence capacity was
+`severity: high, code: uncertain_state — Bounded evidence capacity is
 exceeded`, and nothing recovered it: not pause/resume, not releasing and
 re-possessing, not waiting. The adapter session records hash-chained evidence
 per action into a window bounded by the scenario's `maxEvidenceEvents` (≤256,
@@ -15,10 +15,10 @@ permanently, because nothing resets `certain`. A marathon session is guaranteed
 to hit this: the cap fires at a fixed count of actions, not at any actual
 uncertainty about the game state.
 
-The bound itself is correct for what it was built for. A **receipt** run — the
+The bound itself is correct for what it is built for. A **receipt** run — the
 frozen deterministic scenarios with their byte-identical two-core replays — is
 _supposed_ to be invalid when it exceeds its evidence budget; that is the
-fail-closed evidence model doing its job. The bug was applying receipt rules to
+fail-closed evidence model doing its job. The bug is applying receipt rules to
 open-ended play, where [ADR 0049](0049-free-play-agency-and-non-deterministic-evidence.md)
 already accepts that no run reproduces another and evidence is per-turn, not a
 sealed whole.
@@ -43,7 +43,7 @@ actual uncertainty about state.
 
 ## Consequences
 
-- Marathon possession and free-play sessions no longer have a hidden ~256-action
+- Marathon possession and free-play sessions have no hidden ~256-action
   fuse. The trace still bounds memory: at most one window of events is retained.
 - A rolling trace is a **window onto** the run, not a receipt **of** the run —
   its `rolledWindows`/`droppedEvidenceEvents` fields say so explicitly, and

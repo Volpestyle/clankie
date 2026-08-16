@@ -27,7 +27,7 @@ export interface DiscordBotPresenceRuntimeOptions {
   botToken: string;
   /** Injectable REST for fixtures; defaults to a live discord.js REST client. */
   rest?: REST;
-  /** Optional artifact resolver for send_attachment (bytes stay outside the control plane). */
+  /** Optional artifact resolver for send_attachment (bytes stay outside the service). */
   resolveAttachment?: (artifactRef: string) => Promise<{ data: Buffer; contentType?: string }>;
   /**
    * Deny-by-default surface → embedded application id map (ADR 0047). A surface

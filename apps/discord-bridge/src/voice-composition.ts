@@ -4,9 +4,9 @@
  *
  * Everything here is deliberately import-light and side-effect free so the
  * wiring the bridge actually runs — environment parsing, the realtime ports,
- * the briefing provider, the volition decider, the idle auto-leave, and the
- * user-facing disclosure text — is testable offline without touching the
- * process-global startup in `index.ts`.
+ * the briefing provider, the idle auto-leave, and the user-facing disclosure
+ * text — is testable offline without touching the process-global startup in
+ * `index.ts`.
  */
 
 import type {
@@ -23,7 +23,9 @@ import {
   type DiscordVoiceBriefing,
   type DiscordVoiceBriefingRequest,
   type DiscordVoiceRealtimePorts,
+  type DiscordVoiceConsentPolicy,
   type DiscordVoiceSessionStatus,
+  type LookAtScreenResult,
   type RealtimeSocketFactory,
   type RealtimeTimers,
   type VoiceConversationOpenInput,
@@ -60,15 +62,15 @@ export const DEFAULT_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT = 12_000;
 export const DEFAULT_VOICE_IDLE_LEAVE_MS = 15 * 60_000;
 /** The idle timer must stay bounded: a day-long "idle" cap is a disabled cap. */
 export const MAX_VOICE_IDLE_LEAVE_MS = 24 * 60 * 60_000;
-/** The volition gate's one cheap text call (ADR 0057); never a realtime session. */
-export const DEFAULT_VOICE_VOLITION_MODEL = "gpt-4o-mini";
 
-/** Cascade-era knobs. Set-but-ignored configuration is drift, so they fail loudly. */
-const RETIRED_VOICE_ENV_NAMES = [
-  "CLANKIE_VOICE_STT_MODEL",
-  "CLANKIE_VOICE_TTS_MODEL",
-  "CLANKIE_VOICE_TTS_VOICE",
-] as const;
+/** Removed knobs and where their job went. Set-but-ignored configuration is drift, so they fail loudly. */
+const RETIRED_VOICE_ENV: Readonly<Record<string, string>> = {
+  CLANKIE_VOICE_STT_MODEL: "use CLANKIE_VOICE_TRANSCRIBE_MODEL",
+  CLANKIE_VOICE_TTS_MODEL: "use CLANKIE_VOICE_REALTIME_MODEL",
+  CLANKIE_VOICE_TTS_VOICE: "use CLANKIE_VOICE_REALTIME_VOICE",
+  CLANKIE_VOICE_VOLITION_MODEL:
+    "there is no separate volition model — his own realtime session decides whether to speak up",
+};
 
 export interface VoiceRealtimeEnvConfig {
   readonly realtimeModel: string;
@@ -91,7 +93,6 @@ export interface VoiceRealtimeEnvConfig {
   /** Owner-tunable floor decay dial (mission human decision 1). */
   readonly decayWindowMs: number;
   readonly idleLeaveMs: number;
-  readonly volitionModel: string;
 }
 
 /**
@@ -100,11 +101,12 @@ export interface VoiceRealtimeEnvConfig {
  * hour of debugging.
  */
 export function parseVoiceRealtimeEnv(env: NodeJS.ProcessEnv): VoiceRealtimeEnvConfig {
-  const retired = RETIRED_VOICE_ENV_NAMES.filter((name) => env[name] !== undefined);
+  const retired = Object.entries(RETIRED_VOICE_ENV).filter(([name]) => env[name] !== undefined);
   if (retired.length > 0) {
     throw new Error(
-      `${retired.join(", ")} belong to the removed STT→captain→TTS cascade. Use ` +
-        "CLANKIE_VOICE_TRANSCRIBE_MODEL, CLANKIE_VOICE_REALTIME_MODEL, and CLANKIE_VOICE_REALTIME_VOICE.",
+      `Retired voice configuration is set and would be ignored: ${retired
+        .map(([name, guidance]) => `${name} (${guidance})`)
+        .join(", ")}.`,
     );
   }
   const language = env.CLANKIE_VOICE_STT_LANGUAGE;
@@ -156,7 +158,6 @@ export function parseVoiceRealtimeEnv(env: NodeJS.ProcessEnv): VoiceRealtimeEnvC
     idleLeaveMs:
       optionalIntegerEnv(env, "CLANKIE_VOICE_IDLE_LEAVE_MS", 1, MAX_VOICE_IDLE_LEAVE_MS) ??
       DEFAULT_VOICE_IDLE_LEAVE_MS,
-    volitionModel: nonEmptyEnv(env, "CLANKIE_VOICE_VOLITION_MODEL", DEFAULT_VOICE_VOLITION_MODEL),
   };
 }
 
@@ -318,11 +319,32 @@ export interface VoiceBriefingApiPort {
 }
 
 /**
- * Maps the media owner's briefing request onto the control plane's endpoint.
+ * Maps the media owner's briefing request onto the service's endpoint.
  * The request carries only ids; persona, lane instructions, self-state, and
- * approved person memory are all control-plane-resolved (T4), so the bridge
+ * approved person memory are all service-resolved (T4), so the bridge
  * can neither supply nor widen any of them.
  */
+export interface VoiceLookAtScreenApiPort {
+  fetchPlayStill(): Promise<{
+    readonly outcome: "not_playing" | "pending" | "still";
+    readonly pngBase64?: string;
+    readonly mimeType?: "image/png";
+  }>;
+}
+
+export function createVoiceLookAtScreenProvider(
+  api: VoiceLookAtScreenApiPort,
+): () => Promise<LookAtScreenResult> {
+  return async () => {
+    const still = await api.fetchPlayStill();
+    if (still.outcome === "still" && still.pngBase64 !== undefined) {
+      return { outcome: "still", pngBase64: still.pngBase64, mimeType: "image/png" };
+    }
+    if (still.outcome === "pending") return { outcome: "pending" };
+    return { outcome: "not_playing" };
+  };
+}
+
 export function createVoiceBriefingProvider(
   api: VoiceBriefingApiPort,
 ): (request: DiscordVoiceBriefingRequest) => Promise<DiscordVoiceBriefing> {
@@ -335,127 +357,6 @@ export function createVoiceBriefingProvider(
     });
     return { instructions: briefing.instructions, briefing: briefing.briefing };
   };
-}
-
-// ---------------------------------------------------------------------------
-// The volition decider: one cheap gated text call, fails closed.
-// ---------------------------------------------------------------------------
-
-export const VOICE_VOLITION_SYSTEM_PROMPT =
-  "You decide whether Clankie, a participant in a Discord voice room, has something genuinely " +
-  "worth saying right now. Answer strictly yes or no.";
-const VERDICT_TIMEOUT_MS = 10_000;
-/** Matches the transcript ring bound; anything longer is a leak, not a room. */
-const VOLITION_ROOM_TEXT_MAX_CHARACTERS = 4_000;
-/** A one-word verdict has no business arriving in a payload bigger than this. */
-const VERDICT_RESPONSE_MAX_CHARACTERS = 65_536;
-
-export interface BoundedChatVerdictInput {
-  /** The same brokered OpenAI key the realtime ports use. */
-  readonly apiKey: string;
-  readonly model: string;
-  readonly systemPrompt: string;
-  /** Untrusted user text is sliced to this bound before it is sent. */
-  readonly maxUserTextCharacters: number;
-  /** Must be HTTPS unless loopback. Defaults to the OpenAI API origin. */
-  readonly baseUrl?: string;
-  readonly fetchImpl?: typeof fetch;
-  readonly timeoutMs?: number;
-}
-
-/**
- * One bounded chat verdict: temperature 0, a handful of output tokens, a hard
- * timeout, and a bounded response. Returns the normalized verdict token
- * (trimmed, lowercased, trailing punctuation stripped) or `undefined` on any
- * failure — timeouts, transport errors, bad statuses, malformed or over-long
- * payloads. It never throws and never logs the user text: a transport error
- * object can echo the request, and untrusted text must never reach logs.
- */
-export function createBoundedChatVerdict(
-  input: BoundedChatVerdictInput,
-): (userText: string) => Promise<string | undefined> {
-  const url = new URL("/v1/chat/completions", input.baseUrl ?? "https://api.openai.com");
-  if (url.protocol !== "https:" && !["127.0.0.1", "localhost", "::1"].includes(url.hostname)) {
-    throw new Error("Bounded verdict base URL must use HTTPS unless it is loopback");
-  }
-  const fetchImpl = input.fetchImpl ?? fetch;
-  const timeoutMs = input.timeoutMs ?? VERDICT_TIMEOUT_MS;
-  return async (userText) => {
-    try {
-      const response = await fetchImpl(url, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${input.apiKey}`,
-        },
-        body: JSON.stringify({
-          model: input.model,
-          temperature: 0,
-          max_tokens: 5,
-          messages: [
-            { role: "system", content: input.systemPrompt },
-            { role: "user", content: userText.slice(0, input.maxUserTextCharacters) },
-          ],
-        }),
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-      if (!response.ok) return undefined;
-      const raw = await response.text();
-      if (raw.length > VERDICT_RESPONSE_MAX_CHARACTERS) return undefined;
-      const verdict = extractChatContent(JSON.parse(raw));
-      if (verdict === undefined) return undefined;
-      return verdict
-        .trim()
-        .toLowerCase()
-        .replace(/[.,;:!]+$/u, "");
-    } catch {
-      // Fail closed; deliberately unlogged (see above).
-      return undefined;
-    }
-  };
-}
-
-export interface VoiceVolitionDeciderInput {
-  /** The same brokered OpenAI key the realtime ports use. */
-  readonly apiKey: string;
-  readonly model: string;
-  /** Must be HTTPS unless loopback. Defaults to the OpenAI API origin. */
-  readonly baseUrl?: string;
-  readonly fetchImpl?: typeof fetch;
-  readonly timeoutMs?: number;
-}
-
-/**
- * ADR 0057's volition call. The gate is cheap and mechanical (the floor
- * machine rate-caps it); this decides only content. It never throws, never
- * logs room text, and anything other than a clear "yes" — including timeouts,
- * transport errors, and over-long responses — is a suppressed offer.
- */
-export function createVoiceVolitionDecider(
-  input: VoiceVolitionDeciderInput,
-): (roomText: string) => Promise<boolean> {
-  const verdict = createBoundedChatVerdict({
-    apiKey: input.apiKey,
-    model: input.model,
-    systemPrompt: VOICE_VOLITION_SYSTEM_PROMPT,
-    maxUserTextCharacters: VOLITION_ROOM_TEXT_MAX_CHARACTERS,
-    ...(input.baseUrl === undefined ? {} : { baseUrl: input.baseUrl }),
-    ...(input.fetchImpl === undefined ? {} : { fetchImpl: input.fetchImpl }),
-    ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
-  });
-  return async (roomText) => (await verdict(roomText)) === "yes";
-}
-
-function extractChatContent(parsed: unknown): string | undefined {
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
-  const choices = (parsed as Record<string, unknown>).choices;
-  if (!Array.isArray(choices) || choices.length === 0) return undefined;
-  const first: unknown = choices[0];
-  if (first === null || typeof first !== "object" || Array.isArray(first)) return undefined;
-  const message = (first as Record<string, unknown>).message;
-  if (message === null || typeof message !== "object" || Array.isArray(message)) return undefined;
-  const content = (message as Record<string, unknown>).content;
-  return typeof content === "string" ? content : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -604,7 +505,18 @@ export function describeVoiceResponse(evidence: DiscordVoiceResponseEvidence): s
 export function renderVoiceJoinDisclosure(
   daveProtocolVersion: number | undefined,
   ttsProvider: VoiceTtsProvider = DEFAULT_VOICE_TTS_PROVIDER,
+  consentPolicy: DiscordVoiceConsentPolicy = "explicit",
 ): string {
+  if (consentPolicy === "presence") {
+    return (
+      `Joined with DAVE protocol ${String(daveProtocolVersion)}. Anyone in this voice channel can talk to me — ` +
+      `being here is consent. **/clankie voice-consent opt-out** refuses for the rest of this call. ` +
+      `Room audio feeds a live OpenAI realtime session that keeps this call's conversation ` +
+      `on OpenAI's servers for as long as the call lasts. I listen continuously but speak only ` +
+      `when addressed, or briefly on my own initiative. ${describeSpokenReplies(ttsProvider)} ` +
+      `Nothing said in voice can ever approve privileged actions.`
+    );
+  }
   return (
     `Joined with DAVE protocol ${String(daveProtocolVersion)}. Only you are opted in — ` +
     `audio from anyone who has not explicitly consented is never streamed anywhere. ` +
@@ -643,9 +555,19 @@ export function renderVoiceConsentReply(
   consented: boolean,
   participantCount: number,
   ttsProvider: VoiceTtsProvider = DEFAULT_VOICE_TTS_PROVIDER,
+  consentPolicy: DiscordVoiceConsentPolicy = "explicit",
 ): string {
   if (!consented) {
     return "Your voice consent is revoked and any active capture for you was discarded.";
+  }
+  if (consentPolicy === "presence") {
+    return (
+      `This server already treats being in the call as consent — you do not need to opt in each session. ` +
+      `Anyone in this voice channel can talk. **/clankie voice-consent opt-out** refuses for the rest of this call. ` +
+      `Room audio feeds a live OpenAI realtime session that keeps this call's conversation ` +
+      `on OpenAI's servers for as long as the call lasts. ${describeSpokenReplies(ttsProvider)} ` +
+      `Nothing said in voice can ever approve privileged actions.`
+    );
   }
   return (
     `You are opted in for this voice session. ${String(participantCount)} participant(s) are now opted in. ` +
@@ -660,14 +582,19 @@ export function renderVoiceConsentReply(
 export function renderVoiceStatusReply(
   status: DiscordVoiceSessionStatus | undefined,
   voiceEnabled: boolean,
+  consentPolicy: DiscordVoiceConsentPolicy = "explicit",
 ): string {
   if (status?.active !== true) {
     return `Voice is ${voiceEnabled ? "enabled but not connected" : "disabled"}.`;
   }
   const posture = status.floorState === "engaged" ? "engaged in conversation" : "listening dormant";
+  const who =
+    consentPolicy === "presence"
+      ? "anyone in this channel can talk (opt-out still binds)"
+      : `${String(status.consentedParticipantCount)} participant(s) opted in`;
   return (
     `Voice is active with DAVE protocol ${String(status.daveProtocolVersion)}; ` +
-    `${String(status.consentedParticipantCount)} participant(s) opted in, ` +
+    `${who}, ` +
     `${String(status.activeCaptureCount)} bounded capture(s) active, currently ${posture}. ` +
     `I hold a short bounded transcript window in memory, and the live OpenAI realtime session ` +
     `keeps this call's conversation server-side for the duration of the call.`

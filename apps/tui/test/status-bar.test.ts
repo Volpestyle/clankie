@@ -2,29 +2,29 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 import {
   ClankieStatusBarComponent,
+  formatCaptainContextStatus,
+  formatCaptainContextUsage,
   formatCaptainPresenceStatus,
   STATUS_BAR_MAX_ROWS,
 } from "../src/shell/status-bar.ts";
-import type { CaptainPresenceSnapshot, CaptainPresenceState } from "../src/observation/mission-observer.ts";
+import type { PresenceSnapshot } from "../src/observation/presence.ts";
 
 describe("captain status bar", () => {
-  it("renders every captain presence state with an explicit label", () => {
-    const states: CaptainPresenceState[] = [
-      "working",
-      "waiting_user",
-      "waiting_dependency",
-      "idle",
-      "offline",
-    ];
-    for (const state of states) {
-      const presence: CaptainPresenceSnapshot = {
-        state,
-        summary: `Clankie ${state}`,
-        updatedAt: "2026-07-16T00:00:00.000Z",
-      };
-      expect(formatCaptainPresenceStatus(presence)).toBe(`clankie: ${state}`);
+  it("renders every presence phase with an explicit label", () => {
+    const phases = ["present", "voice_active", "go_live_active", "off", "no presence session"];
+    for (const phase of phases) {
+      const presence: PresenceSnapshot = { phase };
+      expect(formatCaptainPresenceStatus(presence)).toBe(`clankie: ${phase}`);
     }
     expect(formatCaptainPresenceStatus(undefined)).toBe("clankie: unknown");
+  });
+
+  it("shows current context tokens out of the model window", () => {
+    expect(formatCaptainContextStatus({ tokens: 72_400, contextWindow: 200_000 })).toBe(
+      "context: 72.4k / 200k",
+    );
+    expect(formatCaptainContextUsage({ tokens: null, contextWindow: 1_000_000 })).toBe("? / 1m");
+    expect(formatCaptainContextStatus(undefined)).toBe("context: unavailable");
   });
 
   it("keeps ANSI-styled and wrapped status rows within the supplied width", () => {

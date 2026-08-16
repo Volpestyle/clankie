@@ -61,6 +61,8 @@ connection phase, attached/delivered counts, room-listening state, local
 delivery ids, and sanitized refusal codes. No utterance or narration text is
 part of the evidence type. A narration-submission event means the live voice
 session accepted the event; a rejected call emits only a refusal, never both.
+Asked play may send its own `deliveryId` so the journal turn, the submission,
+the spoken response, and a rate-limit/`playing` suppression share one join key.
 The production loopback test delivers a room line
 after asked play reports `running`, observes it on the next gameplay turn, and
 sees a gameplay event return through narration on the same socket.

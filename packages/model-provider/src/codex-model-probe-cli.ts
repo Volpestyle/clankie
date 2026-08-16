@@ -1,5 +1,5 @@
 /**
- * Streamed Codex-backend probe. ADR 0014 admits a model to the `openai-codex`
+ * Streamed Codex-backend probe. ADR 0052 admits a model to the `openai-codex`
  * provider only after a streamed subscription request proves Clankie's own
  * `originator` identity may call it — first-party Codex client visibility is
  * not evidence. This drives the real path (broker credential → codex fetch

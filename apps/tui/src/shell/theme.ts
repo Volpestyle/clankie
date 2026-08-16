@@ -33,6 +33,7 @@ export function createFaceThemeBundle(stream: NodeJS.WriteStream): FaceThemeBund
   };
   const editorTheme: EditorTheme = {
     borderColor: ansi.dim,
+    ghostText: ansi.dim,
     selectList: selectListTheme,
   };
   const markdownTheme = createClankieFaceMarkdownTheme(ansi);

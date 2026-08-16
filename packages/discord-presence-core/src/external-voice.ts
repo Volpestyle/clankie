@@ -49,6 +49,7 @@ export interface ExternalVoiceRealtimePort {
   readonly isOpen: boolean;
   appendAudio(pcm: Buffer): void;
   createTextItem(text: string): void;
+  createImageItem(pngBase64: string, mimeType?: "image/png"): void;
   createResponse(): void;
   submitFunctionResult(callId: string, output: string): void;
   close(): void;
@@ -176,6 +177,10 @@ class ExternalVoiceConversation implements VoiceConversationPort {
 
   public createTextItem(text: string): void {
     this.requireRealtime().createTextItem(text);
+  }
+
+  public createImageItem(pngBase64: string, mimeType?: "image/png"): void {
+    this.requireRealtime().createImageItem(pngBase64, mimeType);
   }
 
   public createResponse(): void {

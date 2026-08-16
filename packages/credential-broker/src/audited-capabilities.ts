@@ -33,7 +33,7 @@ export interface CapabilityAuditSink {
   readAll(): Promise<CapabilityAuditEnvelope[]>;
 }
 
-/** Mission and worker attribution supplied by the trusted runner/control plane. */
+/** Caller attribution supplied by the trusted service (kept wire slot names). */
 export interface CapabilityAuditContext {
   missionId: string;
   workerRunId: string;

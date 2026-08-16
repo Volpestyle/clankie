@@ -34,15 +34,75 @@ describe("Discord voice evidence (ADR 0057)", () => {
       { type: "joined", ...scope, daveProtocolVersion: 1 },
       { type: "consent", ...scope, userId: "user-1", consented: true, participantCount: 3 },
       { type: "utterance", ...scope, userId: "user-1", deliveryId: "delivery-1", durationMs: 1_150 },
+      {
+        type: "transcription",
+        ...scope,
+        userId: "user-1",
+        deliveryId: "delivery-1",
+        outcome: "accepted",
+        characters: 18,
+        latencyMs: 240,
+        addressed: true,
+      },
+      {
+        type: "floor_decision",
+        ...scope,
+        userId: "user-1",
+        deliveryId: "delivery-1",
+        action: "wake",
+        reason: "addressed",
+        state: "engaged",
+      },
       { type: "floor", ...scope, state: "engaged", reason: "addressed" },
       { type: "floor", ...scope, state: "dormant", reason: "decay" },
+      {
+        type: "model_response",
+        ...scope,
+        deliveryId: "delivery-1",
+        userId: "user-1",
+        phase: "completed",
+        outcome: "tool",
+        responseId: "response-1",
+        audioBytes: 0,
+        textCharacters: 0,
+      },
+      {
+        type: "realtime_tool",
+        ...scope,
+        deliveryId: "delivery-1",
+        userId: "user-1",
+        callId: "call-1",
+        name: "music_play",
+        phase: "completed",
+      },
+      {
+        type: "music",
+        ...scope,
+        deliveryId: "delivery-1",
+        callId: "call-1",
+        source: "realtime",
+        operation: "play",
+        component: "player",
+        outcome: "playing",
+        current: true,
+        queuedCount: 0,
+        paused: false,
+      },
       fastPathResponse,
       abilityResponse,
       { type: "volition", ...scope, offered: 4, taken: 1, suppressed: 3 },
       { type: "overlap", ...scope, userId: "user-2", activeCaptureCount: 2 },
       { type: "interrupted", ...scope, userId: "user-1", phase: "playing" },
       { type: "failed", ...scope, stage: "captain_handoff", code: "voice_captain_turn_failed" },
-      { type: "left", ...scope },
+      {
+        type: "left",
+        ...scope,
+        stayId: "stay-1",
+        inputTokens: 120,
+        outputTokens: 40,
+        spokenCount: 2,
+        narrationSuppressed: 5,
+      },
       { type: "possessor_connection", phase: "attached", attachedCount: 1 },
       { type: "possessor_room", listening: true, attachedCount: 1, deliveredCount: 1 },
       {
@@ -52,6 +112,13 @@ describe("Discord voice evidence (ADR 0057)", () => {
         deliveredCount: 1,
       },
       { type: "possessor_narration_submission", deliveryId: "possessor-delivery-2", attachedCount: 1 },
+      {
+        type: "possessor_narration_suppressed",
+        ...scope,
+        stayId: "stay-1",
+        deliveryId: "possessor-delivery-4",
+        reason: "rate_limited",
+      },
       {
         type: "possessor_refusal",
         deliveryId: "possessor-delivery-3",
@@ -97,6 +164,18 @@ describe("Discord voice evidence (ADR 0057)", () => {
     ).toThrow();
     expect(() =>
       DiscordVoiceEvidenceSchema.parse({
+        type: "music",
+        ...scope,
+        callId: "call-1",
+        source: "realtime",
+        operation: "play",
+        component: "queue",
+        outcome: "started",
+        url: "https://youtu.be/private-choice",
+      }),
+    ).toThrow();
+    expect(() =>
+      DiscordVoiceEvidenceSchema.parse({
         type: "utterance",
         ...scope,
         userId: "user-1",
@@ -138,6 +217,17 @@ describe("Discord voice evidence (ADR 0057)", () => {
     for (const code of ["Playback Timeout", "playback-timeout", "PLAYBACK", "x".repeat(65), ""]) {
       expect(() => DiscordVoiceEvidenceSchema.parse({ ...failed, code })).toThrow();
     }
+  });
+
+  it("keeps stay ids and token counts optional on responses", () => {
+    expect(
+      DiscordVoiceEvidenceSchema.parse({
+        ...fastPathResponse,
+        stayId: "stay-1",
+        inputTokens: 800,
+        outputTokens: 120,
+      }),
+    ).toMatchObject({ stayId: "stay-1", inputTokens: 800, outputTokens: 120 });
   });
 
   it("rejects numbers a receipt cannot carry", () => {

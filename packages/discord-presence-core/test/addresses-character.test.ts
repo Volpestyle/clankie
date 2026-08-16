@@ -29,11 +29,12 @@ describe("addressesCharacter", () => {
 });
 
 describe("reply policy parsing", () => {
-  it("falls back to the quiet policy for absent or unknown values", () => {
-    expect(parseDiscordReplyPolicy(undefined)).toBe("addressed");
-    expect(parseDiscordReplyPolicy("")).toBe("addressed");
-    expect(parseDiscordReplyPolicy("everything")).toBe("addressed");
-    expect(parseDiscordReplyPolicy("ALL")).toBe("addressed");
+  it("falls back to the agent-first policy for absent or unknown values", () => {
+    expect(parseDiscordReplyPolicy(undefined)).toBe("all");
+    expect(parseDiscordReplyPolicy("")).toBe("all");
+    expect(parseDiscordReplyPolicy("everything")).toBe("all");
+    expect(parseDiscordReplyPolicy("ALL")).toBe("all");
     expect(parseDiscordReplyPolicy("all")).toBe("all");
+    expect(parseDiscordReplyPolicy("addressed")).toBe("addressed");
   });
 });

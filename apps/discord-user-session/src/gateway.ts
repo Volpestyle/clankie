@@ -1,4 +1,4 @@
-import type { DiscordRawAttachment } from "@clankie/discord-presence-core";
+import type { DiscordRawAttachment, DiscordRawEmbed } from "@clankie/discord-presence-core";
 import { WebSocket, type RawData } from "ws";
 
 /**
@@ -43,6 +43,8 @@ export interface DiscordGatewayMessage {
   readonly content: string;
   /** Raw `attachments` from the dispatch; ingress policy decides which he is shown. */
   readonly attachments: readonly DiscordRawAttachment[];
+  /** Raw visual embeds from the dispatch; only bounded gifv media are admitted. */
+  readonly embeds: readonly DiscordRawEmbed[];
 }
 
 export interface DiscordGatewayVoiceState {
@@ -75,6 +77,8 @@ export interface DiscordGatewayEvents {
   messageCreate: (message: DiscordGatewayMessage) => void;
   voiceStateUpdate: (state: DiscordGatewayVoiceState) => void;
   voiceServerUpdate: (server: DiscordGatewayVoiceServer) => void;
+  /** Every dispatch, for stream discovery (STREAM_CREATE / STREAM_WATCH path). */
+  raw: (packet: { readonly t: string; readonly d: Record<string, unknown> }) => void;
 }
 
 type Listener<E extends keyof DiscordGatewayEvents> = DiscordGatewayEvents[E];
@@ -99,6 +103,8 @@ export class DiscordUserGateway {
   private sessionId: string | undefined;
   private resumeUrl: string | undefined;
   private selfUserId: string | undefined;
+  private selfVoiceSessionId: string | undefined;
+  private readonly voiceChannels = new Map<string, string>();
   private reconnectAttempts = 0;
   private acked = true;
   private closed = false;
@@ -112,6 +118,16 @@ export class DiscordUserGateway {
 
   public get userId(): string | undefined {
     return this.selfUserId;
+  }
+
+  /** Discord voice session id for this user, once they have joined a channel. */
+  public get voiceSessionId(): string | undefined {
+    return this.selfVoiceSessionId;
+  }
+
+  /** Fresh gateway voice state for an actor; channel ids never come from model input. */
+  public voiceChannelFor(guildId: string, userId: string): string | undefined {
+    return this.voiceChannels.get(`${guildId}:${userId}`);
   }
 
   public on<E extends keyof DiscordGatewayEvents>(event: E, listener: Listener<E>): void {
@@ -146,6 +162,20 @@ export class DiscordUserGateway {
   /** Raw passthrough used by the voice adapter, which builds its own op 4 frames. */
   public sendPayload(payload: unknown): boolean {
     return this.send(payload);
+  }
+
+  /** Content-free DJ ack. Never logs the token. */
+  public async sendMessage(channelId: string, content: string): Promise<void> {
+    const trimmed = content.trim();
+    if (channelId.length === 0 || trimmed.length === 0) return;
+    await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+      method: "POST",
+      headers: {
+        authorization: this.token,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ content: trimmed.slice(0, 2_000), allowed_mentions: { parse: [] } }),
+    });
   }
 
   public close(): void {
@@ -212,9 +242,11 @@ export class DiscordUserGateway {
   private dispatch(type: string, data: unknown): void {
     const payload = record(data);
     if (payload === undefined) return;
+    this.emit("raw", { t: type, d: payload });
     switch (type) {
       case "READY": {
         this.reconnectAttempts = 0;
+        this.voiceChannels.clear();
         const user = record(payload.user);
         this.sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined;
         this.resumeUrl =
@@ -232,6 +264,22 @@ export class DiscordUserGateway {
         this.reconnectAttempts = 0;
         this.emit("resumed");
         return;
+      case "GUILD_CREATE": {
+        if (typeof payload.id !== "string" || !Array.isArray(payload.voice_states)) return;
+        for (const value of payload.voice_states) {
+          const state = record(value);
+          if (typeof state?.user_id !== "string" || typeof state.channel_id !== "string") continue;
+          this.voiceChannels.set(`${payload.id}:${state.user_id}`, state.channel_id);
+        }
+        return;
+      }
+      case "GUILD_DELETE": {
+        if (typeof payload.id !== "string") return;
+        const prefix = `${payload.id}:`;
+        for (const key of this.voiceChannels.keys())
+          if (key.startsWith(prefix)) this.voiceChannels.delete(key);
+        return;
+      }
       case "MESSAGE_CREATE": {
         const author = record(payload.author);
         if (typeof payload.id !== "string" || typeof payload.channel_id !== "string") return;
@@ -248,11 +296,20 @@ export class DiscordUserGateway {
           ),
           content: typeof payload.content === "string" ? payload.content : "",
           attachments: readAttachments(payload.attachments),
+          embeds: readEmbeds(payload.embeds),
         });
         return;
       }
       case "VOICE_STATE_UPDATE": {
         if (typeof payload.user_id !== "string") return;
+        if (typeof payload.guild_id === "string") {
+          const key = `${payload.guild_id}:${payload.user_id}`;
+          if (typeof payload.channel_id === "string") this.voiceChannels.set(key, payload.channel_id);
+          else this.voiceChannels.delete(key);
+        }
+        if (payload.user_id === this.selfUserId && typeof payload.session_id === "string") {
+          this.selfVoiceSessionId = payload.session_id;
+        }
         this.emit("voiceStateUpdate", {
           ...(typeof payload.guild_id === "string" ? { guildId: payload.guild_id } : {}),
           ...(typeof payload.channel_id === "string" ? { channelId: payload.channel_id } : {}),
@@ -409,4 +466,24 @@ function readAttachments(value: unknown): readonly DiscordRawAttachment[] {
     });
   }
   return attachments;
+}
+
+function readEmbeds(value: unknown): readonly DiscordRawEmbed[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    const embed = record(entry);
+    if (embed === undefined) return [];
+    const thumbnail = record(embed.thumbnail);
+    const video = record(embed.video);
+    return [
+      {
+        ...(typeof embed.type === "string" ? { type: embed.type } : {}),
+        ...(typeof embed.url === "string" ? { url: embed.url } : {}),
+        ...(typeof thumbnail?.url === "string" ? { thumbnailUrl: thumbnail.url } : {}),
+        ...(typeof thumbnail?.proxy_url === "string" ? { thumbnailProxyUrl: thumbnail.proxy_url } : {}),
+        ...(typeof video?.url === "string" ? { videoUrl: video.url } : {}),
+        ...(typeof video?.proxy_url === "string" ? { videoProxyUrl: video.proxy_url } : {}),
+      },
+    ];
+  });
 }

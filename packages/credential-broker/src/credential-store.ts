@@ -25,6 +25,10 @@ export const ProviderCredentialSchema = z.discriminatedUnion("type", [
     refresh: z.string(),
     expires: z.number().int().nonnegative(),
     accountId: z.string().optional(),
+    /** Dynamic-registration client id (Linear MCP OAuth). */
+    clientId: z.string().optional(),
+    /** Dynamic-registration client secret, when the AS issued one. */
+    clientSecret: z.string().optional(),
   }),
   z.object({
     type: z.literal("wellknown"),

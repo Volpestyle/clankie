@@ -1,20 +1,18 @@
 import { mkdtemp, readFile, rm, stat, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Client, HandleMessageStreamEvent, SessionState } from "eve/client";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   processTraceStream,
   runHeadlessCaptainCommand,
   traceCaptainCursorPath,
 } from "../bin/headless-captain.ts";
-import {
-  CAPTAIN_AGENT_NAME,
-  CAPTAIN_AUTHORED_TOOL_NAMES,
-  CAPTAIN_DISABLED_FRAMEWORK_TOOL_NAMES,
-  EVE_WORKFLOW_ID,
-} from "../src/session/captain-identity.ts";
-import { reportHerdrAgent, reportHerdrMetadata } from "../src/session/herdr-report.ts";
+import type {
+  CaptainSessionClient,
+  CaptainSessionState,
+  CaptainStreamEvent,
+} from "../src/session/captain-stream.ts";
+import { herdrPaneIdFromEnv, reportHerdrAgent, reportHerdrMetadata } from "../src/session/herdr-report.ts";
 import { CaptainSessionCursorStore } from "../src/session/session-cursor.ts";
 import { headlessCaptainCursorPath } from "../bin/headless-captain.ts";
 import { renderTraceEvent, renderTraceEvents } from "../src/session/trace-renderer.ts";
@@ -27,23 +25,6 @@ const SECRET = "Bearer super-secret-token-do-not-leak";
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((path) => rm(path, { force: true, recursive: true })));
 });
-
-function captainInfo(): unknown {
-  return {
-    kind: "eve-agent-info",
-    mode: "start",
-    agent: {
-      name: CAPTAIN_AGENT_NAME,
-      agentRoot: "/captain/agent",
-      appRoot: "/captain/app",
-    },
-    tools: {
-      authored: CAPTAIN_AUTHORED_TOOL_NAMES.map((name) => ({ name })),
-      available: CAPTAIN_AUTHORED_TOOL_NAMES.map((name) => ({ name })),
-      disabledFramework: [...CAPTAIN_DISABLED_FRAMEWORK_TOOL_NAMES],
-    },
-  };
-}
 
 function outputBuffer(): { readonly stream: { write(chunk: string): void }; readonly text: () => string } {
   let output = "";
@@ -58,18 +39,12 @@ function outputBuffer(): { readonly stream: { write(chunk: string): void }; read
 }
 
 function fakeClient(input: {
-  readonly events?: readonly HandleMessageStreamEvent[];
-  readonly streamImpl?: (signal: AbortSignal | undefined) => AsyncIterable<HandleMessageStreamEvent>;
-  readonly onStream?: (state: SessionState, startIndex: number | undefined) => void;
-}): Client {
+  readonly events?: readonly CaptainStreamEvent[];
+  readonly streamImpl?: (signal: AbortSignal | undefined) => AsyncIterable<CaptainStreamEvent>;
+  readonly onStream?: (state: CaptainSessionState, startIndex: number | undefined) => void;
+}): CaptainSessionClient {
   return {
-    health: async () => ({ ok: true, status: "ready", workflowId: EVE_WORKFLOW_ID }),
-    info: async () => captainInfo(),
-    session: (state: SessionState = { streamIndex: 0 }) => ({
-      send: async () => ({
-        continuationToken: "continuation-private",
-        sessionId: state.sessionId ?? "trace-session",
-      }),
+    session: (state: CaptainSessionState = { streamIndex: 0 }) => ({
       stream: (options?: { signal?: AbortSignal; startIndex?: number }) => {
         input.onStream?.(state, options?.startIndex);
         if (input.streamImpl !== undefined) return input.streamImpl(options?.signal);
@@ -78,7 +53,7 @@ function fakeClient(input: {
         })();
       },
     }),
-  } as unknown as Client;
+  };
 }
 
 async function stateEnv(): Promise<NodeJS.ProcessEnv> {
@@ -183,7 +158,7 @@ const multiTurnEvents = [
     type: "session.waiting",
     data: { wait: "next-user-message" },
   },
-] as unknown as HandleMessageStreamEvent[];
+] as unknown as CaptainStreamEvent[];
 
 describe("trace renderer", () => {
   it("labels two interleaved typed lanes without inferring from prose", () => {
@@ -199,7 +174,7 @@ describe("trace renderer", () => {
               reasoningDelta: "operator path",
               reasoningSoFar: "operator path",
             },
-          } as HandleMessageStreamEvent,
+          } as CaptainStreamEvent,
         },
         {
           lane: "discord_voice",
@@ -218,7 +193,7 @@ describe("trace renderer", () => {
                 },
               ],
             },
-          } as HandleMessageStreamEvent,
+          } as CaptainStreamEvent,
         },
         {
           lane: "tui",
@@ -237,7 +212,7 @@ describe("trace renderer", () => {
                 isError: false,
               },
             },
-          } as HandleMessageStreamEvent,
+          } as CaptainStreamEvent,
         },
         {
           lane: "discord_voice",
@@ -256,7 +231,7 @@ describe("trace renderer", () => {
                 isError: false,
               },
             },
-          } as HandleMessageStreamEvent,
+          } as CaptainStreamEvent,
         },
       ],
       "human",
@@ -294,7 +269,7 @@ describe("trace renderer", () => {
             },
           ],
         },
-      } as HandleMessageStreamEvent,
+      } as CaptainStreamEvent,
     });
 
     const human = lines.map((line) => line.text).join("\n");
@@ -437,7 +412,7 @@ describe("clankie trace command", () => {
         },
       },
       { type: "session.waiting", data: { wait: "next-user-message" } },
-    ] as unknown as HandleMessageStreamEvent[];
+    ] as unknown as CaptainStreamEvent[];
 
     const exitCode = await runHeadlessCaptainCommand(["trace", "--json"], {
       repoRoot: "/repo",
@@ -461,6 +436,8 @@ describe("clankie trace command", () => {
       return { stdout: "", stderr: "" };
     };
 
+    expect(herdrPaneIdFromEnv({})).toBeUndefined();
+    expect(herdrPaneIdFromEnv({ HERDR_ENV: "1", HERDR_PANE_ID: "w3:p2J" })).toBe("w3:p2J");
     expect(
       await reportHerdrAgent("working", {
         env: {},
@@ -499,9 +476,7 @@ describe("clankie trace command", () => {
       host,
       clientFactory: () =>
         fakeClient({
-          events: [
-            { type: "session.waiting", data: { wait: "next-user-message" } },
-          ] as HandleMessageStreamEvent[],
+          events: [{ type: "session.waiting", data: { wait: "next-user-message" } }] as CaptainStreamEvent[],
         }),
       stdout: outputBuffer().stream,
       traceOnce: true,
@@ -513,6 +488,7 @@ describe("clankie trace command", () => {
     });
     expect(herdrCalls.some((args) => args.includes("report-agent"))).toBe(true);
     expect(herdrCalls.some((args) => args.includes("report-metadata"))).toBe(true);
+    expect(herdrCalls.some((args) => args.includes("--token") && args.includes("lane=tui"))).toBe(true);
 
     const inertCalls: string[][] = [];
     await runHeadlessCaptainCommand(["trace"], {
@@ -521,9 +497,7 @@ describe("clankie trace command", () => {
       host,
       clientFactory: () =>
         fakeClient({
-          events: [
-            { type: "session.waiting", data: { wait: "next-user-message" } },
-          ] as HandleMessageStreamEvent[],
+          events: [{ type: "session.waiting", data: { wait: "next-user-message" } }] as CaptainStreamEvent[],
         }),
       stdout: outputBuffer().stream,
       traceOnce: true,
@@ -559,7 +533,7 @@ describe("clankie trace command", () => {
                 reasoningSoFar: "this prose mentions tui and discord but is not the lane",
               },
             },
-          ] as unknown as HandleMessageStreamEvent[],
+          ] as unknown as CaptainStreamEvent[],
         }),
       stdout: stdout.stream,
       traceOnce: true,

@@ -66,7 +66,7 @@ class ScriptedMenuCore implements GbaCoreSeam {
     this.menu = menu;
   }
 
-  public pressButton(button: GbaButton, holdFrames: number): void {
+  public async pressButton(button: GbaButton, holdFrames: number): Promise<void> {
     this.pressed.push(button);
     this.frame += holdFrames;
     this.inputCount += 1;
@@ -96,7 +96,7 @@ class ScriptedMenuCore implements GbaCoreSeam {
     if (button === "up" && menu.cursor > 0) menu.cursor -= 1;
   }
 
-  public advanceFrames(frames: number): void {
+  public async advanceFrames(frames: number): Promise<void> {
     this.frame += frames;
   }
 

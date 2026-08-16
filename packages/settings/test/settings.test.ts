@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   DiscordSettingsSchema,
+  EmailSettingsSchema,
+  LinearSettingsSchema,
   VoiceSettingsSchema,
   applyDiscordSettingsToEnvironment,
   applyVoiceSettingsToEnvironment,
@@ -164,6 +166,62 @@ describe("discord settings resolution", () => {
     expect(overridden.overriddenByEnvironment).toContain("CLANKIE_POSSESSOR_VOICE_ENABLED");
   });
 
+  it("carries the Discord system-actor allowlist and lets the environment override it", () => {
+    expect(DiscordSettingsSchema.parse({}).systemActorUserIds).toEqual([]);
+    expect(discordSettingsToEnvironment(stored)["DISCORD_SYSTEM_ACTOR_USER_IDS"]).toBeUndefined();
+
+    const allowlisted = DiscordSettingsSchema.parse({
+      systemActorUserIds: ["555555555555555555"],
+    });
+    expect(discordSettingsToEnvironment(allowlisted)["DISCORD_SYSTEM_ACTOR_USER_IDS"]).toBe(
+      "555555555555555555",
+    );
+
+    const overridden = resolveDiscordSettings(allowlisted, {
+      DISCORD_SYSTEM_ACTOR_USER_IDS: "111111111111111111,222222222222222222",
+    } as NodeJS.ProcessEnv);
+    expect(overridden.settings.systemActorUserIds).toEqual(["111111111111111111", "222222222222222222"]);
+    expect(overridden.overriddenByEnvironment).toContain("DISCORD_SYSTEM_ACTOR_USER_IDS");
+  });
+
+  it("defaults the active body to the official bot and can switch to the lab body", () => {
+    expect(DiscordSettingsSchema.parse({}).activeBody).toBe("bot");
+    expect(discordSettingsToEnvironment(stored)["DISCORD_ACTIVE_BODY"]).toBe("bot");
+
+    const labMouth = DiscordSettingsSchema.parse({ activeBody: "user_session" });
+    expect(discordSettingsToEnvironment(labMouth)["DISCORD_ACTIVE_BODY"]).toBe("user_session");
+
+    const overridden = resolveDiscordSettings(stored, {
+      DISCORD_ACTIVE_BODY: "user_session",
+    } as NodeJS.ProcessEnv);
+    expect(overridden.settings.activeBody).toBe("user_session");
+    expect(overridden.overriddenByEnvironment).toContain("DISCORD_ACTIVE_BODY");
+  });
+
+  it("projects the lab user-session body only when the owner enables it", () => {
+    expect(DiscordSettingsSchema.parse({}).userSessionEnabled).toBe(false);
+    expect(discordSettingsToEnvironment(stored)["DISCORD_USER_SESSION_ENABLED"]).toBeUndefined();
+
+    const lab = DiscordSettingsSchema.parse({
+      userSessionEnabled: true,
+      userSessionGuildIds: ["111111111111111111"],
+      userSessionChannelIds: ["222222222222222222"],
+      userSessionVoiceEnabled: true,
+    });
+    const env = discordSettingsToEnvironment(lab);
+    expect(env["DISCORD_USER_SESSION_ENABLED"]).toBe("true");
+    expect(env["DISCORD_USER_SESSION_GUILD_IDS"]).toBe("111111111111111111");
+    expect(env["DISCORD_USER_SESSION_CHANNEL_IDS"]).toBe("222222222222222222");
+    expect(env["DISCORD_USER_SESSION_VOICE_ENABLED"]).toBe("true");
+    expect(env["DISCORD_USER_SESSION_DM_POLICY"]).toBe("owner_only");
+
+    const overridden = resolveDiscordSettings(lab, {
+      DISCORD_USER_SESSION_ENABLED: "false",
+    } as NodeJS.ProcessEnv);
+    expect(overridden.settings.userSessionEnabled).toBe(false);
+    expect(overridden.overriddenByEnvironment).toContain("DISCORD_USER_SESSION_ENABLED");
+  });
+
   it("carries the voice consent policy, defaulting to explicit opt-in", () => {
     // Presence-as-consent is an owner decision (ADR 0045's boundary made
     // configurable); the default preserves the explicit policy exactly.
@@ -231,5 +289,41 @@ describe("voice settings resolution", () => {
     } as NodeJS.ProcessEnv);
     expect(resolved.settings.elevenLabsVoiceId).toBe("voice_from_shell");
     expect(resolved.overriddenByEnvironment).toEqual(["CLANKIE_VOICE_ELEVENLABS_VOICE_ID"]);
+  });
+});
+
+describe("linear and email settings", () => {
+  it("defaults to disconnected and accepts a public team id", () => {
+    expect(LinearSettingsSchema.parse({})).toEqual({});
+    expect(
+      LinearSettingsSchema.parse({ defaultTeamId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" }).defaultTeamId,
+    ).toBe("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+  });
+
+  it("defaults mail ports and refuses a credential-shaped hostname", () => {
+    const parsed = EmailSettingsSchema.parse({});
+    expect(parsed.imapPort).toBe(993);
+    expect(parsed.smtpPort).toBe(587);
+    expect(parsed.secure).toBe(true);
+    expect(() => EmailSettingsSchema.parse({ imapHost: "user:pass@mail.example" })).toThrow(/hostname/);
+  });
+
+  it("loads a pre-connection settings file without the new keys", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "clankie-settings-"));
+    const path = join(directory, "settings.json");
+    await writeFile(
+      path,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        discord: DiscordSettingsSchema.parse({}),
+        persona: { displayName: "Clankie" },
+        voice: {},
+      })}\n`,
+      "utf8",
+    );
+    const loaded = await new SettingsStore(path).load();
+    expect(loaded.linear).toEqual({});
+    expect(loaded.email.imapPort).toBe(993);
+    expect(loaded.email.username).toBeUndefined();
   });
 });

@@ -8,7 +8,7 @@ synthesizes Clankie's speech.
 
 ## Context
 
-ADR 0057 gave `gpt-realtime-2.1` the ears, the mouth, and turn-taking. The
+ADR 0057 gives `gpt-realtime-2.1` the ears, the mouth, and turn-taking. The
 mouth half of that bargain has a limitation the ears half does not: the
 realtime model speaks only from OpenAI's fixed voice list. A Clankie whose
 voice is part of his character — cloned, designed, or simply not on that list —
@@ -18,7 +18,7 @@ The obvious escape hatches are all worse than the problem. Rebuilding the
 cascade around a better TTS reintroduces `captainMs` on the critical path.
 Voice-changing the realtime audio pays for audio output tokens _and_ a second
 synthesis, adds a hop of latency, and still leaves the timbre downstream of a
-voice he was trying to leave. Moving to a vendor's conversational-agent
+voice he is trying to leave. Moving to a vendor's conversational-agent
 platform re-imports every 1:1 default ADR 0057 fought out of — their turn
 detection, their tool plumbing, no floor machine.
 
@@ -26,7 +26,7 @@ What makes a cheaper path possible is a property ADR 0057 already bought:
 every response is an explicit `createResponse()` decision, playback is owned by
 this repository, and the media owner talks to the engaged tier through one
 structural port (`VoiceConversationPort`). The mouth is already a module; it
-just was not yet swappable.
+just is not yet swappable.
 
 ## Decision
 
@@ -36,15 +36,7 @@ behind the same port: the realtime session keeps the ears, the brain, and
 stream through an ElevenLabs multi-context TTS WebSocket whose 24 kHz PCM
 enters the existing playback path.
 
-```mermaid
-flowchart LR
-  D["Discord consented mix<br/>48k stereo → 24k mono"] --> RT
-  RT["gpt-realtime-2.1<br/>output_modalities: [text]<br/>ears · brain · ask_clankie"] -->|"response.output_text.delta"| XI
-  XI["ElevenLabs multi-context WS<br/>eleven_flash_v2_5<br/>pcm_24000, one context per response"] -->|"PCM"| OUT
-  OUT["unchanged playback<br/>24k mono → 48k stereo → Opus"] --> D
-  RT -->|"ask_clankie"| C["captain discord_voice lane<br/>UNCHANGED"]
-  C -->|"result text"| RT
-```
+![ADR 0070: An external voice is a swappable mouth, not a second architecture](../diagrams/0070-external-voice-via-streaming-tts.jpg)
 
 - **The media owner cannot tell the difference.** `voice-session.ts` — floor,
   pendings, receipts, barge-in triggers, playback, `ask_clankie` round trips —
@@ -72,10 +64,10 @@ flowchart LR
 
 ### Three ordering problems, owned in one place
 
-The pairing glue exists because "the mouth is a different process now" breaks
-three assumptions the media owner was allowed to make:
+The pairing glue exists because a separate mouth process breaks
+three assumptions the media owner is allowed to make:
 
-- **`response.done` no longer means the speech exists.** Synthesized audio
+- **`response.done` does not mean the speech exists.** Synthesized audio
   necessarily trails the model's done event, and the media owner drops late
   audio after a response settles. The port therefore holds the done event
   until the TTS context reports final — bounded by a drain timeout so a wedged
@@ -84,21 +76,21 @@ three assumptions the media owner was allowed to make:
   repair, and the server rejects it for text items. Barge-in becomes: close
   the TTS context (stopping paid synthesis of speech nobody will hear), drop
   the item's late output, and inject a bounded marker item telling the model
-  the room did not hear the rest.
+  the room does not hear the rest.
 - **The mouth can die independently of the ears.** A dropped TTS socket fails
   the current utterance loudly, releases any held done event, and is reopened
   lazily on the next utterance. The conversation open itself is eager on both
   sessions: a conversation that can hear but never speak fails the open
   instead of failing the first sentence.
 
-### What the disclosure now says
+### Disclosure
 
 Room audio never reaches ElevenLabs — only the words Clankie chooses to say.
 That is a genuinely different residency story from "everything stays with one
 vendor", and the join and opt-in disclosures say it explicitly when the
 external voice is configured: replies are synthesized by ElevenLabs from his
 words, and participant audio is never sent there. The consent model is
-otherwise unchanged, which is exactly why the integration point was chosen
+otherwise unchanged, which is exactly why the integration point is chosen
 this far downstream of capture.
 
 ### What is deliberately lost
@@ -116,7 +108,7 @@ owner's to make, per persona, in settings — not a code default.
   streaming voice conversion is not there; the model's vocal performance is
   the only thing it preserves.
 - **Rebuild the cascade with better TTS** — rejected. It optimizes the stage
-  that was never the bottleneck and puts the captain back on the critical
+  that is never the bottleneck and puts the captain back on the critical
   path; ADR 0057 exists because of that latency.
 - **A vendor conversational-agent platform** — rejected. Turn-taking, tool
   routing, and context land in vendor defaults that are all wrong for a group
@@ -125,7 +117,7 @@ owner's to make, per persona, in settings — not a code default.
   Every consumer of `VoiceConversationPort` would need to care which mouth is
   wired; the pairing glue keeps the blast radius of this feature at one file
   plus composition.
-- **Probe the ElevenLabs socket in readiness** — rejected for now. Readiness
+- **Probe the ElevenLabs socket in readiness** — rejected. Readiness
   checks the brokered credential and configuration; a live synthesis probe
   spends paid characters to prove what the first utterance proves anyway. The
   live gate still exercises the full path end-to-end.
@@ -136,7 +128,7 @@ owner's to make, per persona, in settings — not a code default.
   ElevenLabs' chunk schedule and every server-side buffer, so each frame is
   synthesized as one unit with its own prosody. That is what makes a short
   reply fast, and it is only correct for a caller sending complete phrases:
-  relaying the model's token deltas straight through made every word its own
+  relaying the model's token deltas straight through makes every word its own
   utterance. The pairing therefore accumulates deltas and emits on sentence and
   clause boundaries (`splitSpeakableUnits`), with a character cap so an
   unpunctuated run still starts speaking and an end-of-response drain so a tail
@@ -145,9 +137,9 @@ owner's to make, per persona, in settings — not a code default.
 - **Latency adds one hop but stays conversational.** Text deltas arrive
   faster than audio deltas, so the net cost is roughly the TTS time-to-first
   byte (~100–300 ms with `eleven_flash_v2_5` and `auto_mode`). The captain
-  remains off the critical path. `toFirstAudioMs` in the response receipt now
+  remains off the critical path. `toFirstAudioMs` in the response receipt
   includes the TTS hop; its meaning — decision to first audible frame — is
-  unchanged, and no receipt field was added or removed.
+  unchanged, and no receipt field is added or removed.
 - **Cost changes shape favorably.** Audio output tokens ($64/1M, re-billed as
   context on every later response) become cheap text tokens in context, traded
   for ElevenLabs character pricing on what he actually says. Barge-in closes
@@ -164,7 +156,7 @@ owner's to make, per persona, in settings — not a code default.
   composes its own ports inline and is not wired to the external voice; it
   keeps `marin` until deliberately routed through the shared composition. The
   seam (`openExternalVoiceConversation`) is exported for exactly that move.
-- **The persona/voice naming collision sharpened.** `/persona`'s "voice" menu
-  item means chattiness; `/voice` now means how he sounds. The `/persona`
-  wording was left as "How much he talks", which reads unambiguously, but the
+- **The persona/voice naming collision is explicit.** `/persona`'s "voice" menu
+  item means chattiness; `/voice` means how he sounds. The `/persona`
+  wording is left as "How much he talks", which reads unambiguously, but the
   two commands sitting side by side is worth a future rename if it confuses.

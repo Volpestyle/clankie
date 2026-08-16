@@ -63,10 +63,18 @@ export type RenderedSurfaceFrame = z.infer<typeof RenderedSurfaceFrameSchema>;
  * What holds instead: every line is length-capped and count-capped here, the
  * text stays untrusted, and it reaches a viewer only through this schema — never
  * as raw model output posted straight to a channel.
+ *
+ * The overlay is versioned independently of the package constant: v1 carried
+ * free-form `lines`; v2 carries the structured turn fields. The hub and client
+ * accept both so an old producer keeps its lower third during a rolling
+ * upgrade, but a new producer always puts an honest 2 on the wire.
  */
-export const RenderedSurfaceOverlaySchema = z
+export const RENDERED_SURFACE_OVERLAY_SCHEMA_VERSION = 2 as const;
+
+/** The legacy v1 overlay: short free-form lines. Accepted, never produced. */
+export const RenderedSurfaceOverlayV1Schema = z
   .object({
-    schemaVersion: z.literal(INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION),
+    schemaVersion: z.literal(1),
     surface: DiscordActivitySurfaceSchema,
     sequence: z.number().int().nonnegative(),
     /** Short human-readable lines, e.g. party summary or the chosen move. */
@@ -74,6 +82,39 @@ export const RenderedSurfaceOverlaySchema = z
     updatedAt: z.string().datetime(),
   })
   .strict();
+export type RenderedSurfaceOverlayV1 = z.infer<typeof RenderedSurfaceOverlayV1Schema>;
+
+export const RenderedSurfaceOverlayV2Schema = z
+  .object({
+    // Producers built while the overlay still shared the package-wide version
+    // stamp 1 on this structured shape. The shapes are disjoint (v1 carries
+    // `lines`), so the stale stamp is unambiguous: parsing normalizes it here
+    // and a structured overlay labelled 1 never reaches the wire, because both
+    // producers publish the output of this parse. Drop the tolerance for 1
+    // once every producer stamps 2 itself.
+    schemaVersion: z
+      .union([z.literal(1), z.literal(2)])
+      .transform(() => RENDERED_SURFACE_OVERLAY_SCHEMA_VERSION),
+    surface: DiscordActivitySurfaceSchema,
+    sequence: z.number().int().nonnegative(),
+    /** Clankie's standing goal, authored by the mind and carried across turns. */
+    objective: z.string().min(1).max(256).nullable(),
+    /** The concrete next action Clankie intends to take. */
+    intent: z.string().min(1).max(256).nullable(),
+    /** Why Clankie chose the current action, in his own bounded words. */
+    monologue: z.string().min(1).max(256).nullable(),
+    /** What the runner observed after the action settled. */
+    effect: z.string().min(1).max(256).nullable(),
+    updatedAt: z.string().datetime(),
+  })
+  .strict();
+export type RenderedSurfaceOverlayV2 = z.infer<typeof RenderedSurfaceOverlayV2Schema>;
+
+/** Any overlay accepted on the wire: the current v2, or the legacy v1 lines. */
+export const RenderedSurfaceOverlaySchema = z.union([
+  RenderedSurfaceOverlayV2Schema,
+  RenderedSurfaceOverlayV1Schema,
+]);
 export type RenderedSurfaceOverlay = z.infer<typeof RenderedSurfaceOverlaySchema>;
 
 export const RenderedSurfaceMessageSchema = z.discriminatedUnion("kind", [

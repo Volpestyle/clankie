@@ -82,14 +82,14 @@ export async function inspectDiscordTextReadiness(
       "bridge identity",
       bridgeToken !== undefined,
       bridgeToken === undefined ? "broker entry clankie_discord_bridge is missing" : "present in broker",
-      "Start the control plane once so it can mint the local Discord bridge identity.",
+      "Start the clankie service once so it can mint the local Discord bridge identity.",
     );
   } catch (error) {
     add(
       "bridge identity",
       false,
       error instanceof Error ? error.message : "stored bridge identity is invalid",
-      "Remove the malformed clankie_discord_bridge entry and restart the control plane.",
+      "Remove the malformed clankie_discord_bridge entry and restart the clankie service.",
     );
   }
   const voiceEnabled = options.env.DISCORD_VOICE_ENABLED === "true";
@@ -102,14 +102,14 @@ export async function inspectDiscordTextReadiness(
         voiceBridgeToken === undefined
           ? "broker entry clankie_discord_voice_bridge is missing"
           : "present in broker",
-        "Start the control plane once so it can mint the local Discord voice identity.",
+        "Start the clankie service once so it can mint the local Discord voice identity.",
       );
     } catch (error) {
       add(
         "voice bridge identity",
         false,
         error instanceof Error ? error.message : "stored voice bridge identity is invalid",
-        "Remove the malformed clankie_discord_voice_bridge entry and restart the control plane.",
+        "Remove the malformed clankie_discord_voice_bridge entry and restart the clankie service.",
       );
     }
   } else {
@@ -149,7 +149,7 @@ export async function inspectDiscordTextReadiness(
     ambientRoles.size > 0
       ? `${ambientRoles.size.toString()} role binding(s) configured`
       : "no ambient role binding is configured",
-    "Set DISCORD_AMBIENT_ROLE_IDS to the role ids allowed to create and steer missions.",
+    "Set DISCORD_AMBIENT_ROLE_IDS to the role ids granted the ambient command tier.",
   );
   const openAiCredential = voiceEnabled ? await options.store.get("openai") : undefined;
   add(
@@ -210,19 +210,19 @@ export async function inspectDiscordTextReadiness(
     const readiness = await options.api.inspectDiscordReadiness();
     const ready = readiness.ready && Object.values(readiness.checks).every(Boolean);
     add(
-      "control-plane composition",
+      "service composition",
       ready,
       ready
         ? "event store, Clankie channel turns, and Discord presence runtime are ready"
-        : "one or more Discord control-plane dependencies are unavailable",
-      "Start the control plane with CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE configured.",
+        : "one or more Discord service dependencies are unavailable",
+      "Start the clankie service with CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE configured.",
     );
   } catch (error) {
     add(
-      "control-plane composition",
+      "service composition",
       false,
-      error instanceof Error ? error.message : "control-plane readiness request failed",
-      "Start the control plane on CLANKIE_API_URL with the Discord presence runtime configured.",
+      error instanceof Error ? error.message : "service readiness request failed",
+      "Start the clankie service on CLANKIE_API_URL with the Discord presence runtime configured.",
     );
   }
 

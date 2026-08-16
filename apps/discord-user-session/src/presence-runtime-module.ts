@@ -11,10 +11,10 @@ import type {
 import { DiscordUserPresenceRuntime } from "./user-presence-runtime.ts";
 
 /**
- * Trusted control-plane load target for the user-session transport
+ * Trusted service load target for the user-session transport
  * (`CLANKIE_DISCORD_USER_PRESENCE_RUNTIME_MODULE`, ADR 0048).
  *
- * Mirrors the bot plane's module contract so the control plane treats both the
+ * Mirrors the bot plane's module contract so the service treats both the
  * same way: policy is decided centrally, and only this privileged module ever
  * resolves connection material. The user token is never read from the
  * environment, and a per-action grant is re-checked against the durable opt-in
@@ -77,7 +77,7 @@ export function createDiscordUserPresenceRuntime(
 }
 
 /**
- * Reads the durable opt-in the control plane already owns. The record is public
+ * Reads the durable opt-in the service already owns. The record is public
  * to an authenticated local caller and carries no token material, so the module
  * does not need its own store.
  */

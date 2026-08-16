@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { compileDoctrine, loadDoctrineFile } from "@clankie/doctrine";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   GoogleImageAdapter,
@@ -10,7 +9,6 @@ import {
   GrokVideoAdapter,
   MediaGenerationRequestSchema,
   OpenAiImageAdapter,
-  projectMediaGenerationGrant,
   type ImageGenerationRequest,
   type MediaFetch,
   type VideoGenerationRequest,
@@ -253,29 +251,6 @@ describe("video jobs", () => {
     expect(result).toMatchObject({ kind: "video", mimeType: "video/mp4", provider: "grok" });
     expect(result.sha256).toBe(createHash("sha256").update(videoBytes).digest("hex"));
     expect(await readFile(outputPath)).toEqual(videoBytes);
-  });
-});
-
-describe("doctrine projection", () => {
-  it("fails closed without compiled doctrine", () => {
-    expect(projectMediaGenerationGrant(undefined, { principalId: "test-worker" })).toBe(false);
-  });
-
-  it("allows media generation through the read risk class", async () => {
-    const path = join(import.meta.dirname, "..", "..", "..", "doctrine", "profiles", "self-build-lab.yaml");
-    const doctrine = compileDoctrine([await loadDoctrineFile(path)]);
-    expect(projectMediaGenerationGrant(doctrine, { principalId: "test-worker" })).toBe(true);
-    expect(projectMediaGenerationGrant(doctrine, { principalId: "test-worker", kind: "video" })).toBe(true);
-  });
-
-  it("projects each kind as its own action so one can be denied alone", async () => {
-    const path = join(import.meta.dirname, "..", "..", "..", "doctrine", "profiles", "self-build-lab.yaml");
-    const base = await loadDoctrineFile(path);
-    const doctrine = compileDoctrine([
-      { ...base, actions: { ...base.actions, "media.generate.video": { default: "deny", rules: [] } } },
-    ]);
-    expect(projectMediaGenerationGrant(doctrine, { principalId: "test-worker" })).toBe(true);
-    expect(projectMediaGenerationGrant(doctrine, { principalId: "test-worker", kind: "video" })).toBe(false);
   });
 });
 

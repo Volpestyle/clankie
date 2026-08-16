@@ -6,7 +6,7 @@ import type { GbaCoreState } from "./core-double.ts";
  * `GbaEmulatorSession` drives exactly this surface and nothing else, so the
  * deterministic CI test double (`DeterministicGbaCoreDouble`) and the real
  * headless mGBA core (`MgbaFireRedCore`) are interchangeable behind it:
- * button input consuming frames, a typed RAM-derived state view, and
+ * button input consuming frames, an honest typed state view (or `unknown`), and
  * RAM/framebuffer digests for hash-chained evidence.
  */
 /**
@@ -33,10 +33,16 @@ export interface GbaCoreMapGrid {
 
 export interface GbaCoreSeam {
   readonly coreId: string;
-  /** Hold `button` for `holdFrames` frames, then release. */
-  pressButton(button: GbaButton, holdFrames: number): void;
+  /**
+   * Hold `button` for `holdFrames` frames, then release.
+   *
+   * Asynchronous because a watched core paces itself to hardware speed, and
+   * pacing that blocks the thread stops everything else in the process for the
+   * length of an action — including the socket flush the watcher's frames need.
+   */
+  pressButton(button: GbaButton, holdFrames: number): Promise<void>;
   /** Advance `frames` frames with no input held. */
-  advanceFrames(frames: number): void;
+  advanceFrames(frames: number): Promise<void>;
   /**
    * Advance `frames` frames with `button` held, spending no input. FireRed's
    * text printer zeroes its per-character delay while A/B is held — the
@@ -45,7 +51,19 @@ export interface GbaCoreSeam {
    * as a fresh edge. Optional: a core without it prints at its configured
    * text speed and `advance_dialog` simply waits longer.
    */
-  advanceFramesHolding?(button: GbaButton, frames: number): void;
+  advanceFramesHolding?(button: GbaButton, frames: number): Promise<void>;
+  /**
+   * Run `frames` frames off the console's own clock, spending no input and
+   * counting toward nothing.
+   *
+   * This is what keeps a watched game alive while its player is thinking: the
+   * core otherwise advances only when an action drives it, so the screen holds
+   * a single frame for the whole gap. Synchronous and unpaced — the caller's
+   * timer is the clock — and a no-op while an action is running, because an
+   * idle frame landing mid-press would release a button the action still holds.
+   * Optional: a core without it simply freezes between actions, as before.
+   */
+  idleFrames?(frames: number): void;
   /** Typed game-state view decoded from the core's authoritative state. */
   gameState(): GbaCoreState;
   /**

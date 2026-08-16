@@ -87,6 +87,7 @@ function emptyView(): FreePlayView {
     framePng: null,
     refusedHere: [],
     stalledForTurns: null,
+    repeatingForTurns: null,
     notes: null,
     objective: null,
     interjection: null,

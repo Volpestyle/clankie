@@ -81,7 +81,7 @@ export interface GbaCoreSurroundings {
 }
 
 export interface GbaCoreState {
-  mode: "overworld" | "dialog" | "battle" | "battle_won" | "battle_lost";
+  mode: "unknown" | "overworld" | "dialog" | "battle" | "battle_won" | "battle_lost";
   /**
    * Whether an otherwise idle overworld is accepting player input. Real
    * cores set this false during menu/field callback transitions; test doubles
@@ -127,6 +127,17 @@ export interface GbaCoreState {
   surroundings?: GbaCoreSurroundings | null;
   /** Walkable map dimensions, when the core knows them. */
   mapSize?: { width: number; height: number } | null;
+  /**
+   * Every way off the loaded map, when the core decodes them: warp events
+   * (doors, stairs, mats) in player coordinate space, and edge connections.
+   * Same absence semantics as `surroundings`.
+   */
+  exits?: GbaCoreMapExits | null;
+}
+
+export interface GbaCoreMapExits {
+  warps: { x: number; y: number; destinationMapId: string }[];
+  connections: { direction: "north" | "south" | "west" | "east"; destinationMapId: string }[];
 }
 
 const DIRECTIONS: Record<
@@ -197,7 +208,7 @@ export class DeterministicGbaCoreDouble {
     };
   }
 
-  public pressButton(button: GbaButton, holdFrames: number): void {
+  public async pressButton(button: GbaButton, holdFrames: number): Promise<void> {
     this.state.frame += holdFrames + 1; // hold plus release edge
     this.state.inputCount += 1;
     if (this.state.mode === "overworld" && this.state.menu) {
@@ -216,16 +227,17 @@ export class DeterministicGbaCoreDouble {
         return;
       case "battle_won":
       case "battle_lost":
+      case "unknown":
         return;
     }
   }
 
-  public advanceFrames(frames: number): void {
+  public async advanceFrames(frames: number): Promise<void> {
     this.state.frame += frames;
   }
 
   /** Advance frames with `button` held: no input spent, printing accelerated. */
-  public advanceFramesHolding(button: GbaButton, frames: number): void {
+  public async advanceFramesHolding(button: GbaButton, frames: number): Promise<void> {
     this.state.frame += frames;
     if (this.state.mode === "dialog" && (button === "a" || button === "b")) {
       // Each held frame counts multiply toward the box becoming ready — the

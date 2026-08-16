@@ -1,8 +1,8 @@
 # ADR 0025: ClankVox is an in-repo voice sidecar behind versioned bridge IPC
 
-Status: superseded for official-bot voice by
-[ADR 0045](0045-official-bot-dave-group-voice.md) (2026-07-25). The versioned
-IPC parser remains an inactive compatibility artifact.
+Status: inactive compatibility boundary. Official-bot voice uses
+[ADR 0045](0045-official-bot-dave-group-voice.md); only the versioned IPC parser
+remains relevant here.
 
 ## Context
 
@@ -71,48 +71,7 @@ its DAVE manager from the same `user_id` and voice `channel_id`. This confirms c
 sufficiency, not live interoperability. VUH-807 must prove `dave_state=ready` and audible outbound
 voice using bot credentials only before the path is treated as live-proven.
 
-```mermaid
-flowchart LR
-  subgraph Gateway[discord.js official-bot gateway]
-    OP4[OP4 voice state update]
-    VSU[VOICE_SERVER_UPDATE<br/>endpoint · token · guild_id]
-    VST[VOICE_STATE_UPDATE<br/>session_id · user_id · channel_id]
-  end
-
-  subgraph Bridge[apps/discord-bridge]
-    A[guild.voiceAdapterCreator<br/>callbacks + sendPayload]
-    C[credential collector]
-    IPC[ClankVox IPC v1]
-  end
-
-  subgraph Vox[apps/clankvox]
-    WS[Discord voice WebSocket<br/>identify + DAVE control]
-    UDP[UDP · RTP · Opus<br/>transport AEAD + DAVE]
-    MIX[PCM buffer + internal mixer<br/>20 ms pacing]
-  end
-
-  subgraph Brain[governed voice brain]
-    OUT[model PCM<br/>24 kHz mono s16le]
-    IN[per-speaker PCM<br/>24 kHz mono s16le]
-  end
-
-  D[Discord voice media<br/>48 kHz Opus]
-
-  A -->|sendPayload| OP4
-  VSU --> A
-  VST --> A
-  A --> C
-  C -->|session_open NDJSON| IPC
-  IPC --> WS
-  WS <--> D
-  OUT -->|audio NDJSON| IPC
-  IPC --> MIX
-  MIX -->|resample 24→48 · Opus · encrypt| UDP
-  UDP --> D
-  D --> UDP
-  UDP -->|decrypt · Opus decode · resample 48→24| IPC
-  IPC -->|user_audio binary lane| IN
-```
+![ADR 0025: ClankVox is an in-repo voice sidecar behind versioned bridge IPC](../diagrams/0025-clankvox-placement-and-ipc.jpg)
 
 ### IPC transport
 

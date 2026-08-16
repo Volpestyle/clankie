@@ -1,0 +1,28 @@
+import { describe, expect, it } from "vitest";
+import { createDiscordVoicePresenceClient } from "../src/discord-voice-presence.ts";
+
+describe("createDiscordVoicePresenceClient", () => {
+  it("posts the host-stamped actor and guild to the active body", async () => {
+    const calls: { url: string; body: unknown }[] = [];
+    const client = createDiscordVoicePresenceClient(
+      { DISCORD_ACTIVE_BODY: "bot", CLANKIE_DISCORD_BRIDGE_CONTROL_PORT: "4313" },
+      async (url, init) => {
+        calls.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+        return new Response(
+          JSON.stringify({ action: "joined", channelId: "voice-1", actorAutoOptedIn: false }),
+        );
+      },
+    );
+    await expect(client.join({ guildId: "guild-1", actorId: "user-1" })).resolves.toEqual({
+      action: "joined",
+      channelId: "voice-1",
+      actorAutoOptedIn: false,
+    });
+    expect(calls).toEqual([
+      {
+        url: "http://127.0.0.1:4313/voice/join",
+        body: { guildId: "guild-1", actorId: "user-1" },
+      },
+    ]);
+  });
+});

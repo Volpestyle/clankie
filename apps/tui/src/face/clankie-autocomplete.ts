@@ -20,17 +20,18 @@ export type ClankieAutocompleteOptions = {
   readonly listMcpConnectionNames?: () => Awaitable<readonly string[]>;
   readonly listMcpServerNames?: () => Awaitable<readonly string[]>;
   readonly listIntegrationConnectionNames?: () => Awaitable<readonly string[]>;
+  readonly listSkills?: () => Awaitable<readonly ClankieAutocompleteSkill[]>;
+};
+
+export type ClankieAutocompleteSkill = {
+  readonly name: string;
+  readonly description: string;
 };
 
 type ArgumentContext = {
   readonly args: readonly string[];
   readonly argumentText: string;
   readonly prefix: string;
-};
-
-type CommandMatch = {
-  readonly command: ClankieAutocompleteCommand;
-  readonly canonical: boolean;
 };
 
 type StaticArgumentSpec = {
@@ -149,7 +150,7 @@ export function clankieCommandCompletion(command: ClankieAutocompleteCommand): s
 }
 
 class ClankieAutocompleteProvider implements AutocompleteProvider {
-  readonly triggerCharacters: string[] = [];
+  readonly triggerCharacters: string[] = ["$"];
   private readonly commands: readonly ClankieAutocompleteCommand[];
   private readonly delegate: CombinedAutocompleteProvider;
   private readonly options: ClankieAutocompleteOptions;
@@ -172,6 +173,20 @@ class ClankieAutocompleteProvider implements AutocompleteProvider {
   ): Promise<AutocompleteSuggestions | null> {
     const currentLine = lines[cursorLine] ?? "";
     const textBeforeCursor = currentLine.slice(0, cursorCol);
+    const skillPrefix = skillMentionPrefix(textBeforeCursor);
+    if (skillPrefix !== undefined) {
+      const skills = await this.options.listSkills?.();
+      const items = fuzzyFilter(
+        [...(skills ?? [])],
+        skillPrefix.slice(1),
+        (skill) => `${skill.name} ${skill.description}`,
+      ).map((skill) => ({
+        value: skill.name,
+        label: `$${skill.name}`,
+        description: skill.description,
+      }));
+      return items.length === 0 ? null : { items, prefix: skillPrefix };
+    }
     if (!textBeforeCursor.trimStart().startsWith("/")) {
       return await this.delegate.getSuggestions(lines, cursorLine, cursorCol, options);
     }
@@ -197,6 +212,13 @@ class ClankieAutocompleteProvider implements AutocompleteProvider {
   ): { lines: string[]; cursorLine: number; cursorCol: number } {
     const currentLine = lines[cursorLine] ?? "";
     const textBeforeCursor = currentLine.slice(0, cursorCol);
+    if (prefix.startsWith("$")) {
+      const beforePrefix = currentLine.slice(0, Math.max(0, cursorCol - prefix.length));
+      const completed = `${beforePrefix}$${item.value} `;
+      const nextLines = [...lines];
+      nextLines[cursorLine] = completed + currentLine.slice(cursorCol).replace(/^\s+/u, "");
+      return { lines: nextLines, cursorLine, cursorCol: completed.length };
+    }
     if (!textBeforeCursor.trimStart().startsWith("/")) {
       return this.delegate.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
     }
@@ -215,6 +237,7 @@ class ClankieAutocompleteProvider implements AutocompleteProvider {
   shouldTriggerFileCompletion(lines: string[], cursorLine: number, cursorCol: number): boolean {
     const currentLine = lines[cursorLine] ?? "";
     const textBeforeCursor = currentLine.slice(0, cursorCol);
+    if (skillMentionPrefix(textBeforeCursor) !== undefined) return true;
     if (textBeforeCursor.trimStart().startsWith("/")) return true;
     return this.delegate.shouldTriggerFileCompletion?.(lines, cursorLine, cursorCol) ?? false;
   }
@@ -292,6 +315,10 @@ class ClankieAutocompleteProvider implements AutocompleteProvider {
   }
 }
 
+function skillMentionPrefix(textBeforeCursor: string): string | undefined {
+  return /(?:^|\s)(\$[a-z0-9-]*)$/iu.exec(textBeforeCursor)?.[1];
+}
+
 function parseSlashInput(text: string): {
   commandToken: string;
   argumentText: string;
@@ -318,10 +345,21 @@ function splitArgumentTokens(text: string): string[] {
   return text.trim().length === 0 ? [] : text.trim().split(/\s+/u);
 }
 
-function findCommand(
-  commands: readonly ClankieAutocompleteCommand[],
+/**
+ * Resolve a slash token to a command. A real command name always wins over an
+ * earlier command's leftover alias — otherwise `/connect` would open `/auth`.
+ */
+export function resolveClankieCommand<T extends ClankieAutocompleteCommand>(
+  commands: readonly T[],
   token: string,
-): CommandMatch | undefined {
+): { readonly command: T; readonly canonical: boolean } | undefined {
+  return findCommand(commands, token);
+}
+
+function findCommand<T extends ClankieAutocompleteCommand>(
+  commands: readonly T[],
+  token: string,
+): { readonly command: T; readonly canonical: boolean } | undefined {
   const normalized = token.toLowerCase();
   const command = commands.find((entry) => entry.name === normalized);
   if (command !== undefined) return { command, canonical: true };
@@ -406,20 +444,25 @@ function commandCategory(commandName: string): string {
       "trace",
       "layout",
       "status",
+      "board",
       "new",
       "clear",
       "exit",
     ].includes(commandName)
   )
     return "runtime";
-  if (["mcp", "integrations", "browser"].includes(commandName)) return "tools";
-  if (["discord-token", "discord-scope", "voice"].includes(commandName)) return "discord";
+  if (["mcp", "integrations", "browser", "connect"].includes(commandName)) return "tools";
+  if (["discord-token", "discord-scope", "voice", "discord"].includes(commandName)) return "discord";
   if (commandName === "pet") return "desktop";
   return "command";
 }
 
 function staticArgumentSpec(commandName: string, context: ArgumentContext): StaticArgumentSpec {
   switch (commandName) {
+    case "board":
+      return values(["focus", "close"], ["/board", "/board focus", "/board close"]);
+    case "discord":
+      return values(["status", "invite"], ["/discord status", "/discord invite"]);
     case "discord-token":
       return values(["status", "--user-token", "--voice"], ["/discord-token status"]);
     case "model":
@@ -520,6 +563,8 @@ function staticArgumentSpec(commandName: string, context: ArgumentContext): Stat
       return layoutArguments(context);
     case "mcp":
       return mcpArguments(context);
+    case "connect":
+      return connectArguments(context);
     case "voice":
       return voiceArguments(context);
     case "harness":
@@ -619,7 +664,7 @@ function layoutArguments(context: ArgumentContext): StaticArgumentSpec {
  * Only providers this repository has an adapter for, named by their catalog id
  * (`google`, not `gemini`) — the id is what `/image-model` writes into the
  * config ref, so a friendlier alias here would complete to a setting the
- * control plane cannot resolve.
+ * service cannot resolve.
  */
 function imageModelArguments(context: ArgumentContext): StaticArgumentSpec {
   const provider = context.args[0]?.toLowerCase();
@@ -640,6 +685,14 @@ function videoModelArguments(context: ArgumentContext): StaticArgumentSpec {
   return values(
     ["status", "xai", "unset"],
     ["/video-model status", "/video-model xai grok-imagine-video-1.5"],
+  );
+}
+
+function connectArguments(context: ArgumentContext): StaticArgumentSpec {
+  if (context.args[0]?.toLowerCase() === "status") return { values: [], examples: ["/connect status"] };
+  return values(
+    ["status", "linear", "email", "discord"],
+    ["/connect status", "/connect linear", "/connect email", "/connect discord"],
   );
 }
 

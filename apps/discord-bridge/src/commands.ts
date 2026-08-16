@@ -1,5 +1,4 @@
 import { SlashCommandBuilder } from "discord.js";
-import { DISCORD_WORKER_STEER_CHOICES } from "./steering.ts";
 
 /**
  * The single top-level command name.
@@ -11,19 +10,15 @@ import { DISCORD_WORKER_STEER_CHOICES } from "./steering.ts";
  * would make command registration change under an operator editing a
  * personality setting.
  *
- * One namespace with subcommands rather than ten bare names: `/join`, `/leave`,
- * `/status`, and `/memory` would collide with essentially every music and
- * utility bot in a shared server, and one entry reads better in the picker.
+ * One namespace with subcommands rather than bare names: `/join`, `/leave`,
+ * and `/status` would collide with essentially every music and utility bot in
+ * a shared server, and one entry reads better in the picker.
  */
 export const DISCORD_COMMAND_NAME = "clankie";
 
 /** Subcommand names, exported so authority tests can assert against the surface. */
 export const DISCORD_SUBCOMMANDS = [
   "status",
-  "mission",
-  "steer",
-  "approval",
-  "memory",
   "person-memory",
   "join",
   "leave",
@@ -36,69 +31,8 @@ export type DiscordSubcommand = (typeof DISCORD_SUBCOMMANDS)[number];
 export const commands = [
   new SlashCommandBuilder()
     .setName(DISCORD_COMMAND_NAME)
-    .setDescription("Clankie: missions, memory, and voice.")
+    .setDescription("Clankie: memory and voice.")
     .addSubcommand((sub) => sub.setName("status").setDescription("Show the local harness status."))
-    .addSubcommand((sub) =>
-      sub
-        .setName("mission")
-        .setDescription("Create a new governed mission.")
-        .addStringOption((option) =>
-          option.setName("goal").setDescription("The outcome to achieve.").setRequired(true),
-        )
-        .addStringOption((option) =>
-          option
-            .setName("doctrine")
-            .setDescription("Doctrine profile id.")
-            .setRequired(false)
-            .addChoices(
-              { name: "Rawdog", value: "rawdog" },
-              { name: "Structured", value: "structured" },
-              { name: "Fine Control", value: "fine-control" },
-            ),
-        ),
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("steer")
-        .setDescription("Steer the active worker for this mission from its Discord thread.")
-        .addStringOption((option) =>
-          option
-            .setName("intent")
-            .setDescription("Choose a bounded, policy-checked steering intent.")
-            .setRequired(true)
-            .addChoices(...DISCORD_WORKER_STEER_CHOICES.map(({ name, value }) => ({ name, value }))),
-        ),
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("approval")
-        .setDescription("Open an approval on the authenticated operator surface.")
-        .addStringOption((option) =>
-          option.setName("approval-id").setDescription("The pending approval id.").setRequired(true),
-        )
-        .addStringOption((option) =>
-          option
-            .setName("decision")
-            .setDescription("The decision you intend to make on the authenticated surface.")
-            .setRequired(true)
-            .addChoices({ name: "Approve", value: "approve" }, { name: "Deny", value: "deny" }),
-        ),
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("memory")
-        .setDescription("Show or clear this bridge's zero-retention mission correlation.")
-        .addStringOption((option) =>
-          option
-            .setName("action")
-            .setDescription("Inspect retention or forget this thread-to-mission correlation.")
-            .setRequired(false)
-            .addChoices(
-              { name: "Status", value: "status" },
-              { name: "Forget bridge correlation", value: "forget" },
-            ),
-        ),
-    )
     .addSubcommand((sub) =>
       sub
         .setName("person-memory")

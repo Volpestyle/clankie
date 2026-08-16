@@ -47,7 +47,7 @@ export interface PossessorVoiceClient {
    * happened and replied to, which is the ADR 0074 defect. Rejects when the
    * bridge is unreachable.
    */
-  narrate(text: string): Promise<void>;
+  narrate(text: string, options?: { readonly deliveryId?: string }): Promise<void>;
   /** Subscribe to room utterances as they happen. Returns an unsubscribe. */
   subscribe(listener: (utterance: string) => void): () => void;
   /**
@@ -118,7 +118,7 @@ export function createPossessorVoiceClient(options: PossessorVoiceClientOptions)
   open();
 
   return {
-    narrate(text) {
+    narrate(text, options) {
       const trimmed = text.trim();
       if (trimmed.length === 0) {
         return Promise.reject(new Error("clankie_speech_empty: nothing to say"));
@@ -138,10 +138,12 @@ export function createPossessorVoiceClient(options: PossessorVoiceClientOptions)
           new Error("clankie_speech_unavailable: the Discord bridge is not reachable on the possessor seam"),
         );
       }
+      const deliveryId = options?.deliveryId?.trim();
       const message: PossessorNarrate = {
         schemaVersion: POSSESSOR_VOICE_SCHEMA_VERSION,
         type: "narrate",
         text: trimmed,
+        ...(deliveryId === undefined || deliveryId.length === 0 ? {} : { deliveryId }),
       };
       try {
         socket.send(JSON.stringify(message));

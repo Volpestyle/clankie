@@ -8,8 +8,11 @@ selfbot token. Activities are the supported alternative: a web app hosted in an
 iframe inside a voice channel, launched by the bot through an
 `EMBEDDED_APPLICATION` invite. This app is that web app.
 
-It is a **rendering client only**. It holds no Discord credentials, no mission
+It is a **rendering client only**. It holds no Discord credentials, no
 authority, and no emulator core. The host feeds it frames; it draws them.
+Its live lower third keeps Clankie's self-authored objective, intent, and
+monologue separate from the observed effect; spoken output stays on the
+voice surface rather than being duplicated here.
 
 ```mermaid
 flowchart LR
@@ -99,7 +102,7 @@ blank in Discord with nothing reporting why
 plane; the incident is recorded in the launcher's tunnel service).
 
 The probe asks the public hostname rather than the process table, because "a
-`cloudflared` is running" was true for every one of those six days. It
+`cloudflared` is running" is true for every one of those six days. It
 distinguishes three states an operator repairs differently:
 
 | Probe result           | Means                                         |
@@ -120,36 +123,60 @@ server. A producer path mounted on the tunnelled server would be reachable by
 anyone who can reach the activity, so frame injection is kept off the public
 surface entirely; the bearer token is the second lock rather than the only one.
 
-The activity server owns the listener, so it owns the first-run mint. The runner
-only ever resolves, which avoids two processes minting different tokens. A
-runner with no resolvable credential publishes nothing rather than falling back
-to an unauthenticated connection.
+**Only the process holding the GBA body may open a producer connection.** The
+slot goes to the newest connection and closes the previous one, and every sink
+reconnects two seconds after being closed — so two connected producers do not
+share the surface, they livelock, each taking the slot back from the other. An
+idle `gba-mcp` server that opened its sink at startup did exactly this: measured
+on 2026-08-15 against a live playthrough, a viewer received 47 of 139 published
+frames in 20 seconds, in bursts separated by the 2s reconnect delay. The body
+lock is what makes "one producer" true, so the sink is opened and closed with
+possession rather than with the process.
 
-The runner dials **out** to this endpoint (`@clankie/rendered-surface-client`)
-rather than accepting an inbound connection, so the trusted runner opens no port
-for an internet-facing surface to connect into.
+The activity server owns the listener, so it owns the first-run mint. The
+clankie service only ever resolves, which avoids two processes minting
+different tokens. A producer with no resolvable credential publishes nothing
+rather than falling back to an unauthenticated connection.
+
+The service dials **out** to this endpoint (`@clankie/rendered-surface-client`)
+rather than accepting an inbound connection, so the trusted service opens no
+port for an internet-facing surface to connect into.
 
 ## Bounds
 
 - One encoded frame is capped at `RENDERED_SURFACE_FRAME_MAX_BYTES` (256 KiB);
   a real 240×160 GBA PNG lands in single-digit kilobytes.
-- The frame stream rate-limits to 20fps by default and drops frames whose bytes
-  are unchanged, so an idle overworld costs nothing to publish.
+- The play runner publishes at hardware rate (~60fps) and idles the core between
+  turns, so the surface is continuous rather than a still image between actions.
+  `GbaFrameStream`, which serves the MCP observation path, still rate-limits to
+  20fps because that path publishes only when an external agent looks.
+- Both paths drop frames whose bytes are unchanged, so an idle overworld costs
+  nothing to publish.
 - A viewer whose socket backlog exceeds `maxBufferedBytes` has frames dropped
-  rather than queued. Drops are counted on `droppedFrameCount`, never silent.
-- The runner-side sink drops frames while disconnected rather than buffering
+  rather than queued, and the drops are counted on `droppedFrameCount`. The
+  standalone entrypoint reports that counter to stdout whenever it changes, so a
+  stuttering stream names itself instead of being guessed at.
+- The producer-side sink drops frames while disconnected rather than buffering
   them, so a reconnect resumes at the present moment instead of replaying a
   stale playthrough. Those drops are counted too.
+- The client's status line reads `Live view · <n> fps`, and names loss where it
+  happened: `· <n> lost` counts gaps in the runner-assigned `sequence`, so it is
+  everything lost before the canvas — producer socket, hub backpressure, Discord
+  proxy. `· <n> slow` counts frames this browser abandoned mid-decode because a
+  newer one landed first, which is the client failing to keep up rather than the
+  network. A healthy stream shows neither.
 - Producer messages are validated before they reach a viewer: a frame whose
   `byteLength` disagrees with its payload is rejected, not forwarded.
 - Lifecycle messages (`stopped`) are never dropped.
+- Producer disconnect invalidates the latest frame and overlay, so an ended or
+  crashed session cannot remain labelled live for late viewers.
 - Concurrent viewers are bounded; an over-cap viewer is closed, not queued.
 
 ## What this app is not
 
 - Not a recorder. Only the most recent frame and overlay are held, nothing is
-  persisted, and frame bytes never enter a semantic event stream — evidence
-  keeps carrying the framebuffer digest instead.
+  persisted, and frame bytes never enter a semantic event stream — observations
+  carry the framebuffer digest instead.
 - Not an authority surface. Viewer input arriving here is ambient authority and
   cannot approve privileged actions, exactly as voice and text ingress cannot.
 

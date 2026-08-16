@@ -41,6 +41,14 @@ describe("possessor voice client", () => {
       type: "narrate",
       text: "walked into a wall by the lab",
     });
+
+    await client.narrate("took a step", { deliveryId: "play-turn-3" });
+    expect(JSON.parse(socket.sent[1] ?? "{}")).toEqual({
+      schemaVersion: POSSESSOR_VOICE_SCHEMA_VERSION,
+      type: "narrate",
+      text: "took a step",
+      deliveryId: "play-turn-3",
+    });
   });
 
   it("refuses rather than queues when the bridge is unreachable", async () => {

@@ -1,6 +1,7 @@
-import { execFile as execFileCallback } from "node:child_process";
+import { execFile as execFileCallback, type spawn, type ChildProcess } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { createServer } from "node:http";
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -9,51 +10,15 @@ import {
   mintOperatorToken,
   OPERATOR_CREDENTIAL_PROVIDER_ID,
 } from "@clankie/credential-broker";
-import type { Client, HandleMessageStreamEvent, SessionState } from "eve/client";
 import { afterEach, describe, expect, it } from "vitest";
-import { headlessCaptainCursorPath, runHeadlessCaptainCommand } from "../bin/headless-captain.ts";
-import type { CaptainServiceHandle } from "../bin/captain-service.ts";
-import {
-  CAPTAIN_AGENT_NAME,
-  CAPTAIN_AUTHORED_TOOL_NAMES,
-  CAPTAIN_DISABLED_FRAMEWORK_TOOL_NAMES,
-  EVE_WORKFLOW_ID,
-} from "../src/session/captain-identity.ts";
-import { CaptainSessionCursorStore } from "../src/session/session-cursor.ts";
+import { runHeadlessCaptainCommand } from "../bin/headless-captain.ts";
 
 const execFileAsync = promisify(execFileCallback);
 const tempDirs: string[] = [];
-const TEST_GENERATION = "a".repeat(64);
 
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((path) => rm(path, { force: true, recursive: true })));
 });
-
-function captainInfo(): unknown {
-  return {
-    kind: "eve-agent-info",
-    mode: "start",
-    agent: {
-      name: CAPTAIN_AGENT_NAME,
-      agentRoot: "/captain/agent",
-      appRoot: "/captain/app",
-    },
-    tools: {
-      authored: CAPTAIN_AUTHORED_TOOL_NAMES.map((name) => ({ name })),
-      available: CAPTAIN_AUTHORED_TOOL_NAMES.map((name) => ({ name })),
-      disabledFramework: [...CAPTAIN_DISABLED_FRAMEWORK_TOOL_NAMES],
-    },
-  };
-}
-
-function healthyFetch(calls: string[] = []): typeof fetch {
-  return (async (input: string | URL | Request) => {
-    calls.push(String(input));
-    return String(input).endsWith("/eve/v1/info")
-      ? Response.json(captainInfo())
-      : Response.json({ ok: true, status: "ready", workflowId: EVE_WORKFLOW_ID });
-  }) as typeof fetch;
-}
 
 function outputBuffer(): { readonly stream: { write(chunk: string): void }; readonly text: () => string } {
   let output = "";
@@ -67,42 +32,14 @@ function outputBuffer(): { readonly stream: { write(chunk: string): void }; read
   };
 }
 
-function captainHandle(host: string): CaptainServiceHandle {
-  return {
-    generation: TEST_GENERATION,
-    host,
-    owned: false,
-    stop: () => Promise.resolve(),
-    stopSync: () => undefined,
-  };
-}
-
-function fakeClient(input: {
-  readonly events?: readonly HandleMessageStreamEvent[];
-  readonly onSend?: (message: string) => void;
-  readonly onStream?: (state: SessionState, startIndex: number | undefined) => void;
-  readonly streamImpl?: (signal: AbortSignal | undefined) => AsyncIterable<HandleMessageStreamEvent>;
-}): Client {
-  return {
-    health: async () => ({ ok: true, status: "ready", workflowId: EVE_WORKFLOW_ID }),
-    info: async () => captainInfo(),
-    session: (state: SessionState = { streamIndex: 0 }) => ({
-      send: async (payload: { message?: string }) => {
-        input.onSend?.(payload.message ?? "");
-        return {
-          continuationToken: "continuation-private",
-          sessionId: state.sessionId ?? "headless-session",
-        };
-      },
-      stream: (options?: { signal?: AbortSignal; startIndex?: number }) => {
-        input.onStream?.(state, options?.startIndex);
-        if (input.streamImpl !== undefined) return input.streamImpl(options?.signal);
-        return (async function* () {
-          for (const event of input.events ?? []) yield event;
-        })();
-      },
-    }),
-  } as unknown as Client;
+/** A detached child that stays alive, like a real service. */
+function runningChild(pid: number): ChildProcess {
+  return Object.assign(new EventEmitter(), {
+    exitCode: null as number | null,
+    pid,
+    kill: () => true,
+    unref: () => {},
+  }) as unknown as ChildProcess;
 }
 
 async function stateEnv(): Promise<NodeJS.ProcessEnv> {
@@ -115,25 +52,18 @@ async function stateEnv(): Promise<NodeJS.ProcessEnv> {
   };
 }
 
-async function writeServiceRecord(env: NodeJS.ProcessEnv, host: string): Promise<void> {
-  const directory = join(env.XDG_STATE_HOME as string, "clankie");
-  await mkdir(directory, { recursive: true });
-  await writeFile(
-    join(directory, "captain-eve-service.json"),
-    `${JSON.stringify({
-      version: 1,
-      host,
-      generation: TEST_GENERATION,
-      pid: process.pid,
-    })}\n`,
-  );
+/** Healthy clankie service + activity; nothing else running. */
+function healthyFetch(calls: string[] = []): typeof fetch {
+  return (async (input: string | URL | Request) => {
+    calls.push(String(input));
+    return Response.json({ ok: true, service: "clankie" });
+  }) as typeof fetch;
 }
 
-describe("headless captain commands", () => {
-  it("uses the canonical health and info endpoints without starting the captain", async () => {
+describe("headless clankie commands", () => {
+  it("probes the single service health route without starting anything", async () => {
     const calls: string[] = [];
     const stdout = outputBuffer();
-    let ensureCalled = false;
 
     const exitCode = await runHeadlessCaptainCommand(["health"], {
       repoRoot: "/unused",
@@ -142,45 +72,37 @@ describe("headless captain commands", () => {
       // Otherwise the bridge probe reads the real process table, and a developer
       // with a live bridge sees "healthy" where CI sees "unreachable".
       listProcessCommandsImpl: () => [],
-      ensureImpl: async () => {
-        ensureCalled = true;
-        throw new Error("health must not start the captain");
-      },
       stdout: stdout.stream,
     });
 
     expect(exitCode).toBe(0);
-    expect(ensureCalled).toBe(false);
-    // The captain is probed exactly once through its two canonical endpoints.
-    // Status also reports the other local services, so it legitimately probes
-    // their health too; what must not regress is a duplicate captain round trip.
-    const captainPaths = calls
+    // The clankie service is probed exactly once through its health route. The
+    // bridge's presence detail legitimately rides the same port; what must not
+    // regress is a duplicate health round trip.
+    const servicePaths = calls
       .map((url) => new URL(url))
-      .filter((url) => url.port === "4321")
+      .filter((url) => url.port === "4310")
       .map((url) => url.pathname);
-    expect(captainPaths).toEqual(["/eve/v1/health", "/eve/v1/info"]);
+    expect(servicePaths.filter((path) => path === "/health")).toEqual(["/health"]);
     expect(JSON.parse(stdout.text())).toMatchObject({
       ok: true,
       status: "ready",
-      endpointState: "healthy",
-      healthPath: "/eve/v1/health",
-      infoPath: "/eve/v1/info",
+      host: "http://127.0.0.1:4310",
       operatorCredential: { present: true, source: "env", consistency: "env_only" },
     });
-    // Status reports every supervised service in dependency order. Only the
-    // captain is reachable in this fixture, and nothing here is launcher-owned.
+    // Status reports every supervised service in dependency order. The bridge
+    // has no process behind it in this fixture, and nothing is launcher-owned.
     const { services } = JSON.parse(stdout.text()) as {
       services: readonly { id: string; state: string; owned: boolean }[];
     };
     expect(services.map((service) => [service.id, service.state, service.owned])).toEqual([
-      ["captain-eve", "healthy", false],
-      ["control-plane", "unhealthy", false],
+      ["clankie", "healthy", false],
       ["discord-bridge", "unreachable", false],
+      ["discord-user-session", "healthy", false],
       // The surfaces an audience actually reaches are reported too — health
       // used to stop at the bridge, which is how a dead tunnel stayed invisible.
       ["activity", "healthy", false],
       ["tunnel", "healthy", false],
-      ["runner", "unreachable", false],
     ]);
     // No tunnel configured in this fixture, and that is not a fault to report.
     expect(services.find((service) => service.id === "tunnel")).toMatchObject({
@@ -199,9 +121,11 @@ describe("headless captain commands", () => {
 
     const exitCode = await runHeadlessCaptainCommand(["health"], {
       repoRoot: "/unused",
-      env: { CLANKIE_OPERATOR_TOKEN: overridden },
+      env: { XDG_STATE_HOME: root, CLANKIE_OPERATOR_TOKEN: overridden },
       fetchImpl: healthyFetch(),
+      listProcessCommandsImpl: () => [],
       operatorCredentialStore: store,
+      captainCredentialStore: store,
       stdout: stdout.stream,
     });
 
@@ -239,32 +163,49 @@ describe("headless captain commands", () => {
     if (rotated?.type === "api") expect(stdout.text()).not.toContain(rotated.key);
   });
 
-  it("routes a captain-scoped restart without initializing the TTY face", async () => {
+  it("routes a captain-scoped restart through the single service without a TTY face", async () => {
     const stdout = outputBuffer();
     const stderr = outputBuffer();
-    const host = "http://127.0.0.1:4321";
-    let restarted = false;
+    const spawned: string[][] = [];
+    // The service reports down until it is spawned, then healthy; the bridge
+    // probe is record-backed, so it turns healthy once its own spawn lands.
+    let clankieUp = false;
 
     const exitCode = await runHeadlessCaptainCommand(["restart", "captain"], {
       repoRoot: "/repo",
       env: await stateEnv(),
-      host,
-      restartImpl: async () => {
-        restarted = true;
-        return { ...captainHandle(host), owned: true };
-      },
+      fetchImpl: (async (input: string | URL | Request) => {
+        if (String(input).includes("/health")) {
+          if (!clankieUp) throw new Error("connection refused");
+          return Response.json({ ok: true });
+        }
+        throw new Error("connection refused");
+      }) as typeof fetch,
+      listProcessCommandsImpl: () => [],
+      processIsAliveImpl: () => true,
+      spawnImpl: ((_command: string, args: string[]) => {
+        spawned.push(args);
+        if (args.includes("@clankie/clankie")) clankieUp = true;
+        return runningChild(9_000 + spawned.length);
+      }) as unknown as typeof spawn,
       stdout: stdout.stream,
       stderr: stderr.stream,
     });
 
     expect(exitCode).toBe(0);
-    expect(restarted).toBe(true);
+    // The captain restart fans out to the bridge, whose live presence claim the
+    // restarted service no longer honors.
+    expect(spawned.map((args) => args[1])).toEqual(["@clankie/clankie", "@clankie/discord-bridge"]);
     expect(JSON.parse(stdout.text())).toMatchObject({
       ok: true,
       status: "ready",
       owned: true,
-      target: "captain-eve",
-      services: [{ id: "captain-eve", ok: true }],
+      target: "clankie",
+      services: [
+        { id: "clankie", ok: true },
+        { id: "discord-bridge", ok: true },
+        { id: "discord-user-session", ok: true },
+      ],
     });
     // Progress narration must stay off stdout so it remains a JSON document.
     expect(stderr.text()).toContain("Clankie");
@@ -273,226 +214,23 @@ describe("headless captain commands", () => {
   it("rejects an unknown restart target without signalling anything", async () => {
     const stdout = outputBuffer();
     const stderr = outputBuffer();
-    let restarted = false;
+    let spawnedAnything = false;
 
     const exitCode = await runHeadlessCaptainCommand(["restart", "not-a-service"], {
       repoRoot: "/repo",
       env: await stateEnv(),
-      restartImpl: async () => {
-        restarted = true;
-        throw new Error("must not restart on an unknown target");
-      },
+      spawnImpl: (() => {
+        spawnedAnything = true;
+        throw new Error("must not spawn on an unknown target");
+      }) as unknown as typeof spawn,
       stdout: stdout.stream,
       stderr: stderr.stream,
     });
 
     expect(exitCode).toBe(1);
-    expect(restarted).toBe(false);
+    expect(spawnedAnything).toBe(false);
     expect(stdout.text()).toBe("");
     expect(stderr.text()).toContain('Unknown service "not-a-service"');
-  });
-
-  it("submits a message without echoing it and writes a private isolated cursor", async () => {
-    const env = await stateEnv();
-    const host = "http://127.0.0.1:4321";
-    const stdout = outputBuffer();
-    const secretPrompt = "coordinate the next private mission";
-    let delivered: string | undefined;
-
-    const exitCode = await runHeadlessCaptainCommand(["msg", secretPrompt], {
-      repoRoot: "/repo",
-      env,
-      host,
-      ensureImpl: async () => captainHandle(host),
-      clientFactory: () =>
-        fakeClient({
-          onSend: (message) => {
-            delivered = message;
-          },
-        }),
-      stdout: stdout.stream,
-    });
-
-    expect(exitCode).toBe(0);
-    expect(delivered).toBe(secretPrompt);
-    expect(stdout.text()).not.toContain(secretPrompt);
-    expect(JSON.parse(stdout.text())).toMatchObject({
-      ok: true,
-      status: "submitted",
-      sessionId: "headless-session",
-      next: "clankie watch",
-    });
-    const path = headlessCaptainCursorPath(env);
-    expect(JSON.parse(await readFile(path, "utf8"))).toMatchObject({
-      version: 2,
-      active: true,
-      generation: TEST_GENERATION,
-      sessionId: "headless-session",
-      streamIndex: 0,
-    });
-    expect((await stat(path)).mode & 0o777).toBe(0o600);
-  });
-
-  it("reads a non-TTY message from stdin", async () => {
-    const env = await stateEnv();
-    const host = "http://127.0.0.1:4321";
-    let delivered: string | undefined;
-
-    const exitCode = await runHeadlessCaptainCommand(["msg"], {
-      repoRoot: "/repo",
-      env,
-      host,
-      readStdin: async () => "message from pipe\n",
-      ensureImpl: async () => captainHandle(host),
-      clientFactory: () =>
-        fakeClient({
-          onSend: (message) => {
-            delivered = message;
-          },
-        }),
-      stdout: outputBuffer().stream,
-    });
-
-    expect(exitCode).toBe(0);
-    expect(delivered).toBe("message from pipe\n");
-  });
-
-  it("streams from the durable index exactly once and settles the cursor", async () => {
-    const env = await stateEnv();
-    const host = "http://127.0.0.1:4321";
-    await writeServiceRecord(env, host);
-    const store = new CaptainSessionCursorStore(headlessCaptainCursorPath(env));
-    await store.write({
-      version: 2,
-      active: true,
-      generation: TEST_GENERATION,
-      sessionId: "headless-session",
-      continuationToken: "continuation-private",
-      streamIndex: 3,
-    });
-    const events = [
-      { type: "message.completed", data: { message: "done", sequence: 3, stepIndex: 0, turnId: "t" } },
-      { type: "session.waiting", data: { wait: "next-user-message" } },
-    ] as unknown as HandleMessageStreamEvent[];
-    const stdout = outputBuffer();
-    let observedStart: number | undefined;
-
-    const exitCode = await runHeadlessCaptainCommand(["watch"], {
-      repoRoot: "/repo",
-      env,
-      host,
-      clientFactory: () =>
-        fakeClient({
-          events,
-          onStream: (_state, startIndex) => {
-            observedStart = startIndex;
-          },
-        }),
-      stdout: stdout.stream,
-    });
-
-    expect(exitCode).toBe(0);
-    expect(observedStart).toBe(3);
-    expect(stdout.text()).toContain('"type":"message.completed"');
-    expect(stdout.text()).toContain('"status":"waiting"');
-    expect(await store.read()).toMatchObject({ active: false, streamIndex: 5 });
-  });
-
-  it("wait suppresses intermediate events and prints only the final boundary", async () => {
-    const env = await stateEnv();
-    const host = "http://127.0.0.1:4321";
-    await writeServiceRecord(env, host);
-    await new CaptainSessionCursorStore(headlessCaptainCursorPath(env)).write({
-      version: 2,
-      active: true,
-      generation: TEST_GENERATION,
-      sessionId: "headless-session",
-      streamIndex: 0,
-    });
-    const stdout = outputBuffer();
-
-    const exitCode = await runHeadlessCaptainCommand(["wait"], {
-      repoRoot: "/repo",
-      env,
-      host,
-      clientFactory: () =>
-        fakeClient({
-          events: [
-            { type: "message.appended", data: { messageDelta: "x", messageSoFar: "x" } },
-            { type: "session.completed" },
-          ] as unknown as HandleMessageStreamEvent[],
-        }),
-      stdout: stdout.stream,
-    });
-
-    expect(exitCode).toBe(0);
-    expect(stdout.text().trim().split("\n")).toHaveLength(1);
-    expect(JSON.parse(stdout.text())).toMatchObject({ ok: true, status: "completed" });
-  });
-
-  it("returns 124 on an explicit watch timeout and preserves the active cursor", async () => {
-    const env = await stateEnv();
-    const host = "http://127.0.0.1:4321";
-    await writeServiceRecord(env, host);
-    const store = new CaptainSessionCursorStore(headlessCaptainCursorPath(env));
-    await store.write({
-      version: 2,
-      active: true,
-      generation: TEST_GENERATION,
-      sessionId: "headless-session",
-      streamIndex: 2,
-    });
-    const stderr = outputBuffer();
-
-    const exitCode = await runHeadlessCaptainCommand(["watch", "--timeout", "0.01"], {
-      repoRoot: "/repo",
-      env,
-      host,
-      clientFactory: () =>
-        fakeClient({
-          streamImpl: (signal) =>
-            (async function* () {
-              await new Promise<void>((_resolve, reject) => {
-                signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), {
-                  once: true,
-                });
-              });
-              yield { type: "session.completed" } as HandleMessageStreamEvent;
-            })(),
-        }),
-      stdout: outputBuffer().stream,
-      stderr: stderr.stream,
-    });
-
-    expect(exitCode).toBe(124);
-    expect(JSON.parse(stderr.text())).toMatchObject({ status: "timeout" });
-    expect(await store.read()).toMatchObject({ active: true, streamIndex: 2 });
-  });
-
-  it("refuses a second message while the saved turn is active", async () => {
-    const env = await stateEnv();
-    const host = "http://127.0.0.1:4321";
-    await new CaptainSessionCursorStore(headlessCaptainCursorPath(env)).write({
-      version: 2,
-      active: true,
-      generation: TEST_GENERATION,
-      sessionId: "headless-session",
-      streamIndex: 0,
-    });
-    const stderr = outputBuffer();
-
-    const exitCode = await runHeadlessCaptainCommand(["msg", "must not send"], {
-      repoRoot: "/repo",
-      env,
-      host,
-      ensureImpl: async () => captainHandle(host),
-      clientFactory: () => fakeClient({ onSend: () => expect.unreachable() }),
-      stdout: outputBuffer().stream,
-      stderr: stderr.stream,
-    });
-
-    expect(exitCode).toBe(1);
-    expect(stderr.text()).toContain("clankie watch");
   });
 
   it("routes the real executable health command without a TTY", async () => {
@@ -500,13 +238,7 @@ describe("headless captain commands", () => {
     const server = createServer((request, response) => {
       paths.push(request.url ?? "");
       response.setHeader("content-type", "application/json");
-      response.end(
-        JSON.stringify(
-          request.url === "/eve/v1/info"
-            ? captainInfo()
-            : { ok: true, status: "ready", workflowId: EVE_WORKFLOW_ID },
-        ),
-      );
+      response.end(JSON.stringify({ ok: true, service: "clankie" }));
     });
     await new Promise<void>((resolvePromise) => server.listen(0, "127.0.0.1", resolvePromise));
     try {
@@ -515,23 +247,22 @@ describe("headless captain commands", () => {
       const repoRoot = resolve(import.meta.dirname, "../../..");
       const processStateRoot = await mkdtemp(join(tmpdir(), "clankie-headless-process-test-"));
       tempDirs.push(processStateRoot);
-      const { stdout, stderr } = await execFileAsync(
+      const { stdout } = await execFileAsync(
         process.execPath,
         [join(repoRoot, "apps", "tui", "bin", "clankie.ts"), "health"],
         {
           cwd: repoRoot,
           env: {
             ...process.env,
-            CLANKIE_CAPTAIN_URL: `http://127.0.0.1:${address.port}`,
+            CLANKIE_CONTROL_PLANE_URL: `http://127.0.0.1:${address.port}`,
             CLANKIE_CREDENTIALS_FILE: join(processStateRoot, "credentials.json"),
             CLANKIE_OPERATOR_TOKEN: "operator-secret",
             XDG_STATE_HOME: processStateRoot,
           },
         },
       );
-      expect(stderr).toBe("");
-      expect(JSON.parse(stdout)).toMatchObject({ ok: true, status: "ready", endpointState: "healthy" });
-      expect(paths).toEqual(["/eve/v1/health", "/eve/v1/info"]);
+      expect(JSON.parse(stdout)).toMatchObject({ ok: true, status: "ready" });
+      expect(paths).toContain("/health");
     } finally {
       server.close();
     }

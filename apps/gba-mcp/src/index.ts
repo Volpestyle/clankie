@@ -93,9 +93,14 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         // right: it refuses the possession, not the server's existence.
         const holderId = possession.current()?.holderId ?? "unknown";
         bodyLock = acquireBodyLock({ rootDir: bodyRoot, holderId: `gba-mcp:${holderId}` });
+        // Only now is this server the one playing, so only now may it claim
+        // the surface people watch. The lock above is what makes that safe:
+        // whoever holds the body is the only one with frames worth showing.
+        openSink(++sinkGeneration);
       } else if (!held && bodyLock !== null) {
         bodyLock.release();
         bodyLock = null;
+        closeSink();
       }
     },
   });
@@ -105,12 +110,43 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   // returns the frame to the caller and nowhere else. Optional and best-effort:
   // no activity server running means no sink, and play continues unwatched
   // rather than failing.
-  const sink = await createBrokeredActivityFrameSink({
-    url: process.env["CLANKIE_ACTIVITY_PRODUCER_URL"] ?? "ws://127.0.0.1:4322/producer",
-  });
-  if (sink === undefined) {
-    process.stderr.write("no activity producer credential; nobody can watch this session\n");
-  }
+  //
+  // Opened on possession for the same reason the body lock is, and it is the
+  // same mistake to open it at startup — worse, because it fails silently. The
+  // producer endpoint gives the slot to the newest connection and closes the
+  // previous one, and every sink reconnects 2s after being closed. An idle
+  // server holding the slot therefore does not merely sit there: it takes the
+  // slot from whoever is actually playing, gets taken back, and both sides
+  // livelock. Measured on 2026-08-15 against a live playthrough, a viewer
+  // received 47 of 139 published frames in 20 seconds, in bursts separated by
+  // the 2s reconnect delay. That is what "it randomly sticks on a frame" was.
+  let sink: Awaited<ReturnType<typeof createBrokeredActivityFrameSink>>;
+  // Bumped on every possession change, so a connection that resolves after its
+  // possession already ended closes itself instead of squatting the slot.
+  let sinkGeneration = 0;
+  const openSink = (generation: number): void => {
+    void createBrokeredActivityFrameSink({
+      url: process.env["CLANKIE_ACTIVITY_PRODUCER_URL"] ?? "ws://127.0.0.1:4322/producer",
+    }).then(
+      (opened) => {
+        if (generation !== sinkGeneration) {
+          opened?.close();
+          return;
+        }
+        if (opened === undefined) {
+          process.stderr.write("no activity producer credential; nobody can watch this session\n");
+          return;
+        }
+        sink = opened;
+      },
+      () => undefined,
+    );
+  };
+  const closeSink = (): void => {
+    sinkGeneration += 1;
+    sink?.close();
+    sink = undefined;
+  };
 
   // So a possessor can commentate what it is playing. Optional and best-effort
   // for the same reason the sink is: no bridge, no voice, and the tools refuse
@@ -148,7 +184,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     });
   };
 
-  if (sink !== undefined && smooth) {
+  // Installed unconditionally now that the sink comes and goes with possession;
+  // `publish` no-ops whenever there is nobody to publish to.
+  if (smooth) {
     game.observeFrames(
       () => {
         publish();
@@ -167,7 +205,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         schemaVersion: 1,
         surface: "gba_emulator",
         sequence,
-        lines: [monologue.slice(0, 256)],
+        objective: null,
+        intent: null,
+        monologue: monologue.slice(0, 256),
+        effect: null,
         updatedAt: new Date().toISOString(),
       }),
     );

@@ -1,14 +1,14 @@
 # ADR 0045: Official-bot group voice uses the maintained Discord media stack
 
-Status: accepted (2026-07-25). The STT → captain → TTS pipeline is superseded
-by [ADR 0057](0057-realtime-voice-with-captain-handoff.md); media ownership,
-DAVE, the consent model, and the allowlists remain authoritative here. Live
+Status: accepted (2026-07-25). [ADR 0057](0057-realtime-voice-with-captain-handoff.md)
+defines the realtime speech path; media ownership, DAVE, the consent model, and
+the allowlists remain authoritative here. Live
 Discord evidence remains a deployment gate.
 
 ## Context
 
 Clankie needs an official Discord bot that can participate in a multi-person
-voice channel with speaker attribution, transcription, the same Eve captain
+voice channel with speaker attribution, transcription, the same pi captain
 identity, governed person memory, and spoken responses. ADR 0025 selected a
 selective import of the v1 Rust ClankVox media owner. That import cannot proceed
 while its `AGPL-3.0-or-later` source and this repository's `Apache-2.0` license
@@ -28,19 +28,7 @@ placement and direct `guild.voiceAdapterCreator` plan for official-bot voice.
 The schema-1 ClankVox IPC parser and fixtures remain an inactive compatibility
 artifact; no AGPL ClankVox source is imported or executed.
 
-```mermaid
-flowchart LR
-  D[Discord group voice<br/>DAVE · RTP/Opus] <--> V[@discordjs/voice<br/>single media owner]
-  V -->|consented user-id Opus| C[bounded per-speaker capture]
-  C -->|24 kHz mono PCM<br/>memory only| L[dormant listener<br/>gpt-realtime-whisper]
-  L --> F{floor machine}
-  F -->|wake| RT[engaged session<br/>gpt-realtime-2.1<br/>ADR 0057]
-  M[(approved guild/user memory)] --> B[control-plane briefing] --> RT
-  RT -->|ask_clankie| E[Eve discord_voice lane]
-  E -->|result text| RT
-  RT -->|streamed 24 kHz PCM<br/>AI-voice disclosure| V
-  RT --> R[(content-free receipts)]
-```
+![ADR 0045: Official-bot group voice uses the maintained Discord media stack](../diagrams/0045-official-bot-dave-group-voice.jpg)
 
 ### Consent and privacy
 
@@ -53,16 +41,18 @@ flowchart LR
   voice presence check on `/clankie join` plus per-participant consent.
   `DISCORD_INGRESS_CHANNEL_IDS` follows the same rule, so one mental model
   covers both planes: the guild allowlist bounds reach, the channel list refines
-  it. Text ingress has no per-turn gate equivalent to voice consent, so an open
-  channel list there makes the ingress trigger policy the only thing standing
-  between Clankie and a reply to every message in the server.
+  it. Text has no per-speaker consent gate, so every message in those admitted
+  channels reaches the captain by default; he still decides whether to reply.
+  The explicit `addressed` resource policy narrows that spend when wanted.
 - `/clankie join` is gated by the voice presence tier
   ([ADR 0050](0050-voice-presence-authority-tier.md)), joins the invoker's
   allowlisted channel, discloses DAVE, the live OpenAI realtime session's
   audio residency, and AI-generated speech, and opts in only the invoker.
-- Every other human uses `/clankie voice-consent opt-in`. Opt-out, leaving the
-  channel, bot leave, emergency shutdown, or process restart revokes ephemeral
-  consent. Merely being present never implies consent.
+- Under the default `explicit` policy every other human uses
+  `/clankie voice-consent opt-in`. [ADR 0071](0071-presence-as-consent-voice-policy.md)
+  also permits an owner-selected `presence` policy for disclosed private rooms;
+  explicit opt-out always wins. Leaving the channel, bot leave, emergency
+  shutdown, or process restart revokes ephemeral consent.
 - The receiver subscribes only to consented Discord user ids, so unconsented
   audio never reaches the realtime input buffer. Local raw and generated PCM
   buffers are memory-only and zeroed after use; the live realtime session
@@ -77,17 +67,21 @@ flowchart LR
 
 Conversation is answered by the engaged realtime session; anything that
 touches the world goes through its single `ask_clankie` tool to the continuing
-`discord_voice` Eve lane for the active guild/channel
-([ADR 0057](0057-realtime-voice-with-captain-handoff.md)). The control plane,
+`discord_voice` pi session for the active guild/channel
+([ADR 0057](0057-realtime-voice-with-captain-handoff.md)). The Clankie service,
 not the bridge request, resolves approved person-memory facts for consented
 guild/user identities and supplies the bounded briefing projection. Voice can
 use approved memory but cannot commit memory or persist a raw transcript.
 
-Concurrent speakers retain separate Opus subscriptions. Overlap emits
-content-free evidence. Barge-in is deliberate: the floor holder speaking over
-him, or a re-address, truncates playback, while crosstalk between other people
-lets him finish. Captain handoffs and playback remain serialized so two
-responses do not talk over one another.
+Concurrent speakers retain separate Opus subscriptions and separate
+transcription sessions, then converge as gateway-attributed text in one shared
+floor and engaged conversation. Overlap emits content-free evidence. Barge-in
+is deliberate: the floor holder speaking over him, or a re-address, truncates
+playback, while crosstalk between other people lets him finish. The utterance's
+gateway user id and delivery id remain immutable through captain handoff and
+response evidence, even if another participant takes the floor meanwhile.
+Captain handoffs and playback remain serialized so two responses do not talk
+over one another.
 
 ### Credentials and evidence
 
@@ -98,7 +92,7 @@ plane mints distinct `clankie_discord_bridge` and
 `discord_voice` captain source.
 
 Readiness checks the brokered identities, OpenAI speech configuration, native
-Opus, allowlists, live bot/application/guild identity, and control-plane
+Opus, allowlists, live bot/application/guild identity, and Clankie service
 composition. The live gate requires one positive DAVE protocol, three unique
 explicit consents, three attributed speakers with captain/TTS round trips, no
 media failure, and a clean leave.
@@ -106,7 +100,7 @@ media failure, and a clean leave.
 ## Options weighed
 
 - **Import v1 ClankVox** — rejected for this outcome because licensing is
-  unresolved and the maintained library now supplies the required bot media
+  unresolved and the maintained library supplies the required bot media
   and DAVE paths.
 - **Write a new Rust sidecar** — rejected because it duplicates an actively
   maintained protocol implementation without adding a required isolation

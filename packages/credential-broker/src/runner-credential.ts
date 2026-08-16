@@ -2,14 +2,11 @@ import { randomBytes } from "node:crypto";
 import { createDefaultCredentialStore, type CredentialStore } from "./credential-store.ts";
 
 /**
- * The local bearer between the runner and the control plane. Broker-owned for
- * the same reason the bridge bearers are: an env-only token dies with the
- * shell that exported it, and a control plane restarted without it silently
- * loses its runner plane — every claim 401s while nothing logs why. The
- * control plane mints on first start; the runner only resolves.
+ * The local bearer authenticating runner-scoped routes on the service.
+ * Broker-owned for the same reason the bridge bearers are: an env-only token
+ * dies with the shell that exported it. The service mints on first start.
  * `CLANKIE_RUNNER_TOKEN` in the environment still wins when set, so tests and
- * deliberate overrides keep working — but it must then be set for both
- * processes or neither.
+ * deliberate overrides keep working.
  */
 export const RUNNER_CREDENTIAL_PROVIDER_ID = "clankie_runner";
 const RUNNER_TOKEN_PREFIX = "clankie_runner_";
@@ -37,7 +34,7 @@ interface MintRunnerCredentialOptions extends RunnerCredentialOptions {
   readonly randomBytes?: (size: number) => Buffer;
 }
 
-/** Mints the local bearer used only between the runner and the control plane. */
+/** Mints the local bearer for runner-scoped routes on the service. */
 export function mintRunnerToken(random: (size: number) => Buffer = randomBytes): string {
   const entropy = random(RUNNER_TOKEN_BYTES);
   if (entropy.length !== RUNNER_TOKEN_BYTES) {
@@ -63,9 +60,8 @@ export async function resolveRunnerCredential(
 }
 
 /**
- * Control-plane-owned first-run bootstrap. The runner resolves this credential
- * only after the control plane has created it, which avoids cross-process mint
- * races.
+ * Service-owned first-run bootstrap: mints the credential when it is absent,
+ * resolves it otherwise.
  */
 export async function ensureRunnerCredential(options: MintRunnerCredentialOptions = {}): Promise<string> {
   const existing = await resolveRunnerCredential(options);

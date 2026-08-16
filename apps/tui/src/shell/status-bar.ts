@@ -6,12 +6,30 @@
  * v1 (clankie snapshot 04734df9, scripts/clankie.ts).
  */
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component } from "@earendil-works/pi-tui";
-import type { CaptainPresenceSnapshot } from "../observation/mission-observer.ts";
+import type { PresenceSnapshot } from "../observation/presence.ts";
+import type { OperatorConversationContextUsage } from "@clankie/protocol";
 
 export const STATUS_BAR_MAX_ROWS = 6;
 
-export function formatCaptainPresenceStatus(presence: CaptainPresenceSnapshot | undefined): string {
-  return `clankie: ${presence?.state ?? "unknown"}`;
+export function formatCaptainPresenceStatus(presence: PresenceSnapshot | undefined): string {
+  return `clankie: ${presence?.phase ?? "unknown"}`;
+}
+
+export function formatCaptainContextStatus(usage: OperatorConversationContextUsage | undefined): string {
+  return `context: ${formatCaptainContextUsage(usage)}`;
+}
+
+export function formatCaptainContextUsage(usage: OperatorConversationContextUsage | undefined): string {
+  if (usage === undefined) return "unavailable";
+  return `${usage.tokens === null ? "?" : formatTokenCount(usage.tokens)} / ${formatTokenCount(usage.contextWindow)}`;
+}
+
+function formatTokenCount(tokens: number): string {
+  if (tokens < 1_000) return String(tokens);
+  const divisor = tokens < 1_000_000 ? 1_000 : 1_000_000;
+  const suffix = divisor === 1_000 ? "k" : "m";
+  const value = tokens / divisor;
+  return `${value >= 100 || Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)}${suffix}`;
 }
 
 export class ClankieStatusBarComponent implements Component {

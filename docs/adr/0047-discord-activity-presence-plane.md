@@ -1,13 +1,11 @@
 # ADR 0047: The Discord activity plane carries Clankie's rendered video
 
-Status: accepted (James, 2026-07-25). The ADR and presence contracts land first;
-the activity app, the frame transport, and live Discord evidence remain
-implementation gates.
+Status: accepted (James, 2026-07-25). The activity app, frame transport, and
+live Discord evidence are implementation gates.
 
 ## Context
 
-Clankie can already do both halves of "play a game in front of people" — but not
-at the same time, and not in the same place.
+Clankie plays and talks in the same Discord room through separate surfaces.
 
 He plays: the pinned headless mGBA core drives an operator-supplied FireRed ROM
 and decodes overworld position, party records, legal moves, bag, dialog, menus,
@@ -16,26 +14,24 @@ and battle outcome from RAM ([ADR 0040](0040-real-mgba-core-behind-the-emulator-
 official bot holds a DAVE group-voice session with brokered speech
 ([ADR 0045](0045-official-bot-dave-group-voice.md)).
 
-What is missing is a way for the pixels to reach the humans in the voice
-channel. `MgbaFireRedCore.framebufferSnapshot()` returns real RGB565 frames and
-they are discarded after one evidence screenshot.
+The activity plane carries `MgbaFireRedCore.framebufferSnapshot()` RGB565 frames
+to humans in the voice channel without moving the ROM, core, or savestate.
 
 **Discord blocks video publication from bot accounts.** This is a gateway-level
 restriction, not a missing library. Every Go Live implementation — the
 Discord-RE fork, `@dank074/discord-video-stream`, and the republished
 derivatives — takes a selfbot library as a peer dependency and requires a raw
 user-account token. The published request to lift this for bots
-(`discord/discord-api-docs#1603`) has never been granted, and the March 2026
+(`discord/discord-api-docs#1603`) remains open, and the March 2026
 move to end-to-end encrypted calls everywhere raises the maintenance cost of
 reverse-engineered transports further.
 
-[ADR 0024](0024-discord-dual-plane-presence.md) therefore scoped Go Live as an
+[ADR 0024](0024-discord-dual-plane-presence.md) scopes Go Live as an
 explicitly opted-in, isolated **personal-lab** capability, denied by the
-high-assurance and team doctrine profiles, and left it unimplemented behind
-VUH-836/840/841. That boundary was correct and this ADR does not relax it.
+high-assurance and team doctrine profiles. This ADR does not relax that boundary.
 
-It was, however, incomplete: it treated Go Live as _the_ way to put a rendered
-surface in front of a voice channel. There is an officially supported one.
+Discord Activities provide the officially supported rendered surface for a
+voice channel.
 
 ## Decision
 
@@ -44,28 +40,7 @@ Embedded App SDK. Activities are web apps hosted in an iframe inside a voice
 channel. They are open to all developers, they run on bot transport, and they
 require no user-account token.
 
-```mermaid
-flowchart LR
-  subgraph host["Clankie host (local)"]
-    core["mGBA WASM core<br/>pinned ROM · never leaves host"]
-    adapter["GbaEmulatorAdapter<br/>decoded party · route · battle"]
-    frames["frame transport seam<br/>RGB565 → capped encoded stream"]
-    cap["captain lane"]
-    core --> adapter --> cap
-    core --> frames
-  end
-
-  subgraph discord["Discord voice channel"]
-    bot["official bot<br/>DAVE voice · spoken narration"]
-    act["activity iframe<br/>canvas + decoded-state overlay"]
-  end
-
-  frames -->|"encoded frames via /.proxy WebSocket"| act
-  adapter -->|"decoded state"| act
-  cap --> bot
-  act -.->|"bounded viewer input"| cap
-  core -.->|"framebuffer digest only"| ev[("hash-chained evidence")]
-```
+![ADR 0047: The Discord activity plane carries Clankie's rendered video](../diagrams/0047-discord-activity-presence-plane.jpg)
 
 The bot launches the activity through the documented invite endpoint —
 `POST /channels/{channel.id}/invites` with `target_type: 2`
@@ -97,13 +72,14 @@ session sits at `voice_active` — so ordering them against each other would for
 one slot to carry two unrelated meanings and would make "is an activity running"
 unanswerable whenever Go Live is also active.
 
-Activity instances are therefore a separate facet on the session record, gated
-by `minPhase: voice_active`. `activity_stop` additionally requires a running
-instance rather than a higher phase.
+Activity instances remain a separate observational facet on the session record,
+but action admission does not guess from it. The executor reads Discord's live
+invite state, replaces old launch links on start, and treats stopping an
+already-stopped surface as success. Both actions require `voice_active`.
 
-This leaves `go_live_active`-as-a-phase as pre-existing modelling debt inherited
-from ADR 0024. This decision does not resolve it; VUH-841 should, when the
-publish path lands and the same orthogonality argument applies to it.
+`go_live_active` remains representable for a transport that publishes it, but
+control does not depend on that projection: `go_live_stop` is available from
+`voice_active` and is idempotent against the live publisher.
 
 ### The frame transport boundary
 
@@ -112,21 +88,61 @@ cross the transport — only encoded frames do. This preserves the pinned-digest
 fail-closed model, keeps copyrighted bytes off every client, and keeps the
 existing two-fresh-core byte-identical live receipt meaningful.
 
-The seam is versioned and bounded: a capped frame rate, a capped encoded frame
-size, and a capped in-flight queue. GBA output is 240×160 flat-palette pixel art
-that compresses hard, so per-frame PNG through the existing RGB565 unpack in
-`integrations/gba-emulator/scripts/png-writer.ts` is sufficient; WebCodecs is
-the upgrade path if 60fps is ever wanted.
+The seam is versioned and bounded: a capped encoded frame size and a capped
+in-flight queue. GBA output is 240×160 flat-palette pixel art that compresses
+hard, so per-frame PNG through the existing RGB565 unpack in
+`integrations/gba-emulator/scripts/png-writer.ts` is sufficient at hardware rate:
+measured on the FireRed bedroom state, one frame is 3.2KB of base64 and 1.68ms of
+encode, so 60fps costs ~0.19 MB/s and ~10% of a core. WebCodecs remains the
+upgrade path only if the frame budget ever stops holding.
 
-Clankie does not play at 60fps — he advances the core in `advanceFrames` bursts —
-so frames are pushed on observation plus a paced tick, which matches how the
-agent actually behaves and costs far less than a constant encode.
+The watched stream runs at hardware rate whether or not he is acting. His own
+cadence is bursty — he advances the core in `advanceFrames` bursts and then
+thinks — but a stream that mirrors that cadence is a still image two thirds of
+the time (measured: 379 emulated seconds over 1143 wall-clock seconds on the
+2026-08-15 run), which reads as a crash rather than as thought. The play host
+therefore idles the core between turns with nothing held, which is what standing
+still in FireRed looks like, and observes every frame rather than every third
+one. The frames the watcher sees are the frames the console draws.
+
+This buys continuity at the cost of reproducibility: an idling core advances the
+game's RNG, so a live playthrough is not replayable frame-for-frame from
+its start state. The competence benchmark keeps determinism because it drives
+`createFreePlaySession` directly and never installs the idle tick.
+
+**The core seam's input methods are asynchronous, and that is load-bearing.**
+Pacing a watched action with `Atomics.wait` stops the process even though it is
+precise and costs no CPU: the current 600-frame benchmark fires 0 of roughly 731
+timer ticks during the action. Frames cannot flush, and the HTTP API, Discord
+turn, and voice seam also freeze. Awaiting a timer leaves the loop free (599 of
+roughly 628 ticks) and, paced against a deadline rather than per chunk, runs an
+action in the console's wall-clock time instead of 16% over. Therefore
+`pressButton`, `advanceFrames`, and
+`advanceFramesHolding` return promises; `EnvironmentRuntime` dispatches
+asynchronously, so the boundary stops at the adapter.
+
+That makes idle ticks and actions genuinely concurrent, so `idleFrames` — which
+releases every button — stands off while an action holds the core. The guard
+lives in the core rather than in the play host because every caller of the seam
+needs it, not just the play path.
+
+A live console also costs the play loop its cheapest "did anything happen?"
+signal, and that has to be paid for rather than ignored. `observeEffect` diffs
+the framebuffer digest to catch what the decoded state misses — a naming cursor,
+a page swap — which only worked because a frozen console changed nothing except
+what an action changed. Sampling that digest at observation time now spans the
+whole decision, so ambient animation reads as the action's own effect: on
+2026-08-15 a fruitless A press was reported to him as "screen changed … trust
+the frame", and he spent the following turn discovering that it had not. The
+digest is therefore sampled immediately before dispatch, narrowing the window
+back to the action. Ambient change _during_ an action stays attributed to it,
+which is the honest limit of a frame diff against a world that moves on its own.
 
 Raw frames never enter semantic event streams. Evidence keeps carrying the
 `framebufferSha256` digest it already carries, consistent with the media
 boundary ADR 0024 sets for VUH-840.
 
-The runner and the activity server are separate processes, so the seam is a
+The Clankie service and the activity server are separate processes, so the seam is a
 concrete wire with a deliberate direction and exposure:
 
 - The activity server runs **two listeners**. The viewer listener is tunnelled
@@ -134,19 +150,22 @@ concrete wire with a deliberate direction and exposure:
   only and is never tunnelled. A producer path mounted on the tunnelled server
   would be reachable by anyone who can reach the activity, so the split — not
   the bearer token — is the primary control. The token is the second lock.
-- The **runner dials out** to the producer endpoint. The trusted runner holds
+- The **play host dials out** to the producer endpoint. The Clankie service holds
   credentials and opens no port for an internet-facing surface to connect into.
 - The producer bearer lives in the **credential broker** under
   `clankie_activity_producer`, alongside the other internal Clankie bearers, and
   `CLANKIE_ACTIVITY_PRODUCER_TOKEN` is a hard startup error. The activity server
-  owns the first-run mint because it owns the listener; the runner only
+  owns the first-run mint because it owns the listener; the play host only
   resolves, so the two processes cannot mint divergent tokens.
-- Ingress is deny-by-default: a runner with no resolvable credential publishes
+- Ingress is deny-by-default: a play host with no resolvable credential publishes
   nothing rather than connecting unauthenticated.
-- The wire is lossy in both directions by design. The runner drops frames while
+- The wire is lossy in both directions by design. The play host drops frames while
   disconnected instead of buffering them, so a reconnect resumes at the present
   moment rather than replaying a stale playthrough; the hub drops frames for a
   backed-up viewer rather than growing a queue. Both count their drops.
+- The latest frame and overlay are valid only while their producer is connected.
+  Producer disconnect emits `stopped` and clears both values, so a late viewer
+  never receives a finished playthrough labelled as live.
 
 ### Eligibility and constraints, stated plainly
 
@@ -169,12 +188,12 @@ concrete wire with a deliberate direction and exposure:
 - **Go Live via a selfbot user token as the primary path** — rejected as the
   default. It automates a normal user account against Discord's terms, risks the
   account, breaks whenever the custom UDP protocol changes, and would require
-  weakening the `DISCORD_USER_TOKEN` hard-fail that is currently a startup
+  weakening the `DISCORD_USER_TOKEN` hard-fail that is a startup
   error. It survives only as ADR 0024's separately gated lab capability.
-- **Wait for Discord to allow bot video** — rejected. The request has been open
+- **Wait for Discord to allow bot video** — rejected. The request is open
   for years with no commitment.
 - **Post periodic PNG attachments into the mission thread** — rejected as the
-  primary path. It works today and needs no new infrastructure, but it is not
+  primary path. It works and needs no new infrastructure, but it is not
   live, not in the voice channel, and cannot take viewer input. It remains a
   useful fallback when no activity is running.
 - **Stream to Twitch/YouTube and link it in the channel** — rejected. It leaves
@@ -192,14 +211,14 @@ concrete wire with a deliberate direction and exposure:
 - `@clankie/protocol` and `@clankie/interactive-environment` gain the activity
   actions, their `publish-external` risk class, and the session facet. Action
   schemas stay transport-agnostic as ADR 0024 requires.
-- The trusted runner owns the emulator body. `createRunnerGbaEnvironmentLifecycle`
+- The Clankie service owns the emulator body. `createRunnerGbaEnvironmentLifecycle`
   composes the `GbaEmulatorAdapter` behind the durable environment runtime, so
   playing is an agent decision dispatched through a lease rather than a script
   invocation, and the frame sink is an explicit option on that composition. The
-  runner falls back to the clearly-labeled deterministic core double when no ROM
+  play host falls back to the clearly-labeled deterministic core double when no ROM
   is configured, so CI exercises the path without copyrighted bytes.
 - Game audio remains absent: the core installs no-op `retro_set_audio_sample`
-  callbacks and discards every sample. Narration covers the gap for now; mixing
+  callbacks and discards every sample. Narration covers the gap; mixing
   emulator audio into the existing 48 kHz stereo voice path is separate work.
 - The `DISCORD_USER_TOKEN` startup error, ADR 0045's official-bot voice
   boundary, and the doctrine profile denials all stay exactly as they are.

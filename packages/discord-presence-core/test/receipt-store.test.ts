@@ -50,6 +50,29 @@ describe("DiscordBridgeReceiptStore", () => {
     await expect(store.append("discord.bridge.ready", { commandCount: 8 })).rejects.toThrow("not a symlink");
   });
 
+  it("appends a suppressed narration receipt", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-discord-receipts-suppress-"));
+    roots.push(root);
+    const path = join(root, "receipts.jsonl");
+    const store = new DiscordBridgeReceiptStore({
+      path,
+      clock: () => new Date("2026-08-15T21:00:00.000Z"),
+      idFactory: () => "receipt-suppress",
+    });
+    await store.append("discord.voice.possessor_narration_suppressed", {
+      type: "possessor_narration_suppressed",
+      guildId: "guild-1",
+      channelId: "channel-1",
+      stayId: "stay-1",
+      deliveryId: "play-turn-2",
+      reason: "rate_limited",
+    });
+    const receipt = parseDiscordBridgeReceipt(JSON.parse((await readFile(path, "utf8")).trim()));
+    expect(receipt.type).toBe("discord.voice.possessor_narration_suppressed");
+    expect(receipt.data.deliveryId).toBe("play-turn-2");
+    expect(receipt.data.reason).toBe("rate_limited");
+  });
+
   it("appends the ADR 0057 floor and volition receipt types", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-discord-receipts-0057-"));
     roots.push(root);
@@ -119,5 +142,20 @@ describe("DiscordBridgeReceiptStore", () => {
     expect(() => parseDiscordBridgeReceipt({ ...base, data: { audio: "base64" } })).toThrow(
       "cannot contain audio",
     );
+  });
+
+  it("makes jpeg and image fields unrepresentable in stream receipts", () => {
+    const base = {
+      schemaVersion: 1,
+      id: "receipt-stream",
+      occurredAt: "2026-08-15T16:15:00.000Z",
+      type: "discord.stream.frame",
+    } as const;
+    expect(() => parseDiscordBridgeReceipt({ ...base, data: { jpeg: "...." } })).toThrow(
+      "cannot contain jpeg",
+    );
+    expect(
+      parseDiscordBridgeReceipt({ ...base, data: { width: 1280, height: 720, userId: "u1" } }).data,
+    ).toMatchObject({ width: 1280, height: 720 });
   });
 });

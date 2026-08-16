@@ -34,9 +34,9 @@ therefore remains conditional and independently gated: transport isolation, cons
 approval, resource budgets, media correctness, and live official-client evidence must each pass
 before a particular Go Live path is usable.
 
-Publishing a _Clankie-rendered_ surface no longer depends on that path.
+Publishing a _Clankie-rendered_ surface does not depend on that path.
 [ADR 0047](0047-discord-activity-presence-plane.md) adds an officially supported activity plane on
-bot transport for exactly that case, so this decision now covers only what activities cannot do —
+bot transport for exactly that case, so this decision covers only what activities cannot do —
 principally watching another user's stream.
 
 ### Dual planes, one character
@@ -79,7 +79,7 @@ user. Runtime binding + phase + doctrine select availability. Go Live requires
 | ADR + protocol stubs                                                                      | done                                                                                                                                                                                                                                                                                                                                                                      |
 | **P1 outbound bot-transport** via `POST /v1/discord/presence-actions` + bot REST executor | **done** — policy-gated catalog execution only; not free-form DM/chat ingress                                                                                                                                                                                                                                                                                             |
 | **P1.5 publish-external completion**                                                      | Attachments follow `require_approval` → bounded `ApprovalRequest` → authenticated resume → exact-idempotency-key re-execution. Denied and expired requests remain terminal. Approval records and semantic events retain only the artifact reference and write hash; the privileged bot runtime resolves and verifies bytes. Go Live remains unavailable on bot transport. |
-| **P2 ingress** (channel-turn / DM / mention → Eve bounded turn)                           | **implemented** — explicit opt-in Message Content intent, deny-by-default guild/channel and DM policy, Discord text only in ephemeral Eve `clientContext`, a content-free durable message, no retained continuation cursor, authenticated `discord_presence` lane addressing, and policy-gated reply. Live bot verification remains a separate gate.                      |
+| **P2 ingress** (channel turn / DM / mention → pi bounded turn)                            | **implemented** — explicit opt-in Message Content intent, deny-by-default guild/channel and DM policy, bounded untrusted channel context, one-shot text sessions, authenticated `discord_presence` lane addressing, and policy-gated reply. Live bot verification remains a separate gate.                                                                                |
 | P2 user_session transport                                                                 | **implemented** — [ADR 0048](0048-discord-user-session-transport.md); isolated `apps/discord-user-session` process, four fail-closed gates, transport bound to authentication. Live account evidence remains a deployment gate                                                                                                                                            |
 | P3 Go Live watch media                                                                    | **kept follow-up** — VUH-840, bounded sampled observations                                                                                                                                                                                                                                                                                                                |
 | P3 Go Live publish media                                                                  | **kept follow-up** — VUH-841, governed video playback/rendered surfaces                                                                                                                                                                                                                                                                                                   |
@@ -94,13 +94,13 @@ The Discord bridge owns the bot presence session record. Discord gateway and bot
 callbacks drive `off → connecting → present → voice_active` and the `degraded` / `failed`
 loss states. Every transition is published as a typed
 `discord.presence.session.phase_changed` semantic event through the authenticated ambient
-captain channel. The control plane replays those events into a read-only projection and gates
+captain channel. The Clankie service replays those events into a read-only projection and gates
 catalog execution and tool exposure from the projected record. The bridge also carries its
 presence session id, phase, and monotonic revision as a typed claim on each authenticated action
-request. The control plane advances its latest validated live-session watermark before awaiting
+request. The Clankie service advances its latest validated live-session watermark before awaiting
 durable publication and requires the action claim to match that watermark exactly. Immediate loss
 therefore fences execution while durable publication is still in flight, and a pre-loss claim
-cannot be replayed through that window. After a control-plane restart, durable session replay
+cannot be replayed through that window. After a service restart, durable session replay
 restores status but leaves act gating unvalidated until a fresh authenticated lifecycle delivery
 re-establishes the live watermark. Both the live claim and durable projection must permit the
 action. Payload kinds never infer or widen phase.
@@ -118,14 +118,18 @@ the adapter remains the required boundary when that host is introduced.
 
 ## Consequences
 
-- The control plane classifies presence actions, narrative writes share the tracker rate
+- The Clankie service classifies presence actions, narrative writes share the tracker rate
   ledger (content may be omitted and derived for react/typing), publish-external stops at
   doctrine decision without approval minting (explicit debt), bot executor lives in
   `apps/discord-bridge` and loads via `CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE`.
-- The bridge-to-control-plane phase stream is the status authority. ANSI output and action
+- The bridge-to-service phase stream is the status authority. ANSI output and action
   payloads are not lifecycle signals; the TUI renders phase directly from retained semantic events.
 - User-session credentials and Go Live media remain separately gated follow-ups rather than being folded into the bot executor.
-- P2 text ingress requests Message Content only under explicit configuration, fetches bounded context only after admission, keeps Discord text in Eve's ephemeral `clientContext` rather than durable session history, excludes raw message bodies from ingress evidence, and returns settled text through the existing bot presence policy path.
+- P2 text ingress requests Message Content only under explicit configuration,
+  fetches bounded context only after admission, gives that untrusted context to
+  a one-shot pi session rather than durable lane history, excludes raw message
+  bodies from ingress evidence, and returns settled text through the bot
+  presence policy path.
 - The secondary user-session process, credential isolation, the durable opt-in event, deny-by-default
   profiles, and the invariant that bot and user-session transports never co-own a voice/media session
   are delivered in [ADR 0048](0048-discord-user-session-transport.md) (VUH-836).
@@ -135,8 +139,5 @@ the adapter remains the required boundary when that host is introduced.
 - VUH-841 owns stream publish, including paced audio/video publication, YUV-native frames through
   encode and IPC boundaries, send-side DAVE/keyframe/RTX correctness, operator-available stop, and
   official-client live evidence. External content passthrough remains a separate rights/ToS
-  decision. Clankie-rendered surfaces now reach a voice channel through the ADR 0047 activity plane
-  instead, so VUH-841 is no longer the only route to that outcome and is sequenced accordingly.
-- VUH-246 remains canceled legacy evidence for the v1 investigation. VUH-840 and VUH-841 define
-  new v2 execution and do not reopen that historical ticket.
-- Former dual ADR `0020` for ClankVox is renumbered to [ADR 0025](0025-clankvox-placement-and-ipc.md).
+  decision. Clankie-rendered surfaces reach a voice channel through the ADR 0047 activity plane
+  instead, so VUH-841 is not the only route to that outcome and is sequenced accordingly.

@@ -6,18 +6,14 @@ tests.
 
 ## Context
 
-Every boot of the real core loads the one pinned savestate and verifies it
-against the digest its scenario fixture pins, failing closed on mismatch. That
-is the determinism model working as designed — and it also meant a play
-session's progress was structurally unsaveable. Nothing called the core's
-serializer during play, the in-game save wrote to flash that only existed in
-process RAM, and the next boot restored the bedroom regardless.
-[ADR 0059](0059-lease-expiry-pauses-the-body.md) closed with exactly this
-loose end: world state does not survive process death, and durable progress
-across restarts was "a separate, undecided concern."
+Every boot of the real core loads a pinned savestate and verifies it against the
+scenario fixture's digest, failing closed on mismatch. Play progress persists
+through separately minted checkpoints. The configured fixture remains immutable;
+the in-game save writes to process-local flash until the checkpoint serializer
+captures the complete core state.
 
 The naive fix — write the current state over the configured savestate — would
-break the model it lives inside: the fixture's digest would no longer match,
+break the model it lives inside: the fixture's digest would fail to match,
 and "the pinned savestate" would quietly stop meaning anything.
 
 ## Decision
@@ -62,13 +58,13 @@ serialize that the scenario does not already pin.
 ## Consequences
 
 - Hours of unreplayable free play ([ADR 0049](0049-free-play-agency-and-non-deterministic-evidence.md))
-  can now outlive the process: save a checkpoint, and a later boot points
+  outlives the process: save a checkpoint, and a later boot points
   `CLANKIE_GBA_SAVESTATE_PATH` and `CLANKIE_GBA_SCENARIO_PATH` at the
   checkpoint's pair. Mid-session, a possessor can restore without restarting.
 - The determinism anchors hold. Session specs bind to whatever scenario booted
   them, checkpoint or fixture, through the unchanged `validateScenarioBinding`.
 - The companion scenario's route fields (map, start, target) describe the
-  original fixture's route, not where the checkpoint was taken; the receipt
+  original fixture's route, not where the checkpoint is taken; the receipt
   records the actual position. A checkpoint scenario is a boot anchor, not a
   route to replay — running the deterministic route drivers from one is not a
   supported use.

@@ -25,8 +25,8 @@ export const DiscordUserSessionGrantRequestSchema = z
 export type DiscordUserSessionGrantRequest = z.input<typeof DiscordUserSessionGrantRequestSchema>;
 
 /**
- * Evidence that the owner accepted user-session risk under a specific compiled
- * doctrine, supplied by the caller from the durable control-plane record. The
+ * Evidence that the owner accepted user-session risk under a specific
+ * profile hash, supplied by the caller from the durable service record. The
  * provider never reads it from configuration, so flipping an environment
  * variable can never reach a user token.
  */

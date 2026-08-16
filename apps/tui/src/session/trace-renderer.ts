@@ -1,5 +1,5 @@
 import { sanitizeForSupportBundle } from "@clankie/observability";
-import type { HandleMessageStreamEvent } from "eve/client";
+import type { CaptainStreamAction, CaptainStreamActionResult, CaptainStreamEvent } from "./captain-stream.ts";
 import type { TraceLane, TracedStreamEvent } from "./trace-types.ts";
 
 const RESULT_PREVIEW_CHARS = 240;
@@ -22,31 +22,29 @@ export interface TraceRenderLine {
   readonly json: Record<string, unknown>;
 }
 
-function actionName(
-  action: Extract<HandleMessageStreamEvent, { type: "actions.requested" }>["data"]["actions"][number],
-): string {
+function actionName(action: CaptainStreamAction): string {
   switch (action.kind) {
     case "tool-call":
-      return action.toolName;
-    case "load-skill":
-      return typeof action.input.skill === "string" ? action.input.skill : "load_skill";
+      return action.toolName ?? "tool";
+    case "load-skill": {
+      const skill = (action.input as { skill?: unknown } | undefined)?.skill;
+      return typeof skill === "string" ? skill : "load_skill";
+    }
     case "subagent-call":
-      return action.subagentName;
+      return action.subagentName ?? "subagent";
     case "remote-agent-call":
-      return action.remoteAgentName;
+      return action.remoteAgentName ?? "remote-agent";
   }
 }
 
-function resultName(
-  result: Extract<HandleMessageStreamEvent, { type: "action.result" }>["data"]["result"],
-): string {
+function resultName(result: CaptainStreamActionResult): string {
   switch (result.kind) {
     case "tool-result":
-      return result.toolName;
+      return result.toolName ?? "tool";
     case "load-skill-result":
       return result.name ?? "load_skill";
     case "subagent-result":
-      return result.subagentName;
+      return result.subagentName ?? "subagent";
   }
 }
 
@@ -73,9 +71,7 @@ function laneTag(lane: TraceLane): string {
  * Redacts secrets via the central support-bundle sanitizer (no local secret-key list).
  * Does not write to disk.
  */
-export function renderTraceEvent(
-  traced: TracedStreamEvent<HandleMessageStreamEvent>,
-): readonly TraceRenderLine[] {
+export function renderTraceEvent(traced: TracedStreamEvent<CaptainStreamEvent>): readonly TraceRenderLine[] {
   const { lane, event } = traced;
   const lines: TraceRenderLine[] = [];
 
@@ -272,7 +268,7 @@ export function formatTraceLines(
 
 /** Render a batch of typed multi-lane events into ordered output lines. */
 export function renderTraceEvents(
-  events: readonly TracedStreamEvent<HandleMessageStreamEvent>[],
+  events: readonly TracedStreamEvent<CaptainStreamEvent>[],
   mode: TraceRenderMode = "human",
 ): readonly string[] {
   const lines: string[] = [];

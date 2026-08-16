@@ -55,6 +55,20 @@ describe("DiscordUserGateway", () => {
         content: "hey clankie",
         author: { id: "human-1" },
         mentions: [{ id: "self-1" }],
+        embeds: [
+          {
+            type: "gifv",
+            url: "https://klipy.com/gifs/greetings-PSr",
+            thumbnail: {
+              url: "https://static.klipy.com/greeting.webp",
+              proxy_url: "https://images-ext-1.discordapp.net/external/greeting.webp",
+            },
+            video: {
+              url: "https://static.klipy.com/greeting.mp4",
+              proxy_url: "https://images-ext-1.discordapp.net/external/greeting.mp4",
+            },
+          },
+        ],
       },
     });
     expect(messages).toEqual([
@@ -67,6 +81,16 @@ describe("DiscordUserGateway", () => {
         mentionsSelf: true,
         content: "hey clankie",
         attachments: [],
+        embeds: [
+          {
+            type: "gifv",
+            url: "https://klipy.com/gifs/greetings-PSr",
+            thumbnailUrl: "https://static.klipy.com/greeting.webp",
+            thumbnailProxyUrl: "https://images-ext-1.discordapp.net/external/greeting.webp",
+            videoUrl: "https://static.klipy.com/greeting.mp4",
+            videoProxyUrl: "https://images-ext-1.discordapp.net/external/greeting.mp4",
+          },
+        ],
       },
     ]);
 
@@ -77,6 +101,16 @@ describe("DiscordUserGateway", () => {
       d: { guild_id: "guild-1", token: "voice-token", endpoint: "voice.discord.gg" },
     });
     expect(servers).toEqual([{ guildId: "guild-1", token: "voice-token", endpoint: "voice.discord.gg" }]);
+
+    const raw: string[] = [];
+    gateway.on("raw", (packet) => raw.push(packet.t));
+    socket.deliver({
+      op: 0,
+      s: 4,
+      t: "STREAM_CREATE",
+      d: { stream_key: "guild:guild-1:voice-1:human-1" },
+    });
+    expect(raw).toContain("STREAM_CREATE");
     gateway.close();
   });
 
@@ -134,6 +168,36 @@ describe("DiscordUserGateway", () => {
       op: 4,
       d: { guild_id: "guild-1", channel_id: "voice-1", self_mute: false, self_deaf: false },
     });
+    gateway.close();
+  });
+
+  it("tracks current member voice channels from gateway state", () => {
+    const socket = new FakeSocket();
+    const gateway = new DiscordUserGateway({ token: "user-token", connect: () => socket.asWebSocket() });
+    gateway.open();
+    socket.deliver({ op: 10, d: { heartbeat_interval: 45_000 } });
+    socket.deliver({
+      op: 0,
+      s: 1,
+      t: "GUILD_CREATE",
+      d: { id: "guild-1", voice_states: [{ user_id: "human-1", channel_id: "voice-1" }] },
+    });
+    expect(gateway.voiceChannelFor("guild-1", "human-1")).toBe("voice-1");
+
+    socket.deliver({
+      op: 0,
+      s: 2,
+      t: "VOICE_STATE_UPDATE",
+      d: { guild_id: "guild-1", user_id: "human-1", channel_id: "voice-2" },
+    });
+    expect(gateway.voiceChannelFor("guild-1", "human-1")).toBe("voice-2");
+    socket.deliver({
+      op: 0,
+      s: 3,
+      t: "VOICE_STATE_UPDATE",
+      d: { guild_id: "guild-1", user_id: "human-1", channel_id: null },
+    });
+    expect(gateway.voiceChannelFor("guild-1", "human-1")).toBeUndefined();
     gateway.close();
   });
 });

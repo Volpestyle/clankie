@@ -37,6 +37,7 @@ export {
   type DiscordInboundContextMessage,
   type DiscordInboundMessage,
   type DiscordRawAttachment,
+  type DiscordRawEmbed,
   type DiscordTextIngressConfig,
   type DiscordTextIngressEvidence,
   type DiscordTextIngressOutcome,
@@ -58,6 +59,7 @@ export {
   TRANSCRIPT_RING_MAX_LINES,
   type DiscordVoiceBriefing,
   type DiscordVoiceBriefingRequest,
+  type LookAtScreenResult,
   type DiscordVoiceRealtimePorts,
   type DiscordVoiceSessionOptions,
   type DiscordVoiceSessionStatus,
@@ -68,11 +70,39 @@ export {
   type VoiceTranscriptionPort,
 } from "./voice-session.ts";
 export {
+  VoiceMusicQueue,
+  applyMusicControl,
+  createYoutubeAudioSink,
+  isAllowedMusicUrl,
+  parseMusicControlPath,
+  parseYtDlpSearchJson,
+  searchYouTube,
+  tryHandleMusicControlRequest,
+  type MusicControlAction,
+  type MusicControlInput,
+  type MusicControlResult,
+  type VoiceMusicCommand,
+  type VoiceMusicSink,
+  type VoiceMusicTrace,
+  type VoiceMusicTraceContext,
+  type VoiceMusicTraceEvent,
+  type YouTubeSearchHit,
+  type VoiceMusicSnapshot,
+  type VoiceMusicTrack,
+} from "./voice-music.ts";
+export {
+  parseVoicePresenceControlPath,
+  tryHandleVoicePresenceControlRequest,
+  type VoicePresenceControlAction,
+  type VoicePresenceControlInput,
+} from "./voice-control.ts";
+export { tryHandleCaptainDiscordActionRequest } from "./captain-action-control.ts";
+export {
   DiscordVoiceConsentRegistry,
   type DiscordVoiceConsentPolicy,
   type DiscordVoiceConsentSession,
 } from "./voice-consent.ts";
-export { addressKeys, phoneticKey, releasesFloor, voiceAddressesCharacter } from "./voice-address.ts";
+export { addressKeys, phoneticKey, voiceAddressesCharacter } from "./voice-address.ts";
 export {
   DEFAULT_DECAY_WINDOW_MS,
   VOLITION_DEFAULTS,
@@ -86,6 +116,7 @@ export {
 } from "./voice-floor.ts";
 export {
   ASK_CLANKIE_TOOL_NAME,
+  LOOK_AT_SCREEN_TOOL_NAME,
   DEFAULT_REALTIME_POST_INSTRUCTIONS_TOKEN_LIMIT,
   DEFAULT_REALTIME_SESSION_LIFETIME_MS,
   DEFAULT_REALTIME_TRUNCATION_RETENTION_RATIO,
@@ -93,6 +124,7 @@ export {
   MAX_REALTIME_INSTRUCTIONS_CHARACTERS,
   MAX_REALTIME_RESPONSE_AUDIO_BYTES,
   MAX_REALTIME_RESPONSE_TEXT_CHARACTERS,
+  MAX_REALTIME_IMAGE_CHARACTERS,
   MAX_REALTIME_TEXT_ITEM_CHARACTERS,
   openRealtimeConversationSession,
   openRealtimeTranscriptionSession,

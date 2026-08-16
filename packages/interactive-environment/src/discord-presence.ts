@@ -33,7 +33,7 @@ export const DiscordPresenceSessionPhaseSchema = z.enum([
 ]);
 export type DiscordPresenceSessionPhase = z.infer<typeof DiscordPresenceSessionPhaseSchema>;
 
-/** Authenticated bridge-to-control-plane fence carrying immediate gateway truth. */
+/** Authenticated bridge-to-service fence carrying immediate gateway truth. */
 export const DISCORD_PRESENCE_LIVE_PHASE_HEADER = "x-clankie-discord-presence-phase" as const;
 export const DISCORD_PRESENCE_LIVE_SESSION_HEADER = "x-clankie-discord-presence-session" as const;
 export const DISCORD_PRESENCE_LIVE_REVISION_HEADER = "x-clankie-discord-presence-revision" as const;
@@ -395,7 +395,7 @@ export const DISCORD_PRESENCE_CATALOG: readonly DiscordPresenceCatalogEntry[] = 
   catalogEntry("discord.presence.voice_leave", ANY_TRANSPORT, "voice_active"),
   // Discord exposes Go Live only to a user session; a bot cannot publish one.
   catalogEntry("discord.presence.go_live_start", ["user_session"], "voice_active"),
-  catalogEntry("discord.presence.go_live_stop", ["user_session"], "go_live_active"),
+  catalogEntry("discord.presence.go_live_stop", ["user_session"], "voice_active"),
   // Activity plane (ADR 0047): embedded applications are launched by the owning
   // bot application, so this pair is bot-only rather than merely bot-first.
   catalogEntry("discord.presence.activity_start", ["bot"], "voice_active"),
@@ -440,16 +440,6 @@ export function isDiscordPresenceActionAvailable(input: {
   if (!entry.transports.includes(input.session.transportKind)) return false;
   if (PHASE_RANK[input.session.phase] < PHASE_RANK[entry.minPhase]) return false;
   if (["off", "degraded", "failed"].includes(input.session.phase)) return false;
-  // The activity facet gates stop, because activity state is not on the phase ladder.
-  if (input.action === "discord.presence.activity_stop" && input.session.activityInstances.length === 0) {
-    return false;
-  }
-  if (
-    input.action === "discord.presence.activity_start" &&
-    input.session.activityInstances.length >= DISCORD_ACTIVITY_INSTANCE_MAX
-  ) {
-    return false;
-  }
   return true;
 }
 

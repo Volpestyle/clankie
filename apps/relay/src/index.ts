@@ -34,7 +34,7 @@ const conversationHandler = createOperatorConversationRelayHandler({
           throw new Error("Captain conversation authentication is unavailable");
         }
       : createCaptainConversationDispatch({
-          baseUrl: process.env.CLANKIE_CAPTAIN_URL ?? "http://127.0.0.1:4321",
+          baseUrl: process.env.CLANKIE_CAPTAIN_URL ?? "http://127.0.0.1:4310",
           bearerToken: captainToken,
         }),
   logger: conversationLogger,

@@ -1,4 +1,4 @@
-import { chmodSync, closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
@@ -9,19 +9,7 @@ import {
   type CredentialStore,
   type OperatorCredentialStatus,
 } from "@clankie/credential-broker";
-import { Client, isCurrentTurnBoundaryEvent, type HandleMessageStreamEvent } from "eve/client";
 import QRCode from "qrcode";
-import {
-  captainServiceStatePath,
-  captainStateDirectory,
-  DEFAULT_CAPTAIN_URL,
-  ensureCaptainService,
-  inspectCaptain,
-  readCaptainServiceRecord,
-  type CaptainServiceHandle,
-  type EnsureCaptainServiceOptions,
-  type RestartCaptainServiceOptions,
-} from "./captain-service.ts";
 import {
   inspectServices,
   parseServiceTarget,
@@ -30,19 +18,14 @@ import {
   type ServiceOutcome,
   type ServiceRegistryOptions,
 } from "./services.ts";
-import type { ServiceStatus } from "./service-supervisor.ts";
-import { assertCaptainEndpoint, captainInfoGeneration } from "../src/session/captain-identity.ts";
+import { clankieStateDirectory, SERVICE_ORDER } from "./service-supervisor.ts";
+import type { CaptainSessionClient, CaptainStreamEvent } from "../src/session/captain-stream.ts";
 import {
   reportHerdrAgent,
   reportHerdrMetadata,
   type HerdrCommandRunner,
 } from "../src/session/herdr-report.ts";
-import {
-  CaptainSessionCursorStore,
-  emptyCaptainCursor,
-  type CaptainSessionCursor,
-  type StoredCaptainSessionCursor,
-} from "../src/session/session-cursor.ts";
+import { CaptainSessionCursorStore } from "../src/session/session-cursor.ts";
 import { emptyTraceCursor, TraceCursorStore } from "../src/session/trace-cursor.ts";
 import { formatTraceLines, renderTraceEvent, type TraceRenderMode } from "../src/session/trace-renderer.ts";
 import { parseTraceLane, type TraceCursor, type TraceLane } from "../src/session/trace-types.ts";
@@ -64,17 +47,22 @@ import {
 } from "./devices.ts";
 
 const HEADLESS_CURSOR_NAME = "captain-headless-session.json";
-const HEADLESS_LOCK_NAME = "captain-headless-session.lock";
 const TRACE_CURSOR_NAME = "captain-trace-session.json";
-/** Default typed lane for the HTTP headless captain session (captain-eve channel mapping). */
+/**
+ * Legacy state record carrying the captain build generation the trace cursor is
+ * versioned by. The pi service has no build generation, so nothing writes this
+ * anymore; a live trace transport supplies it through tests or future tooling.
+ */
+const CAPTAIN_SERVICE_STATE_NAME = "captain-eve-service.json";
+/** Default typed lane for the headless captain session. */
 const DEFAULT_TRACE_LANE: TraceLane = "tui";
 const TRACE_IDLE_POLL_MS = 500;
 
 type Writable = { write(chunk: string): unknown };
 
 export interface HeadlessCaptainCommandOptions {
-  readonly clientFactory?: (host: string) => Client;
-  readonly ensureImpl?: (options: EnsureCaptainServiceOptions) => Promise<CaptainServiceHandle>;
+  /** Trace transport seam. The clankie service exposes no session stream yet. */
+  readonly clientFactory?: (host: string) => CaptainSessionClient;
   readonly env?: NodeJS.ProcessEnv;
   readonly fetchImpl?: typeof fetch;
   readonly host?: string;
@@ -89,10 +77,12 @@ export interface HeadlessCaptainCommandOptions {
    * status than CI does.
    */
   readonly listProcessCommandsImpl?: () => readonly (readonly [number, string])[];
-  readonly readStdin?: () => Promise<string>;
   readonly repoRoot: string;
-  readonly restartImpl?: (options: RestartCaptainServiceOptions) => Promise<CaptainServiceHandle>;
   readonly sleepImpl?: (ms: number) => Promise<void>;
+  readonly spawnImpl?: ServiceRegistryOptions["spawnImpl"];
+  readonly killImpl?: ServiceRegistryOptions["killImpl"];
+  readonly processIsAliveImpl?: ServiceRegistryOptions["processIsAliveImpl"];
+  readonly readProcessCommandImpl?: ServiceRegistryOptions["readProcessCommandImpl"];
   readonly stderr?: Writable;
   readonly stdout?: Writable;
   /** Test hook: stop the long-lived trace loop after the current stream ends. */
@@ -100,69 +90,25 @@ export interface HeadlessCaptainCommandOptions {
 }
 
 export function headlessCaptainCursorPath(env: NodeJS.ProcessEnv = process.env): string {
-  return join(captainStateDirectory(env), HEADLESS_CURSOR_NAME);
+  return join(clankieStateDirectory(env), HEADLESS_CURSOR_NAME);
 }
 
 export function traceCaptainCursorPath(env: NodeJS.ProcessEnv = process.env): string {
-  return join(captainStateDirectory(env), TRACE_CURSOR_NAME);
+  return join(clankieStateDirectory(env), TRACE_CURSOR_NAME);
 }
 
-function headlessCaptainLockPath(env: NodeJS.ProcessEnv): string {
-  return join(captainStateDirectory(env), HEADLESS_LOCK_NAME);
-}
-
-function processIsAlive(pid: number): boolean {
+/** Reads the legacy captain service record for its trace-cursor generation. */
+function readTraceGeneration(env: NodeJS.ProcessEnv): string | undefined {
   try {
-    process.kill(pid, 0);
-    return true;
+    const record = JSON.parse(
+      readFileSync(join(clankieStateDirectory(env), CAPTAIN_SERVICE_STATE_NAME), "utf8"),
+    ) as { generation?: unknown };
+    return typeof record.generation === "string" && /^[a-f0-9]{64}$/u.test(record.generation)
+      ? record.generation
+      : undefined;
   } catch {
-    return false;
+    return undefined;
   }
-}
-
-async function withHeadlessLock<T>(env: NodeJS.ProcessEnv, operation: () => Promise<T>): Promise<T> {
-  const directory = captainStateDirectory(env);
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
-  chmodSync(directory, 0o700);
-  const path = headlessCaptainLockPath(env);
-  let fd: number;
-  try {
-    fd = openSync(path, "wx", 0o600);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    let stale = false;
-    try {
-      const record = JSON.parse(readFileSync(path, "utf8")) as { pid?: unknown };
-      stale = typeof record.pid !== "number" || !processIsAlive(record.pid);
-    } catch {
-      stale = true;
-    }
-    if (!stale) {
-      throw new Error("Another clankie msg/watch command owns the headless Clankie session.");
-    }
-    unlinkSync(path);
-    fd = openSync(path, "wx", 0o600);
-  }
-  writeFileSync(fd, `${JSON.stringify({ pid: process.pid, startedAt: Date.now() })}\n`);
-  try {
-    return await operation();
-  } finally {
-    closeSync(fd);
-    try {
-      unlinkSync(path);
-    } catch {
-      // A stale-lock recovery may already have removed it.
-    }
-  }
-}
-
-function createClient(host: string): Client {
-  return new Client({
-    host,
-    maxReconnectAttempts: 5,
-    preserveCompletedSessions: true,
-    redirect: "error",
-  });
 }
 
 function outputJson(stream: Writable, value: unknown): void {
@@ -174,12 +120,9 @@ function commandHelp(): string {
     "Usage: clankie <command>",
     "",
     "Headless Clankie commands:",
-    "  health | status          Probe Clankie and report every local service",
+    "  health | status          Probe the clankie service and every local service",
     "  restart [service]        Restart launcher-owned services in dependency order",
     "  down [service]           Stop launcher-owned services in reverse order",
-    "  msg [--new] <message>    Send without opening the TTY face; omit message to read stdin",
-    "  watch [--timeout SEC]    Stream JSONL events until the active turn settles",
-    "  wait [--timeout SEC]     Wait silently and print the final boundary",
     "  trace [--json] [--lane LANE] [--timeout SEC]",
     "                           Live render-only reasoning/tool stream (stays across turns)",
     "  pair [--json] [--timeout SEC]",
@@ -192,8 +135,8 @@ function commandHelp(): string {
     "  play status              Show the live embodiment (asked play) session",
     "  play stop                Stop the live playthrough cleanly (mints its checkpoint)",
     "",
-    "Services for restart/down: all (default), clankie, control-plane, discord, activity, tunnel, runner",
-    "Aliases: captain, eve, cp, bridge, watch, viewer, cloudflared",
+    "Services for restart/down: all (default), clankie, discord, user-session, activity, tunnel",
+    "Aliases: captain, eve, cp, control-plane, bridge, lab, watch, viewer, cloudflared",
     "",
     "With no command, clankie opens the fullscreen operator console and requires a TTY.",
   ].join("\n");
@@ -205,9 +148,6 @@ export function isHeadlessCaptainCommand(command: string | undefined): boolean {
     command === "status" ||
     command === "restart" ||
     command === "down" ||
-    command === "msg" ||
-    command === "watch" ||
-    command === "wait" ||
     command === "trace" ||
     command === "pair" ||
     command === "devices" ||
@@ -221,14 +161,13 @@ export function isHeadlessCaptainCommand(command: string | undefined): boolean {
 
 function commandHost(options: HeadlessCaptainCommandOptions): string {
   const env = options.env ?? process.env;
-  return options.host ?? env.CLANKIE_CAPTAIN_URL ?? DEFAULT_CAPTAIN_URL;
+  return (
+    options.host ?? env.CLANKIE_CONTROL_PLANE_URL ?? env.CLANKIE_CAPTAIN_URL ?? DEFAULT_CONTROL_PLANE_URL
+  );
 }
 
 async function runInspection(options: HeadlessCaptainCommandOptions): Promise<number> {
   const env = options.env ?? process.env;
-  const host = commandHost(options);
-  const inspection = await inspectCaptain(host, options.fetchImpl ?? fetch);
-  const record = readCaptainServiceRecord(captainServiceStatePath(env), host);
   let operatorCredential:
     | OperatorCredentialStatus
     | { readonly present: false; readonly source: "none"; readonly consistency: "invalid" };
@@ -242,57 +181,27 @@ async function runInspection(options: HeadlessCaptainCommandOptions): Promise<nu
   }
   const operatorCredentialHealthy =
     operatorCredential.present && operatorCredential.consistency !== "mismatch";
-  // The captain was just probed above; synthesize its row rather than paying for
-  // a second round trip to the same two endpoints.
-  const captainStatus: ServiceStatus = {
-    id: "captain-eve",
-    label: "Clankie",
-    // A stale captain is ours but not serving this checkout's tools, so it
-    // reports as unhealthy with the reason rather than as a healthy captain
-    // that will surprise the next caller.
-    state: inspection.state === "stale" ? "unhealthy" : inspection.state,
-    owned: record !== undefined,
-    ...(inspection.state === "stale"
-      ? { detail: "older build than this checkout; run `clankie restart`" }
-      : inspection.generation === undefined
-        ? {}
-        : { detail: `generation ${inspection.generation.slice(0, 8)}` }),
-    ...(record === undefined ? {} : { pid: record.pid }),
-  };
-  // Every local service, which is what this command has always claimed to
-  // report. It used to stop after the bridge, so the surfaces an audience
-  // actually reaches — the activity and the tunnel publishing it — were the
-  // two a `clankie health` could never tell you were down. That is how a
-  // tunnel stayed dead for six days while health said ready.
-  const services = [
-    captainStatus,
-    ...(await inspectServices(
-      ["control-plane", "discord-bridge", "activity", "tunnel", "runner"],
-      await serviceOptions(options),
-    )),
-  ];
+  // Every local service: the clankie service itself, the bridge, and the
+  // surfaces an audience actually reaches — the activity and the tunnel
+  // publishing it. Health used to stop earlier, which is how a tunnel stayed
+  // dead for six days while health said ready.
+  const services = await inspectServices(SERVICE_ORDER, await serviceOptions(options));
+  const clankie = services.find((service) => service.id === "clankie");
+  const serviceHealthy = clankie?.state === "healthy";
   outputJson(options.stdout ?? process.stdout, {
-    ok: inspection.state === "healthy" && operatorCredentialHealthy,
-    status:
-      inspection.state !== "healthy"
-        ? inspection.state
-        : operatorCredentialHealthy
-          ? "ready"
-          : `operator_credential_${operatorCredential.consistency}`,
-    endpointState: inspection.state,
-    host,
-    healthPath: inspection.healthPath,
-    infoPath: inspection.infoPath,
-    ...(inspection.agent === undefined ? {} : { agent: inspection.agent }),
-    ...(record?.generation === undefined && inspection.generation === undefined
-      ? {}
-      : { generation: record?.generation ?? inspection.generation }),
-    owned: record !== undefined,
+    ok: serviceHealthy && operatorCredentialHealthy,
+    status: !serviceHealthy
+      ? (clankie?.state ?? "unreachable")
+      : operatorCredentialHealthy
+        ? "ready"
+        : `operator_credential_${operatorCredential.consistency}`,
+    host: commandHost(options),
+    ...(clankie === undefined ? {} : { owned: clankie.owned }),
+    ...(clankie?.pid === undefined ? {} : { pid: clankie.pid }),
     operatorCredential,
-    ...(record === undefined ? {} : { pid: record.pid }),
     services,
   });
-  return inspection.state === "healthy" && operatorCredentialHealthy ? 0 : 1;
+  return serviceHealthy && operatorCredentialHealthy ? 0 : 1;
 }
 
 /**
@@ -300,11 +209,10 @@ async function runInspection(options: HeadlessCaptainCommandOptions): Promise<nu
  * and only enriches the bridge's presence detail, so a missing one degrades the
  * report rather than failing the restart.
  *
- * The captain credential is different in kind: it is one shared secret that
- * captain-eve presents and the control plane authenticates, so it is minted on
- * first run rather than merely read. It is returned separately instead of being
- * merged into `env` because the Discord bridge refuses to start when it can see
- * that variable.
+ * The captain credential is different in kind: it is one shared secret the
+ * dispatch route authenticates, so it is minted on first run rather than merely
+ * read. It is handed to each service through `serviceEnv` because the Discord
+ * bridge refuses to start when it can see that variable.
  */
 async function serviceOptions(options: HeadlessCaptainCommandOptions): Promise<ServiceRegistryOptions> {
   const env = options.env ?? process.env;
@@ -341,9 +249,14 @@ async function serviceOptions(options: HeadlessCaptainCommandOptions): Promise<S
     ...(options.listProcessCommandsImpl === undefined
       ? {}
       : { listProcessCommandsImpl: options.listProcessCommandsImpl }),
+    ...(options.spawnImpl === undefined ? {} : { spawnImpl: options.spawnImpl }),
+    ...(options.killImpl === undefined ? {} : { killImpl: options.killImpl }),
+    ...(options.processIsAliveImpl === undefined ? {} : { processIsAliveImpl: options.processIsAliveImpl }),
+    ...(options.readProcessCommandImpl === undefined
+      ? {}
+      : { readProcessCommandImpl: options.readProcessCommandImpl }),
     // Progress narration goes to stderr so stdout stays a clean JSON document.
     onStatus: (status: string) => stderr.write(`${status}\n`),
-    ...(options.restartImpl === undefined ? {} : { restartCaptainImpl: options.restartImpl }),
   };
 }
 
@@ -361,16 +274,15 @@ async function runRestart(args: readonly string[], options: HeadlessCaptainComma
   const target = parseServiceTarget(args[0]);
   const registryOptions = await serviceOptions(options);
   const outcomes = await restartTarget(target, registryOptions);
-  const captain = outcomes.find((outcome) => outcome.id === "captain-eve");
+  const clankie = outcomes.find((outcome) => outcome.id === "clankie");
   const ok = outcomes.length > 0 && outcomes.every((outcome) => outcome.ok);
   (options.stderr ?? process.stderr).write(`${describeOutcomes(outcomes)}\n`);
   outputJson(options.stdout ?? process.stdout, {
     ok,
     status: ok ? "ready" : "failed",
     target,
-    // Retained for callers that predate multi-service restart.
     host: commandHost(options),
-    ...(captain === undefined ? {} : { owned: captain.ok }),
+    ...(clankie === undefined ? {} : { owned: clankie.ok }),
     services: outcomes,
   });
   return ok ? 0 : 1;
@@ -388,114 +300,6 @@ async function runDown(args: readonly string[], options: HeadlessCaptainCommandO
     services: outcomes,
   });
   return ok ? 0 : 1;
-}
-
-async function readMessage(
-  args: readonly string[],
-  options: HeadlessCaptainCommandOptions,
-): Promise<{
-  message: string;
-  startNew: boolean;
-}> {
-  const startNew = args[0] === "--new";
-  const messageArgs = startNew ? args.slice(1) : args;
-  const message =
-    messageArgs.length > 0 ? messageArgs.join(" ") : await (options.readStdin ?? readStandardInput)();
-  if (message.trim().length === 0) throw new Error("clankie msg requires a non-empty message.");
-  return { message, startNew };
-}
-
-async function readStandardInput(): Promise<string> {
-  let text = "";
-  for await (const chunk of process.stdin) text += String(chunk);
-  return text;
-}
-
-async function connectCaptain(input: {
-  readonly clientFactory?: (host: string) => Client;
-  readonly generation?: string;
-  readonly host: string;
-}): Promise<{ client: Client; generation: string }> {
-  const client = (input.clientFactory ?? createClient)(input.host);
-  const [health, info] = await Promise.all([client.health(), client.info()]);
-  assertCaptainEndpoint(health, info);
-  const generation = input.generation ?? captainInfoGeneration(info);
-  if (generation === undefined) {
-    throw new Error("Clankie's endpoint does not expose a durable build identity.");
-  }
-  return { client, generation };
-}
-
-function normalizeCursor(
-  cursor: StoredCaptainSessionCursor | undefined,
-  generation: string,
-  startNew: boolean,
-): CaptainSessionCursor {
-  if (startNew || cursor === undefined) return emptyCaptainCursor(generation);
-  if (cursor.version !== 2 || cursor.generation !== generation) {
-    if (cursor.active) {
-      throw new Error(
-        "The saved headless turn belongs to a different Clankie build. Inspect mission state, then use `clankie msg --new ...` to abandon it explicitly.",
-      );
-    }
-    return emptyCaptainCursor(generation);
-  }
-  return cursor;
-}
-
-async function runMessage(args: readonly string[], options: HeadlessCaptainCommandOptions): Promise<number> {
-  const env = options.env ?? process.env;
-  const host = commandHost(options);
-  const input = await readMessage(args, options);
-  return await withHeadlessLock(env, async () => {
-    const handle = await (options.ensureImpl ?? ensureCaptainService)({
-      repoRoot: options.repoRoot,
-      host,
-      env,
-      fetchImpl: options.fetchImpl ?? fetch,
-    });
-    const connected = await connectCaptain({
-      host,
-      ...(options.clientFactory === undefined ? {} : { clientFactory: options.clientFactory }),
-      ...(handle.generation === undefined ? {} : { generation: handle.generation }),
-    });
-    const store = new CaptainSessionCursorStore(headlessCaptainCursorPath(env));
-    const cursor = normalizeCursor(await store.read(), connected.generation, input.startNew);
-    if (cursor.active) {
-      throw new Error("The headless Clankie turn is still active. Run `clankie watch` or `clankie wait`.");
-    }
-    const response = await connected.client.session(cursor).send({ message: input.message });
-    const next: CaptainSessionCursor = {
-      version: 2,
-      active: true,
-      generation: connected.generation,
-      sessionId: response.sessionId,
-      streamIndex: cursor.sessionId === response.sessionId ? cursor.streamIndex : 0,
-      ...(response.continuationToken === undefined
-        ? cursor.continuationToken === undefined
-          ? {}
-          : { continuationToken: cursor.continuationToken }
-        : { continuationToken: response.continuationToken }),
-    };
-    await store.write(next);
-    outputJson(options.stdout ?? process.stdout, {
-      ok: true,
-      status: "submitted",
-      sessionId: response.sessionId,
-      next: "clankie watch",
-    });
-    return 0;
-  });
-}
-
-function parseTimeout(args: readonly string[]): number | undefined {
-  if (args.length === 0) return undefined;
-  if (args.length !== 2 || args[0] !== "--timeout") {
-    throw new Error("Usage: clankie watch|wait [--timeout SEC]");
-  }
-  const seconds = Number(args[1]);
-  if (!Number.isFinite(seconds) || seconds <= 0) throw new Error("Timeout must be a positive number.");
-  return seconds * 1_000;
 }
 
 interface TraceCliOptions {
@@ -535,92 +339,20 @@ function parseTraceArgs(args: readonly string[]): TraceCliOptions {
   return { json, lane, timeoutMs };
 }
 
-function boundaryState(event: HandleMessageStreamEvent): "completed" | "failed" | "waiting" | undefined {
+function boundaryState(event: CaptainStreamEvent): "completed" | "failed" | "waiting" | undefined {
   if (event.type === "session.completed") return "completed";
   if (event.type === "session.failed") return "failed";
   if (event.type === "session.waiting") return "waiting";
   return undefined;
 }
 
-async function runWatch(
-  args: readonly string[],
-  options: HeadlessCaptainCommandOptions,
-  quiet: boolean,
-): Promise<number> {
-  const timeoutMs = parseTimeout(args);
-  const env = options.env ?? process.env;
-  const host = commandHost(options);
-  return await withHeadlessLock(env, async () => {
-    const store = new CaptainSessionCursorStore(headlessCaptainCursorPath(env));
-    const stored = await store.read();
-    if (stored === undefined || !stored.active || stored.sessionId === undefined) {
-      outputJson(options.stdout ?? process.stdout, { ok: true, status: "idle" });
-      return 0;
-    }
-    const record = readCaptainServiceRecord(captainServiceStatePath(env), host);
-    const connected = await connectCaptain({
-      host,
-      ...(options.clientFactory === undefined ? {} : { clientFactory: options.clientFactory }),
-      ...(record?.generation === undefined ? {} : { generation: record.generation }),
-    });
-    const cursor = normalizeCursor(stored, connected.generation, false);
-    const controller = new AbortController();
-    const timer =
-      timeoutMs === undefined
-        ? undefined
-        : setTimeout(() => {
-            controller.abort();
-          }, timeoutMs);
-    let nextIndex = cursor.streamIndex;
-    let boundary: "completed" | "failed" | "waiting" | undefined;
-    try {
-      for await (const event of connected.client.session(cursor).stream({
-        startIndex: cursor.streamIndex,
-        signal: controller.signal,
-      })) {
-        nextIndex += 1;
-        if (!quiet) outputJson(options.stdout ?? process.stdout, event);
-        boundary = boundaryState(event);
-        if (boundary === "failed") {
-          await store.write(emptyCaptainCursor(connected.generation));
-        } else {
-          await store.write({ ...cursor, active: boundary === undefined, streamIndex: nextIndex });
-        }
-        if (isCurrentTurnBoundaryEvent(event)) break;
-      }
-    } catch (error) {
-      if (controller.signal.aborted) {
-        outputJson(options.stderr ?? process.stderr, {
-          ok: false,
-          status: "timeout",
-          sessionId: cursor.sessionId,
-        });
-        return 124;
-      }
-      throw error;
-    } finally {
-      if (timer !== undefined) clearTimeout(timer);
-    }
-    if (boundary === undefined) {
-      throw new Error("Clankie's event stream ended before the turn reached a boundary.");
-    }
-    outputJson(options.stdout ?? process.stdout, {
-      ok: boundary !== "failed",
-      status: boundary,
-      sessionId: cursor.sessionId,
-      streamIndex: nextIndex,
-    });
-    return boundary === "failed" ? 1 : 0;
-  });
-}
-
 /**
- * Consume one Eve session event stream without exiting on turn boundaries.
+ * Consume one captain session event stream without exiting on turn boundaries.
  * Advances only the identity-only trace cursor; never writes event payloads.
  * Returns the updated cursor and how many events were observed.
  */
 export async function processTraceStream(input: {
-  readonly events: AsyncIterable<HandleMessageStreamEvent>;
+  readonly events: AsyncIterable<CaptainStreamEvent>;
   readonly cursor: TraceCursor;
   readonly mode: TraceRenderMode;
   readonly write: (line: string) => void;
@@ -657,7 +389,7 @@ export async function processTraceStream(input: {
     );
     for (const line of lines) input.write(`${line}\n`);
     if (input.onCursor !== undefined) await input.onCursor(cursor);
-    // Unlike watch/wait, never break on isCurrentTurnBoundaryEvent.
+    // A boundary settles the turn but never ends the trace subscription.
     if (input.maxEvents !== undefined && eventsSeen >= input.maxEvents) break;
   }
   return { cursor, eventsSeen, hitBoundary };
@@ -694,6 +426,19 @@ async function resolveTraceSession(input: {
   return emptyTraceCursor(input.generation, input.lane);
 }
 
+function unavailableTraceClient(): CaptainSessionClient {
+  return {
+    session: () => ({
+      // eslint-disable-next-line require-yield
+      stream: async function* (): AsyncIterable<CaptainStreamEvent> {
+        throw new Error(
+          "The clankie service does not expose a captain session stream yet; `clankie trace` has no live transport.",
+        );
+      },
+    }),
+  };
+}
+
 async function runTrace(args: readonly string[], options: HeadlessCaptainCommandOptions): Promise<number> {
   const cli = parseTraceArgs(args);
   const env = options.env ?? process.env;
@@ -703,19 +448,15 @@ async function runTrace(args: readonly string[], options: HeadlessCaptainCommand
   const delay = options.sleepImpl ?? sleep;
   const store = new TraceCursorStore(traceCaptainCursorPath(env));
 
-  const record = readCaptainServiceRecord(captainServiceStatePath(env), host);
-  const connected = await connectCaptain({
-    host,
-    ...(options.clientFactory === undefined ? {} : { clientFactory: options.clientFactory }),
-    ...(record?.generation === undefined ? {} : { generation: record.generation }),
-  });
+  const generation = readTraceGeneration(env);
+  if (generation === undefined) {
+    throw new Error(
+      "No captain service record with a build generation exists; live session tracing is unavailable.",
+    );
+  }
+  const client = (options.clientFactory ?? unavailableTraceClient)(host);
 
-  let cursor = await resolveTraceSession({
-    env,
-    generation: connected.generation,
-    lane: cli.lane,
-    store,
-  });
+  let cursor = await resolveTraceSession({ env, generation, lane: cli.lane, store });
   await store.write(cursor);
 
   const herdrOpts = {
@@ -725,7 +466,7 @@ async function runTrace(args: readonly string[], options: HeadlessCaptainCommand
   await reportHerdrMetadata({
     ...herdrOpts,
     title: "clankie trace",
-    customStatus: `lane=${cursor.lane}`,
+    token: `lane=${cursor.lane}`,
     agent: "clankie-trace",
   });
   await reportHerdrAgent("working", {
@@ -745,12 +486,7 @@ async function runTrace(args: readonly string[], options: HeadlessCaptainCommand
   try {
     while (!controller.signal.aborted) {
       if (cursor.sessionId === undefined) {
-        cursor = await resolveTraceSession({
-          env,
-          generation: connected.generation,
-          lane: cli.lane,
-          store,
-        });
+        cursor = await resolveTraceSession({ env, generation, lane: cli.lane, store });
         if (cursor.sessionId === undefined) {
           if (options.traceOnce === true) break;
           await delay(TRACE_IDLE_POLL_MS);
@@ -765,7 +501,7 @@ async function runTrace(args: readonly string[], options: HeadlessCaptainCommand
       };
       try {
         const result = await processTraceStream({
-          events: connected.client.session(sessionState).stream({
+          events: client.session(sessionState).stream({
             startIndex: cursor.streamIndex,
             signal: controller.signal,
           }),
@@ -791,13 +527,8 @@ async function runTrace(args: readonly string[], options: HeadlessCaptainCommand
         if (controller.signal.aborted) break;
         // Stream ended: reconnect with identity-only cursor (no payload on disk).
         await delay(TRACE_IDLE_POLL_MS);
-        // Re-adopt headless session if a new turn started under a new session id.
-        const refreshed = await resolveTraceSession({
-          env,
-          generation: connected.generation,
-          lane: cli.lane,
-          store,
-        });
+        // Re-adopt the headless session if a new turn started under a new session id.
+        const refreshed = await resolveTraceSession({ env, generation, lane: cli.lane, store });
         if (refreshed.sessionId !== cursor.sessionId) {
           cursor = refreshed;
           await store.write(cursor);
@@ -809,7 +540,7 @@ async function runTrace(args: readonly string[], options: HeadlessCaptainCommand
     }
   } finally {
     if (timer !== undefined) clearTimeout(timer);
-    await reportHerdrAgent(controller.signal.aborted ? "idle" : "idle", {
+    await reportHerdrAgent("idle", {
       ...herdrOpts,
       message: "trace stopped",
     }).catch(() => undefined);
@@ -859,18 +590,18 @@ function parsePairArgs(args: readonly string[]): PairCliOptions {
 
 /**
  * `clankie pair` — request one short-lived, single-use pairing offer from the
- * platform pairing service and render a scannable QR plus a copyable code/deep
- * link. Fully headless: no captain/model session, no TTY requirement. Fails
- * closed on every error path with an actionable, secret-free message. The QR,
- * code, and deep link are secret-bearing display data — written to stdout for
- * the operator, never logged, persisted, or echoed into error output.
+ * clankie service and render a scannable QR plus a copyable code/deep link.
+ * Fully headless: no captain session, no TTY requirement. Fails closed on every
+ * error path with an actionable, secret-free message. The QR, code, and deep
+ * link are secret-bearing display data — written to stdout for the operator,
+ * never logged, persisted, or echoed into error output.
  */
 async function runPair(args: readonly string[], options: HeadlessCaptainCommandOptions): Promise<number> {
   const { json, timeoutMs } = parsePairArgs(args);
   const env = options.env ?? process.env;
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
-  const controlPlaneUrl = env.CLANKIE_CONTROL_PLANE_URL ?? DEFAULT_CONTROL_PLANE_URL;
+  const controlPlaneUrl = commandHost({ ...options, env });
   const operatorCredential = await resolveOperatorCredential({
     env,
     ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
@@ -945,15 +676,15 @@ function parseDevicesArgs(args: readonly string[]): DevicesCliOptions {
 
 /**
  * `clankie devices` — list paired devices, or `clankie devices revoke <id>`.
- * Operator-authenticated against the control plane, fully headless, fails closed
- * with actionable, secret-free messages.
+ * Operator-authenticated against the clankie service, fully headless, fails
+ * closed with actionable, secret-free messages.
  */
 async function runDevices(args: readonly string[], options: HeadlessCaptainCommandOptions): Promise<number> {
   const parsed = parseDevicesArgs(args);
   const env = options.env ?? process.env;
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
-  const controlPlaneUrl = env.CLANKIE_CONTROL_PLANE_URL ?? DEFAULT_CONTROL_PLANE_URL;
+  const controlPlaneUrl = commandHost({ ...options, env });
   const operatorCredential = await resolveOperatorCredential({
     env,
     ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
@@ -1051,17 +782,17 @@ async function runPlay(args: readonly string[], options: HeadlessCaptainCommandO
   });
   const token = credential?.token;
   if (token === undefined) {
-    throw new Error("No operator credential is available; start the control plane once first.");
+    throw new Error("No operator credential is available; start the clankie service once first.");
   }
   const fetchImpl = options.fetchImpl ?? fetch;
-  const base = env.CLANKIE_CONTROL_PLANE_URL ?? DEFAULT_CONTROL_PLANE_URL;
+  const base = commandHost({ ...options, env });
   const stdout = options.stdout ?? process.stdout;
   if (action === "status") {
     const response = await fetchImpl(new URL("/v1/embodiment/sessions/live", base), {
       headers: { authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(5_000),
     });
-    if (!response.ok) throw new Error(`control plane returned ${String(response.status)}`);
+    if (!response.ok) throw new Error(`clankie service returned ${String(response.status)}`);
     outputJson(stdout, await response.json());
     return 0;
   }
@@ -1075,7 +806,7 @@ async function runPlay(args: readonly string[], options: HeadlessCaptainCommandO
     return 0;
   }
   if (!response.ok) {
-    throw new Error(`control plane returned ${String(response.status)}: ${await response.text()}`);
+    throw new Error(`clankie service returned ${String(response.status)}: ${await response.text()}`);
   }
   outputJson(stdout, await response.json());
   return 0;
@@ -1090,9 +821,6 @@ export async function runHeadlessCaptainCommand(
     if (command === "health" || command === "status") return await runInspection(options);
     if (command === "restart") return await runRestart(args.slice(1), options);
     if (command === "down") return await runDown(args.slice(1), options);
-    if (command === "msg") return await runMessage(args.slice(1), options);
-    if (command === "watch") return await runWatch(args.slice(1), options, false);
-    if (command === "wait") return await runWatch(args.slice(1), options, true);
     if (command === "trace") return await runTrace(args.slice(1), options);
     if (command === "pair") return await runPair(args.slice(1), options);
     if (command === "devices") return await runDevices(args.slice(1), options);

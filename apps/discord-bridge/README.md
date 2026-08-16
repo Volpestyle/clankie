@@ -11,26 +11,28 @@ processes never share a gateway or a credential. Both consume
 [`@clankie/discord-presence-core`](../../packages/discord-presence-core/README.md)
 for ingress shaping, the presence lifecycle, consent, capture, and lane
 addressing, so this bridge holds only bot-shaped concerns: slash commands,
-mission threads, the projector, and the activity plane.
+voice, and the activity plane.
 
 The bridge uses slash commands, optional bounded Discord text ingress, and
-explicit official-bot group voice. `/clankie join` discloses DAVE, the live
-OpenAI realtime session's audio residency, and AI-generated speech; every
-other participant must opt in with `/clankie voice-consent`. All voice-command
+official-bot group voice. `/clankie join` discloses DAVE, the live OpenAI
+realtime session's audio residency, and AI-generated speech. Under the default
+`explicit` consent policy every other participant opts in with
+`/clankie voice-consent`; under `presence`, room membership grants consent and
+an explicit opt-out still wins. All voice-command
 replies are ephemeral — the bot posts nothing into the text channel, so his
 public presence is the same one a person has: sitting in the voice channel.
 The residency terms reach exactly the people they bind, privately, at join
 and at opt-in.
 
-`/clankie mission` offers the three user ceremony presets: `rawdog`, `structured`, and `fine-control`. It defaults to `structured`; internal fixtures and doctrine overlays are not exposed as presets. The command creates exactly one Discord thread for the mission. A mode-0600 local state file binds the Discord interaction, guild, thread, and mission before retryable work crosses each boundary; thread names are presentation only and never restore authority. The bridge polls the authoritative mission snapshot, verifies its mission identity, and projects mission/task/approval-attention transitions into that thread. A persisted projection fingerprint prevents unchanged summaries from replaying after restart. `/clankie status` queries the current snapshot. `/clankie steer` targets its active worker run through an explicit finite choice list—focus, continue, retry, or summarize—and sends only the corresponding typed intent to the control plane. Discord never forwards arbitrary steering text.
+`/clankie status` reports whether the service is healthy. Everything conversational — asks, plans, ongoing work — happens through channel turns, not slash commands.
 
-Discord is an ambient authority surface. `DISCORD_AMBIENT_ROLE_IDS` and `DISCORD_AMBIENT_USER_IDS` are comma-separated, deny-by-default bindings for mission creation, steering, and memory commands; the user list names individual operators who hold that tier without a mapped role. `DISCORD_APPROVAL_ROLE_IDS` allows selected roles to receive an approval handoff, but `/clankie approval` always refuses to record the decision in Discord and links to `CLANKIE_AUTHENTICATED_SURFACE_URL`. The bridge never accepts or loads an operator approval token.
+Discord is an ambient authority surface. `DISCORD_AMBIENT_ROLE_IDS` and `DISCORD_AMBIENT_USER_IDS` are comma-separated, deny-by-default bindings for the ambient command tier (person-memory); the user list names individual operators who hold that tier without a mapped role.
 
-Voice presence is a separate tier ([ADR 0050](../../docs/adr/0050-voice-presence-authority-tier.md)). `DISCORD_VOICE_JOIN_POLICY` decides who may invoke `/clankie join` and `/clankie leave`: `ambient` (default) keeps them on the ambient binding, and `guild_members` admits any member of an allowlisted voice guild. The open policy widens voice presence only — mission creation, steering, and memory stay on the ambient binding — so opening a call to a server never grants that server code execution. The guild allowlist is checked first either way.
+Voice presence is a separate tier ([ADR 0050](../../docs/adr/0050-voice-presence-authority-tier.md)). `DISCORD_VOICE_JOIN_POLICY` decides who may invoke `/clankie join` and `/clankie leave`: `ambient` (default) keeps them on the ambient binding, and `guild_members` admits any member of an allowlisted voice guild. The open policy widens voice presence only — ambient commands stay on the ambient binding. The guild allowlist is checked first either way.
 
-Members can also just ask ([ADR 0062](../../docs/adr/0062-voice-join-by-asking.md)). With text ingress and voice both enabled, an admitted guild message that addresses Clankie, comes from someone currently sitting in a voice channel, and looks voice-shaped passes one bounded intent read — join, leave, or none, fail closed; message body only, never logged. A read ask then runs exactly the slash checks (the ADR 0050 presence tier and the voice guild/channel allowlists) before the media session joins the asker's current channel or leaves; the model interprets and never authorizes or picks a channel. An asked join auto-opts-in nobody, the asker included — consent still arrives only through `/clankie voice-consent opt-in` — and the executed outcome is injected into the same captain turn as a content-free note so his reply reflects what actually happened. A join refused only because the asker was not in voice keeps listening: for two minutes the same asker's follow-up in the same text channel ("try now", "im in general") needs no voice-ish word and, once the gateway reports them in a voice channel, earns one retry-framed intent read before the same deterministic checks run — nobody repeats an ask he already heard, and nobody else's chatter can ride the window into a join.
+Members can also just ask ([ADR 0062](../../docs/adr/0062-voice-join-by-asking.md)). The admitted message goes to the captain once, and he decides whether to call `voice_join` or `voice_leave` like any other ability. Those tools take no ids: the service stamps the authenticated actor and guild, then this bridge resolves the actor's current gateway voice channel and runs exactly the slash authority and allowlist checks before touching the media session. The official-bot tool join auto-opts-in nobody; consent still arrives through `/clankie voice-consent opt-in`. Follow-ups such as “try now” use the normal channel context rather than a separate intent model or retry state.
 
-`/clankie memory` exposes the enforced bridge invariant: the bot does not persist channel transcripts, infer speaker memory, or retain slash-command text after forwarding it. Message-content access is requested only when bounded text ingress is explicitly enabled. The trigger and up to the configured number of preceding messages exist only in the Eve turn request and are excluded from ingress evidence. `forget` removes only the live bridge-owned thread/mission correlation and projection cache, renames and archives the thread so it is not rebound after restart, and explicitly does not claim to delete Discord history or authoritative control-plane/captain memory.
+The enforced bridge invariant: the bot does not persist channel transcripts, infer speaker memory, or retain slash-command text after forwarding it. Message-content access is requested only when bounded text ingress is explicitly enabled. The trigger and up to the configured number of preceding messages exist only in the captain turn request and are excluded from ingress evidence.
 
 Required configuration. First store the bot token in the credential broker:
 run `clankie`, then `/auth` → “Add / update API key” → “Other…” → provider id
@@ -48,13 +50,10 @@ write boundary.
 ```bash
 DISCORD_APPLICATION_ID=...
 DISCORD_GUILD_ID=...          # optional, faster command registration in development
-DISCORD_AMBIENT_ROLE_IDS=...  # comma-separated roles allowed to create/steer missions
+DISCORD_AMBIENT_ROLE_IDS=...  # comma-separated roles granted the ambient command tier
 DISCORD_AMBIENT_USER_IDS=...  # comma-separated user ids with the same authority, no role needed
-DISCORD_APPROVAL_ROLE_IDS=... # comma-separated roles allowed to receive approval handoffs
 CLANKIE_API_URL=http://127.0.0.1:4310
-CLANKIE_AUTHENTICATED_SURFACE_URL=http://127.0.0.1:4311/approvals
-DISCORD_MISSION_POLL_INTERVAL_MS=5000
-DISCORD_BRIDGE_STATE_PATH=$HOME/.local/state/clankie/discord-bridge.json # optional absolute override
+CLANKIE_AUTHENTICATED_SURFACE_URL=http://127.0.0.1:4310 # authenticated operator surface referenced by ingress replies
 DISCORD_BRIDGE_RECEIPT_PATH=$HOME/.local/state/clankie/discord-live-receipts.jsonl # optional absolute override
 
 # Optional bounded text ingress (requires Message Content Intent in the Discord developer portal)
@@ -71,6 +70,7 @@ DISCORD_VOICE_ENABLED=true
 DISCORD_VOICE_GUILD_IDS=...          # deny-by-default guild allowlist
 DISCORD_VOICE_CHANNEL_IDS=...        # optional; empty admits every voice channel in the allowlisted guilds
 DISCORD_VOICE_JOIN_POLICY=ambient    # ambient | guild_members — who may /clankie join and /clankie leave
+DISCORD_VOICE_CONSENT_POLICY=explicit # explicit | presence — who may be transcribed
 DISCORD_VOICE_CHANNEL_ID=...         # one private channel used by readiness/live proof
 CLANKIE_VOICE_REALTIME_MODEL=gpt-realtime-2.1       # optional; engaged conversation tier
 CLANKIE_VOICE_TRANSCRIBE_MODEL=gpt-realtime-whisper # optional; dormant listener tier
@@ -84,7 +84,6 @@ CLANKIE_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT=12000   # optional; 1000-128000
 CLANKIE_VOICE_SESSION_LIFETIME_MS=...               # optional; overrides the runtime's session lifetime cap
 CLANKIE_VOICE_DECAY_WINDOW_MS=60000                 # optional; floor decay window
 CLANKIE_VOICE_IDLE_LEAVE_MS=900000                  # optional; idle auto-leave, capped at 24 h
-CLANKIE_VOICE_VOLITION_MODEL=gpt-4o-mini            # optional; the volition gate's text model
 
 # Optional activity plane (ADR 0047) — rendered surfaces in a voice channel
 DISCORD_ACTIVITY_APPLICATION_ID_GBA=...        # embedded application id for the gba_emulator surface
@@ -114,6 +113,12 @@ Surfaces are deny-by-default: a surface with no configured application id cannot
 be launched, so the plane stays off until an owner sets the variable above. A
 model names a surface from the frozen catalog, never a Discord application id.
 
+The captain can choose these through `discord_watch_start` /
+`discord_watch_stop`. It supplies no channel id: this bridge freshly resolves
+the authenticated speaker's voice channel, reapplies voice authority and
+allowlists, and grounds the write there. Reactions and thread actions follow the
+same rule on the trigger message supplied by ingress.
+
 Stop is best-effort by design. Discord cannot evict viewers already inside a
 running instance, so stop means "no further launches" — the frame stream going
 dark is what actually ends the surface.
@@ -121,14 +126,14 @@ dark is what actually ends the surface.
 An **unverified** activity is launchable only by the app team's developers and
 testers, and only in servers with fewer than 25 members.
 
-`clankie restart` starts the captain, the control plane, and the bridge in
-dependency order and health gates each one; `clankie restart discord` restarts
+`clankie restart` starts the clankie service and the bridge in dependency
+order and health gates each one; `clankie restart discord` restarts
 the bridge alone ([ADR 0055](../../docs/adr/0055-launcher-owned-local-services.md)).
 Use it rather than a hand-rolled kill-and-start sequence — it refuses to signal a
 pid it does not own, and it reads allowlists from settings.json instead of an env
 prefix that can drift from them.
 
-Start the control plane once before the bridge. The control plane mints the
+Start the clankie service once before the bridge. The service mints the
 internal `clankie_discord_bridge` and `clankie_discord_voice_bridge` bearers in
 the credential broker and authenticates them as the `discord_text` and
 `discord_voice` captain lanes. The bridge resolves both directly from the
@@ -139,43 +144,46 @@ external voice is configured ([ADR 0070](../../docs/adr/0070-external-voice-via-
 speech synthesis additionally uses the brokered `elevenlabs` API credential,
 and `ELEVENLABS_API_KEY` / `XI_API_KEY` are hard startup errors the same way.
 
-The bridge is a channel adapter. It never owns mission state, model credentials, approval credentials, or merge authority.
+The bridge is a channel adapter. It never owns model credentials or merge authority.
 
 Run `pnpm discord:readiness` before starting the bridge. It verifies the two
 broker entries, application identity, Message Content Intent, target-guild bot
 membership, ingress/presence allowlist alignment, and the authenticated
-control-plane composition. `--json` emits a content-free machine-readable
+service composition. `--json` emits a content-free machine-readable
 report suitable for an evidence artifact.
 
 The bridge appends mode-0600 JSONL live receipts for gateway readiness, bounded
-ingress outcomes, reply message ids, mission thread bindings/restoration,
-ambient approval refusal, person-memory proposal/recall, and graceful stop.
-Receipts contain bounded ids and typed outcomes only—never message bodies,
-Discord names, or credentials.
+ingress outcomes, reply message ids, person-memory proposal/recall, and
+graceful stop. Receipts contain bounded ids and typed outcomes only—never
+message bodies, Discord names, or credentials.
 
 After the live ceremony, run `pnpm discord:live-proof`. It requires an actual
-admitted-and-settled text delivery with a reply id, a mission binding restored
-across a graceful bridge restart, and an ambient approval refusal. Partial or
-fixture-only receipts cannot pass this gate.
+admitted-and-settled text delivery with a reply id. Partial or fixture-only
+receipts cannot pass this gate.
 
 ## Text ingress (ADR 0024 P2)
 
-When `DISCORD_TEXT_INGRESS_ENABLED=true`, owner DMs and messages in the explicit guild/channel allowlists become bounded `DiscordPresenceChannelTurnRequest` values. Discord message IDs are the delivery idempotency keys. Bot/self messages, unallowlisted traffic, empty messages, and conflicting redeliveries stop before an Eve turn and emit content-free ingress evidence. Context history is fetched only after policy admission, capped at 50 messages, framed as untrusted turn-only input, and never written to bridge state or ingress logs.
+When `DISCORD_TEXT_INGRESS_ENABLED=true`, owner DMs and messages in the explicit guild/channel allowlists become bounded `DiscordPresenceChannelTurnRequest` values. Discord message IDs are the delivery idempotency keys. Bot/self messages, unallowlisted traffic, empty messages, and conflicting redeliveries stop before a captain turn and emit content-free ingress evidence. Context history is fetched only after policy admission, capped at 50 messages, framed as untrusted turn-only input, and never written to bridge state or ingress logs.
 
-The control plane authenticates the bridge as the `discord_text` captain source, addresses the `discord_presence` lane, and places trigger/context text only in Eve's ephemeral `clientContext`, which does not enter durable session history. The durable Eve message is a fixed content-free instruction, and the adapter retains no continuation cursor after the result. A settled response becomes a typed `discord.presence.reply` and passes through the existing narrative policy, rate ledger, credential broker, and bot REST runtime. A presence session is its own narrative attribution scope until a real mission is explicitly coupled; non-narrative actions still require mission attribution. Discord never records privileged approval.
+Every admitted message reaches the captain by default, and he chooses a reply
+or the silent sentinel. Owners can select the `addressed` resource policy to
+spend turns only on mentions and configured names.
 
-While an addressed turn (a DM, a mention, or one of his names) is being composed, the ingress posts policy-gated `discord.presence.typing_start` writes so the channel shows him typing, refreshed until the turn settles; the reply then clears the indicator. Unprompted turns — messages he is merely reading and may decline — never signal typing, and a failed typing post stops the refresh without touching the turn.
+The service authenticates the bridge as the `discord_text` captain source and addresses the `discord_presence` lane. Trigger and context text are fenced and labelled untrusted; uploaded images and GIF-picker media are references, with at most the newest context visual carried into a turn. GIF motion becomes bounded chronological image frames at the service boundary. Text turns are one-shot, so channel history never enters durable session state, and the adapter retains no continuation cursor after the result. A settled response becomes a typed `discord.presence.reply` and passes through the existing narrative policy, rate ledger, credential broker, and bot REST runtime.
+
+While a live turn is being composed, ingress posts policy-gated `discord.presence.typing_start` writes so the channel shows him typing, refreshed until the turn settles; the reply then clears the indicator. He may still choose silence. Catch-up turns do not signal typing, and a failed typing post stops the refresh without touching the turn.
+
+One-shot Discord text turns have a 10-minute hard captain deadline so model reasoning and multiple bounded tool calls can finish. A wedged run is then aborted with `captain_turn_timeout`, which settles ingress. The bridge independently stops refreshing typing after 60 seconds, so a frozen service or HTTP connection cannot hold cosmetic presence open while the execution clock remains generous.
 
 `/clankie person-memory` proposes or recalls long-term person facts under the
 stable guild/user identity. A proposal contains an explicit bounded fact, not a
-transcript, and remains uncommitted until the authenticated operator surface
-approves it. Ambient Discord cannot export or delete person memory. Recall
-enforces guild/channel visibility and never returns operator-private facts.
-Run `pnpm discord:person-memory-live-proof` after proposing a fact, approving it
-on the authenticated operator surface, restarting the control plane, and
-recalling that person from Discord. The gate requires the exact generated fact
-id to be recalled from a different control-plane instance, proving both the
-approval-only write path and durable restart behavior.
+transcript, and applies directly, upserted by fact id. Ambient Discord cannot
+export or delete person memory. Recall enforces guild/channel visibility and
+never returns operator-private facts. Run
+`pnpm discord:person-memory-live-proof` after proposing a fact, restarting the
+clankie service, and recalling that person from Discord. The gate requires the
+exact generated fact id to be recalled from a different service instance,
+proving the write path and durable restart behavior.
 
 ## Official-bot group voice
 
@@ -189,29 +197,41 @@ reaches the realtime input buffer.
 
 ```mermaid
 flowchart LR
-  D["Discord per-user Opus<br/>consented ids only"] -->|"48 kHz stereo → 24 kHz mono"| L
-  L["dormant listener<br/>gpt-realtime-whisper"] --> F{"floor machine<br/>addressed? volition?"}
-  F -->|wake| RT["engaged session<br/>gpt-realtime-2.1"]
-  B["briefing<br/>persona · lane · self-state · person memory"] --> RT
-  RT -->|"streamed audio<br/>24 kHz → 48 kHz"| D
+  A["Discord user A Opus"] -->|"48 kHz stereo → 24 kHz mono"| LA["A transcription"]
+  B["Discord user B Opus"] -->|"48 kHz stereo → 24 kHz mono"| LB["B transcription"]
+  LA -->|"{ speakerId: A, text }"| F{"shared floor machine<br/>addressed? rate cap open?"}
+  LB -->|"{ speakerId: B, text }"| F
+  F -->|"wake · offered turn"| RT["engaged session<br/>gpt-realtime-2.1"]
+  BR["briefing<br/>persona · lane · self-state · person memory"] --> RT
+  RT -->|"streamed audio<br/>24 kHz → 48 kHz"| V["Discord voice channel"]
   RT -.->|"text deltas<br/>external voice only"| XI["ElevenLabs TTS<br/>24 kHz PCM"]
-  XI -.-> D
+  XI -.-> V
   RT -->|"ask_clankie"| C["captain discord_voice lane"]
   C -->|"result text"| RT
-  RT -.->|"release or decay"| L
+  RT -.->|"spoke, or passed"| F
 ```
 
-Dormant, a `gpt-realtime-whisper` transcription session hears the consented mix
-and answers nothing. When the repository-owned floor machine decides he has a
-reason to speak — someone addressed him (the same word-boundary name matching
-as the text plane, with phonetic tolerance for transcription artifacts), or a
-rate-capped volition call decides he has something worth saying — the engaged
-`gpt-realtime-2.1` session opens, is seeded with the control-plane-composed
-briefing plus the recent transcript window, and answers with streamed audio.
-`response.create` is always explicit; no utterance is auto-answered. The floor
-releases on an explicit closing phrase or by decay
-(`CLANKIE_VOICE_DECAY_WINDOW_MS`), and the engaged session is held connected
-briefly across a release so a conversation that resumes wakes instantly.
+Dormant, one `gpt-realtime-whisper` session per permitted speaker hears that
+speaker's authenticated Discord stream and answers nothing. Their attributed
+transcripts converge in one shared floor. When someone addresses him — the same
+word-boundary name matching as the text plane, with phonetic tolerance for
+transcription artifacts — the engaged `gpt-realtime-2.1` session opens, is
+seeded with the service-composed briefing plus the recent attributed JSONL
+transcript window, and answers with streamed audio. Later approved utterances
+enter as structured text; overlapping room audio is never interleaved and
+attributed by arrival order. `response.create` is always explicit; no utterance
+is auto-answered.
+
+When nobody addressed him, the repository-owned floor machine decides only
+whether the `persona.chattiness` rate cap permits offering him an unprompted
+turn. Whether to use it is his: the offer is a `response.create` on his own
+engaged session carrying a system note that nobody asked him anything and that
+saying nothing is a normal answer. Audio back means he spoke up; an empty
+response means he passed, and the session parks on the hold window. No phrase
+releases the floor — a goodbye with his name in it is an address he answers —
+so release is decay alone (`CLANKIE_VOICE_DECAY_WINDOW_MS`), and the engaged
+session is held connected briefly across it so a conversation that resumes wakes
+instantly.
 
 How he sounds is configurable from the TUI's `/voice` wizard
 ([ADR 0070](../../docs/adr/0070-external-voice-via-streaming-tts.md)). The
@@ -222,11 +242,10 @@ context per response, flushed when the response's text completes, closed early
 on barge-in — whose 24 kHz PCM feeds the same playback path. The ears, floor
 machine, `ask_clankie` fence, and receipts are identical in both modes.
 
-The engaged session holds exactly one tool: `ask_clankie`, which routes
-through the unchanged continuing `discord_voice` captain lane and recalls only
-control-plane-approved person memory. Conversation never pays a captain turn;
-anything that touches the world does. Approval-shaped results still come back
-as the authenticated-surface handoff — nothing said in voice can approve
+The engaged session uses `ask_clankie` for the unchanged continuing
+`discord_voice` captain lane and bounded local tools for YouTube search and
+music transport. Conversation and music control never pay a captain turn;
+anything else that touches the world does. Nothing said in voice can authorize
 privileged work, and the realtime model holds no privileged tool to be talked
 into using.
 
@@ -242,18 +261,24 @@ after `CLANKIE_VOICE_IDLE_LEAVE_MS` with no conversational sign of life.
 
 Barge-in is deliberate: the floor holder speaking over him, or a re-address,
 truncates playback, while crosstalk between other people lets him finish.
-Every transition emits a content-free receipt (`discord.voice.joined`,
-`consent`, `utterance`, `floor`, `response`, `volition`, `overlap`,
-`interrupted`, `failed`, `left`) carrying only ids, counts, durations, DAVE
-version, and typed outcomes. `discord.voice.response` reports first-audio
-latency separately for waking and continuing turns, captain handoff latency,
-and whether the turn took the fast path; `discord.voice.volition` reports the
-offered/taken/suppressed counters, so "he talks too much" and "he never speaks
-up" are both falsifiable against a number.
+Every transition emits a content-free receipt carrying only ids, counts,
+durations, exit codes, DAVE version, and typed outcomes. A delivery id now
+joins utterance, transcription outcome, floor decision, realtime response,
+tool call/result, music queue, `yt-dlp`/FFmpeg, and player checkpoints without
+storing the transcript, query, URL, model text, or audio. One `stayId` stamps
+every receipt from join to leave. `discord.voice.response` reports first-audio latency separately for
+waking and continuing turns, captain handoff latency, whether the turn took
+the fast path, and realtime token counts when the provider sends them;
+`discord.voice.volition` reports the offered/taken/suppressed counters for
+unprompted turns — offered by the rate cap, taken or passed on by him — so "he
+talks too much" and "he never speaks up" are both falsifiable against a
+number. Play commentary that is seeded but not spoken emits
+`discord.voice.possessor_narration_suppressed` (`playing` or `rate_limited`)
+with the same `deliveryId` as the journal turn and the submission.
 
 Run `pnpm discord:voice-readiness` before starting. Beyond credentials,
-allowlists, native Opus, and control-plane composition, it validates the
-realtime configuration, exercises the control plane's voice-briefing endpoint
+allowlists, native Opus, and service composition, it validates the
+realtime configuration, exercises the service's voice-briefing endpoint
 with zero consented ids, and runs a live wake-transition probe: a real dormant
 listener session opens, then — with the listener still connected, exactly like
 a wake — a real engaged session must produce a response. Run
@@ -282,9 +307,9 @@ seeds that report into the live conversation session and lets the persona
 compose the words.
 
 Two possessors use this listener, under the same flag and the same fence: an
-external MCP harness, and the runner's asked-play host when Clankie is playing
+external MCP harness, and the service's asked-play host when Clankie is playing
 because someone asked him to
-([ADR 0067](../../docs/adr/0067-asked-play-speaks-through-the-possessor-seam.md)).
+([ADR 0067](../../docs/adr/0067-a-play-request-speaks-through-the-possessor-seam.md)).
 With the flag off, both stay silent and both keep working.
 
 ```mermaid
@@ -316,7 +341,7 @@ rejected by the receipt schema.
 
 ## Presence actions (ADR 0024 P1)
 
-Policy-gated bot presence actions (reply, react, send, …) execute through the control plane:
+Policy-gated bot presence actions (reply, react, send, …) execute through the clankie service:
 
 ```bash
 CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE=$PWD/apps/discord-bridge/src/presence-runtime-module.ts
@@ -331,13 +356,13 @@ See [`ADR 0024`](../../docs/adr/0024-discord-dual-plane-presence.md).
 
 The bridge owns one official-bot presence session keyed by application id. Gateway readiness,
 resume/reconnect/disconnect, invalidation, and the bot's own voice-state updates publish typed
-phase transitions to the control plane over the authenticated captain channel. The control plane
+phase transitions to the service over the authenticated captain channel. The service
 projects that stream before exposing or executing presence actions; `degraded`, `failed`, and
 `off` expose no act tools. Operator status therefore comes from semantic events rather than bot
 log text, and an action payload can never manufacture the phase it requires. Each authenticated
-action carries the live session id, phase, and monotonic revision. The control plane requires that
+action carries the live session id, phase, and monotonic revision. The service requires that
 claim to match its latest validated session record as well as the durable exposure. A loss-phase
 callback synchronously advances the live revision and fences the advertised tool catalog before
 durable publication can await I/O; bounded publication retries then reconcile the durable record.
-After a control-plane restart, act execution remains fail-closed until an authenticated lifecycle
+After a service restart, act execution remains fail-closed until an authenticated lifecycle
 delivery revalidates the live watermark; durable session replay alone restores status only.

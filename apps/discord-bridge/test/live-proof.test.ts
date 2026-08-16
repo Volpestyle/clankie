@@ -16,30 +16,17 @@ describe("Discord text live proof", () => {
     ).resolves.toEqual([]);
   });
 
-  it("requires a real reply, mission restart restoration, and ambient approval refusal", () => {
+  it("requires a real settled reply", () => {
     const receipts = [
       receipt("discord.bridge.ready", {}),
       receipt("discord.text.ingress", { deliveryId: "m1", outcome: "accepted" }),
       receipt("discord.text.ingress", { deliveryId: "m1", outcome: "settled" }),
       receipt("discord.text.reply", { deliveryId: "m1", responseMessageId: "r1" }),
-      receipt("discord.mission.bound", {
-        missionId: "mission-1",
-        threadId: "thread-1",
-        guildId: "guild-1",
-      }),
-      receipt("discord.bridge.stopped", { signal: "SIGTERM" }),
-      receipt("discord.mission.restored", {
-        missionId: "mission-1",
-        threadId: "thread-1",
-        guildId: "guild-1",
-      }),
-      receipt("discord.bridge.ready", { restoredMissionCount: 1 }),
-      receipt("discord.approval.refused", { approvalId: "approval-1" }),
     ];
 
     expect(evaluateDiscordLiveProof(receipts)).toMatchObject({
       passed: true,
-      receiptCount: 9,
+      receiptCount: 4,
     });
   });
 
@@ -52,14 +39,12 @@ describe("Discord text live proof", () => {
     expect(report.passed).toBe(false);
     expect(report.checks.filter((check) => !check.ok).map((check) => check.name)).toEqual([
       "bounded text round trip",
-      "mission restart restoration",
-      "ambient approval denial",
     ]);
   });
 });
 
 describe("Discord person-memory live proof", () => {
-  it("requires the exact approved fact to survive a control-plane restart", () => {
+  it("requires the exact proposed fact to survive a service restart", () => {
     const report = evaluateDiscordPersonMemoryLiveProof([
       receipt("discord.person-memory.proposed", {
         guildId: "guild-1",
@@ -68,7 +53,6 @@ describe("Discord person-memory live proof", () => {
         controlPlaneInstanceId: "boot-1",
         proposalId: "proposal-1",
         factId: "fact-1",
-        approvalId: "approval-1",
       }),
       receipt("discord.person-memory.recalled", {
         guildId: "guild-1",
@@ -90,7 +74,6 @@ describe("Discord person-memory live proof", () => {
       controlPlaneInstanceId: "boot-1",
       proposalId: "proposal-1",
       factId: "fact-1",
-      approvalId: "approval-1",
     });
     const sameBoot = evaluateDiscordPersonMemoryLiveProof([
       proposal,
@@ -111,10 +94,8 @@ describe("Discord person-memory live proof", () => {
       }),
     ]);
 
-    expect(sameBoot.checks.find((check) => check.name === "control-plane restart durability")?.ok).toBe(
-      false,
-    );
-    expect(unrelated.checks.find((check) => check.name === "approved fact recalled")?.ok).toBe(false);
+    expect(sameBoot.checks.find((check) => check.name === "service restart durability")?.ok).toBe(false);
+    expect(unrelated.checks.find((check) => check.name === "fact recalled")?.ok).toBe(false);
   });
 });
 

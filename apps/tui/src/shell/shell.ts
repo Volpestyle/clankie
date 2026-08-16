@@ -4,9 +4,9 @@
  * fullscreen differential-render layout, and owns the central input router,
  * overlay/selection plumbing, guided-flow engine, turn loader, and inline `!`
  * shell escape. Extracted from v1's `scripts/clankie.ts` monolith (clankie
- * snapshot 04734df9) with the eve brain coupling removed: mission data flows
- * in through `FaceShellOptions` (commands, onPrompt, statusExtras) so the
- * control plane stays behind `@clankie/api-client`.
+ * snapshot 04734df9): dynamic data flows in through `FaceShellOptions`
+ * (commands, onPrompt, statusExtras) so the clankie service stays behind
+ * `@clankie/api-client`.
  */
 import type { ChildProcess } from "node:child_process";
 import {
@@ -15,7 +15,8 @@ import {
   Loader,
   matchesKey,
   ProcessTerminal,
-  TUI,
+  TuiMainScreen,
+  type TUI,
   type Component,
   type OverlayHandle,
   type OverlayOptions,
@@ -48,8 +49,11 @@ import {
 } from "../face/clankie-sgr-mouse.ts";
 import { writeClankieClipboard } from "../face/clankie-clipboard.ts";
 import {
+  clankieCommandCompletion,
   createClankieAutocompleteProvider,
+  resolveClankieCommand,
   type ClankieAutocompleteOptions,
+  type ClankieAutocompleteSkill,
 } from "../face/clankie-autocomplete.ts";
 import {
   ClankieCommandTypeaheadPanel,
@@ -61,9 +65,10 @@ import {
   isExactClankieCommandTypeahead,
   moveClankieCommandTypeaheadSelection,
   selectedClankieCommandTypeahead,
+  typeaheadSelectionDelta,
   type ClankieCommandTypeaheadState,
 } from "../face/clankie-command-ui.ts";
-import { clankieCommandCompletion } from "../face/clankie-autocomplete.ts";
+
 import {
   ClankieTranscriptViewport,
   type ClankieTranscriptBlockHandle,
@@ -91,6 +96,7 @@ import { createFaceThemeBundle, type FaceThemeBundle } from "./theme.ts";
 import { ClankieStatusBarComponent } from "./status-bar.ts";
 import { createSetupFlow, type SetupFlowController } from "./setup-flow.ts";
 import { appendPromptHistory, readPromptHistory } from "./prompt-history.ts";
+import { clankieSlashSkillSuffix, resolveClankieSlashSkill } from "../skill-catalog.ts";
 
 // Mode 1002 reports drag motion while a button is held (1000 only reports
 // press/release), which the transcript needs to track a selection gesture.
@@ -120,9 +126,10 @@ export interface FaceShellOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly bannerFields: BannerFields;
   readonly autocomplete?: ClankieAutocompleteOptions;
+  readonly skills?: readonly ClankieAutocompleteSkill[];
   /** File that persists editor prompt history across sessions. */
   readonly historyPath?: string;
-  /** Extra status bar segments (model, mission, …) appended after shell state. */
+  /** Extra status bar segments (model, activity, …) appended after shell state. */
   readonly statusExtras?: () => readonly string[];
   /** Handles a plain prompt (not a slash command, not `!`). */
   readonly onPrompt?: (prompt: string, shell: ClankieFaceShell, signal: AbortSignal) => Promise<void>;
@@ -219,7 +226,7 @@ export class ClankieFaceShell {
       unicode: this.theme.capabilities.unicode,
     });
 
-    this.tui = new TUI(new ProcessTerminal());
+    this.tui = new TuiMainScreen(new ProcessTerminal());
     this.tui.setClearOnShrink(true);
     this.banner = new ClankieBannerComponent(
       options.bannerFields,
@@ -717,9 +724,15 @@ export class ClankieFaceShell {
 
   refreshCommandSurface(text: string): void {
     const disabled = this.setupFlow.isWaitingForInput() || this.bashMode;
-    this.commandTypeaheadState = disabled
+    const commandState = disabled
       ? undefined
       : clankieCommandTypeaheadFor(this.options.commands, text, this.commandTypeaheadState);
+    const skillSuffix =
+      commandState?.matches.length === 0
+        ? clankieSlashSkillSuffix(text, this.options.skills ?? [])
+        : undefined;
+    this.editor.setGhostText(skillSuffix);
+    this.commandTypeaheadState = skillSuffix === undefined ? commandState : undefined;
     this.commandTypeaheadPanel.setText(text, this.commandTypeaheadState, disabled);
     this.tui.requestRender();
   }
@@ -740,13 +753,12 @@ export class ClankieFaceShell {
     const listOpen = isClankieCommandTypeaheadOpen(state);
     const exact = isExactClankieCommandTypeahead(state);
 
-    if (listOpen && matchesKey(data, Key.up)) {
-      this.setCommandTypeaheadState(moveClankieCommandTypeaheadSelection(state, -1));
-      return { consume: true };
-    }
-    if (listOpen && matchesKey(data, Key.down)) {
-      this.setCommandTypeaheadState(moveClankieCommandTypeaheadSelection(state, 1));
-      return { consume: true };
+    if (listOpen) {
+      const delta = typeaheadSelectionDelta(data);
+      if (delta !== undefined) {
+        this.setCommandTypeaheadState(moveClankieCommandTypeaheadSelection(state, delta));
+        return { consume: true };
+      }
     }
     if ((listOpen || exact || state.matches.length === 0) && matchesKey(data, Key.escape)) {
       this.setCommandTypeaheadState(dismissClankieCommandTypeahead(state));
@@ -1062,10 +1074,17 @@ export class ClankieFaceShell {
   private async handleSlashPrompt(prompt: string): Promise<void> {
     const withoutSlash = prompt.slice(1);
     const token = (withoutSlash.split(/\s+/u)[0] ?? "").toLowerCase();
-    const command = this.options.commands.find(
-      (candidate) => candidate.name === token || candidate.aliases.includes(token),
-    );
+    const command = resolveClankieCommand(this.options.commands, token)?.command;
     if (command === undefined) {
+      if (resolveClankieSlashSkill(prompt, this.options.skills ?? []) !== undefined) {
+        if (this.respondingState) {
+          this.editor.setText(prompt);
+          this.refreshCommandSurface(prompt);
+          return;
+        }
+        await this.submitPrompt(prompt);
+        return;
+      }
       this.insertCommandResult(prompt, `Unknown command /${token}. Run /help for the command list.`, "error");
       return;
     }

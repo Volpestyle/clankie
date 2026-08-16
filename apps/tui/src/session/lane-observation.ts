@@ -2,26 +2,23 @@
  * Watching a lane the operator is not talking in (ADR 0083).
  *
  * Every room Clankie answers in — each Discord server and channel, voice,
- * gameplay — is its own durable Eve session. The console reads the authenticated
- * lane listing to learn which sessions exist, then subscribes to the same public
- * `/eve/v1/session/:id/stream` it already uses for its own conversation. It is a
- * subscriber and nothing else: no send, no continuation token, no steering.
+ * gameplay — is a lane the clankie service reports on its authenticated
+ * `/captain/v1/lanes` listing. The console reads that listing to learn which
+ * rooms exist and, when a room is watched, polls its bounded heard/said log for
+ * new entries. It is a subscriber and nothing else: no send, no steering.
  *
- * A Discord text lane starts a fresh session per turn, so following one means
- * re-reading the listing when its stream ends and resetting the stream index
- * when the session id rotates.
+ * This is conversation history, not private pi reasoning or tool state.
  */
 import {
   CAPTAIN_LANE_OBSERVATION_PATH,
   CaptainLaneListingSchema,
+  type CaptainLaneObservationEntry,
   type ObservableCaptainLane,
 } from "@clankie/protocol";
-import type { Client, HandleMessageStreamEvent } from "eve/client";
 import type { ClankieFaceShell } from "../shell/shell.ts";
-import { EveFaceRenderer } from "./eve-renderer.ts";
 import type { CaptainRouteFetcher } from "./operator-conversations.ts";
 
-/** Poll cadence while a followed lane has no live session to attach to. */
+/** Poll cadence while a followed lane is active. */
 const LANE_IDLE_POLL_MS = 2_000;
 /** Ceiling the quiet-room backoff climbs to, so a settled room stays cheap to watch. */
 const LANE_MAX_POLL_MS = 15_000;
@@ -75,7 +72,7 @@ export function selectLanes(
   argument: string,
 ): readonly ObservableCaptainLane[] {
   const query = argument.trim().toLowerCase();
-  if (query.length === 0 || query === "all") return lanes.filter((lane) => lane.lane !== "tui");
+  if (query.length === 0 || query === "all") return lanes.filter((lane) => lane.lane !== "operator");
   const exact = lanes.filter(
     (lane) => laneKey(lane).toLowerCase() === query || lane.targetId.toLowerCase() === query,
   );
@@ -85,7 +82,11 @@ export function selectLanes(
   return lanes.filter((lane) => laneKey(lane).toLowerCase().includes(query));
 }
 
-/** One `/trace` listing line: room, state, session presence, and whether it is being watched. */
+function latestEntryAt(lane: ObservableCaptainLane): string {
+  return lane.entries.at(-1)?.at ?? "";
+}
+
+/** One `/trace` listing line: room, recent history, and whether it is being watched. */
 export function formatLaneListing(
   lanes: readonly ObservableCaptainLane[],
   watched: ReadonlySet<string>,
@@ -94,48 +95,60 @@ export function formatLaneListing(
     return "No captain lanes have run a turn yet. Rooms appear here once Clankie answers in them.";
   }
   return [...lanes]
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+    .sort((left, right) => latestEntryAt(right).localeCompare(latestEntryAt(left)))
     .map((lane) => {
       const key = laneKey(lane);
       const mark = watched.has(key) ? "▶" : " ";
-      const session = lane.sessionId === undefined ? "no session yet" : lane.state;
-      return `${mark} ${key} · ${session} · ${lane.updatedAt}`;
+      const latest = latestEntryAt(lane);
+      const activity = latest.length === 0 ? "quiet" : `${String(lane.entries.length)} recent · ${latest}`;
+      return `${mark} ${key} · ${activity}`;
     })
     .join("\n");
 }
 
 export interface LaneTailOptions {
   readonly address: LaneAddress;
-  readonly client: Client;
   readonly lanes: CaptainLaneClient;
-  /** Renders one event; a rotated session hands back a fresh renderer. */
-  readonly render: (event: HandleMessageStreamEvent) => void;
-  /** Called when the followed lane starts a new session, so the caller can reset its renderer. */
-  readonly onSessionRotated?: (sessionId: string) => void;
-  /** Surfaces a non-fatal problem (listing unreachable, stream failed) without stopping the tail. */
+  /** Renders one observed change in the followed room. */
+  readonly render: (line: string) => void;
+  /** Surfaces a non-fatal problem (listing unreachable) without stopping the tail. */
   readonly onNotice?: (message: string) => void;
   readonly pollIntervalMs?: number;
   readonly sleep?: (ms: number) => Promise<void>;
   readonly signal: AbortSignal;
 }
 
-function isAbort(error: unknown): boolean {
-  return error instanceof Error && (error.name === "AbortError" || /abort/iu.test(error.message));
+function sameEntry(left: CaptainLaneObservationEntry, right: CaptainLaneObservationEntry): boolean {
+  return left.at === right.at && left.kind === right.kind && left.text === right.text;
+}
+
+/** Finds the appended suffix when the service's bounded log window advances. */
+function appendedEntries(
+  previous: readonly CaptainLaneObservationEntry[] | undefined,
+  current: readonly CaptainLaneObservationEntry[],
+): readonly CaptainLaneObservationEntry[] {
+  if (previous === undefined) return current;
+  for (let overlap = Math.min(previous.length, current.length); overlap > 0; overlap -= 1) {
+    const previousStart = previous.length - overlap;
+    if (
+      current.slice(0, overlap).every((entry, index) => sameEntry(previous[previousStart + index]!, entry))
+    ) {
+      return current.slice(overlap);
+    }
+  }
+  return current;
 }
 
 /**
- * Follows one lane until the signal aborts. Rotation-aware: the stream index
- * resets to 0 on a new session id, so a Discord text lane that gets a fresh
- * session every turn keeps rendering in one continuous feed.
+ * Follows one lane until the signal aborts, polling the listing and reporting
+ * newly appended heard/said entries. A quiet room backs off to
+ * {@link LANE_MAX_POLL_MS}; the first observed change brings the cadence back.
  */
 export async function followLane(options: LaneTailOptions): Promise<void> {
   const poll = options.pollIntervalMs ?? LANE_IDLE_POLL_MS;
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
   const key = laneKey(options.address);
-  let sessionId: string | undefined;
-  let streamIndex = 0;
-  // A settled room would otherwise be re-opened every poll forever; quiet rounds
-  // back off, and the first event brings the cadence straight back.
+  let previous: readonly CaptainLaneObservationEntry[] | undefined;
   let quietRounds = 0;
   const waitQuietly = async (): Promise<void> => {
     const delay = Math.min(poll * 2 ** quietRounds, LANE_MAX_POLL_MS);
@@ -161,54 +174,28 @@ export async function followLane(options: LaneTailOptions): Promise<void> {
       continue;
     }
     if (options.signal.aborted) return;
-    if (current?.sessionId === undefined) {
-      await waitQuietly();
-      continue;
-    }
-    if (current.sessionId !== sessionId) {
-      sessionId = current.sessionId;
-      streamIndex = 0;
+    lastNotice = undefined;
+    const appended = current === undefined ? [] : appendedEntries(previous, current.entries);
+    if (current !== undefined) previous = current.entries;
+    if (appended.length > 0) {
+      for (const entry of appended) options.render(`${entry.kind} · ${entry.at}\n\n${entry.text}`);
       quietRounds = 0;
-      options.onSessionRotated?.(sessionId);
-    }
-
-    let rendered = 0;
-    try {
-      for await (const event of options.client
-        .session({ sessionId, streamIndex })
-        .stream({ startIndex: streamIndex, signal: options.signal })) {
-        if (options.signal.aborted) return;
-        streamIndex += 1;
-        rendered += 1;
-        lastNotice = undefined;
-        options.render(event);
-      }
-    } catch (error) {
-      if (options.signal.aborted || isAbort(error)) return;
-      notice(error);
-    }
-    // The stream ended: the session settled, or the lane is about to rotate.
-    // Re-read the listing rather than assuming either.
-    if (rendered === 0) {
+      await sleep(poll);
+    } else {
       await waitQuietly();
-      continue;
     }
-    quietRounds = 0;
-    await sleep(poll);
   }
 }
 
 /**
- * Owns the console's live lane tails. Several rooms can be watched at once; each
- * gets its own renderer so a rotated session resets only that room's blocks.
+ * Owns the console's live lane tails. Several rooms can be watched at once;
+ * each renders its changes as room-tagged transcript lines.
  */
 export class CaptainLaneTraceController {
-  private readonly client: Client;
   private readonly lanesClient: CaptainLaneClient;
   private readonly watchers = new Map<string, AbortController>();
 
-  public constructor(options: { readonly client: Client; readonly lanes: CaptainLaneClient }) {
-    this.client = options.client;
+  public constructor(options: { readonly lanes: CaptainLaneClient }) {
     this.lanesClient = options.lanes;
   }
 
@@ -226,20 +213,17 @@ export class CaptainLaneTraceController {
     if (this.watchers.has(key)) return false;
     const controller = new AbortController();
     this.watchers.set(key, controller);
-    let renderer = new EveFaceRenderer(shell, { label: key });
     void followLane({
       address,
-      client: this.client,
       lanes: this.lanesClient,
       signal: controller.signal,
-      render: (event) => {
-        renderer.render(event);
-      },
-      onSessionRotated: () => {
-        renderer = new EveFaceRenderer(shell, { label: key });
+      render: (line) => {
+        shell.insertMarkdown(`\`${key}\` **trace**\n\n${line}`);
+        shell.requestRender();
       },
       onNotice: (message) => {
         shell.insertMarkdown(`\`${key}\` **trace**\n\n${message}`);
+        shell.requestRender();
       },
     }).catch((error: unknown) => {
       this.watchers.delete(key);

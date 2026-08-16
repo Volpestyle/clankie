@@ -1,0 +1,135 @@
+diff --git a/dist/components/editor.d.ts b/dist/components/editor.d.ts
+index a6fedc9e3b36d066e34860d040db6df47d88c432..f21274d8c1a8a4b9cf29814b0e151b55e3485cc9 100644
+--- a/dist/components/editor.d.ts
++++ b/dist/components/editor.d.ts
+@@ -25,6 +25,8 @@ export declare function wordWrapLine(line: string, maxWidth: number, preSegmente
+ export interface EditorTheme {
+     borderColor: (str: string) => string;
+     selectList: SelectListTheme;
++    /** Style for inline completion text. Defaults to ANSI dim. */
++    ghostText?: (str: string) => string;
+ }
+ export interface EditorOptions {
+     paddingX?: number;
+@@ -53,6 +55,7 @@ export declare class Editor implements Component, Focusable {
+     private autocompleteRequestTask;
+     private autocompleteStartToken;
+     private autocompleteRequestId;
++    private ghostText;
+     private pastes;
+     private pasteCounter;
+     private pasteBuffer;
+@@ -79,6 +82,8 @@ export declare class Editor implements Component, Focusable {
+     getAutocompleteMaxVisible(): number;
+     setAutocompleteMaxVisible(maxVisible: number): void;
+     setAutocompleteProvider(provider: AutocompleteProvider): void;
++    /** Set a single-line suffix that renders at the cursor and is accepted with Tab. */
++    setGhostText(text?: string): void;
+     /**
+      * Add a prompt to history for up/down arrow navigation.
+      * Called after successful submission.
+@@ -137,6 +142,8 @@ export declare class Editor implements Component, Focusable {
+      * Use this for all non-vertical cursor movements to reset sticky column behavior.
+      */
+     private setCursorCol;
++    private visibleGhostText;
++    private acceptGhostText;
+     /**
+      * Move cursor to a target visual line, applying sticky column logic.
+      * Shared by moveCursor() and pageScroll().
+diff --git a/dist/components/editor.js b/dist/components/editor.js
+index 4786b46932b65785cfbd2304610ca77ccead910a..98d304f7813de9641302f41768def4eafc3061e4 100644
+--- a/dist/components/editor.js
++++ b/dist/components/editor.js
+@@ -219,6 +219,7 @@ export class Editor {
+     autocompleteRequestTask = Promise.resolve();
+     autocompleteStartToken = 0;
+     autocompleteRequestId = 0;
++    ghostText = "";
+     // Paste tracking for large pastes
+     pastes = new Map();
+     pasteCounter = 0;
+@@ -289,6 +290,14 @@ export class Editor {
+         this.autocompleteProvider = provider;
+         this.setAutocompleteTriggerCharacters(provider.triggerCharacters ?? []);
+     }
++    /** Set a single-line suffix that renders at the cursor and is accepted with Tab. */
++    setGhostText(text) {
++        const next = text !== undefined && !/[\r\n]/u.test(text) ? text : "";
++        if (this.ghostText === next)
++            return;
++        this.ghostText = next;
++        this.tui.requestRender();
++    }
+     /**
+      * Add a prompt to history for up/down arrow navigation.
+      * Called after successful submission.
+@@ -438,10 +447,18 @@ export class Editor {
+                     // lineVisibleWidth stays the same - we're replacing, not adding
+                 }
+                 else {
+-                    // Cursor is at the end - add highlighted space
+-                    const cursor = "\x1b[7m \x1b[0m";
+-                    displayText = before + marker + cursor;
+-                    lineVisibleWidth = lineVisibleWidth + 1;
++                    const ghost = sliceByColumn(this.visibleGhostText(), 0, contentWidth - lineVisibleWidth, true);
++                    if (ghost.length > 0) {
++                        const firstGrapheme = [...graphemeSegmenter.segment(ghost)][0]?.segment ?? "";
++                        const styleGhost = this.theme.ghostText ?? ((text) => `\x1b[2m${text}\x1b[22m`);
++                        displayText = before + marker + `\x1b[7m${styleGhost(firstGrapheme)}\x1b[0m` + styleGhost(ghost.slice(firstGrapheme.length));
++                        lineVisibleWidth += visibleWidth(ghost);
++                    }
++                    else {
++                        // Cursor is at the end - add highlighted space
++                        displayText = `${before + marker}\x1b[7m \x1b[0m`;
++                        lineVisibleWidth += 1;
++                    }
+                     // If cursor overflows content width into the padding, flag it
+                     if (lineVisibleWidth > contentWidth && paddingX > 0) {
+                         cursorInPadding = true;
+@@ -574,6 +591,9 @@ export class Editor {
+                 }
+             }
+         }
++        if (kb.matches(data, "tui.input.tab") && !this.autocompleteState && this.acceptGhostText()) {
++            return;
++        }
+         // Tab - trigger completion
+         if (kb.matches(data, "tui.input.tab") && !this.autocompleteState) {
+             this.handleTabCompletion();
+@@ -1067,6 +1087,7 @@ export class Editor {
+     }
+     submitValue() {
+         this.cancelAutocomplete();
++        this.ghostText = "";
+         const result = this.expandPasteMarkers(this.state.lines.join("\n")).trim();
+         this.state = { lines: [""], cursorLine: 0, cursorCol: 0 };
+         this.pastes.clear();
+@@ -1157,9 +1178,27 @@ export class Editor {
+      */
+     setCursorCol(col) {
+         this.state.cursorCol = col;
++        this.ghostText = "";
+         this.preferredVisualCol = null;
+         this.snappedFromCursorCol = null;
+     }
++    visibleGhostText() {
++        if (this.ghostText.length === 0 || this.autocompleteState !== null)
++            return "";
++        const line = this.state.lines[this.state.cursorLine] ?? "";
++        return this.state.cursorCol === line.length ? this.ghostText : "";
++    }
++    acceptGhostText() {
++        const text = this.visibleGhostText();
++        if (text.length === 0)
++            return false;
++        this.pushUndoSnapshot();
++        this.lastAction = null;
++        this.exitHistoryBrowsing();
++        this.ghostText = "";
++        this.insertTextAtCursorInternal(text);
++        return true;
++    }
+     /**
+      * Move cursor to a target visual line, applying sticky column logic.
+      * Shared by moveCursor() and pageScroll().

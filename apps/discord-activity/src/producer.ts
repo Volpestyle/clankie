@@ -1,7 +1,7 @@
 import { RenderedSurfaceMessageSchema } from "@clankie/interactive-environment";
 import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server } from "node:http";
-import { WebSocketServer } from "ws";
+import { WebSocketServer, type WebSocket } from "ws";
 import type { RenderedSurfaceHub } from "./frame-hub.ts";
 
 /**
@@ -16,7 +16,7 @@ import type { RenderedSurfaceHub } from "./frame-hub.ts";
  */
 export interface FrameProducerServerOptions {
   hub: RenderedSurfaceHub;
-  /** Shared secret the runner presents. Absent means the endpoint stays closed. */
+  /** Shared secret the frame producer presents. Absent means the endpoint stays closed. */
   token: string;
   /** Producer frames are bounded by the transport contract; this is the guard. */
   maxPayloadBytes?: number;
@@ -40,10 +40,29 @@ export function createFrameProducerServer(options: FrameProducerServerOptions): 
     maxPayload: options.maxPayloadBytes ?? DEFAULT_MAX_PAYLOAD_BYTES,
   });
 
-  const server = createServer((_request, response) => {
-    // The producer listener serves no content at all.
+  const server = createServer((request, response) => {
+    const path = new URL(request.url ?? "/", "http://localhost").pathname;
+    if (request.method === "GET" && path === "/snapshot") {
+      if (!authorized(request, token)) {
+        response.writeHead(401).end();
+        return;
+      }
+      const frame = hub.snapshot();
+      if (frame === null) {
+        response.writeHead(404).end();
+        return;
+      }
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(frame));
+      return;
+    }
     response.writeHead(404).end();
   });
+
+  // The newest authenticated producer owns the session. A runner reconnect
+  // can race its dying socket's close, so a superseded socket must be unable
+  // to stop or mutate the session it no longer owns.
+  let current: WebSocket | null = null;
 
   server.on("upgrade", (request, socket, head) => {
     const path = new URL(request.url ?? "/", "http://localhost").pathname;
@@ -52,7 +71,11 @@ export function createFrameProducerServer(options: FrameProducerServerOptions): 
       return;
     }
     wss.handleUpgrade(request, socket, head, (ws) => {
+      const previous = current;
+      current = ws;
+      previous?.close();
       ws.on("message", (raw) => {
+        if (current !== ws) return;
         // The producer is trusted but still validated: a malformed frame must
         // not reach viewers, and byteLength/digest are checked by the schema.
         const parsed = RenderedSurfaceMessageSchema.safeParse(safeJson(raw.toString()));
@@ -60,6 +83,14 @@ export function createFrameProducerServer(options: FrameProducerServerOptions): 
         if (parsed.data.kind === "frame") hub.publishFrame(parsed.data.frame);
         else if (parsed.data.kind === "overlay") hub.publishOverlay(parsed.data.overlay);
         else hub.stop(parsed.data.reason);
+      });
+      // A live-only surface must not relabel its last frame as current after
+      // the producer exits or crashes. Disconnect invalidates the snapshot —
+      // but only when the closing socket still owns the session.
+      ws.on("close", () => {
+        if (current !== ws) return;
+        current = null;
+        hub.stop("session_ended");
       });
     });
   });

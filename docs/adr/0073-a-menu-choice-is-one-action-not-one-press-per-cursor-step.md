@@ -1,7 +1,7 @@
 # 0073. A menu choice is one action, not one press per cursor step
 
 Date: 2026-08-01
-Status: proposed
+Status: accepted
 
 ## Context
 
@@ -36,7 +36,7 @@ verifying the cursor against live state between presses.
   of wandering.
 - **It stops and says why** (`endedBecause`): `selected`, `menu_closed`,
   `cursor_stalled`, or an exhausted input/frame budget. A stop never presses
-  the confirming A, so a stall cannot select an entry the caller did not name.
+  the confirming A, so a stall cannot select an entry the caller does not name.
 - **Fail-closed refusals** before any press: `menu_not_open`,
   `menu_entry_not_found`, `menu_not_navigable` (the naming screen belongs to
   `enter_text`), and `menu_window_scrolled` — bag windows are a 16-entry slice
@@ -46,7 +46,7 @@ verifying the cursor against live state between presses.
   to `emulator.gba.input` exactly as `walk_to`, `advance_dialog`, and
   `enter_text` do.
 - The evidence event `actionKind` enum gains the new kind, the same additive
-  extension `advance_dialog` and `enter_text` made. Frozen receipts are
+  extension used by `advance_dialog` and `enter_text`. Frozen receipts are
   untouched: their runs never emit it.
 
 Both driver wires offer it — the free-play flat schema and the MCP

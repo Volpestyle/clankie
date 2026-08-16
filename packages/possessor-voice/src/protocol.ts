@@ -29,6 +29,11 @@ export const PossessorNarrateSchema = z
     ...EnvelopeShape,
     type: z.literal("narrate"),
     text: z.string().min(1).max(POSSESSOR_NARRATION_MAX_CHARS),
+    /**
+     * Optional join key minted by the play journal. The listener falls back to
+     * its own id when a possessor omits it (gba-mcp `clankie_say`).
+     */
+    deliveryId: z.string().min(1).max(128).regex(/^\S+$/u).optional(),
   })
   .strict();
 export type PossessorNarrate = z.infer<typeof PossessorNarrateSchema>;
@@ -37,12 +42,17 @@ export const PossessorClientMessageSchema = z.discriminatedUnion("type", [Posses
 export type PossessorClientMessage = z.infer<typeof PossessorClientMessageSchema>;
 
 /**
- * Bridge → possessor. One already-attributed transcript line, pushed as it
+ * Bridge → possessor. One already-attributed line from the room, pushed as it
  * happens. Push rather than pull is a privacy constraint: a pull-shaped port
  * would force the bridge to retain transcripts, and it retains none.
  *
+ * Two sources, one message: a voice-transcript line from inside the consent
+ * registry, and — since ADR 0098 — a text message the ingress allowlist already
+ * admits. Speaking in the channel he plays in front of and typing in it are the
+ * same act, and a possessor cannot tell which it received.
+ *
  * Raw audio never crosses this seam, and nothing a possessor receives here was
- * captured outside the existing consent registry.
+ * captured outside a boundary the owner had already drawn.
  */
 export const PossessorUtteranceSchema = z
   .object({

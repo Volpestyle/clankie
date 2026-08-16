@@ -26,7 +26,7 @@ export interface PossessorVoiceListenerOptions {
    * and expected — he may not be in a voice channel — and the reason travels
    * back to the possessor rather than being swallowed.
    */
-  narrate: (text: string) => Promise<void>;
+  narrate: (text: string, options: { readonly deliveryId: string }) => Promise<void>;
   /**
    * Whether anyone can currently hear the body, read at attach time so a
    * possessor that connects mid-call learns the room without waiting for the
@@ -51,29 +51,34 @@ export type PossessorVoiceListenerEvidence =
       readonly type: "possessor_connection";
       readonly phase: "attached" | "detached";
       readonly attachedCount: number;
+      readonly stayId?: string;
     }
   | {
       readonly type: "possessor_room";
       readonly listening: boolean;
       readonly attachedCount: number;
       readonly deliveredCount: number;
+      readonly stayId?: string;
     }
   | {
       readonly type: "possessor_transcript_delivery";
       readonly deliveryId: string;
       readonly attachedCount: number;
       readonly deliveredCount: number;
+      readonly stayId?: string;
     }
   | {
       readonly type: "possessor_narration_submission";
       readonly deliveryId: string;
       readonly attachedCount: number;
+      readonly stayId?: string;
     }
   | {
       readonly type: "possessor_refusal";
       readonly deliveryId: string;
       readonly attachedCount: number;
       readonly reason: string;
+      readonly stayId?: string;
     };
 
 export interface PossessorVoiceListener {
@@ -171,11 +176,11 @@ export function createPossessorVoiceListener(options: PossessorVoiceListenerOpti
       ws.on("message", (raw) => {
         const parsed = PossessorClientMessageSchema.safeParse(safeJson(raw.toString()));
         if (!parsed.success) return;
-        const deliveryId = idFactory();
+        const deliveryId = parsed.data.deliveryId ?? idFactory();
         // Fire-and-forget on purpose: narration is an utterance in a live room,
         // not a request/response. A failure is reported through the bridge's own
         // evidence, and a possessor that waited on it would stall its play loop.
-        void narrate(parsed.data.text)
+        void narrate(parsed.data.text, { deliveryId })
           .then(() => {
             // A submission receipt means the live persona accepted the event,
             // not merely that the listener attempted the call. Keeping it

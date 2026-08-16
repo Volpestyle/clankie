@@ -13,10 +13,6 @@
     "test": {
       "outputs": []
     },
-    "eval": {
-      "dependsOn": ["build"],
-      "outputs": ["artifacts/evals/**"]
-    },
     "dev": {
       "cache": false,
       "persistent": true

@@ -24,6 +24,28 @@ function at(mapId: string, x: number, y: number, facing = "south"): GbaEmulatorO
   ];
 }
 
+function withScene(
+  observations: GbaEmulatorObservation[],
+  mode: string,
+  inputReady: boolean,
+): GbaEmulatorObservation[] {
+  return [
+    ...observations,
+    {
+      schemaVersion: 1,
+      kind: "scene",
+      observationId: `obs-scene-${mode}`,
+      sessionId: "s",
+      characterId: "clankie",
+      worldId: "w",
+      goalVersion: 0,
+      capturedAt: "2026-07-25T18:00:00.000Z",
+      frame: 1,
+      data: { mode, inputReady, waitingForDialogAdvance: false },
+    } as unknown as GbaEmulatorObservation,
+  ];
+}
+
 function withMenu(
   observations: GbaEmulatorObservation[],
   menuId: string,
@@ -58,6 +80,26 @@ describe("observed effect", () => {
       action: pressLeft,
     });
     expect(effect.summary).toBe("moved to (9,5)");
+    expect(effect.refused).toBeNull();
+  });
+
+  it("does not mint a wall when a directional press started a battle", () => {
+    const effect = observeEffect({
+      before: at("route-1", 23, 24, "south"),
+      after: withScene(at("route-1", 23, 24, "south"), "battle", false),
+      action: { kind: "button_press", button: "down", holdFrames: 16 },
+    });
+    expect(effect.summary).toBe("a battle started");
+    expect(effect.refused).toBeNull();
+  });
+
+  it("does not mint a wall when a directional press started a fade", () => {
+    const effect = observeEffect({
+      before: at("center", 14, 15, "south"),
+      after: withScene(at("center", 14, 15, "south"), "overworld", false),
+      action: { kind: "button_press", button: "down", holdFrames: 16 },
+    });
+    expect(effect.summary).toContain("transition is holding the screen");
     expect(effect.refused).toBeNull();
   });
 
@@ -286,5 +328,34 @@ describe("walk effects", () => {
     });
     expect(effect.summary).toContain("blocked at (6,14)");
     expect(effect.summary).toContain("NPC");
+  });
+
+  it("names a battle instead of inventing an NPC on the grass", () => {
+    const effect = walk({
+      steps: 2,
+      plannedSteps: 37,
+      arrived: false,
+      blockedAt: { x: 23, y: 25 },
+      blockedBecause: "battle",
+      mode: "battle",
+      warped: false,
+    });
+    expect(effect.summary).toContain("a battle started at (23,25)");
+    expect(effect.summary).toContain("advance_dialog");
+    expect(effect.summary).not.toContain("NPC");
+  });
+
+  it("names a fade instead of inventing an NPC on a door", () => {
+    const effect = walk({
+      steps: 4,
+      plannedSteps: 4,
+      arrived: false,
+      blockedAt: { x: 14, y: 15 },
+      blockedBecause: "transition",
+      inputReady: false,
+      warped: false,
+    });
+    expect(effect.summary).toContain("a transition held the screen at (14,15)");
+    expect(effect.summary).not.toContain("NPC");
   });
 });

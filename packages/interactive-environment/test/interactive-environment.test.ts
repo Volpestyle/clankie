@@ -199,7 +199,7 @@ describe("Minecraft profile", () => {
     ).toThrow(/invalid gameplay tool exposure/);
   });
 
-  it("runs the activity plane on bot transport and gates it by facet, not by the phase ladder", () => {
+  it("runs idempotent activity control on bot transport while voice is active", () => {
     const voiceBot = presenceSession("voice_active", "bot");
 
     // ADR 0047: the activity plane needs no user session, unlike Go Live.
@@ -214,10 +214,11 @@ describe("Minecraft profile", () => {
       }),
     ).toBe(false);
 
-    // Stop is gated by a running instance, not by a higher phase rung.
+    // Stop is safe even when already stopped; live invite state belongs to the
+    // runtime and is not guessed from a stale session facet.
     expect(
       isDiscordPresenceActionAvailable({ action: "discord.presence.activity_stop", session: voiceBot }),
-    ).toBe(false);
+    ).toBe(true);
     const running = presenceSession("voice_active", "bot", [activityInstance()]);
     expect(
       isDiscordPresenceActionAvailable({ action: "discord.presence.activity_stop", session: running }),
@@ -248,7 +249,7 @@ describe("Minecraft profile", () => {
       }),
     ).toThrow(/activity instances cannot outlive/);
 
-    // Capacity is bounded rather than unbounded fan-out.
+    // Start replaces old launch links, so stale facet capacity cannot block it.
     const saturated = presenceSession(
       "voice_active",
       "bot",
@@ -256,7 +257,7 @@ describe("Minecraft profile", () => {
     );
     expect(
       isDiscordPresenceActionAvailable({ action: "discord.presence.activity_start", session: saturated }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("keeps Discord presence actions transport-agnostic and gates Go Live to user_session", () => {
@@ -279,6 +280,12 @@ describe("Minecraft profile", () => {
     expect(
       isDiscordPresenceActionAvailable({
         action: "discord.presence.go_live_start",
+        session: presenceSession("voice_active", "user_session"),
+      }),
+    ).toBe(true);
+    expect(
+      isDiscordPresenceActionAvailable({
+        action: "discord.presence.go_live_stop",
         session: presenceSession("voice_active", "user_session"),
       }),
     ).toBe(true);

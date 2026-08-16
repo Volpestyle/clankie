@@ -27,8 +27,13 @@ async function attach(port: number, token = TOKEN): Promise<WebSocket> {
   return socket;
 }
 
-function narration(text: string): string {
-  return JSON.stringify({ schemaVersion: POSSESSOR_VOICE_SCHEMA_VERSION, type: "narrate", text });
+function narration(text: string, deliveryId?: string): string {
+  return JSON.stringify({
+    schemaVersion: POSSESSOR_VOICE_SCHEMA_VERSION,
+    type: "narrate",
+    text,
+    ...(deliveryId === undefined ? {} : { deliveryId }),
+  });
 }
 
 describe("possessor voice listener", () => {
@@ -36,6 +41,33 @@ describe("possessor voice listener", () => {
     expect(() => createPossessorVoiceListener({ token: "  ", narrate: async () => undefined })).toThrow(
       /possessor_voice_token_required/u,
     );
+  });
+
+  it("prefers the play journal's delivery id over a minted one", async () => {
+    const narrate = vi.fn(async () => undefined);
+    const evidence: PossessorVoiceListenerEvidence[] = [];
+    listener = createPossessorVoiceListener({
+      token: TOKEN,
+      narrate,
+      emit: (event) => {
+        evidence.push(event);
+      },
+      idFactory: () => "should-not-use",
+    });
+    const port = await listener.listen(0);
+    const socket = await attach(port);
+    socket.send(narration("walked into a wall by the lab", "play-turn-9"));
+    await vi.waitFor(() =>
+      expect(narrate).toHaveBeenCalledWith("walked into a wall by the lab", { deliveryId: "play-turn-9" }),
+    );
+    await vi.waitFor(() =>
+      expect(evidence).toContainEqual({
+        type: "possessor_narration_submission",
+        deliveryId: "play-turn-9",
+        attachedCount: 1,
+      }),
+    );
+    socket.close();
   });
 
   it("hands a narration to the live voice session", async () => {
@@ -53,7 +85,11 @@ describe("possessor voice listener", () => {
 
     const socket = await attach(port);
     socket.send(narration("walked into a wall by the lab"));
-    await vi.waitFor(() => expect(narrate).toHaveBeenCalledWith("walked into a wall by the lab"));
+    await vi.waitFor(() =>
+      expect(narrate).toHaveBeenCalledWith("walked into a wall by the lab", {
+        deliveryId: "accepted-narration",
+      }),
+    );
     await vi.waitFor(() =>
       expect(evidence).toContainEqual({
         type: "possessor_narration_submission",
@@ -108,7 +144,7 @@ describe("possessor voice listener", () => {
     socket.send(JSON.stringify({ schemaVersion: 1, type: "narrate", text: "" }));
     socket.send(narration("real one"));
     await vi.waitFor(() => expect(narrate).toHaveBeenCalledTimes(1));
-    expect(narrate).toHaveBeenCalledWith("real one");
+    expect(narrate).toHaveBeenCalledWith("real one", { deliveryId: expect.any(String) });
     socket.close();
   });
 

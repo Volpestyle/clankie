@@ -27,23 +27,11 @@ timers, no audio device, no sockets — the no-network boundary stays trivially
 provable (runtime tripwire + the existing static source scan).
 
 `MgbaFireRedCore` implements the same `GbaCoreSeam` the test double
-implements; `GbaEmulatorAdapter` now takes a core factory (defaulting to the
+implements; `GbaEmulatorAdapter` takes a core factory (defaulting to the
 double), so CI runs unchanged without a ROM and the governed dispatch path is
 byte-for-byte the same for both cores.
 
-```mermaid
-flowchart LR
-  D[State-derived route driver] -->|observe / decide / act once / verify| R[EnvironmentRuntime]
-  R --> A[GBA emulator adapter]
-  A --> S{{GbaCoreSeam}}
-  S --> T[Deterministic core double - CI]
-  S --> M[MgbaFireRedCore - ROM-gated]
-  M --> W[mgba_libretro.wasm pinned sha256]
-  M --> E[EWRAM and IWRAM: verified memory maps]
-  F[Frozen fixture: rom / savestate / wasm sha256 pins] --> A
-  F --> M
-  A --> V[Hash-chained evidence + artifact refs]
-```
+![ADR 0040: Real headless mGBA core behind the emulator seam](../diagrams/0040-real-mgba-core-behind-the-emulator-seam.jpg)
 
 ### Determinism anchors and identity pins
 
@@ -139,7 +127,7 @@ and carry it as a repository- or operator-pinned artifact behind the same
 ## Consequences
 
 - Clankie drives a real Pokémon FireRed binary end-to-end through the
-  unchanged governed surface: VUH-907's plumbing is no longer proven only
+  unchanged governed surface: VUH-907's plumbing is proven beyond
   against a stand-in.
 - The adapter constructor accepts an injected core factory; the double stays
   the default and CI stays ROM-free and green.

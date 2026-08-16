@@ -5,18 +5,20 @@ Status: accepted (2026-07-26). Builds on
 decides, never who is present), [ADR 0053](0053-mcp-possession-of-clankies-body.md)
 (possession over MCP), and [ADR 0057](0057-realtime-voice-with-captain-handoff.md)
 (the realtime voice architecture, its floor, and its consent disclosures). None
-of them changes here.
+of them changes here. Amended by
+[ADR 0098](0098-the-room-can-type-to-a-playthrough.md), which widens the hearing
+half from voice transcripts to any text the ingress allowlist already admits.
 
 ## Context
 
 A harness can possess Clankie's GBA body and play FireRed, and the activity
-plane lets people watch the frames. What nobody could do was hear him talk about
-it. `clankie_say` and `clankie_listen` shipped with `deniedSpeechPort` and
+plane lets people watch the frames. What nobody could do is hear him talk about
+it. `clankie_say` and `clankie_listen` default to `deniedSpeechPort` and
 `deniedHearingPort` as their only implementations — correct refusals with no
-counterpart, so every call failed with a reason and commentary was impossible.
+counterpart, so every call failed with a reason and commentary is impossible.
 
 The refusal exists for a real reason rather than an unfinished wire. Speaking
-through the control plane's `POST /v1/discord/presence-actions` requires a live
+through the Clankie service's `POST /v1/discord/presence-actions` requires a live
 presence claim: the session id, phase, and monotonic revision the bridge
 publishes while it holds the gateway. Only the process holding the gateway can
 mint one, which is precisely what fences an action against a session that is
@@ -37,22 +39,13 @@ Two further constraints shape the answer:
 A possessor never speaks directly. It reports to the process that owns the body
 in Discord, over a loopback seam, and that process speaks.
 
-```mermaid
-flowchart LR
-  P["possessor<br/>(gba-mcp, no gateway)"] -->|"narrate: what just happened"| L["loopback listener<br/>127.0.0.1 · brokered bearer"]
-  L --> N["DiscordVoiceSession.narrate()"]
-  N --> S["createTextItem(...)<br/>seeded as context"]
-  S --> R["createResponse()<br/>rate-limited"]
-  R --> V["the persona composes the words"]
-  T["attributed transcript line<br/>already past consent"] -->|push| L
-  L -->|utterance| P
-```
+![ADR 0064: The possessor voice seam](../diagrams/0064-possessor-voice-seam.jpg)
 
 Four properties make this the same fence rather than a hole in it:
 
 **The possessor supplies the event; the persona supplies the words.** Narration
 is seeded with `createTextItem` and never spoken verbatim. What Clankie says
-about walking into a wall is his, composed in the voice the briefing gave him
+about walking into a wall is his, composed in the voice the briefing supplies
 and folded in with whatever the room is saying. A possessor that could script
 his dialogue would be choosing how he sounds, which is exactly what ADR 0047
 reserves to the character.
@@ -72,7 +65,9 @@ new rooms.
 subscribers as it happens, so its retention stays at zero. What a possessor then
 holds is bounded, its own, and discarded when the lease ends. Nothing captured
 outside the existing consent registry crosses the seam, and raw audio never
-does — transcripts only.
+does. Which lines qualify is widened by
+[ADR 0098](0098-the-room-can-type-to-a-playthrough.md) to include admitted text;
+the retention floor and the audio fence are unchanged.
 
 ### Rate-limiting narration, not narration's content
 
@@ -81,7 +76,11 @@ each report would turn a voice channel into a monologue nobody can talk over.
 Seeding is therefore unbounded and responding is rate-limited
 (`narrationMinIntervalMs`, default 12 s). He always knows what his body just
 did — the alternative is narrating a past he never saw — but he speaks about it
-at the pace of a person watching a game, not a process emitting events.
+at the pace of a person watching a game, not a process emitting events. A
+drop is receipt-visible as `possessor_narration_suppressed` with reason
+`playing` or `rate_limited`. Asked play mints one `speechDeliveryId` on the
+journal turn and carries it across the seam so the submission, the spoken
+response, and the drop share a join key. The receipts stay content-free.
 
 ## Consequences
 

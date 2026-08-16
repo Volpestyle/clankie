@@ -30,27 +30,32 @@ const WARMUP_FRAMES_AFTER_RESTORE = 2;
 /**
  * Emulated frames between observations while an action runs.
  *
- * A GBA renders at ~59.7fps, so a chunk of 3 yields ~20 observations per second
- * — the rate the frame stream already publishes at. Smaller chunks cost more
- * encodes for frames the stream would drop as duplicates.
+ * One frame per observation is hardware rate: what a watcher sees is what the
+ * console drew. A chunk of 3 showed every third frame, which reads as a stutter
+ * through the 16-frame walk cycle rather than as walking. It cost nothing to
+ * fix because the activity stream publishes the native 240x160 screen: measured
+ * on the FireRed bedroom state, 3.2KB base64 at 1.68ms encode, so 60fps costs
+ * fewer milliseconds and the same bytes as the 3x-upscaled 20fps it replaces.
  */
-const OBSERVE_CHUNK_FRAMES = 3;
+const OBSERVE_CHUNK_FRAMES = 1;
 
 /** Wall-clock milliseconds one emulated frame represents. */
 const FRAME_INTERVAL_MS = 1_000 / 59.7275;
 
 /**
- * Sleep synchronously.
+ * Wait `ms` while leaving the event loop free.
  *
- * The core seam is synchronous, and making it async to add pacing would ripple
- * through the adapter, the runtime, and every scenario. `Atomics.wait` blocks
- * this thread precisely and without spinning a CPU, which is what a frame
- * pacer needs.
+ * This was `Atomics.wait`, which paces precisely but blocks the whole thread:
+ * measured on 2026-08-15, a single 600-frame action fired 0 of the ~731 timer
+ * ticks due during it. Nothing else in the process ran for the duration of an
+ * action, so nothing could flush: the frames a watcher was owed piled up in the
+ * socket the runner publishes through and arrived as a burst when the action
+ * ended, which is what "frozen, then it teleports" actually was. The HTTP API,
+ * the Discord turn, and the voice seam were just as stuck.
  */
-function sleepSync(ms: number): void {
-  if (ms <= 0) return;
-  const shared = new Int32Array(new SharedArrayBuffer(4));
-  Atomics.wait(shared, 0, 0, ms);
+function delay(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((done) => setTimeout(done, ms));
 }
 
 export interface MgbaFireRedCoreInit {
@@ -197,28 +202,53 @@ export class MgbaFireRedCore implements GbaCoreSeam {
 
   private frameObserver: (() => void) | null = null;
   private paceToWallClock = false;
+  /** True while an action owns the core, so idle ticks stand off. */
+  private running = false;
 
-  /** Run frames, surfacing intermediate ones when someone is watching. */
-  private runFramesObserved(frames: number): void {
+  /** Console-clock frames between actions. See `GbaCoreSeam.idleFrames`. */
+  public idleFrames(frames: number): void {
+    if (this.running || frames <= 0) return;
+    this.core.setHeldButtons([]);
+    this.core.runFrames(frames);
+    this.frame += frames;
+    this.frameObserver?.();
+  }
+
+  /**
+   * Run frames, surfacing intermediate ones when someone is watching.
+   *
+   * Paced against a deadline rather than per-chunk: sleeping `interval - work`
+   * each time accumulates every rounding error, which ran the 2026-08-15 loop
+   * 16% slow. Anchoring on `startedAt` lets a late frame be made up by the next
+   * one, so a watched action takes the wall-clock time the console would.
+   */
+  private async runFramesObserved(frames: number): Promise<void> {
     const observer = this.frameObserver;
     if (observer === null && !this.paceToWallClock) {
       this.core.runFrames(frames);
       return;
     }
-    let remaining = frames;
-    while (remaining > 0) {
-      const chunk = Math.min(OBSERVE_CHUNK_FRAMES, remaining);
+    // Held across the awaits: an idle tick that fired between two paced frames
+    // would clear the buttons this action is still holding.
+    this.running = true;
+    try {
       const startedAt = performance.now();
-      this.core.runFrames(chunk);
-      remaining -= chunk;
-      observer?.();
-      if (this.paceToWallClock) {
-        sleepSync(chunk * FRAME_INTERVAL_MS - (performance.now() - startedAt));
+      let done = 0;
+      while (done < frames) {
+        const chunk = Math.min(OBSERVE_CHUNK_FRAMES, frames - done);
+        this.core.runFrames(chunk);
+        done += chunk;
+        observer?.();
+        if (this.paceToWallClock) {
+          await delay(startedAt + done * FRAME_INTERVAL_MS - performance.now());
+        }
       }
+    } finally {
+      this.running = false;
     }
   }
 
-  public pressButton(button: GbaButton, holdFrames: number): void {
+  public async pressButton(button: GbaButton, holdFrames: number): Promise<void> {
     if (this.retainedBattleMode === "battle_won" || this.retainedBattleMode === "battle_lost") {
       this.priorBattleHp = null;
       this.retainedBattle = null;
@@ -226,16 +256,16 @@ export class MgbaFireRedCore implements GbaCoreSeam {
       this.retainedActivePartySlot = 0;
     }
     this.core.setHeldButtons([button]);
-    this.runFramesObserved(holdFrames);
+    await this.runFramesObserved(holdFrames);
     this.core.setHeldButtons([]);
-    this.runFramesObserved(POST_INPUT_SETTLE_FRAMES);
+    await this.runFramesObserved(POST_INPUT_SETTLE_FRAMES);
     this.frame += holdFrames + POST_INPUT_SETTLE_FRAMES;
     this.inputCount += 1;
   }
 
-  public advanceFrames(frames: number): void {
+  public async advanceFrames(frames: number): Promise<void> {
     this.core.setHeldButtons([]);
-    this.runFramesObserved(frames);
+    await this.runFramesObserved(frames);
     this.frame += frames;
   }
 
@@ -246,14 +276,14 @@ export class MgbaFireRedCore implements GbaCoreSeam {
    * released: a button held straight into a `pressButton` would never produce
    * the fresh-press edge the wait-for-press native requires.
    */
-  public advanceFramesHolding(button: GbaButton, frames: number): void {
+  public async advanceFramesHolding(button: GbaButton, frames: number): Promise<void> {
     if (frames <= 0) return;
     if (frames > 1) {
       this.core.setHeldButtons([button]);
-      this.runFramesObserved(frames - 1);
+      await this.runFramesObserved(frames - 1);
     }
     this.core.setHeldButtons([]);
-    this.runFramesObserved(1);
+    await this.runFramesObserved(1);
     this.frame += frames;
   }
 
