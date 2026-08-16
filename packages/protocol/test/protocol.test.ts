@@ -424,19 +424,18 @@ describe("protocol", () => {
         payload: { kind: "reply", channelId: "dm1", messageId: "m1", content: "hello" },
       }).identity.presenceSessionId,
     ).toBe("discord:dm:dm1");
-    expect(() =>
+    expect(
       DiscordPresenceWriteSchema.parse({
         schemaVersion: 1,
         idempotencyKey: "ambient-thread",
         action: "discord.presence.create_thread",
         identity: ambientTurn.identity,
-        payload: { kind: "create_thread", channelId: "dm1", messageId: "m1", name: "nope" },
-      }),
-    ).toThrow(/mission attribution/);
+        payload: { kind: "create_thread", channelId: "dm1", messageId: "m1", name: "topic" },
+      }).identity.presenceSessionId,
+    ).toBe("discord:dm:dm1");
     // The activity surface serves the ambient embodiment plane too (ADR 0063):
     // asked play has no mission, so its launch write attributes to the
-    // presence session it serves. Authority is unchanged — publish-external
-    // still routes through the operator approval gate.
+    // presence session it serves. The owning body still supplies the target.
     expect(
       DiscordPresenceWriteSchema.parse({
         schemaVersion: 1,

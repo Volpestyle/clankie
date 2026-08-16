@@ -11,9 +11,9 @@ const persona = (overrides: Partial<ReturnType<typeof PersonaSettingsSchema.pars
   });
 
 describe("persona defaults", () => {
-  it("stays quiet and addressed-only until an owner says otherwise", () => {
+  it("lets the agent decide when to speak until an owner chooses addressed-only", () => {
     const parsed = PersonaSettingsSchema.parse({});
-    expect(parsed.replyPolicy).toBe("addressed");
+    expect(parsed.replyPolicy).toBe("all");
     expect(parsed.chattiness).toBe("balanced");
     expect(parsed.characterNotes).toBe("");
   });

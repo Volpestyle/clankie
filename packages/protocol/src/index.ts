@@ -40,27 +40,32 @@ export type CaptainLane = z.infer<typeof CaptainLaneCompatibilitySchema>;
 // ---------------------------------------------------------------------------
 // Captain lane observation (ADR 0083).
 //
-// The read-only session→lane listing an operator surface needs before it can
-// watch a lane it is not talking in. Identity only: which room, which durable
-// session, what state. No message, reasoning, tool, or continuation-token field
-// appears here — the events themselves come from the Eve session stream.
+// The bounded room history an operator surface reads to watch a lane it is not
+// talking in. This is heard/said conversation only: no reasoning, tool, private
+// pi session state, or continuation-token field appears here.
 // ---------------------------------------------------------------------------
 
 /** The authenticated captain route that lists observable lanes. */
 export const CAPTAIN_LANE_OBSERVATION_PATH = "/captain/v1/lanes";
 
-export const CaptainLaneSessionStateSchema = z.enum(["active", "waiting", "completed", "failed"]);
-export type CaptainLaneSessionState = z.infer<typeof CaptainLaneSessionStateSchema>;
+export const CAPTAIN_LANE_ENTRIES_MAX = 40;
+export const CAPTAIN_LANE_TEXT_MAX = 16_384;
+
+export const CaptainLaneObservationEntrySchema = z
+  .object({
+    at: z.string().datetime(),
+    kind: z.enum(["heard", "said"]),
+    text: z.string().max(CAPTAIN_LANE_TEXT_MAX),
+  })
+  .strict();
+export type CaptainLaneObservationEntry = z.infer<typeof CaptainLaneObservationEntrySchema>;
 
 export const ObservableCaptainLaneSchema = z
   .object({
-    lane: CaptainLaneCompatibilitySchema,
+    lane: CaptainSessionLaneV2Schema,
     /** The room address: `guildId:channelId` for Discord, conversation-shaped elsewhere. */
     targetId: z.string().trim().min(1).max(512),
-    /** Absent until the lane has run a turn; rotates when a lane starts a fresh session. */
-    sessionId: z.string().trim().min(1).max(512).optional(),
-    state: CaptainLaneSessionStateSchema,
-    updatedAt: z.string().datetime(),
+    entries: z.array(CaptainLaneObservationEntrySchema).max(CAPTAIN_LANE_ENTRIES_MAX),
   })
   .strict();
 export type ObservableCaptainLane = z.infer<typeof ObservableCaptainLaneSchema>;
@@ -1247,6 +1252,56 @@ export const DiscordPresenceActionSchema = z.enum([
 ]);
 export type DiscordPresenceAction = z.infer<typeof DiscordPresenceActionSchema>;
 
+/** Grounded Discord actions a social captain turn may ask the live body to perform. */
+export const DiscordCaptainActionSchema = z.enum([
+  "react",
+  "unreact",
+  "create_thread",
+  "join_thread",
+  "watch_start",
+  "watch_stop",
+]);
+export type DiscordCaptainAction = z.infer<typeof DiscordCaptainActionSchema>;
+
+const DiscordCaptainActionContextSchema = z.object({
+  callId: z.string().min(1).max(256),
+  actorId: z.string().min(1).max(128),
+  guildId: z.string().min(1).max(128).optional(),
+  channelId: z.string().min(1).max(128),
+  messageId: z.string().min(1).max(128),
+});
+
+/** IDs are host-stamped from the active turn; the model supplies only action content. */
+export const DiscordCaptainActionInputSchema = z.discriminatedUnion("action", [
+  DiscordCaptainActionContextSchema.extend({
+    action: z.literal("react"),
+    emoji: z.string().trim().min(1).max(64),
+  }).strict(),
+  DiscordCaptainActionContextSchema.extend({
+    action: z.literal("unreact"),
+    emoji: z.string().trim().min(1).max(64),
+  }).strict(),
+  DiscordCaptainActionContextSchema.extend({
+    action: z.literal("create_thread"),
+    name: z.string().trim().min(1).max(100),
+  }).strict(),
+  DiscordCaptainActionContextSchema.extend({ action: z.literal("join_thread") }).strict(),
+  DiscordCaptainActionContextSchema.extend({
+    action: z.literal("watch_start"),
+    guildId: z.string().min(1).max(128),
+  }).strict(),
+  DiscordCaptainActionContextSchema.extend({
+    action: z.literal("watch_stop"),
+    guildId: z.string().min(1).max(128),
+  }).strict(),
+]);
+export type DiscordCaptainActionInput = z.infer<typeof DiscordCaptainActionInputSchema>;
+
+export const DiscordCaptainActionResultSchema = z
+  .object({ ok: z.boolean(), message: z.string().min(1).max(1_000) })
+  .strict();
+export type DiscordCaptainActionResult = z.infer<typeof DiscordCaptainActionResultSchema>;
+
 /**
  * Rendered surfaces the activity plane may publish (ADR 0047). Frozen lab
  * catalog: the executor maps a surface to its configured Discord application id
@@ -1650,14 +1705,18 @@ export const DiscordPresenceWriteSchema = z
     if (
       DISCORD_PRESENCE_ACTION_RISK_CLASS[write.action] !== "narrative-write" &&
       write.identity.missionId === undefined &&
-      // The activity surface also serves the ambient embodiment plane (ADR
-      // 0063): an asked play session has no mission, so its launch and stop
-      // writes may attribute to the presence session they serve instead. The
-      // publish-external approval gate is unchanged — this widens attribution,
-      // never authority.
+      // Grounded social actions originate in an authenticated ambient turn and
+      // attribute to that presence session. The body supplies every target id;
+      // this widens attribution, never authority.
       !(
-        (write.action === "discord.presence.activity_start" ||
-          write.action === "discord.presence.activity_stop") &&
+        [
+          "discord.presence.create_thread",
+          "discord.presence.join_thread",
+          "discord.presence.go_live_start",
+          "discord.presence.go_live_stop",
+          "discord.presence.activity_start",
+          "discord.presence.activity_stop",
+        ].includes(write.action) &&
         write.identity.presenceSessionId !== undefined
       )
     ) {

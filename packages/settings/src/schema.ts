@@ -152,12 +152,8 @@ export const PersonaSettingsSchema = z
     characterNotes: z.string().max(4_000).default(""),
     /** How readily he speaks, and how much room he takes when he does. */
     chattiness: z.enum(["quiet", "balanced", "chatty"]).default("balanced"),
-    /**
-     * What earns a reply in an admitted text channel. `addressed` is the
-     * default because an open channel allowlist otherwise means replying to
-     * every message in the server.
-     */
-    replyPolicy: z.enum(["addressed", "all"]).default("addressed"),
+    /** What he perceives in admitted text channels; silence remains his decision. */
+    replyPolicy: z.enum(["addressed", "all"]).default("all"),
     /**
      * How many messages may pass in a channel, after he last replied there,
      * before he stops reading it live and lets it pile up until he next checks
