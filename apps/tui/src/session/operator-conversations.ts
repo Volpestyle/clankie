@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -164,11 +164,11 @@ export class OperatorConversationSelection {
   }
 }
 
-/** A corrupt or unreadable selection store — never silently ignored. */
-export class OperatorConversationSelectionStoreError extends Error {
+/** Corrupt or unreadable local replay state is never silently ignored. */
+export class OperatorConversationStateStoreError extends Error {
   public constructor(message: string) {
     super(message);
-    this.name = "OperatorConversationSelectionStoreError";
+    this.name = "OperatorConversationStateStoreError";
   }
 }
 
@@ -177,77 +177,8 @@ function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
 }
 
 /**
- * Persists the selected conversation so a surface reloads the same captain
- * target across restart/reconnect. Fail-closed: only a missing file (ENOENT) is
- * "no selection"; a corrupt, wrong-version, or invalid-id store raises rather
- * than silently attaching the operator to the wrong conversation. Writes are
- * atomic (temp file + rename) with a private 0700 parent and 0600 file.
- */
-export class OperatorConversationSelectionStore {
-  private readonly path: string;
-
-  public constructor(path: string) {
-    this.path = path;
-  }
-
-  public async read(): Promise<string | undefined> {
-    let raw: string;
-    try {
-      raw = await readFile(this.path, "utf8");
-    } catch (error) {
-      if (isErrnoException(error) && error.code === "ENOENT") return undefined;
-      throw new OperatorConversationSelectionStoreError(
-        `Operator conversation selection is unreadable: ${isErrnoException(error) ? error.code : "error"}`,
-      );
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      throw new OperatorConversationSelectionStoreError("Operator conversation selection is corrupt JSON");
-    }
-    if (
-      typeof parsed !== "object" ||
-      parsed === null ||
-      (parsed as { version?: unknown }).version !== 1 ||
-      !OperatorConversationIdSchema.safeParse((parsed as { conversationId?: unknown }).conversationId).success
-    ) {
-      throw new OperatorConversationSelectionStoreError(
-        "Operator conversation selection has an invalid schema, version, or id",
-      );
-    }
-    return (parsed as { conversationId: string }).conversationId;
-  }
-
-  public async write(conversationId: string): Promise<void> {
-    if (!OperatorConversationIdSchema.safeParse(conversationId).success) {
-      throw new OperatorConversationSelectionStoreError(`Refusing to persist invalid conversation id`);
-    }
-    await ensurePrivateParent(this.path);
-    const temporary = `${this.path}.${process.pid}.tmp`;
-    await writeFile(temporary, `${JSON.stringify({ version: 1, conversationId })}\n`, {
-      encoding: "utf8",
-      mode: 0o600,
-    });
-    await rename(temporary, this.path);
-    await chmod(this.path, 0o600);
-  }
-
-  public async clear(): Promise<void> {
-    try {
-      await rm(this.path);
-    } catch (error) {
-      if (isErrnoException(error) && error.code === "ENOENT") return;
-      throw error;
-    }
-  }
-}
-
-/**
- * The conversation rooted at a workspace directory, opened on first use. The
- * registry is the only place a workspace conversation is created, so two
- * consoles launched in the same project meet in the same room; the server
- * returns them most-recently-used first.
+ * The newest retained conversation rooted at a workspace directory, used by
+ * `/cd`. Process startup creates a fresh conversation instead.
  */
 export async function resolveWorkspaceConversation(input: {
   readonly client: OperatorConversationClient;
@@ -264,46 +195,34 @@ export async function resolveWorkspaceConversation(input: {
   });
 }
 
+export function newConversationTitle(now = new Date()): string {
+  return `New chat · ${now.toISOString().replace("T", " ")}`;
+}
+
 /**
- * Resolves the initial conversation for a surface, confirming every candidate
- * against the server before use so a stale or attacker-supplied id can never
- * attach. A direct `--chat` id overrides the persisted selection only after
- * `get()` confirms it; the confirmed choice is then persisted. With nothing
- * persisted, a launch workspace opens that directory's conversation, and a
- * launch inside the service repo falls back to the default global conversation.
+ * A TUI process is one fresh conversation unless `--chat` explicitly resumes
+ * an existing one. The conversation remains the only durable model-session
+ * identity; the process does not persist a second local selection/session.
  */
 export async function resolveInitialConversation(input: {
   readonly client: OperatorConversationClient;
-  readonly store: OperatorConversationSelectionStore;
   readonly directConversationId?: string;
   readonly workspace?: string;
 }): Promise<OperatorConversation> {
-  const selection = new OperatorConversationSelection(input.client);
   if (input.directConversationId !== undefined) {
-    const confirmed = await selection.select(input.directConversationId);
-    await input.store.write(confirmed.conversationId);
-    return confirmed;
-  }
-  const persisted = await input.store.read();
-  if (persisted !== undefined) {
-    const found = await input.client.get(persisted);
-    if (found !== undefined) {
-      await selection.select(found.conversationId);
-      return found;
+    const conversation = await input.client.get(input.directConversationId);
+    if (conversation === undefined) {
+      throw new Error(`Unknown operator conversation ${input.directConversationId}`);
     }
-    // The persisted conversation no longer exists on the server; drop it.
-    await input.store.clear();
-  }
-  if (input.workspace !== undefined) {
-    const conversation = await resolveWorkspaceConversation({
-      client: input.client,
-      workspace: input.workspace,
-    });
-    await selection.select(conversation.conversationId);
-    await input.store.write(conversation.conversationId);
     return conversation;
   }
-  return await selection.selectDefault();
+  return await input.client.create({
+    scope:
+      input.workspace === undefined
+        ? { kind: "global" }
+        : { kind: "workspace", workspaceId: input.workspace },
+    title: newConversationTitle(),
+  });
 }
 
 export function parseDirectConversation(args: readonly string[]): {
@@ -351,7 +270,7 @@ export class OperatorConversationTailStore {
       raw = await readFile(this.path, "utf8");
     } catch (error) {
       if (!isErrnoException(error) || error.code !== "ENOENT") {
-        throw new OperatorConversationSelectionStoreError(
+        throw new OperatorConversationStateStoreError(
           `Operator conversation tail state is unreadable: ${isErrnoException(error) ? error.code : "error"}`,
         );
       }
@@ -367,10 +286,10 @@ export class OperatorConversationTailStore {
     try {
       parsed = JSON.parse(raw);
     } catch {
-      throw new OperatorConversationSelectionStoreError("Operator conversation tail state is corrupt JSON");
+      throw new OperatorConversationStateStoreError("Operator conversation tail state is corrupt JSON");
     }
     if (!isStoredTailState(parsed)) {
-      throw new OperatorConversationSelectionStoreError(
+      throw new OperatorConversationStateStoreError(
         "Operator conversation tail state has an invalid schema, version, id, or cursor",
       );
     }
@@ -390,17 +309,17 @@ export class OperatorConversationTailStore {
       !OperatorConversationIdSchema.safeParse(conversationId).success ||
       !OperatorConversationCursorSchema.safeParse(cursor).success
     ) {
-      throw new OperatorConversationSelectionStoreError("Refusing to persist invalid tail state");
+      throw new OperatorConversationStateStoreError("Refusing to persist invalid tail state");
     }
     const current = this.requiredState();
-    const cursors = current.cursors.filter((item) => item.conversationId !== conversationId);
+    const cursors = current.cursors.filter((item) => item.conversationId !== conversationId).slice(-255);
     this.state = { ...current, cursors: [...cursors, { conversationId, cursor }] };
     await this.persist();
   }
 
   private requiredState(): StoredOperatorConversationTailState {
     if (this.state === undefined) {
-      throw new OperatorConversationSelectionStoreError(
+      throw new OperatorConversationStateStoreError(
         "Operator conversation tail store must be initialized before use",
       );
     }
@@ -423,7 +342,7 @@ async function ensurePrivateParent(path: string): Promise<void> {
     await mkdir(parent, { recursive: true, mode: 0o700 });
     await chmod(parent, 0o700);
   } catch (error) {
-    throw new OperatorConversationSelectionStoreError(
+    throw new OperatorConversationStateStoreError(
       `Operator conversation state parent cannot be secured: ${isErrnoException(error) ? error.code : "error"}`,
     );
   }
@@ -526,7 +445,10 @@ export class OperatorConversationPromptSession {
       });
       if (page.status === "recover") {
         sink.recovery(page);
-        return false;
+        if (!page.recoverable) return false;
+        cursor = page.resetCursor;
+        await this.tails.writeCursor(conversationId, cursor);
+        continue;
       }
       for (const event of page.events) {
         sink.event(event);
@@ -568,7 +490,7 @@ export class OperatorConversationPromptSession {
     if (accepted.status === "revision_conflict") {
       throw new OperatorConversationClientError("This conversation changed elsewhere; retry the prompt");
     }
-    while (signal?.aborted !== true) {
+    tail: while (signal?.aborted !== true) {
       const cursor = this.tails.cursor(conversationId);
       try {
         for await (const item of this.client.tail(
@@ -583,7 +505,9 @@ export class OperatorConversationPromptSession {
         )) {
           if (item.kind === "recovery") {
             sink.recovery(item.recovery);
-            return;
+            if (!item.recovery.recoverable) return;
+            await this.tails.writeCursor(conversationId, item.recovery.resetCursor);
+            continue tail;
           }
           sink.event(item.event);
           await this.tails.writeCursor(conversationId, item.event.cursor);

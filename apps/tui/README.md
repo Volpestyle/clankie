@@ -36,18 +36,24 @@ expects the service to be running already.
 
 ## Workspaces
 
-Where `clankie` is typed decides which room it opens
+Where `clankie` is typed decides the scope of the fresh room it creates
 ([ADR 0104](../../docs/adr/0104-clankie-works-where-you-launched-him.md)). A
-launch outside this repository attaches to the conversation for that project —
+launch outside this repository creates a conversation for that project —
 its checkout root, or the directory itself when it is not a checkout — and the
 captain's session runs its tools there. A launch inside this repository opens
-the default global conversation, whose session works in this repository.
+a fresh global conversation whose session works in this repository. Use
+`--chat <conversationId>` to resume instead.
 
-`/cd <path>` moves to another project's conversation, opening it on first visit;
-`/cd` alone names the current one. The console's own `!` shell escape, path
-completion, banner, and `/status` follow the same directory. Each workspace
-remembers its own last selection, so two consoles in two projects do not
-overwrite each other.
+`/cd <path>` moves to the newest retained conversation for another project,
+opening its first on first visit; `/cd` alone names the current one. The
+console's own `!` shell escape, path completion, banner, and `/status` follow the
+same directory. The process keeps its selection in memory rather than
+persisting a second session pointer.
+
+The service retains recent inactive conversation directories for explicit
+resume: at most 64 conversations, 30 days of inactivity, and 256 MiB. A
+conversation's public replay log retains at most 500 events. Active, newly
+created, and default-global conversations are protected from automatic removal.
 
 The service stays up when a console exits, so sibling Herdr panes do not
 disconnect each other. Logs live under
@@ -76,9 +82,12 @@ Discord body identities resolve directly from the credential broker.
 
 ## Operator behavior
 
-- `/conversation` lists or switches persistent conversations. `/chat` remains
-  an alias. Each console has its own replay cursor; switching never creates a
-  device-local conversation.
+- `/conversation` lists or switches retained conversations. `/chat` remains an
+  alias. Each console has its own bounded replay cursor; switching never creates
+  a device-local session.
+- `/new [title]` starts and selects a conversation with fresh model context in
+  the current workspace. The previous conversation remains available through
+  `/conversation`.
 - `/cd` opens the conversation for another directory and moves the console's
   shell escape and completion with it.
 - Type `/skill-name` for direct skill invocation or `$` at a token boundary for

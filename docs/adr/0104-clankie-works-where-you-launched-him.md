@@ -37,13 +37,14 @@ The captain builds that conversation's pi session with `cwd = workspaceId` — f
 `AGENTS.md` and skills, and for the session header. Clankie's skills stay on the
 path from the service repo, and a global conversation still works there.
 
-Which conversation a console opens is decided by where it launched. Outside this
-repository that is the launch directory's checkout root (nearest ancestor holding
-`.git`, else the directory itself), resolved to the existing conversation for that
-path or created on first visit. Inside this repository there is no workspace: that
-is the global conversation's home. `/cd <path>` moves between them by the same
-rule, and the console's banner, shell escape, path completion, and `/status`
-follow the selected conversation.
+The launch directory decides the fresh conversation's scope. Outside this
+repository that is the launch directory's checkout root (nearest ancestor
+holding `.git`, else the directory itself). Inside this repository there is no
+workspace, so the fresh conversation has global scope. `/cd <path>` moves to the
+newest retained conversation for that workspace (creating its first when none
+exists), while `/new` creates a fresh conversation in the current scope. The
+console's banner, shell escape, path completion, and `/status` follow the
+selected conversation ([ADR 0111](0111-a-console-process-starts-one-conversation.md)).
 
 ![ADR 0104 workspace-scoped operator conversations](../diagrams/0104-clankie-works-where-you-launched-him.jpg)
 
@@ -59,11 +60,10 @@ machine, because that path becomes the cwd of an unsandboxed shell.
 
 ## Consequences
 
-- `clankie` in a project opens that project's room, with the captain's tools and
-  the console's `!` shell both rooted there.
-- Every project keeps a durable conversation with its own transcript and pi
-  session, and its own remembered selection, so two consoles in two projects no
-  longer overwrite one shared last-selection file.
+- `clankie` in a project creates a fresh room with the captain's tools and the
+  console's `!` shell both rooted there.
+- Concurrent consoles in the same project have independent conversations and
+  Pi contexts. `--chat` is the explicit way to share or resume one.
 - The captain reads the project's own `AGENTS.md` and repository skills, so his
   instructions are the ones that repository publishes.
 - Conversations created before this ADR carry a global scope and keep working in

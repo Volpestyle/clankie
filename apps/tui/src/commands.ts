@@ -65,6 +65,8 @@ export interface ConsoleCommandContext {
       }[]
     >;
     select(conversationId: string): Promise<{ readonly conversationId: string; readonly title: string }>;
+    /** Creates and selects a conversation with fresh model context in the current scope. */
+    create?(title?: string): Promise<{ readonly conversationId: string; readonly title: string }>;
     /** Opens the conversation rooted at a directory, creating it on first visit. */
     open?(path: string): Promise<{ readonly conversationId: string; readonly title: string }>;
   };
@@ -194,6 +196,27 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
               return `${current ? "●" : "○"} ${item.title}${current ? " · current" : ""}\n  ${location}`;
             })
             .join("\n")}\n\nSwitch with /conversation <name> or /cd <path>.`,
+          "success",
+        );
+      },
+    },
+    {
+      name: "new",
+      aliases: [],
+      description: "Start a fresh conversation in the current workspace",
+      argumentHint: "[<title>]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        if (conversations?.create === undefined) {
+          shell.insertCommandResult("/new", "Conversations are unavailable.", "error");
+          return;
+        }
+        const title = argument.trim() || undefined;
+        const created = await conversations.create(title);
+        shell.clearTranscript();
+        shell.insertCommandResult(
+          title === undefined ? "/new" : `/new ${title}`,
+          `Started ${created.title} with fresh context.`,
           "success",
         );
       },

@@ -23,21 +23,16 @@ import { buildMemoryCommands } from "./memory-commands.ts";
 import {
   createCaptainRouteClient,
   createCaptainOperatorConversationClient,
+  newConversationTitle,
   OperatorConversationPromptSession,
   OperatorConversationSelection,
-  OperatorConversationSelectionStore,
   OperatorConversationTailStore,
   parseDirectConversation,
   resolveCaptainRouteToken,
   resolveInitialConversation,
   resolveWorkspaceConversation,
 } from "./session/operator-conversations.ts";
-import {
-  conversationWorkspace,
-  launchWorkspace,
-  resolveWorkspacePath,
-  workspaceStateKey,
-} from "./session/workspace.ts";
+import { conversationWorkspace, launchWorkspace, resolveWorkspacePath } from "./session/workspace.ts";
 import { createOperatorConversationShellSink } from "./session/operator-conversation-renderer.ts";
 import { CaptainLaneTraceController, createCaptainLaneClient } from "./session/lane-observation.ts";
 import { HerdrRoster } from "./observation/herdr-roster.ts";
@@ -80,11 +75,10 @@ const services = createProviderServices({
 });
 
 // Production operator conversation client over the service's authenticated
-// dispatch route. `--chat`/`/conversation` enumerate and select the real
-// server-owned registry; the selection persists (fail-closed) and reloads
-// across restart, confirmed against the server before attaching. The bearer
-// resolves through the credential broker (env override first), so a
-// shell-launched face matches the token the launcher injected into the service.
+// dispatch route. A process creates one fresh server-owned conversation;
+// `--chat` is the explicit resume path. The bearer resolves through the
+// credential broker (env override first), so a shell-launched face matches the
+// token the launcher injected into the service.
 const captainRouteToken = await resolveCaptainRouteToken({ env: process.env });
 const captainRouteClient = createCaptainRouteClient({
   host: serviceUrl,
@@ -95,20 +89,6 @@ const conversationClient = createCaptainOperatorConversationClient(captainRouteC
 const laneTrace = new CaptainLaneTraceController({
   lanes: createCaptainLaneClient(captainRouteClient),
 });
-// Per workspace: one console in a project and another in a second project each
-// reopen their own room, instead of overwriting one shared last-selection file.
-const conversationSelectionStore = new OperatorConversationSelectionStore(
-  launchedWorkspace === undefined
-    ? join(repoRoot, ".data", "tui", "operator-conversation.json")
-    : join(
-        repoRoot,
-        ".data",
-        "tui",
-        "workspaces",
-        workspaceStateKey(launchedWorkspace),
-        "operator-conversation.json",
-      ),
-);
 const conversationSelection = new OperatorConversationSelection(conversationClient);
 let currentContextUsage: OperatorConversationContextUsage | undefined;
 const conversationPrompt = new OperatorConversationPromptSession({
@@ -125,7 +105,6 @@ try {
   const directConversationId = parseDirectConversation(process.argv.slice(2)).conversationId;
   const initial = await resolveInitialConversation({
     client: conversationClient,
-    store: conversationSelectionStore,
     ...(directConversationId === undefined ? {} : { directConversationId }),
     ...(launchedWorkspace === undefined ? {} : { workspace: launchedWorkspace }),
   });
@@ -134,8 +113,8 @@ try {
   currentContextUsage = selected.contextUsage;
   currentWorkspace = conversationWorkspace(selected) ?? repoRoot;
 } catch (error) {
-  // The service may not be ready yet, or the store is corrupt; surface it and
-  // keep the console usable (the /conversation command re-checks on demand).
+  // The service may not be ready yet; surface it and keep the console usable
+  // (the /conversation command re-checks on demand).
   conversationNotice = `conversation selection unavailable: ${error instanceof Error ? error.message : String(error)}`;
 }
 
@@ -155,12 +134,22 @@ const conversationsContext = {
     currentConversationTitle = conversation.title;
     currentContextUsage = conversation.contextUsage;
     currentWorkspace = conversationWorkspace(conversation) ?? repoRoot;
-    await conversationSelectionStore.write(conversation.conversationId);
     // The console's own shell escape, path completion, and banner follow the
     // captain into the directory his session now works in.
     shell.setCwd(currentWorkspace);
     refreshBanner();
     return conversation;
+  },
+  create: async (title?: string) => {
+    const conversationId = conversationSelection.conversationId;
+    if (conversationId === undefined) throw new Error("No conversation is selected");
+    const current = await conversationClient.get(conversationId);
+    if (current === undefined) throw new Error("Selected conversation no longer exists");
+    const created = await conversationClient.create({
+      scope: current.scope,
+      title: title ?? newConversationTitle(),
+    });
+    return await conversationsContext.select(created.conversationId);
   },
   // `/cd`: the room for a directory, opened on first visit. The service repo is
   // not one workspace among many — it is where the global conversation lives.
@@ -168,8 +157,9 @@ const conversationsContext = {
     const workspace = resolveWorkspacePath(path, currentWorkspace);
     const conversation =
       launchWorkspace(workspace, repoRoot) === undefined
-        ? await conversationSelection.selectDefault()
+        ? (await conversationClient.list({ kind: "global" }))[0]
         : await resolveWorkspaceConversation({ client: conversationClient, workspace });
+    if (conversation === undefined) throw new Error("No global conversation is available");
     return await conversationsContext.select(conversation.conversationId);
   },
 };

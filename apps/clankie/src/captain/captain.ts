@@ -498,6 +498,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         unsubscribe();
       }
     },
+    (conversationId) => {
+      const key = `operator:${conversationId}`;
+      const pending = sessions.get(key);
+      sessions.delete(key);
+      void pending?.then((lane) => lane.session.dispose()).catch(() => undefined);
+    },
   );
 
   async function runDiscordTurn(

@@ -27,8 +27,8 @@ try {
   process.exit(1);
 }
 // `--chat` is validated here and stripped from the headless-command args; the
-// operator console (src/index.ts) re-parses argv and resolves/persists the
-// selection against the server, so no process-global env couples the lane.
+// operator console (src/index.ts) re-parses argv and confirms the explicit
+// resume against the server, so no process-global env couples the lane.
 const args = direct.remaining;
 
 if (isHeadlessCaptainCommand(args[0])) {

@@ -1,8 +1,8 @@
-import { chmod, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mintCaptainToken, type CredentialStore } from "@clankie/credential-broker";
 import type {
@@ -16,12 +16,11 @@ import {
   OperatorConversationClientError,
   OperatorConversationPromptSession,
   OperatorConversationSelection,
-  OperatorConversationSelectionStore,
-  OperatorConversationSelectionStoreError,
   OperatorConversationTailStore,
   parseDirectConversation,
   resolveCaptainRouteToken,
   resolveInitialConversation,
+  resolveWorkspaceConversation,
   type OperatorConversationEventSink,
   type OperatorConversationClient,
 } from "../src/session/operator-conversations.ts";
@@ -85,12 +84,6 @@ const roots: string[] = [];
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
-async function tempStore(): Promise<OperatorConversationSelectionStore> {
-  const root = await mkdtemp(join(tmpdir(), "operator-selection-"));
-  roots.push(root);
-  return new OperatorConversationSelectionStore(join(root, "nested", "operator-conversation.json"));
-}
-
 function fakeCredentialStore(credential?: { type: "api"; key: string }): CredentialStore {
   return {
     get: async () => credential,
@@ -159,62 +152,57 @@ describe("TUI operator conversation selection", () => {
     expect(() => parseDirectConversation(["--chat"])).toThrow(/--chat <conversationId>/u);
   });
 
-  it("persists and reloads the selected conversation atomically across restart", async () => {
-    const store = await tempStore();
-    expect(await store.read()).toBeUndefined(); // ENOENT -> no selection
-    await store.write("workspace-1");
-    expect(await store.read()).toBe("workspace-1");
-    // A fresh process (new store instance, same path) reloads it.
-    const reopened = new OperatorConversationSelectionStore((store as unknown as { path: string }).path);
-    expect(await reopened.read()).toBe("workspace-1");
+  it("bounds durable replay checkpoints to the newest 256 conversations", async () => {
+    const { store, path } = await tempTailStore();
+    await store.initialize();
+    for (let index = 0; index <= 256; index += 1) {
+      await store.writeCursor(`conversation-${index}`, String(index));
+    }
+    const reopened = new OperatorConversationTailStore(path);
+    await reopened.initialize();
+    expect(reopened.cursor("conversation-0")).toBeUndefined();
+    expect(reopened.cursor("conversation-256")).toBe("256");
   });
 
-  it("hardens an existing selection-store parent to mode 0700", async () => {
-    const store = await tempStore();
-    const path = (store as unknown as { path: string }).path;
-    await store.write("global-default");
-    await chmod(dirname(path), 0o755);
-    await store.write("workspace-1");
-    expect((await stat(dirname(path))).mode & 0o777).toBe(0o700);
-  });
+  it("starts fresh by default and resumes only an explicit --chat", async () => {
+    const conversations: OperatorConversation[] = [DEFAULT, WORKSPACE];
+    const created: OperatorConversation[] = [];
+    const scoped: OperatorConversationClient = {
+      ...client(),
+      get: async (id) => conversations.find((conversation) => conversation.conversationId === id),
+      create: async (input) => {
+        const conversation: OperatorConversation = {
+          ...DEFAULT,
+          ...input,
+          conversationId: `conv-${created.length + 1}`,
+          isDefault: false,
+        };
+        created.push(conversation);
+        conversations.push(conversation);
+        return conversation;
+      },
+    };
 
-  it("fails closed on a corrupt or wrong-version selection store", async () => {
-    const store = await tempStore();
-    const path = (store as unknown as { path: string }).path;
-    await store.write("global-default"); // creates the parent dir
-    await writeFile(path, "{ not json", "utf8");
-    await expect(store.read()).rejects.toBeInstanceOf(OperatorConversationSelectionStoreError);
-    await writeFile(path, JSON.stringify({ version: 2, conversationId: "x" }), "utf8");
-    await expect(store.read()).rejects.toBeInstanceOf(OperatorConversationSelectionStoreError);
-    await store.write("bad".repeat(1)); // valid id write still works
-    expect(await store.read()).toBe("bad");
-  });
+    const first = await resolveInitialConversation({ client: scoped, workspace: "/repos/thing" });
+    const second = await resolveInitialConversation({ client: scoped, workspace: "/repos/thing" });
+    const global = await resolveInitialConversation({ client: scoped });
+    expect(first.conversationId).not.toBe(second.conversationId);
+    expect(first.scope).toEqual({ kind: "workspace", workspaceId: "/repos/thing" });
+    expect(global.scope).toEqual({ kind: "global" });
+    expect(created).toHaveLength(3);
+    expect(created.every((conversation) => conversation.title.startsWith("New chat · "))).toBe(true);
 
-  it("confirms --chat and persisted selections against the server before attaching", async () => {
-    const store = await tempStore();
-    // --chat confirmed via get(), then persisted.
     const confirmed = await resolveInitialConversation({
-      client: client([WORKSPACE]),
-      store,
+      client: scoped,
       directConversationId: "workspace-1",
     });
     expect(confirmed.conversationId).toBe("workspace-1");
-    expect(await store.read()).toBe("workspace-1");
-    // Restart: persisted selection reloads and is confirmed.
-    const reloaded = await resolveInitialConversation({ client: client([WORKSPACE]), store });
-    expect(reloaded.conversationId).toBe("workspace-1");
-    // A --chat for an unknown id is rejected, never silently attached.
     await expect(
-      resolveInitialConversation({ client: client([WORKSPACE]), store, directConversationId: "ghost" }),
+      resolveInitialConversation({ client: scoped, directConversationId: "ghost" }),
     ).rejects.toThrow(/Unknown operator conversation/u);
-    // A persisted id the server no longer knows is dropped, falling back to default.
-    const stale = await resolveInitialConversation({ client: client(), store });
-    expect(stale.conversationId).toBe("global-default");
-    expect(await store.read()).toBeUndefined();
   });
 
-  it("opens the launch workspace's conversation, creating it only on first visit", async () => {
-    const store = await tempStore();
+  it("reuses the newest workspace conversation only for an in-process /cd", async () => {
     const conversations: OperatorConversation[] = [DEFAULT];
     const created: string[] = [];
     const scoped: OperatorConversationClient = {
@@ -242,23 +230,11 @@ describe("TUI operator conversation selection", () => {
       },
     };
 
-    const first = await resolveInitialConversation({ client: scoped, store, workspace: "/repos/thing" });
-    expect(first.scope).toEqual({ kind: "workspace", workspaceId: "/repos/thing" });
+    const first = await resolveWorkspaceConversation({ client: scoped, workspace: "/repos/thing" });
     expect(created).toEqual(["thing"]);
-    // Relaunching in the same directory reuses it — through the persisted
-    // selection, and again with the selection dropped.
-    expect((await resolveInitialConversation({ client: scoped, store })).conversationId).toBe(
-      first.conversationId,
-    );
-    await store.clear();
-    const reopened = await resolveInitialConversation({ client: scoped, store, workspace: "/repos/thing" });
+    const reopened = await resolveWorkspaceConversation({ client: scoped, workspace: "/repos/thing" });
     expect(reopened.conversationId).toBe(first.conversationId);
     expect(created).toEqual(["thing"]);
-    // A launch inside the service repo carries no workspace and stays global.
-    await store.clear();
-    expect((await resolveInitialConversation({ client: scoped, store })).conversationId).toBe(
-      "global-default",
-    );
   });
 
   it("builds a production client over an authenticated Client.fetch transport", async () => {
@@ -433,12 +409,10 @@ describe("TUI selected-conversation prompt path", () => {
     expect(panes).toEqual(["w3:p2J"]);
   });
 
-  it("resumes the persisted selection and exact per-surface tail cursor after restart", async () => {
-    const selectionStore = await tempStore();
-    await selectionStore.write("workspace-1");
+  it("resumes an explicit selection at the exact per-surface tail cursor", async () => {
     const { store, path } = await tempTailStore();
     const firstSelection = new OperatorConversationSelection(client([WORKSPACE]));
-    await firstSelection.select((await selectionStore.read()) as string);
+    await firstSelection.select("workspace-1");
     let run = 0;
     const tailStarts: Array<string | undefined> = [];
     const routed: OperatorConversationClient = {
@@ -472,7 +446,7 @@ describe("TUI selected-conversation prompt path", () => {
     await first.prompt("one", recordingSink().sink);
 
     const restartedSelection = new OperatorConversationSelection(client([WORKSPACE]));
-    await restartedSelection.select((await selectionStore.read()) as string);
+    await restartedSelection.select("workspace-1");
     const reopened = new OperatorConversationPromptSession({
       client: routed,
       selection: restartedSelection,
@@ -567,7 +541,7 @@ describe("TUI selected-conversation prompt path", () => {
     );
   });
 
-  it("surfaces typed recovery exactly once and stops before sending or crossing the reset", async () => {
+  it("resumes a recoverable retained boundary before sending", async () => {
     const { store } = await tempTailStore();
     const selection = new OperatorConversationSelection(client());
     await selection.selectDefault();
@@ -581,21 +555,48 @@ describe("TUI selected-conversation prompt path", () => {
       resetCursor: "global-default:reset",
       message: "server text must not be displayed",
     };
+    let replays = 0;
     const routed: OperatorConversationClient = {
       ...client(),
-      replay: async () => recovery,
+      replay: async (request) => {
+        replays += 1;
+        return replays === 1
+          ? recovery
+          : {
+              schemaVersion: 1,
+              status: "page",
+              conversationId: request.conversationId,
+              surfaceClientId: request.surfaceClientId,
+              events: [],
+              retainedFromCursor: recovery.resetCursor,
+              nextCursor: recovery.resetCursor,
+              safeCursor: recovery.resetCursor,
+              hasMore: false,
+            };
+      },
       send: async (turn) => {
         sends += 1;
-        return await client().send(turn);
+        return { ...(await client().send(turn)), runId: "run-recovered" };
+      },
+      tail: async function* () {
+        yield {
+          kind: "event",
+          event: streamEvent("global-default", "global-default:done", {
+            type: "turn",
+            runId: "run-recovered",
+            phase: "completed",
+          }),
+        };
       },
     };
     const recorded = recordingSink();
     const session = new OperatorConversationPromptSession({ client: routed, selection, tails: store });
     await session.initialize();
-    await expect(session.prompt("must not send", recorded.sink)).rejects.toThrow(/explicit recovery/u);
+    await session.prompt("continue from retained history", recorded.sink);
     expect(recorded.recoveries).toEqual([recovery]);
-    expect(sends).toBe(0);
+    expect(sends).toBe(1);
     expect(renderOperatorConversationRecovery(recovery)).toContain("cursor_expired");
+    expect(renderOperatorConversationRecovery(recovery)).toContain("resumed");
     expect(renderOperatorConversationRecovery(recovery)).not.toContain(recovery.message);
   });
 

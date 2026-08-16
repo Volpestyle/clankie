@@ -8,7 +8,6 @@ import {
   launchWorkspace,
   resolveWorkspacePath,
   workspaceRoot,
-  workspaceStateKey,
 } from "../src/session/workspace.ts";
 import type { OperatorConversation } from "@clankie/protocol";
 
@@ -54,12 +53,6 @@ describe("console workspace resolution", () => {
     expect(resolveWorkspacePath(nested, repo)).toBe(repo);
     expect(() => resolveWorkspacePath("README.md", repo)).toThrow(/is not a directory/u);
     expect(() => resolveWorkspacePath("nope", repo)).toThrow(/is not a directory/u);
-  });
-
-  it("keys console state by path, not by project name alone", () => {
-    expect(workspaceStateKey("/a/thing")).not.toBe(workspaceStateKey("/b/thing"));
-    expect(workspaceStateKey("/a/thing")).toMatch(/^thing-[0-9a-f]{8}$/u);
-    expect(workspaceStateKey("/a/we ird!")).toMatch(/^we-ird--[0-9a-f]{8}$/u);
   });
 
   it("reads the working directory off a conversation's scope", () => {

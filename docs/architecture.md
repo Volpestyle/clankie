@@ -30,7 +30,11 @@ after 60 seconds, so cosmetic presence cannot remain stuck.
 
 The TUI and relay speak the same operator-conversation contract
 (`/operator/v1/dispatch`): revision-fenced sends, cursored replay, long-polled
-tails. Conversations are files under `~/.clankie/captain/`. The full HTTP
+tails. A TUI process creates a fresh conversation unless `--chat` explicitly
+resumes one. Conversation and Pi session are one lifetime: bounded retention
+removes their shared directory, while public event logs rotate with typed cursor
+recovery ([ADR 0111](adr/0111-a-console-process-starts-one-conversation.md)).
+Conversations are files under `~/.clankie/captain/`. The full HTTP
 surface is listed in [`apps/clankie/openapi.yaml`](../apps/clankie/openapi.yaml);
 [`apps/clankie/scripts/setup-yaak.py`](../apps/clankie/scripts/setup-yaak.py)
 builds a local Yaak workspace against it.

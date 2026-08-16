@@ -7,7 +7,6 @@
  * means "work here". A workspace is that launch directory, carried on the
  * conversation's scope so the captain's session runs its tools there.
  */
-import { createHash } from "node:crypto";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
@@ -57,15 +56,4 @@ export function resolveWorkspacePath(input: string, base: string): string {
 /** The directory a conversation works in; global conversations name none. */
 export function conversationWorkspace(conversation: OperatorConversation): string | undefined {
   return conversation.scope.kind === "workspace" ? conversation.scope.workspaceId : undefined;
-}
-
-/**
- * A filesystem-safe, human-recognizable key for per-workspace console state.
- * The path itself cannot be a directory name, and a bare basename collides
- * across checkouts of the same project.
- */
-export function workspaceStateKey(workspace: string): string {
-  const name = workspace.split(sep).filter(Boolean).pop() ?? "workspace";
-  const slug = name.replace(/[^a-zA-Z0-9._-]/gu, "-").slice(0, 48);
-  return `${slug}-${createHash("sha256").update(workspace).digest("hex").slice(0, 8)}`;
 }

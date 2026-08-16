@@ -84,6 +84,39 @@ describe("shell assembly", () => {
     expect(results[1]).toEqual({ invocation: "/conversation dev", text: "Switched to dev." });
   });
 
+  it("starts a fresh conversation in the current scope", async () => {
+    const results: Array<{ invocation: string; text: string }> = [];
+    const created: Array<string | undefined> = [];
+    let cleared = false;
+    const command = buildConsoleCommands({
+      conversations: {
+        conversationId: "conv-dev",
+        title: "dev",
+        conversations: async () => [],
+        select: async (conversationId) => ({ conversationId, title: "dev" }),
+        create: async (title) => {
+          created.push(title);
+          return { conversationId: "conv-new", title: title ?? "New chat" };
+        },
+      },
+    }).find((candidate) => candidate.name === "new");
+    if (command === undefined) throw new Error("new command not found");
+    const shell = {
+      clearTranscript() {
+        cleared = true;
+      },
+      insertCommandResult(invocation: string, text: string) {
+        results.push({ invocation, text });
+      },
+    } as unknown as ClankieFaceShell;
+
+    await command.run("", shell);
+
+    expect(created).toEqual([undefined]);
+    expect(cleared).toBe(true);
+    expect(results).toEqual([{ invocation: "/new", text: "Started New chat with fresh context." }]);
+  });
+
   it("lets an active setup prompt handle Escape", () => {
     const shell = new ClankieFaceShell({
       commands: buildConsoleCommands({}),

@@ -107,7 +107,9 @@ export function renderOperatorConversationEvent(event: OperatorConversationStrea
 }
 
 export function renderOperatorConversationRecovery(recovery: OperatorConversationRecovery): string {
-  return `**Conversation recovery required**\n\n${recovery.code}. Streaming stopped before crossing the reset boundary.`;
+  return recovery.recoverable
+    ? `**Conversation history resumed**\n\n${recovery.code}. Older unavailable events were skipped at the retained boundary.`
+    : `**Conversation recovery required**\n\n${recovery.code}. This conversation is no longer available.`;
 }
 
 export interface OperatorConversationShellSinkOptions {
@@ -186,7 +188,9 @@ export function createOperatorConversationShellSink(
     },
     recovery(recovery): void {
       shell.insertMarkdown(renderOperatorConversationRecovery(recovery));
-      shell.refreshStatus("conversation recovery required");
+      shell.refreshStatus(
+        recovery.recoverable ? "conversation history resumed" : "conversation recovery required",
+      );
     },
   };
 }

@@ -22,6 +22,11 @@ additional global or workspace-scoped conversations. Different conversations
 run concurrently; sends to the same conversation serialize. A stale revision is
 rejected with the current revision and safe cursor so the client can refresh.
 
+Each TUI process creates a fresh conversation in its launch scope unless
+`--chat` explicitly resumes one. Conversation and Pi session lifetime stay the
+same; bounded retention removes their shared directory together
+([ADR 0111](0111-a-console-process-starts-one-conversation.md)).
+
 The public record is provider-neutral and never exposes provider credentials or
 pi session internals. Each surface attaches with its own cursor, so another
 surface can replay and tail without taking ownership away from the first.
@@ -32,8 +37,8 @@ Approval completion and other privileged control surfaces stay separate.
 ## Consequences
 
 - `operator` is the conversation-scoped captain lane.
-- Local transcript stores are caches keyed by `conversationId`, never sources of
-  durable identity.
+- Local replay state is a bounded delivery checkpoint keyed by `conversationId`,
+  never a session or source of durable identity.
 - Disconnecting a client does not cancel an accepted turn.
 - Worker conversations remain herdr panes and are not copied into the operator
   conversation store.
