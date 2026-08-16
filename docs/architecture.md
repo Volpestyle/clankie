@@ -16,8 +16,11 @@ A Discord message reaches the bridge, which posts it to
 `POST /v1/captain/channel-turns`. The service normalizes it — untrusted body
 fenced and labelled, images resolved to bytes at the last hop, channel context
 attached — and prompts a pi session. Voice channels and operator conversations
-get durable sessions (pi JSONL trees that survive restarts); text turns are
-one-shot, because the channel history rides in with each request. The reply
+get continuing sessions (pi JSONL trees that survive restarts); text turns are
+one-shot, because the channel history rides in with each request. A one-shot
+still writes its tree — one per turn under `~/.clankie/captain/turns/` — so the
+tools it ran are readable afterwards
+([ADR 0107](adr/0107-a-one-shot-turn-still-leaves-a-trail.md)). The reply
 carries the turn's last screenshot or generated image with it, and replying
 with the silence sentinel sends nothing: silence is a real answer. A one-shot
 text run has a 10-minute hard ceiling so model reasoning and multiple bounded

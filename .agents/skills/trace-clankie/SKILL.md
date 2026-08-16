@@ -15,6 +15,7 @@ is append-only JSONL or plain files now), never write to it.
 | Operator console chat (the TUI dialogue) | `~/.clankie/captain/conversations/<conversationId>/`                           | `meta.json` (title, revision, session state) + append-only `events.jsonl` (`message` role/text, `reasoning`, `tool`, `turn` phases). Cursors are zero-padded line counts.              |
 | The pi session behind a conversation     | `~/.clankie/captain/conversations/<conversationId>/pi/`                        | pi JSONL session trees; durable voice sessions live under `~/.clankie/captain/voice/<sessionKey>/` the same way.                                                                       |
 | What he heard/said per room              | `~/.clankie/captain/lanes/<lane>~<encoded-target>.jsonl`                       | One JSONL file per lane+target; `observe_room` and the TUI lanes view read the same files.                                                                                             |
+| Tool calls he made in a room             | `~/.clankie/captain/turns/<lane>~<encoded-target>/*.jsonl`                     | One pi tree per one-shot turn (Discord text, and every privileged turn) with full `toolCall`/`toolResult` args and results. Same directory name as the lane log file. ADR 0107.        |
 | Presence + system events                 | `~/.clankie/events.jsonl` (override: `CLANKIE_EVENT_LOG`)                      | One `DomainEvent` per line, full JSON. Heartbeats are not persisted; everything else is. Replayed at boot to rebuild presence.                                                         |
 | Durable memory                           | `~/.clankie/memory/discord-people/*.json`, `captain-episodes/*.jsonl`          | Approved person facts grouped by guild/user plus one global bounded episode ring stored across source-lane files. `/memory status` reads the same store through the operator-only API. |
 | Play sessions (GBA)                      | `~/.local/state/clankie/gba-play/*.jsonl`                                      | Header / per-turn (monologue, intent, `detail` with position + transcript) / summary.                                                                                                  |
@@ -41,6 +42,15 @@ is append-only JSONL or plain files now), never write to it.
   Inside Herdr the console lists panes from `herdr pane list` as
   `[<agent> · herdr]` rows; outside Herdr an empty roster only means "no
   visibility" — check `herdr pane list` yourself.
+- **A turn with no tree never answered.** Pi holds a session file back until the
+  first assistant message, so a one-shot that timed out or failed before he
+  replied leaves nothing under `turns/`. Absence is evidence; pair it with the
+  `discord.text.ingress` receipt that has no matching `discord.text.reply`.
+- **Realtime voice tool calls are receipts only.** `discord.voice.realtime_tool`
+  names the tool (`ask_clankie`, `look_at_screen`, `music_*`) and its phase,
+  never its arguments or result — the content fence applies. To see arguments,
+  follow `ask_clankie` into the captain: the durable channel tree under
+  `~/.clankie/captain/voice/`, or `turns/` when that handoff was privileged.
 - **Voice does not leave a room transcript.** `get_self_state.voiceHistory` is
   closed stays only (join/leave), and it is empty while he is still in the
   channel. `get_self_state.recentVoiceSpeech` is the content-free projection:
@@ -65,6 +75,18 @@ Last N chat messages in a conversation:
 ```bash
 tail -n 40 ~/.clankie/captain/conversations/<id>/events.jsonl | jq -c '{type, role, text}'
 ```
+
+Every tool he ran in a room, newest last:
+
+```bash
+jq -c 'select(.type=="message" and .message.role=="assistant")
+       | {at: .timestamp, tools: [.message.content[] | select(.type=="toolCall") | .name]}
+       | select(.tools | length > 0)' \
+  ~/.clankie/captain/turns/discord_presence~*/*.jsonl
+```
+
+Swap `.name` for the whole block to see arguments, and grep the same files for
+`"role":"toolResult"` to see what came back.
 
 What happened tonight, minus presence noise:
 

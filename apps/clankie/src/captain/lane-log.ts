@@ -24,11 +24,11 @@ export class LaneLog {
   public async append(lane: string, targetId: string, entry: LaneObservationEntry): Promise<void> {
     await mkdir(this.dir, { recursive: true });
     const line = `${JSON.stringify({ ...entry, targetId })}\n`;
-    await appendFile(join(this.dir, `${fileKey(lane, targetId)}.jsonl`), line, "utf8");
+    await appendFile(join(this.dir, `${laneKey(lane, targetId)}.jsonl`), line, "utf8");
   }
 
   public async read(lane: string, targetId: string, limit = 40): Promise<LaneObservation> {
-    const entries = await this.readEntries(fileKey(lane, targetId), limit);
+    const entries = await this.readEntries(laneKey(lane, targetId), limit);
     return { lane, targetId, entries };
   }
 
@@ -81,6 +81,11 @@ export class LaneLog {
   }
 }
 
-function fileKey(lane: string, targetId: string): string {
+/**
+ * One filesystem name per room. The lane log spends it on `<key>.jsonl`; the
+ * one-shot turn trail spends it on a directory of pi trees, so the two trails
+ * for a room sort next to each other under the same name.
+ */
+export function laneKey(lane: string, targetId: string): string {
   return `${lane}~${encodeURIComponent(targetId)}`;
 }

@@ -1,6 +1,8 @@
 # ADR 0083: Every room he thinks in is watchable
 
-Status: accepted (James, 2026-08-09). Applies to pi lane logs.
+Status: accepted (James, 2026-08-09). Applies to pi lane logs. Amended by
+[ADR 0107](0107-a-one-shot-turn-still-leaves-a-trail.md), which keeps the tree a
+one-shot turn writes so its tool calls survive the turn.
 
 ## Context
 
@@ -26,7 +28,8 @@ continuation handles, provider credentials, or a write path.
 
 - The operator can inspect every room from one seat.
 - Discord text stays one-shot at the model layer, but its lane log still has a
-  durable past.
+  durable past. The lane log is the bounded room view; the per-turn tree beside
+  it is the full record of what he ran there.
 - Room observation is a bounded read of what is heard and said, not a dump of
   private model reasoning.
 - Rotation and replay belong to the append-only lane log, not to framework

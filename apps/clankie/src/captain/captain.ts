@@ -37,7 +37,7 @@ import { readHerdrSessionCensus, type HerdrSessionCensus } from "./herdr-census.
 import { operatorPromptWithHerdrSeat } from "./herdr-seat.ts";
 import type { CaptainDeps, ResolvedAttachment } from "./deps.ts";
 import { normalizeDiscordTurn, type NormalizedDiscordTurn } from "./discord-turn.ts";
-import { LaneLog } from "./lane-log.ts";
+import { LaneLog, laneKey } from "./lane-log.ts";
 import { createCaptainModelRuntime, type CaptainModelRuntime } from "./model.ts";
 import type { CaptainPort } from "./port.ts";
 import { connectionTools } from "./connect-tools.ts";
@@ -229,11 +229,13 @@ export async function runOneShotDiscordTurn(
 }
 
 /**
- * The captain on pi. Sessions are pi's: durable JSONL trees for the operator
- * conversations and voice channels, one-shot in-memory sessions for bounded
- * Discord text turns (the channel history arrives with each request, so a
- * durable transcript would only duplicate the untrusted room). The persona
- * still comes from owner-authored settings, never from the caller.
+ * The captain on pi. Sessions are pi's JSONL trees throughout: continuing ones
+ * for operator conversations and voice channels, and a fresh tree per turn for
+ * bounded Discord text turns and privileged one-shots. Nothing carries forward
+ * out of a one-shot — the channel history arrives with each request — but the
+ * tree it wrote stays, because that is the only record of the tools it ran
+ * (ADR 0107). The persona still comes from owner-authored settings, never from
+ * the caller.
  */
 export function createCaptain(deps: CaptainDeps, options: CaptainOptions): CaptainPort {
   const laneLog = new LaneLog(join(options.stateDir, "lanes"));
@@ -588,9 +590,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         durable: discordTurnUsesDurableSession({ durable: heard.durable, systemTools }),
       };
       if (!normalized.durable) {
+        // One-shot for context, durable for evidence: a fresh session per turn
+        // (nothing carries forward), but written to disk under the room's own
+        // directory so what he actually did — every tool call and result — is
+        // readable afterwards. This is the only trail a privileged turn's shell
+        // leaves; the receipts above it are content-free by design.
+        // ponytail: one file per turn, unbounded; prune by mtime if a busy room
+        // ever makes the directory unwieldy.
         const lane = await buildSession(
           normalized.lane,
-          SessionManager.inMemory(options.repoRoot),
+          SessionManager.create(
+            options.repoRoot,
+            join(options.stateDir, "turns", laneKey(normalized.lane, normalized.targetId)),
+          ),
           systemTools,
           options.repoRoot,
         );
