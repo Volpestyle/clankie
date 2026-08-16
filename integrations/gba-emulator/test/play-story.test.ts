@@ -20,6 +20,7 @@ const turn = (index: number, extra: Partial<FreePlayTurn> = {}): FreePlayTurn =>
   outcome: "accepted",
   detail: null,
   effect: "moved north",
+  effectAdvice: null,
   ...extra,
 });
 

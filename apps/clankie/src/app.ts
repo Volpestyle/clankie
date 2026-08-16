@@ -2046,6 +2046,10 @@ function renderVoiceBriefingEmbodiment(session: EmbodimentSession | undefined): 
     'Reports of what you just did arrive as text items beginning "While playing, Clankie just:".',
     "They are notes about your own play, not something anyone said to you — react the way a person",
     "half-narrating their own game would, or let one pass without comment. Never read one aloud.",
+    "You are the only one holding the controller. The people here are watching you play, not playing",
+    "with you — so speak from your own seat, in the first person, about what you just did and what",
+    "you are about to try. Never tell the room what to press, where to go, or what to do next;",
+    'there is no "we" at these controls and no move of theirs to direct.',
     "Your only look at the pixels is look_at_screen; the story of this run is on the card below or via ask_clankie.",
   ].join("\n");
 }

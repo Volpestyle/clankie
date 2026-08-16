@@ -389,7 +389,7 @@ describe("rewind is his to choose", () => {
       turns: 1,
     });
     expect(result.turns[0]?.outcome).toBe("rejected_by_adapter");
-    expect(result.turns[0]?.effect).toContain("no saved time");
+    expect(result.turns[0]?.effectAdvice).toContain("no saved time");
   });
 
   it("reports a refused load as the refusal, and the game does not move", async () => {
@@ -412,7 +412,7 @@ describe("rewind is his to choose", () => {
       turns: 1,
     });
     expect(result.turns[0]?.outcome).toBe("rejected_by_adapter");
-    expect(result.turns[0]?.effect).toContain("checkpoint_not_found");
+    expect(result.turns[0]?.effectAdvice).toContain("checkpoint_not_found");
   });
 });
 
@@ -889,7 +889,7 @@ describe("rejection visibility", () => {
     });
     expect(result.turns[0]?.outcome).toBe("rejected_by_adapter");
     expect(result.turns[0]?.effect).toMatch(/^rejected, nothing ran/u);
-    expect(result.turns[0]?.effect).toContain("more button presses");
+    expect(result.turns[0]?.effectAdvice).toContain("more button presses");
   });
 
   it("translates a refused dialog advance instead of claiming it read nothing", async () => {
@@ -908,8 +908,23 @@ describe("rejection visibility", () => {
       ]),
       turns: 1,
     });
-    expect(result.turns[0]?.effect).toContain("script or fanfare");
+    expect(result.turns[0]?.effectAdvice).toContain("script or fanfare");
     expect(result.turns[0]?.effect).not.toContain("read no new text");
+  });
+
+  it("keeps the coaching out of the line an audience is handed", async () => {
+    // The possessor seam reports `effect` to a voice room, where a persona
+    // composes the words. While the advice rode along inside it, the room was
+    // handed "use raw button presses and the visible screen" and he relayed it
+    // — sounding like he was directing the people watching through a game none
+    // of them was playing. Heard live on 2026-08-16.
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(failed("semantic_state_unavailable"))),
+      mind: mind([press("right", "east")]),
+      turns: 1,
+    });
+    expect(result.turns[0]?.effect).toBe("rejected, nothing ran");
+    expect(result.turns[0]?.effectAdvice).toContain("use raw button presses");
   });
 });
 

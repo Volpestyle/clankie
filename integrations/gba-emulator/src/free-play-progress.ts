@@ -84,33 +84,68 @@ export function transitionKey(position: GbaPosition, direction: string): string 
 /** How much read-back text a single turn's effect line may carry. */
 const DIALOG_TRANSCRIPT_LIMIT = 600;
 
-const DIALOG_ENDINGS: Readonly<Record<string, string>> = {
-  dialog_closed: "the text ended",
-  choice_open: "a choice is waiting — answer it",
-  battle_started: "a battle started",
-  battle_ended: "the battle ended",
-  script_released: "the script let go without more text — you have control again",
-  script_holding: "a script still holds the screen with no readable box — it may need more time",
-  input_bound_reached: "the input budget ran out; more text remains",
-  frame_bound_reached: "the frame budget ran out; more text remains",
-  choice_unlisted:
-    "the box did not advance — a Yes/No or list the decoder does not list is probably waiting; look at the frame and press A, not select_menu_entry",
+/**
+ * An effect line split by who it is for.
+ *
+ * `summary` is what happened. `advice` is the harness coaching his next
+ * decision — second person, imperative, written for the player and nobody
+ * else. Both reach the mind; only `summary` crosses the possessor seam to a
+ * voice room, because a persona handed "hold the direction longer" relays it
+ * at the people watching and ends up directing a game none of them is
+ * playing. ADR 0074's seam carries the moment, not the tutor.
+ */
+export interface Described {
+  readonly summary: string;
+  readonly advice?: string;
+}
+
+/** Build a `Described` under `exactOptionalPropertyTypes`. */
+export function described(summary: string, advice?: string | undefined): Described {
+  return advice === undefined || advice.length === 0 ? { summary } : { summary, advice };
+}
+
+/** The one line the mind reads: what happened, then what to do about it. */
+export function mindEffectLine(effect: Described): string {
+  return effect.advice === undefined ? effect.summary : `${effect.summary}; ${effect.advice}`;
+}
+
+const DIALOG_ENDINGS: Readonly<Record<string, Described>> = {
+  dialog_closed: { summary: "the text ended" },
+  choice_open: { summary: "a choice is waiting", advice: "answer it" },
+  battle_started: { summary: "a battle started" },
+  battle_ended: { summary: "the battle ended" },
+  script_released: {
+    summary: "the script let go without more text",
+    advice: "you have control again",
+  },
+  script_holding: {
+    summary: "a script still holds the screen with no readable box",
+    advice: "it may need more time",
+  },
+  input_bound_reached: { summary: "the input budget ran out", advice: "more text remains" },
+  frame_bound_reached: { summary: "the frame budget ran out", advice: "more text remains" },
+  choice_unlisted: {
+    summary: "the box did not advance",
+    advice:
+      "a Yes/No or list the decoder does not list is probably waiting; look at the frame and press A, not select_menu_entry",
+  },
 };
 
-function describeDialogAdvance(outcome: Record<string, unknown> | undefined): string {
+function describeDialogAdvance(outcome: Record<string, unknown> | undefined): Described {
   const transcript = Array.isArray(outcome?.transcript)
     ? outcome.transcript.filter((line): line is string => typeof line === "string")
     : [];
   const ending = typeof outcome?.endedBecause === "string" ? outcome.endedBecause : null;
-  const reason = ending === null ? "the dialog stopped" : (DIALOG_ENDINGS[ending] ?? ending);
-  if (transcript.length === 0) return `read no new text — ${reason}`;
+  const reason =
+    ending === null ? { summary: "the dialog stopped" } : (DIALOG_ENDINGS[ending] ?? { summary: ending });
+  if (transcript.length === 0) return described(`read no new text — ${reason.summary}`, reason.advice);
   // Oldest boxes drop first: the last thing said is the part still in play.
   let text = transcript.join(" / ");
   while (text.length > DIALOG_TRANSCRIPT_LIMIT && transcript.length > 1) {
     transcript.shift();
     text = `… / ${transcript.join(" / ")}`;
   }
-  return `read: "${text.slice(0, DIALOG_TRANSCRIPT_LIMIT)}" — ${reason}`;
+  return described(`read: "${text.slice(0, DIALOG_TRANSCRIPT_LIMIT)}" — ${reason.summary}`, reason.advice);
 }
 
 function walkStopReason(outcome: Record<string, unknown>): "battle" | "transition" | "npc" {
@@ -127,78 +162,95 @@ function describeWalk(
   action: { x: number; y: number },
   outcome: Record<string, unknown>,
   after: GbaPosition | null,
-): string {
+): Described {
   const steps = typeof outcome["steps"] === "number" ? String(outcome["steps"]) : "?";
   const planned = typeof outcome["plannedSteps"] === "number" ? String(outcome["plannedSteps"]) : "?";
   const blocked = outcome["blockedAt"] as { x?: number; y?: number } | null | undefined;
   if (outcome["warped"] === true && after !== null) {
-    return `walked onto a warp after ${steps} steps — entered ${after.mapId} at (${String(after.x)},${String(after.y)})`;
+    return described(
+      `walked onto a warp after ${steps} steps — entered ${after.mapId} at (${String(after.x)},${String(after.y)})`,
+    );
   }
   if (outcome["arrived"] === true) {
-    return `walked ${steps} steps and arrived at (${String(action.x)},${String(action.y)})`;
+    return described(`walked ${steps} steps and arrived at (${String(action.x)},${String(action.y)})`);
   }
   if (blocked != null && typeof blocked.x === "number" && typeof blocked.y === "number") {
     const at = `(${String(blocked.x)},${String(blocked.y)})`;
     const reason = walkStopReason(outcome);
     if (reason === "battle") {
-      return (
-        `walked ${steps} of ${planned} steps, then a battle started at ${at} — ` +
-        "use advance_dialog to read the intro; it stops at the command menu"
+      return described(
+        `walked ${steps} of ${planned} steps, then a battle started at ${at}`,
+        "use advance_dialog to read the intro; it stops at the command menu",
       );
     }
     if (reason === "transition") {
-      return (
-        `walked ${steps} of ${planned} steps, then a transition held the screen at ${at} — ` +
-        "wait it out rather than stepping again"
+      return described(
+        `walked ${steps} of ${planned} steps, then a transition held the screen at ${at}`,
+        "wait it out rather than stepping again",
       );
     }
-    return (
+    return described(
       `walked ${steps} of ${planned} steps, then the way was blocked at ` +
-      `${at} by something the map does not show — an NPC, ` +
-      "probably; step around it or talk to it"
+        `${at} by something the map does not show — an NPC, probably`,
+      "step around it or talk to it",
     );
   }
-  return `walked ${steps} of ${planned} planned steps toward (${String(action.x)},${String(action.y)})`;
+  return described(
+    `walked ${steps} of ${planned} planned steps toward (${String(action.x)},${String(action.y)})`,
+  );
 }
 
-const ENTER_TEXT_ENDINGS: Readonly<Record<string, string>> = {
-  confirmed: "confirmed — the screen closed",
-  typed: "typed and left open, as asked",
-  screen_closed: "the naming screen closed before typing finished",
-  input_not_registered: "a press stopped registering; the entry stopped rather than guess",
-  input_bound_reached: "the input budget ran out mid-entry; repeat the action to continue",
-  frame_bound_reached: "the frame budget ran out mid-entry; repeat the action to continue",
+const ENTER_TEXT_ENDINGS: Readonly<Record<string, Described>> = {
+  confirmed: { summary: "confirmed — the screen closed" },
+  typed: { summary: "typed and left open, as asked" },
+  screen_closed: { summary: "the naming screen closed before typing finished" },
+  input_not_registered: {
+    summary: "a press stopped registering; the entry stopped rather than guess",
+  },
+  input_bound_reached: {
+    summary: "the input budget ran out mid-entry",
+    advice: "repeat the action to continue",
+  },
+  frame_bound_reached: {
+    summary: "the frame budget ran out mid-entry",
+    advice: "repeat the action to continue",
+  },
 };
 
 /** Bounded entry summary from the adapter's own account of the typing. */
-function describeEnterText(text: string, outcome: Record<string, unknown> | undefined): string {
+function describeEnterText(text: string, outcome: Record<string, unknown> | undefined): Described {
   const typed = typeof outcome?.["typed"] === "string" ? outcome["typed"] : "";
   const ending = typeof outcome?.["endedBecause"] === "string" ? outcome["endedBecause"] : null;
-  const reason = ending === null ? "the entry ended" : (ENTER_TEXT_ENDINGS[ending] ?? ending);
-  if (outcome?.["confirmed"] === true) return `named "${text}" — ${reason}`;
-  return `typed "${typed}" of "${text}" — ${reason}`;
+  const reason =
+    ending === null ? { summary: "the entry ended" } : (ENTER_TEXT_ENDINGS[ending] ?? { summary: ending });
+  if (outcome?.["confirmed"] === true) return described(`named "${text}" — ${reason.summary}`, reason.advice);
+  return described(`typed "${typed}" of "${text}" — ${reason.summary}`, reason.advice);
 }
 
-const SELECT_MENU_ENDINGS: Readonly<Record<string, string>> = {
-  menu_closed: "the menu closed before the cursor arrived",
-  cursor_stalled: "the cursor refused to move — steer this menu with single presses",
-  input_bound_reached: "the input budget ran out before the cursor arrived",
-  frame_bound_reached: "the frame budget ran out before the cursor arrived",
+const SELECT_MENU_ENDINGS: Readonly<Record<string, Described>> = {
+  menu_closed: { summary: "the menu closed before the cursor arrived" },
+  cursor_stalled: {
+    summary: "the cursor refused to move",
+    advice: "steer this menu with single presses",
+  },
+  input_bound_reached: { summary: "the input budget ran out before the cursor arrived" },
+  frame_bound_reached: { summary: "the frame budget ran out before the cursor arrived" },
 };
 
 /** Bounded choice summary from the adapter's own account of the selection. */
-function describeSelectMenuEntry(outcome: Record<string, unknown> | undefined): string {
+function describeSelectMenuEntry(outcome: Record<string, unknown> | undefined): Described {
   const label = typeof outcome?.["label"] === "string" ? outcome["label"] : "an entry";
   const menuId = typeof outcome?.["menuId"] === "string" ? outcome["menuId"] : "the menu";
-  if (outcome?.["confirmed"] === true) return `chose "${label.slice(0, 120)}" in ${menuId}`;
+  if (outcome?.["confirmed"] === true) return described(`chose "${label.slice(0, 120)}" in ${menuId}`);
   const ending = typeof outcome?.["endedBecause"] === "string" ? outcome["endedBecause"] : null;
-  const reason = ending === null ? "the selection stopped" : (SELECT_MENU_ENDINGS[ending] ?? ending);
-  return `did not choose "${label.slice(0, 120)}" — ${reason}`;
+  const reason =
+    ending === null
+      ? { summary: "the selection stopped" }
+      : (SELECT_MENU_ENDINGS[ending] ?? { summary: ending });
+  return described(`did not choose "${label.slice(0, 120)}" — ${reason.summary}`, reason.advice);
 }
 
-export interface ObservedEffect {
-  /** Bounded, human-readable — this is what the model is told. */
-  summary: string;
+export interface ObservedEffect extends Described {
   /** A directed move the emulator refused, for the blocked-transition memory. */
   refused: { position: GbaPosition; direction: string } | null;
   position: GbaPosition | null;
@@ -251,7 +303,7 @@ export function observeEffect(input: {
   // text has to come from the outcome or it is lost to him entirely.
   if (input.action.kind === "advance_dialog") {
     return {
-      summary: describeDialogAdvance(input.outcome),
+      ...describeDialogAdvance(input.outcome),
       refused: null,
       position: after,
       enteredMap: before !== null && after !== null && before.mapId !== after.mapId,
@@ -262,7 +314,7 @@ export function observeEffect(input: {
   // none of which the decoded overworld diff can see.
   if (input.action.kind === "enter_text") {
     return {
-      summary: describeEnterText(input.action.text, input.outcome),
+      ...describeEnterText(input.action.text, input.outcome),
       refused: null,
       position: after,
       enteredMap: false,
@@ -273,7 +325,7 @@ export function observeEffect(input: {
   // cursor stopped when it was not — the diff alone reads as "menu changed".
   if (input.action.kind === "select_menu_entry") {
     return {
-      summary: describeSelectMenuEntry(input.outcome),
+      ...describeSelectMenuEntry(input.outcome),
       refused: null,
       position: after,
       enteredMap: false,
@@ -285,7 +337,7 @@ export function observeEffect(input: {
   // (x,y)" after a 3-of-9-step walk would hide exactly the part he needs.
   if (input.action.kind === "walk_to" && input.outcome !== undefined) {
     return {
-      summary: describeWalk(input.action, input.outcome, after),
+      ...describeWalk(input.action, input.outcome, after),
       refused: null,
       position: after,
       enteredMap: before !== null && after !== null && before.mapId !== after.mapId,
@@ -317,7 +369,8 @@ export function observeEffect(input: {
       const facingAfter = facingOf(input.after);
       if (facingAfter !== null && facingAfter !== facingBefore) {
         return {
-          summary: `turned to face ${facingAfter} without stepping — hold the direction longer to move`,
+          summary: `turned to face ${facingAfter} without stepping`,
+          advice: "hold the direction longer to move",
           refused: null,
           position: after,
           enteredMap: false,
@@ -332,7 +385,8 @@ export function observeEffect(input: {
         }
         if (held === "transition") {
           return {
-            summary: "a transition is holding the screen — wait it out rather than pressing into it",
+            summary: "a transition is holding the screen",
+            advice: "wait it out rather than pressing into it",
             refused: null,
             position: after,
             enteredMap: false,
@@ -381,8 +435,11 @@ export function observeEffect(input: {
   if (input.screenChanged === true) {
     return {
       summary: menuOpen
-        ? `screen changed inside ${describeMenu(menuAfter ?? menuBefore)} — a detail the decoder does not model; trust the frame`
-        : "screen changed though the decoded state did not — possibly ambient animation; trust the frame",
+        ? `screen changed inside ${describeMenu(menuAfter ?? menuBefore)}`
+        : "screen changed though the decoded state did not",
+      advice: menuOpen
+        ? "a detail the decoder does not model; trust the frame"
+        : "possibly ambient animation; trust the frame",
       refused: null,
       position: after,
       enteredMap: false,

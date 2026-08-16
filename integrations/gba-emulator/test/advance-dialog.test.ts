@@ -289,7 +289,7 @@ describe("advance_dialog", () => {
         after: [],
         action: advance(),
         outcome: (result as { outcome: Record<string, unknown> }).outcome,
-      }).summary,
+      }).advice,
     ).toContain("press A, not select_menu_entry");
   });
 
@@ -559,7 +559,8 @@ describe("advance_dialog", () => {
       },
     });
     expect(effect.summary).toBe(
-      'read: "PROF. OAK: Hello there! / PROF. OAK: My name is OAK." — a choice is waiting — answer it',
+      'read: "PROF. OAK: Hello there! / PROF. OAK: My name is OAK." — a choice is waiting',
     );
+    expect(effect.advice).toBe("answer it");
   });
 });

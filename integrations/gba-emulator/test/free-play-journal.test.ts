@@ -22,6 +22,7 @@ const turn = (index: number): FreePlayTurn => ({
   outcome: "accepted",
   detail: null,
   effect: "moved north",
+  effectAdvice: null,
 });
 
 const result = (turns: FreePlayTurn[]): FreePlayResult => ({

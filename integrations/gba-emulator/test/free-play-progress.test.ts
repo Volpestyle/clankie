@@ -135,7 +135,9 @@ describe("observed effect", () => {
       action: pressLeft,
     });
     expect(effect.summary).toContain("turned to face west");
-    expect(effect.summary).toContain("hold the direction longer");
+    // The coaching rides in `advice`, never in the line an audience is handed.
+    expect(effect.summary).not.toContain("hold the direction longer");
+    expect(effect.advice).toContain("hold the direction longer");
     expect(effect.refused).toBeNull();
   });
 
@@ -172,7 +174,7 @@ describe("observed effect", () => {
     });
     // The decoded menu missed the cursor move, but the frame did not.
     expect(cursorOnly.summary).toContain("screen changed inside naming-screen");
-    expect(cursorOnly.summary).toContain("trust the frame");
+    expect(cursorOnly.advice).toContain("trust the frame");
     expect(cursorOnly.refused).toBeNull();
   });
 
@@ -341,7 +343,7 @@ describe("walk effects", () => {
       warped: false,
     });
     expect(effect.summary).toContain("a battle started at (23,25)");
-    expect(effect.summary).toContain("advance_dialog");
+    expect(effect.advice).toContain("advance_dialog");
     expect(effect.summary).not.toContain("NPC");
   });
 

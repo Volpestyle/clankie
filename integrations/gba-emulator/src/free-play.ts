@@ -29,10 +29,14 @@ export * from "./free-play-bounds.ts";
 import { canonicalJson, sha256 } from "./core-double.ts";
 import type { GbaDriverIo } from "./driver.ts";
 import {
+  described,
   FreePlayProgressTracker,
+  mindEffectLine,
   observeEffect,
   positionOf,
+  type Described,
   type FreePlayProgress,
+  type ObservedEffect,
 } from "./free-play-progress.ts";
 
 /**
@@ -221,8 +225,21 @@ export const FreePlayTurnSchema = z
     /**
      * What actually changed. `accepted` only means the adapter took the button;
      * this says whether he moved, was blocked, or changed nothing.
+     *
+     * Observation only. Everything that reads this field is an audience — the
+     * activity overlay, the story card, and the possessor seam that hands a
+     * voice room what just happened — so the coaching half lives next door.
      */
     effect: z.string().max(200).nullable(),
+    /**
+     * The harness's advice for his next press, which rides with the effect in
+     * the history he reads: "hold the direction longer to move", "use
+     * advance_dialog to read the intro". It is written to him, in the
+     * imperative, and a room handed it hears him telling *them* what to press.
+     * Split out rather than dropped, because the trail must still show what he
+     * was told. Defaulted so journals written before the split keep parsing.
+     */
+    effectAdvice: z.string().max(300).nullable().default(null),
   })
   .strict();
 export type FreePlayTurn = z.infer<typeof FreePlayTurnSchema>;
@@ -439,6 +456,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
       outcome: "mind_failed",
       detail: null,
       effect: null,
+      effectAdvice: null,
       notes,
       objective,
       interjection: null,
@@ -506,9 +524,9 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
 
     let accepted = false;
     let actionOutcome: Record<string, unknown> | undefined;
-    let rejection: string | null = null;
+    let rejection: Described | null = null;
     /** Set only by an accepted body action, whose effect no diff can read. */
-    let bodySummary: string | null = null;
+    let bodySummary: Described | null = null;
     /**
      * The screen as it stands the instant before the action, which is not the
      * screen he was shown when he decided.
@@ -528,19 +546,19 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
       if (input.checkpoints === undefined) {
         record.outcome = "rejected_by_adapter";
         record.detail = "checkpoints_unavailable";
-        rejection = "rejected, nothing ran — this body has no saved time to move through";
+        rejection = described("rejected, nothing ran", "this body has no saved time to move through");
       } else {
         try {
           bodySummary = applyBodyAction(chosen, input.checkpoints);
           record.outcome = "accepted";
           accepted = true;
-          record.detail = bounded(bodySummary);
+          record.detail = bounded(mindEffectLine(bodySummary));
         } catch (error) {
           // The port's gates speak for themselves: checkpoint_not_found, a
           // digest mismatch, a foreign ROM. The reason is the effect.
           record.outcome = "rejected_by_adapter";
           record.detail = bounded(error);
-          rejection = `rejected, nothing ran — ${bounded(error)}`;
+          rejection = described("rejected, nothing ran", bounded(error));
         }
       }
     } else {
@@ -587,7 +605,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     const afterObservations = accepted ? observe(input.io) : observations;
     const effect =
       rejection !== null
-        ? { summary: rejection, refused: null, position: positionOf(observations), enteredMap: false }
+        ? { ...rejection, refused: null, position: positionOf(observations), enteredMap: false }
         : bodySummary !== null
           ? // A rewind's effect is what the port reports plus where he now
             // stands — a state diff around a restored world would only restate
@@ -603,11 +621,19 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
               screenChanged: frameBefore !== null && frameAfter !== null ? frameAfter !== frameBefore : null,
             });
     progress.record(effect, accepted);
+    // Only the observation is stored. `effect.advice` is the harness coaching
+    // his next press, and everything downstream of this record is an audience:
+    // the overlay, the story card, and the possessor seam that hands a voice
+    // room what just happened. A room told "hold the direction longer to move"
+    // hears him directing *them*, which is how he ended up sounding like the
+    // spectators were the ones playing. The advice goes to the mind alone.
     record.effect = effect.summary.slice(0, 200);
+    record.effectAdvice = effect.advice === undefined ? null : effect.advice.slice(0, 300);
+    const mindEffect = mindEffectLine(effect);
 
-    // Same action, same result: the state-independent stuck signal. The stored
-    // effect is the bounded one he is actually shown, so the comparison is
-    // between the two lines he read, not between two fuller strings he did not.
+    // Same action, same result: the state-independent stuck signal. Keyed on
+    // the observation rather than the fuller line he reads, which discriminates
+    // identically — advice never varies except with the branch that set it.
     const signature = canonicalJson({ action: chosen, effect: record.effect });
     // Annotated: without it the loop-carried assignment below makes this
     // variable's type depend on itself.
@@ -698,7 +724,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
       intent: parsed.data.intent,
       action: parsed.data.action,
       outcome: record.outcome,
-      effect: effect.summary,
+      effect: mindEffect,
     });
     if (history.length > historyLimit) history.shift();
     const settledTurn = finalize(record, input.onTurn);
@@ -751,14 +777,19 @@ const CHECKPOINT_LISTING_LIMIT = 6;
  * own account is what he gets. Throws propagate — the caller renders them as
  * the rejection they are.
  */
-function applyBodyAction(action: FreePlayBodyAction, checkpoints: FreePlayCheckpointPort): string {
+function applyBodyAction(action: FreePlayBodyAction, checkpoints: FreePlayCheckpointPort): Described {
   if (action.kind === "restart_game") {
     checkpoints.restart();
-    return "the game restarted from its configured beginning — the world rewound, your notes are still yours";
+    return described(
+      "the game restarted from its configured beginning — the world rewound",
+      "your notes are still yours",
+    );
   }
   if (action.checkpointId === undefined) {
     const listed = checkpoints.list();
-    if (listed.length === 0) return "no checkpoints exist yet — the beginning is still restart_game away";
+    if (listed.length === 0) {
+      return described("no checkpoints exist yet", "the beginning is still restart_game away");
+    }
     const shown = listed
       .slice(0, CHECKPOINT_LISTING_LIMIT)
       .map((checkpoint) => {
@@ -774,23 +805,29 @@ function applyBodyAction(action: FreePlayBodyAction, checkpoints: FreePlayCheckp
       listed.length > CHECKPOINT_LISTING_LIMIT
         ? `; and ${String(listed.length - CHECKPOINT_LISTING_LIMIT)} older`
         : "";
-    return `your checkpoints, newest first: ${shown}${more} — load one by its id, or restart_game for the beginning`;
+    return described(
+      `your checkpoints, newest first: ${shown}${more}`,
+      "load one by its id, or restart_game for the beginning",
+    );
   }
   const restored = checkpoints.load(action.checkpointId);
   const label = restored.label === null ? "" : ` (${restored.label})`;
-  return `restored checkpoint ${restored.checkpointId}${label}, captured ${restored.capturedAt} — the world is as it was then; your notes are still yours`;
+  return described(
+    `restored checkpoint ${restored.checkpointId}${label}, captured ${restored.capturedAt} — the world is as it was then`,
+    "your notes are still yours",
+  );
 }
 
 /** An accepted rewind's effect: the port's account, plus where he now stands. */
 function rewindEffect(
-  summary: string,
+  body: Described,
   before: readonly GbaEmulatorObservation[],
   after: readonly GbaEmulatorObservation[],
-): { summary: string; refused: null; position: ReturnType<typeof positionOf>; enteredMap: boolean } {
+): ObservedEffect {
   const from = positionOf(before);
   const to = positionOf(after);
   return {
-    summary,
+    ...body,
     refused: null,
     position: to,
     enteredMap: from !== null && to !== null && from.mapId !== to.mapId,
@@ -833,15 +870,15 @@ const REJECTION_HINTS: Readonly<Record<string, string>> = {
   capability_not_granted: "this session does not allow that action",
 };
 
-function describeRejectionForPlayer(errorCode: string | null, raw: string): string {
+function describeRejectionForPlayer(errorCode: string | null, raw: string): Described {
   const hint = errorCode === null ? undefined : REJECTION_HINTS[errorCode];
-  if (hint === undefined) return `rejected, nothing ran — ${raw}`;
+  if (hint === undefined) return described("rejected, nothing ran", raw);
   // The adapter appends per-refusal information after an em-dash — the map's
   // bounds, the nearest reachable tile. The static hint says what went wrong;
   // that detail is what to do instead, so it rides along.
   const detailAt = raw.lastIndexOf(" — ");
   const detail = detailAt === -1 ? "" : `;${raw.slice(detailAt + 2)}`;
-  return `rejected, nothing ran — ${hint}${detail}`;
+  return described("rejected, nothing ran", `${hint}${detail}`);
 }
 
 function bounded(value: unknown): string {

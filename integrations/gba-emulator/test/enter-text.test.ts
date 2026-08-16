@@ -347,8 +347,7 @@ describe("enter_text", () => {
       action: { kind: "enter_text", text: "GASKET" },
       outcome: { typed: "GA", confirmed: false, endedBecause: "input_bound_reached" },
     });
-    expect(interrupted.summary).toBe(
-      'typed "GA" of "GASKET" — the input budget ran out mid-entry; repeat the action to continue',
-    );
+    expect(interrupted.summary).toBe('typed "GA" of "GASKET" — the input budget ran out mid-entry');
+    expect(interrupted.advice).toBe("repeat the action to continue");
   });
 });

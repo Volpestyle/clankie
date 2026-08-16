@@ -210,11 +210,20 @@ his notes ride across the jump — the world rewinds, the mind does not.
 
 Failure is a turn outcome, never an exception: `rejected_by_adapter`,
 `invalid_decision`, and `mind_failed` are all recorded and the run continues —
-and the refusal reason is the turn's effect line, so a rejected action reads
+and the refusal reason is the turn's effect, so a rejected action reads
 as the refusal it is, never as a fabricated result (ADR 0072). A `scene`
 observation carries `mode`, `inputReady`, and `waitingForDialogAdvance`, so a
 scripted hold or an undecoded screen announces itself instead of masquerading
 as a stuck overworld.
+
+An effect is two fields, because it has two readers (ADR 0108). `effect` is the
+observation — what changed — and it is the half every audience gets: the
+activity overlay, the story card, and the possessor seam that hands a voice
+room what just happened. `effectAdvice` is the harness coaching his next press
+("hold the direction longer to move", "use advance_dialog to read the intro"),
+written to him in the imperative and joined onto the effect only in the history
+the mind reads. Coaching in an audience's line is how he came to sound like he
+was directing the room through a game nobody else was playing.
 
 The run reports **coherence** — how often the previous turn's stated intent
 referenced the action actually taken. It separates reasoning from post-hoc
