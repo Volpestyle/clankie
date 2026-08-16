@@ -257,6 +257,20 @@ export interface ObservedEffect extends Described {
   enteredMap: boolean;
 }
 
+/**
+ * Whether the body decoded any state this turn, or null when it did not say.
+ *
+ * `danger.stateCertain` is what both bodies publish for this, so an effect can
+ * tell "the decoder saw nothing change" apart from "there was no decoder
+ * output to change".
+ */
+function decoded(observations: readonly GbaEmulatorObservation[]): boolean | null {
+  const danger = observations.find((observation) => observation.kind === "danger") as
+    | { data?: { stateCertain?: boolean } }
+    | undefined;
+  return danger?.data?.stateCertain ?? null;
+}
+
 /** Bounded "menuId: selected entry" line, so a menu effect names the menu. */
 function describeMenu(observation: GbaEmulatorObservation | null): string {
   const data = (
@@ -433,6 +447,15 @@ export function observeEffect(input: {
   // visible change" while the screen visibly moved, and he had to learn to
   // distrust his own effect line.
   if (input.screenChanged === true) {
+    // "though the decoded state did not" is a comparison, and a comparison
+    // needs two sides. On a screen that decodes to nothing — a boot sequence,
+    // an intro, a help page — there is no decoded state to have stood still,
+    // so the sentence reports a disagreement that never happened. Said every
+    // turn for the minutes an intro runs, it reads as a broken decoder, and
+    // this line is also the one an audience hears (ADR 0108).
+    if (decoded(input.after) === false) {
+      return { summary: "the screen changed", refused: null, position: after, enteredMap: false };
+    }
     return {
       summary: menuOpen
         ? `screen changed inside ${describeMenu(menuAfter ?? menuBefore)}`

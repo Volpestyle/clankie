@@ -1,7 +1,7 @@
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
-import { createModelFreePlayMind, createModelVoice } from "../src/free-play-mind.ts";
+import { createModelFreePlayMind, createModelVoice, renderView } from "../src/free-play-mind.ts";
 import type { FreePlayView } from "../src/free-play.ts";
 import type { VoiceView } from "../src/free-play-voice.ts";
 
@@ -96,6 +96,63 @@ function emptyView(): FreePlayView {
     history: [],
   };
 }
+
+/**
+ * A boot screen used to arrive as three separate alarms and no statement, so
+ * the mind diagnosed the decoder itself, wrote the diagnosis into its notes,
+ * and re-derived the same sentence every turn for the length of the FRLG
+ * intro — then narrated it to a voice room. Stating what reaches the controls
+ * is what stops the rediscovery.
+ */
+describe("the view says what reaches the controls", () => {
+  const screen = (mode: string, stateCertain: boolean): FreePlayView => ({
+    ...emptyView(),
+    observations: [
+      {
+        schemaVersion: 1,
+        kind: "danger",
+        observationId: "obs-danger",
+        sessionId: "s",
+        characterId: "clankie",
+        worldId: "w",
+        goalVersion: 0,
+        capturedAt: "2026-08-16T15:34:00.000Z",
+        frame: 1,
+        data: { severity: "low", code: "input_bound", summary: "", stateCertain },
+      },
+      {
+        schemaVersion: 1,
+        kind: "scene",
+        observationId: "obs-scene",
+        sessionId: "s",
+        characterId: "clankie",
+        worldId: "w",
+        goalVersion: 0,
+        capturedAt: "2026-08-16T15:34:00.000Z",
+        frame: 1,
+        data: { mode, inputReady: false, waitingForDialogAdvance: false },
+      },
+    ] as unknown as FreePlayView["observations"],
+  });
+
+  it("states that an undecoded screen is normal and what still runs", () => {
+    const rendered = renderView(screen("unknown", false));
+    expect(rendered).toContain("Nothing on this screen decodes");
+    expect(rendered).toContain("not a fault");
+    expect(rendered).toContain("button_press and frame_advance");
+  });
+
+  it("names a screen that decodes but carries no position", () => {
+    const rendered = renderView(screen("cutscene", false));
+    expect(rendered).toContain("This is a cutscene screen");
+    expect(rendered).toContain("expected, not a fault");
+  });
+
+  it("stays quiet once a screen decodes", () => {
+    const rendered = renderView(screen("overworld", true));
+    expect(rendered).not.toContain("not a fault");
+  });
+});
 
 function emptyVoiceView(): VoiceView {
   return {

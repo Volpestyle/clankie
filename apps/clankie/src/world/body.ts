@@ -372,10 +372,14 @@ class HostedWorldBody implements WorldBody {
               },
             };
           }
-          // A screen the adapter *understood* but that carries no position or
-          // party — a cutscene, a menu, the naming keyboard — is not a danger.
-          // Reporting the intro as high-severity uncertainty for the minutes it
-          // runs is how a mind learns to distrust this signal entirely.
+          // A screen that carries no position or party — a cutscene, a menu,
+          // the naming keyboard — is not a danger, and neither is one the
+          // adapter does not recognise at all. Reporting a boot sequence as
+          // high-severity uncertainty for the minutes it runs is how a mind
+          // learns to distrust this signal entirely; it did, and then narrated
+          // the distrust to a voice room. `stateCertain` is the load-bearing
+          // field either way — a scripted driver still halts on it — so the
+          // severity here only decides whether a normal intro reads as alarm.
           const knownScreen = observation !== undefined && observation.scene.decoded;
           return {
             ...base,
@@ -388,9 +392,11 @@ class HostedWorldBody implements WorldBody {
                   stateCertain: false,
                 }
               : {
-                  severity: "high" as const,
+                  severity: "low" as const,
                   code: "uncertain_state" as const,
-                  summary: "Hosted world semantic state is unavailable; raw buttons and frames remain usable",
+                  summary:
+                    "Hosted world is on a screen the adapter does not decode — common during boot " +
+                    "and intros; raw buttons and frames remain usable",
                   stateCertain: false,
                 },
           };
@@ -580,6 +586,19 @@ class HostedWorldBody implements WorldBody {
         replayed: result.data.replayed,
         bodyGeneration: result.data.bodyGeneration,
         frame: result.data.frame,
+        // A composite action's own account of itself, spread flat because the
+        // world names these fields the way the local adapter does — so every
+        // effect line `free-play-progress` already writes works here unchanged.
+        // Dropping it is what made every `advance_dialog` on a hosted world
+        // read as "read no new text — the dialog stopped", however much it read.
+        //
+        // Read off the parsed result rather than through its type: `detail`
+        // arrived in world protocol v2, and this file has to compile against
+        // whichever commit `package.json` pins. The read is safe either way —
+        // a v1 host sends no detail, and a v2 host cannot reach a v1 client at
+        // all, because the version is pinned with `z.literal` and a mismatched
+        // join is refused outright.
+        ...detailOf(result.data.outcome),
       },
     };
     this.lastAction = completed;
@@ -750,6 +769,12 @@ function mapAction(action: GbaEmulatorAction): Action {
     default:
       return ActionSchema.parse(action);
   }
+}
+
+/** The composite action's own account of itself, when the world sent one. */
+function detailOf(outcome: unknown): Record<string, unknown> | undefined {
+  const detail = (outcome as { detail?: unknown }).detail;
+  return typeof detail === "object" && detail !== null ? (detail as Record<string, unknown>) : undefined;
 }
 
 function requireSemanticState(state: FireRedState | undefined): FireRedState {

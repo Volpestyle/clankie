@@ -850,8 +850,14 @@ function describeRejection(result: EnvironmentActionResult): string {
  * playthrough actually meets, translated into what to do about them.
  */
 const REJECTION_HINTS: Readonly<Record<string, string>> = {
+  // Deliberately about *this screen*, not the cartridge. The older wording
+  // ("this cartridge has no decoded state profile yet") described a permanent
+  // defect, so a boot sequence — where nothing decodes for minutes and then
+  // everything does — read as a dead decoder, and he stopped reaching for the
+  // helpers long after they started working again.
   semantic_state_unavailable:
-    "this cartridge has no decoded state profile yet — use raw button presses and the visible screen",
+    "this screen carries no decoded state — normal on intros, help screens and boot; " +
+    "read the frame and press buttons, and the helpers return when a screen decodes",
   input_bound_exceeded: "it asked for more button presses than one action may spend",
   frame_bound_exceeded: "it asked for more frames than one action may spend",
   dialog_not_open:

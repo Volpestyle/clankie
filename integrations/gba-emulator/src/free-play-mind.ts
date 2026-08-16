@@ -434,6 +434,26 @@ function heldScreenAdvice(observations: FreePlayView["observations"]): string | 
     | undefined;
   const data = scene?.data;
   if (data === undefined) return null;
+  // What reaches this screen's controls, said as a given rather than left to be
+  // inferred from a refusal. A boot sequence decodes to nothing for minutes at a
+  // time, and a mind told only "semantic_state_unavailable" spends a turn
+  // concluding the decoder is broken, writes that into its notes, and concludes
+  // it again next turn — the same sentence re-derived at full price every turn.
+  const uncertain = certainty(observations) === false;
+  if (uncertain && data.mode === "unknown") {
+    return (
+      "Nothing on this screen decodes — normal during boot, intros and help screens, " +
+      "and not a fault. The frame is the whole truth here: button_press and " +
+      "frame_advance are the only actions that will run, so read the picture and press."
+    );
+  }
+  if (uncertain) {
+    return (
+      `This is a ${data.mode ?? "recognised"} screen — it decodes, but carries no position or ` +
+      "party, so there is nothing for the state view to show. That is expected, not a fault. " +
+      "Read the frame and act on what it shows."
+    );
+  }
   if (data.mode === "battle" && data.inputReady === false) {
     return (
       "Scene is a battle and input is not ready — use advance_dialog, not frame_advance. " +
@@ -447,6 +467,21 @@ function heldScreenAdvice(observations: FreePlayView["observations"]): string | 
     );
   }
   return null;
+}
+
+/**
+ * Whether the body claims decoded state this turn, or null when it did not say.
+ *
+ * `danger.stateCertain` is the one field both bodies publish for this — the
+ * local adapter from its own decode, the hosted world from the adapter behind
+ * the socket — so it is the signal to read rather than inferring absence from
+ * which observation kinds happen to be missing.
+ */
+function certainty(observations: FreePlayView["observations"]): boolean | null {
+  const danger = observations.find((observation) => observation.kind === "danger") as
+    | { data?: { stateCertain?: boolean } }
+    | undefined;
+  return danger?.data?.stateCertain ?? null;
 }
 
 /** Drop transport fields the model has no use for and would only pay tokens on. */

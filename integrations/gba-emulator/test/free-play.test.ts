@@ -915,16 +915,16 @@ describe("rejection visibility", () => {
   it("keeps the coaching out of the line an audience is handed", async () => {
     // The possessor seam reports `effect` to a voice room, where a persona
     // composes the words. While the advice rode along inside it, the room was
-    // handed "use raw button presses and the visible screen" and he relayed it
-    // — sounding like he was directing the people watching through a game none
-    // of them was playing. Heard live on 2026-08-16.
+    // handed the harness's coaching and he relayed it — sounding like he was
+    // directing the people watching through a game none of them was playing.
+    // Heard live on 2026-08-16.
     const result = await runFreePlay({
       io: io(() => Promise.resolve(failed("semantic_state_unavailable"))),
       mind: mind([press("right", "east")]),
       turns: 1,
     });
     expect(result.turns[0]?.effect).toBe("rejected, nothing ran");
-    expect(result.turns[0]?.effectAdvice).toContain("use raw button presses");
+    expect(result.turns[0]?.effectAdvice).toContain("read the frame and press buttons");
   });
 });
 

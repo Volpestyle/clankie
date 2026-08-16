@@ -10,6 +10,7 @@ import {
   type CredentialStore,
 } from "@clankie/credential-broker";
 import { EnvironmentAdapterActionError } from "@clankie/environment-runtime";
+import { WORLD_PROTOCOL_VERSION } from "@pokeagent-mmo/world-protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { joinWorld } from "../src/world/body.ts";
 
@@ -137,7 +138,12 @@ describe("hosted world body", () => {
     expect(joinRequest).toMatchObject({
       operation: "world.join",
       credential: CREDENTIAL,
-      input: { protocolVersion: 1, gameId: "firered", displayName: "Clankie", harness: "clankie" },
+      input: {
+        protocolVersion: WORLD_PROTOCOL_VERSION,
+        gameId: "firered",
+        displayName: "Clankie",
+        harness: "clankie",
+      },
     });
     const acts = world.requests.filter((request) => request.operation === "play.act");
     expect(acts).toHaveLength(2);
@@ -394,7 +400,61 @@ describe("a decoded screen with no semantic state", () => {
     await result.body.close();
   });
 
-  it("still reports a screen it could not interpret as uncertain", async () => {
+  // The boxes `advance_dialog` reads are gone from the observation by the time
+  // it is taken, so while the world's account of the read was dropped here,
+  // every dialog advance on a hosted world reported "read no new text — the
+  // dialog stopped" however much it had actually read. He tried the helper
+  // twice on 2026-08-16, believed it broken, and went back to pressing A.
+  it("keeps what a composite action read, so the effect line can say it", async () => {
+    let current = observation({ frame: 30, x: 5, y: 7 });
+    const world = await fakeWorld((request) => {
+      switch (request.operation) {
+        case "world.join":
+          return joinResult();
+        case "play.observe":
+          return current;
+        case "play.act":
+          current = observation({ frame: 40, x: 5, y: 7 });
+          return actRan(current, {
+            kind: "advance_dialog",
+            transcript: ["Welcome to the world of POKéMON!"],
+            presses: 3,
+            endedBecause: "dialog_closed",
+          });
+        case "play.frame":
+          return frame({ frame: current.frame, data: "after-dialog" });
+        case "world.leave":
+          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
+        default:
+          throw new Error(`unexpected operation ${request.operation}`);
+      }
+    });
+    const result = await joinWorld({
+      environmentId: "pokemon-firered",
+      env: await provisionedEnv(world.stateDir),
+    });
+    expect(result.outcome).toBe("joined");
+    if (result.outcome !== "joined") return;
+    const acted = await result.body.io.act({ kind: "advance_dialog" });
+    if (WORLD_PROTOCOL_VERSION >= 2) {
+      // Flat alongside the transport counters, named as the local adapter names
+      // them, so the existing effect describers read it without a translation.
+      expect(acted).toMatchObject({
+        status: "completed",
+        outcome: { transcript: ["Welcome to the world of POKéMON!"], endedBecause: "dialog_closed" },
+      });
+    } else {
+      // `detail` landed in world protocol v2 and the outcome schemas are
+      // strict, so a v1 pin refuses the whole result rather than reading half
+      // of it. That refusal is why the wire change came with a version bump:
+      // a mismatched join is turned away at the handshake, where an operator
+      // can see it, instead of every action failing to parse in the dark.
+      expect(acted).toMatchObject({ status: "failed" });
+    }
+    await result.body.close();
+  });
+
+  it("names a screen it could not interpret without raising an alarm", async () => {
     const world = await fakeWorld((request) => {
       switch (request.operation) {
         case "world.join":
@@ -415,8 +475,13 @@ describe("a decoded screen with no semantic state", () => {
     if (result.outcome !== "joined") return;
     const danger = result.body.io.observe("danger");
     if (danger.kind !== "danger") throw new Error("expected a danger observation");
-    expect(danger.data.severity).toBe("high");
+    // `stateCertain` is the load-bearing field — a scripted driver halts on it
+    // — but the severity is not an alarm. A boot sequence decodes to nothing
+    // for minutes, and reporting that as high severity every turn is how a mind
+    // learns to distrust the signal entirely. It did, on 2026-08-16.
     expect(danger.data.code).toBe("uncertain_state");
+    expect(danger.data.stateCertain).toBe(false);
+    expect(danger.data.severity).toBe("low");
     await result.body.close();
   });
 });
@@ -466,7 +531,7 @@ function observation(options: {
   };
 }
 
-function actRan(current: ReturnType<typeof observation>) {
+function actRan(current: ReturnType<typeof observation>, detail?: Record<string, unknown>) {
   return {
     ok: true,
     sessionId: SESSION_ID,
@@ -479,6 +544,7 @@ function actRan(current: ReturnType<typeof observation>) {
       framesSpent: 10,
       screenChanged: true,
       observation: current,
+      ...(detail === undefined ? {} : { detail }),
     },
   };
 }

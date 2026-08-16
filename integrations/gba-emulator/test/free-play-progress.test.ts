@@ -69,6 +69,29 @@ function withMenu(
   ];
 }
 
+function withDanger(observations: GbaEmulatorObservation[], stateCertain: boolean): GbaEmulatorObservation[] {
+  return [
+    ...observations,
+    {
+      schemaVersion: 1,
+      kind: "danger",
+      observationId: `obs-danger-${String(stateCertain)}`,
+      sessionId: "s",
+      characterId: "clankie",
+      worldId: "w",
+      goalVersion: 0,
+      capturedAt: "2026-07-25T18:00:00.000Z",
+      frame: 1,
+      data: { severity: "low", code: "input_bound", summary: "", stateCertain },
+    } as unknown as GbaEmulatorObservation,
+  ];
+}
+
+const certain = (observations: GbaEmulatorObservation[]): GbaEmulatorObservation[] =>
+  withDanger(observations, true);
+const uncertain = (observations: GbaEmulatorObservation[]): GbaEmulatorObservation[] =>
+  withDanger(observations, false);
+
 const pressLeft: GbaEmulatorAction = { kind: "button_press", button: "left", holdFrames: 4 };
 const pressA: GbaEmulatorAction = { kind: "button_press", button: "a", holdFrames: 4 };
 
@@ -176,6 +199,31 @@ describe("observed effect", () => {
     expect(cursorOnly.summary).toContain("screen changed inside naming-screen");
     expect(cursorOnly.advice).toContain("trust the frame");
     expect(cursorOnly.refused).toBeNull();
+  });
+
+  it("does not claim the decoded state stood still when nothing decoded", () => {
+    // The FRLG intro decodes to nothing for minutes. Saying "the screen
+    // changed though the decoded state did not" there reports a disagreement
+    // between a decode and a frame when only the frame exists — and this line
+    // is also what a voice room is handed (ADR 0108). Heard live 2026-08-16.
+    const undecoded = observeEffect({
+      before: uncertain(withScene([], "unknown", false)),
+      after: uncertain(withScene([], "unknown", false)),
+      action: pressA,
+      screenChanged: true,
+    });
+    expect(undecoded.summary).toBe("the screen changed");
+    expect(undecoded.advice).toBeUndefined();
+
+    // With a decode to compare against, the disagreement is real and stays.
+    const decoded = observeEffect({
+      before: certain(at("bedroom", 10, 5)),
+      after: certain(at("bedroom", 10, 5)),
+      action: pressA,
+      screenChanged: true,
+    });
+    expect(decoded.summary).toBe("screen changed though the decoded state did not");
+    expect(decoded.advice).toContain("trust the frame");
   });
 
   it("reports a menu opening and closing by name", () => {
