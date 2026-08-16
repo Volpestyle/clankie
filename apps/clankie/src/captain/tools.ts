@@ -805,10 +805,14 @@ export function browserExtension(deps: CaptainDeps, turn: TurnContext): InlineEx
         }),
         executionMode: "sequential",
         execute: async (_id, params) => {
-          const terms = params.query.toLowerCase().split(/[^a-z0-9]+/u).filter(Boolean);
+          const terms = params.query
+            .toLowerCase()
+            .split(/[^a-z0-9]+/u)
+            .filter(Boolean);
           const matches = catalog.tools
             .filter((tool) => {
-              const haystack = `${tool.name.replace(/^agent_browser_/u, "")} ${tool.description}`.toLowerCase();
+              const haystack =
+                `${tool.name.replace(/^agent_browser_/u, "")} ${tool.description}`.toLowerCase();
               return terms.every((term) => haystack.includes(term));
             })
             .slice(0, params.limit ?? 5)

@@ -14,8 +14,15 @@ export interface OperatorConversationBlockOptions {
   readonly collapsed: boolean;
 }
 
+export interface OperatorConversationBlockHandle {
+  setMarkdown(markdown: string): void;
+}
+
 export interface OperatorConversationRenderTarget {
-  insertMarkdown(markdown: string, options?: OperatorConversationBlockOptions): unknown;
+  insertMarkdown(
+    markdown: string,
+    options?: OperatorConversationBlockOptions,
+  ): OperatorConversationBlockHandle;
   refreshStatus(label: string): void;
 }
 
@@ -65,13 +72,7 @@ export function renderOperatorConversationEvent(event: OperatorConversationStrea
         if (event.phase === "started") return undefined;
         return `**Skill: ${event.skillName} - ${event.phase === "completed" ? "loaded" : "failed to load"}**`;
       }
-      const summary = event.summary === undefined ? "" : event.summary;
-      const detail =
-        event.detail === undefined
-          ? ""
-          : `${event.phase === "started" ? "Arguments" : "Result"}:\n\n\`\`\`${event.phase === "started" ? "json" : ""}\n${event.detail}\n\`\`\``;
-      const body = [summary, detail].filter((part) => part.length > 0).join("\n\n");
-      return `**Tool: ${event.name} - ${event.phase}**${body.length === 0 ? "" : `\n\n${body}`}`;
+      return renderToolEvent(event);
     }
     case "input_requested":
       return `**Input requested**\n\n${event.prompt}${
@@ -124,6 +125,10 @@ export function createOperatorConversationShellSink(
 ): OperatorConversationEventSink {
   // The registry stores the trimmed submitted message, so compare trimmed.
   let pendingEcho = options.localEchoText?.trim();
+  const activeTools = new Map<
+    string,
+    { readonly argumentsDetail?: string; readonly block: OperatorConversationBlockHandle }
+  >();
   return {
     event(event): void {
       if (
@@ -133,6 +138,24 @@ export function createOperatorConversationShellSink(
         event.text === pendingEcho
       ) {
         pendingEcho = undefined;
+      } else if (event.type === "tool" && event.skillName === undefined) {
+        if (event.phase === "started") {
+          const markdown = renderToolEvent(event);
+          const block = shell.insertMarkdown(markdown, operatorConversationBlockOptions(event, markdown));
+          activeTools.set(event.toolCallId, {
+            ...(event.detail === undefined ? {} : { argumentsDetail: event.detail }),
+            block,
+          });
+        } else {
+          const activeTool = activeTools.get(event.toolCallId);
+          activeTools.delete(event.toolCallId);
+          const markdown = renderToolEvent(event, activeTool?.argumentsDetail);
+          if (activeTool === undefined) {
+            shell.insertMarkdown(markdown, operatorConversationBlockOptions(event, markdown));
+          } else {
+            activeTool.block.setMarkdown(markdown);
+          }
+        }
       } else {
         const markdown = renderOperatorConversationEvent(event);
         if (markdown !== undefined) {
@@ -147,4 +170,20 @@ export function createOperatorConversationShellSink(
       shell.refreshStatus("conversation recovery required");
     },
   };
+}
+
+type OperatorConversationToolEvent = Extract<OperatorConversationStreamEvent, { readonly type: "tool" }>;
+
+function renderToolEvent(event: OperatorConversationToolEvent, argumentsDetail?: string): string {
+  const summary = event.summary === undefined ? "" : event.summary;
+  const argumentsBlock =
+    event.phase !== "started" && argumentsDetail !== undefined
+      ? `Arguments:\n\n\`\`\`json\n${argumentsDetail}\n\`\`\``
+      : "";
+  const detail =
+    event.detail === undefined
+      ? ""
+      : `${event.phase === "started" ? "Arguments" : "Result"}:\n\n\`\`\`${event.phase === "started" ? "json" : ""}\n${event.detail}\n\`\`\``;
+  const body = [summary, argumentsBlock, detail].filter((part) => part.length > 0).join("\n\n");
+  return `**Tool: ${event.name} - ${event.phase}**${body.length === 0 ? "" : `\n\n${body}`}`;
 }

@@ -619,7 +619,10 @@ describe("TUI selected-conversation prompt path", () => {
     const statuses: string[] = [];
     const sink = createOperatorConversationShellSink(
       {
-        insertMarkdown: (markdown: string) => inserted.push(markdown),
+        insertMarkdown: (markdown: string) => {
+          inserted.push(markdown);
+          return { setMarkdown: () => undefined };
+        },
         refreshStatus: (label: string) => statuses.push(label),
       },
       { localEchoText: "  hi  " },
@@ -649,7 +652,10 @@ describe("TUI selected-conversation prompt path", () => {
     const usages: { tokens: number | null; contextWindow: number }[] = [];
     const sink = createOperatorConversationShellSink(
       {
-        insertMarkdown: (markdown: string) => inserted.push(markdown),
+        insertMarkdown: (markdown: string) => {
+          inserted.push(markdown);
+          return { setMarkdown: () => undefined };
+        },
         refreshStatus: () => undefined,
       },
       { onContextUsage: (usage) => usages.push(usage) },
@@ -672,7 +678,10 @@ describe("TUI selected-conversation prompt path", () => {
   it("renders operator history as You when no local echo is pending (restore path)", () => {
     const inserted: string[] = [];
     const sink = createOperatorConversationShellSink({
-      insertMarkdown: (markdown: string) => inserted.push(markdown),
+      insertMarkdown: (markdown: string) => {
+        inserted.push(markdown);
+        return { setMarkdown: () => undefined };
+      },
       refreshStatus: () => undefined,
     });
     sink.event({
@@ -756,13 +765,60 @@ describe("TUI selected-conversation prompt path", () => {
     // The sink forwards the options so the face can arm click-to-toggle.
     const inserted: [string, OperatorConversationBlockOptions | undefined][] = [];
     const sink = createOperatorConversationShellSink({
-      insertMarkdown: (markdown: string, options?: OperatorConversationBlockOptions) =>
-        inserted.push([markdown, options]),
+      insertMarkdown: (markdown: string, options?: OperatorConversationBlockOptions) => {
+        inserted.push([markdown, options]);
+        return { setMarkdown: () => undefined };
+      },
       refreshStatus: () => undefined,
     });
     sink.event({ ...shortTool, summary: "a\nb" });
     expect(inserted).toEqual([
       ["**Tool: read_file - completed**\n\na\nb", { clickToggle: true, collapsed: true }],
+    ]);
+  });
+
+  it("replaces a started tool block with one completed block containing arguments and result", () => {
+    const base = {
+      schemaVersion: 1 as const,
+      conversationId: "global-default",
+      cursor: "global-default:event",
+      revision: 1,
+      occurredAt: "2026-07-12T00:00:00.000Z",
+      type: "tool" as const,
+      toolCallId: "call-1",
+      name: "get_self_state",
+    };
+    const inserted: string[] = [];
+    const updated: string[] = [];
+    const sink = createOperatorConversationShellSink({
+      insertMarkdown: (markdown: string) => {
+        inserted.push(markdown);
+        return { setMarkdown: (next) => updated.push(next) };
+      },
+      refreshStatus: () => undefined,
+    });
+
+    sink.event({ ...base, phase: "started", detail: '{\n  "includePresence": true\n}' });
+    sink.event({ ...base, phase: "completed", detail: '{\n  "status": "idle"\n}' });
+
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0]).toContain("**Tool: get_self_state - started**");
+    expect(updated).toEqual([
+      [
+        "**Tool: get_self_state - completed**",
+        "",
+        "Arguments:",
+        "",
+        "```json",
+        '{\n  "includePresence": true\n}',
+        "```",
+        "",
+        "Result:",
+        "",
+        "```",
+        '{\n  "status": "idle"\n}',
+        "```",
+      ].join("\n"),
     ]);
   });
 });
