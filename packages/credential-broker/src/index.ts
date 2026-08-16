@@ -39,6 +39,7 @@ export {
   runLinearBrowserLogin,
   type LinearBrowserLoginOptions,
 } from "./linear-oauth.ts";
+export { resolveProviderBearer } from "./provider-bearer.ts";
 export {
   DISCORD_BOT_PROVIDER_ID,
   DISCORD_PRESENCE_CAPABILITIES,

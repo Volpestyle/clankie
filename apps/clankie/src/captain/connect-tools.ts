@@ -13,78 +13,16 @@ function operatorOnly(lane: CaptainSessionLaneV2): unknown | undefined {
 }
 
 /**
- * Linear and email join the authored tool bank. They refuse when nothing is
- * connected, the same way generate_image refuses a missing key — so a session
- * built before /connect still works the moment the owner stores credentials.
+ * Email joins the authored tool bank. It refuses when nothing is connected, the
+ * same way generate_image refuses a missing key — so a session built before
+ * /connect still works the moment the owner stores credentials.
  *
- * Email is operator-lane only: dumping a mailbox into Discord is a
- * cross-channel disclosure. Linear is the work tracker he was given access to,
- * so search/create/comment are available in every room.
+ * Mail is operator-lane only: dumping a mailbox into Discord is a cross-channel
+ * disclosure. Connectors that speak MCP — Linear among them — arrive through
+ * the MCP host instead of being hand-written here (ADR 0109).
  */
 export function connectionTools(deps: CaptainDeps, lane: CaptainSessionLaneV2): ToolDefinition[] {
   return [
-    defineTool({
-      name: "linear_search",
-      label: "Search Linear",
-      description:
-        "Search Linear issues. Use this when someone asks about a ticket, a project, or what is open. " +
-        "'refused' with credential_unavailable means nobody has connected Linear yet (/connect linear).",
-      parameters: Type.Object({
-        query: Type.String({ minLength: 1, maxLength: 400 }),
-        limit: Type.Optional(Type.Number({ minimum: 1, maximum: 25 })),
-      }),
-      execute: async (_id, params) => json(await deps.linear.search(params.query, params.limit)),
-    }),
-    defineTool({
-      name: "linear_get",
-      label: "Read a Linear issue",
-      description:
-        "Read one Linear issue by id or identifier (ENG-123). Say when it is missing rather than inventing status.",
-      parameters: Type.Object({
-        id: Type.String({ minLength: 1, maxLength: 80 }),
-      }),
-      execute: async (_id, params) => json(await deps.linear.get(params.id)),
-    }),
-    defineTool({
-      name: "linear_create",
-      label: "Create a Linear issue",
-      description:
-        "Create a Linear issue. teamId is optional when /connect set a default team. A refusal is something to say, not retry.",
-      parameters: Type.Object({
-        title: Type.String({ minLength: 1, maxLength: 500 }),
-        description: Type.Optional(Type.String({ maxLength: 8_000 })),
-        teamId: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
-      }),
-      execute: async (_id, params) => json(await deps.linear.create(params)),
-    }),
-    defineTool({
-      name: "linear_update",
-      label: "Update a Linear issue",
-      description: "Update a Linear issue's title or description. Pass the issue id or identifier.",
-      parameters: Type.Object({
-        id: Type.String({ minLength: 1, maxLength: 80 }),
-        title: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
-        description: Type.Optional(Type.String({ maxLength: 8_000 })),
-      }),
-      execute: async (_id, params) => json(await deps.linear.update(params)),
-    }),
-    defineTool({
-      name: "linear_comment",
-      label: "Comment on a Linear issue",
-      description: "Add a comment to a Linear issue.",
-      parameters: Type.Object({
-        id: Type.String({ minLength: 1, maxLength: 80 }),
-        body: Type.String({ minLength: 1, maxLength: 8_000 }),
-      }),
-      execute: async (_id, params) => json(await deps.linear.comment(params)),
-    }),
-    defineTool({
-      name: "linear_teams",
-      label: "List Linear teams",
-      description: "List Linear teams you can file issues against, with their ids.",
-      parameters: Type.Object({}),
-      execute: async () => json(await deps.linear.teams()),
-    }),
     defineTool({
       name: "email_list",
       label: "List recent mail",

@@ -216,18 +216,87 @@ export const GameplaySettingsSchema = z
   .strict();
 export type GameplaySettings = z.infer<typeof GameplaySettingsSchema>;
 
+/** Server ids prefix every tool name they contribute, so keep them identifier-shaped. */
+const McpServerIdSchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9_]{0,31}$/u, "must be lowercase letters, digits, and underscores");
+
 /**
- * Linear is a tool connector, not a body: the API key lives in the credential
- * broker under provider id `linear`. This file only holds the public default
- * team so creating an issue does not ask every time.
+ * One MCP server Clankie may call tools on.
+ *
+ * Owner-authored and non-secret, like everything else here: `credential` names
+ * a **broker provider id**, never a token. The host resolves that id at call
+ * time and sends it as a Bearer header (http) or injects it into
+ * {@link credentialEnv} when spawning the process (stdio).
+ *
+ * `lane` is the authority gate and defaults closed. A server reached from every
+ * room is a capability handed to everyone who can type at him, so widening it
+ * is a deliberate edit rather than what happens when the field is omitted.
  */
-export const LinearSettingsSchema = z
+export const McpServerSchema = z
   .object({
-    /** Linear team UUID (not the ENG-style key). */
-    defaultTeamId: z.string().min(1).max(64).optional(),
+    id: McpServerIdSchema,
+    transport: z.enum(["stdio", "http"]).default("stdio"),
+    /** stdio: the executable to run. */
+    command: z.string().min(1).max(500).optional(),
+    args: z.array(z.string().max(1_000)).max(64).default([]),
+    /** http: the server endpoint. */
+    url: z.string().min(1).max(2_000).optional(),
+    lane: z.enum(["operator", "everywhere"]).default("operator"),
+    /** Broker provider id holding this server's secret. Never the secret itself. */
+    credential: z.string().min(1).max(128).optional(),
+    /** stdio only: environment variable that receives the resolved secret. */
+    credentialEnv: z
+      .string()
+      .regex(/^[A-Z][A-Z0-9_]{0,63}$/u, "must be an uppercase environment variable name")
+      .optional(),
+    /**
+     * Tools active from the first turn. Empty means all of them — right for a
+     * small server, and why a large one should narrow it: everything active is
+     * described in the prompt on every turn, and `mcp_tool_search` pulls in the
+     * rest on demand.
+     */
+    initialTools: z.array(z.string().min(1).max(128)).max(64).default([]),
+    enabled: z.boolean().default(true),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.transport === "stdio" && value.command === undefined) {
+      context.addIssue({ code: "custom", path: ["command"], message: "required when transport is stdio" });
+    }
+    if (value.transport === "http") {
+      if (value.url === undefined) {
+        context.addIssue({ code: "custom", path: ["url"], message: "required when transport is http" });
+        return;
+      }
+      let parsed: URL;
+      try {
+        parsed = new URL(value.url);
+      } catch {
+        context.addIssue({ code: "custom", path: ["url"], message: "must be an absolute URL" });
+        return;
+      }
+      // A bearer token rides every request to this URL. Plaintext is allowed
+      // only where it cannot leave the machine.
+      const loopback = parsed.hostname === "localhost" || /^127(\.\d{1,3}){3}$/u.test(parsed.hostname);
+      if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && loopback)) {
+        context.addIssue({ code: "custom", path: ["url"], message: "must be https, or http on loopback" });
+      }
+    }
+  });
+export type McpServerSettings = z.infer<typeof McpServerSchema>;
+
+/**
+ * Owner-authored MCP servers, on top of the connectors Clankie ships knowing
+ * about (`/connect linear`). A curated connector needs no entry here; this is
+ * the escape hatch for everything else.
+ */
+export const McpSettingsSchema = z
+  .object({
+    servers: z.array(McpServerSchema).max(32).default([]),
   })
   .strict();
-export type LinearSettings = z.infer<typeof LinearSettingsSchema>;
+export type McpSettings = z.infer<typeof McpSettingsSchema>;
 
 const HostnameSchema = z
   .string()
@@ -266,7 +335,7 @@ export const ClankieSettingsSchema = z
     persona: PersonaSettingsSchema.default(() => PersonaSettingsSchema.parse({})),
     voice: VoiceSettingsSchema.default(() => VoiceSettingsSchema.parse({})),
     gameplay: GameplaySettingsSchema.default(() => GameplaySettingsSchema.parse({})),
-    linear: LinearSettingsSchema.default(() => LinearSettingsSchema.parse({})),
+    mcp: McpSettingsSchema.default(() => McpSettingsSchema.parse({})),
     email: EmailSettingsSchema.default(() => EmailSettingsSchema.parse({})),
   })
   .strict();
@@ -274,6 +343,31 @@ export type ClankieSettings = z.infer<typeof ClankieSettingsSchema>;
 
 export function emptySettings(): ClankieSettings {
   return ClankieSettingsSchema.parse({ schemaVersion: SETTINGS_SCHEMA_VERSION });
+}
+
+/**
+ * Top-level sections earlier versions wrote that this one no longer has.
+ *
+ * - `linear`: a default team id, back when a hand-written GraphQL port needed
+ *   one. Linear is reached over MCP now and its server resolves the team.
+ */
+const RETIRED_SETTINGS_KEYS: readonly string[] = ["linear"];
+
+/**
+ * Drops sections this version has retired, so an owner whose file predates the
+ * change is not met with a parse error on a key that no longer means anything.
+ *
+ * Deliberately a named list rather than stripping every unknown key: the schema
+ * is strict so a typo surfaces loudly instead of silently doing nothing, and
+ * that property is worth keeping. A retired section can only ever remove
+ * capability, never widen it, which is why it is safe to discard unread.
+ */
+export function dropRetiredSettings(parsed: unknown): unknown {
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return parsed;
+  const entries = Object.entries(parsed as Record<string, unknown>).filter(
+    ([key]) => !RETIRED_SETTINGS_KEYS.includes(key),
+  );
+  return Object.fromEntries(entries);
 }
 
 /** Token prefixes that must never reach the settings file. */

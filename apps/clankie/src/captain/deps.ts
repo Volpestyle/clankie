@@ -31,7 +31,7 @@ import type {
   GenerateVideoResult,
 } from "@clankie/protocol";
 import type { EmailPort } from "../email.ts";
-import type { LinearPort } from "../linear.ts";
+import type { McpCallResult, McpToolDescriptor } from "../mcp-host.ts";
 import type { FinishedRender } from "../media-generation.ts";
 
 /**
@@ -39,7 +39,16 @@ import type { FinishedRender } from "../media-generation.ts";
  * in-process function calls.
  */
 export interface CaptainDeps {
-  readonly linear: LinearPort;
+  /** Tools on his connected MCP servers. The lane is passed on every call. */
+  readonly mcp: {
+    catalog(lane: CaptainSessionLaneV2): Promise<readonly McpToolDescriptor[]>;
+    call(input: {
+      readonly lane: CaptainSessionLaneV2;
+      readonly server: string;
+      readonly tool: string;
+      readonly arguments: Record<string, unknown>;
+    }): Promise<McpCallResult>;
+  };
   readonly email: EmailPort;
   readonly browser: {
     catalog(): Promise<BrowserToolCatalog>;

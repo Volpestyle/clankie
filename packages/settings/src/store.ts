@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import {
   ClankieSettingsSchema,
   assertNoSecretShapedValue,
+  dropRetiredSettings,
   emptySettings,
   type ClankieSettings,
 } from "./schema.ts";
@@ -52,7 +53,9 @@ export class SettingsStore {
     }
     // A malformed settings file fails loudly rather than silently reverting to
     // defaults, which would quietly widen an allowlist the operator narrowed.
-    return ClankieSettingsSchema.parse(parsed);
+    // Sections this version retired are the one exception: they are dropped, so
+    // an older file still opens. The next write persists it without them.
+    return ClankieSettingsSchema.parse(dropRetiredSettings(parsed));
   }
 
   /** Apply a transform atomically under a serialized queue. */

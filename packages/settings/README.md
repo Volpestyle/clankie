@@ -52,8 +52,20 @@ enable a plane.
 
 Use `/discord`, `/connect`, or `/games` in the Clankie TUI. Tokens and API keys
 go to the credential broker (same destination as `/auth`). Public identifiers —
-Discord ids, a Linear default team, an IMAP host and username — and gameplay
-enablement write here.
+Discord ids, an IMAP host and username, MCP server commands and URLs — and
+gameplay enablement write here.
+
+`mcp.servers` is the owner's MCP servers ([ADR 0109](../../docs/adr/0109-mcp-is-how-he-reaches-a-service.md)).
+Connectors Clankie ships knowing about — Linear — need no entry; connecting the
+credential is enough. Each entry names a `credential` by **broker provider id**,
+never a secret, and declares a `lane`: `operator` (the default) keeps the server
+at the console, `everywhere` opens it to every room he is in. `initialTools`
+narrows which of a large server's tools start active; the rest stay one
+`mcp_tool_search` away.
+
+A top-level section this version has retired is dropped when the file is read,
+so an older settings file still opens. Any _other_ unknown key is still a hard
+parse failure, which is how a typo stays visible.
 
 `gameplay.pokemonEmulatorEnabled` controls solo FireRed/Emerald through the
 local GBA emulator. `gameplay.pokeagentMmoEnabled` independently controls the

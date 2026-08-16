@@ -42,7 +42,7 @@ import { createCaptainModelRuntime, type CaptainModelRuntime } from "./model.ts"
 import type { CaptainPort } from "./port.ts";
 import { connectionTools } from "./connect-tools.ts";
 import { discordTurnHasSystemTools, discordTurnUsesDurableSession } from "./system-authority.ts";
-import { browserExtension, captainTools, roomKey, type TurnContext } from "./tools.ts";
+import { browserExtension, captainTools, mcpExtension, roomKey, type TurnContext } from "./tools.ts";
 
 const REGISTER_FOR_LANE: Readonly<Record<CaptainSessionLaneV2, PersonaRegister>> = {
   operator: "operator",
@@ -291,7 +291,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       agentDir: getAgentDir(),
       systemPrompt: systemPrompt(lane, systemTools, currentSettings),
       noExtensions: true,
-      extensionFactories: [captainMemoryExtension(deps.memory, lane), browserExtension(deps, capture)],
+      extensionFactories: [
+        captainMemoryExtension(deps.memory, lane),
+        browserExtension(deps, capture),
+        mcpExtension(deps, lane),
+      ],
       noPromptTemplates: true,
       additionalSkillPaths: [join(options.repoRoot, ".agents", "skills")],
       settingsManager: piSettings,

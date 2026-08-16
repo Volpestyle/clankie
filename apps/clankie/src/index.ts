@@ -30,7 +30,7 @@ import { createDiscordMusicClient } from "./discord-music.ts";
 import { createDiscordCaptainActionClient } from "./discord-captain-actions.ts";
 import { createDiscordVoicePresenceClient } from "./discord-voice-presence.ts";
 import { createEmailPort } from "./email.ts";
-import { createLinearPort } from "./linear.ts";
+import { createMcpHost } from "./mcp-host.ts";
 import { createDiscordAttachmentResolver } from "./discord-attachment-fetch.ts";
 import { loadOrCreateDeviceSessionKey } from "./device-session.ts";
 import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
@@ -206,10 +206,16 @@ const boundApp = (): ClankieApp => {
   return clankieRef;
 };
 
-const linear = createLinearPort({
+// His connected services (ADR 0109). Servers are connected up front so no turn
+// pays for a handshake; one that is unreachable costs him that server's tools
+// and nothing else.
+const mcpHost = createMcpHost({
   credentials: operatorCredentialStore,
   settings: settingsStore,
+  logger,
 });
+await mcpHost.warm();
+
 const email = createEmailPort({
   credentials: operatorCredentialStore,
   settings: settingsStore,
@@ -217,7 +223,7 @@ const email = createEmailPort({
 
 const captain = createCaptain(
   {
-    linear,
+    mcp: mcpHost,
     email,
     browser: {
       catalog: () =>
@@ -429,6 +435,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
     const result = await playHost.stopAndWait({ deadlineMs: playShutdownDeadlineMs, reason: signal });
     await captain.close().catch(() => undefined);
     await browserHost?.close().catch(() => undefined);
+    await mcpHost.close().catch(() => undefined);
     clankie.close();
     if (result.status === "deadline_expired") {
       logger.error(

@@ -3,7 +3,7 @@
  * owner's own services (ADR 0093). Secrets go to the credential broker;
  * public identifiers go to settings.json — the same split `/discord` uses.
  */
-import { SettingsStore, type ClankieSettings, type EmailSettings } from "@clankie/settings";
+import { SettingsStore, type EmailSettings } from "@clankie/settings";
 import type { ProviderCredential, RedactedCredential } from "@clankie/credential-broker";
 import { describeRedactedCredential, runDiscordWizard, showDiscordInvite } from "./discord-commands.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
@@ -105,23 +105,19 @@ export function normalizeConnectArgument(argument: string): string {
 export async function probeLinearKey(
   apiKey: string,
   fetchImpl: typeof fetch = fetch,
-): Promise<
-  | { ok: true; viewer: string; teams: readonly { id: string; key: string; name: string }[] }
-  | { ok: false; detail: string }
-> {
+): Promise<{ ok: true; viewer: string } | { ok: false; detail: string }> {
   try {
     const response = await fetchImpl(LINEAR_GRAPHQL_URL, {
       method: "POST",
       headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
       body: JSON.stringify({
-        query: `query { viewer { name } organization { name } teams { nodes { id key name } } }`,
+        query: `query { viewer { name } organization { name } }`,
       }),
     });
     const payload = (await response.json()) as {
       data?: {
         viewer?: { name?: string };
         organization?: { name?: string };
-        teams?: { nodes?: { id: string; key: string; name: string }[] };
       };
       errors?: readonly { message?: string }[];
     };
@@ -136,11 +132,7 @@ export async function probeLinearKey(
       };
     }
     const organization = payload.data?.organization?.name;
-    return {
-      ok: true,
-      viewer: organization === undefined ? name : `${name} · ${organization}`,
-      teams: payload.data?.teams?.nodes ?? [],
-    };
+    return { ok: true, viewer: organization === undefined ? name : `${name} · ${organization}` };
   } catch (error) {
     return { ok: false, detail: error instanceof Error ? error.message : String(error) };
   }
@@ -149,14 +141,11 @@ export async function probeLinearKey(
 export function formatConnectStatus(input: {
   readonly discordBot: boolean;
   readonly linear: boolean;
-  readonly linearTeam?: string;
   readonly email: boolean;
   readonly emailUsername?: string;
   readonly emailHost?: string;
 }): string {
-  const linear = input.linear
-    ? `connected${input.linearTeam === undefined ? "" : ` · default team ${input.linearTeam}`}`
-    : "not connected — /connect linear";
+  const linear = input.linear ? "connected" : "not connected — /connect linear";
   const email = input.email
     ? `connected${input.emailUsername === undefined ? "" : ` · ${input.emailUsername}`}${
         input.emailHost === undefined ? "" : ` @ ${input.emailHost}`
@@ -195,7 +184,6 @@ async function showConnectStatus(shell: ClankieFaceShell, services: ConnectComma
     formatConnectStatus({
       discordBot: credentials.discord_bot !== undefined,
       linear: credentials[LINEAR_PROVIDER_ID] !== undefined,
-      ...(stored.linear.defaultTeamId === undefined ? {} : { linearTeam: stored.linear.defaultTeamId }),
       email: credentials[EMAIL_PROVIDER_ID] !== undefined,
       ...(stored.email.username === undefined ? {} : { emailUsername: stored.email.username }),
       ...(stored.email.imapHost === undefined ? {} : { emailHost: stored.email.imapHost }),
@@ -281,7 +269,6 @@ async function runLinearWizard(shell: ClankieFaceShell, services: ConnectCommand
         { value: "keep", label: "Keep it" },
         { value: "oauth", label: "Sign in with Linear again", hint: "browser OAuth" },
         { value: "key", label: "Replace with an API key" },
-        { value: "team", label: "Change default team" },
         { value: "remove", label: "Disconnect Linear" },
       ],
       required: true,
@@ -291,13 +278,7 @@ async function runLinearWizard(shell: ClankieFaceShell, services: ConnectCommand
     if (choice === undefined || choice === "keep") return;
     if (choice === "remove") {
       await services.removeCredential(LINEAR_PROVIDER_ID);
-      await services.settings.update((current) => ({ ...current, linear: {} }));
       shell.insertCommandResult("/connect linear", "Disconnected Linear.", "success");
-      return;
-    }
-    if (choice === "team") {
-      const stored = await services.settings.load();
-      await pickDefaultTeam(shell, services, stored, undefined);
       return;
     }
     if (choice === "oauth") {
@@ -364,7 +345,6 @@ async function connectLinearOauth(shell: ClankieFaceShell, services: ConnectComm
       accountId: result.viewer,
     });
     flow.renderLine(`Connected as ${result.viewer}.`, "success");
-    await pickDefaultTeam(shell, services, await services.settings.load(), result.teams);
     shell.insertCommandResult(
       "/connect linear",
       `Linear connected as ${result.viewer} via OAuth. Search and file issues from any room.`,
@@ -398,64 +378,11 @@ async function connectLinearApiKey(shell: ClankieFaceShell, services: ConnectCom
   }
   await services.setCredential(LINEAR_PROVIDER_ID, key.trim());
   flow.renderLine(`Connected as ${result.viewer}.`, "success");
-  await pickDefaultTeam(shell, services, await services.settings.load(), result.teams);
   shell.insertCommandResult(
     "/connect linear",
     `Linear connected as ${result.viewer} with an API key. Search and file issues from any room.`,
     "success",
   );
-}
-
-async function pickDefaultTeam(
-  shell: ClankieFaceShell,
-  services: ConnectCommandServices,
-  stored: ClankieSettings,
-  teams: readonly { id: string; key: string; name: string }[] | undefined,
-): Promise<void> {
-  const flow = shell.setupFlow;
-  let resolvedTeams = teams;
-  if (resolvedTeams === undefined) {
-    const listed = await services.listCredentials();
-    if (listed[LINEAR_PROVIDER_ID] === undefined) return;
-    // Team picker without a fresh probe still lets the owner paste a UUID.
-    resolvedTeams = [];
-  }
-  if (resolvedTeams.length > 0) {
-    const picked = await flow.readSelect({
-      kind: "single",
-      message: "Default team for new issues",
-      options: [
-        ...resolvedTeams.map((team) => ({
-          value: team.id,
-          label: `${team.key} · ${team.name}`,
-          ...(stored.linear.defaultTeamId === team.id ? { hint: "current" } : {}),
-        })),
-        { value: "__none__", label: "No default", hint: "pass teamId on each create" },
-      ],
-      required: true,
-      allowBack: true,
-    });
-    const teamId = picked?.[0];
-    if (teamId === undefined) return;
-    await services.settings.update((current) => ({
-      ...current,
-      linear: teamId === "__none__" ? {} : { defaultTeamId: teamId },
-    }));
-    flow.renderLine(
-      teamId === "__none__" ? "No default Linear team." : "Saved default Linear team.",
-      "success",
-    );
-    return;
-  }
-  const typed = await flow.readText({
-    message: "Default Linear team UUID (blank skips)",
-    placeholder: stored.linear.defaultTeamId ?? "paste a team id, or leave blank",
-  });
-  if (typed === undefined) return;
-  await services.settings.update((current) => ({
-    ...current,
-    linear: typed.trim().length === 0 ? {} : { defaultTeamId: typed.trim() },
-  }));
 }
 
 async function runEmailWizard(shell: ClankieFaceShell, services: ConnectCommandServices): Promise<void> {

@@ -31,7 +31,6 @@ describe("connect status", () => {
       formatConnectStatus({
         discordBot: true,
         linear: true,
-        linearTeam: "team-1",
         email: true,
         emailUsername: "me@example.com",
         emailHost: "imap.gmail.com",
@@ -39,7 +38,7 @@ describe("connect status", () => {
     ).toBe(
       [
         "discord: bot token stored · /discord for servers and allowlists",
-        "linear: connected · default team team-1",
+        "linear: connected",
         "email: connected · me@example.com @ imap.gmail.com",
       ].join("\n"),
     );
@@ -60,18 +59,10 @@ describe("linear probe", () => {
   it("maps a viewer payload and surfaces GraphQL errors", async () => {
     const ok = await probeLinearKey("lin_api_test", async () =>
       Response.json({
-        data: {
-          viewer: { name: "Ada" },
-          organization: { name: "Acme" },
-          teams: { nodes: [{ id: "t1", key: "ENG", name: "Engineering" }] },
-        },
+        data: { viewer: { name: "Ada" }, organization: { name: "Acme" } },
       }),
     );
-    expect(ok).toEqual({
-      ok: true,
-      viewer: "Ada · Acme",
-      teams: [{ id: "t1", key: "ENG", name: "Engineering" }],
-    });
+    expect(ok).toEqual({ ok: true, viewer: "Ada · Acme" });
 
     const failed = await probeLinearKey("lin_api_test", async () =>
       Response.json({ errors: [{ message: "invalid key" }] }),

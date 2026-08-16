@@ -6,7 +6,7 @@ import {
   DiscordSettingsSchema,
   EmailSettingsSchema,
   GameplaySettingsSchema,
-  LinearSettingsSchema,
+  McpServerSchema,
   VoiceSettingsSchema,
   applyDiscordSettingsToEnvironment,
   applyVoiceSettingsToEnvironment,
@@ -304,12 +304,38 @@ describe("voice settings resolution", () => {
   });
 });
 
-describe("linear and email settings", () => {
-  it("defaults to disconnected and accepts a public team id", () => {
-    expect(LinearSettingsSchema.parse({})).toEqual({});
-    expect(
-      LinearSettingsSchema.parse({ defaultTeamId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" }).defaultTeamId,
-    ).toBe("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+describe("mcp and email settings", () => {
+  it("closes the lane by default and requires the field the transport needs", () => {
+    // Deny-by-default: a server the owner did not place in a room stays at the
+    // console, so forgetting `lane` never widens who can reach it.
+    expect(McpServerSchema.parse({ id: "notes", command: "notes-mcp" }).lane).toBe("operator");
+    expect(() => McpServerSchema.parse({ id: "notes", transport: "stdio" })).toThrow(/command/);
+    expect(() => McpServerSchema.parse({ id: "notes", transport: "http" })).toThrow(/url/);
+  });
+
+  it("refuses to send a bearer over plaintext off the machine", () => {
+    const http = { id: "remote", transport: "http" as const };
+    expect(() => McpServerSchema.parse({ ...http, url: "http://example.com/mcp" })).toThrow(/https/);
+    expect(McpServerSchema.parse({ ...http, url: "http://127.0.0.1:8080/mcp" }).url).toContain("127.0.0.1");
+    expect(McpServerSchema.parse({ ...http, url: "https://example.com/mcp" }).url).toContain("https");
+  });
+
+  it("opens a file written before linear was retired, and still rejects a typo", async () => {
+    // A section this version dropped must not lock the owner out of his own
+    // settings; anything else unknown is still a loud failure.
+    const path = join(await mkdtemp(join(tmpdir(), "clankie-settings-")), "settings.json");
+    await writeFile(
+      path,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        linear: { defaultTeamId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" },
+      })}\n`,
+      "utf8",
+    );
+    expect((await new SettingsStore(path).load()).mcp.servers).toEqual([]);
+
+    await writeFile(path, `${JSON.stringify({ schemaVersion: 1, lienar: {} })}\n`, "utf8");
+    await expect(new SettingsStore(path).load()).rejects.toThrow(/nrecognized/);
   });
 
   it("defaults mail ports and refuses a credential-shaped hostname", () => {
@@ -334,7 +360,7 @@ describe("linear and email settings", () => {
       "utf8",
     );
     const loaded = await new SettingsStore(path).load();
-    expect(loaded.linear).toEqual({});
+    expect(loaded.mcp.servers).toEqual([]);
     expect(loaded.email.imapPort).toBe(993);
     expect(loaded.email.username).toBeUndefined();
   });

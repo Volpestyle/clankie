@@ -101,6 +101,9 @@ importers:
       '@hono/node-server':
         specifier: 2.0.8
         version: 2.0.8(hono@4.12.28)
+      '@modelcontextprotocol/sdk':
+        specifier: 1.29.0
+        version: 1.29.0(zod@4.4.3)
       '@pokeagent-mmo/world-protocol':
         specifier: github:Volpestyle/pokeagent-mmo#bbd7fda4827c3a8257e2bd76c4db3ab6d920b680&path:/packages/world-protocol
         version: git+ssh://git@github.com/Volpestyle/pokeagent-mmo.git#bbd7fda4827c3a8257e2bd76c4db3ab6d920b680&path:/packages/world-protocol

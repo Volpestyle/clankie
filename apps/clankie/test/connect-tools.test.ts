@@ -2,33 +2,14 @@ import { describe, expect, it } from "vitest";
 import { connectionTools } from "../src/captain/connect-tools.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import type { EmailPort } from "../src/email.ts";
-import type { LinearPort } from "../src/linear.ts";
 
 const unused = (): never => {
   throw new Error("unused");
 };
 
-function deps(overrides: { linear?: Partial<LinearPort>; email?: Partial<EmailPort> }): CaptainDeps {
+function deps(overrides: { email?: Partial<EmailPort> }): CaptainDeps {
   return {
-    linear: {
-      search: async () => ({ outcome: "ok", issues: [] }),
-      get: async () => ({
-        outcome: "ok",
-        issue: { id: "1", identifier: "ENG-1", title: "x", url: "https://linear.app/x" },
-      }),
-      create: async () => ({
-        outcome: "ok",
-        issue: { id: "1", identifier: "ENG-1", title: "x", url: "https://linear.app/x" },
-      }),
-      update: async () => ({
-        outcome: "ok",
-        issue: { id: "1", identifier: "ENG-1", title: "x", url: "https://linear.app/x" },
-      }),
-      comment: async () => ({ outcome: "ok", commentId: "c1" }),
-      teams: async () => ({ outcome: "ok", teams: [] }),
-      viewer: async () => ({ outcome: "ok", viewer: { name: "Ada" } }),
-      ...overrides.linear,
-    },
+    mcp: { catalog: async () => [], call: unused },
     email: {
       list: async () => ({ outcome: "ok", messages: [] }),
       read: unused,
@@ -57,10 +38,7 @@ async function exec(
 }
 
 describe("connection tools", () => {
-  it("lets Discord search Linear and refuses to open the inbox there", async () => {
-    const search = await exec("linear_search", "discord_presence", { query: "auth" });
-    expect(JSON.parse((search.content[0] as { text: string }).text)).toEqual({ outcome: "ok", issues: [] });
-
+  it("refuses to open the inbox from Discord", async () => {
     const inbox = await exec("email_list", "discord_presence", {});
     expect(JSON.parse((inbox.content[0] as { text: string }).text)).toMatchObject({
       refused: "operator_only",

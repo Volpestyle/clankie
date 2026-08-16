@@ -768,6 +768,91 @@ function diagramTools(deps: CaptainDeps, turn: TurnContext): ToolDefinition[] {
   ];
 }
 
+const MCP_TOOL_SEARCH = "mcp_tool_search";
+
+/**
+ * The tools his connected MCP servers offer (ADR 0109), registered the same way
+ * the browser's are: everything the lane may reach is registered, only the
+ * useful few start active, and the rest are found by searching.
+ *
+ * The narrowing is the point. A tracker's server alone advertises dozens of
+ * tools, and an active tool is described in the prompt on *every* turn — so
+ * registering them all active would tax every "hey clankie" in a voice channel
+ * for capabilities that turn never uses.
+ */
+export function mcpExtension(deps: CaptainDeps, lane: CaptainSessionLaneV2): InlineExtension {
+  return {
+    name: "captain-mcp",
+    hidden: true,
+    async factory(pi) {
+      const catalog = await deps.mcp.catalog(lane);
+      if (catalog.length === 0) return;
+
+      const registeredNames = new Set<string>();
+      for (const tool of catalog) {
+        registeredNames.add(tool.qualifiedName);
+        pi.registerTool({
+          name: tool.qualifiedName,
+          label: `${tool.server}: ${tool.name}`,
+          description: tool.description,
+          parameters: tool.inputSchema as TSchema,
+          executionMode: "sequential",
+          execute: async (_id, params) => {
+            const result = await deps.mcp.call({
+              lane,
+              server: tool.server,
+              tool: tool.name,
+              arguments: (params ?? {}) as Record<string, unknown>,
+            });
+            // A server's own error is the model's to react to, so it is raised
+            // rather than returned as a successful-looking payload.
+            if (result.outcome === "ok" && result.isError) {
+              throw new Error(result.content || `${tool.qualifiedName} failed`);
+            }
+            return json(result);
+          },
+        });
+      }
+
+      pi.registerTool({
+        name: MCP_TOOL_SEARCH,
+        label: "Find connected-service tools",
+        description:
+          "Find and enable tools on his connected services that are not already active. Search by task, " +
+          "such as projects, cycles, documents, or labels. Use this before saying a service cannot do something.",
+        parameters: Type.Object({
+          query: Type.String({ minLength: 1, maxLength: 200 }),
+          limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 10 })),
+        }),
+        executionMode: "sequential",
+        execute: async (_id, params) => {
+          const terms = params.query
+            .toLowerCase()
+            .split(/[^a-z0-9]+/u)
+            .filter(Boolean);
+          const matches = catalog
+            .filter((tool) => {
+              const haystack = `${tool.server} ${tool.name} ${tool.description}`.toLowerCase();
+              return terms.every((term) => haystack.includes(term));
+            })
+            .slice(0, params.limit ?? 5)
+            .map((tool) => tool.qualifiedName);
+          const active = pi.getActiveTools();
+          const added = matches.filter((name) => !active.includes(name));
+          if (added.length > 0) pi.setActiveTools([...active, ...added]);
+          return json({ matches, added });
+        },
+      });
+
+      pi.on("session_start", () => {
+        const keep = pi.getActiveTools().filter((name) => !registeredNames.has(name));
+        const initial = catalog.filter((tool) => tool.initial).map((tool) => tool.qualifiedName);
+        pi.setActiveTools([...new Set([...keep, ...initial, MCP_TOOL_SEARCH])]);
+      });
+    },
+  };
+}
+
 const INITIAL_BROWSER_TOOLS = new Set([
   "agent_browser_open",
   "agent_browser_read",

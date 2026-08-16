@@ -1,6 +1,11 @@
 # ADR 0093: Owner-authored service connections
 
-Status: accepted (2026-08-15).
+Status: accepted (2026-08-15), amended in part by
+[ADR 0109](0109-mcp-is-how-he-reaches-a-service.md). `/connect` is still the
+catalog, Discord is still a body, mail is still operator-lane, and secrets are
+still broker-owned. Two things below no longer describe what runs: "Generic MCP
+is not a captain surface" is reversed, and Linear is reached over its MCP server
+rather than through hand-written GraphQL tools and a default-team setting.
 
 ## Context
 
