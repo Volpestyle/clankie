@@ -125,5 +125,23 @@ on|off` remain available for direct use. Restart Clankie to apply a change.
   without fingerprints or secret values. Remove an active
   `CLANKIE_OPERATOR_TOKEN` override before rotating the stored credential.
 
+## Transcript rendering
+
+A frame renders every block in the transcript, so block cost is paid on every
+keystroke and must not grow with the length of the session
+([ADR 0112](../../docs/adr/0112-a-frame-costs-the-same-at-turn-one-thousand.md)).
+A block component returns a stable array while its content is unchanged —
+memoize through `ClankieRenderCache`, and clear it in `invalidate` and in every
+setter. The viewport uses that array's identity to skip re-decorating the block.
+A component that rebuilds its array each call still renders correctly, but it
+re-pays its own cost every frame.
+
+Measure before and after any change to the render path:
+
+```bash
+node apps/tui/bench/transcript-render.ts          # default 10..500 blocks
+node apps/tui/bench/transcript-render.ts 1000     # a specific scrollback size
+```
+
 The launcher runs TypeScript through Node's native type stripping; the repo's
 `erasableSyntaxOnly` setting enforces the supported syntax.

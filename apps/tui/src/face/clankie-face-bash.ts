@@ -7,6 +7,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { truncateToWidth, wrapTextWithAnsi, type Component } from "@earendil-works/pi-tui";
 import type { ClankieFaceAnsiTheme } from "./clankie-face-theme.ts";
+import { ClankieRenderCache } from "./clankie-render-cache.ts";
 
 export interface FaceBashResult {
   stdout: string;
@@ -135,6 +136,7 @@ export class ClankieBashResultComponent implements Component {
   private readonly command: string;
   private readonly result: FaceBashResult;
   private readonly ansi: ClankieFaceAnsiTheme;
+  private readonly cache = new ClankieRenderCache();
 
   constructor(command: string, result: FaceBashResult, ansi: ClankieFaceAnsiTheme) {
     this.command = command;
@@ -142,9 +144,13 @@ export class ClankieBashResultComponent implements Component {
     this.ansi = ansi;
   }
 
-  invalidate(): void {}
+  invalidate(): void {
+    this.cache.clear();
+  }
 
   render(width: number): string[] {
-    return formatFaceBashResultLines(this.command, this.result, this.ansi, width);
+    return this.cache.get(width, () =>
+      formatFaceBashResultLines(this.command, this.result, this.ansi, width),
+    );
   }
 }

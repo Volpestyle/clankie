@@ -4,6 +4,7 @@
  */
 import { truncateToWidth, wrapTextWithAnsi, type Component } from "@earendil-works/pi-tui";
 import type { ClankieFaceAnsiTheme } from "../face/clankie-face-theme.ts";
+import { ClankieRenderCache } from "../face/clankie-render-cache.ts";
 
 export type CommandLogTone = "error" | "success";
 
@@ -42,6 +43,7 @@ export class ClankieCommandResultComponent implements Component {
   private readonly tone: CommandLogTone;
   private readonly body: Component;
   private readonly ansi: ClankieFaceAnsiTheme;
+  private readonly cache = new ClankieRenderCache();
 
   constructor(prompt: string, tone: CommandLogTone, body: Component, ansi: ClankieFaceAnsiTheme) {
     this.prompt = prompt;
@@ -51,15 +53,18 @@ export class ClankieCommandResultComponent implements Component {
   }
 
   invalidate(): void {
+    this.cache.clear();
     this.body.invalidate();
   }
 
   render(width: number): string[] {
-    const bodyWidth = Math.max(1, width - 2);
-    return [
-      formatCommandLogHeader(this.prompt, this.tone, this.ansi),
-      ...this.body.render(bodyWidth).map((line) => `  ${truncateToWidth(line, bodyWidth, "", true)}`),
-    ];
+    return this.cache.get(width, () => {
+      const bodyWidth = Math.max(1, width - 2);
+      return [
+        formatCommandLogHeader(this.prompt, this.tone, this.ansi),
+        ...this.body.render(bodyWidth).map((line) => `  ${truncateToWidth(line, bodyWidth, "", true)}`),
+      ];
+    });
   }
 }
 
@@ -69,6 +74,7 @@ export class ClankieCommandTextResultComponent implements Component {
   private readonly message: string;
   private readonly tone: CommandLogTone;
   private readonly ansi: ClankieFaceAnsiTheme;
+  private readonly cache = new ClankieRenderCache();
 
   constructor(prompt: string, message: string, tone: CommandLogTone, ansi: ClankieFaceAnsiTheme) {
     this.prompt = prompt;
@@ -77,20 +83,24 @@ export class ClankieCommandTextResultComponent implements Component {
     this.ansi = ansi;
   }
 
-  invalidate(): void {}
+  invalidate(): void {
+    this.cache.clear();
+  }
 
   render(width: number): string[] {
-    const bodyWidth = Math.max(1, width - 2);
-    const lines = [formatCommandLogHeader(this.prompt, this.tone, this.ansi)];
-    for (const line of commandResultBodyLines(this.message)) {
-      if (line.trim().length === 0) {
-        lines.push("");
-        continue;
+    return this.cache.get(width, () => {
+      const bodyWidth = Math.max(1, width - 2);
+      const lines = [formatCommandLogHeader(this.prompt, this.tone, this.ansi)];
+      for (const line of commandResultBodyLines(this.message)) {
+        if (line.trim().length === 0) {
+          lines.push("");
+          continue;
+        }
+        for (const wrapped of wrapTextWithAnsi(styleCommandResultLine(line, this.ansi), bodyWidth)) {
+          lines.push(`  ${truncateToWidth(wrapped, bodyWidth, "", true)}`);
+        }
       }
-      for (const wrapped of wrapTextWithAnsi(styleCommandResultLine(line, this.ansi), bodyWidth)) {
-        lines.push(`  ${truncateToWidth(wrapped, bodyWidth, "", true)}`);
-      }
-    }
-    return lines;
+      return lines;
+    });
   }
 }
