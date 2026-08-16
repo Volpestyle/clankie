@@ -16,6 +16,7 @@ import {
   type CaptainSessionLaneV2,
   type DiscordPresenceChannelTurnRequest,
   type ObservableCaptainLane,
+  type OperatorConversationActivityPhase,
   type OperatorConversationEventBody,
   type OperatorConversationServiceRequest,
   type OperatorConversationServiceResult,
@@ -35,12 +36,12 @@ import { ConversationStore } from "./conversations.ts";
 import { readHerdrSessionCensus, type HerdrSessionCensus } from "./herdr-census.ts";
 import { operatorPromptWithHerdrSeat } from "./herdr-seat.ts";
 import type { CaptainDeps, ResolvedAttachment } from "./deps.ts";
-import { normalizeDiscordTurn } from "./discord-turn.ts";
+import { normalizeDiscordTurn, type NormalizedDiscordTurn } from "./discord-turn.ts";
 import { LaneLog } from "./lane-log.ts";
 import { createCaptainModelRuntime, type CaptainModelRuntime } from "./model.ts";
 import type { CaptainPort } from "./port.ts";
 import { connectionTools } from "./connect-tools.ts";
-import { discordTurnHasSystemTools } from "./system-authority.ts";
+import { discordTurnHasSystemTools, discordTurnUsesDurableSession } from "./system-authority.ts";
 import { browserExtension, captainTools, roomKey, type TurnContext } from "./tools.ts";
 
 const REGISTER_FOR_LANE: Readonly<Record<CaptainSessionLaneV2, PersonaRegister>> = {
@@ -244,9 +245,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const runtime = (): Promise<CaptainModelRuntime> =>
     (modelRuntime ??= createCaptainModelRuntime(options.repoRoot));
 
-  async function systemPrompt(lane: CaptainSessionLaneV2, systemTools: boolean): Promise<string> {
+  function systemPrompt(
+    lane: CaptainSessionLaneV2,
+    systemTools: boolean,
+    currentSettings: ClankieSettings,
+  ): string {
     const identity = readFileSync(join(import.meta.dirname, "instructions.md"), "utf8");
-    const persona = personaInstructions((await settings()).persona, REGISTER_FOR_LANE[lane]);
+    const persona = personaInstructions(currentSettings.persona, REGISTER_FOR_LANE[lane]);
     const reach = systemTools
       ? [
           "",
@@ -261,19 +266,28 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return `${identity}\n\n${persona}${reach}`;
   }
 
+  /**
+   * Where a session's tools run. A workspace-scoped operator conversation
+   * works in its own directory, so the project resources it picks up (AGENTS.md,
+   * that repo's skills) are the ones for the code in front of him. Clankie's own
+   * skills stay on the path from the service repo either way, and every other
+   * lane works in the service repo.
+   */
   async function buildSession(
     lane: CaptainSessionLaneV2,
     sessionManager: SessionManager,
     systemTools: boolean,
+    cwd: string,
   ): Promise<LaneSession> {
     const capture: TurnContext = {};
     const { runtime: models, resolveSelection } = await runtime();
+    const currentSettings = await settings();
     const selection = await resolveSelection();
     const piSettings = SettingsManager.inMemory();
     const loader = new DefaultResourceLoader({
-      cwd: options.repoRoot,
+      cwd,
       agentDir: getAgentDir(),
-      systemPrompt: await systemPrompt(lane, systemTools),
+      systemPrompt: systemPrompt(lane, systemTools, currentSettings),
       noExtensions: true,
       extensionFactories: [captainMemoryExtension(deps.memory, lane), browserExtension(deps, capture)],
       noPromptTemplates: true,
@@ -282,19 +296,24 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     });
     await loader.reload();
     const { session } = await createAgentSession({
-      cwd: options.repoRoot,
+      cwd,
       model: selection.model,
       thinkingLevel: selection.thinkingLevel,
       modelRuntime: models,
-      customTools: [...captainTools(deps, capture, laneLog, lane), ...connectionTools(deps, lane)],
+      customTools: [
+        ...captainTools(deps, capture, laneLog, lane, currentSettings.gameplay),
+        ...connectionTools(deps, lane),
+      ],
       resourceLoader: loader,
       sessionManager,
       settingsManager: piSettings,
       // Coding tools (read/bash/edit/write) run unsandboxed as the service
-      // user. The operator console always has them. A Discord text turn gets
-      // them only when the trigger actor is on `systemActorUserIds` — a tools
-      // list is a boundary; the framing around untrusted channel history is
-      // not. Voice never does: that session is shared across speakers.
+      // user. The operator console always has them. A Discord turn — text or
+      // voice — gets them only when the trigger actor is on
+      // `systemActorUserIds` (ADR 0105), and only on a one-shot session, so a
+      // grant never outlives the speaker who earned it on the shared voice
+      // lane. A tools list is a boundary; the framing around untrusted channel
+      // history is not.
       ...(systemTools ? {} : { noTools: "builtin" as const }),
     });
     await session.bindExtensions({ mode: "print" });
@@ -329,17 +348,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     lane: CaptainSessionLaneV2,
     dir: string,
     systemTools: boolean,
+    cwd: string,
   ): Promise<LaneSession> {
     const existing = sessions.get(key);
     if (existing !== undefined) return existing;
     const created = (async () => {
       let manager: SessionManager;
       try {
-        manager = SessionManager.continueRecent(options.repoRoot, dir);
+        manager = SessionManager.continueRecent(cwd, dir);
       } catch {
-        manager = SessionManager.create(options.repoRoot, dir);
+        manager = SessionManager.create(cwd, dir);
       }
-      return buildSession(lane, manager, systemTools);
+      return buildSession(lane, manager, systemTools, cwd);
     })();
     sessions.set(key, created);
     created.catch(() => sessions.delete(key));
@@ -348,19 +368,44 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   const conversations = new ConversationStore(
     join(options.stateDir, "conversations"),
-    async (conversationId, message, publish, seat) => {
+    async (conversationId, message, publish, context) => {
       const lane = await durableSession(
         `operator:${conversationId}`,
         "operator",
         join(options.stateDir, "conversations", conversationId, "pi"),
         true,
+        context.workspace ?? options.repoRoot,
       );
       lane.capture.media = undefined;
       lane.capture.room = roomKey("operator", conversationId);
       lane.capture.targetId = conversationId;
       const skillCalls = new Map<string, string>();
+      let activity: OperatorConversationActivityPhase | undefined;
+      const publishActivity = (phase: OperatorConversationActivityPhase): void => {
+        if (activity === phase) return;
+        activity = phase;
+        publish({ type: "activity", phase });
+      };
       const unsubscribe = lane.session.subscribe((event) => {
-        if (event.type === "tool_execution_start") {
+        if (event.type === "message_update") {
+          if (
+            event.assistantMessageEvent.type === "thinking_start" ||
+            event.assistantMessageEvent.type === "thinking_delta"
+          ) {
+            publishActivity("thinking");
+          } else if (
+            event.assistantMessageEvent.type === "text_start" ||
+            event.assistantMessageEvent.type === "text_delta"
+          ) {
+            publishActivity("responding");
+          } else if (
+            event.assistantMessageEvent.type === "toolcall_start" ||
+            event.assistantMessageEvent.type === "toolcall_delta"
+          ) {
+            publishActivity("preparing_tool");
+          }
+        } else if (event.type === "tool_execution_start") {
+          activity = undefined;
           const skillName = operatorSkillName(event.toolName, event.args);
           if (skillName !== undefined) skillCalls.set(event.toolCallId, skillName);
           publish({
@@ -382,10 +427,22 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             detail: formatOperatorToolResult(event.result),
             ...(skillName === undefined ? {} : { skillName }),
           });
-        } else if (
-          (event.type === "message_end" && event.message.role === "assistant") ||
-          event.type === "compaction_end"
-        ) {
+        } else if (event.type === "compaction_start") {
+          publishActivity("compacting");
+        } else if (event.type === "auto_retry_start") {
+          publishActivity("retrying");
+        } else if (event.type === "auto_retry_end") {
+          publishActivity("waiting");
+        } else if (event.type === "compaction_end") {
+          publishActivity("waiting");
+          const usage = lane.session.getContextUsage();
+          if (usage !== undefined) {
+            publish({
+              type: "context",
+              usage: { tokens: usage.tokens, contextWindow: usage.contextWindow },
+            });
+          }
+        } else if (event.type === "message_end" && event.message.role === "assistant") {
           const usage = lane.session.getContextUsage();
           if (usage !== undefined) {
             publish({
@@ -402,12 +459,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           kind: "heard",
           text: message,
         });
-        const census =
-          seat?.herdrPaneId === undefined ? undefined : await readHerdrSessionCensus(seat.herdrPaneId);
+        const paneId = context.seat?.herdrPaneId;
+        const census = paneId === undefined ? undefined : await readHerdrSessionCensus(paneId);
         const prompt = resolveOperatorPrompt(
           message,
           lane.session.resourceLoader.getSkills().skills,
-          seat?.herdrPaneId,
+          paneId,
           census,
         );
         if (prompt.skillName !== undefined) {
@@ -516,18 +573,26 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   return {
     async submitDiscordTurn(request: DiscordPresenceChannelTurnRequest): Promise<CaptainChannelTurnResult> {
-      const normalized = await normalizeDiscordTurn(request, deps);
+      const heard = await normalizeDiscordTurn(request, deps);
       const { settings: discord } = resolveDiscordSettings((await settings()).discord);
       const systemTools = discordTurnHasSystemTools({
-        lane: normalized.lane,
+        lane: heard.lane,
         actorId: request.trigger.actorId,
         systemActorUserIds: discord.systemActorUserIds,
       });
+      // A privileged voice turn leaves the shared voice session for a one-shot
+      // of its own, so the tools it was granted cannot answer to the next
+      // speaker. Every other voice turn continues the durable lane as before.
+      const normalized: NormalizedDiscordTurn = {
+        ...heard,
+        durable: discordTurnUsesDurableSession({ durable: heard.durable, systemTools }),
+      };
       if (!normalized.durable) {
         const lane = await buildSession(
           normalized.lane,
           SessionManager.inMemory(options.repoRoot),
           systemTools,
+          options.repoRoot,
         );
         return runDiscordTurn(lane, normalized, request.deliveryId);
       }
@@ -536,6 +601,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         normalized.lane,
         join(options.stateDir, "voice", encodeURIComponent(normalized.sessionKey)),
         false,
+        options.repoRoot,
       );
       return runDiscordTurn(lane, normalized, request.deliveryId);
     },

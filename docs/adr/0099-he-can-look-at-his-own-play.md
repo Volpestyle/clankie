@@ -9,7 +9,7 @@ Status: accepted (2026-08-15). Narrows [ADR 0057](0057-realtime-voice-with-capta
 The talking half in Discord voice and the playing half that holds the GBA are
 one character. People in the call can watch the activity surface. The mouth
 receives pushed `While playing, Clankie just:` notes and a briefing that he is
-at the controls, but neither carries pixels. `observe_current_activity` stays
+at the controls, but neither carries pixels. `pokeagent_observe` stays
 digest-only: "frame bytes stay on the rendered-surface media plane."
 `observe_share` returns a short chronological JPEG sequence from _someone
 else's_ Discord share.
@@ -26,11 +26,11 @@ He may **pull** two things, and only those two:
 1. **Glance.** One still of the live framebuffer, captured when he asks.
    `look_at_screen` is a read-only tool on the realtime session. It GETs
    `/v1/embodiment/sessions/live/still` and seeds an `input_image` item. It
-   presses nothing. The captain's `observe_current_activity` now includes the
+   presses nothing. The captain's `pokeagent_observe` includes the
    same still when one exists, matching `observe_share`.
 2. **Story.** A bounded card projected from the play journal: turns taken,
    current objective, maps, last eight `speakWanted` effects. Never monologue,
-   notes, or the raw JSONL. `recall_play` is a captain tool;
+   notes, or the raw JSONL. `pokeagent_recall` is a captain tool;
    `/v1/embodiment/sessions/live/story` is the same card; the voice briefing
    includes it when he is playing. The mouth reaches the story through
    `ask_clankie` or the briefing, not by opening the log.
@@ -38,17 +38,9 @@ He may **pull** two things, and only those two:
 `ask_clankie` remains the only privileged tool. Room audio still cannot
 press a button, write memory, or start play.
 
-```mermaid
-flowchart LR
-  RT["realtime mouth"] -->|"look_at_screen"| STILL["GET .../still"]
-  RT -->|"ask_clankie"| C["captain"]
-  C -->|"observe_current_activity"| STILL
-  C -->|"recall_play"| STORY["GET .../story"]
-  PLAY["play host"] --> FB["live framebuffer"]
-  PLAY --> J["play journal"]
-  STILL --> FB
-  STORY --> J
-```
+![ADR 0099 Clankie observes current and recalled play](../diagrams/0099-he-can-look-at-his-own-play.jpg)
+
+[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams-2.tldraw)
 
 ## Consequences
 

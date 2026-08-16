@@ -1,8 +1,8 @@
-# Clankie operator console (`@clankie/tui`)
+# Clankie TUI (`@clankie/tui`)
 
-The operator console is a fullscreen `@earendil-works/pi-tui` client with a
-transcript, status bar, slash-command completion, guided setup flows, and a
-`Ctrl+/` command workbench.
+The TUI is Clankie's fullscreen local chat and tool workspace, with a transcript,
+status bar, slash-command completion, guided setup flows, and a `Ctrl+/` command
+workbench.
 
 It talks to one backend: the clankie service on port `4310`. Plain prompts use
 the shared operator-conversation dispatch contract at
@@ -34,6 +34,21 @@ clankie play status|stop
 From the repository, `pnpm --filter @clankie/tui dev` opens only the console and
 expects the service to be running already.
 
+## Workspaces
+
+Where `clankie` is typed decides which room it opens
+([ADR 0104](../../docs/adr/0104-clankie-works-where-you-launched-him.md)). A
+launch outside this repository attaches to the conversation for that project —
+its checkout root, or the directory itself when it is not a checkout — and the
+captain's session runs its tools there. A launch inside this repository opens
+the default global conversation, whose session works in this repository.
+
+`/cd <path>` moves to another project's conversation, opening it on first visit;
+`/cd` alone names the current one. The console's own `!` shell escape, path
+completion, banner, and `/status` follow the same directory. Each workspace
+remembers its own last selection, so two consoles in two projects do not
+overwrite each other.
+
 The service stays up when a console exits, so sibling Herdr panes do not
 disconnect each other. Logs live under
 `${XDG_STATE_HOME:-~/.local/state}/clankie/` rather than entering the fullscreen
@@ -44,13 +59,9 @@ display.
 The launcher owns the long-lived local processes and restarts them in dependency
 order ([ADR 0055](../../docs/adr/0055-launcher-owned-local-services.md)):
 
-```mermaid
-flowchart LR
-  clankie["clankie :4310"] --> bridge["discord-bridge"]
-  clankie --> lab["discord-user-session"]
-  lab --> vox["clankvox child<br/>body-owned, not launcher-managed"]
-  activity["discord-activity :4320"] --> tunnel["cloudflared tunnel"]
-```
+![Launcher-owned local process architecture](../../docs/diagrams/tui-supervision.jpg)
+
+[Editable Turbopuffer tldraw source](../../docs/diagrams/clankie-docs-diagrams-2.tldraw)
 
 Each process has a mode-0600 pid record and adjacent log. Before signalling a
 pid, the launcher re-reads its live command and refuses if it no longer matches
@@ -65,16 +76,23 @@ Discord body identities resolve directly from the credential broker.
 
 ## Operator behavior
 
-- `/conversation` lists or selects server-owned conversations. Each console has
-  its own replay cursor; switching never creates a local conversation.
+- `/conversation` lists or switches persistent conversations. `/chat` remains
+  an alias. Each console has its own replay cursor; switching never creates a
+  device-local conversation.
+- `/cd` opens the conversation for another directory and moves the console's
+  shell escape and completion with it.
 - Type `/skill-name` for direct skill invocation or `$` at a token boundary for
   the skill picker. The transcript records a compact `skill loaded` receipt.
 - `/activity` shows the current goal, commentary, intent, observed outcome, and
   the loopback watch URL without controlling the emulator.
+- `/games` opens a toggle dialog for both PokeAgent modes; move to a game and
+  press Enter to enable or disable it. `/games solo on|off` and `/games mmo
+on|off` remain available for direct use. Restart Clankie to apply a change.
+  Both may be enabled, with one live session across them.
 - `/memory` browses and edits episodes and permitted Discord person facts through
   operator-only APIs.
-- `/status` shows presence, conversation, model context, activity availability,
-  and the Herdr pane roster when seated inside Herdr.
+- `/status` shows presence, conversation, workspace, model context, activity
+  availability, and the Herdr pane roster when seated inside Herdr.
 - `/board`, `/board focus`, and `/board close` manage the herdr-lead companion
   board. A seated turn receives the current agent census.
 - `/connect` configures Linear and email and can open Discord setup; use direct

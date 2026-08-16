@@ -1,7 +1,9 @@
 # ADR 0102: PokeAgent MMO is an external MCP world
 
-**Status:** Accepted
-**Date:** 2026-08-15
+Status: accepted 2026-08-15, amended in part by
+[ADR 0103](0103-a-hosted-world-is-another-body.md). The player/owner boundary
+below still holds. The transport does not: Clankie reaches the world through the
+pinned `@pokeagent-mmo/world-protocol` contract, not through the MCP server.
 
 ## Context
 
@@ -11,17 +13,19 @@ gameplay API.
 
 ## Decision
 
+The transport in this section is retained as ratified and is not what runs.
+ADR 0103 records the shipped seam and the reasoning that moved it; the paragraph
+on what Clankie may not own carries forward unchanged.
+
 Clankie interacts with PokeAgent MMO only through the packaged
 `@pokeagent-mmo/world-mcp` executable and his generic MCP client. The MCP
 process owns the world protocol, local transport, capability-filtered tools,
 and session bearer. Clankie owns only his intent, tool calls, personality, and
 presentation.
 
-```mermaid
-flowchart LR
-  C["Clankie generic MCP client"] --> M["@pokeagent-mmo/world-mcp"]
-  M --> W["PokeAgent MMO host"]
-```
+![ADR 0102 PokeAgent MMO external MCP world](../diagrams/0102-pokeagent-mmo-is-an-external-mcp-world.jpg)
+
+[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams-2.tldraw)
 
 Clankie does not import the world protocol, server, emulator, mailbox, or
 persistence packages, does not invoke the world CLI as an application

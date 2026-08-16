@@ -38,15 +38,9 @@ turn:
 - model text and arbitrary filesystem paths cannot set the capture; and
 - a Discord reply attaches only a validated captured reference.
 
-```mermaid
-flowchart LR
-  C[Captain media tool] --> S[Service generator]
-  B[Credential broker + owner model config] --> S
-  S --> A[Hash-bound governed artifact]
-  A --> T[Host-owned turn capture]
-  T --> R[Reply with media]
-  F[Arbitrary file or model-written path] -. refused .-> T
-```
+![ADR 0085 generated pictures as governed replies](../diagrams/0085-a-picture-he-makes-is-something-he-says.jpg)
+
+[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams.tldraw)
 
 The attachment is captured, never asserted. The last successful generation in
 a turn wins, so the model cannot attach a path by describing it.

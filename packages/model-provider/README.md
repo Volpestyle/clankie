@@ -6,24 +6,9 @@ Turns clankie configuration plus the
 ready-to-call AI SDK language models and Pi provider declarations. The
 non-captain AI SDK path has four pure layers:
 
-```mermaid
-flowchart LR
-  subgraph inputs
-    G["global config<br/>clankie.json"]
-    R["repo config<br/>.clankie.json"]
-    C["catalog<br/>model-registry"]
-    B["credentials<br/>credential-broker"]
-  end
-  G --> CFG[config.ts<br/>load + merge + validate]
-  R --> CFG
-  CFG --> RES[resolve.ts<br/>providers + roles]
-  C --> RES
-  B --> RES
-  RES --> VAR[variants.ts<br/>reasoning presets]
-  VAR --> INST[instantiate.ts<br/>AI SDK factories]
-  B --> INST
-  INST --> M[(LanguageModel)]
-```
+![Model-provider configuration and resolution pipeline](../../docs/diagrams/model-provider.jpg)
+
+[Editable Turbopuffer tldraw source](../../docs/diagrams/clankie-docs-diagrams-2.tldraw)
 
 The captain takes a separate final branch: `registerConfiguredPiProviders`
 projects custom Clankie provider declarations into Pi, while Pi's `ModelRuntime`

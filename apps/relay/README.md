@@ -23,14 +23,9 @@ provider payloads do not cross the boundary.
 
 Turn submission retains the registry's `expectedRevision` fence. Duplicate delivery of the same authenticated device request is collapsed to one in-flight or retained result; a stale fence returns the registry's typed `revision_conflict` result. Replay and tail cursors remain opaque and surface-scoped. A dropped stream resumes from the last emitted event cursor, while expired or reset cursors produce one typed recovery frame and close.
 
-```mermaid
-flowchart LR
-  Device["iPhone / iPad"] -->|"device bearer + public request"| Relay["apps/relay"]
-  Relay -->|"verify current session + chat grant"| Service["clankie service device projection"]
-  Relay -->|"captain bearer + unchanged registry request"| Captain["captain conversation dispatch"]
-  Captain -->|"strict public result / opaque cursor"| Relay
-  Relay -->|"JSON or NDJSON"| Device
-```
+![Relay device-request architecture](../../docs/diagrams/relay-architecture.jpg)
+
+[Editable Turbopuffer tldraw source](../../docs/diagrams/clankie-docs-diagrams-2.tldraw)
 
 ## Run
 

@@ -4,6 +4,41 @@ import type { LaneLog } from "../src/captain/lane-log.ts";
 import { captainTools } from "../src/captain/tools.ts";
 
 describe("captain voice presence tools", () => {
+  it("presents Pokemon play as one PokeAgent tool family", () => {
+    const deps = {
+      embodiment: {
+        submitIntent: () => Promise.reject(new Error("unused")),
+        getSession: () => Promise.resolve(undefined),
+        getLiveSession: () => Promise.resolve(undefined),
+      },
+    } as unknown as CaptainDeps;
+    const names = (gameplay?: { pokemonEmulatorEnabled: boolean; pokeagentMmoEnabled: boolean }) =>
+      captainTools(deps, {}, {} as LaneLog, "operator", gameplay)
+        .map((tool) => tool.name)
+        .filter((name) => name.startsWith("pokeagent_"));
+
+    expect(names()).toEqual([
+      "pokeagent_start_solo",
+      "pokeagent_join_mmo",
+      "pokeagent_stop",
+      "pokeagent_observe",
+      "pokeagent_recall",
+    ]);
+    expect(names({ pokemonEmulatorEnabled: true, pokeagentMmoEnabled: false })).toEqual([
+      "pokeagent_start_solo",
+      "pokeagent_stop",
+      "pokeagent_observe",
+      "pokeagent_recall",
+    ]);
+    expect(names({ pokemonEmulatorEnabled: false, pokeagentMmoEnabled: true })).toEqual([
+      "pokeagent_join_mmo",
+      "pokeagent_stop",
+      "pokeagent_observe",
+      "pokeagent_recall",
+    ]);
+    expect(names({ pokemonEmulatorEnabled: false, pokeagentMmoEnabled: false })).toEqual([]);
+  });
+
   it("lets the captain decide while the host supplies identity", async () => {
     const calls: unknown[] = [];
     const deps = {
@@ -53,9 +88,9 @@ describe("captain voice presence tools", () => {
       },
     } as unknown as CaptainDeps;
     const start = captainTools(deps, { actorId: "user-1" }, {} as LaneLog, "discord_presence").find(
-      (tool) => tool.name === "start_play",
+      (tool) => tool.name === "pokeagent_start_solo",
     );
-    if (start === undefined) throw new Error("start_play is missing");
+    if (start === undefined) throw new Error("pokeagent_start_solo is missing");
 
     await start.execute("call-1", { environmentId: "pokemon-firered" }, undefined, undefined, {} as never);
 
@@ -67,9 +102,9 @@ describe("captain voice presence tools", () => {
     expect(calls[0]).not.toHaveProperty("venue");
 
     const join = captainTools(deps, { actorId: "user-1" }, {} as LaneLog, "discord_presence").find(
-      (tool) => tool.name === "join_world",
+      (tool) => tool.name === "pokeagent_join_mmo",
     );
-    if (join === undefined) throw new Error("join_world is missing");
+    if (join === undefined) throw new Error("pokeagent_join_mmo is missing");
     await join.execute("call-2", { environmentId: "pokemon-firered" }, undefined, undefined, {} as never);
     expect(calls[1]).toEqual(
       expect.objectContaining({

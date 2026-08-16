@@ -28,25 +28,9 @@ live play surface. The host grounds reactions/threads in the trigger message;
 the body resolves live-watch actions from the authenticated speaker's fresh
 voice state. Raw user, guild, channel, and message ids are never tool arguments.
 
-```mermaid
-sequenceDiagram
-    participant Human
-    participant Body as Discord body
-    participant Captain
-    participant Policy as Authority + allowlists
-    participant Voice as Media session
+![ADR 0062 voice join by asking](../diagrams/0062-voice-join-by-asking.jpg)
 
-    Human->>Body: “clankie, hop in vc”
-    Body->>Captain: admitted turn + host-stamped actor/guild
-    Captain->>Captain: decide whether joining fits the conversation
-    Captain->>Body: voice_join(actor/guild from host context)
-    Body->>Body: read actor roles + current voice channel
-    Body->>Policy: authorize actor and channel
-    Policy-->>Body: allow / refuse
-    Body->>Voice: join resolved current channel
-    Voice-->>Captain: typed result
-    Captain-->>Human: reply from what actually happened
-```
+[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams.tldraw)
 
 - **Agent-owned intent.** No phrase matcher, voice-token gate, classifier model,
   or pending-retry state runs ahead of the captain. An admitted message reaches

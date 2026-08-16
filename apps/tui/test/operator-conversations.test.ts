@@ -213,6 +213,54 @@ describe("TUI operator conversation selection", () => {
     expect(await store.read()).toBeUndefined();
   });
 
+  it("opens the launch workspace's conversation, creating it only on first visit", async () => {
+    const store = await tempStore();
+    const conversations: OperatorConversation[] = [DEFAULT];
+    const created: string[] = [];
+    const scoped: OperatorConversationClient = {
+      ...client(),
+      list: async (scope) =>
+        conversations.filter(
+          (conversation) =>
+            scope === undefined ||
+            (conversation.scope.kind === scope.kind &&
+              (scope.kind !== "workspace" ||
+                (conversation.scope.kind === "workspace" &&
+                  conversation.scope.workspaceId === scope.workspaceId))),
+        ),
+      get: async (id) => conversations.find((conversation) => conversation.conversationId === id),
+      create: async (input) => {
+        created.push(input.title);
+        const conversation: OperatorConversation = {
+          ...DEFAULT,
+          ...input,
+          conversationId: `conv-${created.length}`,
+          isDefault: false,
+        };
+        conversations.push(conversation);
+        return conversation;
+      },
+    };
+
+    const first = await resolveInitialConversation({ client: scoped, store, workspace: "/repos/thing" });
+    expect(first.scope).toEqual({ kind: "workspace", workspaceId: "/repos/thing" });
+    expect(created).toEqual(["thing"]);
+    // Relaunching in the same directory reuses it — through the persisted
+    // selection, and again with the selection dropped.
+    expect((await resolveInitialConversation({ client: scoped, store })).conversationId).toBe(
+      first.conversationId,
+    );
+    await store.clear();
+    const reopened = await resolveInitialConversation({ client: scoped, store, workspace: "/repos/thing" });
+    expect(reopened.conversationId).toBe(first.conversationId);
+    expect(created).toEqual(["thing"]);
+    // A launch inside the service repo carries no workspace and stays global.
+    await store.clear();
+    expect((await resolveInitialConversation({ client: scoped, store })).conversationId).toBe(
+      "global-default",
+    );
+  });
+
   it("builds a production client over an authenticated Client.fetch transport", async () => {
     const captain = createCaptainOperatorConversationClient({
       fetch: async (path, init) => {
@@ -819,6 +867,46 @@ describe("TUI selected-conversation prompt path", () => {
         '{\n  "status": "idle"\n}',
         "```",
       ].join("\n"),
+    ]);
+  });
+
+  it("updates the turn loader as activity and parallel tools change", () => {
+    const base = {
+      schemaVersion: 1 as const,
+      conversationId: "global-default",
+      cursor: "global-default:event",
+      revision: 1,
+      occurredAt: "2026-07-12T00:00:00.000Z",
+    };
+    const loaders: string[] = [];
+    const sink = createOperatorConversationShellSink({
+      insertMarkdown: () => ({ setMarkdown: () => undefined }),
+      refreshStatus: () => undefined,
+      setTurnLoaderMessage: (message) => loaders.push(message),
+    });
+
+    sink.event({ ...base, type: "turn", runId: "run", phase: "accepted" });
+    sink.event({ ...base, type: "activity", phase: "thinking" });
+    sink.event({ ...base, type: "activity", phase: "responding" });
+    sink.event({ ...base, type: "activity", phase: "preparing_tool" });
+    sink.event({ ...base, type: "tool", toolCallId: "call-1", name: "read", phase: "started" });
+    sink.event({ ...base, type: "tool", toolCallId: "call-2", name: "bash", phase: "started" });
+    sink.event({ ...base, type: "tool", toolCallId: "call-2", name: "bash", phase: "completed" });
+    sink.event({ ...base, type: "tool", toolCallId: "call-1", name: "read", phase: "completed" });
+    sink.event({ ...base, type: "activity", phase: "compacting" });
+    sink.event({ ...base, type: "activity", phase: "retrying" });
+
+    expect(loaders).toEqual([
+      "Waiting for response...",
+      "Thinking...",
+      "Responding...",
+      "Preparing tool call...",
+      "Running read...",
+      "Running bash...",
+      "Running read...",
+      "Waiting for response...",
+      "Compacting...",
+      "Retrying...",
     ]);
   });
 });

@@ -34,15 +34,9 @@ origin lane and target; model input cannot aim a write or recall at another
 room. Operator-private episodes remain operator-only, while ambient recall sees
 only entries visible to its destination.
 
-```mermaid
-flowchart LR
-  R[Live room and body registries] --> S[Bounded self-state card]
-  S --> T[Every current turn]
-  T -->|self-authored summary| E[Bounded episode ring]
-  E --> F{Host-stamped destination lane}
-  F -->|operator| O[Operator-private recall]
-  F -->|ambient| A[Shareable ambient recall]
-```
+![ADR 0054 cross-lane presence and episodic self-memory](../diagrams/0054-cross-lane-presence-and-episodic-self-memory.jpg)
+
+[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams.tldraw)
 
 Recall is injected by the host rather than exposed as a destination-selecting
 tool. The write tool accepts bounded content and visibility, while the host

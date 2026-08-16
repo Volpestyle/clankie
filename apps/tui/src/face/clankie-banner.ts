@@ -1,7 +1,7 @@
 /**
  * Clankie's welcome banner.
  *
- * A compact text header with identity + model/harness/cwd + a hint line.
+ * A compact text header with identity on one line and working context on the next.
  *
  * Degrades on capability: truecolor -> 256-color -> no color, and a Unicode
  * support check. On narrow terminals it collapses to a single condensed line
@@ -25,16 +25,7 @@ export type BannerFields = {
   title: string;
   tagline: string;
   model?: string;
-  harness?: string;
   cwd?: string;
-  server?: string;
-  /** Where this face sits inside the detected terminal multiplexer, or "none". */
-  stage?: string;
-  /** The row label for `stage` — the detected multiplexer ("herdr"/"tmux"). */
-  stageLabel?: string;
-  /** Non-default approval posture (e.g. armed yolo mode); omitted when gated. */
-  approvals?: string;
-  hint?: string;
 };
 
 export class ClankieBannerComponent implements Component {
@@ -86,13 +77,14 @@ export function renderClankieBanner(fields: BannerFields, caps: BannerCapabiliti
     return renderCondensed(fields, caps);
   }
 
-  const lines = buildFeedLines(fields, caps).map((line) => (line.length === 0 ? "" : ` ${line}`));
-  if (fields.hint !== undefined && fields.hint.length > 0) {
-    lines.push("");
-    lines.push(` ${paint(fields.hint, { fg: "dim" }, caps)}`);
-  }
-  lines.push(renderRule(caps));
-  return lines;
+  const mascot = paint(clankieMascot(caps), { fg: "accent", bold: true }, caps);
+  const name = paint(fields.title.toLowerCase(), { fg: "accent", bold: true }, caps);
+  const context = [fields.model, fields.cwd].filter((value) => value !== undefined && value.length > 0);
+  return [
+    ` ${mascot}  ${name} ${paint(`· ${fields.tagline}`, { fg: "dim" }, caps)}`,
+    ...(context.length === 0 ? [] : [` ${paint(context.join(" · "), { fg: "dim" }, caps)}`]),
+    renderRule(caps),
+  ];
 }
 
 /** A full-width colored rule that underlines the header block. */
@@ -102,40 +94,10 @@ function renderRule(caps: BannerCapabilities): string {
   return ` ${paint(glyph.repeat(width), { fg: "accent" }, caps)}`;
 }
 
-function buildFeedLines(fields: BannerFields, caps: BannerCapabilities): string[] {
-  const lines: string[] = [];
-  const mascot = paint(clankieMascot(caps), { fg: "accent", bold: true }, caps);
-  const name = paint(fields.title.toLowerCase(), { fg: "accent", bold: true }, caps);
-  lines.push(`${mascot}  ${name}`);
-  lines.push(paint(fields.tagline, { fg: "dim" }, caps));
-  lines.push("");
-  const rows = (
-    [
-      ["model", fields.model],
-      ["harness", fields.harness],
-      ["cwd", fields.cwd],
-      ["server", fields.server],
-      [fields.stageLabel ?? "stage", fields.stage],
-      ["approvals", fields.approvals],
-    ] as const
-  ).filter(([, value]) => value !== undefined && value.length > 0);
-  const labelWidth = Math.max(8, ...rows.map(([label]) => label.length + 1));
-  for (const [label, value] of rows) {
-    lines.push(`${paint(label.padEnd(labelWidth), { fg: "label" }, caps)}${paint(value ?? "", {}, caps)}`);
-  }
-  return lines;
-}
-
 function renderCondensed(fields: BannerFields, caps: BannerCapabilities): string[] {
   const mascot = paint(clankieMascot(caps), { fg: "accent", bold: true }, caps);
   const head = paint(fields.title.toLowerCase(), { fg: "accent", bold: true }, caps);
-  const detail = fields.model !== undefined ? paint(` — ${fields.model}`, { fg: "dim" }, caps) : "";
-  const lines = [` ${mascot} ${head}${detail}`];
-  if (fields.hint !== undefined && fields.hint.length > 0) {
-    lines.push(` ${paint(fields.hint, { fg: "dim" }, caps)}`);
-  }
-  lines.push(renderRule(caps));
-  return lines;
+  return [` ${mascot} ${head}`, renderRule(caps)];
 }
 
 function paint(

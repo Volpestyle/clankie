@@ -14,21 +14,9 @@ commit. Intentional behavior changes require a separate baseline update.
 
 Phase B provides three gates:
 
-```mermaid
-flowchart LR
-  V[Synthetic byte vector] --> O[legacy decoder]
-  V --> N[candidate decoder]
-  S1[fresh scripted port] --> C1[legacy composite]
-  S2[fresh scripted port] --> C2[candidate composite]
-  R1[fresh pinned mGBA core] --> A1[legacy boundary]
-  R2[fresh pinned mGBA core] --> A2[candidate boundary]
-  O --> D[deep value or failure-category equality]
-  N --> D
-  C1 --> T[per-frame masks, reads, result]
-  C2 --> T
-  A1 --> F[state, grid, RAM/framebuffer/save digests]
-  A2 --> F
-```
+![GBA decoder oracle comparison layers](../../../../docs/diagrams/gba-decoder-oracle.jpg)
+
+[Editable Turbopuffer tldraw source](../../../../docs/diagrams/clankie-docs-diagrams-2.tldraw)
 
 Run the legal gate:
 

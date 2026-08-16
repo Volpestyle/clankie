@@ -148,6 +148,13 @@ describe("protocol", () => {
     expect(
       OperatorConversationStreamEventSchema.parse({
         ...base,
+        type: "activity",
+        phase: "responding",
+      }),
+    ).toMatchObject({ type: "activity", phase: "responding" });
+    expect(
+      OperatorConversationStreamEventSchema.parse({
+        ...base,
         type: "tool",
         toolCallId: "call-1",
         name: "read",

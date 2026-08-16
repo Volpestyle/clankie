@@ -18,16 +18,9 @@ Voice presence receives its own actor policy. `DISCORD_VOICE_JOIN_POLICY`
 selects `ambient` or `guild_members`, while `DISCORD_AMBIENT_USER_IDS` can name
 individual ambient operators alongside role ids.
 
-```mermaid
-flowchart LR
-  A[Authenticated Discord actor] --> G{Allowlisted guild?}
-  G -->|no| R[Refuse]
-  G -->|yes| V{Voice join policy}
-  V -->|ambient| B[Ambient role or user binding]
-  V -->|guild_members| J[Join or leave only]
-  B --> J
-  J -. does not grant .-> M[Machine/system authority]
-```
+![ADR 0050 voice-presence authority tier](../diagrams/0050-voice-presence-authority-tier.jpg)
+
+[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams.tldraw)
 
 `guild_members` widens voice presence and nothing else. Guild and channel
 allowlists still apply first, and leave cannot target a call in another guild.

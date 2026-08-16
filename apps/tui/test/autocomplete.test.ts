@@ -60,8 +60,8 @@ const commands: ClankieAutocompleteCommand[] = [
   {
     name: "conversation",
     aliases: ["chat"],
-    description: "List or select a server-owned operator conversation",
-    argumentHint: "[<conversation-id>]",
+    description: "List or switch persistent chat conversations",
+    argumentHint: "[<name-or-path>]",
     takesArgument: true,
   },
   {
@@ -214,7 +214,7 @@ describe("command typeahead", () => {
       {
         name: "conversation",
         aliases: ["chat"],
-        description: "List or select a conversation",
+        description: "List or switch conversations",
         takesArgument: true,
       },
       {
@@ -280,7 +280,7 @@ describe("command typeahead", () => {
 
     const narrowRootRows = renderClankieCommandTypeahead(rootState, accentTheme, 64);
     expect(stripAnsi(narrowRootRows[0] ?? "")).toBe("");
-    expect(stripAnsi(narrowRootRows[1] ?? "")).toBe("List or select a server-owned operator conversation");
+    expect(stripAnsi(narrowRootRows[1] ?? "")).toBe("List or switch persistent chat conversations");
     expect(narrowRootRows[1]?.startsWith("\x1b[33m")).toBe(true);
     expectFits(narrowRootRows, 64);
 
@@ -290,7 +290,7 @@ describe("command typeahead", () => {
       "skips the preview when the row description fits",
     ).toBe(true);
     const selectedDescriptionRows = renderClankieCommandTypeahead(rootState, selectedDescriptionTheme, 140);
-    expect(selectedDescriptionRows[1]?.includes("\x1b[37mList or select")).toBe(true);
+    expect(selectedDescriptionRows[1]?.includes("\x1b[37mList or switch")).toBe(true);
   });
 
   it("respects the row budget, wraps selection, and tracks dismissal", () => {

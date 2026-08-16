@@ -1,7 +1,6 @@
 /**
- * Transcript blocks for slash-command outcomes: a `done /cmd command` header
- * with an indented, lightly styled body. Ported from v1 (clankie snapshot
- * 04734df9, scripts/clankie.ts).
+ * Transcript blocks for slash-command outcomes: a compact `done /cmd` header
+ * with an indented, lightly styled body.
  */
 import { truncateToWidth, wrapTextWithAnsi, type Component } from "@earendil-works/pi-tui";
 import type { ClankieFaceAnsiTheme } from "../face/clankie-face-theme.ts";
@@ -15,7 +14,7 @@ export function formatCommandLogHeader(
 ): string {
   const command = slashCommandLabel(prompt);
   const status = tone === "error" ? ansi.red("error") : ansi.green("done");
-  return `${status} ${ansi.cyan(command)} ${ansi.dim("command")}`;
+  return `${status} ${ansi.cyan(command)}`;
 }
 
 export function slashCommandLabel(prompt: string): string {

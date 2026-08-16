@@ -39,20 +39,9 @@ terminal event before stopping the service. The operator face retries only a
 dropped durable tail read, then resumes from its persisted cursor. It never
 replays the prompt or any tools that already ran.
 
-```mermaid
-sequenceDiagram
-  participant C as Clankie turn
-  participant H as Restart helper
-  participant L as Conversation log
-  participant S as Service supervisor
-  participant T as Operator face
-  C->>H: clankie restart (PI_SESSION_FILE)
-  H-->>C: scheduled after this turn
-  C->>L: final reply + terminal turn
-  H->>L: observe terminal turn
-  H->>S: restart dependency closure
-  T->>L: reconnect and replay from cursor
-```
+![ADR 0055 launcher-owned local services](../diagrams/0055-launcher-owned-local-services.jpg)
+
+[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams.tldraw)
 
 The compatibility aliases `captain`, `captain-eve`, `eve`, `control-plane`, and
 `cp` all resolve to `clankie`; they do not name separate processes.

@@ -3,7 +3,10 @@
 Status: accepted (James, 2026-08-15). The console seat is pane-native. This
 extends the herdr-as-fleet decision in the pi rewrite
 ([architecture](../architecture.md)) and the no-bespoke-herdr-tools rule in
-[ADR 0095](0095-discord-system-actors.md).
+[ADR 0095](0095-discord-system-actors.md). The second decision below — the
+console opening the board beside itself — is amended by
+[ADR 0106](0106-the-board-opens-when-asked.md): the board now opens only on
+`/board`. The rest of this record stands.
 
 ## Context
 

@@ -126,6 +126,31 @@ async function playEnv(): Promise<NodeJS.ProcessEnv> {
 }
 
 describe("world play execution", () => {
+  it("refuses each disabled play venue before touching its body", async () => {
+    for (const venue of [undefined, "world"] as const) {
+      const client = fakeClient({ kind: "start", session: session(venue) });
+      const host = new PlayHost({
+        client,
+        runnerId: "runner-local",
+        environmentIds: ["pokemon-firered"],
+        execute: createGbaPlayExecution({
+          logger: silentLogger,
+          gameplay: {
+            pokemonEmulatorEnabled: venue === "world",
+            pokeagentMmoEnabled: venue !== "world",
+          },
+        }),
+        logger: silentLogger,
+      });
+
+      expect(await host.poll()).toBe(true);
+      await host.settled();
+      expect(client.reports).toEqual([
+        expect.objectContaining({ state: "refused", refusalReason: "environment_unavailable" }),
+      ]);
+    }
+  });
+
   it("runs a world session against a fake body and never takes the local lock", async () => {
     let closed = 0;
     const body = fakeWorldBody({
@@ -182,7 +207,7 @@ describe("world play execution", () => {
     }
   });
 
-  it("treats an omitted venue as local — the existing start_play path", () => {
+  it("treats an omitted venue as local — the existing pokeagent_start_solo path", () => {
     expect(embodimentVenue(session())).toBe("local");
     expect(embodimentVenue(session("world"))).toBe("world");
   });
@@ -214,7 +239,7 @@ describe("joinWorld captain ask", () => {
     }
   });
 
-  it("leaves start_play's intent local and its refusal vocabulary intact", async () => {
+  it("leaves pokeagent_start_solo's intent local and its refusal vocabulary intact", async () => {
     const intents: unknown[] = [];
     const note = await startPlay(
       {

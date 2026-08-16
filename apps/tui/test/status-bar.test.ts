@@ -8,23 +8,34 @@ import {
   STATUS_BAR_MAX_ROWS,
 } from "../src/shell/status-bar.ts";
 import type { PresenceSnapshot } from "../src/observation/presence.ts";
+import { PresencePoller } from "../src/observation/presence.ts";
 
 describe("captain status bar", () => {
-  it("renders every presence phase with an explicit label", () => {
+  it("renders every presence phase compactly", () => {
     const phases = ["present", "voice_active", "go_live_active", "off", "no presence session"];
     for (const phase of phases) {
       const presence: PresenceSnapshot = { phase };
-      expect(formatCaptainPresenceStatus(presence)).toBe(`clankie: ${phase}`);
+      expect(formatCaptainPresenceStatus(presence)).toBe(`discord ${phase.replaceAll("_", " ")}`);
     }
-    expect(formatCaptainPresenceStatus(undefined)).toBe("clankie: unknown");
+    expect(formatCaptainPresenceStatus(undefined)).toBe("discord unavailable");
+  });
+
+  it("names presence authentication failures instead of calling them unknown", async () => {
+    const presence = new PresencePoller({
+      baseUrl: "http://127.0.0.1:4310",
+      operatorToken: "stale",
+      fetchImpl: (() => Promise.resolve(Response.json({}, { status: 401 }))) as unknown as typeof fetch,
+    });
+
+    expect(presence.snapshot).toEqual({ phase: "checking" });
+    await presence.poll();
+    expect(presence.snapshot).toEqual({ phase: "authentication failed" });
   });
 
   it("shows current context tokens out of the model window", () => {
-    expect(formatCaptainContextStatus({ tokens: 72_400, contextWindow: 200_000 })).toBe(
-      "context: 72.4k / 200k",
-    );
+    expect(formatCaptainContextStatus({ tokens: 72_400, contextWindow: 200_000 })).toBe("context 72.4k/200k");
     expect(formatCaptainContextUsage({ tokens: null, contextWindow: 1_000_000 })).toBe("? / 1m");
-    expect(formatCaptainContextStatus(undefined)).toBe("context: unavailable");
+    expect(formatCaptainContextStatus(undefined)).toBe("context unavailable");
   });
 
   it("keeps ANSI-styled and wrapped status rows within the supplied width", () => {

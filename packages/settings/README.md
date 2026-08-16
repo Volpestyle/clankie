@@ -50,9 +50,15 @@ enable a plane.
 
 ## Editing
 
-Use `/discord` or `/connect` in the Clankie TUI. Tokens and API keys go to the
-credential broker (same destination as `/auth`). Public identifiers — Discord
-ids, a Linear default team, an IMAP host and username — write here.
+Use `/discord`, `/connect`, or `/games` in the Clankie TUI. Tokens and API keys
+go to the credential broker (same destination as `/auth`). Public identifiers —
+Discord ids, a Linear default team, an IMAP host and username — and gameplay
+enablement write here.
+
+`gameplay.pokemonEmulatorEnabled` controls solo FireRed/Emerald through the
+local GBA emulator. `gameplay.pokeagentMmoEnabled` independently controls the
+hosted PokeAgent MMO. Both may be enabled, while the shared play host permits
+one live session across them.
 
 `/discord status` prints the effective configuration, whether `discord_bot` is
 present in the broker, and any environment overrides in effect.

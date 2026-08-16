@@ -23,14 +23,9 @@ kind, confidence, visibility, optional expiry, correction lineage, and
 content-free provenance. Raw transcripts and audio are not stored through this
 boundary.
 
-```mermaid
-flowchart LR
-  D[Admitted Discord turn] --> F{Guild and channel visibility}
-  F --> P[Person projection by guildId + userId]
-  P --> C[Bounded recall card]
-  O[Operator memory UI] -->|inspect, edit, forget| P
-  P -. no raw transcript or audio .-> X[Durable store]
-```
+![ADR 0042 Discord person-memory projection](../diagrams/0042-discord-person-memory-projection.jpg)
+
+[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams.tldraw)
 
 An authenticated Discord turn may propose and recall facts visible to that
 room. The operator may inspect, edit, export, and delete the projection. Identity

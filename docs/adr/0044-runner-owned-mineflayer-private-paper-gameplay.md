@@ -1,6 +1,11 @@
 # ADR 0044: The runner owns Mineflayer while Paper owns Minecraft success
 
-Status: accepted.
+Status: accepted, and the body it governs was later removed. The runner, the
+Mineflayer client, and the Minecraft environment bindings are gone; the Paper
+verifier retains no source. Everything below is the ratified decision, not a
+description of the running system — Clankie's only game bodies today are the
+local GBA emulator and a hosted PokeAgent MMO seat
+([ADR 0103](0103-a-hosted-world-is-another-body.md)).
 
 ## Context
 

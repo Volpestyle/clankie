@@ -5,38 +5,9 @@ Clankie's presence plane: the native media plane for voice and Go Live. Discord
 is the only platform it targets today, and the roles below are its Discord
 transport.
 
-```mermaid
-flowchart TB
-  user[People in media sessions]
-  surfaces[Platform media surfaces]
-  discord[Discord voice and stream servers]
-  clankie[Clankie Node runtime]
-  ipc[stdin JSON lines<br/>stdout framed IPC]
-  vox[clankvox Rust media plane]
-  family[transport implementations]
-  voice[Discord voice role]
-  watch[Discord stream_watch role]
-  publish[Discord stream_publish role]
-  crypto[transport crypto]
-  audio[codecs, PCM, RTP audio]
-  video[codecs, RTP video]
+![Vox native media architecture](../../../docs/diagrams/vox-architecture.jpg)
 
-  user <--> surfaces
-  surfaces <--> discord
-  clankie <--> ipc
-  ipc <--> vox
-  vox --> family
-  family --> voice
-  family --> watch
-  family --> publish
-  voice --> crypto
-  watch --> crypto
-  publish --> crypto
-  crypto --> audio
-  crypto --> video
-  audio <--> discord
-  video <--> discord
-```
+[Editable Turbopuffer tldraw source](../../../docs/diagrams/vox-architecture.tldraw)
 
 ## Ownership Split
 

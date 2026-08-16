@@ -178,8 +178,8 @@ export type OperatorConversationAttachment = z.infer<typeof OperatorConversation
 
 /**
  * Strict discriminated public event union. Every app-renderable VUH-745 session
- * event (message, reasoning, context occupancy, tool, typed input, auth/session
- * lifecycle, turn lifecycle, redacted worker transcript) is a named bounded
+ * event (activity, message, reasoning, context occupancy, tool, typed input,
+ * auth/session lifecycle, turn lifecycle, redacted worker transcript) is a named bounded
  * variant. Raw model, provider, continuation, and credential payloads are
  * impossible by schema; the captain redacts to these shapes before publishing
  * to the durable log/tail.
@@ -192,7 +192,21 @@ const OperatorConversationEventEnvelopeSchema = z.object({
   occurredAt: z.string().datetime(),
 });
 
+export const OperatorConversationActivityPhaseSchema = z.enum([
+  "waiting",
+  "thinking",
+  "responding",
+  "preparing_tool",
+  "compacting",
+  "retrying",
+]);
+export type OperatorConversationActivityPhase = z.infer<typeof OperatorConversationActivityPhaseSchema>;
+
 export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type", [
+  OperatorConversationEventEnvelopeSchema.extend({
+    type: z.literal("activity"),
+    phase: OperatorConversationActivityPhaseSchema,
+  }).strict(),
   OperatorConversationEventEnvelopeSchema.extend({
     type: z.literal("message"),
     role: z.enum(["operator", "captain"]),
@@ -2027,7 +2041,7 @@ export function embodimentVenue(
 }
 
 /**
- * Why a world join did not happen, said out loud. Distinct from `start_play`'s
+ * Why a world join did not happen, said out loud. Distinct from `pokeagent_start_solo`'s
  * `body_held`: these are all about a world somewhere else.
  */
 export const WorldJoinRefusalReasonSchema = z.enum([

@@ -6,7 +6,7 @@ his game bodies, and the HTTP API every surface speaks.
 
 ![Current system overview](diagrams/clankie-current-architecture.jpg)
 
-[Editable tldraw source](diagrams/clankie-current-architecture.tldraw)
+[Editable Turbopuffer tldraw source](diagrams/clankie-current-architecture.tldraw)
 
 ## How a message becomes a turn
 
@@ -44,14 +44,21 @@ persisting duplicate cards in the conversation. Discord turns also receive the
 newest visible person facts for their authenticated guild/user identity. The
 global 128-episode ring and per-person fact files live under
 `~/.clankie/memory/`; the TUI's `/memory` command browses, edits, and forgets
-that same store through operator-only routes.
+that same store through operator-only routes. [`docs/memory.md`](memory.md) is
+the full picture — what each store holds, who may read it, and what bounds it.
 
 ## Where things run
 
 - **Captain tools.** Coding tools (read/bash/edit/write) are pi built-ins. They
-  attach to the operator console and to Discord text turns whose actor is on
-  `discord.systemActorUserIds`
-  ([ADR 0095](adr/0095-discord-system-actors.md)); voice never gets them. The
+  attach to the operator console and to Discord turns — text or voice — whose
+  trigger actor is on `discord.systemActorUserIds`
+  ([ADR 0095](adr/0095-discord-system-actors.md),
+  [ADR 0105](adr/0105-voice-is-as-capable-as-the-room-it-is-in.md)). A
+  privileged turn always runs on a one-shot session, so the grant never
+  outlives the actor who earned it on the shared voice lane. They
+  land in the conversation's workspace — the directory a workspace-scoped
+  operator conversation names, this repository for every other lane
+  ([ADR 0104](adr/0104-clankie-works-where-you-launched-him.md)). The
   canonical authored-tool registry is
   [`apps/clankie/src/captain/tools.ts`](../apps/clankie/src/captain/tools.ts),
   connected-service additions live in
@@ -72,10 +79,19 @@ that same store through operator-only routes.
   herdr-lead board is the companion dashboard
   ([ADR 0097](adr/0097-herdr-lead-is-the-companion-dashboard.md)). Agents
   coordinate through herdr and plain files.
-- **Game body.** [`integrations/gba-emulator`](../integrations/gba-emulator/README.md)
-  is booted and leased by the local play host. `body-lock` keeps one writer on
-  the emulator across the free-play CLI, GBA MCP, and live session. Frames flow
-  to the Discord activity surface.
+- **Game bodies.** `runFreePlay` drives one seam, `GbaDriverIo`, and the mind,
+  voice, journal, and minted progress above it never learn where the body is.
+  Two bodies implement that seam. The local one is
+  [`integrations/gba-emulator`](../integrations/gba-emulator/README.md), booted
+  and leased by the local play host; `body-lock` keeps one writer on it across
+  the free-play CLI, GBA MCP, and live session. The hosted one is a seat in a
+  PokeAgent MMO world, reached through the pinned
+  `@pokeagent-mmo/world-protocol` contract and entered with the `pokeagent_join_mmo`
+  tool ([ADR 0103](adr/0103-a-hosted-world-is-another-body.md)). A hosted world
+  cannot be paused, changes without him acting, and can replace his body under
+  him. Owner settings independently enable the local emulator and hosted MMO;
+  both may be available while the shared play host allows one live session
+  across them. Frames from either flow to the Discord activity surface.
 - **Auth.** Provider keys and OAuth tokens live in the credential broker
   (Keychain), written by the TUI `/auth` flow and read by pi through a
   credential-store bridge. Compatibility model/media provider keys may fall
@@ -85,7 +101,9 @@ that same store through operator-only routes.
   `~/.config/clankie/settings.json` and can never be set by a caller.
   `/connect` stores Linear and mailbox credentials the same way; Discord
   remains a body configured by `/discord` ([credential guide](credentials.md),
-  [ADR 0093](adr/0093-owner-authored-service-connections.md)). An optional lab
+  [ADR 0093](adr/0093-owner-authored-service-connections.md)). A seat in a
+  hosted world is a broker credential too — `pokeagent_mmo_world`, with the
+  environment variant refused outright. An optional lab
   user-session body watches Discord screen shares and publishes Go Live through
   the owned `@clankie/vox` native media package ([Discord media guide](discord-media.md),
   [ADR 0100](adr/0100-vox-is-an-owned-native-media-package.md)).
@@ -131,6 +149,7 @@ media, browsing, and operator control.
 | Possessor commentary/hearing   | [`packages/possessor-voice/README.md`](../packages/possessor-voice/README.md)             |
 | Native media                   | [`apps/vox/README.md`](../apps/vox/README.md)                                             |
 | Discord media surfaces         | [`docs/discord-media.md`](discord-media.md)                                               |
+| Durable memory                 | [`docs/memory.md`](memory.md)                                                             |
 | Credential identities/setup    | [`docs/credentials.md`](credentials.md)                                                   |
 | Credential implementation      | [`packages/credential-broker/README.md`](../packages/credential-broker/README.md)         |
 | Models                         | [`packages/model-provider/README.md`](../packages/model-provider/README.md)               |

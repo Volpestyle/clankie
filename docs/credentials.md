@@ -28,16 +28,9 @@ Only this body can watch another person's share or publish Go Live.
 Both account tokens may remain stored, but the launcher starts exactly one
 Discord body. The processes do not share credentials or gateways.
 
-```mermaid
-flowchart LR
-  K[Credential broker]
-  K -->|discord_bot| B[Official bot process]
-  K -->|discord_user_session| U[Lab user-session process]
-  L[discord.activeBody] -->|bot| B
-  L -->|user_session| U
-  B --> D[Discord bot gateway]
-  U --> E[Discord user gateway]
-```
+![Credential routing by active Discord body](diagrams/credential-routing.jpg)
+
+[Editable Turbopuffer tldraw source](diagrams/clankie-docs-diagrams-2.tldraw)
 
 ## Configure Discord
 
@@ -98,6 +91,27 @@ claim another transport by changing a request field.
 Discord also issues short-lived voice and stream-server credentials after a
 gateway session is established. Those runtime values go directly to the media
 owner and are neither operator configuration nor broker entries.
+
+## World seat
+
+A seat in a hosted PokeAgent MMO world is a bearer the world's operator mints
+and hands out, not a value Clankie can issue for himself. It lives in the broker
+under `pokeagent_mmo_world`.
+
+| Broker id             | Principal                               | Issued by                 |
+| --------------------- | --------------------------------------- | ------------------------- |
+| `pokeagent_mmo_world` | Clankie's player seat in a hosted world | The world host's operator |
+
+`CLANKIE_WORLD_CREDENTIAL` is refused outright — setting it fails the join even
+when the broker also holds an entry, so an ambient environment value can never
+beat the broker ([ADR 0103](adr/0103-a-hosted-world-is-another-body.md)). This
+is the one credential with no environment fallback of any kind.
+
+No `/auth` or `/connect` flow writes this slot yet; the operator stores it in
+the broker directly. Without an entry, `pokeagent_join_mmo` refuses with
+`no_credential`, which Clankie says out loud rather than retrying. The minting
+and holder-file side lives in the world's own
+[joining guide](https://github.com/Volpestyle/pokeagent-mmo/blob/main/docs/joining-a-world.md).
 
 ## Provider credentials
 

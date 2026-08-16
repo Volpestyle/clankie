@@ -24,6 +24,7 @@ export interface OperatorConversationRenderTarget {
     options?: OperatorConversationBlockOptions,
   ): OperatorConversationBlockHandle;
   refreshStatus(label: string): void;
+  setTurnLoaderMessage?(message: string): void;
 }
 
 // A body at or under this length fits on one or two wrapped transcript rows at
@@ -61,6 +62,8 @@ export function operatorConversationBlockOptions(
  */
 export function renderOperatorConversationEvent(event: OperatorConversationStreamEvent): string | undefined {
   switch (event.type) {
+    case "activity":
+      return undefined;
     case "message":
       return `**${event.role === "operator" ? "You" : "Clankie"}**\n\n${event.text}`;
     case "reasoning":
@@ -125,12 +128,28 @@ export function createOperatorConversationShellSink(
 ): OperatorConversationEventSink {
   // The registry stores the trimmed submitted message, so compare trimmed.
   let pendingEcho = options.localEchoText?.trim();
+  const activeToolMessages = new Map<string, string>();
   const activeTools = new Map<
     string,
     { readonly argumentsDetail?: string; readonly block: OperatorConversationBlockHandle }
   >();
   return {
     event(event): void {
+      if (event.type === "activity" && activeToolMessages.size === 0) {
+        shell.setTurnLoaderMessage?.(activityLoaderMessage(event.phase));
+      } else if (event.type === "tool") {
+        if (event.phase === "started") {
+          activeToolMessages.set(
+            event.toolCallId,
+            event.skillName === undefined ? `Running ${event.name}...` : `Loading ${event.skillName}...`,
+          );
+        } else {
+          activeToolMessages.delete(event.toolCallId);
+        }
+        shell.setTurnLoaderMessage?.([...activeToolMessages.values()].at(-1) ?? "Waiting for response...");
+      } else if (event.type === "turn" && event.phase === "accepted") {
+        shell.setTurnLoaderMessage?.("Waiting for response...");
+      }
       if (
         event.type === "message" &&
         event.role === "operator" &&
@@ -170,6 +189,25 @@ export function createOperatorConversationShellSink(
       shell.refreshStatus("conversation recovery required");
     },
   };
+}
+
+function activityLoaderMessage(
+  phase: Extract<OperatorConversationStreamEvent, { readonly type: "activity" }>["phase"],
+): string {
+  switch (phase) {
+    case "waiting":
+      return "Waiting for response...";
+    case "thinking":
+      return "Thinking...";
+    case "responding":
+      return "Responding...";
+    case "preparing_tool":
+      return "Preparing tool call...";
+    case "compacting":
+      return "Compacting...";
+    case "retrying":
+      return "Retrying...";
+  }
 }
 
 type OperatorConversationToolEvent = Extract<OperatorConversationStreamEvent, { readonly type: "tool" }>;

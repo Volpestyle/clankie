@@ -41,7 +41,7 @@ export class PresencePoller {
   private readonly operatorToken: string | undefined;
   private readonly fetchImpl: typeof fetch;
   private readonly pollIntervalMs: number;
-  private current: PresenceSnapshot | undefined;
+  private current: PresenceSnapshot = { phase: "checking" };
   private timer: ReturnType<typeof setInterval> | undefined;
 
   public constructor(options: PresencePollerOptions) {
@@ -51,7 +51,7 @@ export class PresencePoller {
     this.pollIntervalMs = options.pollIntervalMs ?? POLL_INTERVAL_MS;
   }
 
-  public get snapshot(): PresenceSnapshot | undefined {
+  public get snapshot(): PresenceSnapshot {
     return this.current;
   }
 
@@ -73,27 +73,28 @@ export class PresencePoller {
   }
 
   public async poll(): Promise<boolean> {
-    const before = this.current?.phase;
+    const before = this.current.phase;
     this.current = await this.read();
-    return this.current?.phase !== before;
+    return this.current.phase !== before;
   }
 
-  private async read(): Promise<PresenceSnapshot | undefined> {
-    if (this.operatorToken === undefined) return undefined;
+  private async read(): Promise<PresenceSnapshot> {
+    if (this.operatorToken === undefined) return { phase: "authentication unavailable" };
     try {
       const response = await this.fetchImpl(new URL(PRESENCE_STATUS_PATH, this.baseUrl), {
         headers: { authorization: `Bearer ${this.operatorToken}` },
         redirect: "error",
         signal: AbortSignal.timeout(2_000),
       });
-      if (!response.ok) return undefined;
+      if (response.status === 401 || response.status === 403) return { phase: "authentication failed" };
+      if (!response.ok) return { phase: "service unavailable" };
       const parsed = PresenceStatusSchema.safeParse(await response.json());
-      if (!parsed.success) return undefined;
+      if (!parsed.success) return { phase: "status unavailable" };
       const live = parsed.data.sessions.filter((session) => LIVE_PRESENCE_PHASES.has(session.phase));
       const session = live[0] ?? parsed.data.sessions[0];
-      return session === undefined ? { phase: "no presence session" } : { phase: session.phase };
+      return session === undefined ? { phase: "not connected" } : { phase: session.phase };
     } catch {
-      return undefined;
+      return { phase: "unreachable" };
     }
   }
 }

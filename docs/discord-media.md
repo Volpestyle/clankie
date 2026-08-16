@@ -11,16 +11,9 @@ described as one generic stream.
 | Go Live publish                             | Personal-lab user body  | Clankie to Discord viewers  | H264 video through Vox; currently no source audio         |
 | Screen-share watch                          | Personal-lab user body  | Discord sharer to Clankie   | Up to four chronological JPEG samples for `observe_share` |
 
-```mermaid
-flowchart LR
-  G[GBA producer] -->|brokered loopback| H[Activity frame hub]
-  H -->|public viewer| A[activity.clankie.bot]
-  H -->|brokered snapshot| P[User-session Go Live publisher]
-  P -->|Vox H264| D[Discord viewers]
-  R[Remote Discord share] -->|Vox receive/decode| S[Clankie service]
-  S -->|up to four 1 fps JPEGs| O[observe_share]
-  Y[YouTube] -->|yt-dlp + ffmpeg audio| V[Official-bot voice]
-```
+![Discord media publish and observation paths](diagrams/discord-media.jpg)
+
+[Editable Turbopuffer tldraw source](diagrams/clankie-docs-diagrams-2.tldraw)
 
 ## YouTube music
 

@@ -25,15 +25,9 @@ set starts active; tool search activates uncommon browser actions additively.
 If the process is unavailable, the captain receives one truthful unavailable
 result rather than a partial catalog.
 
-```mermaid
-flowchart LR
-  R[Operator, Discord text, or voice handoff] --> C[Captain tool bank]
-  C --> H[Service-owned browser host]
-  H --> M[agent-browser MCP]
-  M --> P[Persistent Clankie browser profile]
-  H -->|bounded result| C
-  S[System shell and files] -. separate actor/lane authority .-> C
-```
+![ADR 0082 Clankie holds the browser](../diagrams/0082-clankie-holds-the-browser.jpg)
+
+[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams.tldraw)
 
 Browser access does not grant system tools.
 [ADR 0095](0095-discord-system-actors.md) separately limits shell and filesystem

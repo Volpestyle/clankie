@@ -244,16 +244,39 @@ export class OperatorConversationSelectionStore {
 }
 
 /**
+ * The conversation rooted at a workspace directory, opened on first use. The
+ * registry is the only place a workspace conversation is created, so two
+ * consoles launched in the same project meet in the same room; the server
+ * returns them most-recently-used first.
+ */
+export async function resolveWorkspaceConversation(input: {
+  readonly client: OperatorConversationClient;
+  readonly workspace: string;
+  readonly title?: string;
+}): Promise<OperatorConversation> {
+  const scope = { kind: "workspace", workspaceId: input.workspace } as const;
+  const existing = await input.client.list(scope);
+  const found = existing[0];
+  if (found !== undefined) return found;
+  return await input.client.create({
+    scope,
+    title: input.title ?? input.workspace.split("/").filter(Boolean).pop() ?? input.workspace,
+  });
+}
+
+/**
  * Resolves the initial conversation for a surface, confirming every candidate
  * against the server before use so a stale or attacker-supplied id can never
  * attach. A direct `--chat` id overrides the persisted selection only after
- * `get()` confirms it; the confirmed choice is then persisted. Falls back to the
- * default global conversation.
+ * `get()` confirms it; the confirmed choice is then persisted. With nothing
+ * persisted, a launch workspace opens that directory's conversation, and a
+ * launch inside the service repo falls back to the default global conversation.
  */
 export async function resolveInitialConversation(input: {
   readonly client: OperatorConversationClient;
   readonly store: OperatorConversationSelectionStore;
   readonly directConversationId?: string;
+  readonly workspace?: string;
 }): Promise<OperatorConversation> {
   const selection = new OperatorConversationSelection(input.client);
   if (input.directConversationId !== undefined) {
@@ -270,6 +293,15 @@ export async function resolveInitialConversation(input: {
     }
     // The persisted conversation no longer exists on the server; drop it.
     await input.store.clear();
+  }
+  if (input.workspace !== undefined) {
+    const conversation = await resolveWorkspaceConversation({
+      client: input.client,
+      workspace: input.workspace,
+    });
+    await selection.select(conversation.conversationId);
+    await input.store.write(conversation.conversationId);
+    return conversation;
   }
   return await selection.selectDefault();
 }
@@ -534,9 +566,7 @@ export class OperatorConversationPromptSession {
       ...(herdrPaneId === undefined ? {} : { herdrPaneId }),
     });
     if (accepted.status === "revision_conflict") {
-      throw new OperatorConversationClientError(
-        `Conversation changed at revision ${accepted.currentRevision}; retry the prompt`,
-      );
+      throw new OperatorConversationClientError("This conversation changed elsewhere; retry the prompt");
     }
     while (signal?.aborted !== true) {
       const cursor = this.tails.cursor(conversationId);
@@ -579,7 +609,7 @@ export class OperatorConversationPromptSession {
     const conversationId = this.selection.conversationId;
     if (conversationId === undefined) {
       throw new OperatorConversationClientError(
-        "No operator conversation is selected; use /conversation to choose one",
+        "No conversation is selected; use /conversation to choose one",
       );
     }
     return conversationId;

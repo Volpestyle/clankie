@@ -85,7 +85,7 @@ export interface WorldBody {
 
 /**
  * Why a join did not happen, in the vocabulary he says out loud. Distinct from
- * `start_play`'s refusals on purpose: `body_held` is about his own machine,
+ * `pokeagent_start_solo`'s refusals on purpose: `body_held` is about his own machine,
  * these are all about a world somewhere else.
  */
 export type WorldJoinRefusal =

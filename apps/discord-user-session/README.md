@@ -24,14 +24,9 @@ is `@clankie/discord-presence-core`, shared with the bot bridge.
 The [credential guide](../../docs/credentials.md) distinguishes the bare normal-
 user token from the official bot token and Clankie's four local bridge bearers.
 
-```mermaid
-flowchart LR
-  G[gateway.ts<br/>raw ws · bare token] --> C["@clankie/discord-presence-core"]
-  G --> A[voice-adapter.ts]
-  A -->|"@discordjs/voice"| C
-  C --> CP[clankie service]
-  CP -->|allowed writes| R[user-presence-runtime.ts<br/>fetch REST]
-```
+![Discord user-session transport architecture](../../docs/diagrams/discord-user-session-architecture.jpg)
+
+[Editable Turbopuffer tldraw source](../../docs/diagrams/clankie-docs-diagrams-2.tldraw)
 
 ## Three gates, all fail-closed
 

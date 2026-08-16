@@ -34,15 +34,9 @@ worth remarking on. It does not send `FreePlayTurn.speak`, `reply`, or any other
 finished sentence. The gateway-owning realtime session receives the event and
 is the sole author of what the room hears.
 
-```mermaid
-flowchart LR
-  R[Admitted attributed room utterance] -->|push| S[Possessor hearing seam]
-  S --> Q[Play interjection queue]
-  Q --> P[Next play decision]
-  P -->|bounded notable event| N[Possessor narration seam]
-  N --> V[Realtime room session]
-  V -->|sole authored response| R
-```
+![ADR 0067 play requests through the possessor seam](../diagrams/0067-a-play-request-speaks-through-the-possessor-seam.jpg)
+
+[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams.tldraw)
 
 Judgement and carriage remain separate: the play loop decides whether a moment
 is worth offering; the seam carries the event; the room session decides the

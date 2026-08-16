@@ -5,16 +5,9 @@ environments. Adapters implement provider-neutral start, attach, heartbeat,
 pause, resume, action, cancellation, and stop operations using strict
 provider-profiled contracts from `@clankie/interactive-environment`.
 
-```mermaid
-flowchart LR
-  C[Trusted command boundary] --> R[EnvironmentRuntime]
-  R --> L[(Atomic lease + action state)]
-  R --> A[Environment adapter]
-  A --> X[External process]
-  R --> E[Semantic events]
-  A --> T[Opaque artifact references]
-  T --> E
-```
+![Environment runtime command and event boundaries](../../docs/diagrams/environment-runtime.jpg)
+
+[Editable Turbopuffer tldraw source](../../docs/diagrams/clankie-docs-diagrams-2.tldraw)
 
 Exactly one unexpired writer lease may own a character/world pair. Capability
 tokens and connection credentials stay in host memory; durable records hold

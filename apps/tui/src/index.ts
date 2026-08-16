@@ -30,11 +30,17 @@ import {
   parseDirectConversation,
   resolveCaptainRouteToken,
   resolveInitialConversation,
+  resolveWorkspaceConversation,
 } from "./session/operator-conversations.ts";
+import {
+  conversationWorkspace,
+  launchWorkspace,
+  resolveWorkspacePath,
+  workspaceStateKey,
+} from "./session/workspace.ts";
 import { createOperatorConversationShellSink } from "./session/operator-conversation-renderer.ts";
 import { CaptainLaneTraceController, createCaptainLaneClient } from "./session/lane-observation.ts";
 import { HerdrRoster } from "./observation/herdr-roster.ts";
-import { ensureHerdLeadCompanion, formatHerdLeadCompanionResult } from "./observation/herd-lead-companion.ts";
 import { herdrPaneIdFromEnv, reportHerdrAgent, reportHerdrMetadata } from "./session/herdr-report.ts";
 import { PresencePoller } from "./observation/presence.ts";
 import { formatCaptainContextStatus, formatCaptainPresenceStatus } from "./shell/status-bar.ts";
@@ -42,9 +48,12 @@ import { discoverClankieSkills } from "./skill-catalog.ts";
 
 const repoRoot = resolve(import.meta.dirname, "..", "..", "..");
 const skillCatalog = await discoverClankieSkills(repoRoot);
+// The launcher is a symlink into this repo, so the process always starts here.
+// Where the operator typed `clankie` is what decides the room they land in.
+const launchedWorkspace = launchWorkspace(process.cwd(), repoRoot);
 
 if (process.stdin.isTTY !== true || process.stdout.isTTY !== true) {
-  process.stderr.write("clankie: the operator console requires a TTY\n");
+  process.stderr.write("clankie: the TUI requires a TTY\n");
   process.exit(1);
 }
 
@@ -86,8 +95,19 @@ const conversationClient = createCaptainOperatorConversationClient(captainRouteC
 const laneTrace = new CaptainLaneTraceController({
   lanes: createCaptainLaneClient(captainRouteClient),
 });
+// Per workspace: one console in a project and another in a second project each
+// reopen their own room, instead of overwriting one shared last-selection file.
 const conversationSelectionStore = new OperatorConversationSelectionStore(
-  join(repoRoot, ".data", "tui", "operator-conversation.json"),
+  launchedWorkspace === undefined
+    ? join(repoRoot, ".data", "tui", "operator-conversation.json")
+    : join(
+        repoRoot,
+        ".data",
+        "tui",
+        "workspaces",
+        workspaceStateKey(launchedWorkspace),
+        "operator-conversation.json",
+      ),
 );
 const conversationSelection = new OperatorConversationSelection(conversationClient);
 let currentContextUsage: OperatorConversationContextUsage | undefined;
@@ -99,15 +119,20 @@ const conversationPrompt = new OperatorConversationPromptSession({
 });
 await conversationPrompt.initialize();
 let conversationNotice: string | undefined;
+let currentWorkspace = launchedWorkspace ?? repoRoot;
+let currentConversationTitle: string | undefined;
 try {
   const directConversationId = parseDirectConversation(process.argv.slice(2)).conversationId;
   const initial = await resolveInitialConversation({
     client: conversationClient,
     store: conversationSelectionStore,
     ...(directConversationId === undefined ? {} : { directConversationId }),
+    ...(launchedWorkspace === undefined ? {} : { workspace: launchedWorkspace }),
   });
   const selected = await conversationSelection.select(initial.conversationId);
+  currentConversationTitle = selected.title;
   currentContextUsage = selected.contextUsage;
+  currentWorkspace = conversationWorkspace(selected) ?? repoRoot;
 } catch (error) {
   // The service may not be ready yet, or the store is corrupt; surface it and
   // keep the console usable (the /conversation command re-checks on demand).
@@ -118,13 +143,34 @@ const conversationsContext = {
   get conversationId(): string | undefined {
     return conversationSelection.conversationId;
   },
+  get title(): string | undefined {
+    return currentConversationTitle;
+  },
+  get workspace(): string {
+    return currentWorkspace;
+  },
   conversations: () => conversationSelection.conversations(),
   select: async (conversationId: string) => {
     const conversation = await conversationSelection.select(conversationId);
+    currentConversationTitle = conversation.title;
     currentContextUsage = conversation.contextUsage;
+    currentWorkspace = conversationWorkspace(conversation) ?? repoRoot;
     await conversationSelectionStore.write(conversation.conversationId);
-    shell.refreshStatusView();
+    // The console's own shell escape, path completion, and banner follow the
+    // captain into the directory his session now works in.
+    shell.setCwd(currentWorkspace);
+    refreshBanner();
     return conversation;
+  },
+  // `/cd`: the room for a directory, opened on first visit. The service repo is
+  // not one workspace among many — it is where the global conversation lives.
+  open: async (path: string) => {
+    const workspace = resolveWorkspacePath(path, currentWorkspace);
+    const conversation =
+      launchWorkspace(workspace, repoRoot) === undefined
+        ? await conversationSelection.selectDefault()
+        : await resolveWorkspaceConversation({ client: conversationClient, workspace });
+    return await conversationsContext.select(conversation.conversationId);
   },
 };
 
@@ -140,6 +186,7 @@ const brokeredCommands = {
 };
 const commands = [
   ...buildConsoleCommands({
+    settings: settingsStore,
     conversations: conversationsContext,
     laneTrace,
     presence: () => presence.snapshot,
@@ -165,37 +212,21 @@ const commands = [
   ...buildMemoryCommands(operatorClient === undefined ? {} : { client: operatorClient }),
 ];
 
-function stageFromEnv(): { label?: string; value?: string } {
-  if (process.env.HERDR_ENV === "1") {
-    const pane = process.env.HERDR_PANE_ID;
-    return { label: "herdr", value: pane === undefined ? "session" : `pane ${pane}` };
-  }
-  if (process.env.TMUX !== undefined && process.env.TMUX.length > 0) {
-    const pane = process.env.TMUX_PANE;
-    return { label: "tmux", value: pane === undefined ? "session" : `pane ${pane}` };
-  }
-  return { label: "stage", value: "none" };
+function bannerFieldsFor(cwd: string) {
+  return {
+    title: "Clankie",
+    tagline: "chat · tools",
+    cwd: cwd.replace(process.env.HOME ?? " ", "~"),
+  };
 }
-
-const stage = stageFromEnv();
-const baseBannerFields = {
-  title: "Clankie",
-  tagline: "clankie agent os · operator console",
-  hint: "/help for commands · ctrl+c to exit",
-  cwd: repoRoot.replace(process.env.HOME ?? " ", "~"),
-  server: serviceUrl,
-  ...(stage.value === undefined ? {} : { stage: stage.value }),
-  ...(stage.label === undefined ? {} : { stageLabel: stage.label }),
-};
 const shell = new ClankieFaceShell({
   commands,
-  cwd: repoRoot,
+  cwd: currentWorkspace,
   autocomplete: { listSkills: () => skillCatalog },
   skills: skillCatalog,
-  bannerFields: baseBannerFields,
+  bannerFields: bannerFieldsFor(currentWorkspace),
   historyPath: join(repoRoot, ".data", "tui", "prompt-history.jsonl"),
   statusExtras: () => [
-    currentModelRef ?? "model unset — /provider then /model",
     formatCaptainContextStatus(currentContextUsage),
     formatCaptainPresenceStatus(presence.snapshot),
   ],
@@ -226,13 +257,18 @@ const shell = new ClankieFaceShell({
   },
 });
 
-function applyModelDisplay(config: ClankieConfig): void {
-  currentModelRef = config.model;
+/** The banner carries both the model and the workspace; either can move alone. */
+function refreshBanner(): void {
   shell.setBannerFields({
-    ...baseBannerFields,
+    ...bannerFieldsFor(currentWorkspace),
     ...(currentModelRef === undefined ? {} : { model: currentModelRef }),
   });
   shell.refreshStatusView();
+}
+
+function applyModelDisplay(config: ClankieConfig): void {
+  currentModelRef = config.model;
+  refreshBanner();
 }
 
 // Crash-safety envelope: Node >=24 terminates on an unhandled rejection with no
@@ -260,7 +296,7 @@ process.on("unhandledRejection", (reason) => {
 
 shell.start();
 void reportHerdrMetadata({ source: "clankie", agent: "clankie", title: "Clankie" });
-void reportHerdrAgent("idle", { source: "clankie", agent: "clankie", message: "operator console" });
+void reportHerdrAgent("idle", { source: "clankie", agent: "clankie", message: "Clankie TUI" });
 herdrRoster.start(() => {
   shell.requestRender();
 });
@@ -273,10 +309,10 @@ shell.insertMarkdown(
     "",
     conversationSelection.conversationId === undefined
       ? "Clankie is unavailable. Direct `clankie` startup normally launches him; check the Clankie log."
-      : "Connected to Clankie. Plain prompts use the selected server-owned conversation.",
+      : "Connected to Clankie. Plain prompts continue in the current conversation.",
     ...(conversationSelection.conversationId === undefined
       ? []
-      : [`Conversation: ${conversationSelection.conversationId} · /conversation to list or switch.`]),
+      : [`Conversation: ${currentConversationTitle ?? "current"} · /conversation to list or switch.`]),
     ...(conversationNotice === undefined ? [] : [conversationNotice]),
     "Try /auth, /provider, /model, /status, /board — or type a prompt.",
   ].join("\n"),
@@ -299,11 +335,6 @@ if (conversationSelection.conversationId !== undefined) {
       shell.refreshStatus("conversation restore unavailable");
     });
 }
-void ensureHerdLeadCompanion().then((result) => {
-  if (result.outcome === "skipped") return;
-  const formatted = formatHerdLeadCompanionResult(result, "open");
-  shell.insertMarkdown(`**Herd lead**\n\n${formatted.text} \`/board\` reopens.`);
-});
 void loadConfig({ env: process.env, cwd: repoRoot })
   .then(({ config }) => {
     applyModelDisplay(config);

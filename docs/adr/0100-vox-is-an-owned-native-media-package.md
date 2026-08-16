@@ -52,19 +52,9 @@ Vox is a workspace package, not an independently supervised daemon: media
 credentials and process lifetime remain scoped to the body that opened the
 Discord user gateway.
 
-```mermaid
-flowchart LR
-  captain[Clankie captain] --> body[Active Discord body]
-  gateway[Discord user gateway] --> body
-  body --> client[@clankie/vox-client]
-  client -->|framed IPC| vox[clankvox child process]
-  vox <-->|DAVE + RTP media| stream[Discord stream server]
-  body -->|reports sampled stills| service[Clankie service]
-```
+![Vox native media architecture](../diagrams/vox-architecture.jpg)
 
-The detailed implementation and readiness flow lives in the
-[rendered Vox architecture map](../diagrams/vox-architecture.jpg), with an
-[editable Turbopuffer tldraw source](../diagrams/vox-architecture.tldraw).
+[Editable Turbopuffer tldraw source](../diagrams/vox-architecture.tldraw)
 
 ## Options weighed
 

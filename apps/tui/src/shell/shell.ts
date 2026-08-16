@@ -117,7 +117,7 @@ export interface FaceShellCommand {
 
 export interface FaceShellOptions {
   readonly commands: readonly FaceShellCommand[];
-  /** Working directory for the inline `!` shell escape and path autocomplete. */
+  /** Initial working directory for the `!` shell escape and path autocomplete; {@link ClankieFaceShell.setCwd} moves it. */
   readonly cwd: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly bannerFields: BannerFields;
@@ -193,6 +193,8 @@ export class ClankieFaceShell {
   private transcriptScrollbarDragActive = false;
   private transcriptClickTarget: { readonly col: number; readonly row: number } | undefined;
 
+  /** Follows the selected conversation's workspace, so `!` lands where he works. */
+  private cwdValue: string;
   private bashMode = false;
   private bashRunning = 0;
   private activeBashChild: ChildProcess | undefined;
@@ -205,6 +207,7 @@ export class ClankieFaceShell {
 
   constructor(options: FaceShellOptions) {
     this.options = options;
+    this.cwdValue = options.cwd;
     this.env = options.env ?? process.env;
     this.theme = createFaceThemeBundle(process.stdout);
     const { ansi } = this.theme;
@@ -263,9 +266,7 @@ export class ClankieFaceShell {
         this.showSelectableOverlay(component, overlayOptions),
     });
 
-    this.editor.setAutocompleteProvider(
-      createClankieAutocompleteProvider(options.commands, options.cwd, options.autocomplete ?? {}),
-    );
+    this.applyAutocompleteProvider();
     this.editor.onChange = (text) => {
       this.refreshCommandSurface(text);
     };
@@ -403,6 +404,28 @@ export class ClankieFaceShell {
     this.tui.requestRender();
   }
 
+  get cwd(): string {
+    return this.cwdValue;
+  }
+
+  /** Repoints the `!` shell escape and path completion at another directory. */
+  setCwd(cwd: string): void {
+    if (cwd === this.cwdValue) return;
+    this.cwdValue = cwd;
+    this.applyAutocompleteProvider();
+    this.refreshStatusView();
+  }
+
+  private applyAutocompleteProvider(): void {
+    this.editor.setAutocompleteProvider(
+      createClankieAutocompleteProvider(
+        this.options.commands,
+        this.cwdValue,
+        this.options.autocomplete ?? {},
+      ),
+    );
+  }
+
   get headerVisible(): boolean {
     return this.headerVisibleState;
   }
@@ -531,7 +554,7 @@ export class ClankieFaceShell {
     return this.respondingState;
   }
 
-  startTurnLoader(message = "Thinking..."): void {
+  startTurnLoader(message = "Waiting for response..."): void {
     this.respondingState = true;
     const loader = new Loader(
       this.tui,
@@ -1174,7 +1197,7 @@ export class ClankieFaceShell {
     this.tui.requestRender();
     try {
       const result = await runFaceBashCommand(command, {
-        cwd: this.options.cwd,
+        cwd: this.cwdValue,
         env: this.env,
         onSpawn: (child) => {
           this.activeBashChild = child;
@@ -1202,7 +1225,7 @@ export class ClankieFaceShell {
     const focusState = this.transcriptViewport.focused ? "transcript nav" : "";
     const bashState = this.bashMode
       ? `${ansi.accent("shell")}${
-          this.bashRunning > 0 ? ansi.dim(" running") : ansi.dim(` · ${displayHomePath(this.options.cwd)}`)
+          this.bashRunning > 0 ? ansi.dim(" running") : ansi.dim(` · ${displayHomePath(this.cwdValue)}`)
         }`
       : "";
     const extras = this.options.statusExtras?.() ?? [];
@@ -1217,7 +1240,7 @@ export class ClankieFaceShell {
       .filter((part) => part.length > 0)
       .map((part) => (part.includes("\x1b[") ? part : ansi.dim(part)));
     if (!this.headerVisibleState) parts.unshift(ansi.bold(ansi.accent("clankie")));
-    const statusLine = parts.join("  ·  ");
+    const statusLine = parts.join(" · ");
     if (
       this.layoutSettingsState.inputPlacement === "bottom" &&
       this.layoutSettingsState.statusPlacement === "above-input"

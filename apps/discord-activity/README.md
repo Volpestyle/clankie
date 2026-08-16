@@ -16,12 +16,9 @@ Its live lower third keeps Clankie's self-authored objective, intent, and
 monologue separate from the observed effect; spoken output stays on the
 voice surface rather than being duplicated here.
 
-```mermaid
-flowchart LR
-  core["mGBA core (body holder)<br/>ROM never leaves"] --> producer["producer sink<br/>capped · lossy"]
-  producer --> hub["RenderedSurfaceHub<br/>latest frame + overlay"]
-  hub -->|"/.proxy/frames"| iframe["activity iframe<br/>canvas + overlay"]
-```
+![Discord Activity rendered-frame architecture](../../docs/diagrams/discord-activity-architecture.jpg)
+
+[Editable Turbopuffer tldraw source](../../docs/diagrams/clankie-docs-diagrams-2.tldraw)
 
 ## Running it
 

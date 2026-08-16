@@ -39,12 +39,14 @@ import { createFileMemory, defaultMemoryDir } from "./memory.ts";
 import { createGbaPlayExecution } from "./play-execution.ts";
 import { PlayHost, type EmbodimentClientPort, type PlayExecution } from "./play-host.ts";
 import { createCredentialBackedOperatorAuthenticator } from "./operator-auth.ts";
+import { applyRepoProviderEnvironment } from "./repo-environment.ts";
 
 const logger = createLogger({ service: "clankie", version: "0.2.0" });
 
 /**
- * The repository root, and the `.env.local` sitting in it. Absent keys only:
- * anything the launcher or the shell set deliberately wins.
+ * Provider API-key compatibility fallbacks from the root `.env.local`.
+ * Broker-owned credentials and runtime configuration never enter process.env
+ * through this file; anything the launcher or shell set deliberately wins.
  */
 const repoRoot = resolve(import.meta.dirname, "../../..");
 function loadRepoEnvFile(): void {
@@ -54,28 +56,15 @@ function loadRepoEnvFile(): void {
   } catch {
     return;
   }
-  for (const line of contents.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed.length === 0 || trimmed.startsWith("#")) continue;
-    const separator = trimmed.indexOf("=");
-    if (separator <= 0) continue;
-    const key = trimmed.slice(0, separator).trim();
-    if (key.length === 0 || process.env[key] !== undefined) continue;
-    const raw = trimmed.slice(separator + 1).trim();
-    const unquoted =
-      (raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))
-        ? raw.slice(1, -1)
-        : raw;
-    process.env[key] = unquoted;
-  }
+  applyRepoProviderEnvironment(contents, process.env);
 }
 loadRepoEnvFile();
 
 // Fill the Discord environment from settings.json before anything reads it;
 // existing environment entries win, so a deliberate override still overrides.
-const settingsFilledDiscordNames = applyDiscordSettingsToEnvironment(
-  (await new SettingsStore().load()).discord,
-);
+const settingsStore = new SettingsStore();
+const startupSettings = await settingsStore.load();
+const settingsFilledDiscordNames = applyDiscordSettingsToEnvironment(startupSettings.discord);
 
 const stateRoot = process.env.CLANKIE_STATE?.trim() || join(homedir(), ".clankie");
 const runnerStateRoot = process.env.CLANKIE_RUNNER_STATE ?? join(stateRoot, "runner");
@@ -217,14 +206,13 @@ const boundApp = (): ClankieApp => {
   return clankieRef;
 };
 
-const connectionSettings = new SettingsStore();
 const linear = createLinearPort({
   credentials: operatorCredentialStore,
-  settings: connectionSettings,
+  settings: settingsStore,
 });
 const email = createEmailPort({
   credentials: operatorCredentialStore,
-  settings: connectionSettings,
+  settings: settingsStore,
 });
 
 const captain = createCaptain(
@@ -343,7 +331,7 @@ const captain = createCaptain(
     },
     resolveDiscordAttachments: createDiscordAttachmentResolver(),
   },
-  { repoRoot, stateDir: join(stateRoot, "captain"), settings: connectionSettings },
+  { repoRoot, stateDir: join(stateRoot, "captain"), settings: settingsStore },
 );
 
 const clankie = await createClankieApp({
@@ -456,7 +444,12 @@ process.on("SIGINT", () => requestShutdown("SIGINT"));
 process.on("SIGTERM", () => requestShutdown("SIGTERM"));
 
 function createConfiguredPlayExecution(): PlayExecution {
-  return createGbaPlayExecution({ logger, activityObservations, playSight });
+  return createGbaPlayExecution({
+    logger,
+    activityObservations,
+    playSight,
+    gameplay: startupSettings.gameplay,
+  });
 }
 
 function parseCaptainSteerSourceLane(value: string): "discord_text" | "discord_voice" | "api" {

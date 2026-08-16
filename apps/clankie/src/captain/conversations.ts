@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { appendFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
 import type {
   OperatorConversation,
   OperatorConversationContextUsage,
@@ -35,13 +35,38 @@ export interface ConversationTurnSeat {
   readonly herdrPaneId: string;
 }
 
+/** Where a turn runs and who it arrived from. */
+export interface ConversationTurnContext {
+  /**
+   * Absolute directory the conversation's session works in, from a workspace
+   * scope. Absent for a global conversation, which works in the service repo.
+   */
+  readonly workspace?: string;
+  readonly seat?: ConversationTurnSeat;
+}
+
 /** Runs one accepted operator turn against the captain's model session. */
 export type ConversationRunner = (
   conversationId: string,
   message: string,
   publish: (event: OperatorConversationEventBody) => void,
-  seat?: ConversationTurnSeat,
+  context: ConversationTurnContext,
 ) => Promise<void>;
+
+/**
+ * A workspace scope names the directory the conversation's session works in.
+ * That directory becomes the cwd of an unsandboxed shell, so the registry
+ * refuses anything but an absolute path that already resolves to a directory —
+ * a conversation is never created pointing at a path the caller invented.
+ */
+function workspaceOf(scope: OperatorConversationScope): string | undefined {
+  if (scope.kind !== "workspace") return undefined;
+  const workspace = scope.workspaceId;
+  if (!isAbsolute(workspace)) {
+    throw new Error(`Workspace ${workspace} is not an absolute path`);
+  }
+  return workspace;
+}
 
 /**
  * File-backed conversation registry: `meta.json` + append-only `events.jsonl`
@@ -171,6 +196,10 @@ export class ConversationStore {
   }
 
   private create(scope: OperatorConversationScope, title: string): OperatorConversation {
+    const workspace = workspaceOf(scope);
+    if (workspace !== undefined && !statSync(workspace, { throwIfNoEntry: false })?.isDirectory()) {
+      throw new Error(`Workspace ${workspace} is not a directory on this machine`);
+    }
     const now = new Date().toISOString();
     const meta: ConversationMeta = {
       conversationId: `conv-${randomUUID()}`,
@@ -239,6 +268,7 @@ export class ConversationStore {
     if (meta === undefined) {
       throw new Error(`Unknown conversation ${turn.conversationId}`);
     }
+    const workspace = workspaceOf(meta.scope);
     const safeCursor = this.lastCursor(meta.conversationId);
     if (turn.expectedRevision !== meta.revision) {
       return {
@@ -267,7 +297,10 @@ export class ConversationStore {
           (event) => {
             this.append(meta, event);
           },
-          turn.herdrPaneId === undefined ? undefined : { herdrPaneId: turn.herdrPaneId },
+          {
+            ...(workspace === undefined ? {} : { workspace }),
+            ...(turn.herdrPaneId === undefined ? {} : { seat: { herdrPaneId: turn.herdrPaneId } }),
+          },
         ),
       )
       .then(() => {

@@ -19,21 +19,16 @@ cannot become a private path around that lock.
 
 ## Decision
 
-The captain exposes `start_play` and `stop_play` for a catalogued environment.
+The captain exposes the enabled `pokeagent_start_solo`, `pokeagent_join_mmo`,
+and shared lifecycle tools for the current PokeAgent environments. Owner
+settings enable the solo emulator and hosted MMO independently; both may be
+enabled while the play host holds one live session across them.
 It decides whether to ask; the service-owned play runner resolves the body,
 validates the request, and reports what actually happened.
 
-```mermaid
-flowchart LR
-  H[Operator or admitted room turn] --> C[Captain]
-  C -->|start_play / stop_play| S[Clankie play runner]
-  S --> L{Shared body lock}
-  L -->|available| G[GBA session]
-  L -->|held| R[Typed refusal]
-  G --> A[Activity frame sink]
-  G --> J[Journal + checkpoint]
-  R --> C
-```
+![ADR 0063 play request and embodiment](../diagrams/0063-a-play-request-starts-embodiment.jpg)
+
+[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams.tldraw)
 
 - **Agent-owned intent.** No keyword matcher decides that a message means play.
   The captain chooses a typed capability from the conversation.
@@ -74,6 +69,8 @@ body ownership, or stop controls.
 - Replies reflect a real start, refusal, or pending request rather than intent.
 - All callers converge on one body-lock refusal regardless of which process
   currently holds the emulator.
+- A disabled venue is absent from the captain's tool bank and refused again at
+  the shared execution boundary.
 - Presence, activity rendering, narration, and play lifecycle remain separate
   capabilities that compose around the body.
 - Current commands, tool semantics, possession, and checkpoints belong in the

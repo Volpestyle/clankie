@@ -1,12 +1,12 @@
 /**
  * The operator console's slash commands. Display fields feed the ported
  * typeahead / Ctrl+/ workbench / autocomplete; `run` handlers speak to the
- * shell API and the clankie service. Command UX follows v1: results land as
- * `done /cmd command` transcript blocks, configurators run as guided SetupFlow
- * wizards.
+ * shell API and the clankie service. Results land as compact command transcript
+ * blocks; configurators run as guided SetupFlow wizards.
  */
 import { parseInputPlacement, parseStatusPlacement } from "./shell/face-settings.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
+import type { GameplaySettings, SettingsStore } from "@clankie/settings";
 import { formatActivityObservation, type ActivityObservationClient } from "./activity-command.ts";
 import {
   formatLaneListing,
@@ -14,7 +14,11 @@ import {
   selectLanes,
   type CaptainLaneTraceController,
 } from "./session/lane-observation.ts";
-import type { ObservableCaptainLane, OperatorConversationContextUsage } from "@clankie/protocol";
+import type {
+  ObservableCaptainLane,
+  OperatorConversationContextUsage,
+  OperatorConversationScope,
+} from "@clankie/protocol";
 import type { PresenceSnapshot } from "./observation/presence.ts";
 import type { HerdrRosterSnapshot } from "./observation/herdr-roster.ts";
 import {
@@ -29,6 +33,7 @@ import { formatCaptainContextUsage } from "./shell/status-bar.ts";
 type StatusTone = "normal" | "active" | "ok" | "warn" | "bad" | "muted";
 
 export interface ConsoleCommandContext {
+  readonly settings?: SettingsStore;
   readonly activityClient?: ActivityObservationClient;
   readonly activityWatchUrl?: string;
   /** Read-only tails onto the lanes the operator is not talking in (ADR 0083). */
@@ -47,15 +52,21 @@ export interface ConsoleCommandContext {
   };
   readonly conversations?: {
     readonly conversationId?: string | undefined;
+    readonly title?: string | undefined;
+    /** Directory the selected conversation's session works in. */
+    readonly workspace?: string;
     conversations(): Promise<
       readonly {
         readonly conversationId: string;
         readonly title: string;
         readonly isDefault: boolean;
         readonly revision: number;
+        readonly scope: OperatorConversationScope;
       }[]
     >;
     select(conversationId: string): Promise<{ readonly conversationId: string; readonly title: string }>;
+    /** Opens the conversation rooted at a directory, creating it on first visit. */
+    open?(path: string): Promise<{ readonly conversationId: string; readonly title: string }>;
   };
 }
 
@@ -69,6 +80,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     contextUsage,
     herdrRoster,
     herdLead,
+    settings,
   } = context;
   const openBoard = herdLead?.ensure ?? (() => ensureHerdLeadCompanion());
   const focusBoard = herdLead?.focus ?? (() => focusHerdLeadCompanion());
@@ -130,37 +142,82 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "conversation",
       aliases: ["chat"],
-      description: "List or select a server-owned operator conversation",
-      argumentHint: "[<conversation-id>]",
+      description: "List or switch persistent chat conversations",
+      argumentHint: "[<name-or-path>]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
         if (conversations === undefined) {
-          shell.insertCommandResult(
-            "/conversation",
-            "Clankie's conversation registry port is unavailable.",
-            "error",
-          );
+          shell.insertCommandResult("/conversation", "Conversations are unavailable.", "error");
           return;
         }
         const selector = argument.trim();
+        const rows = await conversations.conversations();
         if (selector.length > 0) {
-          const selected = await conversations.select(selector);
-          shell.insertCommandResult(
-            `/conversation ${selector}`,
-            `Selected ${selected.title} (${selected.conversationId}).`,
-            "success",
-          );
+          const byId = rows.find((item) => item.conversationId === selector);
+          const matches =
+            byId === undefined
+              ? rows.filter(
+                  (item) =>
+                    item.title.toLowerCase() === selector.toLowerCase() ||
+                    (item.scope.kind === "workspace" && item.scope.workspaceId === selector),
+                )
+              : [byId];
+          if (matches.length === 0) {
+            shell.insertCommandResult(
+              `/conversation ${selector}`,
+              `No conversation matches ${selector}. Run /conversation to list them.`,
+              "error",
+            );
+            return;
+          }
+          if (matches.length > 1) {
+            shell.insertCommandResult(
+              `/conversation ${selector}`,
+              `More than one conversation is named ${selector}. Use /cd <path> to choose its workspace.`,
+              "error",
+            );
+            return;
+          }
+          const selected = await conversations.select(matches[0]!.conversationId);
+          shell.insertCommandResult(`/conversation ${selector}`, `Switched to ${selected.title}.`, "success");
           return;
         }
-        const rows = await conversations.conversations();
         shell.insertCommandResult(
           "/conversation",
-          rows
-            .map(
-              (item) =>
-                `${item.conversationId === conversations.conversationId ? "*" : " "} ${item.title} · ${item.conversationId} · revision ${item.revision}${item.isDefault ? " · default" : ""}`,
-            )
-            .join("\n"),
+          `${rows
+            .map((item) => {
+              const current = item.conversationId === conversations.conversationId;
+              const location =
+                item.scope.kind === "workspace"
+                  ? `Workspace · ${item.scope.workspaceId}`
+                  : `Global${item.isDefault ? " · default" : ""}`;
+              return `${current ? "●" : "○"} ${item.title}${current ? " · current" : ""}\n  ${location}`;
+            })
+            .join("\n")}\n\nSwitch with /conversation <name> or /cd <path>.`,
+          "success",
+        );
+      },
+    },
+    {
+      name: "cd",
+      aliases: ["workspace"],
+      description: "Work in another directory — opens that workspace's conversation",
+      argumentHint: "[<path>]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        const target = argument.trim();
+        if (conversations?.open === undefined) {
+          shell.insertCommandResult("/cd", "Conversations are unavailable.", "error");
+          return;
+        }
+        if (target.length === 0) {
+          shell.insertCommandResult("/cd", `Working in ${conversations.workspace ?? "unknown"}.`, "success");
+          return;
+        }
+        const opened = await conversations.open(target);
+        shell.insertCommandResult(
+          `/cd ${target}`,
+          `Switched to ${opened.title} · ${conversations.workspace ?? target}.`,
           "success",
         );
       },
@@ -227,6 +284,48 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       takesArgument: true,
       run(argument, shell): void {
         runLayoutCommand(shell, argument);
+      },
+    },
+    {
+      name: "games",
+      aliases: ["gameplay"],
+      description: "Configure Clankie's PokeAgent game bodies",
+      argumentHint: "[solo|mmo] [on|off]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        if (settings === undefined) {
+          shell.insertCommandResult("/games", "Gameplay settings are unavailable.", "error");
+          return;
+        }
+        const words = argument.trim().toLowerCase().split(/\s+/u).filter(Boolean);
+        if (words.length === 0) {
+          await runGameplayWizard(shell, settings);
+          return;
+        }
+        if (words.length === 1 && words[0] === "status") {
+          shell.insertCommandResult(
+            "/games",
+            formatGameplaySettings((await settings.load()).gameplay),
+            "success",
+          );
+          return;
+        }
+        const [mode, state] = words;
+        if (
+          (mode !== "solo" && mode !== "mmo") ||
+          (state !== "on" && state !== "off") ||
+          words.length !== 2
+        ) {
+          shell.insertCommandResult("/games", "Usage: /games [solo|mmo] [on|off]", "error");
+          return;
+        }
+        const enabled = state === "on";
+        const next = await setGameplayEnabled(settings, mode, enabled);
+        shell.insertCommandResult(
+          "/games",
+          `${formatGameplaySettings(next.gameplay)}\n\nRestart Clankie to apply this change.`,
+          "success",
+        );
       },
     },
     {
@@ -302,8 +401,9 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           "/status",
           [
             s.title("Console"),
-            s.line("presence", snapshot?.phase ?? "unavailable", snapshot === undefined ? "warn" : "ok"),
-            s.line("conversation", conversations?.conversationId ?? "none selected", "active"),
+            s.line("discord", snapshot?.phase ?? "unavailable", snapshot === undefined ? "warn" : "ok"),
+            s.line("conversation", conversations?.title ?? "none selected", "active"),
+            s.line("workspace", conversations?.workspace ?? "unknown", "normal"),
             s.line(
               "context",
               formatCaptainContextUsage(currentContextUsage),
@@ -346,6 +446,68 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
   );
 
   return commands;
+}
+
+function formatGameplaySettings(settings: GameplaySettings): string {
+  return [
+    `Pokémon emulator (solo): ${settings.pokemonEmulatorEnabled ? "enabled" : "disabled"}`,
+    `PokeAgent MMO: ${settings.pokeagentMmoEnabled ? "enabled" : "disabled"}`,
+    "Live session: one across both modes",
+  ].join("\n");
+}
+
+async function setGameplayEnabled(settings: SettingsStore, mode: "solo" | "mmo", enabled: boolean) {
+  return await settings.update((current) => ({
+    ...current,
+    gameplay:
+      mode === "solo"
+        ? { ...current.gameplay, pokemonEmulatorEnabled: enabled }
+        : { ...current.gameplay, pokeagentMmoEnabled: enabled },
+  }));
+}
+
+async function runGameplayWizard(shell: ClankieFaceShell, settings: SettingsStore): Promise<void> {
+  const flow = shell.setupFlow;
+  let initialValue = "solo";
+  flow.begin("games");
+  try {
+    for (;;) {
+      const gameplay = (await settings.load()).gameplay;
+      const selected = await flow.readSelect({
+        kind: "single",
+        message:
+          "Toggle a PokeAgent game\nEnter toggles availability. Both may be enabled; one live session runs across them.",
+        options: [
+          {
+            value: "solo",
+            label: `${gameplay.pokemonEmulatorEnabled ? "✓" : "○"} Pokémon emulator (solo)`,
+            hint: gameplay.pokemonEmulatorEnabled ? "enabled" : "disabled",
+            description: "FireRed or Emerald on Clankie's local GBA emulator.",
+          },
+          {
+            value: "mmo",
+            label: `${gameplay.pokeagentMmoEnabled ? "✓" : "○"} PokeAgent MMO`,
+            hint: gameplay.pokeagentMmoEnabled ? "enabled" : "disabled",
+            description: "FireRed or Emerald in the hosted multiplayer world.",
+          },
+        ],
+        statusActions: [{ value: "done", label: "Done", hint: "restart Clankie to apply changes" }],
+        initialValue,
+        required: true,
+      });
+      const mode = selected?.[0];
+      if (mode !== "solo" && mode !== "mmo") break;
+      const enabled = mode === "solo" ? !gameplay.pokemonEmulatorEnabled : !gameplay.pokeagentMmoEnabled;
+      await setGameplayEnabled(settings, mode, enabled);
+      flow.renderLine(
+        `${mode === "solo" ? "Pokémon emulator" : "PokeAgent MMO"} ${enabled ? "enabled" : "disabled"}.`,
+        "success",
+      );
+      initialValue = mode;
+    }
+  } finally {
+    flow.end();
+  }
 }
 
 function runLayoutCommand(shell: ClankieFaceShell, argument: string): void {

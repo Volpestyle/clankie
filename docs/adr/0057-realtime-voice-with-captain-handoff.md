@@ -21,18 +21,9 @@ acts outside that conversation crosses one `ask_clankie` handoff to the existing
 `discord_voice` captain lane. The realtime model receives no system shell or
 other machine-authority tool.
 
-```mermaid
-flowchart LR
-  A[Attributed speaker A transcript] --> F[Shared room floor]
-  B[Attributed speaker B transcript] --> F
-  F --> R[One engaged realtime conversation]
-  P[Persona + bounded briefing] --> R
-  R -->|conversation audio| V[Discord room]
-  R -->|ask_clankie| C[Captain discord_voice lane]
-  C -->|ability result| R
-  R -. text deltas when configured .-> T[External TTS mouth]
-  T -. PCM .-> V
-```
+![ADR 0057 realtime voice with captain handoff](../diagrams/0057-realtime-voice-with-captain-handoff.jpg)
+
+[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams.tldraw)
 
 ### One character, two jobs
 

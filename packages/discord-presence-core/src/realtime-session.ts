@@ -14,9 +14,11 @@
  *   `turn_detection.interrupt_response` are both forced `false`, because the
  *   1:1 defaults answer and truncate on every voice in a group room. Every
  *   response is an explicit {@link RealtimeConversationSession.createResponse}
- *   decision by the floor logic that owns this session, and the model's entire
- *   tool surface is `ask_clankie` — a charmed or prompt-injected model has
- *   nothing else to execute with.
+ *   decision by the floor logic that owns this session, and `ask_clankie` is
+ *   the model's only privileged tool — everything else it can call (music, a
+ *   read-only glance at his own screen) is local to this call and reaches no
+ *   shell, no filesystem, and no room but this one, so a charmed or
+ *   prompt-injected model has nothing to escalate with.
  *
  * The transport is injected ({@link RealtimeSocketFactory}) so tests are
  * deterministic and offline; {@link openRealtimeWebSocket} is the production

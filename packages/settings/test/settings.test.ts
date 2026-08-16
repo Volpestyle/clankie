@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   DiscordSettingsSchema,
   EmailSettingsSchema,
+  GameplaySettingsSchema,
   LinearSettingsSchema,
   VoiceSettingsSchema,
   applyDiscordSettingsToEnvironment,
@@ -25,6 +26,17 @@ async function tempStore(): Promise<SettingsStore> {
 }
 
 describe("settings store", () => {
+  it("configures solo Pokemon and PokeAgent MMO independently", () => {
+    expect(GameplaySettingsSchema.parse({})).toEqual({
+      pokemonEmulatorEnabled: true,
+      pokeagentMmoEnabled: true,
+    });
+    expect(GameplaySettingsSchema.parse({ pokemonEmulatorEnabled: false })).toEqual({
+      pokemonEmulatorEnabled: false,
+      pokeagentMmoEnabled: true,
+    });
+  });
+
   it("returns defaults when no file exists and persists mode 0600", async () => {
     const store = await tempStore();
     expect(await store.load()).toEqual(emptySettings());

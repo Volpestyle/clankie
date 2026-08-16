@@ -26,16 +26,9 @@ contracts remain transport-neutral and declare which bodies can perform them.
 Exactly one configured body is active: the launcher starts either the official
 bot or `apps/discord-user-session`, and voice/media attach to that one mouth.
 
-```mermaid
-flowchart LR
-  L[Launcher activeBody] -->|bot| B[Official bot process]
-  L -->|user_session| U[Lab user-session process]
-  B --> C[@clankie/discord-presence-core]
-  U --> C
-  C --> S[One room-addressed captain lane]
-  U --> V[Vox watch and Go Live]
-  B --> A[Discord activity]
-```
+![ADR 0048 Discord user-session transport](../diagrams/0048-discord-user-session-transport.jpg)
+
+[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams.tldraw)
 
 | Action family                                | Bot | User session |
 | -------------------------------------------- | --- | ------------ |

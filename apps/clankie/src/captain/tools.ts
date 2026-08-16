@@ -16,6 +16,7 @@ import {
   type InlineExtension,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import type { GameplaySettings } from "@clankie/settings";
 import { Type, type TSchema } from "typebox";
 import type { CaptainDeps } from "./deps.ts";
 import type { LaneLog } from "./lane-log.ts";
@@ -75,12 +76,20 @@ export function captainTools(
   turn: TurnContext,
   laneLog: LaneLog,
   lane: CaptainSessionLaneV2,
+  gameplay: GameplaySettings = { pokemonEmulatorEnabled: true, pokeagentMmoEnabled: true },
 ): ToolDefinition[] {
   const playPorts = {
     submitEmbodimentIntent: deps.embodiment.submitIntent,
     getEmbodimentSession: deps.embodiment.getSession,
     getLiveEmbodimentSession: deps.embodiment.getLiveSession,
   };
+  const enabled = new Set([
+    ...(gameplay.pokemonEmulatorEnabled ? ["pokeagent_start_solo"] : []),
+    ...(gameplay.pokeagentMmoEnabled ? ["pokeagent_join_mmo"] : []),
+    ...(gameplay.pokemonEmulatorEnabled || gameplay.pokeagentMmoEnabled
+      ? ["pokeagent_stop", "pokeagent_observe", "pokeagent_recall"]
+      : []),
+  ]);
   return [
     defineTool({
       name: "generate_image",
@@ -133,12 +142,12 @@ export function captainTools(
     }),
     ...diagramTools(deps, turn),
     defineTool({
-      name: "start_play",
-      label: "Start playing",
+      name: "pokeagent_start_solo",
+      label: "PokeAgent: start solo",
       description:
-        "Start playing a GAME on your own body (Pokemon FireRed or Emerald), live on the activity watch surface. " +
+        "Start a solo PokeAgent session on your own GBA body (Pokemon FireRed or Emerald), live on the activity watch surface. " +
         "Not for songs or YouTube — those are youtube_search / music_play. Not a hosted world with other players — " +
-        "that is join_world. The session resumes from your latest " +
+        "that is pokeagent_join_mmo. The session resumes from your latest " +
         "checkpoint and keeps going until someone asks you to stop; people can watch. 'started' means you are " +
         "playing; 'start_refused' names a reason you can say out loud (body_held means someone else is already " +
         "driving your body); 'pending' means it is still spinning up — say so, never claim to be playing yet.",
@@ -157,11 +166,11 @@ export function captainTools(
         ),
     }),
     defineTool({
-      name: "join_world",
-      label: "Join a world",
+      name: "pokeagent_join_mmo",
+      label: "PokeAgent: join MMO",
       description:
-        "Join a hosted Pokemon world where other players already exist, live on the activity watch surface. " +
-        "Not your own private cartridge — that is start_play. You land in a session someone else is hosting; " +
+        "Join the hosted PokeAgent MMO where other Pokemon players already exist, live on the activity watch surface. " +
+        "Not your own private cartridge — that is pokeagent_start_solo. You land in a session someone else is hosting; " +
         "you can see who else is here. 'joined' means you are in the world; 'join_refused' names a reason you " +
         "can say out loud (no_credential means nobody provisioned you a seat, world_unreachable means the host " +
         "is down, world_full means there is no room, region_not_hosted means that game is not up, world_refused " +
@@ -184,10 +193,10 @@ export function captainTools(
     ...discordActionTools(deps, turn, lane),
     ...discordMusicTools(deps, turn, lane),
     defineTool({
-      name: "stop_play",
-      label: "Stop playing",
+      name: "pokeagent_stop",
+      label: "PokeAgent: stop",
       description:
-        "Stop the live play session on your body. The result is what actually happened; a session that was " +
+        "Stop the live PokeAgent session, solo or MMO. The result is what actually happened; a session that was " +
         "already stopped is not an error worth apologising for.",
       parameters: Type.Object({}),
       execute: async () =>
@@ -257,10 +266,10 @@ export function captainTools(
       },
     }),
     defineTool({
-      name: "observe_current_activity",
-      label: "Look at your screen",
+      name: "pokeagent_observe",
+      label: "PokeAgent: look at screen",
       description:
-        "Look at what is currently on your own screen — the live play session's latest frame and status. " +
+        "Look at the current PokeAgent session — its latest Pokemon frame and status. " +
         "Use it when someone asks what you are doing, what is on screen, or how the run is going. " +
         "When a still is available it arrives as an image; say what you actually see.",
       parameters: Type.Object({}),
@@ -293,10 +302,10 @@ export function captainTools(
       },
     }),
     defineTool({
-      name: "recall_play",
-      label: "Recall this playthrough",
+      name: "pokeagent_recall",
+      label: "PokeAgent: recall session",
       description:
-        "Read this playthrough's story so far: where you are, what you are after, and the last few moments " +
+        "Read the current PokeAgent session's story so far: where you are, what you are after, and the last few moments " +
         "you judged worth a remark. Not the raw journal. Use it when someone asks how you got here or what " +
         "has happened in the run. Say when you are not playing rather than inventing a playthrough.",
       parameters: Type.Object({}),
@@ -395,7 +404,7 @@ export function captainTools(
         return json({ remembered: true });
       },
     }),
-  ];
+  ].filter((tool) => !tool.name.startsWith("pokeagent_") || enabled.has(tool.name));
 }
 
 function turnActor(turn: TurnContext, lane: CaptainSessionLaneV2): string {
@@ -574,7 +583,7 @@ function discordMusicTools(
       description:
         "Search YouTube for a song or video to play in Discord voice. Returns numbered results. " +
         "Read them to the room and ask which one, then music_play or music_queue with that url or index. " +
-        "Use this when someone wants a song, a track, or YouTube — not start_play (that is Pokemon).",
+        "Use this when someone wants a song, a track, or YouTube — not pokeagent_start_solo (that is Pokemon).",
       parameters: Type.Object({
         query: Type.String({ minLength: 1, maxLength: 200 }),
         next: Type.Optional(Type.Boolean({ description: "True if they asked to play it next / queue it." })),

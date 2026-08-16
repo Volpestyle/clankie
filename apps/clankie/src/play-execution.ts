@@ -48,7 +48,7 @@ import {
 import { resolveConfiguredLanguageModel } from "@clankie/model-provider";
 import { createBrokeredPossessorVoiceClient, type PossessorVoiceClient } from "@clankie/possessor-voice";
 import { createBrokeredActivityFrameSink } from "@clankie/rendered-surface-client";
-import { personaInstructions, SettingsStore } from "@clankie/settings";
+import { personaInstructions, SettingsStore, type GameplaySettings } from "@clankie/settings";
 import { embodimentVenue } from "@clankie/protocol";
 import type { ActivityObservationWritePort } from "./activity-observation.ts";
 import type { PlayExecution } from "./play-host.ts";
@@ -110,6 +110,8 @@ interface PlayExecutionLogger {
 
 export interface GbaPlayExecutionOptions {
   logger: PlayExecutionLogger;
+  /** Owner-enabled play venues; omitted by tests and dev callers to enable both. */
+  gameplay?: GameplaySettings;
   env?: NodeJS.ProcessEnv;
   clock?: () => Date;
   /**
@@ -149,7 +151,15 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
   const runWorld = createWorldPlayExecution(options);
 
   return async (session, control, onRunning) => {
-    if (embodimentVenue(session) === "world") {
+    const venue = embodimentVenue(session);
+    if (
+      venue === "world"
+        ? options.gameplay?.pokeagentMmoEnabled === false
+        : options.gameplay?.pokemonEmulatorEnabled === false
+    ) {
+      return { kind: "refused", reason: "environment_unavailable" };
+    }
+    if (venue === "world") {
       return runWorld(session, control, onRunning);
     }
     // The body lock comes first: a held body must refuse fast and typed, not

@@ -2,7 +2,10 @@
 
 Status: accepted (James, 2026-08-15). Defines the Discord authority split with
 [ADR 0050](0050-voice-presence-authority-tier.md) and the operator-only coding
-tools in the pi captain.
+tools in the pi captain. Amended by
+[ADR 0105](0105-voice-is-as-capable-as-the-room-it-is-in.md): the allowlist now
+reaches voice as well, on the one-shot session boundary this record named as the
+missing precondition. The "voice never gets the tools" rule below is historical.
 
 ## Context
 

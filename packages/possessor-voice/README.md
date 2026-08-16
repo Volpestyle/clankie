@@ -7,12 +7,9 @@ A process driving Clankie's GBA body holds no Discord gateway or live presence
 claim. It reports what happened; the Discord body decides whether and how to
 speak, and pushes only room input it is already allowed to hear.
 
-```mermaid
-flowchart LR
-  C["client<br/>possessor"] -->|"narrate"| L["bridge listener<br/>loopback + bearer"]
-  L --> S["live Discord voice session"]
-  L -->|"utterance + room state"| C
-```
+![Possessor voice bridge architecture](../../docs/diagrams/possessor-voice.jpg)
+
+[Editable Turbopuffer tldraw source](../../docs/diagrams/clankie-docs-diagrams-2.tldraw)
 
 ## API
 

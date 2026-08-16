@@ -13,7 +13,7 @@
  * when `response.create` is issued: no utterance is ever auto-answered.
  *
  * The captain never sits on the conversational critical path. The engaged
- * session's only ability tool is `ask_clankie`, which serializes on the turn
+ * session's only privileged tool is `ask_clankie`, which serializes on the turn
  * queue and routes through the unchanged `discord_voice` captain lane
  * ({@link DiscordVoiceIngress}); approval-shaped results still come back as the
  * authenticated-surface handoff, so ambient voice cannot approve privileged

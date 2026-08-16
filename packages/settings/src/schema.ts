@@ -205,6 +205,17 @@ export const VoiceSettingsSchema = z
   });
 export type VoiceSettings = z.infer<typeof VoiceSettingsSchema>;
 
+/** Which PokeAgent bodies the captain may offer. One live session spans both. */
+export const GameplaySettingsSchema = z
+  .object({
+    /** Solo FireRed/Emerald in the local GBA emulator. */
+    pokemonEmulatorEnabled: z.boolean().default(true),
+    /** FireRed/Emerald in the hosted PokeAgent MMO. */
+    pokeagentMmoEnabled: z.boolean().default(true),
+  })
+  .strict();
+export type GameplaySettings = z.infer<typeof GameplaySettingsSchema>;
+
 /**
  * Linear is a tool connector, not a body: the API key lives in the credential
  * broker under provider id `linear`. This file only holds the public default
@@ -254,6 +265,7 @@ export const ClankieSettingsSchema = z
     discord: DiscordSettingsSchema.default(() => DiscordSettingsSchema.parse({})),
     persona: PersonaSettingsSchema.default(() => PersonaSettingsSchema.parse({})),
     voice: VoiceSettingsSchema.default(() => VoiceSettingsSchema.parse({})),
+    gameplay: GameplaySettingsSchema.default(() => GameplaySettingsSchema.parse({})),
     linear: LinearSettingsSchema.default(() => LinearSettingsSchema.parse({})),
     email: EmailSettingsSchema.default(() => EmailSettingsSchema.parse({})),
   })

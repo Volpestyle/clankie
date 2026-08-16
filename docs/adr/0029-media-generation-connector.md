@@ -24,15 +24,9 @@ both sides of the request, write mode-0600 artifacts, and hash the exact written
 bytes. The package reads no ambient provider credentials and imports no provider
 SDK.
 
-```mermaid
-flowchart LR
-  T[TUI model choice] --> S[Clankie service]
-  C[Credential broker] --> S
-  S --> M[@clankie/media-connector v2]
-  M --> P[Provider adapter]
-  P --> A[Hash-bound local artifact]
-  A --> R[Governed reply capture]
-```
+![ADR 0029 media-generation connector](../diagrams/0029-media-generation-connector.jpg)
+
+[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams.tldraw)
 
 At ratification callers projected `media.generate.image` and
 `media.generate.video` through compiled doctrine. That policy engine no longer

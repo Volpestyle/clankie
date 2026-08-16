@@ -2,7 +2,10 @@
 
 Status: accepted (James, 2026-08-09). Applies with
 [ADR 0095](0095-discord-system-actors.md), which defines the active actor-level
-boundary.
+boundary, as amended by
+[ADR 0105](0105-voice-is-as-capable-as-the-room-it-is-in.md). The "Discord voice
+never receives system tools" sentence below is historical: the gate is the
+actor, and a granted turn runs one-shot.
 
 ## Context
 

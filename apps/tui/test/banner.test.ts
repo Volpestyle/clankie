@@ -14,7 +14,6 @@ const FIELDS: BannerFields = {
   tagline: "eve conductor · herdr stage",
   model: "claude-opus-4-8 (high effort)",
   cwd: "~/dev/clankie",
-  hint: "/help for commands · ctrl+c to exit",
 };
 
 // oxlint-disable-next-line no-control-regex -- intentionally strips ANSI escape sequences
@@ -39,9 +38,10 @@ describe("truecolor unicode banner", () => {
     expect(/\[◉‿◉\]\s+clankie/u.test(fullText)).toBe(true);
   });
 
-  it("shows the model and cwd in the feed", () => {
+  it("keeps model and cwd together on one context line", () => {
     expect(fullText).toContain("claude-opus-4-8 (high effort)");
     expect(fullText).toContain("~/dev/clankie");
+    expect(full).toHaveLength(3);
   });
 
   it("emits 24-bit color codes", () => {
@@ -84,10 +84,11 @@ describe("ascii fallback banner", () => {
 });
 
 describe("condensed banner", () => {
-  it("collapses to a short header on narrow terminals", () => {
+  it("collapses to identity and a rule on narrow terminals", () => {
     const condensed = renderClankieBanner(FIELDS, wide({ columns: 36 }));
-    expect(condensed.length).toBeLessThanOrEqual(3);
+    expect(condensed).toHaveLength(2);
     expect(stripAnsi(condensed[0] ?? "")).toContain("clankie");
+    expect(stripAnsi(condensed.join("\n"))).not.toContain("claude-opus");
     for (const line of condensed) {
       expect(stripAnsi(line).length).toBeLessThanOrEqual(64);
     }
@@ -98,7 +99,7 @@ describe("banner component", () => {
   it("condenses to the render width, not just the startup terminal width", () => {
     const component = new ClankieBannerComponent(FIELDS, wide({ columns: 100 }));
     const narrowComponent = component.render(32);
-    expect(narrowComponent.length).toBeLessThanOrEqual(5);
+    expect(narrowComponent).toHaveLength(4);
     for (const line of narrowComponent) {
       expect(visibleWidth(line)).toBeLessThanOrEqual(32);
     }

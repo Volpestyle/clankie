@@ -12,11 +12,11 @@ import type { OperatorConversationContextUsage } from "@clankie/protocol";
 export const STATUS_BAR_MAX_ROWS = 6;
 
 export function formatCaptainPresenceStatus(presence: PresenceSnapshot | undefined): string {
-  return `clankie: ${presence?.phase ?? "unknown"}`;
+  return `discord ${presence?.phase.replaceAll("_", " ") ?? "unavailable"}`;
 }
 
 export function formatCaptainContextStatus(usage: OperatorConversationContextUsage | undefined): string {
-  return `context: ${formatCaptainContextUsage(usage)}`;
+  return `context ${formatCaptainContextUsage(usage).replace(" / ", "/")}`;
 }
 
 export function formatCaptainContextUsage(usage: OperatorConversationContextUsage | undefined): string {

@@ -41,7 +41,8 @@ core wasm binary; `MgbaFireRedCore.create` fails closed on any mismatch. ROM
 and savestate bytes stay operator-local (env paths `CLANKIE_GBA_ROM_PATH`,
 `CLANKIE_GBA_SAVESTATE_PATH`) and never enter the repository, fixtures,
 events, or artifacts. The savestate is regenerated deterministically by
-`scripts/bootstrap-savestate.ts` — a frozen power-on input schedule that
+`integrations/gba-emulator/scripts/bootstrap-savestate.ts` — a frozen power-on
+input schedule that
 starts a new game and stops in the player's bedroom; two independent
 generations produce byte-identical savestates. Game RNG state comes from the
 savestate itself (the fixture's `rngSeed` is a schema anchor, pinned 0);
