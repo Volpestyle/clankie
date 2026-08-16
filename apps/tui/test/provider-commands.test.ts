@@ -174,6 +174,7 @@ function testShell(
 async function testServices(
   options: {
     readonly refreshResult?: RefreshResult;
+    readonly captainModels?: ProviderServices["captainModels"];
   } = {},
 ): Promise<{
   readonly changed: string[];
@@ -204,6 +205,7 @@ async function testServices(
     services: {
       cwd: root,
       env,
+      ...(options.captainModels === undefined ? {} : { captainModels: options.captainModels }),
       onConfigChanged(config) {
         if (config.model !== undefined) changed.push(config.model);
       },
@@ -536,6 +538,47 @@ describe("auth command", () => {
 });
 
 describe("provider and model commands", () => {
+  it("uses Pi as the captain model and effort catalog", async () => {
+    const fixture = await testServices({
+      captainModels: {
+        providers: () => Promise.resolve([{ id: "pi-provider", name: "Pi Provider" }]),
+        models: () =>
+          Promise.resolve([
+            {
+              id: "pi-model",
+              name: "Pi Model",
+              reasoning: true,
+              tool_call: true,
+              temperature: true,
+              attachment: false,
+              limit: { context: 200_000, output: 16_000 },
+            },
+          ]),
+        thinkingLevels: () => Promise.resolve(["off", "low", "high"]),
+        refresh: () => Promise.resolve(),
+      },
+    });
+    const commands = buildProviderCommands(fixture.services);
+    const modelView = testShell([["pi-provider"], ["pi-model"]]);
+
+    await command(commands, "provider").run("", modelView.shell);
+    await command(commands, "model").run("", modelView.shell);
+
+    expect(modelView.selects[0]?.options.map((option) => option.value)).toEqual(["pi-provider"]);
+    expect(modelView.selects[1]?.options.map((option) => option.value)).toEqual(["pi-model"]);
+    const effortView = testShell([["high"]]);
+    await command(commands, "effort").run("", effortView.shell);
+    expect(effortView.selects[0]?.options.map((option) => option.value)).toEqual([
+      "off",
+      "low",
+      "high",
+      "__clear__",
+    ]);
+    expect((await loadConfig({ cwd: fixture.services.cwd, env: fixture.env })).config.variant).toEqual({
+      "pi-provider/pi-model": "high",
+    });
+  });
+
   it("separates provider intent from the authoritative model write", async () => {
     const { changed, env, services } = await testServices();
     const commands = buildProviderCommands(services);

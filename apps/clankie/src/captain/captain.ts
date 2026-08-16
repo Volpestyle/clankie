@@ -27,6 +27,7 @@ import {
   DefaultResourceLoader,
   getAgentDir,
   SessionManager,
+  SettingsManager,
   type AgentSession,
   type InlineExtension,
 } from "@earendil-works/pi-coding-agent";
@@ -40,7 +41,7 @@ import { createCaptainModelRuntime, type CaptainModelRuntime } from "./model.ts"
 import type { CaptainPort } from "./port.ts";
 import { connectionTools } from "./connect-tools.ts";
 import { discordTurnHasSystemTools } from "./system-authority.ts";
-import { browserTools, captainTools, roomKey, type TurnContext } from "./tools.ts";
+import { browserExtension, captainTools, roomKey, type TurnContext } from "./tools.ts";
 
 const REGISTER_FOR_LANE: Readonly<Record<CaptainSessionLaneV2, PersonaRegister>> = {
   operator: "operator",
@@ -145,6 +146,7 @@ export interface CaptainOptions {
 interface LaneSession {
   readonly session: AgentSession;
   readonly capture: TurnContext;
+  modelRef: string;
   lastAssistantText: string;
   turnCounter: number;
   /** Settlement of the in-flight run, while one is active: true if it succeeded. */
@@ -265,28 +267,29 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     systemTools: boolean,
   ): Promise<LaneSession> {
     const capture: TurnContext = {};
-    const { runtime: models, resolveModel } = await runtime();
+    const { runtime: models, resolveSelection } = await runtime();
+    const selection = await resolveSelection();
+    const piSettings = SettingsManager.inMemory();
     const loader = new DefaultResourceLoader({
       cwd: options.repoRoot,
       agentDir: getAgentDir(),
       systemPrompt: await systemPrompt(lane, systemTools),
       noExtensions: true,
-      extensionFactories: [captainMemoryExtension(deps.memory, lane)],
+      extensionFactories: [captainMemoryExtension(deps.memory, lane), browserExtension(deps, capture)],
       noPromptTemplates: true,
       additionalSkillPaths: [join(options.repoRoot, ".agents", "skills")],
+      settingsManager: piSettings,
     });
     await loader.reload();
     const { session } = await createAgentSession({
       cwd: options.repoRoot,
-      model: await resolveModel(),
+      model: selection.model,
+      thinkingLevel: selection.thinkingLevel,
       modelRuntime: models,
-      customTools: [
-        ...captainTools(deps, capture, laneLog, lane),
-        ...connectionTools(deps, lane),
-        ...(await browserTools(deps, capture)),
-      ],
+      customTools: [...captainTools(deps, capture, laneLog, lane), ...connectionTools(deps, lane)],
       resourceLoader: loader,
       sessionManager,
+      settingsManager: piSettings,
       // Coding tools (read/bash/edit/write) run unsandboxed as the service
       // user. The operator console always has them. A Discord text turn gets
       // them only when the trigger actor is on `systemActorUserIds` — a tools
@@ -294,13 +297,31 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       // not. Voice never does: that session is shared across speakers.
       ...(systemTools ? {} : { noTools: "builtin" as const }),
     });
-    const laneSession: LaneSession = { session, capture, lastAssistantText: "", turnCounter: 0 };
+    await session.bindExtensions({ mode: "print" });
+    const laneSession: LaneSession = {
+      session,
+      capture,
+      modelRef: selection.ref,
+      lastAssistantText: "",
+      turnCounter: 0,
+    };
     session.subscribe((event) => {
       if (event.type === "message_end" && event.message.role === "assistant") {
         laneSession.lastAssistantText = assistantText(event.message);
       }
     });
     return laneSession;
+  }
+
+  async function syncModel(lane: LaneSession): Promise<void> {
+    const selection = await (await runtime()).resolveSelection();
+    if (lane.modelRef !== selection.ref) {
+      await lane.session.setModel(selection.model);
+      lane.modelRef = selection.ref;
+    }
+    if (lane.session.thinkingLevel !== selection.thinkingLevel) {
+      lane.session.setThinkingLevel(selection.thinkingLevel);
+    }
   }
 
   function durableSession(
@@ -375,6 +396,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         }
       });
       try {
+        await syncModel(lane);
         await laneLog.append("operator", conversationId, {
           at: new Date().toISOString(),
           kind: "heard",
@@ -436,6 +458,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     let role: "ran" | "absorbed" = "ran";
     try {
       if (normalized.durable) {
+        if (lane.running === undefined && !lane.session.isStreaming) await syncModel(lane);
         role = await runDurableTurn(lane, normalized.prompt, normalized.images.map(toImageContent));
       } else {
         const completed = await runOneShotDiscordTurn(

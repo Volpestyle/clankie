@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  DISCORD_STREAM_WATCH_FRAME_HISTORY_MAX,
   DiscordStreamWatchObservationSchema,
   DiscordStreamWatchReportSchema,
   SHARE_ARTIFACT_DIRECTORY,
@@ -11,7 +12,7 @@ import {
 } from "@clankie/protocol";
 
 /**
- * Latest-only view of Discord screen shares.
+ * Latest view plus a short rolling history of Discord screen shares.
  *
  * Memory-first: raw video never enters the event log. A still is optional and
  * is written under `shares/` only when an attachment root is configured, so
@@ -35,9 +36,10 @@ export class DiscordStreamWatchProjection {
     this.bySource.set(parsed.source, parsed.streams);
 
     let frame = this.currentObservation.frame;
+    let frames = this.currentObservation.frames ?? [];
     if (parsed.frame !== undefined) {
       const jpeg = Buffer.from(parsed.frame.jpegBase64, "base64");
-      frame = {
+      const nextFrame = {
         streamKey: parsed.frame.streamKey,
         userId: parsed.frame.userId,
         width: parsed.frame.width,
@@ -46,17 +48,23 @@ export class DiscordStreamWatchProjection {
         capturedAt: parsed.frame.capturedAt,
         ...this.writeShareArtifact(jpeg),
       };
+      frame = nextFrame;
+      frames = [...frames.filter((sample) => sample.streamKey === nextFrame.streamKey), nextFrame].slice(
+        -DISCORD_STREAM_WATCH_FRAME_HISTORY_MAX,
+      );
     }
     const merged = mergeStreams(this.bySource);
     const keepKey = frame?.streamKey;
     if (keepKey !== undefined && !merged.some((stream) => stream.streamKey === keepKey)) {
       frame = undefined;
+      frames = [];
     }
 
     this.currentObservation = DiscordStreamWatchObservationSchema.parse({
       schemaVersion: 1,
       streams: merged,
       ...(frame === undefined ? {} : { frame }),
+      ...(frames.length === 0 ? {} : { frames }),
       decoder: parsed.decoder ?? this.currentObservation.decoder,
       ...(parsed.decoderDetail === undefined ? {} : { decoderDetail: parsed.decoderDetail }),
       updatedAt: now.toISOString(),

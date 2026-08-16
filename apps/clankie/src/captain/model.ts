@@ -3,8 +3,21 @@ import {
   type CredentialStore as ClankieCredentialStore,
   type ProviderCredential,
 } from "@clankie/credential-broker";
-import { loadConfig, parseModelRef } from "@clankie/model-provider";
-import type { Credential, CredentialInfo, Model, Api } from "@earendil-works/pi-ai";
+import { createModelRegistry } from "@clankie/model-registry";
+import {
+  loadConfig,
+  parseModelRef,
+  registerConfiguredPiProviders,
+  subscriptionRefFor,
+} from "@clankie/model-provider";
+import {
+  clampThinkingLevel,
+  type Credential,
+  type CredentialInfo,
+  type Model,
+  type Api,
+  type ModelThinkingLevel,
+} from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
 export class CaptainModelError extends Error {}
@@ -15,7 +28,7 @@ export class CaptainModelError extends Error {}
  * OAuth tokens against the same store the rest of the system uses. The shapes
  * are near-identical; only the api-key tag differs.
  */
-class BrokerCredentialStore {
+export class BrokerCredentialStore {
   private readonly broker: ClankieCredentialStore;
   // pi runs OAuth refresh inside modify() and relies on writes being
   // serialized; two lanes refreshing one provider concurrently would rotate
@@ -49,10 +62,7 @@ class BrokerCredentialStore {
     const run = (this.locks.get(providerId) ?? Promise.resolve()).then(async () => {
       const stored = await this.broker.get(providerId);
       const next = await fn(toPiCredential(stored));
-      if (next === undefined) {
-        await this.broker.delete(providerId);
-        return undefined;
-      }
+      if (next === undefined) return toPiCredential(stored);
       const mapped = fromPiCredential(next, stored);
       if (mapped !== undefined) await this.broker.set(providerId, mapped);
       return next;
@@ -74,6 +84,7 @@ function toPiCredential(credential: ProviderCredential | undefined): Credential 
       access: credential.access,
       refresh: credential.refresh,
       expires: credential.expires,
+      ...(credential.accountId === undefined ? {} : { accountId: credential.accountId }),
     };
   }
   // "wellknown" carries a resolved bearer token; to pi that is just a key.
@@ -95,34 +106,77 @@ function fromPiCredential(
     access: credential.access,
     refresh: credential.refresh,
     expires: credential.expires,
+    ...(typeof credential.accountId === "string" ? { accountId: credential.accountId } : {}),
   };
+}
+
+export interface CaptainModelSelection {
+  readonly model: Model<Api>;
+  readonly thinkingLevel: ModelThinkingLevel;
+  readonly ref: string;
 }
 
 export interface CaptainModelRuntime {
   readonly runtime: ModelRuntime;
-  /** Resolves the operator-configured captain model, failing with a sayable reason. */
-  resolveModel(): Promise<Model<Api>>;
+  /** Resolves Clankie's configured policy through Pi's model catalog. */
+  resolveSelection(): Promise<CaptainModelSelection>;
 }
 
 export async function createCaptainModelRuntime(repoRoot: string): Promise<CaptainModelRuntime> {
   const broker = createDefaultCredentialStore();
   const runtime = await ModelRuntime.create({
     credentials: new BrokerCredentialStore(broker),
+    modelsPath: null,
     refreshOnCreate: false,
   });
+  const initialConfig = await loadConfig({ cwd: repoRoot });
+  registerConfiguredPiProviders(runtime, initialConfig.config, await createModelRegistry().catalog());
   return {
     runtime,
-    resolveModel: async () => {
+    resolveSelection: async () => {
       const configured = await loadConfig({ cwd: repoRoot });
       const ref = configured.config.model === undefined ? undefined : parseModelRef(configured.config.model);
       if (ref === undefined) throw new CaptainModelError("No captain model is configured; run /model");
-      const model = runtime.getModel(ref.providerId, ref.modelId);
+      if (
+        configured.config.disabled_providers?.includes(ref.providerId) === true ||
+        (configured.config.enabled_providers !== undefined &&
+          configured.config.enabled_providers.length > 0 &&
+          !configured.config.enabled_providers.includes(ref.providerId))
+      ) {
+        throw new CaptainModelError(`Configured captain provider ${ref.providerId} is disabled`);
+      }
+      const subscriptionRef =
+        (await broker.get("openai-codex")) === undefined
+          ? undefined
+          : subscriptionRefFor(ref, configured.config);
+      const effective = parseModelRef(subscriptionRef ?? configured.config.model!);
+      if (effective === undefined)
+        throw new CaptainModelError(`Invalid captain model ${configured.config.model}`);
+      const model = runtime.getModel(effective.providerId, effective.modelId);
       if (model === undefined) {
         throw new CaptainModelError(
-          `Configured captain model ${ref.providerId}/${ref.modelId} is not in pi's catalog`,
+          `Configured captain model ${effective.providerId}/${effective.modelId} is not in pi's catalog`,
         );
       }
-      return model;
+      const effectiveRef = `${effective.providerId}/${effective.modelId}`;
+      const variant =
+        configured.config.variant?.[effectiveRef] ?? configured.config.variant?.[configured.config.model!];
+      return {
+        model,
+        ref: effectiveRef,
+        thinkingLevel: clampThinkingLevel(model, normalizeThinkingLevel(variant)),
+      };
     },
   };
+}
+
+function normalizeThinkingLevel(value: string | undefined): ModelThinkingLevel {
+  if (value === "none") return "off";
+  if (value === "think-8k") return "low";
+  if (value === "think-16k") return "medium";
+  if (value === "think-24k" || value === "think-32k") return "high";
+  if (["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(value ?? "")) {
+    return value as ModelThinkingLevel;
+  }
+  return "medium";
 }

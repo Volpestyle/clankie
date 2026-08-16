@@ -21,6 +21,8 @@
     "@ai-sdk/xai": "^4.0.10",
     "@clankie/credential-broker": "workspace:*",
     "@clankie/model-registry": "workspace:*",
+    "@earendil-works/pi-ai": "0.84.2",
+    "@earendil-works/pi-coding-agent": "0.84.2",
     "ai": "^7.0.19",
     "zod": "4.4.3"
   },

@@ -117,7 +117,7 @@ paths:
       tags: [Operator, Discord]
       operationId: getDiscordStreamWatch
       summary: Latest observed Discord screen shares
-      description: Metadata plus an optional still. Raw video is never stored.
+      description: Metadata plus up to four chronological stills. Raw video is never stored.
       security: [{ captainBearer: [] }, { operatorBearer: [] }]
       responses:
         "200":
@@ -128,8 +128,8 @@ paths:
       summary: Bridge report of shares and optional stills
       security: [{ captainBearer: [] }]
       responses:
-        "200":
-          description: Updated projection
+        "204":
+          description: Report accepted
 
   /v1/discord/readiness:
     get:

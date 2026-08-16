@@ -59,6 +59,11 @@ that same store through operator-only routes.
   `observe_share`, `get_self_state`, `remember_episode`. Linear search/create/comment after
   `/connect linear`. Mail list/read/send after `/connect email` — operator
   console only.
+- **Browser catalog.** The service registers the complete paginated
+  `agent-browser` catalog with pi, but only everyday navigation tools and
+  `browser_tool_search` start active. Browser calls are sequential across rooms;
+  the subprocess receives no Clankie credentials, but true filesystem/network
+  isolation requires a VM or remote broker ([ADR 0082](adr/0082-clankie-holds-the-browser.md)).
 - **Leading agents.** Clankie leads coding agents through the herdr CLI over
   bash, guided by skills — there is no worker protocol. The service is his
   durable body; joining a herdr session (the operator console in a pane)
@@ -78,17 +83,31 @@ that same store through operator-only routes.
   `~/.config/clankie/settings.json` and can never be set by a caller.
   `/connect` stores Linear and mailbox credentials the same way; Discord
   remains a body configured by `/discord` ([ADR 0093](adr/0093-owner-authored-service-connections.md)).
-  An optional lab user-session body watches Discord screen shares through an
-  external ClankVox binary ([ADR 0098](adr/0098-user-session-watches-discord-shares.md)).
+  An optional lab user-session body watches Discord screen shares through the
+  owned `@clankie/vox` native media package
+  ([ADR 0100](adr/0100-vox-is-an-owned-native-media-package.md)).
   `/discord` Active body picks which process is the mouth; the launcher
   starts only that one ([ADR 0048](adr/0048-discord-user-session-transport.md)).
   Who may ask him to drive this machine from Discord is
   `discord.systemActorUserIds` ([ADR 0095](adr/0095-discord-system-actors.md)).
 
+## Native media plane
+
+![Vox native media architecture](diagrams/vox-architecture.jpg)
+
+[Editable Turbopuffer tldraw source](diagrams/vox-architecture.tldraw)
+
+The active user-session body owns one `clankvox` child. Apache product code
+speaks through `@clankie/vox-client`; the AGPL executable owns DAVE, RTP/RTCP,
+codecs, capture, screen-watch, and Go Live publishing. Product receipts wait
+for native `transport_state=ready` instead of treating process spawn as media
+readiness.
+
 ## Current architecture constraints
 
-Clankie uses pi's `createAgentSession` for sessions, tools, skills, and
-compaction. The captain, HTTP control surface, and play runner share one service.
+Clankie uses pi's `ModelRuntime` and `createAgentSession` for the captain's
+models, sessions, tools, skills, and compaction. The captain, HTTP control
+surface, and play runner share one service.
 Herdr exposes the coding-agent fleet as visible panes coordinated through its CLI
 and plain files. Untrusted input stays fenced, secrets stay in the credential
 broker, and every report describes observed outcomes rather than intentions.

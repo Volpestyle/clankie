@@ -766,7 +766,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
     const parsed = DiscordStreamWatchReportSchema.safeParse(await readJson(context.req.raw));
     if (!parsed.success) return context.json({ error: "invalid_discord_stream_watch_report" }, 400);
-    return context.json(discordStreamWatch.apply(parsed.data, clock()));
+    discordStreamWatch.apply(parsed.data, clock());
+    return context.body(null, 204);
   });
 
   app.get(DISCORD_STREAM_WATCH_PATH, async (context) => {
@@ -2015,13 +2016,13 @@ function renderVoiceBriefingSelfState(
     for (const stream of streams) {
       const watch = stream.watching
         ? stream.hasFrame
-          ? "watching, a still is available — use observe_share"
+          ? "watching, chronological stills are available — use observe_share"
           : "watching, no still yet"
         : "visible, not watching";
       lines.push(`- Screen share: user ${stream.userId} in channel ${stream.channelId} (${watch}).`);
     }
     if (streamWatch?.decoder === "missing") {
-      lines.push("- Share decoder: ClankVox binary is not configured (CLANKVOX_BIN).");
+      lines.push("- Share decoder: Vox is not built; run `pnpm --filter @clankie/vox build`.");
     }
   }
   return lines.join("\n");

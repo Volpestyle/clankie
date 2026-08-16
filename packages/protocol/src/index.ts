@@ -1857,6 +1857,13 @@ export const DiscordStreamWatchFrameSchema = z
   .strict();
 export type DiscordStreamWatchFrame = z.infer<typeof DiscordStreamWatchFrameSchema>;
 
+/** Four 1 fps share samples: enough for coarse motion without feeding video continuously. */
+export const DISCORD_STREAM_WATCH_FRAME_HISTORY_MAX = 4;
+
+const DiscordStreamWatchObservationFrameSchema = DiscordStreamWatchFrameSchema.omit({ schemaVersion: true })
+  .extend({ artifactRef: z.string().optional() })
+  .strict();
+
 /** What a bridge posts when a share starts, stops, or yields a still. */
 export const DiscordStreamWatchReportSchema = z
   .object({
@@ -1875,17 +1882,11 @@ export const DiscordStreamWatchObservationSchema = z
   .object({
     schemaVersion: z.literal(1),
     streams: z.array(DiscordActiveStreamSchema).max(16),
-    frame: z
-      .object({
-        streamKey: z.string().min(1),
-        userId: z.string().min(1),
-        width: z.number().int().positive(),
-        height: z.number().int().positive(),
-        jpegBase64: z.string().min(1),
-        artifactRef: z.string().optional(),
-        capturedAt: z.string().datetime(),
-      })
-      .strict()
+    frame: DiscordStreamWatchObservationFrameSchema.optional(),
+    /** Chronological coarse-motion samples, oldest to newest. `frame` remains the latest for compatibility. */
+    frames: z
+      .array(DiscordStreamWatchObservationFrameSchema)
+      .max(DISCORD_STREAM_WATCH_FRAME_HISTORY_MAX)
       .optional(),
     decoder: z.enum(["ready", "missing", "error", "idle"]),
     decoderDetail: z.string().max(400).optional(),

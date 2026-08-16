@@ -2,10 +2,7 @@ import type { CaptainSessionLaneV2 } from "@clankie/protocol";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { CaptainDeps } from "./deps.ts";
-
-function json(value: unknown): { content: [{ type: "text"; text: string }]; details: unknown } {
-  return { content: [{ type: "text", text: JSON.stringify(value) }], details: value };
-}
+import { toolJson as json } from "./tools.ts";
 
 function operatorOnly(lane: CaptainSessionLaneV2): unknown | undefined {
   if (lane === "operator") return undefined;

@@ -41,9 +41,11 @@ Options weighed:
 ## Decision
 
 **Browser reach joins the bank.** The service reads the live MCP catalog and
-projects each declared `agent-browser` tool into the pi session. If the host is
-unavailable, the captain receives one truthful `browser_unavailable` tool
-instead of silently answering from memory.
+registers every `agent-browser` tool with pi. A small everyday set starts active;
+`browser_tool_search` activates uncommon tools additively when a task needs them.
+The host follows MCP pagination, so the catalog is complete rather than only
+the first page. If the host is unavailable, the captain receives one truthful
+`browser_unavailable` tool.
 
 **Browser access does not grant system tools.** [ADR 0095](0095-discord-system-actors.md)
 limits pi's shell and filesystem tools to the operator and configured system
@@ -51,21 +53,16 @@ actors. Browser projection follows its own catalog and risk classes.
 
 **`agent-browser` is Clankie's browser, not a worker's tool.** The Clankie
 service hosts it as a stdio MCP server (`agent-browser mcp --tools all`) and the
-captain reaches it through the same in-process capability bank. It
-is registered in the operator-authored MCP registry with one risk class per
-tool, so it is governed by the same doctrine vocabulary as every other
-connector.
+captain reaches it through the same in-process capability bank. Browser calls
+are serialized in the host because every room shares one browser state. Pi also
+marks each browser definition sequential, preserving order within one tool
+batch.
 
 **The profile is his, and it persists.** A browser that forgets every session
 turns each lookup behind a login into a password request, which is the
 opposite of the capability being added. The profile therefore lives in the
-service's private state root and is reused across runs
-(`AGENT_BROWSER_RESTORE_SAVE=always`, the deliberate opposite of the Codex
-projection's `never`). It is Clankie's own profile, never the operator's
-browser. The accumulated credentials are precisely why
-`agent_browser_set_credentials`, `agent_browser_eval`, and
-`agent_browser_get_cdp_url` are approval-class: the profile gets more valuable to an attacker
-over time, so the verbs that could exfiltrate it stay behind a human.
+service's private state root and is reused through `AGENT_BROWSER_PROFILE`. It
+is Clankie's own profile, never the operator's browser.
 
 Unlike the Codex projection, the captain's browser carries **the full action
 set**. The read-only policy that gates the Codex shell (`navigate`, `snapshot`,
@@ -73,15 +70,14 @@ set**. The read-only policy that gates the Codex shell (`navigate`, `snapshot`,
 general-purpose seat that can read a page but never fill a form is not doing
 the job asked of it.
 
-**`require_approval` grants for the captain instead of withholding.**
-`projectCaptainMcpToolGrants` differs from `projectMcpToolGrants` in exactly
-one way, and it is the safety mechanism that makes the full action set
-tractable. A worker cannot pause mid-tool for a human, so an approval-class
-tool in a worker's set would either execute unapproved or deadlock — hence the
-worker rule. The captain is the seat that _owns_ the approval envelope, so
-withholding approval-class tools from it would mean no principal could ever
-perform them. `deny` still denies, and an undeclared tool is still never
-projected.
+**The subprocess is hardened, not sandboxed.** It receives an allowlisted
+environment with a dedicated `HOME`, `TMPDIR`, socket directory, and profile;
+Clankie tokens, the SSH agent, and unrelated service credentials do not cross
+the spawn boundary. Raw `extraArgs` are refused so a model cannot replace those
+paths or inject arbitrary CLI flags. This remains the same macOS user and
+kernel, so it is not a filesystem or network security boundary. Strong
+containment means moving the complete MCP, daemon, and Chrome process tree into
+a dedicated VM or remote browser broker with no host mounts or credentials.
 
 ![ADR 0082: Clankie holds the browser](../diagrams/0082-clankie-holds-the-browser.jpg)
 
@@ -91,41 +87,25 @@ projected.
   answered on the same path as one asked in the TUI, which is what one
   character with one bank is always supposed to mean.
 - **A full-action browser sits behind `ask_clankie`, so untrusted room text can
-  reach it.** This is the real cost of the decision and it is accepted
-  deliberately. Three things bound it: the browser runs on Clankie's own
-  profile rather than the operator's, every credential- or script-bearing verb
-  (`eval`, `set_credentials`, `get_cdp_url`) is approval-class and stops for a
-  human, and
-  the registry stays a closed list so an undeclared tool is never projected.
-  Room speech still never carries approval authority
-  ([ADR 0050](0050-voice-presence-authority-tier.md)). The persistent profile
-  raises the stakes over time rather than lowering them, which is the reason
-  the approval gate is enforced by the service on every call instead of
-  by a step-scoped hook that a replayed turn could skip.
-- Risk classes are assigned per tool against the names `agent-browser mcp
---tools all` advertises (64 at v0.33.2), not against CLI command groups. The
-  host drops anything the registry does not declare, so upgrades verify against
-  a live `tools/list`.
-- An overlay can deny any `mcp.agent_browser.*` action outright.
+  reach it.** Content boundaries label page output but do not create a security
+  boundary. Authenticated profiles therefore carry materially more risk than
+  anonymous browsing until the process tree moves behind an OS boundary.
+- Dynamic activation keeps 150-plus schemas out of the initial prompt without
+  reducing the registered capability set. Providers with native deferred tools
+  use Pi's load point; other providers receive the additive active set.
+- Tool text is bounded to Pi's 50KB/2,000-line limits. MCP error results become
+  failed Pi tool results instead of successful error-shaped content.
 - Workers keep their own coding-oriented research paths.
 
 ## Current state
 
-The service owns the stdio MCP host, projects the live browser catalog into pi,
-applies the registry's risk classes, and routes calls through the approval gate.
-
-The live agent-browser 0.33.2 and Chrome 151 check projects 64 tools,
-14 approval-gated (every irreversible-write, publish-external, and destructive
-class under `self-build-lab`), with `agent_browser_open` and
-`agent_browser_get_title` returning a real page title. Reads and page
-interaction — including `click`, `fill`, and `screenshot` — run unattended.
+The service owns the stdio MCP host, registers the paginated live catalog in Pi,
+and starts with open/read/snapshot/click/fill/screenshot/current-URL plus the
+tool search loader. Browser calls are globally serialized.
 
 `CLANKIE_BROWSER_ENABLED` **defaults on**, and only an explicit falsey value
-turns it off. Enabling is not granting — a compiled doctrine profile and a registry
-are still both required, and a missing binary degrades to a logged
-unavailability rather than a boot failure. Those two stay explicit on purpose:
-the profile decides what he may actually call, so defaulting it would silently
-choose a permissive lab profile on someone's behalf.
+turns it off. A missing binary degrades to a logged unavailability rather than
+a boot failure.
 
 The free-play mind has no direct browser route. In a voice room, browser
 questions reach the captain through `ask_clankie`; direct play-loop

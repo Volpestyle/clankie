@@ -4,7 +4,7 @@ Status: accepted (James, 2026-07-10; VUH-756 umbrella).
 
 ## Decision
 
-Captain model access is configured through three cooperating layers:
+Model access is configured through three cooperating layers:
 
 1. **Model registry** (`packages/model-registry`) — the models.dev catalog fetched programmatically with a disk cache (5-minute TTL, atomic writes) and a vendored snapshot fallback, so the model list stays current without making network a requirement. Env escape hatches: `CLANKIE_MODELS_URL`, `CLANKIE_MODELS_PATH`, `CLANKIE_DISABLE_MODELS_FETCH`. Local/unlisted models overlay the catalog via custom-provider merge.
 2. **Credential store** (`packages/credential-broker`) — a discriminated union (`api` | `oauth` | `wellknown`) behind a `CredentialStore` interface; macOS Keychain backend by default, 0600-file fallback elsewhere (`CLANKIE_CREDENTIALS_FILE` override). Secrets never appear in config files or logs (redaction helpers). This diverges deliberately from opencode's plaintext `auth.json`.
@@ -16,10 +16,9 @@ invalidates prior local credentials immediately. Environment input is an
 explicit CI/test override and health exposes only content-free consistency. 3. **Provider layer** (`packages/model-provider`) — non-secret config in
 `~/.config/clankie/clankie.json` with a per-repo override, deep-merged and
 zod-validated; provider resolution (credential present ∪ env var declared by
-the registry ∪ config-declared); AI SDK instantiation with
+the registry ∪ config-declared); Pi provider projection for the captain; AI SDK instantiation for gameplay, voice, and media with
 `@ai-sdk/openai-compatible` as the universal adapter for local endpoints
-(Ollama, LM Studio/MLX, llama.cpp, vLLM — just `baseURL`); reasoning effort as
-per-model variants (`{id, headers, body}`) lowered to each API's wire format.
+(Ollama, LM Studio/MLX, llama.cpp, vLLM — just `baseURL`). The captain uses Pi's native thinking levels; non-captain AI SDK adapters lower their provider options at request time.
 
 **Captain auth supports four methods:** API keys, Anthropic Pro/Max subscription OAuth, ChatGPT/Codex subscription OAuth with its request adaptation (Codex backend, `ChatGPT-Account-Id`/`originator` headers, single-flight lazy refresh), and SuperGrok / X Premium device-code OAuth on the same `xai` slot as an API key (RFC 8628 against `auth.x.ai`, Bearer against `api.x.ai/v1`, no endpoint reroute). Worker harnesses remain provider-native adapters whose own logins are the source of worker auth; the `/auth` wizard guides those logins rather than re-implementing them.
 
@@ -33,10 +32,10 @@ The operator UX is the TUI's guided setup (`/auth`, `/provider`, `/model`,
 `/effort`, and `/voice`). Voice configuration uses the same registry and
 credential store.
 
-Session/context management follows the [architecture](../architecture.md): pi
-owns durable conversation history, replay, compaction, and step usage; the TUI
-stores a private conversation cursor and displays context usage from registry
-limits.
+Session/context management follows the [architecture](../architecture.md): Pi
+owns the captain's language-model runtime, durable conversation history,
+compaction, and step usage; the TUI stores a private conversation cursor and
+displays Pi's context limits.
 
 ## Options weighed
 

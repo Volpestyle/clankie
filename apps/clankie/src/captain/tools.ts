@@ -7,7 +7,15 @@ import {
   type DrawDiagramResult,
   isAttachableTurnMediaRef,
 } from "@clankie/protocol";
-import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { StringEnum } from "@earendil-works/pi-ai";
+import {
+  DEFAULT_MAX_BYTES,
+  DEFAULT_MAX_LINES,
+  defineTool,
+  truncateHead,
+  type InlineExtension,
+  type ToolDefinition,
+} from "@earendil-works/pi-coding-agent";
 import { Type, type TSchema } from "typebox";
 import type { CaptainDeps } from "./deps.ts";
 import type { LaneLog } from "./lane-log.ts";
@@ -42,9 +50,19 @@ export function roomKey(lane: string, targetId: string): string {
   return `${lane}:${targetId}`;
 }
 
-function json(value: unknown): { content: [{ type: "text"; text: string }]; details: unknown } {
-  return { content: [{ type: "text", text: JSON.stringify(value) }], details: value };
+export function toolJson(value: unknown): { content: [{ type: "text"; text: string }]; details: unknown } {
+  const serialized = JSON.stringify(value, null, 2) ?? String(value);
+  const truncated = truncateHead(serialized, {
+    maxBytes: DEFAULT_MAX_BYTES,
+    maxLines: DEFAULT_MAX_LINES,
+  });
+  const text = truncated.truncated
+    ? `${truncated.content}\n\n[Output truncated to ${String(truncated.outputBytes)} of ${String(truncated.totalBytes)} bytes; request a narrower result.]`
+    : truncated.content;
+  return { content: [{ type: "text", text }], details: value };
 }
+
+const json = toolJson;
 
 /**
  * The captain's authored tool bank. Coding tools (read/bash/edit/write) are
@@ -85,6 +103,7 @@ export function captainTools(
           }),
         ),
       }),
+      executionMode: "sequential",
       execute: async (_id, params) => {
         const result = await deps.media.generateImage({ schemaVersion: 1, ...params });
         if (result.outcome === "ok")
@@ -104,6 +123,7 @@ export function captainTools(
         prompt: Type.String({ minLength: 1, maxLength: 4000 }),
         requestId: Type.Optional(Type.String({ description: "Resume a render that came back pending." })),
       }),
+      executionMode: "sequential",
       execute: async (_id, params) => {
         const result = await deps.media.generateVideo({ schemaVersion: 1, ...params }, turn.room);
         if (result.outcome === "ok")
@@ -122,14 +142,14 @@ export function captainTools(
         "playing; 'start_refused' names a reason you can say out loud (body_held means someone else is already " +
         "driving your body); 'pending' means it is still spinning up — say so, never claim to be playing yet.",
       parameters: Type.Object({
-        environmentId: Type.Union([Type.Literal("pokemon-firered"), Type.Literal("pokemon-emerald")], {
+        environmentId: StringEnum(["pokemon-firered", "pokemon-emerald"], {
           default: "pokemon-firered",
         }),
       }),
       execute: async (_id, params) =>
         json(
           await startPlay(playPorts, {
-            environmentId: params.environmentId,
+            environmentId: params.environmentId as "pokemon-firered" | "pokemon-emerald",
             originLane: lane,
             requestedBy: turnActor(turn, lane),
           }),
@@ -152,11 +172,13 @@ export function captainTools(
       name: "observe_share",
       label: "Look at a screen share",
       description:
-        "Look at a Discord screen share in a voice channel you can see. Returns a still of the share when " +
+        "Look at a Discord screen share in a voice channel you can see. Returns up to four chronological " +
+        "stills, oldest to newest, when " +
         "the lab user body is watching it. If someone is sharing but you have no still, say that — do not invent " +
         "what is on their screen. Use it when someone asks what is on the share, what they are looking at, or " +
         "what is on screen in the call.",
       parameters: Type.Object({}),
+      executionMode: "sequential",
       execute: async () => {
         const observation = await deps.streamWatch.current();
         if (observation.streams.length === 0) {
@@ -174,13 +196,14 @@ export function captainTools(
             ...(observation.decoderDetail === undefined ? {} : { decoderDetail: observation.decoderDetail }),
             detail:
               observation.decoder === "missing"
-                ? "someone is sharing but ClankVox is not configured, so you cannot see the picture"
+                ? "someone is sharing but Vox is not built, so you cannot see the picture"
                 : "someone is sharing but you do not have a still yet",
           });
         }
         if (frame.artifactRef !== undefined && isAttachableTurnMediaRef(frame.artifactRef)) {
           turn.media = { artifactRef: frame.artifactRef, filename: `share-${frame.userId}.jpg` };
         }
+        const frames = observation.frames?.length ? observation.frames : [frame];
         return {
           content: [
             {
@@ -188,14 +211,23 @@ export function captainTools(
               text: JSON.stringify({
                 outcome: "frame",
                 streams: observation.streams,
-                width: frame.width,
-                height: frame.height,
+                sequence: "oldest_to_newest",
+                frameCount: frames.length,
+                capturedAt: frames.map((sample) => sample.capturedAt),
                 userId: frame.userId,
+                detail:
+                  frames.length > 1
+                    ? "Compare these chronological samples to infer coarse motion or change."
+                    : "Only one sample is available, so do not infer motion.",
               }),
             },
-            { type: "image" as const, data: frame.jpegBase64, mimeType: "image/jpeg" },
+            ...frames.map((sample) => ({
+              type: "image" as const,
+              data: sample.jpegBase64,
+              mimeType: "image/jpeg" as const,
+            })),
           ],
-          details: { outcome: "frame", streams: observation.streams },
+          details: { outcome: "frame", streams: observation.streams, frameCount: frames.length },
         };
       },
     }),
@@ -207,6 +239,7 @@ export function captainTools(
         "Use it when someone asks what you are doing, what is on screen, or how the run is going. " +
         "When a still is available it arrives as an image; say what you actually see.",
       parameters: Type.Object({}),
+      executionMode: "sequential",
       execute: async () => {
         const activity = await deps.activity.current();
         const still = (await deps.playSight?.still()) ?? {
@@ -322,7 +355,7 @@ export function captainTools(
         "still know tomorrow. Facts, not transcripts.",
       parameters: Type.Object({
         summary: Type.String({ minLength: 1, maxLength: CAPTAIN_EPISODE_SUMMARY_MAX }),
-        visibility: Type.Optional(Type.Union([Type.Literal("shareable"), Type.Literal("operator_private")])),
+        visibility: Type.Optional(StringEnum(["shareable", "operator_private"])),
       }),
       execute: async (_id, params) => {
         if (turn.targetId === undefined) throw new Error("Turn room attribution is unavailable");
@@ -330,7 +363,9 @@ export function captainTools(
           lane,
           targetId: turn.targetId,
           summary: params.summary,
-          ...(params.visibility === undefined ? {} : { visibility: params.visibility }),
+          ...(params.visibility === undefined
+            ? {}
+            : { visibility: params.visibility as "shareable" | "operator_private" }),
         });
         return json({ remembered: true });
       },
@@ -639,19 +674,9 @@ function diagramTools(deps: CaptainDeps, turn: TurnContext): ToolDefinition[] {
             name: Type.String({ minLength: 1, maxLength: 60 }),
             engine: Type.Optional(Type.String({ maxLength: 60 })),
             tone: Type.Optional(
-              Type.Union(
-                [
-                  Type.Literal("black"),
-                  Type.Literal("grey"),
-                  Type.Literal("blue"),
-                  Type.Literal("green"),
-                  Type.Literal("yellow"),
-                  Type.Literal("orange"),
-                  Type.Literal("red"),
-                  Type.Literal("violet"),
-                ],
-                { description: "Group related tables by colour." },
-              ),
+              StringEnum(["black", "grey", "blue", "green", "yellow", "orange", "red", "violet"], {
+                description: "Group related tables by colour.",
+              }),
             ),
             columns: Type.String({ minLength: 1, maxLength: 4000 }),
             footer: Type.Optional(Type.String({ maxLength: 600 })),
@@ -671,6 +696,7 @@ function diagramTools(deps: CaptainDeps, turn: TurnContext): ToolDefinition[] {
           ),
         ),
       }),
+      executionMode: "sequential",
       execute: async (_id, params) => {
         const result = await diagrams.drawErDiagram(
           DrawErDiagramRequestSchema.parse({ schemaVersion: 1, ...params }),
@@ -696,6 +722,7 @@ function diagramTools(deps: CaptainDeps, turn: TurnContext): ToolDefinition[] {
         lanes: Type.String({ minLength: 1, maxLength: 1200 }),
         steps: Type.String({ minLength: 1, maxLength: 8000 }),
       }),
+      executionMode: "sequential",
       execute: async (_id, params) => {
         const result = await diagrams.drawSequenceDiagram(
           DrawSequenceDiagramRequestSchema.parse({ schemaVersion: 1, ...params }),
@@ -707,50 +734,99 @@ function diagramTools(deps: CaptainDeps, turn: TurnContext): ToolDefinition[] {
   ];
 }
 
-/**
- * The browser, resolved from the live catalog when a session is built (ADR
- * 0082): the agent-browser host names the tools, this file never enumerates
- * them. When the host is unreachable he gets one honest tool that says so,
- * instead of a silently empty surface.
- */
-export async function browserTools(deps: CaptainDeps, turn: TurnContext): Promise<ToolDefinition[]> {
-  const catalog = await deps.browser.catalog();
-  if (!catalog.available || catalog.tools.length === 0) {
-    return [
-      defineTool({
-        name: "browser_unavailable",
-        label: "Browser status",
-        description:
-          "Report why your browser is not reachable right now. If this is the only browser tool you have, " +
-          "say you cannot browse and why, rather than implying you chose not to.",
-        parameters: Type.Object({}),
-        execute: async () =>
-          json({ available: false, reason: catalog.reason ?? "the browser host reported no tools" }),
-      }),
-    ];
-  }
-  return catalog.tools.map((tool) =>
-    defineTool({
-      name: `browser_${tool.name}`,
-      label: `Browser: ${tool.name}`,
-      description: tool.description,
-      // The MCP server's own JSON Schema, passed through so the model sees the
-      // arguments the tool actually takes. TypeBox validates plain JSON Schema.
-      parameters: (tool.inputSchema ?? Type.Object({})) as TSchema,
-      execute: async (_id, params) => {
-        const result = await deps.browser.call({
-          schemaVersion: 1,
-          tool: tool.name,
-          arguments: (params ?? {}) as Record<string, unknown>,
+const INITIAL_BROWSER_TOOLS = new Set([
+  "agent_browser_open",
+  "agent_browser_read",
+  "agent_browser_snapshot",
+  "agent_browser_click",
+  "agent_browser_fill",
+  "agent_browser_screenshot",
+  "agent_browser_get_url",
+]);
+const BROWSER_TOOL_SEARCH = "browser_tool_search";
+
+/** Register the live browser catalog once, then reveal uncommon tools only when searched for. */
+export function browserExtension(deps: CaptainDeps, turn: TurnContext): InlineExtension {
+  return {
+    name: "captain-browser",
+    hidden: true,
+    async factory(pi) {
+      const catalog = await deps.browser.catalog();
+      if (!catalog.available || catalog.tools.length === 0) {
+        pi.registerTool({
+          name: "browser_unavailable",
+          label: "Browser status",
+          description: "Report why the browser is unavailable instead of pretending you chose not to browse.",
+          parameters: Type.Object({}),
+          execute: async () =>
+            json({ available: false, reason: catalog.reason ?? "the browser host reported no tools" }),
         });
-        if (result.outcome === "ok" && result.artifacts.length > 0) {
-          const artifact = result.artifacts.at(-1);
-          if (artifact !== undefined) {
-            turn.media = { artifactRef: artifact.artifactRef, filename: artifact.filename };
-          }
-        }
-        return json(result);
-      },
-    }),
-  );
+        return;
+      }
+
+      const registeredNames = new Set<string>();
+      for (const tool of catalog.tools) {
+        const name = `browser_${tool.name}`;
+        registeredNames.add(name);
+        pi.registerTool({
+          name,
+          label: `Browser: ${tool.name}`,
+          description: tool.description,
+          parameters: (tool.inputSchema ?? Type.Object({})) as TSchema,
+          executionMode: "sequential",
+          execute: async (_id, params) => {
+            const result = await deps.browser.call({
+              schemaVersion: 1,
+              tool: tool.name,
+              arguments: (params ?? {}) as Record<string, unknown>,
+            });
+            if (result.outcome === "ok" && result.isError) {
+              throw new Error(result.content || `${tool.name} failed`);
+            }
+            if (result.outcome === "ok" && result.artifacts.length > 0) {
+              const artifact = result.artifacts.at(-1);
+              if (artifact !== undefined) {
+                turn.media = { artifactRef: artifact.artifactRef, filename: artifact.filename };
+              }
+            }
+            return json(result);
+          },
+        });
+      }
+
+      pi.registerTool({
+        name: BROWSER_TOOL_SEARCH,
+        label: "Find browser tools",
+        description:
+          "Find and enable browser capabilities that are not in the small default set. Search by task, such as tabs, cookies, console errors, network requests, accessibility, viewport, or recording.",
+        parameters: Type.Object({
+          query: Type.String({ minLength: 1, maxLength: 200 }),
+          limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 10 })),
+        }),
+        executionMode: "sequential",
+        execute: async (_id, params) => {
+          const terms = params.query.toLowerCase().split(/[^a-z0-9]+/u).filter(Boolean);
+          const matches = catalog.tools
+            .filter((tool) => {
+              const haystack = `${tool.name.replace(/^agent_browser_/u, "")} ${tool.description}`.toLowerCase();
+              return terms.every((term) => haystack.includes(term));
+            })
+            .slice(0, params.limit ?? 5)
+            .map((tool) => `browser_${tool.name}`);
+          const active = pi.getActiveTools();
+          const added = matches.filter((name) => !active.includes(name));
+          if (added.length > 0) pi.setActiveTools([...active, ...added]);
+          return json({ matches, added });
+        },
+      });
+
+      pi.on("session_start", () => {
+        const keep = pi.getActiveTools().filter((name) => !registeredNames.has(name));
+        const initial = catalog.tools
+          .filter((tool) => INITIAL_BROWSER_TOOLS.has(tool.name))
+          .map((tool) => `browser_${tool.name}`);
+        pi.setActiveTools([...new Set([...keep, ...initial, BROWSER_TOOL_SEARCH])]);
+      });
+    },
+  };
 }

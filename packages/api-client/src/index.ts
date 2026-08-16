@@ -277,16 +277,13 @@ export class ClankieApiClient {
       : DiscordUserSessionOptInSchema.parse(result.optIn);
   }
 
-  public async reportDiscordStreamWatch(
-    report: DiscordStreamWatchReport,
-  ): Promise<DiscordStreamWatchObservation> {
+  public async reportDiscordStreamWatch(report: DiscordStreamWatchReport): Promise<void> {
     const body = DiscordStreamWatchReportSchema.parse(report);
-    const result = await this.request<unknown>(DISCORD_STREAM_WATCH_PATH, {
+    await this.request<void>(DISCORD_STREAM_WATCH_PATH, {
       method: "POST",
       headers: this.captainHeaders(),
       body: JSON.stringify(body),
     });
-    return DiscordStreamWatchObservationSchema.parse(result);
   }
 
   public async inspectDiscordStreamWatch(): Promise<DiscordStreamWatchObservation> {

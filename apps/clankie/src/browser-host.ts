@@ -42,8 +42,8 @@ export function browserEnabled(value: string | undefined): boolean {
   return !["0", "false", "no", "off"].includes(normalized);
 }
 
-/** One tool result is capped well below the protocol's ceiling so a page dump cannot flood a turn. */
-const MAX_RESULT_CHARACTERS = 100_000;
+/** Pi's own tool-output ceiling; the captain wrapper applies the byte/line check too. */
+const MAX_RESULT_CHARACTERS = 50_000;
 /** Matches the Discord attachment ceiling; a larger image could never be sent anyway. */
 const MAX_ARTIFACT_BYTES = 25 * 1024 * 1024;
 const ARTIFACT_SUBDIRECTORY = "browser";
@@ -193,8 +193,12 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
   // of the Codex projection's `never`: staying logged in is the point.
   const profileDirectory = join(options.runnerStateRoot, "browser", "profile");
   const socketDirectory = join(options.runnerStateRoot, "browser", "run");
+  const homeDirectory = join(options.runnerStateRoot, "browser", "home");
+  const tempDirectory = join(options.runnerStateRoot, "browser", "tmp");
   await mkdir(profileDirectory, { recursive: true, mode: 0o700 });
   await mkdir(socketDirectory, { recursive: true, mode: 0o700 });
+  await mkdir(homeDirectory, { recursive: true, mode: 0o700 });
+  await mkdir(tempDirectory, { recursive: true, mode: 0o700 });
 
   // Artifacts land under the root the Discord attachment resolver already
   // serves, so a screenshot is attachable without a second copy or a second
@@ -209,11 +213,16 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
   const child = (options.spawnImpl ?? spawn)(command, [...(options.args ?? DEFAULT_BROWSER_ARGS)], {
     stdio: ["pipe", "pipe", "pipe"],
     env: {
-      ...environment,
+      PATH: environment.PATH,
+      LANG: environment.LANG,
+      HOME: homeDirectory,
+      TMPDIR: tempDirectory,
       AGENT_BROWSER_SOCKET_DIR: socketDirectory,
-      AGENT_BROWSER_PROFILE_DIR: profileDirectory,
-      AGENT_BROWSER_RESTORE_SAVE: "always",
+      AGENT_BROWSER_PROFILE: profileDirectory,
+      AGENT_BROWSER_NAMESPACE: "clankie",
+      AGENT_BROWSER_SESSION: "clankie",
       AGENT_BROWSER_CONTENT_BOUNDARIES: "1",
+      AGENT_BROWSER_MAX_OUTPUT: String(MAX_RESULT_CHARACTERS),
     },
   }) as ChildProcessWithoutNullStreams;
   child.stderr?.setEncoding("utf8");
@@ -223,7 +232,9 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
 
   const client = new StdioMcpClient(child);
   let descriptors: BrowserToolDescriptor[] | undefined;
+  let descriptorsLoading: Promise<BrowserToolDescriptor[]> | undefined;
   let unavailableReason: string | undefined;
+  let callTail = Promise.resolve();
 
   try {
     await client.request(
@@ -250,28 +261,127 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
 
   async function loadDescriptors(): Promise<BrowserToolDescriptor[]> {
     if (descriptors !== undefined) return descriptors;
-    const result = (await client.request("tools/list", {}, REQUEST_TIMEOUT_MS)) as {
-      tools?: { name?: unknown; description?: unknown; inputSchema?: unknown }[];
-    };
-    const projected: BrowserToolDescriptor[] = [];
-    for (const tool of result.tools ?? []) {
-      if (typeof tool.name !== "string") continue;
-      // Full catalog, minus an optional blocklist. Doctrine projection left
-      // with the governance machinery; restraint, when wanted, is the blocklist.
-      if (blockedTools.has(tool.name)) continue;
-      projected.push({
-        name: tool.name,
-        description: typeof tool.description === "string" ? tool.description.slice(0, 4_000) : tool.name,
-        inputSchema:
-          tool.inputSchema !== null && typeof tool.inputSchema === "object"
-            ? (tool.inputSchema as Record<string, unknown>)
-            : { type: "object" },
-        riskClass: "read",
-        requiresApproval: false,
+    if (descriptorsLoading !== undefined) return descriptorsLoading;
+    descriptorsLoading = (async () => {
+      const projected: BrowserToolDescriptor[] = [];
+      const seenCursors = new Set<string>();
+      let cursor: string | undefined;
+      do {
+        const result = (await client.request(
+          "tools/list",
+          cursor === undefined ? {} : { cursor },
+          REQUEST_TIMEOUT_MS,
+        )) as {
+          tools?: { name?: unknown; description?: unknown; inputSchema?: unknown }[];
+          nextCursor?: unknown;
+        };
+        for (const tool of result.tools ?? []) {
+          if (typeof tool.name !== "string" || blockedTools.has(tool.name)) continue;
+          projected.push({
+            name: tool.name,
+            description: typeof tool.description === "string" ? tool.description.slice(0, 4_000) : tool.name,
+            inputSchema:
+              tool.inputSchema !== null && typeof tool.inputSchema === "object"
+                ? (tool.inputSchema as Record<string, unknown>)
+                : { type: "object" },
+            riskClass: "read",
+            requiresApproval: false,
+          });
+        }
+        const next =
+          typeof result.nextCursor === "string" && result.nextCursor.length > 0
+            ? result.nextCursor
+            : undefined;
+        if (next !== undefined && seenCursors.has(next)) throw new Error("browser_catalog_cursor_repeated");
+        if (next !== undefined) seenCursors.add(next);
+        cursor = next;
+      } while (cursor !== undefined);
+      descriptors = projected;
+      return projected;
+    })();
+    try {
+      return await descriptorsLoading;
+    } finally {
+      descriptorsLoading = undefined;
+    }
+  }
+
+  async function call(request: CallBrowserToolRequest): Promise<CallBrowserToolResult> {
+    if (Object.hasOwn(request.arguments, "extraArgs")) {
+      return CallBrowserToolResultSchema.parse({
+        outcome: "refused",
+        tool: request.tool,
+        reason: "unknown_tool",
+        detail: "Raw agent-browser CLI arguments are not available through Clankie",
       });
     }
-    descriptors = projected;
-    return projected;
+    if (blockedTools.has(request.tool)) {
+      return CallBrowserToolResultSchema.parse({
+        outcome: "refused",
+        tool: request.tool,
+        reason: "unknown_tool",
+        detail: `${request.tool} is on this deployment's browser blocklist`,
+      });
+    }
+    if (unavailableReason !== undefined || client.closed) {
+      return CallBrowserToolResultSchema.parse({
+        outcome: "refused",
+        tool: request.tool,
+        reason: "browser_unavailable",
+        detail: unavailableReason ?? "browser_host_closed",
+      });
+    }
+    let result: {
+      content?: { type?: unknown; text?: unknown; data?: unknown; mimeType?: unknown }[];
+      isError?: unknown;
+    };
+    try {
+      result = (await client.request(
+        "tools/call",
+        { name: request.tool, arguments: request.arguments },
+        REQUEST_TIMEOUT_MS,
+      )) as typeof result;
+    } catch (error) {
+      return CallBrowserToolResultSchema.parse({
+        outcome: "refused",
+        tool: request.tool,
+        reason: "browser_unavailable",
+        detail: error instanceof Error ? error.message.slice(0, 500) : "browser_call_failed",
+      });
+    }
+    const text = (result.content ?? [])
+      .filter((block) => block.type === "text" && typeof block.text === "string")
+      .map((block) => block.text as string)
+      .join("\n");
+    // Screenshots return a text path *and* an image block. Keeping only the
+    // text is what let a screenshot look successful while no pixels existed
+    // anywhere he could reach: he was handed a path on the runner's disk and
+    // rendered it as though it were an attachment.
+    const artifacts: BrowserArtifact[] = [];
+    for (const block of result.content ?? []) {
+      if (block.type !== "image" || typeof block.data !== "string") continue;
+      const mimeType = typeof block.mimeType === "string" ? block.mimeType : "application/octet-stream";
+      const bytes = Buffer.from(block.data, "base64");
+      if (bytes.byteLength === 0 || bytes.byteLength > MAX_ARTIFACT_BYTES) continue;
+      const digest = createHash("sha256").update(bytes).digest("hex");
+      const extension = ARTIFACT_EXTENSIONS[mimeType] ?? "bin";
+      const relativePath = join(ARTIFACT_SUBDIRECTORY, `${digest}.${extension}`);
+      await writeFile(join(artifactRoot, relativePath), bytes, { mode: 0o600 });
+      artifacts.push({
+        artifactRef: `sha256:${digest}:${relativePath}`,
+        filename: `${request.tool.replace(/^agent_browser_/u, "")}-${digest.slice(0, 8)}.${extension}`,
+        mimeType,
+        byteLength: bytes.byteLength,
+      });
+    }
+    options.logger.info({ event: "browser.host.call", tool: request.tool }, "browser tool called");
+    return CallBrowserToolResultSchema.parse({
+      outcome: "ok",
+      tool: request.tool,
+      content: text.slice(0, MAX_RESULT_CHARACTERS),
+      isError: result.isError === true,
+      artifacts,
+    });
   }
 
   return {
@@ -300,74 +410,13 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
       }
     },
 
-    async call(request: CallBrowserToolRequest): Promise<CallBrowserToolResult> {
-      if (blockedTools.has(request.tool)) {
-        return CallBrowserToolResultSchema.parse({
-          outcome: "refused",
-          tool: request.tool,
-          reason: "unknown_tool",
-          detail: `${request.tool} is on this deployment's browser blocklist`,
-        });
-      }
-      if (unavailableReason !== undefined || client.closed) {
-        return CallBrowserToolResultSchema.parse({
-          outcome: "refused",
-          tool: request.tool,
-          reason: "browser_unavailable",
-          detail: unavailableReason ?? "browser_host_closed",
-        });
-      }
-      let result: {
-        content?: { type?: unknown; text?: unknown; data?: unknown; mimeType?: unknown }[];
-        isError?: unknown;
-      };
-      try {
-        result = (await client.request(
-          "tools/call",
-          { name: request.tool, arguments: request.arguments },
-          REQUEST_TIMEOUT_MS,
-        )) as typeof result;
-      } catch (error) {
-        return CallBrowserToolResultSchema.parse({
-          outcome: "refused",
-          tool: request.tool,
-          reason: "browser_unavailable",
-          detail: error instanceof Error ? error.message.slice(0, 500) : "browser_call_failed",
-        });
-      }
-      const text = (result.content ?? [])
-        .filter((block) => block.type === "text" && typeof block.text === "string")
-        .map((block) => block.text as string)
-        .join("\n");
-      // Screenshots return a text path *and* an image block. Keeping only the
-      // text is what let a screenshot look successful while no pixels existed
-      // anywhere he could reach: he was handed a path on the runner's disk and
-      // rendered it as though it were an attachment.
-      const artifacts: BrowserArtifact[] = [];
-      for (const block of result.content ?? []) {
-        if (block.type !== "image" || typeof block.data !== "string") continue;
-        const mimeType = typeof block.mimeType === "string" ? block.mimeType : "application/octet-stream";
-        const bytes = Buffer.from(block.data, "base64");
-        if (bytes.byteLength === 0 || bytes.byteLength > MAX_ARTIFACT_BYTES) continue;
-        const digest = createHash("sha256").update(bytes).digest("hex");
-        const extension = ARTIFACT_EXTENSIONS[mimeType] ?? "bin";
-        const relativePath = join(ARTIFACT_SUBDIRECTORY, `${digest}.${extension}`);
-        await writeFile(join(artifactRoot, relativePath), bytes, { mode: 0o600 });
-        artifacts.push({
-          artifactRef: `sha256:${digest}:${relativePath}`,
-          filename: `${request.tool.replace(/^agent_browser_/u, "")}-${digest.slice(0, 8)}.${extension}`,
-          mimeType,
-          byteLength: bytes.byteLength,
-        });
-      }
-      options.logger.info({ event: "browser.host.call", tool: request.tool }, "browser tool called");
-      return CallBrowserToolResultSchema.parse({
-        outcome: "ok",
-        tool: request.tool,
-        content: text.slice(0, MAX_RESULT_CHARACTERS),
-        isError: result.isError === true,
-        artifacts,
-      });
+    call(request: CallBrowserToolRequest): Promise<CallBrowserToolResult> {
+      const queued = callTail.then(() => call(request));
+      callTail = queued.then(
+        () => undefined,
+        () => undefined,
+      );
+      return queued;
     },
 
     close: () => client.close(),

@@ -46,11 +46,39 @@ describe("Discord stream-watch projection", () => {
     expect(next.streams[0]?.watching).toBe(true);
     expect(next.frame?.width).toBe(1280);
     expect(next.frame?.artifactRef).toBeDefined();
+    expect(next.frames).toHaveLength(1);
     expect(isShareArtifactRef(next.frame?.artifactRef ?? "")).toBe(true);
     const written = await readFile(join(root, "shares", `${next.frame!.artifactRef!.split(":")[1]}.jpg`));
     expect(written.equals(jpeg)).toBe(true);
 
     projection.apply({ schemaVersion: 1, source: "bot", streams: [], decoder: "idle" });
     expect(projection.current().streams[0]?.watching).toBe(true);
+  });
+
+  it("keeps the latest four frames in chronological order for coarse motion", () => {
+    const projection = new DiscordStreamWatchProjection();
+
+    for (let second = 1; second <= 5; second += 1) {
+      projection.apply({
+        schemaVersion: 1,
+        source: "user_session",
+        streams: [{ ...stream, watching: true, hasFrame: true }],
+        decoder: "ready",
+        frame: {
+          schemaVersion: 1,
+          streamKey: stream.streamKey,
+          userId: "u1",
+          width: 1280,
+          height: 720,
+          jpegBase64: Buffer.from(`frame-${second}`).toString("base64"),
+          capturedAt: `2026-08-15T00:00:0${second}.000Z`,
+        },
+      });
+    }
+
+    expect(
+      projection.current().frames?.map((frame) => Buffer.from(frame.jpegBase64, "base64").toString()),
+    ).toEqual(["frame-2", "frame-3", "frame-4", "frame-5"]);
+    expect(projection.current().frame?.capturedAt).toBe("2026-08-15T00:00:05.000Z");
   });
 });

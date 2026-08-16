@@ -16,13 +16,19 @@ const logger = { info: () => undefined, warn: () => undefined };
  */
 function fakeServer(options: {
   tools?: { name: string; description?: string; inputSchema?: unknown }[];
+  toolPages?: { name: string; description?: string; inputSchema?: unknown }[][];
   onCall?: (
     name: string,
     args: unknown,
-  ) => {
-    content: { type: string; text?: string; data?: string; mimeType?: string }[];
-    isError?: boolean;
-  };
+  ) =>
+    | {
+        content: { type: string; text?: string; data?: string; mimeType?: string }[];
+        isError?: boolean;
+      }
+    | Promise<{
+        content: { type: string; text?: string; data?: string; mimeType?: string }[];
+        isError?: boolean;
+      }>;
 }) {
   const stdin = new PassThrough();
   const stdout = new PassThrough();
@@ -50,19 +56,25 @@ function fakeServer(options: {
       const message = JSON.parse(line) as {
         id?: number;
         method: string;
-        params?: { name?: string; arguments?: unknown };
+        params?: { name?: string; arguments?: unknown; cursor?: string };
       };
       if (message.id === undefined) continue;
       const reply = (result: unknown) =>
         stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: message.id, result })}\n`);
       if (message.method === "initialize") reply({ protocolVersion: "2025-11-25", capabilities: {} });
-      else if (message.method === "tools/list") reply({ tools: options.tools ?? [] });
-      else if (message.method === "tools/call") {
-        reply(
+      else if (message.method === "tools/list") {
+        const page = Number(message.params?.cursor ?? "0");
+        const pages = options.toolPages ?? [options.tools ?? []];
+        reply({
+          tools: pages[page] ?? [],
+          ...(page + 1 < pages.length ? { nextCursor: String(page + 1) } : {}),
+        });
+      } else if (message.method === "tools/call") {
+        void Promise.resolve(
           options.onCall?.(message.params?.name ?? "", message.params?.arguments) ?? {
             content: [{ type: "text", text: "ok" }],
           },
-        );
+        ).then(reply);
       }
     }
   });
@@ -135,6 +147,19 @@ describe("browser host", () => {
     });
   });
 
+  it("loads every paginated catalog page", async () => {
+    const created = await build(
+      fakeServer({
+        toolPages: [
+          [{ name: "first", inputSchema: { type: "object" } }],
+          [{ name: "second", inputSchema: { type: "object" } }],
+        ],
+      }),
+    );
+
+    expect((await created.catalog()).tools.map((tool) => tool.name)).toEqual(["first", "second"]);
+  });
+
   it("calls a granted tool and returns its bounded text", async () => {
     const created = await build(
       fakeServer({
@@ -186,5 +211,31 @@ describe("browser host", () => {
     );
     const result = await created.call({ schemaVersion: 1, tool: "eval", arguments: {} });
     expect(result).toMatchObject({ outcome: "refused", reason: "unknown_tool" });
+  });
+
+  it("serializes calls across sessions and rejects raw CLI arguments", async () => {
+    let active = 0;
+    let maxActive = 0;
+    const created = await build(
+      fakeServer({
+        tools: [{ name: "navigate", inputSchema: { type: "object" } }],
+        async onCall() {
+          active += 1;
+          maxActive = Math.max(maxActive, active);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          active -= 1;
+          return { content: [{ type: "text", text: "ok" }] };
+        },
+      }),
+    );
+
+    await Promise.all([
+      created.call({ schemaVersion: 1, tool: "navigate", arguments: {} }),
+      created.call({ schemaVersion: 1, tool: "navigate", arguments: {} }),
+    ]);
+    expect(maxActive).toBe(1);
+    await expect(
+      created.call({ schemaVersion: 1, tool: "navigate", arguments: { extraArgs: ["--profile", "/tmp/x"] } }),
+    ).resolves.toMatchObject({ outcome: "refused" });
   });
 });

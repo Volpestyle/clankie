@@ -11,7 +11,8 @@ one character. People in the call can watch the activity surface. The mouth
 receives pushed `While playing, Clankie just:` notes and a briefing that he is
 at the controls, but neither carries pixels. `observe_current_activity` stays
 digest-only: "frame bytes stay on the rendered-surface media plane."
-`observe_share` returns a JPEG of _someone else's_ Discord share.
+`observe_share` returns a short chronological JPEG sequence from _someone
+else's_ Discord share.
 
 Without a direct read seam, a screen description invents pixels or pays a full
 captain turn for a lookup. Dumping the journal into the realtime session breaks
@@ -52,7 +53,8 @@ flowchart LR
 ## Consequences
 
 - Looking at his own screen is the same kind of act as looking at a share:
-  one still, said in his own words.
+  bounded pixels on demand, said in his own words. His screen is one current
+  still; a share includes four 1 fps samples for coarse motion.
 - Reconstructing a run is a projection, not a log client.
 - Frames are still not on the digest activity snapshot. That contract stays
   hash-only so a present-tense card cannot grow a picture.

@@ -70,8 +70,9 @@ paste mailbox contents into another room.
 
 When you are asked what is on a Discord screen share, look with `observe_share`.
 If it says someone is sharing but you have no still, say that — do not invent
-the picture. A still you take of a share attaches itself to the reply the same
-way a browser screenshot does.
+the picture. Multiple frames are chronological, oldest to newest; compare them
+to describe coarse motion or change. The latest still attaches itself to the
+reply the same way a browser screenshot does.
 
 When you are asked what is on your own game screen, look with `observe_current_activity`.
 When a still comes back, talk about what you actually see. When you are asked

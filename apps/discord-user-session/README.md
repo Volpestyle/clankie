@@ -96,15 +96,14 @@ widen it.
 ## Watching screen shares
 
 The official bot cannot receive Go Live video. This process can. When someone
-in an allowlisted channel hits Share Screen, the lab body joins muted/deafened,
-sends OP20 `STREAM_WATCH`, and — if a ClankVox binary is configured — decodes
-sampled JPEGs. The captain looks with `observe_share`. The bot keeps talking.
+in an allowlisted channel hits Share Screen, the lab body joins the channel,
+sends OP20 `STREAM_WATCH`, and Vox decodes one JPEG per second. The service
+keeps a four-frame rolling window, and the captain looks across those
+chronological samples with `observe_share`; the active lab body remains the
+one mouth.
 
 ```bash
-# Build ClankVox from its own AGPL tree, then:
-cp /path/to/clankvox ~/.clankie/bin/clankvox
-# or
-export CLANKVOX_BIN=/path/to/clankvox
+pnpm --filter @clankie/vox build
 ```
 
 Enable the body in `/discord` → Lab user body (token, allowlists that include
@@ -124,7 +123,7 @@ mint those receipts.
 
 `go_live_start` is refused on the official bot. On this process it:
 
-1. Joins the target voice channel muted and deafened
+1. Joins the target voice channel as the active lab body
 2. Sends OP18 `STREAM_CREATE`, then OP22 unpause
 3. Hands stream-server credentials to ClankVox
 4. Plays an optional `sourceUrl`, or pumps the live activity PNG snapshot
@@ -132,9 +131,11 @@ mint those receipts.
 
 Songs go through the model, not a chat parser. Text uses the captain's
 `youtube_search` / `music_play` tools (they POST to this process on
-`/music/*`); voice uses the same tool names on the realtime session. Both
-hit one queue. On this body the sink is Go Live video. On the official bot
-the same queue plays audio in voice. One track never uses both sinks.
+`/music/*`); voice uses the same tool names on the realtime session. The
+current Go Live URL pipeline is video-only and strips source audio. Audible
+synchronized music remains unavailable on the lab body until its ordinary
+voice media path moves onto Vox; the official bot is down while this body is
+active.
 
 Voice presence is agentic too ([ADR 0062](../../docs/adr/0062-voice-join-by-asking.md)).
 The captain's argument-free `voice_join` / `voice_leave` tools POST to this
@@ -150,7 +151,7 @@ on this body, but only after the gateway freshly resolves the owner in the
 active allowlisted voice channel.
 
 A leftover optional GPL selfbot publisher (`go-live-media.ts`) can still be
-injected in tests. Production uses ClankVox. Without a running lab process,
+injected in tests. Production uses `@clankie/vox`. Without a running lab process,
 `go_live_start` throws `discord_presence_go_live_media_unavailable`.
 
 **Account risk.** Automating a normal Discord account violates Discord's terms
