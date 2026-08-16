@@ -106,8 +106,9 @@ media failure, and a clean leave.
   maintained protocol implementation without adding a required isolation
   boundary.
 - **Normal-user voice or Go Live transport** — rejected for official-bot voice.
-  Screen watch/publish remains the separately opted-in personal-lab decision in
-  ADR 0024 and never shares this session.
+  The separately opted-in screen-watch/publish path later shipped in
+  [ADR 0098 (user-session shares)](0098-user-session-watches-discord-shares.md)
+  and never shares this session.
 - **Local temporary-file STT/TTS** — rejected because the existing brokered
   speech provider supports a bounded memory-only path and avoids raw-audio
   filesystem retention.
@@ -118,8 +119,9 @@ media failure, and a clean leave.
   readiness.
 - A live Discord server and three consenting humans remain necessary to call
   the group-voice row complete; deterministic tests cannot substitute for it.
-- Discord screen watch/publish still needs its isolated user-session media
-  owner. This ADR grants no normal-user token capability.
+- Discord screen watch/publish uses the isolated user-session Vox media owner
+  from [ADR 0100](0100-vox-is-an-owned-native-media-package.md). This ADR grants
+  no normal-user token capability.
 - [ADR 0048](0048-discord-user-session-transport.md) reuses this media owner
   behind the personal-lab user session through a custom gateway adapter. The
   single-media-owner decision constrains the media stack, not which credential

@@ -17,11 +17,11 @@ flowchart LR
 ```
 
 Exactly one unexpired writer lease may own a character/world pair. Capability
-tokens and connection credentials stay in service memory; durable records hold
+tokens and connection credentials stay in host memory; durable records hold
 only a token fingerprint and the strict credential-free v2 lease. The runtime
-dual-reads legacy v1 Minecraft-shaped sessions, normalizes them once, and
-single-writes v2 records. Every action ID is registered before adapter dispatch,
-so a repeated command or restart
+normalizes persisted v1 sessions through the `legacy_v1` migration profile and
+writes v2 records. Every action ID is registered before adapter dispatch, so a
+repeated command or restart
 returns the recorded result instead of repeating an external side effect.
 One live host process owns each state directory; a replacement takes ownership
 through restart reconciliation rather than concurrent file access.

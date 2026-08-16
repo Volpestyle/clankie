@@ -87,5 +87,5 @@ acting.
   not survive process death — the GBA adapter cannot reattach an in-memory core
   — and [ADR 0060](0060-progress-as-minted-checkpoints.md) provides durable
   progress across restarts.
-- Fail-closed tests assert `expired` plus successful recovery in the GBA and
-  PokeMMO suites. Separate assertions keep emergency stop terminal.
+- Fail-closed tests assert `expired` plus successful recovery in the GBA suite.
+  Separate assertions keep emergency stop terminal.

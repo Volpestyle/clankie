@@ -1,7 +1,9 @@
 # ADR 0088: A screenshot is something he shows you
 
 Status: accepted (James, 2026-08-09). Widens the attachable-media boundary drawn
-by [ADR 0085](0085-a-picture-he-makes-is-something-he-says.md).
+by [ADR 0085](0085-a-picture-he-makes-is-something-he-says.md). The arbitrary-file
+approval path cited at ratification was later removed; governed turn capture
+remains the current boundary.
 
 ## Context
 
@@ -30,20 +32,19 @@ presence write use it.
 their artifact refs to `isAttachableTurnMediaRef`; an accepted ref becomes the
 turn's media. Nothing the model writes is consulted.
 
-**Everything else keeps its approval.** A repository file, a support bundle, an
-evidence archive — anything under the attachment root that neither governed host
-minted — is still `send_attachment`, still `publish-external`, still gated.
+**Everything else stays outside turn media.** A repository file, support bundle,
+or evidence archive that no governed host minted cannot enter the reply capture.
 
 ## Consequences
 
-- What reaches a channel without an approval includes pictures his governed
+- What reaches a channel through turn capture includes pictures his governed
   tools produce, including any page he can
   render — including pages behind logins his browser profile holds. The
   containment argument is about provenance; it does not constrain subject
   matter. A prompt-injected page that talks him into capturing something
   sensitive has a one-call path into a room.
-- System tools remain separately governed by actor and lane (ADR 0086); they do
-  not assign turn media.
+- System tools remain separately governed by actor and lane
+  ([ADR 0086](0086-clankie-holds-a-shell.md)); they do not assign turn media.
 - Only the last image of a turn attaches, unchanged from ADR 0085. Three
   screenshots means the one he settled on.
 - Tests prove browser attachment and pin every rejection: nested paths,

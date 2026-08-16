@@ -18,14 +18,18 @@ the `voice` role.
 
 Go Live video send/receive is documented separately in [go-live.md](./go-live.md).
 
+This document describes implemented Vox audio capability. The current Clankie
+product keeps ordinary Discord voice and audible music on `@discordjs/voice`;
+only lab-user screen watch and Go Live are wired through Vox.
+
 ## Inbound Audio Receive
 
 The Discord `voice` transport receives RTP packets from Discord and processes
 them in this order:
 
-1. RTP header parse (this yields the `header_size` the transport decrypt needs
-   as its AAD boundary, matching the "rtpsize AAD Rules" in
-   [go-live.md](./go-live.md))
+1. RTP header parse (this locates the payload; transport decrypt recomputes the
+   fixed-header, CSRC, and extension-prefix AAD described in
+   [go-live.md](./go-live.md), rather than using the full `header_size`)
 2. transport decrypt using the negotiated RTP-size AEAD mode
 3. SSRC-to-user lookup for the speaking user
 4. DAVE decrypt for that user
@@ -82,7 +86,8 @@ Music also emits lifecycle events back into the main loop, including:
 - `music_error`
 - `music_gain_reached`
 
-Those events let Clankie coordinate reply handoff, ducking, and the Go Live sender lifecycle.
+Those events are available for a future Clankie voice-owner migration; the
+current product does not connect native Vox music to its shared queue.
 
 ## TTS Buffering And Telemetry
 

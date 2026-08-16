@@ -1,6 +1,8 @@
 # Discord activity surface
 
 The activity plane's rendering surface ([ADR 0047](../../docs/adr/0047-discord-activity-presence-plane.md)).
+The [Discord media guide](../../docs/discord-media.md) distinguishes this public
+viewer from lab-user Go Live publishing and inbound screen-share watching.
 
 Discord blocks video publication from bot accounts, so Go Live is unavailable to
 an official bot and every library that implements it depends on a normal-user
@@ -16,8 +18,8 @@ voice surface rather than being duplicated here.
 
 ```mermaid
 flowchart LR
-  core["mGBA core (host)<br/>ROM never leaves"] --> stream["GbaFrameStream<br/>capped · deduped"]
-  stream --> hub["RenderedSurfaceHub<br/>latest frame + overlay"]
+  core["mGBA core (body holder)<br/>ROM never leaves"] --> producer["producer sink<br/>capped · lossy"]
+  producer --> hub["RenderedSurfaceHub<br/>latest frame + overlay"]
   hub -->|"/.proxy/frames"| iframe["activity iframe<br/>canvas + overlay"]
 ```
 
@@ -50,7 +52,7 @@ settings' `discord` block:
 ```jsonc
 {
   "activityTunnelName": "clankie-activity", // cloudflared tunnel create <name>
-  "activityTunnelHostname": "clankie.example.com", // the DNS route to it
+  "activityTunnelHostname": "activity.clankie.bot", // the DNS route to it
 }
 ```
 
@@ -66,7 +68,7 @@ tunnel: clankie-activity
 credentials-file: /Users/<you>/.cloudflared/<tunnel-uuid>.json
 
 ingress:
-  - hostname: activity.example.com
+  - hostname: activity.clankie.bot
     service: http://127.0.0.1:4320 # the viewer, never the producer
   - service: http_status:404
 ```
@@ -79,10 +81,15 @@ Full first-time setup, once the hostname's zone is on Cloudflare:
 ```bash
 cloudflared tunnel login
 cloudflared tunnel create clankie-activity
-cloudflared tunnel route dns clankie-activity activity.example.com
+cloudflared tunnel route dns clankie-activity activity.clankie.bot
 # write ~/.cloudflared/config.yml as above, set both settings, then:
 clankie restart tunnel
 ```
+
+In the Discord Developer Portal, map the Activity's root URL and Entry Point to
+`https://activity.clankie.bot/`. The public hostname is also directly reachable;
+Discord's `discordsays.com` proxy is not an authentication boundary. Keep the
+producer listener absent from every URL mapping and tunnel rule.
 
 The zone must be **active** in Cloudflare, not merely added. A pending zone
 serves the routed hostname as a bare `*.cfargotunnel.com` CNAME that resolves to
@@ -113,10 +120,10 @@ distinguishes three states an operator repairs differently:
 
 ## Two listeners, on purpose
 
-| Listener | Bind      | Exposure                       | Purpose                             |
-| -------- | --------- | ------------------------------ | ----------------------------------- |
-| Viewer   | tunnelled | public via the Discord proxy   | serves the client, `/.proxy/frames` |
-| Producer | 127.0.0.1 | loopback only, never tunnelled | `/producer` frame ingress           |
+| Listener | Bind      | Exposure                        | Purpose                             |
+| -------- | --------- | ------------------------------- | ----------------------------------- |
+| Viewer   | tunnelled | public directly and via Discord | serves the client, `/.proxy/frames` |
+| Producer | 127.0.0.1 | loopback only, never tunnelled  | `/producer` frame ingress           |
 
 The producer endpoint is a **separate listener**, not a path on the viewer
 server. A producer path mounted on the tunnelled server would be reachable by
@@ -146,12 +153,11 @@ port for an internet-facing surface to connect into.
 
 - One encoded frame is capped at `RENDERED_SURFACE_FRAME_MAX_BYTES` (256 KiB);
   a real 240×160 GBA PNG lands in single-digit kilobytes.
-- The play runner publishes at hardware rate (~60fps) and idles the core between
-  turns, so the surface is continuous rather than a still image between actions.
-  `GbaFrameStream`, which serves the MCP observation path, still rate-limits to
-  20fps because that path publishes only when an external agent looks.
-- Both paths drop frames whose bytes are unchanged, so an idle overworld costs
-  nothing to publish.
+- The resident play host publishes at hardware rate (~60fps), deduplicates
+  unchanged PNGs, and idles the core between turns, so the surface remains live
+  rather than becoming a stale still.
+- GBA MCP publishes directly while it holds the body lock. It does not share the
+  resident host's byte-deduplication step.
 - A viewer whose socket backlog exceeds `maxBufferedBytes` has frames dropped
   rather than queued, and the drops are counted on `droppedFrameCount`. The
   standalone entrypoint reports that counter to stdout whenever it changes, so a
@@ -160,7 +166,7 @@ port for an internet-facing surface to connect into.
   them, so a reconnect resumes at the present moment instead of replaying a
   stale playthrough. Those drops are counted too.
 - The client's status line reads `Live view · <n> fps`, and names loss where it
-  happened: `· <n> lost` counts gaps in the runner-assigned `sequence`, so it is
+  happened: `· <n> lost` counts gaps in the producer-assigned `sequence`, so it is
   everything lost before the canvas — producer socket, hub backpressure, Discord
   proxy. `· <n> slow` counts frames this browser abandoned mid-decode because a
   newer one landed first, which is the client failing to keep up rather than the
@@ -177,8 +183,8 @@ port for an internet-facing surface to connect into.
 - Not a recorder. Only the most recent frame and overlay are held, nothing is
   persisted, and frame bytes never enter a semantic event stream — observations
   carry the framebuffer digest instead.
-- Not an authority surface. Viewer input arriving here is ambient authority and
-  cannot approve privileged actions, exactly as voice and text ingress cannot.
+- Not an input or authority surface. The current viewer implements no keyboard,
+  pointer, or outbound control channel.
 
 ## Eligibility
 

@@ -11,7 +11,7 @@ Schemas are lenient by design: unknown keys pass through and malformed or missin
 1. `CLANKIE_MODELS_PATH` — an explicit catalog file wins over everything.
 2. Fresh disk cache — `<cacheDir>/models.json` within the TTL (default 5 minutes).
 3. Stale disk cache — still usable, just past the TTL.
-4. Bundled snapshot — `data/models-dev-snapshot.json`.
+4. Bundled snapshot — [`data/models-dev-snapshot.json`](data/models-dev-snapshot.json).
 
 The default cache dir is `${XDG_CACHE_HOME ?? ~/.cache}/clankie`.
 
@@ -28,5 +28,7 @@ The default cache dir is `${XDG_CACHE_HOME ?? ~/.cache}/clankie`.
 ## Re-vendoring the snapshot
 
 ```sh
-curl https://models.dev/api.json > data/models-dev-snapshot.json
+curl https://models.dev/api.json > packages/model-registry/data/models-dev-snapshot.json
 ```
+
+Run that command from the repository root.

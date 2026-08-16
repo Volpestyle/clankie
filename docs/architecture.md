@@ -29,7 +29,8 @@ The TUI and relay speak the same operator-conversation contract
 (`/operator/v1/dispatch`): revision-fenced sends, cursored replay, long-polled
 tails. Conversations are files under `~/.clankie/captain/`. The full HTTP
 surface is listed in [`apps/clankie/openapi.yaml`](../apps/clankie/openapi.yaml);
-`apps/clankie/scripts/setup-yaak.py` builds a local Yaak workspace against it.
+[`apps/clankie/scripts/setup-yaak.py`](../apps/clankie/scripts/setup-yaak.py)
+builds a local Yaak workspace against it.
 
 Operator input can invoke an exact loaded skill as `/name task` or
 `/skill:name task`. The service rewrites that verified invocation to Pi's native
@@ -47,18 +48,17 @@ that same store through operator-only routes.
 
 ## Where things run
 
-- **Captain tools.** Coding tools (read/bash/edit/write) are pi built-ins.
-  They attach to the operator console and to Discord text turns whose actor
-  is on `discord.systemActorUserIds` ([ADR 0095](adr/0095-discord-system-actors.md)).
-  Voice never gets them. Authored tools: browser (catalog resolved live from
-  the agent-browser MCP host), `generate_image` / `generate_video`,
-  `voice_join` / `voice_leave`, `youtube_search` and the `music_*` controls,
-  grounded Discord reactions, threads, and live-watch start/stop,
-  `start_play` / `stop_play`, `observe_room`, `observe_current_activity`,
-  `recall_play`,
-  `observe_share`, `get_self_state`, `remember_episode`. Linear search/create/comment after
-  `/connect linear`. Mail list/read/send after `/connect email` — operator
-  console only.
+- **Captain tools.** Coding tools (read/bash/edit/write) are pi built-ins. They
+  attach to the operator console and to Discord text turns whose actor is on
+  `discord.systemActorUserIds`
+  ([ADR 0095](adr/0095-discord-system-actors.md)); voice never gets them. The
+  canonical authored-tool registry is
+  [`apps/clankie/src/captain/tools.ts`](../apps/clankie/src/captain/tools.ts),
+  connected-service additions live in
+  [`captain/connect-tools.ts`](../apps/clankie/src/captain/connect-tools.ts), and
+  the HTTP surface is
+  [`apps/clankie/openapi.yaml`](../apps/clankie/openapi.yaml). This document does
+  not duplicate their changing census.
 - **Browser catalog.** The service registers the complete paginated
   `agent-browser` catalog with pi, but only everyday navigation tools and
   `browser_tool_search` start active. Browser calls are sequential across rooms;
@@ -72,20 +72,23 @@ that same store through operator-only routes.
   herdr-lead board is the companion dashboard
   ([ADR 0097](adr/0097-herdr-lead-is-the-companion-dashboard.md)). Agents
   coordinate through herdr and plain files.
-- **Game bodies.** `integrations/gba-emulator` and
-  `integrations/minecraft-mineflayer`, booted and leased inside the service;
-  `body-lock` keeps one writer on the emulator across processes (the free-play
-  CLI, gba-mcp, and the live session cannot fight over it). Frames flow to the
-  Discord activity surface.
+- **Game body.** [`integrations/gba-emulator`](../integrations/gba-emulator/README.md)
+  is booted and leased by the local play host. `body-lock` keeps one writer on
+  the emulator across the free-play CLI, GBA MCP, and live session. Frames flow
+  to the Discord activity surface.
 - **Auth.** Provider keys and OAuth tokens live in the credential broker
   (Keychain), written by the TUI `/auth` flow and read by pi through a
-  credential-store bridge. Persona is owner-authored in
+  credential-store bridge. Compatibility model/media provider keys may fall
+  back to existing shell values or the gitignored root `.env.local` when the
+  broker has no entry; Discord account and body credentials remain broker-only
+  except documented operator/captain/runner test overrides. Persona is owner-authored in
   `~/.config/clankie/settings.json` and can never be set by a caller.
   `/connect` stores Linear and mailbox credentials the same way; Discord
-  remains a body configured by `/discord` ([ADR 0093](adr/0093-owner-authored-service-connections.md)).
-  An optional lab user-session body watches Discord screen shares through the
-  owned `@clankie/vox` native media package
-  ([ADR 0100](adr/0100-vox-is-an-owned-native-media-package.md)).
+  remains a body configured by `/discord` ([credential guide](credentials.md),
+  [ADR 0093](adr/0093-owner-authored-service-connections.md)). An optional lab
+  user-session body watches Discord screen shares and publishes Go Live through
+  the owned `@clankie/vox` native media package ([Discord media guide](discord-media.md),
+  [ADR 0100](adr/0100-vox-is-an-owned-native-media-package.md)).
   `/discord` Active body picks which process is the mouth; the launcher
   starts only that one ([ADR 0048](adr/0048-discord-user-session-transport.md)).
   Who may ask him to drive this machine from Discord is
@@ -106,11 +109,28 @@ readiness.
 ## Current architecture constraints
 
 Clankie uses pi's `ModelRuntime` and `createAgentSession` for the captain's
-models, sessions, tools, skills, and compaction. The captain, HTTP control
-surface, and play runner share one service.
+models, sessions, tools, skills, and compaction. The captain, HTTP surface, and
+play host share one service
+([ADR 0101](adr/0101-pi-owns-the-captain-model-runtime.md)).
 Herdr exposes the coding-agent fleet as visible panes coordinated through its CLI
 and plain files. Untrusted input stays fenced, secrets stay in the credential
 broker, and every report describes observed outcomes rather than intentions.
 
 [`adr/`](adr/) records the active decisions for play mechanics, voice, presence,
 media, browsing, and operator control.
+
+## Canonical Homes
+
+| Concern                        | Canonical reference                                                                       |
+| ------------------------------ | ----------------------------------------------------------------------------------------- |
+| HTTP API                       | [`apps/clankie/openapi.yaml`](../apps/clankie/openapi.yaml)                               |
+| Operator console and launcher  | [`apps/tui/README.md`](../apps/tui/README.md)                                             |
+| Official Discord bot operation | [`apps/discord-bridge/README.md`](../apps/discord-bridge/README.md)                       |
+| Shared Discord behavior        | [`packages/discord-presence-core/README.md`](../packages/discord-presence-core/README.md) |
+| Personal-lab Discord body      | [`apps/discord-user-session/README.md`](../apps/discord-user-session/README.md)           |
+| Possessor commentary/hearing   | [`packages/possessor-voice/README.md`](../packages/possessor-voice/README.md)             |
+| Native media                   | [`apps/vox/README.md`](../apps/vox/README.md)                                             |
+| Discord media surfaces         | [`docs/discord-media.md`](discord-media.md)                                               |
+| Credential identities/setup    | [`docs/credentials.md`](credentials.md)                                                   |
+| Credential implementation      | [`packages/credential-broker/README.md`](../packages/credential-broker/README.md)         |
+| Models                         | [`packages/model-provider/README.md`](../packages/model-provider/README.md)               |

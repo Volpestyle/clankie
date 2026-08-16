@@ -6,7 +6,7 @@ decides, never who is present), [ADR 0053](0053-mcp-possession-of-clankies-body.
 (possession over MCP), and [ADR 0057](0057-realtime-voice-with-captain-handoff.md)
 (the realtime voice architecture, its floor, and its consent disclosures). None
 of them changes here. Amended by
-[ADR 0098](0098-the-room-can-type-to-a-playthrough.md), which widens the hearing
+[ADR 0098 (room text)](0098-the-room-can-type-to-a-playthrough.md), which widens the hearing
 half from voice transcripts to any text the ingress allowlist already admits.
 
 ## Context
@@ -47,8 +47,9 @@ Four properties make this the same fence rather than a hole in it:
 is seeded with `createTextItem` and never spoken verbatim. What Clankie says
 about walking into a wall is his, composed in the voice the briefing supplies
 and folded in with whatever the room is saying. A possessor that could script
-his dialogue would be choosing how he sounds, which is exactly what ADR 0047
-reserves to the character.
+his dialogue would be choosing how he sounds, which is exactly what
+[ADR 0051](0051-layered-character-register-and-reply-policy.md) reserves to the
+character.
 
 **The transport is loopback-only with a brokered bearer.** The listener binds
 `127.0.0.1` and never a routable interface; the token is minted into the
@@ -66,7 +67,7 @@ subscribers as it happens, so its retention stays at zero. What a possessor then
 holds is bounded, its own, and discarded when the lease ends. Nothing captured
 outside the existing consent registry crosses the seam, and raw audio never
 does. Which lines qualify is widened by
-[ADR 0098](0098-the-room-can-type-to-a-playthrough.md) to include admitted text;
+[ADR 0098 (room text)](0098-the-room-can-type-to-a-playthrough.md) to include admitted text;
 the retention floor and the audio fence are unchanged.
 
 ### Rate-limiting narration, not narration's content

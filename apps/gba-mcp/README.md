@@ -217,134 +217,22 @@ To boot a later session from a checkpoint instead of the bedroom, point
 loader, aimed at the minted identity. Checkpoints are unavailable on the
 deterministic core double, whose determinism is its identity.
 
-## Discord reach: speaking and listening
+## Discord Voice
 
-`clankie_say` and `clankie_listen` extend possession into the channel. Both
-require the lease — talking and eavesdropping as him are driving him — and both
-go through a **port**, because the same fence blocks them.
+`clankie_say` and `clankie_listen` require the possession lease. They use the
+canonical [`@clankie/possessor-voice`](../../packages/possessor-voice/README.md)
+package; its operating guide owns the wire, credential, direction, retention,
+and refusal semantics.
 
-### Speaking as Clankie
+Report what happened, not a sentence to speak. The Discord-side persona decides
+whether and how to voice the event. Hearing is push-only, carries attributed
+text rather than raw audio, and grants no consent beyond what the active Discord
+body already holds. With no credential, bridge, or live voice session, the tools
+return a typed unavailable refusal and gameplay continues.
 
-`clankie_say` makes Clankie talk about something in the channel he is present
-in, and requires the possession lease — talking as him is driving him. The
-caller cannot choose the audience: a possessor drives the character, it does not
-pick new rooms.
-
-**Pass what happened, not the sentence you want said.** The `text` is an event
-report, seeded as a conversation item so the persona composes the words in his
-own voice; it is not a script and never spoken verbatim. A caller that passes
-finished speech gets it treated as an event that happened and replied to — see
-[ADR 0074](../../docs/adr/0074-the-room-hears-one-voice.md), where exactly that
-turned a six-word quip into seventeen seconds of speech in a live run. The port
-behind this tool is named `narrate` for the same reason.
-
-**A possessor cannot speak directly, and that is a fence rather than an
-oversight.** The service's presence action requires a _live presence
-claim_ — the session id, phase, and monotonic revision the Discord bridge
-publishes while it holds the gateway ([ADR 0024](../../docs/adr/0024-discord-dual-plane-presence.md)).
-Only the bridge can mint one, which is exactly what stops an action reaching a
-session that is not live. A possessor holds no gateway, so it holds no claim.
-
-So speech goes through a port: the possessor asks the process that owns the body
-in Discord to speak for it. That also keeps the invariant intact — possession
-changes who is deciding, never which account is present. Clankie stays the bot in
-the channel.
-
-`ClankieSpeechPort` is that seam, and it is **denied by default** with a reason:
-
-```
-clankie_speech_unavailable: no speech port is wired. A possessor cannot speak
-directly — the service's presence action requires a live claim only the
-Discord bridge can mint.
-```
-
-`@clankie/possessor-voice` is the implementation that satisfies it
-([ADR 0064](../../docs/adr/0064-possessor-voice-seam.md)). It resolves the
-broker-minted `clankie_possessor_voice` bearer and dials the bridge's loopback
-listener; with no credential, no bridge, or no live voice session, the refusal
-above stands and play simply continues in silence.
-
-**What you say is an event, not a script.** The text is seeded into his live
-realtime session as context and never spoken verbatim — report what the body
-just did (`"walked into a wall by the lab"`) and he composes the line himself,
-in his own voice, folded in with whatever the room is saying. Responses are
-rate-limited (12 s by default) while seeding is not, so a play loop that reports
-every step keeps him informed without turning the channel into a monologue.
-
-### Listening
-
-`ClankieHearingPort` is symmetric and blocked by the same fence: the bridge holds
-the gateway _and_ the consent registry, so a possessor cannot subscribe to voice
-itself.
-
-Consent is not re-litigated at this boundary. A possessor hears exactly what
-Clankie is already permitted to hear under
-[ADR 0045](../../docs/adr/0045-official-bot-dave-group-voice.md) — asking as a
-possessor grants no additional access — and **raw audio never crosses**:
-transcripts only.
-
-**Hearing is push, not pull, and that is a privacy constraint.** The obvious
-shape — "give me the last N lines" — would require the bridge to retain
-transcripts, and it deliberately retains none: PCM buffers are zeroed after use
-and the bot does not persist channel transcripts. A pull-shaped port would have
-quietly forced whoever implemented it to break that.
-
-So the bridge pushes each utterance to a live subscriber and keeps nothing.
-`PossessorHearing` holds a small bounded window on the _possessor's_ side, and
-`gba_emulator_release` clears it: what is heard does not outlive the possession
-that heard it. Subscription is lazy, so a possessor that never calls
-`clankie_listen` causes no capture at all.
-
-## How the ports actually reach Discord
-
-Claude Code never talks to Discord. The bridge already holds the gateway — it is
-the Discord-facing process — so the ports are a **local control channel between
-two Clankie processes**, not a new inbound integration:
-
-```
-harness → MCP server → (loopback, token-gated) → bridge → Discord
-```
-
-The direction matters: the MCP server dials _out_ to the bridge, so the process
-holding Discord credentials opens no port for anything else to connect into.
-That is the same shape as the activity plane's frame producer in
-[`apps/discord-activity`](../discord-activity/README.md) — loopback listener,
-broker-minted bearer, deny-by-default — and reusing it means one pattern rather
-than a second bespoke transport.
-
-## A possessor is itself, not Clankie
-
-**Owner decision (James, 2026-07-25): a harness possessing Clankie does not
-inherit his personality, and does not need to.**
-
-Possession means another mind is driving. The body is Clankie's, the account is
-Clankie's, the bounds are Clankie's — but the decisions are the possessor's, and
-pretending a Codex session _is_ Clankie would be the confusing story, not the
-honest one. This also removes a coupling: the MCP server needs no persona
-plumbing, and the persona work stays scoped to Clankie's own free-play loop.
-
-Gameplay is unaffected — a button press has no voice. Speech is where the
-distinction needed a decision, and
-[ADR 0064](../../docs/adr/0064-possessor-voice-seam.md) makes it: the possessor
-supplies the **event**, the persona supplies the **words**. A report crosses the
-seam as context for his live voice session, so what third parties hear is
-Clankie's account carrying _Clankie's_ voice, describing what a guest driver
-just did. The possessor still needs no persona plumbing — it never composes a
-line — and a run that should sound like him does, without one.
-
-The trade this accepts is the mirror image: a possessor **cannot** make him say
-a specific sentence. Anything needing verbatim output belongs on the
-presence-action path with a live claim, not here.
-
-**Possession is not announced in the channel** (owner decision, ADR 0053). It is
-visible operator-side — every lease transition (acquired, released, expired,
-stolen, refused) writes the server's stderr **and** appends durably to
-`possession-events.jsonl` beside `body.lock` in the shared body root
-([ADR 0068](../../docs/adr/0068-a-playthrough-leaves-a-durable-trail.md)), so
-who held the body survives the process that granted it — and the room is not
-informed that a guest is driving. That trade rests on the deployment being private and
-its participants known to the owner, and ADR 0053 records the trigger for
-revisiting it.
+The possessor remains its own decision-maker rather than inheriting Clankie's
+persona; [ADR 0053](../../docs/adr/0053-mcp-possession-of-clankies-body.md) and
+[ADR 0064](../../docs/adr/0064-possessor-voice-seam.md) own that decision.
 
 ## One body, one process
 

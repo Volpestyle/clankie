@@ -5,6 +5,10 @@ Provider credentials stay in the macOS Keychain by default; trusted adapters
 receive signed grants that name only their principal, profile hash, allowed
 capabilities, optional resources, and expiry.
 
+The operator-facing [credential guide](../../docs/credentials.md) owns token
+names, bot-versus-user setup, rotation, and the distinction between Discord
+account credentials and local Clankie bearers.
+
 ## Credential storage
 
 - `KeychainCredentialStore` stores one generic-password item per provider and a
@@ -19,6 +23,15 @@ capabilities, optional resources, and expiry.
   `CLANKIE_CREDENTIALS_FILE` explicitly selects the file backend.
 - Credential summaries pass through `redactCredential()` before entering a UI
   or structured log.
+
+The broker is canonical, but provider consumers retain a compatibility fallback:
+when no broker entry exists they may read the provider's declared API-key
+environment variable. The clankie service also fills absent keys from the
+gitignored root `.env.local`; an existing shell value wins. Discord account
+tokens, bridge identities, the activity producer, and possessor voice do not use
+that fallback and reject their forbidden environment names.
+`CLANKIE_OPERATOR_TOKEN`, `CLANKIE_CAPTAIN_TOKEN`, and `CLANKIE_RUNNER_TOKEN`
+remain explicit test/CI overrides.
 
 ## Local operator credential
 
@@ -75,7 +88,7 @@ environment names are hard startup errors in the bridge.
 `DiscordUserSessionCredentialProvider` mirrors the bot provider — expiring,
 resource-scoped grants exchanged only by the trusted transport adapter — and
 adds one gate the bot plane does not need: a durable owner opt-in bound to the
-recorded profile hash, re-checked at redemption so a revocation stops the very
+recorded character and scope, re-checked at redemption so a revocation stops the very
 next action instead of waiting for grant expiry. A `DISCORD_USER_TOKEN`
 environment variable is a startup error in every process that could reach it.
 
@@ -96,20 +109,6 @@ lifetime. Signed obligation identifiers travel with the grant so a consumer
 receives the constraints attached to the original allow decision. A
 profile-hash mismatch invalidates the grant immediately.
 
-`AuditedCapabilityBroker` is the runtime entry point:
-
-1. `issue()` appends a redacted `capability.issued` event before returning the
-   token.
-2. `authorizeUse()` binds the token to the calling attribution (the kept
-   `missionId`/`workerRunId` wire slots), then appends `capability.use.allowed`
-   or `capability.use.denied` before returning a decision.
-3. An allowed grant is consumed once. Consumption is rehydrated from the event
-   log after restart, and same-process broker instances serialize use of the
-   same grant.
-4. If the event sink fails, issuance and authorization fail closed.
-
-Audit events include SHA-256 fingerprints for grant, capability, and resource
-and obligation identifiers plus trusted caller correlation and expiry. Caller-controlled
-strings are never copied into event data, so a malicious resource cannot smuggle
-a signed token, nonce, or provider credential into the log. `CapabilityAuditSink`
-is a minimal append/read shape the host process satisfies with its own event log.
+`CapabilityTokenIssuer` is a signing/verification primitive, not a runtime
+broker. Callers own issuance policy and any evidence they require; this package
+validates grant shape, lifetime, signature, and exact resource matching.

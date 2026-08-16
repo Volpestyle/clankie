@@ -2,7 +2,8 @@
 
 Status: accepted (2026-08-15). Extends
 [ADR 0085](0085-a-picture-he-makes-is-something-he-says.md) (media he makes rides
-his reply) and [ADR 0088](0088-a-screenshot-is-something-he-shows-you.md).
+his reply) and [ADR 0088](0088-a-screenshot-is-something-he-shows-you.md). The
+approval-path comparison below is historical; that subsystem was later removed.
 
 ## Context
 
@@ -20,11 +21,11 @@ and could in principle remember, but nothing prompts him to look.
 
 The prior art here is opencode's background jobs, which finish out of band and
 inject the result into the parent session as a synthetic message. Injection
-needs something clankie deliberately does not have: a way for him to speak into
-a Discord channel unprompted. Every outbound write answers a turn, and
-`send_attachment` carries a `publish-external` approval that no captain tool
-requests. Building that path is a decision about what he may do to a room
-without anyone asking, and it is not this ADR's to make.
+needs something Clankie deliberately does not have: a way for him to speak into
+a Discord channel unprompted. Every outbound write answers a turn. At
+ratification `send_attachment` carried an approval that no captain tool
+requested. Building an unprompted path is still a decision about what he may do
+to a room without anyone asking, and it is not this ADR's to make.
 
 ## Decision
 
@@ -43,7 +44,9 @@ The render is remembered, and **the turn is the clock**.
   appears in `get_self_state`, room-scoped.
 - Collecting it calls the tool he already has: `generate_video` with that
   `requestId` returns the stored result, which sets the turn's media capture,
-  which auto-attaches under ADR 0085. No new tool, no new authority, no new
+  which auto-attaches under
+  [ADR 0085](0085-a-picture-he-makes-is-something-he-says.md). No new tool, no
+  new authority, no new
   wire contract. The bytes are fetched once however many times he comes back.
 - Renders are scoped to their room for the same reason `observe_room` hides the
   operator's console: what one channel asked him to make is not another
@@ -67,5 +70,5 @@ same terms as every other fact the harness hands him.
 - Records live in memory. A restart loses them; the `requestId` in the
   originating `pending` reply is the recovery path.
 - If the room should hear about a finished render without being spoken to
-  first, that needs an unprompted outbound write and the approval decision that
-  comes with it. This ADR deliberately stops short of it.
+  first, that needs a separately authorized unprompted outbound write. This ADR
+  deliberately stops short of it.

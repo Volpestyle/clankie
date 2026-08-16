@@ -1,12 +1,13 @@
 # ADR 0039: GBA emulator embodiment and the deterministic core boundary
 
-Status: accepted.
+Status: accepted. The real-core follow-up described below shipped in
+[ADR 0040](0040-real-mgba-core-behind-the-emulator-seam.md).
 
 ## Context
 
-Clankie's embodiment stack has two governed game environments (Minecraft,
-PokeMMO simulator) but no rules-clean target for _real_ input control. PokeMMO
-client automation is prohibited by that game's macroing policy (ADR 0038), so
+At ratification Clankie's embodiment stack had two governed game environments
+(Minecraft and a PokeMMO simulator) but no rules-clean target for _real_ input
+control. PokeMMO client automation is prohibited by that game's macroing policy, so
 the live actuator must land against a game we are permitted to automate: a
 locally-emulated Game Boy Advance Pokémon game the operator is legally entitled
 to run. The adapter must inherit the environment-runtime governance invariants
@@ -16,8 +17,8 @@ observed state instead of replaying a script.
 
 ## Decision
 
-`gba_emulator` is a sibling provider profile in the strict v2 resource-bounds
-union (ADR 0038's "profile discriminator owns the resource vocabulary" rule).
+`gba_emulator` was added as a sibling provider profile in the strict v2
+resource-bounds union. Each profile owns its own resource vocabulary.
 Its bounds carry the determinism anchors — pinned core identifier, savestate
 _identity_ digest, RNG seed — plus per-action input/frame quotas and typed
 `emulator.gba.*` capabilities. No Minecraft or PokeMMO field appears in the
@@ -53,7 +54,7 @@ governance, and frozen-scenario evidence are proven byte-for-byte replayable in
 CI without a ROM. No real emulator process, ROM, BIOS, or savestate is
 involved yet.
 
-### Real-core integration path (next slice)
+### Real-core integration path (subsequently delivered)
 
 The pinned core becomes headless **mGBA** driven in-process through its
 scripting/embedding surface (libmgba bindings), preferred over RetroArch
@@ -79,7 +80,7 @@ fixtures, or artifacts.
 ## Options weighed
 
 - **Reuse the PokeMMO simulator profile with emulator meanings** — rejected;
-  ADR 0038 forbids one field serving two providers, and the acceptance boundary
+  one field must not serve two providers, and the acceptance boundary
   requires emulator-specific bounds.
 - **Drive a real emulator core in this slice** — rejected for CI determinism
   and ROM licensing: CI cannot carry game binaries, and the governance/driver
@@ -87,8 +88,8 @@ fixtures, or artifacts.
 - **Script the scenario as a fixed input transcript** — rejected; VUH-905's
   verification rejection established transcripts fake autonomy. Decisions must
   be computed from observed state and change when it changes.
-- **A dedicated emulator runtime beside `EnvironmentRuntime`** — rejected
-  (ADR 0038 precedent); it would not prove the shared lease, idempotency,
+- **A dedicated emulator runtime beside `EnvironmentRuntime`** — rejected; it
+  would not prove the shared lease, idempotency,
   cancellation, and emergency-stop architecture.
 - **RetroArch network command interface for input injection** — rejected for
   the default path; it introduces a local network socket where an in-process
@@ -96,12 +97,11 @@ fixtures, or artifacts.
 
 ## Consequences
 
-- Clankie gains a legitimate full-input embodiment target with the same
-  governance surface as every other environment; the PokeMMO live boundary
-  stays untouched and separately gated (ADR 0038).
-- The emulator contract, adapter, driver, and evidence pipeline are frozen and
-  CI-proven before any ROM-dependent code lands; the next slice swaps the core
-  implementation without touching the governed surface.
+- Clankie gained a legitimate full-input embodiment target without widening the
+  separately constrained PokeMMO boundary.
+- The emulator contract, adapter, driver, and evidence pipeline were frozen and
+  CI-proven before ADR 0040 swapped in the real core without changing the
+  adapter surface.
 - The capability boundary cannot represent network or live-service tampering,
   and tests assert the integration sources contain no network I/O path.
 - Scenario evidence (report, hash-chained event trace, decision trace) is

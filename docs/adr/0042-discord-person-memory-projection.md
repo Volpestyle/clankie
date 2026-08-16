@@ -1,63 +1,60 @@
 # ADR 0042: Discord person memory is a separate governed identity projection
 
-Status: accepted.
+Status: accepted. The mission/world-fact store used as the comparison in this
+record was later retired. The separate Discord person projection remains part
+of the current memory surface.
 
 ## Context
 
-Mission memory stores approved repository and mission facts. A long-lived
-Discord relationship has different identity, privacy, and lifecycle rules: the
-same Discord user id may appear in several guilds; channel-visible notes must
-not leak to another channel; private operator notes must not enter ambient
-recall; facts expire, are corrected, exported, and deleted per person.
+At ratification Clankie also had a mission/world-fact namespace. A long-lived
+Discord relationship had different identity, privacy, and lifecycle rules: the
+same user could appear in several guilds, channel-visible notes must not leak to
+another room, and operator-private notes must not enter ambient recall.
 
-Adding these fields to the mission-fact namespace would make one category and
-deduplication key serve two authorities. A normalized preference shared by two
-people could merge accidentally, and mission retention could become person-data
-retention.
+Putting person data in the world-fact namespace would have made one key and
+retention policy serve two authorities. That rejected namespace is historical;
+the privacy argument for a separate person projection still holds.
 
 ## Decision
 
 The Clankie service owns a separate file-backed person-memory projection keyed
-by `(guildId, userId)`. Display names are presentation only. Facts carry a
-bounded kind, confidence, guild/channel/operator-private visibility, optional
-expiry, correction lineage, and content-free provenance. The provenance schema
-requires `rawTranscript: false`; text and voice can propose an explicit fact
-but cannot store audio or a transcript through this boundary.
+by `(guildId, userId)`. Display names are presentation only. Facts carry bounded
+kind, confidence, visibility, optional expiry, correction lineage, and
+content-free provenance. Raw transcripts and audio are not stored through this
+boundary.
 
-![ADR 0042: Discord person memory is a separate governed identity projection](../diagrams/0042-discord-person-memory-projection.jpg)
+```mermaid
+flowchart LR
+  D[Admitted Discord turn] --> F{Guild and channel visibility}
+  F --> P[Person projection by guildId + userId]
+  P --> C[Bounded recall card]
+  O[Operator memory UI] -->|inspect, edit, forget| P
+  P -. no raw transcript or audio .-> X[Durable store]
+```
 
-An authenticated Discord captain may propose and recall visible facts; a
-proposal applies directly and upserts by `factId`. The authenticated operator
-may browse every person and fact, export or delete a person's projection, and
-edit or forget one fact from the TUI. An edit can change bounded content, kind,
-visibility, confidence, or expiry, but never identity or source provenance.
-Mutation events record ids and the operator identity without copying
-memory content into the event log.
+An authenticated Discord turn may propose and recall facts visible to that
+room. The operator may inspect, edit, export, and delete the projection. Identity
+and source provenance do not change when content is corrected. Mutation events
+record identifiers without copying memory content.
 
-Every guild text and captain-handoff voice turn receives up to eight of that
-speaker's newest visible facts as host-authored context. Direct messages have no
-guild identity and receive no person-memory projection. Guild and channel
-visibility filtering happens before prompt construction; operator-private facts
-never reach Discord.
+Each Discord turn receives only the newest facts visible to its authenticated
+guild, channel, and user. Direct messages have no guild projection, and
+operator-private facts never reach Discord.
 
-## Options weighed
+## Alternatives considered
 
-- **Add a person category to mission memory** — rejected because global
-  normalized deduplication, mission provenance, and category caps do not encode
-  guild identity or visibility.
-- **Key only by Discord user id** — rejected because it silently shares
-  relationship context across unrelated guilds.
-- **Persist raw text or voice transcripts and extract later** — rejected
-  because it expands retention and disclosure risk. Only explicit bounded
-  proposals enter the durable approval flow.
-- **Allow Discord to delete or curate facts** — rejected because Discord is an
-  ambient authority surface. Its authenticated captain may only upsert a fact
-  it explicitly proposes and recall facts visible to that room.
+- **Store person data with world facts** was rejected because global
+  deduplication and retention did not encode guild identity or visibility.
+- **Key only by Discord user id** was rejected because it silently shares
+  context across unrelated guilds.
+- **Persist transcripts and extract later** was rejected because it expands
+  retention and disclosure risk.
 
 ## Consequences
 
-- Renames do not break memory because names are never part of the durable key.
-- Cross-guild and channel isolation are query invariants with regression tests.
-- Correction, expiry, export, and deletion have explicit APIs and receipts.
-- The person projection has its own per-identity cap and migration, independent
-  of mission-memory category caps.
+- Renames do not break memory because names are not durable keys.
+- Cross-guild and channel isolation are query invariants.
+- Correction, expiry, export, and deletion have explicit paths.
+- Current memory behavior is summarized in the
+  [architecture guide](../architecture.md); this ADR preserves why person data
+  received its own projection.

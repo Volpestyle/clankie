@@ -54,7 +54,7 @@ flowchart LR
 
 - Looking at his own screen is the same kind of act as looking at a share:
   bounded pixels on demand, said in his own words. His screen is one current
-  still; a share includes four 1 fps samples for coarse motion.
+  still; a share includes up to four 1 fps samples for coarse motion.
 - Reconstructing a run is a projection, not a log client.
 - Frames are still not on the digest activity snapshot. That contract stays
   hash-only so a present-tense card cannot grow a picture.

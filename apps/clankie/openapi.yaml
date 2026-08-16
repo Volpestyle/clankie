@@ -6,8 +6,9 @@ info:
     Local `apps/clankie` service on `http://127.0.0.1:4310`. There is no HTML
     index: `/` is 404 and `GET /health` is the public probe.
 
-    All other routes take a `Authorization: Bearer <token>` header. Tokens live
-    in the credential broker (Keychain service `bot.clankie.credentials`):
+    Most other routes take an `Authorization: Bearer <token>` header. Pairing
+    redeem/complete use their one-time offer secrets instead. Persistent tokens
+    live in the credential broker (Keychain service `bot.clankie.credentials`):
 
     | Principal | Keychain account | Typical use |
     | --- | --- | --- |
@@ -15,6 +16,8 @@ info:
     | Captain | `clankie_captain` (also `CLANKIE_CAPTAIN_TOKEN`) | `/operator/v1/dispatch`, `/captain/v1/lanes` |
     | Discord text | `clankie_discord_bridge` | Discord channel turns, presence, person memory |
     | Discord voice | `clankie_discord_voice_bridge` | Voice briefing; voice-lane channel turns |
+    | Discord user text | `clankie_discord_user_bridge` | Lab-user channel turns and presence |
+    | Discord user voice | `clankie_discord_user_voice_bridge` | Lab-user voice-lane turns |
     | Runner | `clankie_runner` | Embodiment claim/report |
     | Device | minted at pairing complete | `/v1/devices/self*` |
 
@@ -78,7 +81,7 @@ paths:
       tags: [Discord]
       operationId: getDiscordUserSessionOptIn
       summary: Current user-session opt-in
-      security: [{ captainBearer: [] }]
+      security: [{ captainBearer: [] }, { operatorBearer: [] }]
       responses:
         "200":
           description: Opt-in or null
@@ -758,7 +761,7 @@ paths:
       tags: [Browser]
       operationId: postBrowserCall
       summary: Call a browser tool
-      description: Approval-required tools refuse unless the bearer is the operator.
+      description: Calls one raw `agent-browser` MCP tool from the live catalog.
       security: [{ operatorBearer: [] }, { captainBearer: [] }]
       requestBody:
         required: true
@@ -766,7 +769,7 @@ paths:
           application/json:
             example:
               schemaVersion: 1
-              tool: browser_snapshot
+              tool: agent_browser_snapshot
               arguments: {}
       responses:
         "200":
@@ -938,11 +941,11 @@ components:
     discordTextBearer:
       type: http
       scheme: bearer
-      description: Keychain `clankie_discord_bridge`
+      description: Keychain `clankie_discord_bridge` or `clankie_discord_user_bridge`
     discordVoiceBearer:
       type: http
       scheme: bearer
-      description: Keychain `clankie_discord_voice_bridge`
+      description: Keychain `clankie_discord_voice_bridge` or `clankie_discord_user_voice_bridge`
     runnerBearer:
       type: http
       scheme: bearer

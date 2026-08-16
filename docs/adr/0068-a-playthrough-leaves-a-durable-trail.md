@@ -61,4 +61,6 @@ different rules:
   one; ended-record pruning is what keeps that finite.
 - The journal directory grows one file per run and is deliberately not pruned
   by code — deleting play history is an owner's call, never an agent's.
-- `docs/08-observability-debugging.md` documents where every artifact lives.
+- The [GBA MCP operating guide](../../apps/gba-mcp/README.md) documents the
+  live body, possession, checkpoint, and observation paths; this ADR remains
+  the stable record for journal ownership and retention.

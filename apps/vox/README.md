@@ -1,12 +1,11 @@
 # Vox
 
-Vox is Clankie's **presence plane**: the dedicated native media plane that
-puts Clankie where the humans already are. Today that means Discord: voice
-(Opus, E2EE via DAVE, real 20ms send pacing) and Go Live streaming and screen
-share — so you can talk to your swarm lead in a voice channel while it
-screen-shares its work. It is the layer Clankie delegates to whenever presence
-needs realtime sockets, codec work, packet timing, encryption, or low-level
-media telemetry that the Node brain is too slow and unequipped to run.
+Vox is Clankie's native Discord media implementation: realtime sockets, codecs,
+packet timing, encryption, capture, playback, screen watch, and Go Live. The
+current product rollout uses Vox for the active lab user body's screen-watch and
+Go Live paths. Ordinary bot and user-session voice and audible music still use
+`@discordjs/voice`; Vox's voice/audio contract is implemented for a separately
+evidenced migration ([ADR 0100](../../docs/adr/0100-vox-is-an-owned-native-media-package.md)).
 
 ![Vox native media architecture](../../docs/diagrams/vox-architecture.jpg)
 
@@ -25,8 +24,7 @@ PCM, and Go Live watch/publish.
 
 ## 1. What ClankVox Handles
 
-Clankie delegates the realtime media transport work that should not live in the
-Node runtime. For Discord, that means ClankVox owns:
+For Discord, ClankVox implements:
 
 - Discord voice and stream-server sockets, UDP/RTP send and receive
 - codec advertisement, packet framing, Opus encode/decode, PCM normalization
@@ -42,7 +40,8 @@ ClankVox reports transport truth and leaves the product decisions to Clankie.
 
 ## 2. Mental Model
 
-The canonical media-plane map is [docs/diagram.md](./docs/diagram.md).
+The cross-package/process map is the diagram above. The
+[internal transport map](./docs/diagram.md) details Vox modules and roles.
 
 Clankie owns product policy and ClankVox owns deterministic media mechanics; they
 meet at the stdin/stdout IPC boundary. The Discord transport exposes three roles
@@ -86,15 +85,20 @@ Most behavior is split across supervisor-style modules:
   stream discovery, sender/receiver flows.
 
 The product integration lives in
-[`../discord-user-session`](../discord-user-session), which imports the
-separately Apache-licensed process client from `@clankie/vox-client`.
+[`apps/discord-user-session`](../discord-user-session/README.md), which imports the
+separately Apache-licensed process client from `@clankie/vox-client`. The
+[Discord media guide](../../docs/discord-media.md) describes the user-visible
+Activity, Go Live, share-watch, and music differences.
 
 ## Build And Test
 
-ClankVox is Unix-only and requires Rust 1.85+ and CMake to build. URL/video
-playback also uses the host's FFmpeg and yt-dlp installations. H264 publishing
-requires an FFmpeg build with the libx264 encoder; `pnpm doctor` reports the
-FFmpeg and yt-dlp executables but does not check for libx264 encoder support.
+ClankVox requires a Unix-like host, Rust 1.85+, and CMake. The build fails
+explicitly on non-Unix targets because media subprocess control uses a POSIX
+shell and process groups. URL/video playback additionally requires host
+`ffmpeg` and `yt-dlp`; H264 publishing requires FFmpeg's `libx264` encoder.
+`pnpm doctor` treats Rust and CMake as required development prerequisites and
+reports `ffmpeg`/`yt-dlp` as optional feature tools. It does not check the Unix
+shell contract or `libx264` encoder availability.
 
 ```bash
 pnpm --filter @clankie/vox typecheck
@@ -114,16 +118,16 @@ The client resolves `target/release/clankvox`, then
 
 ## License boundary
 
-This package is `AGPL-3.0-or-later`; see [LICENSE](./LICENSE) and
-[PROVENANCE.md](./PROVENANCE.md). The surrounding Clankie monorepo remains
+This package is `AGPL-3.0-or-later`; see [LICENSE](LICENSE) and
+[PROVENANCE.md](PROVENANCE.md). The surrounding Clankie monorepo remains
 Apache-2.0. The process and typed IPC boundary keep the differently licensed
 media implementation explicit rather than silently relicensing it.
 
 ## Discord Boundaries
 
-- ClankVox is Clankie's native voice/media transport plane; Discord voice and Go
-  Live are the transports it implements, and Discord is the only platform it
-  targets today.
+- ClankVox implements Discord voice and Go Live transport; Discord is the only
+  platform it targets today. Current product integration consumes the two Go
+  Live roles, not native ordinary voice/music.
 - Inbound native screen watch is integrated end to end through `stream_watch`.
 - Outbound publish exists and is intentionally narrow: YouTube-backed
   music/video URLs plus browser-session PNG frames, H264 sender transport, and

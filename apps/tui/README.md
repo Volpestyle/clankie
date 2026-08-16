@@ -1,214 +1,102 @@
 # Clankie operator console (`@clankie/tui`)
 
-The operator console wears the v1 clankie face: a fullscreen `@earendil-works/pi-tui` layout (differential renderer, scrollback preserved) with the banner, transcript viewport, status bar, slash-command typeahead, Ctrl+/ command workbench, guided modal flows, and the agent-spinners loader — ported verbatim from clankie snapshot `04734df9` (VUH-755).
+The operator console is a fullscreen `@earendil-works/pi-tui` client with a
+transcript, status bar, slash-command completion, guided setup flows, and a
+`Ctrl+/` command workbench.
 
-The TUI talks to **one backend**: the clankie service on port `4310`
-(`apps/clankie`), which hosts the captain, the operator conversation dispatch
-(`POST /operator/v1/dispatch`, the shared `OperatorConversationService*`
-contract in `@clankie/protocol`), the lane listing (`GET /captain/v1/lanes`),
-and the operator APIs (health, devices, pairing, presence, embodiment,
-activity, memory). The HTTP catalog is `apps/clankie/openapi.yaml`. `CLANKIE_CONTROL_PLANE_URL` overrides the base URL (default
-`http://127.0.0.1:4310`; `CLANKIE_CAPTAIN_URL` is honored as a legacy alias).
-Plain prompts ride the selected server-owned conversation over the dispatch
-route with a durable per-surface replay cursor; there is no local scheduler and
-no state inference from terminal text. Type `/skill-name` at the start of the
-input for inline suffix completion and direct skill invocation, or type `$` at
-a token boundary to search the full skill picker and mention `$skill-name`. When
-Clankie loads a skill, the transcript records one compact `skill loaded` receipt
-instead of exposing the underlying `SKILL.md` read as a generic tool call.
-Inside Herdr the face _is_ his seat: it reports this pane as `clankie` and
-opens the herdr-lead board beside itself (one board per session; `/board`
-opens, `/board focus` jumps, `/board close` dismisses). Joining the session
-attaches a live agent
-census to each prompt so he can lead, route, and harvest. The board is the
-companion dashboard — `herdr-lead state` is the same picture with worktrees.
+It talks to one backend: the clankie service on port `4310`. Plain prompts use
+the shared operator-conversation dispatch contract at
+`POST /operator/v1/dispatch`; lane observation uses
+`GET /captain/v1/lanes`; health, devices, pairing, presence, embodiment,
+activity, and memory use the operator APIs in the
+[HTTP catalog](../clankie/openapi.yaml). `CLANKIE_CONTROL_PLANE_URL` overrides
+the default `http://127.0.0.1:4310`; `CLANKIE_CAPTAIN_URL` remains a
+compatibility alias.
 
-Run after installing with Node 24. The fullscreen face requires a TTY; the
-control subcommands are non-interactive:
+## Run
+
+The fullscreen console requires a TTY. Install the launcher with
+`pnpm cli:install`, then use:
 
 ```bash
-clankie                         # via the bin/clankie.ts launcher (~/.local/bin symlink)
-clankie --chat <conversationId> # select an existing server-owned conversation
-clankie status                  # service probe plus every launcher-owned service
-clankie restart                 # restart every service in dependency order
-clankie restart captain         # restart the clankie service (+ the bodies that claim against it)
-clankie down                    # stop them in reverse dependency order
-clankie trace                   # render-only reasoning/tool stream (transport pending)
-clankie pair                    # one-time QR + code to pair a device
-clankie devices                 # list paired devices (revoke <id> to revoke)
+clankie                         # start the core service and open the console
+clankie --chat <conversationId> # select a server-owned conversation
+clankie status                  # probe every launcher-owned service
+clankie restart [service]       # restart in dependency order
+clankie down [service]          # stop in reverse dependency order
+clankie pair                    # show a one-time device pairing QR and code
+clankie devices                 # list paired devices
+clankie devices revoke <id>
 clankie operator-credential rotate
-clankie play status|stop        # live embodiment session controls
-pnpm --filter @clankie/tui dev  # from the repo
+clankie play status|stop
 ```
 
-`clankie` starts the clankie service when it is not already answering
-`GET /health`, then opens the face. The service stays up when one TUI face
-exits, so sibling Herdr panes do not disconnect one another. Service logs stay
-out of the fullscreen terminal at
-`${XDG_STATE_HOME:-~/.local/state}/clankie/clankie.log`. Direct
-`pnpm --filter @clankie/tui dev` expects the service to be started separately.
+From the repository, `pnpm --filter @clankie/tui dev` opens only the console and
+expects the service to be running already.
 
-## Supervised local services
+The service stays up when a console exits, so sibling Herdr panes do not
+disconnect each other. Logs live under
+`${XDG_STATE_HOME:-~/.local/state}/clankie/` rather than entering the fullscreen
+display.
 
-`clankie` owns the long-lived local processes and restarts them in dependency
+## Supervised services
+
+The launcher owns the long-lived local processes and restarts them in dependency
 order ([ADR 0055](../../docs/adr/0055-launcher-owned-local-services.md)):
 
 ```mermaid
 flowchart LR
   clankie["clankie :4310"] --> bridge["discord-bridge"]
   clankie --> lab["discord-user-session"]
+  lab --> vox["clankvox child<br/>body-owned, not launcher-managed"]
   activity["discord-activity :4320"] --> tunnel["cloudflared tunnel"]
 ```
 
-`restart` walks that order and stops at the first failure; `down` walks the
-reverse. Each service keeps an atomic mode-0600 pid record at
-`${XDG_STATE_HOME:-~/.local/state}/clankie/<id>-service.json` and logs to
-`<id>.log` beside it. Before signalling, the launcher re-reads the recorded
-pid's live command and refuses if it no longer looks like the service it
-started, so a stale record can never kill a process that inherited the pid.
-When Clankie requests a restart from his own operator turn, the launcher
-returns a scheduled result and a detached helper waits for the durable terminal
-turn before restarting. The face reconnects its read-only tail from the last
-persisted cursor, so the reply lands without re-running the prompt or its tools.
+Each process has a mode-0600 pid record and adjacent log. Before signalling a
+pid, the launcher re-reads its live command and refuses if it no longer matches
+the service it started. Starts are health-gated; the activity tunnel is probed
+through its public hostname. A restart requested inside an active operator turn
+waits for that durable turn to settle, and the console reconnects without
+re-running the prompt.
 
-Start is health gated: it returns when the service's probe reports healthy, not
-when the child spawns. The clankie service probes `GET /health`; the bridge —
-which serves no HTTP — reports process state enriched with the presence phase it
-publishes via the operator-readable `GET /v1/discord/presence-status`; the
-tunnel probe is end-to-end against the public hostname. `clankie restart
-captain` (compatibility aliases: `clankie`, `eve`, `cp`, `control-plane`) restarts the single
-service and carries the Discord bridge with it, because the bridge's live
-presence claim is only valid against the service instance that issued it.
+Guild/channel settings come from `~/.config/clankie/settings.json`. The launcher
+injects repository paths and local service credentials where required, while
+Discord body identities resolve directly from the credential broker.
 
-Guild and channel allowlists come from `~/.config/clankie/settings.json`, not an
-env prefix; the launcher supplies only `CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE`
-(a repository path rather than a preference) and the brokered
-`CLANKIE_CAPTAIN_TOKEN` half of the dispatch-auth secret — which is stripped
-from the bridge's env, whose identity is brokered separately.
+## Operator behavior
 
-### `clankie trace` (read-only live thinking surface)
+- `/conversation` lists or selects server-owned conversations. Each console has
+  its own replay cursor; switching never creates a local conversation.
+- Type `/skill-name` for direct skill invocation or `$` at a token boundary for
+  the skill picker. The transcript records a compact `skill loaded` receipt.
+- `/activity` shows the current goal, commentary, intent, observed outcome, and
+  the loopback watch URL without controlling the emulator.
+- `/memory` browses and edits episodes and permitted Discord person facts through
+  operator-only APIs.
+- `/status` shows presence, conversation, model context, activity availability,
+  and the Herdr pane roster when seated inside Herdr.
+- `/board`, `/board focus`, and `/board close` manage the herdr-lead companion
+  board. A seated turn receives the current agent census.
+- `/connect` configures Linear and email and can open Discord setup; use direct
+  `/discord` for the complete lab-user opt-in flow and either body's non-secret ids
+  ([ADR 0093](../../docs/adr/0093-owner-authored-service-connections.md)).
+- `/auth` writes provider keys and OAuth credentials to the credential broker.
+  `/auth status` may also report compatibility provider environment fallbacks;
+  Discord and body credentials remain broker-only except documented
+  operator/captain/runner test overrides.
+- YouTube music is an ordinary prompt, not a slash command. Audible playback is
+  on the official-bot voice path; see the
+  [Discord media guide](../../docs/discord-media.md).
+- `/provider`, `/model`, and `/effort` select the captain. `/image-model` and
+  `/video-model` select generation models. Non-secret model configuration lives
+  in `~/.config/clankie/clankie.json`.
+- `/layout` moves the input and status bands and toggles the header.
+- `Ctrl+T` focuses the transcript. `!` on empty input opens the inline shell.
+  Esc detaches from an in-flight turn; the service continues it and the console
+  resumes its tail before another prompt.
+- `clankie health` reports operator credential source and env/store consistency
+  without fingerprints or secret values. Remove an active
+  `CLANKIE_OPERATOR_TOKEN` override before rotating the stored credential.
 
-`clankie trace` is a **render-only** stream renderer with lane tags, redaction,
-and an identity-only cursor. The pi-based clankie service does not expose a
-per-event captain session stream, so the command has no live
-transport and reports that plainly; the rendering pipeline (`processTraceStream`,
-`src/session/trace-renderer.ts`) is kept as the seam a future stream plugs into.
-
-- **Lane tags from typed context only.** Every rendered line is prefixed with a
-  typed captain lane (`tui`, `discord_voice`, `discord_presence`, `gameplay`),
-  from session context or an explicit `--lane` — never inferred from prose.
-- **No payload persistence.** The mode-0600 checkpoint at
-  `${XDG_STATE_HOME:-~/.local/state}/clankie/captain-trace-session.json` holds
-  only sanitized continuation identity (`generation`, `sessionId`,
-  `streamIndex`, `lane`, `active`).
-- **Render-time redaction.** Tool inputs/outputs pass through
-  `@clankie/observability`'s `sanitizeForSupportBundle` so secrets such as
-  `Authorization` headers render as `[REDACTED]`.
-- **`--json`.** One redacted JSON object per renderable event; human mode dims
-  reasoning and prints `name(args-summary)` tool lines.
-- **Herdr pane.** Inside Herdr (`HERDR_ENV=1`), the process calls
-  `herdr pane report-agent` / `report-metadata` so the pane shows trace status.
-
-### `/trace` (watching the rooms you are not in)
-
-`/trace` in the fullscreen face watches any other captain lane — each Discord
-server and channel he answers in, voice, gameplay
-([ADR 0083](../../docs/adr/0083-every-room-he-thinks-in-is-watchable.md)).
-
-```text
-/trace                      list every room, recent activity, and which are watched
-/trace discord_presence     watch a whole lane
-/trace 1234:5678            watch one room by guild:channel (or any substring)
-/trace all                  watch every room except this conversation
-/trace off                  stop watching
-```
-
-Rooms come from `GET /captain/v1/lanes`, the service's authenticated
-bounded lane log: lane, target id, and recent `heard`/`said` entries — no
-reasoning, tool, private pi session state, or continuation field. A watched room
-is polled for appended entries and renders them as room-tagged transcript lines.
-Watching is a subscription and nothing else: no send, no steering, and a
-watched room never drives the turn loader or status bar.
-
-## Layout
-
-```text
-src/face/    Ported v1 face components (theme, banner, spinners, outline,
-             transcript viewport + blocks, command UI, interactive flow,
-             autocomplete, chrome selection, SGR mouse, clipboard, bash escape).
-             Verbatim ports — fix bugs upstream-style, don't restyle.
-src/shell/   The face shell: layout assembly, central input router, overlay +
-             selection plumbing, SetupFlow wizard engine, status bar, turn
-             loader, prompt history. Extracted from v1's scripts/clankie.ts.
-src/commands.ts   Console slash commands (/help /conversation /trace /activity
-                  /layout /clear /status /exit).
-src/connect-commands.ts  /connect (alias /integrations) for Linear, email, and
-                  Discord ([ADR 0093](../../docs/adr/0093-owner-authored-service-connections.md)).
-src/provider-commands.ts  /auth /provider /model /effort wizards (VUH-760) plus
-                  the positional /image-model and /video-model (ADR 0085), over
-                  @clankie/model-registry, @clankie/credential-broker, and
-                  @clankie/model-provider (clankie.json config).
-src/memory-commands.ts  /memory browser/editor for captain episodes and Discord
-                  person facts over the operator-only memory API.
-src/session/      Operator conversation client (dispatch wire contract over
-                  plain fetch), conversation renderer, lane observation,
-                  trace renderer + cursors, herdr reporting.
-src/observation/  Presence poller for the status bar and the Herdr pane roster.
-bin/              The clankie launcher, service registry/supervisor, and the
-                  headless commands (health, restart, down, trace, pair,
-                  devices, operator-credential, play).
-```
-
-## Interactions
-
-- Type `/` for the command typeahead; Tab completes, Enter runs.
-- A slash skill uses an inline dim suffix instead of the command list; Tab
-  accepts the suffix and Enter invokes an exact skill name. `/skill:name` is the
-  explicit form. Local console commands win when names overlap.
-- `/conversation` lists the server-owned conversation registry and
-  `/conversation <conversationId>` selects an existing conversation. Each face
-  keeps an independent replay cursor; selection never creates a local chat ID.
-- `/activity` reads Clankie's authenticated current-activity projection. It
-  labels model-authored goal/commentary/intent separately from runner-observed
-  outcome/effect/progress and prints the loopback watch URL for live frames.
-  `CLANKIE_ACTIVITY_PORT` selects the viewer port (default `4320`). The command
-  neither reads the gameplay transcript nor controls the emulator.
-- `/memory` opens the operator-only browser for Clankie's self-authored episodes
-  and approved Discord person facts. Selecting a record edits its bounded
-  content/visibility or forgets it after confirmation. `/memory status` prints
-  the complete catalog into the transcript. The TUI never reads or rewrites the
-  backing JSON/JSONL files directly.
-- The persistent status bar and `/status` show the selected conversation's live
-  model context as current tokens out of the total context window. The value
-  comes from Pi's compaction-aware session estimate; immediately after
-  compaction the current side is `?` until the next model response.
-- `/status` also shows the polled presence phase, the selected conversation,
-  activity availability, and — inside Herdr — the sibling pane worker roster.
-- `clankie health` reports operator-credential presence and env/store
-  consistency without fingerprints or secret content. A mismatch fails the
-  health command while the explicit env value remains the runtime override.
-- `clankie operator-credential rotate` replaces the stored credential and
-  invalidates existing operator requests immediately. Remove an active
-  `CLANKIE_OPERATOR_TOKEN` override before rotating.
-- `Ctrl+/` opens the fuzzy command workbench; `Ctrl+T` toggles transcript focus.
-- `!` on an empty input enters the inline shell escape (Esc exits; Ctrl+C kills the running command).
-- Esc detaches from an in-flight turn; the durable server-side turn continues
-  and the face re-tails the conversation before sending another prompt.
-- Mouse: wheel scrolls, drag selects (OSC-52 copy), scrollbar gutter drags, and clicking a tool block toggles its full arguments and result. A running tool's block updates in place when it completes instead of adding a second receipt. With the keyboard, `Ctrl+T` focuses the transcript and Enter/Space toggles the selected block; Alt+Enter does the same without moving focus.
-- `/layout` moves the input/status bands, toggles the header, and picks the spinner (`CLANKIE_TUI_*` env vars seed the defaults).
-- `/connect` is how an owner gives him Linear, email, and Discord. Linear signs in with Linear's MCP OAuth (browser, no API key); an API key is an advanced fallback. Email takes IMAP/SMTP plus an app password (Gmail/iCloud/Fastmail/Outlook presets). Mail stays at the console. Discord is still a body: `/connect discord` opens `/discord`, which includes a portal primer and `/discord invite`. `/auth mcp` redirects here ([ADR 0093](../../docs/adr/0093-owner-authored-service-connections.md)).
-- `/auth` manages provider credentials (masked API-key entry into the Keychain broker — LLM providers plus the featured `elevenlabs` voice credential — ChatGPT/Codex browser or device OAuth, Claude Pro/Max manual-code OAuth, local credential removal, and harness-login guidance). `/auth status` lists first-class owner slots (stored, env, or missing) — auto-minted `clankie_*` process identities stay out of this surface — and does not reprint redacted secret prefixes. `/provider` and `/model` choose the captain from Pi's provider/model catalog; `/effort` uses Pi's supported thinking levels. `/provider small|voice` and `/model small|voice` retain the models.dev catalog for non-Pi AI SDK roles. `/image-model` and `/video-model` are positional rather than wizards (`/image-model openai gpt-image-2`, `/video-model xai grok-imagine-video-1.5`, plus `status` and `unset`) because each supported provider has one usable model; the service reads the resulting ref per request, so a change takes effect without a restart ([ADR 0085](../../docs/adr/0085-a-picture-he-makes-is-something-he-says.md)). Provider intent stays process-local and is reconstructed from the configured `provider/model` ref after restart, so non-secret config has one authority in `~/.config/clankie/clankie.json`.
-- OpenAI API-key access is `openai/<model>`; ChatGPT subscription access is the
-  explicit `openai-codex/<model>` provider. They never borrow each other's
-  credentials. While a subscription credential is stored it supersedes the API
-  key for the models the Codex backend serves: `/model` and `/model status`
-  show the redirect (`openai/gpt-5.5 → openai-codex/gpt-5.5`), and `/auth`
-  logout is what restores metered access.
-- The conversation selection and tail cursors are stored atomically with mode
-  0600 under `.data/tui/operator-conversation*.json`. They are capability-like
-  local state and are excluded from support bundles; a corrupt store raises
-  rather than silently attaching the operator to the wrong conversation.
-
-The `clankie` command runs `bin/clankie.ts` under Node's native type stripping, so the whole dependency graph stays erasable TypeScript (no enums, namespaces, or constructor parameter properties) — enforced repo-wide by `erasableSyntaxOnly` in `tsconfig.base.json`.
-
-Known gap from the v1 port: drag-and-drop attachment paste rewriting stayed behind (`tui-attachments.ts` is coupled to the v1 brain's attachment pipeline); it returns with the service-side attachment path.
+The launcher runs TypeScript through Node's native type stripping; the repo's
+`erasableSyntaxOnly` setting enforces the supported syntax.

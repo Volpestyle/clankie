@@ -1,8 +1,21 @@
-import { access, readFile, readdir } from "node:fs/promises";
+import { access, glob, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
-const markdown = (await walk(root)).filter((path) => path.endsWith(".md") && !path.includes("node_modules"));
+const markdown = [];
+for await (const path of glob("**/*.md", {
+  cwd: root,
+  exclude: [
+    "**/node_modules/**",
+    "**/target/**",
+    "**/.git/**",
+    "**/.turbo/**",
+    "**/artifacts/**",
+    ".codebase-index/**",
+  ],
+})) {
+  markdown.push(resolve(root, path));
+}
 const failures = [];
 for (const path of markdown) {
   const source = await readFile(path, "utf8");
@@ -24,16 +37,4 @@ if (failures.length) {
   process.exitCode = 1;
 } else {
   console.log(`Checked ${markdown.length} markdown files; local links resolve.`);
-}
-
-async function walk(directory) {
-  const output = [];
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
-    if (["node_modules", "target", ".git", ".turbo", "artifacts", ".codebase-index"].includes(entry.name))
-      continue;
-    const path = resolve(directory, entry.name);
-    if (entry.isDirectory()) output.push(...(await walk(path)));
-    else output.push(path);
-  }
-  return output;
 }

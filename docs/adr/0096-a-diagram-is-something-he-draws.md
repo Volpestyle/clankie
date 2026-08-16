@@ -80,8 +80,8 @@ model does. Nothing reaches the app at boot; the first diagram opens the board.
 
 ## Consequences
 
-- He draws in Discord, in voice, and on the console, and the picture rides his
-  reply with no approval — same as a picture he makes and a screenshot he takes.
+- He draws in Discord, in voice, and on the console, and the picture rides the
+  same provenance-scoped reply capture as a generated image or screenshot.
 - The capability is bound to a desktop app on one machine. If the service ever
   runs headless, diagrams stop working and say so. That is a real ceiling and
   the price of reusing a tool that is already good.

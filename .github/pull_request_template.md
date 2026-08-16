@@ -6,17 +6,14 @@
 
 ## Evidence
 
-- [ ] typecheck
-- [ ] unit/integration tests
-- [ ] `pnpm eval:self-build` when orchestration/policy/protocol/eval changed
+- [ ] `pnpm check`
+- [ ] focused live proof when an external integration changed
 - [ ] screenshots or design comparison for UI changes
 
 ## Risk, privacy, and security
-
-## Doctrine exceptions
 
 ## Rollback
 
 ## Agent attribution
 
-List lead, implementer, verifier, reviewer/evaluator worker run IDs and native session IDs when applicable.
+List contributing agents or Herdr panes when useful to reviewers.

@@ -1,68 +1,66 @@
 # @clankie/possessor-voice
 
-The loopback seam that lets a possessor commentate
+The canonical loopback seam for gameplay commentary and room hearing
 ([ADR 0064](../../docs/adr/0064-possessor-voice-seam.md)).
 
-A harness driving Clankie's GBA body holds no Discord gateway, so it holds no
-live presence claim and cannot speak for itself. It reports what the body just
-did; the process that owns the body in Discord speaks.
+A process driving Clankie's GBA body holds no Discord gateway or live presence
+claim. It reports what happened; the Discord body decides whether and how to
+speak, and pushes only room input it is already allowed to hear.
 
 ```mermaid
 flowchart LR
-  C["client<br/>possessor, dials out"] -->|"narrate"| L["listener<br/>bridge, loopback + bearer"]
-  L --> S["DiscordVoiceSession.narrate()"]
-  L -->|"utterance (push)"| C
+  C["client<br/>possessor"] -->|"narrate"| L["bridge listener<br/>loopback + bearer"]
+  L --> S["live Discord voice session"]
+  L -->|"utterance + room state"| C
 ```
 
-## Two halves
+## API
 
-| Export                               | Who uses it | What it does                                                                                              |
-| ------------------------------------ | ----------- | --------------------------------------------------------------------------------------------------------- |
-| `createPossessorVoiceListener`       | the bridge  | Binds `127.0.0.1`, validates the bearer, hands reports to the voice session, pushes transcript lines back |
-| `createBrokeredPossessorVoiceClient` | a possessor | Resolves the broker bearer and dials out; `say` / `subscribe`                                             |
+| Export                               | Consumer              | Responsibility                                                                                |
+| ------------------------------------ | --------------------- | --------------------------------------------------------------------------------------------- |
+| `createPossessorVoiceListener`       | Discord bridge        | Binds loopback, authenticates the bearer, accepts narration, pushes utterances and room state |
+| `createBrokeredPossessorVoiceClient` | Asked play or GBA MCP | Resolves the broker bearer and dials the listener                                             |
 
-The client's shape matches `ClankieSpeechPort` and `ClankieHearingPort` in
-`@clankie/gba-mcp` structurally, so neither package imports the other to satisfy
-a type.
+The client exposes `narrate`, `subscribe`, `roomListening`, `connected`, and
+`close`. The listener exposes `publishUtterance`, `publishRoom`,
+`attachedCount`, and `close`. Their shapes satisfy the GBA MCP speech and
+hearing ports structurally, so the packages do not import each other's types.
 
-## What it will not carry
+## Wire And Bounds
 
-The wire is two messages — `narrate` in, `utterance` out — and adding a third is
-a decision, not a patch. A possessor cannot choose an audience, join or leave a
-channel, or reach any other presence action from here. It drives the character;
-it does not pick new rooms.
+The wire has three messages: `narrate` enters the bridge; attributed `utterance`
+and boolean `room` state are pushed back. Narration and utterances are capped at
+2,000 characters; a socket payload is capped at 64 KiB.
 
-Narration is **context, never a script**: the bridge seeds it and the persona
-composes the words. Anything needing verbatim speech belongs on the
-presence-action path with a live claim.
+Narration is context, never a script. The possessor cannot choose an audience,
+join or leave a channel, or reach another presence action. Raw audio and member
+identities never cross this seam.
 
-## Direction and locks
+## Direction And Credentials
 
-The possessor dials **out**, mirroring the activity frame sink: the
-credential-holding process opens no port for the less-trusted side to connect
-into, and the listener never binds a routable interface. The broker-minted
-`clankie_possessor_voice` bearer is the second lock, not the only one.
+The bridge opens only a loopback listener. The possessor dials it and presents
+the broker-minted `clankie_possessor_voice` bearer, so local binding and
+authentication are independent locks. The bridge owns first-run minting;
+clients only resolve the stored bearer. `CLANKIE_POSSESSOR_VOICE_TOKEN` is a
+hard error.
 
-Both halves are deny-by-default. No credential, no bridge, or no live voice
-session all resolve to a refusal with a reason rather than silence.
+Enable the seam with `discord.possessorVoiceEnabled` in `/discord` or the
+non-secret `CLANKIE_POSSESSOR_VOICE_ENABLED=true` override. The listener
+defaults to `ws://127.0.0.1:4323/possessor`;
+`CLANKIE_POSSESSOR_VOICE_PORT` changes the bridge port and
+`CLANKIE_POSSESSOR_VOICE_URL` changes a GBA MCP client's target.
 
-## Lossy on purpose
+No credential, bridge, or live voice session returns a typed refusal rather
+than false success.
 
-`say` refuses when the bridge is unreachable instead of queueing. A line about a
-wall he bumped into is worth nothing thirty seconds later, and a possessor
-deserves to learn the body is unreachable rather than believe it spoke.
-Utterances published with nobody attached are dropped, never replayed on
-connect.
+## Loss And Evidence
 
-## Evidence
+Narration refuses while disconnected instead of queueing stale commentary.
+Utterances published with nobody attached are dropped, never replayed. Current
+room state is sent once on attach and on every change.
 
-The listener can emit content-free seam evidence for the bridge receipt log:
-connection phase, attached/delivered counts, room-listening state, local
-delivery ids, and sanitized refusal codes. No utterance or narration text is
-part of the evidence type. A narration-submission event means the live voice
-session accepted the event; a rejected call emits only a refusal, never both.
-Asked play may send its own `deliveryId` so the journal turn, the submission,
-the spoken response, and a rate-limit/`playing` suppression share one join key.
-The production loopback test delivers a room line
-after asked play reports `running`, observes it on the next gameplay turn, and
-sees a gameplay event return through narration on the same socket.
+The listener's optional evidence contains only connection phase,
+attached/delivered counts, listening state, delivery ids, and bounded refusal
+codes. Narration and utterance text cannot enter the evidence type. A
+narration-submission event means the live voice session accepted the report; a
+rejected call emits only a refusal.

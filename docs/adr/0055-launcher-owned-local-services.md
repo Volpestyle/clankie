@@ -18,7 +18,7 @@ reliable health gate.
 The backend is one `clankie` process: the HTTP API, pi captain, presence state,
 media, and game bodies all live there. The Discord bridge depends on it. The
 optional lab user-session body depends on it too and stays off until enabled
-([ADR 0098](0098-user-session-watches-discord-shares.md)). The activity
+([ADR 0098 (user-session shares)](0098-user-session-watches-discord-shares.md)). The activity
 surface and tunnel publish what he plays.
 
 Every managed process gets:

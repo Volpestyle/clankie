@@ -1,11 +1,8 @@
 # Remote relay
 
-The relay exposes two deliberately separate boundaries for remote Apple clients.
-
-- Operator conversations use authenticated HTTP and NDJSON. Device session credentials are verified against the clankie service's durable device projection on every request, between tail polls, and immediately before each tail page is emitted, so expiry, revocation, and grant removal take effect without waiting for a reconnect.
-- The legacy local-development WebSocket carries `control` and `terminal` planes. It binds to loopback, is disabled unless `CLANKIE_RELAY_DEV_TOKEN` is configured, and is not an application authorization boundary.
-
-Tailscale may transport either connection, but Tailscale identity is never accepted as relay authorization. The relay never exposes a local PTY or Herdr socket directly to the public internet.
+The relay is the HTTP-only operator-conversation boundary for remote Apple
+clients. Tailscale may carry the connection, but network identity is not
+authorization: every request carries a device-session bearer.
 
 ## Operator conversation boundary
 
@@ -14,11 +11,17 @@ The HTTP surface composes the unchanged `@clankie/protocol` operator-conversatio
 - `POST /operator/v1/dispatch` accepts strict `list`, `get`, `create`, `send`, and `replay` requests.
 - `POST /operator/v1/tail` accepts the same strict `tail` request and emits newline-delimited `{ kind: "event", event }`, `{ kind: "recovery", recovery }`, or terminal `{ kind: "auth_failure", failure }` frames.
 
-Each request carries a device session bearer. The relay checks the current device record and `chat` grant against the clankie service, then uses its own captain service credential for the upstream hop. Device credentials never cross that hop. Captain responses pass the strict public schema and an authorization/token/credential value redactor before emission, which excludes private values even when they are embedded in an otherwise allowed string such as a title. Captain session IDs, continuation tokens, provider credentials, and arbitrary provider payloads do not cross the boundary.
+The relay checks the current device record and `chat` grant against the clankie
+service on every request, between tail polls, and immediately before emitting a
+tail page. Expiry, revocation, and grant removal therefore take effect without a
+reconnect. It uses its own captain service credential for the upstream hop;
+device credentials never cross it.
+
+Responses pass the strict public schema and value redaction before emission.
+Captain session IDs, continuation tokens, provider credentials, and arbitrary
+provider payloads do not cross the boundary.
 
 Turn submission retains the registry's `expectedRevision` fence. Duplicate delivery of the same authenticated device request is collapsed to one in-flight or retained result; a stale fence returns the registry's typed `revision_conflict` result. Replay and tail cursors remain opaque and surface-scoped. A dropped stream resumes from the last emitted event cursor, while expired or reset cursors produce one typed recovery frame and close.
-
-No approval-completion route exists here: both the HTTP router and the legacy opaque control tunnel deny approval-shaped traffic.
 
 ```mermaid
 flowchart LR
@@ -27,12 +30,13 @@ flowchart LR
   Relay -->|"captain bearer + unchanged registry request"| Captain["captain conversation dispatch"]
   Captain -->|"strict public result / opaque cursor"| Relay
   Relay -->|"JSON or NDJSON"| Device
-  Relay -. "never forwards" .-> Approval["approval-shaped traffic"]
 ```
 
-Structured logs contain bounded, value-redacted route, operation, device, conversation, surface, status, and recovery metadata only. They never include message text or either bearer credential.
+## Run
 
-Recorded React Native consumer fixtures live in `test/fixtures/operator-conversations.json` and `test/fixtures/operator-conversation-tail.ndjson`.
+```bash
+pnpm --filter @clankie/relay start
+```
 
 Configuration:
 
@@ -40,4 +44,8 @@ Configuration:
 - `CLANKIE_CAPTAIN_URL` defaults to `http://127.0.0.1:4310` (conversation dispatch on the same service).
 - `CLANKIE_CAPTAIN_TOKEN` enables the authenticated captain hop; conversation requests fail closed when absent.
 - `CLANKIE_RELAY_HOST` defaults to loopback; set it to a specific tailnet interface for direct physical-device access.
-- `CLANKIE_RELAY_DEV_TOKEN` optionally enables the legacy loopback WebSocket.
+- `PORT` defaults to `4320`.
+
+Structured logs contain bounded, redacted route, operation, device,
+conversation, surface, status, and recovery metadata only. They never include
+message text or either bearer credential.

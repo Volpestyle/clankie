@@ -10,6 +10,8 @@ what lets both bodies be one character
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | `presence-session`           | Gateway/voice phase lifecycle, typed phase events, act-tool revoke fence                                      |
 | `presence-action-advertiser` | Retains the live catalogue and forwards phase as an execution fence                                           |
+| `discord-rest`               | Shared bounded REST writes for both Discord transports                                                        |
+| `captain-action-control`     | Authenticated local control requests from captain tools                                                       |
 | `text-ingress`               | Normalises gateway messages into bounded, allowlist-gated captain turns, images included (ADR 0081)           |
 | `voice-address`              | Phonetic address detection over `characterNames()` (ADR 0057)                                                 |
 | `voice-floor`                | The dormant ↔ engaged floor machine: wake, decay, and the unprompted-turn rate cap                            |
@@ -17,6 +19,9 @@ what lets both bodies be one character
 | `elevenlabs-tts`             | Injectable ElevenLabs multi-context streaming-TTS boundary (ADR 0070)                                         |
 | `external-voice`             | Pairs a text-modality realtime session with a TTS mouth behind the one conversation port (ADR 0070)           |
 | `voice-session`              | Media owner: consent, per-speaker capture/transcription, shared group floor, deliberate barge-in and playback |
+| `voice-composition`          | Shared voice dependency assembly for bot and user-session bodies                                              |
+| `voice-control`              | Local join/leave control request handling                                                                     |
+| `voice-music`                | Shared bounded queue and transport controls                                                                   |
 | `voice-ingress`              | Routes one `ask_clankie` handoff to the continuing `discord_voice` captain lane                               |
 | `voice-consent`              | Ephemeral consent under explicit or owner-selected presence policy; opt-out always wins                       |
 | `voice-audio`                | Memory-only PCM conversion between Discord 48 kHz stereo and realtime 24 kHz mono                             |
@@ -53,10 +58,15 @@ durations, and typed outcomes, never transcript, prompt, audio, or PCM.
   session closes after two minutes and reopens on demand. At 25 retained
   listeners, the least recently active idle listener is evicted before another
   opens; active captures and pending transcript correlation are never evicted.
+- **Music behavior is body-dependent.** The official bot provides audible
+  YouTube playback through `@discordjs/voice`; the lab body currently sends
+  video-only Go Live through Vox. The cross-surface contract lives in the
+  [Discord media guide](../../docs/discord-media.md).
 
 ## Consumers
 
-- `apps/discord-bridge` — official bot: slash commands, voice, the
-  activity plane.
-- `apps/discord-user-session` — personal-lab user session, gated by
+- [`apps/discord-bridge`](../../apps/discord-bridge/README.md) — official bot:
+  slash commands, voice, and the activity plane.
+- [`apps/discord-user-session`](../../apps/discord-user-session/README.md) —
+  personal-lab user session, gated by
   [ADR 0048](../../docs/adr/0048-discord-user-session-transport.md).

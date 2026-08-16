@@ -166,7 +166,10 @@ semantic-event, and screenshot hashes before accepting existing evidence.
 - `pnpm --filter @clankie/gba-emulator fixture:check`
 - `pnpm --filter @clankie/gba-emulator scenario:validate [outputDir]`
 
-## Free play (ADR 0049)
+## Free Play
+
+[ADR 0049](../../docs/adr/0049-free-play-agency-and-non-deterministic-evidence.md)
+defines free-play agency.
 
 `pnpm gba:free-play` runs a **model**, not an algorithm. The scenario drivers
 above compute every action — `nextRealRouteStep` is BFS, move selection is an
@@ -220,7 +223,7 @@ gated.
 
 ### Free-play competence gate
 
-`pnpm gba:competence -- --mode deterministic_double` runs two pinned ROM-free
+`pnpm --filter @clankie/gba-emulator gameplay:competence -- --mode deterministic_double` runs two pinned ROM-free
 seeds through a state-derived controller and requires objective milestones,
 turn-budget efficiency, distinct accepted actions, and no unresolved stall.
 A repeat-only controller fails even when the adapter accepts every press.
@@ -230,7 +233,7 @@ model content:
 
 ```bash
 CLANKIE_GBA_COMPETENCE_RECEIPT_DIR=/operator/evidence/free-play \
-  pnpm gba:competence -- --mode rom_gated
+  pnpm --filter @clankie/gba-emulator gameplay:competence -- --mode rom_gated
 
 CLANKIE_GBA_COMPETENCE_RECEIPT_PATH=/operator/evidence/free-play/free-play-competence-receipt.json \
   pnpm --filter @clankie/gba-emulator gameplay:evaluate-competence-receipt
@@ -250,7 +253,10 @@ Runs against the core double with no ROM. The trace is written under
 stays untracked because it carries model monologue; a six-turn format sample
 lives in `fixtures/free-play/sample-trace.jsonl`.
 
-## Asked play (ADR 0063)
+## Asked Play
+
+[ADR 0063](../../docs/adr/0063-a-play-request-starts-embodiment.md) defines the
+product entry into play.
 
 The product entrance to free play is an ask: a captain turn submits an
 embodiment intent, the service's play host claims it, and this package's
@@ -260,7 +266,7 @@ takes a `shouldStop` hook so an asked stop or an exhausted duration budget ends
 the playthrough at a turn boundary, and an asked session resumes from the
 newest compatible checkpoint and mints one on the way out (ADR 0060).
 `pnpm gba:free-play-live` remains the development alias of the same composition
-(`apps/clankie/src/play-execution.ts`).
+([`apps/clankie/src/play-execution.ts`](../../apps/clankie/src/play-execution.ts)).
 
 Every run leaves a durable trail (ADR 0068). `openFreePlayJournal` writes one
 append-only JSONL per run — header, every validated `FreePlayTurn`, then a

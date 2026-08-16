@@ -78,9 +78,12 @@ Inbound native watch works like this:
    - `user_video_state`
    - `user_video_frame`
    - `user_video_end`
-8. clankvox decodes H264 access units to JPEG in-process (`decoded_video_frame`); Clankie decodes sampled VP8 keyframes to JPEG and feeds the higher-level screen-watch pipeline
+8. clankvox decodes H264 access units to JPEG in-process
+   (`decoded_video_frame`) for the higher-level screen-watch pipeline
 
-The receiver path supports H264 and VP8 receive.
+The transport can emit raw VP8 frames, but the current TypeScript product does
+not decode or promote them. End-to-end screen observation therefore requires
+the H264 `decoded_video_frame` path.
 
 ## `stream_publish` Flow
 
@@ -204,7 +207,7 @@ fragments still assemble, then decrypt.
 path remains best-effort; cached SPS+PPS and the persistent OpenH264
 decoder still cover keyframe recovery.
 
-## Video Decode (OpenH264 in-process; VP8 via ffmpeg)
+## Video Decode (OpenH264 in-process)
 
 H264 decode is handled entirely in-process by clankvox's persistent OpenH264
 decoder (`video_decoder.rs`), running on a dedicated decode thread
@@ -213,7 +216,5 @@ and JPEG encode never stall the event loop. The fps gate runs between decode
 and JPEG encode: every frame feeds the decoder's reference state, but
 rate-limited frames skip the encode entirely. H264 frames do not use ffmpeg.
 
-VP8 still uses per-frame ffmpeg decode on the Clankie side. The ffmpeg raw demuxer
-hangs on single-frame input; Clankie works around this by piping through
-`cat | ffmpeg -fflags +genpts -f ivf -i pipe:0` which guarantees clean pipe
-close and EOF delivery.
+VP8 receive remains an encoded transport capability. No current Clankie product
+consumer decodes the raw `user_video_frame` events.

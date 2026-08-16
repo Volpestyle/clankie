@@ -13,14 +13,16 @@ The same store owns the host-local `clankie_operator` bearer. First-run bootstra
 mints it with 256 bits of entropy, operator clients auto-load it, and the
 service authorization boundary resolves it per request so one broker rotation
 invalidates prior local credentials immediately. Environment input is an
-explicit CI/test override and health exposes only content-free consistency. 3. **Provider layer** (`packages/model-provider`) — non-secret config in
-`~/.config/clankie/clankie.json` with a per-repo override, deep-merged and
-zod-validated; provider resolution (credential present ∪ env var declared by
-the registry ∪ config-declared); Pi provider projection for the captain; AI SDK instantiation for gameplay, voice, and media with
-`@ai-sdk/openai-compatible` as the universal adapter for local endpoints
-(Ollama, LM Studio/MLX, llama.cpp, vLLM — just `baseURL`). The captain uses Pi's native thinking levels; non-captain AI SDK adapters lower their provider options at request time.
+explicit CI/test override and health exposes only content-free consistency.
 
-**Captain auth supports four methods:** API keys, Anthropic Pro/Max subscription OAuth, ChatGPT/Codex subscription OAuth with its request adaptation (Codex backend, `ChatGPT-Account-Id`/`originator` headers, single-flight lazy refresh), and SuperGrok / X Premium device-code OAuth on the same `xai` slot as an API key (RFC 8628 against `auth.x.ai`, Bearer against `api.x.ai/v1`, no endpoint reroute). Worker harnesses remain provider-native adapters whose own logins are the source of worker auth; the `/auth` wizard guides those logins rather than re-implementing them.
+3. **Provider layer** (`packages/model-provider`) — non-secret config in
+   `~/.config/clankie/clankie.json` with a per-repo override, deep-merged and
+   zod-validated; provider resolution (credential present ∪ env var declared by
+   the registry ∪ config-declared); Pi provider projection for the captain; AI SDK instantiation for gameplay, voice, and media with
+   `@ai-sdk/openai-compatible` as the universal adapter for local endpoints
+   (Ollama, LM Studio/MLX, llama.cpp, vLLM — just `baseURL`). The captain uses Pi's native thinking levels; non-captain AI SDK adapters lower their provider options at request time.
+
+**Captain auth supports four methods:** API keys, Anthropic Pro/Max subscription OAuth, ChatGPT/Codex subscription OAuth with its request adaptation (Codex backend, `ChatGPT-Account-Id`/`originator` headers, single-flight lazy refresh), and SuperGrok / X Premium device-code OAuth on the same `xai` slot as an API key (RFC 8628 against `auth.x.ai`, Bearer against `api.x.ai/v1`, no endpoint reroute). Coding-agent harnesses keep their native logins; the `/auth` wizard guides those logins rather than re-implementing them.
 
 OpenAI API-key and ChatGPT subscription access are separate provider
 identities: `openai` and `openai-codex`. The latter projects the supported
@@ -35,11 +37,14 @@ credential store.
 Session/context management follows the [architecture](../architecture.md): Pi
 owns the captain's language-model runtime, durable conversation history,
 compaction, and step usage; the TUI stores a private conversation cursor and
-displays Pi's context limits.
+displays Pi's context limits
+([ADR 0101](0101-pi-owns-the-captain-model-runtime.md)).
 
 ## Options weighed
 
-- **Re-implementing worker OAuth in-house** — rejected: ADR 0006 makes harness-native logins authoritative; duplicating them adds ToS risk and maintenance for no capability.
+- **Re-implementing coding-agent OAuth in-house** — rejected because each
+  harness's native login is authoritative; duplicating it adds ToS risk and
+  maintenance for no capability.
 - **Plaintext auth file (opencode's model)** — rejected for secrets at rest; Keychain is already committed (VUH-689). File fallback exists only for non-darwin/CI.
 - **Hand-maintained model list (v1's hardcoded menus)** — rejected; models.dev gives cost/limits/modalities/reasoning metadata across 158 providers and refreshes programmatically.
 - **Config in saved env vars (v1's `CLANKIE_*` env store)** — rejected in favor of typed, diffable JSON with global + repo override.
@@ -47,5 +52,5 @@ displays Pi's context limits.
 ## Constraints
 
 Only the Clankie service and privileged connectors resolve provider credentials.
-Workers use their provider-native authentication. The TUI owns the local setup
+Coding-agent harnesses use their provider-native authentication. The TUI owns the local setup
 flow and writes non-secret provider/model references to the settings store.

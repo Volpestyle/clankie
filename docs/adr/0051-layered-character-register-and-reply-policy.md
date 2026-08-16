@@ -1,6 +1,9 @@
 # ADR 0051: Character, operating contract, and register are separate layers
 
-Status: accepted (2026-07-25).
+Status: accepted (2026-07-25). The possession section is amended by
+[ADR 0064](0064-possessor-voice-seam.md) and
+[ADR 0074](0074-the-room-hears-one-voice.md): the possessor remains a distinct
+inbound principal, but it no longer authors outbound room speech verbatim.
 
 ## Context
 
@@ -9,7 +12,7 @@ serve different purposes. The same person participates in operator work,
 Discord rooms, and gameplay, while each surface needs its own speaking register.
 
 The naive fix — writing a personality into the authored instructions — fails for
-two reasons. It would make him informal in mission threads where precision is
+two reasons. It would make him informal in operator work where precision is
 the product, and it would place character in the same file as the operating
 contract, so editing one risks the other.
 
@@ -17,11 +20,11 @@ contract, so editing one risks the other.
 
 Identity is three layers with different lifetimes and different owners.
 
-| Layer                  | Holds                                        | Varies by surface | Owner             |
-| ---------------------- | -------------------------------------------- | ----------------- | ----------------- |
-| **Character**          | name, aliases, humor, disposition, interests | no                | the human owner   |
-| **Operating contract** | mission doctrine, evidence rules, escalation | no                | the repository    |
-| **Register**           | how he speaks in the room he is currently in | **yes**           | derived from lane |
+| Layer                  | Holds                                           | Varies by surface | Owner             |
+| ---------------------- | ----------------------------------------------- | ----------------- | ----------------- |
+| **Character**          | name, aliases, humor, disposition, interests    | no                | the human owner   |
+| **Operating contract** | repository rules, safety boundaries, escalation | no                | the repository    |
+| **Register**           | how he speaks in the room he is currently in    | **yes**           | derived from lane |
 
 One person in different rooms — not two bots, and not a personality that
 dissolves the operating contract.
@@ -57,14 +60,12 @@ at session creation. No caller controls either layer.
 Every rendered persona ends with an explicit invariant: voice changes with the
 room, permission never does.
 
-This is load-bearing rather than decorative. A warm, agreeable, eager-to-please
-persona is precisely the thing that can be talked into privileged action — "sure,
-I'll deploy that for you" is a plausible sentence for a character designed to be
-helpful and chill. The persona layer therefore states plainly that being asked
-warmly is not an approval, and every authority check remains exactly where it
-is: ambient input still cannot approve privileged work (ADR 0045), and
-privileged actions still route through the policy engine and the authenticated
-surface.
+This is load-bearing rather than decorative. A warm, agreeable persona is
+precisely the thing that can be talked into machine action. The persona layer
+therefore states plainly that social agreement is not authority. Host-grounded
+actor and lane checks remain outside the register; current Discord system-tool
+authority is defined by
+[ADR 0095](0095-discord-system-actors.md).
 
 ### The gameplay register has one intended consumer
 
@@ -107,50 +108,23 @@ persona renderer, satisfying one definition of the character.
 
 ### Possession is a distinct principal, not a borrowed persona
 
-An external harness can drive Clankie over MCP — playing, listening to the voice
-channel, and injecting speech. A raw `speak(text)` tool would route
-around this ADR's central property: persona is owner-authored and never supplied
-by the caller, so that caller-controlled context cannot redefine who Clankie is.
-A guest process's system prompt would become Clankie's voice in a room whose
-participants consented to something else.
+An external harness can drive Clankie's body and hear admitted room input. The
+body, account, and bounds are Clankie's; gameplay decisions are the possessor's.
+Possession is another mind driving, not a costume, so the MCP process does not
+receive persona plumbing or inherit captain authority.
 
-The decision, ruled by the owner, is that **a possessor does not inherit the
-character and does not need to. The body, account, and bounds are Clankie's; the
-decisions are the possessor's.** Possession is another mind driving, not a
-costume it wears.
+That remains the inbound and control-side decision. The original outbound
+consequence was later superseded. A possessor cannot inject a sentence for the
+room to hear. Under [ADR 0064](0064-possessor-voice-seam.md) it reports an event,
+and under [ADR 0074](0074-the-room-hears-one-voice.md) the realtime room session
+is the sole author of the spoken words. Character consistency is therefore
+enforced at the gateway-owning mouth without pretending the possessor made
+Clankie's decision.
 
-Persona therefore does not reach the possession path, and the MCP surface needs
-no persona plumbing. The character applies only when Clankie owns the decision.
-
-Whether the room learns that a guest is driving is a **separate question**. The
-owner's rule is no in-channel disclosure.
-Possession stays operator-visible through the lease transition log; the room is
-not notified.
-
-[ADR 0053](0053-mcp-possession-of-clankies-body.md) is authoritative for
-possession and records that decision, its reasoning, its residual risk — a
-possessor both speaks and listens, so participants are addressed and overheard
-by a party they cannot detect — and the conditions that should reopen it. This
-ADR deliberately does not restate any of it, so the two cannot drift apart.
-
-What belongs here is only the character consequence, and it is a limit worth
-stating plainly: for verbatim speech the code cannot make the words sound like
-anyone, because the possessor authors them. Character consistency under possession
-is a discipline a harness may choose to keep, never an invariant this repository
-enforces.
-
-Two constraints follow, both assigned to the implementing ADR to
-specify in detail:
-
-- **An MCP possessor is a new principal class.** It attaches to neither the
-  ambient tier nor the voice presence tier. [ADR 0050](0050-voice-presence-authority-tier.md)
-  is the precedent for adding one properly: a separate named policy, denied by
-  default, reachable only by writing the open value exactly.
-- **A listen tool is a new egress path** for private conversation into a guest
-  process. It must sit strictly downstream of `/clankie voice-consent` and expose
-  only consented, already-transcribed text. Raw and generated PCM are
-  memory-only and zeroed after use (ADR 0045); a transcript tool must not
-  become the reason that stops being true.
+Whether the room learns that a guest is driving remains a separate disclosure
+decision owned by [ADR 0053](0053-mcp-possession-of-clankies-body.md). Hearing
+also remains downstream of voice consent: transcripts may cross the possessor
+seam, raw audio may not.
 
 ### Reply policy
 
@@ -174,7 +148,7 @@ boundary so "clankiest" and `github.com/clankieproject` do not summon him.
 ## Options weighed
 
 - **Write the personality into `instructions.md`** — rejected. It couples
-  character to the operating contract and makes him informal in mission threads.
+  character to the operating contract and makes him informal in operator work.
 - **Pass persona through channel metadata** — rejected. Caller-controlled
   context redefining identity is the same hole ceremony instructions close with
   HMAC verification.
@@ -186,20 +160,18 @@ boundary so "clankiest" and `github.com/clankieproject` do not summon him.
   decides speech versus silence; a second personality-free model duplicates him.
 - **Generating a default personality when none is authored** — rejected. Taste
   belongs to the owner; a synthesized character would be both wrong and sticky.
-- **Re-voicing possessed speech through the persona** — rejected by the owner. A
-  possessor is itself, not Clankie; dressing its decisions in his character
-  would misrepresent whose they are. What follows from that for the room is
-  ADR 0053's to decide, not this document's.
+- **Let the possessor author room speech verbatim** — the original consequence
+  was superseded by ADR 0064/0074. The possessor now reports what happened and
+  the room's realtime persona authors what is heard.
 
 ## Consequences
 
 - The pi captain reads `@clankie/settings` when it creates a session, so owner
   persona stays outside repository instructions and caller input.
 - The Discord bridge reads reply policy from owner settings.
-- `persona.chattiness` shapes reply length and eagerness. Proactive
-  speech — speaking unprompted when a voice channel goes quiet — is deliberately
-  **not** in this ADR. It needs an idle clock, cooldowns, and barge-in
-  interaction, and it will consume this same setting when it lands.
+- `persona.chattiness` shapes reply length and eagerness.
+  [ADR 0057](0057-realtime-voice-with-captain-handoff.md) later used it to
+  rate-limit offered unprompted voice turns.
 - Register is presentation only. Any future change that lets a register alter
   what an action may do contradicts this ADR and must supersede it explicitly.
 - Free play consumes the `gameplay` register through

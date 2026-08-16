@@ -9,6 +9,11 @@ the native media sockets, codec work, packet timing, encryption, and low-level
 telemetry that live below Clankie's Node runtime. The invariant across the
 boundary is that ClankVox stays deterministic; Clankie applies policy.
 
+Current product wiring consumes `stream_watch` and `stream_publish` from the
+active lab user body. Ordinary voice and audible music still run through
+`@discordjs/voice`; the native `voice` and music contracts below describe
+implemented Vox capability, not the current product owner.
+
 ## Ownership Boundary
 
 Clankie's TypeScript runtime owns:
@@ -17,8 +22,8 @@ Clankie's TypeScript runtime owns:
 - Discord selfbot gateway session and stream discovery dispatch handling
 - session orchestration and product logic
 - tools, prompts, settings, and commentary decisions
-- decoding VP8 watch frames into JPEG for the higher-level screen-watch
-  pipeline (the VP8 fallback path only)
+- deciding whether raw VP8 frames can be promoted; the current product path does
+  not decode them and uses Vox-decoded H264 JPEGs
 
 `clankvox` owns:
 

@@ -19,8 +19,9 @@ resolution and where artifacts land. Nothing else constructs these adapters.
 caller-selected local artifact.
 
 Posting a generated artifact is a separate concern with its own boundary: his own reply carrying
-a picture he just made is decided by the clankie service and the presence schema, never here. See
-ADR 0085.
+a picture he just made is decided by the clankie service and the presence
+schema, never here. See
+[ADR 0085](../../docs/adr/0085-a-picture-he-makes-is-something-he-says.md).
 
 Provider responses are untrusted. Adapters validate their response shape, decode the image, write it
 with mode `0600` under a `MEDIA_ARTIFACT_BYTES_MAX` ceiling, and return a validated absolute artifact

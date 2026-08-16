@@ -18,7 +18,7 @@ in usage bills or the session ledger.
 ## Decision
 
 While a subscription credential is stored, it supersedes the API key for every
-model the Codex backend serves. `resolveConfiguredLanguageModel` redirects an
+model the Codex backend serves. The shared subscription policy redirects an
 `openai/<model>` ref to `openai-codex/<model>` before any credential lookup;
 `gpt-5.6` maps to `gpt-5.6-sol`, the slug the backend answers.
 
@@ -32,8 +32,8 @@ than silently reaching for the other credential, so the identity boundary stands
 
 The redirect is stated, never silent. `/model status` renders
 `openai/gpt-5.5 → openai-codex/gpt-5.5 (ChatGPT subscription)`, `/model` says so
-on selection, and every turn records the effective ref as
-`captain.session.model_selected` in the captain session ledger.
+on selection, and the active Pi session reports the effective model and context
+budget.
 
 Two ways back to metered access, both deliberate:
 
@@ -77,4 +77,5 @@ pays for.
 - The captain's usable context can shrink after a login (1.05M → 272k input) for
   the same ref; the status line and ledger budget reflect the narrower window.
 - Expanding `CODEX_SUBSCRIPTION_MODEL_IDS` also expands what the redirect
-  captures, so the streamed probe (`pnpm models:codex-probe`) gates both.
+  captures, so the streamed probe
+  (`pnpm --filter @clankie/model-provider codex-probe`) gates both.

@@ -1,11 +1,13 @@
 # ADR 0016: Versioned interactive-environment contract and lane-scoped tools
 
-Status: accepted. The frozen v1 lifecycle remains supported; ADR 0038 owns the
-current provider-profiled v2 session and lease shape.
+Status: accepted. The Minecraft lifecycle and mission/task bindings below are
+historical. The provider-neutral versioning, lease, and bounded-media decisions
+remain in the GBA environment stack; no separate ADR file survives for the
+provider-profiled v2 follow-up.
 
 ## Context
 
-Minecraft introduces a durable external body whose motor loop outlives any one
+At ratification Minecraft introduced a durable external body whose motor loop outlived any one
 model turn. Operator, Discord voice, and gameplay reasoning use separate pi
 sessions but present one Clankie identity. A global Minecraft tool catalog or a
 blocking tool call would couple those sessions, waste model context, and let a
@@ -18,23 +20,24 @@ stable product API.
 
 ## Decision
 
-`@clankie/protocol` owns the cross-product identity, captain-lane, authority,
-intent, character-snapshot, and mission/task binding schemas.
-`@clankie/interactive-environment` owns provider-neutral session, lease,
+At ratification `@clankie/protocol` owned cross-product identity, captain-lane,
+authority, intent, character-snapshot, and mission/task binding schemas, while
+`@clankie/interactive-environment` owned provider-neutral session, lease,
 command, action-result, observation, event, and Minecraft profile schemas.
-Runtime adapters depend inward on these contracts; neither shared package
-imports Mineflayer or Paper types.
+The enduring decision is that runtime adapters depend inward on versioned,
+provider-neutral contracts rather than leaking implementation types. Neither
+shared package imported Mineflayer or Paper types.
 
 Every command carries a source lane, principal and authority tier,
 correlation ID, and expected `goalVersion`. The arbiter rejects a command when
 its expected version is stale. Long-running commands return an action handle;
 completion and failure arrive as later results and semantic events.
 
-Tool exposure is a deterministic projection of session phase and lane:
+Tool exposure was a deterministic projection of session phase and lane:
 
 ![ADR 0016: Versioned interactive-environment contract and lane-scoped tools](../diagrams/0016-versioned-interactive-environment-contract.jpg)
 
-The runner owns the lease, credentials, connection, and cancellation. Lease
+The runner owned the lease, credentials, connection, and cancellation. Lease
 schemas name server, world, character, quotas, and capabilities but reject
 credential fields. Ticks, chunks, packets, audio, and video never enter the
 semantic event stream; bounded artifacts reference them when evidence needs
@@ -67,9 +70,8 @@ translators rather than reinterpretation.
 
 - Downstream components share one validated contract and can evolve adapters
   independently.
-- Dormant Minecraft contributes only `join` and `status` to model routing.
-- Active gameplay tools cannot appear in TUI or Discord lanes through a
-  model-authored request; the deterministic projection rejects forged sets.
+- The historical Minecraft adapter exposed only `join` and `status` while
+  dormant and rejected model-forged capability sets.
 - Version negotiation and migration require explicit boundary code when v2 is
   introduced.
 - Schemas describe authority requests and results but grant no capability and

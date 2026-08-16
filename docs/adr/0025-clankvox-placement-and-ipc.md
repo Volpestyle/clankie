@@ -41,10 +41,12 @@ The selective import retains voice RTP/Opus, PCM conversion and internal mixing,
 transport AEAD, DAVE audio, speaking/capture state, and transport statistics. The only governed
 outbound media input is generic `audio`. It does not retain v1 music/YouTube/player-control IPC,
 Go Live, video, user-token paths, v1 Realtime orchestration, or transcript-pane naming.
-User-session Go Live and transport-agnostic Discord presence are owned by
-[`ADR 0024`](0024-discord-dual-plane-presence.md). VUH-840 and VUH-841 may extend ClankVox or
-select a sibling media owner behind a new ADR and versioned boundary, but they must not fold user
-credentials or video into this schema-1 bot-only media plane.
+User-session Go Live and transport-agnostic Discord presence were assigned to
+[`ADR 0024`](0024-discord-dual-plane-presence.md). The later receive/publish work
+shipped through
+[ADR 0098 (user-session shares)](0098-user-session-watches-discord-shares.md)
+and [ADR 0100](0100-vox-is-an-owned-native-media-package.md); it did not fold
+user credentials or video into this superseded schema-1 bot-only media plane.
 
 ### One Discord media owner
 
@@ -173,5 +175,8 @@ second version word to the v1 header. `user_audio_end` closes the current per-sp
   provenance for the imported native implementation.
 - The official-bot media session uses the maintained `@discordjs/voice` path in
   ADR 0045 and does not instantiate this direct-adapter design.
-- The isolated, opt-in user-session transport and Go Live receive/publish work
-  remain under ADR 0024 and preserve the single-owner invariant.
+- The isolated, opt-in user-session transport and shipped Go Live receive/publish
+  path are owned by
+  [ADR 0098 (user-session shares)](0098-user-session-watches-discord-shares.md)
+  and [ADR 0100](0100-vox-is-an-owned-native-media-package.md), preserving the
+  single-owner invariant.

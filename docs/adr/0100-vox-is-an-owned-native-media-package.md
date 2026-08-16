@@ -13,7 +13,9 @@ media plane: Discord voice, DAVE, speaker capture, TTS and music pacing,
 screen-watch, Go Live publishing, and transport telemetry.
 
 The previous source is `AGPL-3.0-or-later`. The rest of this repository is
-Apache-2.0. ADR 0025 therefore prohibited an unrecorded import, while ADR 0098
+Apache-2.0. [ADR 0025](0025-clankvox-placement-and-ipc.md) therefore prohibited
+an unrecorded import, while
+[ADR 0098 (user-session shares)](0098-user-session-watches-discord-shares.md)
 allowed the compiled process only as an external sidecar. That arrangement
 kept the licenses separate but made the binary's source, build, protocol, and
 runtime drift independently.
@@ -45,9 +47,10 @@ The first rollout keeps the existing proven ownership split:
 - Official-bot voice moves only after live DAVE, capture, latency, and recovery
   evidence shows that replacing the maintained Discord library is better.
 
-The active Discord body owns the Vox child process. Vox is a workspace package,
-not an independently supervised daemon: media credentials and process lifetime
-remain scoped to the body that opened the Discord gateway.
+The active user-session body owns the Vox child process in the current rollout.
+Vox is a workspace package, not an independently supervised daemon: media
+credentials and process lifetime remain scoped to the body that opened the
+Discord user gateway.
 
 ```mermaid
 flowchart LR
@@ -56,7 +59,7 @@ flowchart LR
   body --> client[@clankie/vox-client]
   client -->|framed IPC| vox[clankvox child process]
   vox <-->|DAVE + RTP media| stream[Discord stream server]
-  body -->|reports latest still| service[Clankie service]
+  body -->|reports sampled stills| service[Clankie service]
 ```
 
 The detailed implementation and readiness flow lives in the
@@ -84,5 +87,7 @@ The detailed implementation and readiness flow lives in the
   corresponding-source obligations.
 - Discord's normal-user automation risk remains unchanged and stays behind the
   existing personal-lab opt-in and active-body controls.
-- ADR 0025's placement prohibition and ADR 0098's external-binary placement are
-  superseded by this decision; their protocol and product boundaries remain.
+- [ADR 0025](0025-clankvox-placement-and-ipc.md)'s placement prohibition and
+  [ADR 0098 (user-session shares)](0098-user-session-watches-discord-shares.md)'s
+  external-binary placement are superseded by this decision; their protocol and
+  product boundaries remain.

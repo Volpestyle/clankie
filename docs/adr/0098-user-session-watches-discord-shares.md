@@ -1,6 +1,7 @@
 # ADR 0098: The lab user body watches Discord shares through ClankVox
 
-Status: accepted (2026-08-15).
+Status: accepted (2026-08-15). The native package placement is owned by
+[ADR 0100](0100-vox-is-an-owned-native-media-package.md).
 
 ## Context
 
@@ -49,7 +50,7 @@ active it joins unmuted. When the bot is active, watch is unavailable.
 **Productization.** `/discord` stores the user token, enablement, allowlists,
 the durable opt-in, and `activeBody`. The launcher starts
 `@clankie/discord-user-session` only when that body is enabled **and**
-active. High-assurance and team profiles still deny the transport.
+active. The owner opt-in, allowlists, and active-body switch remain mandatory.
 
 ## Consequences
 

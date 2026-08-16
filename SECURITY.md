@@ -1,17 +1,31 @@
 # Security policy
 
-Do not report vulnerabilities in public issues. Use the private disclosure channel configured by the project owner before launch.
+Report vulnerabilities privately to the repository maintainers. Do not put
+exploit details, credentials, private message content, or user-session tokens in
+a public issue.
 
-High-priority areas:
+Clankie's current security boundaries are:
 
-- runner command execution and sandbox escape;
-- terminal control-lease bypass;
-- relay authentication or cross-workspace routing;
-- credential leakage into workers, logs, events, analytics, or support bundles;
-- policy bypass through direct provider tools or shell commands;
-- prompt injection from repositories, terminals, Discord, trackers, Figma, or skill packages;
-- cross-channel/private-memory disclosure;
-- malicious ANSI/control-sequence handling;
-- tampering with event logs, tests, evaluations, or doctrine hashes.
+- The clankie service and native producer/listener ports bind to loopback.
+- Local services authenticate with brokered bearers. The remote relay requires a
+  live device session with the `chat` grant on every request and tail poll.
+- The credential broker is canonical for provider, Discord, mailbox, and
+  internal credentials. Compatibility model/media provider keys may come from
+  the process environment; logs and public protocol results remain secret-free.
+- Discord, attachments, generated media responses, browser content, and model
+  output are untrusted input. Only configured `systemActorUserIds` may expose
+  the operator's machine tools to a Discord text turn; voice never gets them.
+- Bot and personal-lab Discord credentials live in separate processes. The
+  user-session body is off by default and requires explicit owner opt-in.
+- Vox is a separate native process behind validated, bounded IPC.
 
-Preserve evidence, revoke affected credentials, stop the runner, and follow `docs/10-security-threat-model.md` for containment.
+High-priority reports include authentication bypass, cross-device or
+cross-channel disclosure, credential exposure, unsafe attachment/media fetches,
+Discord allowlist or consent bypass, native media parser issues, and any path
+that gives untrusted input machine tools.
+
+For containment, stop affected services with `clankie down`, preserve the
+mode-0600 state logs without publishing them, revoke affected provider or
+Discord credentials, rotate the operator bearer with
+`clankie operator-credential rotate`, and revoke paired devices with
+`clankie devices revoke <id>`.

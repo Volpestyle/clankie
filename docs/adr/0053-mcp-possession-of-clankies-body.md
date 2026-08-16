@@ -1,157 +1,94 @@
 # ADR 0053: An external harness possesses Clankie under a lease
 
-Status: accepted (James, 2026-07-25). The MCP server, the possession lease, and
-the Discord ports' seams are implemented; the ports have no bridge-side
-implementation yet.
+Status: accepted (James, 2026-07-25). The speech/hearing ports were implemented
+by [ADR 0064](0064-possessor-voice-seam.md), admitted room text was added by
+[ADR 0098 (room text)](0098-the-room-can-type-to-a-playthrough.md), and outbound
+authorship was superseded by
+[ADR 0074](0074-the-room-hears-one-voice.md). The possessor remains authoritative
+for its own gameplay decisions, not for exact words heard by the room.
 
 ## Context
 
-Clankie plays FireRed in an agent loop ([ADR 0049](0049-free-play-agency-and-non-deterministic-evidence.md)).
-A coding harness is the same loop. Publishing his body as MCP tools lets Claude
-Code, Codex, or anything else drive him — and is the strongest available test of
-the tool surface, because a surface an external harness can play well through is
-one his own loop can.
-
-`GbaEmulatorToolNameSchema` had specified that surface since ADR 0016 and had
-zero consumers. This adds the second one.
+Publishing the emulator surface over MCP lets an external harness drive the same
+body as Clankie's model-decided loop. It is also a strong test of the shared tool
+surface: an external caller must inherit the same bounds, refusals, and observed
+state rather than gaining a private path to the core.
 
 ## Decision
 
-`apps/gba-mcp` publishes the emulator surface over MCP. It is a **consumer** of
-the existing surface, not a parallel stack: tool arguments derive from the
-existing action and observation schemas, every action dispatches through
-`EnvironmentRuntime`, and the ROM loader is shared with the free-play CLI so
-there is one path to the core and one place digests are checked.
+`apps/gba-mcp` is a consumer of the existing emulator contracts. Tool arguments
+derive from shared action and observation schemas, every action dispatches
+through `EnvironmentRuntime`, and the ROM loader is shared with the play host.
+The MCP server does not define a second game body or capability catalog.
 
-That is what keeps ADR 0049's "changes _who decides_, not how an action is
-authorised" true when the decider is an external harness: an illegal button, an
-exceeded frame bound, or a missing capability is refused by the machinery that
-refuses a script.
+### A possessor holds no Discord gateway
 
-`@clankie/mcp-registry` is the _consumption_ side — Clankie's workers using
-external servers under doctrine. This is the opposite direction and is a
-separate package rather than an extension of it.
+The Discord presence path requires a live claim minted by the process holding
+the gateway. A possessor holds no gateway and cannot mint that claim. Speech and
+hearing therefore use ports to the gateway-owning process rather than a direct
+presence action.
 
-### The fence: a possessor holds no gateway
+This preserves the key invariant: possession changes who drives the body, never
+which Discord account is present or which room it occupies.
 
-**This is the central finding, and a future reader will otherwise re-derive it
-the hard way.**
+### Possession is a lease
 
-The obvious implementation of "let the possessor speak" is a direct call to the
-Clankie service's `POST /v1/discord/presence-actions`. It does not work. That
-endpoint requires a **live presence claim** — the session id, phase, and
-monotonic revision the Discord bridge publishes while it holds the gateway
-([ADR 0024](0024-discord-dual-plane-presence.md)) — and only the bridge can mint
-one. That is precisely the fence stopping an action from reaching a session that
-is not live.
+Two drivers reaching the same core would produce conflicting intent. Taking the
+body suspends the resident loop instead of arbitrating after both actions land.
 
-A possessor holds no gateway, therefore no claim, therefore cannot speak
-directly. So speech and hearing are **ports**: the possessor asks the process
-that owns the body in Discord to act for it. That also preserves the invariant
-that possession changes who is deciding, never which account is present.
+- Observation needs no lease.
+- Acting, reporting narration, and hearing require the lease.
+- Stealing a live lease requires an explicit force operation.
+- Leases expire so a crashed holder cannot retain the body forever.
+- A separate cross-process body lock prevents two runtimes from each believing
+  they are the only writer.
 
-### Possession is a lease, not a second driver
+The body lock follows driving rather than MCP process startup, allowing idle MCP
+servers to observe without monopolizing the body.
 
-Two dispatchers reaching the same core produce a character twitching between two
-intents. Taking the body therefore **suspends** the resident loop rather than
-racing it; arbitrating afterwards would still have let both intents land.
+### A distinct principal and consent boundary
 
-- Observation needs no lease. Looking is not driving, and a harness should see
-  the game before deciding to take it.
-- Acting, speaking, and listening require the lease.
-- Stealing a live lease requires `force`, so it is an explicit act rather than
-  the outcome of a race. Every transition is logged.
-- Leases expire, so a crashed holder does not keep the body forever.
+A possessor is neither an ordinary room participant nor the owner/operator
+seat. It receives only the capabilities the possession surface exposes. Hearing
+is downstream of the existing Discord admission and consent boundary, carries
+transcripts rather than audio, and grants no new access merely because the
+possessor asks.
 
-### A new principal class
+Hearing is push-only. A pull-shaped "last N lines" API would require the bridge
+to retain transcripts; instead, attributed utterances reach only live
+subscribers and the possessor's bounded window is cleared on release.
 
-The possessor attaches to **neither the ambient tier nor the voice presence
-tier**. Possessing the body has a different consequence from summoning Clankie
-into a call or starting a mission, and [ADR 0050](0050-voice-presence-authority-tier.md)
-established that a different consequence gets its own named, deny-by-default
-binding rather than being folded into an existing one. Unset means possession is
-unavailable and only observation works.
+### Disclosure and speech authorship
 
-### Hearing is push, and downstream of consent
+The owner decision at ratification was no in-channel possession announcement.
+Lease transitions remain operator-visible. The residual risk is explicit: a
+private room can be heard by a guest driver that participants cannot detect.
+This decision must be revisited if the deployment stops being private and
+owner-known or possession is delegated beyond the owner.
 
-`clankie_listen` is an egress path, so it sits downstream of
-`/captain-voice-consent`: a possessor hears exactly what Clankie is already
-permitted to hear, transcripts only, never raw PCM. Asking as a possessor grants
-no additional access.
+The original consequence that the account carried the possessor's verbatim
+voice is no longer current. ADR 0064 makes the possessor report an event, and
+ADR 0074 makes the realtime room session the sole author of what the room hears.
 
-It is **push rather than pull, and that is a privacy constraint**. Asking the
-bridge for "the last N lines" would require it to retain transcripts, and it
-deliberately retains none — PCM buffers are zeroed after use and the bot does
-not persist channel transcripts ([ADR 0045](0045-official-bot-dave-group-voice.md)).
-A pull-shaped port would have quietly forced whoever implemented it to break
-that invariant. Utterances are pushed to a live subscriber; the bounded window
-lives on the possessor's side and is cleared on release, so what is heard does
-not outlive the possession that heard it.
+## Alternatives considered
 
-### Possession is not disclosed to the room
-
-**Owner decision (James, 2026-07-25): no in-channel disclosure.** Possession is
-visible operator-side — every lease transition is logged — and the room is not
-told that a guest is driving.
-
-This is the deployment-specific disclosure rule alongside
-[ADR 0051](0051-layered-character-register-and-reply-policy.md). The boundary is
-deployment-shaped rather than universal: the
-lab server is private and small, its participants are known to the owner, and
-they already know Clankie is a machine the owner drives. Two extra messages per
-session buy nothing those particular people do not already have.
-
-The residual risk is recorded rather than argued away. A possessor both speaks
-and listens, so participants are addressed and overheard by a party they cannot
-detect, and the operator-side log is accountability for the owner, not for them.
-**That trade holds only while the deployment stays private and owner-known.** If
-the activity is ever verified, the server opened past the people the owner can
-name, or possession handed to someone other than the owner, this decision should
-be revisited rather than inherited.
-
-## Options weighed
-
-- **Fold the server into `@clankie/mcp-registry`** — rejected. That package is
-  the consumption side; producing a server is a different direction, and folding
-  them would blur which way trust flows.
-- **Give the MCP server its own path to the core** — rejected. It would produce a
-  third definition of what Clankie can do in a game, and the fail-closed
-  behaviour would have to be reimplemented rather than inherited.
-- **Let both the possessor and the free-play loop drive, arbitrating on
-  `goalVersion`** — rejected; see the lease section.
-- **Speech as a direct Clankie service call** — rejected: the live-claim fence
-  forbids it.
-- **No listening seam at all** — rejected: a port interface is a seam, not a
-  third capability definition, and omitting it makes the surface asymmetric.
+- **Give the MCP server its own core path** was rejected because it would create
+  a second capability definition and duplicate fail-closed behavior.
+- **Let the resident loop and possessor drive concurrently** was rejected
+  because arbitration after dispatch is too late.
+- **Call Discord presence actions directly** was rejected because the live-claim
+  fence correctly excludes a process with no gateway.
+- **Use a pull transcript API** was rejected because it would create bridge-side
+  retention.
 
 ## Consequences
 
-- **Two locks, two jobs.** The possession lease decides which harness drives a
-  running loop; a lockfile in the shared body root decides which _process_ owns
-  the body at all. `EnvironmentRuntime`'s one-writer rule does not close
-  the second gap: every entrypoint constructs its own runtime, so the rule is
-  in-memory and invisible across processes — the MCP server and the free-play CLI
-  could each hold what they believed is the only body. `acquireBodyLock` makes
-  that a refusal naming the holding process, verified across two real processes.
-  It expires by liveness (`kill(pid, 0)`) rather than by time, so a crash cannot
-  brick the body and a long playthrough cannot be evicted mid-turn. The MCP
-  server takes it **on possession, not at startup**: clients launch stdio servers
-  freely, so locking at process start makes the first server win and every later
-  one fail to connect at all. Looking is not driving, and the lock follows
-  driving. Consequently
-  the body is a **single-machine** resource; `CLANKIE_GBA_BODY_ROOT` is the
-  documented way to run a second, separate body.
-- Both Discord ports refuse by default with errors naming what is missing.
-  Implementing them is a change in `apps/discord-bridge`, the process holding the
-  live claim and the consent registry.
-- The ports reach Discord over a loopback, token-gated control channel dialled
-  outward from the MCP server, so the credential-holding process opens no
-  inbound port. This reuses the activity plane's frame-producer shape
-  ([ADR 0047](0047-discord-activity-presence-plane.md)) rather than introducing a
-  second bespoke transport.
-- A possessor does not inherit Clankie's persona and does not need to: the body,
-  account, and bounds are his, the decisions are the possessor's. Gameplay is
-  unaffected by this — a button press has no voice — but `clankie_say` reaches
-  third parties, so a possessor speaking reads as Clankie's account carrying the
-  possessor's voice. If a run should sound like him, that is a reason to let his
-  own loop drive.
+- The emulator body is a single-machine resource with one active writer.
+- Missing lease, bridge, credential, consent, or live voice state fails closed
+  with a specific reason; play itself may continue silently.
+- Possession remains operator-auditable without granting the harness Discord
+  credentials or raw audio.
+- Setup, commands, lock locations, tool semantics, and live operation belong in
+  the [GBA MCP operating guide](../../apps/gba-mcp/README.md). The bridge-side
+  media seam belongs in the
+  [Discord bridge operating guide](../../apps/discord-bridge/README.md).
