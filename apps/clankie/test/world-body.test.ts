@@ -354,6 +354,73 @@ function joinResult() {
   };
 }
 
+describe("a decoded screen with no semantic state", () => {
+  it("names the screen and does not report it as danger", async () => {
+    // VUH-980. The world decodes FireRed's intro perfectly and says so; it just
+    // has no position or party to report. Calling that `unknown` at high
+    // severity told a mind the game was broken for the minutes the intro runs.
+    const world = await fakeWorld((request) => {
+      switch (request.operation) {
+        case "world.join":
+          return joinResult();
+        case "play.observe":
+          return {
+            ...observation({ frame: 371, decoded: false }),
+            scene: { mode: "cutscene", inputReady: false, waitingForAdvance: false, decoded: true },
+          };
+        case "world.leave":
+          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
+        default:
+          throw new Error(`unexpected operation ${request.operation}`);
+      }
+    });
+    const result = await joinWorld({
+      environmentId: "pokemon-firered",
+      env: await provisionedEnv(world.stateDir),
+    });
+    expect(result.outcome).toBe("joined");
+    if (result.outcome !== "joined") return;
+
+    const scene = result.body.io.observe("scene");
+    expect(scene.kind === "scene" && scene.data.mode).toBe("cutscene");
+
+    const danger = result.body.io.observe("danger");
+    if (danger.kind !== "danger") throw new Error("expected a danger observation");
+    expect(danger.data.severity).toBe("low");
+    expect(danger.data.code).not.toBe("uncertain_state");
+    // Still not certain: there genuinely is no position or party to read.
+    expect(danger.data.stateCertain).toBe(false);
+
+    await result.body.close();
+  });
+
+  it("still reports a screen it could not interpret as uncertain", async () => {
+    const world = await fakeWorld((request) => {
+      switch (request.operation) {
+        case "world.join":
+          return joinResult();
+        case "play.observe":
+          return observation({ frame: 12, decoded: false });
+        case "world.leave":
+          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
+        default:
+          throw new Error(`unexpected operation ${request.operation}`);
+      }
+    });
+    const result = await joinWorld({
+      environmentId: "pokemon-firered",
+      env: await provisionedEnv(world.stateDir),
+    });
+    expect(result.outcome).toBe("joined");
+    if (result.outcome !== "joined") return;
+    const danger = result.body.io.observe("danger");
+    if (danger.kind !== "danger") throw new Error("expected a danger observation");
+    expect(danger.data.severity).toBe("high");
+    expect(danger.data.code).toBe("uncertain_state");
+    await result.body.close();
+  });
+});
+
 function observation(options: {
   frame: number;
   bodyGeneration?: number;

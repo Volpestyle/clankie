@@ -359,16 +359,33 @@ class HostedWorldBody implements WorldBody {
 
     const mapped = (() => {
       switch (kind) {
-        case "danger":
+        case "danger": {
+          if (certain) {
+            return {
+              ...base,
+              kind,
+              data: {
+                severity: "low" as const,
+                code: "policy_boundary" as const,
+                summary: "Hosted world state is decoded; the shared world may advance independently",
+                stateCertain: true,
+              },
+            };
+          }
+          // A screen the adapter *understood* but that carries no position or
+          // party — a cutscene, a menu, the naming keyboard — is not a danger.
+          // Reporting the intro as high-severity uncertainty for the minutes it
+          // runs is how a mind learns to distrust this signal entirely.
+          const knownScreen = observation !== undefined && observation.scene.decoded;
           return {
             ...base,
             kind,
-            data: certain
+            data: knownScreen
               ? {
                   severity: "low" as const,
-                  code: "policy_boundary" as const,
-                  summary: "Hosted world state is decoded; the shared world may advance independently",
-                  stateCertain: true,
+                  code: "input_bound" as const,
+                  summary: `Hosted world is on a ${observation.scene.mode} screen; no position or party to read, raw buttons still work`,
+                  stateCertain: false,
                 }
               : {
                   severity: "high" as const,
@@ -377,6 +394,7 @@ class HostedWorldBody implements WorldBody {
                   stateCertain: false,
                 },
           };
+        }
         case "scene":
           return {
             ...base,
@@ -744,10 +762,19 @@ function requireSemanticState(state: FireRedState | undefined): FireRedState {
   return state;
 }
 
+/**
+ * The world and clankie now name the same screens the same way, so this is a
+ * pass-through rather than a translation. `unknown` stays reserved for a screen
+ * the adapter could not interpret — never for one it understood and that simply
+ * carries no position or party.
+ */
 function localSceneMode(mode: Observation["scene"]["mode"] | undefined) {
   switch (mode) {
     case "overworld":
     case "dialog":
+    case "menu":
+    case "naming":
+    case "cutscene":
     case "battle":
       return mode;
     default:
