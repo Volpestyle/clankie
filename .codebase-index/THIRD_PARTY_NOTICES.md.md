@@ -5,14 +5,12 @@ license posture (explicitly not legal advice).
 
 Vendored code: only
 apps/tui/src/face/agent-spinners.ts, spinner
-frames ported from expo-agent-spinners (MIT),
-carried over from the v1 clankie face.
+frame data from expo-agent-spinners (MIT).
 
-Designed-around but not vendored: Vercel Eve
-(Apache-2.0), the @earendil-works pi packages
-(MIT), React Native / RN-macOS / RN Skia (MIT),
-and Herdr (AGPL/commercial — treat as an optional
-external terminal provider). Codex and Claude are
-provider adapters governed by each provider's
-terms. Calls for a full SBOM before any public
-release.
+Used or interoperated with but not vendored: the
+@earendil-works pi packages (MIT), React Native /
+RN-macOS / RN Skia (MIT), and Herdr
+(AGPL/commercial — treat as an optional external
+terminal provider). Codex and Claude are provider
+adapters governed by each provider's terms. Calls
+for a full SBOM before any public release.

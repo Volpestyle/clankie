@@ -10,8 +10,8 @@ this line is what the model is told.
 Per-action describers use the adapter's own
 outcome where a diff cannot see it: dialog
 transcripts (oldest boxes dropped first),
-walk results (arrived / warped / blocked by
-something the map does not show — an NPC),
+walk results (arrived / warped / blocked by an
+NPC, battle, or transition),
 enter_text and select_menu_entry endings. A
 short directional tap that only turned the
 character is reported as a turn, not a wall
@@ -20,6 +20,10 @@ inside an open menu are never judged as
 walking; the frame digest gets the last word
 ("screen changed — trust the frame" vs "no
 visible change").
+
+Unlisted dialog choices produce an explicit hint
+to inspect the frame and press directly instead of
+letting `advance_dialog` answer a prompt.
 
 `FreePlayProgressTracker` keeps distinct tiles
 stood on, map order, turns since a new tile,

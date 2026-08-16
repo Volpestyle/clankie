@@ -267,6 +267,7 @@ export class ClankieFaceShell {
     this.setupFlow = createSetupFlow({
       tui: this.tui,
       editor: this.editor,
+      editorTheme: this.theme.editorTheme,
       selectListTheme: this.theme.selectListTheme,
       setStatus: (message) => this.refreshStatus(message),
       refreshStatusView: () => this.refreshStatusView(),
@@ -682,6 +683,7 @@ export class ClankieFaceShell {
       return { consume: true };
     }
     if (matchesKey(data, Key.escape) && this.setupFlow.isWaitingForInput()) {
+      if (this.setupFlow.hasActivePrompt()) return undefined;
       this.setupFlow.handleSubmit("/cancel");
       return { consume: true };
     }

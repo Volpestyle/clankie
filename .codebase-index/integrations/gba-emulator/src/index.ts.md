@@ -5,4 +5,5 @@ contracts, cores, adapter, drivers, scenarios,
 mGBA core, FireRed decoders, live proof,
 frames, and the whole free-play family
 (loop, journal, mind, session, boot, voice,
-competence), plus body-lock and checkpoints.
+competence, bounded play-story projection), plus
+body-lock and checkpoints.

@@ -1,13 +1,5 @@
 # apps/discord-activity/src/index.ts
 
-Entrypoint and barrel. When run directly: starts
-the viewer server on CLANKIE_ACTIVITY_PORT
-(default 4320), mints/resolves the producer
-bearer via ensureActivityProducerCredential (the
-activity server owns the listener, so it owns the
-first-run mint — never from env), starts the
-producer listener on CLANKIE_ACTIVITY_PRODUCER_PORT
-(default 4322; 4321 collided with the captain),
-and closes both on SIGINT/SIGTERM. Re-exports
-RenderedSurfaceHub, createFrameProducerServer,
-and createDiscordActivityServer.
+Standalone entrypoint and barrel exports. It starts the public viewer server on `:4320`, resolves/mints the producer credential in the broker, starts the loopback producer/snapshot server on `:4322`, and closes both on signals.
+
+Re-exports `RenderedSurfaceHub`, `createFrameProducerServer`, and `createDiscordActivityServer` for tests and embedded use.

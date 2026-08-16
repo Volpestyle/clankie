@@ -1,6 +1,6 @@
 # packages/model-provider/test
 
-Five vitest suites across the pipeline layers,
+Eight vitest suites across the pipeline layers,
 all with stubbed fetch/stores — no network, no
 real keychain.
 
@@ -19,3 +19,8 @@ real keychain.
   refresh, and the anthropic fetch adapter
 - anthropic-configured-model.test.ts — brokered
   Pro/Max credential vs API-key path selection
+- xai-oauth.test.ts — device login polling,
+  refresh sharing/rotation/revocation, request
+  bearer replacement, JWT expiry skew
+- xai-configured-model.test.ts — SuperGrok OAuth
+  adapter vs ordinary xAI API-key SDK path

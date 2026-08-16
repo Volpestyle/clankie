@@ -23,5 +23,6 @@ the free-play-* files cover the loop, journal,
 progress, session/body-lock, boot, voice,
 prompts (real SDK validation vs mocked
 timeout), character rules, and the competence
-benchmark; checkpoint, frame-stream, and
+benchmark; play-story guards the bounded public
+journal projection; checkpoint, frame-stream, and
 live-proof cover their namesake modules.

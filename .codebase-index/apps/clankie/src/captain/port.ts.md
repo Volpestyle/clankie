@@ -1,14 +1,5 @@
 # apps/clankie/src/captain/port.ts
 
-`CaptainPort`: the seam between the HTTP app and
-the pi captain. The app parses and
-authenticates; the captain owns sessions, tools,
-and persona. Methods: `submitDiscordTurn` (one
-message = one turn), `serveOperatorConversation`
-(TUI/relay wire contract), `observeLanes` (lane
-transcript snapshots), `voiceLaneInstructions`
-(realtime briefing fragment), `close`.
+`CaptainPort` is the boundary between authenticated HTTP routes and Pi runtime ownership. It submits Discord turns, serves operator-conversation requests, returns protocol-native observable lanes, supplies the realtime voice instruction fragment, and closes active sessions.
 
-Also defines `LaneObservation`/`Entry` and
-`createStubCaptain()`, the test stand-in that
-lets every route suite run without a model.
+`createStubCaptain()` provides an overrideable no-model stand-in for route tests; `LaneObservationEntry` aliases the shared protocol type.

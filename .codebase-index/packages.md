@@ -2,7 +2,9 @@
 
 Shared contracts and adapters consumed by the
 apps. `protocol` depends on nothing but zod;
-everything else layers on it.
+everything else layers on it, from durable
+environment lifecycles and Discord presence to
+credentials, settings, models, and media.
 
 - `protocol` — every zod schema, frozen table,
   and type that crosses a process boundary
@@ -14,11 +16,13 @@ everything else layers on it.
   per route.
 - `credential-broker` — the local secret
   boundary: Keychain/file stores, HMAC
-  capability grants with audited one-time
-  use, every broker-owned internal bearer.
+  capability grants with audited one-time use,
+  every broker-owned internal bearer, and Linear
+  MCP OAuth.
 - `settings` — operator-facing non-secret
   config in a 0600 settings.json; env
-  overrides win and are reported;
+  overrides win and are reported; Discord,
+  persona, voice, Linear, and email coordinates;
   token-shaped values are refused.
 - `observability` — pino logger factory with
   secret redaction, `withSpan` OTel helper,
@@ -35,8 +39,9 @@ everything else layers on it.
   reclaim, read-only observer.
 - `discord-presence-core` — transport-neutral
   Discord participation for both bodies: text
-  ingress, presence lifecycle, the two-tier
-  realtime voice stack, content-free receipts.
+  ingress, presence lifecycle, two-tier realtime
+  voice, screen sight, YouTube music, and
+  content-free receipts.
 - `environment-runtime` — durable
   single-writer lifecycle and lease
   enforcement for embodied sessions:
@@ -45,7 +50,8 @@ everything else layers on it.
 - `interactive-environment` — provider-neutral
   zod contracts for embodied environments:
   sessions, leases, commands, observations,
-  semantic events.
+  semantic events, rendered surfaces, and
+  pull-on-demand play still/story reads.
 - `media-connector` — versioned boundary for
   local image/video generation (OpenAI,
   Google, Grok adapters), hardened artifact

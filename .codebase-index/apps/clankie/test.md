@@ -1,37 +1,11 @@
 # apps/clankie/test
 
-Vitest suites for the service, all offline by
-design: routes run against `createStubCaptain()`
-and temp dirs, the browser suite fakes the MCP
-server on in-memory streams, and play suites use
-the deterministic GBA core double — no model, no
-Discord, no real browser.
+Offline Vitest coverage for the service. Routes use `createStubCaptain`, state lives in temp directories, and browser, model, Discord, mail, Linear, tldraw, media, and emulator collaborators are injected fakes.
 
-- `app-smoke.test.ts` — boot-to-first-answer
-  pass over the merged app.
-- `discord-channel.test.ts` — channel-turn
-  route: auth, dedupe, lane authority, retry.
-- `captain-episodes.test.ts`,
-  `discord-person-memory.test.ts` — memory
-  routes and visibility fences.
-- `captain-presence.test.ts` — lease manager +
-  presence route.
-- `devices.test.ts`, `pairing.test.ts`,
-  `device-session.test.ts` — pairing flow,
-  token signer, key file hygiene.
-- `embodiment.test.ts`,
-  `embodiment-operator.test.ts` — the
-  embodiment manager and operator play routes.
-- `play-host.test.ts`,
-  `play-round-trip.test.ts`,
-  `play-voice.test.ts` — the play host
-  lifecycle, real turns on the core double
-  (checkpoints, autosave, restart, body lock),
-  and the ADR 0074 voice wiring.
-- `browser-host.test.ts`,
-  `media-generation.test.ts`,
-  `discord-attachment-fetch.test.ts`,
-  `activity-observation.test.ts`,
-  `environment-lifecycle.test.ts`,
-  `operator-auth.test.ts` — one suite per
-  capability module.
+- Captain: sessions/episodes/memory, voice steering, render notices, system authority, connected tools, Herdr seat, tool detail, operator context.
+- Discord: channel/presence/attachment behavior, visual context, music/social/voice clients, person memory, stream-watch and voice-receipt projections.
+- Play: embodiment manager/operator routes, host round trips, sight, checkpoints, voice, activity observation, environment lifecycle.
+- Capabilities: browser host, media generation, tldraw host, Linear, email.
+- Trust/storage: devices, pairing, device sessions, operator auth, file memory.
+
+The suites pin fail-closed authority and typed degradation as well as success paths; none require live Discord, provider credentials, a browser, canvas, or ROM.

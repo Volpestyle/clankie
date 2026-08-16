@@ -1,31 +1,9 @@
 # apps/discord-bridge
 
-Clankie's official Discord bot body: slash
-commands, bounded text ingress, realtime group
-voice, and the activity launch plane. A channel
-adapter around `@clankie/discord-presence-core` —
-it holds bot-shaped concerns only and never owns
-model credentials or a user token.
+The official Discord bot body: bounded text ingress, slash commands, background catch-up, realtime group voice, music, grounded social actions, activity launch, and playthrough hearing. It adapts Discord-specific state onto shared presence/captain protocols and never owns model authority.
 
-- README.md — operator guide: config, voice
-  architecture, activity plane, proof gates
-- package.json — scripts (readiness, live-proof,
-  voice variants) and discord.js/voice deps
-- src/ — gateway process, command dispatch,
-  voice composition, presence runtime, CLIs
-- test/ — vitest suites incl. source-asserted
-  authority tiers and golden IPC fixtures
+- `src/` — gateway process plus testable authority, presence, voice, readiness, receipts, and action modules.
+- `test/` — offline fakes and source assertions for every authority tier.
+- `README.md`, `package.json`, `tsconfig.json` — operator guide and package config.
 
-Key invariants: every credential (bot token,
-captain bearers, OpenAI, ElevenLabs) comes from
-the credential broker — the matching env vars are
-hard startup errors. Voice needs DAVE plus
-per-user consent; the two-tier realtime flow
-(dormant whisper listener → engaged gpt-realtime
-session, ADR 0057) is composed in
-voice-composition.ts and asked-join ("clankie hop
-in vc") in voice-intent.ts. Everything emits
-content-free JSONL receipts that the
-readiness/live-proof CLIs evaluate as evidence
-gates. Non-secret DISCORD_* settings fill from
-~/.config/clankie/settings.json at startup.
+Brokered credentials are mandatory and matching secret env vars are rejected. DAVE and per-user consent gate voice; host-stamped live gateway state selects voice/action targets; room text can reach a running playthrough only through the existing ingress allowlist. Content-free receipts power readiness/live-proof evidence.

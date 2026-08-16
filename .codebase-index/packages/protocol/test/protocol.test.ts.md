@@ -1,12 +1,15 @@
 # packages/protocol/test/protocol.test.ts
 
-The broadest protocol suite: operator-conversation
-boundary properties (strictness, bounds, no
-credential/continuation fields; the conversation
-lane can never authorize an approval; unwired
-submits come back typed `unsupported`), bounded
-replay recovery and the callable service envelope,
-v1/v2 lane dual-read rules, the bridge voice
-presence note, captain presence/lifecycle events,
-the named public type surface, and tail recovery
-stopping instead of silently resyncing.
+Broad protocol suite for the shared public
+boundary. It covers operator-conversation
+strictness/bounds, context usage, bounded tool
+detail, herdr pane ids, replay recovery, callable
+dispatch, v1/v2 lane compatibility, authority,
+captain presence, and public type exports.
+
+Discord assertions pin transport-neutral writes,
+ambient attribution, action policy, and governed
+share artifact refs. Private capabilities,
+credentials, unknown keys, invalid pane ids,
+ungoverned media refs, and unbounded payloads are
+rejected at parse time.

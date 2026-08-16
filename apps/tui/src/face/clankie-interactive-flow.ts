@@ -1,6 +1,7 @@
 import {
   CURSOR_MARKER,
   decodeKittyPrintable,
+  Editor,
   Input,
   Key,
   matchesKey,
@@ -25,6 +26,8 @@ export type InteractiveTextPromptOptions = {
   readonly defaultValue?: string | undefined;
   readonly placeholder?: string | undefined;
   readonly error?: string | undefined;
+  /** Multi-line editor supplied by the flow for long-form values. */
+  readonly editor?: Editor | undefined;
   /** Masks the input and suppresses values from prompt chrome. */
   readonly sensitive?: boolean | undefined;
   readonly allowBack?: boolean | undefined;
@@ -71,22 +74,27 @@ const TITLE_WORD_OVERRIDES: Record<string, string> = {
 };
 
 export class InteractiveTextPrompt implements Component, Focusable {
-  private readonly input = new Input();
+  private readonly input: Input | Editor;
   private readonly options: InteractiveTextPromptOptions;
 
   private _focused = false;
 
   constructor(options: InteractiveTextPromptOptions) {
     this.options = options;
-    this.input.setValue(options.defaultValue ?? "");
+    this.input = options.editor ?? new Input();
+    if (this.input instanceof Editor) this.input.setText(options.defaultValue ?? "");
+    else this.input.setValue(options.defaultValue ?? "");
     this.input.onSubmit = (value) => {
-      if (options.sensitive === true) this.input.setValue("");
+      if (options.sensitive === true && this.input instanceof Input) this.input.setValue("");
       options.onSubmit(value);
     };
-    this.input.onEscape = () => {
-      if (options.sensitive === true) this.input.setValue("");
-      options.onCancel();
-    };
+    if (this.input instanceof Input) {
+      const input = this.input;
+      input.onEscape = () => {
+        if (options.sensitive === true) input.setValue("");
+        options.onCancel();
+      };
+    }
   }
 
   get focused(): boolean {
@@ -103,6 +111,10 @@ export class InteractiveTextPrompt implements Component, Focusable {
   }
 
   handleInput(data: string): void {
+    if (this.input instanceof Editor && (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c")))) {
+      this.options.onCancel();
+      return;
+    }
     this.input.handleInput(data);
     this.options.onRender();
   }
@@ -113,7 +125,7 @@ export class InteractiveTextPrompt implements Component, Focusable {
       this.options.sensitive === true
         ? [
             truncateToWidth(
-              `> ${this.focused ? CURSOR_MARKER : ""}${this.input.getValue() === "" ? "" : "••••••••"}`,
+              `> ${this.focused ? CURSOR_MARKER : ""}${this.input instanceof Input && this.input.getValue() !== "" ? "••••••••" : ""}`,
               contentWidth,
               "",
             ),
@@ -125,7 +137,9 @@ export class InteractiveTextPrompt implements Component, Focusable {
         this.options.message,
         contentWidth,
       ),
-      ...(this.options.sensitive === true || this.options.defaultValue === undefined
+      ...(this.options.sensitive === true ||
+      this.options.editor !== undefined ||
+      this.options.defaultValue === undefined
         ? []
         : [dim(`Default: ${this.options.defaultValue}`)]),
       ...(this.options.sensitive === true || this.options.placeholder === undefined
@@ -134,7 +148,15 @@ export class InteractiveTextPrompt implements Component, Focusable {
       ...(this.options.error === undefined ? [] : [errorLine(this.options.error)]),
       "",
       ...inputLines,
-      dim(this.options.allowBack === true ? "Enter accepts. Esc goes back." : "Enter accepts. Esc cancels."),
+      dim(
+        this.options.editor === undefined
+          ? this.options.allowBack === true
+            ? "Enter accepts. Esc goes back."
+            : "Enter accepts. Esc cancels."
+          : this.options.allowBack === true
+            ? "Enter accepts. Shift+Enter adds a line. Esc goes back."
+            : "Enter accepts. Shift+Enter adds a line. Esc cancels.",
+      ),
     ];
     return boxLines(lines, width);
   }

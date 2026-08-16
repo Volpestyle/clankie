@@ -2,8 +2,10 @@
 
 Transport-neutral Discord participation: text
 ingress, presence lifecycle, the whole voice
-stack (consent, floor, realtime, TTS, playback),
-and content-free receipts. Everything is blind to
+stack (consent, per-speaker transcription, floor,
+realtime, TTS, screen sight, music, playback),
+shared loopback controls, and content-free
+receipts. Everything is blind to
 whether Clankie wears the official bot or the
 personal-lab user session — which is what lets
 both bodies be one character (ADR 0024/0048).
@@ -14,8 +16,9 @@ Children:
 
 - `README.md` — module table + rules
 - `package.json` — @clankie/discord-presence-core
-- `src/` — 14 modules (see src.md)
-- `test/` — 13 suites mirroring the modules
+- `src/` — 17 implementation modules plus the
+  barrel (see src.md)
+- `test/` — 15 suites mirroring the modules
 - `tsconfig.json` — standard noEmit config
 
 Hard rules:
@@ -36,12 +39,12 @@ Hard rules:
   content-free scalars only — the schema makes
   transcript/audio fields unrepresentable.
 
-Voice architecture (ADR 0057/0070): a dormant
-realtime transcription tier that hears everything
-and can answer nothing; a floor state machine
-that alone decides when the engaged conversation
-tier speaks; `ask_clankie` as the model's entire
-tool surface, routed through the unchanged
-captain lane; and an optional external mouth
-(text-modality realtime + ElevenLabs streaming
-TTS) behind the same conversation port.
+Voice architecture (ADR 0057/0070/0099): each
+consented speaker gets a separate dormant
+transcriber that can answer nothing; a floor
+state machine alone decides when the engaged
+conversation tier speaks; privileged work goes
+through `ask_clankie`, while read-only screen
+sight and music remain local tools; an optional
+external mouth (text realtime + ElevenLabs TTS)
+sits behind the same conversation port.

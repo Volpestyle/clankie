@@ -1,31 +1,5 @@
 # apps/clankie/src/captain/conversations.ts
 
-`ConversationStore`: file-backed operator
-conversation registry — `meta.json` plus
-append-only `events.jsonl` per conversation
-under the captain state dir. Serves the wire
-contract the TUI and relay speak:
-list/get/create/replay/tail/send with revision
-fencing and cursored pages (zero-padded
-line-count cursors).
+`ConversationStore` is the file-backed operator conversation registry: `meta.json` plus append-only `events.jsonl` per conversation. It serves list/get/create/replay/tail/send with revision fencing, line-count cursors, detached-run lifetime, optional Herdr seat metadata, and persisted Pi context occupancy.
 
-Behavior:
-
-- `send` rejects on revision conflict, appends
-  the operator message + turn-accepted event,
-  then chains the injected `ConversationRunner`
-  per conversation; completion/failure appends
-  the terminal turn event and updates
-  sessionState.
-- Boot recovery: a crash mid-run leaves
-  "active" metas — reset to waiting and close
-  each orphaned accepted-but-unterminated run
-  as failed `service_restarted`, so no client
-  tails forever.
-- `worker_steer` and typed-input submissions
-  answer `unsupported` (workers are herdr panes
-  now).
-- `awaitRun(runId)` keeps a detached run alive
-  for a transport's waitUntil; `close()` awaits
-  all runs. Unreadable conversations are
-  skipped on boot, never fatal.
+Accepted sends append the operator and lifecycle events, then serialize the injected runner per conversation. Boot closes orphaned accepted runs as `service_restarted`, unreadable conversations are skipped, and unsupported legacy worker-steer/input requests answer explicitly rather than inventing a mission layer.

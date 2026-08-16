@@ -32,12 +32,36 @@ Restart follows dependencies. Restarting `clankie` also restarts the bridge
 and the lab user-session body, because both hold live claims against the
 service instance. Stopping one named service remains scoped to that service.
 
+A restart requested from Clankie's own operator-turn bash tool is handed to a
+detached launcher helper. Pi already exposes the durable `PI_SESSION_FILE`; the
+launcher uses its conversation's append-only event log to wait for that turn's
+terminal event before stopping the service. The operator face retries only a
+dropped durable tail read, then resumes from its persisted cursor. It never
+replays the prompt or any tools that already ran.
+
+```mermaid
+sequenceDiagram
+  participant C as Clankie turn
+  participant H as Restart helper
+  participant L as Conversation log
+  participant S as Service supervisor
+  participant T as Operator face
+  C->>H: clankie restart (PI_SESSION_FILE)
+  H-->>C: scheduled after this turn
+  C->>L: final reply + terminal turn
+  H->>L: observe terminal turn
+  H->>S: restart dependency closure
+  T->>L: reconnect and replay from cursor
+```
+
 The compatibility aliases `captain`, `captain-eve`, `eve`, `control-plane`, and
 `cp` all resolve to `clankie`; they do not name separate processes.
 
 ## Consequences
 
 - `clankie restart` and `clankie status` cover the full local stack.
+- A self-restart finishes the conversation turn before replacing its backend;
+  a dropped tail reconnects without repeating the turn.
 - A process started outside the launcher is reported but never adopted or
   killed.
 - Settings remain the source of Discord allowlists; the launcher supplies only

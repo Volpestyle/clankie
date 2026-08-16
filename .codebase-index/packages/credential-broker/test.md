@@ -12,6 +12,8 @@ strings.
 
 - credential-store.test.ts — file + keychain
   store behavior, redaction, atomicity
+- linear-oauth.test.ts — authorize URL, dynamic
+  registration, code exchange, refresh rotation
 - capability/audited-capabilities tests — issuer
   windows, canonical encoding, one-time use,
   replay rehydration, fail-closed audit

@@ -6,7 +6,8 @@ Vitest suites, one file per contract area of
 rather than re-testing zod.
 
 - protocol.test.ts — operator conversations, lane
-  compatibility, presence events, public types
+  compatibility, context/tool detail, governed
+  share refs, presence events, public types
 - event-stream.test.ts — stream-kind namespaces
   and the DomainEvent envelope
 - embodiment.test.ts — intents, session records,
@@ -14,4 +15,6 @@ rather than re-testing zod.
 - discord-person-memory.test.ts — bounded facts
   and escape-path rejection
 - discord-voice-evidence.test.ts — voice receipt
-  variants and free-text unrepresentability
+  variants (transcription/tool/music/possessor),
+  optional stay/token counters, and free-text
+  unrepresentability

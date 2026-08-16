@@ -13,6 +13,9 @@ concurrent mints converge).
 - index.ts — barrel re-exports of every module
 - credential-store.ts — store interface, Keychain
   and file backends, redaction
+- linear-oauth.ts — Linear MCP browser OAuth,
+  dynamic client registration, PKCE, exchange,
+  and refresh
 - capability-token.ts — HMAC-signed grants
 - audited-capabilities.ts — audited one-time use
 - discord-bot-provider.ts — bot-token grants

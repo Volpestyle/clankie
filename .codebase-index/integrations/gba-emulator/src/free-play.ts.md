@@ -34,8 +34,11 @@ rate gate (cooldown), with volition counters
 `roomAuthors` seam that silences both authors
 when a live room composes his speech. The
 result reports progress, volition, accepted
-count, and `coherence` — a keyword heuristic
+count, `longestUnchangedRun`, and `coherence` — a keyword heuristic
 (`intentMatchesAction`) comparing stated
 intent to the next action, reported and never
 gated. `shouldStop` ends an asked session
-cleanly at a turn boundary.
+cleanly at a turn boundary. The loop surfaces
+identical action+effect runs after three turns and
+samples the framebuffer immediately before action
+dispatch so console idling is not misattributed.

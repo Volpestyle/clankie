@@ -3,7 +3,8 @@
 Typed at-rest storage for provider credentials,
 keyed by normalized providerId. Credentials are a
 zod union: `api` (key + metadata), `oauth`
-(access/refresh/expires/accountId), `wellknown`
+(access/refresh/expires/accountId plus optional
+dynamic-registration client id/secret), `wellknown`
 (key + token). `redactCredential` reduces any of
 them to a display-safe summary; `list()` never
 returns secrets.

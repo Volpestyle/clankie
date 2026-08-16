@@ -21,6 +21,8 @@ Children:
 - `fixtures/` — pinned scenario JSON (digests
   only, never ROM/savestate bytes).
 - `README.md` — the package's own deep guide.
+- `package.json` — workspace package metadata and scripts.
+- `tsconfig.json` — TypeScript project config.
 
 Key ideas: every action is validated against
 the strict emulator contract and per-lease
@@ -33,7 +35,8 @@ composite actions (`walk_to`,
 of what used to cost dozens of presses; and
 free play hands each decision to a model —
 the mind — with a separate voice agent for
-speech. Collision, exits, and menus are read
+speech plus a bounded journal story projection.
+Collision, exits, and menus are read
 live from FireRed RAM at empirically verified
 addresses, failing closed on anything the
 decoders cannot trust.

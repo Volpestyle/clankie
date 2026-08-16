@@ -12,10 +12,11 @@ Minecraft section: typed actions/observations
 (chat marked untrusted), lifecycle-only tools
 until active, gameplay tools only in the gameplay
 lane, forged exposures rejected. Discord section:
-the activity plane runs on bot transport and is
-gated by the instance facet (not the phase
-ladder), Go Live is user_session-only, activity
-instances cannot outlive the gateway and are
-capped, risk classes match doctrine, and v2 lanes
-single-write while legacy `tui` dual-reads as
-`operator`.
+the activity plane is bot-only, Go Live is user-
+session-only, and availability gates on transport
+
+- phase while idempotent facet state stays with
+  the executor. Activity instances cannot outlive
+  the gateway and are capped; risk classes match
+  doctrine; v2 lanes single-write while legacy
+  `tui` dual-reads as `operator`.

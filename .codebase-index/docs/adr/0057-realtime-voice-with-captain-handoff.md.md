@@ -4,7 +4,9 @@ The realtime voice architecture: gpt-realtime
 owns ears, mouth, and turn-taking in a Discord
 call; the captain owns everything Clankie can do,
 reached through exactly one tool (`ask_clankie`).
-Supersedes ADR 0045's STT→captain→TTS cascade.
+Bounded music search/play controls stay local to
+the voice plane; privileged abilities still cross
+the captain handoff.
 
 Read for the group-room design: two tiers
 (dormant transcription session that answers

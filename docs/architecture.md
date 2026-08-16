@@ -4,9 +4,13 @@ Clankie is one service plus the surfaces that reach it. The service owns the
 captain (a [pi](https://pi.dev)-based agent with durable sessions), his tools,
 his game bodies, and the HTTP API every surface speaks.
 
-![Architecture](diagrams/architecture.jpg)
+![Current system overview](diagrams/clankie-current-architecture.jpg)
+
+[Editable tldraw source](diagrams/clankie-current-architecture.tldraw)
 
 ## How a message becomes a turn
+
+![Message to captain turn sequence](diagrams/clankie-message-turn-sequence.jpg)
 
 A Discord message reaches the bridge, which posts it to
 `POST /v1/captain/channel-turns`. The service normalizes it — untrusted body

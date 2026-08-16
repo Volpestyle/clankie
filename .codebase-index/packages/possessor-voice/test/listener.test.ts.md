@@ -3,8 +3,10 @@
 Listener suite against a real loopback server and
 `ws` clients. Covers: refusing construction with a
 blank token; handing narration to the live voice
-session with a `possessor_narration_submission`
-receipt; rejecting a wrong bearer and unknown
+session with caller-supplied or listener-minted
+delivery-id correlation and a
+`possessor_narration_submission` receipt;
+rejecting a wrong bearer and unknown
 paths at upgrade; surviving narrate failures
 without dropping the connection; ignoring
 off-contract client messages (e.g. a smuggled

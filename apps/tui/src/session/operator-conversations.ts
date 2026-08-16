@@ -1,6 +1,7 @@
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { resolveCaptainCredential, type CaptainCredentialOptions } from "@clankie/credential-broker";
 import {
   createOperatorConversationServiceClient,
@@ -541,29 +542,39 @@ export class OperatorConversationPromptSession {
       throw new OperatorConversationClientError("Clankie does not support ordinary conversation messages");
     }
 
-    const cursor = this.tails.cursor(conversationId);
-    for await (const item of this.client.tail(
-      {
-        schemaVersion: 1,
-        conversationId,
-        surfaceClientId: this.tails.surfaceClientId,
-        ...(cursor === undefined ? {} : { cursor }),
-        limit: 100,
-      },
-      signal,
-    )) {
-      if (item.kind === "recovery") {
-        sink.recovery(item.recovery);
+    while (signal?.aborted !== true) {
+      const cursor = this.tails.cursor(conversationId);
+      try {
+        for await (const item of this.client.tail(
+          {
+            schemaVersion: 1,
+            conversationId,
+            surfaceClientId: this.tails.surfaceClientId,
+            ...(cursor === undefined ? {} : { cursor }),
+            limit: 100,
+          },
+          signal,
+        )) {
+          if (item.kind === "recovery") {
+            sink.recovery(item.recovery);
+            return;
+          }
+          sink.event(item.event);
+          await this.tails.writeCursor(conversationId, item.event.cursor);
+          if (
+            item.event.type === "turn" &&
+            item.event.runId === accepted.runId &&
+            ["completed", "failed", "cancelled"].includes(item.event.phase)
+          ) {
+            return;
+          }
+        }
         return;
-      }
-      sink.event(item.event);
-      await this.tails.writeCursor(conversationId, item.event.cursor);
-      if (
-        item.event.type === "turn" &&
-        item.event.runId === accepted.runId &&
-        ["completed", "failed", "cancelled"].includes(item.event.phase)
-      ) {
-        return;
+      } catch (error) {
+        // Fetch uses TypeError for a dropped connection. Re-open only the
+        // idempotent durable tail; send and schema/HTTP failures stay terminal.
+        if (!(error instanceof TypeError)) throw error;
+        await sleep(250, undefined, signal === undefined ? undefined : { signal });
       }
     }
   }

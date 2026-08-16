@@ -1,42 +1,15 @@
 # apps/discord-bridge/src
 
-The bridge process and its offline-testable
-composition modules. index.ts is the only file
-with process-global startup; everything else is
-side-effect-free wiring or a small CLI.
+The official bot process and side-effect-free composition modules.
 
-- index.ts — startup guards, gateway client,
-  slash dispatch, ingress/voice composition
-- commands.ts — the single `/clankie` slash
-  namespace and its subcommands
-- authority.ts — ambient and voice-presence
-  authority tiers (ADR 0050)
-- text.ts — Discord text sanitizer
-- attachment-resolver.ts — hash-bound filesystem
-  attachment resolver
-- bot-presence-runtime.ts — REST executor for
-  the presence action catalog (ADR 0024 P1)
-- presence-runtime-module.ts — service load
-  target wrapping the runtime behind broker
-  grants
-- voice-composition.ts — realtime env parsing,
-  realtime/TTS ports, volition decider, idle
-  auto-leave, disclosure text (ADR 0057/0070)
-- voice-intent.ts — asked voice presence: gate,
-  intent read, retry window, execution (ADR 0062)
-- readiness.ts / voice-readiness.ts — fail-closed
-  live readiness checks (voice adds a real
-  dormant→engaged wake probe)
-- live-proof.ts — receipt-log evaluators for the
-  text, person-memory, and voice proof gates
-- *-cli.ts — thin stdout wrappers for the above
-  (readiness, live-proof, person-memory,
-  voice-readiness, voice-live-proof)
+- `index.ts` — startup guards, gateway/ingress assembly, slash dispatch, catch-up loop, music/action control, voice and playthrough text wiring.
+- `commands.ts`, `authority.ts`, `text.ts`, `attachment-resolver.ts` — command shape, policy tiers, sanitization, and hash-bound files.
+- `bot-presence-runtime.ts`, `presence-runtime-module.ts` — Discord REST executor and service-loaded capability module.
+- `voice-composition.ts` — realtime/transcription/TTS ports, briefing/screen-look providers, idle leave, receipts, disclosure text.
+- `voice-presence.ts` — captain-requested join/leave using fresh gateway state.
+- `possessor-text.ts` — admitted room speech to active gameplay.
+- `clankvox-ipc.ts` — framed media-sidecar contract.
+- `readiness.ts`, `voice-readiness.ts`, `live-proof.ts` — fail-closed evidence evaluators.
+- `*-cli.ts` — thin JSON/stdout wrappers for readiness and proof runs.
 
-Flow: gateway events → presence phase publication
-to the service; messages → DiscordTextIngress
-(with a voice-presence ask decided first, so the
-same captain turn carries the outcome note);
-interactions → the `/clankie` switch, each case
-gating inline on its authority tier. All evidence
-lands as content-free JSONL receipts.
+Gateway messages enter shared `DiscordTextIngress`; active-body control requests remain loopback-only. Voice keeps the dormant-listener/engaged-session architecture, with optional ElevenLabs speech, bounded retention, idle auto-leave, and content-free latency/token evidence.

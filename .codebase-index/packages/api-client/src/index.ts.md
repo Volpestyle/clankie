@@ -16,16 +16,22 @@ Route groups:
   Discord channel turns, presence actions (which
   also stamp the bridge's live-session claim
   headers and surface error-shaped refusal
-  bodies), phase events, presence-session and
-  voice-history reads, the voice briefing
-  (ids-only request; service composes persona).
+  bodies), phase events, stream-watch reports,
+  presence-session/voice-history reads, and the
+  voice briefing (ids-only request; service
+  composes persona).
+- Operator Discord controls — durable user-
+  session opt-in create/revoke and read access
+  shared with captain activity reads.
 - Memory — person-memory proposals/recall
-  (captain), export/delete (operator), captain
-  episodes record/recall (lane comes from the
+  (captain), whole-catalog inspection plus fact
+  edit/delete (operator), captain episodes
+  record/recall/edit/delete (lane comes from the
   service-stamped channel, never the model).
 - Embodiment — submit intents, session reads,
   the single live session, body possession
-  (`undefined` = nobody), activity observation;
+  (`undefined` = nobody), activity observation,
+  and read-only live play still/story endpoints;
   runner-side `claimEmbodiment` /
   `reportEmbodiment` both carry 10 s
   `AbortSignal.timeout`s so a hung request can't

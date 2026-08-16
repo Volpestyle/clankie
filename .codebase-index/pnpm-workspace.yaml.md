@@ -13,6 +13,8 @@ knobs shared across them.
   4.23.0) referenced via `catalog:` in package
   manifests.
 - minimumReleaseAgeExclude: the four
-  @earendil-works pi packages at 0.84.1 are
+  @earendil-works pi packages at 0.84.2 are
   exempt from pnpm's minimum-release-age
   supply-chain delay.
+- patchedDependencies: applies the tracked
+  `@earendil-works/pi-tui@0.84.2` ghost-text patch.

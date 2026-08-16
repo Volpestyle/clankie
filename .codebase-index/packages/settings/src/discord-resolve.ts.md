@@ -1,21 +1,19 @@
 # packages/settings/src/discord-resolve.ts
 
-Discord settings ↔ environment. Three exports:
+Discord settings ↔ environment boundary.
 
-- `resolveDiscordSettings(stored, env)` — merges
-  stored settings with `DISCORD_*` /
-  `CLANKIE_ACTIVITY_*` env variables,
-  **environment wins** (the opposite of the
-  broker's secret rule, deliberately), and every
-  override is reported in
-  `overriddenByEnvironment` so the TUI can show
-  why a stored value is not the effective one.
-- `applyDiscordSettingsToEnvironment(settings,
-env)` — the adoption seam: fills only _unset_
-  env names at startup so every existing
-  `process.env.DISCORD_*` read keeps working;
-  returns what it filled for startup logging.
-- `discordSettingsToEnvironment(settings)` — the
-  pure projection; disabled booleans are omitted
-  rather than emitted as "false" so a stale
-  export cannot enable a plane.
+- `resolveDiscordSettings` merges stored values
+  with `DISCORD_*`/`CLANKIE_*` variables,
+  environment winning, and reports every override.
+- `discordSettingsToEnvironment` projects public
+  settings, including system actors, active body,
+  user-session allowlists, voice, and activity;
+  disabled booleans are omitted.
+- `applyDiscordSettingsToEnvironment` fills only
+  unset names so existing readers adopt the store
+  without overwriting explicit process config.
+- `parseDiscordActiveBody`,
+  `resolveDiscordActiveBody`, and
+  `isDiscordBodyActive` centralize the bot vs
+  user-session mouth decision, defaulting safely
+  to bot.

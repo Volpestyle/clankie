@@ -20,7 +20,10 @@ Shape of the seam:
 
 - Wire is three messages and nothing else:
   `narrate` in; `utterance` (attributed transcript
-  line) and `room` (is anyone listening) out.
+  or already-admitted text line) and `room` (is
+  anyone listening) out. Narration may carry a
+  play-journal delivery id that joins later voice
+  evidence.
   A possessor cannot join channels or reach any
   presence action from here.
 - Narration is context, never a script — the
@@ -33,8 +36,9 @@ Shape of the seam:
   with nobody attached are dropped, never
   replayed.
 - Listener emits content-free seam evidence
-  (connection phase, delivery counts, sanitized
-  refusal codes) for the bridge receipt log.
+  (connection phase, delivery counts, optional
+  stay/journal join ids, sanitized refusal codes)
+  for the bridge receipt log.
 
 Client shape structurally matches
 `ClankieSpeechPort`/`ClankieHearingPort` in

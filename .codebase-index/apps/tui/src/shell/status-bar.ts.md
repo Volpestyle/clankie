@@ -1,11 +1,5 @@
 # apps/tui/src/shell/status-bar.ts
 
-The status band. `ClankieStatusBarComponent` renders
-whatever text the shell sets, wrapping long lines
-(ANSI-aware) instead of clipping, capped at 6 rows
-with an ellipsis on the last; leading/trailing
-newlines become spacer rows. `formatStatusRows` is
-the pure helper; `formatCaptainPresenceStatus`
-renders the polled presence snapshot as
-`clankie: <phase>` (`unknown` when the poller has
-nothing).
+`ClankieStatusBarComponent` renders ANSI-aware wrapped status text, capped at six rows with an ellipsis. `formatCaptainPresenceStatus()` shows the polled Discord phase; `formatCaptainContextStatus()` and `formatCaptainContextUsage()` render current operator-conversation token occupancy/compaction state without exposing content.
+
+`formatStatusRows()` is the pure width-budget helper used by the shell and tests.

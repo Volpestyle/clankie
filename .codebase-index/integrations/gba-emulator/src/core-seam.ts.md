@@ -6,7 +6,8 @@ visual) implement `GbaCoreSeam`, so the
 governed surface never changes when the core
 swaps.
 
-`GbaCoreSeam`: `pressButton`, `advanceFrames`,
+`GbaCoreSeam`: async `pressButton`,
+`advanceFrames`,
 optional `advanceFramesHolding` (held A/B
 accelerates FireRed's text printer), a typed
 `gameState()` view, optional `mapGrid()`
@@ -20,3 +21,8 @@ SHA-256 digests for evidence. Also defines
 subset the adapter consumes; `trainer` is
 optional for real-core scenarios), and
 `GbaCoreFactory`.
+
+Optional synchronous `idleFrames` runs the watched
+console between actions and no-ops while an action
+owns the core, preventing an idle tick from
+releasing held input.

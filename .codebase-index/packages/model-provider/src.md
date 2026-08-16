@@ -21,4 +21,4 @@ the subscription fetch adapters.
   set and backend window
 - codex-model-probe-cli.ts — streamed backend
   probe CLI
-- oauth/ — openai-codex.ts, anthropic.ts
+- oauth/ — openai-codex.ts, anthropic.ts, xai.ts

@@ -7,7 +7,10 @@ receive short-lived signed capability grants
 instead of raw tokens; and every internal Clankie
 bearer (captain, operator, runner, bridges,
 activity producer, possessor voice) is minted and
-resolved here rather than hand-exported.
+resolved here rather than hand-exported. Linear
+MCP OAuth also lives here so its access, refresh,
+and dynamic-client credentials remain broker-
+owned.
 
 Children:
 
@@ -15,6 +18,8 @@ Children:
 - package.json / tsconfig.json — zod-only, ESM
 - src/
   - credential-store.ts — Keychain + file stores
+  - linear-oauth.ts — OAuth 2.1 PKCE, dynamic
+    registration, browser callback, refresh
   - capability-token.ts — HMAC grant issuer
   - audited-capabilities.ts — fail-closed,
     audited one-time use broker

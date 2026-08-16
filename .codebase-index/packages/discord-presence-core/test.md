@@ -1,10 +1,11 @@
 # packages/discord-presence-core/test
 
-Thirteen vitest suites mirroring src:
+Fifteen vitest suites covering the shared
+Discord boundary:
 
 - `addresses-character.test.ts` — text-plane name
   matching + reply-policy parsing
-- `voice-address.test.ts` — phonetic wake/release
+- `voice-address.test.ts` — phonetic addressing
 - `voice-floor.test.ts` — the floor machine under
   an explicit clock
 - `voice-audio.test.ts` — PCM conversions
@@ -23,3 +24,7 @@ Thirteen vitest suites mirroring src:
   end (second largest)
 - `receipt-store.test.ts` — receipt schema and
   file hygiene
+- `captain-action-control.test.ts` — validated
+  host-stamped loopback actions
+- `voice-music.test.ts` — YouTube search/control,
+  queue semantics, pipeline and trace hygiene

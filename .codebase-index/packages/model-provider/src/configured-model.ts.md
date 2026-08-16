@@ -10,8 +10,9 @@ exists, resolves the selected variant, and
 constructs the model — `createCodexLanguageModel`
 with the codex fetch adapter for `openai-codex`,
 otherwise `createLanguageModel`, wiring the
-Anthropic OAuth fetch adapter when the anthropic
-credential is oauth-typed.
+Anthropic or xAI subscription fetch adapter when
+the selected credential is OAuth-typed. API-key
+credentials stay on the normal AI SDK path.
 
 Returns `ConfiguredLanguageModel`: ref,
 provider/model ids, the LanguageModel, context/

@@ -66,6 +66,10 @@ reverse. Each service keeps an atomic mode-0600 pid record at
 `<id>.log` beside it. Before signalling, the launcher re-reads the recorded
 pid's live command and refuses if it no longer looks like the service it
 started, so a stale record can never kill a process that inherited the pid.
+When Clankie requests a restart from his own operator turn, the launcher
+returns a scheduled result and a detached helper waits for the durable terminal
+turn before restarting. The face reconnects its read-only tail from the last
+persisted cursor, so the reply lands without re-running the prompt or its tools.
 
 Start is health gated: it returns when the service's probe reports healthy, not
 when the child spawns. The clankie service probes `GET /health`; the bridge —

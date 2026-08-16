@@ -16,7 +16,10 @@ records hash-chained evidence.
 - `walk_to` — BFS route over the live collision
   grid, warp-aware (a blocked warp tile is
   approached and pressed into), refusals name
-  the map bounds or nearest reachable tile,
+  the map bounds or nearest reachable tile; a
+  bounded per-map memory routes around NPC tiles
+  that stopped earlier paths, with raw-grid retry
+  so moving NPCs cannot make a target unreachable,
 - `select_menu_entry` — cursor walked press by
   press, verified against live state (XOR grid
   for battle menus, vertical lists otherwise),
@@ -41,4 +44,7 @@ crop with `topLeft`), and
 `validateGbaEmulatorTrace` which re-verifies
 the whole hash chain. `closed()` errors use an
 em-dash separator the free-play effect line
-splits on.
+splits on. Action application awaits the async
+core seam so watched pacing leaves the event loop
+free; dialog stops before unlisted choices rather
+than pressing an answer.

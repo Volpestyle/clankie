@@ -1,17 +1,5 @@
 # apps/tui/src/face/clankie-autocomplete.ts
 
-Slash-command autocomplete and inspection.
-`createClankieAutocompleteProvider` wraps pi-tui's
-`CombinedAutocompleteProvider`: `/`-prefixed input
-gets command-argument suggestions (static per-command
-specs plus dynamic items for mcp/auth/integrations
-via injected name listers); everything else falls
-through to file-path completion.
+Slash-command and skill autocomplete/inspection. `createClankieAutocompleteProvider()` wraps Pi TUI completion: command arguments and discovered `/skill` names use static/dynamic catalogs, while ordinary input falls through to file-path completion.
 
-Also exports the pure helpers the command UI builds
-on: `formatClankieCommandInspector` (live markdown
-detail for the typed command),
-`searchClankieCommands`/`listClankieCommands` (fuzzy
-workbench rows), `describeClankieCommand` (valid next
-args, examples, warnings), and
-`clankieCommandCompletion`. Suggestions cap at 18.
+Pure helpers power inline typeahead and the workbench: fuzzy search/list/detail, exact command resolution, append-only completion, argument parsing and warnings/examples. Suggestions are bounded and injected service/MCP/skill name listers keep the renderer independent of discovery.

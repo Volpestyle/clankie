@@ -2,4 +2,5 @@
 
 Barrel file: `export *` from config, resolve,
 variants, instantiate, configured-model,
-codex-catalog, and both oauth modules. No logic.
+codex-catalog, and all three OAuth modules. No
+logic.

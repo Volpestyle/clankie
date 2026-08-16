@@ -1,15 +1,9 @@
 # apps/tui/src/observation
 
-Background pollers feeding the status bar and
-`/status`.
+Live operator-surface observations and Herdr companion control.
 
-- `presence.ts` — `PresencePoller`: 5s read-only
-  poll of `/v1/discord/presence-status` for the live
-  presence phase.
-- `herdr-roster.ts` — `HerdrRoster`: 5s poll of
-  `herdr pane list` for sibling pane agents, inert
-  outside HERDR_ENV=1.
+- `presence.ts` — 5s read-only service presence poller.
+- `herdr-roster.ts` — 5s sibling-pane roster, inert outside Herdr.
+- `herd-lead-companion.ts` — open/inherit/focus/close the labelled `Herd Lead` pane with this console as jump-back peer.
 
-Both expose `snapshot`/`snapshot()`,
-`start(onChange)` (unref'd timers, callback only on
-change), and `stop()`.
+Pollers use unref'd timers and notify only on changes; companion operations are injectable and return explicit unavailable outcomes.

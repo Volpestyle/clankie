@@ -1,25 +1,10 @@
 # apps/tui/test
 
-Vitest suites, one per module cluster, all
-deterministic and TTY-free (fake shells, in-memory
-credential stores, ephemeral HTTP servers, injected
-spawn/kill/fetch seams, temp dirs cleaned in
-afterEach).
+Deterministic, TTY-free Vitest suites for the launcher and operator face. Tests use fake shells, injected process/fetch/credential seams, ephemeral servers, and cleaned temp directories.
 
-- Face components: `banner`, `agent-spinners`,
-  `autocomplete` (provider + typeahead + workbench),
-  `interactive-flow`, `transcript-block`,
-  `transcript-viewport`, `transcript-key-routing`,
-  `face-layout`, `face-bash`.
-- Shell: `shell-assembly` (constructs the shell
-  without starting it), `status-bar`.
-- Commands: `activity-command`, `discord-commands`,
-  `provider-commands`, `voice-commands`.
-- bin: `headless-captain` (health/restart/down over
-  seams), `services` (supervisor + registry,
-  ownership and probe semantics), `pairing`,
-  `devices`, `trace` (cursor stores, redaction,
-  stream processing).
-- Session/observation: `operator-conversations`
-  (stores, session, renderer, real HTTP round
-  trips), `lane-observation`, `herdr-roster`.
+- Face/shell: banner, spinners, autocomplete/workbench/skills, modal flows, transcript blocks/viewport/routing, layout, bash, status, assembly.
+- Commands: activity, connections, Discord, memory, providers, voice, companion board.
+- Session/observation: operator conversations/context rendering, lane tracing, Herdr report/roster/companion.
+- Launcher/bin: service supervisor/registry, headless captain, devices, pairing, trace.
+
+Coverage pins secret redaction, mode-0600 stores, health/ownership semantics, command routing, and graceful unavailable states without starting the real fullscreen console.

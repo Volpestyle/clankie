@@ -12,7 +12,9 @@ Behavior:
 
 - Inbound `narrate` messages are schema-checked
   and handed fire-and-forget to the injected
-  `narrate(text)` (the live voice session);
+  `narrate(text, {deliveryId})` (the live voice
+  session); caller ids are preserved, otherwise
+  the listener mints one;
   success emits `possessor_narration_submission`
   evidence, rejection emits `possessor_refusal`
   with a sanitized single-token reason — never
@@ -26,7 +28,8 @@ Behavior:
   immediately via the injected `room()` reader.
 - All evidence (`PossessorVoiceListenerEvidence`)
   is content-free: connection phase, attached/
-  delivered counts, delivery ids, refusal codes.
+  delivered counts, delivery/stay ids, refusal
+  codes.
 - Throws `possessor_voice_token_required` on an
   empty token; 64 KB max payload; `close()` tears
   down sockets and the server.

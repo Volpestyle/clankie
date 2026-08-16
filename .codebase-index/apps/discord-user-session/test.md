@@ -1,16 +1,10 @@
 # apps/discord-user-session/test
 
-Offline vitest suites; sockets and the GPL Go
-Live modules are injected fakes.
+Offline Vitest suites for the lab body with injected sockets, Discord transport, local HTTP, and ClankVox modules.
 
-- gateway.test.ts — identify/resume/heartbeat and
-  dispatch shaping over a fake websocket
-- readiness.test.ts — every admission gate,
-  including scope narrowing vs widening and
-  refusal-before-credential
-- user-presence-runtime.test.ts — bare-token
-  fetch executor, mention suppression, transport
-  and activity refusals, Go Live paths, safe
-  error reporting
-- go-live-media.test.ts — publisher lifecycle
-  with a fake module pair, no GPL import in CI
+- `gateway.test.ts` — identify/resume/heartbeat/reconnect, message/voice/raw dispatch shaping.
+- `readiness.test.ts` — opt-in, scope, settings, and credential admission order.
+- `user-presence-runtime.test.ts` — bare-token REST, social/music/control actions, safe refusals.
+- `go-live-media.test.ts`, `go-live-source.test.ts` — optional publisher and local activity snapshot.
+- `stream-discovery.test.ts`, `stream-watch.test.ts` — user-only opcodes, watching, stills, and publishing.
+- `live-proof.test.ts` — real-watch plus decoded-still evidence.

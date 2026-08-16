@@ -3,7 +3,7 @@
  * asserts the basic wiring: setup flow idle, default layout, spinner resolved,
  * and the console command set feeding the typeahead/workbench.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildConsoleCommands } from "../src/commands.ts";
 import { ClankieFaceShell } from "../src/shell/shell.ts";
 
@@ -28,5 +28,24 @@ describe("shell assembly", () => {
       expect(command.name.length).toBeGreaterThan(0);
       expect(command.description.length).toBeGreaterThan(0);
     }
+  });
+
+  it("lets an active setup prompt handle Escape", () => {
+    const shell = new ClankieFaceShell({
+      commands: buildConsoleCommands({}),
+      cwd: process.cwd(),
+      env: {},
+      bannerFields: { title: "Clankie", tagline: "test" },
+    });
+    vi.spyOn(shell.setupFlow, "isWaitingForInput").mockReturnValue(true);
+    vi.spyOn(shell.setupFlow, "hasActivePrompt").mockReturnValue(true);
+    const cancel = vi.spyOn(shell.setupFlow, "handleSubmit");
+
+    const routed = (
+      shell as unknown as { routeInput(data: string): { consume?: boolean } | undefined }
+    ).routeInput("\x1b");
+
+    expect(routed).toBeUndefined();
+    expect(cancel).not.toHaveBeenCalled();
   });
 });

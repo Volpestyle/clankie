@@ -130,7 +130,10 @@ async function editCharacter(shell: ClankieFaceShell, services: PersonaCommandSe
   const current = (await services.settings.load()).persona;
   const notes = await flow.readText({
     message: "Character — how he acts, jokes, and carries himself",
-    placeholder: current.characterNotes.split("\n")[0] ?? "chill, likes to roast, genuinely helpful",
+    defaultValue: current.characterNotes,
+    placeholder: "chill, likes to roast, genuinely helpful",
+    multiline: true,
+    allowBack: true,
     validate: (value: string) => (value.length > 4_000 ? "Keep it under 4000 characters." : undefined),
   });
   if (notes === undefined) return;
@@ -144,77 +147,91 @@ async function editCharacter(shell: ClankieFaceShell, services: PersonaCommandSe
 async function editNames(shell: ClankieFaceShell, services: PersonaCommandServices): Promise<void> {
   const flow = shell.setupFlow;
   const current = (await services.settings.load()).persona;
+  let displayNameDraft = current.displayName;
 
-  const displayName = await flow.readText({
-    message: "Name",
-    placeholder: current.displayName,
-    validate: (value: string) => (value.trim().length > 64 ? "Keep it under 64 characters." : undefined),
-  });
-  if (displayName === undefined) return;
+  for (;;) {
+    const displayName = await flow.readText({
+      message: "Name",
+      defaultValue: displayNameDraft,
+      allowBack: true,
+      validate: (value: string) => (value.trim().length > 64 ? "Keep it under 64 characters." : undefined),
+    });
+    if (displayName === undefined) return;
+    displayNameDraft = displayName;
 
-  // Humans shorten and misspell names constantly; every alias here is another
-  // way someone can get his attention without an @mention.
-  const aliases = await flow.readText({
-    message: "Other names he answers to (comma separated)",
-    placeholder: current.aliases.join(",") || "Clanky, clanker",
-    validate: (value: string) => (splitList(value).length > 16 ? "At most 16 aliases." : undefined),
-  });
-  if (aliases === undefined) return;
+    // Humans shorten and misspell names constantly; every alias here is another
+    // way someone can get his attention without an @mention.
+    const aliases = await flow.readText({
+      message: "Other names he answers to (comma separated)",
+      defaultValue: current.aliases.join(", "),
+      placeholder: "Clanky, clanker",
+      allowBack: true,
+      validate: (value: string) => (splitList(value).length > 16 ? "At most 16 aliases." : undefined),
+    });
+    if (aliases === undefined) continue;
 
-  await apply(services, (persona) => ({
-    ...persona,
-    displayName: resolvePersonaText(displayName, persona.displayName),
-    ...(aliases.trim() ? { aliases: splitList(aliases) } : {}),
-  }));
-  flow.renderLine("Saved names.", "success");
+    await apply(services, (persona) => ({
+      ...persona,
+      displayName: resolvePersonaText(displayName, persona.displayName),
+      ...(aliases.trim() ? { aliases: splitList(aliases) } : {}),
+    }));
+    flow.renderLine("Saved names.", "success");
+    return;
+  }
 }
 
 async function editVoice(shell: ClankieFaceShell, services: PersonaCommandServices): Promise<void> {
   const flow = shell.setupFlow;
 
-  const chattiness = await flow.readSelect({
-    kind: "single",
-    message: "How talkative is he by nature?",
-    options: [
-      { value: "quiet", label: "Quiet", hint: "short, sparing" },
-      { value: "balanced", label: "Balanced", hint: "a sentence or two" },
-      { value: "chatty", label: "Chatty", hint: "takes more room" },
-    ],
-    required: true,
-  });
-  const chattinessChoice = chattiness?.[0];
-  if (chattinessChoice === undefined) return;
+  for (;;) {
+    const chattiness = await flow.readSelect({
+      kind: "single",
+      message: "How talkative is he by nature?",
+      options: [
+        { value: "quiet", label: "Quiet", hint: "short, sparing" },
+        { value: "balanced", label: "Balanced", hint: "a sentence or two" },
+        { value: "chatty", label: "Chatty", hint: "takes more room" },
+      ],
+      required: true,
+      allowBack: true,
+    });
+    const chattinessChoice = chattiness?.[0];
+    if (chattinessChoice === undefined) return;
 
-  const replyPolicy = await flow.readSelect({
-    kind: "single",
-    message: "Which admitted text messages should he see?",
-    options: [
-      {
-        value: "all",
-        label: "Every message",
-        hint: "recommended",
-        description: "He sees each message and decides for himself whether speaking would add anything.",
-      },
-      {
-        value: "addressed",
-        label: "When addressed",
-        description: "Only a mention or one of his names spends a model turn; useful when cost matters more.",
-      },
-    ],
-    required: true,
-  });
-  const replyChoice = replyPolicy?.[0];
-  if (replyChoice === undefined) return;
+    const replyPolicy = await flow.readSelect({
+      kind: "single",
+      message: "Which admitted text messages should he see?",
+      options: [
+        {
+          value: "all",
+          label: "Every message",
+          hint: "recommended",
+          description: "He sees each message and decides for himself whether speaking would add anything.",
+        },
+        {
+          value: "addressed",
+          label: "When addressed",
+          description:
+            "Only a mention or one of his names spends a model turn; useful when cost matters more.",
+        },
+      ],
+      required: true,
+      allowBack: true,
+    });
+    const replyChoice = replyPolicy?.[0];
+    if (replyChoice === undefined) continue;
 
-  await apply(services, (persona) => ({
-    ...persona,
-    chattiness: chattinessChoice as PersonaSettings["chattiness"],
-    replyPolicy: replyChoice as PersonaSettings["replyPolicy"],
-  }));
-  flow.renderLine(
-    replyChoice === "all"
-      ? "Saved. He will read every admitted message and choose when to speak — restart the bridge to apply."
-      : "Saved. Restart the bridge to apply.",
-    "success",
-  );
+    await apply(services, (persona) => ({
+      ...persona,
+      chattiness: chattinessChoice as PersonaSettings["chattiness"],
+      replyPolicy: replyChoice as PersonaSettings["replyPolicy"],
+    }));
+    flow.renderLine(
+      replyChoice === "all"
+        ? "Saved. He will read every admitted message and choose when to speak — restart the bridge to apply."
+        : "Saved. Restart the bridge to apply.",
+      "success",
+    );
+    return;
+  }
 }

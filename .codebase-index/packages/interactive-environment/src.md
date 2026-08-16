@@ -13,6 +13,8 @@
   transport schemas
 - `activity-observation.ts` — self-observation
   read contract
+- `play-sight.ts` — read-only live PNG still and
+  bounded play-story card
 - `index.ts` — barrel re-exporting all of the above
 
 Every profile module follows the same pattern:

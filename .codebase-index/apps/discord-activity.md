@@ -1,30 +1,10 @@
 # apps/discord-activity
 
-The watch-me-play surface (ADR 0047): the web app
-Discord embeds in a voice-channel iframe when the
-bot posts an EMBEDDED_APPLICATION invite. A
-rendering client only — no Discord credentials,
-no authority, no emulator core; the host feeds it
-frames and it draws them with a live lower third
-of Clankie's objective/thought/intent/effect.
+Credential-free watch-me-play web surface embedded by Discord. A public viewer server renders the latest frame/lower third, while a separate loopback bearer-gated producer server accepts frames and exposes the current PNG for the user-session Go Live source.
 
-- README.md — running it, the cloudflared named
-  tunnel as a launcher-owned service, bounds,
-  eligibility
-- src/ — viewer server + client page, frame hub,
-  loopback producer listener, entrypoint
-- test/ — hub fan-out and producer auth suites
-- scripts/ — viewer-probe evidence tool
+- `src/` — frame hub, public HTTP/WebSocket viewer, loopback producer, client, entrypoint.
+- `test/` — latest-only fan-out, auth, lifecycle, snapshot, and backpressure coverage.
+- `scripts/viewer-probe.ts` — live evidence probe.
+- `README.md`, `package.json`, `tsconfig.json` — operating and package configuration.
 
-Two listeners on purpose: the viewer server
-(tunnelled, public through the discordsays.com
-proxy, answers both `/.proxy/*` and bare paths)
-and the producer listener (127.0.0.1 only, never
-tunnelled, bearer-authenticated — the token is
-minted into the credential broker on first start
-as `clankie_activity_producer`; the env var is a
-hard startup error). Only the latest frame and
-overlay are held — nothing is recorded — with
-backpressure drops counted, viewers bounded, and
-producer disconnect invalidating the snapshot so
-an ended session never stays labelled live.
+The hub records nothing: it retains only the current frame/overlay, drops lagging viewer frames with counters, and invalidates state when the producer disconnects. Viewer paths work both bare and beneath Discord's `/.proxy/` prefix.

@@ -12,6 +12,7 @@ Read for the fences: episode lane/target are
 stamped by a hook from the trusted channel, never
 chosen by the model; `operator_private` episodes
 never surface in ambient lanes; recall is an
-instruction, not a tool. Amended by ADR 0084,
-which lifts the transcript fence in the operator
-lane only.
+instruction, not a tool. ADR 0084 adds bounded
+`observe_room` reads: the operator can read every
+lane, while ambient lanes can read only
+non-operator rooms.

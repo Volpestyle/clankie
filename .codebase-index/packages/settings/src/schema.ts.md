@@ -1,34 +1,27 @@
 # packages/settings/src/schema.ts
 
-The settings schema (`schemaVersion: 1`), all
-strict, all non-secret:
+Strict schema-version-1 non-secret settings.
 
-- `DiscordSettingsSchema` — snowflake-validated
-  ids and allowlists for authority (ambient/
-  approval roles, owner), text ingress (guilds,
-  channels, DM policy, context depth), presence,
-  voice (enable, allowlists, join policy, consent
-  policy `explicit`/`presence`, the possessor
-  voice seam flag), and the activity plane (GBA
-  application id, named Cloudflare tunnel name +
-  hostname — named, not quick, so restarts keep
-  the portal-configured hostname; commented with
-  the 2026-08-01 dead-edge incident).
-- `PersonaSettingsSchema` — displayName, aliases,
-  owner-authored characterNotes, chattiness,
-  replyPolicy (`addressed` default), and
-  liveMessageWindow (what he _sees_, never what
-  he must say). Presentation only; never
-  authority (ADR 0051).
-- `VoiceSettingsSchema` — ttsProvider
-  (`openai`/`elevenlabs`), voice/model ids;
-  elevenlabs requires a voice id via superRefine.
-- `assertNoSecretShapedValue` — walks every
-  string in a settings tree and throws on known
-  token prefixes (sk-, ghp_, clankie_, Bearer, …)
-  or Discord-bot-token shapes, so the write path
-  fails closed instead of trusting the operator
-  to notice.
+- `DiscordSettingsSchema` — ids/allowlists for
+  authority (`systemActorUserIds` is the machine-
+  tool grant), text/DM/presence/voice policy,
+  active bot vs user-session mouth, lab-body
+  allowlists, and activity tunnel coordinates.
+- `PersonaSettingsSchema` — names, owner notes,
+  chattiness, agent-first `replyPolicy: all`, and
+  live-message window. Presentation never grants
+  authority.
+- `VoiceSettingsSchema` — OpenAI/ElevenLabs
+  provider/model/voice selection with required
+  ElevenLabs voice refinement.
+- `LinearSettingsSchema` — optional public default
+  team UUID; the credential remains broker-owned.
+- `EmailSettingsSchema` — bounded IMAP/SMTP host,
+  port, username, and TLS coordinates; password
+  remains broker-owned.
 
-Also exports `ClankieSettingsSchema` (with lazy
-sub-defaults) and `emptySettings()`.
+`ClankieSettingsSchema` gives each section lazy
+defaults. `assertNoSecretShapedValue` recursively
+rejects known token prefixes, bearer strings, and
+Discord-bot-token shapes before any write;
+`emptySettings()` returns the parsed defaults.

@@ -479,6 +479,46 @@ describe("TUI selected-conversation prompt path", () => {
     await prompt;
   });
 
+  it("reopens a dropped durable tail and replays through the accepted turn", async () => {
+    const { store } = await tempTailStore();
+    const selection = new OperatorConversationSelection(client());
+    await selection.selectDefault();
+    let tails = 0;
+    const routed: OperatorConversationClient = {
+      ...client(),
+      tail: async function* (request) {
+        tails += 1;
+        if (tails === 1) throw new TypeError("fetch failed");
+        yield {
+          kind: "event",
+          event: streamEvent(request.conversationId, "global-default:reply", {
+            type: "message",
+            role: "captain",
+            text: "back after restart",
+            streaming: false,
+          }),
+        };
+        yield {
+          kind: "event",
+          event: streamEvent(request.conversationId, "global-default:done", {
+            type: "turn",
+            runId: "run:test",
+            phase: "completed",
+          }),
+        };
+      },
+    };
+    const recorded = recordingSink();
+    const session = new OperatorConversationPromptSession({ client: routed, selection, tails: store });
+    await session.initialize();
+    await session.prompt("restart yourself", recorded.sink);
+
+    expect(tails).toBe(2);
+    expect(recorded.events).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: "message", text: "back after restart" })]),
+    );
+  });
+
   it("surfaces typed recovery exactly once and stops before sending or crossing the reset", async () => {
     const { store } = await tempTailStore();
     const selection = new OperatorConversationSelection(client());

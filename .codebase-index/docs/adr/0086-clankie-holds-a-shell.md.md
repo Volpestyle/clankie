@@ -1,21 +1,14 @@
 # docs/adr/0086-clankie-holds-a-shell.md
 
-The captain gets `bash` and `read_file`, executed
-by the body-owning host under a macOS Seatbelt
-`ShellSandbox`: reads reach the whole host,
-writes are confined to one scratchpad, no network
-egress, no inherited environment. Splits ADR
-0027's "tool-less captain" into its load-bearing
-half (he cannot change the tree he is judged
-against) and the half that was incidental.
+Pi's built-in `bash`, `read`, `edit`, and `write`
+are machine tools, available only to the operator
+lane and Discord text turns whose authenticated
+actor appears in `systemActorUserIds`. All other
+Discord text stays social, and voice never
+receives system tools.
 
-Read for the probed boundary table (writes
-outside → SIGKILL, `curl` → killed, `nohup`
-children confined, launchd unreachable; Apple
-Events unverified) and the standing caveats:
-reads include on-disk credentials by explicit
-operator choice; no-egress is what keeps
-read-anything from being exfiltrate-anything;
-delegation to workers, not the sandbox, is the
-real path to unconfined execution. macOS only —
-fails closed elsewhere.
+The tools run directly as the Clankie service's
+OS user. The host-derived actor/lane tool set —
+not prompt wording — is the boundary; the allowlist
+must remain small and owner-authored, and secrets
+remain in the credential broker.

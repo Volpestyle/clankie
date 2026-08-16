@@ -16,4 +16,7 @@ any mismatch and boots from the pinned title
 savestate, which `bootSavestate()` retains for
 restarts. Same press/settle timing,
 `observeFrames` pacing, and checkpoint
-save/load surface as the FireRed core.
+save/load surface as the FireRed core. Watched
+input methods await hardware-rate deadline pacing,
+and `idleFrames` advances the console only while
+no action owns it.

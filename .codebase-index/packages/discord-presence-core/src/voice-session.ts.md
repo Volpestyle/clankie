@@ -1,75 +1,53 @@
 # packages/discord-presence-core/src/voice-session.ts
 
-`DiscordVoiceSession`: the single official-bot
-media owner for one guild voice channel, wired
-for ADR 0057's two-tier realtime flow. The only
-module in the package touching `@discordjs/voice`
-and prism-media.
+`DiscordVoiceSession` is the media owner for one
+guild voice channel and ADR 0057's two-tier
+realtime flow. It is the package's only
+`@discordjs/voice`/prism-media module; a lab body
+may inject a video sink for music.
 
-Lifecycle: `join` connects with DAVE encryption
-required, opens the dormant transcription
-listener (its failure fails the join — no silent
-deafness), and opens per-session consent; `leave`
-tears everything down, zeroes the transcript
-ring, and bumps a session generation that every
-async callback checks.
+**Lifecycle and consent:** `join` requires DAVE,
+probes transcription before succeeding, and
+opens the session-bound consent registry.
+`leave` fences late callbacks, stops music,
+closes every realtime port, cancels timers, and
+zeroes retained transcript/audio buffers. Only
+permitted user streams are subscribed and each
+chunk rechecks consent.
 
-Capture: only consented user ids are ever
-subscribed (`consent.permits` at speaking-start
-and re-checked per decoded chunk — mission
-criterion 3), Opus → 48 kHz stereo → 24 kHz mono,
-streamed into the transcription session sliced to
-the append cap; the engaged conversation gets a
-copy only while the floor is engaged (never
-during the hold window, so overheard chatter
-cannot grow a priced context). Utterances shorter
-than 350 ms earn no receipt.
+**Attribution and floor:** every gateway user
+owns a separate dormant transcriber, capped at 25
+with two-minute idle-LRU eviction. Final text
+inherits that immutable user id, so overlapping
+audio never mixes identities. A bounded JSONL
+ring feeds `VoiceFloor`; addressed wakes fetch a
+fresh persona/person-memory briefing, seed the
+engaged model, and explicitly create a response.
+Decay keeps the connection warm for five minutes;
+unprompted offers let the realtime persona choose
+speech or silence.
 
-Floor wiring: final transcripts are attributed
-from gateway speaking spans (most-recent-active
-heuristic — never from audio), pushed into a
-bounded transcript ring (the only transcript
-retention anywhere; zeroed on eviction and
-leave), and fed to `VoiceFloor`. Wakes brief
-(persona + person memory for whoever may be
-heard), open the conversation, seed ring-then-
-briefing, and announce `Speaker: <id>` items; a
-release keeps the session warm for
-`ENGAGED_HOLD_MS` so a wake inside the window
-skips setup; `ENGAGED_TICK_MS` decay ticks catch
-silent rooms. Volition offers run the injected
-`volitionDecider` over ring text (absent/erroring
-= suppressed, still accounted).
+**Tools:** privileged `ask_clankie` serializes
+through the unchanged `discord_voice` captain
+lane, preserving fixed failure speech and the
+authenticated approval handoff. Local
+`look_at_screen` injects one bounded live PNG.
+YouTube search/play/queue/skip/pause/resume/stop/
+now use `VoiceMusicQueue`, with speech ducking
+the selected audio or video sink.
 
-Ability path: `ask_clankie` is the only accepted
-function call, serialized on a turn queue through
-`DiscordVoiceIngress`; failures speak the fixed
-`CAPTAIN_UNREACHABLE_TEXT`, approval-shaped
-results keep the authenticated-surface handoff,
-and a silent captain outcome says and receipts
-nothing.
+**Playback and resilience:** ordered PCM playback
+zeroes buffers and supports deliberate sustained-
+speech barge-in with realtime truncation. Lost
+speaker transcribers reconnect with bounded
+backoff while needed; a lost conversation opens
+lazily on the next wake. All evidence is emitted
+through a failure-isolated content-free path.
 
-Playback & barge-in: streamed PCM deltas
-(24k→48k stereo) play through one ordered
-playback chain; buffers are zeroed when their job
-ends. Deliberate truncation only — sustained
-speech (≥350 ms) from the floor holder, or a
-re-address from any consented speaker, stops the
-player and issues `conversation.item.truncate` at
-the played offset.
-
-Possessor seam (ADR 0064): `narrate(text)` seeds
-"While playing, Clankie just: …" as context
-(never a script), responding at most once per
-`DEFAULT_NARRATION_MIN_INTERVAL_MS` with the
-decision made inside the ops queue so un-awaited
-bursts collapse to one response;
-`subscribeTranscript` pushes attributed ring
-lines to possessors with zero added retention.
-
-Resilience: a lost listener reconnects forever
-with 1 s→30 s backoff (never silently deaf); a
-lost conversation drops undeliverable pending
-decisions and reopens lazily on the next wake.
-All evidence goes through `emitSafely` — a
-failing emitter never eats a reply.
+**Possessor seam:** narration is context, never a
+script. Every report seeds the model, but spoken
+responses are interval-limited and suppressed
+while other response audio plays; delivery ids
+join play-journal and voice evidence. Attributed
+room lines publish to subscribers with no extra
+retention.

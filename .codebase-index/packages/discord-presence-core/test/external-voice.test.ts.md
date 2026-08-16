@@ -14,8 +14,9 @@ context close + a marker item + dropped late
 output; releasing held dones on mouth death and
 reopening for the next utterance; reporting a
 reopen failure while still settling the turn; and
-delegating the realtime-only surface + closing
-both on close. Separate `splitSpeakableUnits`
+delegating the realtime-only surface (including
+screen image items) + closing both on close.
+Separate `splitSpeakableUnits`
 suite: hold-until-boundary, end-of-buffer
 boundaries, decimal/abbreviation safety, long-run
 word-break splitting, clause enders.

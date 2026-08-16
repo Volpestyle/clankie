@@ -12,7 +12,8 @@ Exports:
   undefined when the seam was never bootstrapped
   (deny-by-default: no credential, cannot speak).
 - `createPossessorVoiceClient(options)` — the
-  client proper: `narrate(text)` (trimmed,
+  client proper: `narrate(text, {deliveryId?})`
+  (trimmed,
   2 000-char bound, rejects with typed
   `clankie_speech_*` errors — including
   `clankie_speech_unavailable` when the bridge is
@@ -28,3 +29,5 @@ Exports:
 Reconnects on close with a fixed delay; malformed
 or off-contract server messages are ignored; one
 throwing subscriber cannot starve the others.
+The optional delivery id lets play-journal and
+voice receipts share one correlation key.

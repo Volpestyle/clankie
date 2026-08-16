@@ -37,8 +37,8 @@ Layers, bottom up:
   `free-play-progress.ts`,
   `free-play-session.ts`, `free-play-boot.ts`,
   `free-play-journal.ts`,
-  `free-play-competence.ts`, `checkpoint.ts`,
-  `naming-keyboard.ts`.
+  `free-play-competence.ts`, `play-story.ts`,
+  `checkpoint.ts`, `naming-keyboard.ts`.
 - Frames: `framebuffer-png.ts`,
   `frame-stream.ts`. `body-lock.ts` re-exports
   the cross-process mutex from
@@ -48,4 +48,5 @@ Layers, bottom up:
 Everything fails closed: unverified digests,
 undecodable RAM, exceeded bounds, and unknown
 states are refusals with named reasons, never
-guesses.
+guesses. Core input methods are async so watched
+hardware-rate pacing never blocks the service.

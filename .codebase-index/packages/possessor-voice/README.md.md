@@ -9,4 +9,7 @@ decision), narration-as-context-never-script, the
 dial-out + loopback + bearer direction/locking
 model, the refuse-don't-queue lossiness, and the
 content-free evidence the listener can emit for
-the bridge receipt log. Includes a mermaid diagram.
+the bridge receipt log. It explains how an asked-
+play `deliveryId` joins journal, submission,
+spoken response, and suppression evidence.
+Includes a mermaid diagram.

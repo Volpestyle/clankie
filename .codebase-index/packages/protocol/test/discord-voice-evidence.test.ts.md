@@ -1,9 +1,13 @@
 # packages/protocol/test/discord-voice-evidence.test.ts
 
-Voice-evidence tests (ADR 0057): every receipt
-variant parses; waking vs continuing first-audio
-latency stays separately reportable; turn id and
-handoff cost bind to the ask_clankie path only;
-free text, the retired cascade timings, non-token
-failure codes, and non-finite numbers are all
-unrepresentable.
+Voice-evidence suite (ADR 0057): parses every
+capture/transcription, floor-decision, model,
+realtime-tool, music, response/playback, and
+possessor variant. It pins fast-path vs captain-
+handoff timing, optional stay/token/session
+counters, and narration suppression.
+
+Strictness tests prove transcript/prompt/audio,
+music URLs, arbitrary codes, retired timings,
+unknown fields, negative/non-finite numbers, and
+other free text are unrepresentable.

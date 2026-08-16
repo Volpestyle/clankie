@@ -23,7 +23,8 @@ exit text remains advanceable. Also:
 `mapGrid()` from the live map buffer,
 `saveState`/`loadState` for checkpoints,
 `observeFrames(observer, {pace})` to surface
-intermediate frames (3-frame chunks, optional
-wall-clock pacing via a synchronous
-`Atomics.wait` sleep), and
+every intermediate frame with optional async,
+deadline-based hardware-rate pacing,
+`idleFrames()` for the watched console between
+actions, and
 `framebufferSnapshot()` for screenshots.

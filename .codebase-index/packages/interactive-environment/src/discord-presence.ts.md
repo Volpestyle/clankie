@@ -28,8 +28,9 @@ lane addressing shared by both transports.
   carrying transports, and minimum phase; Go Live
   is user_session-only, embedded activities are
   bot-only. `isDiscordPresenceActionAvailable`
-  gates by transport, phase rank, and the activity
-  facet. Unlisted Discord methods fail closed.
+  gates by transport and phase rank; the body that
+  owns execution handles idempotent current-facet
+  checks. Unlisted Discord methods fail closed.
 - `discordPresenceLaneAddress({guildId?,
 channelId})` → `discord:<guildId|dm>:<channelId>`
   — the canonical lane key by _where_ the

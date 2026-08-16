@@ -1,6 +1,8 @@
 # docs/adr
 
-Architecture decision records, 0012–0090.
+Architecture decision records, 0012–0099: 58 files
+with deliberate numbering gaps and two distinct
+0098 decisions.
 Numbering gaps are deliberate: governance-era ADRs
 were deleted in the 2026-08 pi rewrite and live
 only in git history. What remains documents the
@@ -8,26 +10,22 @@ fun: GBA/Minecraft play, Discord presence and
 voice, media, browser and shell, memory, and the
 supervision plumbing around them.
 
-Several older ADRs still name pre-rewrite
-structures (Eve, control plane, runner, missions,
-doctrine); the invariants they argue for —
-untrusted input fenced, secrets brokered, honest
-reporting — survive in `apps/clankie`.
+Older records retain historical option context;
+their active decisions describe the current pi
+service, launcher, Discord bodies, and play hosts.
 
 ## Children
 
 - `0012` — provider/auth/model config: registry,
   credential broker, provider layer
-- `0014` — TUI as loopback client of a shared
-  captain-session singleton
 - `0016` — versioned interactive-environment
   contract; lane-scoped tool projection
 - `0024` — dual Discord planes (bot + lab user
   session), one character; presence phases
 - `0025` — ClankVox voice sidecar IPC (superseded
   by 0045; parser is a compat artifact)
-- `0029` — versioned media-generation connector
-  (v2 arrives in 0085)
+- `0029` — schema-v2 image/video connector;
+  generation remains separate from publication
 - `0032` — the conversation, not the device, is
   the operator lane unit
 - `0039` — GBA embodiment; deterministic core
@@ -73,7 +71,7 @@ reporting — survive in `apps/clankie`.
   play
 - `0062` — voice join by asking in natural text
 - `0063` — asked embodiment: captain
-  `start_play`/`stop_play`, runner owns sessions
+  `start_play`/`stop_play`, play host owns sessions
 - `0064` — possessor voice seam: events in,
   persona composes the words
 - `0066` — `advance_dialog`: a conversation is one
@@ -95,29 +93,52 @@ reporting — survive in `apps/clankie`.
 - `0075` — rewinding is a play choice
   (`load_checkpoint`, `restart_game`)
 - `0081` — an inbound Discord image is part of
-  what was said
+  what is said
 - `0082` — Clankie holds the browser (web tools +
-  agent-browser via the runner)
-- `0083` — every room is watchable: lane listing +
-  TUI `/trace`
-- `0084` — the operator seat reads his other rooms
-  (`observe_room`)
+  service-hosted agent-browser MCP)
+- `0083` — every room is watchable through one
+  append-only `LaneLog`
+- `0084` — `observe_room` reads visible branches;
+  ambient lanes cannot read operator history
 - `0085` — a generated picture rides his reply
   without approval; video jobs
-- `0086` — Clankie holds a sandboxed shell (read
-  anywhere, write one scratchpad)
+- `0086` — machine tools only in operator and
+  system-actor text rooms
 - `0088` — browser screenshots ride replies on the
   same provenance argument
 - `0089` — the map is his to read: minimap, warp
   decode, named refusals
 - `0090` — Emerald plays from the screen (visual
   core, no semantic decode)
+- `0091` — mid-turn durable-lane messages steer one
+  merged reply
+- `0092` — identical action + effect repeats become
+  a visible stuck signal
+- `0093` — `/connect`: owner-authored Linear, mail,
+  and Discord connections
+- `0094` — slow renders return to their room on a
+  later turn
+- `0095` — Discord `systemActorUserIds` gates
+  machine tools
+- `0096` — governed tldraw ER/sequence diagrams
+  ride replies
+- `0097` — the herdr pane is Clankie's seat; the
+  herdr-lead board is its companion
+- `0098-the-room` — admitted channel text reaches
+  attached playthroughs as interjections
+- `0098-user-session` — the lab user body watches
+  Discord shares through external ClankVox
+- `0099` — live play stills and bounded journal
+  story cards
 
 ## Reading notes
 
 The GBA play arc is the longest thread: 0039 →
 0040 → 0043 → 0049 → 0053 → 0058/0059/0060/0061 →
-0066/0072/0073/0075 → 0089 → 0090. The voice arc:
-0045 → 0057 → 0056 → 0062/0064/0067 → 0070/0071 → 0074. Capability growth for the captain: 0082
-(browser) → 0085/0088 (media out) → 0086 (shell) →
-0083/0084 (cross-room reads).
+0066/0072/0073/0075 → 0089/0090 → 0092/0098/0099.
+The voice arc: 0045 → 0057 → 0056 →
+0062/0064/0067 → 0070/0071/0074 → 0091/0098/0099.
+Captain capability growth: 0082 (browser) →
+0085/0088/0094/0096 (media out) → 0083/0084
+(cross-room reads) → 0086/0095/0097 (trusted
+machine and fleet access) → 0093 (connections).

@@ -7,7 +7,8 @@ AI SDK language models. A four-layer pipeline:
 config (load/merge/validate) → resolve (providers,
 roles, subscription precedence) → variants
 (reasoning presets) → instantiate (AI SDK
-factories), with provider OAuth flows alongside.
+factories), with ChatGPT, Claude, and SuperGrok
+subscription OAuth flows alongside.
 
 Children:
 
@@ -33,9 +34,10 @@ Children:
     subscription model list
   - codex-model-probe-cli.ts — opt-in backend
     probe (`pnpm models:codex-probe`)
-  - oauth/ — ChatGPT/Codex and Anthropic Pro/Max
-    subscription OAuth + fetch adapters
-- test/ — five suites across the layers
+  - oauth/ — ChatGPT/Codex, Anthropic Pro/Max,
+    and xAI SuperGrok subscription OAuth + fetch
+    adapters
+- test/ — eight suites across the layers
 
 Invariants: secrets never live in config (schema
 rejects secret-shaped keys, pointing at /auth and
@@ -43,4 +45,6 @@ the broker); construction never throws for
 missing credentials (placeholder keys fail at
 call time); a stored ChatGPT subscription
 supersedes the metered OpenAI key for models the
-Codex backend serves.
+Codex backend serves; OAuth-typed Anthropic and
+xAI credentials select their broker-backed fetch
+adapters while API keys keep the normal SDK path.

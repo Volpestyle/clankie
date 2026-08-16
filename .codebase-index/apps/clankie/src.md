@@ -1,50 +1,17 @@
 # apps/clankie/src
 
-The merged service's code: composition root,
-HTTP surface, and one module per capability —
-play, browser, media, memory, presence, devices.
-The old control-plane/runner split is gone;
-everything runs in one process and talks through
-in-process ports.
+The service implementation: composition root, Hono API, Pi captain, capability hosts, projections, and persistence. Incoming surfaces authenticate and validate in `app.ts`, then call small in-process ports assembled by `index.ts`.
 
-- `index.ts` — composition root; wires
-  credentials, captain, hosts, and serves :4310.
-- `app.ts` — every HTTP route, auth, and the
-  JSONL event log with boot replay.
-- `captain/` — the pi captain (own entry).
-- `embodiment.ts` — asked-play authority: intent
-  → session lifecycle, event-sourced.
-- `play-host.ts` — claims play work and runs it;
-  `play-execution.ts` — the actual GBA
-  playthrough (lock, boot, checkpoints, frames,
-  voice, journal).
-- `browser-host.ts` — owns the agent-browser MCP
-  server over stdio JSON-RPC.
-- `media-generation.ts` — image/video generation
-  from operator-configured models.
-- `memory.ts` — file-backed person facts and
-  captain episodes.
-- `activity-observation.ts` — latest-only "what
-  is on his screen" projection.
-- `captain-presence.ts` — captain heartbeat
-  lease manager.
-- `discord-presence-session.ts`,
-  `discord-presence-runtime.ts`,
-  `discord-user-session-opt-in.ts`,
-  `discord-attachment-fetch.ts` — Discord
-  presence projections, executor port, opt-in
-  record, and the SSRF-hardened attachment
-  fetcher.
-- `devices.ts`, `device-session.ts`,
-  `pairing.ts`, `operator-auth.ts` — device
-  pairing, HMAC session tokens, and operator
-  credential auth.
-- `environment-lifecycle.ts` — GBA/Minecraft
-  environment-runtime compositions.
+- `index.ts` — resolves brokered credentials/settings and wires the process.
+- `app.ts` — routes, authentication, JSONL event replay, and live projections.
+- `captain/` — Pi sessions, tools, operator conversations, memory recall, and Herdr context.
+- `memory.ts` — Discord person facts, captain episodes, operator catalog/edit/delete.
+- `embodiment.ts`, `play-host.ts`, `play-execution.ts`, `play-sight.ts` — asked play lifecycle, GBA execution, checkpoints/journal, and pull sight.
+- `browser-host.ts`, `media-generation.ts`, `tldraw-host.ts` — browser calls, generated artifacts, and styled diagrams.
+- `linear.ts`, `email.ts` — owner-connected work and mailbox ports.
+- `discord-*` modules — presence/session projections, attachment ingestion, active-body social/music/voice clients, stream-watch state.
+- `voice-receipt-activity.ts` — content-free recent speech/stay metrics.
+- `devices.ts`, `device-session.ts`, `pairing.ts`, `operator-auth.ts` — remote-device and operator trust boundaries.
+- `activity-observation.ts`, `environment-lifecycle.ts` — latest play surface and environment runtime composition.
 
-Flow: a surface (bridge/TUI/relay/device) hits a
-route in `app.ts`; routes authenticate, validate
-with protocol schemas, and call either the
-captain port or an in-process manager. Managers
-emit domain events to the JSONL log and rebuild
-their projections from it on boot.
+Durable domain state is event- or file-backed; raw screen-share video and live handles are not. Optional integrations return typed unavailable/refused outcomes so a missing canvas, mailbox, model, ROM, or body does not masquerade as success.

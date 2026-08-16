@@ -1,14 +1,18 @@
 # packages/model-provider/src/oauth
 
-Provider subscription OAuth flows. Both modules
-follow the same shape: PKCE login flows, refresh
-with single-flight sharing, broker persistence,
-and a fetch adapter that attaches the
-subscription bearer at request time so the AI SDK
-only ever sees a placeholder key.
+Provider subscription OAuth flows and fetch
+adapters. Each reads broker state at request
+time, rotates credentials back into the store,
+and keeps real bearers out of AI SDK model
+configuration.
 
-- openai-codex.ts — ChatGPT/Codex subscription:
-  browser + headless device flows, request
-  rerouting to the Codex backend
-- anthropic.ts — Claude Pro/Max: manual-code
-  browser flow, beta-header injection
+- `openai-codex.ts` — ChatGPT/Codex browser and
+  headless device flows, refresh, and Responses
+  rerouting to the Codex backend.
+- `anthropic.ts` — Claude Pro/Max manual-code
+  PKCE, single-flight refresh, revocation, and
+  required beta headers.
+- `xai.ts` — SuperGrok/X Premium RFC 8628 device
+  flow, expiry-aware single-flight refresh, and a
+  request adapter that replaces the SDK's
+  placeholder bearer.

@@ -1,5 +1,6 @@
+import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
   ensureCaptainCredential,
@@ -17,6 +18,7 @@ import {
   stopTarget,
   type ServiceOutcome,
   type ServiceRegistryOptions,
+  type ServiceTarget,
 } from "./services.ts";
 import { clankieStateDirectory, SERVICE_ORDER } from "./service-supervisor.ts";
 import type { CaptainSessionClient, CaptainStreamEvent } from "../src/session/captain-stream.ts";
@@ -57,6 +59,8 @@ const CAPTAIN_SERVICE_STATE_NAME = "captain-eve-service.json";
 /** Default typed lane for the headless captain session. */
 const DEFAULT_TRACE_LANE: TraceLane = "tui";
 const TRACE_IDLE_POLL_MS = 500;
+const RESTART_TURN_POLL_MS = 100;
+const RESTART_AFTER_TURN_FLAG = "--after-operator-turn";
 
 type Writable = { write(chunk: string): unknown };
 
@@ -83,6 +87,8 @@ export interface HeadlessCaptainCommandOptions {
   readonly killImpl?: ServiceRegistryOptions["killImpl"];
   readonly processIsAliveImpl?: ServiceRegistryOptions["processIsAliveImpl"];
   readonly readProcessCommandImpl?: ServiceRegistryOptions["readProcessCommandImpl"];
+  /** Test seam for the executable a deferred self-restart launches. */
+  readonly cliEntryPath?: string;
   readonly stderr?: Writable;
   readonly stdout?: Writable;
   /** Test hook: stop the long-lived trace loop after the current stream ends. */
@@ -270,8 +276,105 @@ function describeOutcomes(outcomes: readonly ServiceOutcome[]): string {
     .join("\n");
 }
 
+interface RestartTurnHandoff {
+  readonly eventsPath: string;
+  readonly runId: string;
+}
+
+function turnPhases(eventsPath: string): Map<string, string> {
+  const phases = new Map<string, string>();
+  for (const line of readFileSync(eventsPath, "utf8").split("\n")) {
+    if (line.length === 0) continue;
+    try {
+      const event = JSON.parse(line) as { type?: unknown; runId?: unknown; phase?: unknown };
+      if (event.type === "turn" && typeof event.runId === "string" && typeof event.phase === "string") {
+        phases.set(event.runId, event.phase);
+      }
+    } catch {
+      // A trailing partial append is not a durable event yet; the next poll sees it.
+    }
+  }
+  return phases;
+}
+
+/** Pi's built-in bash tool exposes its durable session file to every command. */
+function activeOperatorTurn(env: NodeJS.ProcessEnv): RestartTurnHandoff | undefined {
+  const sessionFile = env.PI_SESSION_FILE?.trim();
+  if (sessionFile === undefined || sessionFile.length === 0) return undefined;
+  const piDirectory = dirname(sessionFile);
+  if (basename(piDirectory) !== "pi") return undefined;
+  const eventsPath = join(dirname(piDirectory), "events.jsonl");
+  try {
+    const active = [...turnPhases(eventsPath)].find(([, phase]) => phase === "accepted");
+    return active === undefined ? undefined : { eventsPath, runId: active[0] };
+  } catch {
+    return undefined;
+  }
+}
+
+function restartIncludesClankie(target: ServiceTarget): boolean {
+  return target === "all" || target === "clankie";
+}
+
+async function waitForOperatorTurn(
+  handoff: RestartTurnHandoff,
+  sleepImpl: (ms: number) => Promise<void>,
+): Promise<void> {
+  // ponytail: short-lived whole-log scan; keep a byte cursor if conversation logs make this measurable.
+  for (;;) {
+    const phase = turnPhases(handoff.eventsPath).get(handoff.runId);
+    if (phase === "completed" || phase === "failed" || phase === "cancelled") return;
+    await sleepImpl(RESTART_TURN_POLL_MS);
+  }
+}
+
+function scheduleRestartAfterTurn(
+  target: ServiceTarget,
+  handoff: RestartTurnHandoff,
+  options: HeadlessCaptainCommandOptions,
+): void {
+  const cliEntryPath = options.cliEntryPath ?? process.argv[1];
+  if (cliEntryPath === undefined || cliEntryPath.length === 0) {
+    throw new Error("Cannot locate the clankie launcher for a deferred restart.");
+  }
+  const env = { ...(options.env ?? process.env) };
+  delete env.PI_SESSION_FILE;
+  delete env.PI_SESSION_ID;
+  const child = (options.spawnImpl ?? spawn)(
+    cliEntryPath,
+    ["restart", target, RESTART_AFTER_TURN_FLAG, handoff.eventsPath, handoff.runId],
+    { detached: true, env, stdio: "ignore" },
+  );
+  if (child.pid === undefined) throw new Error("Deferred restart helper did not start.");
+  child.unref();
+}
+
 async function runRestart(args: readonly string[], options: HeadlessCaptainCommandOptions): Promise<number> {
   const target = parseServiceTarget(args[0]);
+  const afterTurn =
+    args[1] === RESTART_AFTER_TURN_FLAG && args[2] !== undefined && args[3] !== undefined
+      ? { eventsPath: args[2], runId: args[3] }
+      : undefined;
+  if (args.length > 1 && afterTurn === undefined) {
+    throw new Error("Usage: clankie restart [service]");
+  }
+  if (afterTurn !== undefined) {
+    await waitForOperatorTurn(afterTurn, options.sleepImpl ?? sleep);
+  } else if (restartIncludesClankie(target)) {
+    const activeTurn = activeOperatorTurn(options.env ?? process.env);
+    if (activeTurn !== undefined) {
+      scheduleRestartAfterTurn(target, activeTurn, options);
+      (options.stderr ?? process.stderr).write("Restart scheduled after this conversation turn completes.\n");
+      outputJson(options.stdout ?? process.stdout, {
+        ok: true,
+        status: "scheduled",
+        target,
+        host: commandHost(options),
+        afterRun: activeTurn.runId,
+      });
+      return 0;
+    }
+  }
   const registryOptions = await serviceOptions(options);
   const outcomes = await restartTarget(target, registryOptions);
   const clankie = outcomes.find((outcome) => outcome.id === "clankie");

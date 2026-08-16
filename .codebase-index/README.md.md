@@ -11,15 +11,19 @@ Sections:
 
 - What he does: Discord teammate, games on a
   watch surface, media generation, coding and
-  fleet leadership, one persona across all rooms.
+  herdr fleet leadership (including allowlisted
+  Discord system actors), one persona across all
+  rooms.
 - Get started: Node 24+, pnpm 11+; `pnpm install`,
   `pnpm doctor`, `pnpm cli:install`, then run
   `clankie` to start the service and TUI. Secrets
   live in the credential broker (Keychain), never
   `.env`; configure via TUI slash commands
-  (`/auth`, `/model`, `/image-model`, `/persona`).
+  (`/auth`, `/model`, `/image-model`, `/persona`,
+  `/connect`).
 - Apps table: apps/clankie (the service, API on
-  :4310), tui, discord-bridge,
+  :4310 with `openapi.yaml` as its catalog), tui,
+  discord-bridge,
   discord-user-session, discord-activity, gba-mcp,
   relay; plus integrations/ and packages/.
 - Development commands (`pnpm check`,

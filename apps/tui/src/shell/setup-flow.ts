@@ -7,13 +7,14 @@
  * scripts/clankie.ts createSetupFlow); the interface is deliberately
  * renderer-agnostic so a remote surface can serialize the same flows later.
  */
-import type {
-  OverlayHandle,
-  OverlayOptions,
-  SelectListTheme,
-  TUI,
-  Component,
+import {
   Editor,
+  type EditorTheme,
+  type OverlayHandle,
+  type OverlayOptions,
+  type SelectListTheme,
+  type TUI,
+  type Component,
 } from "@earendil-works/pi-tui";
 import {
   InteractiveSelectPrompt,
@@ -40,6 +41,7 @@ export type SetupFlow = {
     readonly message: string;
     readonly defaultValue?: string;
     readonly placeholder?: string;
+    readonly multiline?: boolean;
     readonly allowBack?: boolean;
     readonly validate?: (value: string) => string | undefined;
   }): Promise<string | undefined>;
@@ -69,6 +71,7 @@ export type SetupFlow = {
 export type SetupFlowController = SetupFlow & {
   cancelActivePrompt(reason?: string): void;
   handleSubmit(text: string): boolean;
+  hasActivePrompt(): boolean;
   isWaitingForInput(): boolean;
 };
 
@@ -76,6 +79,7 @@ export type SetupFlowController = SetupFlow & {
 export interface SetupFlowContext {
   readonly tui: TUI;
   readonly editor: Editor;
+  readonly editorTheme: EditorTheme;
   readonly selectListTheme: SelectListTheme;
   setStatus(message: string): void;
   refreshStatusView(): void;
@@ -163,6 +167,7 @@ export function createSetupFlow(context: SetupFlowContext): SetupFlowController 
         defaultValue,
         error,
         message: options.message,
+        editor: options.multiline === true ? new Editor(context.tui, context.editorTheme) : undefined,
         onCancel: cancel,
         onRender: () => context.tui.requestRender(),
         onSubmit: (value) => finish(value),
@@ -282,6 +287,9 @@ export function createSetupFlow(context: SetupFlowContext): SetupFlowController 
     },
     cancelActivePrompt: cancelPrompt,
     handleSubmit,
+    hasActivePrompt(): boolean {
+      return cancelActivePrompt !== undefined;
+    },
     isWaitingForInput(): boolean {
       return cancelActivePrompt !== undefined || interruptResolvers.size > 0;
     },

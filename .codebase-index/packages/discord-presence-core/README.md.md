@@ -6,7 +6,8 @@ package, the `discord.voice.*` receipt vocabulary
 discord.js import; lane addresses from
 `discordPresenceLaneAddress`; transportKind is
 configuration, not inference; attachment
-selection lives here for both bodies; the package
-never fetches attachment bytes), and the two
-consumers (the bot bridge and the user-session
-bridge).
+selection including `gifv` lives here for both
+bodies; the package never fetches attachment
+bytes). It also records the per-speaker
+transcription identity/capacity rules and the two
+consumers (bot bridge and user-session bridge).

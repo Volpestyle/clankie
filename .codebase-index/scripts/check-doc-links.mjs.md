@@ -2,7 +2,8 @@
 
 Doc-link checker run as `pnpm docs:check` (part
 of `pnpm check`). Walks the whole repo (skipping
-node_modules, .git, .turbo, artifacts), scans
+node_modules, .git, .turbo, artifacts, and
+.codebase-index), scans
 every .md file for `[text](target)` links, and
 verifies each relative target exists on disk.
 

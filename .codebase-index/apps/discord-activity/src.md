@@ -1,26 +1,11 @@
 # apps/discord-activity/src
 
-The surface's four pieces plus the entrypoint.
+The watch surface's complete runtime.
 
-- index.ts — standalone entrypoint: viewer on
-  :4320, broker-minted producer bearer, producer
-  on loopback :4322
-- frame-hub.ts — RenderedSurfaceHub, latest-only
-  fan-out with backpressure drops and a viewer
-  cap
-- server.ts — viewer HTTP/WS server serving
-  client.html and `/.proxy/frames`
-- producer.ts — loopback, bearer-authenticated
-  frame ingress; newest producer owns the session
-- client.html — the iframe page: pixelated canvas
-  - lower third, self-reconnecting
+- `index.ts` — starts viewer `:4320` and loopback producer `:4322`, resolving the brokered producer bearer.
+- `frame-hub.ts` — `RenderedSurfaceHub`, latest-only fan-out, viewer cap/backpressure counters, and current PNG snapshot.
+- `server.ts` — public client/page and viewer WebSocket server with Discord proxy-path support.
+- `producer.ts` — loopback-only authenticated frame ingress plus snapshot response.
+- `client.html` — reconnecting pixelated canvas, live lower third, and presentation controls.
 
-Flow: the emulator host dials the producer socket
-and sends validated frame/overlay/stopped
-messages; the hub keeps only the latest of each
-and broadcasts to viewers (late joiners get the
-current state immediately); the client renders
-frames by sequence and shows objective/thought/
-intent/effect, with a v1 free-form-lines overlay
-fallback. Producer disconnect stops the surface
-for everyone.
+Producer messages validate through shared protocol schemas; the hub broadcasts current state to late joiners and ends every viewer when the owning producer stops.

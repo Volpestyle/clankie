@@ -1,7 +1,7 @@
 import { execFile as execFileCallback, type spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { createServer } from "node:http";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -209,6 +209,50 @@ describe("headless clankie commands", () => {
     });
     // Progress narration must stay off stdout so it remains a JSON document.
     expect(stderr.text()).toContain("Clankie");
+  });
+
+  it("defers a restart requested by the active operator turn", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-restart-handoff-"));
+    tempDirs.push(root);
+    const piDirectory = join(root, "global-default", "pi");
+    await mkdir(piDirectory, { recursive: true });
+    const sessionFile = join(piDirectory, "session.jsonl");
+    const eventsPath = join(root, "global-default", "events.jsonl");
+    await writeFile(sessionFile, "");
+    await writeFile(
+      eventsPath,
+      `${JSON.stringify({ type: "turn", runId: "run-active", phase: "accepted" })}\n`,
+    );
+    const stdout = outputBuffer();
+    const stderr = outputBuffer();
+    const spawns: Array<{ readonly command: string; readonly args: readonly string[] }> = [];
+
+    const exitCode = await runHeadlessCaptainCommand(["restart", "captain"], {
+      repoRoot: "/repo",
+      cliEntryPath: "/repo/apps/tui/bin/clankie.ts",
+      env: { ...(await stateEnv()), PI_SESSION_FILE: sessionFile },
+      spawnImpl: ((command: string, args: string[]) => {
+        spawns.push({ command, args });
+        return runningChild(9_100);
+      }) as unknown as typeof spawn,
+      stdout: stdout.stream,
+      stderr: stderr.stream,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout.text())).toMatchObject({
+      ok: true,
+      status: "scheduled",
+      target: "clankie",
+      afterRun: "run-active",
+    });
+    expect(stderr.text()).toContain("after this conversation turn completes");
+    expect(spawns).toEqual([
+      {
+        command: "/repo/apps/tui/bin/clankie.ts",
+        args: ["restart", "clankie", "--after-operator-turn", eventsPath, "run-active"],
+      },
+    ]);
   });
 
   it("rejects an unknown restart target without signalling anything", async () => {

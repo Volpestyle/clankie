@@ -1,27 +1,5 @@
 # apps/discord-user-session/src/gateway.ts
 
-DiscordUserGateway: a minimal hand-rolled Discord
-gateway client for a normal-user credential
-(discord.js refuses user tokens; implementing
-only the needed slice keeps the surface
-auditable). The token lives in one private field,
-never logged, never on an event.
+`DiscordUserGateway` is the narrow hand-written gateway client for a normal-user token. It implements identify, heartbeat/zombie detection, resume, bounded reconnect, voice-state updates, typed message/voice/server dispatches, and a raw packet/sender seam for Go Live opcodes.
 
-Speaks identify (bare token, `capabilities: 0`
-instead of bot intents), heartbeat with
-missed-ack zombie detection, resume via the
-READY-supplied resume URL, and op 4 voice-state
-updates (plus raw payload passthrough for the
-voice adapter). Dispatches surfaced as typed
-events: ready/resumed/reconnecting/disconnected/
-failed, messageCreate (with attachments read into
-the transport-neutral shape, malformed entries
-skipped), voiceStateUpdate (carrying the raw
-payload untouched for the media stack), and
-voiceServerUpdate.
-
-Reconnects on a bounded exponential ladder (1s →
-60s, 10 attempts); close code 4004
-(authentication) is terminal rather than retried —
-repeated failed identifies are what get an
-account flagged.
+The bare token remains private and never appears in events. Message attachments/visual embeds are reduced into transport-neutral bounded shapes, malformed entries are skipped, and authentication failure or exhausted reconnect budget is terminal.

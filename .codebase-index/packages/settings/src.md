@@ -7,11 +7,11 @@ read, overrides reported, projection fills only
 unset names).
 
 - schema.ts — ClankieSettings (discord/persona/
-  voice) + secret-shape write guard
+  voice/linear/email) + secret-shape write guard
 - store.ts — SettingsStore, atomic 0600 writes
 - persona.ts — registers → instruction text
 - discord-resolve.ts — DISCORD_* env merge and
-  projection
+  projection + active-body helpers
 - voice-resolve.ts — CLANKIE_VOICE_* env merge
   and projection
 - index.ts — barrel re-exports

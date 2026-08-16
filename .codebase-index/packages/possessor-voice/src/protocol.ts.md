@@ -1,22 +1,21 @@
 # packages/possessor-voice/src/protocol.ts
 
-The wire contract for the possessor voice seam
-(ADR 0064): three strict zod messages, schema
-version 1, and deliberately nothing more.
+Version-1 wire contract for the ADR 0064
+possessor seam: three strict zod messages and no
+general presence controls.
 
 - `PossessorNarrateSchema` (possessor → bridge):
-  bounded `text` describing what just happened in
-  the body — context the persona voices, never a
-  script (2 000-char cap).
+  bounded context about what the body did, plus
+  an optional whitespace-free `deliveryId` that
+  joins play and voice evidence.
 - `PossessorUtteranceSchema` (bridge → possessor):
-  one already-attributed transcript line, pushed
-  as it happens; push-not-pull so the bridge
-  retains no transcripts. Raw audio never crosses.
-- `PossessorRoomSchema` (bridge → possessor): a
-  single `listening` boolean — whether anyone can
-  hear the body — pushed on change and on connect.
-  A participant count was drafted and cut.
-- Client/server discriminated unions, plus
-  `POSSESSOR_VOICE_PATH` ("/possessor"),
-  `POSSESSOR_VOICE_DEFAULT_PORT` (4323), and
-  `POSSESSOR_VOICE_DEFAULT_URL` (loopback ws URL).
+  one already-admitted room line, sourced from
+  consented voice transcription or allowlisted
+  text. Push-only, so the bridge retains nothing.
+- `PossessorRoomSchema` (bridge → possessor): one
+  listening boolean, pushed on change/connect.
+
+Raw audio, audiences, identities, join/leave, and
+other presence actions are unrepresentable.
+Exports the client/server unions and loopback
+path/port/URL constants.

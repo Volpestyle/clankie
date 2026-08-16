@@ -1,32 +1,15 @@
 # apps/discord-user-session/src
 
-The user-session process and its transport pieces.
+The user-account body and its transport-specific media stack.
 
-- index.ts — the process: guards, admission,
-  presence session, ingress, minimal realtime
-  voice, shutdown
-- gateway.ts — hand-rolled minimal Discord
-  gateway client for a user token
-- voice-adapter.ts — bridges that gateway to
-  @discordjs/voice
-- readiness.ts — the fail-closed admission gates
-  (enablement, allowlists, opt-in, credential)
-- readiness-cli.ts — diagnose a refusal without
-  connecting
-- user-presence-runtime.ts — fetch-based executor
-  for the presence action catalog, incl. Go Live
-- presence-runtime-module.ts — trusted service
-  load target issuing per-action grants
-- go-live-media.ts — dynamic loader/publisher for
-  the optional GPL selfbot stream stack
+- `index.ts` — admission, gateway/ingress, operator-driven voice, music/control port, stream wiring, shutdown.
+- `gateway.ts` — auditable identify/resume/heartbeat client plus raw dispatch and voice-state access.
+- `readiness.ts`, `readiness-cli.ts` — ordered fail-closed opt-in/config/credential gates.
+- `user-presence-runtime.ts`, `presence-runtime-module.ts` — bare-token REST executor and service capability wrapper.
+- `voice-adapter.ts` — gateway-to-`@discordjs/voice` seam.
+- `stream-discovery.ts`, `stream-watch.ts` — Go Live opcode catalog and watch/publish lifecycle.
+- `clankvox-sidecar.ts` — external sidecar framing and process control.
+- `go-live-source.ts`, `go-live-media.ts` — local activity PNG source and optional publisher stack.
+- `live-proof.ts`, `live-proof-cli.ts` — decoded-still evidence gate.
 
-Flow: admission passes → the gateway identifies
-with the bare brokered token → dispatches feed
-DiscordTextIngress (context limit 0 — a user
-account reads no channel history) and the voice
-session; the service executes allowed presence
-writes back through user-presence-runtime over
-plain fetch. Voice reuses the same
-realtime-session runtimes as the bot but with no
-volition decider: a secondary presence never
-interjects on its own.
+The body can watch a share muted/deafened while the official bot remains the mouth. When it is the active mouth it can publish local activity or a URL; every media path is optional and reports an explicit unavailable/incomplete state.

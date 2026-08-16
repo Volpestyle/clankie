@@ -372,11 +372,11 @@ describe.skipIf(!realArtifactsAvailable)("Phase B real mGBA comparison", () => {
         sha256(readFileSync(realScenarioPath)),
       );
       const legacyFinal = {
-        ...((coreSnapshot(legacy.traced) as object) ?? {}),
+        ...(coreSnapshot(legacy.traced) as object),
         finalSavestateSha256: sha256(legacy.core.saveState()),
       };
       const candidateFinal = {
-        ...((coreSnapshot(candidate.traced) as object) ?? {}),
+        ...(coreSnapshot(candidate.traced) as object),
         finalSavestateSha256: sha256(candidate.core.saveState()),
       };
 

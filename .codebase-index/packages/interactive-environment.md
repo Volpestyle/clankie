@@ -11,6 +11,11 @@ simulator, the GBA emulator, and Discord presence
 emulator, the bridges) implement these; this
 package is the stable protocol boundary.
 
+Read-only play sight complements the live
+activity digest with one bounded PNG still or a
+small story card projected from the play journal;
+neither endpoint can control the body.
+
 Children:
 
 - `README.md` — contract overview
@@ -41,6 +46,8 @@ src modules:
   overlay schemas
 - `activity-observation.ts` — latest-only
   self-observation read contract
+- `play-sight.ts` — pull-on-demand live still and
+  bounded story-card read contracts
 
 Cross-cutting rules: strict schemas with bounded
 strings everywhere; raw ticks/packets/audio/video

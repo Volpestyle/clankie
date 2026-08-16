@@ -6,7 +6,7 @@ process boundary in Clankie lives here: captain
 lanes and presence, operator conversations,
 Discord presence/voice, embodiment (asked play),
 device pairing, person memory, browser tools, and
-media generation. Depends on nothing but zod;
+media/diagram generation. Depends on nothing but zod;
 every other package and app imports from it.
 
 Children:
@@ -30,4 +30,5 @@ Design notes:
 - A little runtime logic lives beside the schemas:
   the operator-conversation service client,
   `eventStreamKindForId`, and the generated-media
-  / browser-artifact ref checks.
+  / browser / tldraw / stream-share artifact ref
+  checks.

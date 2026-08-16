@@ -1,9 +1,10 @@
 # .agents/skills/trace-clankie/SKILL.md
 
-The trace-clankie skill body: maps each
-surface (operator console, Discord, play
-sessions, service state) to the durable trail
-that records it — event log, play journals,
-receipts — and the safe way to read each
-(everything is read-only; never possess a
-live session to observe it).
+The trace-clankie skill body maps each surface —
+operator console, Discord rooms and voice,
+durable memory, play sessions, body possession,
+and service state — to the JSONL or file trail
+that records it. It also gives read-only `jq` /
+`find` recipes keyed by delivery, call, stay, and
+session ids; observing never possesses or writes
+a live session.

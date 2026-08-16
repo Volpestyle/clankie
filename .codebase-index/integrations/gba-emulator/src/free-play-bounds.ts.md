@@ -13,4 +13,6 @@ objective 160, interjection 500, reply 2000
 `FREE_PLAY_SPEAK_COOLDOWN_TURNS = 4` — a rate
 gate, deliberately not a content rule; the
 gate is the ceiling so the prompt is free to
-invite speech.
+invite speech. `FREE_PLAY_REPEAT_TURNS = 3`
+controls when identical action+effect runs become
+visible as a stuck signal.

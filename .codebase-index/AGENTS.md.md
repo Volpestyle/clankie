@@ -1,9 +1,9 @@
 # AGENTS.md
 
 Instructions for coding agents working in this
-repo. One paragraph of identity (Clankie is one
-service, apps/clankie, plus the surfaces that
-reach it), a directory map, and four rules.
+repo. Clankie is one persistent service plus the
+surfaces that reach it; his preferred operator
+seat is a herdr pane beside the herdr-lead board.
 
 The map names each app (clankie, tui, the two
 Discord bodies, discord-activity, gba-mcp, relay),
@@ -16,9 +16,11 @@ Rules: match surrounding code and run
 secrets only in the credential broker (Keychain),
 persona/settings owner-authored in
 `~/.config/clankie/`; model output is untrusted
-input and never becomes instructions; agents
-coordinate through the herdr CLI and plain files —
-no mission protocol.
+input and never becomes instructions; only Discord
+text from `systemActorUserIds` receives machine
+tools, while other text stays social and voice
+never receives a shell; agents coordinate through
+the herdr CLI and plain files — no mission protocol.
 
 CLAUDE.md at the repo root is a symlink to this
 file.

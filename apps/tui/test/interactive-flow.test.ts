@@ -1,4 +1,4 @@
-import { CURSOR_MARKER, visibleWidth } from "@earendil-works/pi-tui";
+import { CURSOR_MARKER, Editor, visibleWidth, type TUI } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 import {
   InteractiveSelectPrompt,
@@ -70,6 +70,26 @@ describe("InteractiveTextPrompt", () => {
       onSubmit: () => undefined,
     });
     expect(backTextPrompt.render(60).some((line) => stripAnsi(line).includes("Esc goes back"))).toBe(true);
+  });
+
+  it("renders an existing multi-line value in the editor", () => {
+    const editor = new Editor({ terminal: { rows: 40 } } as unknown as TUI, {
+      borderColor: (text) => text,
+      selectList: theme,
+    });
+    const textPrompt = new InteractiveTextPrompt({
+      defaultValue: "First paragraph.\n\nSecond paragraph.",
+      editor,
+      message: "Character",
+      onCancel: () => undefined,
+      onRender: () => undefined,
+      onSubmit: () => undefined,
+    });
+
+    const rendered = textPrompt.render(60).map(stripAnsi).join("\n");
+    expect(rendered).toContain("First paragraph.");
+    expect(rendered).toContain("Second paragraph.");
+    expect(rendered).toContain("Shift+Enter adds a line");
   });
 
   it("masks sensitive values at every supported width", () => {
