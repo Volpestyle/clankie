@@ -4,8 +4,18 @@ import { describe, expect, it } from "vitest";
 
 const repoRoot = resolve(import.meta.dirname, "../../..");
 const productRoots = ["apps", "integrations", "packages"] as const;
-const allowedDependencies = new Set(["@pokeagent-mmo/firered", "@pokeagent-mmo/world-mcp"]);
-const allowedSourceImports = new Set(["@pokeagent-mmo/firered"]);
+/**
+ * `world-protocol` is the one package that crosses from the world's repo, as a
+ * pinned git dependency carrying the client transport on its `/ipc` subpath —
+ * PokeAgent MMO ADR 0008. Clankie is a player in that world, not its owner
+ * (ADR 0001), so the contract is allowed and the client and host are not.
+ */
+const allowedDependencies = new Set([
+  "@pokeagent-mmo/firered",
+  "@pokeagent-mmo/world-mcp",
+  "@pokeagent-mmo/world-protocol",
+]);
+const allowedSourceImports = new Set(["@pokeagent-mmo/firered", "@pokeagent-mmo/world-protocol"]);
 const skippedDirectories = new Set(["coverage", "dist", "node_modules", "test"]);
 
 interface PackageManifest {

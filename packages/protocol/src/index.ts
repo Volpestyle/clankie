@@ -2012,6 +2012,33 @@ export type DeviceEvent = z.infer<typeof DeviceEventSchema>;
 export const EmbodimentEnvironmentIdSchema = z.enum(["pokemon-firered", "pokemon-emerald"]);
 export type EmbodimentEnvironmentId = z.infer<typeof EmbodimentEnvironmentIdSchema>;
 
+/**
+ * Whose body, and where. Orthogonal to `environmentId` (which game).
+ * Absent means local — every existing caller keeps meaning "my own body".
+ */
+export const EmbodimentVenueSchema = z.enum(["local", "world"]);
+export type EmbodimentVenue = z.infer<typeof EmbodimentVenueSchema>;
+
+export function embodimentVenue(
+  value: EmbodimentVenue | { readonly venue?: EmbodimentVenue | undefined } | undefined,
+): EmbodimentVenue {
+  if (value === undefined || typeof value === "string") return value ?? "local";
+  return value.venue ?? "local";
+}
+
+/**
+ * Why a world join did not happen, said out loud. Distinct from `start_play`'s
+ * `body_held`: these are all about a world somewhere else.
+ */
+export const WorldJoinRefusalReasonSchema = z.enum([
+  "no_credential",
+  "world_unreachable",
+  "world_refused",
+  "region_not_hosted",
+  "world_full",
+]);
+export type WorldJoinRefusalReason = z.infer<typeof WorldJoinRefusalReasonSchema>;
+
 export const EmbodimentIntentIdSchema = z.string().min(1).max(200);
 export type EmbodimentIntentId = z.infer<typeof EmbodimentIntentIdSchema>;
 
@@ -2056,6 +2083,12 @@ export const EmbodimentIntentSchema = z.discriminatedUnion("kind", [
       ...embodimentIntentBase,
       environmentId: EmbodimentEnvironmentIdSchema,
       budget: EmbodimentBudgetSchema,
+      /**
+       * Absent means local. A hosted world is `world` — not a new
+       * environmentId, because FireRed alone and FireRed in the world are
+       * both valid.
+       */
+      venue: EmbodimentVenueSchema.optional(),
     })
     .strict(),
   z
@@ -2091,6 +2124,11 @@ export const EmbodimentRefusalReasonSchema = z.enum([
   "budget",
   "policy",
   "not_playing",
+  "no_credential",
+  "world_unreachable",
+  "world_refused",
+  "region_not_hosted",
+  "world_full",
 ]);
 export type EmbodimentRefusalReason = z.infer<typeof EmbodimentRefusalReasonSchema>;
 
@@ -2120,6 +2158,7 @@ export const EmbodimentSessionSchema = z
     schemaVersion: z.literal(1),
     sessionId: EnvironmentSessionIdSchema,
     environmentId: EmbodimentEnvironmentIdSchema,
+    venue: EmbodimentVenueSchema.optional(),
     state: EmbodimentSessionStateSchema,
     intentId: EmbodimentIntentIdSchema,
     originLane: CaptainSessionLaneV2Schema,
@@ -2328,7 +2367,21 @@ export const EmbodimentPlayNoteSchema = z.discriminatedUnion("action", [
     .strict(),
   z
     .object({
+      action: z.literal("joined"),
+      sessionId: EnvironmentSessionIdSchema,
+      environmentId: EmbodimentEnvironmentIdSchema,
+    })
+    .strict(),
+  z
+    .object({
       action: z.literal("start_refused"),
+      environmentId: EmbodimentEnvironmentIdSchema,
+      reason: EmbodimentRefusalReasonSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("join_refused"),
       environmentId: EmbodimentEnvironmentIdSchema,
       reason: EmbodimentRefusalReasonSchema,
     })

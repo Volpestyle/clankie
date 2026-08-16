@@ -30,7 +30,7 @@ function harness(options: HarnessOptions = {}) {
   };
 }
 
-function startIntent(intentId = "intent-1"): EmbodimentIntent {
+function startIntent(intentId = "intent-1", extras: { venue?: "local" | "world" } = {}): EmbodimentIntent {
   return {
     kind: "start",
     schemaVersion: 1,
@@ -40,6 +40,7 @@ function startIntent(intentId = "intent-1"): EmbodimentIntent {
     requestedAt: "2026-07-26T12:00:00.000Z",
     environmentId: "pokemon-firered",
     budget: { maxTurns: 40, maxDurationMs: 30 * 60 * 1_000 },
+    ...extras,
   };
 }
 
@@ -129,6 +130,22 @@ describe("EmbodimentManager", () => {
     expect(test.manager.liveSession()?.intentId).toBe("intent-1");
     // No second session was minted for the repeat ask.
     expect(second.outcome === "accepted" && second.session.sessionId).toBe("session-1");
+  });
+
+  it("does not treat a world join as the same ask as a local start", async () => {
+    const test = harness();
+    await test.manager.submit(startIntent());
+    const world = await test.manager.submit(startIntent("intent-world", { venue: "world" }));
+    expect(world).toMatchObject({ outcome: "refused", reason: "body_held" });
+  });
+
+  it("records a world venue on the session so the runner can dispatch", async () => {
+    const test = harness();
+    const submitted = await test.manager.submit(startIntent("intent-1", { venue: "world" }));
+    expect(submitted).toMatchObject({
+      outcome: "accepted",
+      session: { venue: "world" },
+    });
   });
 
   it("still refuses a start while the live session is winding down", async () => {

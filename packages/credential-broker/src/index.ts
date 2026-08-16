@@ -70,6 +70,15 @@ export {
   type ActivityProducerCredentialOptions,
 } from "./activity-producer-credential.ts";
 export {
+  WORLD_CREDENTIAL_FORBIDDEN_ENV,
+  WORLD_CREDENTIAL_PROVIDER_ID,
+  WorldCredentialError,
+  assertNoEnvironmentWorldCredential,
+  resolveWorldCredential,
+  type WorldCredentialErrorCode,
+  type WorldCredentialOptions,
+} from "./world-credential.ts";
+export {
   RUNNER_CREDENTIAL_PROVIDER_ID,
   RunnerCredentialError,
   ensureRunnerCredential,
