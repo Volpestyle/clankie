@@ -7,15 +7,15 @@ import type { Readable } from "node:stream";
  * ## Why the library is loaded dynamically
  *
  * Publishing video to Discord requires a **selfbot** transport: Discord blocks
- * video from bot accounts, so every implementation depends on
- * `discord.js-selfbot-v13`, which is **GPL-3.0**. This repository is
- * Apache-2.0, and [ADR 0045](../../../docs/adr/0045-official-bot-dave-group-voice.md)
- * already refused an AGPL import on exactly that basis.
+ * video from bot accounts, so this fallback depends on
+ * `discord.js-selfbot-v13`, which is **GPL-3.0**. The owned production path is
+ * `@clankie/vox` under
+ * [ADR 0100](../../../docs/adr/0100-vox-is-an-owned-native-media-package.md).
  *
  * The dependency is therefore never declared in this workspace. It is imported
- * at runtime, only after an operator deliberately installs it, so the
- * Apache-2.0 dependency graph and CI stay free of copyleft transport and the
- * capability stays as opt-in as ADR 0024 requires it to be.
+ * at runtime only after an operator deliberately installs it. The optional
+ * fallback stays outside the declared dependency graph and remains as opt-in
+ * as ADR 0024 requires it to be.
  *
  * Automating a normal Discord account violates Discord's terms and can get the
  * account terminated. That risk is the operator's to accept, which is why this
@@ -40,7 +40,7 @@ export const GO_LIVE_INSTALL_HINT =
   "Go Live media requires the optional selfbot stack. Install it deliberately: " +
   "pnpm --filter @clankie/discord-user-session add @dank074/discord-video-stream discord.js-selfbot-v13 " +
   "and allow builds for node-av and node-datachannel in pnpm-workspace.yaml. " +
-  "discord.js-selfbot-v13 is GPL-3.0 and is intentionally not a declared dependency of this Apache-2.0 repository.";
+  "discord.js-selfbot-v13 is GPL-3.0 and is intentionally not a declared dependency; production uses @clankie/vox.";
 
 /** Minimal shape of the optional library, so this module needs no GPL types. */
 interface StreamerLike {

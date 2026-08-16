@@ -20,6 +20,7 @@
     "@clankie/interactive-environment": "workspace:*",
     "@clankie/protocol": "workspace:*",
     "@clankie/settings": "workspace:*",
+    "@clankie/vox-client": "workspace:*",
     "@discordjs/opus": "0.10.0",
     "@discordjs/voice": "0.19.2",
     "discord-api-types": "0.38.49",

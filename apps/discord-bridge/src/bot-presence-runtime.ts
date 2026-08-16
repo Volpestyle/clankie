@@ -200,7 +200,7 @@ export class DiscordBotPresenceRuntime {
       }
       case "voice_join":
       case "voice_leave":
-        throw new Error("discord_presence_voice_via_clankvox_only");
+        throw new Error("discord_presence_voice_via_media_session_only");
       case "go_live_start":
       case "go_live_stop":
         throw new Error("discord_presence_go_live_requires_user_session");

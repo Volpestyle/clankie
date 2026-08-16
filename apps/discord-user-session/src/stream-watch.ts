@@ -1,7 +1,7 @@
 import type { ClankieApiClient } from "@clankie/api-client";
 import type { DiscordActiveStream, DiscordStreamWatchReport } from "@clankie/protocol";
+import { createVoxClient, type VoxStreamClient } from "@clankie/vox-client";
 import type { DiscordUserGateway } from "./gateway.ts";
-import { createClankvoxSidecar, type ClankvoxSidecar } from "./clankvox-sidecar.ts";
 import { fetchActivitySnapshot } from "./go-live-source.ts";
 import {
   createDiscordStreamDiscovery,
@@ -13,7 +13,7 @@ export interface StreamWatchControllerOptions {
   readonly gateway: DiscordUserGateway;
   readonly api: ClankieApiClient;
   readonly allowlisted: (guildId: string, channelId: string) => boolean;
-  readonly clankvox?: ClankvoxSidecar;
+  readonly vox?: VoxStreamClient;
   readonly now?: () => Date;
   readonly fetchActivitySnapshot?: () => Promise<
     { mimeType: "image/png"; data: string; sha256: string } | undefined
@@ -51,26 +51,37 @@ export function startStreamWatch(options: StreamWatchControllerOptions): {
 } {
   const now = options.now ?? (() => new Date());
   const vox =
-    options.clankvox ??
-    createClankvoxSidecar({
+    options.vox ??
+    createVoxClient({
       onError: (message) => {
-        console.warn({ message }, "ClankVox sidecar");
+        console.warn({ message }, "Vox sidecar");
+      },
+      onLog: (message) => {
+        console.warn({ message }, "Vox sidecar");
       },
     });
   let watching: DiscoveredDiscordStream | undefined;
+  let requestedWatchKey: string | undefined;
+  let watchTransportReady = false;
+  let watchReceiptKey: string | undefined;
   let joinedForWatch: { guildId: string; channelId: string } | undefined;
   let lastFrameAt = 0;
   let pendingPublish:
     | { guildId: string; channelId: string; sourceUrl?: string; opcodeSent: boolean }
     | undefined;
   let publishing = false;
+  let publishingStream: DiscoveredDiscordStream | undefined;
+  let publishPaused = false;
+  let publishTransportReady = false;
+  let publishReceiptSent = false;
+  let transportError: string | undefined;
   let publishPump: ReturnType<typeof setInterval> | undefined;
   let lastPublishDigest: string | undefined;
-  const decoder: DiscordStreamWatchReport["decoder"] = vox.available ? "ready" : "missing";
   const onPublishEvent = options.onPublishEvent;
   const joinMuted = options.joinMuted !== false;
 
   const report = (frame?: DiscordStreamWatchReport["frame"]): void => {
+    const decoder = decoderStatus(vox, transportError);
     const streams = discovery
       .listStreams()
       .filter((stream) =>
@@ -88,7 +99,9 @@ export function startStreamWatch(options: StreamWatchControllerOptions): {
         ),
       ),
       decoder,
-      ...(vox.available ? {} : { decoderDetail: vox.detail }),
+      ...(decoder === "missing" || decoder === "error"
+        ? { decoderDetail: transportError ?? vox.detail }
+        : {}),
       ...(frame === undefined ? {} : { frame }),
     };
     void options.api.reportDiscordStreamWatch(payload).catch((error: unknown) => {
@@ -99,7 +112,29 @@ export function startStreamWatch(options: StreamWatchControllerOptions): {
     });
   };
 
+  const notifyWatchConnected = (): void => {
+    if (watching === undefined || !watchTransportReady || watchReceiptKey === watching.streamKey) return;
+    watchReceiptKey = watching.streamKey;
+    options.onWatchEvent?.("watch_connected", {
+      userId: watching.userId,
+      channelId: watching.channelId,
+      decoder: "ready",
+    });
+  };
+
+  const notifyPublishStarted = (): void => {
+    if (!publishing || !publishTransportReady || publishReceiptSent) return;
+    publishReceiptSent = true;
+    onPublishEvent?.("publish_started", {
+      guildId: publishingStream?.guildId ?? "",
+      channelId: publishingStream?.channelId ?? "",
+      source: pendingPublish?.sourceUrl === undefined ? "activity" : "url",
+    });
+  };
+
   const connectWatch = (stream: DiscoveredDiscordStream): void => {
+    if (watching !== undefined) return;
+    if (requestedWatchKey !== undefined && requestedWatchKey !== stream.streamKey) return;
     if (!options.allowlisted(stream.guildId, stream.channelId)) return;
     if (stream.endpoint === null || stream.token === null || stream.rtcServerId === null) return;
     const sessionId = options.gateway.voiceSessionId;
@@ -107,6 +142,10 @@ export function startStreamWatch(options: StreamWatchControllerOptions): {
     const daveChannelId = deriveDiscordStreamWatchDaveChannelId(stream.rtcServerId);
     if (sessionId === undefined || userId === undefined || daveChannelId === undefined) return;
     watching = stream;
+    requestedWatchKey = undefined;
+    watchTransportReady = false;
+    watchReceiptKey = undefined;
+    transportError = undefined;
     lastFrameAt = 0;
     vox.streamWatchConnect({
       endpoint: stream.endpoint,
@@ -117,11 +156,6 @@ export function startStreamWatch(options: StreamWatchControllerOptions): {
       daveChannelId,
     });
     vox.subscribeUserVideo(stream.userId, 1);
-    options.onWatchEvent?.("watch_connected", {
-      userId: stream.userId,
-      channelId: stream.channelId,
-      decoder: vox.available ? "ready" : "missing",
-    });
     report();
   };
 
@@ -141,6 +175,10 @@ export function startStreamWatch(options: StreamWatchControllerOptions): {
       daveChannelId,
     });
     publishing = true;
+    publishingStream = stream;
+    publishPaused = false;
+    publishTransportReady = false;
+    publishReceiptSent = false;
     const url = pendingPublish?.sourceUrl;
     if (url !== undefined) {
       vox.streamPublishPlay(url);
@@ -149,11 +187,6 @@ export function startStreamWatch(options: StreamWatchControllerOptions): {
       startActivityPump();
     }
     discovery.setPublishPaused(stream.streamKey, false);
-    onPublishEvent?.("publish_started", {
-      guildId: stream.guildId,
-      channelId: stream.channelId,
-      source: url === undefined ? "activity" : "url",
-    });
   };
 
   const sendPublishOpcode = (): boolean => {
@@ -169,7 +202,7 @@ export function startStreamWatch(options: StreamWatchControllerOptions): {
     const pull = options.fetchActivitySnapshot ?? (() => fetchActivitySnapshot());
     publishPump = setInterval(() => {
       void pull().then((frame) => {
-        if (frame === undefined || !publishing) return;
+        if (frame === undefined || !publishing || publishPaused) return;
         if (frame.sha256 === lastPublishDigest) return;
         lastPublishDigest = frame.sha256;
         vox.streamPublishBrowserFrame({
@@ -190,6 +223,10 @@ export function startStreamWatch(options: StreamWatchControllerOptions): {
       vox.streamPublishStop();
       vox.streamPublishDisconnect("operator_stop");
       publishing = false;
+      publishingStream = undefined;
+      publishPaused = false;
+      publishTransportReady = false;
+      publishReceiptSent = false;
       lastPublishDigest = undefined;
       onPublishEvent?.("publish_stopped", {});
     }
@@ -206,13 +243,41 @@ export function startStreamWatch(options: StreamWatchControllerOptions): {
     joinedForWatch = { guildId: stream.guildId, channelId: stream.channelId };
   };
 
+  function watchFirstAvailable(): void {
+    if (watching !== undefined) return;
+    if (requestedWatchKey !== undefined) {
+      const requested = discovery
+        .listStreams()
+        .find((candidate) => candidate.streamKey === requestedWatchKey);
+      if (requested === undefined) {
+        requestedWatchKey = undefined;
+      } else {
+        connectWatch(requested);
+        return;
+      }
+    }
+    const stream = discovery.listStreams().find((candidate) => {
+      if (candidate.userId === options.gateway.userId) return false;
+      return options.allowlisted(candidate.guildId, candidate.channelId);
+    });
+    if (stream === undefined) return;
+    ensureJoined(stream);
+    if (stream.endpoint !== null && stream.token !== null && stream.rtcServerId !== null) {
+      connectWatch(stream);
+      return;
+    }
+    if (discovery.requestWatch(stream.streamKey)) requestedWatchKey = stream.streamKey;
+  }
+
   const discovery = createDiscordStreamDiscovery(
     { send: (payload) => options.gateway.sendPayload(payload) },
     {
       onStreamListed(stream) {
         if (!options.allowlisted(stream.guildId, stream.channelId)) return;
+        if (stream.userId === options.gateway.userId) return;
+        if (watching !== undefined || requestedWatchKey !== undefined) return;
         ensureJoined(stream);
-        discovery.requestWatch(stream.streamKey);
+        if (discovery.requestWatch(stream.streamKey)) requestedWatchKey = stream.streamKey;
         report();
       },
       onStreamCredentials(stream) {
@@ -233,6 +298,8 @@ export function startStreamWatch(options: StreamWatchControllerOptions): {
           vox.unsubscribeUserVideo(stream.userId);
           vox.streamWatchDisconnect("stream_deleted");
           watching = undefined;
+          watchTransportReady = false;
+          watchReceiptKey = undefined;
           if (joinedForWatch !== undefined && pendingPublish === undefined) {
             options.gateway.sendVoiceStateUpdate({
               guildId: joinedForWatch.guildId,
@@ -243,10 +310,40 @@ export function startStreamWatch(options: StreamWatchControllerOptions): {
             joinedForWatch = undefined;
           }
         }
+        if (requestedWatchKey === stream.streamKey) requestedWatchKey = undefined;
+        watchFirstAvailable();
         report();
       },
     },
   );
+
+  vox.onStatus(() => {
+    report();
+  });
+
+  vox.onEvent((event) => {
+    if (
+      event.type !== "transport_state" ||
+      typeof event.role !== "string" ||
+      typeof event.status !== "string"
+    ) {
+      return;
+    }
+    if (event.role === "stream_watch") {
+      watchTransportReady = event.status === "ready";
+      if (event.status === "connecting" || event.status === "ready") transportError = undefined;
+      if (event.status === "failed") {
+        transportError = typeof event.reason === "string" ? event.reason : "stream_watch_transport_failed";
+      }
+      notifyWatchConnected();
+      report();
+      return;
+    }
+    if (event.role === "stream_publish") {
+      publishTransportReady = event.status === "ready" || event.status === "playing";
+      notifyPublishStarted();
+    }
+  });
 
   vox.onDecodedFrame((frame) => {
     const stream = watching;
@@ -283,16 +380,7 @@ export function startStreamWatch(options: StreamWatchControllerOptions): {
         .listStreams()
         .find((stream) => stream.userId === options.gateway.userId && stream.endpoint !== null);
       if (own !== undefined) connectPublish(own);
-      for (const stream of discovery.listStreams()) {
-        if (stream.userId === options.gateway.userId) continue;
-        if (!options.allowlisted(stream.guildId, stream.channelId)) continue;
-        if (stream.endpoint === null || stream.token === null) {
-          ensureJoined(stream);
-          discovery.requestWatch(stream.streamKey);
-          continue;
-        }
-        connectWatch(stream);
-      }
+      watchFirstAvailable();
       report();
     },
     requestPublish(input) {
@@ -323,6 +411,9 @@ export function startStreamWatch(options: StreamWatchControllerOptions): {
       const own = discovery.listStreams().find((stream) => stream.userId === options.gateway.userId);
       if (own === undefined) return;
       discovery.setPublishPaused(own.streamKey, paused);
+      publishPaused = paused;
+      if (paused) vox.streamPublishPause();
+      else vox.streamPublishResume();
     },
     stopPublish() {
       const own = discovery.listStreams().find((stream) => stream.userId === options.gateway.userId);
@@ -339,6 +430,16 @@ export function startStreamWatch(options: StreamWatchControllerOptions): {
       vox.close();
     },
   };
+}
+
+function decoderStatus(
+  vox: Pick<VoxStreamClient, "available" | "status">,
+  transportError?: string,
+): DiscordStreamWatchReport["decoder"] {
+  if (!vox.available || vox.status === "missing") return "missing";
+  if (transportError !== undefined || vox.status === "error") return "error";
+  if (vox.status === "ready") return "ready";
+  return "idle";
 }
 
 function toActive(

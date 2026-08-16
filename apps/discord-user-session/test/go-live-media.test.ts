@@ -4,7 +4,7 @@ import { GO_LIVE_INSTALL_HINT, createGoLiveMediaPublisher } from "../src/go-live
 
 /**
  * The optional selfbot stack is GPL-3.0 and deliberately not a dependency of
- * this Apache-2.0 repository, so every test injects a fake module pair. CI
+ * the declared dependency graph, so every test injects a fake module pair. CI
  * therefore exercises the whole publication path without ever importing it.
  */
 function fakeModules() {

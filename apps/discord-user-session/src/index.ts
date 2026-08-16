@@ -406,7 +406,7 @@ gateway.on("voiceStateUpdate", (state) => {
   void presenceSession
     .voiceStateChanged(state.guildId, state.channelId !== undefined)
     .catch(reportPhaseFailure);
-  // A watch join just got a session id — retry connecting ClankVox.
+  // A watch join just got a session id — retry connecting Vox.
   streamWatch.publish();
 });
 

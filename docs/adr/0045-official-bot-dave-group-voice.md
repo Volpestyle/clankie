@@ -10,9 +10,9 @@ Discord evidence remains a deployment gate.
 Clankie needs an official Discord bot that can participate in a multi-person
 voice channel with speaker attribution, transcription, the same pi captain
 identity, governed person memory, and spoken responses. ADR 0025 selected a
-selective import of the v1 Rust ClankVox media owner. That import cannot proceed
-while its `AGPL-3.0-or-later` source and this repository's `Apache-2.0` license
-have no recorded disposition.
+selective import of the v1 Rust ClankVox media owner. ADR 0100 records that
+source's `AGPL-3.0-or-later` disposition as an isolated native package inside
+this otherwise `Apache-2.0` repository.
 
 The maintained `@discordjs/voice@0.19.2` package already owns the official-bot
 voice WebSocket, UDP, RTP/Opus, transport encryption, receive subscriptions,
@@ -25,8 +25,8 @@ implementation is unnecessary for the bounded group-voice outcome.
 The official-bot group-voice session lives in `apps/discord-bridge` and has one
 media owner: `@discordjs/voice`. This decision supersedes ADR 0025's ClankVox
 placement and direct `guild.voiceAdapterCreator` plan for official-bot voice.
-The schema-1 ClankVox IPC parser and fixtures remain an inactive compatibility
-artifact; no AGPL ClankVox source is imported or executed.
+The AGPL Vox source now lives in the explicit mixed-license `apps/vox` package
+under ADR 0100, but it is not executed for official-bot voice.
 
 ![ADR 0045: Official-bot group voice uses the maintained Discord media stack](../diagrams/0045-official-bot-dave-group-voice.jpg)
 
@@ -99,9 +99,9 @@ media failure, and a clean leave.
 
 ## Options weighed
 
-- **Import v1 ClankVox** — rejected for this outcome because licensing is
-  unresolved and the maintained library supplies the required bot media
-  and DAVE paths.
+- **Use v1 ClankVox for official-bot voice** — rejected for this outcome because
+  the maintained library supplies the required bot media and DAVE paths. Vox
+  remains the separately licensed user-session media owner under ADR 0100.
 - **Write a new Rust sidecar** — rejected because it duplicates an actively
   maintained protocol implementation without adding a required isolation
   boundary.

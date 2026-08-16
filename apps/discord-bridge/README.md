@@ -292,9 +292,9 @@ candidate, so an incomplete or failed newer session cannot be masked by old
 success, while a trailing clean reconnect-only session does not displace the
 main proof.
 
-The reviewed inactive ClankVox schema-1 compatibility parser remains in
-[`src/clankvox-ipc.ts`](src/clankvox-ipc.ts); no AGPL ClankVox source is
-imported or executed.
+The AGPL native media implementation lives behind the explicit `@clankie/vox`
+package boundary. Official-bot voice does not execute it; that path remains on
+the maintained `@discordjs/voice` media stack.
 
 ## Possessor voice seam (ADR 0064)
 

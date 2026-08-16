@@ -895,7 +895,7 @@ async function editLabBody(shell: ClankieFaceShell, services: DiscordCommandServ
       dmPolicy: current.userSessionDmPolicy,
     });
     flow.renderLine(
-      "Lab user body enabled and opted in. Run `clankie restart` so the launcher starts it. Include the voice channel you share in. Point CLANKVOX_BIN at a ClankVox binary to decode shares.",
+      "Lab user body enabled and opted in. Run `pnpm --filter @clankie/vox build`, then `clankie restart`. Include the voice channel you share in.",
       "success",
     );
   } catch (error) {

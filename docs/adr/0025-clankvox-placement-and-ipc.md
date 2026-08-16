@@ -1,8 +1,8 @@
 # ADR 0025: ClankVox is an in-repo voice sidecar behind versioned bridge IPC
 
-Status: inactive compatibility boundary. Official-bot voice uses
-[ADR 0045](0045-official-bot-dave-group-voice.md); only the versioned IPC parser
-remains relevant here.
+Status: superseded. Official-bot voice uses
+[ADR 0045](0045-official-bot-dave-group-voice.md); owned native media placement
+and the live IPC client use [ADR 0100](0100-vox-is-an-owned-native-media-package.md).
 
 ## Context
 
@@ -18,6 +18,10 @@ The source snapshot is `Volpestyle/clankie@04734df9ec1ec4665a233c4c64f0a51a9d3b0
 file-level provenance when it performs the selective import.
 
 ## Decision
+
+The design below is retained as the superseded proposal. It is not the live
+wire contract: the imported process uses the unversioned command/event contract
+defined together by `apps/vox/src/ipc.rs` and `@clankie/vox-client` under ADR 0100.
 
 ### Placement and import boundary
 
@@ -75,8 +79,8 @@ voice using bot credentials only before the path is treated as live-proven.
 
 ### IPC transport
 
-`apps/discord-bridge/src/clankvox-ipc.ts` is the TypeScript source of truth for the adapter
-contract. Rust mirrors it during VUH-805.
+`@clankie/vox-client` and `apps/vox/src/ipc.rs` now own the live adapter
+contract under ADR 0100.
 
 Node to Rust is newline-delimited UTF-8 JSON. Each complete line, including its newline, is capped
 at 8 MiB. The reader discards an oversized line through its newline, emits `input_too_large`, and
@@ -165,11 +169,9 @@ second version word to the v1 header. `user_audio_end` closes the current per-sp
 
 ## Consequences
 
-- The TypeScript schema-1 parser and golden fixtures remain reviewable
-  compatibility evidence, but no Rust source or executable is imported.
+- ADR 0100 records and preserves the AGPL package license and exact source
+  provenance for the imported native implementation.
 - The official-bot media session uses the maintained `@discordjs/voice` path in
   ADR 0045 and does not instantiate this direct-adapter design.
-- Importing the AGPL source remains prohibited without a recorded licensing
-  disposition.
 - The isolated, opt-in user-session transport and Go Live receive/publish work
   remain under ADR 0024 and preserve the single-owner invariant.
