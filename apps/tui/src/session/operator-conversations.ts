@@ -538,10 +538,6 @@ export class OperatorConversationPromptSession {
         `Conversation changed at revision ${accepted.currentRevision}; retry the prompt`,
       );
     }
-    if (accepted.status === "unsupported") {
-      throw new OperatorConversationClientError("Clankie does not support ordinary conversation messages");
-    }
-
     while (signal?.aborted !== true) {
       const cursor = this.tails.cursor(conversationId);
       try {

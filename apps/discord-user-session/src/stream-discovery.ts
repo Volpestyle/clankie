@@ -65,7 +65,6 @@ export function createDiscordStreamDiscovery(
 ): {
   handle(packet: DiscordRawPacket): void;
   listStreams(): DiscoveredDiscordStream[];
-  findStream(target?: string): DiscoveredDiscordStream | undefined;
   requestWatch(streamKey: string): boolean;
   requestPublish(input: { kind?: DiscordStreamKind; guildId: string; channelId: string }): boolean;
   requestPublishStop(streamKey: string): boolean;
@@ -138,17 +137,6 @@ export function createDiscordStreamDiscovery(
     listStreams() {
       expire(Date.now());
       return [...streams.values()].sort((left, right) => right.updatedAt - left.updatedAt);
-    },
-    findStream(target) {
-      const listed = [...streams.values()].sort((left, right) => right.updatedAt - left.updatedAt);
-      const needle = target?.trim().toLowerCase();
-      if (needle === undefined || needle.length === 0) return listed[0];
-      return listed.find(
-        (stream) =>
-          stream.streamKey.toLowerCase().includes(needle) ||
-          stream.userId === needle ||
-          stream.channelId === needle,
-      );
     },
     requestWatch(streamKey) {
       return sender.send({ op: 20, d: { stream_key: streamKey } });

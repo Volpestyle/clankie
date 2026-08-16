@@ -4,7 +4,6 @@ import {
   resolveClankieCommandRows,
   resolveClankieOverlayFrame,
   resolveClankieOverlayMouseTarget,
-  resolveClankieTranscriptMouseTarget,
   resolveClankieTranscriptMouseTargetFromBands,
   resolveClankieTranscriptRows,
 } from "../src/face/clankie-face-layout.ts";
@@ -32,48 +31,6 @@ describe("transcript and command row budgets", () => {
 
   it("hides the command typeahead when the terminal has no spare rows", () => {
     expect(resolveClankieCommandRows({ maxRows: 10, reservedRows: 30, terminalRows: 24 })).toBe(0);
-  });
-});
-
-describe("transcript mouse targets", () => {
-  const roomy = { bannerRows: 4, belowRows: 6, terminalRows: 30, transcriptRows: 20 } as const;
-
-  it("maps the first transcript row just below the banner", () => {
-    const topHit = resolveClankieTranscriptMouseTarget({ ...roomy, mouseCol: 10, mouseRow: 5 });
-    expect(topHit.inside).toBe(true);
-    expect(topHit.row).toBe(0);
-    expect(topHit.col).toBe(9);
-  });
-
-  it("maps the last transcript row just above the status chrome", () => {
-    const bottomHit = resolveClankieTranscriptMouseTarget({ ...roomy, mouseCol: 1, mouseRow: 24 });
-    expect(bottomHit.inside).toBe(true);
-    expect(bottomHit.row).toBe(19);
-  });
-
-  it("clamps banner clicks to the first row, outside the band", () => {
-    const aboveBand = resolveClankieTranscriptMouseTarget({ ...roomy, mouseCol: 1, mouseRow: 4 });
-    expect(aboveBand.inside).toBe(false);
-    expect(aboveBand.row).toBe(0);
-  });
-
-  it("clamps editor clicks to the last row, outside the band", () => {
-    const belowBand = resolveClankieTranscriptMouseTarget({ ...roomy, mouseCol: 1, mouseRow: 25 });
-    expect(belowBand.inside).toBe(false);
-    expect(belowBand.row).toBe(19);
-  });
-
-  it("starts the transcript at screen row 1 when the banner scrolls off the top", () => {
-    const cramped = resolveClankieTranscriptMouseTarget({
-      bannerRows: 4,
-      belowRows: 6,
-      terminalRows: 10,
-      mouseCol: 3,
-      mouseRow: 1,
-      transcriptRows: 4,
-    });
-    expect(cramped.inside).toBe(true);
-    expect(cramped.row).toBe(0);
   });
 });
 

@@ -1,6 +1,6 @@
 /**
  * The guided-flow ("wizard") engine of the face: every configurator speaks this
- * small vocabulary — `begin`/`end`, `renderLine`/`renderOutput`/`setStatus`,
+ * small vocabulary — `begin`/`end`, `renderLine`/`setStatus`,
  * `readText`, `readSecret`, `readSelect`, `waitForInterrupt` — and the shell renders each
  * read as a centered modal overlay (InteractiveTextPrompt /
  * InteractiveSelectPrompt). Ported from v1 (clankie snapshot 04734df9,
@@ -33,8 +33,7 @@ export interface MenuOption {
 
 export type SetupFlow = {
   begin(title: string): void;
-  end(options?: { readonly preserveDiagnostics?: boolean }): void;
-  renderOutput(text: string): void;
+  end(): void;
   renderLine(text: string, tone?: FlowLineTone): void;
   setStatus(status: string | undefined): void;
   readText(options: {
@@ -51,14 +50,12 @@ export type SetupFlow = {
     readonly validate?: (value: string) => string | undefined;
   }): Promise<string | undefined>;
   readSelect(options: {
-    readonly kind: "multi" | "single";
+    readonly kind: "single";
     readonly message: string;
     readonly options: readonly MenuOption[];
     readonly statusActions?: readonly MenuOption[];
     readonly initialValue?: string;
-    readonly initialValues?: readonly string[];
     readonly currentValue?: string;
-    readonly currentValues?: readonly string[];
     readonly required?: boolean;
     readonly allowBack?: boolean;
   }): Promise<string[] | undefined>;
@@ -69,7 +66,6 @@ export type SetupFlow = {
 };
 
 export type SetupFlowController = SetupFlow & {
-  cancelActivePrompt(reason?: string): void;
   handleSubmit(text: string): boolean;
   hasActivePrompt(): boolean;
   isWaitingForInput(): boolean;
@@ -87,9 +83,9 @@ export interface SetupFlowContext {
   showSelectableOverlay(component: Component, options?: OverlayOptions): OverlayHandle;
 }
 
-export function setupOverlayOptions(anchor: "center" | "bottom-center"): OverlayOptions {
+function setupOverlayOptions(): OverlayOptions {
   return {
-    anchor,
+    anchor: "center",
     margin: { bottom: 3, left: 2, right: 2, top: 2 },
     maxHeight: "70%",
     minWidth: 48,
@@ -174,7 +170,7 @@ export function createSetupFlow(context: SetupFlowContext): SetupFlowController 
         placeholder: options.placeholder,
         sensitive: options.sensitive,
       });
-      handle = context.showSelectableOverlay(prompt, setupOverlayOptions("center"));
+      handle = context.showSelectableOverlay(prompt, setupOverlayOptions());
       handle.focus();
       context.tui.requestRender();
     });
@@ -204,9 +200,7 @@ export function createSetupFlow(context: SetupFlowContext): SetupFlowController 
       const prompt = new InteractiveSelectPrompt({
         allowBack: options.allowBack,
         currentValue: options.currentValue,
-        currentValues: options.currentValues,
         initialValue: options.initialValue,
-        initialValues: options.initialValues,
         kind: options.kind,
         message: options.message,
         onCancel: cancel,
@@ -217,7 +211,7 @@ export function createSetupFlow(context: SetupFlowContext): SetupFlowController 
         statusActions: options.statusActions?.map(toInteractivePromptOption),
         theme: context.selectListTheme,
       });
-      handle = context.showSelectableOverlay(prompt, setupOverlayOptions("center"));
+      handle = context.showSelectableOverlay(prompt, setupOverlayOptions());
       handle.focus();
       context.tui.requestRender();
     });
@@ -229,10 +223,6 @@ export function createSetupFlow(context: SetupFlowContext): SetupFlowController 
     },
     end(): void {
       context.setStatus("ready");
-    },
-    renderOutput(text: string): void {
-      const summary = firstMeaningfulLine(text);
-      if (summary !== undefined) context.setStatus(summary);
     },
     renderLine(text: string, tone: FlowLineTone = "info"): void {
       const summary = firstMeaningfulLine(text);
@@ -285,7 +275,6 @@ export function createSetupFlow(context: SetupFlowContext): SetupFlowController 
         },
       };
     },
-    cancelActivePrompt: cancelPrompt,
     handleSubmit,
     hasActivePrompt(): boolean {
       return cancelActivePrompt !== undefined;

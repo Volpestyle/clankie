@@ -4,7 +4,6 @@ import {
   clankieCommandCompletion,
   createClankieAutocompleteProvider,
   describeClankieCommand,
-  formatClankieCommandInspector,
   resolveClankieCommand,
   searchClankieCommands,
   type ClankieAutocompleteCommand,
@@ -59,22 +58,24 @@ const selectedDescriptionTheme = {
 
 const commands: ClankieAutocompleteCommand[] = [
   {
-    name: "n",
-    aliases: [],
-    description: "Start a fresh session and clear the transcript",
-    takesArgument: false,
+    name: "conversation",
+    aliases: ["chat"],
+    description: "List or select a server-owned operator conversation",
+    argumentHint: "[<conversation-id>]",
+    takesArgument: true,
   },
   {
-    name: "new",
+    name: "trace",
     aliases: [],
-    description: "Start a fresh session and clear the transcript",
-    takesArgument: false,
+    description: "Watch another lane's activity",
+    argumentHint: "[<lane>|all|off]",
+    takesArgument: true,
   },
   {
-    name: "discord-token",
-    aliases: ["token"],
-    description: "Set the Discord credential and restart Clankie",
-    argumentHint: "[status|<token>] [--user-token] [--voice]",
+    name: "layout",
+    aliases: ["header", "banner"],
+    description: "Configure header, chat input, and status bar",
+    argumentHint: "[status|input top|input bottom|status above|status below|header on|header off]",
     takesArgument: true,
   },
   {
@@ -93,58 +94,29 @@ const commands: ClankieAutocompleteCommand[] = [
   },
   {
     name: "auth",
-    aliases: ["credentials", "creds", "keys"],
-    description: "Manage subscription logins, API keys, and service credentials",
-    argumentHint: "[status|codex|claude|xai|gemini|openai|discord|mcp|elevenlabs|relay|local-voice]",
+    aliases: ["login"],
+    description: "Manage API keys, subscription OAuth, and harness logins",
+    argumentHint: "[status]",
     takesArgument: true,
   },
   {
     name: "effort",
     aliases: [],
     description: "Set reasoning effort for the active provider",
-    argumentHint: "[status|minimal|low|medium|high|xhigh|unset]",
-    takesArgument: true,
+    takesArgument: false,
   },
   {
     name: "image-model",
-    aliases: ["images"],
-    description: "Set OpenAI image generation model",
-    argumentHint: "[model-id|status|unset]",
-    takesArgument: true,
-  },
-  {
-    name: "profile",
     aliases: [],
-    description: "Switch between an all-local stack and hosted API providers",
-    argumentHint: "[status|local-tiered|local-single|api|local-api|api-local] [model]",
+    description: "Choose the model Clankie makes pictures with",
+    argumentHint: "[openai|google|xai|status|unset]",
     takesArgument: true,
   },
   {
-    name: "policies",
-    aliases: ["policy"],
-    description: "Configure behavior policy flags",
-    argumentHint: "[status|direct|autonomous|approval|pr-only|merge-authority|design-gate|pr-granularity]",
-    takesArgument: true,
-  },
-  {
-    name: "voice",
+    name: "video-model",
     aliases: [],
-    description: "Configure how Clankie sounds in Discord voice",
-    argumentHint: "[status]",
-    takesArgument: true,
-  },
-  {
-    name: "setup",
-    aliases: [],
-    description: "Bootstrap broker credentials and choose first setup steps",
-    argumentHint: "[status|bootstrap|model|auth|integrations]",
-    takesArgument: true,
-  },
-  {
-    name: "integrations",
-    aliases: [],
-    description: "Bind integration roles and PR / Version Control settings",
-    argumentHint: "[status|role|pr-line-limit] [connection|none|unset|lines]",
+    description: "Choose the model Clankie makes video with",
+    argumentHint: "[xai|status|unset]",
     takesArgument: true,
   },
   {
@@ -155,51 +127,29 @@ const commands: ClankieAutocompleteCommand[] = [
     takesArgument: true,
   },
   {
-    name: "mcp",
+    name: "voice",
     aliases: [],
-    description: "Manage dynamic MCPs and curated MCP connection auth",
-    argumentHint: "[status|list|add|remove|enable|disable|auth|install]",
+    description: "Configure how Clankie sounds in Discord voice",
+    argumentHint: "[status]",
     takesArgument: true,
   },
   {
-    name: "browser",
-    aliases: ["bridge"],
-    description: "Install or inspect the browser-control extension bridge",
-    argumentHint: "[status|install]",
-    takesArgument: true,
-  },
-  {
-    name: "spawn",
+    name: "discord",
     aliases: [],
-    description: "Spawn a herdr worker pane through the transcript seam",
-    argumentHint: "--harness <clankie|claude|codex|opencode|custom> [--cwd path] <slug> <task>",
+    description: "Configure Discord ids, allowlists, and the activity plane",
+    argumentHint: "[status|invite]",
     takesArgument: true,
   },
   {
-    name: "skills",
-    aliases: ["skill"],
-    description: "Show Clankie's skills",
-    takesArgument: false,
-  },
-  {
-    name: "trace",
-    aliases: [],
-    description: "Show compact per-turn stream traces",
-    argumentHint: "[status|off|no-reply|all]",
-    takesArgument: true,
-  },
-  {
-    name: "layout",
-    aliases: ["header", "banner"],
-    description: "Configure header, chat input, and status bar placement",
-    argumentHint: "[status|input top|input bottom|status above|status below|header on|header off]",
+    name: "board",
+    aliases: ["herdr-lead", "herd-lead"],
+    description: "Open, focus, or close the herdr-lead companion board",
+    argumentHint: "[focus|close]",
     takesArgument: true,
   },
 ];
 
 const provider = createClankieAutocompleteProvider(commands, process.cwd(), {
-  listMcpConnectionNames: () => ["linear", "figma"],
-  listMcpServerNames: () => ["local-tools", "browser-tools"],
   listSkills: () => [
     { name: "herdr", description: "Lead coding agents in visible panes" },
     { name: "trace-clankie", description: "Read Clankie's durable trails" },
@@ -210,27 +160,28 @@ const signal = new AbortController().signal;
 
 describe("command typeahead", () => {
   it("leaves command-token suggestions to the command typeahead", async () => {
-    expect(await provider.getSuggestions(["/tok"], 0, 4, { signal })).toBeNull();
+    expect(await provider.getSuggestions(["/mod"], 0, 4, { signal })).toBeNull();
   });
 
   it("resolves alias queries to the canonical command", () => {
-    const aliasState = required(clankieCommandTypeaheadFor(commands, "/tok"), "alias typeahead state");
+    const aliasState = required(clankieCommandTypeaheadFor(commands, "/integ"), "alias typeahead state");
     const selected = required(selectedClankieCommandTypeahead(aliasState), "alias selection");
-    expect(selected.name).toBe("discord-token");
-    expect(clankieCommandCompletion(selected)).toBe("/discord-token ");
+    expect(selected.name).toBe("connect");
+    expect(clankieCommandCompletion(selected)).toBe("/connect ");
     const aliasRows = renderClankieCommandTypeahead(aliasState, theme, 72);
-    expect(aliasRows.some((line) => line.includes("/discord-token"))).toBe(true);
+    expect(aliasRows.some((line) => line.includes("/connect"))).toBe(true);
     expectFits(aliasRows, 72);
   });
 
   it("collapses exact commands and aliases to inline argument hints", () => {
-    const exactMcpState = required(clankieCommandTypeaheadFor(commands, "/mcp"), "exact command state");
-    expect(inlineClankieCommandHint(exactMcpState)).toBe(
-      "[status|list|add|remove|enable|disable|auth|install]",
+    const exactTraceState = required(clankieCommandTypeaheadFor(commands, "/trace"), "exact command state");
+    expect(inlineClankieCommandHint(exactTraceState)).toBe("[<lane>|all|off]");
+    const exactAliasState = required(
+      clankieCommandTypeaheadFor(commands, "/integrations"),
+      "exact alias state",
     );
-    const exactAliasState = required(clankieCommandTypeaheadFor(commands, "/token"), "exact alias state");
-    expect(selectedClankieCommandTypeahead(exactAliasState)?.name).toBe("discord-token");
-    expect(inlineClankieCommandHint(exactAliasState)).toBe("[status|<token>] [--user-token] [--voice]");
+    expect(selectedClankieCommandTypeahead(exactAliasState)?.name).toBe("connect");
+    expect(inlineClankieCommandHint(exactAliasState)).toBe("[status|linear|email|discord]");
   });
 
   it("keeps a space between aliases and the description when the invocation column is full", () => {
@@ -321,31 +272,25 @@ describe("command typeahead", () => {
     );
   });
 
-  it("keeps /n as its own command", () => {
-    const shortNewState = required(clankieCommandTypeaheadFor(commands, "/n"), "new shortcut state");
-    const selected = required(selectedClankieCommandTypeahead(shortNewState), "new shortcut selection");
-    expect(selected.name).toBe("n");
-    expect(clankieCommandCompletion(selected)).toBe("/n");
-  });
-
   it("renders the bare-slash menu with a spacer and description preview", () => {
     const rootState = required(clankieCommandTypeaheadFor(commands, "/"), "root typeahead state");
     const rootRows = renderClankieCommandTypeahead(rootState, theme, 72);
     expect(stripAnsi(rootRows[0] ?? "")).toBe("");
-    expect(rootRows.some((line) => line.includes("/n"))).toBe(true);
-    expect(rootRows.some((line) => line.includes("/new"))).toBe(true);
-    expect(rootRows.every((line) => !line.includes("/new (/n)"))).toBe(true);
+    expect(rootRows.some((line) => line.includes("/conversation"))).toBe(true);
 
     const narrowRootRows = renderClankieCommandTypeahead(rootState, accentTheme, 64);
     expect(stripAnsi(narrowRootRows[0] ?? "")).toBe("");
-    expect(stripAnsi(narrowRootRows[1] ?? "")).toBe("Start a fresh session and clear the transcript");
+    expect(stripAnsi(narrowRootRows[1] ?? "")).toBe("List or select a server-owned operator conversation");
     expect(narrowRootRows[1]?.startsWith("\x1b[33m")).toBe(true);
     expectFits(narrowRootRows, 64);
 
     const wideRootRows = renderClankieCommandTypeahead(rootState, theme, 140);
-    expect(wideRootRows[1]?.includes("/n"), "skips the preview when the row description fits").toBe(true);
+    expect(
+      wideRootRows[1]?.includes("/conversation"),
+      "skips the preview when the row description fits",
+    ).toBe(true);
     const selectedDescriptionRows = renderClankieCommandTypeahead(rootState, selectedDescriptionTheme, 140);
-    expect(selectedDescriptionRows[1]?.includes("\x1b[37mStart a fresh session")).toBe(true);
+    expect(selectedDescriptionRows[1]?.includes("\x1b[37mList or select")).toBe(true);
   });
 
   it("respects the row budget, wraps selection, and tracks dismissal", () => {
@@ -353,7 +298,7 @@ describe("command typeahead", () => {
     expect(renderClankieCommandTypeahead(rootState, theme, 72, 2).length).toBe(2);
     expect(renderClankieCommandTypeahead(rootState, theme, 72, 0).length).toBe(0);
     const wrappedState = moveClankieCommandTypeaheadSelection(rootState, -1);
-    expect(selectedClankieCommandTypeahead(wrappedState)?.name).toBe("layout");
+    expect(selectedClankieCommandTypeahead(wrappedState)?.name).toBe("board");
     const dismissedState = dismissClankieCommandTypeahead(rootState);
     expect(clankieCommandTypeaheadFor(commands, "/", dismissedState)?.dismissed).toBe(true);
     expect(clankieCommandTypeaheadFor(commands, "/m", dismissedState)?.dismissed).toBe(false);
@@ -370,30 +315,21 @@ describe("argument suggestions", () => {
     return suggestions.items;
   }
 
-  it("completes model, auth, and effort arguments", async () => {
+  it("completes model and auth arguments", async () => {
     expect((await items("/provider sm", 12)).some((item) => item.value === "small")).toBe(true);
     expect((await items("/model sm", 9)).some((item) => item.value === "small")).toBe(true);
     expect((await items("/model st", 9)).some((item) => item.value === "status")).toBe(true);
     expect((await items("/auth st", 8)).some((item) => item.value === "status")).toBe(true);
     expect((await items("/auth xa", 8)).some((item) => item.value === "xai")).toBe(true);
-    expect((await items("/auth mcp li", 12)).some((item) => item.value === "linear")).toBe(true);
-    expect((await items("/effort st", 10)).some((item) => item.value === "status")).toBe(true);
   });
 
-  it("completes discord-token, image-model, and voice arguments", async () => {
-    expect((await items("/discord-token st", 17)).some((item) => item.value === "status")).toBe(true);
+  it("completes image-model, voice, and Discord arguments", async () => {
     expect((await items("/image-model st", 15)).some((item) => item.value === "status")).toBe(true);
-    // `status` is /voice's only argument; the v1 runtime vocabulary
-    // (`mode`, `local`, …) is gone with the wizard (ADR 0070).
     expect((await items("/voice st", 9)).some((item) => item.value === "status")).toBe(true);
+    expect((await items("/discord in", 11)).some((item) => item.value === "invite")).toBe(true);
   });
 
-  it("completes profile, policies, and layout arguments", async () => {
-    expect((await items("/profile local-t", 16)).some((item) => item.value === "local-tiered")).toBe(true);
-    expect((await items("/profile api-l", 14)).some((item) => item.value === "api-local")).toBe(true);
-    expect((await items("/policies merge-a", 17)).some((item) => item.value === "merge-authority")).toBe(
-      true,
-    );
+  it("completes layout arguments", async () => {
     expect((await items("/layout in", 10)).some((item) => item.value === "input")).toBe(true);
     expect((await items("/layout input t", 15)).some((item) => item.value === "top")).toBe(true);
     expect((await items("/layout status b", 16)).some((item) => item.value === "below")).toBe(true);
@@ -403,43 +339,6 @@ describe("argument suggestions", () => {
     expect((await items("/connect li", 11)).some((item) => item.value === "linear")).toBe(true);
     expect((await items("/connect em", 11)).some((item) => item.value === "email")).toBe(true);
     expect((await items("/connect d", 10)).some((item) => item.value === "discord")).toBe(true);
-  });
-
-  it("completes integrations, browser, and spawn arguments", async () => {
-    expect((await items("/integrations st", 16)).some((item) => item.value === "status")).toBe(true);
-    expect((await items("/integrations ver", 17)).some((item) => item.value === "version-control")).toBe(
-      true,
-    );
-    expect(
-      (await items("/integrations version-control pr", 32)).some((item) => item.value === "pr-line-limit"),
-    ).toBe(true);
-    expect((await items("/integrations work-tracker n", 28)).some((item) => item.value === "none")).toBe(
-      true,
-    );
-    expect((await items("/browser in", 11)).some((item) => item.value === "install")).toBe(true);
-    expect((await items("/spawn --harness c", 18)).some((item) => item.value === "codex")).toBe(true);
-  });
-
-  it("completes mcp actions and dynamic connection/server names", async () => {
-    expect((await items("/mcp a", 6)).some((item) => item.value === "auth")).toBe(true);
-
-    const mcpConnectionSuggestions = required(
-      await provider.getSuggestions(["/mcp auth li"], 0, 12, { signal }),
-      "mcp auth suggestions",
-    );
-    expect(mcpConnectionSuggestions.items.some((item) => item.value === "linear")).toBe(true);
-    const mcpConnectionCompletion = provider.applyCompletion(
-      ["/mcp auth li"],
-      0,
-      12,
-      { value: "linear", label: "linear" },
-      mcpConnectionSuggestions.prefix,
-    );
-    expect(mcpConnectionCompletion.lines[0], "dynamic completion replaces the current token").toBe(
-      "/mcp auth linear ",
-    );
-
-    expect((await items("/mcp remove loc", 15)).some((item) => item.value === "local-tools")).toBe(true);
   });
 });
 
@@ -468,15 +367,15 @@ describe("skill suggestions", () => {
 
 describe("command search and detail", () => {
   it("matches command descriptions and exposes valid args plus examples", () => {
-    const commandSearch = searchClankieCommands(commands, "dynamic");
-    expect(commandSearch[0]?.command.name).toBe("mcp");
-    const mcpCommand = required(
-      commands.find((command) => command.name === "mcp"),
-      "mcp command",
+    const commandSearch = searchClankieCommands(commands, "lane");
+    expect(commandSearch[0]?.command.name).toBe("trace");
+    const traceCommand = required(
+      commands.find((command) => command.name === "trace"),
+      "trace command",
     );
-    const mcpDetail = describeClankieCommand(mcpCommand);
-    expect(mcpDetail.validArgs.some((item) => item.value === "auth")).toBe(true);
-    expect(mcpDetail.examples.includes("/mcp status")).toBe(true);
+    const traceDetail = describeClankieCommand(traceCommand);
+    expect(traceDetail.validArgs.some((item) => item.value === "all")).toBe(true);
+    expect(traceDetail.examples.includes("/trace all")).toBe(true);
   });
 });
 
@@ -484,7 +383,7 @@ describe("typeahead panel", () => {
   it("shows argument details after command whitespace and hides while overlays own keys", () => {
     const rootState = required(clankieCommandTypeaheadFor(commands, "/"), "root typeahead state");
     const panel = new ClankieCommandTypeaheadPanel(commands, theme);
-    panel.setText("/mcp ", undefined);
+    panel.setText("/trace ", undefined);
     const panelRows = panel.render(76);
     expect(panelRows.some((line) => line.includes("next"))).toBe(true);
     expectFits(panelRows, 76);
@@ -497,7 +396,7 @@ describe("typeahead panel", () => {
     const shortPanel = new ClankieCommandTypeaheadPanel(commands, theme, { maxVisibleRows: () => 2 });
     shortPanel.setText("/", rootState);
     expect(shortPanel.render(76).length).toBe(2);
-    shortPanel.setText("/mcp ", undefined);
+    shortPanel.setText("/trace ", undefined);
     expect(shortPanel.render(76).length).toBeLessThanOrEqual(2);
     const hiddenPanel = new ClankieCommandTypeaheadPanel(commands, theme, { maxVisibleRows: () => 0 });
     hiddenPanel.setText("/", rootState);
@@ -521,15 +420,15 @@ describe("command workbench", () => {
         },
       },
       theme,
-      "tok",
+      "integ",
     );
-    expect(workbench.getFilter()).toBe("tok");
-    expect(workbench.getSelectedCommand()?.name).toBe("discord-token");
+    expect(workbench.getFilter()).toBe("integ");
+    expect(workbench.getSelectedCommand()?.name).toBe("connect");
     expectFits(workbench.render(88), 88);
     expectFits(workbench.render(48), 48);
     expect(workbench.render(88)[0]?.startsWith("┌")).toBe(true);
     workbench.handleInput("\r");
-    expect(submitted).toBe("/discord-token ");
+    expect(submitted).toBe("/connect ");
     workbench.handleInput("\x1b");
     expect(cancelled).toBe(true);
   });
@@ -546,21 +445,9 @@ describe("command workbench", () => {
         },
       },
       theme,
-      "mcp",
+      "trace",
     );
     exampleWorkbench.handleInput("\t");
-    expect(submitted).toBe("/mcp status");
-  });
-});
-
-describe("command inspector", () => {
-  it("identifies the active command with valid args and examples, without spurious warnings", () => {
-    const inspector = formatClankieCommandInspector("/mcp a", commands);
-    expect(inspector).toContain("**/mcp");
-    expect(inspector).toContain("Valid next args:");
-    expect(inspector).toContain("/mcp auth linear");
-    expect(inspector).not.toContain("Warning: unknown first arg");
-    const spawnInspector = formatClankieCommandInspector("/spawn --harness codex docs-review", commands);
-    expect(spawnInspector).not.toContain("Warning: unknown first arg");
+    expect(submitted).toBe("/trace discord_presence");
   });
 });

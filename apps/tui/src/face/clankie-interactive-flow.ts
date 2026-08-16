@@ -37,14 +37,12 @@ export type InteractiveTextPromptOptions = {
 };
 
 export type InteractiveSelectPromptOptions = {
-  readonly kind: "multi" | "single";
+  readonly kind: "single";
   readonly message: string;
   readonly options: readonly InteractivePromptOption[];
   readonly statusActions?: readonly InteractivePromptOption[] | undefined;
   readonly initialValue?: string | undefined;
-  readonly initialValues?: readonly string[] | undefined;
   readonly currentValue?: string | undefined;
-  readonly currentValues?: readonly string[] | undefined;
   readonly required?: boolean | undefined;
   readonly allowBack?: boolean | undefined;
   readonly theme: SelectListTheme;
@@ -164,8 +162,7 @@ export class InteractiveTextPrompt implements Component, Focusable {
 
 export class InteractiveSelectPrompt implements Component, Focusable {
   private readonly options: InteractiveSelectPromptOptions;
-  private readonly selectedValues: Set<string>;
-  private readonly currentValues: Set<string>;
+  private readonly currentValue: string | undefined;
   focused = false;
   private cursorIndex = 0;
   private filter = "";
@@ -173,16 +170,9 @@ export class InteractiveSelectPrompt implements Component, Focusable {
 
   constructor(options: InteractiveSelectPromptOptions) {
     this.options = options;
-    this.selectedValues = new Set(options.kind === "multi" ? (options.initialValues ?? []) : []);
-    this.currentValues = new Set(
-      options.kind === "multi"
-        ? (options.currentValues ?? [])
-        : options.currentValue === undefined
-          ? []
-          : [options.currentValue],
-    );
+    this.currentValue = options.currentValue;
     const initialValue = options.initialValue;
-    if (options.kind === "single" && initialValue !== undefined) {
+    if (initialValue !== undefined) {
       const index = this.allOptions().findIndex((item) => item.option.value === initialValue);
       if (index >= 0) this.cursorIndex = index;
     }
@@ -203,17 +193,6 @@ export class InteractiveSelectPrompt implements Component, Focusable {
     }
     if (matchesKey(data, Key.enter) || matchesKey(data, Key.right) || data === "\n" || data === "\r") {
       this.submit();
-      return;
-    }
-    if (this.options.kind === "multi" && (matchesKey(data, Key.space) || data === " ")) {
-      this.toggleCurrent();
-      this.options.onRender();
-      return;
-    }
-    if (this.options.kind === "multi" && (matchesKey(data, Key.ctrl("a")) || data === "\x01")) {
-      this.toggleAllFiltered();
-      this.error = undefined;
-      this.options.onRender();
       return;
     }
     if (matchesKey(data, Key.home)) {
@@ -280,15 +259,14 @@ export class InteractiveSelectPrompt implements Component, Focusable {
     const labelWidth = optionLabelWidth(
       [...visibleMenuItems.items, ...statusActions],
       contentWidth,
-      this.options.kind,
-      this.currentValues,
+      this.currentValue,
     );
     const statusActionLines = statusActions.map((item) =>
       this.renderItem(item, item === active, contentWidth, labelWidth, "none"),
     );
     const lines = [
       ...promptHeader(
-        selectPromptTitle(this.options.message, this.options.kind),
+        selectPromptTitle(this.options.message),
         this.options.message,
         contentWidth,
         statusActionLines,
@@ -370,9 +348,7 @@ export class InteractiveSelectPrompt implements Component, Focusable {
     labelWidth: number,
     prefixMode: "normal" | "none" = "normal",
   ): string {
-    const selected = this.selectedValues.has(item.option.value);
-    const current = this.currentValues.has(item.option.value);
-    const label = optionLabelText(item.option, this.options.kind, selected, current);
+    const label = optionLabelText(item.option, this.currentValue === item.option.value);
     const paddedLabel = padVisible(truncateToWidth(label, labelWidth, ""), labelWidth);
     const details = [item.option.hint, item.option.description]
       .filter((part): part is string => part !== undefined && part.length > 0)
@@ -402,16 +378,11 @@ export class InteractiveSelectPrompt implements Component, Focusable {
 
   private statusLines(filteredCount: number, totalCount: number, width: number): string[] {
     const cursor = this.focused ? CURSOR_MARKER : "";
-    const selected =
-      this.options.kind === "multi" && this.selectedValues.size > 0
-        ? `${this.selectedValues.size} selected`
-        : undefined;
     const back = this.options.allowBack === true ? "← Back" : "Esc cancels";
     let line: string;
     if (this.filter.length > 0) {
       line = compactParts([
         `Showing ${filteredCount} of ${totalCount}`,
-        selected,
         `filter "${this.filter}"${cursor}`,
         "Ctrl+U clears",
         back,
@@ -419,9 +390,7 @@ export class InteractiveSelectPrompt implements Component, Focusable {
       return wrapTextWithAnsi(line, width).map(dim);
     }
     const movement = "Up/down move";
-    const action = this.options.kind === "multi" ? "Space toggles" : "Enter/→ chooses";
-    const finish = this.options.kind === "multi" ? "Enter/→ saves" : undefined;
-    line = compactParts([selected, movement, action, finish, `type to filter${cursor}`, back]);
+    line = compactParts([movement, "Enter/→ chooses", `type to filter${cursor}`, back]);
     return wrapTextWithAnsi(line, width).map(dim);
   }
 
@@ -434,46 +403,18 @@ export class InteractiveSelectPrompt implements Component, Focusable {
     this.cursorIndex = (this.cursorIndex + delta + filteredLength) % filteredLength;
   }
 
-  private toggleCurrent(): void {
-    const current = this.currentOption();
-    if (current === undefined) return;
-    if (this.selectedValues.has(current.value)) this.selectedValues.delete(current.value);
-    else this.selectedValues.add(current.value);
-    this.error = undefined;
-  }
-
-  private toggleAllFiltered(): void {
-    const values = this.filteredOptions().map(({ option }) => option.value);
-    if (values.length === 0) return;
-    const allSelected = values.every((value) => this.selectedValues.has(value));
-    for (const value of values) {
-      if (allSelected) this.selectedValues.delete(value);
-      else this.selectedValues.add(value);
-    }
-  }
-
   private submit(): void {
-    if (this.options.kind === "single") {
-      const current = this.currentOption();
-      if (current !== undefined) {
-        this.options.onSubmit([current.value]);
-        return;
-      }
-      if (this.options.required === true) {
-        this.error = "A selection is required.";
-        this.options.onRender();
-        return;
-      }
-      this.options.onSubmit([]);
+    const current = this.currentOption();
+    if (current !== undefined) {
+      this.options.onSubmit([current.value]);
       return;
     }
-    const values = [...this.selectedValues];
-    if (values.length === 0 && this.options.required === true) {
-      this.error = "Select at least one option.";
+    if (this.options.required === true) {
+      this.error = "A selection is required.";
       this.options.onRender();
       return;
     }
-    this.options.onSubmit(values);
+    this.options.onSubmit([]);
   }
 
   private currentOption(): InteractivePromptOption | undefined {
@@ -563,9 +504,9 @@ function optionSearchText(option: InteractivePromptOption): string {
   return [option.value, option.label, option.hint ?? "", option.description ?? ""].join(" ").toLowerCase();
 }
 
-function selectPromptTitle(message: string, kind: InteractiveSelectPromptOptions["kind"]): string {
+function selectPromptTitle(message: string): string {
   const candidate = selectPromptTitleCandidate(message);
-  if (candidate === undefined) return kind === "multi" ? "Choose Options" : "Choose One";
+  if (candidate === undefined) return "Choose One";
   const normalized = candidate
     .replace(/^(choose|select|pick)\s+(which\s+|the\s+)?/iu, "")
     .replace(/^toggle\s+which\s+/iu, "")
@@ -574,7 +515,7 @@ function selectPromptTitle(message: string, kind: InteractiveSelectPromptOptions
     .replace(/\s+clankie\s+may\s+use\s+for\s+worker\s+panes$/iu, "")
     .replace(/\s+/gu, " ")
     .trim();
-  if (normalized.length === 0) return kind === "multi" ? "Choose Options" : "Choose One";
+  if (normalized.length === 0) return "Choose One";
   return titleCasePromptTitle(normalized);
 }
 
@@ -602,27 +543,19 @@ function titleCasePromptTitle(text: string): string {
 function optionLabelWidth(
   items: readonly IndexedOption[],
   width: number,
-  kind: InteractiveSelectPromptOptions["kind"],
-  currentValues: ReadonlySet<string>,
+  currentValue: string | undefined,
 ): number {
   const labels = items.map((item) =>
-    visibleWidth(optionLabelText(item.option, kind, false, currentValues.has(item.option.value))),
+    visibleWidth(optionLabelText(item.option, currentValue === item.option.value)),
   );
   const longest = Math.max(0, ...labels);
   const detailColumnTarget = Math.max(16, Math.floor(width * 0.44));
   return clamp(longest, 0, Math.max(0, width - detailColumnTarget));
 }
 
-function optionLabelText(
-  option: InteractivePromptOption,
-  kind: InteractiveSelectPromptOptions["kind"],
-  selected: boolean,
-  current: boolean,
-): string {
+function optionLabelText(option: InteractivePromptOption, current: boolean): string {
   const currentSuffix = current ? " (current)" : "";
-  return kind === "multi"
-    ? `${selected ? "[x]" : "[ ]"} ${option.label}${currentSuffix}`
-    : `${option.label}${currentSuffix}`;
+  return `${option.label}${currentSuffix}`;
 }
 
 function padVisible(text: string, width: number): string {

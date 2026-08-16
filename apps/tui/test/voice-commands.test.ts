@@ -50,7 +50,6 @@ function testShell(
     renderLine: (text) => {
       lines.push(text);
     },
-    renderOutput: () => {},
     setStatus: () => {},
     waitForInterrupt: () => ({ promise: new Promise<void>(() => {}), dispose: () => {} }),
   };

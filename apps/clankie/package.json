@@ -15,11 +15,9 @@
   "dependencies": {
     "@clankie/body-lock": "workspace:*",
     "@clankie/credential-broker": "workspace:*",
-    "@clankie/environment-runtime": "workspace:*",
     "@clankie/gba-emulator": "workspace:*",
     "@clankie/interactive-environment": "workspace:*",
     "@clankie/media-connector": "workspace:*",
-    "@clankie/minecraft-mineflayer": "workspace:*",
     "@clankie/model-provider": "workspace:*",
     "@clankie/model-registry": "workspace:*",
     "@clankie/observability": "workspace:*",

@@ -316,12 +316,12 @@ export async function inspectDiscordTextReadiness(
   };
 }
 
-function discordId(value: string | undefined): string | undefined {
+export function discordId(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed && /^\d{5,30}$/u.test(trimmed) ? trimmed : undefined;
 }
 
-function discordIdSet(value: string | undefined): ReadonlySet<string> {
+export function discordIdSet(value: string | undefined): ReadonlySet<string> {
   return new Set(
     value
       ?.split(",")
@@ -330,7 +330,7 @@ function discordIdSet(value: string | undefined): ReadonlySet<string> {
   );
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
+export function asRecord(value: unknown): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
 }

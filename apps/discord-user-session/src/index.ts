@@ -7,7 +7,8 @@ import {
 } from "@clankie/credential-broker";
 import {
   createAdvertisedDiscordPresencePort,
-  DEFAULT_DECAY_WINDOW_MS,
+  createVoiceBriefingProvider,
+  createVoiceLookAtScreenProvider,
   DiscordBridgeReceiptStore,
   DiscordPresenceSession,
   DiscordTextIngress,
@@ -17,12 +18,17 @@ import {
   openRealtimeTranscriptionSession,
   parseDiscordDmPolicy,
   parseDiscordIdSet,
+  parseVoiceRealtimeBaseEnv,
   selectInboundImageAttachments,
+  VoiceIdleAutoLeave,
   VoiceMusicQueue,
+  voiceEvidenceReceiptData,
+  voiceEvidenceReceiptType,
   tryHandleCaptainDiscordActionRequest,
   tryHandleMusicControlRequest,
   tryHandleVoicePresenceControlRequest,
   type DiscordBridgeReceipt,
+  type VoiceRealtimeBaseEnvConfig,
   type VoicePresenceControlAction,
   type VoicePresenceControlInput,
 } from "@clankie/discord-presence-core";
@@ -195,29 +201,51 @@ if (voiceEnabled && openAiCredential?.type !== "api") {
     "User-session voice requires the brokered openai API credential; environment credentials are not accepted.",
   );
 }
-// Minimal parallel of the bot bridge's realtime wiring (ADR 0057). Same env
-// names, same defaults, same always-explicit truncation.
+// The shared base parser keeps both bodies on the same bounded realtime knobs;
+// this user-session composition remains OpenAI-only.
 const voiceConfig = voiceEnabled ? parseUserSessionVoiceRealtimeEnv(process.env) : undefined;
 
-const goLiveMusic = {
-  play: (_url: string): boolean => false,
-  pause: (_paused: boolean): void => undefined,
-  stop: (): void => undefined,
-};
+const streamWatch = startStreamWatch({
+  gateway,
+  api,
+  joinMuted: !isDiscordBodyActive("user_session"),
+  allowlisted: (guildId, channelId) =>
+    (guildIds.size === 0 || guildIds.has(guildId)) &&
+    (channelIds.size === 0 || channelIds.has(channelId) || voiceChannelIds.has(channelId)),
+  onWatchEvent: (type, data) => {
+    void recordReceipt(`discord.stream.${type}`, data);
+  },
+  onPublishEvent: (type, data) => {
+    void recordReceipt(`discord.stream.${type}`, data);
+  },
+});
+
 const music = new VoiceMusicQueue({
   sinkKind: "video",
   sink: {
     play(url) {
-      if (!goLiveMusic.play(url)) throw new Error("discord_music_not_in_voice");
+      if (streamWatch.playSource(url)) return;
+      const status = voiceSession?.status();
+      const guildId = status?.guildId ?? [...guildIds][0];
+      const channelId = status?.channelId ?? [...voiceChannelIds][0];
+      if (
+        guildId === undefined ||
+        channelId === undefined ||
+        guildId.length === 0 ||
+        channelId.length === 0 ||
+        !streamWatch.requestPublish({ guildId, channelId, sourceUrl: url })
+      ) {
+        throw new Error("discord_music_not_in_voice");
+      }
     },
     pause() {
-      goLiveMusic.pause(true);
+      streamWatch.setPublishPaused(true);
     },
     resume() {
-      goLiveMusic.pause(false);
+      streamWatch.setPublishPaused(false);
     },
     stop() {
-      goLiveMusic.stop();
+      streamWatch.stopPublish();
     },
   },
 });
@@ -262,23 +290,8 @@ const voiceSession =
               onError: open.onError,
             }),
         },
-        briefing: async (request) => {
-          const briefing = await voiceApi.fetchDiscordVoiceBriefing({
-            schemaVersion: 1,
-            guildId: request.guildId,
-            channelId: request.channelId,
-            consentedUserIds: request.consentedUserIds,
-          });
-          return { instructions: briefing.instructions, briefing: briefing.briefing };
-        },
-        lookAtScreen: async () => {
-          const still = await voiceApi.fetchPlayStill();
-          if (still.outcome === "still") {
-            return { outcome: "still" as const, pngBase64: still.pngBase64, mimeType: "image/png" as const };
-          }
-          if (still.outcome === "pending") return { outcome: "pending" as const };
-          return { outcome: "not_playing" as const };
-        },
+        briefing: createVoiceBriefingProvider(voiceApi),
+        lookAtScreen: createVoiceLookAtScreenProvider(voiceApi),
         music,
         floor: {
           names: characterNames(storedSettings.persona),
@@ -291,6 +304,26 @@ const voiceSession =
         // the rate cap offers, his own realtime session decides.
         presenceSessionId: () => presenceSession.record.sessionId,
         emit: recordVoiceEvidence,
+      });
+
+const voiceIdleAutoLeave =
+  voiceSession === undefined || voiceConfig === undefined
+    ? undefined
+    : new VoiceIdleAutoLeave({
+        idleLeaveMs: voiceConfig.idleLeaveMs,
+        isActive: () => voiceSession.status().active,
+        leave: () => voiceSession.leave(),
+        onLeave: (idleMs) => {
+          console.info(
+            `Discord user-session voice idle for ${String(idleMs)}ms; leaving the metered channel.`,
+          );
+        },
+        onLeaveError: (error) => {
+          console.error(
+            { error: error instanceof Error ? error.message : String(error) },
+            "Discord user-session voice idle auto-leave failed to close the session",
+          );
+        },
       });
 
 gateway.on("ready", (identity) => {
@@ -362,38 +395,6 @@ gateway.on("messageCreate", (message) => {
     }
   })();
 });
-
-const streamWatch = startStreamWatch({
-  gateway,
-  api,
-  joinMuted: !isDiscordBodyActive("user_session"),
-  allowlisted: (guildId, channelId) =>
-    (guildIds.size === 0 || guildIds.has(guildId)) &&
-    (channelIds.size === 0 || channelIds.has(channelId) || voiceChannelIds.has(channelId)),
-  onWatchEvent: (type, data) => {
-    void recordReceipt(`discord.stream.${type}`, data);
-  },
-  onPublishEvent: (type, data) => {
-    void recordReceipt(`discord.stream.${type}`, data);
-  },
-});
-
-goLiveMusic.play = (url) => {
-  if (streamWatch.playSource(url)) return true;
-  const status = voiceSession?.status();
-  const guildId = status?.guildId ?? [...guildIds][0];
-  const channelId = status?.channelId ?? [...voiceChannelIds][0];
-  if (guildId === undefined || channelId === undefined || guildId.length === 0 || channelId.length === 0) {
-    return false;
-  }
-  return streamWatch.requestPublish({ guildId, channelId, sourceUrl: url });
-};
-goLiveMusic.pause = (paused) => {
-  streamWatch.setPublishPaused(paused);
-};
-goLiveMusic.stop = () => {
-  streamWatch.stopPublish();
-};
 
 gateway.on("raw", (packet) => {
   streamWatch.handleRaw(packet);
@@ -591,35 +592,12 @@ function recordReceipt(
 }
 
 async function recordVoiceEvidence(evidence: DiscordVoiceEvidence): Promise<void> {
-  observeVoiceIdle(evidence);
-  // Evidence is content-free scalars by protocol construction; flattening
-  // drops absent optional fields the receipt record type cannot carry.
-  const data: Record<string, string | number | boolean> = {};
-  for (const [key, value] of Object.entries(evidence)) {
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-      data[key] = value;
-    }
-  }
-  await recordReceipt(`discord.voice.${evidence.type}`, data);
+  voiceIdleAutoLeave?.observe(evidence);
+  await recordReceipt(voiceEvidenceReceiptType(evidence), voiceEvidenceReceiptData(evidence));
 }
 
-/**
- * Minimal parallel of the bot bridge's realtime voice environment parsing
- * (`apps/discord-bridge/src/voice-composition.ts`): same names, same defaults,
- * same bounds, so one set of operator knobs configures both bodies. Truncation
- * and idle auto-leave are always configured, never unbounded (ADR 0057).
- */
-function parseUserSessionVoiceRealtimeEnv(env: NodeJS.ProcessEnv): {
-  readonly realtimeModel: string;
-  readonly transcribeModel: string;
-  readonly voice: string;
-  readonly language?: string;
-  readonly truncationRetentionRatio: number;
-  readonly postInstructionsTokenLimit: number;
-  readonly sessionLifetimeMs?: number;
-  readonly decayWindowMs: number;
-  readonly idleLeaveMs: number;
-} {
+/** Rejects this plane's retired knobs before delegating the shared bounded parser. */
+function parseUserSessionVoiceRealtimeEnv(env: NodeJS.ProcessEnv): VoiceRealtimeBaseEnvConfig {
   const retired = ["CLANKIE_VOICE_STT_MODEL", "CLANKIE_VOICE_TTS_MODEL", "CLANKIE_VOICE_TTS_VOICE"].filter(
     (name) => env[name] !== undefined,
   );
@@ -629,94 +607,7 @@ function parseUserSessionVoiceRealtimeEnv(env: NodeJS.ProcessEnv): {
         "CLANKIE_VOICE_TRANSCRIBE_MODEL, CLANKIE_VOICE_REALTIME_MODEL, and CLANKIE_VOICE_REALTIME_VOICE.",
     );
   }
-  const language = env.CLANKIE_VOICE_STT_LANGUAGE;
-  const sessionLifetimeMs = boundedVoiceInteger(env, "CLANKIE_VOICE_SESSION_LIFETIME_MS", 10_000, 14_400_000);
-  const retention = env.CLANKIE_VOICE_TRUNCATION_RETENTION;
-  const retentionRatio = retention === undefined ? 0.7 : Number(retention);
-  if (!Number.isFinite(retentionRatio) || retentionRatio <= 0 || retentionRatio > 1) {
-    throw new Error("CLANKIE_VOICE_TRUNCATION_RETENTION must be a ratio within (0, 1]");
-  }
-  return {
-    realtimeModel: nonEmptyVoiceEnv(env, "CLANKIE_VOICE_REALTIME_MODEL", "gpt-realtime-2.1"),
-    transcribeModel: nonEmptyVoiceEnv(env, "CLANKIE_VOICE_TRANSCRIBE_MODEL", "gpt-realtime-whisper"),
-    voice: nonEmptyVoiceEnv(env, "CLANKIE_VOICE_REALTIME_VOICE", "marin"),
-    ...(language === undefined ? {} : { language }),
-    truncationRetentionRatio: retentionRatio,
-    postInstructionsTokenLimit:
-      boundedVoiceInteger(env, "CLANKIE_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT", 1_000, 128_000) ?? 12_000,
-    ...(sessionLifetimeMs === undefined ? {} : { sessionLifetimeMs }),
-    decayWindowMs:
-      boundedVoiceInteger(env, "CLANKIE_VOICE_DECAY_WINDOW_MS", 1, Number.MAX_SAFE_INTEGER) ??
-      DEFAULT_DECAY_WINDOW_MS,
-    idleLeaveMs: boundedVoiceInteger(env, "CLANKIE_VOICE_IDLE_LEAVE_MS", 1, 86_400_000) ?? 900_000,
-  };
-}
-
-function nonEmptyVoiceEnv(env: NodeJS.ProcessEnv, name: string, fallback: string): string {
-  const value = env[name];
-  if (value === undefined) return fallback;
-  const trimmed = value.trim();
-  if (trimmed.length === 0) throw new Error(`${name} must be non-empty when set`);
-  return trimmed;
-}
-
-function boundedVoiceInteger(
-  env: NodeJS.ProcessEnv,
-  name: string,
-  minimum: number,
-  maximum: number,
-): number | undefined {
-  const value = env[name];
-  if (value === undefined) return undefined;
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
-    throw new Error(`${name} must be an integer between ${minimum.toString()} and ${maximum.toString()}`);
-  }
-  return parsed;
-}
-
-let voiceIdleHandle: NodeJS.Timeout | undefined;
-
-/**
- * Minimal parallel of the bot bridge's idle auto-leave: a joined channel is a
- * metered realtime session (ADR 0057), so a call with no utterance, response,
- * or floor movement for `CLANKIE_VOICE_IDLE_LEAVE_MS` ends itself.
- */
-function observeVoiceIdle(evidence: DiscordVoiceEvidence): void {
-  const idleLeaveMs = voiceConfig?.idleLeaveMs;
-  if (idleLeaveMs === undefined || voiceSession === undefined) return;
-  if (evidence.type === "left") {
-    stopVoiceIdleTimer();
-    return;
-  }
-  if (
-    evidence.type !== "joined" &&
-    evidence.type !== "utterance" &&
-    evidence.type !== "response" &&
-    evidence.type !== "floor"
-  ) {
-    return;
-  }
-  stopVoiceIdleTimer();
-  voiceIdleHandle = setTimeout(() => {
-    voiceIdleHandle = undefined;
-    if (!voiceSession.status().active) return;
-    console.info(
-      `Discord user-session voice idle for ${String(idleLeaveMs)}ms; leaving the metered channel.`,
-    );
-    void voiceSession.leave().catch((error: unknown) => {
-      console.error(
-        { error: error instanceof Error ? error.message : String(error) },
-        "Discord user-session voice idle auto-leave failed to close the session",
-      );
-    });
-  }, idleLeaveMs);
-}
-
-function stopVoiceIdleTimer(): void {
-  if (voiceIdleHandle === undefined) return;
-  clearTimeout(voiceIdleHandle);
-  voiceIdleHandle = undefined;
+  return parseVoiceRealtimeBaseEnv(env);
 }
 
 function reportPhaseFailure(error: unknown): void {
@@ -731,7 +622,7 @@ let controlServer: ReturnType<typeof createServer> | undefined;
 async function shutdown(signal: NodeJS.Signals): Promise<void> {
   if (shutdownPromise !== undefined) return shutdownPromise;
   shutdownPromise = (async () => {
-    stopVoiceIdleTimer();
+    voiceIdleAutoLeave?.stop();
     streamWatch.close();
     controlServer?.close();
     await voiceSession?.leave();

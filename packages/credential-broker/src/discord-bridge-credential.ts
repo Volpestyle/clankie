@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { createDefaultCredentialStore, type CredentialStore } from "./credential-store.ts";
+import type { CredentialStore } from "./credential-store.ts";
+import { ensureStoredBearer, mintStoredBearer, resolveStoredBearer } from "./stored-bearer.ts";
 
 export const DISCORD_BRIDGE_CREDENTIAL_PROVIDER_ID = "clankie_discord_bridge";
 export const DISCORD_VOICE_BRIDGE_CREDENTIAL_PROVIDER_ID = "clankie_discord_voice_bridge";
@@ -9,7 +10,6 @@ const DISCORD_BRIDGE_TOKEN_PREFIX = "clankie_discord_";
 const DISCORD_VOICE_BRIDGE_TOKEN_PREFIX = "clankie_discord_voice_";
 const DISCORD_USER_BRIDGE_TOKEN_PREFIX = "clankie_discord_user_";
 const DISCORD_USER_VOICE_BRIDGE_TOKEN_PREFIX = "clankie_discord_user_voice_";
-const DISCORD_BRIDGE_TOKEN_BYTES = 32;
 // Anchored and mutually exclusive: `clankie_discord_` is a prefix of every other
 // bearer here, so the bot-plane pattern must reject the user-plane forms or a
 // user-session bearer would authenticate as the bot bridge and inherit its lane.
@@ -41,48 +41,35 @@ interface MintDiscordBridgeCredentialOptions extends DiscordBridgeCredentialOpti
 
 /** Mints the local bearer used only between the Discord bridge and the service. */
 export function mintDiscordBridgeToken(random: (size: number) => Buffer = randomBytes): string {
-  return mintToken(DISCORD_BRIDGE_TOKEN_PREFIX, random);
+  return mintStoredBearer(DISCORD_BRIDGE_TOKEN_PREFIX, "Discord bridge", random);
 }
 
 /** Mints the separate local bearer for Discord voice captain turns. */
 export function mintDiscordVoiceBridgeToken(random: (size: number) => Buffer = randomBytes): string {
-  return mintToken(DISCORD_VOICE_BRIDGE_TOKEN_PREFIX, random);
+  return mintStoredBearer(DISCORD_VOICE_BRIDGE_TOKEN_PREFIX, "Discord bridge", random);
 }
 
 /** Mints the user-session plane's text bearer (ADR 0048). */
 export function mintDiscordUserBridgeToken(random: (size: number) => Buffer = randomBytes): string {
-  return mintToken(DISCORD_USER_BRIDGE_TOKEN_PREFIX, random);
+  return mintStoredBearer(DISCORD_USER_BRIDGE_TOKEN_PREFIX, "Discord bridge", random);
 }
 
 /** Mints the user-session plane's voice bearer (ADR 0048). */
 export function mintDiscordUserVoiceBridgeToken(random: (size: number) => Buffer = randomBytes): string {
-  return mintToken(DISCORD_USER_VOICE_BRIDGE_TOKEN_PREFIX, random);
-}
-
-function mintToken(prefix: string, random: (size: number) => Buffer): string {
-  const entropy = random(DISCORD_BRIDGE_TOKEN_BYTES);
-  if (entropy.length !== DISCORD_BRIDGE_TOKEN_BYTES) {
-    throw new Error(
-      `Discord bridge credential entropy source must return ${DISCORD_BRIDGE_TOKEN_BYTES} bytes`,
-    );
-  }
-  return `${prefix}${entropy.toString("base64url")}`;
+  return mintStoredBearer(DISCORD_USER_VOICE_BRIDGE_TOKEN_PREFIX, "Discord bridge", random);
 }
 
 /** Reads the broker-owned bridge bearer without exposing it through environment configuration. */
 export async function resolveDiscordBridgeCredential(
   options: DiscordBridgeCredentialOptions = {},
 ): Promise<string | undefined> {
-  const store = options.store ?? defaultStore(options.env);
-  const credential = await store.get(DISCORD_BRIDGE_CREDENTIAL_PROVIDER_ID);
-  if (credential === undefined) return undefined;
-  if (credential.type !== "api" || !DISCORD_BRIDGE_TOKEN_PATTERN.test(credential.key)) {
-    throw new DiscordBridgeCredentialError(
-      "invalid_stored_credential",
-      "The stored Discord bridge credential is invalid; refusing to use it",
-    );
-  }
-  return credential.key;
+  return resolveStoredBearer(
+    options,
+    DISCORD_BRIDGE_CREDENTIAL_PROVIDER_ID,
+    DISCORD_BRIDGE_TOKEN_PATTERN,
+    "Discord bridge",
+    DiscordBridgeCredentialError,
+  );
 }
 
 /**
@@ -92,44 +79,27 @@ export async function resolveDiscordBridgeCredential(
 export async function ensureDiscordBridgeCredential(
   options: MintDiscordBridgeCredentialOptions = {},
 ): Promise<string> {
-  const existing = await resolveDiscordBridgeCredential(options);
-  if (existing !== undefined) return existing;
-  const store = options.store ?? defaultStore(options.env);
-  try {
-    await store.set(DISCORD_BRIDGE_CREDENTIAL_PROVIDER_ID, {
-      type: "api",
-      key: mintDiscordBridgeToken(options.randomBytes),
-    });
-  } catch {
-    throw new DiscordBridgeCredentialError(
-      "store_unavailable",
-      "Discord bridge credential bootstrap could not update the credential store",
-    );
-  }
-  const persisted = await resolveDiscordBridgeCredential({ ...options, store });
-  if (persisted === undefined) {
-    throw new DiscordBridgeCredentialError(
-      "missing",
-      "Discord bridge credential bootstrap did not persist a token",
-    );
-  }
-  return persisted;
+  return ensureStoredBearer(
+    options,
+    DISCORD_BRIDGE_CREDENTIAL_PROVIDER_ID,
+    () => mintDiscordBridgeToken(options.randomBytes),
+    resolveDiscordBridgeCredential,
+    "Discord bridge",
+    DiscordBridgeCredentialError,
+  );
 }
 
 /** Reads the voice-lane bearer without exposing it through environment configuration. */
 export async function resolveDiscordVoiceBridgeCredential(
   options: DiscordBridgeCredentialOptions = {},
 ): Promise<string | undefined> {
-  const store = options.store ?? defaultStore(options.env);
-  const credential = await store.get(DISCORD_VOICE_BRIDGE_CREDENTIAL_PROVIDER_ID);
-  if (credential === undefined) return undefined;
-  if (credential.type !== "api" || !DISCORD_VOICE_BRIDGE_TOKEN_PATTERN.test(credential.key)) {
-    throw new DiscordBridgeCredentialError(
-      "invalid_stored_credential",
-      "The stored Discord voice bridge credential is invalid; refusing to use it",
-    );
-  }
-  return credential.key;
+  return resolveStoredBearer(
+    options,
+    DISCORD_VOICE_BRIDGE_CREDENTIAL_PROVIDER_ID,
+    DISCORD_VOICE_BRIDGE_TOKEN_PATTERN,
+    "Discord voice bridge",
+    DiscordBridgeCredentialError,
+  );
 }
 
 /**
@@ -139,28 +109,14 @@ export async function resolveDiscordVoiceBridgeCredential(
 export async function ensureDiscordVoiceBridgeCredential(
   options: MintDiscordBridgeCredentialOptions = {},
 ): Promise<string> {
-  const existing = await resolveDiscordVoiceBridgeCredential(options);
-  if (existing !== undefined) return existing;
-  const store = options.store ?? defaultStore(options.env);
-  try {
-    await store.set(DISCORD_VOICE_BRIDGE_CREDENTIAL_PROVIDER_ID, {
-      type: "api",
-      key: mintDiscordVoiceBridgeToken(options.randomBytes),
-    });
-  } catch {
-    throw new DiscordBridgeCredentialError(
-      "store_unavailable",
-      "Discord voice bridge credential bootstrap could not update the credential store",
-    );
-  }
-  const persisted = await resolveDiscordVoiceBridgeCredential({ ...options, store });
-  if (persisted === undefined) {
-    throw new DiscordBridgeCredentialError(
-      "missing",
-      "Discord voice bridge credential bootstrap did not persist a token",
-    );
-  }
-  return persisted;
+  return ensureStoredBearer(
+    options,
+    DISCORD_VOICE_BRIDGE_CREDENTIAL_PROVIDER_ID,
+    () => mintDiscordVoiceBridgeToken(options.randomBytes),
+    resolveDiscordVoiceBridgeCredential,
+    "Discord voice bridge",
+    DiscordBridgeCredentialError,
+  );
 }
 
 /**
@@ -171,11 +127,12 @@ export async function ensureDiscordVoiceBridgeCredential(
 export async function resolveDiscordUserBridgeCredential(
   options: DiscordBridgeCredentialOptions = {},
 ): Promise<string | undefined> {
-  return resolveBearer(
+  return resolveStoredBearer(
+    options,
     DISCORD_USER_BRIDGE_CREDENTIAL_PROVIDER_ID,
     DISCORD_USER_BRIDGE_TOKEN_PATTERN,
     "Discord user-session bridge",
-    options,
+    DiscordBridgeCredentialError,
   );
 }
 
@@ -183,12 +140,13 @@ export async function resolveDiscordUserBridgeCredential(
 export async function ensureDiscordUserBridgeCredential(
   options: MintDiscordBridgeCredentialOptions = {},
 ): Promise<string> {
-  return ensureBearer(
+  return ensureStoredBearer(
+    options,
     DISCORD_USER_BRIDGE_CREDENTIAL_PROVIDER_ID,
     () => mintDiscordUserBridgeToken(options.randomBytes),
     resolveDiscordUserBridgeCredential,
     "Discord user-session bridge",
-    options,
+    DiscordBridgeCredentialError,
   );
 }
 
@@ -196,11 +154,12 @@ export async function ensureDiscordUserBridgeCredential(
 export async function resolveDiscordUserVoiceBridgeCredential(
   options: DiscordBridgeCredentialOptions = {},
 ): Promise<string | undefined> {
-  return resolveBearer(
+  return resolveStoredBearer(
+    options,
     DISCORD_USER_VOICE_BRIDGE_CREDENTIAL_PROVIDER_ID,
     DISCORD_USER_VOICE_BRIDGE_TOKEN_PATTERN,
     "Discord user-session voice bridge",
-    options,
+    DiscordBridgeCredentialError,
   );
 }
 
@@ -208,61 +167,12 @@ export async function resolveDiscordUserVoiceBridgeCredential(
 export async function ensureDiscordUserVoiceBridgeCredential(
   options: MintDiscordBridgeCredentialOptions = {},
 ): Promise<string> {
-  return ensureBearer(
+  return ensureStoredBearer(
+    options,
     DISCORD_USER_VOICE_BRIDGE_CREDENTIAL_PROVIDER_ID,
     () => mintDiscordUserVoiceBridgeToken(options.randomBytes),
     resolveDiscordUserVoiceBridgeCredential,
     "Discord user-session voice bridge",
-    options,
+    DiscordBridgeCredentialError,
   );
-}
-
-async function resolveBearer(
-  providerId: string,
-  pattern: RegExp,
-  label: string,
-  options: DiscordBridgeCredentialOptions,
-): Promise<string | undefined> {
-  const store = options.store ?? defaultStore(options.env);
-  const credential = await store.get(providerId);
-  if (credential === undefined) return undefined;
-  if (credential.type !== "api" || !pattern.test(credential.key)) {
-    throw new DiscordBridgeCredentialError(
-      "invalid_stored_credential",
-      `The stored ${label} credential is invalid; refusing to use it`,
-    );
-  }
-  return credential.key;
-}
-
-async function ensureBearer(
-  providerId: string,
-  mint: () => string,
-  resolveExisting: (options: DiscordBridgeCredentialOptions) => Promise<string | undefined>,
-  label: string,
-  options: MintDiscordBridgeCredentialOptions,
-): Promise<string> {
-  const existing = await resolveExisting(options);
-  if (existing !== undefined) return existing;
-  const store = options.store ?? defaultStore(options.env);
-  try {
-    await store.set(providerId, { type: "api", key: mint() });
-  } catch {
-    throw new DiscordBridgeCredentialError(
-      "store_unavailable",
-      `${label} credential bootstrap could not update the credential store`,
-    );
-  }
-  const persisted = await resolveExisting({ ...options, store });
-  if (persisted === undefined) {
-    throw new DiscordBridgeCredentialError(
-      "missing",
-      `${label} credential bootstrap did not persist a token`,
-    );
-  }
-  return persisted;
-}
-
-function defaultStore(env: NodeJS.ProcessEnv | undefined): CredentialStore {
-  return createDefaultCredentialStore(env === undefined ? {} : { env });
 }

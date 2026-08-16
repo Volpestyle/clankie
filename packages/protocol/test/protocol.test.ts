@@ -1,22 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type {
-  CreateOperatorConversationRequest,
-  GetOperatorConversationRequest,
-  GetOperatorConversationResponse,
-  ListOperatorConversationsRequest,
-  ListOperatorConversationsResponse,
-  OperatorConversationCreateResult,
-  OperatorConversationGetResult,
-  OperatorConversationListResult,
-  OperatorConversationReplayResult,
-  OperatorConversationSendResult,
   OperatorConversationServiceRequest,
   OperatorConversationServiceResult,
   OperatorConversationTailItem,
-  OperatorConversationTailResult,
-  ReplayOperatorConversationRequest,
-  ReplayOperatorConversationResult,
-  SubmitOperatorConversationTurnResult,
 } from "../src/index.ts";
 import {
   CaptainPresenceEventSchema,
@@ -35,7 +21,6 @@ import {
   OPERATOR_CONVERSATION_REF_MAX,
   OPERATOR_CONVERSATION_TOOL_DETAIL_MAX,
   OperatorConversationAttachmentSchema,
-  OperatorConversationInputResponseSchema,
   OperatorConversationRecoverySchema,
   OperatorConversationRevisionConflictSchema,
   OperatorConversationSchema,
@@ -223,17 +208,6 @@ describe("protocol", () => {
         summary: "bounded summary",
       }),
     ).toThrow();
-    expect(() =>
-      SubmitOperatorConversationTurnSchema.parse({
-        schemaVersion: 1,
-        kind: "worker_steer",
-        conversationId: "global-default",
-        surfaceClientId: "rn",
-        expectedRevision: 1,
-        workerRunId: "w".repeat(OPERATOR_CONVERSATION_REF_MAX + 1),
-        intent: { type: "focus", target: "failing_test" },
-      }),
-    ).toThrow();
     // A message event validates and carries no provider/credential surface.
     expect(
       OperatorConversationStreamEventSchema.parse({
@@ -246,42 +220,28 @@ describe("protocol", () => {
     ).toMatchObject({ type: "message", role: "captain" });
   });
 
-  it("never lets the conversation lane authorize an approval, and defers unwired submits", () => {
-    // The conversation lane cannot widen approval authority (ADR 0032): approval
-    // is not an accepted input response kind.
-    expect(() =>
-      OperatorConversationInputResponseSchema.parse({ inputKind: "approval", approve: true }),
-    ).toThrow();
-    expect(
-      OperatorConversationInputResponseSchema.parse({ inputKind: "text", text: "answer" }),
-    ).toMatchObject({
-      inputKind: "text",
-    });
-    // Typed input-response and worker-steer submits parse (shape is defined)…
+  it("only accepts real message submits", () => {
     expect(
       SubmitOperatorConversationTurnSchema.parse({
         schemaVersion: 1,
-        kind: "worker_steer",
+        kind: "message",
         conversationId: "global-default",
         surfaceClientId: "rn",
         expectedRevision: 3,
-        workerRunId: "worker-1",
-        intent: { type: "focus", target: "failing_test" },
+        message: "answer",
       }),
-    ).toMatchObject({ kind: "worker_steer" });
-    // …but an approval decision can never be encoded as a submit input response.
-    expect(() =>
-      SubmitOperatorConversationTurnSchema.parse({
-        schemaVersion: 1,
-        kind: "input_response",
-        conversationId: "global-default",
-        surfaceClientId: "rn",
-        expectedRevision: 3,
-        requestId: "req-1",
-        response: { inputKind: "approval", approve: true },
-      }),
-    ).toThrow();
-    // The accepted result carries a durable run identity; unsupported is a typed status.
+    ).toMatchObject({ kind: "message", message: "answer" });
+    for (const kind of ["input_response", "worker_steer"]) {
+      expect(() =>
+        SubmitOperatorConversationTurnSchema.parse({
+          schemaVersion: 1,
+          kind,
+          conversationId: "global-default",
+          surfaceClientId: "rn",
+          expectedRevision: 3,
+        }),
+      ).toThrow();
+    }
     expect(
       SubmitOperatorConversationTurnResultSchema.parse({
         schemaVersion: 1,
@@ -292,15 +252,13 @@ describe("protocol", () => {
         safeCursor: "event:9",
       }),
     ).toMatchObject({ status: "accepted", runId: "run:1" });
-    expect(
+    expect(() =>
       SubmitOperatorConversationTurnResultSchema.parse({
         schemaVersion: 1,
         status: "unsupported",
         conversationId: "global-default",
-        submitKind: "worker_steer",
-        reason: "Deferred until captain wiring lands.",
       }),
-    ).toMatchObject({ status: "unsupported" });
+    ).toThrow();
   });
 
   it("models bounded replay recovery and the callable service envelope", () => {
@@ -503,32 +461,12 @@ describe("protocol", () => {
     ).toThrow();
   });
 
-  it("exposes a coherent named public type surface with typed get-not-found", () => {
-    // Compile fixture: every public request/result name resolves as a named type
-    // (RN never infers aliases from the union). A missing conversation is typed.
-    const getResult: OperatorConversationGetResult = { op: "get", schemaVersion: 1 };
-    expect(getResult.conversation).toBeUndefined();
-    const getResponse: GetOperatorConversationResponse = { schemaVersion: 1 };
-    expect(getResponse.conversation).toBeUndefined();
-    const names:
-      | [
-          ListOperatorConversationsRequest,
-          ListOperatorConversationsResponse,
-          GetOperatorConversationRequest,
-          CreateOperatorConversationRequest,
-          ReplayOperatorConversationRequest,
-          ReplayOperatorConversationResult,
-          SubmitOperatorConversationTurnResult,
-          OperatorConversationServiceRequest,
-          OperatorConversationServiceResult,
-          OperatorConversationListResult,
-          OperatorConversationCreateResult,
-          OperatorConversationReplayResult,
-          OperatorConversationTailResult,
-          OperatorConversationSendResult,
-        ]
-      | undefined = undefined;
-    expect(names).toBeUndefined();
+  it("types get-not-found on the canonical service result", () => {
+    const result: Extract<OperatorConversationServiceResult, { op: "get" }> = {
+      op: "get",
+      schemaVersion: 1,
+    };
+    expect(result.conversation).toBeUndefined();
   });
 
   it("surfaces typed tail recovery and stops instead of silently resyncing", async () => {

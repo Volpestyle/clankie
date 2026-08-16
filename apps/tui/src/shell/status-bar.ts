@@ -1,7 +1,7 @@
 /**
  * Status bar band of the face shell: a single component whose text the shell
- * recomputes on every state change. Wraps long transient messages (e.g. a
- * modal's result surfaced via flow.renderOutput) across rows instead of
+ * recomputes on every state change. Wraps long transient wizard messages
+ * across rows instead of
  * clipping, capped so a pathological message can't eat the screen. Ported from
  * v1 (clankie snapshot 04734df9, scripts/clankie.ts).
  */

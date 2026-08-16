@@ -16,7 +16,7 @@ import {
   type RealtimeSocketFactory,
   type RealtimeTimers,
 } from "@clankie/discord-presence-core";
-import type { DiscordReadinessCheck } from "./readiness.ts";
+import { asRecord, discordId, discordIdSet, type DiscordReadinessCheck } from "./readiness.ts";
 import {
   DEFAULT_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT,
   DEFAULT_VOICE_REALTIME_MODEL,
@@ -581,24 +581,4 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
         reject(error instanceof Error ? error : new Error(String(error)));
       });
   });
-}
-
-function discordId(value: string | undefined): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed && /^\d{5,30}$/u.test(trimmed) ? trimmed : undefined;
-}
-
-function discordIdSet(value: string | undefined): ReadonlySet<string> {
-  return new Set(
-    value
-      ?.split(",")
-      .map((entry) => discordId(entry))
-      .filter((entry): entry is string => entry !== undefined) ?? [],
-  );
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
 }

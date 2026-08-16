@@ -6,7 +6,7 @@ export const baseContext = {
     principal: { kind: "captain" as const, id: "clankie" },
     tier: "autonomous" as const,
   },
-  correlationId: "corr-minecraft-1",
+  correlationId: "corr-environment-1",
   expectedGoalVersion: 42,
 };
 
@@ -16,15 +16,15 @@ export const validStartActionCommand: EnvironmentCommand = {
   type: "start_action",
   context: baseContext,
   requestedAt: "2026-07-11T12:00:00.000Z",
-  sessionId: "minecraft-session-1",
-  actionId: "minecraft-action-1",
-  action: { kind: "collect", block: "oak_log", count: 4 },
+  sessionId: "environment-session-1",
+  actionId: "environment-action-1",
+  action: { kind: "test_action" },
 };
 
 const resultBase = {
   schemaVersion: 1 as const,
-  actionId: "minecraft-action-1",
-  sessionId: "minecraft-session-1",
+  actionId: "environment-action-1",
+  sessionId: "environment-session-1",
   updatedAt: "2026-07-11T12:00:01.000Z",
 };
 
@@ -57,9 +57,9 @@ export const actionResultFixtures = {
 export const validEnvironmentLease: EnvironmentLease = {
   schemaVersion: 1,
   leaseId: "lease-1",
-  sessionId: "minecraft-session-1",
+  sessionId: "environment-session-1",
   holderId: "runner-1",
-  missionId: "minecraft-mission",
+  missionId: "environment-mission",
   taskId: "play-task",
   issuedAt: "2026-07-11T12:00:00.000Z",
   heartbeatAt: "2026-07-11T12:00:05.000Z",
@@ -72,6 +72,6 @@ export const validEnvironmentLease: EnvironmentLease = {
     maxDistanceFromOrigin: 256,
     maxActionDurationMs: 60_000,
     maxBlockChangesPerAction: 16,
-    capabilities: ["minecraft.world.observe", "minecraft.world.navigate"],
+    capabilities: ["environment.test"],
   },
 };

@@ -19,7 +19,6 @@
     "@clankie/credential-broker": "workspace:*",
     "@clankie/model-provider": "workspace:*",
     "@clankie/model-registry": "workspace:*",
-    "@clankie/observability": "workspace:*",
     "@clankie/protocol": "workspace:*",
     "@clankie/settings": "workspace:*",
     "@earendil-works/pi-ai": "0.84.2",

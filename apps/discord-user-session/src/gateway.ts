@@ -164,20 +164,6 @@ export class DiscordUserGateway {
     return this.send(payload);
   }
 
-  /** Content-free DJ ack. Never logs the token. */
-  public async sendMessage(channelId: string, content: string): Promise<void> {
-    const trimmed = content.trim();
-    if (channelId.length === 0 || trimmed.length === 0) return;
-    await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
-      method: "POST",
-      headers: {
-        authorization: this.token,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ content: trimmed.slice(0, 2_000), allowed_mentions: { parse: [] } }),
-    });
-  }
-
   public close(): void {
     this.closed = true;
     this.clearTimers();

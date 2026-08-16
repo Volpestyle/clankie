@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { createDefaultCredentialStore, type CredentialStore } from "./credential-store.ts";
+import type { CredentialStore } from "./credential-store.ts";
+import { ensureStoredBearer, mintStoredBearer, resolveStoredBearer } from "./stored-bearer.ts";
 
 /**
  * Local bearer for the possessor voice seam (ADR 0064).
@@ -15,7 +16,6 @@ import { createDefaultCredentialStore, type CredentialStore } from "./credential
  */
 export const POSSESSOR_VOICE_CREDENTIAL_PROVIDER_ID = "clankie_possessor_voice";
 const POSSESSOR_VOICE_TOKEN_PREFIX = "clankie_possessor_voice_";
-const POSSESSOR_VOICE_TOKEN_BYTES = 32;
 const POSSESSOR_VOICE_TOKEN_PATTERN = /^clankie_possessor_voice_[A-Za-z0-9_-]{43}$/u;
 
 /** Environment names that must never carry this token. */
@@ -48,13 +48,7 @@ interface MintPossessorVoiceCredentialOptions extends PossessorVoiceCredentialOp
 
 /** Mints the local bearer shared by the bridge listener and the possessor client. */
 export function mintPossessorVoiceToken(random: (size: number) => Buffer = randomBytes): string {
-  const entropy = random(POSSESSOR_VOICE_TOKEN_BYTES);
-  if (entropy.length !== POSSESSOR_VOICE_TOKEN_BYTES) {
-    throw new Error(
-      `Possessor voice credential entropy source must return ${POSSESSOR_VOICE_TOKEN_BYTES} bytes`,
-    );
-  }
-  return `${POSSESSOR_VOICE_TOKEN_PREFIX}${entropy.toString("base64url")}`;
+  return mintStoredBearer(POSSESSOR_VOICE_TOKEN_PREFIX, "possessor voice", random);
 }
 
 /**
@@ -75,16 +69,13 @@ export async function resolvePossessorVoiceCredential(
   options: PossessorVoiceCredentialOptions = {},
 ): Promise<string | undefined> {
   assertNoEnvironmentPossessorVoiceToken(options.env ?? process.env);
-  const store = options.store ?? defaultStore(options.env);
-  const credential = await store.get(POSSESSOR_VOICE_CREDENTIAL_PROVIDER_ID);
-  if (credential === undefined) return undefined;
-  if (credential.type !== "api" || !POSSESSOR_VOICE_TOKEN_PATTERN.test(credential.key)) {
-    throw new PossessorVoiceCredentialError(
-      "invalid_stored_credential",
-      "The stored possessor voice credential is invalid; refusing to use it",
-    );
-  }
-  return credential.key;
+  return resolveStoredBearer(
+    options,
+    POSSESSOR_VOICE_CREDENTIAL_PROVIDER_ID,
+    POSSESSOR_VOICE_TOKEN_PATTERN,
+    "possessor voice",
+    PossessorVoiceCredentialError,
+  );
 }
 
 /**
@@ -95,30 +86,12 @@ export async function resolvePossessorVoiceCredential(
 export async function ensurePossessorVoiceCredential(
   options: MintPossessorVoiceCredentialOptions = {},
 ): Promise<string> {
-  const existing = await resolvePossessorVoiceCredential(options);
-  if (existing !== undefined) return existing;
-  const store = options.store ?? defaultStore(options.env);
-  try {
-    await store.set(POSSESSOR_VOICE_CREDENTIAL_PROVIDER_ID, {
-      type: "api",
-      key: mintPossessorVoiceToken(options.randomBytes),
-    });
-  } catch {
-    throw new PossessorVoiceCredentialError(
-      "store_unavailable",
-      "Possessor voice credential bootstrap could not update the credential store",
-    );
-  }
-  const persisted = await resolvePossessorVoiceCredential({ ...options, store });
-  if (persisted === undefined) {
-    throw new PossessorVoiceCredentialError(
-      "missing",
-      "Possessor voice credential bootstrap did not persist a token",
-    );
-  }
-  return persisted;
-}
-
-function defaultStore(env: NodeJS.ProcessEnv | undefined): CredentialStore {
-  return createDefaultCredentialStore(env === undefined ? {} : { env });
+  return ensureStoredBearer(
+    options,
+    POSSESSOR_VOICE_CREDENTIAL_PROVIDER_ID,
+    () => mintPossessorVoiceToken(options.randomBytes),
+    resolvePossessorVoiceCredential,
+    "possessor voice",
+    PossessorVoiceCredentialError,
+  );
 }

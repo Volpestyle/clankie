@@ -8,9 +8,9 @@
     "start": "tsx src/index.ts",
     "readiness": "tsx src/readiness-cli.ts",
     "live-proof": "tsx src/live-proof-cli.ts",
-    "person-memory-live-proof": "tsx src/person-memory-live-proof-cli.ts",
+    "person-memory-live-proof": "tsx src/live-proof-cli.ts person-memory",
     "voice-readiness": "tsx src/voice-readiness-cli.ts",
-    "voice-live-proof": "tsx src/voice-live-proof-cli.ts",
+    "voice-live-proof": "tsx src/live-proof-cli.ts voice",
     "build": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
@@ -27,8 +27,7 @@
     "@discordjs/opus": "0.10.0",
     "@discordjs/voice": "0.19.2",
     "discord.js": "14.26.4",
-    "prism-media": "1.3.5",
-    "zod": "4.4.3"
+    "prism-media": "1.3.5"
   },
   "devDependencies": {
     "@types/node": "24.12.4",

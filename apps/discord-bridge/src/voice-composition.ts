@@ -3,46 +3,47 @@
  * ([ADR 0057](../../../docs/adr/0057-realtime-voice-with-captain-handoff.md)).
  *
  * Everything here is deliberately import-light and side-effect free so the
- * wiring the bridge actually runs — environment parsing, the realtime ports,
- * the briefing provider, the idle auto-leave, and the user-facing disclosure
- * text — is testable offline without touching the process-global startup in
- * `index.ts`.
+ * bot-specific environment parsing, realtime ports, and user-facing disclosure
+ * text are testable offline without touching the process-global startup in
+ * `index.ts`. Transport-neutral helpers are re-exported from the shared core.
  */
 
-import type {
-  DiscordVoiceBriefing as ApiDiscordVoiceBriefing,
-  DiscordVoiceBriefingRequest as ApiDiscordVoiceBriefingRequest,
-} from "@clankie/api-client";
 import {
-  DEFAULT_DECAY_WINDOW_MS,
   openElevenLabsTtsSession,
   openExternalVoiceConversation,
   openRealtimeConversationSession,
   openRealtimeTranscriptionSession,
-  type DiscordBridgeReceipt,
-  type DiscordVoiceBriefing,
-  type DiscordVoiceBriefingRequest,
   type DiscordVoiceRealtimePorts,
   type DiscordVoiceConsentPolicy,
   type DiscordVoiceSessionStatus,
-  type LookAtScreenResult,
+  parseVoiceRealtimeBaseEnv,
   type RealtimeSocketFactory,
   type RealtimeTimers,
+  type VoiceRealtimeBaseEnvConfig,
   type VoiceConversationOpenInput,
   type VoiceTranscriptionHandlers,
 } from "@clankie/discord-presence-core";
 import type { DiscordVoiceEvidence } from "@clankie/protocol";
 
+export {
+  DEFAULT_VOICE_IDLE_LEAVE_MS,
+  DEFAULT_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT,
+  DEFAULT_VOICE_REALTIME_MODEL,
+  DEFAULT_VOICE_REALTIME_VOICE,
+  DEFAULT_VOICE_TRANSCRIBE_MODEL,
+  DEFAULT_VOICE_TRUNCATION_RETENTION,
+  MAX_VOICE_IDLE_LEAVE_MS,
+  VoiceIdleAutoLeave,
+  createVoiceBriefingProvider,
+  createVoiceLookAtScreenProvider,
+  voiceEvidenceReceiptData,
+  voiceEvidenceReceiptType,
+} from "@clankie/discord-presence-core";
+
 // ---------------------------------------------------------------------------
 // Environment configuration.
 // ---------------------------------------------------------------------------
 
-/** The engaged conversation tier (ADR 0057's decision of record). */
-export const DEFAULT_VOICE_REALTIME_MODEL = "gpt-realtime-2.1";
-/** The dormant listener tier. */
-export const DEFAULT_VOICE_TRANSCRIBE_MODEL = "gpt-realtime-whisper";
-/** The voice the cascade already used, so the architecture swap does not change how he sounds. */
-export const DEFAULT_VOICE_REALTIME_VOICE = "marin";
 /**
  * Who synthesizes his speech ([ADR 0070](../../../docs/adr/0070-external-voice-via-streaming-tts.md)):
  * `openai` is the realtime model's own mouth, `elevenlabs` switches the
@@ -51,17 +52,6 @@ export const DEFAULT_VOICE_REALTIME_VOICE = "marin";
 export const VOICE_TTS_PROVIDERS = ["openai", "elevenlabs"] as const;
 export type VoiceTtsProvider = (typeof VOICE_TTS_PROVIDERS)[number];
 export const DEFAULT_VOICE_TTS_PROVIDER: VoiceTtsProvider = "openai";
-/** `session.truncation` retention ratio — configured, never defaulted to unbounded (mission T6). */
-export const DEFAULT_VOICE_TRUNCATION_RETENTION = 0.7;
-export const DEFAULT_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT = 12_000;
-/**
- * A joined channel is metered (ADR 0057 cost consequence), so an idle call must
- * end itself. Fifteen minutes of no utterance, response, or floor movement
- * means the room moved on without him.
- */
-export const DEFAULT_VOICE_IDLE_LEAVE_MS = 15 * 60_000;
-/** The idle timer must stay bounded: a day-long "idle" cap is a disabled cap. */
-export const MAX_VOICE_IDLE_LEAVE_MS = 24 * 60 * 60_000;
 
 /** Removed knobs and where their job went. Set-but-ignored configuration is drift, so they fail loudly. */
 const RETIRED_VOICE_ENV: Readonly<Record<string, string>> = {
@@ -72,27 +62,11 @@ const RETIRED_VOICE_ENV: Readonly<Record<string, string>> = {
     "there is no separate volition model — his own realtime session decides whether to speak up",
 };
 
-export interface VoiceRealtimeEnvConfig {
-  readonly realtimeModel: string;
-  readonly transcribeModel: string;
-  readonly voice: string;
+export interface VoiceRealtimeEnvConfig extends VoiceRealtimeBaseEnvConfig {
   readonly ttsProvider: VoiceTtsProvider;
   /** Required exactly when {@link ttsProvider} is `elevenlabs`. */
   readonly elevenLabsVoiceId?: string;
   readonly elevenLabsModelId?: string;
-  /**
-   * `CLANKIE_VOICE_STT_LANGUAGE`, unchanged semantics from the cascade: unset
-   * defers to the runtime's pinned default, empty restores per-utterance
-   * auto-detection for a genuinely multilingual room.
-   */
-  readonly language?: string;
-  readonly truncationRetentionRatio: number;
-  readonly postInstructionsTokenLimit: number;
-  /** Optional override of the runtime's session lifetime cap. */
-  readonly sessionLifetimeMs?: number;
-  /** Owner-tunable floor decay dial (mission human decision 1). */
-  readonly decayWindowMs: number;
-  readonly idleLeaveMs: number;
 }
 
 /**
@@ -109,13 +83,6 @@ export function parseVoiceRealtimeEnv(env: NodeJS.ProcessEnv): VoiceRealtimeEnvC
         .join(", ")}.`,
     );
   }
-  const language = env.CLANKIE_VOICE_STT_LANGUAGE;
-  const sessionLifetimeMs = optionalIntegerEnv(
-    env,
-    "CLANKIE_VOICE_SESSION_LIFETIME_MS",
-    10_000,
-    4 * 60 * 60_000,
-  );
   const ttsProvider = ttsProviderEnv(env);
   const elevenLabsVoiceId = env.CLANKIE_VOICE_ELEVENLABS_VOICE_ID?.trim();
   const elevenLabsModelId = env.CLANKIE_VOICE_ELEVENLABS_MODEL_ID?.trim();
@@ -134,30 +101,12 @@ export function parseVoiceRealtimeEnv(env: NodeJS.ProcessEnv): VoiceRealtimeEnvC
     );
   }
   return {
-    realtimeModel: nonEmptyEnv(env, "CLANKIE_VOICE_REALTIME_MODEL", DEFAULT_VOICE_REALTIME_MODEL),
-    transcribeModel: nonEmptyEnv(env, "CLANKIE_VOICE_TRANSCRIBE_MODEL", DEFAULT_VOICE_TRANSCRIBE_MODEL),
-    voice: nonEmptyEnv(env, "CLANKIE_VOICE_REALTIME_VOICE", DEFAULT_VOICE_REALTIME_VOICE),
+    ...parseVoiceRealtimeBaseEnv(env),
     ttsProvider,
     ...(ttsProvider === "elevenlabs" && elevenLabsVoiceId !== undefined ? { elevenLabsVoiceId } : {}),
     ...(ttsProvider === "elevenlabs" && elevenLabsModelId !== undefined && elevenLabsModelId.length > 0
       ? { elevenLabsModelId }
       : {}),
-    ...(language === undefined ? {} : { language }),
-    truncationRetentionRatio: ratioEnv(
-      env,
-      "CLANKIE_VOICE_TRUNCATION_RETENTION",
-      DEFAULT_VOICE_TRUNCATION_RETENTION,
-    ),
-    postInstructionsTokenLimit:
-      optionalIntegerEnv(env, "CLANKIE_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT", 1_000, 128_000) ??
-      DEFAULT_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT,
-    ...(sessionLifetimeMs === undefined ? {} : { sessionLifetimeMs }),
-    decayWindowMs:
-      optionalIntegerEnv(env, "CLANKIE_VOICE_DECAY_WINDOW_MS", 1, Number.MAX_SAFE_INTEGER) ??
-      DEFAULT_DECAY_WINDOW_MS,
-    idleLeaveMs:
-      optionalIntegerEnv(env, "CLANKIE_VOICE_IDLE_LEAVE_MS", 1, MAX_VOICE_IDLE_LEAVE_MS) ??
-      DEFAULT_VOICE_IDLE_LEAVE_MS,
   };
 }
 
@@ -172,41 +121,8 @@ function ttsProviderEnv(env: NodeJS.ProcessEnv): VoiceTtsProvider {
   return match;
 }
 
-function nonEmptyEnv(env: NodeJS.ProcessEnv, name: string, fallback: string): string {
-  const value = env[name];
-  if (value === undefined) return fallback;
-  const trimmed = value.trim();
-  if (trimmed.length === 0) throw new Error(`${name} must be non-empty when set`);
-  return trimmed;
-}
-
-function ratioEnv(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
-  const value = env[name];
-  if (value === undefined) return fallback;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 1) {
-    throw new Error(`${name} must be a ratio within (0, 1]`);
-  }
-  return parsed;
-}
-
-function optionalIntegerEnv(
-  env: NodeJS.ProcessEnv,
-  name: string,
-  minimum: number,
-  maximum: number,
-): number | undefined {
-  const value = env[name];
-  if (value === undefined) return undefined;
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
-    throw new Error(`${name} must be an integer between ${minimum.toString()} and ${maximum.toString()}`);
-  }
-  return parsed;
-}
-
 // ---------------------------------------------------------------------------
-// Realtime ports and the briefing provider.
+// Realtime ports.
 // ---------------------------------------------------------------------------
 
 export interface VoiceRealtimePortsInput {
@@ -314,151 +230,9 @@ export function createVoiceRealtimePorts(input: VoiceRealtimePortsInput): Discor
   };
 }
 
-export interface VoiceBriefingApiPort {
-  fetchDiscordVoiceBriefing(input: ApiDiscordVoiceBriefingRequest): Promise<ApiDiscordVoiceBriefing>;
-}
-
-/**
- * Maps the media owner's briefing request onto the service's endpoint.
- * The request carries only ids; persona, lane instructions, self-state, and
- * approved person memory are all service-resolved (T4), so the bridge
- * can neither supply nor widen any of them.
- */
-export interface VoiceLookAtScreenApiPort {
-  fetchPlayStill(): Promise<{
-    readonly outcome: "not_playing" | "pending" | "still";
-    readonly pngBase64?: string;
-    readonly mimeType?: "image/png";
-  }>;
-}
-
-export function createVoiceLookAtScreenProvider(
-  api: VoiceLookAtScreenApiPort,
-): () => Promise<LookAtScreenResult> {
-  return async () => {
-    const still = await api.fetchPlayStill();
-    if (still.outcome === "still" && still.pngBase64 !== undefined) {
-      return { outcome: "still", pngBase64: still.pngBase64, mimeType: "image/png" };
-    }
-    if (still.outcome === "pending") return { outcome: "pending" };
-    return { outcome: "not_playing" };
-  };
-}
-
-export function createVoiceBriefingProvider(
-  api: VoiceBriefingApiPort,
-): (request: DiscordVoiceBriefingRequest) => Promise<DiscordVoiceBriefing> {
-  return async (request) => {
-    const briefing = await api.fetchDiscordVoiceBriefing({
-      schemaVersion: 1,
-      guildId: request.guildId,
-      channelId: request.channelId,
-      consentedUserIds: request.consentedUserIds,
-    });
-    return { instructions: briefing.instructions, briefing: briefing.briefing };
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Idle auto-leave: a joined channel is metered, so idleness ends it.
-// ---------------------------------------------------------------------------
-
-export interface VoiceIdleAutoLeaveOptions {
-  readonly idleLeaveMs: number;
-  readonly isActive: () => boolean;
-  readonly leave: () => Promise<void>;
-  /** Log seam — called just before leaving, with the idle threshold that fired. */
-  readonly onLeave?: (idleMs: number) => void;
-  readonly onLeaveError?: (error: unknown) => void;
-  readonly timers?: RealtimeTimers;
-}
-
-const globalTimers: RealtimeTimers = {
-  setTimeout: (handler, delayMs) => setTimeout(handler, delayMs),
-  clearTimeout: (handle) => {
-    clearTimeout(handle as ReturnType<typeof setTimeout>);
-  },
-};
-
-/**
- * Watches the voice evidence stream and leaves the channel after
- * `CLANKIE_VOICE_IDLE_LEAVE_MS` with no conversational sign of life. Joining
- * arms the timer; utterances, responses, and floor movement re-arm it; leaving
- * (his own or the auto-leave's) disarms it.
- */
-export class VoiceIdleAutoLeave {
-  private readonly options: VoiceIdleAutoLeaveOptions;
-  private readonly timers: RealtimeTimers;
-  private handle: unknown;
-
-  public constructor(options: VoiceIdleAutoLeaveOptions) {
-    if (!Number.isSafeInteger(options.idleLeaveMs) || options.idleLeaveMs <= 0) {
-      throw new Error("Voice idle auto-leave threshold must be a positive number of milliseconds");
-    }
-    this.options = options;
-    this.timers = options.timers ?? globalTimers;
-  }
-
-  public observe(evidence: DiscordVoiceEvidence): void {
-    switch (evidence.type) {
-      case "joined":
-      case "utterance":
-      case "response":
-      case "floor":
-        this.arm();
-        return;
-      case "left":
-        this.stop();
-        return;
-      default:
-      // Consent changes, overlaps, interruptions, volition accounting, and
-      // failures are not conversational activity; they neither arm nor feed
-      // the idle clock.
-    }
-  }
-
-  public stop(): void {
-    if (this.handle === undefined) return;
-    this.timers.clearTimeout(this.handle);
-    this.handle = undefined;
-  }
-
-  private arm(): void {
-    this.stop();
-    this.handle = this.timers.setTimeout(() => {
-      this.handle = undefined;
-      if (!this.options.isActive()) return;
-      this.options.onLeave?.(this.options.idleLeaveMs);
-      void this.options.leave().catch((error: unknown) => {
-        this.options.onLeaveError?.(error);
-      });
-    }, this.options.idleLeaveMs);
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Evidence → receipts and the operator-visible response line.
 // ---------------------------------------------------------------------------
-
-/** Every ADR 0057 evidence type maps 1:1 onto the receipt vocabulary. */
-export function voiceEvidenceReceiptType(evidence: DiscordVoiceEvidence): DiscordBridgeReceipt["type"] {
-  return `discord.voice.${evidence.type}`;
-}
-
-/**
- * Projects evidence into the receipt store's flat scalar record. Evidence is
- * content-free by protocol construction; this only flattens it, dropping
- * absent optional fields (the store's record type admits no `undefined`).
- */
-export function voiceEvidenceReceiptData(evidence: DiscordVoiceEvidence): DiscordBridgeReceipt["data"] {
-  const data: Record<string, string | number | boolean> = {};
-  for (const [key, value] of Object.entries(evidence)) {
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-      data[key] = value;
-    }
-  }
-  return data;
-}
 
 export type DiscordVoiceResponseEvidence = Extract<DiscordVoiceEvidence, { type: "response" }>;
 

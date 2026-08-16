@@ -1,16 +1,4 @@
 export {
-  AuditedCapabilityBroker,
-  CapabilityUseRequestSchema,
-  type CapabilityAuditContext,
-  type CapabilityAuditEnvelope,
-  type CapabilityAuditEvent,
-  type CapabilityAuditSink,
-  type AuditedCapabilityBrokerOptions,
-  type CapabilityUseDecision,
-  type CapabilityUseReason,
-  type CapabilityUseRequest,
-} from "./audited-capabilities.ts";
-export {
   CapabilityGrantSchema,
   CapabilityTokenError,
   CapabilityTokenIssuer,

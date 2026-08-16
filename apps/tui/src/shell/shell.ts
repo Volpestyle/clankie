@@ -23,12 +23,6 @@ import {
 } from "@earendil-works/pi-tui";
 import { ClankieBannerComponent, type BannerFields } from "../face/clankie-banner.ts";
 import {
-  DEFAULT_AGENT_SPINNER_CYCLE_DWELL_MS,
-  resolveAgentSpinner,
-  type AgentSpinnerSelection,
-  type ResolvedAgentSpinner,
-} from "../face/agent-spinners.ts";
-import {
   resolveClankieChromeMouseTargetFromBands,
   resolveClankieCommandRows,
   resolveClankieOverlayFrame,
@@ -84,10 +78,7 @@ import {
   type CommandLogTone,
 } from "./command-log.ts";
 import {
-  CLANKIE_TUI_SPINNER_ENV,
-  CLANKIE_TUI_SPINNER_RATE_MS_ENV,
   layoutSettingsFromEnv,
-  parseAgentSpinnerCycleRateMs,
   type InputPlacement,
   type LayoutSettings,
   type StatusPlacement,
@@ -103,6 +94,11 @@ import { clankieSlashSkillSuffix, resolveClankieSlashSkill } from "../skill-cata
 const CLANKIE_MOUSE_TRACKING_ENABLE = "\x1b[?1002h\x1b[?1006h";
 const CLANKIE_MOUSE_TRACKING_DISABLE = "\x1b[?1002l\x1b[?1006l";
 const MIN_TRANSCRIPT_ROWS = 4;
+const UNICODE_AGENT_SPINNER = {
+  frames: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+  intervalMs: 80,
+} as const;
+const ASCII_AGENT_SPINNER = { frames: ["/", "-", "\\", "|"], intervalMs: 80 } as const;
 
 export type FaceBlockHandle = {
   remove(): void;
@@ -184,8 +180,7 @@ export class ClankieFaceShell {
 
   private layoutSettingsState: LayoutSettings;
   private headerVisibleState: boolean;
-  private agentSpinner: ResolvedAgentSpinner;
-  private agentSpinnerCycleRateMs: number;
+  private readonly agentSpinner: typeof UNICODE_AGENT_SPINNER | typeof ASCII_AGENT_SPINNER;
 
   private uiReady = false;
   private shutdownStarted = false;
@@ -216,15 +211,7 @@ export class ClankieFaceShell {
 
     this.layoutSettingsState = layoutSettingsFromEnv(this.env);
     this.headerVisibleState = this.env.CLANKIE_HEADER !== "0" && this.env.CLANKIE_HEADER !== "off";
-    this.agentSpinnerCycleRateMs =
-      parseAgentSpinnerCycleRateMs(
-        this.env[CLANKIE_TUI_SPINNER_RATE_MS_ENV],
-        DEFAULT_AGENT_SPINNER_CYCLE_DWELL_MS,
-      ) ?? DEFAULT_AGENT_SPINNER_CYCLE_DWELL_MS;
-    this.agentSpinner = resolveAgentSpinner(this.env[CLANKIE_TUI_SPINNER_ENV], {
-      cycleDwellMs: this.agentSpinnerCycleRateMs,
-      unicode: this.theme.capabilities.unicode,
-    });
+    this.agentSpinner = this.theme.capabilities.unicode ? UNICODE_AGENT_SPINNER : ASCII_AGENT_SPINNER;
 
     this.tui = new TuiMainScreen(new ProcessTerminal());
     this.tui.setClearOnShrink(true);
@@ -364,7 +351,7 @@ export class ClankieFaceShell {
       cyan: ansi.cyan,
       dim: ansi.dim,
       green: ansi.green,
-      loadingGlyph: () => this.currentAgentSpinnerFrame().trimEnd() || "◜",
+      loadingGlyph: () => this.currentAgentSpinnerFrame(),
       markdown: markdownTheme,
       red: ansi.red,
       yellow: ansi.yellow,
@@ -524,30 +511,6 @@ export class ClankieFaceShell {
       reservedRows,
       terminalRows: this.tui.terminal.rows,
     });
-  }
-
-  // --- spinner ---
-
-  get spinner(): ResolvedAgentSpinner {
-    return this.agentSpinner;
-  }
-
-  get spinnerCycleRateMs(): number {
-    return this.agentSpinnerCycleRateMs;
-  }
-
-  setSpinner(selection: AgentSpinnerSelection | undefined): void {
-    // `resolveAgentSpinner(undefined)` applies the unicode-aware default.
-    this.agentSpinner = resolveAgentSpinner(selection, {
-      cycleDwellMs: this.agentSpinnerCycleRateMs,
-      unicode: this.theme.capabilities.unicode,
-    });
-    this.tui.requestRender();
-  }
-
-  setSpinnerCycleRateMs(rateMs: number): void {
-    this.agentSpinnerCycleRateMs = rateMs;
-    this.setSpinner(this.agentSpinner.name as AgentSpinnerSelection);
   }
 
   private currentAgentSpinnerFrame(): string {
@@ -1279,7 +1242,6 @@ export class ClankieFaceShell {
         "",
         `terminal ${width}x${this.tui.terminal.rows} · bands ${bands}`,
         `layout input=${this.layoutSettingsState.inputPlacement} status=${this.layoutSettingsState.statusPlacement} header=${this.headerVisibleState ? "on" : "off"}`,
-        `spinner ${this.agentSpinner.name} @ ${this.agentSpinnerCycleRateMs}ms`,
       ].join("\n"),
     );
   }

@@ -76,7 +76,7 @@ describe("Embodiment intents (ADR 0063)", () => {
   });
 
   it("rejects a start intent aimed at an unknown environment", () => {
-    expect(EmbodimentIntentSchema.safeParse({ ...startIntent, environmentId: "pokemmo" }).success).toBe(
+    expect(EmbodimentIntentSchema.safeParse({ ...startIntent, environmentId: "unknown-game" }).success).toBe(
       false,
     );
   });

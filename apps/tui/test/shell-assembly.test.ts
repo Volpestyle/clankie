@@ -1,7 +1,7 @@
 /**
  * Constructs the face shell without starting it (start() needs a TTY) and
- * asserts the basic wiring: setup flow idle, default layout, spinner resolved,
- * and the console command set feeding the typeahead/workbench.
+ * asserts the basic wiring: setup flow idle, default layout, and the console
+ * command set feeding the typeahead/workbench.
  */
 import { describe, expect, it, vi } from "vitest";
 import { buildConsoleCommands } from "../src/commands.ts";
@@ -18,7 +18,6 @@ describe("shell assembly", () => {
     });
     expect(shell.setupFlow.isWaitingForInput()).toBe(false);
     expect(shell.layoutSettings.inputPlacement).toBe("bottom");
-    expect(shell.spinner.frames.length).toBeGreaterThan(0);
   });
 
   it("builds a console command set with names and descriptions", () => {

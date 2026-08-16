@@ -5,17 +5,7 @@
  * `done /cmd command` transcript blocks, configurators run as guided SetupFlow
  * wizards.
  */
-import {
-  AGENT_SPINNER_CYCLE_NAME,
-  AGENT_SPINNER_NAMES,
-  AGENT_SPINNER_PRESET_NAMES,
-  normalizeAgentSpinnerSelection,
-} from "./face/agent-spinners.ts";
-import {
-  parseAgentSpinnerCycleRateMs,
-  parseInputPlacement,
-  parseStatusPlacement,
-} from "./shell/face-settings.ts";
+import { parseInputPlacement, parseStatusPlacement } from "./shell/face-settings.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 import { formatActivityObservation, type ActivityObservationClient } from "./activity-command.ts";
 import {
@@ -232,9 +222,8 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "layout",
       aliases: ["header", "banner"],
-      description: "Configure header, chat input, status bar, and spinner",
-      argumentHint:
-        "[status|input top|input bottom|status above|status below|header on|header off|spinner <name>|spinner rate <ms>]",
+      description: "Configure header, chat input, and status bar",
+      argumentHint: "[status|input top|input bottom|status above|status below|header on|header off]",
       takesArgument: true,
       run(argument, shell): void {
         runLayoutCommand(shell, argument);
@@ -373,12 +362,8 @@ function runLayoutCommand(shell: ClankieFaceShell, argument: string): void {
         `${ansi.bold(ansi.cyan("Layout"))}`,
         `${ansi.dim("input:")} ${ansi.bold(ansi.cyan(shell.layoutSettings.inputPlacement))}`,
         `${ansi.dim("status:")} ${ansi.bold(ansi.cyan(statusPlacement))}`,
-        `${ansi.dim("spinner:")} ${ansi.bold(ansi.cyan(shell.spinner.name))}`,
-        `${ansi.dim("spinner rate:")} ${ansi.bold(ansi.cyan(`${shell.spinnerCycleRateMs}ms/style`))}`,
         `${ansi.dim("header:")} ${shell.headerVisible ? ansi.green("on") : ansi.dim("off")}`,
-        ansi.dim(
-          "Usage: /layout [status|input top|bottom|status above|below|spinner <name|preset>|spinner rate <ms>|header on|off|toggle]",
-        ),
+        ansi.dim("Usage: /layout [status|input top|bottom|status above|below|header on|off|toggle]"),
       ].join("\n"),
       "success",
     );
@@ -424,36 +409,9 @@ function runLayoutCommand(shell: ClankieFaceShell, argument: string): void {
     return;
   }
 
-  if (words[0] === "spinner" && words[1] === "rate") {
-    const rate = parseAgentSpinnerCycleRateMs(words[2], shell.spinnerCycleRateMs);
-    if (rate === undefined) {
-      shell.insertCommandResult("/layout", "Usage: /layout spinner rate <ms|fast|normal|slow>", "error");
-      return;
-    }
-    shell.setSpinnerCycleRateMs(rate);
-    shell.insertCommandResult("/layout", `Spinner cycle rate: ${rate}ms/style.`, "success");
-    return;
-  }
-
-  if (words[0] === "spinner") {
-    const selection = normalizeAgentSpinnerSelection(words.slice(1).join(" "));
-    if (selection === undefined) {
-      const available = [AGENT_SPINNER_CYCLE_NAME, ...AGENT_SPINNER_PRESET_NAMES, ...AGENT_SPINNER_NAMES];
-      shell.insertCommandResult(
-        "/layout",
-        `Unknown spinner "${words.slice(1).join(" ")}". Available: ${available.join(", ")}`,
-        "error",
-      );
-      return;
-    }
-    shell.setSpinner(selection);
-    shell.insertCommandResult("/layout", `Spinner: ${shell.spinner.name}.`, "success");
-    return;
-  }
-
   shell.insertCommandResult(
     "/layout",
-    "Usage: /layout [status|input top|bottom|status above|below|spinner <name|preset>|spinner rate <ms>|header on|off|toggle]",
+    "Usage: /layout [status|input top|bottom|status above|below|header on|off|toggle]",
     "error",
   );
 }

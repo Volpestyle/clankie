@@ -1,3 +1,4 @@
+import { encodeReactionEmoji } from "@clankie/discord-presence-core";
 import {
   isDiscordPresenceActionAvailable,
   type DiscordPresenceSessionRecord,
@@ -7,8 +8,6 @@ import {
   type DiscordPresenceWrite,
   type DiscordPresenceWriteResult,
 } from "@clankie/protocol";
-import type { Readable } from "node:stream";
-import type { GoLiveMediaPublisher } from "./go-live-media.ts";
 
 const DISCORD_API_BASE = "https://discord.com/api/v10";
 
@@ -19,17 +18,6 @@ export interface DiscordUserRestOptions {
   /** Injectable for tests. */
   readonly fetch?: typeof globalThis.fetch;
   readonly resolveAttachment?: (artifactRef: string) => Promise<{ data: Buffer; contentType?: string }>;
-  /**
-   * Go Live media publisher (ADR 0024 VUH-841). Absent, `go_live_*` still fails
-   * closed — reporting a stream nobody can watch is worse than refusing.
-   */
-  readonly goLiveMedia?: GoLiveMediaPublisher;
-  /**
-   * Resolves the media to publish for a Go Live request. Kept separate from the
-   * publisher so the surface being streamed is a composition choice, not
-   * something this executor knows about.
-   */
-  readonly resolveGoLiveSource?: (input: { guildId: string; channelId: string }) => Readable;
   /** Injectable loopback fetch for the user-session control port. */
   readonly controlFetch?: typeof globalThis.fetch;
 }
@@ -46,8 +34,6 @@ export class DiscordUserPresenceRuntime {
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof globalThis.fetch;
   private readonly resolveAttachment: DiscordUserRestOptions["resolveAttachment"];
-  private readonly goLiveMedia: GoLiveMediaPublisher | undefined;
-  private readonly resolveGoLiveSource: DiscordUserRestOptions["resolveGoLiveSource"];
   private readonly controlFetch: typeof globalThis.fetch;
 
   public constructor(options: DiscordUserRestOptions) {
@@ -56,8 +42,6 @@ export class DiscordUserPresenceRuntime {
     this.baseUrl = options.baseUrl ?? DISCORD_API_BASE;
     this.fetchImpl = options.fetch ?? globalThis.fetch;
     this.resolveAttachment = options.resolveAttachment;
-    this.goLiveMedia = options.goLiveMedia;
-    this.resolveGoLiveSource = options.resolveGoLiveSource;
     this.controlFetch = options.controlFetch ?? globalThis.fetch;
   }
 
@@ -183,17 +167,6 @@ export class DiscordUserPresenceRuntime {
         // op 4 directly; routing it through REST would desynchronise the two.
         throw new Error("discord_presence_voice_via_media_session_only");
       case "go_live_start": {
-        if (this.goLiveMedia !== undefined && this.resolveGoLiveSource !== undefined) {
-          await this.goLiveMedia.start({
-            guildId: payload.guildId,
-            channelId: payload.channelId,
-            source: this.resolveGoLiveSource({
-              guildId: payload.guildId,
-              channelId: payload.channelId,
-            }),
-          });
-          return this.result(write, payload.channelId);
-        }
         await postUserSessionControl(
           "/go-live/start",
           {
@@ -208,10 +181,6 @@ export class DiscordUserPresenceRuntime {
         return this.result(write, payload.channelId);
       }
       case "go_live_stop": {
-        if (this.goLiveMedia !== undefined) {
-          await this.goLiveMedia.stop(payload.guildId);
-          return this.result(write);
-        }
         await postUserSessionControl("/go-live/stop", { guildId: payload.guildId }, this.controlFetch);
         return this.result(write);
       }
@@ -313,12 +282,4 @@ async function postUserSessionControl(
   }
 }
 
-/** Encode a reaction for the Discord REST path (unicode or name:id custom). */
-export function encodeReactionEmoji(emoji: string): string {
-  const trimmed = emoji.trim();
-  const mentioned = /^<a?:([a-zA-Z0-9_]{2,32}):(\d+)>$/u.exec(trimmed);
-  if (mentioned) return `${mentioned[1] ?? ""}:${mentioned[2] ?? ""}`;
-  if (/^[a-zA-Z0-9_]{2,32}:\d+$/u.test(trimmed)) return trimmed;
-  if (trimmed.includes(":")) throw new Error("discord_presence_invalid_emoji");
-  return encodeURIComponent(trimmed);
-}
+export { encodeReactionEmoji } from "@clankie/discord-presence-core";

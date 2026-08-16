@@ -5,11 +5,5 @@
   "semi": true,
   "singleQuote": false,
   "trailingComma": "all",
-  "ignorePatterns": [
-    "artifacts/**",
-    ".data/**",
-    "**/.eve/**",
-    "packages/model-registry/data/**",
-    "scenarios/minecraft/collect-craft-place/v1/scenario.yml"
-  ]
+  "ignorePatterns": ["artifacts/**", ".data/**", "**/.eve/**", "packages/model-registry/data/**"]
 }

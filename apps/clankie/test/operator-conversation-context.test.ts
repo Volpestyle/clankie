@@ -11,7 +11,7 @@ afterEach(async () => {
 });
 
 describe("operator conversation context", () => {
-  it("streams and persists the latest context occupancy", async () => {
+  it("streams context, persists it, and fences stale revisions", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-conversation-context-"));
     roots.push(root);
     const store = new ConversationStore(root, async (_conversationId, _message, publish) => {
@@ -33,6 +33,23 @@ describe("operator conversation context", () => {
     expect(sent.op).toBe("send");
     if (sent.op !== "send" || sent.result.status !== "accepted") throw new Error("turn was not accepted");
     await store.awaitRun(sent.result.runId);
+    const stale = await store.serve({
+      op: "send",
+      schemaVersion: 1,
+      turn: {
+        schemaVersion: 1,
+        kind: "message",
+        conversationId: "global-default",
+        surfaceClientId: "test",
+        expectedRevision: 0,
+        message: "stale",
+      },
+    });
+    expect(stale.op === "send" ? stale.result : undefined).toMatchObject({
+      status: "revision_conflict",
+      expectedRevision: 0,
+      currentRevision: 1,
+    });
     await store.close();
 
     const restarted = new ConversationStore(root, async () => undefined);

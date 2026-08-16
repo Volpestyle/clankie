@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { createDefaultCredentialStore, type CredentialStore } from "./credential-store.ts";
+import type { CredentialStore } from "./credential-store.ts";
+import { ensureStoredBearer, mintStoredBearer, resolveStoredBearer } from "./stored-bearer.ts";
 
 /**
  * Local bearer for the activity plane's frame producer endpoint (ADR 0047).
@@ -11,7 +12,6 @@ import { createDefaultCredentialStore, type CredentialStore } from "./credential
  */
 export const ACTIVITY_PRODUCER_CREDENTIAL_PROVIDER_ID = "clankie_activity_producer";
 const ACTIVITY_PRODUCER_TOKEN_PREFIX = "clankie_activity_producer_";
-const ACTIVITY_PRODUCER_TOKEN_BYTES = 32;
 const ACTIVITY_PRODUCER_TOKEN_PATTERN = /^clankie_activity_producer_[A-Za-z0-9_-]{43}$/u;
 
 /** Environment names that must never carry this token. */
@@ -44,13 +44,7 @@ interface MintActivityProducerCredentialOptions extends ActivityProducerCredenti
 
 /** Mints the local bearer shared by the activity server and the runner sink. */
 export function mintActivityProducerToken(random: (size: number) => Buffer = randomBytes): string {
-  const entropy = random(ACTIVITY_PRODUCER_TOKEN_BYTES);
-  if (entropy.length !== ACTIVITY_PRODUCER_TOKEN_BYTES) {
-    throw new Error(
-      `Activity producer credential entropy source must return ${ACTIVITY_PRODUCER_TOKEN_BYTES} bytes`,
-    );
-  }
-  return `${ACTIVITY_PRODUCER_TOKEN_PREFIX}${entropy.toString("base64url")}`;
+  return mintStoredBearer(ACTIVITY_PRODUCER_TOKEN_PREFIX, "activity producer", random);
 }
 
 /**
@@ -71,16 +65,13 @@ export async function resolveActivityProducerCredential(
   options: ActivityProducerCredentialOptions = {},
 ): Promise<string | undefined> {
   assertNoEnvironmentActivityProducerToken(options.env ?? process.env);
-  const store = options.store ?? defaultStore(options.env);
-  const credential = await store.get(ACTIVITY_PRODUCER_CREDENTIAL_PROVIDER_ID);
-  if (credential === undefined) return undefined;
-  if (credential.type !== "api" || !ACTIVITY_PRODUCER_TOKEN_PATTERN.test(credential.key)) {
-    throw new ActivityProducerCredentialError(
-      "invalid_stored_credential",
-      "The stored activity producer credential is invalid; refusing to use it",
-    );
-  }
-  return credential.key;
+  return resolveStoredBearer(
+    options,
+    ACTIVITY_PRODUCER_CREDENTIAL_PROVIDER_ID,
+    ACTIVITY_PRODUCER_TOKEN_PATTERN,
+    "activity producer",
+    ActivityProducerCredentialError,
+  );
 }
 
 /**
@@ -91,30 +82,12 @@ export async function resolveActivityProducerCredential(
 export async function ensureActivityProducerCredential(
   options: MintActivityProducerCredentialOptions = {},
 ): Promise<string> {
-  const existing = await resolveActivityProducerCredential(options);
-  if (existing !== undefined) return existing;
-  const store = options.store ?? defaultStore(options.env);
-  try {
-    await store.set(ACTIVITY_PRODUCER_CREDENTIAL_PROVIDER_ID, {
-      type: "api",
-      key: mintActivityProducerToken(options.randomBytes),
-    });
-  } catch {
-    throw new ActivityProducerCredentialError(
-      "store_unavailable",
-      "Activity producer credential bootstrap could not update the credential store",
-    );
-  }
-  const persisted = await resolveActivityProducerCredential({ ...options, store });
-  if (persisted === undefined) {
-    throw new ActivityProducerCredentialError(
-      "missing",
-      "Activity producer credential bootstrap did not persist a token",
-    );
-  }
-  return persisted;
-}
-
-function defaultStore(env: NodeJS.ProcessEnv | undefined): CredentialStore {
-  return createDefaultCredentialStore(env === undefined ? {} : { env });
+  return ensureStoredBearer(
+    options,
+    ACTIVITY_PRODUCER_CREDENTIAL_PROVIDER_ID,
+    () => mintActivityProducerToken(options.randomBytes),
+    resolveActivityProducerCredential,
+    "activity producer",
+    ActivityProducerCredentialError,
+  );
 }

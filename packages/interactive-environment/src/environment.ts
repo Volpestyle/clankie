@@ -23,7 +23,7 @@ export const EnvironmentSessionPhaseSchema = z.enum([
 ]);
 export type EnvironmentSessionPhase = z.infer<typeof EnvironmentSessionPhaseSchema>;
 
-/** Frozen v1 shape. It is Minecraft-shaped and remains readable only through the v2 migration seam. */
+/** Frozen v1 shape retained only through the v2 migration seam. */
 export const EnvironmentResourceBoundsV1Schema = z
   .object({
     serverId: z.string().min(1),
@@ -38,44 +38,11 @@ export const EnvironmentResourceBoundsV1Schema = z
   .strict();
 export type EnvironmentResourceBoundsV1 = z.infer<typeof EnvironmentResourceBoundsV1Schema>;
 
-export const MinecraftResourceBoundsSchema = EnvironmentResourceBoundsV1Schema.extend({
-  profile: z.literal("minecraft_java"),
-}).strict();
-export type MinecraftResourceBounds = z.infer<typeof MinecraftResourceBoundsSchema>;
-
 export const LegacyEnvironmentResourceBoundsSchema = EnvironmentResourceBoundsV1Schema.extend({
   profile: z.literal("legacy_v1"),
   legacyEnvironmentKind: z.string().min(1),
 }).strict();
 export type LegacyEnvironmentResourceBounds = z.infer<typeof LegacyEnvironmentResourceBoundsSchema>;
-
-export const PokeMMOSimulatorCapabilitySchema = z.enum([
-  "pokemmo.simulator.observe",
-  "pokemmo.simulator.navigate",
-  "pokemmo.simulator.interact",
-  "pokemmo.simulator.menu",
-  "pokemmo.simulator.battle",
-  "pokemmo.simulator.party",
-  "pokemmo.simulator.inventory",
-  "pokemmo.simulator.wait",
-]);
-export type PokeMMOSimulatorCapability = z.infer<typeof PokeMMOSimulatorCapabilitySchema>;
-
-export const PokeMMOSimulatorResourceBoundsSchema = z
-  .object({
-    profile: z.literal("pokemmo_simulator"),
-    simulatorId: z.string().min(1).max(128),
-    worldId: WorldIdSchema,
-    characterId: CharacterIdSchema,
-    allowedMapIds: z.array(z.string().min(1).max(128)).min(1).max(64),
-    maxNavigationStepsPerAction: z.number().int().positive().max(1_024),
-    maxMenuChoicesPerAction: z.number().int().positive().max(64),
-    maxBattleTurnsPerAction: z.number().int().positive().max(64),
-    maxActionDurationMs: z.number().int().positive(),
-    capabilities: z.array(PokeMMOSimulatorCapabilitySchema).min(1).max(8),
-  })
-  .strict();
-export type PokeMMOSimulatorResourceBounds = z.infer<typeof PokeMMOSimulatorResourceBoundsSchema>;
 
 export const GbaEmulatorCapabilitySchema = z.enum([
   "emulator.gba.observe",
@@ -104,9 +71,7 @@ export const GbaEmulatorResourceBoundsSchema = z
 export type GbaEmulatorResourceBounds = z.infer<typeof GbaEmulatorResourceBoundsSchema>;
 
 export const EnvironmentResourceBoundsV2Schema = z.discriminatedUnion("profile", [
-  MinecraftResourceBoundsSchema,
   LegacyEnvironmentResourceBoundsSchema,
-  PokeMMOSimulatorResourceBoundsSchema,
   GbaEmulatorResourceBoundsSchema,
 ]);
 export type EnvironmentResourceBoundsV2 = z.infer<typeof EnvironmentResourceBoundsV2Schema>;
@@ -200,18 +165,14 @@ export type EnvironmentSessionSpec = z.infer<typeof EnvironmentSessionSpecSchema
 export function normalizeEnvironmentSessionSpec(input: unknown): EnvironmentSessionSpecV2 {
   const parsed = EnvironmentSessionSpecSchema.parse(input);
   if (parsed.schemaVersion === ENVIRONMENT_SESSION_SCHEMA_VERSION) return parsed;
-  const profile = parsed.environmentKind === "minecraft_java" ? "minecraft_java" : "legacy_v1";
   return EnvironmentSessionSpecV2Schema.parse({
     ...parsed,
     schemaVersion: ENVIRONMENT_SESSION_SCHEMA_VERSION,
-    resourceBounds:
-      profile === "minecraft_java"
-        ? { profile, ...parsed.resourceBounds }
-        : {
-            profile,
-            legacyEnvironmentKind: parsed.environmentKind,
-            ...parsed.resourceBounds,
-          },
+    resourceBounds: {
+      profile: "legacy_v1",
+      legacyEnvironmentKind: parsed.environmentKind,
+      ...parsed.resourceBounds,
+    },
   });
 }
 
@@ -460,37 +421,6 @@ export const EnvironmentSemanticEventTypeSchema = z.enum([
   "environment.damage.taken",
   "environment.player.died",
   "environment.attention.raised",
-  "minecraft.session.started",
-  "minecraft.session.stopped",
-  "minecraft.session.disconnected",
-  "minecraft.goal.changed",
-  "minecraft.goal.superseded",
-  "minecraft.goal.verified",
-  "minecraft.goal.failed",
-  "minecraft.action.requested",
-  "minecraft.action.started",
-  "minecraft.action.progressed",
-  "minecraft.action.completed",
-  "minecraft.action.cancelled",
-  "minecraft.action.failed",
-  "minecraft.presence.changed",
-  "minecraft.inventory.changed",
-  "minecraft.damage.taken",
-  "minecraft.player.died",
-  "minecraft.attention.raised",
-  "pokemmo.session.started",
-  "pokemmo.session.stopped",
-  "pokemmo.session.disconnected",
-  "pokemmo.goal.changed",
-  "pokemmo.goal.superseded",
-  "pokemmo.goal.verified",
-  "pokemmo.goal.failed",
-  "pokemmo.action.requested",
-  "pokemmo.action.started",
-  "pokemmo.action.completed",
-  "pokemmo.action.cancelled",
-  "pokemmo.action.failed",
-  "pokemmo.attention.raised",
   "discord.presence.session.phase_changed",
   "captain.lane.started",
   "captain.lane.parked",

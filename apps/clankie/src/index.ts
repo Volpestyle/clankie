@@ -40,12 +40,6 @@ import { createGbaPlayExecution } from "./play-execution.ts";
 import { PlayHost, type EmbodimentClientPort, type PlayExecution } from "./play-host.ts";
 import { createCredentialBackedOperatorAuthenticator } from "./operator-auth.ts";
 
-export {
-  createRunnerEnvironmentLifecycle,
-  createRunnerGbaEnvironmentLifecycle,
-  createRunnerMinecraftEnvironmentLifecycle,
-} from "./environment-lifecycle.ts";
-
 const logger = createLogger({ service: "clankie", version: "0.2.0" });
 
 /**

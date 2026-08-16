@@ -21,9 +21,7 @@
     "gba:free-play-live": "pnpm --filter @clankie/clankie free-play-live",
     "gba:mcp-probe": "pnpm --filter @clankie/gba-mcp probe",
     "discord:readiness": "pnpm --filter @clankie/discord-bridge readiness",
-    "discord:voice-readiness": "pnpm --filter @clankie/discord-bridge voice-readiness",
-    "minecraft:readiness": "pnpm --filter @clankie/minecraft-mineflayer readiness",
-    "minecraft:paper:bootstrap": "pnpm --filter @clankie/minecraft-mineflayer paper:bootstrap"
+    "discord:voice-readiness": "pnpm --filter @clankie/discord-bridge voice-readiness"
   },
   "devDependencies": {
     "@types/node": "24.12.4",

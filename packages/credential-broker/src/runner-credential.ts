@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { createDefaultCredentialStore, type CredentialStore } from "./credential-store.ts";
+import type { CredentialStore } from "./credential-store.ts";
+import { ensureStoredBearer, mintStoredBearer, resolveStoredBearer } from "./stored-bearer.ts";
 
 /**
  * The local bearer authenticating runner-scoped routes on the service.
@@ -10,7 +11,6 @@ import { createDefaultCredentialStore, type CredentialStore } from "./credential
  */
 export const RUNNER_CREDENTIAL_PROVIDER_ID = "clankie_runner";
 const RUNNER_TOKEN_PREFIX = "clankie_runner_";
-const RUNNER_TOKEN_BYTES = 32;
 const RUNNER_TOKEN_PATTERN = /^clankie_runner_[A-Za-z0-9_-]{43}$/u;
 
 export type RunnerCredentialErrorCode = "invalid_stored_credential" | "missing" | "store_unavailable";
@@ -36,27 +36,20 @@ interface MintRunnerCredentialOptions extends RunnerCredentialOptions {
 
 /** Mints the local bearer for runner-scoped routes on the service. */
 export function mintRunnerToken(random: (size: number) => Buffer = randomBytes): string {
-  const entropy = random(RUNNER_TOKEN_BYTES);
-  if (entropy.length !== RUNNER_TOKEN_BYTES) {
-    throw new Error(`Runner credential entropy source must return ${RUNNER_TOKEN_BYTES} bytes`);
-  }
-  return `${RUNNER_TOKEN_PREFIX}${entropy.toString("base64url")}`;
+  return mintStoredBearer(RUNNER_TOKEN_PREFIX, "runner", random);
 }
 
 /** Reads the broker-owned runner bearer without exposing it through environment configuration. */
 export async function resolveRunnerCredential(
   options: RunnerCredentialOptions = {},
 ): Promise<string | undefined> {
-  const store = options.store ?? defaultStore(options.env);
-  const credential = await store.get(RUNNER_CREDENTIAL_PROVIDER_ID);
-  if (credential === undefined) return undefined;
-  if (credential.type !== "api" || !RUNNER_TOKEN_PATTERN.test(credential.key)) {
-    throw new RunnerCredentialError(
-      "invalid_stored_credential",
-      "The stored runner credential is invalid; refusing to use it",
-    );
-  }
-  return credential.key;
+  return resolveStoredBearer(
+    options,
+    RUNNER_CREDENTIAL_PROVIDER_ID,
+    RUNNER_TOKEN_PATTERN,
+    "runner",
+    RunnerCredentialError,
+  );
 }
 
 /**
@@ -64,27 +57,12 @@ export async function resolveRunnerCredential(
  * resolves it otherwise.
  */
 export async function ensureRunnerCredential(options: MintRunnerCredentialOptions = {}): Promise<string> {
-  const existing = await resolveRunnerCredential(options);
-  if (existing !== undefined) return existing;
-  const store = options.store ?? defaultStore(options.env);
-  try {
-    await store.set(RUNNER_CREDENTIAL_PROVIDER_ID, {
-      type: "api",
-      key: mintRunnerToken(options.randomBytes),
-    });
-  } catch {
-    throw new RunnerCredentialError(
-      "store_unavailable",
-      "Runner credential bootstrap could not update the credential store",
-    );
-  }
-  const persisted = await resolveRunnerCredential({ ...options, store });
-  if (persisted === undefined) {
-    throw new RunnerCredentialError("missing", "Runner credential bootstrap did not persist a token");
-  }
-  return persisted;
-}
-
-function defaultStore(env: NodeJS.ProcessEnv | undefined): CredentialStore {
-  return createDefaultCredentialStore(env === undefined ? {} : { env });
+  return ensureStoredBearer(
+    options,
+    RUNNER_CREDENTIAL_PROVIDER_ID,
+    () => mintRunnerToken(options.randomBytes),
+    resolveRunnerCredential,
+    "runner",
+    RunnerCredentialError,
+  );
 }

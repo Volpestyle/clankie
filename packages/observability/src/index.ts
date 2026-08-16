@@ -1,4 +1,3 @@
-import { SpanStatusCode, trace, type Attributes } from "@opentelemetry/api";
 import pino, { type DestinationStream, type Logger, type LoggerOptions } from "pino";
 
 const defaultRedactPaths = [
@@ -46,48 +45,6 @@ export function createLogger(
       ...options,
     },
     destination,
-  );
-}
-
-export function childLogger(logger: Logger, context: Omit<LoggerContext, "service">): Logger {
-  return logger.child(context);
-}
-
-export async function withSpan<T>(
-  name: string,
-  attributes: Attributes,
-  operation: () => Promise<T>,
-): Promise<T> {
-  const tracer = trace.getTracer("@clankie/observability");
-  return tracer.startActiveSpan(name, { attributes }, async (span) => {
-    try {
-      const value = await operation();
-      span.setStatus({ code: SpanStatusCode.OK });
-      return value;
-    } catch (error) {
-      span.recordException(error instanceof Error ? error : new Error(String(error)));
-      span.setStatus({
-        code: SpanStatusCode.ERROR,
-        message: error instanceof Error ? error.message : String(error),
-      });
-      throw error;
-    } finally {
-      span.end();
-    }
-  });
-}
-
-export interface DiagnosticContext {
-  missionId?: string;
-  taskId?: string;
-  workerRunId?: string;
-  profileHash?: string;
-  eventId?: string;
-}
-
-export function diagnosticFields(context: DiagnosticContext): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(context).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
   );
 }
 

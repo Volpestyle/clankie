@@ -22,38 +22,11 @@ export function resolveClankieCommandRows(options: ClankieCommandRowsOptions): n
   return clampNumber(options.terminalRows - options.reservedRows, 0, options.maxRows);
 }
 
-export type ClankieTranscriptMouseTargetOptions = {
-  readonly bannerRows: number;
-  readonly transcriptRows: number;
-  readonly belowRows: number;
-  readonly terminalRows: number;
-  readonly mouseRow: number;
-  readonly mouseCol: number;
-};
-
 export type ClankieTranscriptMouseTarget = {
   readonly row: number;
   readonly col: number;
   readonly inside: boolean;
 };
-
-// Map an absolute 1-based terminal cell to a transcript row/col for the default
-// bottom-input stack. Returns a clamped row plus whether the cell actually fell
-// inside the transcript band.
-export function resolveClankieTranscriptMouseTarget(
-  options: ClankieTranscriptMouseTargetOptions,
-): ClankieTranscriptMouseTarget {
-  return resolveClankieTranscriptMouseTargetFromBands({
-    bands: [
-      { band: "banner", rows: options.bannerRows },
-      { band: "transcript", rows: options.transcriptRows },
-      { band: "status", rows: options.belowRows },
-    ],
-    mouseCol: options.mouseCol,
-    mouseRow: options.mouseRow,
-    terminalRows: options.terminalRows,
-  });
-}
 
 export type ClankieTranscriptMouseTargetFromBandsOptions = {
   readonly bands: readonly ClankieFaceBandRows[];
@@ -82,42 +55,11 @@ export type ClankieFaceBandRows = {
   readonly rows: number;
 };
 
-export type ClankieChromeMouseTargetOptions = {
-  readonly bannerRows: number;
-  readonly transcriptRows: number;
-  readonly statusRows: number;
-  readonly typeaheadRows: number;
-  readonly editorRows: number;
-  readonly terminalRows: number;
-  readonly mouseRow: number;
-  readonly mouseCol: number;
-};
-
 export type ClankieChromeMouseTarget = {
   readonly band: ClankieChromeBand;
   readonly row: number;
   readonly col: number;
 };
-
-// Map an absolute 1-based terminal cell to a selectable chrome band in the
-// default bottom-input stack. Returns null when the cell falls in the transcript
-// band (which owns its own selection), in the editor, or outside the frame.
-export function resolveClankieChromeMouseTarget(
-  options: ClankieChromeMouseTargetOptions,
-): ClankieChromeMouseTarget | null {
-  return resolveClankieChromeMouseTargetFromBands({
-    bands: [
-      { band: "banner", rows: options.bannerRows },
-      { band: "transcript", rows: options.transcriptRows },
-      { band: "status", rows: options.statusRows },
-      { band: "typeahead", rows: options.typeaheadRows },
-      { band: "editor", rows: options.editorRows },
-    ],
-    mouseCol: options.mouseCol,
-    mouseRow: options.mouseRow,
-    terminalRows: options.terminalRows,
-  });
-}
 
 export type ClankieChromeMouseTargetFromBandsOptions = {
   readonly bands: readonly ClankieFaceBandRows[];

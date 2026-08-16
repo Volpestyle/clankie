@@ -20,17 +20,7 @@ import {
   type ServiceRegistryOptions,
   type ServiceTarget,
 } from "./services.ts";
-import { clankieStateDirectory, SERVICE_ORDER } from "./service-supervisor.ts";
-import type { CaptainSessionClient, CaptainStreamEvent } from "../src/session/captain-stream.ts";
-import {
-  reportHerdrAgent,
-  reportHerdrMetadata,
-  type HerdrCommandRunner,
-} from "../src/session/herdr-report.ts";
-import { CaptainSessionCursorStore } from "../src/session/session-cursor.ts";
-import { emptyTraceCursor, TraceCursorStore } from "../src/session/trace-cursor.ts";
-import { formatTraceLines, renderTraceEvent, type TraceRenderMode } from "../src/session/trace-renderer.ts";
-import { parseTraceLane, type TraceCursor, type TraceLane } from "../src/session/trace-types.ts";
+import { SERVICE_ORDER } from "./service-supervisor.ts";
 import {
   DEFAULT_CONTROL_PLANE_URL,
   pairingFailureMessage,
@@ -48,30 +38,15 @@ import {
   type DeviceListItem,
 } from "./devices.ts";
 
-const HEADLESS_CURSOR_NAME = "captain-headless-session.json";
-const TRACE_CURSOR_NAME = "captain-trace-session.json";
-/**
- * Legacy state record carrying the captain build generation the trace cursor is
- * versioned by. The pi service has no build generation, so nothing writes this
- * anymore; a live trace transport supplies it through tests or future tooling.
- */
-const CAPTAIN_SERVICE_STATE_NAME = "captain-eve-service.json";
-/** Default typed lane for the headless captain session. */
-const DEFAULT_TRACE_LANE: TraceLane = "tui";
-const TRACE_IDLE_POLL_MS = 500;
 const RESTART_TURN_POLL_MS = 100;
 const RESTART_AFTER_TURN_FLAG = "--after-operator-turn";
 
 type Writable = { write(chunk: string): unknown };
 
 export interface HeadlessCaptainCommandOptions {
-  /** Trace transport seam. The clankie service exposes no session stream yet. */
-  readonly clientFactory?: (host: string) => CaptainSessionClient;
   readonly env?: NodeJS.ProcessEnv;
   readonly fetchImpl?: typeof fetch;
   readonly host?: string;
-  readonly herdrRunCommand?: HerdrCommandRunner;
-  readonly maxTraceEvents?: number;
   readonly operatorCredentialStore?: CredentialStore;
   /** Test seam for the brokered captain bearer the launcher injects. */
   readonly captainCredentialStore?: CredentialStore;
@@ -91,30 +66,6 @@ export interface HeadlessCaptainCommandOptions {
   readonly cliEntryPath?: string;
   readonly stderr?: Writable;
   readonly stdout?: Writable;
-  /** Test hook: stop the long-lived trace loop after the current stream ends. */
-  readonly traceOnce?: boolean;
-}
-
-export function headlessCaptainCursorPath(env: NodeJS.ProcessEnv = process.env): string {
-  return join(clankieStateDirectory(env), HEADLESS_CURSOR_NAME);
-}
-
-export function traceCaptainCursorPath(env: NodeJS.ProcessEnv = process.env): string {
-  return join(clankieStateDirectory(env), TRACE_CURSOR_NAME);
-}
-
-/** Reads the legacy captain service record for its trace-cursor generation. */
-function readTraceGeneration(env: NodeJS.ProcessEnv): string | undefined {
-  try {
-    const record = JSON.parse(
-      readFileSync(join(clankieStateDirectory(env), CAPTAIN_SERVICE_STATE_NAME), "utf8"),
-    ) as { generation?: unknown };
-    return typeof record.generation === "string" && /^[a-f0-9]{64}$/u.test(record.generation)
-      ? record.generation
-      : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function outputJson(stream: Writable, value: unknown): void {
@@ -129,8 +80,6 @@ function commandHelp(): string {
     "  health | status          Probe the clankie service and every local service",
     "  restart [service]        Restart launcher-owned services in dependency order",
     "  down [service]           Stop launcher-owned services in reverse order",
-    "  trace [--json] [--lane LANE] [--timeout SEC]",
-    "                           Live render-only reasoning/tool stream (stays across turns)",
     "  pair [--json] [--timeout SEC]",
     "                           Show a one-time QR + code to pair a device",
     "  devices [--json]         List paired devices",
@@ -154,7 +103,6 @@ export function isHeadlessCaptainCommand(command: string | undefined): boolean {
     command === "status" ||
     command === "restart" ||
     command === "down" ||
-    command === "trace" ||
     command === "pair" ||
     command === "devices" ||
     command === "operator-credential" ||
@@ -403,261 +351,6 @@ async function runDown(args: readonly string[], options: HeadlessCaptainCommandO
     services: outcomes,
   });
   return ok ? 0 : 1;
-}
-
-interface TraceCliOptions {
-  readonly json: boolean;
-  readonly lane: TraceLane;
-  readonly timeoutMs: number | undefined;
-}
-
-function parseTraceArgs(args: readonly string[]): TraceCliOptions {
-  let json = false;
-  let lane: TraceLane = DEFAULT_TRACE_LANE;
-  let timeoutMs: number | undefined;
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-    if (arg === "--json") {
-      json = true;
-      continue;
-    }
-    if (arg === "--lane") {
-      const value = args[index + 1];
-      if (value === undefined) throw new Error("Usage: clankie trace [--json] [--lane LANE] [--timeout SEC]");
-      lane = parseTraceLane(value);
-      index += 1;
-      continue;
-    }
-    if (arg === "--timeout") {
-      const value = args[index + 1];
-      if (value === undefined) throw new Error("Usage: clankie trace [--json] [--lane LANE] [--timeout SEC]");
-      const seconds = Number(value);
-      if (!Number.isFinite(seconds) || seconds <= 0) throw new Error("Timeout must be a positive number.");
-      timeoutMs = seconds * 1_000;
-      index += 1;
-      continue;
-    }
-    throw new Error("Usage: clankie trace [--json] [--lane LANE] [--timeout SEC]");
-  }
-  return { json, lane, timeoutMs };
-}
-
-function boundaryState(event: CaptainStreamEvent): "completed" | "failed" | "waiting" | undefined {
-  if (event.type === "session.completed") return "completed";
-  if (event.type === "session.failed") return "failed";
-  if (event.type === "session.waiting") return "waiting";
-  return undefined;
-}
-
-/**
- * Consume one captain session event stream without exiting on turn boundaries.
- * Advances only the identity-only trace cursor; never writes event payloads.
- * Returns the updated cursor and how many events were observed.
- */
-export async function processTraceStream(input: {
-  readonly events: AsyncIterable<CaptainStreamEvent>;
-  readonly cursor: TraceCursor;
-  readonly mode: TraceRenderMode;
-  readonly write: (line: string) => void;
-  readonly onCursor?: (cursor: TraceCursor) => Promise<void>;
-  readonly maxEvents?: number;
-  readonly signal?: AbortSignal;
-}): Promise<{ cursor: TraceCursor; eventsSeen: number; hitBoundary: boolean }> {
-  let cursor = input.cursor;
-  let eventsSeen = 0;
-  let hitBoundary = false;
-  for await (const event of input.events) {
-    if (input.signal?.aborted) break;
-    eventsSeen += 1;
-    const nextIndex = cursor.streamIndex + 1;
-    const boundary = boundaryState(event);
-    if (boundary !== undefined) hitBoundary = true;
-    // Stay subscribed across turn settle: active reflects turn state only.
-    cursor = {
-      version: 1,
-      generation: cursor.generation,
-      streamIndex: nextIndex,
-      lane: cursor.lane,
-      active: boundary === undefined,
-      ...(cursor.sessionId === undefined ? {} : { sessionId: cursor.sessionId }),
-    };
-    const lines = formatTraceLines(
-      renderTraceEvent({
-        lane: cursor.lane,
-        event,
-        ...(cursor.sessionId === undefined ? {} : { sessionId: cursor.sessionId }),
-        streamIndex: nextIndex,
-      }),
-      input.mode,
-    );
-    for (const line of lines) input.write(`${line}\n`);
-    if (input.onCursor !== undefined) await input.onCursor(cursor);
-    // A boundary settles the turn but never ends the trace subscription.
-    if (input.maxEvents !== undefined && eventsSeen >= input.maxEvents) break;
-  }
-  return { cursor, eventsSeen, hitBoundary };
-}
-
-async function resolveTraceSession(input: {
-  readonly env: NodeJS.ProcessEnv;
-  readonly generation: string;
-  readonly lane: TraceLane;
-  readonly store: TraceCursorStore;
-}): Promise<TraceCursor> {
-  const stored = await input.store.read();
-  if (stored !== undefined && stored.generation === input.generation && stored.sessionId !== undefined) {
-    return { ...stored, lane: input.lane };
-  }
-  // Adopt the active headless session identity (session id only — no payloads).
-  const headless = await new CaptainSessionCursorStore(headlessCaptainCursorPath(input.env)).read();
-  if (
-    headless?.sessionId !== undefined &&
-    (headless.version !== 2 || headless.generation === input.generation)
-  ) {
-    return {
-      version: 1,
-      generation: input.generation,
-      sessionId: headless.sessionId,
-      streamIndex: stored?.sessionId === headless.sessionId ? (stored.streamIndex ?? 0) : 0,
-      lane: input.lane,
-      active: headless.active,
-    };
-  }
-  if (stored !== undefined && stored.generation === input.generation) {
-    return { ...stored, lane: input.lane };
-  }
-  return emptyTraceCursor(input.generation, input.lane);
-}
-
-function unavailableTraceClient(): CaptainSessionClient {
-  return {
-    session: () => ({
-      // eslint-disable-next-line require-yield
-      stream: async function* (): AsyncIterable<CaptainStreamEvent> {
-        throw new Error(
-          "The clankie service does not expose a captain session stream yet; `clankie trace` has no live transport.",
-        );
-      },
-    }),
-  };
-}
-
-async function runTrace(args: readonly string[], options: HeadlessCaptainCommandOptions): Promise<number> {
-  const cli = parseTraceArgs(args);
-  const env = options.env ?? process.env;
-  const host = commandHost(options);
-  const stdout = options.stdout ?? process.stdout;
-  const mode: TraceRenderMode = cli.json ? "json" : "human";
-  const delay = options.sleepImpl ?? sleep;
-  const store = new TraceCursorStore(traceCaptainCursorPath(env));
-
-  const generation = readTraceGeneration(env);
-  if (generation === undefined) {
-    throw new Error(
-      "No captain service record with a build generation exists; live session tracing is unavailable.",
-    );
-  }
-  const client = (options.clientFactory ?? unavailableTraceClient)(host);
-
-  let cursor = await resolveTraceSession({ env, generation, lane: cli.lane, store });
-  await store.write(cursor);
-
-  const herdrOpts = {
-    env,
-    ...(options.herdrRunCommand === undefined ? {} : { runCommand: options.herdrRunCommand }),
-  };
-  await reportHerdrMetadata({
-    ...herdrOpts,
-    title: "clankie trace",
-    token: `lane=${cursor.lane}`,
-    agent: "clankie-trace",
-  });
-  await reportHerdrAgent("working", {
-    ...herdrOpts,
-    message: "tracing Clankie session stream",
-  });
-
-  const controller = new AbortController();
-  const timer =
-    cli.timeoutMs === undefined
-      ? undefined
-      : setTimeout(() => {
-          controller.abort();
-        }, cli.timeoutMs);
-
-  let totalEvents = 0;
-  try {
-    while (!controller.signal.aborted) {
-      if (cursor.sessionId === undefined) {
-        cursor = await resolveTraceSession({ env, generation, lane: cli.lane, store });
-        if (cursor.sessionId === undefined) {
-          if (options.traceOnce === true) break;
-          await delay(TRACE_IDLE_POLL_MS);
-          continue;
-        }
-        await store.write(cursor);
-      }
-
-      const sessionState = {
-        streamIndex: cursor.streamIndex,
-        sessionId: cursor.sessionId,
-      };
-      try {
-        const result = await processTraceStream({
-          events: client.session(sessionState).stream({
-            startIndex: cursor.streamIndex,
-            signal: controller.signal,
-          }),
-          cursor,
-          mode,
-          write: (line) => {
-            stdout.write(line);
-          },
-          onCursor: async (next) => {
-            cursor = next;
-            await store.write(next);
-          },
-          ...(options.maxTraceEvents === undefined
-            ? {}
-            : { maxEvents: Math.max(0, options.maxTraceEvents - totalEvents) }),
-          signal: controller.signal,
-        });
-        cursor = result.cursor;
-        totalEvents += result.eventsSeen;
-        await store.write(cursor);
-        if (options.maxTraceEvents !== undefined && totalEvents >= options.maxTraceEvents) break;
-        if (options.traceOnce === true) break;
-        if (controller.signal.aborted) break;
-        // Stream ended: reconnect with identity-only cursor (no payload on disk).
-        await delay(TRACE_IDLE_POLL_MS);
-        // Re-adopt the headless session if a new turn started under a new session id.
-        const refreshed = await resolveTraceSession({ env, generation, lane: cli.lane, store });
-        if (refreshed.sessionId !== cursor.sessionId) {
-          cursor = refreshed;
-          await store.write(cursor);
-        }
-      } catch (error) {
-        if (controller.signal.aborted) break;
-        throw error;
-      }
-    }
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-    await reportHerdrAgent("idle", {
-      ...herdrOpts,
-      message: "trace stopped",
-    }).catch(() => undefined);
-  }
-
-  if (controller.signal.aborted && cli.timeoutMs !== undefined) {
-    outputJson(options.stderr ?? process.stderr, {
-      ok: false,
-      status: "timeout",
-      ...(cursor.sessionId === undefined ? {} : { sessionId: cursor.sessionId }),
-    });
-    return 124;
-  }
-  return 0;
 }
 
 interface PairCliOptions {
@@ -924,7 +617,6 @@ export async function runHeadlessCaptainCommand(
     if (command === "health" || command === "status") return await runInspection(options);
     if (command === "restart") return await runRestart(args.slice(1), options);
     if (command === "down") return await runDown(args.slice(1), options);
-    if (command === "trace") return await runTrace(args.slice(1), options);
     if (command === "pair") return await runPair(args.slice(1), options);
     if (command === "devices") return await runDevices(args.slice(1), options);
     if (command === "operator-credential") {

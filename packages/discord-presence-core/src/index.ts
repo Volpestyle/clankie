@@ -180,3 +180,23 @@ export {
   type DiscordBridgeReceipt,
   type DiscordBridgeReceiptStoreOptions,
 } from "./receipt-store.ts";
+export { encodeReactionEmoji } from "./discord-rest.ts";
+export {
+  DEFAULT_VOICE_IDLE_LEAVE_MS,
+  DEFAULT_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT,
+  DEFAULT_VOICE_REALTIME_MODEL,
+  DEFAULT_VOICE_REALTIME_VOICE,
+  DEFAULT_VOICE_TRANSCRIBE_MODEL,
+  DEFAULT_VOICE_TRUNCATION_RETENTION,
+  MAX_VOICE_IDLE_LEAVE_MS,
+  VoiceIdleAutoLeave,
+  createVoiceBriefingProvider,
+  createVoiceLookAtScreenProvider,
+  parseVoiceRealtimeBaseEnv,
+  voiceEvidenceReceiptData,
+  voiceEvidenceReceiptType,
+  type VoiceBriefingApiPort,
+  type VoiceIdleAutoLeaveOptions,
+  type VoiceLookAtScreenApiPort,
+  type VoiceRealtimeBaseEnvConfig,
+} from "./voice-composition.ts";

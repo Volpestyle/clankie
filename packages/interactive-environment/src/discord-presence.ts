@@ -19,7 +19,7 @@ export { DiscordPresenceActionRequestSchema, type DiscordPresenceActionRequest }
 export const DISCORD_PRESENCE_ENVIRONMENT_KIND = "discord_presence" as const;
 
 /**
- * Presence-plane session phases (ADR 0024). Distinct from Minecraft environment
+ * Presence-plane session phases (ADR 0024). Distinct from environment
  * phases where useful (voice_active, go_live_active) while reusing off/starting/failed.
  */
 export const DiscordPresenceSessionPhaseSchema = z.enum([
@@ -547,7 +547,7 @@ export function resolveDiscordPresencePhaseToolExposure(
   });
 }
 
-/** Map Minecraft-style environment phases into presence phases for shared join/status tools. */
+/** Map environment phases into presence phases for shared join/status tools. */
 export function discordPresencePhaseFromEnvironment(
   phase: EnvironmentSessionPhase,
 ): DiscordPresenceSessionPhase {

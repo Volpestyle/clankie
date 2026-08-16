@@ -5,8 +5,6 @@ import {
   EnvironmentSemanticEventSchema,
   EnvironmentStartActionCommandSchema,
   EnvironmentTelemetryReferenceSchema,
-  MinecraftStartActionCommandSchema,
-  PokeMMOStartActionCommandSchema,
   normalizeEnvironmentLease,
   normalizeEnvironmentSessionSpec,
   type EnvironmentActionResult,
@@ -18,14 +16,11 @@ import {
   type EnvironmentSessionSpec,
   type EnvironmentSessionSpecV2,
   type EnvironmentTelemetryReference,
-  type PokeMMOStartActionCommand,
 } from "@clankie/interactive-environment";
 
 export const MAX_ENVIRONMENT_LEASE_MS = 5 * 60_000;
 const EMERGENCY_ADAPTER_TIMEOUT_MS = 1_000;
-export type EnvironmentStartActionCommand =
-  | Extract<EnvironmentCommand, { type: "start_action" }>
-  | PokeMMOStartActionCommand;
+export type EnvironmentStartActionCommand = Extract<EnvironmentCommand, { type: "start_action" }>;
 
 export interface EnvironmentAdapterActionCompletion {
   status: "completed";
@@ -331,12 +326,7 @@ export class EnvironmentRuntime {
     const parsedCommand = EnvironmentStartActionCommandSchema.parse(raw);
     return this.enqueue(async () => {
       const record = await this.authorize(token, parsedCommand.sessionId);
-      const command =
-        record.spec.resourceBounds.profile === "pokemmo_simulator"
-          ? PokeMMOStartActionCommandSchema.parse(raw)
-          : record.spec.resourceBounds.profile === "minecraft_java"
-            ? MinecraftStartActionCommandSchema.parse(raw)
-            : parsedCommand;
+      const command = parsedCommand;
       const prior = record.actions[command.actionId];
       if (prior) return structuredClone(prior.result);
       // Deadlines are enforced wherever a dispatch touches the session, not

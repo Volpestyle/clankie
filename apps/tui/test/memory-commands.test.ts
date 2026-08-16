@@ -59,7 +59,6 @@ function shellFixture(selections: string[][], texts: string[] = []) {
   const flow: SetupFlow = {
     begin: () => {},
     end: () => {},
-    renderOutput: () => {},
     renderLine: (text) => lines.push(text),
     setStatus: () => {},
     readText: async () => texts.shift(),

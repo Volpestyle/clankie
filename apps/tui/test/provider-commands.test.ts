@@ -156,7 +156,6 @@ function testShell(
     renderLine: (text) => {
       lines.push(text);
     },
-    renderOutput: () => {},
     setStatus: (status) => {
       if (status !== undefined) statuses.push(status);
     },

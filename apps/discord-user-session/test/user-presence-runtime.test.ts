@@ -1,6 +1,5 @@
 import { DiscordPresenceSessionRecordSchema } from "@clankie/interactive-environment";
 import type { DiscordPresenceWrite } from "@clankie/protocol";
-import { Readable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { DiscordUserPresenceRuntime, encodeReactionEmoji } from "../src/user-presence-runtime.ts";
 
@@ -124,55 +123,6 @@ describe("DiscordUserPresenceRuntime", () => {
         goLiveSession,
       ),
     ).rejects.toThrow(/discord_presence_go_live_media_unavailable/u);
-  });
-
-  it("publishes and stops Go Live through the injected media publisher", async () => {
-    const goLiveSession = DiscordPresenceSessionRecordSchema.parse({
-      ...present,
-      phase: "voice_active",
-      voiceGuildIds: ["guild-1"],
-    });
-    const started: { guildId: string; channelId: string }[] = [];
-    const stopped: string[] = [];
-    const media = {
-      active: false,
-      start: (input: { guildId: string; channelId: string }) => {
-        started.push({ guildId: input.guildId, channelId: input.channelId });
-        return Promise.resolve();
-      },
-      stop: (guildId: string) => {
-        stopped.push(guildId);
-        return Promise.resolve();
-      },
-    };
-    const withMedia = new DiscordUserPresenceRuntime({
-      token: "user-token",
-      fetch: jsonFetch({}),
-      goLiveMedia: media,
-      // The surface being streamed is a composition choice, not something the
-      // executor knows about.
-      resolveGoLiveSource: () => Readable.from(["frame-bytes"]),
-    });
-
-    await expect(
-      withMedia.execute(
-        write({
-          action: "discord.presence.go_live_start",
-          payload: { kind: "go_live_start", guildId: "guild-1", channelId: "voice-1" },
-        }),
-        goLiveSession,
-      ),
-    ).resolves.toMatchObject({ action: "discord.presence.go_live_start", transportKind: "user_session" });
-    expect(started).toEqual([{ guildId: "guild-1", channelId: "voice-1" }]);
-
-    await withMedia.execute(
-      write({
-        action: "discord.presence.go_live_stop",
-        payload: { kind: "go_live_stop", guildId: "guild-1" },
-      }),
-      DiscordPresenceSessionRecordSchema.parse({ ...goLiveSession, phase: "go_live_active" }),
-    );
-    expect(stopped).toEqual(["guild-1"]);
   });
 
   it("reports a REST failure by status and route, never by response body", async () => {

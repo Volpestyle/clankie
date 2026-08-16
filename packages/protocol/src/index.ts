@@ -166,54 +166,6 @@ export const OperatorConversationSchema = z
   .strict();
 export type OperatorConversation = z.infer<typeof OperatorConversationSchema>;
 
-export const ListOperatorConversationsRequestSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    scope: OperatorConversationScopeSchema.optional(),
-  })
-  .strict();
-export type ListOperatorConversationsRequest = z.infer<typeof ListOperatorConversationsRequestSchema>;
-export const ListOperatorConversationsResponseSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    conversations: z.array(OperatorConversationSchema).max(OPERATOR_CONVERSATION_LIST_MAX),
-  })
-  .strict();
-export type ListOperatorConversationsResponse = z.infer<typeof ListOperatorConversationsResponseSchema>;
-
-export const GetOperatorConversationRequestSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    conversationId: OperatorConversationIdSchema,
-  })
-  .strict();
-export type GetOperatorConversationRequest = z.infer<typeof GetOperatorConversationRequestSchema>;
-export const GetOperatorConversationResponseSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    // Optional: a missing conversation is a typed not-found (get returns
-    // undefined), consistent with the callable `get` service result.
-    conversation: OperatorConversationSchema.optional(),
-  })
-  .strict();
-export type GetOperatorConversationResponse = z.infer<typeof GetOperatorConversationResponseSchema>;
-
-export const CreateOperatorConversationRequestSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    scope: OperatorConversationScopeSchema,
-    title: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TITLE_MAX),
-  })
-  .strict();
-export type CreateOperatorConversationRequest = z.infer<typeof CreateOperatorConversationRequestSchema>;
-export const CreateOperatorConversationResponseSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    conversation: OperatorConversationSchema,
-  })
-  .strict();
-export type CreateOperatorConversationResponse = z.infer<typeof CreateOperatorConversationResponseSchema>;
-
 export const OperatorConversationAttachmentSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -396,45 +348,6 @@ export const ReplayOperatorConversationResultSchema = z.discriminatedUnion("stat
 ]);
 export type ReplayOperatorConversationResult = z.infer<typeof ReplayOperatorConversationResultSchema>;
 
-/**
- * Typed operator input response payload (answers an `input_requested` event).
- *
- * `approval` is deliberately NOT an accepted response kind: the conversation
- * lane must never widen approval authority (ADR 0032). An `input_requested`
- * event may carry `inputKind: "approval"` as a non-authoritative render hint
- * that points the operator to the dedicated authenticated approval surface, but
- * a privileged approval can never be authorized by submitting over this lane.
- */
-export const OperatorConversationInputResponseSchema = z.discriminatedUnion("inputKind", [
-  z
-    .object({
-      inputKind: z.literal("text"),
-      text: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TEXT_MAX),
-    })
-    .strict(),
-  z
-    .object({
-      inputKind: z.literal("choice"),
-      choice: z.string().trim().min(1).max(OPERATOR_CONVERSATION_SUMMARY_MAX),
-    })
-    .strict(),
-]);
-export type OperatorConversationInputResponse = z.infer<typeof OperatorConversationInputResponseSchema>;
-
-/** Typed worker steering intent carried on an operator conversation submit. */
-export const OperatorConversationSteerIntentSchema = z.discriminatedUnion("type", [
-  z
-    .object({
-      type: z.literal("focus"),
-      target: z.enum(["current_task", "failing_test", "acceptance_criteria", "scope", "diagnosis"]),
-    })
-    .strict(),
-  z.object({ type: z.literal("continue") }).strict(),
-  z.object({ type: z.literal("retry_last_step") }).strict(),
-  z.object({ type: z.literal("summarize_status") }).strict(),
-]);
-export type OperatorConversationSteerIntent = z.infer<typeof OperatorConversationSteerIntentSchema>;
-
 const SubmitOperatorConversationTurnBaseSchema = z.object({
   schemaVersion: z.literal(1),
   conversationId: OperatorConversationIdSchema,
@@ -448,30 +361,12 @@ const SubmitOperatorConversationTurnBaseSchema = z.object({
   herdrPaneId: z.string().trim().min(1).max(64).regex(/^\S+$/u).optional(),
 });
 
-/**
- * Revision-fenced submit. `message` is the ordinary turn; `input_response` and
- * `worker_steer` are the VUH-745 typed variants. Variants not yet implementable
- * from current captain primitives return a typed `unsupported` submit result
- * rather than a false `accepted` (see docs/16-operator-conversations.md).
- */
-export const SubmitOperatorConversationTurnSchema = z.discriminatedUnion("kind", [
-  SubmitOperatorConversationTurnBaseSchema.extend({
-    kind: z.literal("message"),
-    message: z.string().trim().min(1).max(OPERATOR_CONVERSATION_MESSAGE_MAX),
-  }).strict(),
-  SubmitOperatorConversationTurnBaseSchema.extend({
-    kind: z.literal("input_response"),
-    requestId: OperatorConversationEventRefSchema,
-    response: OperatorConversationInputResponseSchema,
-  }).strict(),
-  SubmitOperatorConversationTurnBaseSchema.extend({
-    kind: z.literal("worker_steer"),
-    workerRunId: OperatorConversationWorkerRunIdSchema,
-    intent: OperatorConversationSteerIntentSchema,
-  }).strict(),
-]);
+/** Revision-fenced operator message submit. */
+export const SubmitOperatorConversationTurnSchema = SubmitOperatorConversationTurnBaseSchema.extend({
+  kind: z.literal("message"),
+  message: z.string().trim().min(1).max(OPERATOR_CONVERSATION_MESSAGE_MAX),
+}).strict();
 export type SubmitOperatorConversationTurn = z.infer<typeof SubmitOperatorConversationTurnSchema>;
-export type SubmitOperatorConversationTurnKind = SubmitOperatorConversationTurn["kind"];
 
 export const OperatorConversationTurnAcceptedSchema = z
   .object({
@@ -497,24 +392,9 @@ export const OperatorConversationRevisionConflictSchema = z
   .strict();
 export type OperatorConversationRevisionConflict = z.infer<typeof OperatorConversationRevisionConflictSchema>;
 
-/** Honest deferral: a submit kind whose captain wiring has not landed yet. */
-export const OperatorConversationSubmitUnsupportedSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    status: z.literal("unsupported"),
-    conversationId: OperatorConversationIdSchema,
-    submitKind: z.enum(["message", "input_response", "worker_steer"]),
-    reason: z.string().trim().min(1).max(OPERATOR_CONVERSATION_SUMMARY_MAX),
-  })
-  .strict();
-export type OperatorConversationSubmitUnsupported = z.infer<
-  typeof OperatorConversationSubmitUnsupportedSchema
->;
-
 export const SubmitOperatorConversationTurnResultSchema = z.discriminatedUnion("status", [
   OperatorConversationTurnAcceptedSchema,
   OperatorConversationRevisionConflictSchema,
-  OperatorConversationSubmitUnsupportedSchema,
 ]);
 export type SubmitOperatorConversationTurnResult = z.infer<typeof SubmitOperatorConversationTurnResultSchema>;
 
@@ -623,18 +503,6 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     .strict(),
 ]);
 export type OperatorConversationServiceResult = z.infer<typeof OperatorConversationServiceResultSchema>;
-
-/**
- * Named per-op service results, composed from the discriminated union so RN/
- * macOS/TUI import one coherent set of public names instead of inferring
- * aliases from the union.
- */
-export type OperatorConversationListResult = Extract<OperatorConversationServiceResult, { op: "list" }>;
-export type OperatorConversationGetResult = Extract<OperatorConversationServiceResult, { op: "get" }>;
-export type OperatorConversationCreateResult = Extract<OperatorConversationServiceResult, { op: "create" }>;
-export type OperatorConversationReplayResult = Extract<OperatorConversationServiceResult, { op: "replay" }>;
-export type OperatorConversationTailResult = Extract<OperatorConversationServiceResult, { op: "tail" }>;
-export type OperatorConversationSendResult = Extract<OperatorConversationServiceResult, { op: "send" }>;
 
 /**
  * Transport-neutral dispatch of one service request to its result. RN/macOS
@@ -2140,7 +2008,7 @@ export type DeviceEvent = z.infer<typeof DeviceEventSchema>;
 // bytes, or anything a message body could smuggle through.
 // ---------------------------------------------------------------------------
 
-/** Environments the play seam serves; Minecraft joins when its host lands. */
+/** Environments the play seam serves. */
 export const EmbodimentEnvironmentIdSchema = z.enum(["pokemon-firered", "pokemon-emerald"]);
 export type EmbodimentEnvironmentId = z.infer<typeof EmbodimentEnvironmentIdSchema>;
 

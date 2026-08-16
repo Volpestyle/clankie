@@ -63,7 +63,7 @@ describe("GBA emulator contract", () => {
     ).toThrow();
     expect(() =>
       GbaEmulatorActionRequestSchema.parse({
-        kind: "pokemmo_simulator_action",
+        kind: "other_environment_action",
         action: { kind: "button_press", button: "a", holdFrames: 12 },
         limits: { maxInputs: 8, maxFrames: 600, timeoutMs: 5_000 },
       }),
@@ -76,20 +76,22 @@ describe("GBA emulator contract", () => {
     expect(Object.keys(normalized.resourceBounds)).not.toContain("serverId");
     expect(Object.keys(normalized.resourceBounds)).not.toContain("allowedMapIds");
     expect(Object.keys(normalized.resourceBounds)).not.toContain("simulatorId");
-    // Minecraft and PokeMMO vocabulary cannot enter the emulator contract.
+    // Other environment vocabulary cannot enter the emulator contract.
     expect(() => GbaEmulatorResourceBoundsSchema.parse({ ...bounds, serverId: "not-a-server" })).toThrow();
     expect(() =>
       GbaEmulatorResourceBoundsSchema.parse({ ...bounds, allowedMapIds: ["verdant-path"] }),
     ).toThrow();
     expect(() => GbaEmulatorResourceBoundsSchema.parse({ ...bounds, maxBlockChangesPerAction: 0 })).toThrow();
     expect(() =>
-      GbaEmulatorResourceBoundsSchema.parse({ ...bounds, capabilities: ["pokemmo.simulator.observe"] }),
+      GbaEmulatorResourceBoundsSchema.parse({ ...bounds, capabilities: ["environment.remote.observe"] }),
     ).toThrow();
     // The environment kind must match the emulator profile and its bindings.
     expect(() =>
-      GbaEmulatorSessionSpecSchema.parse({ ...spec, environmentKind: "pokemmo_simulator" }),
+      GbaEmulatorSessionSpecSchema.parse({ ...spec, environmentKind: "other_environment" }),
     ).toThrow();
-    expect(() => normalizeEnvironmentSessionSpec({ ...spec, environmentKind: "minecraft_java" })).toThrow();
+    expect(() =>
+      normalizeEnvironmentSessionSpec({ ...spec, environmentKind: "other_environment" }),
+    ).toThrow();
     expect(() => GbaEmulatorSessionSpecSchema.parse({ ...spec, worldId: "other-world" })).toThrow(
       /world binding mismatch/,
     );
@@ -272,6 +274,6 @@ describe("GBA emulator contract", () => {
       }),
     ).toThrow();
     expect(isGbaEmulatorCapabilityLocal("emulator.gba.input")).toBe(true);
-    expect(isGbaEmulatorCapabilityLocal("pokemmo.live.act")).toBe(false);
+    expect(isGbaEmulatorCapabilityLocal("environment.remote.act")).toBe(false);
   });
 });

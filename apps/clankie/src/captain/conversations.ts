@@ -240,18 +240,6 @@ export class ConversationStore {
       throw new Error(`Unknown conversation ${turn.conversationId}`);
     }
     const safeCursor = this.lastCursor(meta.conversationId);
-    if (turn.kind !== "message") {
-      return {
-        schemaVersion: 1,
-        status: "unsupported",
-        conversationId: meta.conversationId,
-        submitKind: turn.kind,
-        reason:
-          turn.kind === "worker_steer"
-            ? "Workers are herdr panes now; steer them in herdr."
-            : "Typed input responses are not wired to the pi captain.",
-      };
-    }
     if (turn.expectedRevision !== meta.revision) {
       return {
         schemaVersion: 1,

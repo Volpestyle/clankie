@@ -1,3 +1,4 @@
+import { encodeReactionEmoji } from "@clankie/discord-presence-core";
 import {
   isDiscordPresenceActionAvailable,
   type DiscordPresenceSessionRecord,
@@ -295,19 +296,7 @@ function result(
   });
 }
 
-/** Encode a reaction for the Discord REST path (unicode or name:id custom). */
-export function encodeReactionEmoji(emoji: string): string {
-  const trimmed = emoji.trim();
-  // <:name:id> or <a:name:id>
-  const mentioned = trimmed.match(/^<a?:([a-zA-Z0-9_]{2,32}):(\d+)>$/);
-  if (mentioned) return `${mentioned[1]}:${mentioned[2]}`;
-  // Already name:id
-  if (/^[a-zA-Z0-9_]{2,32}:\d+$/.test(trimmed)) return trimmed;
-  if (trimmed.includes(":")) {
-    throw new Error("discord_presence_invalid_emoji");
-  }
-  return encodeURIComponent(trimmed);
-}
+export { encodeReactionEmoji } from "@clankie/discord-presence-core";
 
 export function createDiscordBotPresenceRuntime(options: DiscordBotPresenceRuntimeOptions): {
   execute: DiscordBotPresenceRuntime["execute"];

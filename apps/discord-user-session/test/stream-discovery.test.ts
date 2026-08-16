@@ -31,7 +31,6 @@ describe("Discord stream discovery", () => {
 
     const key = buildDiscordStreamKey({ guildId: "guild-1", channelId: "voice-1", userId: "human-1" });
     expect(listed).toEqual([key]);
-    expect(discovery.findStream("human-1")?.channelId).toBe("voice-1");
     discovery.requestWatch(key);
     expect(sent).toContainEqual({ op: 20, d: { stream_key: key } });
   });
@@ -57,7 +56,6 @@ describe("Discord stream discovery", () => {
       },
     });
     expect(credentials).toEqual([key]);
-    expect(discovery.findStream()?.token).toBe("stream-token");
     expect(deriveDiscordStreamWatchDaveChannelId("99")).toBe("98");
 
     discovery.handle({
