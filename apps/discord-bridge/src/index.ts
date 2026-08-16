@@ -47,6 +47,7 @@ import {
   parseDiscordDmPolicy,
   parseDiscordIdSet,
   selectInboundImageAttachments,
+  tryHandleCaptainDiscordActionRequest,
   tryHandleMusicControlRequest,
   tryHandleVoicePresenceControlRequest,
   type DiscordBridgeReceipt,
@@ -54,7 +55,14 @@ import {
   type VoicePresenceControlAction,
   type VoicePresenceControlInput,
 } from "@clankie/discord-presence-core";
-import { DiscordPresenceWriteSchema, type DiscordVoiceEvidence } from "@clankie/protocol";
+import { discordPresenceLaneAddress } from "@clankie/interactive-environment";
+import {
+  DiscordPresenceWriteSchema,
+  type DiscordCaptainActionInput,
+  type DiscordCaptainActionResult,
+  type DiscordPresenceWrite,
+  type DiscordVoiceEvidence,
+} from "@clankie/protocol";
 import {
   applyDiscordSettingsToEnvironment,
   applyVoiceSettingsToEnvironment,
@@ -66,7 +74,6 @@ import {
   createVoiceBriefingProvider,
   createVoiceLookAtScreenProvider,
   createVoiceRealtimePorts,
-  createVoiceVolitionDecider,
   describeVoiceResponse,
   parseVoiceRealtimeEnv,
   renderVoiceConsentReply,
@@ -284,10 +291,6 @@ const voiceSession =
           chattiness: storedSettings.persona.chattiness,
           decayWindowMs: voiceRealtimeConfig.decayWindowMs,
         },
-        volitionDecider: createVoiceVolitionDecider({
-          apiKey: openAiCredential.key,
-          model: voiceRealtimeConfig.volitionModel,
-        }),
         presenceSessionId: () => presenceSession.record.sessionId,
         emit: recordVoiceEvidence,
       });
@@ -1074,6 +1077,119 @@ async function executeCaptainVoicePresence(
   return result;
 }
 
+async function executeCaptainDiscordAction(
+  input: DiscordCaptainActionInput,
+): Promise<DiscordCaptainActionResult> {
+  if (input.guildId === undefined) {
+    return { ok: false, message: "That Discord action is not available in DMs." };
+  }
+  let channelId = input.channelId;
+  let action: DiscordPresenceWrite["action"];
+  let payload: DiscordPresenceWrite["payload"];
+  if (input.action === "react" || input.action === "unreact") {
+    if (
+      !ingressGuildIds.has(input.guildId) ||
+      (ingressChannelIds.size > 0 && !ingressChannelIds.has(input.channelId))
+    ) {
+      return { ok: false, message: "That message is outside my admitted Discord channels." };
+    }
+    action = `discord.presence.${input.action}`;
+    payload = { kind: input.action, channelId, messageId: input.messageId, emoji: input.emoji };
+  } else if (input.action === "create_thread" || input.action === "join_thread") {
+    if (
+      !ingressGuildIds.has(input.guildId) ||
+      (ingressChannelIds.size > 0 && !ingressChannelIds.has(input.channelId))
+    ) {
+      return { ok: false, message: "Threads only work in my admitted server channels." };
+    }
+    action = `discord.presence.${input.action}`;
+    payload =
+      input.action === "create_thread"
+        ? { kind: "create_thread", channelId, messageId: input.messageId, name: input.name }
+        : { kind: "join_thread", channelId };
+  } else {
+    const guild = client.guilds.cache.get(input.guildId);
+    const member =
+      guild === undefined
+        ? undefined
+        : (guild.members.cache.get(input.actorId) ??
+          (await guild.members.fetch(input.actorId).catch(() => undefined)));
+    if (
+      guild === undefined ||
+      member === undefined ||
+      !authorizeVoicePresenceCommand(
+        { userId: input.actorId, roleIds: new Set(member.roles.cache.keys()) },
+        roleBindings,
+        voiceJoinPolicy,
+      ).allowed
+    ) {
+      return { ok: false, message: "You aren't allowed to put my play surface in voice." };
+    }
+    channelId = member.voice.channelId ?? "";
+    const active = voiceSession?.status();
+    if (
+      channelId.length === 0 ||
+      !voiceGuildIds.has(input.guildId) ||
+      (voiceChannelIds.size > 0 && !voiceChannelIds.has(channelId)) ||
+      active?.active !== true ||
+      active.guildId !== input.guildId ||
+      active.channelId !== channelId
+    ) {
+      return { ok: false, message: "I need to be in your admitted voice channel first." };
+    }
+    action =
+      input.action === "watch_start"
+        ? "discord.presence.activity_start"
+        : "discord.presence.activity_stop";
+    payload =
+      input.action === "watch_start"
+        ? { kind: "activity_start", guildId: input.guildId, channelId, surface: "gba_emulator" }
+        : { kind: "activity_stop", guildId: input.guildId, channelId };
+  }
+
+  try {
+    const health = await presencePort.getHealth();
+    await presencePort.executeDiscordPresenceAction(
+      DiscordPresenceWriteSchema.parse({
+        schemaVersion: 1,
+        idempotencyKey: `captain:${input.callId}:${input.action}`,
+        action,
+        identity: {
+          presenceSessionId: discordPresenceLaneAddress({ guildId: input.guildId, channelId }),
+          correlationId: `discord-captain-action:${input.callId}`,
+          profileHash: health.profileHash,
+          characterId,
+          credentialRef: "discord_bot",
+          transportKind: "bot",
+        },
+        payload,
+      }),
+    );
+    return {
+      ok: true,
+      message:
+        input.action === "watch_start"
+          ? "I posted the live play launch in voice."
+          : input.action === "watch_stop"
+            ? "I stopped offering the live play launch."
+            : input.action === "create_thread"
+              ? "I started the thread."
+              : input.action === "join_thread"
+                ? "I joined the thread."
+                : input.action === "react"
+                  ? "I reacted."
+                  : "I removed my reaction.",
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: `My Discord body refused that action: ${sanitizeDiscordText(
+        error instanceof Error ? error.message : String(error),
+      )}`,
+    };
+  }
+}
+
 function memberRoleIds(interaction: ChatInputCommandInteraction): ReadonlySet<string> {
   if (interaction.member instanceof GuildMember) return new Set(interaction.member.roles.cache.keys());
   const roles = interaction.member?.roles;
@@ -1270,8 +1386,17 @@ const musicServer = createServer((request, response) => {
     response.end(JSON.stringify({ ok: true, service: "discord-bridge" }));
     return;
   }
-  if (tryHandleMusicControlRequest(request, response, voiceSession?.music)) return;
+  if (
+    tryHandleMusicControlRequest(
+      request,
+      response,
+      voiceSession?.music,
+      voiceSession?.status().active === true,
+    )
+  )
+    return;
   if (tryHandleVoicePresenceControlRequest(request, response, executeCaptainVoicePresence)) return;
+  if (tryHandleCaptainDiscordActionRequest(request, response, executeCaptainDiscordAction)) return;
   response.writeHead(404);
   response.end();
 });

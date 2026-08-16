@@ -940,7 +940,11 @@ describe("images are part of what was said", () => {
 
   it("keeps the images on a message that waits for a catch-up", async () => {
     const port = new RecordingPort();
-    const ingress = new DiscordTextIngress(port, { ...config(), liveMessageWindow: 1 });
+    const ingress = new DiscordTextIngress(port, {
+      ...config(),
+      replyPolicy: "addressed",
+      liveMessageWindow: 1,
+    });
     const guild = { guildId: "guild-1", channelId: "channel-1" };
     const attachments = [
       {

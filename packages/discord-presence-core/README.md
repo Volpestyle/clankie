@@ -11,8 +11,8 @@ what lets both bodies be one character
 | `presence-session`           | Gateway/voice phase lifecycle, typed phase events, act-tool revoke fence                                      |
 | `presence-action-advertiser` | Retains the live catalogue and forwards phase as an execution fence                                           |
 | `text-ingress`               | Normalises gateway messages into bounded, allowlist-gated captain turns, images included (ADR 0081)           |
-| `voice-address`              | Phonetic wake and explicit-release detection over `characterNames()` (ADR 0057)                               |
-| `voice-floor`                | The dormant ↔ engaged floor machine: wake, decay, and the volition rate cap                                   |
+| `voice-address`              | Phonetic address detection over `characterNames()` (ADR 0057)                                                 |
+| `voice-floor`                | The dormant ↔ engaged floor machine: wake, decay, and the unprompted-turn rate cap                            |
 | `realtime-session`           | Injectable OpenAI Realtime boundary: transcription + conversation sessions, `ask_clankie` round trips         |
 | `elevenlabs-tts`             | Injectable ElevenLabs multi-context streaming-TTS boundary (ADR 0070)                                         |
 | `external-voice`             | Pairs a text-modality realtime session with a TTS mouth behind the one conversation port (ADR 0070)           |

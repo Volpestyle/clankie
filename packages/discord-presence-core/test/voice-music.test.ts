@@ -1,8 +1,13 @@
+import type { ChildProcess } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { createServer } from "node:http";
-import { describe, expect, it } from "vitest";
+import { PassThrough } from "node:stream";
+import type { AudioPlayer } from "@discordjs/voice";
+import { describe, expect, it, vi } from "vitest";
 import {
   VoiceMusicQueue,
   applyMusicControl,
+  createYoutubeAudioSink,
   isAllowedMusicUrl,
   parseMusicControlPath,
   parseYtDlpSearchJson,
@@ -107,8 +112,9 @@ describe("music control (model tools)", () => {
       sinkKind: "audio",
       search: async () => [...hits],
     });
+    let playbackReady = false;
     const server = createServer((request, response) => {
-      if (!tryHandleMusicControlRequest(request, response, queue)) {
+      if (!tryHandleMusicControlRequest(request, response, queue, playbackReady)) {
         response.writeHead(404);
         response.end();
       }
@@ -134,7 +140,18 @@ describe("music control (model tools)", () => {
         body: JSON.stringify({ index: 1, authorId: "u1" }),
       });
       const playBody = (await play.json()) as { ok: boolean; message: string };
-      expect(playBody.ok).toBe(true);
+      expect(playBody).toEqual({
+        ok: false,
+        message: "I can't play music until I'm in a voice channel.",
+      });
+      expect(sink.calls).toHaveLength(0);
+      playbackReady = true;
+      const retry = await fetch(`${base}/music/play`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ index: 1, authorId: "u1" }),
+      });
+      expect((await retry.json()) as { ok: boolean }).toMatchObject({ ok: true });
       expect(sink.calls).toContain("play:https://www.youtube.com/watch?v=aaa");
     } finally {
       await new Promise<void>((resolve, reject) => {
@@ -171,6 +188,64 @@ describe("music control (model tools)", () => {
 });
 
 describe("voice music queue", () => {
+  it("waits for audio and retries one pre-audio pipeline failure", async () => {
+    const events: VoiceMusicTraceEvent[] = [];
+    const children: ChildProcess[] = [];
+    const kill = vi.fn(() => true);
+    let attempt = 0;
+    const spawnImpl = ((command: string) => {
+      const stdout = new PassThrough();
+      const child = Object.assign(new EventEmitter(), {
+        stdin: command === "ffmpeg" ? new PassThrough() : null,
+        stdout,
+        stderr: null,
+        kill,
+      }) as unknown as ChildProcess;
+      children.push(child);
+      if (command === "ffmpeg") {
+        const currentAttempt = ++attempt;
+        queueMicrotask(() => {
+          if (currentAttempt === 1) stdout.end();
+          else stdout.write(Buffer.alloc(4));
+        });
+      }
+      return child;
+    }) as typeof import("node:child_process").spawn;
+    const player = Object.assign(new EventEmitter(), {
+      play: vi.fn(),
+      pause: vi.fn(),
+      stop: vi.fn(),
+    }) as unknown as AudioPlayer;
+    const queue = new VoiceMusicQueue({
+      sink: createYoutubeAudioSink({ player, spawnImpl, trace: (event) => events.push(event) }),
+      sinkKind: "audio",
+      trace: (event) => events.push(event),
+    });
+
+    await expect(
+      queue.play("https://youtu.be/one", "u1", { source: "control", callId: "call-1" }),
+    ).resolves.toContain("Playing");
+    expect(children).toHaveLength(4);
+    expect(kill).toHaveBeenCalled();
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ component: "pipeline", outcome: "failed", code: "pre_audio_retry" }),
+        expect.objectContaining({ component: "pipeline", outcome: "first_audio" }),
+        expect.objectContaining({ component: "queue", outcome: "started", current: true }),
+      ]),
+    );
+    queue.stop();
+  });
+
+  it("does not claim playback when the audio sink rejects", async () => {
+    const queue = new VoiceMusicQueue({
+      sink: { ...recordingSink(), play: async () => Promise.reject(new Error("no audio")) },
+      sinkKind: "audio",
+    });
+    await expect(queue.play("https://youtu.be/one")).resolves.toBe("I couldn't start that track.");
+    expect(queue.snapshot().current).toBeUndefined();
+  });
+
   it("correlates search and playback without logging the query or URL", async () => {
     const events: VoiceMusicTraceEvent[] = [];
     const queue = new VoiceMusicQueue({
@@ -197,11 +272,7 @@ describe("voice music queue", () => {
     await expect(queue.enqueue("https://youtu.be/two", "u2")).resolves.toContain("Queued");
     expect(queue.snapshot().queued).toHaveLength(1);
     await expect(queue.skip()).resolves.toContain("Playing");
-    expect(sink.calls).toEqual([
-      "play:https://youtu.be/one",
-      "stop",
-      "play:https://youtu.be/two",
-    ]);
+    expect(sink.calls).toEqual(["play:https://youtu.be/one", "stop", "play:https://youtu.be/two"]);
   });
 
   it("ducks and unducks without clearing the queue", async () => {

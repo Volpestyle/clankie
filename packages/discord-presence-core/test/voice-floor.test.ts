@@ -55,9 +55,8 @@ describe("waking", () => {
   });
 
   it("a closing phrase heard while dormant is still an address, so it wakes", () => {
-    // Dismissal only means something while he holds the floor; someone saying
-    // "thanks clankie" late is a person speaking to him, and a missed wake is
-    // the worse social failure.
+    // Someone saying "thanks clankie" is a person speaking to him, whatever
+    // else the sentence means, and a missed wake is the worse social failure.
     const f = floor();
     expect(f.observeTranscript(said("alice", "thanks clankie", 0))).toEqual({
       action: "wake",
@@ -129,19 +128,19 @@ describe("holding the floor", () => {
   });
 });
 
-describe("explicit release", () => {
-  it("releases when anyone hands the floor back with his name near a closing word", () => {
+describe("closing phrases", () => {
+  it("a goodbye with his name in it is an address he gets to answer, not a cut-off", () => {
+    // No phrase releases the floor. "thanks clankie" reaches him like any other
+    // address, he replies to it, and the decay window ends the exchange.
     const f = floor();
     f.observeTranscript(said("alice", "hey clankie", 0));
-    expect(f.observeTranscript(said("bob", "thanks clankie", 10_000))).toEqual({
-      action: "release",
-      reason: "explicit",
-    });
-    expect(f.state).toBe("dormant");
-    expect(f.floorHolderId).toBeUndefined();
+    expect(f.observeTranscript(said("bob", "thanks clankie", 10_000))).toEqual({ action: "hold" });
+    expect(f.state).toBe("engaged");
+    expect(f.floorHolderId).toBe("bob");
+    expect(f.tick(10_000 + WINDOW + 1)).toEqual({ action: "release", reason: "decay" });
   });
 
-  it("thanks aimed at another person does not dismiss him", () => {
+  it("thanks aimed at another person is still crosstalk", () => {
     const f = floor();
     f.observeTranscript(said("alice", "hey clankie", 0));
     expect(f.observeTranscript(said("bob", "thanks bob that fixed it", 10_000))).toEqual({
@@ -308,11 +307,13 @@ describe("volition outcomes", () => {
   it("counters are monotonic and never exceed offers", () => {
     const f = floor({ volition: { minIntervalMs: 0, maxPerHour: 100 } });
     for (let i = 0; i < 5; i += 1) {
-      f.observeTranscript(said("bob", "room chatter", i * 1_000));
+      const atMs = i * 120_000;
+      f.observeTranscript(said("bob", "room chatter", atMs));
       f.noteVolitionOutcome(i % 2 === 0);
       // A duplicate outcome for the same offer must not double-count.
       f.noteVolitionOutcome(true);
-      if (f.state === "engaged") f.observeTranscript(said("bob", "thanks clankie", i * 1_000 + 500));
+      // Decay is the only way back to dormant, so the next round can be offered.
+      if (f.state === "engaged") f.tick(atMs + WINDOW + 1);
     }
     const { offered, taken, suppressed } = f.accounting();
     expect(offered).toBe(5);

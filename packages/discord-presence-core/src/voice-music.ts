@@ -236,7 +236,10 @@ export class VoiceMusicQueue {
     this.queued.length = 0;
     this.paused = false;
     return this.start(
-      { track: { url, ...(requestedBy === undefined ? {} : { requestedBy }) }, ...(trace === undefined ? {} : { trace }) },
+      {
+        track: { url, ...(requestedBy === undefined ? {} : { requestedBy }) },
+        ...(trace === undefined ? {} : { trace }),
+      },
       "play",
     );
   }
@@ -273,10 +276,7 @@ export class VoiceMusicQueue {
       return "Skipped. Queue is empty.";
     }
     this.emit("skip", "queue", "skipped", trace);
-    return this.start(
-      trace === undefined ? next : { track: next.track, trace },
-      "skip",
-    );
+    return this.start(trace === undefined ? next : { track: next.track, trace }, "skip");
   }
 
   public pause(trace?: VoiceMusicTraceContext): string {
@@ -360,7 +360,7 @@ export class VoiceMusicQueue {
     } catch {
       this.current = undefined;
       this.emit(operation, "queue", "failed", track.trace, { code: "music_sink_rejected" });
-      return "I'm not in a voice channel.";
+      return "I couldn't start that track.";
     }
     this.emit(operation, "queue", "started", track.trace);
     return this.sinkKind === "video" ? `Streaming ${track.track.url}` : `Playing ${track.track.url}`;
@@ -488,6 +488,7 @@ export function tryHandleMusicControlRequest(
   request: IncomingMessage,
   response: ServerResponse,
   queue: VoiceMusicQueue | undefined,
+  playbackReady = true,
 ): boolean {
   if (request.method !== "POST") return false;
   const action = parseMusicControlPath(request.url ?? "/");
@@ -500,11 +501,11 @@ export function tryHandleMusicControlRequest(
     void (async () => {
       try {
         const parsed =
-          chunks.length === 0
-            ? {}
-            : (JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown);
+          chunks.length === 0 ? {} : (JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown);
         const result =
-          queue === undefined
+          queue === undefined ||
+          (!playbackReady &&
+            (action === "play" || action === "queue" || action === "skip" || action === "resume"))
             ? { ok: false, message: "I can't play music until I'm in a voice channel." }
             : await applyMusicControl(queue, action, musicControlInputFromUnknown(parsed), {
                 source: "control",
@@ -621,6 +622,8 @@ export function createYoutubeAudioSink(options: {
   let currentTrace: VoiceMusicTraceContext | undefined;
   let startedAt = 0;
   let seekSeconds = 0;
+  let pipelineGeneration = 0;
+  let pendingStart: { readonly generation: number; readonly reject: (error: Error) => void } | undefined;
 
   const emit = (
     operation: VoiceMusicTraceEvent["operation"],
@@ -634,6 +637,9 @@ export function createYoutubeAudioSink(options: {
   };
 
   const stopChildren = (): void => {
+    pendingStart?.reject(new Error("music pipeline stopped"));
+    pendingStart = undefined;
+    pipelineGeneration += 1;
     removePlayerListener?.();
     removePlayerListener = undefined;
     for (const child of children) child.kill("SIGKILL");
@@ -660,79 +666,133 @@ export function createYoutubeAudioSink(options: {
     });
   };
 
-  const startAt = (
+  const startAttempt = (
     url: string,
     seek: number,
     trace: VoiceMusicTraceContext | undefined,
     operation: "play" | "resume",
-  ): void => {
+    generation: number,
+  ): Promise<void> =>
+    new Promise((resolve, reject) => {
+      let settled = false;
+      let receivedAudio = false;
+      const fail = (error: Error): void => {
+        if (settled || generation !== pipelineGeneration) return;
+        settled = true;
+        if (pendingStart?.generation === generation) pendingStart = undefined;
+        reject(error);
+      };
+      pendingStart = { generation, reject: fail };
+      const ffmpegSeek = seek > 0 ? ["-ss", seek.toFixed(1)] : [];
+      const downloader = spawnImpl(
+        "yt-dlp",
+        ["-f", "ba/bestaudio", "-o", "-", "--no-playlist", "--no-warnings", "--no-progress", url],
+        { stdio: ["ignore", "pipe", "ignore"] },
+      );
+      const transcoder = spawnImpl(
+        "ffmpeg",
+        [
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          ...ffmpegSeek,
+          "-i",
+          "pipe:0",
+          "-f",
+          "s16le",
+          "-ar",
+          "48000",
+          "-ac",
+          "2",
+          "pipe:1",
+        ],
+        { stdio: ["pipe", "pipe", "ignore"] },
+      );
+      children = [downloader, transcoder];
+      observeProcess(downloader, "yt_dlp", operation, trace);
+      observeProcess(transcoder, "ffmpeg", operation, trace);
+      const downloadOutput = downloader.stdout;
+      const transcodeInput = transcoder.stdin;
+      const output = transcoder.stdout;
+      if (downloadOutput === null || transcodeInput === null || output === null) {
+        fail(new Error("music pipeline stdio unavailable"));
+        return;
+      }
+      downloadOutput.pipe(transcodeInput);
+      const failBeforeAudio = (): void => {
+        if (!receivedAudio) fail(new Error("music pipeline ended before audio"));
+      };
+      downloader.once("error", failBeforeAudio);
+      transcoder.once("error", failBeforeAudio);
+      downloader.once("close", (code, signal) => {
+        if (code !== 0 || signal !== null) failBeforeAudio();
+      });
+      transcoder.once("close", (code, signal) => {
+        if (code !== 0 || signal !== null) failBeforeAudio();
+      });
+      output.once("data", () => {
+        if (generation !== pipelineGeneration) return;
+        receivedAudio = true;
+        settled = true;
+        if (pendingStart?.generation === generation) pendingStart = undefined;
+        emit(operation, "pipeline", "first_audio", trace);
+        resolve();
+      });
+      const onPlayerState = (_previous: { status: string }, next: { status: string }): void => {
+        if (next.status === AudioPlayerStatus.Playing) emit(operation, "player", "playing", trace);
+        if (next.status === AudioPlayerStatus.Idle) emit(operation, "player", "idle", trace);
+      };
+      options.player.on("stateChange", onPlayerState);
+      removePlayerListener = () => options.player.off("stateChange", onPlayerState);
+      options.player.play(createAudioResource(output, { inputType: StreamType.Raw }));
+      emit(operation, "player", "submitted", trace);
+      output.once("end", () => {
+        if (!receivedAudio) {
+          failBeforeAudio();
+          return;
+        }
+        if (generation !== pipelineGeneration || currentUrl !== url) return;
+        options.onEnded?.();
+      });
+    });
+
+  const startAt = async (
+    url: string,
+    seek: number,
+    trace: VoiceMusicTraceContext | undefined,
+    operation: "play" | "resume",
+  ): Promise<void> => {
     stopChildren();
     currentUrl = url;
     currentTrace = trace;
     seekSeconds = seek;
     startedAt = Date.now();
-    const ffmpegSeek = seek > 0 ? ["-ss", seek.toFixed(1)] : [];
-    const downloader = spawnImpl(
-      "yt-dlp",
-      [
-        "-f",
-        "ba/bestaudio",
-        "-o",
-        "-",
-        "--no-playlist",
-        "--no-warnings",
-        url,
-      ],
-      { stdio: ["ignore", "pipe", "pipe"] },
-    );
-    const transcoder = spawnImpl(
-      "ffmpeg",
-      [
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        ...ffmpegSeek,
-        "-i",
-        "pipe:0",
-        "-f",
-        "s16le",
-        "-ar",
-        "48000",
-        "-ac",
-        "2",
-        "pipe:1",
-      ],
-      { stdio: ["pipe", "pipe", "pipe"] },
-    );
-    children = [downloader, transcoder];
-    observeProcess(downloader, "yt_dlp", operation, trace);
-    observeProcess(transcoder, "ffmpeg", operation, trace);
-    const downloadOutput = downloader.stdout;
-    const transcodeInput = transcoder.stdin;
-    const output = transcoder.stdout;
-    if (downloadOutput === null || transcodeInput === null || output === null) {
-      stopChildren();
-      throw new Error("music pipeline stdio unavailable");
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const generation = pipelineGeneration;
+      try {
+        await startAttempt(url, seek, trace, operation, generation);
+        return;
+      } catch (error) {
+        if (generation !== pipelineGeneration || currentUrl !== url) throw error;
+        if (attempt === 0) {
+          emit(operation, "pipeline", "failed", trace, { code: "pre_audio_retry" });
+          stopChildren();
+          continue;
+        }
+        emit(operation, "pipeline", "failed", trace, { code: "pre_audio_failed" });
+        currentUrl = undefined;
+        currentTrace = undefined;
+        seekSeconds = 0;
+        stopChildren();
+        if (operation === "resume") options.onEnded?.();
+        throw error;
+      }
     }
-    downloadOutput.pipe(transcodeInput);
-    output.once("data", () => emit(operation, "pipeline", "first_audio", trace));
-    const onPlayerState = (_previous: { status: string }, next: { status: string }): void => {
-      if (next.status === AudioPlayerStatus.Playing) emit(operation, "player", "playing", trace);
-      if (next.status === AudioPlayerStatus.Idle) emit(operation, "player", "idle", trace);
-    };
-    options.player.on("stateChange", onPlayerState);
-    removePlayerListener = () => options.player.off("stateChange", onPlayerState);
-    options.player.play(createAudioResource(output, { inputType: StreamType.Raw }));
-    emit(operation, "player", "submitted", trace);
-    output.once("end", () => {
-      if (currentUrl !== url) return;
-      options.onEnded?.();
-    });
   };
 
   return {
     play(url, trace) {
-      startAt(url, 0, trace, "play");
+      return startAt(url, 0, trace, "play");
     },
     pause() {
       if (currentUrl === undefined) return;
@@ -743,7 +803,7 @@ export function createYoutubeAudioSink(options: {
     },
     resume() {
       if (currentUrl === undefined) return;
-      startAt(currentUrl, seekSeconds, currentTrace, "resume");
+      void startAt(currentUrl, seekSeconds, currentTrace, "resume").catch(() => undefined);
     },
     stop() {
       const trace = currentTrace;

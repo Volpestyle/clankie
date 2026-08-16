@@ -23,6 +23,7 @@ import {
   ENGAGED_HOLD_MS,
   ENGAGED_TICK_MS,
   SPEAKER_TRANSCRIPTION_IDLE_MS,
+  UNPROMPTED_TURN_ITEM,
   type DiscordVoiceBriefingRequest,
   type JoinDiscordVoiceInput,
   type VoiceConversationOpenInput,
@@ -356,7 +357,6 @@ const settledResult = (turnId: string, response: string): CaptainChannelTurnResu
 
 interface HarnessOptions {
   readonly narrationMinIntervalMs?: number;
-  readonly volitionDecider?: (roomText: string) => Promise<boolean>;
   readonly floorOverrides?: Partial<VoiceFloorOptions>;
   readonly captain?: (request: DiscordPresenceChannelTurnRequest) => Promise<CaptainChannelTurnResult>;
   readonly lookAtScreen?: () => Promise<import("../src/voice-session.ts").LookAtScreenResult>;
@@ -425,7 +425,6 @@ function buildHarness(options: HarnessOptions = {}) {
       decayWindowMs: 60_000,
       ...options.floorOverrides,
     },
-    ...(options.volitionDecider === undefined ? {} : { volitionDecider: options.volitionDecider }),
     ...(options.narrationMinIntervalMs === undefined
       ? {}
       : { narrationMinIntervalMs: options.narrationMinIntervalMs }),
@@ -759,8 +758,10 @@ describe("audio path", () => {
         text: "one more detail",
       })}`,
     );
-    // Release the floor; the session stays warm but stops hearing the room.
-    await harness.say(ALICE, "thanks clankie");
+    // Let the floor decay; the session stays warm but stops hearing the room.
+    harness.clock.now = 61_000;
+    harness.timers.fire(ENGAGED_TICK_MS);
+    await flush();
     const heardAtRelease = conversation.appended.length;
     const listenerHeard = harness.transcriptionFor(ALICE).appended.length;
     const idleCapture = harness.startCapture(ALICE);
@@ -831,23 +832,28 @@ describe("floor decisions", () => {
 
   // Required mission evidence: no response path exists without a floor
   // decision — dormant crosstalk opens nothing and creates nothing.
-  it("dormant crosstalk never opens a conversation session and never creates a response", async () => {
-    const harness = await joinedHarness();
+  it("dormant crosstalk with volition off never opens a session and never creates a response", async () => {
+    const harness = await joinedHarness({ floorOverrides: { volition: { maxPerHour: 0 } } });
     await harness.consent(BOB);
     await harness.say(BOB, "nice weather this weekend maybe");
     expect(harness.conversations).toHaveLength(0);
-    // Volition still accounts the suppressed offer (no decider configured).
-    expect(harness.ofType("volition")).toMatchObject([
-      { type: "volition", guildId: GUILD, channelId: CHANNEL, offered: 1, taken: 0, suppressed: 1 },
-    ]);
+    expect(harness.ofType("volition")).toHaveLength(0);
     expect(harness.ofType("floor")).toHaveLength(0);
   });
 
-  it("explicit release goes dormant, keeps the session warm, and closes it when the hold expires", async () => {
+  it("no phrase releases the floor: a goodbye is answered and decay ends the exchange", async () => {
     const harness = await engagedHarness();
     const conversation = harness.conversation();
     await harness.say(ALICE, "thanks clankie");
-    expect(at(harness.ofType("floor"), -1)).toMatchObject({ state: "dormant", reason: "released" });
+    // He gets to say goodbye back rather than being cut off by a word list.
+    expect(conversation.responseCreates).toBe(2);
+    expect(at(harness.ofType("floor_decision"), -1)).toMatchObject({ action: "hold" });
+    expect(harness.session.status().floorState).toBe("engaged");
+
+    harness.clock.now = 61_000;
+    harness.timers.fire(ENGAGED_TICK_MS);
+    await flush();
+    expect(at(harness.ofType("floor"), -1)).toMatchObject({ state: "dormant", reason: "decay" });
     expect(conversation.isOpen).toBe(true);
     expect(harness.session.status()).toMatchObject({ floorState: "dormant", engaged: true });
     harness.timers.fire(ENGAGED_HOLD_MS);
@@ -859,7 +865,9 @@ describe("floor decisions", () => {
 
   it("a wake inside the hold window reuses the held session instead of paying setup again", async () => {
     const harness = await engagedHarness();
-    await harness.say(ALICE, "thanks clankie");
+    harness.clock.now = 61_000;
+    harness.timers.fire(ENGAGED_TICK_MS);
+    await flush();
     await harness.say(ALICE, "clankie actually one more thing");
     expect(harness.conversations).toHaveLength(1);
     expect(harness.briefingCalls).toHaveLength(1);
@@ -882,43 +890,86 @@ describe("floor decisions", () => {
   });
 });
 
-describe("volition", () => {
-  it("a taken offer engages on the provoking speaker and is accounted", async () => {
-    const decider = vi.fn((roomText: string) => {
-      expect(roomText).toContain(JSON.stringify({ speakerId: BOB, text: "the garden bot has been quiet" }));
-      return Promise.resolve(true);
-    });
-    const harness = await joinedHarness({ volitionDecider: decider });
+describe("unprompted turns", () => {
+  /** Nobody addressed him, the rate cap allows it: the gate opens and he is asked. */
+  async function offeredHarness() {
+    const harness = await joinedHarness();
     await harness.consent(BOB);
     await harness.say(BOB, "the garden bot has been quiet");
-    expect(decider).toHaveBeenCalledTimes(1);
-    expect(harness.ofType("floor")).toMatchObject([
-      { type: "floor", guildId: GUILD, channelId: CHANNEL, state: "engaged", reason: "volition" },
-    ]);
-    expect(harness.ofType("volition")).toMatchObject([
-      { type: "volition", guildId: GUILD, channelId: CHANNEL, offered: 1, taken: 1, suppressed: 0 },
-    ]);
+    return harness;
+  }
+
+  it("asks his own realtime session rather than a separate yes/no model", async () => {
+    const harness = await offeredHarness();
+    expect(harness.ofType("floor_decision").map((event) => event.action)).toContain("volition_gate_open");
+    // One session, seeded with the room he is deciding about, then asked.
     expect(harness.conversations).toHaveLength(1);
-    expect(harness.conversation().responseCreates).toBe(1);
-    expect(at(harness.conversation().textItems, 0)).toContain(
+    const conversation = harness.conversation();
+    expect(conversation.responseCreates).toBe(1);
+    expect(at(conversation.textItems, 0)).toContain(
       JSON.stringify({ speakerId: BOB, text: "the garden bot has been quiet" }),
     );
+    expect(at(conversation.textItems, -1)).toBe(UNPROMPTED_TURN_ITEM);
+    // Nothing is decided until he answers: the floor has not moved yet.
+    expect(harness.session.status().floorState).toBe("dormant");
+    expect(harness.ofType("volition")).toHaveLength(0);
   });
 
-  it("a decider error counts as suppressed and does not crash the session", async () => {
-    const harness = await joinedHarness({
-      volitionDecider: () => Promise.reject(new Error("volition model unavailable")),
+  it("speaking takes the offer, engages on the provoking speaker, and is accounted", async () => {
+    const harness = await offeredHarness();
+    const conversation = harness.conversation();
+    conversation.input.onAudioDelta(pcmDelta(480), "item_1");
+    await flush();
+    // He has the floor from the first syllable, so the nameless reply that
+    // follows his interjection is conversation rather than crosstalk.
+    expect(harness.session.status().floorState).toBe("engaged");
+    expect(at(harness.ofType("floor"), -1)).toMatchObject({ state: "engaged", reason: "volition" });
+    expect(at(harness.ofType("volition"), -1)).toMatchObject({ offered: 1, taken: 1, suppressed: 0 });
+    conversation.input.onResponseDone({
+      responseId: "resp_1",
+      status: "completed",
+      audioBytes: 480,
+      textCharacters: 0,
     });
-    await harness.consent(BOB);
-    await harness.say(BOB, "someone should check the deploy");
+    await flush();
+    // The outcome is recorded exactly once, however the response finishes.
+    expect(harness.ofType("volition")).toHaveLength(1);
+    await harness.say(BOB, "huh good point");
+    expect(at(harness.conversation().textItems, -1)).toContain("huh good point");
+  });
+
+  it("an empty response is him passing: suppressed, still dormant, session parked on the hold", async () => {
+    const harness = await offeredHarness();
+    harness.conversation().input.onResponseDone({
+      responseId: "resp_1",
+      status: "completed",
+      audioBytes: 0,
+      textCharacters: 0,
+    });
+    await flush();
     expect(harness.ofType("volition")).toMatchObject([
       { type: "volition", guildId: GUILD, channelId: CHANNEL, offered: 1, taken: 0, suppressed: 1 },
     ]);
-    expect(harness.conversations).toHaveLength(0);
+    expect(harness.ofType("floor")).toHaveLength(0);
+    expect(harness.session.status().floorState).toBe("dormant");
+    // Nothing is left running on his behalf: the warm session sits behind the
+    // hold window and closes itself when it expires.
+    expect(harness.timers.pending().map((timer) => timer.delayMs)).toContain(ENGAGED_HOLD_MS);
+    harness.timers.fire(ENGAGED_HOLD_MS);
+    await flush();
+    expect(harness.conversation().isOpen).toBe(false);
+  });
+
+  it("a session that dies before he answers counts the offer as suppressed", async () => {
+    const harness = await offeredHarness();
+    harness.conversation().lose("error");
+    await flush();
+    expect(harness.ofType("volition")).toMatchObject([{ offered: 1, taken: 0, suppressed: 1 }]);
+    expect(harness.session.status().floorState).toBe("dormant");
     // Still alive: an addressed wake works afterwards.
     await harness.consent(ALICE);
     await harness.say(ALICE, "hey clankie");
-    expect(harness.conversations).toHaveLength(1);
+    expect(harness.conversations).toHaveLength(2);
   });
 });
 

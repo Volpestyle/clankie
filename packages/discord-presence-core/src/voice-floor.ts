@@ -7,11 +7,12 @@
  * repository owns. Engagement is not a permission that conversation grants and
  * revokes — it is downstream of one question asked continuously over the
  * transcript stream: *does he have a reason to say something right now?*
- * Being addressed answers it trivially and for free. Volition answers it with
- * one cheap gated model call. Release is the absence of an answer — the decay
- * window — with the explicit "thanks, clankie" as a fast path over the loop,
- * never the mechanism, so a room that never says goodbye still gets a Clankie
- * who stops talking.
+ * Being addressed answers it trivially and for free. When nobody addressed
+ * him, this machine answers only the mechanical half — *may an unprompted turn
+ * be offered at all right now?* — and the realtime Clankie session answers the
+ * part that needs a personality. Release is the absence of an answer: the decay
+ * window, and only the decay window. No phrase releases the floor, because
+ * "thanks, clankie" is someone speaking to him and he gets to answer it.
  *
  * Pure by construction: no I/O, no timers, no Date.now. Time arrives as
  * explicit `atMs` numbers from the caller, which is what makes every decay and
@@ -21,7 +22,7 @@
  * transcript and on `tick`.
  */
 
-import { releasesFloor, voiceAddressesCharacter } from "./voice-address.ts";
+import { voiceAddressesCharacter } from "./voice-address.ts";
 
 export type FloorState = "dormant" | "engaged";
 
@@ -30,11 +31,11 @@ export interface VoiceFloorOptions {
   readonly names: readonly string[];
   /** Same setting, same meaning as the text plane: `all` wakes on anything. */
   readonly replyPolicy: "addressed" | "all";
-  /** Sets the volition rate-cap defaults; ADR 0051 reserved it for exactly this. */
+  /** Sets the unprompted-turn rate-cap defaults; ADR 0051 reserved it for exactly this. */
   readonly chattiness: "quiet" | "balanced" | "chatty";
   /** How long an engagement survives without a reason to hold the floor. */
   readonly decayWindowMs?: number;
-  /** Owner overrides for the volition rate cap; defaults derive from chattiness. */
+  /** Owner overrides for the unprompted-turn rate cap; defaults derive from chattiness. */
   readonly volition?: {
     readonly minIntervalMs?: number;
     readonly maxPerHour?: number;
@@ -52,18 +53,20 @@ export type FloorDecision =
   | { readonly action: "wake"; readonly reason: "addressed" | "reply_policy_all" | "volition" }
   /** Engaged: the floor holder continued, or someone re-addressed him (floor moves to that speaker). */
   | { readonly action: "hold" }
-  | { readonly action: "release"; readonly reason: "explicit" | "decay" }
+  /** The only way the floor is ever given up: nothing gave him a reason to keep it. */
+  | { readonly action: "release"; readonly reason: "decay" }
   | { readonly action: "ignore" }
-  /** Dormant and unaddressed, and the rate cap permits one volition tick now. */
+  /** Dormant and unaddressed, and the rate cap permits offering him one unprompted turn now. */
   | { readonly action: "volition_gate_open" };
 
 /**
  * Monotonic counters, per ADR 0057's consequence: unprompted speech lands on
  * humans, so "he talks too much" and "he never speaks up" must both be
  * falsifiable against a number instead of a vibe. `offered` counts gate
- * openings; `taken`/`suppressed` count what the volition call decided. The
- * machine only accepts an outcome while an offer is outstanding, so
- * `taken + suppressed <= offered` always holds.
+ * openings; `taken`/`suppressed` count what the realtime session did with the
+ * turn it was offered — spoke, or passed. The machine only accepts an outcome
+ * while an offer is outstanding, so `taken + suppressed <= offered` always
+ * holds.
  */
 export interface VolitionAccounting {
   readonly offered: number;
@@ -90,8 +93,8 @@ export interface VolitionRateCap {
  * The rate cap is load-bearing, not protective tuning: it is the only thing
  * standing between phonetic tolerance tuned toward false positives and a bot
  * that interjects into human conversation. Numbers err conservative — these
- * cap how often the *question* gets asked; the model still answers no most of
- * the time, so actual speech runs well under them.
+ * cap how often he is *offered* an unprompted turn; he passes on most of them,
+ * so actual speech runs well under them.
  */
 export const VOLITION_DEFAULTS: Readonly<Record<VoiceFloorOptions["chattiness"], VolitionRateCap>> = {
   quiet: { minIntervalMs: 600_000, maxPerHour: 2 },
@@ -116,8 +119,8 @@ interface PendingOffer {
  * - Being addressed always wins. It wakes from dormant, holds (and moves the
  *   floor) while engaged, and even revives a stale engagement as a fresh wake,
  *   because a person who spoke to him must never be eaten by a decay check.
- * - Explicit release outranks the address check while engaged, since every
- *   release phrase necessarily contains his name.
+ *   Nothing outranks it — "thanks, clankie" is an address like any other, and
+ *   he answers it rather than being cut off mid-goodbye by a word list.
  * - Decay is evaluated before anything else touches an engaged floor: an event
  *   arriving after the window belongs to whatever conversation comes next, so
  *   it is judged under dormant rules and, if it wakes nothing, surfaces the
@@ -197,14 +200,14 @@ export class VoiceFloor {
   }
 
   /**
-   * The volition call's verdict. `offered` was counted when the gate opened;
-   * this records what the model decided. A taken offer engages the floor from
-   * dormant — the ADR's "volition says he has something to say" transition —
-   * and returns the `wake(volition)` decision so the caller learns it from the
-   * same union every other transition uses. If an addressed wake beat the
-   * outcome to it, the accounting still lands but the floor is left alone.
-   * Without an outstanding offer this is a no-op, which is what keeps
-   * `taken + suppressed <= offered` an invariant rather than a hope.
+   * What the realtime session did with the turn it was offered. `offered` was
+   * counted when the gate opened; this records whether he actually spoke. A
+   * taken offer engages the floor from dormant — the ADR's "he had something
+   * to say" transition — and returns the `wake(volition)` decision so the
+   * caller learns it from the same union every other transition uses. If an
+   * addressed wake beat the outcome to it, the accounting still lands but the
+   * floor is left alone. Without an outstanding offer this is a no-op, which is
+   * what keeps `taken + suppressed <= offered` an invariant rather than a hope.
    */
   public noteVolitionOutcome(taken: boolean): FloorDecision {
     if (this.pendingOffer === undefined) return { action: "ignore" };
@@ -239,13 +242,6 @@ export class VoiceFloor {
 
   private observeEngaged(event: VoiceTranscriptEvent): FloorDecision {
     if (!hasSpeech(event.text)) return { action: "ignore" };
-    // Release before address: every release phrase contains his name, so the
-    // address check would shadow it. Anyone may hand the floor back, not just
-    // the holder — "thanks clankie" from a third voice still means done.
-    if (releasesFloor(event.text, this.names)) {
-      this.drop();
-      return { action: "release", reason: "explicit" };
-    }
     if (voiceAddressesCharacter(event.text, this.names)) {
       this.holderId = event.speakerId;
       this.lastRelevantAtMs = event.atMs;
@@ -261,12 +257,7 @@ export class VoiceFloor {
     return { action: "ignore" };
   }
 
-  /**
-   * Dormant judgment of one transcript; mutates into engaged on a wake.
-   * A closing phrase heard while dormant still wakes him — "thanks clankie"
-   * said late is still someone speaking to him, and a missed wake is the worse
-   * social failure, so dismissal is only meaningful while he holds the floor.
-   */
+  /** Dormant judgment of one transcript; mutates into engaged on a wake. */
   private wakeFor(event: VoiceTranscriptEvent): FloorDecision | undefined {
     if (!hasSpeech(event.text)) return undefined;
     if (voiceAddressesCharacter(event.text, this.names)) {

@@ -31,13 +31,9 @@ export interface DiscordTextIngressConfig {
   readonly contextMessageLimit: number;
   readonly authenticatedSurfaceUrl: string;
   /**
-   * What earns a reply in an admitted channel. `addressed` (the default)
-   * answers a mention or a message that uses one of his names; `all` answers
-   * every admitted message.
-   *
-   * This is evaluated *before* the captain turn on purpose. Deciding to stay
-   * quiet must not cost a model call, or an open channel allowlist bills for
-   * every message in the server.
+   * What Clankie gets to perceive in an admitted channel. `all` (the default)
+   * lets the captain decide whether to answer; `addressed` is the explicit
+   * cost-saving mode that only wakes on a mention or one of his names.
    */
   readonly replyPolicy?: DiscordReplyPolicy;
   /** Lowercased names he answers to. Only consulted by the `addressed` policy. */
@@ -61,9 +57,9 @@ export interface DiscordTextIngressConfig {
 
 export type DiscordReplyPolicy = "addressed" | "all";
 
-/** Unknown values fall back to the quiet policy, never the noisy one. */
+/** Unknown values preserve the agent-first default. */
 export function parseDiscordReplyPolicy(value: string | undefined): DiscordReplyPolicy {
-  return value?.trim() === "all" ? "all" : "addressed";
+  return value?.trim() === "addressed" ? "addressed" : "all";
 }
 
 /**
@@ -639,7 +635,7 @@ export class DiscordTextIngress {
       return "channel_not_allowlisted";
     }
     // A DM is already addressed to him by construction; a guild channel is not.
-    if ((this.config.replyPolicy ?? "addressed") === "addressed") {
+    if ((this.config.replyPolicy ?? "all") === "addressed") {
       const addressed =
         message.mentionsBot || addressesCharacter(message.body, this.config.characterNames ?? []);
       // Whether he is *reading* is decided in `handle`, which can buffer for a
@@ -719,7 +715,7 @@ export class DiscordTextIngress {
     // A DM is addressed to him by construction, and `all` means he reads the
     // room by policy. Neither drifts.
     if (message.guildId === undefined) return true;
-    if ((this.config.replyPolicy ?? "addressed") === "all") return true;
+    if ((this.config.replyPolicy ?? "all") === "all") return true;
     if (message.mentionsBot || addressesCharacter(message.body, this.config.characterNames ?? [])) {
       return true;
     }

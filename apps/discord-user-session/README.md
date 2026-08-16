@@ -144,6 +144,11 @@ allowlists still bind the result. A new join auto-opts that authenticated owner
 into live speaker-attributed transcription, which the captain discloses in his
 reply.
 
+Reactions and thread actions are grounded in the current ingress message. The
+same captain `discord_watch_start` / `discord_watch_stop` tools map to Go Live
+on this body, but only after the gateway freshly resolves the owner in the
+active allowlisted voice channel.
+
 A leftover optional GPL selfbot publisher (`go-live-media.ts`) can still be
 injected in tests. Production uses ClankVox. Without a running lab process,
 `go_live_start` throws `discord_presence_go_live_media_unavailable`.

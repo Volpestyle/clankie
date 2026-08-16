@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { DiscordVoiceEvidence } from "@clankie/protocol";
 import type { RealtimeTimers } from "@clankie/discord-presence-core";
 import {
-  createVoiceVolitionDecider,
   describeVoiceResponse,
   parseVoiceRealtimeEnv,
   renderVoiceConsentReply,
@@ -11,7 +10,6 @@ import {
   VoiceIdleAutoLeave,
   voiceEvidenceReceiptData,
   voiceEvidenceReceiptType,
-  VOICE_VOLITION_SYSTEM_PROMPT,
 } from "../src/voice-composition.ts";
 
 class TestTimers implements RealtimeTimers {
@@ -48,7 +46,6 @@ describe("realtime voice environment", () => {
       postInstructionsTokenLimit: 12_000,
       decayWindowMs: 60_000,
       idleLeaveMs: 900_000,
-      volitionModel: "gpt-4o-mini",
     });
   });
 
@@ -85,7 +82,6 @@ describe("realtime voice environment", () => {
       CLANKIE_VOICE_SESSION_LIFETIME_MS: "600000",
       CLANKIE_VOICE_DECAY_WINDOW_MS: "45000",
       CLANKIE_VOICE_IDLE_LEAVE_MS: "300000",
-      CLANKIE_VOICE_VOLITION_MODEL: "gpt-4.1-mini",
     });
     expect(config.realtimeModel).toBe("gpt-realtime-2.1-mini");
     expect(config.transcribeModel).toBe("gpt-realtime-whisper-2");
@@ -97,7 +93,6 @@ describe("realtime voice environment", () => {
     expect(config.sessionLifetimeMs).toBe(600_000);
     expect(config.decayWindowMs).toBe(45_000);
     expect(config.idleLeaveMs).toBe(300_000);
-    expect(config.volitionModel).toBe("gpt-4.1-mini");
   });
 
   it("rejects unbounded or disabled idle auto-leave", () => {
@@ -120,68 +115,18 @@ describe("realtime voice environment", () => {
     );
   });
 
-  it("fails loudly on retired cascade knobs instead of silently ignoring them", () => {
-    for (const name of ["CLANKIE_VOICE_STT_MODEL", "CLANKIE_VOICE_TTS_MODEL", "CLANKIE_VOICE_TTS_VOICE"]) {
+  it("fails loudly on retired knobs instead of silently ignoring them", () => {
+    const retired = [
+      "CLANKIE_VOICE_STT_MODEL",
+      "CLANKIE_VOICE_TTS_MODEL",
+      "CLANKIE_VOICE_TTS_VOICE",
+      // There is no separate volition model any more: his own realtime session
+      // decides whether to speak up, so a set model name would be ignored.
+      "CLANKIE_VOICE_VOLITION_MODEL",
+    ];
+    for (const name of retired) {
       expect(() => parseVoiceRealtimeEnv({ [name]: "anything" })).toThrow(new RegExp(name, "u"));
     }
-  });
-});
-
-describe("volition decider", () => {
-  const openAiAnswer = (content: unknown): Response =>
-    new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    });
-
-  function decider(fetchImpl: typeof fetch): (roomText: string) => Promise<boolean> {
-    return createVoiceVolitionDecider({ apiKey: "vol-key", model: "gpt-4o-mini", fetchImpl });
-  }
-
-  it("sends the bounded room text with temperature 0 and the brokered key", async () => {
-    const requests: { url: string; init: RequestInit | undefined }[] = [];
-    const decide = decider(((url: URL | RequestInfo, init?: RequestInit) => {
-      requests.push({ url: String(url), init });
-      return Promise.resolve(openAiAnswer("yes"));
-    }) as typeof fetch);
-    await expect(decide("1000: clankie should weigh in here")).resolves.toBe(true);
-    expect(requests).toHaveLength(1);
-    expect(requests[0]?.url).toBe("https://api.openai.com/v1/chat/completions");
-    const body = JSON.parse(String(requests[0]?.init?.body)) as {
-      model: string;
-      temperature: number;
-      messages: { role: string; content: string }[];
-    };
-    expect(body.model).toBe("gpt-4o-mini");
-    expect(body.temperature).toBe(0);
-    expect(body.messages[0]?.content).toBe(VOICE_VOLITION_SYSTEM_PROMPT);
-    expect(body.messages[1]?.content).toContain("clankie should weigh in");
-    const headers = requests[0]?.init?.headers as Record<string, string>;
-    expect(headers.authorization).toBe("Bearer vol-key");
-  });
-
-  it("parses yes strictly: only a clear yes speaks", async () => {
-    await expect(decider(() => Promise.resolve(openAiAnswer("Yes.")))("room")).resolves.toBe(true);
-    await expect(decider(() => Promise.resolve(openAiAnswer("no")))("room")).resolves.toBe(false);
-    await expect(decider(() => Promise.resolve(openAiAnswer("maybe yes")))("room")).resolves.toBe(false);
-    await expect(decider(() => Promise.resolve(openAiAnswer("yes, because")))("room")).resolves.toBe(false);
-    await expect(decider(() => Promise.resolve(openAiAnswer(42)))("room")).resolves.toBe(false);
-  });
-
-  it("fails closed on transport errors, bad statuses, and malformed payloads", async () => {
-    await expect(decider(() => Promise.reject(new Error("offline")))("room")).resolves.toBe(false);
-    await expect(decider(() => Promise.resolve(new Response("nope", { status: 500 })))("room")).resolves.toBe(
-      false,
-    );
-    await expect(
-      decider(() => Promise.resolve(new Response("not json", { status: 200 })))("room"),
-    ).resolves.toBe(false);
-  });
-
-  it("refuses a non-HTTPS non-loopback endpoint at construction", () => {
-    expect(() =>
-      createVoiceVolitionDecider({ apiKey: "k", model: "m", baseUrl: "http://example.com" }),
-    ).toThrow(/HTTPS/u);
   });
 });
 

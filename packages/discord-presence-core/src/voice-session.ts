@@ -131,9 +131,10 @@ export const ENGAGED_TICK_MS = 5_000;
 export const SPEAKER_TRANSCRIPTION_IDLE_MS = 2 * 60_000;
 /**
  * The transcript ring is the only transcript retention anywhere in the voice
- * path: recent final lines used to seed an engaged session and as the volition
- * decider's room text. ~30 lines / ~4 000 bytes holds the last few minutes of
- * a lively room and stays well inside a single bounded realtime text item.
+ * path: recent final lines used to seed an engaged session, including the one
+ * opened to offer him an unprompted turn. ~30 lines / ~4 000 bytes holds the
+ * last few minutes of a lively room and stays well inside a single bounded
+ * realtime text item.
  */
 export const TRANSCRIPT_RING_MAX_LINES = 30;
 export const TRANSCRIPT_RING_MAX_BYTES = 4_000;
@@ -156,6 +157,20 @@ const RECONNECT_BACKOFF_CAP_MS = 30_000;
  */
 export const CAPTAIN_UNREACHABLE_TEXT =
   "I couldn't reach my captain for that just now. Give me a moment and ask again.";
+/**
+ * What the room's own Clankie is told when the floor machine offers him an
+ * unprompted turn (ADR 0057). The mechanical half — may a turn be offered at
+ * all — is the rate cap's; *this* is the half that needs a personality, so it
+ * is asked of the realtime session that has one rather than of a bounded
+ * yes/no model that has none. Marked as a system note so the model cannot read
+ * it as something a participant said, and explicit that saying nothing is a
+ * real answer: a response the model declines to fill produces no audio, which
+ * the session accounts as a suppressed offer.
+ */
+export const UNPROMPTED_TURN_ITEM =
+  "System note, not spoken by anyone in the room: nobody addressed you. You may say something on " +
+  "your own if you actually have something worth saying to these people right now. If you do not, " +
+  "produce no output at all — staying quiet is a normal, correct answer, and most of these are.";
 
 export interface JoinDiscordVoiceInput {
   readonly guildId: string;
@@ -269,12 +284,6 @@ export interface DiscordVoiceSessionOptions {
   readonly briefing: (request: DiscordVoiceBriefingRequest) => Promise<DiscordVoiceBriefing>;
   readonly floor: VoiceFloorOptions;
   /**
-   * The volition call from ADR 0057: given bounded room text, does he have
-   * something worth saying? Absent means every offer is suppressed — still
-   * accounted, so the counters stay honest. Errors count as suppressed.
-   */
-  readonly volitionDecider?: (roomText: string) => Promise<boolean>;
-  /**
    * Floor for how often a possessor's narration may trigger a spoken response.
    * Seeding is never rate-limited; only speaking is. Defaults to
    * {@link DEFAULT_NARRATION_MIN_INTERVAL_MS}.
@@ -327,6 +336,8 @@ interface PendingVoiceResponse {
   readonly state: "settled" | "waiting_user";
   readonly handoffMs: number;
   readonly decidedAtMs: number;
+  /** Set when the floor machine offered this turn rather than the room asking for it. */
+  readonly offer?: boolean;
   firstAudioAtMs?: number;
   inputTokens?: number;
   outputTokens?: number;
@@ -416,6 +427,8 @@ export class DiscordVoiceSession {
   private openPlayback: PlaybackJob | undefined;
   /** The job currently at the player. */
   private playingJob: PlaybackJob | undefined;
+  /** An unprompted turn has been offered and the session has not yet spoken or passed. */
+  private offerOutstanding = false;
   private tickHandle: unknown;
   private holdHandle: unknown;
   private readonly reconnectHandles = new Map<string, unknown>();
@@ -478,9 +491,10 @@ export class DiscordVoiceSession {
     this.stayOutputTokens = 0;
     this.staySpokenCount = 0;
     this.stayNarrationSuppressed = 0;
-    // A fresh floor per call: volition accounting and rate caps are
-    // per-session, exactly like consent.
+    // A fresh floor per call: offer accounting and rate caps are per-session,
+    // exactly like consent.
     this.floor = new VoiceFloor(this.options.floor);
+    this.offerOutstanding = false;
     this.consent.open(input.guildId, input.channelId, input.invokingUserId);
     const connection = joinVoiceChannel({
       guildId: input.guildId,
@@ -603,6 +617,7 @@ export class DiscordVoiceSession {
     this.stayNarrationSuppressed = 0;
     this.daveProtocolVersion = undefined;
     this.sessionGeneration += 1;
+    this.offerOutstanding = false;
     this.stopTick();
     this.cancelHold();
     for (const handle of this.reconnectHandles.values()) this.timers.clearTimeout(handle);
@@ -1020,14 +1035,19 @@ export class DiscordVoiceSession {
           guildId,
           channelId,
           state: "dormant",
-          reason: decision.reason === "explicit" ? "released" : "decay",
+          reason: decision.reason,
         });
         this.stopTick();
         this.armHold();
         return;
       }
       case "volition_gate_open": {
-        this.runVolition(turn, text, guildId, channelId);
+        // The cap allowed an unprompted turn; who decides whether to use it is
+        // the point of ADR 0057's amendment. It is his own realtime session,
+        // holding his persona and everything he has heard — not a separate
+        // personality-free yes/no model that only ever saw ring text.
+        this.offerOutstanding = true;
+        this.queueEngagedResponse(turn, text, guildId, channelId, true);
         return;
       }
       case "ignore":
@@ -1035,26 +1055,29 @@ export class DiscordVoiceSession {
     }
   }
 
-  private runVolition(turn: PendingTranscriptTurn, text: string, guildId: string, channelId: string): void {
-    const generation = this.sessionGeneration;
-    const decider = this.options.volitionDecider;
-    // Absent decider ⇒ every offer suppressed, still accounted; a decider
-    // error counts as suppressed and must not crash the session.
-    const verdict =
-      decider === undefined
-        ? Promise.resolve(false)
-        : Promise.resolve()
-            .then(() => decider(this.ringText()))
-            .catch(() => false);
-    void verdict.then(async (taken) => {
-      if (generation !== this.sessionGeneration) return;
-      const outcome = this.floor.noteVolitionOutcome(taken);
-      if (outcome.action === "wake") {
-        await this.emitSafely({ type: "floor", guildId, channelId, state: "engaged", reason: "volition" });
-        this.queueEngagedResponse(turn, text, guildId, channelId);
-      }
-      await this.emitSafely({ type: "volition", guildId, channelId, ...this.floor.accounting() });
-    });
+  /**
+   * Records what the realtime session did with an offered turn: `taken` when it
+   * produced audio or reached for a tool, suppressed when the response came
+   * back empty or could never be issued at all. Single-shot — first settle wins
+   * — so the counters stay monotonic no matter which signal arrives first.
+   */
+  private settleOffer(taken: boolean): void {
+    if (!this.offerOutstanding) return;
+    const guildId = this.guildId;
+    const channelId = this.channelId;
+    if (guildId === undefined || channelId === undefined) return;
+    this.offerOutstanding = false;
+    const outcome = this.floor.noteVolitionOutcome(taken);
+    if (outcome.action === "wake") {
+      void this.emitSafely({ type: "floor", guildId, channelId, state: "engaged", reason: "volition" });
+      this.armTick();
+    } else if (this.floor.state !== "engaged") {
+      // He passed. The floor never moved, so the session that was opened to ask
+      // him goes back behind the hold window instead of idling open forever.
+      this.stopTick();
+      this.armHold();
+    }
+    void this.emitSafely({ type: "volition", guildId, channelId, ...this.floor.accounting() });
   }
 
   // ------------------------------------------------------------------
@@ -1067,12 +1090,17 @@ export class DiscordVoiceSession {
    * across a release inside the hold window) goes straight to the response.
    * The distinction is receipt-visible per ADR 0057, or the wake cost would
    * be invisible.
+   *
+   * An `offer` is the same machinery with one extra text item and one extra
+   * outcome: nobody asked him anything, so silence is a legitimate answer and
+   * whichever way it lands settles the offer's accounting.
    */
   private queueEngagedResponse(
     turn: PendingTranscriptTurn,
     text: string,
     guildId: string,
     channelId: string,
+    offer = false,
   ): void {
     const generation = this.sessionGeneration;
     this.cancelHold();
@@ -1085,10 +1113,16 @@ export class DiscordVoiceSession {
         if (this.conversation === undefined) {
           wake = "waking";
           await this.openConversationNow(guildId, channelId, turn.userId);
-          if (generation !== this.sessionGeneration || this.conversation === undefined) return;
+          if (generation !== this.sessionGeneration || this.conversation === undefined) {
+            // Briefing or open failed: he was never actually asked, so the
+            // offer is suppressed rather than left outstanding forever.
+            if (offer) this.settleOffer(false);
+            return;
+          }
           opened = true;
         }
         if (!opened) this.createRoomUtteranceItem(this.conversation, turn.userId, text);
+        if (offer) this.createUnpromptedTurnItem(this.conversation);
         this.pendingResponses.push({
           deliveryId: turn.deliveryId,
           wake,
@@ -1098,6 +1132,7 @@ export class DiscordVoiceSession {
           state: "settled",
           handoffMs: 0,
           decidedAtMs: this.clock(),
+          ...(offer ? { offer: true } : {}),
           done: false,
         });
         void this.emitSafely({
@@ -1112,6 +1147,7 @@ export class DiscordVoiceSession {
           this.conversation.createResponse();
         } catch {
           this.pendingResponses.pop();
+          if (offer) this.settleOffer(false);
           void this.emitSafely({
             type: "model_response",
             guildId,
@@ -1219,6 +1255,15 @@ export class DiscordVoiceSession {
     }
   }
 
+  private createUnpromptedTurnItem(conversation: VoiceConversationPort): void {
+    if (!conversation.isOpen) return;
+    try {
+      conversation.createTextItem(UNPROMPTED_TURN_ITEM);
+    } catch {
+      // Closed between frames; the close handler owns cleanup.
+    }
+  }
+
   private handleConversationClose(
     reason: RealtimeSessionCloseReason,
     generation: number,
@@ -1239,6 +1284,9 @@ export class DiscordVoiceSession {
       this.openPlayback = undefined;
     }
     this.pendingResponses = this.pendingResponses.filter((pending) => keep.has(pending));
+    // An offered turn whose session died before he answered is a suppressed
+    // offer, not an offer that hangs outstanding forever.
+    this.settleOffer(false);
     if (reason === "closed") return;
     void this.emitSafely({
       type: "failed",
@@ -1698,7 +1746,13 @@ export class DiscordVoiceSession {
       pcm.fill(0);
       return;
     }
-    if (pending.firstAudioAtMs === undefined) pending.firstAudioAtMs = this.clock();
+    if (pending.firstAudioAtMs === undefined) {
+      pending.firstAudioAtMs = this.clock();
+      // He took an offered turn the moment he opens his mouth, not when the
+      // response finishes: the room may answer him before then, and that reply
+      // has to find an engaged floor.
+      if (pending.offer === true) this.settleOffer(true);
+    }
     let discordPcm: Buffer;
     try {
       discordPcm = openAiPcmToDiscordPcm(pcm);
@@ -1732,6 +1786,11 @@ export class DiscordVoiceSession {
     const settled = this.pendingResponses.find((candidate) => !candidate.done);
     if (settled === undefined) return;
     settled.done = true;
+    // An offered turn he declined comes back with nothing in it. Reaching for a
+    // tool counts as taking it — the speech arrives on the follow-up response.
+    if (settled.offer === true) {
+      this.settleOffer(settled.firstAudioAtMs !== undefined || settled.toolCalled === true);
+    }
     if (meta?.inputTokens !== undefined) settled.inputTokens = meta.inputTokens;
     if (meta?.outputTokens !== undefined) settled.outputTokens = meta.outputTokens;
     const guildId = this.guildId;

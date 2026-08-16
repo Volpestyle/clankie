@@ -96,12 +96,13 @@ export {
   type VoicePresenceControlAction,
   type VoicePresenceControlInput,
 } from "./voice-control.ts";
+export { tryHandleCaptainDiscordActionRequest } from "./captain-action-control.ts";
 export {
   DiscordVoiceConsentRegistry,
   type DiscordVoiceConsentPolicy,
   type DiscordVoiceConsentSession,
 } from "./voice-consent.ts";
-export { addressKeys, phoneticKey, releasesFloor, voiceAddressesCharacter } from "./voice-address.ts";
+export { addressKeys, phoneticKey, voiceAddressesCharacter } from "./voice-address.ts";
 export {
   DEFAULT_DECAY_WINDOW_MS,
   VOLITION_DEFAULTS,

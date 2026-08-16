@@ -84,7 +84,6 @@ CLANKIE_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT=12000   # optional; 1000-128000
 CLANKIE_VOICE_SESSION_LIFETIME_MS=...               # optional; overrides the runtime's session lifetime cap
 CLANKIE_VOICE_DECAY_WINDOW_MS=60000                 # optional; floor decay window
 CLANKIE_VOICE_IDLE_LEAVE_MS=900000                  # optional; idle auto-leave, capped at 24 h
-CLANKIE_VOICE_VOLITION_MODEL=gpt-4o-mini            # optional; the volition gate's text model
 
 # Optional activity plane (ADR 0047) — rendered surfaces in a voice channel
 DISCORD_ACTIVITY_APPLICATION_ID_GBA=...        # embedded application id for the gba_emulator surface
@@ -113,6 +112,12 @@ credential class, and `DISCORD_USER_TOKEN` remains a hard startup error.
 Surfaces are deny-by-default: a surface with no configured application id cannot
 be launched, so the plane stays off until an owner sets the variable above. A
 model names a surface from the frozen catalog, never a Discord application id.
+
+The captain can choose these through `discord_watch_start` /
+`discord_watch_stop`. It supplies no channel id: this bridge freshly resolves
+the authenticated speaker's voice channel, reapplies voice authority and
+allowlists, and grounds the write there. Reactions and thread actions follow the
+same rule on the trigger message supplied by ingress.
 
 Stop is best-effort by design. Discord cannot evict viewers already inside a
 running instance, so stop means "no further launches" — the frame stream going
@@ -160,11 +165,15 @@ receipts cannot pass this gate.
 
 When `DISCORD_TEXT_INGRESS_ENABLED=true`, owner DMs and messages in the explicit guild/channel allowlists become bounded `DiscordPresenceChannelTurnRequest` values. Discord message IDs are the delivery idempotency keys. Bot/self messages, unallowlisted traffic, empty messages, and conflicting redeliveries stop before a captain turn and emit content-free ingress evidence. Context history is fetched only after policy admission, capped at 50 messages, framed as untrusted turn-only input, and never written to bridge state or ingress logs.
 
+Every admitted message reaches the captain by default, and he chooses a reply
+or the silent sentinel. Owners can select the `addressed` resource policy to
+spend turns only on mentions and configured names.
+
 The service authenticates the bridge as the `discord_text` captain source and addresses the `discord_presence` lane. Trigger and context text are fenced and labelled untrusted; uploaded images and GIF-picker media are references, with at most the newest context visual carried into a turn. GIF motion becomes bounded chronological image frames at the service boundary. Text turns are one-shot, so channel history never enters durable session state, and the adapter retains no continuation cursor after the result. A settled response becomes a typed `discord.presence.reply` and passes through the existing narrative policy, rate ledger, credential broker, and bot REST runtime.
 
-While an addressed turn (a DM, a mention, or one of his names) is being composed, the ingress posts policy-gated `discord.presence.typing_start` writes so the channel shows him typing, refreshed until the turn settles; the reply then clears the indicator. Unprompted turns — messages he is merely reading and may decline — never signal typing, and a failed typing post stops the refresh without touching the turn.
+While a live turn is being composed, ingress posts policy-gated `discord.presence.typing_start` writes so the channel shows him typing, refreshed until the turn settles; the reply then clears the indicator. He may still choose silence. Catch-up turns do not signal typing, and a failed typing post stops the refresh without touching the turn.
 
-One-shot Discord text turns have a 60-second captain deadline. A wedged model run is aborted with `captain_turn_timeout`, which settles ingress and stops the typing refresh instead of leaving the channel lit indefinitely. The bridge independently stops refreshing after 60 seconds, so a frozen service or HTTP connection cannot hold cosmetic presence open either.
+One-shot Discord text turns have a 10-minute hard captain deadline so model reasoning and multiple bounded tool calls can finish. A wedged run is then aborted with `captain_turn_timeout`, which settles ingress. The bridge independently stops refreshing typing after 60 seconds, so a frozen service or HTTP connection cannot hold cosmetic presence open while the execution clock remains generous.
 
 `/clankie person-memory` proposes or recalls long-term person facts under the
 stable guild/user identity. A proposal contains an explicit bounded fact, not a
@@ -190,33 +199,39 @@ reaches the realtime input buffer.
 flowchart LR
   A["Discord user A Opus"] -->|"48 kHz stereo → 24 kHz mono"| LA["A transcription"]
   B["Discord user B Opus"] -->|"48 kHz stereo → 24 kHz mono"| LB["B transcription"]
-  LA -->|"{ speakerId: A, text }"| F{"shared floor machine<br/>addressed? volition?"}
+  LA -->|"{ speakerId: A, text }"| F{"shared floor machine<br/>addressed? rate cap open?"}
   LB -->|"{ speakerId: B, text }"| F
-  F -->|wake| RT["engaged session<br/>gpt-realtime-2.1"]
+  F -->|"wake · offered turn"| RT["engaged session<br/>gpt-realtime-2.1"]
   BR["briefing<br/>persona · lane · self-state · person memory"] --> RT
   RT -->|"streamed audio<br/>24 kHz → 48 kHz"| V["Discord voice channel"]
   RT -.->|"text deltas<br/>external voice only"| XI["ElevenLabs TTS<br/>24 kHz PCM"]
   XI -.-> V
   RT -->|"ask_clankie"| C["captain discord_voice lane"]
   C -->|"result text"| RT
-  RT -.->|"release or decay"| F
+  RT -.->|"spoke, or passed"| F
 ```
 
 Dormant, one `gpt-realtime-whisper` session per permitted speaker hears that
 speaker's authenticated Discord stream and answers nothing. Their attributed
-transcripts converge in one shared floor. When the repository-owned floor
-machine decides he has a
-reason to speak — someone addressed him (the same word-boundary name matching
-as the text plane, with phonetic tolerance for transcription artifacts), or a
-rate-capped volition call decides he has something worth saying — the engaged
-`gpt-realtime-2.1` session opens, is seeded with the service-composed
-briefing plus the recent attributed JSONL transcript window, and answers with
-streamed audio. Later approved utterances enter as structured text; overlapping
-room audio is never interleaved and attributed by arrival order.
-`response.create` is always explicit; no utterance is auto-answered. The floor
-releases on an explicit closing phrase or by decay
-(`CLANKIE_VOICE_DECAY_WINDOW_MS`), and the engaged session is held connected
-briefly across a release so a conversation that resumes wakes instantly.
+transcripts converge in one shared floor. When someone addresses him — the same
+word-boundary name matching as the text plane, with phonetic tolerance for
+transcription artifacts — the engaged `gpt-realtime-2.1` session opens, is
+seeded with the service-composed briefing plus the recent attributed JSONL
+transcript window, and answers with streamed audio. Later approved utterances
+enter as structured text; overlapping room audio is never interleaved and
+attributed by arrival order. `response.create` is always explicit; no utterance
+is auto-answered.
+
+When nobody addressed him, the repository-owned floor machine decides only
+whether the `persona.chattiness` rate cap permits offering him an unprompted
+turn. Whether to use it is his: the offer is a `response.create` on his own
+engaged session carrying a system note that nobody asked him anything and that
+saying nothing is a normal answer. Audio back means he spoke up; an empty
+response means he passed, and the session parks on the hold window. No phrase
+releases the floor — a goodbye with his name in it is an address he answers —
+so release is decay alone (`CLANKIE_VOICE_DECAY_WINDOW_MS`), and the engaged
+session is held connected briefly across it so a conversation that resumes wakes
+instantly.
 
 How he sounds is configurable from the TUI's `/voice` wizard
 ([ADR 0070](../../docs/adr/0070-external-voice-via-streaming-tts.md)). The
@@ -254,7 +269,8 @@ storing the transcript, query, URL, model text, or audio. One `stayId` stamps
 every receipt from join to leave. `discord.voice.response` reports first-audio latency separately for
 waking and continuing turns, captain handoff latency, whether the turn took
 the fast path, and realtime token counts when the provider sends them;
-`discord.voice.volition` reports the offered/taken/suppressed counters, so "he
+`discord.voice.volition` reports the offered/taken/suppressed counters for
+unprompted turns — offered by the rate cap, taken or passed on by him — so "he
 talks too much" and "he never speaks up" are both falsifiable against a
 number. Play commentary that is seeded but not spoken emits
 `discord.voice.possessor_narration_suppressed` (`playing` or `rate_limited`)
