@@ -4,17 +4,15 @@
  * Every room Clankie answers in — each Discord server and channel, voice,
  * gameplay — is a lane the clankie service reports on its authenticated
  * `/captain/v1/lanes` listing. The console reads that listing to learn which
- * rooms exist and, when a room is watched, polls it for changes: session
- * rotations and state transitions. It is a subscriber and nothing else: no
- * send, no steering.
+ * rooms exist and, when a room is watched, polls its bounded heard/said log for
+ * new entries. It is a subscriber and nothing else: no send, no steering.
  *
- * The listing is identity-only (room, session, state, updated-at); the service
- * does not expose a per-event session stream, so a watched lane reports state
- * transitions rather than a full reasoning/tool feed.
+ * This is conversation history, not private pi reasoning or tool state.
  */
 import {
   CAPTAIN_LANE_OBSERVATION_PATH,
   CaptainLaneListingSchema,
+  type CaptainLaneObservationEntry,
   type ObservableCaptainLane,
 } from "@clankie/protocol";
 import type { ClankieFaceShell } from "../shell/shell.ts";
@@ -74,7 +72,7 @@ export function selectLanes(
   argument: string,
 ): readonly ObservableCaptainLane[] {
   const query = argument.trim().toLowerCase();
-  if (query.length === 0 || query === "all") return lanes.filter((lane) => lane.lane !== "tui");
+  if (query.length === 0 || query === "all") return lanes.filter((lane) => lane.lane !== "operator");
   const exact = lanes.filter(
     (lane) => laneKey(lane).toLowerCase() === query || lane.targetId.toLowerCase() === query,
   );
@@ -84,7 +82,11 @@ export function selectLanes(
   return lanes.filter((lane) => laneKey(lane).toLowerCase().includes(query));
 }
 
-/** One `/trace` listing line: room, state, session presence, and whether it is being watched. */
+function latestEntryAt(lane: ObservableCaptainLane): string {
+  return lane.entries.at(-1)?.at ?? "";
+}
+
+/** One `/trace` listing line: room, recent history, and whether it is being watched. */
 export function formatLaneListing(
   lanes: readonly ObservableCaptainLane[],
   watched: ReadonlySet<string>,
@@ -93,12 +95,13 @@ export function formatLaneListing(
     return "No captain lanes have run a turn yet. Rooms appear here once Clankie answers in them.";
   }
   return [...lanes]
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+    .sort((left, right) => latestEntryAt(right).localeCompare(latestEntryAt(left)))
     .map((lane) => {
       const key = laneKey(lane);
       const mark = watched.has(key) ? "▶" : " ";
-      const session = lane.sessionId === undefined ? "no session yet" : lane.state;
-      return `${mark} ${key} · ${session} · ${lane.updatedAt}`;
+      const latest = latestEntryAt(lane);
+      const activity = latest.length === 0 ? "quiet" : `${String(lane.entries.length)} recent · ${latest}`;
+      return `${mark} ${key} · ${activity}`;
     })
     .join("\n");
 }
@@ -108,8 +111,6 @@ export interface LaneTailOptions {
   readonly lanes: CaptainLaneClient;
   /** Renders one observed change in the followed room. */
   readonly render: (line: string) => void;
-  /** Called when the followed lane starts a new session. */
-  readonly onSessionRotated?: (sessionId: string) => void;
   /** Surfaces a non-fatal problem (listing unreachable) without stopping the tail. */
   readonly onNotice?: (message: string) => void;
   readonly pollIntervalMs?: number;
@@ -117,17 +118,37 @@ export interface LaneTailOptions {
   readonly signal: AbortSignal;
 }
 
+function sameEntry(left: CaptainLaneObservationEntry, right: CaptainLaneObservationEntry): boolean {
+  return left.at === right.at && left.kind === right.kind && left.text === right.text;
+}
+
+/** Finds the appended suffix when the service's bounded log window advances. */
+function appendedEntries(
+  previous: readonly CaptainLaneObservationEntry[] | undefined,
+  current: readonly CaptainLaneObservationEntry[],
+): readonly CaptainLaneObservationEntry[] {
+  if (previous === undefined) return current;
+  for (let overlap = Math.min(previous.length, current.length); overlap > 0; overlap -= 1) {
+    const previousStart = previous.length - overlap;
+    if (
+      current.slice(0, overlap).every((entry, index) => sameEntry(previous[previousStart + index]!, entry))
+    ) {
+      return current.slice(overlap);
+    }
+  }
+  return current;
+}
+
 /**
  * Follows one lane until the signal aborts, polling the listing and reporting
- * session rotations and state transitions. A quiet room backs off to
+ * newly appended heard/said entries. A quiet room backs off to
  * {@link LANE_MAX_POLL_MS}; the first observed change brings the cadence back.
  */
 export async function followLane(options: LaneTailOptions): Promise<void> {
   const poll = options.pollIntervalMs ?? LANE_IDLE_POLL_MS;
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
   const key = laneKey(options.address);
-  let sessionId: string | undefined;
-  let state: string | undefined;
+  let previous: readonly CaptainLaneObservationEntry[] | undefined;
   let quietRounds = 0;
   const waitQuietly = async (): Promise<void> => {
     const delay = Math.min(poll * 2 ** quietRounds, LANE_MAX_POLL_MS);
@@ -154,26 +175,10 @@ export async function followLane(options: LaneTailOptions): Promise<void> {
     }
     if (options.signal.aborted) return;
     lastNotice = undefined;
-    if (current?.sessionId === undefined) {
-      await waitQuietly();
-      continue;
-    }
-    let changed = false;
-    if (current.sessionId !== sessionId) {
-      sessionId = current.sessionId;
-      state = undefined;
-      changed = true;
-      options.onSessionRotated?.(sessionId);
-      options.render(`session ${current.sessionId} · ${current.state} · ${current.updatedAt}`);
-    }
-    if (current.state !== state) {
-      state = current.state;
-      if (!changed) {
-        changed = true;
-        options.render(`state ${current.state} · ${current.updatedAt}`);
-      }
-    }
-    if (changed) {
+    const appended = current === undefined ? [] : appendedEntries(previous, current.entries);
+    if (current !== undefined) previous = current.entries;
+    if (appended.length > 0) {
+      for (const entry of appended) options.render(`${entry.kind} · ${entry.at}\n\n${entry.text}`);
       quietRounds = 0;
       await sleep(poll);
     } else {

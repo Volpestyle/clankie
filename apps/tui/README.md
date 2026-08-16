@@ -112,7 +112,7 @@ server and channel he answers in, voice, gameplay
 ([ADR 0083](../../docs/adr/0083-every-room-he-thinks-in-is-watchable.md)).
 
 ```text
-/trace                      list every room, its state, and which are watched
+/trace                      list every room, recent activity, and which are watched
 /trace discord_presence     watch a whole lane
 /trace 1234:5678            watch one room by guild:channel (or any substring)
 /trace all                  watch every room except this conversation
@@ -120,13 +120,11 @@ server and channel he answers in, voice, gameplay
 ```
 
 Rooms come from `GET /captain/v1/lanes`, the service's authenticated
-identity-only listing: lane, target id, bound session id, state, and last
-update — no message, reasoning, tool, or continuation field. A watched room is
-polled for changes and renders its session rotations and state transitions as
-room-tagged transcript lines. Watching is a subscription and nothing else: no
-send, no steering, and a watched room never drives the turn loader or status
-bar. Per-event reasoning/tool rendering for watched rooms returns when the
-service exposes lane transcripts.
+bounded lane log: lane, target id, and recent `heard`/`said` entries — no
+reasoning, tool, private pi session state, or continuation field. A watched room
+is polled for appended entries and renders them as room-tagged transcript lines.
+Watching is a subscription and nothing else: no send, no steering, and a
+watched room never drives the turn loader or status bar.
 
 ## Layout
 

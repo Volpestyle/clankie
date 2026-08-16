@@ -54,6 +54,23 @@ const TARGET_ALIASES: Readonly<Record<string, ServiceTarget>> = {
   lab: "discord-user-session",
 };
 
+/**
+ * How a package service is spawned, and how to recognize that spawn in the
+ * process table.
+ *
+ * The matcher looks for the launcher's own argv (`--filter <pkg> start`), not
+ * for the package name alone. A bare name matches every process that merely
+ * mentions it — an agent running `pnpm --filter @clankie/clankie test`, a grep,
+ * the shell wrapper around either — and the launcher then reports the service
+ * as "running but not launcher-owned" and refuses to start or stop the real
+ * one. With a fleet of agents working in this repo that fires constantly.
+ */
+function pnpmStart(pkg: string): Pick<ManagedService, "spawnArgs" | "commandMatches"> {
+  const argv = ["--filter", pkg, "start"];
+  const spawnShape = argv.join(" ");
+  return { spawnArgs: argv, commandMatches: (command) => command.includes(spawnShape) };
+}
+
 export function parseServiceTarget(raw: string | undefined): ServiceTarget {
   if (raw === undefined || raw.length === 0) return "all";
   const target = TARGET_ALIASES[raw.toLowerCase()];
@@ -156,8 +173,7 @@ const CLANKIE: ManagedService = {
   id: "clankie",
   label: "Clankie",
   dependsOn: [],
-  spawnArgs: ["--filter", "@clankie/clankie", "start"],
-  commandMatches: (command) => command.includes("@clankie/clankie"),
+  ...pnpmStart("@clankie/clankie"),
   /**
    * The presence runtime module is a repository path, not a preference, so the
    * launcher supplies it rather than making the operator remember an env
@@ -194,8 +210,7 @@ const DISCORD_BRIDGE: ManagedService = {
   id: "discord-bridge",
   label: "Discord bridge",
   dependsOn: ["clankie"],
-  spawnArgs: ["--filter", "@clankie/discord-bridge", "start"],
-  commandMatches: (command) => command.includes("@clankie/discord-bridge"),
+  ...pnpmStart("@clankie/discord-bridge"),
   enabled: (env) => resolveDiscordActiveBody(env) === "bot",
   // Its live presence claim is only valid against the service instance that
   // issued it, so a clankie restart requires a bridge restart.
@@ -247,8 +262,7 @@ const DISCORD_USER_SESSION: ManagedService = {
   id: "discord-user-session",
   label: "Discord lab body",
   dependsOn: ["clankie"],
-  spawnArgs: ["--filter", "@clankie/discord-user-session", "start"],
-  commandMatches: (command) => command.includes("@clankie/discord-user-session"),
+  ...pnpmStart("@clankie/discord-user-session"),
   restartsWith: ["clankie"],
   enabled: (env) =>
     env.DISCORD_USER_SESSION_ENABLED === "true" && resolveDiscordActiveBody(env) === "user_session",
@@ -300,8 +314,7 @@ const ACTIVITY: ManagedService = {
   id: "activity",
   label: "Activity surface",
   dependsOn: [],
-  spawnArgs: ["--filter", "@clankie/discord-activity", "start"],
-  commandMatches: (command) => command.includes("@clankie/discord-activity"),
+  ...pnpmStart("@clankie/discord-activity"),
   probe: async ({ env, fetchImpl }) => {
     const port = env["CLANKIE_ACTIVITY_PORT"] ?? "4320";
     try {

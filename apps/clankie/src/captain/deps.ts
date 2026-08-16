@@ -15,6 +15,8 @@ import type {
   CaptainSessionLaneV2,
   DiscordPersonIdentity,
   DiscordPresenceAttachment,
+  DiscordCaptainActionInput,
+  DiscordCaptainActionResult,
   DiscordStreamWatchObservation,
   DiscordVoicePresenceResult,
   DrawDiagramResult,
@@ -105,6 +107,10 @@ export interface CaptainDeps {
   readonly discordVoicePresence?: {
     join(input: { guildId: string; actorId: string }): Promise<DiscordVoicePresenceResult>;
     leave(input: { guildId: string; actorId: string }): Promise<DiscordVoicePresenceResult>;
+  };
+  /** Grounded social actions on the message and body belonging to the active turn. */
+  readonly discordActions?: {
+    execute(input: DiscordCaptainActionInput): Promise<DiscordCaptainActionResult>;
   };
   readonly presence: {
     listSessions(): Promise<DiscordPresenceSessionRecord[]>;

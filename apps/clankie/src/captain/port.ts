@@ -1,6 +1,8 @@
 import type {
   CaptainChannelTurnResult,
+  CaptainLaneObservationEntry,
   DiscordPresenceChannelTurnRequest,
+  ObservableCaptainLane,
   OperatorConversationServiceRequest,
   OperatorConversationServiceResult,
 } from "@clankie/protocol";
@@ -17,19 +19,16 @@ export interface CaptainPort {
     request: OperatorConversationServiceRequest,
   ): Promise<OperatorConversationServiceResult>;
   /** Lane transcript snapshots for the TUI lanes view. */
-  observeLanes(): Promise<readonly LaneObservation[]>;
+  observeLanes(): Promise<readonly ObservableCaptainLane[]>;
   /** Prompt fragment describing the voice lane, for the realtime voice briefing. */
   voiceLaneInstructions(): string;
   /** Graceful shutdown: waits for in-flight turns. */
   close(): Promise<void>;
 }
 
-export interface LaneObservationEntry {
-  readonly at: string;
-  readonly kind: "heard" | "said";
-  readonly text: string;
-}
+export type LaneObservationEntry = CaptainLaneObservationEntry;
 
+/** A direct room read accepts a model-supplied lane before visibility checks. */
 export interface LaneObservation {
   readonly lane: string;
   readonly targetId: string;

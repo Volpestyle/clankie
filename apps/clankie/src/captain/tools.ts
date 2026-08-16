@@ -32,6 +32,9 @@ export interface TurnContext {
   actorId?: string | undefined;
   /** Discord guild for this turn. Host-stamped; absent in DMs and non-Discord rooms. */
   guildId?: string | undefined;
+  /** Discord channel and trigger message for grounded social actions. */
+  channelId?: string | undefined;
+  messageId?: string | undefined;
 }
 
 /** Room key, stable across a room's turns and distinct across rooms. */
@@ -122,34 +125,28 @@ export function captainTools(
         environmentId: Type.Union([Type.Literal("pokemon-firered"), Type.Literal("pokemon-emerald")], {
           default: "pokemon-firered",
         }),
-        requestedBy: Type.String({
-          minLength: 1,
-          maxLength: 200,
-          description: "The asker's id; 'owner' for the operator.",
-        }),
       }),
       execute: async (_id, params) =>
         json(
           await startPlay(playPorts, {
             environmentId: params.environmentId,
             originLane: lane,
-            requestedBy: params.requestedBy,
+            requestedBy: turnActor(turn, lane),
           }),
         ),
     }),
     ...discordVoicePresenceTools(deps, turn, lane),
-    ...discordMusicTools(deps, turn),
+    ...discordActionTools(deps, turn, lane),
+    ...discordMusicTools(deps, turn, lane),
     defineTool({
       name: "stop_play",
       label: "Stop playing",
       description:
         "Stop the live play session on your body. The result is what actually happened; a session that was " +
         "already stopped is not an error worth apologising for.",
-      parameters: Type.Object({
-        requestedBy: Type.String({ minLength: 1, maxLength: 200 }),
-      }),
-      execute: async (_id, params) =>
-        json(await stopPlay(playPorts, { originLane: lane, requestedBy: params.requestedBy })),
+      parameters: Type.Object({}),
+      execute: async () =>
+        json(await stopPlay(playPorts, { originLane: lane, requestedBy: turnActor(turn, lane) })),
     }),
     defineTool({
       name: "observe_share",
@@ -341,12 +338,19 @@ export function captainTools(
   ];
 }
 
+function turnActor(turn: TurnContext, lane: CaptainSessionLaneV2): string {
+  if (lane === "operator") return "owner";
+  if (lane === "gameplay") return "clankie";
+  if (turn.actorId === undefined) throw new Error("Turn actor attribution is unavailable");
+  return turn.actorId;
+}
+
 function discordVoicePresenceTools(
   deps: CaptainDeps,
   turn: TurnContext,
   lane: CaptainSessionLaneV2,
 ): ToolDefinition[] {
-  if (lane === "operator") return [];
+  if (!lane.startsWith("discord_")) return [];
   const voice = deps.discordVoicePresence;
   const call = async (action: "join" | "leave") => {
     const guildId = turn.guildId;
@@ -382,6 +386,106 @@ function discordVoicePresenceTools(
   ];
 }
 
+function discordActionTools(
+  deps: CaptainDeps,
+  turn: TurnContext,
+  lane: CaptainSessionLaneV2,
+): ToolDefinition[] {
+  if (!lane.startsWith("discord_") || deps.discordActions === undefined) return [];
+  const context = (callId: string) => {
+    if (turn.actorId === undefined || turn.channelId === undefined || turn.messageId === undefined) {
+      throw new Error("Discord turn attribution is unavailable");
+    }
+    return {
+      callId,
+      actorId: turn.actorId,
+      ...(turn.guildId === undefined ? {} : { guildId: turn.guildId }),
+      channelId: turn.channelId,
+      messageId: turn.messageId,
+    };
+  };
+  const textActions =
+    lane === "discord_presence"
+      ? [
+          defineTool({
+            name: "discord_react",
+            label: "React to message",
+            description:
+              "Add a reaction to the Discord message you are answering. Use your own social judgment.",
+            parameters: Type.Object({ emoji: Type.String({ minLength: 1, maxLength: 64 }) }),
+            execute: (callId, params) =>
+              deps.discordActions!
+                .execute({ action: "react", ...context(callId), emoji: params.emoji })
+                .then(json),
+          }),
+          defineTool({
+            name: "discord_unreact",
+            label: "Remove reaction",
+            description: "Remove one of your reactions from the Discord message you are answering.",
+            parameters: Type.Object({ emoji: Type.String({ minLength: 1, maxLength: 64 }) }),
+            execute: (callId, params) =>
+              deps.discordActions!
+                .execute({ action: "unreact", ...context(callId), emoji: params.emoji })
+                .then(json),
+          }),
+          defineTool({
+            name: "discord_create_thread",
+            label: "Start a thread",
+            description:
+              "Start a Discord thread from the message you are answering when the conversation deserves one.",
+            parameters: Type.Object({ name: Type.String({ minLength: 1, maxLength: 100 }) }),
+            execute: (callId, params) =>
+              deps.discordActions!
+                .execute({ action: "create_thread", ...context(callId), name: params.name })
+                .then(json),
+          }),
+          defineTool({
+            name: "discord_join_thread",
+            label: "Join thread",
+            description: "Join the current Discord thread when you want to participate in it.",
+            parameters: Type.Object({}),
+            execute: (callId) =>
+              deps.discordActions!.execute({ action: "join_thread", ...context(callId) }).then(json),
+          }),
+        ]
+      : [];
+  return [
+    ...textActions,
+    defineTool({
+      name: "discord_watch_start",
+      label: "Start sharing play",
+      description:
+        "Show your live play surface in the speaker's current voice channel. The body chooses its supported " +
+        "Discord surface and freshly resolves the speaker's voice channel; a refusal is a fact, not a retry cue.",
+      parameters: Type.Object({}),
+      execute: (callId) => {
+        const grounded = context(callId);
+        if (grounded.guildId === undefined) {
+          return Promise.resolve(json({ ok: false, message: "Voice needs a server." }));
+        }
+        return deps.discordActions!
+          .execute({ action: "watch_start", ...grounded, guildId: grounded.guildId })
+          .then(json);
+      },
+    }),
+    defineTool({
+      name: "discord_watch_stop",
+      label: "Stop sharing play",
+      description: "Stop offering your live play surface in the speaker's current voice channel.",
+      parameters: Type.Object({}),
+      execute: (callId) => {
+        const grounded = context(callId);
+        if (grounded.guildId === undefined) {
+          return Promise.resolve(json({ ok: false, message: "Voice needs a server." }));
+        }
+        return deps.discordActions!
+          .execute({ action: "watch_stop", ...grounded, guildId: grounded.guildId })
+          .then(json);
+      },
+    }),
+  ];
+}
+
 /**
  * His drawing hand (ADR 0096).
  *
@@ -391,9 +495,13 @@ function discordVoicePresenceTools(
  * lane rather than only the ones that hold a shell. The design system is fixed,
  * so his attention goes to what the diagram says.
  */
-function discordMusicTools(deps: CaptainDeps, turn: TurnContext): ToolDefinition[] {
+function discordMusicTools(
+  deps: CaptainDeps,
+  turn: TurnContext,
+  lane: CaptainSessionLaneV2,
+): ToolDefinition[] {
   const music = deps.discordMusic;
-  const author = (): string => turn.actorId?.trim() || "unknown";
+  const author = (): string => turnActor(turn, lane);
   const unavailable = () =>
     json({
       ok: false,

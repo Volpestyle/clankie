@@ -27,6 +27,7 @@ import { browserEnabled, createBrowserHost, type BrowserHost } from "./browser-h
 import { createTldrawHost, tldrawEnabled, type TldrawHost } from "./tldraw-host.ts";
 import { createCaptain } from "./captain/captain.ts";
 import { createDiscordMusicClient } from "./discord-music.ts";
+import { createDiscordCaptainActionClient } from "./discord-captain-actions.ts";
 import { createDiscordVoicePresenceClient } from "./discord-voice-presence.ts";
 import { createEmailPort } from "./email.ts";
 import { createLinearPort } from "./linear.ts";
@@ -310,6 +311,7 @@ const captain = createCaptain(
     },
     discordMusic: createDiscordMusicClient(),
     discordVoicePresence: createDiscordVoicePresenceClient(),
+    discordActions: createDiscordCaptainActionClient(),
     presence: {
       listSessions: () => Promise.resolve(boundApp().presenceSessions()),
       listVoiceHistory: (limit = 5) => Promise.resolve(boundApp().voiceHistory(limit)),

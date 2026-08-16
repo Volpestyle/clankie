@@ -49,7 +49,7 @@ export function describePersona(persona: PersonaSettings): string[] {
     `name: ${persona.displayName}`,
     `also answers to: ${persona.aliases.length === 0 ? "—" : persona.aliases.join(", ")}`,
     `chattiness: ${persona.chattiness}`,
-    `replies in text channels: ${persona.replyPolicy === "all" ? "every message" : "when addressed"}`,
+    `reads text channels: ${persona.replyPolicy === "all" ? "every admitted message" : "when addressed"}`,
     "",
     "character:",
     ...(notes.length === 0 ? ["  (none set — he will sound like a default assistant)"] : indent(notes)),
@@ -187,18 +187,18 @@ async function editVoice(shell: ClankieFaceShell, services: PersonaCommandServic
 
   const replyPolicy = await flow.readSelect({
     kind: "single",
-    message: "When should he reply in a text channel?",
+    message: "Which admitted text messages should he see?",
     options: [
-      {
-        value: "addressed",
-        label: "When addressed",
-        hint: "recommended",
-        description: "An @mention, or a message using one of his names.",
-      },
       {
         value: "all",
         label: "Every message",
-        description: "Replies to everything in every admitted channel, and spends a model turn on each one.",
+        hint: "recommended",
+        description: "He sees each message and decides for himself whether speaking would add anything.",
+      },
+      {
+        value: "addressed",
+        label: "When addressed",
+        description: "Only a mention or one of his names spends a model turn; useful when cost matters more.",
       },
     ],
     required: true,
@@ -213,7 +213,7 @@ async function editVoice(shell: ClankieFaceShell, services: PersonaCommandServic
   }));
   flow.renderLine(
     replyChoice === "all"
-      ? "Saved. He will answer every message in every admitted channel — restart the bridge to apply."
+      ? "Saved. He will read every admitted message and choose when to speak — restart the bridge to apply."
       : "Saved. Restart the bridge to apply.",
     "success",
   );

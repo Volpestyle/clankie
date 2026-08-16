@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { runDurableTurn, runOneShotDiscordTurn } from "../src/captain/captain.ts";
+import {
+  DISCORD_TEXT_TURN_HARD_TIMEOUT_MS,
+  runDurableTurn,
+  runOneShotDiscordTurn,
+} from "../src/captain/captain.ts";
 
 /**
  * The durable-lane dispatch (ADR 0091): an idle lane runs, a streaming lane
@@ -135,7 +139,7 @@ describe("runDurableTurn", () => {
 });
 
 describe("runOneShotDiscordTurn", () => {
-  it("aborts a Discord text run that exceeds its deadline", async () => {
+  it("allows tool-using Discord text runs beyond the typing window, then enforces the hard deadline", async () => {
     vi.useFakeTimers();
     try {
       const abort = vi.fn(() => Promise.resolve());
@@ -143,10 +147,12 @@ describe("runOneShotDiscordTurn", () => {
         { abort, prompt: () => new Promise<void>(() => undefined) },
         "hello",
         [],
-        50,
       );
 
-      await vi.advanceTimersByTimeAsync(50);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(abort).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(DISCORD_TEXT_TURN_HARD_TIMEOUT_MS - 60_000);
 
       await expect(run).resolves.toBe(false);
       expect(abort).toHaveBeenCalledOnce();

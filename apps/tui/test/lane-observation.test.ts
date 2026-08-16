@@ -12,29 +12,25 @@ const lanes: readonly ObservableCaptainLane[] = [
   {
     lane: "discord_presence",
     targetId: "111:222",
-    sessionId: "session-a",
-    state: "completed",
-    updatedAt: "2026-08-09T10:00:00.000Z",
+    entries: [
+      { at: "2026-08-09T09:59:00.000Z", kind: "heard", text: "hello" },
+      { at: "2026-08-09T10:00:00.000Z", kind: "said", text: "hey" },
+    ],
   },
   {
     lane: "discord_voice",
     targetId: "111:333",
-    sessionId: "session-b",
-    state: "active",
-    updatedAt: "2026-08-09T11:00:00.000Z",
+    entries: [{ at: "2026-08-09T11:00:00.000Z", kind: "heard", text: "yo" }],
   },
   {
-    lane: "tui",
-    targetId: "operator",
-    sessionId: "session-c",
-    state: "waiting",
-    updatedAt: "2026-08-09T09:00:00.000Z",
+    lane: "operator",
+    targetId: "global-default",
+    entries: [{ at: "2026-08-09T09:00:00.000Z", kind: "said", text: "ready" }],
   },
   {
     lane: "gameplay",
     targetId: "firered",
-    state: "completed",
-    updatedAt: "2026-08-09T08:00:00.000Z",
+    entries: [],
   },
 ];
 
@@ -96,53 +92,47 @@ describe("lane selection", () => {
     const rows = listing.split("\n");
     expect(rows[0]).toContain("▶ discord_voice:111:333");
     expect(rows[1]).toContain("  discord_presence:111:222");
-    expect(listing).toContain("gameplay:firered · no session yet");
+    expect(listing).toContain("gameplay:firered · quiet");
   });
 });
 
 describe("followLane", () => {
-  it("reports the followed room's session and state changes in order", async () => {
+  it("reports initial history and only the appended suffix as the bounded window advances", async () => {
     const seen: string[] = [];
-    const rotations: string[] = [];
     const controller = new AbortController();
-    const sessions = ["turn-one", "turn-one", "turn-two"];
-    const states = ["active", "waiting", "active"];
+    const first = { at: "2026-08-09T10:00:00.000Z", kind: "heard", text: "one" } as const;
+    const second = { at: "2026-08-09T10:00:01.000Z", kind: "said", text: "two" } as const;
+    const third = { at: "2026-08-09T10:00:02.000Z", kind: "heard", text: "three" } as const;
+    const snapshots = [
+      [first, second],
+      [second, third],
+    ];
     let listed = 0;
     await followLane({
       address: { lane: "discord_presence", targetId: "111:222" },
       lanes: {
         lanes: async () => {
-          const index = Math.min(listed, sessions.length - 1);
+          const index = Math.min(listed, snapshots.length - 1);
           listed += 1;
-          return [
-            {
-              ...(lanes[0] as ObservableCaptainLane),
-              sessionId: sessions[index] as string,
-              state: states[index] as ObservableCaptainLane["state"],
-            },
-          ];
+          return [{ ...(lanes[0] as ObservableCaptainLane), entries: snapshots[index]! }];
         },
       },
       signal: controller.signal,
       sleep: async () => {
-        if (listed >= 3) controller.abort();
+        if (listed >= 2) controller.abort();
       },
       render: (line) => {
         seen.push(line);
       },
-      onSessionRotated: (sessionId) => {
-        rotations.push(sessionId);
-      },
     });
-    expect(rotations).toEqual(["turn-one", "turn-two"]);
     expect(seen).toEqual([
-      "session turn-one · active · 2026-08-09T10:00:00.000Z",
-      "state waiting · 2026-08-09T10:00:00.000Z",
-      "session turn-two · active · 2026-08-09T10:00:00.000Z",
+      "heard · 2026-08-09T10:00:00.000Z\n\none",
+      "said · 2026-08-09T10:00:01.000Z\n\ntwo",
+      "heard · 2026-08-09T10:00:02.000Z\n\nthree",
     ]);
   });
 
-  it("waits without rendering while a room has no session yet", async () => {
+  it("waits without rendering while a room is quiet", async () => {
     const controller = new AbortController();
     let polls = 0;
     await followLane({
@@ -154,7 +144,7 @@ describe("followLane", () => {
         if (polls >= 3) controller.abort();
       },
       render: () => {
-        throw new Error("a room with no session must not render");
+        throw new Error("a quiet room must not render");
       },
     });
     expect(polls).toBe(3);
@@ -164,15 +154,18 @@ describe("followLane", () => {
     // A settled room must not be re-polled at full cadence forever.
     const waits: number[] = [];
     const controller = new AbortController();
-    const sessions = ["turn-one", "turn-one", "turn-one", "turn-two"];
+    const initial = lanes[0]!.entries;
+    const appended = [
+      ...initial,
+      { at: "2026-08-09T10:01:00.000Z", kind: "heard" as const, text: "anything new?" },
+    ];
     let listed = 0;
     await followLane({
       address: { lane: "discord_presence", targetId: "111:222" },
       lanes: {
         lanes: async () => {
-          const index = Math.min(listed, sessions.length - 1);
           listed += 1;
-          return [{ ...(lanes[0] as ObservableCaptainLane), sessionId: sessions[index] as string }];
+          return [{ ...(lanes[0] as ObservableCaptainLane), entries: listed < 4 ? initial : appended }];
         },
       },
       signal: controller.signal,
@@ -183,8 +176,8 @@ describe("followLane", () => {
       },
       render: () => undefined,
     });
-    // First round is a change (fresh session), then two quiet rounds back off,
-    // then the rotation snaps the cadence back.
+    // Initial history is a change, then two quiet rounds back off, then the
+    // appended entry snaps the cadence back.
     expect(waits).toEqual([1_000, 1_000, 2_000, 1_000]);
   });
 

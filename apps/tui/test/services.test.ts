@@ -352,7 +352,7 @@ describe("discord bridge health", () => {
       env,
       fetchImpl: presenceFetch("present"),
       operatorToken: "operator-secret",
-      listProcessCommandsImpl: processList("node @clankie/discord-bridge start"),
+      listProcessCommandsImpl: processList("node pnpm.mjs --filter @clankie/discord-bridge start"),
     });
 
     expect(status).toMatchObject({ id: "discord-bridge", state: "healthy", owned: false });
@@ -381,7 +381,7 @@ describe("discord bridge health", () => {
       env,
       fetchImpl: presenceFetch(undefined),
       operatorToken: "operator-secret",
-      listProcessCommandsImpl: processList("node @clankie/discord-bridge start"),
+      listProcessCommandsImpl: processList("node pnpm.mjs --filter @clankie/discord-bridge start"),
     });
 
     expect(status).toMatchObject({ state: "healthy", owned: false });
@@ -444,6 +444,14 @@ describe("service targets", () => {
         DISCORD_ACTIVE_BODY: "user_session",
       }),
     ).toBe(true);
+  });
+
+  it("recognizes the service's own spawn, not every mention of its package", () => {
+    const matches = managedService("clankie").commandMatches;
+    expect(matches("node /path/pnpm.mjs --filter @clankie/clankie start")).toBe(true);
+    // Agent shells that merely name the package are not a running service.
+    expect(matches("pnpm --filter @clankie/clankie test")).toBe(false);
+    expect(matches("rg @clankie/clankie apps/tui")).toBe(false);
   });
 
   it("rejects an unknown target instead of guessing", () => {
@@ -598,7 +606,7 @@ describe("service targets", () => {
       fetchImpl: (async () => {
         throw new Error("connection refused");
       }) as unknown as typeof fetch,
-      listProcessCommandsImpl: processList("node @clankie/clankie start"),
+      listProcessCommandsImpl: processList("node pnpm.mjs --filter @clankie/clankie start"),
     });
 
     expect(outcomes.map((outcome) => [outcome.id, outcome.ok])).toEqual([

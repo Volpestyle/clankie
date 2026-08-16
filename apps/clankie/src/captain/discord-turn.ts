@@ -15,6 +15,8 @@ export interface NormalizedDiscordTurn {
   readonly heard: string;
   readonly actorId: string;
   readonly guildId?: string;
+  readonly channelId: string;
+  readonly messageId: string;
 }
 
 /**
@@ -161,6 +163,8 @@ export async function normalizeDiscordTurn(
     images: [...resolved, ...resolvedContext],
     heard: body.length === 0 ? `(sent ${String(attachments.length)} image(s))` : body,
     actorId,
+    channelId: request.trigger.channelId,
+    messageId: request.trigger.messageId ?? request.trigger.id,
     ...(request.trigger.guildId === undefined ? {} : { guildId: request.trigger.guildId }),
   };
 }

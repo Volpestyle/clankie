@@ -15,6 +15,7 @@ import {
   type CaptainChannelTurnResult,
   type CaptainSessionLaneV2,
   type DiscordPresenceChannelTurnRequest,
+  type ObservableCaptainLane,
   type OperatorConversationEventBody,
   type OperatorConversationServiceRequest,
   type OperatorConversationServiceResult,
@@ -36,7 +37,7 @@ import type { CaptainDeps, ResolvedAttachment } from "./deps.ts";
 import { normalizeDiscordTurn } from "./discord-turn.ts";
 import { LaneLog } from "./lane-log.ts";
 import { createCaptainModelRuntime, type CaptainModelRuntime } from "./model.ts";
-import type { CaptainPort, LaneObservation } from "./port.ts";
+import type { CaptainPort } from "./port.ts";
 import { connectionTools } from "./connect-tools.ts";
 import { discordTurnHasSystemTools } from "./system-authority.ts";
 import { browserTools, captainTools, roomKey, type TurnContext } from "./tools.ts";
@@ -49,7 +50,8 @@ const REGISTER_FOR_LANE: Readonly<Record<CaptainSessionLaneV2, PersonaRegister>>
 };
 
 const TOOL_DETAIL_TRUNCATED = "\n… truncated";
-export const DISCORD_TEXT_TURN_TIMEOUT_MS = 60_000;
+/** Whole-turn backstop; tools own their tighter deadlines and typing has its own cosmetic clock. */
+export const DISCORD_TEXT_TURN_HARD_TIMEOUT_MS = 10 * 60_000;
 
 /** Refresh bounded episodic recall as trusted context for every Pi run. */
 export function captainMemoryExtension(memory: CaptainDeps["memory"], lane: CaptainSessionLaneV2) {
@@ -205,7 +207,7 @@ export async function runOneShotDiscordTurn(
   session: Pick<AgentSession, "abort" | "prompt">,
   prompt: string,
   images: ImageContent[],
-  timeoutMs = DISCORD_TEXT_TURN_TIMEOUT_MS,
+  timeoutMs = DISCORD_TEXT_TURN_HARD_TIMEOUT_MS,
 ): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -423,6 +425,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     lane.capture.targetId = normalized.targetId;
     lane.capture.actorId = normalized.actorId;
     lane.capture.guildId = normalized.guildId;
+    lane.capture.channelId = normalized.channelId;
+    lane.capture.messageId = normalized.messageId;
     const turnId = `turn-${lane.turnCounter}-${deliveryId}`;
     await laneLog.append(normalized.lane, normalized.targetId, {
       at: new Date().toISOString(),
@@ -519,7 +523,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return conversations.serve(request);
     },
 
-    async observeLanes(): Promise<readonly LaneObservation[]> {
+    async observeLanes(): Promise<readonly ObservableCaptainLane[]> {
       return laneLog.list();
     },
 

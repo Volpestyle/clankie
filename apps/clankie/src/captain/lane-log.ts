@@ -1,5 +1,12 @@
 import { appendFile, mkdir, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import {
+  CAPTAIN_LANE_ENTRIES_MAX,
+  CAPTAIN_LANE_TEXT_MAX,
+  CaptainLaneObservationEntrySchema,
+  CaptainSessionLaneV2Schema,
+  type ObservableCaptainLane,
+} from "@clankie/protocol";
 import type { LaneObservation, LaneObservationEntry } from "./port.ts";
 
 /**
@@ -25,20 +32,24 @@ export class LaneLog {
     return { lane, targetId, entries };
   }
 
-  public async list(limit = 20): Promise<readonly LaneObservation[]> {
+  public async list(limit = 20): Promise<readonly ObservableCaptainLane[]> {
     let files: string[];
     try {
       files = await readdir(this.dir);
     } catch {
       return [];
     }
-    const lanes: LaneObservation[] = [];
+    const lanes: ObservableCaptainLane[] = [];
     for (const file of files.filter((name) => name.endsWith(".jsonl")).sort()) {
       const key = file.slice(0, -".jsonl".length);
       const separator = key.indexOf("~");
-      const lane = separator === -1 ? key : key.slice(0, separator);
+      const parsedLane = CaptainSessionLaneV2Schema.safeParse(
+        separator === -1 ? key : key.slice(0, separator),
+      );
+      if (!parsedLane.success) continue;
       const targetId = separator === -1 ? "" : decodeURIComponent(key.slice(separator + 1));
-      lanes.push({ lane, targetId, entries: await this.readEntries(key, limit) });
+      if (targetId.length === 0 || targetId.length > 512) continue;
+      lanes.push({ lane: parsedLane.data, targetId, entries: await this.readEntries(key, limit) });
     }
     return lanes;
   }
@@ -53,11 +64,16 @@ export class LaneLog {
     return raw
       .split("\n")
       .filter((line) => line.length > 0)
-      .slice(-limit)
+      .slice(-Math.min(limit, CAPTAIN_LANE_ENTRIES_MAX))
       .flatMap((line) => {
         try {
           const parsed = JSON.parse(line) as LaneObservationEntry & { targetId?: string };
-          return [{ at: parsed.at, kind: parsed.kind, text: parsed.text }];
+          const entry = CaptainLaneObservationEntrySchema.safeParse({
+            at: parsed.at,
+            kind: parsed.kind,
+            text: typeof parsed.text === "string" ? parsed.text.slice(0, CAPTAIN_LANE_TEXT_MAX) : parsed.text,
+          });
+          return entry.success ? [entry.data] : [];
         } catch {
           return [];
         }
