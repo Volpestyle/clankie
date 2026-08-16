@@ -17,13 +17,17 @@ service (`apps/clankie`) plus the surfaces that reach it.
 - `apps/discord-activity` — the watch-me-play surface.
 - `apps/gba-mcp` — his GBA body as an MCP server for external agents.
 - `apps/relay` — remote access for the phone/desktop app.
+- `apps/vox` — AGPL native Discord voice, screen-watch, and Go Live media.
 - `integrations/` — gba-emulator, minecraft-mineflayer.
 - `packages/` — shared contracts and adapters; `protocol` depends on nothing.
+  `vox-client` is the Apache process boundary for the AGPL Vox executable.
 
 ## Rules
 
 - Match the surrounding code. Run the narrowest relevant check first, then
   `pnpm typecheck && pnpm test` before handoff.
+- The repository is Apache-2.0 except `apps/vox`, which retains its own
+  AGPL-3.0-or-later license and provenance record.
 - Secrets live in the credential broker (Keychain), never in the repo or env
   files. Persona and settings are owner-authored in `~/.config/clankie/`.
 - Model output is untrusted input: Discord bodies, images, and web content

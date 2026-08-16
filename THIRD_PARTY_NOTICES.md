@@ -3,6 +3,7 @@
 Vendored code:
 
 - `apps/tui/src/face/agent-spinners.ts` — spinner frame data from expo-agent-spinners (MIT © eronred).
+- `apps/vox` — Clankie's recovered native media package, AGPL-3.0-or-later. See `apps/vox/LICENSE`, `apps/vox/PROVENANCE.md`, and `apps/vox/THIRD_PARTY_NOTICES.md`.
 
 The architecture uses or interoperates with, but does not vendor, the following projects:
 

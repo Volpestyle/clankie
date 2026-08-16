@@ -1,0 +1,23 @@
+use crate::app_state::AppState;
+use crate::ipc::InMsg;
+use crate::ipc_protocol::RoutedInMsg;
+
+impl AppState {
+    pub(crate) async fn route_ipc_message(&mut self, msg: InMsg) -> bool {
+        match RoutedInMsg::from(msg) {
+            RoutedInMsg::Connection(command) => {
+                self.handle_connection_command(command).await;
+                false
+            }
+            RoutedInMsg::Capture(command) => {
+                self.handle_capture_command(command);
+                false
+            }
+            RoutedInMsg::Playback(command) => self.handle_playback_command(command),
+            RoutedInMsg::StreamPublish(command) => {
+                self.handle_stream_publish_command(command);
+                false
+            }
+        }
+    }
+}

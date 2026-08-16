@@ -12,7 +12,7 @@ web, remembers people and what happened yesterday, and codes. When work is
 bigger than one pair of hands, he leads a fleet of coding agents through
 herdr panes you can watch.
 
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0%20%2B%20AGPL--3.0-blue?style=flat-square)](#license)
 [![built on pi](https://img.shields.io/badge/agent-pi-7c3aed?style=flat-square)](https://pi.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 
@@ -42,7 +42,8 @@ herdr panes you can watch.
 
 ## Get started
 
-Requirements: Node 24+, pnpm 11+, Git.
+Requirements: Node 24+, pnpm 11+, Git. Building the native Vox package also
+requires Rust 1.85+ and CMake.
 
 ```bash
 corepack enable
@@ -69,6 +70,7 @@ Linear, email, and Discord.
 | `apps/discord-activity`     | The watch-me-play surface                                                              |
 | `apps/gba-mcp`              | His GBA body as an MCP server                                                          |
 | `apps/relay`                | Remote access for the phone/desktop app                                                |
+| `apps/vox`                  | Native Discord voice, screen-watch, and Go Live media                                  |
 
 `integrations/` holds the game bodies (gba-emulator, minecraft-mineflayer);
 `packages/` holds the shared contracts. The graphical garden app is a separate
@@ -90,5 +92,6 @@ agent at this repo.
 
 ## License
 
-Apache-2.0. Third-party dependencies retain their own licenses; see
-[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+Apache-2.0 except `apps/vox`, which is AGPL-3.0-or-later under its own
+[`LICENSE`](apps/vox/LICENSE). Third-party dependencies retain their own
+licenses; see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).

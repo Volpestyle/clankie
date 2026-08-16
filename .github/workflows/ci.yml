@@ -20,8 +20,13 @@ jobs:
         with:
           node-version: 24.12.0
           cache: pnpm
+      - uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          components: clippy, rustfmt
+      - run: brew install cmake
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      - run: pnpm --filter @clankie/vox build
       - uses: actions/upload-artifact@v4
         if: always()
         with:

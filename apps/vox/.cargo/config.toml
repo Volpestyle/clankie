@@ -1,0 +1,6 @@
+[env]
+OPUS_NO_PKG = { value = "1", force = true }
+OPUS_STATIC = { value = "1", force = true }
+# audiopus_sys builds bundled libopus through cmake; cmake >= 4 refuses the
+# ancient cmake_minimum_required in that vendored tree without this floor.
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"

@@ -1,0 +1,101 @@
+[package]
+name = "clankvox"
+version = "0.3.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Clankie's native Discord voice and media transport"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/Volpestyle/clankie"
+homepage = "https://github.com/Volpestyle/clankie/tree/main/apps/vox"
+keywords = ["clankie", "media", "voice", "rtp", "discord"]
+categories = ["multimedia::audio", "network-programming"]
+
+[lints.rust]
+unsafe_code = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# Allow these common pedantic lints that are noisy in real-time audio code
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_precision_loss = "allow"
+cast_lossless = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+# Existing transport/media code intentionally keeps a few large protocol
+# functions and low-level byte operations in-line. CI denies every other clippy
+# warning so newly introduced lint classes still fail the check.
+cast_possible_wrap = "allow"
+collapsible_else_if = "allow"
+decimal_bitwise_operands = "allow"
+doc_markdown = "allow"
+duration_suboptimal_units = "allow"
+elidable_lifetime_names = "allow"
+empty_line_after_doc_comments = "allow"
+if_not_else = "allow"
+items_after_statements = "allow"
+large_futures = "allow"
+large_stack_arrays = "allow"
+len_zero = "allow"
+manual_checked_ops = "allow"
+many_single_char_names = "allow"
+map_unwrap_or = "allow"
+match_same_arms = "allow"
+match_wildcard_for_single_variants = "allow"
+needless_pass_by_value = "allow"
+needless_range_loop = "allow"
+op_ref = "allow"
+semicolon_if_nothing_returned = "allow"
+similar_names = "allow"
+struct_field_names = "allow"
+too_many_arguments = "allow"
+too_many_lines = "allow"
+uninlined_format_args = "allow"
+unreadable_literal = "allow"
+unused_self = "allow"
+used_underscore_binding = "allow"
+
+[dependencies]
+tokio = { version = "1", features = ["full", "rt-multi-thread"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+base64 = "0.22"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
+parking_lot = "0.12"
+crossbeam-channel = "0.5"
+anyhow = "1"
+libc = "0.2"
+
+# Voice WebSocket
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+futures-util = "0.3"
+
+# DAVE E2EE
+davey = "0.1.4"
+
+# Opus codec (standalone, for DAVE pipeline)
+audiopus = "0.3.0-rc.0"
+
+# Transport encryption (RTP payload AEAD)
+aes-gcm = "0.10"
+chacha20poly1305 = "0.10"
+# Wipe transport key material from memory on drop
+zeroize = "1"
+
+# Persistent H264 video decoder (Cisco OpenH264 bindings)
+openh264 = "0.9"
+openh264-sys2 = "0.9"
+
+# Fast JPEG encoding for decoded video frames (libjpeg-turbo bindings)
+turbojpeg = "1.4"
+
+# rustls crypto provider (required by tokio-tungstenite's rustls backend)
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"

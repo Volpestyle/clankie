@@ -23,25 +23,41 @@ result(
 );
 
 for (const check of [
-  ["pnpm", true, ["--version"], "Enable Corepack and install pnpm 11.", 11],
+  ["pnpm", true, ["--version"], "Enable Corepack and install pnpm 11.", "11.0"],
   ["git", true, ["--version"], "Install Git."],
+  ["cargo", true, ["--version"], "Install the Rust 1.85+ toolchain to build @clankie/vox.", "1.85"],
+  ["cmake", true, ["--version"], "Install CMake to build Vox's bundled native codecs."],
+  ["ffmpeg", false, ["-version"], "Required for Vox URL/video playback and VP8 decode."],
+  ["yt-dlp", false, ["--version"], "Required for Vox playback from indirect media URLs."],
   ["docker", false, ["--version"], "Optional: install Docker for telemetry and sandbox experiments."],
   ["codex", false, ["--version"], "Optional: install/authenticate Codex CLI for App Server workers."],
   ["pi", false, ["--version"], "Optional: install @earendil-works/pi-coding-agent for Pi RPC workers."],
   ["herdr", false, ["--version"], "Optional: install Herdr as an external pane host."],
   ["xcodebuild", false, ["-version"], "Required only for iOS/macOS native shells."],
 ]) {
-  const [command, required, args, remediation, minimumMajor] = check;
+  const [command, required, args, remediation, minimumVersion] = check;
   try {
     const { stdout, stderr } = await execFileAsync(command, args, { timeout: 5_000 });
     const detail = `${stdout}${stderr}`.trim().split("\n")[0] ?? "available";
-    const detectedMajor = Number(detail.match(/\d+/u)?.[0]);
+    const detectedVersion = detail.match(/\d+(?:\.\d+)*/u)?.[0];
     const ok =
-      minimumMajor === undefined || (Number.isFinite(detectedMajor) && detectedMajor >= minimumMajor);
+      minimumVersion === undefined ||
+      (detectedVersion !== undefined && versionAtLeast(detectedVersion, minimumVersion));
     result(command, required, ok, detail, remediation);
   } catch {
     result(command, required, false, "not available", remediation);
   }
+}
+
+function versionAtLeast(detected, minimum) {
+  const detectedParts = detected.split(".").map(Number);
+  const minimumParts = minimum.split(".").map(Number);
+  for (let index = 0; index < Math.max(detectedParts.length, minimumParts.length); index += 1) {
+    const detectedPart = detectedParts[index] ?? 0;
+    const minimumPart = minimumParts[index] ?? 0;
+    if (detectedPart !== minimumPart) return detectedPart > minimumPart;
+  }
+  return true;
 }
 
 try {

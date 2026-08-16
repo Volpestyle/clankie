@@ -1,6 +1,6 @@
 Clankie
 Copyright 2026 Clankie contributors
 
-This repository contains integration scaffolding for third-party projects.
-Those projects retain their own copyrights and licenses. Review
-THIRD_PARTY_NOTICES.md before distribution.
+The repository is Apache-2.0 except apps/vox, which retains its
+AGPL-3.0-or-later package license. Third-party projects retain their own
+copyrights and licenses. Review THIRD_PARTY_NOTICES.md before distribution.
