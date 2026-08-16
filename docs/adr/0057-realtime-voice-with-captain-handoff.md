@@ -162,10 +162,10 @@ the floor never enters the engaged context. A warm session reused after release
 receives the new waking utterance before it responds.
 
 In both states everyone consented is always _heard_ and nobody is ever
-auto-answered: no utterance reaches `response.create` without the floor logic
-deciding it should. `persona.replyPolicy` governs that decision exactly as it
-governs text — `addressed` (the default) runs the machine above, and `all` means
-what it says.
+auto-answered: `response.create` is explicit, and the realtime Clankie may
+produce no output. `persona.replyPolicy` governs which dormant transcripts are
+offered exactly as it governs text — `all` is the agent-first default;
+`addressed` is the explicit cost-saving mode. Engaged follow-ups need neither.
 
 ### Release is not an event, and engagement is not a permission
 
@@ -185,36 +185,52 @@ transcript stream:
 
 Three situations, one question:
 
-| Situation                                               | Answer            | Cost                                    |
-| ------------------------------------------------------- | ----------------- | --------------------------------------- |
-| Someone addressed him                                   | yes, trivially    | free — `addressesCharacter()`, no model |
-| Nobody addressed him, but he has something worth saying | volition decides  | one cheap gated call                    |
-| He holds the floor and the room has moved on            | no reason → decay | the same call, answering no             |
+| Situation                                    | Answer               | Cost                                        |
+| -------------------------------------------- | -------------------- | ------------------------------------------- |
+| Someone addressed him                        | yes, trivially       | free — `addressesCharacter()`, no model     |
+| Nobody addressed him                         | he decides, in voice | one realtime response, most of them empty   |
+| He holds the floor and the room has moved on | no reason → decay    | free — a timer, no model, no phrase to hear |
 
 Release stops being a signal to detect and becomes the absence of a reason to
 hold the floor. The identical mechanism that lets him re-engage unprompted is
 what lets him let go, which is why building only the release half is always
 going to feel arbitrary.
 
-This is [ADR 0056](0056-voice-is-a-separate-agent-from-the-player.md)'s finding
-applied to a room instead of a game, and its measurement is the reason volition
-is a dedicated call rather than a flag on something else: speech offered as an
-optional field on another decision produced silence in 15 of 16 turns across
-four prompt revisions, and only a decision whose _entire_ job is whether to
-speak moved it. A "should I also say something?" boolean bolted onto the wake
-check would reproduce that failure exactly.
+#### Whether to speak is a question only Clankie can answer
 
-The gate is cheap and mechanical; the model only decides content. A volition
-tick runs on new transcript rather than on a timer, is rate-capped the way free
-play's remarks are, and reads the room from text — never audio — so it costs
-text tokens and never realtime audio. `persona.chattiness` sets the bar, which
-is the setting ADR 0051 explicitly reserved for proactive speech: this is where
-it lands.
+The repository owns the _mechanical_ half of unprompted speech and nothing more:
+a rate cap, derived from `persona.chattiness` (the setting ADR 0051 reserved for
+exactly this), that decides how often he may be offered an unprompted turn at
+all. It runs on new transcript rather than on a timer, so an empty room costs
+nothing.
 
-An explicit close — "thanks, Clankie" — stays as a fast path, because a clear
-signal should not wait for a decay window. It is an optimization over the loop,
-never the mechanism, and a room that never uses it still gets a Clankie who
-stops talking.
+The half that decides whether to actually say something belongs to the realtime
+session itself. It is the only component in the loop that _is_ Clankie: it holds
+the composed persona, the seeded room transcript, the current briefing, and
+whatever it just heard. A separate bounded yes/no model has none of that — asked
+"does Clankie have something worth saying?", it answers as a generic assistant
+reasoning about a character it has never met, and its verdict is uncorrelated
+with anything he would actually have said. Personality is not a filter applied
+after a decision; it is what makes the decision.
+
+So an offered turn is an ordinary `response.create` on the engaged session, with
+one system-note item saying nobody addressed him and that producing no output is
+a normal answer. A response that comes back with audio is him speaking up; a
+response that comes back empty is him passing. Both settle the same accounting.
+
+This keeps [ADR 0056](0056-voice-is-a-separate-agent-from-the-player.md)'s
+measured finding intact — speech offered as an optional field on another
+decision produced silence in 15 of 16 turns across four prompt revisions, and
+only a decision whose _entire_ job is whether to speak moved it. The offered
+turn is that dedicated decision; it is simply asked of him rather than about
+him. A "should I also say something?" boolean bolted onto the wake check would
+reproduce the original failure exactly.
+
+Nothing else releases the floor. In particular no closing phrase does: "thanks,
+Clankie" contains his name, so it wakes or holds like any other address and he
+gets to answer it. Matching goodbyes against a word list took the floor away
+mid-sentence — the one moment a reply is most obviously expected — to save a
+decay window that costs nothing to wait out.
 
 ### Hearing his own name is a voice-plane problem
 
@@ -270,9 +286,9 @@ the failure it is written to prevent.
   token per 100 ms, so an hour of a lively channel is roughly 36k tokens of
   context he mostly does not need, growing the bill superlinearly. The dormant
   tier keeps unaddressed conversation out of the priced context entirely.
-- **Ask the model whether it is addressed** — rejected. It spends a response to
-  decide not to respond, which is the exact cost ADR 0051's pre-turn reply
-  policy exists to avoid.
+- **Ask a separate model whether he should speak** — rejected. It duplicates
+  the actual realtime Clankie without his live session or full character.
+  `addressed` remains available as a deterministic cost-saving policy.
 - **Push-to-talk or a wake word** — rejected. It solves addressing by making the
   room work for Clankie, and a channel where people must announce themselves is
   not the social presence ADR 0045 is for. The floor machine gets the same
@@ -310,10 +326,18 @@ the failure it is written to prevent.
 - **Unprompted speech to humans is a higher bar than unprompted speech over a
   game.** Free play's remarks land on an audience; these land in a conversation
   between people who can be interrupted. The rate cap is therefore load-bearing
-  rather than protective tuning, and volition must be reported the way ADR 0056
-  reports it — offered, taken, suppressed — so "he talks too much" and "he never
-  speaks up" are both falsifiable against a number instead of a vibe. The
+  rather than protective tuning, and offered turns must be reported the way ADR
+  0056 reports them — offered, taken, suppressed — so "he talks too much" and "he
+  never speaks up" are both falsifiable against a number instead of a vibe. The
   measurement is what makes `persona.chattiness` tunable rather than decorative.
+- **An offered turn he declines is not free.** Asking him costs a realtime
+  response, and asking him from a cold room additionally pays briefing, session
+  open, and seeding — where a bounded text verdict cost a fraction of a cent.
+  The rate cap is what bounds that spend, which is a second reason it is
+  load-bearing. A declined offer parks the warm session on the same hold window
+  a decayed exchange uses, so passing costs one response and not an idle
+  session; `discord.voice.volition`'s suppressed counter is what makes the
+  wasted half of the spend visible.
 - **The first response after being addressed pays the wake.** Every later turn in
   the exchange is the fast path this decision is for, but the opening one carries
   session setup, and the whole point is latency. The engaged session is

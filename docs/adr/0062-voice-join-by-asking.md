@@ -22,6 +22,12 @@ The captain owns the join/leave decision through `voice_join` and
 `voice_leave`. The active Discord body owns authorization, target resolution,
 and execution.
 
+This is the general social-action split, not a voice special case. The captain
+also chooses reactions, thread participation, and whether to show or stop his
+live play surface. The host grounds reactions/threads in the trigger message;
+the body resolves live-watch actions from the authenticated speaker's fresh
+voice state. Raw user, guild, channel, and message ids are never tool arguments.
+
 ```mermaid
 sequenceDiagram
     participant Human
@@ -65,6 +71,11 @@ sequenceDiagram
   participants use `/clankie voice-consent opt-in`. The owner-only lab body
   auto-opts its authenticated owner when it creates the media session, and the
   captain discloses live speaker-attributed transcription in the reply.
+- **Grounded catalog coverage.** Replies, generated media, and typing already
+  happen as consequences of a captain turn. Reactions and threads target that
+  turn's trigger; live-watch targets fresh voice state. Arbitrary
+  edit/delete/send-by-id actions stay out of the social tool bank until the
+  host can prove an owned target instead of asking the model to invent one.
 
 ## Options weighed
 
@@ -85,5 +96,7 @@ sequenceDiagram
   call plus a separate intent call.
 - Voice presence behaves like play, music, browser, and media abilities: the
   captain chooses a typed tool, while the owning subsystem validates and acts.
+- Reactions, threads, and live-watch actions use the same seam: agent-owned
+  intent, host-owned identity and destination, body-owned authority and effect.
 - Tool-call history is the durable explanation of why Clankie moved. The body
   logs only content-free actor/guild/result metadata.

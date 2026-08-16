@@ -72,12 +72,14 @@ session sits at `voice_active` — so ordering them against each other would for
 one slot to carry two unrelated meanings and would make "is an activity running"
 unanswerable whenever Go Live is also active.
 
-Activity instances are therefore a separate facet on the session record, gated
-by `minPhase: voice_active`. `activity_stop` additionally requires a running
-instance rather than a higher phase.
+Activity instances remain a separate observational facet on the session record,
+but action admission does not guess from it. The executor reads Discord's live
+invite state, replaces old launch links on start, and treats stopping an
+already-stopped surface as success. Both actions require `voice_active`.
 
-`go_live_active` remains phase-modelled. VUH-841 tracks extracting it into the
-same orthogonal facet model when the publish path is available.
+`go_live_active` remains representable for a transport that publishes it, but
+control does not depend on that projection: `go_live_stop` is available from
+`voice_active` and is idempotent against the live publisher.
 
 ### The frame transport boundary
 

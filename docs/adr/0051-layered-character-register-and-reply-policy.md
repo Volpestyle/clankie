@@ -154,19 +154,22 @@ specify in detail:
 
 ### Reply policy
 
-`persona.replyPolicy` decides what earns a reply in an admitted text channel:
+`persona.replyPolicy` decides what reaches the captain in an admitted text
+channel. Reaching him is not an obligation to answer: the captain may return
+the silent sentinel on every turn.
 
-- `addressed` (default) — an `@mention`, or a message using one of his names.
-- `all` — every admitted message.
+- `all` (default) — every admitted message reaches him and he decides whether
+  to speak.
+- `addressed` — an `@mention`, or a message using one of his names, reaches him.
 
-`addressed` is the default because ADR 0045's channel allowlist treats an
-empty list as "every channel in the allowlisted guilds". Without a trigger
-policy, that combination makes Clankie reply to every message in the server.
+`all` is the default because Clankie is the social agent, not the output of a
+phrase gate. Guild/channel/DM admission still bounds what he may perceive.
+Owners who prefer to avoid one model turn per admitted message can explicitly
+choose `addressed`; that is a resource policy, not a substitute decision-maker.
 
-The policy is evaluated in `refusalReason`, **before** the captain turn. Deciding
-to stay quiet must not cost a model call, or an open channel allowlist bills a
-turn for every message in every channel. Name matching requires a word boundary
-so "clankiest" and `github.com/clankieproject` do not summon him.
+The `addressed` policy is evaluated in `refusalReason`, before the captain turn,
+because its purpose is to save that turn. Name matching requires a word
+boundary so "clankiest" and `github.com/clankieproject` do not summon him.
 
 ## Options weighed
 
@@ -179,8 +182,8 @@ so "clankiest" and `github.com/clankieproject` do not summon him.
   means two souls, two drift paths, and a character that contradicts itself
   across surfaces. `captainLaneInstructions` already asserts one agent across
   lanes.
-- **Model-decided reply triggering** — rejected. Asking the captain
-  whether to answer spends the turn the policy exists to avoid.
+- **A separate model-decided reply trigger** — rejected. The captain already
+  decides speech versus silence; a second personality-free model duplicates him.
 - **Generating a default personality when none is authored** — rejected. Taste
   belongs to the owner; a synthesized character would be both wrong and sticky.
 - **Re-voicing possessed speech through the persona** — rejected by the owner. A

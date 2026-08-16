@@ -39,7 +39,9 @@ host owns the session. Embodiment is a first-class requested capability.
   environment id (`pokemon-firered`). No keyword matches "pokemon" upstream of the tool call: the
   captain reads the message and decides, the same emergent shape as every
   other ability. The tool description carries the teaching — what he can play,
-  that refusals name a reason he can say out loud.
+  that refusals name a reason he can say out loud. The host stamps
+  `requestedBy` from the authenticated turn (`owner` on the operator lane); it
+  is not a model argument.
 - **Transport.** Embodiment intents stay inside the service: the embodiment
   manager records intent, the play host claims it, and lifecycle events flow
   back. The captain tool waits bounded for

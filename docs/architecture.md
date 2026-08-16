@@ -16,8 +16,10 @@ get durable sessions (pi JSONL trees that survive restarts); text turns are
 one-shot, because the channel history rides in with each request. The reply
 carries the turn's last screenshot or generated image with it, and replying
 with the silence sentinel sends nothing: silence is a real answer. A one-shot
-text run has a 60-second deadline; expiry aborts its pi session and settles the
-turn as `captain_turn_timeout` so the bridge stops refreshing Discord typing.
+text run has a 10-minute hard ceiling so model reasoning and multiple bounded
+tool calls can finish; expiry aborts its pi session and settles the turn as
+`captain_turn_timeout`. The bridge separately stops refreshing Discord typing
+after 60 seconds, so cosmetic presence cannot remain stuck.
 
 The TUI and relay speak the same operator-conversation contract
 (`/operator/v1/dispatch`): revision-fenced sends, cursored replay, long-polled
@@ -47,6 +49,7 @@ that same store through operator-only routes.
   Voice never gets them. Authored tools: browser (catalog resolved live from
   the agent-browser MCP host), `generate_image` / `generate_video`,
   `voice_join` / `voice_leave`, `youtube_search` and the `music_*` controls,
+  grounded Discord reactions, threads, and live-watch start/stop,
   `start_play` / `stop_play`, `observe_room`, `observe_current_activity`,
   `recall_play`,
   `observe_share`, `get_self_state`, `remember_episode`. Linear search/create/comment after

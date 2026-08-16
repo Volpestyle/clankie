@@ -41,9 +41,9 @@ artifact; no AGPL ClankVox source is imported or executed.
   voice presence check on `/clankie join` plus per-participant consent.
   `DISCORD_INGRESS_CHANNEL_IDS` follows the same rule, so one mental model
   covers both planes: the guild allowlist bounds reach, the channel list refines
-  it. Text ingress has no per-turn gate equivalent to voice consent, so an open
-  channel list there makes the ingress trigger policy the only thing standing
-  between Clankie and a reply to every message in the server.
+  it. Text has no per-speaker consent gate, so every message in those admitted
+  channels reaches the captain by default; he still decides whether to reply.
+  The explicit `addressed` resource policy narrows that spend when wanted.
 - `/clankie join` is gated by the voice presence tier
   ([ADR 0050](0050-voice-presence-authority-tier.md)), joins the invoker's
   allowlisted channel, discloses DAVE, the live OpenAI realtime session's

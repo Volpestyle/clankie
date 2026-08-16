@@ -59,11 +59,11 @@ active. High-assurance and team profiles still deny the transport.
 - Without `CLANKVOX_BIN`, shares are listed and he cannot see the picture.
 - Publish (`go_live_start`) joins the voice channel, sends OP18 then OP22
   unpause, connects ClankVox, and plays either an optional `sourceUrl` or
-  the live activity PNG snapshot (`GET 127.0.0.1:4322/snapshot`). Chat
-  `play <youtube>` or "clankie play migos next" on the active lab body
-  searches YouTube, lists numbered results, and plays or queues the pick
-  as a stream. Voice transcripts use the same desk as text. The official
-  bot plays audio in voice. Speech ducks the current sink.
+  the live activity PNG snapshot (`GET 127.0.0.1:4322/snapshot`). Song
+  requests go through the captain or voice model (`youtube_search` then
+  `music_play` / `music_queue`); the live body is only the queue and
+  sink. The lab body Go Lives the URL. The official bot plays audio in
+  voice. Speech ducks the current sink.
 - Live evidence is `pnpm --filter @clankie/discord-user-session live-proof`
   against user-session receipts: ready, watch_connected with decoder=ready,
   and one decoded still of that user after the watch. Deterministic tests
