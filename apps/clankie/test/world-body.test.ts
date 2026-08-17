@@ -192,6 +192,43 @@ describe("hosted world body", () => {
     await result.body.close();
   });
 
+  it("does not reuse action keys when the world replays an existing join", async () => {
+    const current = observation({ frame: 10 });
+    const world = await fakeWorld((request) => {
+      switch (request.operation) {
+        case "world.join":
+          return joinResult();
+        case "play.observe":
+          return current;
+        case "play.act":
+          return actRan(current);
+        case "play.frame":
+          return frame({ frame: current.frame, data: "rejoined" });
+        case "world.leave":
+          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
+        default:
+          throw new Error(`unexpected operation ${request.operation}`);
+      }
+    });
+    const env = await provisionedEnv(world.stateDir);
+    const first = await joinWorld({ environmentId: "pokemon-firered", env });
+    const second = await joinWorld({ environmentId: "pokemon-firered", env });
+    if (first.outcome !== "joined" || second.outcome !== "joined") {
+      throw new Error("expected both world joins to succeed");
+    }
+
+    await first.body.io.act({ kind: "button_press", button: "a", holdFrames: 4 });
+    await second.body.io.act({ kind: "button_press", button: "right", holdFrames: 4 });
+
+    const keys = world.requests
+      .filter((request) => request.operation === "play.act")
+      .map((request) => (request.input as { idempotencyKey: string }).idempotencyKey);
+    expect(keys).toHaveLength(2);
+    expect(new Set(keys).size).toBe(2);
+    await first.body.close();
+    await second.body.close();
+  });
+
   it("polls latest frames at the hardware tick and rejects stale generations", async () => {
     let currentGeneration = 1;
     let currentFrame = 0;
