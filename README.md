@@ -43,7 +43,7 @@ hands, he leads a fleet of coding agents through herdr panes you can watch.
 ## Get started
 
 Requirements: Node 24+, pnpm 11+, Git. Building the native Vox package also
-requires Rust 1.85+ and CMake.
+requires Rust 1.88+ and CMake.
 
 ```bash
 corepack enable

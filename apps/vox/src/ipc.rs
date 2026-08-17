@@ -529,7 +529,7 @@ pub fn send_msg(msg: OutMsg) {
                         .ipc_video_dropped
                         .fetch_add(1, Ordering::Relaxed);
                     let dropped = DROPPED_OUTBOUND_VIDEO_FRAMES.fetch_add(1, Ordering::Relaxed) + 1;
-                    if dropped == 1 || dropped % 100 == 0 {
+                    if dropped == 1 || dropped.is_multiple_of(100) {
                         let (user_id, ssrc) = match &returned {
                             OutMsg::UserVideoFrame { user_id, ssrc, .. }
                             | OutMsg::DecodedVideoFrame { user_id, ssrc, .. } => {
@@ -579,7 +579,7 @@ pub fn send_msg(msg: OutMsg) {
                         .fetch_add(1, Ordering::Relaxed);
                     let dropped =
                         DROPPED_OUTBOUND_CONTROL_MESSAGES.fetch_add(1, Ordering::Relaxed) + 1;
-                    if dropped == 1 || dropped % 1000 == 0 {
+                    if dropped == 1 || dropped.is_multiple_of(1000) {
                         error!(
                             dropped_control_messages = dropped,
                             "control IPC lane full; parent appears stalled — dropping control message"
@@ -851,7 +851,8 @@ pub fn spawn_ipc_reader(audio_debug: bool) -> InboundIpc {
                             }
                             Err(mpsc::error::TrySendError::Full(_)) => {
                                 dropped_audio_messages = dropped_audio_messages.saturating_add(1);
-                                if dropped_audio_messages == 1 || dropped_audio_messages % 100 == 0
+                                if dropped_audio_messages == 1
+                                    || dropped_audio_messages.is_multiple_of(100)
                                 {
                                     warn!(
                                         dropped_audio_messages = dropped_audio_messages,

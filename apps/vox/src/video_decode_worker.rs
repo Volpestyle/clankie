@@ -103,7 +103,7 @@ impl VideoDecodeWorker {
                             .inbound_video_decode_dropped
                             .fetch_add(1, Ordering::Relaxed);
                         let dropped = self.dropped_frames.fetch_add(1, Ordering::Relaxed) + 1;
-                        if dropped == 1 || dropped % 100 == 0 {
+                        if dropped == 1 || dropped.is_multiple_of(100) {
                             warn!(
                                 user_id = returned.user_id,
                                 ssrc = returned.ssrc,

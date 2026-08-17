@@ -456,20 +456,20 @@ impl AppState {
         }
 
         let uid_str = user_id.to_string();
-        if let Some(ss) = self.speaking_states.remove(&user_id) {
-            if ss.is_speaking {
-                send_msg(OutMsg::SpeakingEnd {
-                    user_id: uid_str.clone(),
-                });
-            }
+        if let Some(ss) = self.speaking_states.remove(&user_id)
+            && ss.is_speaking
+        {
+            send_msg(OutMsg::SpeakingEnd {
+                user_id: uid_str.clone(),
+            });
         }
 
-        if let Some(state) = self.user_capture_states.remove(&user_id) {
-            if state.stream_active {
-                send_msg(OutMsg::UserAudioEnd {
-                    user_id: uid_str.clone(),
-                });
-            }
+        if let Some(state) = self.user_capture_states.remove(&user_id)
+            && state.stream_active
+        {
+            send_msg(OutMsg::UserAudioEnd {
+                user_id: uid_str.clone(),
+            });
         }
 
         self.user_video_subscriptions.remove(&user_id);

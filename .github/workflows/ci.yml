@@ -13,14 +13,16 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:
           version: 11.11.0
       - uses: actions/setup-node@v4
         with:
-          node-version: 24.12.0
+          node-version: 26.7.0
           cache: pnpm
-      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: dtolnay/rust-toolchain@1.88.0
         with:
           components: clippy, rustfmt
       - run: brew install cmake

@@ -583,15 +583,13 @@ impl VoiceConnection {
         let close_requested = self.ws_cmd_tx.try_send(WsCommand::Close).is_ok();
         let ws_read_abort = self.ws_read_task.abort_handle();
         let ws_write_abort = self.ws_write_task.abort_handle();
-        if close_requested {
-            if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-                runtime.spawn(async move {
-                    time::sleep(Duration::from_millis(250)).await;
-                    ws_read_abort.abort();
-                    ws_write_abort.abort();
-                });
-                return;
-            }
+        if close_requested && let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(async move {
+                time::sleep(Duration::from_millis(250)).await;
+                ws_read_abort.abort();
+                ws_write_abort.abort();
+            });
+            return;
         }
         ws_read_abort.abort();
         ws_write_abort.abort();

@@ -213,7 +213,7 @@ impl DaveManager {
                 self.consecutive_failures = 0;
                 self.unencrypted_passthrough_count += 1;
                 if self.unencrypted_passthrough_count == 1
-                    || self.unencrypted_passthrough_count % 100 == 0
+                    || self.unencrypted_passthrough_count.is_multiple_of(100)
                 {
                     warn!(
                         "DAVE: {label} frame from user {sender_user_id} appears unencrypted \
@@ -239,7 +239,9 @@ impl DaveManager {
             Err(DecryptError::NoDecryptorForUser) => {
                 self.consecutive_failures += 1;
                 self.total_decrypt_failures += 1;
-                if self.total_decrypt_failures <= 3 || self.total_decrypt_failures % 100 == 0 {
+                if self.total_decrypt_failures <= 3
+                    || self.total_decrypt_failures.is_multiple_of(100)
+                {
                     warn!(
                         "DAVE: decrypt_{label} NoDecryptorForUser: user_id={sender_user_id}, \
                          known_users={:?}, pv={}, frame_bytes={}, total={}",
@@ -256,7 +258,9 @@ impl DaveManager {
             Err(DecryptError::DecryptionFailed(ref inner)) => {
                 self.consecutive_failures += 1;
                 self.total_decrypt_failures += 1;
-                if self.total_decrypt_failures <= 3 || self.total_decrypt_failures % 100 == 0 {
+                if self.total_decrypt_failures <= 3
+                    || self.total_decrypt_failures.is_multiple_of(100)
+                {
                     // Extract DAVE trailer info for diagnostics
                     let (has_marker, trailer_nonce, supplemental_size) = if frame.len() >= 11
                         && frame[frame.len() - 2] == 0xFA
@@ -597,10 +601,10 @@ pub(crate) fn ordered_audio_candidate_user_ids(
     known_user_ids: &[u64],
 ) -> Vec<u64> {
     let mut ordered = Vec::new();
-    if let Some(current_user_id) = current_user_id {
-        if current_user_id != bot_user_id {
-            ordered.push(current_user_id);
-        }
+    if let Some(current_user_id) = current_user_id
+        && current_user_id != bot_user_id
+    {
+        ordered.push(current_user_id);
     }
 
     for &candidate_user_id in known_user_ids {
@@ -632,14 +636,14 @@ pub(crate) fn try_decrypt_audio_payload_for_user(
         return Some((decrypted, false));
     }
 
-    if let Some(fallback_payload) = fallback_payload {
-        if let Ok(decrypted) = dm.decrypt(user_id, fallback_payload) {
-            debug!(
-                user_id,
-                ssrc, "UDP: DAVE audio decrypt recovered using alternate RTP ext handling"
-            );
-            return Some((decrypted, true));
-        }
+    if let Some(fallback_payload) = fallback_payload
+        && let Ok(decrypted) = dm.decrypt(user_id, fallback_payload)
+    {
+        debug!(
+            user_id,
+            ssrc, "UDP: DAVE audio decrypt recovered using alternate RTP ext handling"
+        );
+        return Some((decrypted, true));
     }
 
     None

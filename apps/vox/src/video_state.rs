@@ -190,20 +190,20 @@ pub(crate) async fn apply_remote_video_state(
             streams = previous_streams;
         }
 
-        if let Some(video_ssrc) = video_ssrc {
-            if !streams.iter().any(|stream| stream.ssrc == video_ssrc) {
-                streams.push(VideoStreamDescriptor {
-                    ssrc: video_ssrc,
-                    rtx_ssrc: None,
-                    rid: None,
-                    quality: None,
-                    stream_type: None,
-                    active: Some(true),
-                    max_bitrate: None,
-                    max_framerate: None,
-                    max_resolution: None,
-                });
-            }
+        if let Some(video_ssrc) = video_ssrc
+            && !streams.iter().any(|stream| stream.ssrc == video_ssrc)
+        {
+            streams.push(VideoStreamDescriptor {
+                ssrc: video_ssrc,
+                rtx_ssrc: None,
+                rid: None,
+                quality: None,
+                stream_type: None,
+                active: Some(true),
+                max_bitrate: None,
+                max_framerate: None,
+                max_resolution: None,
+            });
         }
 
         guard.retain(|_, binding| binding.user_id != user_id);

@@ -488,19 +488,19 @@ pub(super) async fn udp_recv_loop(
         } else {
             None
         };
-        if let Some((_, recovered_user_id)) = decrypted_packet {
-            if recovered_user_id != binding_user_id {
-                if let Some(binding) = video_ssrc_map.lock().get_mut(&ssrc) {
-                    binding.user_id = recovered_user_id;
-                }
-                debug!(
-                    ssrc,
-                    old_user_id = binding_user_id,
-                    new_user_id = recovered_user_id,
-                    "UDP: remapped video ssrc after per-packet DAVE decrypt"
-                );
-                binding_user_id = recovered_user_id;
+        if let Some((_, recovered_user_id)) = decrypted_packet
+            && recovered_user_id != binding_user_id
+        {
+            if let Some(binding) = video_ssrc_map.lock().get_mut(&ssrc) {
+                binding.user_id = recovered_user_id;
             }
+            debug!(
+                ssrc,
+                old_user_id = binding_user_id,
+                new_user_id = recovered_user_id,
+                "UDP: remapped video ssrc after per-packet DAVE decrypt"
+            );
+            binding_user_id = recovered_user_id;
         }
         let decrypted_primary = decrypted_packet.as_ref().map(|(bytes, _)| bytes.as_slice());
         let depacketize_payload: &[u8] = decrypted_primary.unwrap_or(&primary_payload);
@@ -639,16 +639,15 @@ pub(super) async fn udp_recv_loop(
                     .fetch_add(1, Ordering::Relaxed);
                 if dave_video_diagnostics_enabled
                     && frame_diagnostic_ok_count < MAX_FRAME_DIAGNOSTICS
+                    && let Some(frame_bytes) = diag_frame_bytes
                 {
-                    if let Some(frame_bytes) = diag_frame_bytes {
-                        frame_diagnostic_ok_count += 1;
-                        debug!(
-                            ssrc,
-                            codec = codec.as_str(),
-                            frame_bytes,
-                            "clankvox_dave_video_decrypt_ok_frame"
-                        );
-                    }
+                    frame_diagnostic_ok_count += 1;
+                    debug!(
+                        ssrc,
+                        codec = codec.as_str(),
+                        frame_bytes,
+                        "clankvox_dave_video_decrypt_ok_frame"
+                    );
                 }
             } else {
                 dave_video_passthrough += 1;
@@ -661,21 +660,21 @@ pub(super) async fn udp_recv_loop(
             transport_stats()
                 .inbound_video_dave_decrypt_fail
                 .fetch_add(1, Ordering::Relaxed);
-            if dave_video_diagnostics_enabled && frame_diagnostic_fail_count < MAX_FRAME_DIAGNOSTICS
+            if dave_video_diagnostics_enabled
+                && frame_diagnostic_fail_count < MAX_FRAME_DIAGNOSTICS
+                && let Some(frame_bytes) = diag_frame_bytes
             {
-                if let Some(frame_bytes) = diag_frame_bytes {
-                    frame_diagnostic_fail_count += 1;
-                    debug!(
-                        ssrc,
-                        codec = codec.as_str(),
-                        frame_bytes,
-                        "clankvox_dave_video_decrypt_fail_frame"
-                    );
-                }
+                frame_diagnostic_fail_count += 1;
+                debug!(
+                    ssrc,
+                    codec = codec.as_str(),
+                    frame_bytes,
+                    "clankvox_dave_video_decrypt_fail_frame"
+                );
             }
         }
         let dave_total = dave_video_decrypt_ok + dave_video_decrypt_fail + dave_video_passthrough;
-        if dave_total > 0 && (dave_total <= 5 || dave_total % 100 == 0) {
+        if dave_total > 0 && (dave_total <= 5 || dave_total.is_multiple_of(100)) {
             let success_pct = if dave_total > 0 {
                 dave_video_decrypt_ok * 100 / dave_total
             } else {
@@ -727,7 +726,7 @@ pub(super) async fn udp_recv_loop(
         }
         // Log NAL types for the first 5 H264 frames and periodically after that
         if codec == VideoCodecKind::H264
-            && (video_frame_emit_count <= 5 || video_frame_emit_count % 100 == 0)
+            && (video_frame_emit_count <= 5 || video_frame_emit_count.is_multiple_of(100))
         {
             let nal_types = collect_annexb_nal_types(&frame);
             info!(
