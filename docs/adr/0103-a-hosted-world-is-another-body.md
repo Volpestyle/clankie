@@ -6,6 +6,15 @@ world would be reached only through the packaged MCP server. The shipped code
 (VUH-970) reaches it through the pinned world contract instead; this record
 states the boundary that is actually built and enforced.
 
+Amended in the mechanism, not the boundary (2026-08-16): the contract is now
+the published package `@pokeagents/world-protocol` at a version, not a git
+revision pinned against a private repository. PokeAgent MMO
+[ADR 0014](https://github.com/Volpestyle/pokeagents/blob/main/docs/adr/0014-the-published-kit-carries-the-org-that-owns-it.md)
+publishes the client kit under the `@pokeagents` scope; its private host
+packages keep `@pokeagent-mmo`, so the scope now marks the boundary this record
+is about. Everything below about what may be imported still holds, and the
+`pinned` in the title now means a pinned version.
+
 ## Context
 
 ADR 0102 treated PokeAgent MMO as a tool surface: Clankie would call
@@ -34,7 +43,7 @@ uses. It is not a second play loop.
 Clankie reaches the world through `@pokeagent-mmo/world-protocol`, a git
 dependency pinned to a revision, using the client transport on its `/ipc`
 subpath — PokeAgent MMO
-[ADR 0008](https://github.com/Volpestyle/pokeagent-mmo/blob/main/docs/adr/0008-the-contract-crosses-as-a-pinned-dependency.md)
+[ADR 0008](https://github.com/Volpestyle/pokeagents/blob/main/docs/adr/0008-the-contract-crosses-as-a-pinned-dependency.md)
 ships that contract for exactly this crossing. `apps/clankie/src/world/body.ts`
 holds the seam; `apps/clankie/src/play-execution-world.ts` composes it.
 The operator- and Discord-visible surface is one captain tool, `pokeagent_join_mmo`.

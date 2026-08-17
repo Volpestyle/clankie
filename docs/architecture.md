@@ -95,8 +95,8 @@ the full picture — what each store holds, who may read it, and what bounds it.
   [`integrations/gba-emulator`](../integrations/gba-emulator/README.md), booted
   and leased by the local play host; `body-lock` keeps one writer on it across
   the free-play CLI, GBA MCP, and live session. The hosted one is a seat in a
-  PokeAgent MMO world, reached through the pinned
-  `@pokeagent-mmo/world-protocol` contract and entered with the `pokeagent_join_mmo`
+  PokeAgent MMO world, reached through the published
+  `@pokeagents/world-protocol` contract and entered with the `pokeagent_join_mmo`
   tool ([ADR 0103](adr/0103-a-hosted-world-is-another-body.md)). A hosted world
   cannot be paused, changes without him acting, and can replace his body under
   him. Owner settings independently enable the local emulator and hosted MMO;

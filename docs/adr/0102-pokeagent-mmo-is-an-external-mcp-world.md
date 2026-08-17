@@ -3,7 +3,9 @@
 Status: accepted 2026-08-15, amended in part by
 [ADR 0103](0103-a-hosted-world-is-another-body.md). The player/owner boundary
 below still holds. The transport does not: Clankie reaches the world through the
-pinned `@pokeagent-mmo/world-protocol` contract, not through the MCP server.
+`@pokeagents/world-protocol` contract, not through the MCP server. That contract
+is now consumed as a published version; it crossed as a pinned git revision
+under the `@pokeagent-mmo` scope until 2026-08-16.
 
 ## Context
 

@@ -10,7 +10,7 @@ import {
   type CredentialStore,
 } from "@clankie/credential-broker";
 import { EnvironmentAdapterActionError } from "@clankie/environment-runtime";
-import { WORLD_PROTOCOL_VERSION } from "@pokeagent-mmo/world-protocol";
+import { WORLD_PROTOCOL_VERSION } from "@pokeagents/world-protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { joinWorld } from "../src/world/body.ts";
 

@@ -13,9 +13,9 @@ const productRoots = ["apps", "integrations", "packages"] as const;
 const allowedDependencies = new Set([
   "@pokeagent-mmo/firered",
   "@pokeagent-mmo/world-mcp",
-  "@pokeagent-mmo/world-protocol",
+  "@pokeagents/world-protocol",
 ]);
-const allowedSourceImports = new Set(["@pokeagent-mmo/firered", "@pokeagent-mmo/world-protocol"]);
+const allowedSourceImports = new Set(["@pokeagent-mmo/firered", "@pokeagents/world-protocol"]);
 const skippedDirectories = new Set(["coverage", "dist", "node_modules", "test"]);
 
 interface PackageManifest {
