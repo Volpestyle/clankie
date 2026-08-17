@@ -92,7 +92,7 @@ Activity, Go Live, share-watch, and music differences.
 
 ## Build And Test
 
-ClankVox requires a Unix-like host, Rust 1.85+, and CMake. The build fails
+ClankVox requires a Unix-like host, Rust 1.88+, and CMake. The build fails
 explicitly on non-Unix targets because media subprocess control uses a POSIX
 shell and process groups. URL/video playback additionally requires host
 `ffmpeg` and `yt-dlp`; H264 publishing requires FFmpeg's `libx264` encoder.

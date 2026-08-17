@@ -271,21 +271,17 @@ impl AppState {
             "clankvox_video_sink_wants_updated"
         );
 
-        if !voice_wants_vec.is_empty() || !have_sw {
-            if let Some(conn) = self.voice_conn.as_ref() {
-                if let Err(error) =
-                    conn.update_media_sink_wants(&voice_wants_vec, &voice_pixels_vec)
-                {
-                    tracing::warn!(reason = reason, error = %error, "failed to update voice media sink wants");
-                }
-            }
+        if (!voice_wants_vec.is_empty() || !have_sw)
+            && let Some(conn) = self.voice_conn.as_ref()
+            && let Err(error) = conn.update_media_sink_wants(&voice_wants_vec, &voice_pixels_vec)
+        {
+            tracing::warn!(reason = reason, error = %error, "failed to update voice media sink wants");
         }
-        if !sw_wants_vec.is_empty() {
-            if let Some(conn) = self.stream_watch_conn.as_ref() {
-                if let Err(error) = conn.update_media_sink_wants(&sw_wants_vec, &sw_pixels_vec) {
-                    tracing::warn!(reason = reason, error = %error, "failed to update stream_watch media sink wants");
-                }
-            }
+        if !sw_wants_vec.is_empty()
+            && let Some(conn) = self.stream_watch_conn.as_ref()
+            && let Err(error) = conn.update_media_sink_wants(&sw_wants_vec, &sw_pixels_vec)
+        {
+            tracing::warn!(reason = reason, error = %error, "failed to update stream_watch media sink wants");
         }
     }
 
@@ -316,12 +312,12 @@ impl AppState {
                 else {
                     return;
                 };
-                if let Some(state) = self.user_capture_states.remove(&user_id) {
-                    if state.stream_active {
-                        send_msg(OutMsg::UserAudioEnd {
-                            user_id: user_id.to_string(),
-                        });
-                    }
+                if let Some(state) = self.user_capture_states.remove(&user_id)
+                    && state.stream_active
+                {
+                    send_msg(OutMsg::UserAudioEnd {
+                        user_id: user_id.to_string(),
+                    });
                 }
             }
             CaptureCommand::SubscribeUserVideo {
@@ -842,10 +838,11 @@ impl AppState {
                     let min_gap = std::time::Duration::from_secs_f64(
                         1.0 / f64::from(subscription.max_frames_per_second.max(1)),
                     );
-                    if let Some(last_frame_sent_at) = subscription.last_frame_sent_at {
-                        if now.duration_since(last_frame_sent_at) < min_gap && !keyframe {
-                            return;
-                        }
+                    if let Some(last_frame_sent_at) = subscription.last_frame_sent_at
+                        && now.duration_since(last_frame_sent_at) < min_gap
+                        && !keyframe
+                    {
+                        return;
                     }
                     subscription.last_frame_sent_at = Some(now);
 
@@ -893,14 +890,14 @@ impl AppState {
                             "clankvox_waiting_for_first_keyframe_reasserting_sink_wants"
                         );
                         self.refresh_video_sink_wants("waiting_for_first_keyframe");
-                        if let Some(conn) = self.video_conn() {
-                            if let Err(error) = conn.send_rtcp_pli(ssrc) {
-                                tracing::warn!(
-                                    ssrc,
-                                    error = %error,
-                                    "clankvox_rtcp_pli_failed"
-                                );
-                            }
+                        if let Some(conn) = self.video_conn()
+                            && let Err(error) = conn.send_rtcp_pli(ssrc)
+                        {
+                            tracing::warn!(
+                                ssrc,
+                                error = %error,
+                                "clankvox_rtcp_pli_failed"
+                            );
                         }
                     }
                 }
@@ -911,38 +908,38 @@ impl AppState {
                 // often arrives before the DAVE session is ready, so those
                 // frames fail decrypt and are lost.  Immediately request a
                 // fresh keyframe now that we can actually decrypt.
-                if role == TransportRole::StreamWatch || role == TransportRole::Voice {
-                    if let Some(conn) = self.video_conn() {
-                        for remote_state in self.remote_video_states.values() {
-                            for stream in &remote_state.streams {
-                                tracing::info!(
-                                    role = role.as_str(),
+                if (role == TransportRole::StreamWatch || role == TransportRole::Voice)
+                    && let Some(conn) = self.video_conn()
+                {
+                    for remote_state in self.remote_video_states.values() {
+                        for stream in &remote_state.streams {
+                            tracing::info!(
+                                role = role.as_str(),
+                                ssrc = stream.ssrc,
+                                "clankvox_dave_ready_pli_requesting_keyframe"
+                            );
+                            if let Err(error) = conn.send_rtcp_pli(stream.ssrc) {
+                                tracing::warn!(
                                     ssrc = stream.ssrc,
-                                    "clankvox_dave_ready_pli_requesting_keyframe"
+                                    error = %error,
+                                    "clankvox_dave_ready_pli_failed"
                                 );
-                                if let Err(error) = conn.send_rtcp_pli(stream.ssrc) {
-                                    tracing::warn!(
-                                        ssrc = stream.ssrc,
-                                        error = %error,
-                                        "clankvox_dave_ready_pli_failed"
-                                    );
-                                }
                             }
-                            if let Some(video_ssrc) = remote_state.video_ssrc {
-                                if !remote_state.streams.iter().any(|s| s.ssrc == video_ssrc) {
-                                    tracing::info!(
-                                        role = role.as_str(),
-                                        ssrc = video_ssrc,
-                                        "clankvox_dave_ready_pli_requesting_keyframe"
-                                    );
-                                    if let Err(error) = conn.send_rtcp_pli(video_ssrc) {
-                                        tracing::warn!(
-                                            ssrc = video_ssrc,
-                                            error = %error,
-                                            "clankvox_dave_ready_pli_failed"
-                                        );
-                                    }
-                                }
+                        }
+                        if let Some(video_ssrc) = remote_state.video_ssrc
+                            && !remote_state.streams.iter().any(|s| s.ssrc == video_ssrc)
+                        {
+                            tracing::info!(
+                                role = role.as_str(),
+                                ssrc = video_ssrc,
+                                "clankvox_dave_ready_pli_requesting_keyframe"
+                            );
+                            if let Err(error) = conn.send_rtcp_pli(video_ssrc) {
+                                tracing::warn!(
+                                    ssrc = video_ssrc,
+                                    error = %error,
+                                    "clankvox_dave_ready_pli_failed"
+                                );
                             }
                         }
                     }
@@ -981,14 +978,14 @@ impl AppState {
         for (user_id, ssrc) in self.video_decode_worker.drain_pli_requests() {
             tracing::info!(user_id, ssrc, "clankvox_decoder_reset_requesting_pli");
             self.refresh_video_sink_wants("decoder_reset_pli");
-            if let Some(conn) = self.video_conn() {
-                if let Err(error) = conn.send_rtcp_pli(ssrc) {
-                    tracing::warn!(
-                        ssrc,
-                        error = %error,
-                        "clankvox_decoder_reset_pli_failed"
-                    );
-                }
+            if let Some(conn) = self.video_conn()
+                && let Err(error) = conn.send_rtcp_pli(ssrc)
+            {
+                tracing::warn!(
+                    ssrc,
+                    error = %error,
+                    "clankvox_decoder_reset_pli_failed"
+                );
             }
         }
 

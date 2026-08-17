@@ -25,7 +25,7 @@ result(
 for (const check of [
   ["pnpm", true, ["--version"], "Enable Corepack and install pnpm 11.", "11.0"],
   ["git", true, ["--version"], "Install Git."],
-  ["cargo", true, ["--version"], "Install the Rust 1.85+ toolchain to build @clankie/vox.", "1.85"],
+  ["cargo", true, ["--version"], "Install the Rust 1.88+ toolchain to build @clankie/vox.", "1.88"],
   ["cmake", true, ["--version"], "Install CMake to build Vox's bundled native codecs."],
   ["ffmpeg", false, ["-version"], "Required for Vox URL/video playback and VP8 decode."],
   ["yt-dlp", false, ["--version"], "Required for Vox playback from indirect media URLs."],

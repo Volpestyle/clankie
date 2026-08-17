@@ -166,7 +166,7 @@ impl PersistentVideoDecoder {
         if !state_acceptable {
             self.decode_errors += 1;
             self.consecutive_errors += 1;
-            if self.consecutive_errors <= 5 || self.consecutive_errors % 100 == 0 {
+            if self.consecutive_errors <= 5 || self.consecutive_errors.is_multiple_of(100) {
                 warn!(
                     consecutive_errors = self.consecutive_errors,
                     total_errors = self.decode_errors,
@@ -323,10 +323,10 @@ impl PersistentVideoDecoder {
 
     fn try_reset(&mut self) {
         let now = time::Instant::now();
-        if let Some(last) = self.last_reset_at {
-            if now.duration_since(last) < std::time::Duration::from_secs(5) {
-                return;
-            }
+        if let Some(last) = self.last_reset_at
+            && now.duration_since(last) < std::time::Duration::from_secs(5)
+        {
+            return;
         }
         info!(
             consecutive_errors = self.consecutive_errors,

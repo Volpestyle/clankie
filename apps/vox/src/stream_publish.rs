@@ -882,14 +882,13 @@ impl StreamPublishPlayer {
                 }
                 if let Err(error) =
                     process_unix::signal_process_group(pid, ProcessSignal::Terminate)
+                    && error.kind() != io::ErrorKind::NotFound
                 {
-                    if error.kind() != io::ErrorKind::NotFound {
-                        warn!(
-                            pid,
-                            error = %error,
-                            "failed to stop stream publish process group"
-                        );
-                    }
+                    warn!(
+                        pid,
+                        error = %error,
+                        "failed to stop stream publish process group"
+                    );
                 }
             }
             // Never block the event loop on pipeline teardown — join on a
@@ -1215,10 +1214,10 @@ impl AppState {
             }
             StreamPublishCommand::Pause => {
                 self.stream_publish.paused = true;
-                if let Some(player) = self.stream_publish.player.as_ref() {
-                    if !player.pause() {
-                        warn!("failed to pause stream publish player");
-                    }
+                if let Some(player) = self.stream_publish.player.as_ref()
+                    && !player.pause()
+                {
+                    warn!("failed to pause stream publish player");
                 }
                 if let Some(conn) = self.stream_publish_conn.as_ref() {
                     if let Err(error) = conn.set_stream_publish_speaking(false) {
@@ -1232,19 +1231,19 @@ impl AppState {
             }
             StreamPublishCommand::Resume => {
                 self.stream_publish.paused = false;
-                if let Some(player) = self.stream_publish.player.as_ref() {
-                    if player.resume() {
-                        if let Some(conn) = self.stream_publish_conn.as_ref() {
-                            if let Err(error) = conn.set_stream_publish_video_active(true) {
-                                warn!(error = %error, "failed to enable stream publish video state on resume");
-                            }
-                            if let Err(error) = conn.set_stream_publish_speaking(true) {
-                                warn!(error = %error, "failed to enable stream publish speaking on resume");
-                            }
+                if let Some(player) = self.stream_publish.player.as_ref()
+                    && player.resume()
+                {
+                    if let Some(conn) = self.stream_publish_conn.as_ref() {
+                        if let Err(error) = conn.set_stream_publish_video_active(true) {
+                            warn!(error = %error, "failed to enable stream publish video state on resume");
                         }
-                        self.emit_transport_state(TransportRole::StreamPublish, "playing", None);
-                        return;
+                        if let Err(error) = conn.set_stream_publish_speaking(true) {
+                            warn!(error = %error, "failed to enable stream publish speaking on resume");
+                        }
                     }
+                    self.emit_transport_state(TransportRole::StreamPublish, "playing", None);
+                    return;
                 }
                 if let Some(active_source) = self.stream_publish.active_source.clone() {
                     self.stream_publish.queue_pending_start(active_source);
@@ -1303,7 +1302,7 @@ impl AppState {
             self.stream_publish_frames_sent += 1;
             let queue_depth = self.stream_publish_frame_rx.len();
             if self.stream_publish_frames_sent <= 5
-                || self.stream_publish_frames_sent % 150 == 0
+                || self.stream_publish_frames_sent.is_multiple_of(150)
                 || queue_depth > 10
             {
                 info!(
@@ -1333,7 +1332,7 @@ impl AppState {
                                 self.stream_publish_encrypt_failures =
                                     self.stream_publish_encrypt_failures.saturating_add(1);
                                 let failures = self.stream_publish_encrypt_failures;
-                                if failures == 1 || failures % 100 == 0 {
+                                if failures == 1 || failures.is_multiple_of(100) {
                                     warn!(
                                         consecutive_failures = failures,
                                         error = %error,
@@ -1370,13 +1369,12 @@ impl AppState {
 
             if let Some(encrypted_frame) = encrypted_frame {
                 self.stream_publish_encrypt_failures = 0;
-                if let Some(conn) = self.stream_publish_conn.as_ref() {
-                    if let Err(error) = conn
+                if let Some(conn) = self.stream_publish_conn.as_ref()
+                    && let Err(error) = conn
                         .send_h264_frame(&encrypted_frame, timestamp_increment)
                         .await
-                    {
-                        warn!(error = %error, "failed to send stream publish video frame");
-                    }
+                {
+                    warn!(error = %error, "failed to send stream publish video frame");
                 }
             }
 

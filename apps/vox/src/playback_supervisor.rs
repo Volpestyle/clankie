@@ -246,11 +246,11 @@ impl AppState {
             PlaybackCommand::MusicSetGain { target, fade_ms } => {
                 let clamped = target.clamp(0.0, 1.0);
                 let mut guard = self.audio_send_state.lock();
-                if let Some(ref mut state) = *guard {
-                    if let Some(reached) = state.set_music_gain(clamped, fade_ms) {
-                        drop(guard);
-                        send_msg(OutMsg::MusicGainReached { gain: reached });
-                    }
+                if let Some(ref mut state) = *guard
+                    && let Some(reached) = state.set_music_gain(clamped, fade_ms)
+                {
+                    drop(guard);
+                    send_msg(OutMsg::MusicGainReached { gain: reached });
                 }
                 false
             }
@@ -553,11 +553,11 @@ impl AppState {
 
         {
             let mut guard = self.audio_send_state.lock();
-            if let Some(ref mut state) = *guard {
-                if let Some(reached) = state.maybe_take_music_gain_reached() {
-                    drop(guard);
-                    send_msg(OutMsg::MusicGainReached { gain: reached });
-                }
+            if let Some(ref mut state) = *guard
+                && let Some(reached) = state.maybe_take_music_gain_reached()
+            {
+                drop(guard);
+                send_msg(OutMsg::MusicGainReached { gain: reached });
             }
         }
 
@@ -588,17 +588,16 @@ impl AppState {
             send_tts_playback_state("idle", "tts_drained");
         }
 
-        if let Some(opus) = opus_frame {
-            if let Some(encrypted) = self.encrypt_outbound_opus(opus) {
-                if let Some(ref conn) = self.voice_conn {
-                    if let Err(error) = conn.send_rtp_frame(&encrypted).await {
-                        tracing::debug!("RTP send error: {}", error);
-                    } else {
-                        transport_stats()
-                            .outbound_rtp_audio_sent
-                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    }
-                }
+        if let Some(opus) = opus_frame
+            && let Some(encrypted) = self.encrypt_outbound_opus(opus)
+            && let Some(ref conn) = self.voice_conn
+        {
+            if let Err(error) = conn.send_rtp_frame(&encrypted).await {
+                tracing::debug!("RTP send error: {}", error);
+            } else {
+                transport_stats()
+                    .outbound_rtp_audio_sent
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
         }
 
@@ -626,7 +625,7 @@ impl AppState {
                         self.dave_audio_encrypt_failures =
                             self.dave_audio_encrypt_failures.saturating_add(1);
                         let failures = self.dave_audio_encrypt_failures;
-                        if failures == 1 || failures % 100 == 0 {
+                        if failures == 1 || failures.is_multiple_of(100) {
                             warn!(
                                 consecutive_failures = failures,
                                 error = %error,

@@ -2,7 +2,7 @@
 name = "clankvox"
 version = "0.3.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 description = "Clankie's native Discord voice and media transport"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/Volpestyle/clankie"

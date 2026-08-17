@@ -316,10 +316,9 @@ impl MusicPlayer {
                 }
                 if let Err(error) =
                     process_unix::signal_process_group(pid, ProcessSignal::Terminate)
+                    && error.kind() != io::ErrorKind::NotFound
                 {
-                    if error.kind() != io::ErrorKind::NotFound {
-                        warn!(pid, error = %error, "failed to stop music process group");
-                    }
+                    warn!(pid, error = %error, "failed to stop music process group");
                 }
             }
             if thread.is_finished() {

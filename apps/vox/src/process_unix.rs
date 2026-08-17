@@ -105,10 +105,10 @@ pub(crate) fn signal_process_group(pid: u32, signal: ProcessSignal) -> io::Resul
 /// Helper: send [`ProcessSignal::Terminate`] to a child process, logging on
 /// failure. The `context` label disambiguates the call site in log output.
 pub(crate) fn terminate_child(child: &mut std::process::Child, context: &str) {
-    if let Err(error) = signal_process_group(child.id(), ProcessSignal::Terminate) {
-        if error.kind() != io::ErrorKind::NotFound {
-            warn!(pid = child.id(), error = %error, "{context}: failed to signal process group");
-        }
+    if let Err(error) = signal_process_group(child.id(), ProcessSignal::Terminate)
+        && error.kind() != io::ErrorKind::NotFound
+    {
+        warn!(pid = child.id(), error = %error, "{context}: failed to signal process group");
     }
 }
 
