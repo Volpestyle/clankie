@@ -38,9 +38,11 @@ voice state. Raw user, guild, channel, and message ids are never tool arguments.
   whether to call a tool. Follow-ups such as “try now” use normal channel
   context and engagement.
 - **Argument-free tools.** The model supplies no user, guild, or channel id.
-  The service stamps the authenticated turn actor and guild into mutable tool
-  context. The live body reads the actor's current gateway voice state when the
-  tool executes, so text and prompt injection cannot pick a destination.
+  A Discord turn stamps the authenticated speaker and guild into mutable tool
+  context; the body reads that actor's current gateway voice state. An operator
+  turn stamps nothing: the body follows the configured owner into their current
+  allowlisted voice channel, or refuses `no_owner` / `not_in_voice` / `ambiguous`.
+  Text and prompt injection cannot pick a destination either way.
 - **Body-owned execution.** The captain calls the active body's loopback
   control surface. The official bot applies ADR 0050's voice tier plus the
   voice guild/channel allowlists. The lab user-session body admits only the
@@ -77,7 +79,8 @@ voice state. Raw user, guild, channel, and message ids are never tool arguments.
 ## Consequences
 
 - One admitted Discord turn makes one captain decision instead of a captain
-  call plus a separate intent call.
+  call plus a separate intent call. An operator-console ask uses the same tools
+  and the same body-owned destination; the owner is the only followable actor.
 - Voice presence behaves like play, music, browser, and media abilities: the
   captain chooses a typed tool, while the owning subsystem validates and acts.
 - Reactions, threads, and live-watch actions use the same seam: agent-owned

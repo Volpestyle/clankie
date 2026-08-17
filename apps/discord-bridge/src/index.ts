@@ -49,6 +49,7 @@ import {
   selectInboundImageAttachments,
   tryHandleCaptainDiscordActionRequest,
   tryHandleMusicControlRequest,
+  resolveOwnerFollowTarget,
   tryHandleVoicePresenceControlRequest,
   type DiscordBridgeReceipt,
   type DiscordInboundContextMessage,
@@ -1040,33 +1041,28 @@ async function executeCaptainVoicePresence(
   action: VoicePresenceControlAction,
   input: VoicePresenceControlInput,
 ) {
-  const guild = client.guilds.cache.get(input.guildId);
-  const member =
-    guild === undefined
-      ? undefined
-      : (guild.members.cache.get(input.actorId) ??
-        (await guild.members.fetch(input.actorId).catch(() => undefined)));
-  if (guild === undefined || member === undefined) {
+  const target = await resolveVoicePresenceControlTarget(action, input);
+  if ("reason" in target) {
     return {
       action: action === "join" ? ("join_refused" as const) : ("leave_refused" as const),
-      reason: "failed" as const,
+      reason: target.reason,
     };
   }
   const result = await executeVoicePresenceIntent(
     { bindings: roleBindings, joinPolicy: voiceJoinPolicy, voiceGuildIds, voiceChannelIds, voiceSession },
     {
       intent: action,
-      guildId: input.guildId,
-      principal: { userId: input.actorId, roleIds: new Set(member.roles.cache.keys()) },
-      memberVoiceChannelId: member.voice.channelId ?? undefined,
-      adapterCreator: guild.voiceAdapterCreator,
+      guildId: target.guildId,
+      principal: { userId: target.actorId, roleIds: new Set(target.member.roles.cache.keys()) },
+      memberVoiceChannelId: target.member.voice.channelId ?? undefined,
+      adapterCreator: target.guild.voiceAdapterCreator,
     },
   );
   console.info(
     {
       action,
-      guildId: input.guildId,
-      actorId: input.actorId,
+      guildId: target.guildId,
+      actorId: target.actorId,
       outcome: result.action,
       ...(result.action === "join_refused" || result.action === "leave_refused"
         ? { reason: result.reason }
@@ -1075,6 +1071,76 @@ async function executeCaptainVoicePresence(
     "Captain voice presence tool",
   );
   return result;
+}
+
+async function resolveVoicePresenceControlTarget(
+  action: VoicePresenceControlAction,
+  input: VoicePresenceControlInput,
+): Promise<
+  | {
+      readonly guildId: string;
+      readonly actorId: string;
+      readonly guild: Guild;
+      readonly member: GuildMember;
+    }
+  | { readonly reason: "failed" | "no_owner" | "not_in_voice" | "ambiguous" }
+> {
+  if (input.guildId !== undefined || input.actorId !== undefined) {
+    if (input.guildId === undefined || input.actorId === undefined) return { reason: "failed" };
+    const located = await locateVoiceMember(input.guildId, input.actorId);
+    return located ?? { reason: "failed" };
+  }
+  const ownerUserId = process.env.DISCORD_OWNER_USER_ID?.trim();
+  if (ownerUserId === undefined || ownerUserId.length === 0) return { reason: "no_owner" };
+  if (action === "leave") {
+    const active = voiceSession?.status();
+    const preferred = active?.active === true ? active.guildId : undefined;
+    const guildIdsToTry =
+      preferred !== undefined && voiceGuildIds.has(preferred)
+        ? [preferred, ...[...voiceGuildIds].filter((id) => id !== preferred)]
+        : [...voiceGuildIds];
+    for (const guildId of guildIdsToTry) {
+      const located = await locateVoiceMember(guildId, ownerUserId);
+      if (located !== undefined) return located;
+    }
+    return { reason: "failed" };
+  }
+  const candidates: {
+    guildId: string;
+    channelId: string;
+    located: Awaited<ReturnType<typeof locateVoiceMember>>;
+  }[] = [];
+  for (const guild of client.guilds.cache.values()) {
+    if (!voiceGuildIds.has(guild.id)) continue;
+    const located = await locateVoiceMember(guild.id, ownerUserId);
+    const channelId = located?.member.voice.channelId;
+    if (located === undefined || channelId === undefined || channelId === null) continue;
+    if (voiceChannelIds.size > 0 && !voiceChannelIds.has(channelId)) continue;
+    candidates.push({ guildId: guild.id, channelId, located });
+  }
+  const follow = resolveOwnerFollowTarget(
+    candidates.map(({ guildId, channelId }) => ({ guildId, channelId })),
+    voiceSession?.status(),
+  );
+  if (follow.outcome === "none") return { reason: "not_in_voice" };
+  if (follow.outcome === "ambiguous") return { reason: "ambiguous" };
+  const match = candidates.find(
+    (candidate) => candidate.guildId === follow.guildId && candidate.channelId === follow.channelId,
+  );
+  return match?.located ?? { reason: "failed" };
+}
+
+async function locateVoiceMember(
+  guildId: string,
+  actorId: string,
+): Promise<{ guildId: string; actorId: string; guild: Guild; member: GuildMember } | undefined> {
+  const guild = client.guilds.cache.get(guildId);
+  const member =
+    guild === undefined
+      ? undefined
+      : (guild.members.cache.get(actorId) ?? (await guild.members.fetch(actorId).catch(() => undefined)));
+  if (guild === undefined || member === undefined) return undefined;
+  return { guildId, actorId, guild, member };
 }
 
 async function executeCaptainDiscordAction(

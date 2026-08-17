@@ -200,6 +200,33 @@ describe("DiscordUserGateway", () => {
     expect(gateway.voiceChannelFor("guild-1", "human-1")).toBeUndefined();
     gateway.close();
   });
+
+  it("lists every current voice channel for an actor across guilds", () => {
+    const socket = new FakeSocket();
+    const gateway = new DiscordUserGateway({
+      token: "user-token",
+      connect: () => socket.asWebSocket(),
+    });
+    gateway.open();
+    socket.deliver({ op: 10, d: { heartbeat_interval: 45_000 } });
+    socket.deliver({
+      op: 0,
+      s: 1,
+      t: "GUILD_CREATE",
+      d: { id: "guild-1", voice_states: [{ user_id: "human-1", channel_id: "voice-1" }] },
+    });
+    socket.deliver({
+      op: 0,
+      s: 2,
+      t: "GUILD_CREATE",
+      d: { id: "guild-2", voice_states: [{ user_id: "human-1", channel_id: "voice-2" }] },
+    });
+    expect(gateway.voiceChannelsFor("human-1")).toEqual([
+      { guildId: "guild-1", channelId: "voice-1" },
+      { guildId: "guild-2", channelId: "voice-2" },
+    ]);
+    gateway.close();
+  });
 });
 
 interface Frame {

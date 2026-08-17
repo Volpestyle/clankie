@@ -1294,14 +1294,18 @@ export const DiscordVoicePresenceResultReasonSchema = z.enum([
   "not_in_voice",
   "voice_disabled",
   "other_guild",
+  "no_owner",
+  "ambiguous",
   "failed",
 ]);
 export type DiscordVoicePresenceResultReason = z.infer<typeof DiscordVoicePresenceResultReasonSchema>;
 
 /**
  * What the live Discord body did when the captain used a voice-presence tool.
- * The body resolves the asker's current channel and enforces authority; the
- * model supplies neither ids nor an explanation of the result.
+ * The body resolves the destination and enforces authority; the model supplies
+ * neither ids nor an explanation of the result. A Discord turn follows the
+ * authenticated speaker in that guild. An operator turn follows the configured
+ * owner into their current allowlisted voice channel (`no_owner` / `ambiguous`).
  */
 export const DiscordVoicePresenceResultSchema = z.discriminatedUnion("action", [
   z

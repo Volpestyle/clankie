@@ -92,7 +92,10 @@ export {
 } from "./voice-music.ts";
 export {
   parseVoicePresenceControlPath,
+  resolveOwnerFollowTarget,
   tryHandleVoicePresenceControlRequest,
+  type OwnerFollowTarget,
+  type OwnerVoiceCandidate,
   type VoicePresenceControlAction,
   type VoicePresenceControlInput,
 } from "./voice-control.ts";

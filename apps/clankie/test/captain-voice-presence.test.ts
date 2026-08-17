@@ -70,9 +70,12 @@ describe("captain voice presence tools", () => {
     await join.execute("call-1", {}, undefined, undefined, {} as never);
 
     expect(calls).toEqual([{ guildId: "guild-1", actorId: "user-1" }]);
-    expect(captainTools(deps, {}, {} as LaneLog, "operator").some((tool) => tool.name === "voice_join")).toBe(
-      false,
+    const operatorJoin = captainTools(deps, {}, {} as LaneLog, "operator").find(
+      (tool) => tool.name === "voice_join",
     );
+    if (operatorJoin === undefined) throw new Error("operator voice_join is missing");
+    await operatorJoin.execute("call-2", {}, undefined, undefined, {} as never);
+    expect(calls).toEqual([{ guildId: "guild-1", actorId: "user-1" }, {}]);
   });
 
   it("host-stamps the asker on play intents", async () => {

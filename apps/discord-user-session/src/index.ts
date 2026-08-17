@@ -26,6 +26,7 @@ import {
   voiceEvidenceReceiptType,
   tryHandleCaptainDiscordActionRequest,
   tryHandleMusicControlRequest,
+  resolveOwnerFollowTarget,
   tryHandleVoicePresenceControlRequest,
   type DiscordBridgeReceipt,
   type VoiceRealtimeBaseEnvConfig,
@@ -440,12 +441,11 @@ async function executeCaptainVoicePresence(
   input: VoicePresenceControlInput,
 ): Promise<DiscordVoicePresenceResult> {
   const refused = action === "join" ? ("join_refused" as const) : ("leave_refused" as const);
-  if (ownerUserId === undefined || input.actorId !== ownerUserId) {
-    return { action: refused, reason: "authority" };
-  }
+  const target = resolveUserSessionVoiceTarget(action, input);
+  if ("reason" in target) return { action: refused, reason: target.reason };
   if (voiceSession === undefined) return { action: refused, reason: "voice_disabled" };
   const active = voiceSession.status();
-  if (active.active && active.guildId !== input.guildId) {
+  if (active.active && active.guildId !== target.guildId) {
     return { action: refused, reason: "other_guild" };
   }
   if (action === "leave") {
@@ -456,20 +456,59 @@ async function executeCaptainVoicePresence(
     }
     return { action: "left", ...(active.channelId === undefined ? {} : { channelId: active.channelId }) };
   }
-  const channelId = gateway.voiceChannelFor(input.guildId, input.actorId);
-  if (channelId === undefined) return { action: "join_refused", reason: "not_in_voice" };
-  if (!guildIds.has(input.guildId) || !voiceChannelIds.has(channelId)) {
+  if (!guildIds.has(target.guildId) || !voiceChannelIds.has(target.channelId)) {
     return { action: "join_refused", reason: "allowlist" };
   }
-  if (active.active && active.channelId === channelId) {
-    return { action: "joined", channelId, actorAutoOptedIn: false };
+  if (active.active && active.channelId === target.channelId) {
+    return { action: "joined", channelId: target.channelId, actorAutoOptedIn: false };
   }
   try {
-    await joinUserSessionVoice({ guildId: input.guildId, channelId, invokingUserId: input.actorId });
+    await joinUserSessionVoice({
+      guildId: target.guildId,
+      channelId: target.channelId,
+      invokingUserId: target.actorId,
+    });
   } catch {
     return { action: "join_refused", reason: "failed" };
   }
-  return { action: "joined", channelId, actorAutoOptedIn: true };
+  return { action: "joined", channelId: target.channelId, actorAutoOptedIn: true };
+}
+
+function resolveUserSessionVoiceTarget(
+  action: VoicePresenceControlAction,
+  input: VoicePresenceControlInput,
+):
+  | { readonly guildId: string; readonly actorId: string; readonly channelId: string }
+  | { readonly reason: "authority" | "no_owner" | "not_in_voice" | "ambiguous" | "failed" } {
+  if (ownerUserId === undefined) return { reason: "no_owner" };
+  if (input.guildId !== undefined || input.actorId !== undefined) {
+    if (input.guildId === undefined || input.actorId === undefined) return { reason: "failed" };
+    if (input.actorId !== ownerUserId) return { reason: "authority" };
+    const channelId = gateway.voiceChannelFor(input.guildId, input.actorId);
+    if (channelId === undefined) {
+      return action === "leave"
+        ? { guildId: input.guildId, actorId: input.actorId, channelId: "" }
+        : { reason: "not_in_voice" };
+    }
+    return { guildId: input.guildId, actorId: input.actorId, channelId };
+  }
+  if (action === "leave") {
+    const active = voiceSession?.status();
+    return {
+      guildId: active?.guildId ?? "",
+      actorId: ownerUserId,
+      channelId: active?.channelId ?? "",
+    };
+  }
+  const follow = resolveOwnerFollowTarget(
+    gateway
+      .voiceChannelsFor(ownerUserId)
+      .filter((candidate) => guildIds.has(candidate.guildId) && voiceChannelIds.has(candidate.channelId)),
+    voiceSession?.status(),
+  );
+  if (follow.outcome === "none") return { reason: "not_in_voice" };
+  if (follow.outcome === "ambiguous") return { reason: "ambiguous" };
+  return { guildId: follow.guildId, actorId: ownerUserId, channelId: follow.channelId };
 }
 
 async function executeCaptainDiscordAction(

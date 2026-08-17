@@ -114,8 +114,8 @@ export interface CaptainDeps {
   };
   /** Voice membership on the active Discord body; the body resolves and authorizes the target. */
   readonly discordVoicePresence?: {
-    join(input: { guildId: string; actorId: string }): Promise<DiscordVoicePresenceResult>;
-    leave(input: { guildId: string; actorId: string }): Promise<DiscordVoicePresenceResult>;
+    join(input: { guildId?: string; actorId?: string }): Promise<DiscordVoicePresenceResult>;
+    leave(input: { guildId?: string; actorId?: string }): Promise<DiscordVoicePresenceResult>;
   };
   /** Grounded social actions on the message and body belonging to the active turn. */
   readonly discordActions?: {

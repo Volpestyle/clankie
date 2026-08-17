@@ -94,7 +94,10 @@ Fixtures cannot satisfy these live gates.
 
 - `/clankie status`, `person-memory`, `join`, `leave`, `voice-consent`,
   `voice-status`, and `watch` are the registered slash subcommands. Voice
-  responses and disclosures are ephemeral.
+  responses and disclosures are ephemeral. The captain's argument-free
+  `voice_join` / `voice_leave` tools also reach this process: a Discord turn
+  follows the authenticated speaker, an operator-console turn follows the
+  configured owner ([ADR 0062](../../docs/adr/0062-voice-join-by-asking.md)).
 - Bounded text ingress is deny-by-default by guild/channel/DM policy. Admitted
   Discord content and attachments are labelled untrusted before the captain
   sees them. The bridge persists no channel transcript.

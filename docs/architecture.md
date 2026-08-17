@@ -65,7 +65,10 @@ the full picture — what each store holds, who may read it, and what bounds it.
   outlives the actor who earned it on the shared voice lane. They
   land in the conversation's workspace — the directory a workspace-scoped
   operator conversation names, this repository for every other lane
-  ([ADR 0104](adr/0104-clankie-works-where-you-launched-him.md)). The
+  ([ADR 0104](adr/0104-clankie-works-where-you-launched-him.md)). Voice join/leave
+  are the same argument-free tools on Discord and the operator console: a
+  Discord turn follows the authenticated speaker, an operator turn follows the
+  configured owner ([ADR 0062](adr/0062-voice-join-by-asking.md)). The
   canonical authored-tool registry is
   [`apps/clankie/src/captain/tools.ts`](../apps/clankie/src/captain/tools.ts),
   connected-service additions live in

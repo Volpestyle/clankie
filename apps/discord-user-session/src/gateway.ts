@@ -130,6 +130,17 @@ export class DiscordUserGateway {
     return this.voiceChannels.get(`${guildId}:${userId}`);
   }
 
+  /** Every guild/channel the actor is currently in. Used when the operator lane has no guild. */
+  public voiceChannelsFor(userId: string): readonly { guildId: string; channelId: string }[] {
+    const suffix = `:${userId}`;
+    const found: { guildId: string; channelId: string }[] = [];
+    for (const [key, channelId] of this.voiceChannels) {
+      if (!key.endsWith(suffix)) continue;
+      found.push({ guildId: key.slice(0, -suffix.length), channelId });
+    }
+    return found;
+  }
+
   public on<E extends keyof DiscordGatewayEvents>(event: E, listener: Listener<E>): void {
     const existing = this.listeners.get(event) ?? new Set();
     existing.add(listener as (...args: never[]) => void);

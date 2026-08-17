@@ -132,11 +132,13 @@ this path, so queued tracks do not advance automatically.
 
 Voice presence is agentic too ([ADR 0062](../../docs/adr/0062-voice-join-by-asking.md)).
 The captain's argument-free `voice_join` / `voice_leave` tools POST to this
-process on `/voice/*`; the gateway supplies the owner's current channel. Only
-`DISCORD_OWNER_USER_ID` may move the lab body, and the recorded guild/channel
-allowlists still bind the result. A new join auto-opts that authenticated owner
-into live speaker-attributed transcription, which the captain discloses in his
-reply.
+process on `/voice/*`. A Discord turn supplies the authenticated owner and
+guild; an operator-console turn supplies neither, and the gateway follows that
+same owner into their current allowlisted channel (`not_in_voice` / `ambiguous`
+when that is not unique). Only `DISCORD_OWNER_USER_ID` may move the lab body,
+and the recorded guild/channel allowlists still bind the result. A new join
+auto-opts that authenticated owner into live speaker-attributed transcription,
+which the captain discloses in his reply.
 
 Reactions and thread actions are grounded in the current ingress message. The
 same captain `discord_watch_start` / `discord_watch_stop` tools map to Go Live
