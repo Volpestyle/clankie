@@ -50,10 +50,17 @@ enable a plane.
 
 ## Editing
 
-Use `/discord`, `/connect`, or `/games` in the Clankie TUI. Tokens and API keys
+Use `/discord`, `/voice`, `/connect`, or `/games` in the Clankie TUI. Tokens and API keys
 go to the credential broker (same destination as `/auth`). Public identifiers —
 Discord ids, an IMAP host and username, MCP server commands and URLs — and
 gameplay enablement write here.
+
+`voice.realtimeProvider` selects `openai` or `xai`. Provider-specific model and
+voice fields are retained when switching, so trying Grok does not erase the
+OpenAI setup. The active values project to `CLANKIE_VOICE_REALTIME_*`; xAI's
+reasoning effort projects separately. xAI streaming STT has no model selector,
+while OpenAI keeps its configurable transcription model. Secrets entered in
+`/voice` go directly to the credential broker and never enter this schema.
 
 `mcp.servers` is the owner's MCP servers ([ADR 0109](../../docs/adr/0109-mcp-is-how-he-reaches-a-service.md)).
 Connectors Clankie ships knowing about — Linear — need no entry; connecting the

@@ -32,7 +32,10 @@ There is no implicit credential fallback between the identities.
 
 The operator UX is the TUI's guided setup (`/auth`, `/provider`, `/model`,
 `/effort`, and `/voice`). Voice configuration uses the same registry and
-credential store.
+credential store. Local endpoints are declared in the same `/provider` modal:
+it writes the `baseURL` provider entry and seeds its models from the
+endpoint's own `GET {baseURL}/models`, since models.dev has no catalog for a
+machine-local runtime.
 
 Session/context management follows the [architecture](../architecture.md): Pi
 owns the captain's language-model runtime, durable conversation history,

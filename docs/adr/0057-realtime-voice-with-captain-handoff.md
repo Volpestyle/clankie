@@ -3,6 +3,8 @@
 Status: accepted (2026-07-25). [ADR 0045](0045-official-bot-dave-group-voice.md)
 owns the media session, consent, and allowlists.
 [ADR 0070](0070-external-voice-via-streaming-tts.md) makes the mouth swappable,
+[ADR 0113](0113-one-voice-port-has-multiple-realtime-providers.md) makes the
+realtime provider swappable,
 and [ADR 0074](0074-the-room-hears-one-voice.md) makes the realtime room session
 the sole author of outbound room speech.
 

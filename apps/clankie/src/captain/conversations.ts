@@ -86,7 +86,7 @@ function workspaceOf(scope: OperatorConversationScope): string | undefined {
 
 /**
  * File-backed conversation registry: `meta.json` + append-only `events.jsonl`
- * per conversation. The wire contract (list/get/create/replay/tail/send with
+ * per conversation. The wire contract (list/get/create/close/replay/tail/send with
  * revision fencing and cursored pages) is the one the TUI and relay speak.
  * Cursors are zero-padded line counts.
  */
@@ -192,6 +192,13 @@ export class ConversationStore {
       }
       case "create":
         return { op: "create", schemaVersion: 1, conversation: this.create(request.scope, request.title) };
+      case "close":
+        return {
+          op: "close",
+          schemaVersion: 1,
+          conversationId: request.conversationId,
+          closed: this.removeConversation(request.conversationId),
+        };
       case "replay":
         return { op: "replay", schemaVersion: 1, result: this.replay(request.replay) };
       case "tail":
@@ -506,6 +513,13 @@ export class ConversationStore {
     this.counts.delete(meta.conversationId);
     this.sequences.delete(meta.conversationId);
     this.onPrune?.(meta.conversationId);
+  }
+
+  private removeConversation(conversationId: string): boolean {
+    const meta = this.metas.get(conversationId);
+    if (meta === undefined || meta.isDefault || meta.sessionState === "active") return false;
+    this.remove(meta);
+    return true;
   }
 
   private retainedBytes(): number {

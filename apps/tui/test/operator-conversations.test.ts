@@ -57,6 +57,7 @@ function client(extra: OperatorConversation[] = []): OperatorConversationClient 
     list: async () => conversations,
     get: async (id) => conversations.find((conversation) => conversation.conversationId === id),
     create: async (input) => ({ ...DEFAULT, ...input, conversationId: "created", isDefault: false }),
+    close: async () => false,
     replay: async (input) => ({
       schemaVersion: 1,
       status: "page",

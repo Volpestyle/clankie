@@ -56,13 +56,16 @@ afterEach(async () => {
 });
 
 describe("authenticated operator conversation relay", () => {
-  it("lists, gets, and creates through the unchanged callable contract", async () => {
+  it("lists, gets, creates, and closes through the callable contract", async () => {
     const seen: OperatorConversationServiceRequest[] = [];
     const relay = await startRelay({
       dispatch: async (request) => {
         seen.push(request);
         if (request.op === "list") return { op: "list", schemaVersion: 1, conversations: [conversation] };
         if (request.op === "get") return { op: "get", schemaVersion: 1, conversation };
+        if (request.op === "close") {
+          return { op: "close", schemaVersion: 1, conversationId: request.conversationId, closed: true };
+        }
         if (request.op === "create") {
           return {
             op: "create",
@@ -78,12 +81,13 @@ describe("authenticated operator conversation relay", () => {
       { op: "list", schemaVersion: 1 },
       { op: "get", schemaVersion: 1, conversationId: "global-default" },
       { op: "create", schemaVersion: 1, scope: { kind: "global" }, title: "Second lead" },
+      { op: "close", schemaVersion: 1, conversationId: "conversation-2" },
     ] as const) {
       const response = await post(relay.url, "/operator/v1/dispatch", request);
       expect(response.status).toBe(200);
       OperatorConversationServiceResultSchema.parse(await response.json());
     }
-    expect(seen.map((request) => request.op)).toEqual(["list", "get", "create"]);
+    expect(seen.map((request) => request.op)).toEqual(["list", "get", "create", "close"]);
   });
 
   it("requires application auth independent of Tailscale and observes immediate revocation", async () => {

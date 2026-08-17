@@ -9,16 +9,15 @@ import {
   createAdvertisedDiscordPresencePort,
   createVoiceBriefingProvider,
   createVoiceLookAtScreenProvider,
+  createVoiceRealtimePorts,
   DiscordBridgeReceiptStore,
   DiscordPresenceSession,
   DiscordTextIngress,
   DiscordVoiceIngress,
   DiscordVoiceSession,
-  openRealtimeConversationSession,
-  openRealtimeTranscriptionSession,
   parseDiscordDmPolicy,
   parseDiscordIdSet,
-  parseVoiceRealtimeBaseEnv,
+  parseVoiceRealtimeEnv,
   selectInboundImageAttachments,
   VoiceIdleAutoLeave,
   VoiceMusicQueue,
@@ -29,7 +28,6 @@ import {
   resolveOwnerFollowTarget,
   tryHandleVoicePresenceControlRequest,
   type DiscordBridgeReceipt,
-  type VoiceRealtimeBaseEnvConfig,
   type VoicePresenceControlAction,
   type VoicePresenceControlInput,
 } from "@clankie/discord-presence-core";
@@ -47,6 +45,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 import {
   applyDiscordSettingsToEnvironment,
+  applyVoiceSettingsToEnvironment,
   characterNames,
   isDiscordBodyActive,
   SettingsStore,
@@ -73,7 +72,10 @@ import { DiscordUserVoiceAdapters } from "./voice-adapter.ts";
 // that file; they still cannot exceed the recorded opt-in. Ahead of the token
 // guards on purpose — see the bot bridge for the reasoning.
 const storedSettings = await new SettingsStore().load();
-const settingsFilledNames = applyDiscordSettingsToEnvironment(storedSettings.discord);
+const settingsFilledNames = [
+  ...applyDiscordSettingsToEnvironment(storedSettings.discord),
+  ...applyVoiceSettingsToEnvironment(storedSettings.voice),
+];
 
 if (process.env.DISCORD_USER_TOKEN) {
   throw new Error(
@@ -94,6 +96,12 @@ const apiUrl = process.env.CLANKIE_API_URL ?? "http://127.0.0.1:4310";
 const characterId = process.env.CLANKIE_CHARACTER_ID ?? "clankie";
 const voiceEnabled = process.env.DISCORD_USER_SESSION_VOICE_ENABLED === "true";
 const ownerUserId = process.env.DISCORD_OWNER_USER_ID?.trim();
+if (voiceEnabled && (process.env.OPENAI_API_KEY || process.env.XAI_API_KEY)) {
+  throw new Error("Voice provider API keys must come from the credential broker, not the environment.");
+}
+if (voiceEnabled && (process.env.ELEVENLABS_API_KEY || process.env.XI_API_KEY)) {
+  throw new Error("ElevenLabs API keys must come from the credential broker, not the environment.");
+}
 
 const bridgeToken = await resolveDiscordUserBridgeCredential({ store: credentialStore });
 if (!bridgeToken) {
@@ -196,15 +204,20 @@ const textIngress = new DiscordTextIngress(
   },
 );
 
-const openAiCredential = voiceEnabled ? await credentialStore.get("openai") : undefined;
-if (voiceEnabled && openAiCredential?.type !== "api") {
+const voiceConfig = voiceEnabled ? parseVoiceRealtimeEnv(process.env) : undefined;
+const realtimeCredential =
+  voiceConfig === undefined ? undefined : await credentialStore.get(voiceConfig.realtimeProvider);
+if (voiceEnabled && realtimeCredential?.type !== "api") {
+  const provider = voiceConfig?.realtimeProvider ?? "openai";
   throw new Error(
-    "User-session voice requires the brokered openai API credential; environment credentials are not accepted.",
+    `User-session voice requires a brokered ${provider} API credential; environment credentials are not accepted.`,
   );
 }
-// The shared base parser keeps both bodies on the same bounded realtime knobs;
-// this user-session composition remains OpenAI-only.
-const voiceConfig = voiceEnabled ? parseUserSessionVoiceRealtimeEnv(process.env) : undefined;
+const elevenLabsCredential =
+  voiceConfig?.ttsProvider === "elevenlabs" ? await credentialStore.get("elevenlabs") : undefined;
+if (voiceConfig?.ttsProvider === "elevenlabs" && elevenLabsCredential?.type !== "api") {
+  throw new Error("User-session ElevenLabs speech requires the brokered elevenlabs API credential.");
+}
 
 const streamWatch = startStreamWatch({
   gateway,
@@ -252,7 +265,7 @@ const music = new VoiceMusicQueue({
 });
 
 const voiceSession =
-  openAiCredential?.type !== "api" || voiceApi === undefined || voiceConfig === undefined
+  realtimeCredential?.type !== "api" || voiceApi === undefined || voiceConfig === undefined
     ? undefined
     : new DiscordVoiceSession({
         ingress: new DiscordVoiceIngress(voiceApi, {
@@ -260,37 +273,11 @@ const voiceSession =
           credentialRef: DISCORD_USER_SESSION_PROVIDER_ID,
           transportKind: "user_session",
         }),
-        realtime: {
-          openTranscription: (handlers) =>
-            openRealtimeTranscriptionSession({
-              apiKey: openAiCredential.key,
-              model: voiceConfig.transcribeModel,
-              ...(voiceConfig.language === undefined ? {} : { language: voiceConfig.language }),
-              ...(voiceConfig.sessionLifetimeMs === undefined
-                ? {}
-                : { maxLifetimeMs: voiceConfig.sessionLifetimeMs }),
-              onTranscript: handlers.onTranscript,
-              onClose: handlers.onClose,
-              onError: handlers.onError,
-            }),
-          openConversation: (open) =>
-            openRealtimeConversationSession({
-              apiKey: openAiCredential.key,
-              model: voiceConfig.realtimeModel,
-              voice: voiceConfig.voice,
-              instructions: open.instructions,
-              truncationRetentionRatio: voiceConfig.truncationRetentionRatio,
-              postInstructionsTokenLimit: voiceConfig.postInstructionsTokenLimit,
-              ...(voiceConfig.sessionLifetimeMs === undefined
-                ? {}
-                : { maxLifetimeMs: voiceConfig.sessionLifetimeMs }),
-              onAudioDelta: open.onAudioDelta,
-              onFunctionCall: open.onFunctionCall,
-              onResponseDone: open.onResponseDone,
-              onClose: open.onClose,
-              onError: open.onError,
-            }),
-        },
+        realtime: createVoiceRealtimePorts({
+          apiKey: realtimeCredential.key,
+          ...(elevenLabsCredential?.type === "api" ? { elevenLabsApiKey: elevenLabsCredential.key } : {}),
+          config: voiceConfig,
+        }),
         briefing: createVoiceBriefingProvider(voiceApi),
         lookAtScreen: createVoiceLookAtScreenProvider(voiceApi),
         music,
@@ -633,20 +620,6 @@ function recordReceipt(
 async function recordVoiceEvidence(evidence: DiscordVoiceEvidence): Promise<void> {
   voiceIdleAutoLeave?.observe(evidence);
   await recordReceipt(voiceEvidenceReceiptType(evidence), voiceEvidenceReceiptData(evidence));
-}
-
-/** Rejects this plane's retired knobs before delegating the shared bounded parser. */
-function parseUserSessionVoiceRealtimeEnv(env: NodeJS.ProcessEnv): VoiceRealtimeBaseEnvConfig {
-  const retired = ["CLANKIE_VOICE_STT_MODEL", "CLANKIE_VOICE_TTS_MODEL", "CLANKIE_VOICE_TTS_VOICE"].filter(
-    (name) => env[name] !== undefined,
-  );
-  if (retired.length > 0) {
-    throw new Error(
-      `${retired.join(", ")} belong to the removed STT→captain→TTS cascade. Use ` +
-        "CLANKIE_VOICE_TRANSCRIBE_MODEL, CLANKIE_VOICE_REALTIME_MODEL, and CLANKIE_VOICE_REALTIME_VOICE.",
-    );
-  }
-  return parseVoiceRealtimeBaseEnv(env);
 }
 
 function reportPhaseFailure(error: unknown): void {

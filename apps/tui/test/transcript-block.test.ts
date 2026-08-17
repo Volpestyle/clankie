@@ -134,3 +134,41 @@ describe("ClankieTranscriptMarkdownBlock", () => {
     expect(subagentFailedBlock.render(48)[0]?.trimEnd()).toBe("◆ Planner subagent failed");
   });
 });
+
+describe("ClankieTranscriptMarkdownBlock render cache", () => {
+  it("reuses the same lines across frames but rebuilds after setMarkdown", () => {
+    const block = new ClankieTranscriptMarkdownBlock("**Clankie**\n\nfirst", theme);
+    const first = block.render(48);
+    expect(block.render(48)).toBe(first);
+
+    block.setMarkdown("**Clankie**\n\nsecond");
+    const second = block.render(48);
+    expect(second).not.toBe(first);
+    expect(second.join("\n")).toContain("second");
+    expect(second.join("\n")).not.toContain("first");
+  });
+
+  it("rebuilds on a width change and after invalidate", () => {
+    const block = new ClankieTranscriptMarkdownBlock("**Clankie**\n\nhello", theme);
+    const narrow = block.render(24);
+    expect(visibleWidth(narrow[0] ?? "")).toBe(24);
+    expect(visibleWidth(block.render(48)[0] ?? "")).toBe(48);
+
+    const cached = block.render(48);
+    block.invalidate();
+    expect(block.render(48)).not.toBe(cached);
+  });
+
+  it("keeps re-rendering an in-flight tool header so its spinner still animates", () => {
+    let frame = 0;
+    const spinning = { ...theme, loadingGlyph: () => ["⠃", "⠉"][frame % 2] ?? "" };
+    const running = new ClankieTranscriptMarkdownBlock("**Tool: bash - running**\n\n$ sleep 1", spinning);
+    expect(running.render(48)[0]?.trimEnd()).toBe("⠃ bash running");
+    frame = 1;
+    expect(running.render(48)[0]?.trimEnd()).toBe("⠉ bash running");
+
+    // A settled tool header has no spinner to advance, so it stays cached.
+    const done = new ClankieTranscriptMarkdownBlock("**Tool: bash - completed**\n\nok", spinning);
+    expect(done.render(48)).toBe(done.render(48));
+  });
+});

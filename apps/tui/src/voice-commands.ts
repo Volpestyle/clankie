@@ -8,23 +8,27 @@ export interface VoiceCommandServices {
   listCredentials: () => Promise<Record<string, RedactedCredential>>;
   removeCredential: (providerId: string) => Promise<unknown>;
   /**
-   * Stores a secret in the credential broker. The ElevenLabs key never
-   * touches settings.json — `/voice` writes to the same broker entry the
-   * featured `elevenlabs` provider in `/auth` manages, so an operator can
-   * finish voice setup without leaving this wizard.
+   * Stores a voice-vendor secret in the credential broker. `/voice` writes to
+   * the same `openai`, `xai`, and `elevenlabs` entries `/auth` manages; keys
+   * never touch settings.json.
    */
   setCredential: (providerId: string, key: string) => Promise<void>;
 }
 
 const ELEVENLABS_PROVIDER_ID = "elevenlabs";
+const OPENAI_PROVIDER_ID = "openai";
+const XAI_PROVIDER_ID = "xai";
+const DEFAULT_OPENAI_REALTIME_MODEL = "gpt-realtime-2.1";
+const DEFAULT_OPENAI_TRANSCRIBE_MODEL = "gpt-realtime-whisper";
+const DEFAULT_XAI_REALTIME_MODEL = "grok-voice-think-fast-2.0";
 const VENDOR_IDENTIFIER = /^[\w-]{1,128}$/u;
+const MODEL_IDENTIFIER = /^[\w.-]{1,128}$/u;
 
 /**
- * `/voice` edits **how Clankie sounds** in a voice channel
- * ([ADR 0070](../../../docs/adr/0070-external-voice-via-streaming-tts.md)):
- * the realtime model's own voice, or an ElevenLabs voice streamed from the
- * model's words. Like `/persona`, this is character, not authority — nothing
- * here widens what voice may do.
+ * `/voice` selects the realtime provider and how Clankie sounds in a voice
+ * channel ([ADR 0113](../../../docs/adr/0113-one-voice-port-has-multiple-realtime-providers.md)).
+ * Like `/persona`, this is character, not authority — nothing here widens what
+ * voice may do.
  */
 export function buildVoiceCommands(services: VoiceCommandServices): FaceShellCommand[] {
   return [
@@ -55,16 +59,36 @@ export function validateVendorIdentifier(value: string): string | undefined {
   return undefined;
 }
 
-export function describeVoice(settings: VoiceSettings, elevenLabsKeyStored: boolean): string[] {
+export function describeVoice(
+  settings: VoiceSettings,
+  realtimeKeyStored: boolean,
+  elevenLabsKeyStored: boolean,
+): string[] {
+  const realtime =
+    settings.realtimeProvider === "xai"
+      ? [
+          `realtime: xAI ${settings.xAiRealtimeModel ?? DEFAULT_XAI_REALTIME_MODEL}`,
+          `  voice: ${settings.xAiVoice ?? "eve"}`,
+          `  reasoning: ${settings.xAiReasoningEffort}`,
+        ]
+      : [
+          `realtime: OpenAI ${settings.openAiRealtimeModel ?? DEFAULT_OPENAI_REALTIME_MODEL}`,
+          `  transcriber: ${settings.openAiTranscribeModel ?? DEFAULT_OPENAI_TRANSCRIBE_MODEL}`,
+          `  voice: ${settings.openAiVoice ?? "marin"}`,
+        ];
+  realtime.push(
+    `  API key: ${realtimeKeyStored ? "stored in the credential broker (redacted)" : `MISSING — store it under provider ${settings.realtimeProvider}`}`,
+  );
   if (settings.ttsProvider === "elevenlabs") {
     return [
-      "voice: ElevenLabs (model text streamed through ElevenLabs TTS)",
+      ...realtime,
+      "spoken replies: ElevenLabs (model text streamed through ElevenLabs TTS)",
       `  voice id: ${settings.elevenLabsVoiceId ?? "— (required)"}`,
       `  model: ${settings.elevenLabsModelId ?? "eleven_flash_v2_5 (runtime default)"}`,
       `  API key: ${elevenLabsKeyStored ? "stored in the credential broker (redacted)" : "MISSING — store it under provider elevenlabs"}`,
     ];
   }
-  return [`voice: OpenAI realtime "${settings.openAiVoice ?? "marin"}" (the model speaks natively)`];
+  return [...realtime, "spoken replies: the realtime model speaks natively"];
 }
 
 async function showVoiceStatus(shell: ClankieFaceShell, services: VoiceCommandServices): Promise<void> {
@@ -74,7 +98,12 @@ async function showVoiceStatus(shell: ClankieFaceShell, services: VoiceCommandSe
   const lines = [
     `settings file: ${services.settings.path}`,
     "",
-    ...describeVoice(resolved.settings, ELEVENLABS_PROVIDER_ID in credentials),
+    ...describeVoice(
+      resolved.settings,
+      resolved.settings.realtimeProvider in credentials &&
+        credentials[resolved.settings.realtimeProvider]?.type === "api",
+      ELEVENLABS_PROVIDER_ID in credentials,
+    ),
   ];
   if (resolved.overriddenByEnvironment.length > 0) {
     lines.push("", `overridden by environment: ${resolved.overriddenByEnvironment.join(", ")}`);
@@ -93,9 +122,15 @@ async function runVoiceWizard(shell: ClankieFaceShell, services: VoiceCommandSer
         options: [
           {
             value: "provider",
-            label: "How he sounds",
-            hint: "OpenAI realtime or ElevenLabs",
-            description: "The realtime model's own voice, or an ElevenLabs voice speaking his words.",
+            label: "Voice stack",
+            hint: "OpenAI, Grok, or ElevenLabs",
+            description: "Choose the realtime agent, model, voice, and optional external speech output.",
+          },
+          {
+            value: "realtime-credential",
+            label: "Realtime API key",
+            hint: "broker-owned",
+            description: "Store the selected OpenAI or xAI API key without leaving this wizard.",
           },
           {
             value: "credential",
@@ -115,6 +150,7 @@ async function runVoiceWizard(shell: ClankieFaceShell, services: VoiceCommandSer
         continue;
       }
       if (choice === "provider") await editProvider(shell, services);
+      else if (choice === "realtime-credential") await editRealtimeCredential(shell, services);
       else if (choice === "credential") await editElevenLabsCredential(shell, services);
     }
   } finally {
@@ -132,26 +168,48 @@ async function apply(
   }));
 }
 
+function readModel(
+  flow: ClankieFaceShell["setupFlow"],
+  message: string,
+  placeholder: string,
+): Promise<string | undefined> {
+  return flow.readText({
+    message,
+    placeholder,
+    validate: (value: string) => {
+      const trimmed = value.trim();
+      if (trimmed.length === 0 || MODEL_IDENTIFIER.test(trimmed)) return undefined;
+      return "Use at most 128 letters, digits, dots, underscores, or hyphens.";
+    },
+  });
+}
+
 async function editProvider(shell: ClankieFaceShell, services: VoiceCommandServices): Promise<void> {
   const flow = shell.setupFlow;
   const current = (await services.settings.load()).voice;
 
   const provider = await flow.readSelect({
     kind: "single",
-    message: "Who synthesizes his speech?",
+    message: "Which voice stack should Clankie use?",
     options: [
       {
         value: "openai",
-        label: "OpenAI realtime voice",
+        label: "OpenAI realtime",
         hint: "default",
-        description: "The realtime model speaks natively — lowest latency, fixed voice list.",
+        description: "OpenAI transcribes, reasons, and speaks with its native realtime voice.",
+      },
+      {
+        value: "xai",
+        label: "Grok Voice",
+        hint: "xAI native",
+        description: "xAI streaming STT wakes a Grok Voice agent that speaks with an xAI voice.",
       },
       {
         value: "elevenlabs",
         label: "ElevenLabs voice",
         hint: "custom voice",
         description:
-          "The model writes text and ElevenLabs speaks it. Only his own words go to ElevenLabs — never room audio.",
+          "OpenAI realtime writes text and ElevenLabs speaks it; room audio never reaches ElevenLabs.",
       },
     ],
     required: true,
@@ -160,6 +218,18 @@ async function editProvider(shell: ClankieFaceShell, services: VoiceCommandServi
   if (providerChoice === undefined) return;
 
   if (providerChoice === "openai") {
+    const model = await readModel(
+      flow,
+      "OpenAI realtime model (blank keeps the current/default)",
+      current.openAiRealtimeModel ?? DEFAULT_OPENAI_REALTIME_MODEL,
+    );
+    if (model === undefined) return;
+    const transcriber = await readModel(
+      flow,
+      "OpenAI transcription model (blank keeps the current/default)",
+      current.openAiTranscribeModel ?? DEFAULT_OPENAI_TRANSCRIBE_MODEL,
+    );
+    if (transcriber === undefined) return;
     const voice = await flow.readText({
       message: "OpenAI realtime voice name (blank keeps the current one)",
       placeholder: current.openAiVoice ?? "marin",
@@ -168,10 +238,51 @@ async function editProvider(shell: ClankieFaceShell, services: VoiceCommandServi
     if (voice === undefined) return;
     await apply(services, (settings) => ({
       ...settings,
+      realtimeProvider: "openai",
       ttsProvider: "openai",
+      ...(model.trim().length > 0 ? { openAiRealtimeModel: model.trim() } : {}),
+      ...(transcriber.trim().length > 0 ? { openAiTranscribeModel: transcriber.trim() } : {}),
       ...(voice.trim().length > 0 ? { openAiVoice: voice.trim() } : {}),
     }));
     flow.renderLine("Saved. Restart the bridge to apply.", "success");
+    await offerMissingRealtimeCredential(shell, services, OPENAI_PROVIDER_ID);
+    return;
+  }
+
+  if (providerChoice === "xai") {
+    const model = await readModel(
+      flow,
+      "Grok Voice model (blank keeps the current/default)",
+      current.xAiRealtimeModel ?? DEFAULT_XAI_REALTIME_MODEL,
+    );
+    if (model === undefined) return;
+    const voice = await flow.readText({
+      message: "xAI voice id (blank keeps the current/default)",
+      placeholder: current.xAiVoice ?? "eve",
+      validate: (value: string) => (value.trim().length === 0 ? undefined : validateVendorIdentifier(value)),
+    });
+    if (voice === undefined) return;
+    const reasoning = await flow.readSelect({
+      kind: "single",
+      message: "Grok Voice reasoning",
+      options: [
+        { value: "high", label: "High", hint: "default" },
+        { value: "none", label: "None", hint: "lowest latency" },
+      ],
+      required: true,
+    });
+    const reasoningChoice = reasoning?.[0];
+    if (reasoningChoice !== "high" && reasoningChoice !== "none") return;
+    await apply(services, (settings) => ({
+      ...settings,
+      realtimeProvider: "xai",
+      ttsProvider: "openai",
+      xAiReasoningEffort: reasoningChoice,
+      ...(model.trim().length > 0 ? { xAiRealtimeModel: model.trim() } : {}),
+      ...(voice.trim().length > 0 ? { xAiVoice: voice.trim() } : {}),
+    }));
+    flow.renderLine("Saved. Restart the active Discord body to apply.", "success");
+    await offerMissingRealtimeCredential(shell, services, XAI_PROVIDER_ID);
     return;
   }
 
@@ -199,11 +310,13 @@ async function editProvider(shell: ClankieFaceShell, services: VoiceCommandServi
 
   await apply(services, (settings) => ({
     ...settings,
+    realtimeProvider: "openai",
     ttsProvider: "elevenlabs",
     elevenLabsVoiceId: resolvedVoiceId,
     ...(modelId.trim().length > 0 ? { elevenLabsModelId: modelId.trim() } : {}),
   }));
   flow.renderLine("Saved. Restart the bridge to apply.", "success");
+  await offerMissingRealtimeCredential(shell, services, OPENAI_PROVIDER_ID);
 
   // The provider is settings; the key is broker. Finish the thought here so
   // an operator is never left with a configured voice that cannot speak.
@@ -221,14 +334,45 @@ async function editElevenLabsCredential(
   shell: ClankieFaceShell,
   services: VoiceCommandServices,
 ): Promise<void> {
+  await editApiCredential(shell, services, ELEVENLABS_PROVIDER_ID, "ElevenLabs");
+}
+
+async function editRealtimeCredential(
+  shell: ClankieFaceShell,
+  services: VoiceCommandServices,
+): Promise<void> {
+  const provider = (await services.settings.load()).voice.realtimeProvider;
+  await editApiCredential(shell, services, provider, provider === "xai" ? "xAI" : "OpenAI");
+}
+
+async function offerMissingRealtimeCredential(
+  shell: ClankieFaceShell,
+  services: VoiceCommandServices,
+  providerId: "openai" | "xai",
+): Promise<void> {
+  const credential = (await services.listCredentials())[providerId];
+  if (credential?.type === "api") return;
+  shell.setupFlow.renderLine(
+    `No ${providerId} API key is stored yet — voice cannot start without one.`,
+    "warning",
+  );
+  await editApiCredential(shell, services, providerId, providerId === "xai" ? "xAI" : "OpenAI");
+}
+
+async function editApiCredential(
+  shell: ClankieFaceShell,
+  services: VoiceCommandServices,
+  providerId: string,
+  label: string,
+): Promise<void> {
   const flow = shell.setupFlow;
   const stored = await services.listCredentials();
 
-  const existing = stored[ELEVENLABS_PROVIDER_ID];
+  const existing = stored[providerId];
   if (existing !== undefined) {
     const decision = await flow.readSelect({
       kind: "single",
-      message: `elevenlabs is already stored — ${existing.type} credential (redacted)`,
+      message: `${providerId} is already stored — ${existing.type} credential (redacted)`,
       options: [
         { value: "keep", label: "Keep it", hint: "no change" },
         { value: "replace", label: "Replace it", hint: "enter a new key" },
@@ -240,8 +384,8 @@ async function editElevenLabsCredential(
     const choice = decision?.[0];
     if (choice === undefined || choice === "keep") return;
     if (choice === "remove") {
-      await services.removeCredential(ELEVENLABS_PROVIDER_ID);
-      flow.renderLine("Removed elevenlabs from the credential broker.", "success");
+      await services.removeCredential(providerId);
+      flow.renderLine(`Removed ${providerId} from the credential broker.`, "success");
       return;
     }
   }
@@ -249,7 +393,7 @@ async function editElevenLabsCredential(
   // readSecret keeps the value off the rendered transcript; the broker
   // redacts it thereafter. It is never written to settings.json.
   const key = await flow.readSecret({
-    message: "ElevenLabs API key",
+    message: `${label} API key`,
     validate: (value: string) => {
       const trimmed = value.trim();
       if (trimmed.length === 0) return "Required.";
@@ -259,6 +403,6 @@ async function editElevenLabsCredential(
   });
   if (key === undefined) return;
 
-  await services.setCredential(ELEVENLABS_PROVIDER_ID, key.trim());
-  flow.renderLine("Stored elevenlabs in the credential broker (redacted).", "success");
+  await services.setCredential(providerId, key.trim());
+  flow.renderLine(`Stored ${providerId} in the credential broker (redacted).`, "success");
 }

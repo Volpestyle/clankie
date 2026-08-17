@@ -58,6 +58,7 @@ export type SetupFlow = {
     readonly currentValue?: string;
     readonly required?: boolean;
     readonly allowBack?: boolean;
+    readonly onClose?: (value: string) => void;
   }): Promise<string[] | undefined>;
   waitForInterrupt(): {
     readonly promise: Promise<void>;
@@ -204,6 +205,14 @@ export function createSetupFlow(context: SetupFlowContext): SetupFlowController 
         kind: options.kind,
         message: options.message,
         onCancel: cancel,
+        ...(options.onClose === undefined
+          ? {}
+          : {
+              onClose: (value: string) => {
+                options.onClose?.(value);
+                finish(undefined);
+              },
+            }),
         onRender: () => context.tui.requestRender(),
         onSubmit: (values) => finish(values),
         options: options.options.map(toInteractivePromptOption),

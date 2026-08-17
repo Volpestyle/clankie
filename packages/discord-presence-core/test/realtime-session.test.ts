@@ -7,6 +7,7 @@ import {
   MAX_REALTIME_TEXT_ITEM_CHARACTERS,
   openRealtimeConversationSession,
   openRealtimeTranscriptionSession,
+  openXaiStreamingTranscriptionSession,
   type RealtimeConversationSession,
   type RealtimeConversationSessionOptions,
   type RealtimeFunctionCall,
@@ -21,13 +22,15 @@ import {
 
 class FakeRealtimeSocket implements RealtimeSocket {
   public readonly sentRaw: string[] = [];
+  public readonly sentBinary: Buffer[] = [];
   public closed = false;
   private readonly messageHandlers: ((data: string) => void)[] = [];
   private readonly closeHandlers: (() => void)[] = [];
   private readonly errorHandlers: ((error: unknown) => void)[] = [];
 
-  public send(data: string): void {
-    this.sentRaw.push(data);
+  public send(data: string | Uint8Array): void {
+    if (typeof data === "string") this.sentRaw.push(data);
+    else this.sentBinary.push(Buffer.from(data));
   }
 
   public close(): void {
@@ -618,5 +621,74 @@ describe("realtime transcription session", () => {
     second.socket.close();
     expect(second.closes).toEqual(["socket"]);
     expect(second.session.isOpen).toBe(false);
+  });
+});
+
+describe("xAI voice sessions", () => {
+  it("buffers then streams raw PCM after STT readiness and emits utterance-final transcripts", async () => {
+    const socket = new FakeRealtimeSocket();
+    const transcripts: RealtimeTranscriptEvent[] = [];
+    const calls: { url: string; headers: Readonly<Record<string, string>> }[] = [];
+    const session = await openXaiStreamingTranscriptionSession({
+      apiKey: "xai-secret",
+      socketFactory: (url, headers) => {
+        calls.push({ url, headers });
+        return Promise.resolve(socket);
+      },
+      timers: new FakeTimers(),
+      onTranscript: (event) => transcripts.push(event),
+    });
+    const pcm = Buffer.from([1, 0, 2, 0]);
+    session.appendAudio(pcm);
+    expect(pcm.equals(Buffer.alloc(4))).toBe(true);
+    expect(socket.sentBinary).toHaveLength(0);
+    expect(calls[0]?.url).toContain("wss://api.x.ai/v1/stt");
+    expect(calls[0]?.url).toContain("sample_rate=24000");
+    expect(calls[0]?.headers).toEqual({ authorization: "Bearer xai-secret" });
+
+    socket.emit({ type: "transcript.created" });
+    expect(socket.sentBinary[0]).toEqual(Buffer.from([1, 0, 2, 0]));
+    socket.emit({
+      type: "transcript.partial",
+      text: "hey clankie",
+      is_final: true,
+      speech_final: true,
+    });
+    expect(transcripts).toEqual([{ itemId: "xai-stt-1", text: "hey clankie", final: true }]);
+  });
+
+  it("configures Grok for explicit text turns and handles xAI function-call events", async () => {
+    const calls: RealtimeFunctionCall[] = [];
+    const { socket, factory } = await openConversation({
+      provider: "xai",
+      baseUrl: "wss://api.x.ai/v1/realtime",
+      model: "grok-voice-think-fast-2.0",
+      voice: "eve",
+      reasoningEffort: "none",
+      onFunctionCall: (call) => calls.push(call),
+    });
+    expect(factory[0]?.url).toContain("model=grok-voice-think-fast-2.0");
+    expect(frames(socket)[0]).toMatchObject({
+      type: "session.update",
+      session: {
+        voice: "eve",
+        reasoning: { effort: "none" },
+        turn_detection: null,
+        audio: { output: { format: { type: "audio/pcm", rate: 24_000 } } },
+      },
+    });
+    socket.emit({
+      type: "response.function_call_arguments.done",
+      call_id: "call_xai",
+      name: "ask_clankie",
+      arguments: '{"request":"what are you doing?"}',
+    });
+    expect(calls).toEqual([
+      {
+        callId: "call_xai",
+        name: "ask_clankie",
+        argumentsJson: '{"request":"what are you doing?"}',
+      },
+    ]);
   });
 });

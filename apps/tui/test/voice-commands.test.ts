@@ -109,33 +109,62 @@ describe("/voice", () => {
       // wizard: provider step → done; the missing-key follow-up asks nothing
       // (readSecret consumes from `secrets`).
       [["provider"], ["elevenlabs"], ["done"]],
-      ["xi-secret-key"],
+      ["sk-openai", "xi-secret-key"],
       ["voice_abc123", "eleven_flash_v2_5"],
     );
     await voice.run("", view.shell);
 
     const stored = await settings.load();
-    expect(stored.voice).toEqual({
+    expect(stored.voice).toMatchObject({
+      realtimeProvider: "openai",
       ttsProvider: "elevenlabs",
       elevenLabsVoiceId: "voice_abc123",
       elevenLabsModelId: "eleven_flash_v2_5",
     });
     // The key went to the broker, never to settings.json.
     expect(credentials.get("elevenlabs")).toEqual({ type: "api", key: "xi-secret-key" });
+    expect(credentials.get("openai")).toEqual({ type: "api", key: "sk-openai" });
     expect(JSON.stringify(stored)).not.toContain("xi-secret-key");
     expect(view.lines.join("\n")).toContain("Restart the bridge to apply");
   });
 
-  it("selects the OpenAI voice and leaves the broker untouched", async () => {
+  it("configures OpenAI models, voice, and broker-owned key", async () => {
     const { credentials, services, settings } = await testServices();
     const voice = command(buildVoiceCommands(services), "voice");
-    const view = testShell([["provider"], ["openai"], ["done"]], [], ["cedar"]);
+    const view = testShell(
+      [["provider"], ["openai"], ["done"]],
+      ["sk-openai"],
+      ["gpt-realtime-2.1", "gpt-realtime-whisper", "cedar"],
+    );
     await voice.run("", view.shell);
 
     const stored = await settings.load();
     expect(stored.voice.ttsProvider).toBe("openai");
+    expect(stored.voice.realtimeProvider).toBe("openai");
+    expect(stored.voice.openAiRealtimeModel).toBe("gpt-realtime-2.1");
+    expect(stored.voice.openAiTranscribeModel).toBe("gpt-realtime-whisper");
     expect(stored.voice.openAiVoice).toBe("cedar");
-    expect(credentials.size).toBe(0);
+    expect(credentials.get("openai")).toEqual({ type: "api", key: "sk-openai" });
+  });
+
+  it("configures Grok Voice end to end", async () => {
+    const { credentials, services, settings } = await testServices();
+    const voice = command(buildVoiceCommands(services), "voice");
+    const view = testShell(
+      [["provider"], ["xai"], ["none"], ["done"]],
+      ["xai-secret"],
+      ["grok-voice-think-fast-2.0", "eve"],
+    );
+    await voice.run("", view.shell);
+
+    expect((await settings.load()).voice).toMatchObject({
+      realtimeProvider: "xai",
+      ttsProvider: "openai",
+      xAiRealtimeModel: "grok-voice-think-fast-2.0",
+      xAiVoice: "eve",
+      xAiReasoningEffort: "none",
+    });
+    expect(credentials.get("xai")).toEqual({ type: "api", key: "xai-secret" });
   });
 
   it("writes nothing when the wizard is cancelled mid-step", async () => {
@@ -151,7 +180,12 @@ describe("/voice", () => {
     const { services, settings } = await testServices();
     await settings.update((current) => ({
       ...current,
-      voice: { ttsProvider: "elevenlabs", elevenLabsVoiceId: "voice_abc123" },
+      voice: {
+        realtimeProvider: "openai",
+        ttsProvider: "elevenlabs",
+        xAiReasoningEffort: "high",
+        elevenLabsVoiceId: "voice_abc123",
+      },
     }));
     const voice = command(buildVoiceCommands(services), "voice");
     const view = testShell([]);
@@ -172,11 +206,26 @@ describe("voice command helpers", () => {
   });
 
   it("describes both providers without leaking anything secret-shaped", () => {
-    expect(describeVoice({ ttsProvider: "openai", openAiVoice: "marin" }, false).join("\n")).toContain(
-      'OpenAI realtime "marin"',
-    );
+    expect(
+      describeVoice(
+        {
+          realtimeProvider: "openai",
+          ttsProvider: "openai",
+          xAiReasoningEffort: "high",
+          openAiVoice: "marin",
+        },
+        false,
+        false,
+      ).join("\n"),
+    ).toContain("realtime: OpenAI");
     const elevenLabs = describeVoice(
-      { ttsProvider: "elevenlabs", elevenLabsVoiceId: "voice_abc123" },
+      {
+        realtimeProvider: "openai",
+        ttsProvider: "elevenlabs",
+        xAiReasoningEffort: "high",
+        elevenLabsVoiceId: "voice_abc123",
+      },
+      true,
       true,
     ).join("\n");
     expect(elevenLabs).toContain("voice_abc123");

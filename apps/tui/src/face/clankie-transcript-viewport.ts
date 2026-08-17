@@ -56,6 +56,23 @@ type TranscriptBlock = {
   readonly id: string;
   collapsed: boolean;
   collapsible: boolean;
+  cache?: BlockLineCache;
+};
+
+// Laying out a frame walks every block, so the decoration wrapped around each
+// block's own lines (collapse preview, selection marker, per-line truncation)
+// would otherwise be recomputed for the whole scrollback on every keystroke.
+// Components return a stable array while their content is unchanged, so an
+// identity check on that array is enough to know the decoration still holds.
+type BlockLineCache = {
+  readonly rawLines: readonly string[];
+  readonly childWidth: number;
+  readonly contentWidth: number;
+  readonly collapsed: boolean;
+  readonly focused: boolean;
+  readonly selected: boolean;
+  readonly first: boolean;
+  readonly lines: string[];
 };
 
 type RenderedBlock = {
@@ -521,17 +538,43 @@ export class ClankieTranscriptViewport implements Component, Focusable {
     let cursor = 0;
     return this.blocks.map((block, index) => {
       const selected = index === this.selectedIndex;
+      const first = index === 0;
       const rawLines = block.component.render(childWidth);
-      const blockLines = block.collapsed ? collapsedLines(rawLines, childWidth, this.theme) : rawLines;
-      const bodyLines = blockLines.map((line, lineIndex) => {
-        if (!this.focused) return truncateToWidth(line, contentWidth, "", true);
-        const marker = selected && lineIndex === 0 ? ">" : " ";
-        const cursorMarker = selected && this.focused && lineIndex === 0 ? CURSOR_MARKER : "";
-        const prefix = selected ? this.theme.selected(`${marker} `) : `${marker} `;
-        return `${prefix}${cursorMarker}${truncateToWidth(line, childWidth, "", true)}`;
-      });
-      const spacer = index === 0 ? [] : Array.from({ length: this.blockSpacing }, () => "");
-      const lines = [...spacer, ...bodyLines];
+      const cached = block.cache;
+      let lines: string[];
+      if (
+        cached !== undefined &&
+        cached.rawLines === rawLines &&
+        cached.childWidth === childWidth &&
+        cached.contentWidth === contentWidth &&
+        cached.collapsed === block.collapsed &&
+        cached.focused === this.focused &&
+        cached.selected === selected &&
+        cached.first === first
+      ) {
+        lines = cached.lines;
+      } else {
+        const blockLines = block.collapsed ? collapsedLines(rawLines, childWidth, this.theme) : rawLines;
+        const bodyLines = blockLines.map((line, lineIndex) => {
+          if (!this.focused) return truncateToWidth(line, contentWidth, "", true);
+          const marker = selected && lineIndex === 0 ? ">" : " ";
+          const cursorMarker = selected && this.focused && lineIndex === 0 ? CURSOR_MARKER : "";
+          const prefix = selected ? this.theme.selected(`${marker} `) : `${marker} `;
+          return `${prefix}${cursorMarker}${truncateToWidth(line, childWidth, "", true)}`;
+        });
+        const spacer = first ? [] : Array.from({ length: this.blockSpacing }, () => "");
+        lines = [...spacer, ...bodyLines];
+        block.cache = {
+          childWidth,
+          collapsed: block.collapsed,
+          contentWidth,
+          first,
+          focused: this.focused,
+          lines,
+          rawLines,
+          selected,
+        };
+      }
       const rendered = { block, end: cursor + lines.length, lines, start: cursor };
       cursor = rendered.end;
       return rendered;

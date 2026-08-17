@@ -311,7 +311,7 @@ paths:
       operationId: postOperatorDispatch
       summary: Operator conversation contract
       description: |
-        One route, discriminated `op`: `list`, `get`, `create`, `send`,
+        One route, discriminated `op`: `list`, `get`, `create`, `close`, `send`,
         `replay`, `tail`. The TUI and relay both speak this.
       security: [{ captainBearer: [] }]
       requestBody:
@@ -333,6 +333,12 @@ paths:
                 summary: Get one conversation
                 value:
                   op: get
+                  schemaVersion: 1
+                  conversationId: replace-me
+              close:
+                summary: Close an inactive, non-default conversation
+                value:
+                  op: close
                   schemaVersion: 1
                   conversationId: replace-me
               send:

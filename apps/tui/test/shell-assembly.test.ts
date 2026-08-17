@@ -29,9 +29,10 @@ describe("shell assembly", () => {
     }
   });
 
-  it("shows readable conversations without internal ids or revisions", async () => {
+  it("opens a readable conversation picker", async () => {
     const results: Array<{ invocation: string; text: string }> = [];
     const selected: string[] = [];
+    let menu: Parameters<ClankieFaceShell["setupFlow"]["readSelect"]>[0] | undefined;
     const command = buildConsoleCommands({
       conversations: {
         conversationId: "conv-dev",
@@ -42,6 +43,7 @@ describe("shell assembly", () => {
             title: "dev",
             isDefault: false,
             revision: 3,
+            sessionState: "waiting",
             scope: { kind: "workspace", workspaceId: "/Users/james/dev" },
           },
           {
@@ -49,17 +51,26 @@ describe("shell assembly", () => {
             title: "Clankie",
             isDefault: true,
             revision: 30,
+            sessionState: "waiting",
             scope: { kind: "global" },
           },
         ],
         select: async (conversationId) => {
           selected.push(conversationId);
-          return { conversationId, title: "dev" };
+          return { conversationId, title: conversationId === "global-default" ? "Clankie" : "dev" };
         },
       },
     }).find((candidate) => candidate.name === "conversation");
     if (command === undefined) throw new Error("conversation command not found");
     const shell = {
+      setupFlow: {
+        begin() {},
+        end() {},
+        readSelect(options: NonNullable<typeof menu>) {
+          menu = options;
+          return Promise.resolve(["global-default"]);
+        },
+      },
       insertCommandResult(invocation: string, text: string) {
         results.push({ invocation, text });
       },
@@ -68,20 +79,83 @@ describe("shell assembly", () => {
     await command.run("", shell);
     await command.run("dev", shell);
 
-    expect(results[0]).toEqual({
-      invocation: "/conversation",
-      text: [
-        "● dev · current",
-        "  Workspace · /Users/james/dev",
-        "○ Clankie",
-        "  Global · default",
-        "",
-        "Switch with /conversation <name> or /cd <path>.",
-      ].join("\n"),
+    expect(menu).toMatchObject({
+      currentValue: "conv-dev",
+      initialValue: "conv-dev",
+      options: [
+        { label: "dev", hint: "workspace", description: "/Users/james/dev" },
+        { label: "Clankie", hint: "global · default" },
+      ],
     });
-    expect(results[0]?.text).not.toMatch(/conv-dev|global-default|revision/u);
-    expect(selected).toEqual(["conv-dev"]);
-    expect(results[1]).toEqual({ invocation: "/conversation dev", text: "Switched to dev." });
+    expect(selected).toEqual(["global-default", "conv-dev"]);
+    expect(results).toEqual([
+      { invocation: "/conversation", text: "Switched to Clankie." },
+      { invocation: "/conversation dev", text: "Switched to dev." },
+    ]);
+  });
+
+  it("closes the hovered conversation and selects a fallback when it was current", async () => {
+    let currentConversationId = "conv-dev";
+    let rows = [
+      {
+        conversationId: "conv-dev",
+        title: "dev",
+        isDefault: false,
+        revision: 3,
+        sessionState: "waiting" as const,
+        scope: { kind: "workspace" as const, workspaceId: "/Users/james/dev" },
+      },
+      {
+        conversationId: "global-default",
+        title: "Clankie",
+        isDefault: true,
+        revision: 30,
+        sessionState: "waiting" as const,
+        scope: { kind: "global" as const },
+      },
+    ];
+    const closed: string[] = [];
+    const selected: string[] = [];
+    const command = buildConsoleCommands({
+      conversations: {
+        get conversationId() {
+          return currentConversationId;
+        },
+        conversations: async () => rows,
+        close: async (conversationId) => {
+          closed.push(conversationId);
+          rows = rows.filter((item) => item.conversationId !== conversationId);
+          return true;
+        },
+        select: async (conversationId) => {
+          currentConversationId = conversationId;
+          selected.push(conversationId);
+          return { conversationId, title: "Clankie" };
+        },
+      },
+    }).find((candidate) => candidate.name === "conversation");
+    if (command === undefined) throw new Error("conversation command not found");
+    let reads = 0;
+    const statuses: string[] = [];
+    const shell = {
+      setupFlow: {
+        begin() {},
+        end() {},
+        renderLine(text: string) {
+          statuses.push(text);
+        },
+        readSelect(options: Parameters<ClankieFaceShell["setupFlow"]["readSelect"]>[0]) {
+          if (reads++ === 0) options.onClose?.("conv-dev");
+          return Promise.resolve(undefined);
+        },
+      },
+    } as unknown as ClankieFaceShell;
+
+    await command.run("", shell);
+
+    expect(closed).toEqual(["conv-dev"]);
+    expect(selected).toEqual(["global-default"]);
+    expect(statuses).toEqual(["Closed dev."]);
   });
 
   it("starts a fresh conversation in the current scope", async () => {

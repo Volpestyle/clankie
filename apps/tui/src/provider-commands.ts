@@ -51,11 +51,15 @@ export interface ProviderServices {
   readonly registry: ReturnType<typeof createModelRegistry>;
   readonly env: NodeJS.ProcessEnv;
   readonly cwd: string;
+  /** Injected fetch for local-endpoint probing; defaults to the global fetch. */
+  readonly fetchImpl?: typeof fetch;
   readonly captainModels?: {
     providers(): Promise<readonly { id: string; name: string }[]>;
     models(providerId: string): Promise<readonly ModelEntry[]>;
     thinkingLevels(providerId: string, modelId: string): Promise<readonly string[]>;
     refresh(): Promise<void>;
+    /** Re-projects config-declared providers so a just-added endpoint is pickable now. */
+    register(config: ClankieConfig): Promise<void>;
   };
   readonly oauth: {
     readonly anthropicBrowser: typeof runAnthropicBrowserLogin;
@@ -101,6 +105,9 @@ export function createProviderServices(options: {
       },
       async refresh() {
         await (await runtime()).refresh({ allowNetwork: true, force: true });
+      },
+      async register(config) {
+        registerConfiguredPiProviders(await runtime(), config, await registry.catalog());
       },
     },
     oauth: {
@@ -945,6 +952,7 @@ async function runProviderWizard(
                 ? "refresh Pi model catalog"
                 : "refresh registry (models.dev)",
           },
+          { value: "__local__", label: "add a local endpoint…", hint: "Ollama, LM Studio, vLLM" },
         ],
         ...(currentProvider === undefined ? {} : { currentValue: currentProvider }),
         required: true,
@@ -955,6 +963,11 @@ async function runProviderWizard(
         flow.end();
         shell.insertCommandResult("/provider", "Provider selection cancelled.", "error");
         return;
+      }
+      if (providerId === "__local__") {
+        const added = await addLocalProviderFlow(shell, services);
+        if (added !== undefined) selectedProviders.set(role, added);
+        continue;
       }
       if (providerId === "__refresh__") {
         flow.setStatus("refreshing registry…");
@@ -987,6 +1000,167 @@ async function runProviderWizard(
     flow.end();
     throw error;
   }
+}
+
+// --- /provider → add a local endpoint ---
+
+const LOCAL_PROVIDER_ID = "ollama";
+const LOCAL_BASE_URL = "http://localhost:11434/v1";
+const LOCAL_CONTEXT_FALLBACK = 32_768;
+
+export interface ProbedLocalModel {
+  readonly id: string;
+  readonly context?: number;
+}
+
+/**
+ * Lists an OpenAI-compatible endpoint's models (`GET {baseURL}/models`). Local
+ * runtimes are unknown to models.dev, so the endpoint itself is the catalog.
+ */
+export async function probeLocalEndpoint(
+  baseURL: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<readonly ProbedLocalModel[]> {
+  const response = await fetchImpl(`${baseURL.replace(/\/+$/u, "")}/models`, {
+    signal: AbortSignal.timeout(3_000),
+  });
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  const body = (await response.json()) as { data?: unknown };
+  const entries = Array.isArray(body.data) ? body.data : [];
+  return entries.flatMap((entry: unknown) => {
+    if (typeof entry !== "object" || entry === null) return [];
+    const record = entry as Record<string, unknown>;
+    if (typeof record.id !== "string" || record.id.length === 0) return [];
+    // LM Studio reports a context length per model here; Ollama does not.
+    const context = record.max_context_length ?? record.context_length;
+    return [{ id: record.id, ...(typeof context === "number" && context > 0 ? { context } : {}) }];
+  });
+}
+
+function localModelEntry(context: number): Record<string, unknown> {
+  return { tool_call: true, limit: { context, output: Math.min(8_192, Math.floor(context / 4)) } };
+}
+
+function validateBaseUrl(value: string): string | undefined {
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    return "Enter a full URL, e.g. http://localhost:11434/v1";
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:")
+    return "Only http:// and https:// endpoints work.";
+  return undefined;
+}
+
+function validateContextWindow(value: string): string | undefined {
+  const parsed = Number(value.trim());
+  return Number.isInteger(parsed) && parsed > 0 ? undefined : "Enter a positive whole number of tokens.";
+}
+
+/**
+ * Declares a local OpenAI-compatible endpoint in clankie.json (ADR 0012): a
+ * `baseURL` is what routes a provider through the openai-compatible adapter,
+ * and the endpoint's own model list stands in for the models.dev catalog.
+ * Returns the provider id so the caller can preselect it.
+ */
+async function addLocalProviderFlow(
+  shell: ClankieFaceShell,
+  services: ProviderServices,
+): Promise<string | undefined> {
+  const flow = shell.setupFlow;
+  const typedId = await flow.readText({
+    message: "Provider id (becomes the providerId/modelId prefix)",
+    defaultValue: LOCAL_PROVIDER_ID,
+    validate: (value) =>
+      /^[a-z0-9][a-z0-9._-]*$/u.test(value.trim().toLowerCase())
+        ? undefined
+        : "Use letters, digits, dot, dash, or underscore — no slashes.",
+    allowBack: true,
+  });
+  if (typedId === undefined) return undefined;
+  const providerId = typedId.trim().toLowerCase();
+
+  const typedUrl = await flow.readText({
+    message: `Base URL for ${providerId} (OpenAI-compatible)`,
+    defaultValue: LOCAL_BASE_URL,
+    placeholder: LOCAL_BASE_URL,
+    validate: validateBaseUrl,
+    allowBack: true,
+  });
+  if (typedUrl === undefined) return undefined;
+  const baseURL = typedUrl.trim();
+
+  flow.setStatus(`listing models at ${baseURL}…`);
+  let models: readonly ProbedLocalModel[] = [];
+  try {
+    models = await probeLocalEndpoint(baseURL, services.fetchImpl ?? fetch);
+  } catch (error) {
+    flow.renderLine(`Could not reach ${baseURL} (${String(error)}).`, "warning");
+  }
+  if (models.length === 0) {
+    const typedModels = await flow.readText({
+      message: "Model ids, comma-separated (the endpoint listed none)",
+      placeholder: "qwen3:8b, gpt-oss:20b",
+      validate: (value) =>
+        value
+          .split(",")
+          .map((id) => id.trim())
+          .some((id) => id.length > 0)
+          ? undefined
+          : "At least one model id is required.",
+      allowBack: true,
+    });
+    if (typedModels === undefined) return undefined;
+    models = typedModels
+      .split(",")
+      .map((id) => ({ id: id.trim() }))
+      .filter((model) => model.id.length > 0);
+  }
+  if (models.length === 0) {
+    shell.insertCommandResult("/provider", `No models given for ${providerId}; nothing written.`, "error");
+    return undefined;
+  }
+
+  const typedContext = await flow.readText({
+    message: "Context window in tokens (used for models the endpoint does not report)",
+    defaultValue: String(
+      models.find((model) => model.context !== undefined)?.context ?? LOCAL_CONTEXT_FALLBACK,
+    ),
+    validate: validateContextWindow,
+    allowBack: true,
+  });
+  if (typedContext === undefined) return undefined;
+  const fallbackContext = Number(typedContext.trim());
+
+  const updated = await updateGlobalConfig(
+    (current) => {
+      current.provider = {
+        ...current.provider,
+        [providerId]: {
+          name: `${providerId} (local)`,
+          npm: "@ai-sdk/openai-compatible",
+          options: { baseURL },
+          models: Object.fromEntries(
+            models.map((model) => [model.id, localModelEntry(model.context ?? fallbackContext)]),
+          ),
+        },
+      };
+    },
+    { env: services.env },
+  );
+  services.onConfigChanged(updated);
+  await services.captainModels?.register(updated);
+  flow.renderLine(`Added ${providerId} (${models.length} models).`, "success");
+  shell.insertCommandResult(
+    "/provider",
+    [
+      `${providerId} → ${baseURL} (${models.length} models) written to clankie.json.`,
+      "No credential needed. Restart the service (`clankie restart captain`) before Clankie himself uses it.",
+    ].join("\n"),
+    "success",
+  );
+  return providerId;
 }
 
 async function runModelWizard(

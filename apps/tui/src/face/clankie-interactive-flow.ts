@@ -47,6 +47,7 @@ export type InteractiveSelectPromptOptions = {
   readonly allowBack?: boolean | undefined;
   readonly theme: SelectListTheme;
   readonly onCancel: () => void;
+  readonly onClose?: ((value: string) => void) | undefined;
   readonly onRender: () => void;
   readonly onSubmit: (values: readonly string[]) => void;
 };
@@ -183,8 +184,14 @@ export class InteractiveSelectPrompt implements Component, Focusable {
   }
 
   handleInput(data: string): void {
+    const printable = decodeKittyPrintable(data) ?? printableInput(data);
     if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c"))) {
       this.options.onCancel();
+      return;
+    }
+    if (printable === "x" && this.options.onClose !== undefined) {
+      const current = this.currentOption();
+      if (current !== undefined) this.options.onClose(current.value);
       return;
     }
     if (this.options.allowBack === true && matchesKey(data, Key.left)) {
@@ -239,7 +246,6 @@ export class InteractiveSelectPrompt implements Component, Focusable {
       this.options.onRender();
       return;
     }
-    const printable = decodeKittyPrintable(data) ?? printableInput(data);
     if (printable !== undefined) {
       this.filter += printable;
       this.cursorIndex = 0;
@@ -379,18 +385,20 @@ export class InteractiveSelectPrompt implements Component, Focusable {
   private statusLines(filteredCount: number, totalCount: number, width: number): string[] {
     const cursor = this.focused ? CURSOR_MARKER : "";
     const back = this.options.allowBack === true ? "← Back" : "Esc cancels";
+    const close = this.options.onClose === undefined ? undefined : "x closes selected";
     let line: string;
     if (this.filter.length > 0) {
       line = compactParts([
         `Showing ${filteredCount} of ${totalCount}`,
         `filter "${this.filter}"${cursor}`,
         "Ctrl+U clears",
+        close,
         back,
       ]);
       return wrapTextWithAnsi(line, width).map(dim);
     }
     const movement = "Up/down move";
-    line = compactParts([movement, "Enter/→ chooses", `type to filter${cursor}`, back]);
+    line = compactParts([movement, "Enter/→ chooses", `type to filter${cursor}`, close, back]);
     return wrapTextWithAnsi(line, width).map(dim);
   }
 

@@ -274,7 +274,7 @@ function logFields(
   result?: OperatorConversationServiceResult,
 ): Record<string, unknown> {
   const subject =
-    request.op === "get"
+    request.op === "get" || request.op === "close"
       ? request
       : request.op === "replay"
         ? request.replay

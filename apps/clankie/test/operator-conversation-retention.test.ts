@@ -23,6 +23,64 @@ async function temporaryRoot(): Promise<string> {
 }
 
 describe("operator conversation retention", () => {
+  it("closes whole inactive conversations but protects active and default rooms", async () => {
+    const root = await temporaryRoot();
+    let release!: () => void;
+    const running = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const removed: string[] = [];
+    const store = new ConversationStore(
+      root,
+      async () => running,
+      (conversationId) => {
+        removed.push(conversationId);
+      },
+    );
+    const created = await store.serve({
+      op: "create",
+      schemaVersion: 1,
+      scope: { kind: "global" },
+      title: "temporary",
+    });
+    if (created.op !== "create") throw new Error("conversation was not created");
+    const conversationId = created.conversation.conversationId;
+    const sent = await store.serve({
+      op: "send",
+      schemaVersion: 1,
+      turn: {
+        schemaVersion: 1,
+        kind: "message",
+        conversationId,
+        surfaceClientId: "test",
+        expectedRevision: 0,
+        message: "stay alive",
+      },
+    });
+    if (sent.op !== "send" || sent.result.status !== "accepted") throw new Error("turn was not accepted");
+
+    await expect(
+      store.serve({ op: "close", schemaVersion: 1, conversationId: "global-default" }),
+    ).resolves.toMatchObject({ op: "close", closed: false });
+    await expect(store.serve({ op: "close", schemaVersion: 1, conversationId })).resolves.toMatchObject({
+      op: "close",
+      closed: false,
+    });
+
+    release();
+    await store.awaitRun(sent.result.runId);
+    await expect(store.serve({ op: "close", schemaVersion: 1, conversationId })).resolves.toMatchObject({
+      op: "close",
+      closed: true,
+    });
+    expect(removed).toContain(conversationId);
+    await expect(store.serve({ op: "get", schemaVersion: 1, conversationId })).resolves.toEqual({
+      op: "get",
+      schemaVersion: 1,
+    });
+    await store.close();
+  });
+
   it("bounds replay while keeping cursors monotonic", async () => {
     const root = await temporaryRoot();
     const store = new ConversationStore(root, async (_conversationId, _message, publish) => {

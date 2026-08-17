@@ -17,7 +17,8 @@ tokens from Clankie's local bridge bearers.
 
 1. Start the clankie service once so it mints the internal bridge bearers.
 2. In the TUI, use `/discord` to store the official bot token under provider id
-   `discord_bot` and configure the body. `/auth` is for model/vendor credentials.
+   `discord_bot` and configure the body. Use `/voice` to select OpenAI Realtime
+   or Grok Voice, models, voice, reasoning, and the brokered provider API key.
 3. Use that flow for application/guild ids, ambient bindings, ingress and
    presence allowlists, voice policy, activity application id, and possessor
    voice enablement. These non-secret settings live in
@@ -34,14 +35,22 @@ Explicit shell values override unset non-secret settings. The main groups are:
 | Text ingress     | `DISCORD_TEXT_INGRESS_ENABLED`, `DISCORD_INGRESS_GUILD_IDS`, optional channel/DM policy        |
 | Presence writes  | `DISCORD_PRESENCE_GUILD_IDS`, optional channel allowlist                                       |
 | Voice            | `DISCORD_VOICE_ENABLED`, `DISCORD_VOICE_GUILD_IDS`, optional channels, join and consent policy |
+| Voice provider   | `CLANKIE_VOICE_REALTIME_PROVIDER`; provider model, voice, and optional xAI reasoning effort    |
 | Activity         | `DISCORD_ACTIVITY_APPLICATION_ID_GBA`                                                          |
 | Possessor voice  | `CLANKIE_POSSESSOR_VOICE_ENABLED`; optional `CLANKIE_POSSESSOR_VOICE_PORT`                     |
 
 Secrets do not belong in that file. `DISCORD_BOT_TOKEN`, `DISCORD_USER_TOKEN`,
-and `CLANKIE_CAPTAIN_TOKEN` are hard startup errors. Official-bot voice uses the
-brokered `openai` credential; external speech also uses brokered `elevenlabs`.
-Their API-key environment names are rejected by this process when those paths
-are active.
+and `CLANKIE_CAPTAIN_TOKEN` are hard startup errors. Voice uses the brokered API
+credential matching `openai` or `xai`; external speech also uses brokered
+`elevenlabs`. Their API-key environment names are rejected by this process when
+those paths are active.
+
+The shared voice topology stays the same across providers. OpenAI uses its
+realtime transcription session; xAI uses raw-binary streaming STT at `/v1/stt`.
+Both feed attributed text into one engaged realtime conversation. Grok defaults
+to the pinned `grok-voice-think-fast-2.0` model and `eve` voice; `/voice` can
+change both and xAI's `high`/`none` reasoning effort. xAI does not expose a
+streaming-STT model selector, so no fake model knob is presented.
 
 `CLANKIE_API_URL` defaults to `http://127.0.0.1:4310`.
 `DISCORD_BRIDGE_RECEIPT_PATH` may select an absolute receipt path; otherwise it

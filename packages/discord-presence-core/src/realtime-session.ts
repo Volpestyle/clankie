@@ -1,11 +1,11 @@
 /**
- * The OpenAI Realtime API boundary for Discord voice
+ * The OpenAI-compatible realtime API boundaries for Discord voice
  * ([ADR 0057](../../../docs/adr/0057-realtime-voice-with-captain-handoff.md)).
  *
  * Two session kinds, one discipline:
  *
  * - **Transcription** — the dormant tier. Each instance hears one consented
- *   Discord speaker on `gpt-realtime-whisper`, surfaces transcript deltas and completions, and is
+ *   Discord speaker through OpenAI transcription or xAI streaming STT, surfaces transcripts, and is
  *   structurally incapable of answering: the class has no response path at
  *   all, so "hears everything, answers nothing" is a property of the type
  *   rather than a promise of the caller.
@@ -35,6 +35,8 @@ import { PCM_SAMPLE_BYTES } from "./voice-audio.ts";
 const DEFAULT_TRANSCRIPTION_MODEL = "gpt-realtime-whisper";
 const DEFAULT_CONVERSATION_MODEL = "gpt-realtime-2.1";
 const DEFAULT_REALTIME_BASE_URL = "wss://api.openai.com/v1/realtime";
+export const XAI_REALTIME_BASE_URL = "wss://api.x.ai/v1/realtime";
+export const XAI_STREAMING_STT_BASE_URL = "wss://api.x.ai/v1/stt";
 /** The voice the cascade already used, so the architecture swap does not change how he sounds. */
 const DEFAULT_VOICE = "marin";
 /**
@@ -240,7 +242,7 @@ const MUSIC_TOOLS = [
 
 /** Minimal transport seam. Production wraps a WebSocket; tests inject a fake. */
 export interface RealtimeSocket {
-  send(data: string): void;
+  send(data: string | Uint8Array): void;
   close(): void;
   onMessage(handler: (data: string) => void): void;
   onClose(handler: () => void): void;
@@ -313,9 +315,15 @@ export interface RealtimeTranscriptionSessionOptions extends RealtimeSessionComm
   readonly onTranscript: (event: RealtimeTranscriptEvent) => void;
 }
 
+export type XaiStreamingTranscriptionSessionOptions = Omit<RealtimeTranscriptionSessionOptions, "model">;
+
 export interface RealtimeConversationSessionOptions extends RealtimeSessionCommonOptions {
+  /** Wire-level session dialect. The event stream remains OpenAI-compatible. */
+  readonly provider?: "openai" | "xai";
   readonly model?: string;
   readonly voice?: string;
+  /** xAI Voice reasoning control; omitted for OpenAI. */
+  readonly reasoningEffort?: "high" | "none";
   /**
    * What the responses are made of ([ADR 0070](../../../docs/adr/0070-external-voice-via-streaming-tts.md)).
    * `"audio"` (the default) is the model's own voice; `"text"` takes the
@@ -477,10 +485,14 @@ abstract class RealtimeSessionCore {
       if (pcm.byteLength > MAX_REALTIME_AUDIO_APPEND_BYTES) {
         throw new Error("Realtime audio append exceeded the chunk byte limit");
       }
-      this.sendFrame({ type: "input_audio_buffer.append", audio: pcm.toString("base64") });
+      this.sendAudio(pcm);
     } finally {
       pcm.fill(0);
     }
+  }
+
+  protected sendAudio(pcm: Buffer): void {
+    this.sendFrame({ type: "input_audio_buffer.append", audio: pcm.toString("base64") });
   }
 
   public close(): void {
@@ -489,11 +501,17 @@ abstract class RealtimeSessionCore {
 
   protected abstract handleServerEvent(type: string, event: Record<string, unknown>): void;
 
+  /** Provider-specific cleanup for content buffered before the server is ready. */
+  protected handleClosing(): void {}
+
   protected sendFrame(frame: Record<string, unknown>): void {
+    this.sendRaw(JSON.stringify(frame));
+  }
+
+  protected sendRaw(data: string | Uint8Array): void {
     this.assertOpen();
-    const raw = JSON.stringify(frame);
     try {
-      this.socket.send(raw);
+      this.socket.send(data);
     } catch {
       // The raw transport error is dropped for the same reason onError's is.
       this.closeWith("error");
@@ -505,6 +523,7 @@ abstract class RealtimeSessionCore {
     if (this.closed) return;
     this.closed = true;
     this.timers.clearTimeout(this.lifetimeHandle);
+    this.handleClosing();
     try {
       this.socket.close();
     } catch {
@@ -598,6 +617,81 @@ export class RealtimeTranscriptionSession extends RealtimeSessionCore {
 }
 
 /**
+ * xAI's dedicated streaming STT endpoint. Unlike the OpenAI-compatible voice
+ * socket it accepts raw PCM binary frames and has no model selector or setup
+ * message. Audio offered before `transcript.created` is held behind the same
+ * five-second append bound, then zeroed as soon as it is sent.
+ */
+export class XaiStreamingTranscriptionSession extends RealtimeSessionCore {
+  private readonly onTranscriptCallback: (event: RealtimeTranscriptEvent) => void;
+  private readonly pendingAudio: Buffer[] = [];
+  private pendingAudioBytes = 0;
+  private ready = false;
+  private utterance = 1;
+
+  public constructor(socket: RealtimeSocket, options: XaiStreamingTranscriptionSessionOptions) {
+    super(coreInit(socket, options));
+    this.onTranscriptCallback = options.onTranscript;
+  }
+
+  protected override sendAudio(pcm: Buffer): void {
+    if (this.ready) {
+      this.sendRaw(pcm);
+      return;
+    }
+    if (this.pendingAudioBytes + pcm.byteLength > MAX_REALTIME_AUDIO_APPEND_BYTES) {
+      this.onErrorCallback?.("xAI streaming transcription did not become ready before the audio bound");
+      this.closeWith("error");
+      throw new Error("xAI streaming transcription readiness audio bound exceeded");
+    }
+    const copy = Buffer.from(pcm);
+    this.pendingAudio.push(copy);
+    this.pendingAudioBytes += copy.byteLength;
+  }
+
+  protected override handleServerEvent(type: string, event: Record<string, unknown>): void {
+    if (type === "transcript.created") {
+      if (this.ready) return;
+      this.ready = true;
+      this.flushPendingAudio();
+      return;
+    }
+    if (type !== "transcript.partial") return;
+    const text = asString(event.text);
+    if (text === undefined) return;
+    const final = asBoolean(event.is_final) === true && asBoolean(event.speech_final) === true;
+    this.onTranscriptCallback({
+      itemId: `xai-stt-${this.utterance.toString()}`,
+      text: text.slice(0, MAX_TRANSCRIPT_CHARACTERS),
+      final,
+    });
+    if (final) this.utterance += 1;
+  }
+
+  protected override handleClosing(): void {
+    for (const pcm of this.pendingAudio) pcm.fill(0);
+    this.pendingAudio.length = 0;
+    this.pendingAudioBytes = 0;
+  }
+
+  private flushPendingAudio(): void {
+    try {
+      for (const pcm of this.pendingAudio) {
+        try {
+          this.sendRaw(pcm);
+        } finally {
+          pcm.fill(0);
+        }
+      }
+    } finally {
+      for (const pcm of this.pendingAudio) pcm.fill(0);
+      this.pendingAudio.length = 0;
+      this.pendingAudioBytes = 0;
+    }
+  }
+}
+
+/**
  * The engaged tier: speaks and listens, holds no controller. Responses only
  * ever happen through {@link createResponse}; VAD cannot create or interrupt
  * one, and the single `ask_clankie` tool is the only route to any ability.
@@ -610,8 +704,10 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
   private currentResponseId = "";
   private currentResponseAudioBytes = 0;
   private currentResponseTextCharacters = 0;
+  private readonly provider: "openai" | "xai";
 
   public constructor(socket: RealtimeSocket, options: RealtimeConversationSessionOptions) {
+    const provider = options.provider ?? "openai";
     const model = nonEmpty(options.model ?? DEFAULT_CONVERSATION_MODEL, "Realtime conversation model");
     const outputModality = options.outputModality ?? "audio";
     const voice = nonEmpty(options.voice ?? DEFAULT_VOICE, "Realtime voice");
@@ -619,6 +715,9 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
       // A text-modality session with no text sink would speak into the void;
       // failing at construction beats a silently mute Clankie.
       throw new Error("Realtime text modality requires an onTextDelta callback");
+    }
+    if (provider === "xai" && outputModality === "text") {
+      throw new Error("xAI realtime voice does not expose a text-only output modality");
     }
     const instructions = boundedText(
       options.instructions,
@@ -636,44 +735,58 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
     this.onTextDeltaCallback = options.onTextDelta;
     this.onResponseDoneCallback = options.onResponseDone;
     this.onFunctionCallCallback = options.onFunctionCall;
+    this.provider = provider;
     this.sendFrame({
       type: "session.update",
-      session: {
-        type: "realtime",
-        model,
-        output_modalities: [outputModality],
-        instructions,
-        audio: {
-          input: {
-            format: REALTIME_PCM_FORMAT,
-            // ADR 0057: the 1:1 defaults are wrong in a group room. VAD is
-            // kept for boundaries only; the floor machine this repository
-            // owns decides when he speaks and when he is interrupted.
-            turn_detection: {
-              type: "server_vad",
-              create_response: false,
-              interrupt_response: false,
-            },
-          },
-          // In text modality there is no model mouth to configure; the
-          // external synthesizer owns how he sounds (ADR 0070).
-          ...(outputModality === "audio"
-            ? {
-                output: {
+      session:
+        provider === "xai"
+          ? {
+              voice,
+              instructions,
+              reasoning: { effort: options.reasoningEffort ?? "high" },
+              // The engaged tier receives attributed text from the dormant
+              // per-speaker transcribers. Manual turns prevent xAI's VAD from
+              // becoming a second, conflicting floor owner.
+              turn_detection: null,
+              audio: { output: { format: REALTIME_PCM_FORMAT } },
+              tools: [ASK_CLANKIE_TOOL, LOOK_AT_SCREEN_TOOL, ...MUSIC_TOOLS],
+            }
+          : {
+              type: "realtime",
+              model,
+              output_modalities: [outputModality],
+              instructions,
+              audio: {
+                input: {
                   format: REALTIME_PCM_FORMAT,
-                  voice,
+                  // ADR 0057: the 1:1 defaults are wrong in a group room. VAD is
+                  // kept for boundaries only; the floor machine this repository
+                  // owns decides when he speaks and when he is interrupted.
+                  turn_detection: {
+                    type: "server_vad",
+                    create_response: false,
+                    interrupt_response: false,
+                  },
                 },
-              }
-            : {}),
-        },
-        tools: [ASK_CLANKIE_TOOL, LOOK_AT_SCREEN_TOOL, ...MUSIC_TOOLS],
-        tool_choice: "auto",
-        truncation: {
-          type: "retention_ratio",
-          retention_ratio: retentionRatio,
-          post_instructions_token_limit: postInstructionsTokenLimit,
-        },
-      },
+                // In text modality there is no model mouth to configure; the
+                // external synthesizer owns how he sounds (ADR 0070).
+                ...(outputModality === "audio"
+                  ? {
+                      output: {
+                        format: REALTIME_PCM_FORMAT,
+                        voice,
+                      },
+                    }
+                  : {}),
+              },
+              tools: [ASK_CLANKIE_TOOL, LOOK_AT_SCREEN_TOOL, ...MUSIC_TOOLS],
+              tool_choice: "auto",
+              truncation: {
+                type: "retention_ratio",
+                retention_ratio: retentionRatio,
+                post_instructions_token_limit: postInstructionsTokenLimit,
+              },
+            },
     });
   }
 
@@ -745,7 +858,10 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
       MAX_REALTIME_INSTRUCTIONS_CHARACTERS,
       "Realtime session instructions",
     );
-    this.sendFrame({ type: "session.update", session: { type: "realtime", instructions } });
+    this.sendFrame({
+      type: "session.update",
+      session: this.provider === "xai" ? { instructions } : { type: "realtime", instructions },
+    });
   }
 
   /**
@@ -782,7 +898,11 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
         return;
       }
       case "response.output_item.done": {
-        this.handleOutputItemDone(event);
+        if (this.provider === "openai") this.handleOutputItemDone(event);
+        return;
+      }
+      case "response.function_call_arguments.done": {
+        if (this.provider === "xai") this.handleFunctionCallDone(event);
         return;
       }
       default:
@@ -875,6 +995,18 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
     }
     this.onFunctionCallCallback?.({ callId, name, argumentsJson });
   }
+
+  private handleFunctionCallDone(event: Record<string, unknown>): void {
+    const callId = asString(event.call_id);
+    const name = asString(event.name);
+    if (callId === undefined || name === undefined) return;
+    const argumentsJson = asString(event.arguments) ?? "";
+    if (argumentsJson.length > MAX_FUNCTION_ARGUMENTS_CHARACTERS) {
+      this.onErrorCallback?.("Realtime function call arguments exceeded the character limit");
+      return;
+    }
+    this.onFunctionCallCallback?.({ callId, name, argumentsJson });
+  }
 }
 
 /** Opens the dormant-tier transcription session. */
@@ -883,6 +1015,24 @@ export async function openRealtimeTranscriptionSession(
 ): Promise<RealtimeTranscriptionSession> {
   const socket = await connect(options, { intent: "transcription" });
   return construct(socket, () => new RealtimeTranscriptionSession(socket, options));
+}
+
+/** Opens xAI's raw-binary streaming speech-to-text listener. */
+export async function openXaiStreamingTranscriptionSession(
+  options: XaiStreamingTranscriptionSessionOptions,
+): Promise<XaiStreamingTranscriptionSession> {
+  const socket = await connect(
+    { ...options, baseUrl: options.baseUrl ?? XAI_STREAMING_STT_BASE_URL },
+    {
+      sample_rate: REALTIME_AUDIO_SAMPLE_RATE.toString(),
+      encoding: "pcm",
+      interim_results: "false",
+      ...((options.language ?? DEFAULT_TRANSCRIPTION_LANGUAGE).trim().length === 0
+        ? {}
+        : { language: (options.language ?? DEFAULT_TRANSCRIPTION_LANGUAGE).trim() }),
+    },
+  );
+  return construct(socket, () => new XaiStreamingTranscriptionSession(socket, options));
 }
 
 /** Opens the engaged-tier conversation session. */
@@ -899,7 +1049,7 @@ async function connect(
   query: Readonly<Record<string, string>>,
 ): Promise<RealtimeSocket> {
   const url = buildRealtimeUrl(options.baseUrl, query);
-  const apiKey = nonEmpty(options.apiKey, "OpenAI API key");
+  const apiKey = nonEmpty(options.apiKey, "Realtime API key");
   const factory = options.socketFactory ?? openRealtimeWebSocket;
   return factory(url, Object.freeze({ authorization: `Bearer ${apiKey}` }));
 }
@@ -1000,6 +1150,10 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function asBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
 }
 
 function asCount(value: unknown): number | undefined {

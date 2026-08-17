@@ -129,6 +129,7 @@ const conversationsContext = {
     return currentWorkspace;
   },
   conversations: () => conversationSelection.conversations(),
+  close: (conversationId: string) => conversationClient.close(conversationId),
   select: async (conversationId: string) => {
     const conversation = await conversationSelection.select(conversationId);
     currentConversationTitle = conversation.title;

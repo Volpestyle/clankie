@@ -171,23 +171,35 @@ export type PersonaSettings = z.infer<typeof PersonaSettingsSchema>;
 const VendorIdentifierSchema = z
   .string()
   .regex(/^[\w-]{1,128}$/u, "must be at most 128 word characters or hyphens");
+const ModelIdentifierSchema = z
+  .string()
+  .regex(/^[\w.-]{1,128}$/u, "must be at most 128 word characters, dots, or hyphens");
 
 /**
  * How Clankie sounds ([ADR 0070](../../../docs/adr/0070-external-voice-via-streaming-tts.md))
  * — a peer of `persona` for the same reason persona is a peer of `discord`:
  * this is who he *is* across surfaces, not a Discord authority knob. Like the
- * rest of settings these are public identifiers; the ElevenLabs API key lives
- * in the credential broker under provider id `elevenlabs`, never here.
+ * rest of settings these are public identifiers; voice-vendor API keys live
+ * in the credential broker under their provider ids, never here.
  */
 export const VoiceSettingsSchema = z
   .object({
+    /** Which vendor owns both the dormant transcriber and engaged voice agent. */
+    realtimeProvider: z.enum(["openai", "xai"]).default("openai"),
     /**
-     * Who synthesizes his speech: `openai` is the realtime model's own voice,
-     * `elevenlabs` streams the model's words through ElevenLabs TTS.
+     * Who synthesizes his speech. The historical `openai` value means the
+     * selected realtime provider's native voice; `elevenlabs` is external TTS.
      */
     ttsProvider: z.enum(["openai", "elevenlabs"]).default("openai"),
+    openAiRealtimeModel: ModelIdentifierSchema.optional(),
+    openAiTranscribeModel: ModelIdentifierSchema.optional(),
     /** OpenAI realtime voice name (e.g. `marin`); unset defers to the runtime default. */
     openAiVoice: z.string().min(1).max(64).optional(),
+    xAiRealtimeModel: ModelIdentifierSchema.optional(),
+    /** xAI built-in or custom voice id; unset defers to `eve`. */
+    xAiVoice: VendorIdentifierSchema.optional(),
+    /** xAI Voice's documented reasoning control. */
+    xAiReasoningEffort: z.enum(["high", "none"]).default("high"),
     /** Public ElevenLabs voice identifier, required when {@link ttsProvider} is `elevenlabs`. */
     elevenLabsVoiceId: VendorIdentifierSchema.optional(),
     /** ElevenLabs model (e.g. `eleven_flash_v2_5`); unset defers to the runtime default. */
@@ -200,6 +212,13 @@ export const VoiceSettingsSchema = z
         code: "custom",
         path: ["elevenLabsVoiceId"],
         message: "required when ttsProvider is elevenlabs",
+      });
+    }
+    if (value.realtimeProvider === "xai" && value.ttsProvider === "elevenlabs") {
+      context.addIssue({
+        code: "custom",
+        path: ["ttsProvider"],
+        message: "elevenlabs text output currently requires realtimeProvider openai",
       });
     }
   });

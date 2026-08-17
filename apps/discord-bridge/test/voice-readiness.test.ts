@@ -204,6 +204,33 @@ describe("Discord group voice readiness", () => {
     expect(JSON.stringify(present)).not.toContain("elevenlabs-secret");
   });
 
+  it("checks and reports the selected xAI voice provider", async () => {
+    const store = new MemoryCredentialStore();
+    store.credentials.set("xai", { type: "api", key: "xai-secret" });
+    const report = await inspectDiscordVoiceReadiness({
+      env: { DISCORD_VOICE_ENABLED: "true", CLANKIE_VOICE_REALTIME_PROVIDER: "xai" },
+      store,
+      api: {
+        inspectDiscordReadiness: () => Promise.resolve(controlPlane),
+        fetchDiscordVoiceBriefing: () => Promise.resolve(briefing),
+      },
+      opusAvailable: () => true,
+      wakeProbe: () =>
+        Promise.resolve({
+          listener: { ok: true, detail: "xAI streaming STT opened" },
+          engaged: { ok: true, detail: "Grok Voice responded" },
+        }),
+    });
+    expect(checkByName(report, "xai realtime credential").ok).toBe(true);
+    expect(report.realtime).toMatchObject({
+      provider: "xai",
+      transcribeModel: "xai-streaming-stt",
+      realtimeModel: "grok-voice-think-fast-2.0",
+      voice: "eve",
+    });
+    expect(JSON.stringify(report)).not.toContain("xai-secret");
+  });
+
   it("fails the realtime configuration check when retired cascade envs are set", async () => {
     const store = new MemoryCredentialStore();
     store.credentials.set("openai", { type: "api", key: "openai-secret" });
@@ -233,7 +260,8 @@ class FakeProbeSocket implements RealtimeSocket {
   private readonly messageHandlers: ((data: string) => void)[] = [];
   private readonly closeHandlers: (() => void)[] = [];
 
-  public send(data: string): void {
+  public send(data: string | Uint8Array): void {
+    if (typeof data !== "string") return;
     this.sent.push(data);
     const frame = JSON.parse(data) as { type?: string };
     if (frame.type === "response.create") {
@@ -324,6 +352,23 @@ describe("voice wake-transition probe", () => {
     };
     expect(engagedUpdate.session?.output_modalities).toEqual(["text"]);
     expect(engagedUpdate.session?.audio?.output).toBeUndefined();
+  });
+
+  it("probes xAI streaming STT then Grok Voice", async () => {
+    const urls: string[] = [];
+    const result = await probeVoiceWakeTransition({
+      apiKey: "probe-key",
+      config: parseVoiceRealtimeEnv({ CLANKIE_VOICE_REALTIME_PROVIDER: "xai" }),
+      socketFactory: (url) => {
+        urls.push(url);
+        return Promise.resolve(new FakeProbeSocket());
+      },
+      timeoutMs: 1_000,
+    });
+    expect(result.listener.ok).toBe(true);
+    expect(result.engaged.ok).toBe(true);
+    expect(urls[0]).toContain("wss://api.x.ai/v1/stt");
+    expect(urls[1]).toContain("wss://api.x.ai/v1/realtime");
   });
 
   it("reports the engaged stage as not attempted when the listener cannot open", async () => {

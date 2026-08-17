@@ -174,6 +174,7 @@ async function testServices(
   options: {
     readonly refreshResult?: RefreshResult;
     readonly captainModels?: ProviderServices["captainModels"];
+    readonly fetchImpl?: typeof fetch;
   } = {},
 ): Promise<{
   readonly changed: string[];
@@ -205,6 +206,7 @@ async function testServices(
       cwd: root,
       env,
       ...(options.captainModels === undefined ? {} : { captainModels: options.captainModels }),
+      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
       onConfigChanged(config) {
         if (config.model !== undefined) changed.push(config.model);
       },
@@ -555,6 +557,7 @@ describe("provider and model commands", () => {
           ]),
         thinkingLevels: () => Promise.resolve(["off", "low", "high"]),
         refresh: () => Promise.resolve(),
+        register: () => Promise.resolve(),
       },
     });
     const commands = buildProviderCommands(fixture.services);
@@ -576,6 +579,53 @@ describe("provider and model commands", () => {
     expect((await loadConfig({ cwd: fixture.services.cwd, env: fixture.env })).config.variant).toEqual({
       "pi-provider/pi-model": "high",
     });
+  });
+
+  it("adds a local endpoint from the provider modal and keeps per-model context", async () => {
+    const fixture = await testServices({
+      fetchImpl: () =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              data: [{ id: "qwen3:8b" }, { id: "gpt-oss:20b", max_context_length: 131_072 }],
+            }),
+            { status: 200 },
+          ),
+        ),
+    });
+    const view = testShell([["__local__"], ["ollama"]], [], ["ollama", "http://localhost:11434/v1", "32768"]);
+
+    await command(buildProviderCommands(fixture.services), "provider").run("", view.shell);
+
+    const { config } = await loadConfig({ cwd: fixture.services.cwd, env: fixture.env });
+    const provider = config.provider?.["ollama"];
+    expect(provider?.npm).toBe("@ai-sdk/openai-compatible");
+    expect(provider?.options).toEqual({ baseURL: "http://localhost:11434/v1" });
+    expect(provider?.models).toEqual({
+      "qwen3:8b": { tool_call: true, limit: { context: 32_768, output: 8_192 } },
+      "gpt-oss:20b": { tool_call: true, limit: { context: 131_072, output: 8_192 } },
+    });
+    // Back on the picker, the endpoint is selectable without leaving the modal.
+    expect(view.selects[1]?.options.map((option) => option.value)).toContain("ollama");
+    expect(rendered(view)).toContain("clankie restart captain");
+  });
+
+  it("falls back to typed model ids when the local endpoint is unreachable", async () => {
+    const fixture = await testServices({ fetchImpl: () => Promise.reject(new Error("ECONNREFUSED")) });
+    const view = testShell(
+      [["__local__"], ["lmstudio-local"]],
+      [],
+      ["lmstudio-local", "http://127.0.0.1:1234/v1", "qwen3:8b, , mistral", "8192"],
+    );
+
+    await command(buildProviderCommands(fixture.services), "provider").run("", view.shell);
+
+    const { config } = await loadConfig({ cwd: fixture.services.cwd, env: fixture.env });
+    expect(config.provider?.["lmstudio-local"]?.models).toEqual({
+      "qwen3:8b": { tool_call: true, limit: { context: 8_192, output: 2_048 } },
+      mistral: { tool_call: true, limit: { context: 8_192, output: 2_048 } },
+    });
+    expect(rendered(view)).toContain("Could not reach http://127.0.0.1:1234/v1");
   });
 
   it("separates provider intent from the authoritative model write", async () => {

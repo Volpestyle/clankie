@@ -38,6 +38,7 @@ describe("realtime voice environment", () => {
   it("applies the documented defaults, with truncation always configured", () => {
     const config = parseVoiceRealtimeEnv({});
     expect(config).toEqual({
+      realtimeProvider: "openai",
       realtimeModel: "gpt-realtime-2.1",
       transcribeModel: "gpt-realtime-whisper",
       voice: "marin",
@@ -47,6 +48,23 @@ describe("realtime voice environment", () => {
       decayWindowMs: 60_000,
       idleLeaveMs: 900_000,
     });
+  });
+
+  it("selects Grok Voice with its pinned model, native STT, voice, and reasoning", () => {
+    const config = parseVoiceRealtimeEnv({ CLANKIE_VOICE_REALTIME_PROVIDER: "xai" });
+    expect(config).toMatchObject({
+      realtimeProvider: "xai",
+      realtimeModel: "grok-voice-think-fast-2.0",
+      voice: "eve",
+      xaiReasoningEffort: "high",
+      ttsProvider: "openai",
+    });
+    expect(() =>
+      parseVoiceRealtimeEnv({
+        CLANKIE_VOICE_REALTIME_PROVIDER: "xai",
+        CLANKIE_VOICE_TRANSCRIBE_MODEL: "made-up-selector",
+      }),
+    ).toThrow(/has no model selector/u);
   });
 
   it("parses the ElevenLabs TTS provider and demands a voice id for it", () => {
@@ -404,6 +422,16 @@ describe("voice disclosure and status wording (ADR 0057 audio residency)", () =>
     // provider actually configured.
     expect(renderVoiceJoinDisclosure(1)).not.toContain("ElevenLabs");
     expect(renderVoiceConsentReply(true, 3)).not.toContain("ElevenLabs");
+  });
+
+  it("names xAI and its audio handling when Grok Voice is selected", () => {
+    const disclosure = renderVoiceJoinDisclosure(1, "openai", "explicit", "xai");
+    expect(disclosure).toContain("live xAI Voice sessions");
+    expect(disclosure).toContain("processed in real time and is not stored");
+    expect(disclosure).not.toContain("OpenAI");
+
+    const status = renderVoiceStatusReply(undefined, true, "explicit", "xai");
+    expect(status).toBe("Voice is enabled but not connected.");
   });
 
   it("describes bounded local and server-side retention in voice-status", () => {

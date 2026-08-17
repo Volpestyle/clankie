@@ -139,6 +139,9 @@ if (voiceEnabled && voiceBridgeToken === undefined) {
 if (voiceEnabled && process.env.OPENAI_API_KEY) {
   throw new Error("OPENAI_API_KEY must not be set. Reuse the brokered openai credential.");
 }
+if (voiceEnabled && process.env.XAI_API_KEY) {
+  throw new Error("XAI_API_KEY must not be set. Reuse the brokered xai credential.");
+}
 if (voiceEnabled && (process.env.ELEVENLABS_API_KEY ?? process.env.XI_API_KEY)) {
   throw new Error(
     "ELEVENLABS_API_KEY and XI_API_KEY must not be set. Store the ElevenLabs key under the brokered elevenlabs provider.",
@@ -234,15 +237,19 @@ const voiceChannelIds = parseDiscordIdSet(process.env.DISCORD_VOICE_CHANNEL_IDS)
 if (voiceEnabled && voiceGuildIds.size === 0) {
   throw new Error("Discord voice is enabled but DISCORD_VOICE_GUILD_IDS is empty.");
 }
-const openAiCredential = voiceEnabled ? await credentialStore.get("openai") : undefined;
-if (voiceEnabled && openAiCredential?.type !== "api") {
-  throw new Error(
-    "Discord voice requires the existing brokered openai API credential; OAuth and environment credentials are not accepted by the realtime boundary.",
-  );
-}
 // Validated at startup like the rest of the env: truncation and idle auto-leave
 // are always configured, never defaulted to unbounded (ADR 0057, mission T6).
 const voiceRealtimeConfig = voiceEnabled ? parseVoiceRealtimeEnv(process.env) : undefined;
+const realtimeCredential =
+  voiceRealtimeConfig === undefined
+    ? undefined
+    : await credentialStore.get(voiceRealtimeConfig.realtimeProvider);
+if (voiceEnabled && realtimeCredential?.type !== "api") {
+  const provider = voiceRealtimeConfig?.realtimeProvider ?? "openai";
+  throw new Error(
+    `Discord voice requires a brokered ${provider} API credential; OAuth and environment credentials are not accepted by the realtime boundary.`,
+  );
+}
 // The external voice (ADR 0070) follows the exact openai credential shape:
 // broker-resolved, API-type only, resolved once at startup.
 const elevenLabsCredential =
@@ -259,7 +266,7 @@ if (voiceRealtimeConfig?.ttsProvider === "elevenlabs" && elevenLabsCredential?.t
 const voiceConsentPolicy =
   process.env["DISCORD_VOICE_CONSENT_POLICY"] === "presence" ? ("presence" as const) : ("explicit" as const);
 const voiceSession =
-  openAiCredential?.type !== "api" || voiceApi === undefined || voiceRealtimeConfig === undefined
+  realtimeCredential?.type !== "api" || voiceApi === undefined || voiceRealtimeConfig === undefined
     ? undefined
     : new DiscordVoiceSession({
         ingress: new DiscordVoiceIngress(voiceApi, {
@@ -279,7 +286,7 @@ const voiceSession =
           return [...channel.members.keys()].filter((userId) => userId !== client.user?.id);
         },
         realtime: createVoiceRealtimePorts({
-          apiKey: openAiCredential.key,
+          apiKey: realtimeCredential.key,
           ...(elevenLabsCredential?.type === "api" ? { elevenLabsApiKey: elevenLabsCredential.key } : {}),
           config: voiceRealtimeConfig,
         }),
@@ -876,6 +883,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
           status.daveProtocolVersion,
           voiceRealtimeConfig?.ttsProvider ?? "openai",
           voiceConsentPolicy,
+          voiceRealtimeConfig?.realtimeProvider ?? "openai",
         ),
         allowedMentions: { parse: [] },
       });
@@ -992,6 +1000,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
           status.consentedParticipantCount,
           voiceRealtimeConfig?.ttsProvider ?? "openai",
           voiceConsentPolicy,
+          voiceRealtimeConfig?.realtimeProvider ?? "openai",
         ),
         ephemeral: true,
         allowedMentions: { parse: [] },
@@ -1000,7 +1009,12 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     }
     case "voice-status": {
       await interaction.reply({
-        content: renderVoiceStatusReply(voiceSession?.status(), voiceEnabled, voiceConsentPolicy),
+        content: renderVoiceStatusReply(
+          voiceSession?.status(),
+          voiceEnabled,
+          voiceConsentPolicy,
+          voiceRealtimeConfig?.realtimeProvider ?? "openai",
+        ),
         ephemeral: true,
         allowedMentions: { parse: [] },
       });

@@ -15,7 +15,7 @@ what lets both bodies be one character
 | `text-ingress`               | Normalises gateway messages into bounded, allowlist-gated captain turns, images included (ADR 0081)           |
 | `voice-address`              | Phonetic address detection over `characterNames()` (ADR 0057)                                                 |
 | `voice-floor`                | The dormant ↔ engaged floor machine: wake, decay, and the unprompted-turn rate cap                            |
-| `realtime-session`           | Injectable OpenAI Realtime boundary: transcription + conversation sessions, `ask_clankie` round trips         |
+| `realtime-session`           | Injectable OpenAI/xAI realtime boundaries: transcription, conversation, and `ask_clankie` round trips         |
 | `elevenlabs-tts`             | Injectable ElevenLabs multi-context streaming-TTS boundary (ADR 0070)                                         |
 | `external-voice`             | Pairs a text-modality realtime session with a TTS mouth behind the one conversation port (ADR 0070)           |
 | `voice-session`              | Media owner: consent, per-speaker capture/transcription, shared group floor, deliberate barge-in and playback |

@@ -301,7 +301,7 @@ describe("protocol", () => {
         }),
       ).toMatchObject({ status: "recover", code });
     }
-    // The callable request/result envelope (list/get/create/replay/tail/send) is strict.
+    // The callable request/result envelope is strict.
     expect(
       OperatorConversationServiceRequestSchema.parse({
         op: "replay",
@@ -317,7 +317,14 @@ describe("protocol", () => {
         provider: "openai-codex",
       }),
     ).toThrow();
-    expect(OperatorConversationServiceResultSchema.options).toHaveLength(6);
+    expect(
+      OperatorConversationServiceRequestSchema.parse({
+        op: "close",
+        schemaVersion: 1,
+        conversationId: "conversation-global-default",
+      }),
+    ).toMatchObject({ op: "close" });
+    expect(OperatorConversationServiceResultSchema.options).toHaveLength(7);
     expect(typeof createOperatorConversationServiceClient).toBe("function");
   });
 
@@ -474,6 +481,22 @@ describe("protocol", () => {
       schemaVersion: 1,
     };
     expect(result.conversation).toBeUndefined();
+  });
+
+  it("closes through the canonical service client", async () => {
+    const requests: OperatorConversationServiceRequest[] = [];
+    const client = createOperatorConversationServiceClient(async (request) => {
+      requests.push(request);
+      return {
+        op: "close",
+        schemaVersion: 1,
+        conversationId: "conversation-1",
+        closed: true,
+      };
+    });
+
+    await expect(client.close("conversation-1")).resolves.toBe(true);
+    expect(requests).toEqual([{ op: "close", schemaVersion: 1, conversationId: "conversation-1" }]);
   });
 
   it("surfaces typed tail recovery and stops instead of silently resyncing", async () => {

@@ -250,6 +250,7 @@ describe("discord settings resolution", () => {
 describe("voice settings resolution", () => {
   it("defaults to the OpenAI realtime voice and projects nothing", () => {
     const settings = VoiceSettingsSchema.parse({});
+    expect(settings.realtimeProvider).toBe("openai");
     expect(settings.ttsProvider).toBe("openai");
     // Nothing to project: the runtime's own defaults apply, and the default
     // provider is omitted exactly like a disabled flag.
@@ -286,6 +287,28 @@ describe("voice settings resolution", () => {
     expect(voiceSettingsToEnvironment(inactive)).toEqual({ CLANKIE_VOICE_REALTIME_VOICE: "cedar" });
   });
 
+  it("projects Grok Voice provider, model, voice, and reasoning without an invented STT model", () => {
+    const grok = VoiceSettingsSchema.parse({
+      realtimeProvider: "xai",
+      xAiRealtimeModel: "grok-voice-think-fast-2.0",
+      xAiVoice: "eve",
+      xAiReasoningEffort: "none",
+    });
+    expect(voiceSettingsToEnvironment(grok)).toEqual({
+      CLANKIE_VOICE_REALTIME_PROVIDER: "xai",
+      CLANKIE_VOICE_REALTIME_MODEL: "grok-voice-think-fast-2.0",
+      CLANKIE_VOICE_REALTIME_VOICE: "eve",
+      CLANKIE_VOICE_XAI_REASONING_EFFORT: "none",
+    });
+    expect(() =>
+      VoiceSettingsSchema.parse({
+        realtimeProvider: "xai",
+        ttsProvider: "elevenlabs",
+        elevenLabsVoiceId: "voice_abc123",
+      }),
+    ).toThrow(/requires realtimeProvider openai/u);
+  });
+
   it("fills only unset names and lets the environment win on read", () => {
     const settings = VoiceSettingsSchema.parse({
       ttsProvider: "elevenlabs",
@@ -301,6 +324,25 @@ describe("voice settings resolution", () => {
     } as NodeJS.ProcessEnv);
     expect(resolved.settings.elevenLabsVoiceId).toBe("voice_from_shell");
     expect(resolved.overriddenByEnvironment).toEqual(["CLANKIE_VOICE_ELEVENLABS_VOICE_ID"]);
+  });
+
+  it("projects the selected provider when the environment switches providers", () => {
+    const settings = VoiceSettingsSchema.parse({
+      openAiRealtimeModel: "gpt-realtime-custom",
+      openAiVoice: "cedar",
+      xAiRealtimeModel: "grok-voice-custom",
+      xAiVoice: "eve",
+      xAiReasoningEffort: "none",
+    });
+    const env = { CLANKIE_VOICE_REALTIME_PROVIDER: "xai" } as NodeJS.ProcessEnv;
+
+    expect(applyVoiceSettingsToEnvironment(settings, env)).toEqual([
+      "CLANKIE_VOICE_REALTIME_MODEL",
+      "CLANKIE_VOICE_REALTIME_VOICE",
+      "CLANKIE_VOICE_XAI_REASONING_EFFORT",
+    ]);
+    expect(env["CLANKIE_VOICE_REALTIME_MODEL"]).toBe("grok-voice-custom");
+    expect(env["CLANKIE_VOICE_REALTIME_VOICE"]).toBe("eve");
   });
 });
 

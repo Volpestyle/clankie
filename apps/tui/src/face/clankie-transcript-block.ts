@@ -1,4 +1,5 @@
 import { Markdown, truncateToWidth, type Component, type MarkdownTheme } from "@earendil-works/pi-tui";
+import { ClankieRenderCache } from "./clankie-render-cache.ts";
 
 export type ClankieTranscriptBlockTheme = {
   readonly bold: (text: string) => string;
@@ -37,6 +38,12 @@ export class ClankieTranscriptMarkdownBlock implements Component {
   private readonly theme: ClankieTranscriptBlockTheme;
   private bodyRenderer: Markdown | undefined;
   private bodyRendererText = "";
+  // The inner Markdown renderer already caches; this caches the parse, the
+  // header, and the per-line truncation wrapped around it. A header that pulled
+  // a spinner frame drops straight back out of the cache, since that one really
+  // is different next frame.
+  private readonly cache = new ClankieRenderCache();
+  private animated = false;
 
   constructor(markdown: string, theme: ClankieTranscriptBlockTheme) {
     this.markdown = markdown;
@@ -45,6 +52,7 @@ export class ClankieTranscriptMarkdownBlock implements Component {
 
   setMarkdown(markdown: string): void {
     this.markdown = markdown;
+    this.cache.clear();
     if (this.bodyRenderer !== undefined) {
       const parsed = parseTranscriptMarkdown(markdown);
       this.bodyRendererText = parsed.body;
@@ -53,14 +61,28 @@ export class ClankieTranscriptMarkdownBlock implements Component {
   }
 
   invalidate(): void {
+    this.cache.clear();
     this.bodyRenderer?.invalidate();
   }
 
   render(width: number): string[] {
+    const lines = this.cache.get(width, () => this.build(width));
+    if (this.animated) this.cache.clear();
+    return lines;
+  }
+
+  private build(width: number): string[] {
     const parsed = parseTranscriptMarkdown(this.markdown);
     const bodyPrefix = bodyLinePrefix(parsed.tone);
     const contentWidth = Math.max(1, width - bodyPrefix.length);
-    const header = this.renderHeader(parsed, width);
+    this.animated = false;
+    const header = this.renderHeader(parsed, width, {
+      ...this.theme,
+      loadingGlyph: () => {
+        this.animated = true;
+        return this.theme.loadingGlyph();
+      },
+    });
     const bodyLines = this.renderBody(parsed.body, contentWidth);
     return [
       header,
@@ -68,8 +90,12 @@ export class ClankieTranscriptMarkdownBlock implements Component {
     ];
   }
 
-  private renderHeader(parsed: ParsedTranscriptMarkdown, width: number): string {
-    const title = renderTitle(parsed.title, parsed.tone, this.theme);
+  private renderHeader(
+    parsed: ParsedTranscriptMarkdown,
+    width: number,
+    theme: ClankieTranscriptBlockTheme,
+  ): string {
+    const title = renderTitle(parsed.title, parsed.tone, theme);
     return truncateToWidth(title, width, "", true);
   }
 

@@ -76,12 +76,15 @@ distinct `discord_voice` service identity. Official-bot voice ingress
 cannot reuse the text bridge bearer, and the text bridge cannot submit a
 `voice_event`. The bridge resolves both internal credentials directly from the
 store after the service starts; neither enters an environment variable.
-OpenAI transcription and speech reuse the brokered `openai` API credential
-inside the voice process and never expose it to the captain. When the
+OpenAI transcription and speech reuse the brokered `openai` API credential;
+Grok streaming transcription and speech reuse the brokered `xai` API
+credential. The selected key stays inside the voice process and is never
+exposed to the captain. OAuth entries do not satisfy the voice boundary. When the
 external voice is configured ([ADR 0070](../../docs/adr/0070-external-voice-via-streaming-tts.md)),
 ElevenLabs speech synthesis uses the brokered `elevenlabs` API credential the
 same way — connection headers only, and the `ELEVENLABS_API_KEY` / `XI_API_KEY`
 environment names are hard startup errors in the bridge.
+`OPENAI_API_KEY` and `XAI_API_KEY` are likewise hard errors while voice is active.
 
 `discord_user_session` holds the personal-lab normal-user credential
 ([ADR 0048](../../docs/adr/0048-discord-user-session-transport.md)).

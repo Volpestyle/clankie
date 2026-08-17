@@ -69,6 +69,11 @@ file (`@clankie/settings`, configured with `/discord` in the TUI), including
 the lab-body allowlists. Configuration may narrow the recorded opt-in, never
 widen it.
 
+Voice provider settings are shared with the bot body and configured through
+`/voice`. The active body uses the selected brokered `openai` or `xai` API key,
+model, voice, and xAI reasoning effort; both bodies therefore sound and wake
+the same way after an active-body switch.
+
 ## Capability differences from the bot plane
 
 | Capability                   | Bot | User session | Why                                                                                               |

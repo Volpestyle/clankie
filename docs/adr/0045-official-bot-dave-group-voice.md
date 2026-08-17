@@ -46,8 +46,8 @@ under ADR 0100, but it is not executed for official-bot voice.
   The explicit `addressed` resource policy narrows that spend when wanted.
 - `/clankie join` is gated by the voice presence tier
   ([ADR 0050](0050-voice-presence-authority-tier.md)), joins the invoker's
-  allowlisted channel, discloses DAVE, the live OpenAI realtime session's
-  audio residency, and AI-generated speech, and opts in only the invoker.
+  allowlisted channel, discloses DAVE, the selected realtime provider's data
+  handling and AI-generated speech, and opts in only the invoker.
 - Under the default `explicit` policy every other human uses
   `/clankie voice-consent opt-in`. [ADR 0071](0071-presence-as-consent-voice-policy.md)
   also permits an owner-selected `presence` policy for disclosed private rooms;
@@ -55,9 +55,8 @@ under ADR 0100, but it is not executed for official-bot voice.
   shutdown, or process restart revokes ephemeral consent.
 - The receiver subscribes only to consented Discord user ids, so unconsented
   audio never reaches the realtime input buffer. Local raw and generated PCM
-  buffers are memory-only and zeroed after use; the live realtime session
-  retains the call's audio conversation server-side for the duration of the
-  call, and the join disclosure says so
+  buffers are memory-only and zeroed after use. The join disclosure names the
+  configured provider and its data handling
   ([ADR 0057](0057-realtime-voice-with-captain-handoff.md)). Voice receipts
   reject transcript, response, prompt, audio, and PCM fields.
 - Spoken input remains ambient authority and cannot approve privileged work.

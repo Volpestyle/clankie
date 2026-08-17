@@ -27,6 +27,11 @@ resume path. `/conversation` switches to a retained conversation, `/cd` switches
 workspace scope, and `/new [title]` starts another fresh conversation in the
 current scope.
 
+The conversation picker may explicitly close an inactive, non-default
+conversation. Close uses the registry's whole-directory removal path, so its
+public event log and Pi session tree leave together. The service refuses close
+while a turn is active and always protects the default global conversation.
+
 The conversation remains the only durable model-session identity. It owns one
 Pi session tree and one public event log in the same directory. The TUI keeps
 only an in-memory selected id. Its durable tail file is a delivery checkpoint,
@@ -43,6 +48,7 @@ flowchart LR
     Room --> Events[events.jsonl]
     Room --> Pi[one Pi session tree]
     Exit[TUI exits] -. no deletion .-> Room
+    Picker[Picker x close] -->|inactive and non-default| Delete
     Retention[Retention pass] -->|inactive and outside bounds| Delete[Delete whole directory]
     Room --> Retention
 ```
@@ -79,5 +85,7 @@ together and any cached in-memory Pi lane is disposed.
   surfaces remain safe.
 - Recent conversations remain inspectable and resumable, while their logs have
   explicit count, age, byte, and event bounds.
+- The picker closes an unwanted inactive conversation immediately without
+  weakening the protections around active work or the default global room.
 - The non-deletable default global conversation remains available to clients
   that explicitly select it, but it is not the normal TUI startup target.

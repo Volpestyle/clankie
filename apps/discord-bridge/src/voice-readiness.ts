@@ -13,6 +13,8 @@ import { opus } from "prism-media";
 import {
   openRealtimeConversationSession,
   openRealtimeTranscriptionSession,
+  openXaiStreamingTranscriptionSession,
+  XAI_REALTIME_BASE_URL,
   type RealtimeSocketFactory,
   type RealtimeTimers,
 } from "@clankie/discord-presence-core";
@@ -20,18 +22,22 @@ import { asRecord, discordId, discordIdSet, type DiscordReadinessCheck } from ".
 import {
   DEFAULT_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT,
   DEFAULT_VOICE_REALTIME_MODEL,
+  DEFAULT_VOICE_REALTIME_PROVIDER,
   DEFAULT_VOICE_REALTIME_VOICE,
   DEFAULT_VOICE_TRANSCRIBE_MODEL,
   DEFAULT_VOICE_TRUNCATION_RETENTION,
   DEFAULT_VOICE_TTS_PROVIDER,
+  DEFAULT_XAI_VOICE_REALTIME_MODEL,
+  DEFAULT_XAI_VOICE_REALTIME_VOICE,
   parseVoiceRealtimeEnv,
   type VoiceRealtimeEnvConfig,
+  type VoiceRealtimeProvider,
   type VoiceTtsProvider,
 } from "./voice-composition.ts";
 
 /** Content-free realtime configuration echo: provider, models, and truncation scalars only. */
 export interface VoiceRealtimeReadiness {
-  readonly provider: "openai";
+  readonly provider: VoiceRealtimeProvider;
   readonly transcribeModel: string;
   readonly realtimeModel: string;
   readonly voice: string;
@@ -39,8 +45,9 @@ export interface VoiceRealtimeReadiness {
   readonly ttsProvider: VoiceTtsProvider;
   readonly elevenLabsVoiceId?: string;
   readonly elevenLabsModelId?: string;
-  readonly truncationRetentionRatio: number;
-  readonly postInstructionsTokenLimit: number;
+  /** OpenAI-only explicit context truncation controls. */
+  readonly truncationRetentionRatio?: number;
+  readonly postInstructionsTokenLimit?: number;
 }
 
 export interface DiscordVoiceReadinessReport {
@@ -108,6 +115,7 @@ export async function inspectDiscordVoiceReadiness(
     "DISCORD_BOT_TOKEN",
     "DISCORD_USER_TOKEN",
     "OPENAI_API_KEY",
+    "XAI_API_KEY",
     "ELEVENLABS_API_KEY",
     "XI_API_KEY",
   ].filter((name) => options.env[name]);
@@ -117,7 +125,7 @@ export async function inspectDiscordVoiceReadiness(
     forbiddenCredentials.length === 0
       ? "Discord and voice-vendor credentials are absent from the process environment"
       : `${String(forbiddenCredentials.length)} forbidden credential variable(s) are set`,
-    "Remove credential environment variables; use the brokered discord_bot, openai, and elevenlabs entries.",
+    "Remove credential environment variables; use the brokered discord_bot, selected realtime provider, and elevenlabs entries.",
   );
   add(
     "voice enabled",
@@ -196,12 +204,16 @@ export async function inspectDiscordVoiceReadiness(
       realtimeConfig.ttsProvider === "elevenlabs"
         ? `elevenlabs TTS ${realtimeConfig.elevenLabsVoiceId ?? ""}`
         : realtimeConfig.voice;
+    const context =
+      realtimeConfig.realtimeProvider === "xai"
+        ? "provider-managed context"
+        : `truncation ${String(realtimeConfig.truncationRetentionRatio)} retention / ` +
+          `${String(realtimeConfig.postInstructionsTokenLimit)} post-instructions tokens`;
     add(
       "realtime configuration",
       true,
-      `${realtimeConfig.transcribeModel} listener, ${realtimeConfig.realtimeModel}/${mouth} ` +
-        `engaged session, truncation ${String(realtimeConfig.truncationRetentionRatio)} retention / ` +
-        `${String(realtimeConfig.postInstructionsTokenLimit)} post-instructions tokens`,
+      `${realtimeConfig.realtimeProvider}/${realtimeConfig.realtimeProvider === "xai" ? "streaming-stt" : realtimeConfig.transcribeModel} listener, ` +
+        `${realtimeConfig.realtimeModel}/${mouth} engaged session, ${context}`,
       "",
     );
   } catch (error) {
@@ -212,15 +224,16 @@ export async function inspectDiscordVoiceReadiness(
       "Correct the CLANKIE_VOICE_* realtime environment variables.",
     );
   }
-  const openAiCredential = await options.store.get("openai");
-  const openAiKey = openAiCredential?.type === "api" ? openAiCredential.key : undefined;
+  const provider = realtimeConfig?.realtimeProvider ?? DEFAULT_VOICE_REALTIME_PROVIDER;
+  const realtimeCredential = await options.store.get(provider);
+  const realtimeKey = realtimeCredential?.type === "api" ? realtimeCredential.key : undefined;
   add(
-    "OpenAI realtime credential",
-    openAiKey !== undefined,
-    openAiKey === undefined
-      ? "broker entry openai is missing or is not an API credential"
+    `${provider} realtime credential`,
+    realtimeKey !== undefined,
+    realtimeKey === undefined
+      ? `broker entry ${provider} is missing or is not an API credential`
       : "present in broker",
-    "Store the existing OpenAI API key under provider openai; do not put it in the environment.",
+    `Store the ${provider} API key under provider ${provider}; do not put it in the environment.`,
   );
   // Only when the external voice is configured: readiness must fail the same
   // way the bridge startup gate would, before a call ever depends on it.
@@ -317,12 +330,12 @@ export async function inspectDiscordVoiceReadiness(
   // session — not just one session round trip.
   const wakeProbe =
     options.wakeProbe ??
-    (openAiKey !== undefined && realtimeConfig !== undefined
-      ? buildDefaultWakeProbe(openAiKey, realtimeConfig)
+    (realtimeKey !== undefined && realtimeConfig !== undefined
+      ? buildDefaultWakeProbe(realtimeKey, realtimeConfig)
       : undefined);
   if (wakeProbe === undefined) {
-    const detail = "not checked because the brokered openai credential or realtime configuration is missing";
-    const remediation = "Resolve the OpenAI realtime credential and realtime configuration checks first.";
+    const detail = `not checked because the brokered ${provider} credential or realtime configuration is missing`;
+    const remediation = `Resolve the ${provider} realtime credential and configuration checks first.`;
     add("listener session", false, detail, remediation);
     add("engaged session", false, detail, remediation);
     add("wake transition", false, detail, remediation);
@@ -341,13 +354,13 @@ export async function inspectDiscordVoiceReadiness(
       "listener session",
       probe.listener.ok,
       probe.listener.detail,
-      "Verify the brokered openai credential has access to the configured transcription model.",
+      `Verify the brokered ${provider} credential has voice API access.`,
     );
     add(
       "engaged session",
       probe.engaged.ok,
       probe.engaged.detail,
-      "Verify the brokered openai credential has access to the configured realtime model.",
+      `Verify the brokered ${provider} credential has access to the configured realtime model.`,
     );
     add(
       "wake transition",
@@ -415,10 +428,17 @@ export async function inspectDiscordVoiceReadiness(
     checkedAt: (options.clock ?? (() => new Date()))().toISOString(),
     checks,
     realtime: {
-      provider: "openai",
-      transcribeModel: realtimeConfig?.transcribeModel ?? DEFAULT_VOICE_TRANSCRIBE_MODEL,
-      realtimeModel: realtimeConfig?.realtimeModel ?? DEFAULT_VOICE_REALTIME_MODEL,
-      voice: realtimeConfig?.voice ?? DEFAULT_VOICE_REALTIME_VOICE,
+      provider: realtimeConfig?.realtimeProvider ?? DEFAULT_VOICE_REALTIME_PROVIDER,
+      transcribeModel:
+        (realtimeConfig?.realtimeProvider ?? provider) === "xai"
+          ? "xai-streaming-stt"
+          : (realtimeConfig?.transcribeModel ?? DEFAULT_VOICE_TRANSCRIBE_MODEL),
+      realtimeModel:
+        realtimeConfig?.realtimeModel ??
+        (provider === "xai" ? DEFAULT_XAI_VOICE_REALTIME_MODEL : DEFAULT_VOICE_REALTIME_MODEL),
+      voice:
+        realtimeConfig?.voice ??
+        (provider === "xai" ? DEFAULT_XAI_VOICE_REALTIME_VOICE : DEFAULT_VOICE_REALTIME_VOICE),
       ttsProvider: realtimeConfig?.ttsProvider ?? DEFAULT_VOICE_TTS_PROVIDER,
       ...(realtimeConfig?.elevenLabsVoiceId === undefined
         ? {}
@@ -426,10 +446,14 @@ export async function inspectDiscordVoiceReadiness(
       ...(realtimeConfig?.elevenLabsModelId === undefined
         ? {}
         : { elevenLabsModelId: realtimeConfig.elevenLabsModelId }),
-      truncationRetentionRatio:
-        realtimeConfig?.truncationRetentionRatio ?? DEFAULT_VOICE_TRUNCATION_RETENTION,
-      postInstructionsTokenLimit:
-        realtimeConfig?.postInstructionsTokenLimit ?? DEFAULT_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT,
+      ...(provider === "openai"
+        ? {
+            truncationRetentionRatio:
+              realtimeConfig?.truncationRetentionRatio ?? DEFAULT_VOICE_TRUNCATION_RETENTION,
+            postInstructionsTokenLimit:
+              realtimeConfig?.postInstructionsTokenLimit ?? DEFAULT_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT,
+          }
+        : {}),
     },
   };
 }
@@ -478,17 +502,22 @@ export async function probeVoiceWakeTransition(
     detail: "not attempted because the listener session failed",
   };
   try {
-    listener = await withTimeout(
-      openRealtimeTranscriptionSession({
-        apiKey: options.apiKey,
-        model: options.config.transcribeModel,
-        ...(options.config.language === undefined ? {} : { language: options.config.language }),
-        ...injected,
-        onTranscript: () => undefined,
-      }),
-      timeoutMs,
-      "listener session open timed out",
-    );
+    const openListener: Promise<{ close(): void }> =
+      options.config.realtimeProvider === "xai"
+        ? openXaiStreamingTranscriptionSession({
+            apiKey: options.apiKey,
+            ...(options.config.language === undefined ? {} : { language: options.config.language }),
+            ...injected,
+            onTranscript: () => undefined,
+          })
+        : openRealtimeTranscriptionSession({
+            apiKey: options.apiKey,
+            model: options.config.transcribeModel,
+            ...(options.config.language === undefined ? {} : { language: options.config.language }),
+            ...injected,
+            onTranscript: () => undefined,
+          });
+    listener = await withTimeout(openListener, timeoutMs, "listener session open timed out");
     listenerStage = { ok: true, detail: "dormant transcription session opened cleanly" };
   } catch (error) {
     listenerStage = {
@@ -512,6 +541,13 @@ export async function probeVoiceWakeTransition(
         openRealtimeConversationSession({
           apiKey: options.apiKey,
           model: options.config.realtimeModel,
+          ...(options.config.realtimeProvider === "xai"
+            ? {
+                provider: "xai" as const,
+                baseUrl: XAI_REALTIME_BASE_URL,
+                reasoningEffort: options.config.xaiReasoningEffort ?? "high",
+              }
+            : {}),
           ...(textModality ? { outputModality: "text" as const } : { voice: options.config.voice }),
           instructions: WAKE_PROBE_INSTRUCTIONS,
           truncationRetentionRatio: options.config.truncationRetentionRatio,

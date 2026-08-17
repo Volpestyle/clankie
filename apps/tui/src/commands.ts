@@ -17,6 +17,7 @@ import {
 import type {
   ObservableCaptainLane,
   OperatorConversationContextUsage,
+  OperatorConversationSessionState,
   OperatorConversationScope,
 } from "@clankie/protocol";
 import type { PresenceSnapshot } from "./observation/presence.ts";
@@ -61,10 +62,12 @@ export interface ConsoleCommandContext {
         readonly title: string;
         readonly isDefault: boolean;
         readonly revision: number;
+        readonly sessionState: OperatorConversationSessionState;
         readonly scope: OperatorConversationScope;
       }[]
     >;
     select(conversationId: string): Promise<{ readonly conversationId: string; readonly title: string }>;
+    close?(conversationId: string): Promise<boolean>;
     /** Creates and selects a conversation with fresh model context in the current scope. */
     create?(title?: string): Promise<{ readonly conversationId: string; readonly title: string }>;
     /** Opens the conversation rooted at a directory, creating it on first visit. */
@@ -144,7 +147,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "conversation",
       aliases: ["chat"],
-      description: "List or switch persistent chat conversations",
+      description: "Choose or switch persistent chat conversations",
       argumentHint: "[<name-or-path>]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
@@ -153,51 +156,96 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           return;
         }
         const selector = argument.trim();
+        if (selector.length === 0) {
+          const flow = shell.setupFlow;
+          flow.begin("conversation");
+          try {
+            for (;;) {
+              const rows = await conversations.conversations();
+              const currentConversationId = conversations.conversationId;
+              let conversationIdToClose: string | undefined;
+              const picked = await flow.readSelect({
+                kind: "single",
+                message: "Conversations",
+                options: rows.map((item) => ({
+                  value: item.conversationId,
+                  label: item.title,
+                  hint:
+                    item.scope.kind === "workspace"
+                      ? "workspace"
+                      : item.isDefault
+                        ? "global · default"
+                        : "global",
+                  ...(item.scope.kind === "workspace" ? { description: item.scope.workspaceId } : {}),
+                })),
+                ...(currentConversationId === undefined
+                  ? {}
+                  : { currentValue: currentConversationId, initialValue: currentConversationId }),
+                ...(conversations.close === undefined
+                  ? {}
+                  : { onClose: (conversationId: string) => (conversationIdToClose = conversationId) }),
+                required: true,
+              });
+              if (conversationIdToClose !== undefined && conversations.close !== undefined) {
+                const closing = rows.find((item) => item.conversationId === conversationIdToClose);
+                const closed = await conversations.close(conversationIdToClose);
+                if (!closed) {
+                  flow.renderLine(
+                    closing?.isDefault === true
+                      ? "The default conversation stays available."
+                      : closing?.sessionState === "active"
+                        ? "That conversation is still active."
+                        : "That conversation could not be closed.",
+                    "warning",
+                  );
+                  continue;
+                }
+                if (conversationIdToClose === currentConversationId) {
+                  const fallback = (await conversations.conversations())[0];
+                  if (fallback === undefined) throw new Error("No conversation remains after close");
+                  await conversations.select(fallback.conversationId);
+                }
+                flow.renderLine(`Closed ${closing?.title ?? "conversation"}.`, "success");
+                continue;
+              }
+              const conversationId = picked?.[0];
+              if (conversationId === undefined) return;
+              const selected = await conversations.select(conversationId);
+              shell.insertCommandResult("/conversation", `Switched to ${selected.title}.`, "success");
+              return;
+            }
+          } finally {
+            flow.end();
+          }
+        }
         const rows = await conversations.conversations();
-        if (selector.length > 0) {
-          const byId = rows.find((item) => item.conversationId === selector);
-          const matches =
-            byId === undefined
-              ? rows.filter(
-                  (item) =>
-                    item.title.toLowerCase() === selector.toLowerCase() ||
-                    (item.scope.kind === "workspace" && item.scope.workspaceId === selector),
-                )
-              : [byId];
-          if (matches.length === 0) {
-            shell.insertCommandResult(
-              `/conversation ${selector}`,
-              `No conversation matches ${selector}. Run /conversation to list them.`,
-              "error",
-            );
-            return;
-          }
-          if (matches.length > 1) {
-            shell.insertCommandResult(
-              `/conversation ${selector}`,
-              `More than one conversation is named ${selector}. Use /cd <path> to choose its workspace.`,
-              "error",
-            );
-            return;
-          }
-          const selected = await conversations.select(matches[0]!.conversationId);
-          shell.insertCommandResult(`/conversation ${selector}`, `Switched to ${selected.title}.`, "success");
+        const byId = rows.find((item) => item.conversationId === selector);
+        const matches =
+          byId === undefined
+            ? rows.filter(
+                (item) =>
+                  item.title.toLowerCase() === selector.toLowerCase() ||
+                  (item.scope.kind === "workspace" && item.scope.workspaceId === selector),
+              )
+            : [byId];
+        if (matches.length === 0) {
+          shell.insertCommandResult(
+            `/conversation ${selector}`,
+            `No conversation matches ${selector}. Run /conversation to choose one.`,
+            "error",
+          );
           return;
         }
-        shell.insertCommandResult(
-          "/conversation",
-          `${rows
-            .map((item) => {
-              const current = item.conversationId === conversations.conversationId;
-              const location =
-                item.scope.kind === "workspace"
-                  ? `Workspace · ${item.scope.workspaceId}`
-                  : `Global${item.isDefault ? " · default" : ""}`;
-              return `${current ? "●" : "○"} ${item.title}${current ? " · current" : ""}\n  ${location}`;
-            })
-            .join("\n")}\n\nSwitch with /conversation <name> or /cd <path>.`,
-          "success",
-        );
+        if (matches.length > 1) {
+          shell.insertCommandResult(
+            `/conversation ${selector}`,
+            `More than one conversation is named ${selector}. Use /cd <path> to choose its workspace.`,
+            "error",
+          );
+          return;
+        }
+        const selected = await conversations.select(matches[0]!.conversationId);
+        shell.insertCommandResult(`/conversation ${selector}`, `Switched to ${selected.title}.`, "success");
       },
     },
     {

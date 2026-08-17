@@ -26,8 +26,18 @@ export function resolveVoiceSettings(
     overridden.push(name);
   };
 
+  takeString("realtimeProvider", "CLANKIE_VOICE_REALTIME_PROVIDER");
   takeString("ttsProvider", "CLANKIE_VOICE_TTS_PROVIDER");
-  takeString("openAiVoice", "CLANKIE_VOICE_REALTIME_VOICE");
+  const provider = merged.realtimeProvider === "xai" ? "xai" : "openai";
+  if (provider === "xai") {
+    takeString("xAiRealtimeModel", "CLANKIE_VOICE_REALTIME_MODEL");
+    takeString("xAiVoice", "CLANKIE_VOICE_REALTIME_VOICE");
+    takeString("xAiReasoningEffort", "CLANKIE_VOICE_XAI_REASONING_EFFORT");
+  } else {
+    takeString("openAiRealtimeModel", "CLANKIE_VOICE_REALTIME_MODEL");
+    takeString("openAiTranscribeModel", "CLANKIE_VOICE_TRANSCRIBE_MODEL");
+    takeString("openAiVoice", "CLANKIE_VOICE_REALTIME_VOICE");
+  }
   takeString("elevenLabsVoiceId", "CLANKIE_VOICE_ELEVENLABS_VOICE_ID");
   takeString("elevenLabsModelId", "CLANKIE_VOICE_ELEVENLABS_MODEL_ID");
 
@@ -48,7 +58,8 @@ export function applyVoiceSettingsToEnvironment(
   env: NodeJS.ProcessEnv = process.env,
 ): string[] {
   const applied: string[] = [];
-  for (const [name, value] of Object.entries(voiceSettingsToEnvironment(settings))) {
+  const effective = resolveVoiceSettings(settings, env).settings;
+  for (const [name, value] of Object.entries(voiceSettingsToEnvironment(effective))) {
     const existing = env[name];
     if (existing !== undefined && existing.length > 0) continue;
     env[name] = value;
@@ -59,8 +70,25 @@ export function applyVoiceSettingsToEnvironment(
 
 export function voiceSettingsToEnvironment(settings: VoiceSettings): Record<string, string> {
   const env: Record<string, string> = {};
-  if (settings.openAiVoice !== undefined && settings.openAiVoice.length > 0) {
-    env["CLANKIE_VOICE_REALTIME_VOICE"] = settings.openAiVoice;
+  if (settings.realtimeProvider === "xai") {
+    env["CLANKIE_VOICE_REALTIME_PROVIDER"] = "xai";
+    if (settings.xAiRealtimeModel !== undefined) {
+      env["CLANKIE_VOICE_REALTIME_MODEL"] = settings.xAiRealtimeModel;
+    }
+    if (settings.xAiVoice !== undefined) {
+      env["CLANKIE_VOICE_REALTIME_VOICE"] = settings.xAiVoice;
+    }
+    env["CLANKIE_VOICE_XAI_REASONING_EFFORT"] = settings.xAiReasoningEffort;
+  } else {
+    if (settings.openAiRealtimeModel !== undefined) {
+      env["CLANKIE_VOICE_REALTIME_MODEL"] = settings.openAiRealtimeModel;
+    }
+    if (settings.openAiTranscribeModel !== undefined) {
+      env["CLANKIE_VOICE_TRANSCRIBE_MODEL"] = settings.openAiTranscribeModel;
+    }
+    if (settings.openAiVoice !== undefined && settings.openAiVoice.length > 0) {
+      env["CLANKIE_VOICE_REALTIME_VOICE"] = settings.openAiVoice;
+    }
   }
   // The default provider is omitted, and the ElevenLabs identifiers are
   // projected only under their provider — the env parser treats a set-but-

@@ -4,7 +4,11 @@ import {
   resolveDiscordVoiceBridgeCredential,
 } from "@clankie/credential-broker";
 import { inspectDiscordVoiceReadiness } from "./voice-readiness.ts";
-import { applyDiscordSettingsToEnvironment, SettingsStore } from "@clankie/settings";
+import {
+  applyDiscordSettingsToEnvironment,
+  applyVoiceSettingsToEnvironment,
+  SettingsStore,
+} from "@clankie/settings";
 
 // Readiness must inspect the configuration the bridge will actually run with.
 // The bridge fills unset DISCORD_* names from the operator settings file at
@@ -12,6 +16,7 @@ import { applyDiscordSettingsToEnvironment, SettingsStore } from "@clankie/setti
 // deployment that is in fact configured — the exact opposite of its job.
 const storedSettings = await new SettingsStore().load();
 applyDiscordSettingsToEnvironment(storedSettings.discord);
+applyVoiceSettingsToEnvironment(storedSettings.voice);
 
 const store = createDefaultCredentialStore();
 const bridgeToken = await resolveDiscordVoiceBridgeCredential({ store });
@@ -22,7 +27,9 @@ const api = new ClankieApiClient({
 // This is the live path: with no injected wakeProbe, readiness builds the real
 // dormant→engaged probe from the brokered openai credential and opens both
 // realtime session tiers in sequence (skipped as failed checks when the
-// credential or configuration is missing). Unit tests inject fakes instead.
+// selected realtime-provider credential and opens both session tiers in
+// sequence (skipped as failed checks when the credential or configuration is
+// missing). Unit tests inject fakes instead.
 const report = await inspectDiscordVoiceReadiness({
   env: process.env,
   store,

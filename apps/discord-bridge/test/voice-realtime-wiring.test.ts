@@ -110,6 +110,7 @@ const voiceMock = (discordVoiceModule as unknown as { __voiceMock: VoiceMockStat
 
 class FakeRealtimeSocket implements RealtimeSocket {
   public readonly sent: string[] = [];
+  public readonly binary: Buffer[] = [];
   public readonly url: string;
   public readonly headers: Readonly<Record<string, string>>;
   private readonly messageHandlers: ((data: string) => void)[] = [];
@@ -120,8 +121,9 @@ class FakeRealtimeSocket implements RealtimeSocket {
     this.headers = headers;
   }
 
-  public send(data: string): void {
-    this.sent.push(data);
+  public send(data: string | Uint8Array): void {
+    if (typeof data === "string") this.sent.push(data);
+    else this.binary.push(Buffer.from(data));
   }
 
   public close(): void {
@@ -461,5 +463,49 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
     }
 
     await session.leave();
+  });
+
+  it("composes xAI streaming STT and Grok Voice behind the shared ports", async () => {
+    const sockets: FakeRealtimeSocket[] = [];
+    const config = parseVoiceRealtimeEnv({
+      CLANKIE_VOICE_REALTIME_PROVIDER: "xai",
+      CLANKIE_VOICE_REALTIME_MODEL: "grok-voice-think-fast-2.0",
+      CLANKIE_VOICE_REALTIME_VOICE: "eve",
+      CLANKIE_VOICE_XAI_REASONING_EFFORT: "none",
+    });
+    const ports = createVoiceRealtimePorts({
+      apiKey: "brokered-xai-key",
+      config,
+      timers: new TestTimers(),
+      socketFactory: (url, headers) => {
+        const socket = new FakeRealtimeSocket(url, headers);
+        sockets.push(socket);
+        return Promise.resolve(socket);
+      },
+    });
+
+    const listener = await ports.openTranscription({
+      onTranscript: () => undefined,
+      onClose: () => undefined,
+      onError: () => undefined,
+    });
+    expect(sockets[0]?.url).toContain("wss://api.x.ai/v1/stt");
+    sockets[0]?.serverEvent({ type: "transcript.created" });
+    listener.appendAudio(Buffer.from([1, 0, 2, 0]));
+    expect(sockets[0]?.binary[0]).toEqual(Buffer.from([1, 0, 2, 0]));
+
+    await ports.openConversation({
+      instructions: "Be Clankie.",
+      onAudioDelta: (pcm) => pcm.fill(0),
+      onFunctionCall: () => undefined,
+      onResponseDone: () => undefined,
+      onClose: () => undefined,
+      onError: () => undefined,
+    });
+    expect(sockets[1]?.url).toContain("wss://api.x.ai/v1/realtime");
+    expect(sockets[1]?.frames()[0]).toMatchObject({
+      type: "session.update",
+      session: { voice: "eve", reasoning: { effort: "none" }, turn_detection: null },
+    });
   });
 });

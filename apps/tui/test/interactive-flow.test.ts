@@ -276,5 +276,29 @@ describe("InteractiveSelectPrompt single select", () => {
     expect(noBackPrompt.render(100).some((line) => stripAnsi(line).includes("Esc cancels"))).toBe(true);
     noBackPrompt.handleInput("\x1b[D");
     expect(noBackCancelled).toBe(false);
+    noBackPrompt.handleInput("x");
+    expect(noBackPrompt.render(100).some((line) => stripAnsi(line).includes('filter "x"'))).toBe(true);
+  });
+
+  it("closes the highlighted option with x when the selector provides that action", () => {
+    let closed: string | undefined;
+    const prompt = new InteractiveSelectPrompt({
+      kind: "single",
+      message: "Conversations",
+      onCancel: () => undefined,
+      onClose: (value) => {
+        closed = value;
+      },
+      onRender: () => undefined,
+      onSubmit: () => undefined,
+      options: selectOptions,
+      theme,
+    });
+
+    prompt.handleInput("x");
+
+    expect(closed).toBe("codex");
+    expect(prompt.render(80).some((line) => stripAnsi(line).includes("x closes selected"))).toBe(true);
+    expect(prompt.render(80).some((line) => stripAnsi(line).includes('filter "x"'))).toBe(false);
   });
 });

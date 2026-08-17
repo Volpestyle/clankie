@@ -447,6 +447,13 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     .strict(),
   z
     .object({
+      op: z.literal("close"),
+      schemaVersion: z.literal(1),
+      conversationId: OperatorConversationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
       op: z.literal("replay"),
       schemaVersion: z.literal(1),
       replay: ReplayOperatorConversationRequestSchema,
@@ -492,6 +499,14 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       op: z.literal("create"),
       schemaVersion: z.literal(1),
       conversation: OperatorConversationSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("close"),
+      schemaVersion: z.literal(1),
+      conversationId: OperatorConversationIdSchema,
+      closed: z.boolean(),
     })
     .strict(),
   z
@@ -550,6 +565,7 @@ export interface OperatorConversationServiceClient {
     readonly scope: OperatorConversationScope;
     readonly title: string;
   }): Promise<OperatorConversation>;
+  close(conversationId: string): Promise<boolean>;
   replay(request: ReplayOperatorConversationRequest): Promise<ReplayOperatorConversationResult>;
   /**
    * Yields durable events, then a single `recovery` item and STOPS if the server
@@ -594,6 +610,11 @@ export function createOperatorConversationServiceClient(
       });
       if (result.op !== "create") throw new Error(`Unexpected ${result.op} result for create`);
       return result.conversation;
+    },
+    async close(conversationId) {
+      const result = await dispatch({ op: "close", schemaVersion: 1, conversationId });
+      if (result.op !== "close") throw new Error(`Unexpected ${result.op} result for close`);
+      return result.closed;
     },
     async replay(request) {
       const result = await dispatch({ op: "replay", schemaVersion: 1, replay: request });

@@ -82,9 +82,11 @@ Discord body identities resolve directly from the credential broker.
 
 ## Operator behavior
 
-- `/conversation` lists or switches retained conversations. `/chat` remains an
-  alias. Each console has its own bounded replay cursor; switching never creates
-  a device-local session.
+- `/conversation` opens a searchable dialog for retained conversations;
+  `/conversation <name-or-path>` switches directly. `/chat` remains an alias.
+  Press `x` to close the highlighted inactive conversation; active and default
+  conversations stay protected. Each console has its own bounded replay cursor;
+  switching never creates a device-local session.
 - `/new [title]` starts and selects a conversation with fresh model context in
   the current workspace. The previous conversation remains available through
   `/conversation`.
@@ -111,12 +113,19 @@ on|off` remain available for direct use. Restart Clankie to apply a change.
   `/auth status` may also report compatibility provider environment fallbacks;
   Discord and body credentials remain broker-only except documented
   operator/captain/runner test overrides.
+- `/voice` selects OpenAI Realtime, Grok Voice, or OpenAI plus ElevenLabs and
+  configures the active model, voice, xAI reasoning effort, and brokered API
+  keys. `/voice status` shows the effective settings and environment overrides.
 - YouTube music is an ordinary prompt, not a slash command. Audible playback is
   on the official-bot voice path; see the
   [Discord media guide](../../docs/discord-media.md).
 - `/provider`, `/model`, and `/effort` select the captain. `/image-model` and
   `/video-model` select generation models. Non-secret model configuration lives
   in `~/.config/clankie/clankie.json`.
+- `/provider` → "add a local endpoint…" declares an OpenAI-compatible local
+  runtime (Ollama, LM Studio, vLLM) by base URL, reads its model list from
+  `GET {baseURL}/models`, and needs no credential. The service picks the new
+  provider up on `clankie restart captain`.
 - `/layout` moves the input and status bands and toggles the header.
 - `Ctrl+T` focuses the transcript. `!` on empty input opens the inline shell.
   Esc detaches from an in-flight turn; the service continues it and the console
@@ -124,6 +133,24 @@ on|off` remain available for direct use. Restart Clankie to apply a change.
 - `clankie health` reports operator credential source and env/store consistency
   without fingerprints or secret values. Remove an active
   `CLANKIE_OPERATOR_TOKEN` override before rotating the stored credential.
+
+## Transcript rendering
+
+A frame renders every block in the transcript, so block cost is paid on every
+keystroke and must not grow with the length of the session
+([ADR 0112](../../docs/adr/0112-a-frame-costs-the-same-at-turn-one-thousand.md)).
+A block component returns a stable array while its content is unchanged —
+memoize through `ClankieRenderCache`, and clear it in `invalidate` and in every
+setter. The viewport uses that array's identity to skip re-decorating the block.
+A component that rebuilds its array each call still renders correctly, but it
+re-pays its own cost every frame.
+
+Measure before and after any change to the render path:
+
+```bash
+node apps/tui/bench/transcript-render.ts          # default 10..500 blocks
+node apps/tui/bench/transcript-render.ts 1000     # a specific scrollback size
+```
 
 The launcher runs TypeScript through Node's native type stripping; the repo's
 `erasableSyntaxOnly` setting enforces the supported syntax.

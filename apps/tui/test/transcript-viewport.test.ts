@@ -427,3 +427,69 @@ describe("scrollbar integration", () => {
     expect(narrowBarViewport.scrollbarHitColumn()).toBeUndefined();
   });
 });
+
+// Real transcript blocks hand back the same array while their content is
+// unchanged, which is what lets the viewport skip re-decorating them. These
+// cover the state that must still punch through that cache.
+class StableLineComponent implements Component {
+  private lines: string[];
+
+  constructor(lines: string[]) {
+    this.lines = lines;
+  }
+
+  setLines(lines: string[]): void {
+    this.lines = lines;
+  }
+
+  invalidate(): void {}
+
+  render(): string[] {
+    return this.lines;
+  }
+}
+
+describe("ClankieTranscriptViewport block decoration cache", () => {
+  it("re-decorates when the selection moves, focus flips, or a block collapses", () => {
+    const viewport = new ClankieTranscriptViewport(() => 5, identityTheme, { blockSpacing: 1 });
+    viewport.addChild(new StableLineComponent(["a1", "a2"]));
+    const second = viewport.addChild(new StableLineComponent(["b1", "b2"]));
+
+    expect(plain(viewport.render(80))).toEqual(["a1", "a2", "", "b1", "b2"]);
+
+    viewport.focused = true;
+    expect(
+      plain(viewport.render(80)).some((line) => line.startsWith("> b1")),
+      "focusing must repaint the selection marker onto cached blocks",
+    ).toBe(true);
+
+    viewport.handleInput("\x1b[A");
+    const afterMove = plain(viewport.render(80));
+    expect(afterMove.some((line) => line.startsWith("> a1"))).toBe(true);
+    expect(
+      afterMove.some((line) => line.startsWith("> b1")),
+      "the previously selected block must lose its marker",
+    ).toBe(false);
+
+    second.toggleCollapsed();
+    expect(plain(viewport.render(80)).some((line) => line.includes("hidden lines"))).toBe(true);
+  });
+
+  it("re-truncates cached blocks when the width changes", () => {
+    const viewport = new ClankieTranscriptViewport(() => 1, identityTheme);
+    viewport.addChild(new StableLineComponent(["abcdefghij"]));
+
+    expect(plain(viewport.render(80))[0]?.trimEnd()).toBe("abcdefghij");
+    expect(plain(viewport.render(5))[0]).toBe("abcde");
+  });
+
+  it("picks up new content when a block's own lines change", () => {
+    const viewport = new ClankieTranscriptViewport(() => 1, identityTheme);
+    const component = new StableLineComponent(["before"]);
+    viewport.addChild(component);
+
+    expect(plain(viewport.render(80)).some((line) => line.startsWith("before"))).toBe(true);
+    component.setLines(["after"]);
+    expect(plain(viewport.render(80)).some((line) => line.startsWith("after"))).toBe(true);
+  });
+});
