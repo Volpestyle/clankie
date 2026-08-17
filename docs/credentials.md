@@ -111,7 +111,7 @@ No `/auth` or `/connect` flow writes this slot yet; the operator stores it in
 the broker directly. Without an entry, `pokeagent_join_mmo` refuses with
 `no_credential`, which Clankie says out loud rather than retrying. The minting
 and holder-file side lives in the world's own
-[joining guide](https://github.com/Volpestyle/pokeagent-mmo/blob/main/docs/joining-a-world.md).
+[joining guide](https://github.com/Volpestyle/pokeagents/blob/main/docs/joining-a-world.md).
 
 ## Provider credentials
 

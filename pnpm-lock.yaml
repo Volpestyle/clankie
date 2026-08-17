@@ -104,9 +104,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 1.29.0
         version: 1.29.0(zod@4.4.3)
-      '@pokeagent-mmo/world-protocol':
-        specifier: github:Volpestyle/pokeagent-mmo#6aad5012b22338e87980fadf15c4e1421d0b017e&path:/packages/world-protocol
-        version: git+ssh://git@github.com/Volpestyle/pokeagent-mmo.git#6aad5012b22338e87980fadf15c4e1421d0b017e&path:/packages/world-protocol
+      '@pokeagents/world-protocol':
+        specifier: 0.1.0
+        version: 0.1.0
       hono:
         specifier: 4.12.28
         version: 4.12.28
@@ -1504,9 +1504,8 @@ packages:
   '@pinojs/redact@0.4.0':
     resolution: {integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==}
 
-  '@pokeagent-mmo/world-protocol@git+ssh://git@github.com/Volpestyle/pokeagent-mmo.git#6aad5012b22338e87980fadf15c4e1421d0b017e&path:/packages/world-protocol':
-    resolution: {commit: 6aad5012b22338e87980fadf15c4e1421d0b017e, path: /packages/world-protocol, repo: git@github.com:Volpestyle/pokeagent-mmo.git, type: git}
-    version: 0.1.0
+  '@pokeagents/world-protocol@0.1.0':
+    resolution: {integrity: sha512-N2wes2prbIUUdobHzAxo+XZLeVm5YL8hVqpPJKlm8uS9FOF3pAqwgtg4FQz3FSDjn2auZGrykoJnOyJdXjNGtA==}
 
   '@protobufjs/aspromise@1.1.2':
     resolution: {integrity: sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ==}
@@ -3993,7 +3992,7 @@ snapshots:
 
   '@pinojs/redact@0.4.0': {}
 
-  '@pokeagent-mmo/world-protocol@git+ssh://git@github.com/Volpestyle/pokeagent-mmo.git#6aad5012b22338e87980fadf15c4e1421d0b017e&path:/packages/world-protocol':
+  '@pokeagents/world-protocol@0.1.0':
     dependencies:
       zod: 4.4.3
 

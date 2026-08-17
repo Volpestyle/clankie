@@ -15,7 +15,7 @@ import { describe, expect, it } from "vitest";
 import { joinWorld as askJoinWorld, startPlay } from "../src/captain/play.ts";
 import { createGbaPlayExecution } from "../src/play-execution.ts";
 import { PlayHost } from "../src/play-host.ts";
-import { SessionStatusSchema, WhoResultSchema } from "@pokeagent-mmo/world-protocol";
+import { SessionStatusSchema, WhoResultSchema } from "@pokeagents/world-protocol";
 import type { WorldBody } from "../src/world/body.ts";
 
 const silentLogger = {

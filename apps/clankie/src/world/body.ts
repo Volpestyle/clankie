@@ -54,8 +54,8 @@ import {
   type Observation,
   type SessionStatus,
   type WhoResult,
-} from "@pokeagent-mmo/world-protocol";
-import { callHost, defaultWorldStateDir, worldSocketPath } from "@pokeagent-mmo/world-protocol/ipc";
+} from "@pokeagents/world-protocol";
+import { callHost, defaultWorldStateDir, worldSocketPath } from "@pokeagents/world-protocol/ipc";
 import { z } from "zod";
 
 export interface WorldBody {
