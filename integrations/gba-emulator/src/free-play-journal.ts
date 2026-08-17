@@ -18,9 +18,15 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
-import { FreePlayTurnSchema, type FreePlayResult, type FreePlayTurn } from "./free-play.ts";
+import {
+  FreePlayTurnEvidenceSchema,
+  FreePlayTurnSchema,
+  type FreePlayResult,
+  type FreePlayTurn,
+  type FreePlayTurnEvidence,
+} from "./free-play.ts";
 
-export const FreePlayJournalHeaderSchema = z
+export const FreePlayJournalHeaderV1Schema = z
   .object({
     kind: z.literal("header"),
     schemaVersion: z.literal(1),
@@ -33,9 +39,16 @@ export const FreePlayJournalHeaderSchema = z
     resumedFromCheckpointId: z.string().max(200).nullable(),
   })
   .strict();
+export const FreePlayJournalHeaderV2Schema = FreePlayJournalHeaderV1Schema.extend({
+  schemaVersion: z.literal(2),
+});
+export const FreePlayJournalHeaderSchema = z.union([
+  FreePlayJournalHeaderV1Schema,
+  FreePlayJournalHeaderV2Schema,
+]);
 export type FreePlayJournalHeader = z.infer<typeof FreePlayJournalHeaderSchema>;
 
-export const FreePlayJournalTurnSchema = z
+export const FreePlayJournalTurnV1Schema = z
   .object({
     kind: z.literal("turn"),
     schemaVersion: z.literal(1),
@@ -50,9 +63,24 @@ export const FreePlayJournalTurnSchema = z
     speechDeliveryId: z.string().min(1).max(128).regex(/^\S+$/u).optional(),
   })
   .strict();
+export const FreePlayJournalTurnV2Schema = FreePlayJournalTurnV1Schema.extend({
+  schemaVersion: z.literal(2),
+  evidence: FreePlayTurnEvidenceSchema,
+  /** Exact bounded event offered to the room, never the words the room generated. */
+  narrationEvent: z.string().min(1).max(512).optional(),
+}).superRefine((line, context) => {
+  if ((line.speechDeliveryId === undefined) !== (line.narrationEvent === undefined)) {
+    context.addIssue({
+      code: "custom",
+      path: ["speechDeliveryId"],
+      message: "speechDeliveryId and narrationEvent must be recorded together",
+    });
+  }
+});
+export const FreePlayJournalTurnSchema = z.union([FreePlayJournalTurnV1Schema, FreePlayJournalTurnV2Schema]);
 export type FreePlayJournalTurn = z.infer<typeof FreePlayJournalTurnSchema>;
 
-export const FreePlayJournalSummarySchema = z
+export const FreePlayJournalSummaryV1Schema = z
   .object({
     kind: z.literal("summary"),
     schemaVersion: z.literal(1),
@@ -86,14 +114,26 @@ export const FreePlayJournalSummarySchema = z
     // Defaulted for the same reason the volition skip count is: journals
     // written before the repeat counter existed must keep parsing.
     longestUnchangedRun: z.number().int().nonnegative().default(0),
+    longestRecurringRun: z.number().int().nonnegative().default(0),
+    objectivesRetired: z.number().int().nonnegative().default(0),
   })
   .strict();
+export const FreePlayJournalSummaryV2Schema = FreePlayJournalSummaryV1Schema.extend({
+  schemaVersion: z.literal(2),
+});
+export const FreePlayJournalSummarySchema = z.union([
+  FreePlayJournalSummaryV1Schema,
+  FreePlayJournalSummaryV2Schema,
+]);
 export type FreePlayJournalSummary = z.infer<typeof FreePlayJournalSummarySchema>;
 
-export const FreePlayJournalLineSchema = z.discriminatedUnion("kind", [
-  FreePlayJournalHeaderSchema,
-  FreePlayJournalTurnSchema,
-  FreePlayJournalSummarySchema,
+export const FreePlayJournalLineSchema = z.union([
+  FreePlayJournalHeaderV1Schema,
+  FreePlayJournalHeaderV2Schema,
+  FreePlayJournalTurnV1Schema,
+  FreePlayJournalTurnV2Schema,
+  FreePlayJournalSummaryV1Schema,
+  FreePlayJournalSummaryV2Schema,
 ]);
 export type FreePlayJournalLine = z.infer<typeof FreePlayJournalLineSchema>;
 
@@ -131,7 +171,11 @@ export interface OpenFreePlayJournalInput {
 
 export interface FreePlayJournal {
   readonly path: string;
-  turn(turn: FreePlayTurn, extras?: { readonly speechDeliveryId?: string }): void;
+  turn(
+    turn: FreePlayTurn,
+    evidence: FreePlayTurnEvidence,
+    extras?: { readonly speechDeliveryId?: string; readonly narrationEvent?: string },
+  ): void;
   summary(input: {
     outcome: string;
     result: FreePlayResult;
@@ -158,7 +202,7 @@ export function openFreePlayJournal(input: OpenFreePlayJournalInput): FreePlayJo
     journalPath,
     FreePlayJournalHeaderSchema.parse({
       kind: "header",
-      schemaVersion: 1,
+      schemaVersion: 2,
       runId: input.runId,
       environmentSessionId: input.environmentSessionId,
       scenarioId: input.scenarioId,
@@ -178,21 +222,23 @@ export function openFreePlayJournal(input: OpenFreePlayJournalInput): FreePlayJo
 
   return {
     path: journalPath,
-    turn: (turn, extras) =>
+    turn: (turn, evidence, extras) =>
       append(
-        FreePlayJournalTurnSchema.parse({
+        FreePlayJournalTurnV2Schema.parse({
           kind: "turn",
-          schemaVersion: 1,
+          schemaVersion: 2,
           at: clock().toISOString(),
           turn,
+          evidence,
           ...(extras?.speechDeliveryId === undefined ? {} : { speechDeliveryId: extras.speechDeliveryId }),
+          ...(extras?.narrationEvent === undefined ? {} : { narrationEvent: extras.narrationEvent }),
         }),
       ),
     summary: ({ outcome, result, durationMs, framesPublished, framesDropped, checkpointId }) =>
       append(
-        FreePlayJournalSummarySchema.parse({
+        FreePlayJournalSummaryV2Schema.parse({
           kind: "summary",
-          schemaVersion: 1,
+          schemaVersion: 2,
           at: clock().toISOString(),
           outcome,
           turnsTaken: result.turns.length,
@@ -205,6 +251,8 @@ export function openFreePlayJournal(input: OpenFreePlayJournalInput): FreePlayJo
           volition: result.volition,
           coherence: result.coherence,
           longestUnchangedRun: result.longestUnchangedRun,
+          longestRecurringRun: result.longestRecurringRun,
+          objectivesRetired: result.objectivesRetired,
         }),
       ),
   };
@@ -219,5 +267,7 @@ export function parseFreePlayJournal(contents: string): FreePlayJournalLine[] {
 }
 
 function appendLine(journalPath: string, line: FreePlayJournalLine): void {
-  appendFileSync(journalPath, `${JSON.stringify(line)}\n`, { encoding: "utf8", mode: 0o600 });
+  const serialized = `${JSON.stringify(line)}\n`;
+  if (Buffer.byteLength(serialized) > 256 * 1_024) throw new Error("free_play_journal_line_too_large");
+  appendFileSync(journalPath, serialized, { encoding: "utf8", mode: 0o600 });
 }

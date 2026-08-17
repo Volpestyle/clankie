@@ -13,9 +13,11 @@ import {
   intentMatchesAction,
   runFreePlay,
   type FreePlayMind,
+  type FreePlayTurnEvidence,
+  type FreePlayView,
 } from "../src/free-play.ts";
 
-function overworld(frame: number, x = 5): GbaEmulatorObservation {
+function overworld(frame: number, x = 5, mapId = "PALLET_TOWN"): GbaEmulatorObservation {
   return {
     schemaVersion: 1,
     kind: "overworld",
@@ -27,7 +29,7 @@ function overworld(frame: number, x = 5): GbaEmulatorObservation {
     capturedAt: "2026-07-25T18:00:00.000Z",
     frame,
     data: {
-      position: { mapId: "PALLET_TOWN", x, y: 6 },
+      position: { mapId, x, y: 6 },
       facing: "south",
       ramStateSha256: "b".repeat(64),
     },
@@ -46,7 +48,16 @@ function battle(): GbaEmulatorObservation {
     goalVersion: 0,
     capturedAt: "2026-07-25T18:00:00.000Z",
     frame: 100,
-    data: { inBattle: true, kind: "wild" },
+    data: {
+      battleId: "battle-1",
+      turn: 1,
+      phase: "awaiting_input",
+      opponent: { speciesId: "rattata", level: 3, currentHp: 10, maxHp: 10 },
+      activePartySlot: 0,
+      moveCursor: 0,
+      legalMoves: [{ moveId: "tackle", power: 40 }],
+      untrusted: true,
+    },
   } as unknown as GbaEmulatorObservation;
 }
 
@@ -95,6 +106,23 @@ function io(act: () => Promise<EnvironmentActionResult>): GbaDriverIo {
   };
 }
 
+function cyclingIo(): GbaDriverIo {
+  let frame = 100;
+  let x = 5;
+  return {
+    observe: (kind) => {
+      if (kind !== "overworld") throw new Error(`no ${kind} view`);
+      return overworld(frame++, x);
+    },
+    act: () => {
+      x = x === 5 ? 6 : 5;
+      return Promise.resolve(completed());
+    },
+    pause: () => Promise.resolve(),
+    resume: () => Promise.resolve(),
+  };
+}
+
 function mind(decisions: unknown[]): FreePlayMind {
   let index = 0;
   return {
@@ -104,6 +132,13 @@ function mind(decisions: unknown[]): FreePlayMind {
       return next instanceof Error ? Promise.reject(next) : Promise.resolve(next);
     },
   };
+}
+
+function position(observations: readonly GbaEmulatorObservation[] | undefined) {
+  const overworld = observations?.find((observation) => observation.kind === "overworld") as
+    | { data?: { position?: { mapId: string; x: number; y: number } } }
+    | undefined;
+  return overworld?.data?.position ?? null;
 }
 
 const press = (button: string, intent: string, notes: string | null = null) => ({
@@ -179,6 +214,62 @@ describe("free play", () => {
     expect(result.turns[0]?.effect).not.toContain("ambient animation");
   });
 
+  it("separates decision, immediate pre-action, and post-action semantic state", async () => {
+    let x = 5;
+    let captured: FreePlayTurnEvidence | undefined;
+    const result = await runFreePlay({
+      io: {
+        observe: (kind) => {
+          if (kind !== "overworld") throw new Error(`no ${kind} view`);
+          return overworld(100, x);
+        },
+        act: () => Promise.resolve(completed()),
+        pause: () => Promise.resolve(),
+        resume: () => Promise.resolve(),
+      },
+      mind: {
+        decide: () => {
+          // The hosted world moved while the model was thinking. The action
+          // itself then changed nothing.
+          x = 6;
+          return Promise.resolve(press("a", "talk to the kid"));
+        },
+      },
+      turns: 1,
+      onTurn: (_turn, evidence) => {
+        captured = evidence;
+      },
+    });
+
+    expect(position(captured?.decision.observations)).toEqual({ mapId: "PALLET_TOWN", x: 5, y: 6 });
+    expect(position(captured?.immediatePreAction?.observations)).toEqual({
+      mapId: "PALLET_TOWN",
+      x: 6,
+      y: 6,
+    });
+    expect(position(captured?.postAction?.observations)).toEqual({ mapId: "PALLET_TOWN", x: 6, y: 6 });
+    expect(result.turns[0]?.effect).toContain("no visible change");
+  });
+
+  it("keeps the structured action result whole when the legacy detail is bounded", async () => {
+    const transcript = "x".repeat(1_000);
+    let captured: FreePlayTurnEvidence | undefined;
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve({ ...completed(), outcome: { transcript: [transcript] } })),
+      mind: mind([press("a", "a")]),
+      turns: 1,
+      onTurn: (_turn, evidence) => {
+        captured = evidence;
+      },
+    });
+
+    expect(result.turns[0]?.detail).toHaveLength(400);
+    expect(captured?.actionResult).toMatchObject({
+      source: "environment",
+      result: { outcome: { transcript: [transcript] } },
+    });
+  });
+
   it("survives an adapter rejection and keeps playing", async () => {
     const act = vi
       .fn<() => Promise<EnvironmentActionResult>>()
@@ -199,10 +290,12 @@ describe("free play", () => {
   });
 
   it("survives an unparseable decision and a model that throws", async () => {
+    const evidence: FreePlayTurnEvidence[] = [];
     const result = await runFreePlay({
       io: io(() => Promise.resolve(completed())),
       mind: mind([{ monologue: "no action field" }, new Error("model unavailable"), press("a", "a")]),
       turns: 3,
+      onTurn: (_turn, packet) => evidence.push(packet),
     });
 
     expect(result.turns[0]?.outcome).toBe("invalid_decision");
@@ -210,6 +303,8 @@ describe("free play", () => {
     expect(result.turns[1]?.detail).toContain("model unavailable");
     // Neither failure ends the playthrough.
     expect(result.turns[2]?.outcome).toBe("accepted");
+    expect(evidence[0]).toMatchObject({ immediatePreAction: null, postAction: null, actionResult: null });
+    expect(evidence[1]).toMatchObject({ immediatePreAction: null, postAction: null, actionResult: null });
   });
 
   it("rejects an out-of-bounds action and unbounded model text", async () => {
@@ -513,6 +608,61 @@ describe("stall visibility", () => {
     expect(repeats.every((value) => value === null)).toBe(true);
     expect(result.longestUnchangedRun).toBe(1);
   });
+
+  it("detects an alternating semantic-state loop even when actions differ", async () => {
+    const recurring: (number | null)[] = [];
+    const result = await runFreePlay({
+      io: cyclingIo(),
+      mind: {
+        decide: (view) => {
+          recurring.push(view.recurringForTurns);
+          return Promise.resolve(press(view.turn % 2 === 0 ? "left" : "right", "around the table"));
+        },
+      },
+      turns: 8,
+    });
+
+    expect(recurring.some((turns) => (turns ?? 0) >= FREE_PLAY_REPEAT_TURNS * 2)).toBe(true);
+    expect(result.longestRecurringRun).toBeGreaterThanOrEqual(FREE_PLAY_REPEAT_TURNS * 2);
+    expect(result.longestUnchangedRun).toBe(1);
+  });
+
+  it("counts recurrence that first reaches the boundary on the final settled turn", async () => {
+    const recurring: (number | null)[] = [];
+    const result = await runFreePlay({
+      io: cyclingIo(),
+      mind: {
+        decide: (view) => {
+          recurring.push(view.recurringForTurns);
+          return Promise.resolve(press(view.turn % 2 === 0 ? "left" : "right", "around the table"));
+        },
+      },
+      turns: FREE_PLAY_REPEAT_TURNS * 2 - 1,
+    });
+
+    expect(recurring).not.toContain(FREE_PLAY_REPEAT_TURNS * 2);
+    expect(result.longestRecurringRun).toBe(FREE_PLAY_REPEAT_TURNS * 2);
+  });
+
+  it("retires a stale objective after one warned loop turn without choosing a replacement", async () => {
+    const retired: (string | null)[] = [];
+    const result = await runFreePlay({
+      io: cyclingIo(),
+      mind: {
+        decide: (view) => {
+          retired.push(view.retiredObjective);
+          return Promise.resolve(press(view.turn % 2 === 0 ? "left" : "right", "try the other side"));
+        },
+      },
+      turns: FREE_PLAY_STALL_TURNS + 4,
+      initialObjective: "leave through the front door",
+    });
+
+    expect(result.objectivesRetired).toBe(1);
+    expect(result.turns.some((turn) => turn.objectiveRetired === "leave through the front door")).toBe(true);
+    expect(retired).toContain("leave through the front door");
+    expect(result.turns.at(-1)?.objective).toBeNull();
+  });
 });
 
 describe("burst actions", () => {
@@ -610,6 +760,70 @@ describe("persistent notes", () => {
     // And it is memory, not a script: his rewrite wins immediately.
     expect(seenNotes[2]).toBe("new plan entirely");
     expect(result.turns.at(-1)?.objective).toBe("get outside");
+  });
+
+  it("lets null explicitly clear a standing objective while omission keeps it", async () => {
+    const kept = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: mind([press("up", "up")]),
+      turns: 1,
+      initialObjective: "get outside",
+    });
+    const cleared = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: mind([{ ...press("up", "up"), objective: null }]),
+      turns: 1,
+      initialObjective: "get outside",
+    });
+
+    expect(kept.turns[0]?.objective).toBe("get outside");
+    expect(cleared.turns[0]?.objective).toBeNull();
+  });
+
+  it("keeps learned transition facts after recent history eviction and a return to the map", async () => {
+    let mapId = "house";
+    let x = 11;
+    let actionCount = 0;
+    const learned: FreePlayView["learnedTransitions"][] = [];
+    const transitionIo: GbaDriverIo = {
+      observe: (kind) => {
+        if (kind !== "overworld") throw new Error(`no ${kind} view`);
+        return overworld(100 + actionCount, x, mapId);
+      },
+      act: () => {
+        if (actionCount === 0) {
+          mapId = "town";
+          x = 13;
+        } else if (actionCount === 8) {
+          mapId = "house";
+          x = 11;
+        }
+        actionCount += 1;
+        return Promise.resolve(completed());
+      },
+      pause: () => Promise.resolve(),
+      resume: () => Promise.resolve(),
+    };
+
+    await runFreePlay({
+      io: transitionIo,
+      mind: {
+        decide: (view) => {
+          learned.push(view.learnedTransitions);
+          return Promise.resolve(press(view.turn === 0 ? "down" : "a", "continue"));
+        },
+      },
+      turns: 10,
+      historyLimit: 2,
+    });
+
+    expect(learned[9]).toContainEqual(
+      expect.objectContaining({
+        from: { mapId: "house", x: 11, y: 6 },
+        action: expect.objectContaining({ kind: "button_press", button: "down" }),
+        to: { mapId: "town", x: 13, y: 6 },
+      }),
+    );
   });
 
   it("rejects notes beyond the bound instead of growing the prompt forever", async () => {

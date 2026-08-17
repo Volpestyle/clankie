@@ -23,9 +23,11 @@ That is the right shape for a harness whose relationship to the world is
 tool calls.
 
 Clankie's relationship to a game is not tool calls. `runFreePlay` drives exactly
-one seam — `GbaDriverIo` — and everything above it (the model mind, the voice,
-interjections, the journal, minted progress) never learns where the body is. The
-activity publish path underneath it is equally concrete: a frame source with
+one seam — `GbaDriverIo` — and the behavior above it (the model mind, voice,
+interjections, and minted progress) does not branch on where the body is. Its
+shared journal accepts body-aware provenance for causal evaluation; that is
+evidence about the seam in use, not a second body-specific loop. The activity
+publish path underneath it is equally concrete: a frame source with
 digest dedupe so an idle screen costs no bandwidth, and dropped frames counted
 rather than swallowed.
 
@@ -39,6 +41,11 @@ things about a different body.
 A hosted world is a second implementation of the `GbaDriverIo` seam plus a
 rendered-media source, composed by the same execution the local body already
 uses. It is not a second play loop.
+
+The shared loop describes a hosted walk from its verified before/after state
+when the pinned contract carries counters but no route detail. A map change is a
+transition and reaching the target is an arrival; `inputsSpent` remains button
+presses and is never relabeled as tile steps.
 
 Clankie reaches the world through `@pokeagent-mmo/world-protocol`, a git
 dependency pinned to a revision, using the client transport on its `/ipc`
@@ -83,9 +90,10 @@ ambient credential cannot silently win ([credential guide](../credentials.md)).
 
 ## Consequences
 
-- The mind, voice, journal, and activity publishing are unchanged by where the
-  body is. A hosted world inherits them rather than reimplementing them,
-  including live game sound when its host offers watch media.
+- The mind, voice, behavior loop, journal format, and activity publishing are
+  shared across bodies. A hosted world inherits them rather than reimplementing
+  them, while each journal packet names the body provenance sampled at its
+  causal stages.
 - Clankie tracks a pinned contract revision. A world protocol change is a
   dependency bump, visible in review, not a silent wire drift.
 - `@pokeagent-mmo/world-mcp` remains the path for harnesses that want tools, and
@@ -97,6 +105,10 @@ ambient credential cannot silently win ([credential guide](../credentials.md)).
   under him by a region crossing or an operator takeover, which
   `bodyGeneration` detects and which invalidates everything cached about the
   screen.
+- Journal evidence samples hosted `bodyGeneration` and semantic state at the
+  decision, immediate pre-action, and post-action stages. Ambient world movement
+  while the mind thinks is visible without being credited to the action
+  ([ADR 0117](0117-play-evidence-preserves-causal-stages.md)).
 - A refusal is something he can say out loud. `join_refused` names its reason —
   `no_credential`, `world_unreachable`, `world_full`, `region_not_hosted`,
   `world_refused` — and `pending` means the world is still spinning up, never

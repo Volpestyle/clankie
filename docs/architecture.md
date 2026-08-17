@@ -89,8 +89,11 @@ the full picture — what each store holds, who may read it, and what bounds it.
   herdr-lead board is the companion dashboard
   ([ADR 0097](adr/0097-herdr-lead-is-the-companion-dashboard.md)). Agents
   coordinate through herdr and plain files.
-- **Game bodies.** `runFreePlay` drives one seam, `GbaDriverIo`, and the mind,
-  voice, journal, and minted progress above it never learn where the body is.
+- **Game bodies.** `runFreePlay` drives one seam, `GbaDriverIo`; its mind,
+  voice, progress, learned transitions, and behavior loop do not branch on
+  where the body is. The shared journal format does preserve body-aware
+  provenance at each causal stage, so evaluation can distinguish local state
+  from a hosted body generation without creating a second play loop.
   Two bodies implement that seam. The local one is
   [`integrations/gba-emulator`](../integrations/gba-emulator/README.md), booted
   and leased by the local play host; `body-lock` keeps one writer on it across

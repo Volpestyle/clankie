@@ -25,7 +25,9 @@ a steered run.
 
 Gameplay, voice, image, and video adapters keep their AI SDK paths. They consume
 roles from the same Clankie config, but they are different APIs that Pi's coding
-agent runtime does not replace.
+agent runtime does not replace. Language-model adapters lower Pi's saved effort
+to the provider's request shape and apply Pi's medium default, so gameplay uses
+the same selected model and effort as the captain.
 
 ## Consequences
 

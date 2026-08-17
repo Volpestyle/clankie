@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   buildProviderCommands,
   formatAuthStatus,
+  formatModelBanner,
   validateApiKey,
   type ProviderServices,
 } from "../src/provider-commands.ts";
@@ -180,6 +181,7 @@ async function testServices(
   readonly changed: string[];
   readonly credentials: Map<string, ProviderCredential>;
   readonly env: NodeJS.ProcessEnv;
+  readonly notifications: { count: number };
   readonly refreshes: { count: number };
   readonly services: ProviderServices;
 }> {
@@ -187,6 +189,7 @@ async function testServices(
   tempDirs.push(root);
   const env = { XDG_CONFIG_HOME: join(root, "config") };
   const changed: string[] = [];
+  const notifications = { count: 0 };
   const refreshes = { count: 0 };
   const credentials = credentialStore();
   const registry: ModelRegistry = {
@@ -201,6 +204,7 @@ async function testServices(
   return {
     changed,
     env,
+    notifications,
     refreshes,
     services: {
       cwd: root,
@@ -208,6 +212,7 @@ async function testServices(
       ...(options.captainModels === undefined ? {} : { captainModels: options.captainModels }),
       ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
       onConfigChanged(config) {
+        notifications.count += 1;
         if (config.model !== undefined) changed.push(config.model);
       },
       registry,
@@ -402,6 +407,7 @@ describe("auth command", () => {
     await command(buildProviderCommands(services), "auth").run("", view.shell);
 
     expect(fixture.credentials.get("openai-codex")).toEqual(oauthCredential);
+    expect(fixture.notifications.count).toBe(1);
     expect(rendered(view)).toContain("ChatGPT subscription connected");
     expect(rendered(view)).not.toContain(oauthCredential.access);
     expect(rendered(view)).not.toContain(oauthCredential.refresh);
@@ -428,6 +434,7 @@ describe("auth command", () => {
     );
     expect(view.results.every((result) => !result.text.includes("ABCD-EFGH"))).toBe(true);
     expect(fixture.credentials.get("openai-codex")).toEqual(oauthCredential);
+    expect(fixture.notifications.count).toBe(1);
   });
 
   it("runs Anthropic browser login with masked code entry and broker persistence", async () => {
@@ -528,12 +535,13 @@ describe("auth command", () => {
 
   it("removes only the local broker credential and explains remote revocation", async () => {
     const fixture = await testServices();
-    fixture.credentials.set("anthropic", oauthCredential);
-    const view = testShell([["remove"], ["anthropic"], ["yes"], ["done"]]);
+    fixture.credentials.set("openai-codex", oauthCredential);
+    const view = testShell([["remove"], ["openai-codex"], ["yes"], ["done"]]);
 
     await command(buildProviderCommands(fixture.services), "auth").run("", view.shell);
 
-    expect(fixture.credentials.has("anthropic")).toBe(false);
+    expect(fixture.credentials.has("openai-codex")).toBe(false);
+    expect(fixture.notifications.count).toBe(1);
     expect(rendered(view)).toContain("Provider-side OAuth grants are not revoked");
   });
 });
@@ -556,6 +564,8 @@ describe("provider and model commands", () => {
             },
           ]),
         thinkingLevels: () => Promise.resolve(["off", "low", "high"]),
+        resolveSelection: () =>
+          Promise.resolve({ model: {} as never, ref: "pi-provider/pi-model", thinkingLevel: "high" }),
         refresh: () => Promise.resolve(),
         register: () => Promise.resolve(),
       },
@@ -750,5 +760,27 @@ describe("provider and model commands", () => {
 
     expect(afterExternalChange.selects[0]?.message).toContain("Model from Alpha Provider");
     expect(afterExternalChange.selects[0]?.options.map((option) => option.value)).toEqual(["alpha-one"]);
+  });
+});
+
+describe("model banner", () => {
+  it("renders the effective runtime ref and clamped effort instead of raw config", async () => {
+    const captainModels = {
+      resolveSelection: () =>
+        Promise.resolve({
+          model: {} as never,
+          ref: "openai-codex/gpt-5.6-sol",
+          thinkingLevel: "high" as const,
+        }),
+    };
+    const config = {
+      model: "openai/gpt-5.6",
+      variant: { "openai/gpt-5.6": "low", "openai-codex/gpt-5.6-sol": "xhigh" },
+    };
+
+    await expect(formatModelBanner(config, captainModels)).resolves.toBe(
+      "openai-codex/gpt-5.6-sol (high effort)",
+    );
+    await expect(formatModelBanner({}, captainModels)).resolves.toBeUndefined();
   });
 });

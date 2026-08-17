@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { resolveDiscordActiveBody } from "@clankie/settings";
+import { parsePositiveInt, resolveDiscordActiveBody } from "@clankie/settings";
 import { z } from "zod";
 import { DEFAULT_CONTROL_PLANE_URL } from "./pairing-offer.ts";
 import {
@@ -136,6 +136,15 @@ export const PRESENCE_STATUS_PATH = "/v1/discord/presence-status";
  * operator sees the real phase rather than a flattened "ok".
  */
 const LIVE_PRESENCE_PHASES: ReadonlySet<string> = new Set(["present", "voice_active", "go_live_active"]);
+const DEFAULT_PLAY_SHUTDOWN_DEADLINE_MS = 15_000;
+const PLAY_SHUTDOWN_SUPERVISOR_CUSHION_MS = 2_000;
+
+export function clankieStopGraceMs(env: NodeJS.ProcessEnv): number {
+  return (
+    parsePositiveInt(env.CLANKIE_PLAY_SHUTDOWN_DEADLINE_MS, DEFAULT_PLAY_SHUTDOWN_DEADLINE_MS) +
+    PLAY_SHUTDOWN_SUPERVISOR_CUSHION_MS
+  );
+}
 
 async function readPresenceDetail(input: {
   readonly env: NodeJS.ProcessEnv;
@@ -174,6 +183,7 @@ const CLANKIE: ManagedService = {
   label: "Clankie",
   dependsOn: [],
   ...pnpmStart("@clankie/clankie"),
+  stopGraceMs: clankieStopGraceMs,
   /**
    * The presence runtime module is a repository path, not a preference, so the
    * launcher supplies it rather than making the operator remember an env

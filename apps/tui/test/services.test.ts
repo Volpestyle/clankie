@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parsePositiveInt } from "@clankie/settings";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   inspectService,
@@ -15,6 +16,7 @@ import {
   type ServiceId,
 } from "../bin/service-supervisor.ts";
 import {
+  clankieStopGraceMs,
   managedService,
   parseServiceTarget,
   resolveTargets,
@@ -99,6 +101,22 @@ async function writeRecord(env: NodeJS.ProcessEnv, id: ServiceId, pid: number): 
 }
 
 describe("service supervisor", () => {
+  it("gives Clankie longer than its configured play shutdown deadline", () => {
+    expect(clankieStopGraceMs({})).toBe(17_000);
+    expect(clankieStopGraceMs({ CLANKIE_PLAY_SHUTDOWN_DEADLINE_MS: "25000" })).toBe(27_000);
+    expect(clankieStopGraceMs({ CLANKIE_PLAY_SHUTDOWN_DEADLINE_MS: "nope" })).toBe(17_000);
+    expect(managedService("clankie").stopGraceMs?.({})).toBeGreaterThan(15_000);
+  });
+
+  it.each([undefined, "", "  ", "25000", "25000ms", "1.5", "0", "-1", "nope"])(
+    "parses play shutdown deadline %j exactly like Clankie",
+    (raw) => {
+      expect(clankieStopGraceMs({ CLANKIE_PLAY_SHUTDOWN_DEADLINE_MS: raw }) - 2_000).toBe(
+        parsePositiveInt(raw, 15_000),
+      );
+    },
+  );
+
   it("refuses to signal a recorded pid whose live command is a different process", async () => {
     const env = await stateEnv();
     await writeRecord(env, "clankie", 9_001);

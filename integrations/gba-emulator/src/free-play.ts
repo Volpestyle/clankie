@@ -1,5 +1,7 @@
 import {
+  EnvironmentActionResultSchema,
   GbaEmulatorActionSchema,
+  GbaEmulatorObservationSchema,
   type EnvironmentActionResult,
   type GbaEmulatorAction,
   type GbaEmulatorObservation,
@@ -36,6 +38,7 @@ import {
   positionOf,
   type Described,
   type FreePlayProgress,
+  type LearnedTransition,
   type ObservedEffect,
 } from "./free-play-progress.ts";
 
@@ -79,8 +82,8 @@ export const FreePlayDecisionSchema = z
     /** Why this action, in Clankie's own voice. */
     monologue: z.string().min(1).max(FREE_PLAY_MONOLOGUE_MAX),
     /**
-     * A standing goal that outlives the turn. Carried forward until he changes
-     * it, so plans stop churning every turn.
+     * A standing goal that outlives the turn. A string sets it, null clears it,
+     * and omission keeps it for custom/non-structured minds.
      */
     objective: z.string().max(FREE_PLAY_OBJECTIVE_MAX).nullish(),
     /**
@@ -116,6 +119,102 @@ export const FreePlayDecisionSchema = z
   })
   .strict();
 export type FreePlayDecision = z.infer<typeof FreePlayDecisionSchema>;
+
+export const FreePlayProvenanceSchema = z
+  .object({
+    body: z.enum(["local", "world"]),
+    sessionId: z.string().min(1).max(200).optional(),
+    worldId: z.string().min(1).max(200).optional(),
+    bodyGeneration: z.number().int().nonnegative().optional(),
+    adapterVersion: z.number().int().nonnegative().optional(),
+    coreId: z.string().min(1).max(200).optional(),
+    fixtureSha256: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/u)
+      .optional(),
+    romSha256: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/u)
+      .optional(),
+    coreWasmSha256: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/u)
+      .optional(),
+    real: z.boolean().optional(),
+  })
+  .strict();
+export type FreePlayProvenance = z.infer<typeof FreePlayProvenanceSchema>;
+
+const FreePlayStateEvidenceSchema = z
+  .object({
+    observations: z.array(GbaEmulatorObservationSchema).max(6),
+    provenance: FreePlayProvenanceSchema.nullable(),
+  })
+  .strict();
+
+const FreePlayProgressEvidenceSchema = z
+  .object({
+    distinctTiles: z.number().int().nonnegative(),
+    maps: z.array(z.string().max(200)).max(256),
+    turnsSinceNewTile: z.number().int().nonnegative(),
+    actionsPerNewTile: z.number().nonnegative().nullable(),
+  })
+  .strict();
+
+const FreePlayActionResultEvidenceSchema = z.discriminatedUnion("source", [
+  z.object({ source: z.literal("environment"), result: EnvironmentActionResultSchema }).strict(),
+  z
+    .object({
+      source: z.literal("body"),
+      status: z.enum(["completed", "rejected"]),
+      summary: z.string().max(4_096),
+      advice: z.string().max(4_096).nullable(),
+    })
+    .strict(),
+  z
+    .object({
+      source: z.literal("exception"),
+      name: z.string().min(1).max(200),
+      message: z.string().max(4_096).nullable(),
+      errorCode: z.string().min(1).max(200).nullable(),
+      retryable: z.boolean().nullable(),
+    })
+    .strict(),
+]);
+
+/** Bounded causal evidence stored beside one journal turn. Never contains frame bytes. */
+export const FreePlayTurnEvidenceSchema = z
+  .object({
+    decision: FreePlayStateEvidenceSchema,
+    immediatePreAction: FreePlayStateEvidenceSchema.nullable(),
+    postAction: FreePlayStateEvidenceSchema.nullable(),
+    actionResult: FreePlayActionResultEvidenceSchema.nullable(),
+    progressBefore: FreePlayProgressEvidenceSchema,
+    progressAfter: FreePlayProgressEvidenceSchema.nullable(),
+    signals: z
+      .object({
+        refusedHere: z.array(z.string().max(64)).max(4),
+        stalledForTurns: z.number().int().nonnegative().nullable(),
+        repeatingForTurns: z.number().int().nonnegative().nullable(),
+        recurringForTurns: z.number().int().nonnegative().nullable(),
+        objectiveForTurns: z.number().int().nonnegative().nullable(),
+        localeForTurns: z.number().int().nonnegative().nullable(),
+        previousObjective: z.string().max(FREE_PLAY_OBJECTIVE_MAX).nullable(),
+        previousNotes: z.string().max(FREE_PLAY_NOTES_MAX).nullable(),
+        retiredObjective: z.string().max(FREE_PLAY_OBJECTIVE_MAX).nullable(),
+      })
+      .strict(),
+    timing: z
+      .object({
+        decisionStartedAt: z.string().datetime(),
+        decisionSettledAt: z.string().datetime(),
+        actionStartedAt: z.string().datetime().nullable(),
+        actionSettledAt: z.string().datetime().nullable(),
+      })
+      .strict(),
+  })
+  .strict();
+export type FreePlayTurnEvidence = z.infer<typeof FreePlayTurnEvidenceSchema>;
 
 /**
  * What the model sees.
@@ -155,6 +254,16 @@ export interface FreePlayView {
    * forever), and which one it is stays his read, not the loop's.
    */
   repeatingForTurns: number | null;
+  /** Recent semantic states are revisiting one another despite varied actions. */
+  recurringForTurns: number | null;
+  /** Settled turns spent pursuing the current objective. */
+  objectiveForTurns: number | null;
+  /** Settled turns spent in the current map visit. */
+  localeForTurns: number | null;
+  /** A stale objective the loop retired after warning him, shown once. */
+  retiredObjective: string | null;
+  /** Successful map transitions learned from this session's own actions. */
+  learnedTransitions: readonly LearnedTransition[];
   /** The notes he wrote on the previous turn, verbatim. */
   notes: string | null;
   /** His standing objective, carried until he changes it. */
@@ -204,6 +313,8 @@ export const FreePlayTurnSchema = z
     intent: z.string().max(FREE_PLAY_INTENT_MAX).nullable(),
     notes: z.string().max(FREE_PLAY_NOTES_MAX).nullable(),
     objective: z.string().max(FREE_PLAY_OBJECTIVE_MAX).nullable(),
+    /** A stale standing objective retired after a warning turn. */
+    objectiveRetired: z.string().max(FREE_PLAY_OBJECTIVE_MAX).nullable().default(null),
     /** Recorded so an interjection's influence on the run stays auditable. */
     interjection: z.string().max(FREE_PLAY_INTERJECTION_MAX).nullable(),
     reply: z.string().max(FREE_PLAY_REPLY_MAX).nullable(),
@@ -277,6 +388,10 @@ export interface FreePlayResult {
    * failure it exists for is an action refused the same way forever.
    */
   longestUnchangedRun: number;
+  /** Longest recent window dominated by recurring semantic states. */
+  longestRecurringRun: number;
+  /** Standing objectives retired after remaining stale through a warning turn. */
+  objectivesRetired: number;
   /**
    * Fraction of scoreable turns where the previous turn's intent referenced the
    * action actually taken. A heuristic and a lower bound — see
@@ -367,7 +482,7 @@ export interface RunFreePlayInput {
    */
   checkpoints?: FreePlayCheckpointPort;
   /** Called after every turn so a CLI can stream the playthrough. */
-  onTurn?: (turn: FreePlayTurn) => void;
+  onTurn?: (turn: FreePlayTurn, evidence: FreePlayTurnEvidence) => void;
   /** Called at the real model/action boundary so live viewers never infer it from frame timing. */
   onPhase?: (phase: FreePlayPhase) => void;
   /**
@@ -380,6 +495,10 @@ export interface RunFreePlayInput {
   framebufferSha256?: () => string | null;
   /** Latest rendered screen as PNG bytes, when a core exposes one. */
   framePng?: () => Uint8Array | null;
+  /** Body identity sampled with each causal stage, when the composer exposes it. */
+  provenance?: () => FreePlayProvenance | null;
+  /** Wall clock for causal timing. */
+  clock?: () => Date;
   historyLimit?: number;
   /** Where mid-play questions land. Absent means nobody can talk to him. */
   interjections?: InterjectionQueue;
@@ -428,6 +547,7 @@ export interface FreePlaySettledTurn {
 }
 
 export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResult> {
+  const clock = input.clock ?? (() => new Date());
   const historyLimit = input.historyLimit ?? 8;
   const turns: FreePlayTurn[] = [];
   const history: { intent: string; action: FreePlayAction; outcome: string; effect: string }[] = [];
@@ -435,22 +555,70 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
   // is the loop's own invariant, not the caller's promise.
   let notes: string | null = input.initialNotes?.slice(0, FREE_PLAY_NOTES_MAX) ?? null;
   let objective: string | null = input.initialObjective?.slice(0, FREE_PLAY_OBJECTIVE_MAX) ?? null;
+  let objectiveForTurns = 0;
+  let staleObjectiveWarned = false;
+  let retiredObjective: string | null = null;
+  let objectivesRetired = 0;
   let lastSpokeTurn: number | null = null;
   const volition: FreePlayVolition = { offered: 0, taken: 0, suppressed: 0, skipped: 0 };
   const cooldown = input.speakCooldownTurns ?? FREE_PLAY_SPEAK_COOLDOWN_TURNS;
   const recentlySaid: string[] = [];
   const progress = new FreePlayProgressTracker();
-  progress.seed(positionOf(observe(input.io)));
+  const initialObservations = observe(input.io);
+  const initialPosition = positionOf(initialObservations);
+  progress.seed(initialPosition);
+  const semanticStates = [semanticStateFingerprint(initialObservations, input.framebufferSha256?.() ?? null)];
+  let currentMap = initialPosition?.mapId ?? null;
+  let localeForTurns = 0;
   // Consecutive turns whose action and effect were both identical. A turn that
   // never reached an action — the model errored, or its decision did not parse
   // — leaves this untouched rather than resetting it: a transient failure in
   // the middle of a wedge is not evidence the wedge broke.
   let repeat: { signature: string; turns: number } | null = null;
   let longestUnchangedRun = 0;
+  let longestRecurringRun = 0;
 
   for (let turn = 0; turn < input.turns; turn += 1) {
     if (input.shouldStop?.() === true) break;
     const observations = observe(input.io);
+    const progressBefore = evidenceProgress(progress.snapshot());
+    const sinceNewTile = progressBefore.turnsSinceNewTile;
+    const recurringForTurns = recurringStateTurns(semanticStates);
+    longestRecurringRun = Math.max(longestRecurringRun, recurringForTurns ?? 0);
+    const stalledForTurns =
+      sinceNewTile >= FREE_PLAY_STALL_TURNS && positionOf(observations) !== null ? sinceNewTile : null;
+    const repeatingForTurns = repeat !== null && repeat.turns >= FREE_PLAY_REPEAT_TURNS ? repeat.turns : null;
+    const shownObjectiveForTurns =
+      objective !== null && objectiveForTurns >= FREE_PLAY_STALL_TURNS ? objectiveForTurns : null;
+    const shownLocaleForTurns =
+      currentMap !== null && localeForTurns >= FREE_PLAY_STALL_TURNS ? localeForTurns : null;
+    const refusedHere = progress.refusedFrom(positionOf(observations));
+    const decisionStartedAt = clock().toISOString();
+    const evidence: FreePlayTurnEvidence = {
+      decision: stateEvidence(observations, input.provenance),
+      immediatePreAction: null,
+      postAction: null,
+      actionResult: null,
+      progressBefore,
+      progressAfter: null,
+      signals: {
+        refusedHere,
+        stalledForTurns,
+        repeatingForTurns,
+        recurringForTurns,
+        objectiveForTurns: shownObjectiveForTurns,
+        localeForTurns: shownLocaleForTurns,
+        previousObjective: objective,
+        previousNotes: notes,
+        retiredObjective,
+      },
+      timing: {
+        decisionStartedAt,
+        decisionSettledAt: decisionStartedAt,
+        actionStartedAt: null,
+        actionSettledAt: null,
+      },
+    };
     const record: FreePlayTurn = {
       turn,
       observationSha256: sha256(canonicalJson(observations)),
@@ -464,6 +632,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
       effectAdvice: null,
       notes,
       objective,
+      objectiveRetired: null,
       interjection: null,
       reply: null,
       speak: null,
@@ -477,19 +646,26 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     record.interjection = interjection;
 
     let raw: unknown;
+    let objectiveWasStale = false;
+    const retiredForView = retiredObjective;
     try {
       input.onPhase?.("thinking");
-      const sinceNewTile = progress.snapshot().turnsSinceNewTile;
+      objectiveWasStale =
+        objective !== null && objectiveForTurns >= FREE_PLAY_STALL_TURNS && recurringForTurns !== null;
       raw = await input.mind.decide({
         turn,
         observations,
         framePng: input.framePng?.() ?? null,
-        refusedHere: progress.refusedFrom(positionOf(observations)),
+        refusedHere,
         // Only when he has a position to be stuck at: mid-battle and mid-warp
         // the tile counter stalls for reasons that need no telling.
-        stalledForTurns:
-          sinceNewTile >= FREE_PLAY_STALL_TURNS && positionOf(observations) !== null ? sinceNewTile : null,
-        repeatingForTurns: repeat !== null && repeat.turns >= FREE_PLAY_REPEAT_TURNS ? repeat.turns : null,
+        stalledForTurns,
+        repeatingForTurns,
+        recurringForTurns,
+        objectiveForTurns: shownObjectiveForTurns,
+        localeForTurns: shownLocaleForTurns,
+        retiredObjective: retiredForView,
+        learnedTransitions: progress.transitionsFrom(positionOf(observations)),
         notes,
         objective,
         interjection,
@@ -497,19 +673,22 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
         audience: input.audience ?? null,
         history: [...history],
       });
+      evidence.timing.decisionSettledAt = clock().toISOString();
     } catch (error) {
       // A model that errors must not end the playthrough; the turn is lost and
       // the loop continues so a long run survives a transient failure.
       record.detail = bounded(error);
-      turns.push(finalize(record, input.onTurn));
+      evidence.timing.decisionSettledAt = clock().toISOString();
+      turns.push(finalize(record, evidence, input.onTurn));
       continue;
     }
+    retiredObjective = null;
 
     const parsed = FreePlayDecisionSchema.safeParse(raw);
     if (!parsed.success) {
       record.outcome = "invalid_decision";
       record.detail = bounded(parsed.error.issues.map((issue) => issue.path.join(".")).join(","));
-      turns.push(finalize(record, input.onTurn));
+      turns.push(finalize(record, evidence, input.onTurn));
       continue;
     }
 
@@ -518,9 +697,25 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     // He keeps his notes unless he rewrites them, so silence is not amnesia.
     if (parsed.data.notes !== null && parsed.data.notes !== undefined) notes = parsed.data.notes;
     record.notes = notes;
-    // Same rule as notes: an omitted objective is "unchanged", not "abandoned".
-    if (parsed.data.objective !== null && parsed.data.objective !== undefined) {
-      objective = parsed.data.objective;
+    const priorObjective = objective;
+    // Omission keeps an objective for custom minds; structured minds use null
+    // to clear it and restate the string to keep it.
+    if (parsed.data.objective !== undefined) objective = parsed.data.objective?.trim() || null;
+    const objectiveChanged = objective !== priorObjective;
+    objectiveForTurns = objective === null ? 0 : objectiveChanged ? 1 : objectiveForTurns + 1;
+    if (objectiveWasStale && !objectiveChanged && priorObjective !== null) {
+      if (staleObjectiveWarned) {
+        objective = null;
+        objectiveForTurns = 0;
+        staleObjectiveWarned = false;
+        retiredObjective = priorObjective;
+        record.objectiveRetired = priorObjective;
+        objectivesRetired += 1;
+      } else {
+        staleObjectiveWarned = true;
+      }
+    } else {
+      staleObjectiveWarned = false;
     }
     record.objective = objective;
     record.reply = parsed.data.reply ?? null;
@@ -528,6 +723,9 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     record.action = parsed.data.action;
     const chosen = parsed.data.action;
     input.onPhase?.("acting");
+    const preActionObservations = observe(input.io);
+    evidence.immediatePreAction = stateEvidence(preActionObservations, input.provenance);
+    evidence.timing.actionStartedAt = clock().toISOString();
 
     let accepted = false;
     let actionOutcome: Record<string, unknown> | undefined;
@@ -554,23 +752,37 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
         record.outcome = "rejected_by_adapter";
         record.detail = "checkpoints_unavailable";
         rejection = described("rejected, nothing ran", "this body has no saved time to move through");
+        evidence.actionResult = {
+          source: "body",
+          status: "rejected",
+          summary: "checkpoints_unavailable",
+          advice: "this body has no saved time to move through",
+        };
       } else {
         try {
           bodySummary = applyBodyAction(chosen, input.checkpoints);
           record.outcome = "accepted";
           accepted = true;
           record.detail = bounded(mindEffectLine(bodySummary));
+          evidence.actionResult = {
+            source: "body",
+            status: "completed",
+            summary: bodySummary.summary,
+            advice: bodySummary.advice ?? null,
+          };
         } catch (error) {
           // The port's gates speak for themselves: checkpoint_not_found, a
           // digest mismatch, a foreign ROM. The reason is the effect.
           record.outcome = "rejected_by_adapter";
           record.detail = bounded(error);
           rejection = described("rejected, nothing ran", bounded(error));
+          evidence.actionResult = exceptionEvidence(error);
         }
       }
     } else {
       try {
         const result = await input.io.act(chosen);
+        evidence.actionResult = { source: "environment", result };
         // A rejection arrives as a status, not only as a throw: the adapter fails
         // closed on an illegal button, an exceeded frame bound, a missing
         // capability, or a stale goal version. Both shapes are legitimate answers
@@ -595,6 +807,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
           error instanceof EnvironmentAdapterActionError ? error.errorCode : null,
           bounded(error),
         );
+        evidence.actionResult = exceptionEvidence(error);
       }
     }
 
@@ -609,18 +822,20 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     // The rejection reason IS the effect of that turn, and it is the one line
     // the model actually sees (detail stays journal-only).
     const frameAfter = input.framebufferSha256?.() ?? null;
-    const afterObservations = accepted ? observe(input.io) : observations;
+    const afterObservations = observe(input.io);
+    evidence.postAction = stateEvidence(afterObservations, input.provenance);
+    evidence.timing.actionSettledAt = clock().toISOString();
     const effect =
       rejection !== null
-        ? { ...rejection, refused: null, position: positionOf(observations), enteredMap: false }
+        ? { ...rejection, refused: null, position: positionOf(preActionObservations), enteredMap: false }
         : bodySummary !== null
           ? // A rewind's effect is what the port reports plus where he now
             // stands — a state diff around a restored world would only restate
             // it, and the restored position must still reach the progress
             // tracker so the tile memory follows him back.
-            rewindEffect(bodySummary, observations, afterObservations)
+            rewindEffect(bodySummary, preActionObservations, afterObservations)
           : observeEffect({
-              before: observations,
+              before: preActionObservations,
               // Body actions never reach here, so this narrows to the emulator kinds.
               after: afterObservations,
               action: chosen as GbaEmulatorAction,
@@ -628,6 +843,22 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
               screenChanged: frameBefore !== null && frameAfter !== null ? frameAfter !== frameBefore : null,
             });
     progress.record(effect, accepted);
+    evidence.progressAfter = evidenceProgress(progress.snapshot());
+    if (accepted && chosen.kind !== "load_checkpoint" && chosen.kind !== "restart_game") {
+      progress.recordTransition(preActionObservations, chosen, afterObservations);
+    }
+    semanticStates.push(semanticStateFingerprint(afterObservations, frameAfter));
+    if (semanticStates.length > FREE_PLAY_STALL_TURNS) semanticStates.shift();
+    longestRecurringRun = Math.max(longestRecurringRun, recurringStateTurns(semanticStates) ?? 0);
+    const afterPosition = positionOf(afterObservations);
+    if (afterPosition === null) {
+      localeForTurns += 1;
+    } else if (afterPosition.mapId === currentMap) {
+      localeForTurns += 1;
+    } else {
+      currentMap = afterPosition.mapId;
+      localeForTurns = 0;
+    }
     // Only the observation is stored. `effect.advice` is the harness coaching
     // his next press, and everything downstream of this record is an audience:
     // the overlay, the story card, and the possessor seam that hands a voice
@@ -735,11 +966,11 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
       effect: mindEffect,
     });
     if (history.length > historyLimit) history.shift();
-    const settledTurn = finalize(record, input.onTurn);
+    const settledTurn = finalize(record, evidence, input.onTurn);
     turns.push(settledTurn);
     input.onSettledTurn?.({
       turn: settledTurn,
-      before: observations,
+      before: preActionObservations,
       after: afterObservations,
       progress: progress.snapshot(),
     });
@@ -751,8 +982,42 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     progress: progress.snapshot(),
     volition,
     longestUnchangedRun,
+    longestRecurringRun,
+    objectivesRetired,
     ...coherence(turns),
   };
+}
+
+/** A bounded semantic state key: volatile envelope ids and RAM digests stay out. */
+function semanticStateFingerprint(
+  observations: readonly GbaEmulatorObservation[],
+  framebufferSha256: string | null,
+): string {
+  const data = (kind: GbaEmulatorObservationKind): unknown =>
+    (observations.find((observation) => observation.kind === kind) as { data?: unknown } | undefined)?.data ??
+    null;
+  const position = positionOf(observations);
+  const state = {
+    position,
+    facing: observations.some((observation) => observation.kind === "overworld")
+      ? ((data("overworld") as { facing?: string }).facing ?? null)
+      : null,
+    scene: data("scene"),
+    menu: data("menu"),
+    battle: data("battle"),
+    dialog: data("dialog"),
+  };
+  return Object.values(state).some((value) => value !== null)
+    ? canonicalJson(state)
+    : (framebufferSha256 ?? "unobserved");
+}
+
+/** Detect varied loops by repeated semantic states, not identical actions. */
+function recurringStateTurns(states: readonly string[]): number | null {
+  const window = states.slice(-FREE_PLAY_STALL_TURNS);
+  if (window.length < FREE_PLAY_REPEAT_TURNS * 2) return null;
+  const revisits = window.length - new Set(window).size;
+  return revisits >= Math.ceil(window.length / 2) ? window.length : null;
 }
 
 function observe(io: GbaDriverIo): GbaEmulatorObservation[] {
@@ -768,9 +1033,44 @@ function observe(io: GbaDriverIo): GbaEmulatorObservation[] {
   return observations;
 }
 
-function finalize(record: FreePlayTurn, onTurn: RunFreePlayInput["onTurn"]): FreePlayTurn {
+function stateEvidence(
+  observations: readonly GbaEmulatorObservation[],
+  provenance: RunFreePlayInput["provenance"],
+): FreePlayTurnEvidence["decision"] {
+  return FreePlayTurnEvidenceSchema.shape.decision.parse({
+    observations,
+    provenance: provenance?.() ?? null,
+  });
+}
+
+function evidenceProgress(progress: FreePlayProgress): FreePlayTurnEvidence["progressBefore"] {
+  return {
+    ...progress,
+    maps: progress.maps.slice(-256).map((mapId) => mapId.slice(0, 200)),
+  };
+}
+
+function exceptionEvidence(error: unknown): FreePlayTurnEvidence["actionResult"] {
+  const message = error instanceof Error ? error.message : String(error);
+  const adapter = error instanceof EnvironmentAdapterActionError ? error : null;
+  return {
+    source: "exception",
+    name: error instanceof Error ? error.name || "Error" : "Error",
+    // Never truncate a result into a plausible-looking partial. Oversized
+    // exception text is unavailable; the typed fields still name the refusal.
+    message: message.length <= 4_096 ? message : null,
+    errorCode: adapter?.errorCode ?? null,
+    retryable: adapter?.retryable ?? null,
+  };
+}
+
+function finalize(
+  record: FreePlayTurn,
+  evidence: FreePlayTurnEvidence,
+  onTurn: RunFreePlayInput["onTurn"],
+): FreePlayTurn {
   const validated = FreePlayTurnSchema.parse(record);
-  onTurn?.(validated);
+  onTurn?.(validated, FreePlayTurnEvidenceSchema.parse(evidence));
   return validated;
 }
 

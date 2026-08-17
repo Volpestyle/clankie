@@ -20,13 +20,17 @@ different rules:
   (gba-emulator) writes one append-only JSONL file per run under
   `~/.local/state/clankie/gba-play/`: a header (run identity, environment
   session, scenario, resume lineage), one line per validated `FreePlayTurn` as
-  it settles (with optional `speechDeliveryId` when the turn reported to the
-  voice room), and a summary line carrying the outcome plus the end-of-run
-  metrics. The production play execution always journals; a failed
+  it settles, and a summary line carrying the outcome plus the end-of-run
+  metrics. Journal V2 turn lines carry the bounded causal packet from
+  [ADR 0117](0117-play-evidence-preserves-causal-stages.md): decision,
+  immediate pre-action, and post-action semantic observations plus the complete
+  structured result and available progress/provenance signals. The production
+  play execution always journals; a failed
   append is reported and costs the record, never the playthrough. The journal
-  is never rewritten or pruned by code. `speechDeliveryId` joins a turn to the
-  content-free voice receipts for that report — spoken or suppressed — without
-  writing room speech into the journal.
+  is never rewritten or pruned by code. V1 remains readable. When a room report
+  is attempted, `speechDeliveryId` and the bounded narration event join the turn
+  to content-free voice receipts. The id alone proves no delivery, and generated
+  audible wording remains unknown by policy.
 - **The environment session record is operational state, bounded and
   per-run.** `createFreePlaySession` embeds a start-stamped run id in the
   session id, so runs stop overwriting each other, and opts into
@@ -50,10 +54,12 @@ different rules:
 ## Consequences
 
 - A finished run is reconstructable end to end from files: why each action is
-  chosen (journal), what each action did to the game (environment session
-  record, within its retention window), how the run is going (journal summary and
+  chosen and what it did (journal), how the run is going (journal summary and
   receipt), who held the body when (possession log, body lock), and how the
   lifecycle unfolds (service log and lifecycle events).
+- A run with no summary still has truthful terminal accounting when its run id
+  joins a durable terminal embodiment event. That lifecycle outcome does not
+  become a synthetic summary.
 - Idempotency for environment actions is bounded by the retention window:
   a retry of an action older than the newest 128 dispatches anew. Retries are
   immediate in practice; the bound is the price of a bounded record.

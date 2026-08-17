@@ -128,7 +128,17 @@ describe("asked play round trip on the deterministic double", () => {
     const lines = parseFreePlayJournal(readFileSync(join(journalDir, journalFiles[0]!), "utf8"));
     expect(lines.map((line) => line.kind)).toEqual(["header", "turn", "turn", "summary"]);
     expect(lines[0]).toMatchObject({ runId: "round-trip-1" });
-    expect(lines[1]).toMatchObject({ turn: { monologue: "pressing on", outcome: "accepted" } });
+    expect(lines[1]).toMatchObject({
+      schemaVersion: 2,
+      turn: { monologue: "pressing on", outcome: "accepted" },
+      evidence: {
+        decision: { provenance: { body: "local", real: expect.any(Boolean) } },
+        immediatePreAction: { provenance: { body: "local", real: expect.any(Boolean) } },
+        postAction: { provenance: { body: "local", real: expect.any(Boolean) } },
+        actionResult: { source: "environment", result: { status: "completed" } },
+      },
+    });
+    expect(JSON.stringify(lines[1])).not.toContain("framePng");
     expect(lines.at(-1)).toMatchObject({ outcome: "budget_exhausted", turnsTaken: 2 });
     expect(activitySnapshots).toHaveLength(2);
     expect(activitySnapshots.at(-1)).toMatchObject({

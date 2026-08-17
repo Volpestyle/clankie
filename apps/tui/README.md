@@ -74,7 +74,11 @@ pid, the launcher re-reads its live command and refuses if it no longer matches
 the service it started. Starts are health-gated; the activity tunnel is probed
 through its public hostname. A restart requested inside an active operator turn
 waits for that durable turn to settle, and the console reconnects without
-re-running the prompt.
+re-running the prompt. Generic services receive ten seconds to stop after
+`SIGTERM`. Clankie receives its configured
+`CLANKIE_PLAY_SHUTDOWN_DEADLINE_MS` plus a two-second reporting cushion, so the
+supervisor cannot force-kill an active playthrough before its terminal telemetry
+settles.
 
 Guild/channel settings come from `~/.config/clankie/settings.json`. The launcher
 injects repository paths and local service credentials where required, while
@@ -119,7 +123,9 @@ on|off` remain available for direct use. Restart Clankie to apply a change.
 - YouTube music is an ordinary prompt, not a slash command. Audible playback is
   on the official-bot voice path; see the
   [Discord media guide](../../docs/discord-media.md).
-- `/provider`, `/model`, and `/effort` select the captain. `/image-model` and
+- `/provider`, `/model`, and `/effort` select the captain. The header carries
+  the effective Pi model and effort after subscription routing, effective-ref
+  variant precedence, and model-supported clamping. `/image-model` and
   `/video-model` select generation models. Non-secret model configuration lives
   in `~/.config/clankie/clankie.json`.
 - `/provider` → "add a local endpoint…" declares an OpenAI-compatible local

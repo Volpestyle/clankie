@@ -567,6 +567,19 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
             }),
         framebufferSha256: () => game.framebufferSha256(),
         framePng: () => game.framePng(),
+        provenance: () => ({
+          body: "local",
+          coreId: game.scenario.coreId,
+          fixtureSha256: game.fixtureSha256,
+          real: game.real,
+          ...(game.checkpoints === undefined
+            ? {}
+            : {
+                romSha256: game.checkpoints.identity.romSha256,
+                coreWasmSha256: game.checkpoints.identity.coreWasmSha256,
+              }),
+        }),
+        clock,
         onPhase: (phase) =>
           sink?.publishStatus({
             schemaVersion: 1,
@@ -579,7 +592,7 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
           control.stopRequested() ||
           (session.budget.maxDurationMs !== undefined &&
             clock().getTime() - startedAt >= session.budget.maxDurationMs),
-        onTurn: (turn) => {
+        onTurn: (turn, evidence) => {
           latestTurn = turn;
           sequence += 1;
           if (sink !== undefined) {
@@ -606,9 +619,16 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
           // keeps one judgement of "is this worth saying" rather than a second
           // list of notable-looking effects that would drift from the first.
           const event = roomEvent(turn);
-          const speechDeliveryId = event === null ? undefined : randomUUID();
+          const speechDeliveryId =
+            event !== null && voice !== undefined && voice.roomListening ? randomUUID() : undefined;
           if (event !== null && speechDeliveryId !== undefined) reportToRoom(event, speechDeliveryId);
-          journal?.turn(turn, speechDeliveryId === undefined ? {} : { speechDeliveryId });
+          journal?.turn(
+            turn,
+            evidence,
+            speechDeliveryId === undefined || event === null
+              ? {}
+              : { speechDeliveryId, narrationEvent: event },
+          );
           if (
             autosaveEvery > 0 &&
             game.checkpoints !== undefined &&
@@ -725,6 +745,8 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
           volitionOffered: result.volition.offered,
           coherence: result.coherence,
           longestUnchangedRun: result.longestUnchangedRun,
+          longestRecurringRun: result.longestRecurringRun,
+          objectivesRetired: result.objectivesRetired,
           ...(checkpointId === undefined ? {} : { checkpointId }),
           ...(journal === undefined ? {} : { journalPath: journal.path }),
         },

@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { CatalogSchema, findModel, ProviderEntrySchema } from "@clankie/model-registry";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   ClankieConfigSchema,
@@ -13,6 +14,7 @@ import {
   updateGlobalConfig,
 } from "../src/config.ts";
 import { createLanguageModel, providerFamilyFor, variantProviderOptions } from "../src/instantiate.ts";
+import { resolvePiModelSelection } from "../src/pi.ts";
 import { mergedCatalog, resolveProviders, resolveRole, subscriptionRefFor } from "../src/resolve.ts";
 import { effortVariantsFor, variantById } from "../src/variants.ts";
 
@@ -486,6 +488,32 @@ describe("subscriptionRefFor", () => {
   });
 });
 
+describe("resolvePiModelSelection", () => {
+  it("applies subscription routing, effective-ref variant precedence, and Pi clamping", () => {
+    const model = { id: "gpt-5.6-sol", provider: "openai-codex", reasoning: true } as Model<Api>;
+    const requested: string[] = [];
+    const selection = resolvePiModelSelection(
+      {
+        model: "openai/gpt-5.6",
+        variant: {
+          "openai/gpt-5.6": "low",
+          "openai-codex/gpt-5.6-sol": "xhigh",
+        },
+      },
+      {
+        getModel(providerId, modelId) {
+          requested.push(`${providerId}/${modelId}`);
+          return model;
+        },
+      },
+      true,
+    );
+
+    expect(requested).toEqual(["openai-codex/gpt-5.6-sol"]);
+    expect(selection).toMatchObject({ ref: "openai-codex/gpt-5.6-sol", thinkingLevel: "high" });
+  });
+});
+
 // ---------------------------------------------------------------------------
 // variants
 // ---------------------------------------------------------------------------
@@ -551,10 +579,10 @@ describe("effortVariantsFor", () => {
     expect(must(variants[2]).body).toEqual({ thinking: { type: "enabled", budget_tokens: 32_000 } });
   });
 
-  it("emits low/high for xai and thinkingConfig budgets for google", () => {
+  it("emits low/medium/high for xai and thinkingConfig budgets for google", () => {
     const xai = effortVariantsFor("xai", fakeModel("grok-test", true));
-    expect(xai.map((variant) => variant.id)).toEqual(["low", "high"]);
-    expect(must(xai[1]).body).toEqual({ reasoning_effort: "high" });
+    expect(xai.map((variant) => variant.id)).toEqual(["low", "medium", "high"]);
+    expect(must(xai[2]).body).toEqual({ reasoning_effort: "high" });
 
     const google = effortVariantsFor("google", fakeModel("gemini-test", true));
     expect(google.map((variant) => variant.id)).toEqual(["think-8k", "think-16k", "think-24k"]);

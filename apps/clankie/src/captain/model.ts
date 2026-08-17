@@ -5,19 +5,13 @@ import {
 } from "@clankie/credential-broker";
 import { createModelRegistry } from "@clankie/model-registry";
 import {
+  CODEX_PROVIDER_ID,
   loadConfig,
-  parseModelRef,
   registerConfiguredPiProviders,
-  subscriptionRefFor,
+  resolvePiModelSelection,
+  type PiModelSelection,
 } from "@clankie/model-provider";
-import {
-  clampThinkingLevel,
-  type Credential,
-  type CredentialInfo,
-  type Model,
-  type Api,
-  type ModelThinkingLevel,
-} from "@earendil-works/pi-ai";
+import { type Credential, type CredentialInfo } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
 export class CaptainModelError extends Error {}
@@ -110,11 +104,7 @@ function fromPiCredential(
   };
 }
 
-export interface CaptainModelSelection {
-  readonly model: Model<Api>;
-  readonly thinkingLevel: ModelThinkingLevel;
-  readonly ref: string;
-}
+export type CaptainModelSelection = PiModelSelection;
 
 export interface CaptainModelRuntime {
   readonly runtime: ModelRuntime;
@@ -135,48 +125,15 @@ export async function createCaptainModelRuntime(repoRoot: string): Promise<Capta
     runtime,
     resolveSelection: async () => {
       const configured = await loadConfig({ cwd: repoRoot });
-      const ref = configured.config.model === undefined ? undefined : parseModelRef(configured.config.model);
-      if (ref === undefined) throw new CaptainModelError("No captain model is configured; run /model");
-      if (
-        configured.config.disabled_providers?.includes(ref.providerId) === true ||
-        (configured.config.enabled_providers !== undefined &&
-          configured.config.enabled_providers.length > 0 &&
-          !configured.config.enabled_providers.includes(ref.providerId))
-      ) {
-        throw new CaptainModelError(`Configured captain provider ${ref.providerId} is disabled`);
-      }
-      const subscriptionRef =
-        (await broker.get("openai-codex")) === undefined
-          ? undefined
-          : subscriptionRefFor(ref, configured.config);
-      const effective = parseModelRef(subscriptionRef ?? configured.config.model!);
-      if (effective === undefined)
-        throw new CaptainModelError(`Invalid captain model ${configured.config.model}`);
-      const model = runtime.getModel(effective.providerId, effective.modelId);
-      if (model === undefined) {
-        throw new CaptainModelError(
-          `Configured captain model ${effective.providerId}/${effective.modelId} is not in pi's catalog`,
+      try {
+        return resolvePiModelSelection(
+          configured.config,
+          runtime,
+          (await broker.get(CODEX_PROVIDER_ID)) !== undefined,
         );
+      } catch (error) {
+        throw new CaptainModelError(error instanceof Error ? error.message : String(error));
       }
-      const effectiveRef = `${effective.providerId}/${effective.modelId}`;
-      const variant =
-        configured.config.variant?.[effectiveRef] ?? configured.config.variant?.[configured.config.model!];
-      return {
-        model,
-        ref: effectiveRef,
-        thinkingLevel: clampThinkingLevel(model, normalizeThinkingLevel(variant)),
-      };
     },
   };
-}
-
-function normalizeThinkingLevel(value: string | undefined): ModelThinkingLevel {
-  if (value === "none") return "off";
-  if (value === "think-8k") return "low";
-  if (value === "think-16k") return "medium";
-  if (value === "think-24k" || value === "think-32k") return "high";
-  if (["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(value ?? "")) {
-    return value as ModelThinkingLevel;
-  }
-  return "medium";
 }

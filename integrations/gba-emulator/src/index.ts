@@ -14,6 +14,7 @@ export * from "./framebuffer-png.ts";
 export * from "./frame-stream.ts";
 export * from "./free-play.ts";
 export * from "./free-play-journal.ts";
+export * from "./free-play-evaluator.ts";
 export * from "./play-story.ts";
 export * from "./free-play-mind.ts";
 export * from "./free-play-session.ts";

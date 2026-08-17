@@ -50,6 +50,7 @@ const catalog = CatalogSchema.parse({
       "grok-test": {
         id: "grok-test",
         name: "Grok Test",
+        reasoning: true,
         tool_call: true,
         limit: { context: 128_000, output: 16_000 },
       },
@@ -111,6 +112,7 @@ describe("configured xAI captain models", () => {
 
     expect(result.text).toBe("subscription works");
     expect(configured.ref).toBe("xai/grok-test");
+    expect(configured.modelOptions?.providerOptions).toEqual({ xai: { reasoningEffort: "medium" } });
     expect(capturedHeaders.get("authorization")).toBe("Bearer subscription-access");
   });
 

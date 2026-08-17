@@ -10,20 +10,20 @@ is append-only JSONL or plain files now), never write to it.
 
 ## The trail map
 
-| What you want                            | Where it lives                                                                 | Shape                                                                                                                                                                                  |
-| ---------------------------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Operator console chat (the TUI dialogue) | `~/.clankie/captain/conversations/<conversationId>/`                           | `meta.json` (title, revision, session state) + append-only `events.jsonl` (`message` role/text, `reasoning`, `tool`, `turn` phases). Cursors are zero-padded line counts.              |
-| The pi session behind a conversation     | `~/.clankie/captain/conversations/<conversationId>/pi/`                        | pi JSONL session trees; durable voice sessions live under `~/.clankie/captain/voice/<sessionKey>/` the same way.                                                                       |
-| What he heard/said per room              | `~/.clankie/captain/lanes/<lane>~<encoded-target>.jsonl`                       | One JSONL file per lane+target; `observe_room` and the TUI lanes view read the same files.                                                                                             |
-| Tool calls he made in a room             | `~/.clankie/captain/turns/<lane>~<encoded-target>/*.jsonl`                     | One pi tree per one-shot turn (Discord text, and every privileged turn) with full `toolCall`/`toolResult` args and results. Same directory name as the lane log file. ADR 0107.        |
-| Presence + system events                 | `~/.clankie/events.jsonl` (override: `CLANKIE_EVENT_LOG`)                      | One `DomainEvent` per line, full JSON. Heartbeats are not persisted; everything else is. Replayed at boot to rebuild presence.                                                         |
-| Durable memory                           | `~/.clankie/memory/discord-people/*.json`, `captain-episodes/*.jsonl`          | Approved person facts grouped by guild/user plus one global bounded episode ring stored across source-lane files. `/memory status` reads the same store through the operator-only API. |
-| Play sessions (GBA)                      | `~/.local/state/clankie/gba-play/*.jsonl`                                      | Header / per-turn (monologue, intent, `detail` with position + transcript) / summary.                                                                                                  |
-| Who held the GBA body                    | `~/.local/state/clankie/gba-body/possession-events.jsonl` (beside `body.lock`) | Lease transitions: acquired, released, expired, stolen, refused.                                                                                                                       |
-| Discord semantic actions                 | `~/.local/state/clankie/discord-live-receipts.jsonl`                           | What the bridge actually did — content-free receipts, never message bodies.                                                                                                            |
-| Service stdout + lifecycle               | `~/.local/state/clankie/<id>.log`, `<id>-service.json`                         | Service ids: `clankie`, `discord-bridge`, `activity`, `tunnel`.                                                                                                                        |
-| Live status                              | `clankie status` / `/trace` in the face                                        | `/trace` lists rooms and tails their bounded `heard`/`said` lane logs through the service.                                                                                             |
-| What's on the TUI screen right now       | `herdr pane read <pane> --source recent`                                       | Viewport only — see caveat below.                                                                                                                                                      |
+| What you want                            | Where it lives                                                                                 | Shape                                                                                                                                                                                  |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Operator console chat (the TUI dialogue) | `~/.clankie/captain/conversations/<conversationId>/`                                           | `meta.json` (title, revision, session state) + append-only `events.jsonl` (`message` role/text, `reasoning`, `tool`, `turn` phases). Cursors are zero-padded line counts.              |
+| The pi session behind a conversation     | `~/.clankie/captain/conversations/<conversationId>/pi/`                                        | pi JSONL session trees; durable voice sessions live under `~/.clankie/captain/voice/<sessionKey>/` the same way.                                                                       |
+| What he heard/said per room              | `~/.clankie/captain/lanes/<lane>~<encoded-target>.jsonl`                                       | One JSONL file per lane+target; `observe_room` and the TUI lanes view read the same files.                                                                                             |
+| Tool calls he made in a room             | `~/.clankie/captain/turns/<lane>~<encoded-target>/*.jsonl`                                     | One pi tree per one-shot turn (Discord text, and every privileged turn) with full `toolCall`/`toolResult` args and results. Same directory name as the lane log file. ADR 0107.        |
+| Presence + system events                 | `~/.clankie/events.jsonl` (override: `CLANKIE_EVENT_LOG`)                                      | One `DomainEvent` per line, full JSON. Heartbeats are not persisted; everything else is. Replayed at boot to rebuild presence.                                                         |
+| Durable memory                           | `~/.clankie/memory/discord-people/*.json`, `captain-episodes/*.jsonl`                          | Approved person facts grouped by guild/user plus one global bounded episode ring stored across source-lane files. `/memory status` reads the same store through the operator-only API. |
+| Play sessions (GBA)                      | `~/.local/state/clankie/gba-play/*.jsonl`                                                      | V1/V2 header / per-turn. V2 binds semantic decision, immediate pre-action, result, post-action, and progress evidence / optional summary.                                              |
+| Who held the GBA body                    | `~/.local/state/clankie/gba-body/possession-events.jsonl` (beside `body.lock`)                 | Lease transitions: acquired, released, expired, stolen, refused.                                                                                                                       |
+| Discord semantic actions                 | `~/.local/state/clankie/discord-live-receipts.jsonl` (override: `DISCORD_BRIDGE_RECEIPT_PATH`) | What the bridge actually did — content-free receipts, never message bodies.                                                                                                            |
+| Service stdout + lifecycle               | `~/.local/state/clankie/<id>.log`, `<id>-service.json`                                         | Service ids: `clankie`, `discord-bridge`, `activity`, `tunnel`.                                                                                                                        |
+| Live status                              | `clankie status` / `/trace` in the face                                                        | `/trace` lists rooms and tails their bounded `heard`/`said` lane logs through the service.                                                                                             |
+| What's on the TUI screen right now       | `herdr pane read <pane> --source recent`                                                       | Viewport only — see caveat below.                                                                                                                                                      |
 
 ## Gotchas that cost real time
 
@@ -69,7 +69,16 @@ is append-only JSONL or plain files now), never write to it.
   URL, model text, or PCM. Join a play turn to audio with `speechDeliveryId` on
   the GBA journal line and the same `deliveryId` on the submission / response /
   suppressed receipts. Human words and fast-path model text live only in the
-  bridge's in-memory window and the live OpenAI call.
+  bridge's in-memory window and the live OpenAI call. A journal
+  `speechDeliveryId` is only a join key: only a matching response, suppression,
+  or refusal receipt proves the outcome. V2 `narrationEvent` is the bounded game
+  event offered to the room, not generated voice wording; exact audible wording
+  remains unknown by policy.
+- **A missing play summary is not automatically an incomplete mystery.** Join
+  the journal header `runId` to `embodiment.session.stopped` or
+  `embodiment.session.failed` in `~/.clankie/events.jsonl`. A matching terminal
+  event accounts for the run with its real outcome (including `lease_lapsed`)
+  but never becomes a synthetic summary.
 
 ## Queries that answered real questions
 
@@ -119,4 +128,11 @@ Where did one voice/music turn stop:
 
 ```bash
 jq -c --arg id '<delivery-or-call-id>' 'select(.data.deliveryId == $id or .data.callId == $id) | {type, at: .occurredAt, data: .data}' ~/.local/state/clankie/discord-live-receipts.jsonl
+```
+
+Evaluate one production play journal with lifecycle and receipt joins:
+
+```bash
+pnpm --filter @clankie/gba-emulator gameplay:evaluate-journal -- \
+  ~/.local/state/clankie/gba-play/<run>.jsonl
 ```

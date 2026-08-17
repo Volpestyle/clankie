@@ -58,14 +58,17 @@ const catalog = CatalogSchema.parse({
   },
 });
 
-async function configEnvironment(): Promise<{ cwd: string; env: NodeJS.ProcessEnv }> {
+async function configEnvironment(effort?: string): Promise<{ cwd: string; env: NodeJS.ProcessEnv }> {
   const cwd = await mkdtemp(join(tmpdir(), "anthropic-configured-model-"));
   tempDirs.push(cwd);
   const configDir = join(cwd, "config", "clankie");
   await mkdir(configDir, { recursive: true });
   await writeFile(
     join(configDir, "clankie.json"),
-    `${JSON.stringify({ model: "anthropic/claude-test" })}\n`,
+    `${JSON.stringify({
+      model: "anthropic/claude-test",
+      ...(effort === undefined ? {} : { variant: { "anthropic/claude-test": effort } }),
+    })}\n`,
     "utf8",
   );
   return { cwd, env: { XDG_CONFIG_HOME: join(cwd, "config") } };
@@ -85,6 +88,20 @@ function anthropicResponse(text: string): Response {
 }
 
 describe("configured Anthropic captain models", () => {
+  it("lowers Pi's effort name to the provider-specific thinking budget", async () => {
+    const { cwd, env } = await configEnvironment("medium");
+    const configured = await resolveConfiguredLanguageModel({
+      cwd,
+      env,
+      catalog,
+      store: new MemoryCredentialStore({ anthropic: { type: "api", key: "test-key" } }),
+    });
+
+    expect(configured.modelOptions?.providerOptions).toEqual({
+      anthropic: { thinking: { type: "enabled", budgetTokens: 16_000 } },
+    });
+  });
+
   it("uses the brokered Pro/Max credential for a headless captain turn", async () => {
     const { cwd, env } = await configEnvironment();
     const store = new MemoryCredentialStore({

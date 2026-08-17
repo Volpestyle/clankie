@@ -1,9 +1,52 @@
 import { listModels, type Catalog } from "@clankie/model-registry";
-import type { Api } from "@earendil-works/pi-ai";
+import { clampThinkingLevel, type Api, type Model, type ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ModelRuntime, ProviderConfig } from "@earendil-works/pi-coding-agent";
-import type { ClankieConfig } from "./config.ts";
+import { parseModelRef, type ClankieConfig } from "./config.ts";
 import { providerFamilyFor } from "./instantiate.ts";
-import { mergedCatalog } from "./resolve.ts";
+import { mergedCatalog, subscriptionRefFor } from "./resolve.ts";
+import { thinkingLevelForVariant } from "./variants.ts";
+
+export interface PiModelSelection {
+  readonly model: Model<Api>;
+  readonly thinkingLevel: ModelThinkingLevel;
+  readonly ref: string;
+}
+
+/** Resolves the captain ref and effort exactly as Pi will execute them. */
+export function resolvePiModelSelection(
+  config: ClankieConfig,
+  runtime: Pick<ModelRuntime, "getModel">,
+  hasCodexSubscription: boolean,
+): PiModelSelection {
+  const configuredRef = config.model;
+  if (configuredRef === undefined) throw new Error("No captain model is configured; run /model");
+  const configured = parseModelRef(configuredRef);
+  if (configured === undefined) throw new Error("No captain model is configured; run /model");
+  if (
+    config.disabled_providers?.includes(configured.providerId) === true ||
+    (config.enabled_providers !== undefined &&
+      config.enabled_providers.length > 0 &&
+      !config.enabled_providers.includes(configured.providerId))
+  ) {
+    throw new Error(`Configured captain provider ${configured.providerId} is disabled`);
+  }
+  const subscriptionRef = hasCodexSubscription ? subscriptionRefFor(configured, config) : undefined;
+  const effective = parseModelRef(subscriptionRef ?? configuredRef);
+  if (effective === undefined) throw new Error(`Invalid captain model ${configuredRef}`);
+  const model = runtime.getModel(effective.providerId, effective.modelId);
+  if (model === undefined) {
+    throw new Error(
+      `Configured captain model ${effective.providerId}/${effective.modelId} is not in pi's catalog`,
+    );
+  }
+  const ref = `${effective.providerId}/${effective.modelId}`;
+  const variant = config.variant?.[ref] ?? config.variant?.[configuredRef];
+  return {
+    model,
+    ref,
+    thinkingLevel: clampThinkingLevel(model, thinkingLevelForVariant(variant) ?? "medium"),
+  };
+}
 
 /** Project Clankie's declarative custom providers into Pi's native provider registry. */
 export function registerConfiguredPiProviders(

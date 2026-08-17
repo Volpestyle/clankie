@@ -38,3 +38,9 @@ export {
   voiceSettingsToEnvironment,
   type ResolvedVoiceSettings,
 } from "./voice-resolve.ts";
+
+export function parsePositiveInt(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw.trim().length === 0) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}

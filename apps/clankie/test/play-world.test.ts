@@ -1,3 +1,4 @@
+import { readFileSync, readdirSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +16,7 @@ import { describe, expect, it } from "vitest";
 import { joinWorld as askJoinWorld, startPlay } from "../src/captain/play.ts";
 import { createGbaPlayExecution } from "../src/play-execution.ts";
 import { PlayHost } from "../src/play-host.ts";
+import { parseFreePlayJournal } from "@clankie/gba-emulator";
 import { SessionStatusSchema, WhoResultSchema } from "@pokeagents/world-protocol";
 import type { WorldBody } from "../src/world/body.ts";
 
@@ -61,6 +63,13 @@ function fakeWorldBody(overrides: Partial<WorldBody> = {}): WorldBody {
     droppedFrameCount: () => 0,
     drainAudio: () => [],
     droppedAudioPacketCount: () => 0,
+    traceProvenance: () => ({
+      body: "world",
+      sessionId: "world-session-1",
+      worldId: "kanto",
+      bodyGeneration: 1,
+      adapterVersion: 2,
+    }),
     session: () =>
       Promise.resolve(
         SessionStatusSchema.parse({
@@ -162,13 +171,14 @@ describe("world play execution", () => {
       },
     });
     const client = fakeClient({ kind: "start", session: session("world") });
+    const env = await playEnv();
     const host = new PlayHost({
       client,
       runnerId: "runner-local",
       environmentIds: ["pokemon-firered"],
       execute: createGbaPlayExecution({
         logger: silentLogger,
-        env: await playEnv(),
+        env,
         createMind: buttonMasher,
         joinWorld: () => Promise.resolve({ outcome: "joined", body }),
       }),
@@ -178,6 +188,22 @@ describe("world play execution", () => {
     await host.settled();
     expect(client.reports.map((report) => report.state)).toEqual(["running", "stopped"]);
     expect(client.reports[1]?.receipt?.turnsTaken).toBe(2);
+    const journalDir = env["CLANKIE_GBA_PLAY_JOURNAL_DIR"] as string;
+    const journalFile = readdirSync(journalDir)[0] as string;
+    const lines = parseFreePlayJournal(readFileSync(join(journalDir, journalFile), "utf8"));
+    expect(lines[1]).toMatchObject({
+      schemaVersion: 2,
+      evidence: {
+        decision: {
+          provenance: {
+            body: "world",
+            bodyGeneration: 1,
+            adapterVersion: 2,
+          },
+        },
+        actionResult: { source: "environment", result: { status: "completed" } },
+      },
+    });
     expect(closed).toBe(1);
   });
 

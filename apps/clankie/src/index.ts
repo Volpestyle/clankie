@@ -19,7 +19,7 @@ import {
   ensureRunnerCredential,
 } from "@clankie/credential-broker";
 import { createLogger } from "@clankie/observability";
-import { applyDiscordSettingsToEnvironment, SettingsStore } from "@clankie/settings";
+import { applyDiscordSettingsToEnvironment, parsePositiveInt, SettingsStore } from "@clankie/settings";
 import { createBearerAuthenticator, createClankieApp, type ClankieApp } from "./app.ts";
 import { ActivityObservationProjection } from "./activity-observation.ts";
 import { PlaySightProjection } from "./play-sight.ts";
@@ -462,12 +462,6 @@ function createConfiguredPlayExecution(): PlayExecution {
 function parseCaptainSteerSourceLane(value: string): "discord_text" | "discord_voice" | "api" {
   if (value === "discord_text" || value === "discord_voice" || value === "api") return value;
   throw new Error("CLANKIE_CAPTAIN_STEER_SOURCE_LANE must be discord_text, discord_voice, or api");
-}
-
-function parsePositiveInt(raw: string | undefined, fallback: number): number {
-  if (raw === undefined || raw.trim().length === 0) return fallback;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 /** Loads a privileged Discord presence executor module (same contract as before the merge). */

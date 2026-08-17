@@ -18,6 +18,7 @@
     "gameplay:evaluate-receipt": "tsx scripts/evaluate-live-receipt.ts",
     "gameplay:competence": "tsx scripts/run-free-play-competence.ts",
     "gameplay:evaluate-competence-receipt": "tsx scripts/evaluate-free-play-competence-receipt.ts",
+    "gameplay:evaluate-journal": "tsx scripts/evaluate-free-play-journal.ts",
     "clean": "rm -rf dist coverage",
     "free-play": "tsx scripts/free-play-cli.ts"
   },

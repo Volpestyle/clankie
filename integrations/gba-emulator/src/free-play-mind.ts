@@ -29,7 +29,10 @@ const FreePlayWireDecisionSchema = z
     monologue: z.string(),
     intent: z.string(),
     notes: z.string().nullable().describe("Your running notes; null leaves them unchanged."),
-    objective: z.string().nullable().describe("Your standing goal; null keeps the current one."),
+    objective: z
+      .string()
+      .nullable()
+      .describe("Your standing goal. Repeat the current text to keep it; use null to clear it."),
     reply: z.string().nullable().describe("What you say back if someone spoke to you this turn, else null."),
     // Structured output weights the schema over the system prompt, so guidance
     // that lives only in the prompt gets ignored in favour of a default null.
@@ -167,8 +170,9 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   "- monologue: your reasoning for THIS action — what you see, what you infer,",
   "  why this move. Working notes to yourself. Nobody hears this.",
   '- objective: the goal you are pursuing, e.g. "get downstairs and outside".',
-  "  It is carried to later turns; return null to keep the current one, and",
-  "  change it only when you achieve it or decide to abandon it.",
+  "  It is carried to later turns when you repeat its text. Return null to clear",
+  "  it when you achieve or abandon it. Objectives are optional working context,",
+  "  not obligations; a stale one may be retired after you are shown loop evidence.",
   "- reply: what you say back if someone spoke to you this turn, else null.",
   "  Answer as yourself, about the game you are actually in. You are allowed to",
   "  disagree, to say you would rather do something else, or to ignore a",
@@ -231,8 +235,9 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   "coordinates are topLeft plus its column and row. Pick walk_to targets from",
   "it rather than estimating coordinates off the screenshot. The view also",
   "lists exits: every door and stairway with where it leads, and the map edges",
-  "that connect to neighbouring maps. walk_to aimed at a listed door or",
-  "stairway walks up and steps in, even when the tile itself reads blocked.",
+  "that connect to neighbouring maps. walk_to aimed at a listed exit asks the",
+  "body to take it; trust the resulting map and effect rather than assuming a",
+  "transition from the target coordinate alone.",
   "A refused walk tells you why — off the map, a wall, or unreachable — and",
   "names the nearest tile you can actually reach. If your notes already mark a",
   "tile or NPC as story-locked, do not walk_to it again.",
@@ -384,7 +389,9 @@ export function renderView(view: FreePlayView): string {
     lines.push("  (no readable state this turn)");
   }
   for (const observation of view.observations) {
-    lines.push(`  ${observation.kind}: ${JSON.stringify(stripEnvelope(observation))}`);
+    // The exact semantic object shown here is also persisted in journal V2;
+    // there is no second evaluator-only reconstruction of what the mind saw.
+    lines.push(`  ${observation.kind}: ${JSON.stringify(observation)}`);
   }
   const held = heldScreenAdvice(view.observations);
   if (held !== null) lines.push("", held);
@@ -409,8 +416,25 @@ export function renderView(view: FreePlayView): string {
   if (view.objective !== null && view.objective.length > 0) {
     lines.push("", `Your objective: ${view.objective}`);
   }
+  if (view.objectiveForTurns !== null) {
+    lines.push(`You have pursued it for ${String(view.objectiveForTurns)} settled turns.`);
+  }
+  if (view.retiredObjective !== null) {
+    lines.push("", `A stale objective was retired after repeated-state evidence: ${view.retiredObjective}`);
+  }
   if (view.notes !== null && view.notes.length > 0) {
     lines.push("", "Your notes:", `  ${view.notes}`);
+  }
+  if (view.learnedTransitions.length > 0) {
+    lines.push("", "Transitions your own actions completed earlier:");
+    for (const transition of view.learnedTransitions) {
+      lines.push(
+        `  From ${transition.from.mapId} (${String(transition.from.x)},${String(transition.from.y)})` +
+          `${transition.facing === null ? "" : ` facing ${transition.facing}`}, ` +
+          `${describeAction(transition.action)} entered ${transition.to.mapId} ` +
+          `at (${String(transition.to.x)},${String(transition.to.y)}).`,
+      );
+    }
   }
   if (view.refusedHere.length > 0) {
     // What he already learned the hard way from this exact tile.
@@ -428,6 +452,16 @@ export function renderView(view: FreePlayView): string {
       "",
       `The last ${String(view.repeatingForTurns)} turns were the same action with the same result.`,
     );
+  }
+  if (view.recurringForTurns !== null) {
+    lines.push(
+      "",
+      `Your recent semantic states revisit one another across ${String(view.recurringForTurns)} turns, ` +
+        "even though the actions may differ.",
+    );
+  }
+  if (view.localeForTurns !== null) {
+    lines.push("", `You have remained in this map visit for ${String(view.localeForTurns)} settled turns.`);
   }
   if (view.history.length > 0) {
     lines.push("", "Recently:");
@@ -503,16 +537,6 @@ function certainty(observations: FreePlayView["observations"]): boolean | null {
     | { data?: { stateCertain?: boolean } }
     | undefined;
   return danger?.data?.stateCertain ?? null;
-}
-
-/** Drop transport fields the model has no use for and would only pay tokens on. */
-function stripEnvelope(observation: FreePlayView["observations"][number]): unknown {
-  const {
-    schemaVersion: _schemaVersion,
-    observationId: _observationId,
-    ...rest
-  } = observation as Record<string, unknown> & { schemaVersion?: unknown; observationId?: unknown };
-  return rest;
 }
 
 function describeAction(action: FreePlayView["history"][number]["action"]): string {

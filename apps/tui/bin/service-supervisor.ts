@@ -104,6 +104,8 @@ export interface ManagedService {
    * bridge's claim silently becomes unusable.
    */
   readonly restartsWith?: readonly ServiceId[];
+  /** Time after SIGTERM before this service is force-killed. */
+  readonly stopGraceMs?: (env: NodeJS.ProcessEnv) => number;
   /** Extra environment the service needs, merged over the caller's env. */
   readonly serviceEnv?: (input: {
     readonly env: NodeJS.ProcessEnv;
@@ -384,7 +386,7 @@ export async function stopService(
   kill(record.pid, "SIGTERM");
 
   let signal: NodeJS.Signals = "SIGTERM";
-  const deadline = Date.now() + STOP_GRACE_MS;
+  const deadline = Date.now() + (service.stopGraceMs?.(env) ?? STOP_GRACE_MS);
   while (Date.now() < deadline) {
     if (!isAlive(record.pid)) break;
     await sleep(100);

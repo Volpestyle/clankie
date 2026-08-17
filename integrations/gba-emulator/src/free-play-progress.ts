@@ -20,6 +20,13 @@ export interface GbaPosition {
   y: number;
 }
 
+export interface LearnedTransition {
+  from: GbaPosition;
+  facing: string | null;
+  action: GbaEmulatorAction;
+  to: GbaPosition;
+}
+
 /** Extract the overworld position, when the decoded state carries one. */
 export function positionOf(observations: readonly GbaEmulatorObservation[]): GbaPosition | null {
   for (const observation of observations) {
@@ -161,43 +168,62 @@ function walkStopReason(outcome: Record<string, unknown>): "battle" | "transitio
 function describeWalk(
   action: { x: number; y: number },
   outcome: Record<string, unknown>,
+  before: GbaPosition | null,
   after: GbaPosition | null,
 ): Described {
-  const steps = typeof outcome["steps"] === "number" ? String(outcome["steps"]) : "?";
-  const planned = typeof outcome["plannedSteps"] === "number" ? String(outcome["plannedSteps"]) : "?";
+  const steps = typeof outcome["steps"] === "number" ? String(outcome["steps"]) : null;
+  const planned = typeof outcome["plannedSteps"] === "number" ? String(outcome["plannedSteps"]) : null;
   const blocked = outcome["blockedAt"] as { x?: number; y?: number } | null | undefined;
-  if (outcome["warped"] === true && after !== null) {
+  if (
+    (outcome["warped"] === true || (before !== null && after !== null && before.mapId !== after.mapId)) &&
+    after !== null
+  ) {
     return described(
-      `walked onto a warp after ${steps} steps — entered ${after.mapId} at (${String(after.x)},${String(after.y)})`,
+      `${steps === null ? "walked to the exit" : `walked onto an exit after ${steps} steps`} — ` +
+        `entered ${after.mapId} at (${String(after.x)},${String(after.y)})`,
     );
   }
-  if (outcome["arrived"] === true) {
-    return described(`walked ${steps} steps and arrived at (${String(action.x)},${String(action.y)})`);
+  if (outcome["arrived"] === true || (after?.x === action.x && after.y === action.y)) {
+    if (before?.x === action.x && before.y === action.y && outcome["inputsSpent"] === 0) {
+      return described(`already at (${String(action.x)},${String(action.y)})`);
+    }
+    return described(
+      steps === null
+        ? `arrived at (${String(action.x)},${String(action.y)})`
+        : `walked ${steps} steps and arrived at (${String(action.x)},${String(action.y)})`,
+    );
   }
   if (blocked != null && typeof blocked.x === "number" && typeof blocked.y === "number") {
     const at = `(${String(blocked.x)},${String(blocked.y)})`;
     const reason = walkStopReason(outcome);
     if (reason === "battle") {
       return described(
-        `walked ${steps} of ${planned} steps, then a battle started at ${at}`,
+        `${routeProgress(steps, planned)}, then a battle started at ${at}`,
         "use advance_dialog to read the intro; it stops at the command menu",
       );
     }
     if (reason === "transition") {
       return described(
-        `walked ${steps} of ${planned} steps, then a transition held the screen at ${at}`,
+        `${routeProgress(steps, planned)}, then a transition held the screen at ${at}`,
         "wait it out rather than stepping again",
       );
     }
     return described(
-      `walked ${steps} of ${planned} steps, then the way was blocked at ` +
+      `${routeProgress(steps, planned)}, then the way was blocked at ` +
         `${at} by something the map does not show — an NPC, probably`,
       "step around it or talk to it",
     );
   }
-  return described(
-    `walked ${steps} of ${planned} planned steps toward (${String(action.x)},${String(action.y)})`,
-  );
+  if (after !== null) {
+    return described(
+      `walk toward (${String(action.x)},${String(action.y)}) stopped at (${String(after.x)},${String(after.y)})`,
+    );
+  }
+  return described(`walk toward (${String(action.x)},${String(action.y)}) completed; position unavailable`);
+}
+
+function routeProgress(steps: string | null, planned: string | null): string {
+  return steps === null || planned === null ? "the walk stopped" : `walked ${steps} of ${planned} steps`;
 }
 
 const ENTER_TEXT_ENDINGS: Readonly<Record<string, Described>> = {
@@ -351,7 +377,7 @@ export function observeEffect(input: {
   // (x,y)" after a 3-of-9-step walk would hide exactly the part he needs.
   if (input.action.kind === "walk_to" && input.outcome !== undefined) {
     return {
-      ...describeWalk(input.action, input.outcome, after),
+      ...describeWalk(input.action, input.outcome, before, after),
       refused: null,
       position: after,
       enteredMap: before !== null && after !== null && before.mapId !== after.mapId,
@@ -498,9 +524,11 @@ export interface FreePlayProgress {
  * around furniture. These are the numbers that say whether he is playing well.
  */
 export class FreePlayProgressTracker {
+  private static readonly transitionLimit = 32;
   private readonly tiles = new Set<string>();
   private readonly mapOrder: string[] = [];
   private readonly refusals = new Map<string, Set<string>>();
+  private readonly learnedTransitions: LearnedTransition[] = [];
   private acceptedActions = 0;
   private sinceNewTile = 0;
 
@@ -540,6 +568,37 @@ export class FreePlayProgressTracker {
     return [...(this.refusals.get(key) ?? [])].sort();
   }
 
+  /** Remember only map changes this exact action demonstrably caused. */
+  public recordTransition(
+    before: readonly GbaEmulatorObservation[],
+    action: GbaEmulatorAction,
+    after: readonly GbaEmulatorObservation[],
+  ): void {
+    const from = positionOf(before);
+    const to = positionOf(after);
+    if (from === null || to === null || from.mapId === to.mapId) return;
+    const learned: LearnedTransition = { from, facing: facingOf(before), action, to };
+    const key = transitionFactKey(learned);
+    const existing = this.learnedTransitions.findIndex((transition) => transitionFactKey(transition) === key);
+    if (existing !== -1) this.learnedTransitions.splice(existing, 1);
+    this.learnedTransitions.push(learned);
+    if (this.learnedTransitions.length > FreePlayProgressTracker.transitionLimit) {
+      this.learnedTransitions.shift();
+    }
+  }
+
+  /** Relevant experience only: exact tile first, then the rest of this map. */
+  public transitionsFrom(position: GbaPosition | null): readonly LearnedTransition[] {
+    if (position === null) return [];
+    return this.learnedTransitions
+      .filter((transition) => transition.from.mapId === position.mapId)
+      .sort((left, right) => {
+        const leftExact = left.from.x === position.x && left.from.y === position.y;
+        const rightExact = right.from.x === position.x && right.from.y === position.y;
+        return Number(rightExact) - Number(leftExact);
+      });
+  }
+
   public snapshot(): FreePlayProgress {
     return {
       distinctTiles: this.tiles.size,
@@ -549,4 +608,8 @@ export class FreePlayProgressTracker {
         this.tiles.size <= 1 ? null : this.acceptedActions / Math.max(1, this.tiles.size - 1),
     };
   }
+}
+
+function transitionFactKey(transition: LearnedTransition): string {
+  return JSON.stringify(transition);
 }

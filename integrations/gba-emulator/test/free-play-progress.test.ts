@@ -336,6 +336,26 @@ describe("progress tracker", () => {
     tracker.seed({ mapId: "bedroom", x: 10, y: 5 });
     expect(tracker.snapshot().actionsPerNewTile).toBeNull();
   });
+
+  it("keeps successful transition experience after recent history would expire", () => {
+    const tracker = new FreePlayProgressTracker();
+    const action = { kind: "button_press", button: "down", holdFrames: 16 } as const;
+    tracker.recordTransition(
+      at("players-house-1f", 11, 15, "west"),
+      action,
+      at("pallet-town", 13, 14, "south"),
+    );
+
+    expect(tracker.transitionsFrom({ mapId: "players-house-1f", x: 11, y: 15 })).toEqual([
+      {
+        from: { mapId: "players-house-1f", x: 11, y: 15 },
+        facing: "west",
+        action,
+        to: { mapId: "pallet-town", x: 13, y: 14 },
+      },
+    ]);
+    expect(tracker.transitionsFrom({ mapId: "pallet-town", x: 13, y: 14 })).toEqual([]);
+  });
 });
 
 describe("frame upscale", () => {
@@ -366,6 +386,27 @@ describe("walk effects", () => {
   it("reports an arrival as the route's own account, not a bare position", () => {
     const effect = walk({ steps: 9, plannedSteps: 9, arrived: true, blockedAt: null, warped: false });
     expect(effect.summary).toBe("walked 9 steps and arrived at (8,14)");
+  });
+
+  it("describes hosted walks from verified after-state without inventing step counts", () => {
+    const arrived = observeEffect({
+      before: at("house", 10, 10),
+      after: at("house", 12, 15),
+      action: { kind: "walk_to", x: 12, y: 15 },
+      outcome: { inputsSpent: 7, framesSpent: 280 },
+    });
+    expect(arrived.summary).toBe("arrived at (12,15)");
+    expect(arrived.summary).not.toContain("?");
+    expect(arrived.summary).not.toContain("7 steps");
+
+    const entered = observeEffect({
+      before: at("house", 11, 15),
+      after: at("pallet-town", 13, 14),
+      action: { kind: "walk_to", x: 11, y: 15 },
+      outcome: { inputsSpent: 2, framesSpent: 80 },
+    });
+    expect(entered.summary).toContain("entered pallet-town at (13,14)");
+    expect(entered.summary).not.toContain("?");
   });
 
   it("says where a route stopped and why, so the obstacle is actionable", () => {

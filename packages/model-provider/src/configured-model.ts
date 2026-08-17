@@ -30,7 +30,7 @@ import {
   type ModelRole,
   type ResolvedRole,
 } from "./resolve.ts";
-import { effortVariantsFor, variantById, type ModelVariant } from "./variants.ts";
+import { effortVariantsFor, thinkingLevelForVariant, variantById, type ModelVariant } from "./variants.ts";
 
 export const CAPTAIN_CODEX_PREAMBLE =
   "You are Clankie, a durable agent. Your complete persona, tools, and operating rules are supplied by your session instructions; follow them exactly.";
@@ -90,8 +90,18 @@ function selectedVariant(
   model: ModelEntry | undefined,
   variantId: string | undefined,
 ): ModelVariant | undefined {
-  if (model === undefined || variantId === undefined) return undefined;
-  const variant = variantById(effortVariantsFor(providerId, model), variantId);
+  if (model === undefined) return undefined;
+  const variants = effortVariantsFor(providerId, model);
+  if (variantId === undefined) {
+    return variants.find((variant) => thinkingLevelForVariant(variant.id) === "medium") ?? variants[0];
+  }
+  const level = thinkingLevelForVariant(variantId);
+  const variant =
+    variantById(variants, variantId) ??
+    (level === undefined
+      ? undefined
+      : variants.find((candidate) => thinkingLevelForVariant(candidate.id) === level));
+  if (variant === undefined && level === "off") return undefined;
   if (variant === undefined) {
     throw new ConfiguredModelError(
       `Model variant "${variantId}" is not supported by ${providerId}/${model.id}`,

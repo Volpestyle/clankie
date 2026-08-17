@@ -89,6 +89,11 @@ function emptyView(): FreePlayView {
     refusedHere: [],
     stalledForTurns: null,
     repeatingForTurns: null,
+    recurringForTurns: null,
+    objectiveForTurns: null,
+    localeForTurns: null,
+    retiredObjective: null,
+    learnedTransitions: [],
     notes: null,
     objective: null,
     interjection: null,
@@ -134,6 +139,31 @@ describe("the view says what reaches the controls", () => {
         data: { mode, inputReady: false, waitingForDialogAdvance: false },
       },
     ] as unknown as FreePlayView["observations"],
+  });
+
+  it("renders learned transitions and loop evidence as facts", () => {
+    const rendered = renderView({
+      ...emptyView(),
+      objective: "leave the house",
+      objectiveForTurns: 14,
+      localeForTurns: 20,
+      recurringForTurns: 8,
+      retiredObjective: "talk to Mom forever",
+      learnedTransitions: [
+        {
+          from: { mapId: "house", x: 11, y: 15 },
+          facing: "west",
+          action: { kind: "button_press", button: "down", holdFrames: 16 },
+          to: { mapId: "town", x: 13, y: 14 },
+        },
+      ],
+    });
+
+    expect(rendered).toContain("Transitions your own actions completed earlier");
+    expect(rendered).toContain("pressed down entered town");
+    expect(rendered).toContain("revisit one another");
+    expect(rendered).toContain("stale objective was retired");
+    expect(rendered).not.toContain("You should press down");
   });
 
   it("states that an undecoded screen is normal and what still runs", () => {

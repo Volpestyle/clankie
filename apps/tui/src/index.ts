@@ -14,7 +14,7 @@ import { SettingsStore } from "@clankie/settings";
 import type { OperatorConversationContextUsage } from "@clankie/protocol";
 import { ClankieFaceShell } from "./shell/shell.ts";
 import { buildConsoleCommands } from "./commands.ts";
-import { buildProviderCommands, createProviderServices } from "./provider-commands.ts";
+import { buildProviderCommands, createProviderServices, formatModelBanner } from "./provider-commands.ts";
 import { buildConnectCommands } from "./connect-commands.ts";
 import { buildDiscordCommands, runDiscordWizard, showDiscordInvite } from "./discord-commands.ts";
 import { buildPersonaCommands } from "./persona-commands.ts";
@@ -66,11 +66,11 @@ const presence = new PresencePoller({
   baseUrl: serviceUrl,
   operatorToken: operatorCredential?.token,
 });
-let currentModelRef: string | undefined;
+let currentModelDisplay: string | undefined;
 const services = createProviderServices({
   cwd: repoRoot,
   onConfigChanged: (config) => {
-    applyModelDisplay(config);
+    void applyModelDisplay(config);
   },
 });
 
@@ -252,13 +252,17 @@ const shell = new ClankieFaceShell({
 function refreshBanner(): void {
   shell.setBannerFields({
     ...bannerFieldsFor(currentWorkspace),
-    ...(currentModelRef === undefined ? {} : { model: currentModelRef }),
+    ...(currentModelDisplay === undefined ? {} : { model: currentModelDisplay }),
   });
   shell.refreshStatusView();
 }
 
-function applyModelDisplay(config: ClankieConfig): void {
-  currentModelRef = config.model;
+async function applyModelDisplay(config: ClankieConfig): Promise<void> {
+  try {
+    currentModelDisplay = await formatModelBanner(config, services.captainModels);
+  } catch {
+    currentModelDisplay = undefined;
+  }
   refreshBanner();
 }
 

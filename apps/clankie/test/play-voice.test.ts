@@ -1,3 +1,4 @@
+import { readFileSync, readdirSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +14,7 @@ import {
   type PossessorVoiceClient,
   type PossessorVoiceListenerEvidence,
 } from "@clankie/possessor-voice";
+import { parseFreePlayJournal } from "@clankie/gba-emulator";
 import { describe, expect, it, vi } from "vitest";
 import { createGbaPlayExecution } from "../src/play-execution.ts";
 import { PlayHost } from "../src/play-host.ts";
@@ -153,13 +155,14 @@ async function play(options: {
   onReport?: (report: EmbodimentLifecycleReport) => void | Promise<void>;
 }) {
   const client = fakeClient({ kind: "start", session: session(options.turns ?? 2) }, options.onReport);
+  const env = await playEnv();
   const host = new PlayHost({
     client,
     runnerId: "runner-local",
     environmentIds: ["pokemon-firered"],
     execute: createGbaPlayExecution({
       logger: silentLogger,
-      env: await playEnv(),
+      env,
       createMind: options.mind as () => Promise<never>,
       createVoice: () => Promise.resolve(options.voice),
       ...(options.voiceAgent === undefined
@@ -170,7 +173,7 @@ async function play(options: {
   });
   await host.poll();
   await host.settled();
-  return client;
+  return Object.assign(client, { env });
 }
 
 describe("asked play voice", () => {
@@ -185,6 +188,15 @@ describe("asked play voice", () => {
     // the words; handing it finished speech is the ADR 0074 defect.
     expect(voice.reported).not.toContain("this desk has beaten me twice now");
     expect(client.reports.map((report) => report.state)).toEqual(["running", "stopped"]);
+    const journalDir = client.env["CLANKIE_GBA_PLAY_JOURNAL_DIR"] as string;
+    const lines = parseFreePlayJournal(
+      readFileSync(join(journalDir, readdirSync(journalDir)[0] as string), "utf8"),
+    );
+    expect(lines[1]).toMatchObject({
+      speechDeliveryId: expect.any(String),
+      narrationEvent: expect.stringContaining("working toward:"),
+    });
+    expect(JSON.stringify(lines[1])).not.toContain("this desk has beaten me twice now");
   });
 
   it("stays quiet on the turns his volition passed over", async () => {
@@ -194,9 +206,16 @@ describe("asked play voice", () => {
     // and it is the same judgement whether or not the room holds the pen.
     const voice = fakeVoice();
     const mind = talkingMind(null);
-    await play({ voice: voice.client, mind: mind.create });
+    const client = await play({ voice: voice.client, mind: mind.create });
 
     expect(voice.reported).toEqual([]);
+    const journalDir = client.env["CLANKIE_GBA_PLAY_JOURNAL_DIR"] as string;
+    const lines = parseFreePlayJournal(
+      readFileSync(join(journalDir, readdirSync(journalDir)[0] as string), "utf8"),
+    );
+    expect(lines.filter((line) => line.kind === "turn").every((line) => !("speechDeliveryId" in line))).toBe(
+      true,
+    );
   });
 
   it("names the goal the event served, so the room can react to a moment", async () => {

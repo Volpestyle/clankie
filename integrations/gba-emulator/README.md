@@ -230,6 +230,16 @@ referenced the action actually taken. It separates reasoning from post-hoc
 narration and is a keyword heuristic over free text, so it is reported and never
 gated.
 
+Recent turn history remains capped at eight, while successful map transitions
+live in a separate bounded session memory as observed source/action/destination
+facts ([ADR 0116](../../docs/adr/0116-learned-transitions-and-stale-objectives-are-bounded-facts.md)).
+The loop also reports recurring semantic states across varied actions. A standing
+objective is optional (`null` clears it); after two warned decisions where the
+same old objective and recurring states persist, the loop retires the objective
+without choosing its replacement or the next action. Hosted walks with no route
+detail are described from verified before/after positions, never from transport
+input counts.
+
 ### Free-play competence gate
 
 `pnpm --filter @clankie/gba-emulator gameplay:competence -- --mode deterministic_double` runs two pinned ROM-free
@@ -278,11 +288,31 @@ newest compatible checkpoint and mints one on the way out (ADR 0060).
 ([`apps/clankie/src/play-execution.ts`](../../apps/clankie/src/play-execution.ts)).
 
 Every run leaves a durable trail (ADR 0068). `openFreePlayJournal` writes one
-append-only JSONL per run — header, every validated `FreePlayTurn`, then a
-summary with the progress/volition/coherence metrics — which the production
-path stores under `~/.local/state/clankie/gba-play/`. Each run also has its own
+append-only JSONL per run under `~/.local/state/clankie/gba-play/`: a header,
+every validated `FreePlayTurn` with its V2 causal evidence packet, then a summary
+with progress, volition, coherence, exact-repeat, semantic-recurrence, and
+objective-retirement metrics. V1 journals remain readable. Each run also has its own
 environment session identity (`gba-free-play:<scenario>:v<n>:<run-stamp>`), so
 a new playthrough never overwrites the previous run's session record; the
 record itself is a bounded working set under `EnvironmentRuntimeRetention`
 (newest 128 action outcomes, rolled with a count; newest 16 ended records),
 because the journal, not the runtime's operational state, is the full history.
+
+Evaluate a journal offline as JSON:
+
+```bash
+pnpm --filter @clankie/gba-emulator gameplay:evaluate-journal -- \
+  ~/.local/state/clankie/gba-play/<run>.jsonl
+```
+
+The CLI resolves lifecycle events through `CLANKIE_EVENT_LOG`, then
+`CLANKIE_STATE/events.jsonl`, then `~/.clankie/events.jsonl`. Voice receipts use
+`DISCORD_BRIDGE_RECEIPT_PATH`, then the normal `XDG_STATE_HOME` location.
+`--events` and `--voice-receipts` take final precedence. Missing implicit
+defaults are optional; an explicitly named path must exist. The report includes
+per-turn causal evidence and conservative verdicts plus aggregate timing,
+outcomes, alignment, movement, scene appropriateness, stalls, recovery,
+narration receipts, and terminal accounting. Missing V1, stage, or receipt
+evidence remains `unknown`. Journals never contain PNG, PCM, credentials, media
+bytes, the full room transcript, or generated voice wording; exact audible
+wording remains unknown by policy.

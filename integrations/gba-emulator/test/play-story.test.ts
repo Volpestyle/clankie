@@ -11,6 +11,7 @@ const turn = (index: number, extra: Partial<FreePlayTurn> = {}): FreePlayTurn =>
   intent: "press a",
   notes: null,
   objective: "leave the bedroom",
+  objectiveRetired: null,
   interjection: null,
   reply: null,
   speak: null,

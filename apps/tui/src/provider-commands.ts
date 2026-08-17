@@ -33,6 +33,7 @@ import {
   mergedCatalog,
   parseModelRef,
   resolveProviders,
+  resolvePiModelSelection,
   resolveRole,
   registerConfiguredPiProviders,
   runAnthropicBrowserLogin,
@@ -42,6 +43,7 @@ import {
   subscriptionRefFor,
   updateGlobalConfig,
   type ClankieConfig,
+  type PiModelSelection,
 } from "@clankie/model-provider";
 import type { MenuOption, SetupFlow } from "./shell/setup-flow.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
@@ -57,6 +59,7 @@ export interface ProviderServices {
     providers(): Promise<readonly { id: string; name: string }[]>;
     models(providerId: string): Promise<readonly ModelEntry[]>;
     thinkingLevels(providerId: string, modelId: string): Promise<readonly string[]>;
+    resolveSelection(config: ClankieConfig): Promise<PiModelSelection>;
     refresh(): Promise<void>;
     /** Re-projects config-declared providers so a just-added endpoint is pickable now. */
     register(config: ClankieConfig): Promise<void>;
@@ -67,7 +70,7 @@ export interface ProviderServices {
     readonly codexDevice: typeof runCodexDeviceLogin;
     readonly xaiDevice: typeof runXaiDeviceLogin;
   };
-  /** Called after config changes so the shell can refresh banner/status. */
+  /** Called after config or routing-auth changes so the shell can refresh banner/status. */
   readonly onConfigChanged: (config: ClankieConfig) => void;
 }
 
@@ -79,6 +82,7 @@ export function createProviderServices(options: {
   const env = options.env ?? process.env;
   const cwd = options.cwd ?? process.cwd();
   const registry = createModelRegistry({ env });
+  const store = createDefaultCredentialStore({ env });
   let piRuntime: Promise<ModelRuntime> | undefined;
   const runtime = (): Promise<ModelRuntime> =>
     (piRuntime ??= (async () => {
@@ -88,7 +92,7 @@ export function createProviderServices(options: {
       return created;
     })());
   return {
-    store: createDefaultCredentialStore({ env }),
+    store,
     registry,
     env,
     cwd,
@@ -102,6 +106,13 @@ export function createProviderServices(options: {
       async thinkingLevels(providerId, modelId) {
         const model = (await runtime()).getModel(providerId, modelId);
         return model === undefined ? [] : getSupportedThinkingLevels(model);
+      },
+      async resolveSelection(config) {
+        return resolvePiModelSelection(
+          config,
+          await runtime(),
+          (await store.get(CODEX_PROVIDER_ID)) !== undefined,
+        );
       },
       async refresh() {
         await (await runtime()).refresh({ allowNetwork: true, force: true });
@@ -402,6 +413,19 @@ function ownerCredentialEntries(
 }
 
 /**
+ * The banner's model line comes from the same effective Pi selection the
+ * captain uses, after subscription routing, variant precedence, and clamping.
+ */
+export async function formatModelBanner(
+  config: ClankieConfig,
+  captainModels: Pick<NonNullable<ProviderServices["captainModels"]>, "resolveSelection"> | undefined,
+): Promise<string | undefined> {
+  if (config.model === undefined || captainModels === undefined) return undefined;
+  const selection = await captainModels.resolveSelection(config);
+  return `${selection.ref} (${selection.thinkingLevel} effort)`;
+}
+
+/**
  * Operator-facing /auth status. Lists first-class slots even when empty, omits
  * auto-minted `clankie_*` process identities, and never reprints secret prefixes.
  */
@@ -674,6 +698,7 @@ async function codexOauthFlow(shell: ClankieFaceShell, services: ProviderService
       }
       await services.store.set(CODEX_PROVIDER_ID, credential);
     }
+    await notifyModelSelectionChanged(services);
     flow.renderLine("ChatGPT subscription connected.", "success");
     shell.insertCommandResult(
       "/auth",
@@ -837,6 +862,7 @@ async function removeCredentialFlow(shell: ClankieFaceShell, services: ProviderS
   });
   if (confirmed?.[0] !== "yes") return;
   const removed = await services.store.delete(id);
+  if (removed && id === CODEX_PROVIDER_ID) await notifyModelSelectionChanged(services);
   shell.insertCommandResult(
     "/auth",
     removed
@@ -844,6 +870,11 @@ async function removeCredentialFlow(shell: ClankieFaceShell, services: ProviderS
       : `No local credential was stored for ${id}.`,
     removed ? "success" : "error",
   );
+}
+
+async function notifyModelSelectionChanged(services: ProviderServices): Promise<void> {
+  const { config } = await loadConfig({ env: services.env, cwd: services.cwd });
+  services.onConfigChanged(config);
 }
 
 // --- /provider + /model ---

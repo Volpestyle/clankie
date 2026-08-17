@@ -24,12 +24,12 @@ The retained diagram is the historical evidence model at ratification:
 
 A non-deterministic run asserts different properties:
 
-| Property  | Evidence                                                               |
-| --------- | ---------------------------------------------------------------------- |
-| Legality  | each action is accepted or refused by the adapter                      |
-| Causality | observation digest, intent, action, outcome, and effect share one turn |
-| Bounds    | model text, frames, inputs, and session resources are capped           |
-| Progress  | distinct tiles/maps and accepted actions per new tile                  |
+| Property  | Evidence                                                                        |
+| --------- | ------------------------------------------------------------------------------- |
+| Legality  | each action is accepted or refused by the adapter                               |
+| Causality | decision, immediate pre-action, result, and post-action evidence share one turn |
+| Bounds    | model text, frames, inputs, and session resources are capped                    |
+| Progress  | distinct tiles/maps and accepted actions per new tile                           |
 
 Each decision sees both the rendered frame and decoded state. The frame carries
 scene content such as walls, stairs, NPCs, and text; decoded RAM carries exact
@@ -75,8 +75,9 @@ button over adapting to the game.
 
 ## Consequences
 
-- Free play is not replayable; its durable trail must preserve causal linkage,
-  bounds, progress, and failures instead.
+- Free play is not replayable; its durable trail preserves causal stages,
+  bounds, progress, and failures instead
+  ([ADR 0117](0117-play-evidence-preserves-causal-stages.md)).
 - The rendered frame is untrusted model input; durable records keep its digest,
   not raw frame bytes.
 - Model text shown on an activity overlay is bounded and remains untrusted.

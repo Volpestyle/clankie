@@ -291,6 +291,8 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
           return png === null ? null : createHash("sha256").update(png).digest("hex");
         },
         framePng: () => body.framePng(),
+        provenance: () => body.traceProvenance(),
+        clock,
         onPhase: (phase) =>
           sink?.publishStatus({
             schemaVersion: 1,
@@ -303,7 +305,7 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
           control.stopRequested() ||
           (session.budget.maxDurationMs !== undefined &&
             clock().getTime() - startedAt >= session.budget.maxDurationMs),
-        onTurn: (turn) => {
+        onTurn: (turn, evidence) => {
           sequence += 1;
           if (sink !== undefined) {
             sink.publishOverlay(
@@ -321,9 +323,16 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
           }
           publishFrame(turn.turn);
           const event = roomEvent(turn);
-          const speechDeliveryId = event === null ? undefined : randomUUID();
+          const speechDeliveryId =
+            event !== null && voice !== undefined && voice.roomListening ? randomUUID() : undefined;
           if (event !== null && speechDeliveryId !== undefined) reportToRoom(event, speechDeliveryId);
-          journal?.turn(turn, speechDeliveryId === undefined ? {} : { speechDeliveryId });
+          journal?.turn(
+            turn,
+            evidence,
+            speechDeliveryId === undefined || event === null
+              ? {}
+              : { speechDeliveryId, narrationEvent: event },
+          );
           options.onTurn?.(turn);
         },
         onSettledTurn: (event: FreePlaySettledTurn) => {
@@ -383,6 +392,14 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
           framesDropped,
           audioPacketsPublished,
           audioPacketsDropped,
+          accepted: result.accepted,
+          distinctTiles: result.progress.distinctTiles,
+          maps: result.progress.maps,
+          turnsSinceNewTile: result.progress.turnsSinceNewTile,
+          coherence: result.coherence,
+          longestUnchangedRun: result.longestUnchangedRun,
+          longestRecurringRun: result.longestRecurringRun,
+          objectivesRetired: result.objectivesRetired,
           ...(journal === undefined ? {} : { journalPath: journal.path }),
         },
         "world playthrough finished",

@@ -2,8 +2,12 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { openFreePlayJournal, parseFreePlayJournal } from "../src/free-play-journal.ts";
-import type { FreePlayResult, FreePlayTurn } from "../src/free-play.ts";
+import {
+  FreePlayJournalSummarySchema,
+  openFreePlayJournal,
+  parseFreePlayJournal,
+} from "../src/free-play-journal.ts";
+import type { FreePlayResult, FreePlayTurn, FreePlayTurnEvidence } from "../src/free-play.ts";
 
 const turn = (index: number): FreePlayTurn => ({
   turn: index,
@@ -13,6 +17,7 @@ const turn = (index: number): FreePlayTurn => ({
   intent: "press a",
   notes: null,
   objective: "leave the bedroom",
+  objectiveRetired: null,
   interjection: null,
   reply: null,
   speak: null,
@@ -32,6 +37,45 @@ const result = (turns: FreePlayTurn[]): FreePlayResult => ({
   volition: { offered: turns.length, taken: 1, suppressed: 0, skipped: 0 },
   coherence: 0.5,
   longestUnchangedRun: 1,
+  longestRecurringRun: 6,
+  objectivesRetired: 1,
+});
+
+const evidence = (): FreePlayTurnEvidence => ({
+  decision: { observations: [], provenance: { body: "local", coreId: "test", real: false } },
+  immediatePreAction: { observations: [], provenance: { body: "local", coreId: "test", real: false } },
+  postAction: { observations: [], provenance: { body: "local", coreId: "test", real: false } },
+  actionResult: {
+    source: "environment",
+    result: {
+      schemaVersion: 1,
+      actionId: "11111111-1111-4111-8111-111111111111",
+      sessionId: "session",
+      updatedAt: "2026-08-15T21:00:00.000Z",
+      status: "completed",
+      acceptedGoalVersion: 1,
+      outcome: { transcript: ["complete structured result"] },
+    },
+  },
+  progressBefore: { distinctTiles: 1, maps: ["map"], turnsSinceNewTile: 0, actionsPerNewTile: null },
+  progressAfter: { distinctTiles: 1, maps: ["map"], turnsSinceNewTile: 1, actionsPerNewTile: null },
+  signals: {
+    refusedHere: [],
+    stalledForTurns: null,
+    repeatingForTurns: null,
+    recurringForTurns: null,
+    objectiveForTurns: null,
+    localeForTurns: null,
+    previousObjective: "leave the bedroom",
+    previousNotes: null,
+    retiredObjective: null,
+  },
+  timing: {
+    decisionStartedAt: "2026-08-15T21:00:00.000Z",
+    decisionSettledAt: "2026-08-15T21:00:01.000Z",
+    actionStartedAt: "2026-08-15T21:00:01.000Z",
+    actionSettledAt: "2026-08-15T21:00:02.000Z",
+  },
 });
 
 describe("free-play journal", () => {
@@ -47,7 +91,7 @@ describe("free-play journal", () => {
       clock,
     });
     const turns = [turn(0), turn(1)];
-    for (const record of turns) journal.turn(record);
+    for (const record of turns) journal.turn(record, evidence());
     journal.summary({
       outcome: "stopped",
       result: result(turns),
@@ -60,11 +104,16 @@ describe("free-play journal", () => {
     const lines = parseFreePlayJournal(readFileSync(journal.path, "utf8"));
     expect(lines.map((line) => line.kind)).toEqual(["header", "turn", "turn", "summary"]);
     expect(lines[0]).toMatchObject({
+      schemaVersion: 2,
       runId: "embodiment-abc123",
       scenarioId: "firered-bedroom-route",
       resumedFromCheckpointId: "2026-07-26T15-55-24-710Z-oaks-lab-starter-menu",
     });
-    expect(lines[1]).toMatchObject({ turn: { turn: 0, monologue: "thinking about turn 0" } });
+    expect(lines[1]).toMatchObject({
+      schemaVersion: 2,
+      turn: { turn: 0, monologue: "thinking about turn 0" },
+      evidence: { actionResult: { result: { outcome: { transcript: ["complete structured result"] } } } },
+    });
     expect("speechDeliveryId" in (lines[1] ?? {})).toBe(false);
     expect(lines[3]).toMatchObject({
       outcome: "stopped",
@@ -72,6 +121,8 @@ describe("free-play journal", () => {
       progress: { distinctTiles: 3 },
       volition: { taken: 1 },
       coherence: 0.5,
+      longestRecurringRun: 6,
+      objectivesRetired: 1,
     });
   });
 
@@ -104,7 +155,7 @@ describe("free-play journal", () => {
       onError: (error) => errors.push(error),
     });
     rmSync(rootDir, { recursive: true, force: true });
-    journal.turn(turn(0));
+    journal.turn(turn(0), evidence());
     expect(errors).toHaveLength(1);
   });
 
@@ -117,12 +168,61 @@ describe("free-play journal", () => {
       scenarioId: "scenario",
       clock: () => new Date("2026-08-15T21:00:00.000Z"),
     });
-    journal.turn(turn(0), { speechDeliveryId: "play-turn-1" });
+    journal.turn(turn(0), evidence(), {
+      speechDeliveryId: "play-turn-1",
+      narrationEvent: "moved north (working toward: leave the bedroom)",
+    });
     const lines = parseFreePlayJournal(readFileSync(journal.path, "utf8"));
     expect(lines[1]).toMatchObject({
       kind: "turn",
       speechDeliveryId: "play-turn-1",
+      narrationEvent: "moved north (working toward: leave the bedroom)",
       turn: { turn: 0 },
     });
+  });
+
+  it("keeps V1 journals readable with no invented evidence", () => {
+    const lines = parseFreePlayJournal(
+      [
+        JSON.stringify({
+          kind: "header",
+          schemaVersion: 1,
+          runId: "legacy",
+          environmentSessionId: "legacy-session",
+          scenarioId: "legacy-scenario",
+          startedAt: "2026-07-27T02:30:00.000Z",
+          resumedFromCheckpointId: null,
+        }),
+        JSON.stringify({
+          kind: "turn",
+          schemaVersion: 1,
+          at: "2026-07-27T02:30:01.000Z",
+          turn: turn(0),
+        }),
+      ].join("\n"),
+    );
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toMatchObject({ schemaVersion: 1, kind: "turn" });
+    expect("evidence" in (lines[1] ?? {})).toBe(false);
+  });
+
+  it("defaults loop metrics on summaries written before they existed", () => {
+    const legacy = FreePlayJournalSummarySchema.parse({
+      kind: "summary",
+      schemaVersion: 1,
+      at: "2026-08-15T21:00:00.000Z",
+      outcome: "stopped",
+      turnsTaken: 1,
+      accepted: 1,
+      durationMs: 1,
+      framesPublished: 1,
+      framesDropped: 0,
+      checkpointId: null,
+      progress: { distinctTiles: 1, maps: ["house"], turnsSinceNewTile: 1, actionsPerNewTile: null },
+      volition: { offered: 1, taken: 0, suppressed: 0 },
+      coherence: null,
+    });
+
+    expect(legacy).toMatchObject({ longestRecurringRun: 0, objectivesRetired: 0 });
   });
 });

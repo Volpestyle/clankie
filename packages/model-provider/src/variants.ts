@@ -1,4 +1,5 @@
 import type { ModelEntry } from "@clankie/model-registry";
+import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 
 /**
  * A reasoning-effort preset for a model. `body` holds provider wire-format
@@ -69,7 +70,7 @@ function effortVariant(effort: string): ModelVariant {
  *   `reasoning_effort` ladder (gpt-5.6 reaches `max`, gpt-5.2/5.4/5.5 reach
  *   `xhigh`, gpt-5 still accepts `minimal`), else low/medium/high;
  * - anthropic → extended-thinking token budgets (think-8k / think-16k / think-32k);
- * - xai → `reasoning_effort` low/high (grok reasoning control);
+ * - xai → `reasoning_effort` low/medium/high (grok reasoning control);
  * - google → `thinkingConfig` token budgets (think-8k / think-16k / think-24k);
  * - any other reasoning-capable provider → `reasoning_effort` low/medium/high.
  *
@@ -98,7 +99,7 @@ export function effortVariantsFor(providerId: string, model: ModelEntry): ModelV
   }
 
   if (provider === "xai") {
-    return ["low", "high"].map(effortVariant);
+    return WIDELY_SUPPORTED_EFFORTS.map(effortVariant);
   }
 
   if (provider === "google") {
@@ -119,4 +120,16 @@ export function effortVariantsFor(providerId: string, model: ModelEntry): ModelV
 
 export function variantById(variants: readonly ModelVariant[], id: string): ModelVariant | undefined {
   return variants.find((variant) => variant.id === id);
+}
+
+/** Maps provider-specific variant ids back to the thinking level stored by Pi. */
+export function thinkingLevelForVariant(value: string | undefined): ModelThinkingLevel | undefined {
+  if (value === "none") return "off";
+  if (value === "think-8k") return "low";
+  if (value === "think-16k") return "medium";
+  if (value === "think-24k" || value === "think-32k") return "high";
+  if (["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(value ?? "")) {
+    return value as ModelThinkingLevel;
+  }
+  return undefined;
 }

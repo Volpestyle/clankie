@@ -16,6 +16,7 @@ describe("free-play system prompt", () => {
   it("still carries the rules of the surface", () => {
     expect(FREE_PLAY_SYSTEM_PROMPT).toContain("monologue");
     expect(FREE_PLAY_SYSTEM_PROMPT).toContain("objective");
+    expect(FREE_PLAY_SYSTEM_PROMPT).toContain("Return null to clear");
     expect(FREE_PLAY_SYSTEM_PROMPT).toContain("button_press");
     expect(FREE_PLAY_SYSTEM_PROMPT).toContain("use advance_dialog — not frame_advance");
     expect(FREE_PLAY_SYSTEM_PROMPT).toContain("do not walk_to it again");
@@ -66,6 +67,13 @@ function viewWith(overrides: Partial<FreePlayView>): FreePlayView {
     observations: [],
     framePng: null,
     refusedHere: [],
+    stalledForTurns: null,
+    repeatingForTurns: null,
+    recurringForTurns: null,
+    objectiveForTurns: null,
+    localeForTurns: null,
+    retiredObjective: null,
+    learnedTransitions: [],
     notes: null,
     objective: null,
     interjection: null,

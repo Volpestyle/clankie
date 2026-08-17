@@ -26,7 +26,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { resolveWorldCredential, WorldCredentialError } from "@clankie/credential-broker";
 import { EnvironmentAdapterActionError } from "@clankie/environment-runtime";
-import type { GbaDriverIo } from "@clankie/gba-emulator";
+import type { FreePlayProvenance, GbaDriverIo } from "@clankie/gba-emulator";
 import {
   GbaEmulatorObservationSchema,
   INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION,
@@ -81,6 +81,8 @@ export interface WorldBody {
   readonly drainAudio: () => readonly WorldAudioPacket[];
   /** Audio packets lost before they reached the activity sink. */
   readonly droppedAudioPacketCount: () => number;
+  /** Causal identity sampled beside decision/pre-action/post-action state. */
+  readonly traceProvenance: () => FreePlayProvenance;
   readonly session: () => Promise<SessionStatus>;
   /** Who else is here — the answer he voices, and the reason this exists. */
   readonly who: () => Promise<WhoResult>;
@@ -387,6 +389,14 @@ class HostedWorldBody implements WorldBody {
   public readonly drainAudio = (): readonly WorldAudioPacket[] => this.audioPackets.splice(0);
 
   public readonly droppedAudioPacketCount = (): number => this.droppedAudioPackets;
+
+  public readonly traceProvenance = (): FreePlayProvenance => ({
+    body: "world",
+    sessionId: this.joined.sessionId,
+    worldId: this.joined.worldId,
+    bodyGeneration: this.bodyGeneration,
+    ...(this.observation === undefined ? {} : { adapterVersion: this.observation.adapterVersion }),
+  });
 
   public readonly session = async (): Promise<SessionStatus> => {
     const outcome = await callHost(this.socketPath, {

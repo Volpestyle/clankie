@@ -28,6 +28,12 @@ Every managed process gets:
    unrelated process; and
 3. a service-specific health gate before start succeeds.
 
+The force-kill deadline is also service-specific. Generic services retain the
+launcher's ten-second grace. Clankie's outer grace is its configured play
+shutdown deadline plus two seconds, leaving its play host time to finish a
+normal summary or publish the bounded forced terminal report before the
+supervisor escalates to `SIGKILL`.
+
 Restart follows dependencies. Restarting `clankie` also restarts the bridge
 and the lab user-session body, because both hold live claims against the
 service instance. Stopping one named service remains scoped to that service.
@@ -53,5 +59,7 @@ The compatibility aliases `captain`, `captain-eve`, `eve`, `control-plane`, and
   a dropped tail reconnects without repeating the turn.
 - A process started outside the launcher is reported but never adopted or
   killed.
+- Restarting during play preserves terminal accounting instead of leaving the
+  next process to infer an avoidable lease lapse.
 - Settings remain the source of Discord allowlists; the launcher supplies only
   repository paths and brokered service credentials.
