@@ -47,6 +47,7 @@ describe("model minds issue a prompt the SDK accepts", () => {
     const call = model.doStreamCalls[0]!;
     expect(call.prompt.filter((message) => message.role === "system")).toHaveLength(1);
     expect(call.prompt[0]?.role).toBe("system");
+    expect(JSON.stringify(call.prompt[0])).toContain("save before treating your");
   });
 
   it("lets the voice mind reach the provider", async () => {
@@ -140,6 +141,8 @@ describe("the view says what reaches the controls", () => {
     expect(rendered).toContain("Nothing on this screen decodes");
     expect(rendered).toContain("not a fault");
     expect(rendered).toContain("button_press and frame_advance");
+    expect(rendered).toContain("use A only");
+    expect(rendered).toContain("START, L, and R can open HELP");
   });
 
   it("names a screen that decodes but carries no position", () => {

@@ -59,6 +59,7 @@ describe("projectPlayStory", () => {
       ],
     });
     expect(card.turnsTaken).toBe(3);
+    expect(card.lastTurnAt).toBe("2026-08-15T20:00:02.000Z");
     expect(card.objective).toBe("leave Pallet");
     expect(card.maps).toEqual(["pallet-town", "route-1"]);
     expect(card.moments).toEqual([
@@ -72,5 +73,11 @@ describe("projectPlayStory", () => {
     expect(() =>
       projectPlayStory({ sessionId: "play-1", environmentId: "pokemon-firered", lines: [turnLine(0)] }),
     ).toThrow(/play_story_missing_header/u);
+  });
+
+  it("reports no settled turn while a new session is still deciding", () => {
+    expect(
+      projectPlayStory({ sessionId: "play-1", environmentId: "pokemon-firered", lines: [header()] }),
+    ).toMatchObject({ turnsTaken: 0, lastTurnAt: null });
   });
 });

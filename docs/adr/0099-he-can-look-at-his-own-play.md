@@ -29,8 +29,10 @@ He may **pull** two things, and only those two:
    presses nothing. The captain's `pokeagent_observe` includes the
    same still when one exists, matching `observe_share`.
 2. **Story.** A bounded card projected from the play journal: turns taken,
-   current objective, maps, last eight `speakWanted` effects. Never monologue,
-   notes, or the raw JSONL. `pokeagent_recall` is a captain tool;
+   latest settled-turn time, current objective, maps, last eight `speakWanted`
+   effects. A returned card means the run remains attached; the timestamp does
+   not claim the next decision is stalled. Never monologue, notes, or the raw
+   JSONL. `pokeagent_recall` is a captain tool;
    `/v1/embodiment/sessions/live/story` is the same card; the voice briefing
    includes it when he is playing. The mouth reaches the story through
    `ask_clankie` or the briefing, not by opening the log.

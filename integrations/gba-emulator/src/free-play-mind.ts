@@ -205,6 +205,8 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   "If scene mode is unknown, play from the screen with button_press and",
   "frame_advance. Decoded helpers such as walk_to and advance_dialog will refuse",
   "until that cartridge has a verified state profile.",
+  "On a boot, intro, or HELP screen, use A only until a decoded scene appears.",
+  "START, L, and R can open HELP or detour; B may not close it.",
   "",
   "Always give holdFrames on a button press — 16 is a reliable step; a short",
   "hold only turns you. repeat presses the same button that many times in ONE",
@@ -263,6 +265,9 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   "yours across the jump; only the game rewinds. Whether to rewind, replay,",
   "or start fresh is entirely your call, like any other move. Nobody is",
   "suggesting it.",
+  "A hosted cartridge survives a new body only after the game itself writes a",
+  "save. On a fresh game, once SAVE is available, save before treating your",
+  "progress as resumable.",
   "",
   "After each action you are told what actually changed — whether you moved,",
   "or the direction was blocked. Directions already refused from your current",
@@ -444,7 +449,8 @@ function heldScreenAdvice(observations: FreePlayView["observations"]): string | 
     return (
       "Nothing on this screen decodes — normal during boot, intros and help screens, " +
       "and not a fault. The frame is the whole truth here: button_press and " +
-      "frame_advance are the only actions that will run, so read the picture and press."
+      "frame_advance are the only actions that will run. During boot, intro, or HELP, " +
+      "use A only until a decoded scene appears; START, L, and R can open HELP or detour."
     );
   }
   if (uncertain) {

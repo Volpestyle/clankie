@@ -98,10 +98,11 @@ world with `play.observe` and log `scene.mode` after each press: a plateau names
 the screen you are stuck on. Then take the actual verdict at `WORLD_PACE=1`,
 because pacing is what a watcher sees and what frame delivery is measured under.
 
-**Do not "just check" a running session by joining again.** A second join from
-the same principal _replaces_ the body and destroys the run you were observing.
-To watch a live session, tail its journal instead — one JSON line per action
-with the frame number, under
+**Do not "just check" a running session with a stop or a changed join.** An
+exact join retry reuses the live body, but an explicit operator stop ends it and
+a join with a different fingerprint replaces it. Use an isolated holder/world
+for intrusive probes. To watch the default player's live session, tail its
+journal instead — one JSON line per action with the frame number, under
 `$WORLD_STATE_DIR/players/<hash>/games/<game>/journal/`.
 
 A useful receipt names the code revision and artifact digests, the public path,

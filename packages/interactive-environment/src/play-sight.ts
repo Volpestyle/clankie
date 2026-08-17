@@ -66,6 +66,8 @@ export const PlayStoryCardSchema = z
     scenarioId: z.string().min(1).max(200),
     startedAt: z.string().datetime(),
     turnsTaken: z.number().int().nonnegative(),
+    /** Latest settled turn. A card is attached only while the session is live. */
+    lastTurnAt: z.string().datetime().nullable(),
     objective: z.string().trim().min(1).max(160).nullable(),
     maps: z.array(z.string().min(1).max(200)).max(PLAY_STORY_MAPS_MAX),
     moments: z.array(PlayStoryMomentSchema).max(PLAY_STORY_MOMENTS_MAX),

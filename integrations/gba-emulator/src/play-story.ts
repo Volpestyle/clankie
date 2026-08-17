@@ -58,6 +58,7 @@ export function projectPlayStory(input: ProjectPlayStoryInput): PlayStoryCard {
     scenarioId: header.scenarioId,
     startedAt: header.startedAt,
     turnsTaken: turns.length,
+    lastTurnAt: last?.kind === "turn" ? last.at : null,
     objective: last?.kind === "turn" ? last.turn.objective?.trim().slice(0, 160) || null : null,
     maps: maps.slice(-PLAY_STORY_MAPS_MAX).map((mapId) => mapId.slice(0, 200)),
     moments: moments.slice(-PLAY_STORY_MOMENTS_MAX),

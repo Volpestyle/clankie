@@ -195,6 +195,7 @@ describe("operator play controls", () => {
           scenarioId: "firered-bedroom-route",
           startedAt: "2026-08-15T20:00:00.000Z",
           turnsTaken: 3,
+          lastTurnAt: "2026-08-15T20:00:01.000Z",
           objective: "leave the lab",
           maps: ["oaks-lab"],
           moments: [{ at: "2026-08-15T20:00:01.000Z", effect: "bumped Oak", toward: "leave the lab" }],

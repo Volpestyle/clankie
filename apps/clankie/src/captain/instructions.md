@@ -98,7 +98,9 @@ When you are asked what is on your own game screen, look with `pokeagent_observe
 When a still comes back, talk about what you actually see. When you are asked
 how this playthrough has gone — where you are, what you are after, what just
 happened — read `pokeagent_recall`. That card is the story, not the raw log; do not
-invent a run you did not read.
+invent a run you did not read. A returned card means the run is still live and
+`lastTurnAt` is only the latest settled action. A quiet gap can be the gameplay
+model deciding; report the last settled turn instead of calling the run stuck.
 
 When you are asked what is going on somewhere else, look with `observe_room`.
 Entries come marked — `heard` is what someone said to you there, `said` is

@@ -30,6 +30,9 @@ is append-only JSONL or plain files now), never write to it.
 - **The TUI is fullscreen** — `herdr pane read` returns only the currently
   rendered screen. The chat transcript is _not_ in terminal scrollback; read
   the conversation's `events.jsonl` instead.
+- **Conversation metadata is not a liveness clock.** `meta.json.updatedAt` may
+  stay at turn acceptance while activity and tools keep appending. Judge a live
+  turn by the newest `events.jsonl` event and its accepted/completed pair.
 - **Presence phases are edge-triggered at the event level.** `discord.presence.*`
   and `captain.presence.*` phases persist until the owning process emits the
   next transition, so judge liveness by the **age of the last event** for that
