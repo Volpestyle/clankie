@@ -92,6 +92,8 @@ export interface GbaCoreState {
   facing: "north" | "east" | "south" | "west";
   dialogLineIndex: number;
   dialogLines?: string[];
+  /** Current field text-printer position, used to distinguish printing from a stalled choice. */
+  dialogProgress?: number;
   /**
    * True when the game has finished printing the visible dialog box and is
    * holding it for an A/B press. False while text is still printing. Cores

@@ -1,5 +1,10 @@
 import { resolveActivityProducerCredential } from "@clankie/credential-broker";
-import type { RenderedSurfaceFrame, RenderedSurfaceOverlay } from "@clankie/interactive-environment";
+import type {
+  RenderedSurfaceAudio,
+  RenderedSurfaceFrame,
+  RenderedSurfaceOverlay,
+  RenderedSurfaceStatus,
+} from "@clankie/interactive-environment";
 import { WebSocket } from "ws";
 
 /**
@@ -39,14 +44,19 @@ export interface ActivityFrameSocket {
 
 export interface ActivityFrameSink {
   publishFrame(frame: RenderedSurfaceFrame): void;
+  publishAudio(audio: RenderedSurfaceAudio): void;
   /**
    * The decoded-state sidecar shown beside the canvas. Bounded model text may
    * cross here (ADR 0049); it is what an activity can show that a flat video
    * stream cannot.
    */
   publishOverlay(overlay: RenderedSurfaceOverlay): void;
+  /** Present-tense work state shown while the next overlay is pending. */
+  publishStatus(status: RenderedSurfaceStatus): void;
   /** Frames dropped because the producer socket was not open. Never silent. */
   readonly droppedFrameCount: number;
+  /** PCM packets dropped while disconnected. */
+  readonly droppedAudioPacketCount: number;
   readonly connected: boolean;
   close(): void;
 }
@@ -74,12 +84,22 @@ export function createActivityFrameSink(options: ActivityFrameSinkOptions): Acti
 
   let socket: ActivityFrameSocket | null = null;
   let closed = false;
-  let dropped = 0;
+  let droppedFrames = 0;
+  let droppedAudioPackets = 0;
+  let latestStatus: RenderedSurfaceStatus | undefined;
 
   const open = (): void => {
     if (closed) return;
     const next = connect(options.url, options.token);
     socket = next;
+    next.on("open", () => {
+      if (socket !== next || latestStatus === undefined) return;
+      try {
+        next.send(JSON.stringify({ kind: "status", status: latestStatus }));
+      } catch {
+        // Latest-only state stays retained for the next reconnect.
+      }
+    });
     next.on("close", () => {
       socket = null;
       if (!closed) schedule(open, reconnectDelayMs);
@@ -88,27 +108,37 @@ export function createActivityFrameSink(options: ActivityFrameSinkOptions): Acti
   };
   open();
 
-  const send = (message: unknown): void => {
+  const send = (message: unknown, dropped: () => void): void => {
     if (socket === null || socket.readyState !== OPEN) {
-      dropped += 1;
+      dropped();
       return;
     }
     try {
       socket.send(JSON.stringify(message));
     } catch {
-      dropped += 1;
+      dropped();
     }
   };
 
   return {
     publishFrame(frame) {
-      send({ kind: "frame", frame });
+      send({ kind: "frame", frame }, () => (droppedFrames += 1));
+    },
+    publishAudio(audio) {
+      send({ kind: "audio", audio }, () => (droppedAudioPackets += 1));
     },
     publishOverlay(overlay) {
-      send({ kind: "overlay", overlay });
+      send({ kind: "overlay", overlay }, () => undefined);
+    },
+    publishStatus(status) {
+      latestStatus = status;
+      send({ kind: "status", status }, () => undefined);
     },
     get droppedFrameCount() {
-      return dropped;
+      return droppedFrames;
+    },
+    get droppedAudioPacketCount() {
+      return droppedAudioPackets;
     },
     get connected() {
       return socket !== null && socket.readyState === OPEN;
@@ -117,6 +147,7 @@ export function createActivityFrameSink(options: ActivityFrameSinkOptions): Acti
       closed = true;
       socket?.close();
       socket = null;
+      latestStatus = undefined;
     },
   };
 }

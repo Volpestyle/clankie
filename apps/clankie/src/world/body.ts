@@ -45,6 +45,7 @@ import {
   ObservationSchema,
   RefusalSchema,
   SessionStatusSchema,
+  WatchResultSchema,
   WhoResultSchema,
   WORLD_PROTOCOL_VERSION,
   type Action,
@@ -76,6 +77,10 @@ export interface WorldBody {
    * reports the count so a consumer knows not to assume smooth motion.
    */
   readonly droppedFrameCount: () => number;
+  /** Native stereo PCM received since the last drain. */
+  readonly drainAudio: () => readonly WorldAudioPacket[];
+  /** Audio packets lost before they reached the activity sink. */
+  readonly droppedAudioPacketCount: () => number;
   readonly session: () => Promise<SessionStatus>;
   /** Who else is here — the answer he voices, and the reason this exists. */
   readonly who: () => Promise<WhoResult>;
@@ -102,6 +107,18 @@ export type WorldJoinResult =
 export interface WorldJoinOptions {
   environmentId: EmbodimentEnvironmentId;
   env?: NodeJS.ProcessEnv;
+  fetchImpl?: typeof fetch;
+}
+
+export interface WorldAudioPacket {
+  readonly bodyGeneration: number;
+  readonly frame: number;
+  readonly encoding: "pcm_s16le";
+  readonly sampleRate: number;
+  readonly channels: 2;
+  readonly frames: number;
+  readonly data: Uint8Array;
+  readonly capturedAt: string;
 }
 
 /**
@@ -198,14 +215,17 @@ export async function joinWorld(options: WorldJoinOptions): Promise<WorldJoinRes
     };
   }
 
+  const watchAudio = await openWatchAudio(socketPath, joined.data.token, options.fetchImpl ?? fetch);
   return {
     outcome: "joined",
-    body: new HostedWorldBody(socketPath, joined.data, observation.data),
+    body: new HostedWorldBody(socketPath, joined.data, observation.data, watchAudio),
   };
 }
 
 const REQUIRED_CAPABILITIES = ["world.observe", "world.act", "world.frames", "world.presence"] as const;
 const HARDWARE_TICK_MS = Math.round(1_000 / 59.7275);
+const AUDIO_POLL_MS = 80;
+const AUDIO_QUEUE_MAX = 64;
 const GOAL_VERSION = 1;
 const CHARACTER_ID = "clankie";
 
@@ -235,9 +255,60 @@ const FireRedStateSchema = z
         .strict(),
     ),
     fieldInputReady: z.boolean(),
+    menu: z
+      .object({
+        menuId: z.string().min(1).max(128),
+        cursor: z.number().int().nonnegative().max(63),
+        entries: z
+          .array(z.object({ id: z.string().min(1).max(128), label: z.string().min(1).max(256) }).strict())
+          .min(1)
+          .max(16),
+      })
+      .strict()
+      .nullable(),
   })
   .strict();
 type FireRedState = z.infer<typeof FireRedStateSchema>;
+
+const WatchAudioPacketSchema = z
+  .object({
+    bodyGeneration: z.number().int().positive(),
+    frame: z.number().int().nonnegative(),
+    encoding: z.literal("pcm_s16le"),
+    sampleRate: z.number().int().min(8_000).max(192_000),
+    channels: z.literal(2),
+    frames: z.number().int().positive().max(16_384),
+    byteLength: z
+      .number()
+      .int()
+      .positive()
+      .max(64 * 1024),
+    data: z.string().min(1),
+    capturedAt: z.string().datetime(),
+  })
+  .strict()
+  .superRefine((packet, context) => {
+    const bytes = Buffer.from(packet.data, "base64").byteLength;
+    if (bytes !== packet.byteLength || bytes !== packet.frames * packet.channels * 2) {
+      context.addIssue({ code: "custom", path: ["byteLength"], message: "invalid PCM length" });
+    }
+  });
+
+const WatchAudioBatchSchema = z
+  .object({
+    ok: z.literal(true),
+    bodyGeneration: z.number().int().nonnegative(),
+    cursor: z.number().int().nonnegative(),
+    dropped: z.number().int().nonnegative(),
+    packets: z.array(WatchAudioPacketSchema).max(256),
+  })
+  .strict();
+
+interface WatchAudioSource {
+  readonly endpoint: URL;
+  readonly token: string;
+  readonly fetch: typeof fetch;
+}
 
 class HostedWorldBody implements WorldBody {
   public readonly io: GbaDriverIo;
@@ -252,6 +323,13 @@ class HostedWorldBody implements WorldBody {
   private frame: Frame | undefined;
   private png: Uint8Array | null = null;
   private droppedFrames = 0;
+  private readonly watchAudio: WatchAudioSource | undefined;
+  private readonly audioPackets: WorldAudioPacket[] = [];
+  private audioGeneration = 0;
+  private audioCursor = 0;
+  private droppedAudioPackets = 0;
+  private audioTimer: NodeJS.Timeout | undefined;
+  private audioPollInFlight = false;
   private frameObserver: (() => void) | null = null;
   private frameTimer: NodeJS.Timeout | undefined;
   private framePollInFlight = false;
@@ -261,11 +339,17 @@ class HostedWorldBody implements WorldBody {
   private closePromise: Promise<void> | undefined;
   private lastAction: EnvironmentActionResult | undefined;
 
-  public constructor(socketPath: string, joined: JoinResult, observation: Observation) {
+  public constructor(
+    socketPath: string,
+    joined: JoinResult,
+    observation: Observation,
+    watchAudio?: WatchAudioSource,
+  ) {
     this.socketPath = socketPath;
     this.joined = joined;
     this.observation = observation;
     this.bodyGeneration = observation.bodyGeneration;
+    this.watchAudio = watchAudio;
     this.io = {
       observe: (kind) => this.observe(kind),
       act: (action) => this.act(action),
@@ -295,9 +379,14 @@ class HostedWorldBody implements WorldBody {
     void this.pollFrame();
     this.frameTimer = setInterval(() => void this.pollFrame(), HARDWARE_TICK_MS);
     this.frameTimer.unref();
+    this.startAudioPolling();
   };
 
   public readonly droppedFrameCount = (): number => this.droppedFrames;
+
+  public readonly drainAudio = (): readonly WorldAudioPacket[] => this.audioPackets.splice(0);
+
+  public readonly droppedAudioPacketCount = (): number => this.droppedAudioPackets;
 
   public readonly session = async (): Promise<SessionStatus> => {
     const outcome = await callHost(this.socketPath, {
@@ -353,7 +442,7 @@ class HostedWorldBody implements WorldBody {
     const observation = this.observation;
     const base = this.observationBase();
     const state =
-      observation?.gameId === "firered" && observation.adapterVersion === 1
+      observation?.gameId === "firered" && observation.adapterVersion === 2
         ? FireRedStateSchema.safeParse(observation.state).data
         : undefined;
     const certain = observation?.scene.decoded === true && state !== undefined;
@@ -373,8 +462,8 @@ class HostedWorldBody implements WorldBody {
               },
             };
           }
-          // A screen that carries no position or party — a cutscene, a menu,
-          // the naming keyboard — is not a danger, and neither is one the
+          // A screen that carries no semantic state — a cutscene or the naming
+          // keyboard — is not a danger, and neither is one the
           // adapter does not recognise at all. Reporting a boot sequence as
           // high-severity uncertainty for the minutes it runs is how a mind
           // learns to distrust this signal entirely; it did, and then narrated
@@ -498,10 +587,14 @@ class HostedWorldBody implements WorldBody {
           if (observation?.scene.mode !== "menu" && observation?.scene.mode !== "naming") {
             throw adapterError("menu_not_open", "No menu is open in the hosted world");
           }
-          throw adapterError(
-            "semantic_state_unavailable",
-            "The hosted world does not expose decoded menu entries",
-          );
+          const menu = requireSemanticState(state).menu;
+          if (menu === null) {
+            throw adapterError(
+              "semantic_state_unavailable",
+              "The hosted world does not expose decoded entries for this menu",
+            );
+          }
+          return { ...base, kind, data: { ...menu, untrusted: true as const } };
         case "battle":
           if (observation?.scene.mode !== "battle") {
             throw adapterError("battle_not_active", "No battle is active in the hosted world");
@@ -526,6 +619,16 @@ class HostedWorldBody implements WorldBody {
     const actionId = `world-action-${String(this.actionSequence)}`;
     if (this.closed) return this.failedAction(actionId, "session_ended", "The hosted world body is closed");
     if (this.paused) return this.failedAction(actionId, "session_paused", "Clankie paused his world actions");
+    const selectedMenu =
+      action.kind === "select_menu_entry" &&
+      this.observation?.gameId === "firered" &&
+      this.observation.adapterVersion === 2
+        ? FireRedStateSchema.safeParse(this.observation.state).data?.menu
+        : undefined;
+    const selectedEntry =
+      action.kind === "select_menu_entry"
+        ? selectedMenu?.entries.find((entry) => entry.id === action.entryId)
+        : undefined;
     const worldAction = mapAction(action);
     const request = {
       operation: "play.act",
@@ -592,7 +695,17 @@ class HostedWorldBody implements WorldBody {
         // effect line `free-play-progress` already writes works here unchanged.
         // Dropping it is what made every `advance_dialog` on a hosted world
         // read as "read no new text — the dialog stopped", however much it read.
-        ...result.data.outcome.detail,
+        ...(result.data.outcome.detail ??
+          (selectedMenu === null || selectedMenu === undefined || selectedEntry === undefined
+            ? {}
+            : {
+                menuId: selectedMenu.menuId,
+                entryId: selectedEntry.id,
+                label: selectedEntry.label,
+                confirmed: true,
+                presses: result.data.outcome.inputsSpent,
+                endedBecause: "selected",
+              })),
       },
     };
     this.lastAction = completed;
@@ -684,6 +797,66 @@ class HostedWorldBody implements WorldBody {
     }
   }
 
+  private startAudioPolling(): void {
+    if (this.watchAudio === undefined || this.audioTimer !== undefined) return;
+    void this.pollAudio();
+    this.audioTimer = setInterval(() => void this.pollAudio(), AUDIO_POLL_MS);
+    this.audioTimer.unref();
+  }
+
+  private async pollAudio(): Promise<void> {
+    if (
+      this.closed ||
+      this.frameObserver === null ||
+      this.audioPollInFlight ||
+      this.watchAudio === undefined
+    ) {
+      return;
+    }
+    this.audioPollInFlight = true;
+    try {
+      const endpoint = new URL(this.watchAudio.endpoint);
+      if (this.audioGeneration > 0) {
+        endpoint.searchParams.set("generation", String(this.audioGeneration));
+        endpoint.searchParams.set("after", String(this.audioCursor));
+      }
+      const response = await this.watchAudio.fetch(endpoint, {
+        headers: { Authorization: `Watch ${this.watchAudio.token}` },
+        cache: "no-store",
+      });
+      if (!response.ok) return;
+      const parsed = WatchAudioBatchSchema.safeParse(await response.json());
+      if (!parsed.success) return;
+      const batch = parsed.data;
+      if (this.audioGeneration !== 0 && batch.bodyGeneration !== this.audioGeneration) {
+        this.audioPackets.length = 0;
+      }
+      this.audioGeneration = batch.bodyGeneration;
+      this.audioCursor = batch.cursor;
+      this.droppedAudioPackets += batch.dropped;
+      for (const packet of batch.packets) {
+        this.audioPackets.push({
+          bodyGeneration: packet.bodyGeneration,
+          frame: packet.frame,
+          encoding: packet.encoding,
+          sampleRate: packet.sampleRate,
+          channels: packet.channels,
+          frames: packet.frames,
+          data: Uint8Array.from(Buffer.from(packet.data, "base64")),
+          capturedAt: packet.capturedAt,
+        });
+      }
+      while (this.audioPackets.length > AUDIO_QUEUE_MAX) {
+        this.audioPackets.shift();
+        this.droppedAudioPackets += 1;
+      }
+    } catch {
+      // Audio is best-effort live media. Frame and action polling continue.
+    } finally {
+      this.audioPollInFlight = false;
+    }
+  }
+
   private acceptFrame(incoming: Frame): boolean {
     if (incoming.bodyGeneration < this.bodyGeneration) return false;
     if (incoming.bodyGeneration > this.bodyGeneration) this.resetGeneration(incoming.bodyGeneration);
@@ -722,6 +895,9 @@ class HostedWorldBody implements WorldBody {
     this.observation = undefined;
     this.frame = undefined;
     this.png = null;
+    this.audioGeneration = 0;
+    this.audioCursor = 0;
+    this.audioPackets.length = 0;
   }
 
   private stopIfEnded(outcome: unknown): void {
@@ -738,6 +914,33 @@ class HostedWorldBody implements WorldBody {
   private stopFramePolling(): void {
     if (this.frameTimer !== undefined) clearInterval(this.frameTimer);
     this.frameTimer = undefined;
+    if (this.audioTimer !== undefined) clearInterval(this.audioTimer);
+    this.audioTimer = undefined;
+    this.audioGeneration = 0;
+    this.audioCursor = 0;
+    this.audioPackets.length = 0;
+  }
+}
+
+async function openWatchAudio(
+  socketPath: string,
+  token: string,
+  fetchImpl: typeof fetch,
+): Promise<WatchAudioSource | undefined> {
+  try {
+    const outcome = await callHost(socketPath, {
+      operation: "play.watch",
+      token,
+      input: { visibility: "unlisted" },
+    });
+    const parsed = WatchResultSchema.safeParse(outcome);
+    if (!parsed.success || parsed.data.visibility === "off") return undefined;
+    const watch = new URL(parsed.data.url);
+    const watchToken = decodeURIComponent(watch.hash.slice(1));
+    if (watchToken.length === 0) return undefined;
+    return { endpoint: new URL("/api/watch/audio", watch), token: watchToken, fetch: fetchImpl };
+  } catch {
+    return undefined;
   }
 }
 

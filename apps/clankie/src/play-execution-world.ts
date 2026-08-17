@@ -25,6 +25,7 @@ import {
 } from "@clankie/gba-emulator";
 import {
   GbaActivityObservationSnapshotSchema,
+  RenderedSurfaceAudioSchema,
   RenderedSurfaceOverlaySchema,
 } from "@clankie/interactive-environment";
 import { resolveConfiguredLanguageModel } from "@clankie/model-provider";
@@ -137,6 +138,9 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
     let framesPublished = 0;
     let framesDroppedWithoutSink = 0;
     let sequence = 0;
+    let audioSequence = 0;
+    let audioPacketsPublished = 0;
+    let audioPacketsDroppedWithoutSink = 0;
     let lastFrameDigest: string | null = null;
     const publishFrame = (frame: number): void => {
       const png = body.framePng();
@@ -165,6 +169,31 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
         capturedAt: clock().toISOString(),
       });
     };
+    const publishAudio = (): void => {
+      for (const packet of body.drainAudio()) {
+        if (sink === undefined) {
+          audioPacketsDroppedWithoutSink += 1;
+          continue;
+        }
+        audioSequence += 1;
+        audioPacketsPublished += 1;
+        sink.publishAudio(
+          RenderedSurfaceAudioSchema.parse({
+            schemaVersion: 1,
+            surface: "gba_emulator",
+            sequence: audioSequence,
+            frame: packet.frame,
+            encoding: packet.encoding,
+            sampleRate: packet.sampleRate,
+            channels: packet.channels,
+            frames: packet.frames,
+            data: Buffer.from(packet.data).toString("base64"),
+            byteLength: packet.data.byteLength,
+            capturedAt: packet.capturedAt,
+          }),
+        );
+      }
+    };
 
     const voice =
       options.createVoice === undefined
@@ -173,7 +202,7 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
     if (voice === undefined) {
       options.logger.info(
         { sessionId: session.sessionId },
-        "no possessor voice seam; this playthrough is silent",
+        "no possessor voice seam; this playthrough has no spoken narration",
       );
     }
     const interjections = options.interjections ?? new InterjectionQueue();
@@ -240,7 +269,10 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
           return { png: Buffer.from(png), width: FRAME_WIDTH, height: FRAME_HEIGHT };
         },
       });
-      const observer = (): void => publishFrame(sequence);
+      const observer = (): void => {
+        publishAudio();
+        publishFrame(sequence);
+      };
       body.observeFrames(observer);
 
       const result = await runFreePlay({
@@ -259,6 +291,13 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
           return png === null ? null : createHash("sha256").update(png).digest("hex");
         },
         framePng: () => body.framePng(),
+        onPhase: (phase) =>
+          sink?.publishStatus({
+            schemaVersion: 1,
+            surface: "gba_emulator",
+            phase,
+            updatedAt: clock().toISOString(),
+          }),
         interjections,
         shouldStop: () =>
           control.stopRequested() ||
@@ -328,6 +367,10 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
       const durationMs = clock().getTime() - startedAt;
       const framesDropped =
         (sink?.droppedFrameCount ?? 0) + framesDroppedWithoutSink + body.droppedFrameCount();
+      const audioPacketsDropped =
+        (sink?.droppedAudioPacketCount ?? 0) +
+        audioPacketsDroppedWithoutSink +
+        body.droppedAudioPacketCount();
       journal?.summary({ outcome, result, durationMs, framesPublished, framesDropped });
       options.logger.info(
         {
@@ -338,6 +381,8 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
           durationMs,
           framesPublished,
           framesDropped,
+          audioPacketsPublished,
+          audioPacketsDropped,
           ...(journal === undefined ? {} : { journalPath: journal.path }),
         },
         "world playthrough finished",

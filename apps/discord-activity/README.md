@@ -11,7 +11,8 @@ iframe inside a voice channel, launched by the bot through an
 `EMBEDDED_APPLICATION` invite. This app is that web app.
 
 It is a **rendering client only**. It holds no Discord credentials, no
-authority, and no emulator core. The host feeds it frames; it draws them.
+authority, and no emulator core. The host feeds it frames and bounded PCM; it
+draws the frames and plays sound after the viewer presses **Enable sound**.
 Its live lower third keeps Clankie's self-authored objective, intent, and
 monologue separate from the observed effect; spoken output stays on the
 voice surface rather than being duplicated here.
@@ -117,10 +118,10 @@ distinguishes three states an operator repairs differently:
 
 ## Two listeners, on purpose
 
-| Listener | Bind      | Exposure                        | Purpose                             |
-| -------- | --------- | ------------------------------- | ----------------------------------- |
-| Viewer   | tunnelled | public directly and via Discord | serves the client, `/.proxy/frames` |
-| Producer | 127.0.0.1 | loopback only, never tunnelled  | `/producer` frame ingress           |
+| Listener | Bind      | Exposure                        | Purpose                                             |
+| -------- | --------- | ------------------------------- | --------------------------------------------------- |
+| Viewer   | tunnelled | public directly and via Discord | serves the client and `/.proxy/frames` media socket |
+| Producer | 127.0.0.1 | loopback only, never tunnelled  | `/producer` media ingress                           |
 
 The producer endpoint is a **separate listener**, not a path on the viewer
 server. A producer path mounted on the tunnelled server would be reachable by
@@ -150,6 +151,9 @@ port for an internet-facing surface to connect into.
 
 - One encoded frame is capped at `RENDERED_SURFACE_FRAME_MAX_BYTES` (256 KiB);
   a real 240×160 GBA PNG lands in single-digit kilobytes.
+- One stereo PCM packet is capped at `RENDERED_SURFACE_AUDIO_MAX_BYTES` (64
+  KiB). Audio is never retained for a late viewer, and a slow socket drops it
+  rather than letting sound lag behind play.
 - The resident play host publishes at hardware rate (~60fps), deduplicates
   unchanged PNGs, and idles the core between turns, so the surface remains live
   rather than becoming a stale still.
@@ -161,25 +165,34 @@ port for an internet-facing surface to connect into.
   stuttering stream names itself instead of being guessed at.
 - The producer-side sink drops frames while disconnected rather than buffering
   them, so a reconnect resumes at the present moment instead of replaying a
-  stale playthrough. Those drops are counted too.
+  stale playthrough. Those drops are counted too. Work status is state rather
+  than media, so the sink retains only its latest value and replays it on
+  connect; the first long model decision is visible even when socket setup
+  races the turn.
 - The client's status line reads `<n> fps`, and names loss where it
   happened: `· <n> lost` counts gaps in the producer-assigned `sequence`, so it is
   everything lost before the canvas — producer socket, hub backpressure, Discord
   proxy. `· <n> slow` counts frames this browser abandoned mid-decode because a
   newer one landed first, which is the client failing to keep up rather than the
   network. A healthy stream shows neither.
-- Producer messages are validated before they reach a viewer: a frame whose
-  `byteLength` disagrees with its payload is rejected, not forwarded.
+- The thought header shows the current work state separately from transport
+  health: `Waiting for session`, `Thinking`, or `Playing`. The producer emits
+  thinking/acting at the real free-play boundary, the hub replays the latest
+  state to late joiners, and an older producer falls back to `Live session`.
+  Text carries the meaning; the three-dot motion honors reduced-motion.
+- Producer messages are validated before they reach a viewer: frame and PCM
+  sizes must agree with their payloads before they are forwarded.
 - Lifecycle messages (`stopped`) are never dropped.
-- Producer disconnect invalidates the latest frame and overlay, so an ended or
-  crashed session cannot remain labelled live for late viewers.
+- Producer disconnect invalidates the latest frame, overlay, and work status,
+  so an ended or crashed session cannot remain labelled live for late viewers.
 - Concurrent viewers are bounded; an over-cap viewer is closed, not queued.
 
 ## What this app is not
 
-- Not a recorder. Only the most recent frame and overlay are held, nothing is
-  persisted, and frame bytes never enter a semantic event stream — observations
-  carry the framebuffer digest instead.
+- Not a recorder. Only the most recent frame, overlay, and work status are held;
+  sound is not retained at all. Nothing is persisted, and media bytes never
+  enter a semantic event stream — observations carry the framebuffer digest
+  instead.
 - Not an input or authority surface. The current viewer implements no keyboard,
   pointer, or outbound control channel.
 

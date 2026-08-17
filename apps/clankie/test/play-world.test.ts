@@ -59,6 +59,8 @@ function fakeWorldBody(overrides: Partial<WorldBody> = {}): WorldBody {
     framePng: () => frame,
     observeFrames: () => undefined,
     droppedFrameCount: () => 0,
+    drainAudio: () => [],
+    droppedAudioPacketCount: () => 0,
     session: () =>
       Promise.resolve(
         SessionStatusSchema.parse({

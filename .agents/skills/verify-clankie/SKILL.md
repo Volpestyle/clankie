@@ -44,18 +44,13 @@ weaken the expectation to make the instrument green.
 
 ## Test discovery gotcha
 
-This repo's root `vitest.config.ts` includes **only** `<package>/test/**/*.test.ts`.
-A test written beside its source is silently absent from an otherwise green
-suite — `pnpm check` passes and reports a total that looks right.
+Read the repo's root `vitest.config.ts` before deciding where a test belongs.
+PokeAgents currently discovers both `<package>/test/**/*.test.ts` and co-located
+`<package>/src/**/*.test.ts`; older revisions discovered only `test/`, so moving
+a correctly co-located test based on memory just creates churn.
 
-Put the test in the package's `test/` directory. A scoped Vitest config beside
-the source does _not_ fix this: it makes the file runnable by hand while the
-repository gate still never runs it, which is the same hole with a command
-attached to it. Five world-body tests shipped that way and only ran once they
-were moved, taking the suite from 178 files to 179.
-
-Confirm by count, not by exit code. Note **Test Files** and **Tests** before and
-after; if adding tests did not move both, they are not in the run.
+Confirm discovery by count, not by exit code. Note **Test Files** and **Tests**
+before and after; if adding tests did not move both, they are not in the gate.
 
 ## Hosted FireRed proof
 

@@ -1,9 +1,13 @@
 import {
   RenderedSurfaceFrameSchema,
+  RenderedSurfaceAudioSchema,
   RenderedSurfaceOverlaySchema,
+  RenderedSurfaceStatusSchema,
   type RenderedSurfaceFrame,
+  type RenderedSurfaceAudio,
   type RenderedSurfaceMessage,
   type RenderedSurfaceOverlay,
+  type RenderedSurfaceStatus,
 } from "@clankie/interactive-environment";
 
 /**
@@ -32,8 +36,9 @@ const DEFAULT_MAX_VIEWERS = 64;
 /**
  * Fan-out for the activity plane's frame stream (ADR 0047).
  *
- * The hub holds only the most recent frame and overlay. It is not a recorder:
- * nothing is persisted, and frame bytes never reach a semantic event stream.
+ * The hub holds only the most recent frame, overlay, and work status. It is
+ * not a recorder: nothing is persisted, and media bytes never reach a semantic
+ * event stream. Audio is never retained for late viewers.
  */
 export class RenderedSurfaceHub {
   private readonly viewers = new Set<RenderedSurfaceViewer>();
@@ -41,7 +46,9 @@ export class RenderedSurfaceHub {
   private readonly maxViewers: number;
   private latestFrame: RenderedSurfaceFrame | null = null;
   private latestOverlay: RenderedSurfaceOverlay | null = null;
+  private latestStatus: RenderedSurfaceStatus | null = null;
   private droppedFrames = 0;
+  private droppedAudioPackets = 0;
 
   public constructor(options: RenderedSurfaceHubOptions = {}) {
     this.maxBufferedBytes = options.maxBufferedBytes ?? DEFAULT_MAX_BUFFERED_BYTES;
@@ -55,6 +62,10 @@ export class RenderedSurfaceHub {
   /** Frames dropped for backpressure since start. Surfaced, never silent. */
   public get droppedFrameCount(): number {
     return this.droppedFrames;
+  }
+
+  public get droppedAudioPacketCount(): number {
+    return this.droppedAudioPackets;
   }
 
   /**
@@ -72,6 +83,9 @@ export class RenderedSurfaceHub {
     }
     if (this.latestOverlay !== null) {
       this.deliver(viewer, { kind: "overlay", overlay: this.latestOverlay });
+    }
+    if (this.latestStatus !== null) {
+      this.deliver(viewer, { kind: "status", status: this.latestStatus });
     }
     return true;
   }
@@ -91,10 +105,22 @@ export class RenderedSurfaceHub {
     this.broadcast({ kind: "frame", frame: validated });
   }
 
+  /** Audio is never replayed to a late viewer; only packets produced while connected are live. */
+  public publishAudio(audio: RenderedSurfaceAudio): void {
+    const validated = RenderedSurfaceAudioSchema.parse(audio);
+    this.broadcast({ kind: "audio", audio: validated });
+  }
+
   public publishOverlay(overlay: RenderedSurfaceOverlay): void {
     const validated = RenderedSurfaceOverlaySchema.parse(overlay);
     this.latestOverlay = validated;
     this.broadcast({ kind: "overlay", overlay: validated });
+  }
+
+  public publishStatus(status: RenderedSurfaceStatus): void {
+    const validated = RenderedSurfaceStatusSchema.parse(status);
+    this.latestStatus = validated;
+    this.broadcast({ kind: "status", status: validated });
   }
 
   /** Tell every viewer the surface is done, then drop them. */
@@ -104,6 +130,7 @@ export class RenderedSurfaceHub {
     this.viewers.clear();
     this.latestFrame = null;
     this.latestOverlay = null;
+    this.latestStatus = null;
   }
 
   private broadcast(message: RenderedSurfaceMessage): void {
@@ -112,8 +139,12 @@ export class RenderedSurfaceHub {
 
   private deliver(viewer: RenderedSurfaceViewer, message: RenderedSurfaceMessage): void {
     // Frames are droppable under backpressure; lifecycle messages are not.
-    if (message.kind === "frame" && viewer.bufferedAmount > this.maxBufferedBytes) {
-      this.droppedFrames += 1;
+    if (
+      (message.kind === "frame" || message.kind === "audio") &&
+      viewer.bufferedAmount > this.maxBufferedBytes
+    ) {
+      if (message.kind === "frame") this.droppedFrames += 1;
+      else this.droppedAudioPackets += 1;
       return;
     }
     try {

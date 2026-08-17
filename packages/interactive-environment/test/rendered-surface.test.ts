@@ -56,7 +56,17 @@ describe("rendered surface overlay versioning", () => {
       kind: "overlay",
       overlay: { ...STRUCTURED, schemaVersion: 2 },
     });
+    const status = RenderedSurfaceMessageSchema.parse({
+      kind: "status",
+      status: {
+        schemaVersion: 1,
+        surface: "gba_emulator",
+        phase: "thinking",
+        updatedAt: BASE.updatedAt,
+      },
+    });
     expect(v1.kind === "overlay" && "lines" in v1.overlay).toBe(true);
     expect(v2.kind === "overlay" && v2.overlay.schemaVersion === 2).toBe(true);
+    expect(status).toMatchObject({ kind: "status", status: { phase: "thinking" } });
   });
 });

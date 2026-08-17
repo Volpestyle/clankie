@@ -31,3 +31,9 @@ digest, never frame bytes.
 `ActivityObservationReadSchema` distinguishes a matching snapshot, a live
 session whose first turn is still pending, and no live activity. This is a read
 contract, not an environment command or capability projection.
+`RenderedSurfaceStatusSchema` is the display-only present-tense counterpart:
+its closed `thinking`/`acting` phase accompanies rendered media without moving
+model text, authority, or raw media into the semantic plane.
+`RenderedSurfaceFrameSchema` and `RenderedSurfaceAudioSchema` carry bounded PNG
+and stereo PCM packets only on that rendered-media plane. Audio is live-only;
+consumers drop stale packets instead of retaining or replaying them.

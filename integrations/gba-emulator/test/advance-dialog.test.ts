@@ -40,6 +40,7 @@ const sha256 = (value: string): string => createHash("sha256").update(value).dig
 /** One step of a scripted conversation, in the order the core will report it. */
 interface ScriptedBeat {
   lines?: string[];
+  progress?: number;
   /** Frames this box prints before it accepts an advance. */
   printFrames?: number;
   menu?: GbaCoreState["menu"];
@@ -125,6 +126,7 @@ class ScriptedDialogCore implements GbaCoreSeam {
       facing: "north",
       dialogLineIndex: 0,
       dialogLines: beat?.lines ?? [],
+      ...(beat?.progress === undefined ? {} : { dialogProgress: beat.progress }),
       // Only field dialog parks on the wait-for-press native; battle text and
       // held overworld scripts never report ready, exactly like the decoder.
       waitingForDialogAdvance:
@@ -259,6 +261,27 @@ describe("advance_dialog", () => {
     expect(core.pressed).toEqual(["a", "a", "a"]);
     // Three boxes, one decision, one evidence event.
     expect(adapter.session(spec.sessionId).trace().events).toHaveLength(1);
+  });
+
+  it("keeps reading when FireRed advances inside an unchanged source buffer", async () => {
+    const core = new ScriptedDialogCore([
+      { lines: ["PROF. OAK: My name is OAK."], progress: 100 },
+      { lines: ["PROF. OAK: My name is OAK."], progress: 200 },
+      { lines: ["Now tell me. Are you a boy? Or are you a girl?"], progress: 48 },
+      { mode: "unknown" },
+    ]);
+    const { command, grant, runtime } = await harness(core);
+    const result = await runtime.startAction(grant.token, command("read", advance()));
+
+    expect(result).toMatchObject({
+      status: "completed",
+      outcome: {
+        endedBecause: "dialog_closed",
+        presses: 3,
+        transcript: ["PROF. OAK: My name is OAK.", "Now tell me. Are you a boy? Or are you a girl?"],
+      },
+    });
+    expect(core.pressed).toEqual(["a", "a", "a"]);
   });
 
   it("stops when A does not change the box and no menu was decoded", async () => {

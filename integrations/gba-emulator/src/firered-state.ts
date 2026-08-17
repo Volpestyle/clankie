@@ -217,6 +217,8 @@ export interface FireRedDecodedState {
   inventory: GbaCoreInventoryEntry[];
   battle: FireRedDecodedBattle | null;
   dialogLines: string[];
+  /** Current field text-printer position, or null outside field dialog. */
+  dialogProgress: number | null;
   /**
    * True when the field script is holding the visible dialog for an A/B press
    * — the box has finished printing and an advance will land. False while text
@@ -705,6 +707,7 @@ function readEwramBytes(ewram: DataView, address: number, length: number): Uint8
 
 interface DecodedDialog {
   lines: string[];
+  progress: number | null;
   /**
    * True when the field script is parked on the wait-for-A/B native — the
    * visible box has finished printing and the game will accept an advance.
@@ -715,9 +718,11 @@ interface DecodedDialog {
 
 function decodeDialog(ewram: DataView, iwram: DataView, battle: DecodedBattleContext | null): DecodedDialog {
   if (battle) {
-    if (battle.battle.inputMode !== "resolving") return { lines: [], waitingForAdvance: false };
+    if (battle.battle.inputMode !== "resolving")
+      return { lines: [], progress: null, waitingForAdvance: false };
     return {
       lines: decodeFireRedText(readEwramBytes(ewram, G_DISPLAYED_STRING_BATTLE_ADDRESS, 0x12c)),
+      progress: null,
       waitingForAdvance: false,
     };
   }
@@ -737,10 +742,14 @@ function decodeDialog(ewram: DataView, iwram: DataView, battle: DecodedBattleCon
   );
   const waitingForAdvance = scriptMode === 2 && scriptNative === NATIVE_WAIT_FOR_A_OR_B_PRESS;
   if (messageBoxType === 0 && printer0Active === 0 && !waitingForAdvance) {
-    return { lines: [], waitingForAdvance: false };
+    return { lines: [], progress: null, waitingForAdvance: false };
   }
   const lines = decodeFireRedText(readEwramBytes(ewram, G_STRING_VAR_4_ADDRESS, 0x3e8));
-  return { lines: lines.length > 0 ? lines : ["Field dialog"], waitingForAdvance };
+  return {
+    lines: lines.length > 0 ? lines : ["Field dialog"],
+    progress: ewram.getUint32(ewramOffset(S_TEXT_PRINTERS_ADDRESS, 4), true),
+    waitingForAdvance,
+  };
 }
 
 function hasActiveTask(iwram: DataView, functionAddress: number): boolean {
@@ -1007,6 +1016,7 @@ export function decodeFireRedState(
     inventory,
     battle: battleContext?.battle ?? null,
     dialogLines: dialog.lines,
+    dialogProgress: dialog.progress,
     waitingForDialogAdvance: dialog.waitingForAdvance,
     naming: namingScreen?.state ?? null,
     // HELP overlays whichever callback/menu was active, so its own flag has

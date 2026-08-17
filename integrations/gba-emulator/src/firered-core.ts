@@ -356,6 +356,7 @@ export class MgbaFireRedCore implements GbaCoreSeam {
       exits: decoded.exits,
       dialogLineIndex: 0,
       dialogLines: decoded.dialogLines,
+      ...(decoded.dialogProgress === null ? {} : { dialogProgress: decoded.dialogProgress }),
       waitingForDialogAdvance: decoded.waitingForDialogAdvance,
       naming: decoded.naming,
       menu: decoded.menu,

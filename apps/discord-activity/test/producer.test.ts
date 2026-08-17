@@ -26,6 +26,38 @@ function frameMessage(sequence: number): string {
   });
 }
 
+function audioMessage(sequence: number): string {
+  const pcm = Buffer.alloc(16);
+  return JSON.stringify({
+    kind: "audio",
+    audio: {
+      schemaVersion: 1,
+      surface: "gba_emulator",
+      sequence,
+      frame: sequence,
+      encoding: "pcm_s16le",
+      sampleRate: 65_536,
+      channels: 2,
+      frames: 4,
+      data: pcm.toString("base64"),
+      byteLength: pcm.byteLength,
+      capturedAt: "2026-08-16T18:00:00.000Z",
+    },
+  });
+}
+
+function statusMessage(phase: "thinking" | "acting"): string {
+  return JSON.stringify({
+    kind: "status",
+    status: {
+      schemaVersion: 1,
+      surface: "gba_emulator",
+      phase,
+      updatedAt: "2026-08-16T18:00:00.000Z",
+    },
+  });
+}
+
 function dial(port: number, token?: string): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
     const clientOptions = token === undefined ? {} : { headers: { authorization: `Bearer ${token}` } };
@@ -61,14 +93,18 @@ describe("frame producer server", () => {
 
     const producer = await dial(port, TOKEN);
     producer.send(frameMessage(1));
+    producer.send(audioMessage(1));
+    producer.send(statusMessage("thinking"));
     await new Promise((done) => setTimeout(done, 50));
     producer.close();
     await new Promise((done) => producer.once("close", done));
     await vi.waitFor(() => expect(hub.viewerCount).toBe(0));
 
-    expect(sent).toHaveLength(2);
+    expect(sent).toHaveLength(4);
     expect(JSON.parse(sent[0] ?? "{}")).toMatchObject({ kind: "frame", frame: { sequence: 1 } });
-    expect(JSON.parse(sent[1] ?? "{}")).toEqual({ kind: "stopped", reason: "session_ended" });
+    expect(JSON.parse(sent[1] ?? "{}")).toMatchObject({ kind: "audio", audio: { sequence: 1 } });
+    expect(JSON.parse(sent[2] ?? "{}")).toMatchObject({ kind: "status", status: { phase: "thinking" } });
+    expect(JSON.parse(sent[3] ?? "{}")).toEqual({ kind: "stopped", reason: "session_ended" });
     expect(hub.viewerCount).toBe(0);
   });
 

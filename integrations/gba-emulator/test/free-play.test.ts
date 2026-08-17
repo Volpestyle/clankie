@@ -114,6 +114,18 @@ const press = (button: string, intent: string, notes: string | null = null) => (
 });
 
 describe("free play", () => {
+  it("reports thinking and acting at their real boundaries", async () => {
+    const phases: string[] = [];
+    await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: mind([press("up", "up")]),
+      turns: 1,
+      onPhase: (phase) => phases.push(phase),
+    });
+
+    expect(phases).toEqual(["thinking", "acting"]);
+  });
+
   it("lets the model choose and records a causally linked trace", async () => {
     const result = await runFreePlay({
       io: io(() => Promise.resolve(completed())),

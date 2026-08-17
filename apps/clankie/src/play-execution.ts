@@ -567,6 +567,13 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
             }),
         framebufferSha256: () => game.framebufferSha256(),
         framePng: () => game.framePng(),
+        onPhase: (phase) =>
+          sink?.publishStatus({
+            schemaVersion: 1,
+            surface: "gba_emulator",
+            phase,
+            updatedAt: clock().toISOString(),
+          }),
         interjections,
         shouldStop: () =>
           control.stopRequested() ||

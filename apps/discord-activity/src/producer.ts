@@ -81,7 +81,9 @@ export function createFrameProducerServer(options: FrameProducerServerOptions): 
         const parsed = RenderedSurfaceMessageSchema.safeParse(safeJson(raw.toString()));
         if (!parsed.success) return;
         if (parsed.data.kind === "frame") hub.publishFrame(parsed.data.frame);
+        else if (parsed.data.kind === "audio") hub.publishAudio(parsed.data.audio);
         else if (parsed.data.kind === "overlay") hub.publishOverlay(parsed.data.overlay);
+        else if (parsed.data.kind === "status") hub.publishStatus(parsed.data.status);
         else hub.stop(parsed.data.reason);
       });
       // A live-only surface must not relabel its last frame as current after

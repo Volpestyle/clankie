@@ -913,6 +913,18 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
           | "choice_unlisted";
         for (;;) {
           const during = this.core.gameState();
+          if (
+            during.menu !== null &&
+            during.menu !== undefined &&
+            during.mode !== "battle" &&
+            during.mode !== "battle_won" &&
+            during.mode !== "battle_lost"
+          ) {
+            // A choice is a decision, not a formality — never answer it here.
+            capture(during.dialogLines);
+            endedBecause = "choice_open";
+            break;
+          }
           if (!isReadableText(during)) {
             const scriptHeld = during.mode === "overworld" && !(during.inputReady ?? true);
             if (scriptHeld) {
@@ -934,25 +946,19 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
             // The screen is free; say what ended the reading. The next A press
             // would re-engage whatever is ahead, so ending here is the point.
             endedBecause =
-              during.mode === "overworld"
-                ? sawText
-                  ? "dialog_closed"
-                  : "script_released"
-                : during.mode === "battle"
-                  ? startedInBattle
-                    ? "choice_open"
-                    : "battle_started"
-                  : "battle_ended";
+              during.mode === "battle"
+                ? startedInBattle
+                  ? "choice_open"
+                  : "battle_started"
+                : startedInBattle
+                  ? "battle_ended"
+                  : sawText
+                    ? "dialog_closed"
+                    : "script_released";
             break;
           }
           sawText = true;
           heldFrames = 0;
-          if (during.menu !== null && during.menu !== undefined) {
-            // A choice is a decision, not a formality — never answer it here.
-            capture(during.dialogLines);
-            endedBecause = "choice_open";
-            break;
-          }
           const ready = during.waitingForDialogAdvance ?? during.mode === "dialog";
           if (ready || idleFrames >= DIALOG_STALL_FRAMES) {
             if (presses >= limits.maxInputs) {
@@ -966,6 +972,7 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
               break;
             }
             const beforeLines = (during.dialogLines ?? []).join("\n");
+            const beforeProgress = during.dialogProgress;
             capture(during.dialogLines);
             await this.core.pressButton("a", DIALOG_HOLD_FRAMES);
             presses += 1;
@@ -978,8 +985,12 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
             // leave that to the next loop's mode check.
             if (
               (afterPress.dialogLines ?? []).join("\n") === beforeLines &&
+              (beforeProgress === undefined ||
+                afterPress.dialogProgress === undefined ||
+                afterPress.dialogProgress === beforeProgress) &&
               afterPress.menu == null &&
               isReadableText(afterPress) &&
+              (afterPress.waitingForDialogAdvance ?? afterPress.mode === "dialog") &&
               afterPress.mode !== "battle" &&
               afterPress.mode !== "battle_won" &&
               afterPress.mode !== "battle_lost"

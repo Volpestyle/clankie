@@ -7,7 +7,7 @@ described as one generic stream.
 | Surface                                     | Active body             | Direction                   | What viewers get                                          |
 | ------------------------------------------- | ----------------------- | --------------------------- | --------------------------------------------------------- |
 | Ordinary Discord voice and YouTube music    | Official bot by default | Clankie to voice channel    | Audible voice/music through `@discordjs/voice`            |
-| Embedded Activity at `activity.clankie.bot` | Official bot            | Clankie to Activity viewers | Live GBA frames in an iframe                              |
+| Embedded Activity at `activity.clankie.bot` | Official bot            | Clankie to Activity viewers | Live GBA frames and synchronized cartridge sound          |
 | Go Live publish                             | Personal-lab user body  | Clankie to Discord viewers  | H264 video through Vox; currently no source audio         |
 | Screen-share watch                          | Personal-lab user body  | Discord sharer to Clankie   | Up to four chronological JPEG samples for `observe_share` |
 
@@ -55,7 +55,9 @@ lab body when the requirement is audible music.
 The official bot launches the supported watch-me-play Activity with
 `/clankie watch` or the captain's `discord_watch_start` tool. The Activity viewer
 holds no Discord token, emulator core, input channel, or machine authority. It
-renders the latest producer frame and overlay.
+renders the latest producer frame and overlay, plays live cartridge sound after
+the viewer presses **Enable sound**, and shows a present-tense work state so a
+still-visible prior thought never makes a live model decision look stuck.
 
 The local process has two listeners:
 

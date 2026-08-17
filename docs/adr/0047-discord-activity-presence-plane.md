@@ -1,10 +1,11 @@
-# ADR 0047: The Discord activity plane carries Clankie's rendered video
+# ADR 0047: The Discord activity plane carries Clankie's rendered media
 
 Status: accepted (James, 2026-07-25). The activity plane shipped. The separate
 user-session watch/publish path that was future work at ratification later
 shipped through
 [ADR 0098 (user-session shares)](0098-user-session-watches-discord-shares.md)
-and [ADR 0100](0100-vox-is-an-owned-native-media-package.md).
+and [ADR 0100](0100-vox-is-an-owned-native-media-package.md). Live game sound
+is added by [ADR 0114](0114-a-rendered-game-surface-carries-live-sound.md).
 
 ## Context
 
@@ -23,16 +24,16 @@ alternative.
 ## Decision
 
 Clankie gains an **activity plane**: a Discord Embedded App launched by the bot
-into a voice channel. It receives encoded frames from the host and holds no ROM,
-core, savestate, Discord credential, or machine authority.
+into a voice channel. It receives bounded rendered media from the host and holds
+no ROM, core, savestate, Discord credential, or machine authority.
 
-![ADR 0047: The Discord activity plane carries Clankie's rendered video](../diagrams/0047-discord-activity-presence-plane.jpg)
+![ADR 0047 rendered-frame subpath](../diagrams/0047-discord-activity-presence-plane.jpg)
 
-| Plane             | Process                     | Role                                     |
-| ----------------- | --------------------------- | ---------------------------------------- |
-| Official bot      | `apps/discord-bridge`       | text, voice, and activity launch         |
-| Personal-lab body | `apps/discord-user-session` | screen-share watch and Go Live publish   |
-| Activity          | `apps/discord-activity`     | rendered frames; no viewer input channel |
+| Plane             | Process                     | Role                                    |
+| ----------------- | --------------------------- | --------------------------------------- |
+| Official bot      | `apps/discord-bridge`       | text, voice, and activity launch        |
+| Personal-lab body | `apps/discord-user-session` | screen-share watch and Go Live publish  |
+| Activity          | `apps/discord-activity`     | rendered media; no viewer input channel |
 
 The activity is the default way to show Clankie's own rendered surface. The lab
 body covers screen-share receive and Go Live media that Activities cannot.
@@ -44,12 +45,17 @@ an activity, a Go Live stream, both, or neither. Activity state therefore stays
 a separate observational facet rather than another rung in the connection
 phase ladder.
 
-### Only frames cross the media boundary
+### Rendered media and bounded display state cross the media boundary
 
-The host emits capped encoded frames through a lossy latest-frame transport.
-Raw frames never enter semantic event streams; evidence carries frame digests.
-Disconnected producers and slow viewers drop stale frames rather than building
-queues.
+The host emits capped encoded frames and live PCM through lossy transports.
+Raw media never enters semantic event streams; evidence carries frame digests.
+Disconnected producers and slow viewers drop stale media rather than building
+queues. Audio is never replayed to late viewers.
+
+The display sidecar carries only bounded turn fields and a closed work-phase
+enum. The phase is emitted at the free-play loop's real thinking/action
+boundary and retained latest-only for late viewers. It grants no input or
+authority and prevents clients from guessing model state from frame timing.
 
 The retained implementation evidence justified the simple transport: a FireRed
 frame compressed to about 3.2 KB and encoded in about 1.68 ms, making per-frame

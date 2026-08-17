@@ -87,6 +87,31 @@
         color: var(--muted);
         font-size: 12px;
       }
+      #sound-toggle {
+        position: absolute;
+        right: 14px;
+        bottom: 14px;
+        z-index: 2;
+        padding: 8px 10px;
+        border: 1px solid var(--text);
+        border-radius: 3px;
+        color: var(--text);
+        background: var(--panel);
+        font: inherit;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        cursor: pointer;
+      }
+      #sound-toggle[aria-pressed="true"] {
+        border-color: var(--live);
+        color: var(--live);
+      }
+      #sound-toggle:focus-visible {
+        outline: 3px solid var(--accent);
+        outline-offset: 3px;
+      }
       #lower-third {
         display: grid;
         grid-template-columns: minmax(230px, 25%) minmax(0, 1fr);
@@ -117,6 +142,67 @@
       }
       #thought-label {
         color: var(--accent);
+      }
+      #thought-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 10px;
+      }
+      #thought-heading .label {
+        margin: 0;
+      }
+      #work-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        color: var(--muted);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      #work-status[data-phase="thinking"] {
+        color: var(--accent);
+      }
+      #work-status[data-phase="acting"],
+      #work-status[data-phase="live"] {
+        color: var(--live);
+      }
+      #work-label {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      #work-dots {
+        display: inline-flex;
+        gap: 3px;
+        flex: 0 0 auto;
+      }
+      #work-dots i {
+        width: 4px;
+        height: 4px;
+        background: currentColor;
+        opacity: 0.35;
+      }
+      #work-status[data-phase="thinking"] #work-dots i,
+      #work-status[data-phase="acting"] #work-dots i,
+      #work-status[data-phase="waiting"] #work-dots i {
+        animation: work-pulse 1.2s steps(2, end) infinite;
+      }
+      #work-dots i:nth-child(2) {
+        animation-delay: 0.2s;
+      }
+      #work-dots i:nth-child(3) {
+        animation-delay: 0.4s;
+      }
+      @keyframes work-pulse {
+        50% {
+          opacity: 1;
+          transform: translateY(-2px);
+        }
       }
       #objective,
       #thought,
@@ -212,6 +298,11 @@
         #thought {
           font-size: 16px;
         }
+        #thought-heading {
+          align-items: flex-start;
+          flex-direction: column;
+          gap: 8px;
+        }
         #turn-details {
           grid-template-columns: minmax(0, 1fr);
           gap: 10px;
@@ -219,6 +310,12 @@
         }
         .detail {
           grid-template-columns: 72px minmax(0, 1fr);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #work-dots i {
+          animation: none !important;
+          transform: none !important;
         }
       }
     </style>
@@ -237,6 +334,7 @@
           <strong id="empty-title">Waiting for Clankie</strong>
           <span id="empty-copy">Gameplay appears here when a session starts.</span>
         </div>
+        <button id="sound-toggle" type="button" aria-pressed="false">Enable sound</button>
       </section>
       <section id="lower-third" aria-label="What Clankie is thinking">
         <div id="objective-block">
@@ -245,7 +343,13 @@
           <div id="status" role="status" aria-live="polite">Connecting</div>
         </div>
         <div id="thought-block">
-          <p id="thought-label" class="label">Thought</p>
+          <div id="thought-heading">
+            <p id="thought-label" class="label">Thought</p>
+            <div id="work-status" data-phase="waiting" role="status" aria-live="polite" aria-atomic="true">
+              <span id="work-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span id="work-label">Waiting for session</span>
+            </div>
+          </div>
           <p id="thought" class="placeholder" aria-live="polite">Waiting for the next decision.</p>
           <div id="turn-details">
             <div class="detail">
@@ -271,11 +375,17 @@
       const thought = document.getElementById("thought");
       const intent = document.getElementById("intent");
       const effect = document.getElementById("effect");
+      const soundToggle = document.getElementById("sound-toggle");
+      const workStatus = document.getElementById("work-status");
+      const workLabel = document.getElementById("work-label");
       context.imageSmoothingEnabled = false;
 
       let lastFrameSequence = -1;
       let lastOverlaySequence = -1;
+      let lastAudioSequence = -1;
       let sessionEnded = false;
+      let hasWorkStatus = false;
+      const audio = { context: null, enabled: false, nextAt: 0, sources: new Set() };
 
       /**
        * Frame accounting, because a dropped frame is otherwise invisible here.
@@ -306,11 +416,74 @@
           context.drawImage(image, 0, 0);
           stats.drawn += 1;
           empty.hidden = true;
+          showLiveFallback();
           setStatus(liveLabel(), "live");
         });
         image.addEventListener("error", () => setStatus("Frame unavailable", "idle"));
         image.src = `data:image/png;base64,${frame.data}`;
       }
+
+      function stopAudio() {
+        for (const source of audio.sources) {
+          try {
+            source.stop();
+          } catch {}
+        }
+        audio.sources.clear();
+        audio.nextAt = 0;
+      }
+
+      function renderAudio(packet) {
+        if (packet.sequence <= lastAudioSequence) return;
+        if (lastAudioSequence >= 0 && packet.sequence !== lastAudioSequence + 1) stopAudio();
+        lastAudioSequence = packet.sequence;
+        if (!audio.enabled || !audio.context) return;
+        const binary = atob(packet.data);
+        if (
+          binary.length !== packet.byteLength ||
+          packet.encoding !== "pcm_s16le" ||
+          packet.channels !== 2 ||
+          packet.frames * packet.channels * 2 !== binary.length
+        ) {
+          return;
+        }
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+        const view = new DataView(bytes.buffer);
+        const buffer = audio.context.createBuffer(packet.channels, packet.frames, packet.sampleRate);
+        for (let frame = 0; frame < packet.frames; frame += 1) {
+          for (let channel = 0; channel < packet.channels; channel += 1) {
+            buffer.getChannelData(channel)[frame] =
+              view.getInt16((frame * packet.channels + channel) * 2, true) / 32768;
+          }
+        }
+        const now = audio.context.currentTime;
+        if (audio.nextAt < now - 0.05 || audio.nextAt > now + 0.35) stopAudio();
+        const startsAt = Math.max(audio.nextAt, now + 0.06);
+        const source = audio.context.createBufferSource();
+        source.buffer = buffer;
+        source.connect(audio.context.destination);
+        source.addEventListener("ended", () => audio.sources.delete(source));
+        audio.sources.add(source);
+        source.start(startsAt);
+        audio.nextAt = startsAt + buffer.duration;
+      }
+
+      soundToggle.addEventListener("click", async () => {
+        if (audio.enabled) {
+          audio.enabled = false;
+          stopAudio();
+          soundToggle.textContent = "Enable sound";
+          soundToggle.setAttribute("aria-pressed", "false");
+          return;
+        }
+        audio.context ||= new AudioContext();
+        await audio.context.resume();
+        audio.enabled = true;
+        stopAudio();
+        soundToggle.textContent = "Sound on";
+        soundToggle.setAttribute("aria-pressed", "true");
+      });
 
       /** What the status line says while frames are arriving. */
       function liveLabel() {
@@ -341,7 +514,18 @@
         );
         setField(intent, v1 ? null : overlay.intent, "No next move yet");
         setField(effect, v1 ? null : overlay.effect, "Waiting for a result");
+        showLiveFallback();
         setStatus(liveLabel(), "live");
+      }
+
+      function renderWorkStatus(next) {
+        hasWorkStatus = true;
+        if (next.phase === "thinking") setWorkStatus("Thinking", "thinking");
+        else if (next.phase === "acting") setWorkStatus("Playing", "acting");
+      }
+
+      function showLiveFallback() {
+        if (!hasWorkStatus) setWorkStatus("Live session", "live");
       }
 
       function setField(element, value, fallback) {
@@ -353,6 +537,11 @@
       function setStatus(label, tone) {
         status.textContent = label;
         status.dataset.tone = tone;
+      }
+
+      function setWorkStatus(label, phase) {
+        workLabel.textContent = label;
+        workStatus.dataset.phase = phase;
       }
 
       function showEmpty(title, copy) {
@@ -371,9 +560,13 @@
 
       function connect() {
         sessionEnded = false;
+        hasWorkStatus = false;
         lastFrameSequence = -1;
         lastOverlaySequence = -1;
+        lastAudioSequence = -1;
+        stopAudio();
         setStatus("Connecting", "idle");
+        setWorkStatus("Connecting", "waiting");
         // All activity traffic is proxied through discordsays.com; the /.proxy
         // prefix is required or the request is refused as blocked:csp.
         const scheme = location.protocol === "https:" ? "wss" : "ws";
@@ -381,6 +574,7 @@
 
         socket.addEventListener("open", () => {
           setStatus("Waiting for session", "idle");
+          setWorkStatus("Waiting for session", "waiting");
         });
         socket.addEventListener("message", (event) => {
           let message;
@@ -390,19 +584,25 @@
             return;
           }
           if (message.kind === "frame") render(message.frame);
+          else if (message.kind === "audio") renderAudio(message.audio);
           else if (message.kind === "overlay") renderOverlay(message.overlay);
+          else if (message.kind === "status") renderWorkStatus(message.status);
           else if (message.kind === "stopped") {
             sessionEnded = true;
             clearOverlay();
             showEmpty("Session ended", "Waiting for Clankie to play again.");
             setStatus("Session ended", "idle");
+            setWorkStatus("Session ended", "ended");
+            stopAudio();
           }
         });
         socket.addEventListener("close", () => {
           if (!sessionEnded) {
+            stopAudio();
             clearOverlay();
             showEmpty("Reconnecting", "The live view will resume automatically.");
             setStatus("Reconnecting", "idle");
+            setWorkStatus("Reconnecting", "waiting");
           }
           setTimeout(connect, 1_000);
         });

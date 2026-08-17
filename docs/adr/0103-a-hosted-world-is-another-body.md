@@ -27,9 +27,9 @@ things about a different body.
 
 ## Decision
 
-A hosted world is a second implementation of the `GbaDriverIo` seam plus a frame
-source, composed by the same execution the local body already uses. It is not a
-second play loop.
+A hosted world is a second implementation of the `GbaDriverIo` seam plus a
+rendered-media source, composed by the same execution the local body already
+uses. It is not a second play loop.
 
 Clankie reaches the world through `@pokeagent-mmo/world-protocol`, a git
 dependency pinned to a revision, using the client transport on its `/ipc`
@@ -38,6 +38,18 @@ subpath — PokeAgent MMO
 ships that contract for exactly this crossing. `apps/clankie/src/world/body.ts`
 holds the seam; `apps/clankie/src/play-execution-world.ts` composes it.
 The operator- and Discord-visible surface is one captain tool, `pokeagent_join_mmo`.
+
+The pinned player contract supplies control and frames. Ephemeral game sound
+stays on the world's spectator-media boundary: the body mints its own unlisted
+watch grant, reads live PCM with that read-only capability, and forwards bounded
+packets to the Activity. This keeps spectator media out of the agent protocol
+without creating a second emulator capture.
+
+Adapter-owned state evolves behind that contract. FireRed adapter version 2
+includes the decoded new-game name menus, which the body exposes through the
+same `menu` observation as local play. A successful hosted menu action is
+rendered from that pre-action entry only after the host reports that its live
+cursor reached and confirmed it; an incomplete selection remains a refusal.
 
 The boundary that survives from ADR 0102 is the one that matters: Clankie is a
 player in that world, not its owner (PokeAgent MMO ADR 0001). He does not import
@@ -63,7 +75,8 @@ ambient credential cannot silently win ([credential guide](../credentials.md)).
 ## Consequences
 
 - The mind, voice, journal, and activity publishing are unchanged by where the
-  body is. A hosted world inherits them rather than reimplementing them.
+  body is. A hosted world inherits them rather than reimplementing them,
+  including live game sound when its host offers watch media.
 - Clankie tracks a pinned contract revision. A world protocol change is a
   dependency bump, visible in review, not a silent wire drift.
 - `@pokeagent-mmo/world-mcp` remains the path for harnesses that want tools, and

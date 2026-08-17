@@ -353,6 +353,9 @@ export interface FreePlayCheckpointPort {
   restart(): void;
 }
 
+/** Present-tense state for spectators; completed turn detail still arrives through `onTurn`. */
+export type FreePlayPhase = "thinking" | "acting";
+
 export interface RunFreePlayInput {
   io: GbaDriverIo;
   mind: FreePlayMind;
@@ -365,6 +368,8 @@ export interface RunFreePlayInput {
   checkpoints?: FreePlayCheckpointPort;
   /** Called after every turn so a CLI can stream the playthrough. */
   onTurn?: (turn: FreePlayTurn) => void;
+  /** Called at the real model/action boundary so live viewers never infer it from frame timing. */
+  onPhase?: (phase: FreePlayPhase) => void;
   /**
    * Called after an action has settled and progress has consumed its observed
    * effect. Benchmarks use this boundary so they measure what the adapter
@@ -473,6 +478,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
 
     let raw: unknown;
     try {
+      input.onPhase?.("thinking");
       const sinceNewTile = progress.snapshot().turnsSinceNewTile;
       raw = await input.mind.decide({
         turn,
@@ -521,6 +527,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
 
     record.action = parsed.data.action;
     const chosen = parsed.data.action;
+    input.onPhase?.("acting");
 
     let accepted = false;
     let actionOutcome: Record<string, unknown> | undefined;
@@ -685,6 +692,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
       };
       if (voiceHasSomethingToConsider(voiceView)) {
         try {
+          input.onPhase?.("thinking");
           const spoken = VoiceDecisionSchema.safeParse(await input.voice.decide(voiceView));
           if (spoken.success) {
             wants = spoken.data.speak ?? null;

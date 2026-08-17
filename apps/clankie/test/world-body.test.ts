@@ -158,6 +158,78 @@ describe("hosted world body", () => {
     }
   });
 
+  it("exposes FireRed's rival presets and reports Gary as one verified action", async () => {
+    let current = observation({
+      frame: 30,
+      mode: "menu",
+      menu: {
+        menuId: "intro-rival-name-menu",
+        cursor: 0,
+        entries: [
+          { id: "new-name", label: "New name" },
+          { id: "green", label: "Green" },
+          { id: "gary", label: "Gary" },
+          { id: "kaz", label: "Kaz" },
+          { id: "toru", label: "Toru" },
+        ],
+      },
+    });
+    const world = await fakeWorld((request) => {
+      switch (request.operation) {
+        case "world.join":
+          return joinResult();
+        case "play.observe":
+          return current;
+        case "play.act": {
+          expect(request.input).toMatchObject({ action: { kind: "select_menu_entry", entry: "gary" } });
+          current = observation({
+            frame: 40,
+            mode: "menu",
+            menu: {
+              menuId: "intro-name-confirmation",
+              cursor: 0,
+              entries: [
+                { id: "yes", label: "Yes" },
+                { id: "no", label: "No" },
+              ],
+            },
+          });
+          const ran = actRan(current);
+          return { ...ran, outcome: { ...ran.outcome, inputsSpent: 3 } };
+        }
+        case "play.frame":
+          return frame({ frame: current.frame, data: "gary-confirmation" });
+        case "world.leave":
+          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
+        default:
+          throw new Error(`unexpected operation ${request.operation}`);
+      }
+    });
+    const result = await joinWorld({
+      environmentId: "pokemon-firered",
+      env: await provisionedEnv(world.stateDir),
+    });
+    expect(result.outcome).toBe("joined");
+    if (result.outcome !== "joined") return;
+
+    const menu = result.body.io.observe("menu");
+    expect(menu).toMatchObject({ data: { menuId: "intro-rival-name-menu", cursor: 0 } });
+    if (menu.kind !== "menu") throw new Error("expected menu observation");
+    expect(menu.data.entries.map((entry) => entry.id)).toEqual(["new-name", "green", "gary", "kaz", "toru"]);
+    await expect(result.body.io.act({ kind: "select_menu_entry", entryId: "gary" })).resolves.toMatchObject({
+      status: "completed",
+      outcome: {
+        menuId: "intro-rival-name-menu",
+        entryId: "gary",
+        label: "Gary",
+        confirmed: true,
+        presses: 3,
+        endedBecause: "selected",
+      },
+    });
+    await result.body.close();
+  });
+
   it("treats decoded:false as uncertainty while raw buttons remain usable", async () => {
     const undecoded = observation({ frame: 1, decoded: false });
     const world = await fakeWorld((request) => {
@@ -298,6 +370,89 @@ describe("hosted world body", () => {
     await result.body.close();
   });
 
+  it("starts hosted audio at live time and drains bounded PCM for the activity", async () => {
+    let currentFrame = 10;
+    const world = await fakeWorld(
+      (request) => {
+        switch (request.operation) {
+          case "world.join":
+            return joinResult();
+          case "play.observe":
+            return observation({ frame: currentFrame });
+          case "play.frame":
+            currentFrame += 1;
+            return frame({ frame: currentFrame, data: `frame-${String(currentFrame)}` });
+          case "world.leave":
+            return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
+          default:
+            throw new Error(`unexpected operation ${request.operation}`);
+        }
+      },
+      () => ({
+        ok: true,
+        visibility: "unlisted",
+        url: `https://watch.example/watch#wtk.${"A".repeat(43)}`,
+      }),
+    );
+    const fetches: Array<{ url: URL; authorization: string | null }> = [];
+    const pcm = Buffer.alloc(16, 7);
+    const fetchImpl = (async (input, init) => {
+      const url = new URL(String(input));
+      const authorization = new Headers(init?.headers).get("authorization");
+      fetches.push({ url, authorization });
+      const after = url.searchParams.get("after");
+      return Response.json(
+        after === "10"
+          ? {
+              ok: true,
+              bodyGeneration: 1,
+              cursor: 11,
+              dropped: 2,
+              packets: [
+                {
+                  bodyGeneration: 1,
+                  frame: 11,
+                  encoding: "pcm_s16le",
+                  sampleRate: 65_536,
+                  channels: 2,
+                  frames: 4,
+                  byteLength: pcm.byteLength,
+                  data: pcm.toString("base64"),
+                  capturedAt: NOW,
+                },
+              ],
+            }
+          : { ok: true, bodyGeneration: 1, cursor: after === null ? 10 : 11, dropped: 0, packets: [] },
+      );
+    }) as typeof fetch;
+    const result = await joinWorld({
+      environmentId: "pokemon-firered",
+      env: await provisionedEnv(world.stateDir),
+      fetchImpl,
+    });
+    if (result.outcome !== "joined") throw new Error("expected the world join to succeed");
+
+    const packets = await new Promise<ReturnType<typeof result.body.drainAudio>>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("audio polling did not produce PCM")), 1_000);
+      result.body.observeFrames(() => {
+        const drained = result.body.drainAudio();
+        if (drained.length === 0) return;
+        clearTimeout(timeout);
+        resolve(drained);
+      });
+    });
+    result.body.observeFrames(null);
+
+    expect(packets).toHaveLength(1);
+    expect(packets[0]).toMatchObject({ frame: 11, sampleRate: 65_536, channels: 2, frames: 4 });
+    expect(packets[0]?.data).toEqual(Uint8Array.from(pcm));
+    expect(result.body.droppedAudioPacketCount()).toBe(2);
+    expect(fetches[0]?.url.search).toBe("");
+    expect(fetches.some(({ url }) => url.searchParams.get("after") === "10")).toBe(true);
+    expect(fetches.every(({ authorization }) => authorization?.startsWith("Watch wtk.") === true)).toBe(true);
+    await result.body.close();
+  });
+
   it("refuses absent credentials, and an unhosted game honestly", async () => {
     const emptyDir = await mkdtemp(join(tmpdir(), "clankie-world-empty-"));
     cleanups.push(() => rm(emptyDir, { recursive: true, force: true }));
@@ -329,7 +484,10 @@ describe("hosted world body", () => {
   });
 });
 
-async function fakeWorld(respond: (request: WireRequest) => unknown | Promise<unknown>): Promise<FakeWorld> {
+async function fakeWorld(
+  respond: (request: WireRequest) => unknown | Promise<unknown>,
+  watch?: (request: WireRequest) => unknown | Promise<unknown>,
+): Promise<FakeWorld> {
   const stateDir = await mkdtemp(join(tmpdir(), "clankie-world-body-"));
   const socketPath = join(stateDir, "host.sock");
   const requests: WireRequest[] = [];
@@ -344,7 +502,11 @@ async function fakeWorld(respond: (request: WireRequest) => unknown | Promise<un
       if (newline === -1) return;
       const request = JSON.parse(buffer.slice(0, newline)) as WireRequest;
       requests.push(request);
-      void Promise.resolve(respond(request)).then(
+      const outcome =
+        request.operation === "play.watch"
+          ? (watch?.(request) ?? { ok: false, code: "not_supported", message: "watching is disabled" })
+          : respond(request);
+      void Promise.resolve(outcome).then(
         (outcome) => socket.end(`${JSON.stringify(outcome)}\n`),
         () => socket.destroy(),
       );
@@ -523,40 +685,55 @@ function observation(options: {
   x?: number;
   y?: number;
   decoded?: boolean;
+  mode?: "overworld" | "menu";
+  menu?: {
+    menuId: string;
+    cursor: number;
+    entries: { id: string; label: string }[];
+  };
 }) {
   const decoded = options.decoded ?? true;
+  const mode = options.mode ?? "overworld";
   return {
     sessionId: SESSION_ID,
     bodyGeneration: options.bodyGeneration ?? 1,
     gameId: "firered",
-    adapterVersion: 1,
+    adapterVersion: 2,
     frame: options.frame,
     observedAt: NOW,
     scene: {
-      mode: decoded ? "overworld" : "unknown",
-      inputReady: decoded,
+      mode: decoded ? mode : "unknown",
+      inputReady: decoded && mode === "overworld",
       waitingForAdvance: false,
       decoded,
     },
-    minimap: decoded
-      ? {
-          topLeft: { mapId: "pallet-town/players-house-2f", x: 12, y: 12 },
-          rows: ["...", ".@.", "..."],
-          exits: [],
-        }
-      : null,
+    minimap:
+      decoded && mode === "overworld"
+        ? {
+            topLeft: { mapId: "pallet-town/players-house-2f", x: 12, y: 12 },
+            rows: ["...", ".@.", "..."],
+            exits: [],
+          }
+        : null,
     state: decoded
       ? {
-          overworld: {
-            mapId: "pallet-town/players-house-2f",
-            mapGroup: 4,
-            mapNum: 1,
-            x: options.x ?? 13,
-            y: options.y ?? 13,
-            facing: "north",
-          },
-          party: [{ slot: 0, speciesId: 1, level: 5, currentHp: 20, maxHp: 20, moveIds: [33] }],
-          fieldInputReady: true,
+          overworld:
+            mode === "overworld"
+              ? {
+                  mapId: "pallet-town/players-house-2f",
+                  mapGroup: 4,
+                  mapNum: 1,
+                  x: options.x ?? 13,
+                  y: options.y ?? 13,
+                  facing: "north" as const,
+                }
+              : null,
+          party:
+            mode === "overworld"
+              ? [{ slot: 0, speciesId: 1, level: 5, currentHp: 20, maxHp: 20, moveIds: [33] }]
+              : [],
+          fieldInputReady: mode === "overworld",
+          menu: options.menu ?? null,
         }
       : null,
   };

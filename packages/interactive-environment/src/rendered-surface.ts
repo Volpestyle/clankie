@@ -6,16 +6,20 @@ import { INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION } from "./environment.ts";
  * Frame transport for the activity plane ([ADR 0047](../../../docs/adr/0047-discord-activity-presence-plane.md)).
  *
  * The core stays on the host: the ROM, the WASM core, and the savestate never
- * cross this seam — only encoded frames do. That preserves the pinned-digest
- * fail-closed model and keeps copyrighted bytes off every viewer's client.
+ * cross this seam — only bounded encoded frames and live PCM do. That
+ * preserves the pinned-digest fail-closed model and keeps copyrighted bytes
+ * off every viewer's client.
  *
- * Raw frames never enter semantic event streams. Evidence keeps carrying the
+ * Raw media never enters semantic event streams. Evidence keeps carrying the
  * framebuffer digest it already carries; this envelope is the separate media
  * channel, mirroring the boundary ADR 0024 sets for stream receive.
  */
 
 /** Hard ceiling for one encoded frame. A GBA PNG is normally single-digit KB. */
 export const RENDERED_SURFACE_FRAME_MAX_BYTES = 256 * 1024;
+
+/** Hard ceiling for one live PCM packet (normally about 4 KiB at GBA rate). */
+export const RENDERED_SURFACE_AUDIO_MAX_BYTES = 64 * 1024;
 
 /** Ceiling on frames buffered for a slow viewer before the oldest are dropped. */
 export const RENDERED_SURFACE_QUEUE_MAX = 4;
@@ -49,6 +53,35 @@ export const RenderedSurfaceFrameSchema = z
     }
   });
 export type RenderedSurfaceFrame = z.infer<typeof RenderedSurfaceFrameSchema>;
+
+export const RenderedSurfaceAudioSchema = z
+  .object({
+    schemaVersion: z.literal(INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION),
+    surface: DiscordActivitySurfaceSchema,
+    /** Monotonic per audio stream; gaps mean stale sound was dropped. */
+    sequence: z.number().int().nonnegative(),
+    /** Emulator frame that produced this packet. */
+    frame: z.number().int().nonnegative(),
+    encoding: z.literal("pcm_s16le"),
+    sampleRate: z.number().int().min(8_000).max(192_000),
+    channels: z.literal(2),
+    frames: z.number().int().positive().max(16_384),
+    data: z.string().min(1),
+    byteLength: z.number().int().positive().max(RENDERED_SURFACE_AUDIO_MAX_BYTES),
+    capturedAt: z.string().datetime(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const decoded = Buffer.from(value.data, "base64").byteLength;
+    if (decoded !== value.byteLength || decoded !== value.frames * value.channels * 2) {
+      context.addIssue({
+        code: "custom",
+        path: ["byteLength"],
+        message: "PCM byte length does not match its payload and frame count",
+      });
+    }
+  });
+export type RenderedSurfaceAudio = z.infer<typeof RenderedSurfaceAudioSchema>;
 
 /**
  * The sidecar rendered beside the canvas. This is what an activity can show
@@ -117,9 +150,22 @@ export const RenderedSurfaceOverlaySchema = z.union([
 ]);
 export type RenderedSurfaceOverlay = z.infer<typeof RenderedSurfaceOverlaySchema>;
 
+/** Present-tense work state while the next completed-turn overlay is pending. */
+export const RenderedSurfaceStatusSchema = z
+  .object({
+    schemaVersion: z.literal(INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION),
+    surface: DiscordActivitySurfaceSchema,
+    phase: z.enum(["thinking", "acting"]),
+    updatedAt: z.string().datetime(),
+  })
+  .strict();
+export type RenderedSurfaceStatus = z.infer<typeof RenderedSurfaceStatusSchema>;
+
 export const RenderedSurfaceMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("frame"), frame: RenderedSurfaceFrameSchema }).strict(),
+  z.object({ kind: z.literal("audio"), audio: RenderedSurfaceAudioSchema }).strict(),
   z.object({ kind: z.literal("overlay"), overlay: RenderedSurfaceOverlaySchema }).strict(),
+  z.object({ kind: z.literal("status"), status: RenderedSurfaceStatusSchema }).strict(),
   z.object({ kind: z.literal("stopped"), reason: z.enum(["operator_stop", "session_ended"]) }).strict(),
 ]);
 export type RenderedSurfaceMessage = z.infer<typeof RenderedSurfaceMessageSchema>;
