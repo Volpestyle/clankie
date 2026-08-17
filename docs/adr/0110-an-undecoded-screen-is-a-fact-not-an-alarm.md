@@ -81,6 +81,12 @@ returning `unknown` for all of them, so these screens arrive named. Both halves
 are needed — this ADR keeps a mind calm about a screen nothing can decode; that
 change shrinks the set of such screens.
 
+What a calm mind then _costs_ on those screens is decided by
+[ADR 0115](0115-a-screen-that-asks-nothing-is-not-worth-a-decision.md), which
+also corrects the claim above that `stateCertain` is the signal both readers
+use: the two bodies do not mean the same thing by it, so whether a screen
+decodes is read from the scene's own `mode`.
+
 Oak's speech decodes as `cutscene` rather than `dialog`, because it draws its
 own text and the field message box reads zero throughout. `advance_dialog`
 genuinely cannot read it, and a refusal that returns immediately is cheaper than

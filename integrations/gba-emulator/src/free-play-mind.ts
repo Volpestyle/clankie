@@ -203,10 +203,15 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   '    {"kind":"restart_game"}',
   "",
   "If scene mode is unknown, play from the screen with button_press and",
-  "frame_advance. Decoded helpers such as walk_to and advance_dialog will refuse",
-  "until that cartridge has a verified state profile.",
-  "On a boot, intro, or HELP screen, use A only until a decoded scene appears.",
-  "START, L, and R can open HELP or detour; B may not close it.",
+  "frame_advance. Decoded helpers such as walk_to and advance_dialog refuse on a",
+  "screen that does not decode and work again on the next one that does — it is",
+  "the screen that carries no state, never the cartridge.",
+  "Boot, the title, and the tutorial pages a new file opens with are all",
+  "undecoded, and they are the game's own opening rather than somewhere you",
+  "wandered by accident: A advances them and B does not leave them. None of them",
+  "ask you anything, so clear them in bulk with repeat rather than a page per",
+  "turn. A burst is blind — you see only the screen it ends on — so size it to",
+  "how far you are willing to go without looking.",
   "",
   "Always give holdFrames on a button press — 16 is a reliable step; a short",
   "hold only turns you. repeat presses the same button that many times in ONE",
@@ -232,7 +237,8 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   "names the nearest tile you can actually reach. If your notes already mark a",
   "tile or NPC as story-locked, do not walk_to it again.",
   "",
-  "When text is on screen, use advance_dialog rather than pressing A box by box.",
+  "When text is on screen and the scene decodes, use advance_dialog rather than",
+  "pressing A box by box.",
   "It reads the whole conversation in one action and hands you the transcript,",
   "then stops the moment the text ends or a choice appears — so you spend your",
   "turn on the decision, not on the reading. It never answers a choice for you.",
@@ -249,7 +255,9 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   "entirely your decision; this only saves you the cursor presses. It stops",
   "and says so if the menu closes or the cursor will not move.",
   "In FireRed's Bag, switch pockets with d-pad left/right. L/R opens the HELP",
-  "system; when menuId is help-system, press B until that menu closes.",
+  "system; when the menu view names menuId help-system, press B until that menu",
+  "closes. That is a menu you opened — it is not the undecoded tutorial the game",
+  "runs at the start of a new file, which B does not close.",
   "",
   "On a naming screen, use enter_text with the whole name (letters, digits,",
   "space, basic punctuation; 10 characters max): it drives the keyboard, types",
@@ -444,16 +452,23 @@ function heldScreenAdvice(observations: FreePlayView["observations"]): string | 
   // time, and a mind told only "semantic_state_unavailable" spends a turn
   // concluding the decoder is broken, writes that into its notes, and concludes
   // it again next turn — the same sentence re-derived at full price every turn.
-  const uncertain = certainty(observations) === false;
-  if (uncertain && data.mode === "unknown") {
+  //
+  // The predicate is the scene's own mode, not `stateCertain`. The two bodies do
+  // not mean the same thing by that field: the hosted world publishes false for
+  // a screen that does not decode, while the local adapter publishes its
+  // evidence-chain integrity and stays true right through a boot. Gating on it
+  // made this branch — the one ADR 0110 exists for — unreachable on the local
+  // body. "Nothing decodes" is `mode === "unknown"`, so ask that directly.
+  if (data.mode === "unknown") {
     return (
-      "Nothing on this screen decodes — normal during boot, intros and help screens, " +
-      "and not a fault. The frame is the whole truth here: button_press and " +
-      "frame_advance are the only actions that will run. During boot, intro, or HELP, " +
-      "use A only until a decoded scene appears; START, L, and R can open HELP or detour."
+      "Nothing on this screen decodes — normal during boot, the title, and the " +
+      "tutorial pages a new file opens with, and not a fault. The frame is the whole " +
+      "truth here: button_press and frame_advance are the only actions that will run. " +
+      "A advances these screens and B does not leave them; when a run of them asks you " +
+      "nothing, one button_press with a repeat clears several for a single decision."
     );
   }
-  if (uncertain) {
+  if (certainty(observations) === false) {
     return (
       `This is a ${data.mode ?? "recognised"} screen — it decodes, but carries no position or ` +
       "party, so there is nothing for the state view to show. That is expected, not a fault. " +
@@ -476,12 +491,12 @@ function heldScreenAdvice(observations: FreePlayView["observations"]): string | 
 }
 
 /**
- * Whether the body claims decoded state this turn, or null when it did not say.
+ * Whether the body vouches for this turn's state, or null when it did not say.
  *
- * `danger.stateCertain` is the one field both bodies publish for this — the
- * local adapter from its own decode, the hosted world from the adapter behind
- * the socket — so it is the signal to read rather than inferring absence from
- * which observation kinds happen to be missing.
+ * Read only for a screen that *does* decode, because that is the only question
+ * the two bodies answer the same way. Whether a screen decodes at all is the
+ * scene's own `mode`, not this — the hosted world folds that into
+ * `stateCertain` and the local adapter does not.
  */
 function certainty(observations: FreePlayView["observations"]): boolean | null {
   const danger = observations.find((observation) => observation.kind === "danger") as

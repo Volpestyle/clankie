@@ -141,8 +141,27 @@ describe("the view says what reaches the controls", () => {
     expect(rendered).toContain("Nothing on this screen decodes");
     expect(rendered).toContain("not a fault");
     expect(rendered).toContain("button_press and frame_advance");
-    expect(rendered).toContain("use A only");
-    expect(rendered).toContain("START, L, and R can open HELP");
+    // The intro is the game's own opening, not a detour he took. Told that L/R
+    // and START "can open HELP", he concluded on the FRLG tutorial that he had
+    // opened it by accident, spent two turns pressing B at a screen B does not
+    // close, and carried the wrong belief in his notes for the rest of the run.
+    expect(rendered).toContain("B does not leave them");
+    expect(rendered).not.toContain("can open HELP");
+  });
+
+  /**
+   * The local adapter's `stateCertain` tracks its evidence chain, not its
+   * decode, so it stays true right through a boot. Gating this branch on that
+   * field made the advice ADR 0110 exists for unreachable on the local body.
+   */
+  it("states it on a body that still vouches for its state", () => {
+    const rendered = renderView(screen("unknown", true));
+    expect(rendered).toContain("Nothing on this screen decodes");
+  });
+
+  /** One decision per tutorial page is what made the FRLG intro take minutes. */
+  it("offers repeat as the way through a run of screens that ask nothing", () => {
+    expect(renderView(screen("unknown", false))).toContain("repeat");
   });
 
   it("names a screen that decodes but carries no position", () => {

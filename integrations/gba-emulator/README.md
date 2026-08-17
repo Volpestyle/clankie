@@ -220,7 +220,7 @@ An effect is two fields, because it has two readers (ADR 0108). `effect` is the
 observation — what changed — and it is the half every audience gets: the
 activity overlay, the story card, and the possessor seam that hands a voice
 room what just happened. `effectAdvice` is the harness coaching his next press
-("hold the direction longer to move", "use advance_dialog to read the intro"),
+("hold the direction longer to move", "steer this menu with single presses"),
 written to him in the imperative and joined onto the effect only in the history
 the mind reads. Coaching in an audience's line is how he came to sound like he
 was directing the room through a game nobody else was playing.
