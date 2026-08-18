@@ -35,6 +35,7 @@ import {
   described,
   FreePlayProgressTracker,
   mindEffectLine,
+  type GbaPosition,
   observeEffect,
   positionOf,
   type Described,
@@ -515,7 +516,13 @@ export interface RunFreePlayInput {
   /** Latest framebuffer digest, when a core exposes one. */
   framebufferSha256?: () => string | null;
   /** Latest rendered screen as PNG bytes, when a core exposes one. */
-  framePng?: () => Uint8Array | null;
+  /**
+   * The screen, optionally anchored to the tile he stands on so the picture
+   * carries labelled tile axes. Seeing the furniture was never the problem —
+   * addressing it was, because `walk_to` wants a coordinate and a screenshot
+   * has none (ADR 0120).
+   */
+  framePng?: (anchor?: { readonly playerX: number; readonly playerY: number }) => Uint8Array | null;
   /** Body identity sampled with each causal stage, when the composer exposes it. */
   provenance?: () => FreePlayProvenance | null;
   /** Wall clock for causal timing. */
@@ -679,7 +686,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
       raw = await input.mind.decide({
         turn,
         observations,
-        framePng: input.framePng?.() ?? null,
+        framePng: framePngAt(input.framePng, positionOf(observations)),
         refusedHere,
         knownHardFailures,
         // Only when he has a position to be stuck at: mid-battle and mid-warp
@@ -921,10 +928,18 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
       }
     }
 
-    // Same action, same result: the state-independent stuck signal. Keyed on
-    // the observation rather than the fuller line he reads, which discriminates
-    // identically — advice never varies except with the branch that set it.
-    const signature = canonicalJson({ action: chosen, effect: record.effect });
+    // Same result, whatever he tried: the state-independent stuck signal. Keyed
+    // on the observed effect alone, not on the action that produced it — an
+    // alternating loop is still a loop. On 2026-08-18 he read "Press START to
+    // open the MENU!" four times across nine turns by alternating `a` and
+    // `advance_dialog`; keying on the pair meant the counter reset every turn
+    // and he was never told (ADR 0092). Effect-only subsumes the old pair
+    // signature: identical action *and* effect is identical effect.
+    //
+    // Keyed on the observation rather than the fuller line he reads, which
+    // discriminates identically — advice never varies except with the branch
+    // that set it.
+    const signature = canonicalJson({ effect: record.effect });
     // Annotated: without it the loop-carried assignment below makes this
     // variable's type depend on itself.
     const priorRepeats: number = repeat !== null && repeat.signature === signature ? repeat.turns : 0;
@@ -1326,6 +1341,23 @@ function bounded(value: unknown): string {
  * revising the plan is the *correct* response. Scoring those as incoherence
  * punishes exactly the adaptation good feedback is meant to produce.
  */
+/**
+ * The screen, labelled with tile coordinates when the world decodes a position.
+ *
+ * Undecoded screens — titles, cutscenes, battles — have no overworld tile to
+ * anchor to and get the plain picture, which is correct: there is no grid to
+ * draw and inventing one would be a coordinate frame that means nothing.
+ */
+function framePngAt(
+  framePng:
+    | ((anchor?: { readonly playerX: number; readonly playerY: number }) => Uint8Array | null)
+    | undefined,
+  position: GbaPosition | null,
+): Uint8Array | null {
+  if (framePng === undefined) return null;
+  return (position === null ? framePng() : framePng({ playerX: position.x, playerY: position.y })) ?? null;
+}
+
 function planSurvived(effect: string | null): boolean {
   if (effect === null) return false;
   return !(

@@ -238,10 +238,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const server = createGbaMcpServer(
     {
       io: session.io,
-      framePng: () => {
+      framePng: (anchor) => {
         // Every observation is also a chance to refresh what a watcher sees.
         publish();
-        return game.framePng();
+        return game.framePng(undefined, anchor);
       },
       assertMayAct: (token) => {
         possession.assertMayAct(token);

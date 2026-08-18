@@ -189,9 +189,9 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   "  Spacing is handled for you: a rate gate drops an aside that comes too soon",
   "  after the last one, so you cannot flood the room and do not need to ration",
   "  yourself. If something is worth saying, say it and let the gate decide.",
-  "- intent: the single concrete thing you will do NEXT TURN — a step or a",
+  "- intent: the single concrete thing this turn's action does — a step or a",
   '  press, not the objective. "step left around the desk", not "reach the',
-  '  stairs". You are scored on whether you then do it.',
+  '  stairs". You are scored on whether your action matches it.',
   "- notes: your own running notes, carried to every later turn. Keep what will",
   "  still matter — the room layout you have worked out, what you already tried,",
   "  where you are heading. Rewrite them freely; return null to leave them as",
@@ -291,9 +291,9 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   "tile are listed too. Use that instead of pressing into the same wall.",
   "",
   "The emulator has no clock and waits for you, so think before you press.",
-  "Say what you actually intend — your stated intent is compared against what",
-  "you do next, so narrating something you are not going to do is worse than",
-  "admitting uncertainty.",
+  "Say what you actually intend — your stated intent is compared against the",
+  "action you take with it, so narrating something you are not doing is worse",
+  "than admitting uncertainty.",
 ].join("\n");
 
 export interface ModelFreePlayMindOptions {
@@ -461,10 +461,13 @@ export function renderView(view: FreePlayView): string {
   if (view.repeatingForTurns !== null) {
     // The same fact for the states a tile counter cannot see. Deliberately not
     // "try something else": a script that needs more time and a wedge look
-    // identical from here, and only he can tell them apart.
+    // identical from here, and only he can tell them apart. Says "whatever you
+    // tried" because the counter no longer requires the action to repeat —
+    // alternating two presses against one unmoving box is the loop that used
+    // to be invisible.
     lines.push(
       "",
-      `The last ${String(view.repeatingForTurns)} turns were the same action with the same result.`,
+      `The last ${String(view.repeatingForTurns)} turns produced the same result, whatever you tried.`,
     );
   }
   if (view.recurringForTurns !== null) {

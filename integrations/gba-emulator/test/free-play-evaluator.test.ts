@@ -233,6 +233,67 @@ describe("free-play evaluator", () => {
     });
   });
 
+  it("scores intent against the action it was written beside, not the next turn's", () => {
+    const first = turn(0, "rejected_by_adapter", "delivery-0");
+    const replanned = turn(1, "accepted", "delivery-1");
+    // He reacted to the rejection: a different intent and the action to match.
+    // Scored against the previous turn's intent this read as misaligned, which
+    // rewarded repeating a refused action over adapting to it.
+    replanned.turn.intent = "press A to talk to Oak";
+    replanned.turn.action = { kind: "button_press", button: "a", holdFrames: 2, repeat: 1 } as never;
+    const report = evaluateFreePlayJournal({ journal: journal(first, replanned) });
+
+    expect(report.turns[0]?.verdicts.intentToAction).toBe("aligned");
+    expect(report.turns[1]?.verdicts.intentToAction).toBe("aligned");
+    expect(report.aggregate.intentToAction).toEqual({ aligned: 2 });
+  });
+
+  it("reads a settled model response so an unheard narration is not a missing trail", () => {
+    const spoken = turn(0, "accepted", "delivery-spoken");
+    const unheard = turn(1, "accepted", "delivery-unheard");
+    const broken = turn(2, "accepted", "delivery-failed");
+    const report = evaluateFreePlayJournal({
+      journal: journal(spoken, unheard, broken),
+      voiceReceipts: [
+        {
+          type: "discord.voice.model_response",
+          occurredAt: at,
+          data: { deliveryId: "delivery-spoken", phase: "completed", outcome: "audio" },
+        },
+        {
+          type: "discord.voice.response",
+          occurredAt: at,
+          data: { deliveryId: "delivery-spoken", trigger: "narration", playbackMs: 800 },
+        },
+        {
+          type: "discord.voice.model_response",
+          occurredAt: at,
+          data: { deliveryId: "delivery-unheard", phase: "requested" },
+        },
+        {
+          type: "discord.voice.model_response",
+          occurredAt: at,
+          data: { deliveryId: "delivery-unheard", phase: "completed", outcome: "silent", audioBytes: 0 },
+        },
+        {
+          type: "discord.voice.model_response",
+          occurredAt: at,
+          data: { deliveryId: "delivery-failed", phase: "failed" },
+        },
+      ]
+        .map((line) => JSON.stringify(line))
+        .join("\n"),
+    });
+
+    expect(report.turns.map((entry) => entry.verdicts.narration)).toEqual(["played", "unspoken", "failed"]);
+  });
+
+  it("keeps a narration with no receipt at all distinguishable from one that settled", () => {
+    const report = evaluateFreePlayJournal({ journal: journal(turn(0, "accepted", "delivery-orphan")) });
+
+    expect(report.turns[0]?.verdicts.narration).toBe("attempted_no_receipt");
+  });
+
   it("keeps V1 movement unknown when no semantic start/end evidence exists", () => {
     const legacy = turn(0, "rejected_by_adapter", "delivery-legacy");
     const report = evaluateFreePlayJournal({

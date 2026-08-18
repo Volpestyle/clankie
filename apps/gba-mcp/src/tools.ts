@@ -144,7 +144,12 @@ export interface GbaCheckpointSummary {
 
 export interface GbaToolContext {
   io: GbaDriverIo;
-  framePng: () => Uint8Array | null;
+  /**
+   * The screen. Anchored to the tile the player stands on, it carries labelled
+   * tile axes — an external agent driving this body reads `walk_to` coordinates
+   * off the picture instead of guessing them, same as Clankie does (ADR 0120).
+   */
+  framePng: (anchor?: { readonly playerX: number; readonly playerY: number }) => Uint8Array | null;
   /** Refuses gameplay unless this caller holds the possession lease. */
   assertMayAct?: (token: string | undefined) => void;
   possessionToken?: string | undefined;
@@ -180,7 +185,19 @@ export function observeTool(
       // context the caller does not get, exactly as in free play.
     }
   }
-  const frame = context.framePng();
+  // The observations were just read; the overworld one carries where he stands,
+  // which is what turns the picture into a coordinate frame.
+  const standing = observations
+    .flatMap(
+      (observation) => (observation as { data?: { position?: { x?: unknown; y?: unknown } } }).data ?? [],
+    )
+    .map((data) => (data as { position?: { x?: unknown; y?: unknown } }).position)
+    .find((position) => typeof position?.x === "number" && typeof position?.y === "number") as
+    | { readonly x: number; readonly y: number }
+    | undefined;
+  const frame = context.framePng(
+    standing === undefined ? undefined : { playerX: standing.x, playerY: standing.y },
+  );
   const content: McpToolResult["content"] = [
     { type: "text" as const, text: JSON.stringify(observations, null, 2) },
   ];

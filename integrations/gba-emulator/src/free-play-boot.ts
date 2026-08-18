@@ -6,6 +6,7 @@ import { FrozenGbaScenarioSchema } from "./contracts.ts";
 import { sha256 } from "./core-double.ts";
 import type { GbaAdapterScenario, GbaCoreFactory } from "./core-seam.ts";
 import { MgbaFireRedCore } from "./firered-core.ts";
+import type { FrameGridAnchor } from "./frame-grid.ts";
 import { encodeFramebufferPng } from "./framebuffer-png.ts";
 import { RealGbaRouteScenarioSchema } from "./real-scenario.ts";
 import { MgbaVisualCore, VisualGbaScenarioSchema } from "./visual-core.ts";
@@ -62,7 +63,11 @@ export interface BootedGbaGame {
   /** Undefined when running the deterministic double. */
   checkpoints: GbaCheckpointCapability | undefined;
   /** Latest rendered screen, upscaled, or null when nothing has rendered. */
-  framePng: (scale?: number) => Uint8Array | null;
+  /**
+   * The screen. Given the tile he stands on, the picture carries labelled tile
+   * axes so what he sees becomes something he can name in a `walk_to` (ADR 0120).
+   */
+  framePng: (scale?: number, anchor?: FrameGridAnchor) => Uint8Array | null;
   /**
    * Watch the screen during an action rather than only after it.
    *
@@ -145,7 +150,7 @@ export async function bootGbaGame(options: BootGbaGameOptions): Promise<BootedGb
         identity: core.identity(),
         scenario,
       },
-      framePng: (scale = 3) => encodeFramebufferPng(core.framebufferSnapshot(), scale),
+      framePng: (scale = 3, anchor) => encodeFramebufferPng(core.framebufferSnapshot(), scale, anchor),
       observeFrames: (observer, observeOptions) => {
         core.observeFrames(observer, observeOptions ?? {});
       },
@@ -206,9 +211,9 @@ export async function bootGbaGame(options: BootGbaGameOptions): Promise<BootedGb
       identity: core.identity(),
       scenario: routeScenario,
     },
-    framePng: (scale = 3) => {
+    framePng: (scale = 3, anchor) => {
       try {
-        return encodeFramebufferPng(core.framebufferSnapshot(), scale);
+        return encodeFramebufferPng(core.framebufferSnapshot(), scale, anchor);
       } catch {
         // Nothing rendered yet.
         return null;

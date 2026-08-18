@@ -138,7 +138,7 @@ An evaluation turn is a causal packet, not a score inferred from hashes:
 
 ```mermaid
 flowchart LR
-    D[Decision observation] --> P[Objective, rationale, next-turn intent]
+    D[Decision observation] --> P[Objective, rationale, intent]
     P --> B[Immediate pre-action observation]
     B --> A[Structured action result]
     A --> C[Post-action observation]
@@ -152,11 +152,12 @@ The evaluator reports evidence and `unknown` separately for:
 
 - movement start, target, end, and effectiveness;
 - action appropriateness for the decoded scene;
-- prior intent to next action alignment;
+- stated intent to the action taken with it;
 - standing objective continuity and retirement;
 - structured execution result and observed effect;
 - rejection recovery, repeated failures, stalls, and recurring states;
-- narration offer, suppression, model silence, playback, or missing receipt;
+- narration offer, suppression, model silence, playback, a settled response
+  nobody heard, or a missing receipt;
 - clean summary or terminal embodiment lifecycle accounting.
 
 V1 journals remain readable but cannot reconstruct their missing semantic

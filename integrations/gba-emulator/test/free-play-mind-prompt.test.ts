@@ -111,6 +111,21 @@ function emptyView(): FreePlayView {
  * intro — then narrated it to a voice room. Stating what reaches the controls
  * is what stops the rediscovery.
  */
+describe("the stuck signal reads results, not actions", () => {
+  // 2026-08-18: he read "Press START to open the MENU!" four times across nine
+  // turns by alternating `a` and `advance_dialog`. The counter keyed on
+  // action+effect, so it reset every turn and the view never said a word.
+  it("tells him the result repeated however he got there", () => {
+    const rendered = renderView({ ...emptyView(), repeatingForTurns: 4 });
+    expect(rendered).toContain("produced the same result, whatever you tried");
+    expect(rendered).not.toContain("same action with the same result");
+  });
+
+  it("says nothing when nothing is repeating", () => {
+    expect(renderView(emptyView())).not.toContain("produced the same result");
+  });
+});
+
 describe("the view says what reaches the controls", () => {
   const screen = (mode: string, stateCertain: boolean): FreePlayView => ({
     ...emptyView(),

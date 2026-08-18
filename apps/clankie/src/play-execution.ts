@@ -566,7 +566,7 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
               initialObjective: resumedContinuity.objective,
             }),
         framebufferSha256: () => game.framebufferSha256(),
-        framePng: () => game.framePng(),
+        framePng: (anchor) => game.framePng(undefined, anchor),
         provenance: () => ({
           body: "local",
           coreId: game.scenario.coreId,
@@ -801,11 +801,19 @@ const ROOM_EVENT_OBJECTIVE_MAX = 120;
  */
 function roomEvent(turn: FreePlayTurn): string | null {
   if (!turn.speakWanted) return null;
-  const effect = turn.effect?.trim();
-  if (effect === undefined || effect.length === 0) return null;
+  // The room's template is "While playing, Clankie just: …", which asks for
+  // something he *did*. `effect` is an observed world delta — "the screen
+  // changed", "moved to (13,17)" — and in that slot it leaves him narrating
+  // telemetry: handed "the screen changed" there is nothing to say but "ok,
+  // time to take a look at the screen". His own `intent` is the action, in his
+  // words, and is what the sentence was shaped for. Effect stays the fallback
+  // for turns that carry no intent.
+  const intent = turn.intent?.trim();
+  const did = intent !== undefined && intent.length > 0 ? intent : turn.effect?.trim();
+  if (did === undefined || did.length === 0) return null;
   const objective = turn.objective?.trim();
-  if (objective === undefined || objective.length === 0) return effect;
-  return `${effect} (working toward: ${objective.slice(0, ROOM_EVENT_OBJECTIVE_MAX)})`;
+  if (objective === undefined || objective.length === 0) return did;
+  return `${did} (working toward: ${objective.slice(0, ROOM_EVENT_OBJECTIVE_MAX)})`;
 }
 
 function positiveIntegerOr(raw: string | undefined, fallback: number): number {

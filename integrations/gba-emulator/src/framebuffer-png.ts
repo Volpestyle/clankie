@@ -1,4 +1,5 @@
 import zlib from "node:zlib";
+import { drawTileGrid, type FrameGridAnchor } from "./frame-grid.ts";
 import type { MgbaFramebuffer } from "./mgba-core.ts";
 
 /**
@@ -9,7 +10,11 @@ import type { MgbaFramebuffer } from "./mgba-core.ts";
  * sufficient transport for the activity plane ([ADR 0047](../../../docs/adr/0047-discord-activity-presence-plane.md))
  * without pulling in a video encoder.
  */
-export function encodeFramebufferPng(frame: MgbaFramebuffer, scale = 1): Buffer {
+export function encodeFramebufferPng(
+  frame: MgbaFramebuffer,
+  scale = 1,
+  grid?: FrameGridAnchor | undefined,
+): Buffer {
   if (!Number.isSafeInteger(scale) || scale < 1 || scale > 8) {
     throw new Error("gba_framebuffer_scale_invalid");
   }
@@ -20,22 +25,37 @@ export function encodeFramebufferPng(frame: MgbaFramebuffer, scale = 1): Buffer 
   // Nearest-neighbour upscale. 240x160 is small enough that a vision model can
   // struggle to read tiles; duplicating pixels costs almost nothing, adds no
   // information, and invents none — the picture is identical, just larger.
-  const outWidth = width * scale;
-  const outHeight = height * scale;
-  const raw = Buffer.alloc(outHeight * (1 + outWidth * 3));
-  for (let y = 0; y < outHeight; y += 1) {
-    const row = y * (1 + outWidth * 3);
-    raw[row] = 0; // filter: none
+  const gameWidth = width * scale;
+  const gameHeight = height * scale;
+  const game = new Uint8Array(gameWidth * gameHeight * 3);
+  for (let y = 0; y < gameHeight; y += 1) {
     const sourceY = Math.floor(y / scale);
-    for (let x = 0; x < outWidth; x += 1) {
+    for (let x = 0; x < gameWidth; x += 1) {
       const i = sourceY * width + Math.floor(x / scale);
       const low = bytes[i * 2] ?? 0;
       const high = bytes[i * 2 + 1] ?? 0;
       const value = low | (high << 8);
-      raw[row + 1 + x * 3] = Math.round((((value >> 11) & 0x1f) * 255) / 31);
-      raw[row + 2 + x * 3] = Math.round((((value >> 5) & 0x3f) * 255) / 63);
-      raw[row + 3 + x * 3] = Math.round(((value & 0x1f) * 255) / 31);
+      const at = (y * gameWidth + x) * 3;
+      game[at] = Math.round((((value >> 11) & 0x1f) * 255) / 31);
+      game[at + 1] = Math.round((((value >> 5) & 0x3f) * 255) / 63);
+      game[at + 2] = Math.round(((value & 0x1f) * 255) / 31);
     }
+  }
+
+  // Labelled tile axes in an added margin, never over the game pixels — the
+  // same frame is what the room watches (ADR 0047).
+  const canvas =
+    grid === undefined
+      ? { rgb: game, width: gameWidth, height: gameHeight }
+      : drawTileGrid({ rgb: game, width: gameWidth, height: gameHeight }, scale, grid);
+
+  const outWidth = canvas.width;
+  const outHeight = canvas.height;
+  const raw = Buffer.alloc(outHeight * (1 + outWidth * 3));
+  for (let y = 0; y < outHeight; y += 1) {
+    const row = y * (1 + outWidth * 3);
+    raw[row] = 0; // filter: none
+    raw.set(canvas.rgb.subarray(y * outWidth * 3, (y + 1) * outWidth * 3), row + 1);
   }
 
   const ihdr = Buffer.alloc(13);

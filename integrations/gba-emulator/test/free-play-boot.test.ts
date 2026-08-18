@@ -73,7 +73,7 @@ describe.skipIf(!existsSync(EMERALD_ROM))("Emerald visual core (ROM-gated)", () 
       real: true,
       scenario: { scenarioId: "emerald-title-vision-v1" },
     });
-    expect(game.framePng(1)).not.toBeNull();
+    expect(game.framePng()).not.toBeNull();
     const titleFrame = game.framebufferSha256();
     expect(titleFrame).toMatch(/^[0-9a-f]{64}$/u);
 

@@ -12,6 +12,8 @@ export type NarrationVerdict =
   | "suppressed"
   | "model_silent"
   | "played"
+  | "unspoken"
+  | "failed"
   | "refused";
 
 export interface EvaluateFreePlayJournalInput {
@@ -63,7 +65,7 @@ export function evaluateFreePlayJournal(input: EvaluateFreePlayJournalInput) {
             : matchingReceiptTypes(line.speechDeliveryId, voiceReceipts),
       },
       verdicts: {
-        intentToNextAction: intentAlignment(previous, line.turn.action),
+        intentToAction: intentAlignment(line.turn.intent, line.turn.action),
         goalToAction: goalAlignment(line.turn.objective, line.turn.action),
         planContinuity: planContinuity(previous, line),
         sceneActionAppropriateness: sceneAppropriateness(line),
@@ -118,7 +120,7 @@ export function evaluateFreePlayJournal(input: EvaluateFreePlayJournalInput) {
       turns: turns.length,
       outcomes: countValues(turns.map((line) => line.turn.outcome)),
       timing: aggregateTiming(perTurn.map((turn) => turn.timing)),
-      intentToNextAction: countValues(perTurn.map((turn) => turn.verdicts.intentToNextAction)),
+      intentToAction: countValues(perTurn.map((turn) => turn.verdicts.intentToAction)),
       goalToAction: countValues(perTurn.map((turn) => turn.verdicts.goalToAction)),
       movementEffectiveness: countValues(perTurn.map((turn) => turn.verdicts.movementEffectiveness)),
       sceneActionAppropriateness: countValues(
@@ -161,12 +163,14 @@ function movementEvidence(
   return { attempted: movement, start, target, end, effectiveness };
 }
 
-function intentAlignment(
-  previous: Extract<FreePlayJournalLine, { kind: "turn" }> | undefined,
-  action: FreePlayAction | null,
-): Verdict {
-  if (previous?.turn.intent == null || action === null) return "unknown";
-  return intentMatchesAction(previous.turn.intent, action) ? "aligned" : "misaligned";
+// Intent describes the action it is written beside, so alignment is a
+// self-consistency check: did he do what he said he was doing. Scoring it
+// against the *next* turn's action instead measured plan stickiness, which
+// inverted the signal — adapting to a failed press read as misaligned while
+// repeating a rejected one read as aligned.
+function intentAlignment(intent: string | null, action: FreePlayAction | null): Verdict {
+  if (intent === null || action === null) return "unknown";
+  return intentMatchesAction(intent, action) ? "aligned" : "misaligned";
 }
 
 function goalAlignment(objective: string | null, action: FreePlayAction | null): Verdict {
@@ -239,6 +243,19 @@ function narrationVerdict(
     return "suppressed";
   }
   if (matching.some((receipt) => receipt["type"] === "discord.voice.possessor_refusal")) return "refused";
+  // A narration the gate let through still has a terminal model_response even
+  // when nothing was ever audible. Reading it separates "he was asked and
+  // answered with nothing" from a genuinely missing trail.
+  const settled = matching.filter((receipt) => {
+    const phase = receiptData(receipt)["phase"];
+    return (
+      receipt["type"] === "discord.voice.model_response" && (phase === "completed" || phase === "failed")
+    );
+  });
+  const terminal = settled.at(-1);
+  if (terminal !== undefined) {
+    return receiptData(terminal)["phase"] === "failed" ? "failed" : "unspoken";
+  }
   return "attempted_no_receipt";
 }
 
