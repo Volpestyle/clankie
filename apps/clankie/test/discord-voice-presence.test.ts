@@ -9,14 +9,14 @@ describe("createDiscordVoicePresenceClient", () => {
       async (url, init) => {
         calls.push({ url: String(url), body: JSON.parse(String(init?.body)) });
         return new Response(
-          JSON.stringify({ action: "joined", channelId: "voice-1", actorAutoOptedIn: false }),
+          JSON.stringify({ action: "joined", channelId: "voice-1", actorCanBeHeard: true }),
         );
       },
     );
     await expect(client.join({ guildId: "guild-1", actorId: "user-1" })).resolves.toEqual({
       action: "joined",
       channelId: "voice-1",
-      actorAutoOptedIn: false,
+      actorCanBeHeard: true,
     });
     expect(calls).toEqual([
       {

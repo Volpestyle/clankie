@@ -212,6 +212,7 @@ export interface DiscordVoiceSessionStatus {
 export interface VoiceTranscriptionPort {
   readonly isOpen: boolean;
   appendAudio(pcm: Buffer): void;
+  commitAudio(): void;
   close(): void;
 }
 
@@ -777,6 +778,14 @@ export class DiscordVoiceSession {
     return () => this.transcriptListeners.delete(listener);
   }
 
+  public canHear(userId: string): boolean {
+    return (
+      this.guildId !== undefined &&
+      this.channelId !== undefined &&
+      this.consent.permits(this.guildId, this.channelId, userId)
+    );
+  }
+
   public status(): DiscordVoiceSessionStatus {
     return {
       active: this.connection?.state.status === VoiceConnectionStatus.Ready,
@@ -891,6 +900,14 @@ export class DiscordVoiceSession {
     }
     if (captureFailed || generation !== this.sessionGeneration) return;
     if (!this.consent.permits(guildId, channelId, userId)) return;
+    if (convertedBytes > 0) {
+      try {
+        transcription.commitAudio();
+      } catch {
+        // A closed listener reports through its close handler; the bounded
+        // Discord utterance remains useful evidence even when commit loses.
+      }
+    }
     const durationMs = Math.round((convertedBytes / (REALTIME_AUDIO_SAMPLE_RATE * PCM_SAMPLE_BYTES)) * 1_000);
     if (durationMs < MIN_UTTERANCE_MS) return;
     await this.emitSafely({

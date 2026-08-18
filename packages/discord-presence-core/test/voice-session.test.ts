@@ -197,6 +197,7 @@ const voiceMock = (discordVoiceModule as unknown as { __voiceMock: VoiceMockStat
 class FakeTranscription implements VoiceTranscriptionPort {
   public isOpen = true;
   public readonly appended: Buffer[] = [];
+  public commits = 0;
   public readonly handlers: VoiceTranscriptionHandlers;
 
   public constructor(handlers: VoiceTranscriptionHandlers) {
@@ -210,6 +211,11 @@ class FakeTranscription implements VoiceTranscriptionPort {
     }
     this.appended.push(Buffer.from(pcm));
     pcm.fill(0);
+  }
+
+  public commitAudio(): void {
+    if (!this.isOpen) throw new Error("Realtime session is closed");
+    this.commits += 1;
   }
 
   public close(): void {
@@ -540,6 +546,7 @@ describe("lifecycle", () => {
       floorState: "dormant",
       engaged: false,
     });
+    expect(harness.session.canHear(OWNER)).toBe(true);
     expect(harness.evidence.map((event) => event.type)).toEqual(["joined", "consent"]);
   });
 
@@ -554,6 +561,7 @@ describe("lifecycle", () => {
       })) as unknown as JoinDiscordVoiceInput["adapterCreator"],
     });
     expect(harness.session.status().consentedParticipantCount).toBe(0);
+    expect(harness.session.canHear(OWNER)).toBe(false);
     // No auto-granted consent means no consent evidence either.
     expect(harness.evidence.map((event) => event.type)).toEqual(["joined"]);
     // The asker consents like everyone else: speaking before opt-in is never
@@ -562,6 +570,7 @@ describe("lifecycle", () => {
     expect(harness.connection().captures).toHaveLength(0);
     await harness.consent(OWNER);
     expect(harness.session.status().consentedParticipantCount).toBe(1);
+    expect(harness.session.canHear(OWNER)).toBe(true);
     harness.connection().receiver.speaking.emit("start", OWNER);
     expect(harness.connection().captures).toHaveLength(1);
   });
@@ -629,6 +638,7 @@ describe("consent boundary", () => {
     capture.stream.write(stereoPcm(3_840));
     await flush();
     expect(harness.transcription().appended).toHaveLength(1);
+    expect(harness.transcription().commits).toBe(0);
     await harness.session.setConsent(GUILD, CHANNEL, BOB, false);
     await flush();
     expect(capture.stream.destroyed).toBe(true);
@@ -719,6 +729,7 @@ describe("audio path", () => {
     expect(chunk.equals(Buffer.alloc(chunk.byteLength))).toBe(true);
     capture.stream.end();
     await flush();
+    expect(harness.transcription().commits).toBe(1);
     const utterances = harness.ofType("utterance");
     expect(utterances).toHaveLength(1);
     expect(utterances[0]).toMatchObject({ userId: ALICE, durationMs: 350 });

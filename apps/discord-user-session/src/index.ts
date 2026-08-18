@@ -447,7 +447,11 @@ async function executeCaptainVoicePresence(
     return { action: "join_refused", reason: "allowlist" };
   }
   if (active.active && active.channelId === target.channelId) {
-    return { action: "joined", channelId: target.channelId, actorAutoOptedIn: false };
+    return {
+      action: "joined",
+      channelId: target.channelId,
+      actorCanBeHeard: voiceSession.canHear(target.actorId),
+    };
   }
   try {
     await joinUserSessionVoice({
@@ -458,7 +462,11 @@ async function executeCaptainVoicePresence(
   } catch {
     return { action: "join_refused", reason: "failed" };
   }
-  return { action: "joined", channelId: target.channelId, actorAutoOptedIn: true };
+  return {
+    action: "joined",
+    channelId: target.channelId,
+    actorCanBeHeard: voiceSession.canHear(target.actorId),
+  };
 }
 
 function resolveUserSessionVoiceTarget(

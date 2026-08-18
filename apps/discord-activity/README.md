@@ -13,6 +13,8 @@ iframe inside a voice channel, launched by the bot through an
 It is a **rendering client only**. It holds no Discord credentials, no
 authority, and no emulator core. The host feeds it frames and bounded PCM; it
 draws the frames and plays sound after the viewer presses **Enable sound**.
+The button reads **Sound ready** until valid PCM actually reaches the browser;
+**Sound on** means packets are arriving.
 Its live lower third keeps Clankie's self-authored objective, intent, and
 monologue separate from the observed effect; spoken output stays on the
 voice surface rather than being duplicated here.
@@ -27,6 +29,16 @@ voice surface rather than being duplicated here.
 CLANKIE_ACTIVITY_PORT=4320 \
 CLANKIE_ACTIVITY_PRODUCER_PORT=4322 \
 pnpm --filter @clankie/discord-activity start
+```
+
+Hosted-world frames use the world socket, but sound uses the host's read-only
+watch listener. A local `pokeagents start` therefore needs both watch settings;
+without them the picture works while no PCM exists to play:
+
+```bash
+WORLD_WATCH_ADDRESS=http://127.0.0.1:7780 \
+WORLD_WATCH_PUBLIC_URL=http://127.0.0.1:7780 \
+pokeagents start
 ```
 
 Only non-secret configuration is environment-supplied. The producer bearer is

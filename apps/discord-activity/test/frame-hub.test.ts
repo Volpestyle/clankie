@@ -80,6 +80,7 @@ describe("RenderedSurfaceHub", () => {
     const html = readFileSync(new URL("../src/client.html", import.meta.url), "utf8");
     const script = html.match(/<script type="module">([\s\S]+)<\/script>/u)?.[1];
     expect(html).toContain("Enable sound");
+    expect(html).toContain("Sound ready");
     expect(script).toBeDefined();
     expect(() => new Function(script!)).not.toThrow();
   });

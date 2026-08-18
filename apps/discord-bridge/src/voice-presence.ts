@@ -11,6 +11,7 @@ type VoiceAdapterCreator = JoinDiscordVoiceInput["adapterCreator"];
 
 export interface VoicePresenceSessionPort {
   status(): { readonly active: boolean; readonly guildId?: string; readonly channelId?: string };
+  canHear(userId: string): boolean;
   join(input: {
     readonly guildId: string;
     readonly channelId: string;
@@ -73,12 +74,12 @@ export async function executeVoicePresenceIntent(
     return { action: "join_refused", reason: "other_guild" };
   }
   if (active.active && active.channelId === channelId) {
-    return { action: "joined", channelId, actorAutoOptedIn: false };
+    return { action: "joined", channelId, actorCanBeHeard: session.canHear(input.principal.userId) };
   }
   try {
     await session.join({ guildId: input.guildId, channelId, adapterCreator: input.adapterCreator });
   } catch {
     return { action: "join_refused", reason: "failed" };
   }
-  return { action: "joined", channelId, actorAutoOptedIn: false };
+  return { action: "joined", channelId, actorCanBeHeard: session.canHear(input.principal.userId) };
 }

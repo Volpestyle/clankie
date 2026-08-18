@@ -57,6 +57,7 @@ describe("hosted world body", () => {
 
   it("joins by credential, maps every available view, drives actions, and leaves once", async () => {
     let current = observation({ frame: 10, x: 13, y: 13 });
+    const audioUnavailable: string[] = [];
     const world = await fakeWorld((request) => {
       switch (request.operation) {
         case "world.join":
@@ -84,7 +85,11 @@ describe("hosted world body", () => {
       }
     });
     const env = await provisionedEnv(world.stateDir);
-    const result = await joinWorld({ environmentId: "pokemon-firered", env });
+    const result = await joinWorld({
+      environmentId: "pokemon-firered",
+      env,
+      onAudioUnavailable: (reason) => audioUnavailable.push(reason),
+    });
     expect(result.outcome).toBe("joined");
     if (result.outcome !== "joined") return;
     const body = result.body;
@@ -105,6 +110,7 @@ describe("hosted world body", () => {
         members: [{ speciesId: "firered-species-1", status: "healthy" }],
       },
     });
+    expect(audioUnavailable).toEqual(["not_supported"]);
     expectAdapterError(() => body.io.observe("dialog"), "dialog_not_open");
     expectAdapterError(() => body.io.observe("menu"), "menu_not_open");
     expectAdapterError(() => body.io.observe("battle"), "battle_not_active");
@@ -395,6 +401,7 @@ describe("hosted world body", () => {
       }),
     );
     const fetches: Array<{ url: URL; authorization: string | null }> = [];
+    const audioUnavailable: string[] = [];
     const pcm = Buffer.alloc(16, 7);
     const fetchImpl = (async (input, init) => {
       const url = new URL(String(input));
@@ -429,6 +436,7 @@ describe("hosted world body", () => {
       environmentId: "pokemon-firered",
       env: await provisionedEnv(world.stateDir),
       fetchImpl,
+      onAudioUnavailable: (reason) => audioUnavailable.push(reason),
     });
     if (result.outcome !== "joined") throw new Error("expected the world join to succeed");
 
@@ -450,6 +458,7 @@ describe("hosted world body", () => {
     expect(fetches[0]?.url.search).toBe("");
     expect(fetches.some(({ url }) => url.searchParams.get("after") === "10")).toBe(true);
     expect(fetches.every(({ authorization }) => authorization?.startsWith("Watch wtk.") === true)).toBe(true);
+    expect(audioUnavailable).toEqual([]);
     await result.body.close();
   });
 

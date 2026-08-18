@@ -53,7 +53,7 @@ describe("captain voice presence tools", () => {
           return Promise.resolve({
             action: "joined" as const,
             channelId: "voice-1",
-            actorAutoOptedIn: false,
+            actorCanBeHeard: false,
           });
         },
       },

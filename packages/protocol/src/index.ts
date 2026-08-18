@@ -1333,8 +1333,8 @@ export const DiscordVoicePresenceResultSchema = z.discriminatedUnion("action", [
     .object({
       action: z.literal("joined"),
       channelId: z.string().min(1),
-      /** Whether this join explicitly opted the authenticated speaker into capture. */
-      actorAutoOptedIn: z.boolean(),
+      /** Whether the authenticated speaker can be heard under the room's current consent policy. */
+      actorCanBeHeard: z.boolean(),
     })
     .strict(),
   z.object({ action: z.literal("join_refused"), reason: DiscordVoicePresenceResultReasonSchema }).strict(),

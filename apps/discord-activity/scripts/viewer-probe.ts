@@ -3,16 +3,25 @@ import { WebSocket } from "ws";
 
 const socket = new WebSocket(process.env["CLANKIE_ACTIVITY_VIEWER_URL"] ?? "ws://127.0.0.1:4320/frames");
 let frames = 0;
+let audioPackets = 0;
+let nonSilentAudioPackets = 0;
 let overlays = 0;
 let statuses = 0;
 let lastPhase = "none";
 socket.on("message", (raw: Buffer) => {
   const message = JSON.parse(raw.toString()) as {
     kind: string;
+    audio?: { data?: string };
     overlay?: Record<string, unknown>;
     status?: { phase?: string };
   };
   if (message.kind === "frame") frames += 1;
+  if (message.kind === "audio" && typeof message.audio?.data === "string") {
+    audioPackets += 1;
+    if (Buffer.from(message.audio.data, "base64").some((sample) => sample !== 0)) {
+      nonSilentAudioPackets += 1;
+    }
+  }
   if (message.kind === "overlay" && message.overlay !== undefined) {
     overlays += 1;
     console.log(`OVERLAY: ${JSON.stringify(message.overlay)}`);
@@ -26,6 +35,6 @@ socket.on("message", (raw: Buffer) => {
 const seconds = Number.parseInt(process.env["CLANKIE_VIEWER_SECONDS"] ?? "90", 10);
 await new Promise((resolve) => setTimeout(resolve, seconds * 1_000));
 console.log(
-  `VIEWER frames=${String(frames)} overlays=${String(overlays)} statuses=${String(statuses)} phase=${lastPhase}`,
+  `VIEWER frames=${String(frames)} audio=${String(audioPackets)} nonSilentAudio=${String(nonSilentAudioPackets)} overlays=${String(overlays)} statuses=${String(statuses)} phase=${lastPhase}`,
 );
 socket.close();

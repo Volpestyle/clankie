@@ -110,6 +110,7 @@ export interface WorldJoinOptions {
   environmentId: EmbodimentEnvironmentId;
   env?: NodeJS.ProcessEnv;
   fetchImpl?: typeof fetch;
+  onAudioUnavailable?: (reason: string) => void;
 }
 
 export interface WorldAudioPacket {
@@ -217,7 +218,12 @@ export async function joinWorld(options: WorldJoinOptions): Promise<WorldJoinRes
     };
   }
 
-  const watchAudio = await openWatchAudio(socketPath, joined.data.token, options.fetchImpl ?? fetch);
+  const watchAudio = await openWatchAudio(
+    socketPath,
+    joined.data.token,
+    options.fetchImpl ?? fetch,
+    options.onAudioUnavailable,
+  );
   return {
     outcome: "joined",
     body: new HostedWorldBody(socketPath, joined.data, observation.data, watchAudio),
@@ -936,6 +942,7 @@ async function openWatchAudio(
   socketPath: string,
   token: string,
   fetchImpl: typeof fetch,
+  onUnavailable?: (reason: string) => void,
 ): Promise<WatchAudioSource | undefined> {
   try {
     const outcome = await callHost(socketPath, {
@@ -944,12 +951,24 @@ async function openWatchAudio(
       input: { visibility: "unlisted" },
     });
     const parsed = WatchResultSchema.safeParse(outcome);
-    if (!parsed.success || parsed.data.visibility === "off") return undefined;
+    if (!parsed.success) {
+      const refusal = RefusalSchema.safeParse(outcome);
+      onUnavailable?.(refusal.success ? refusal.data.code : "invalid_watch_response");
+      return undefined;
+    }
+    if (parsed.data.visibility === "off") {
+      onUnavailable?.("watch_disabled");
+      return undefined;
+    }
     const watch = new URL(parsed.data.url);
     const watchToken = decodeURIComponent(watch.hash.slice(1));
-    if (watchToken.length === 0) return undefined;
+    if (watchToken.length === 0) {
+      onUnavailable?.("invalid_watch_token");
+      return undefined;
+    }
     return { endpoint: new URL("/api/watch/audio", watch), token: watchToken, fetch: fetchImpl };
   } catch {
+    onUnavailable?.("watch_unreachable");
     return undefined;
   }
 }

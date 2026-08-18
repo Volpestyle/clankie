@@ -47,7 +47,7 @@ describe("voice presence control", () => {
           return Promise.resolve({
             action: "joined",
             channelId: "voice-1",
-            actorAutoOptedIn: false,
+            actorCanBeHeard: false,
           });
         })
       ) {

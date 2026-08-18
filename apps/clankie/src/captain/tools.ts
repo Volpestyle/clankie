@@ -445,13 +445,13 @@ function discordVoicePresenceTools(
           "channel from gateway state and enforces allowlists. You never pick a guild or channel. A refusal " +
           "reason is a fact to explain, not a reason to retry: not_in_voice means they are not in a call, " +
           "ambiguous means they are in more than one, no_owner means nobody is configured as the owner. " +
-          "On success, actorAutoOptedIn says whether the owner was opted into live speaker-attributed capture. " +
+          "On success, actorCanBeHeard says whether the owner can be heard under the room's current consent policy. " +
           "If false, tell them to use /clankie voice-consent opt-in before you can hear them; if true, plainly disclose " +
           "that their audio is transcribed live and may remain with the configured provider for this call."
         : "Join the Discord voice channel the person speaking to you is in now. Use this when they ask you to " +
           "join, hop in, come talk, or otherwise enter their call. The live Discord body—not you—resolves the " +
           "channel and enforces authority and allowlists. A refusal reason is a fact to explain, not a reason to retry. " +
-          "On success, actorAutoOptedIn says whether the speaker was opted into live speaker-attributed capture. " +
+          "On success, actorCanBeHeard says whether the speaker can be heard under the room's current consent policy. " +
           "If false, tell them to use /clankie voice-consent opt-in before you can hear them; if true, plainly disclose " +
           "that their audio is transcribed live and may remain with the configured provider for this call.",
       parameters: Type.Object({}),

@@ -74,6 +74,11 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
       joined = await join({
         environmentId: session.environmentId,
         env,
+        onAudioUnavailable: (reason) =>
+          options.logger.info(
+            { sessionId: session.sessionId, reason },
+            "world audio unavailable; configure the host watch listener for activity sound",
+          ),
       });
     } catch (error) {
       options.logger.warn(

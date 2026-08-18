@@ -447,6 +447,7 @@
         ) {
           return;
         }
+        soundToggle.textContent = "Sound on";
         const bytes = new Uint8Array(binary.length);
         for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
         const view = new DataView(bytes.buffer);
@@ -481,7 +482,7 @@
         await audio.context.resume();
         audio.enabled = true;
         stopAudio();
-        soundToggle.textContent = "Sound on";
+        soundToggle.textContent = lastAudioSequence >= 0 ? "Sound on" : "Sound ready";
         soundToggle.setAttribute("aria-pressed", "true");
       });
 
@@ -565,6 +566,7 @@
         lastOverlaySequence = -1;
         lastAudioSequence = -1;
         stopAudio();
+        if (audio.enabled) soundToggle.textContent = "Sound ready";
         setStatus("Connecting", "idle");
         setWorkStatus("Connecting", "waiting");
         // All activity traffic is proxied through discordsays.com; the /.proxy

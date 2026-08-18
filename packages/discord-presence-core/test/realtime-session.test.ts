@@ -555,7 +555,7 @@ describe("realtime transcription session", () => {
           input: {
             format: { type: "audio/pcm", rate: 24_000 },
             transcription: { model: "gpt-realtime-whisper", language: "en" },
-            turn_detection: { type: "server_vad" },
+            turn_detection: null,
           },
         },
       },
@@ -592,6 +592,7 @@ describe("realtime transcription session", () => {
     const { session, socket, transcripts } = await openTranscription();
     const pcm = Buffer.from([1, 0, 2, 0]);
     session.appendAudio(pcm);
+    session.commitAudio();
     expect(pcm.equals(Buffer.alloc(4))).toBe(true);
 
     socket.emit({ type: "input_audio_buffer.speech_started", audio_start_ms: 0, item_id: "item_1" });
@@ -607,7 +608,11 @@ describe("realtime transcription session", () => {
     expect(framesOfType(socket, "response.create")).toHaveLength(0);
     expect(framesOfType(socket, "conversation.item.create")).toHaveLength(0);
     const sentTypes = new Set(frames(socket).map((frame) => frame.type));
-    expect([...sentTypes].sort()).toEqual(["input_audio_buffer.append", "session.update"]);
+    expect([...sentTypes].sort()).toEqual([
+      "input_audio_buffer.append",
+      "input_audio_buffer.commit",
+      "session.update",
+    ]);
   });
 
   it("enforces the lifetime cap and reports the socket closing from the far side", async () => {

@@ -584,9 +584,9 @@ export class RealtimeTranscriptionSession extends RealtimeSessionCore {
               model,
               ...(language.length > 0 ? { language } : {}),
             },
-            // VAD segments utterances for transcription; with no conversational
-            // model attached there is nothing it could auto-answer with.
-            turn_detection: { type: "server_vad" },
+            // Discord already supplies authenticated per-speaker turn bounds.
+            // gpt-realtime-whisper rejects VAD, so the caller commits each turn.
+            turn_detection: null,
           },
         },
       },
@@ -607,6 +607,10 @@ export class RealtimeTranscriptionSession extends RealtimeSessionCore {
       // Session acks, VAD boundaries, and anything unrecognized are ignored;
       // the dormant tier reacts to nothing but transcripts.
     }
+  }
+
+  public commitAudio(): void {
+    this.sendFrame({ type: "input_audio_buffer.commit" });
   }
 
   private emitTranscript(event: Record<string, unknown>, text: string, final: boolean): void {
@@ -647,6 +651,10 @@ export class XaiStreamingTranscriptionSession extends RealtimeSessionCore {
     const copy = Buffer.from(pcm);
     this.pendingAudio.push(copy);
     this.pendingAudioBytes += copy.byteLength;
+  }
+
+  public commitAudio(): void {
+    // xAI's streaming STT endpoint owns turn finalization.
   }
 
   protected override handleServerEvent(type: string, event: Record<string, unknown>): void {

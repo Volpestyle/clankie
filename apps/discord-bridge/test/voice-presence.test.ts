@@ -13,11 +13,16 @@ const ADAPTER = (() => ({
 
 class FakeVoiceSession implements VoicePresenceSessionPort {
   public readonly joins: { guildId: string; channelId: string }[] = [];
+  public readonly heardUserIds = new Set<string>();
   public leaves = 0;
   public state: { active: boolean; guildId?: string; channelId?: string } = { active: false };
 
   public status() {
     return this.state;
+  }
+
+  public canHear(userId: string): boolean {
+    return this.heardUserIds.has(userId);
   }
 
   public join(input: { guildId: string; channelId: string }): Promise<void> {
@@ -56,6 +61,7 @@ function input(intent: "join" | "leave", roleIds: readonly string[] = ["voice-ro
 describe("captain voice presence execution", () => {
   it("keeps authority and the join target in the live Discord body", async () => {
     const session = new FakeVoiceSession();
+    session.heardUserIds.add("user-1");
     await expect(executeVoicePresenceIntent(config(session), input("join", []))).resolves.toEqual({
       action: "join_refused",
       reason: "authority",
@@ -65,7 +71,7 @@ describe("captain voice presence execution", () => {
     await expect(executeVoicePresenceIntent(config(session), input("join"))).resolves.toEqual({
       action: "joined",
       channelId: "voice-1",
-      actorAutoOptedIn: false,
+      actorCanBeHeard: true,
     });
     expect(session.joins).toEqual([{ guildId: "guild-1", channelId: "voice-1" }]);
 
