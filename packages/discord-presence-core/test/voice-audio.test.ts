@@ -5,6 +5,7 @@ import {
   encodeMonoPcmWav,
   openAiPcmToDiscordPcm,
   pcmDurationMs,
+  pcmRms,
 } from "../src/voice-audio.ts";
 
 describe("Discord voice PCM", () => {
@@ -78,5 +79,32 @@ describe("Discord voice PCM", () => {
   it("rejects partial samples and invalid PCM formats", () => {
     expect(() => encodeMonoPcmWav(Buffer.from([1]))).toThrow("whole s16le");
     expect(() => pcmDurationMs(Buffer.alloc(2), 0, 1)).toThrow("format is invalid");
+  });
+});
+
+describe("PCM loudness", () => {
+  function level(samples: number, value: number): Buffer {
+    const buffer = Buffer.alloc(samples * 2);
+    for (let index = 0; index < samples; index += 1) buffer.writeInt16LE(value, index * 2);
+    return buffer;
+  }
+
+  it("measures amplitude in raw s16 units and ignores sign", () => {
+    expect(pcmRms(level(64, 4_000))).toBeCloseTo(4_000, 6);
+    expect(pcmRms(level(64, -4_000))).toBeCloseTo(4_000, 6);
+    expect(pcmRms(Buffer.alloc(0))).toBe(0);
+    expect(pcmRms(Buffer.alloc(64))).toBe(0);
+  });
+
+  it("separates room tone from speech, which byte count alone cannot", () => {
+    // The live failure: 350 ms of either clears any duration bar, but only one
+    // of them is somebody talking.
+    expect(pcmRms(level(16_800, 257))).toBeLessThan(1_200);
+    expect(pcmRms(level(16_800, 4_112))).toBeGreaterThan(1_200);
+  });
+
+  it("reads a subarray view without spilling into neighbouring bytes", () => {
+    const backing = Buffer.concat([level(16, 9_000), level(16, 100)]);
+    expect(pcmRms(backing.subarray(32))).toBeCloseTo(100, 6);
   });
 });

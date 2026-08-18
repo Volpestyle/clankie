@@ -9,7 +9,12 @@ describe("createDiscordVoicePresenceClient", () => {
       async (url, init) => {
         calls.push({ url: String(url), body: JSON.parse(String(init?.body)) });
         return new Response(
-          JSON.stringify({ action: "joined", channelId: "voice-1", actorCanBeHeard: true }),
+          JSON.stringify({
+            action: "joined",
+            channelId: "voice-1",
+            actorCanBeHeard: true,
+            transcriptLoggingEnabled: true,
+          }),
         );
       },
     );
@@ -17,6 +22,7 @@ describe("createDiscordVoicePresenceClient", () => {
       action: "joined",
       channelId: "voice-1",
       actorCanBeHeard: true,
+      transcriptLoggingEnabled: true,
     });
     expect(calls).toEqual([
       {

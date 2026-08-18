@@ -39,6 +39,38 @@ describe("captain voice presence tools", () => {
     expect(names({ pokemonEmulatorEnabled: false, pokeagentMmoEnabled: false })).toEqual([]);
   });
 
+  // He read the old description into a group chat word for word: "your audio is
+  // transcribed live and may stay with the configured provider for this call."
+  // A tool description is read by the character who has to speak it, so it
+  // describes the consent situation and never what to say about it.
+  it("describes the join consent situation without scripting a line", () => {
+    const deps = {
+      embodiment: {
+        submitIntent: () => Promise.reject(new Error("unused")),
+        getSession: () => Promise.reject(new Error("unused")),
+        getLiveSession: () => Promise.reject(new Error("unused")),
+      },
+      discordVoicePresence: { join: () => Promise.reject(new Error("unused")) },
+    } as unknown as CaptainDeps;
+    for (const lane of ["discord_presence", "operator"] as const) {
+      const join = captainTools(deps, {}, {} as LaneLog, lane).find((tool) => tool.name === "voice_join");
+      if (join === undefined) throw new Error(`voice_join is missing on ${lane}`);
+      const description = join.description ?? "";
+      // The situation: what consent blocks, and what the room does not know.
+      expect(description).toContain("/clankie voice-consent opt-in");
+      expect(description).toContain("you are transcribing them");
+      expect(description).toContain("they have not been told");
+      // No sentence he can lift into the room, and no order to say one.
+      expect(description).not.toMatch(/their audio is transcribed/i);
+      expect(description).not.toMatch(/may remain with|may stay with/i);
+      expect(description).not.toMatch(/\bdisclose\b|\btell them\b|\bin your own words\b/i);
+    }
+
+    const join = captainTools(deps, {}, {} as LaneLog, "operator").find((tool) => tool.name === "voice_join");
+    expect(join?.description).toContain("transcriptLoggingEnabled");
+    expect(join?.description).toContain("private local development log");
+  });
+
   it("lets the captain decide while the host supplies identity", async () => {
     const calls: unknown[] = [];
     const deps = {
@@ -54,6 +86,7 @@ describe("captain voice presence tools", () => {
             action: "joined" as const,
             channelId: "voice-1",
             actorCanBeHeard: false,
+            transcriptLoggingEnabled: true,
           });
         },
       },

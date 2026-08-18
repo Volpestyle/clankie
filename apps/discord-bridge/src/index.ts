@@ -39,11 +39,13 @@ import {
 import {
   CATCH_UP_INTERVAL_MS,
   createAdvertisedDiscordPresencePort,
+  discordVoiceTranscriptLogPath,
   DiscordBridgeReceiptStore,
   DiscordPresenceSession,
   DiscordTextIngress,
   DiscordVoiceIngress,
   DiscordVoiceSession,
+  DiscordVoiceTranscriptStore,
   parseDiscordDmPolicy,
   parseDiscordIdSet,
   selectInboundImageAttachments,
@@ -112,6 +114,7 @@ if (process.env.CLANKIE_CAPTAIN_TOKEN) {
 }
 const credentialStore = createDefaultCredentialStore();
 const voiceEnabled = process.env.DISCORD_VOICE_ENABLED === "true";
+const voiceTranscriptLoggingEnabled = process.env.DISCORD_VOICE_TRANSCRIPT_LOGGING_ENABLED === "true";
 const credential = await credentialStore.get(DISCORD_BOT_PROVIDER_ID);
 const token = credential?.type === "api" ? credential.key : undefined;
 const applicationId = process.env.DISCORD_APPLICATION_ID;
@@ -304,6 +307,18 @@ const voiceSession =
         presenceSessionId: () => presenceSession.record.sessionId,
         emit: recordVoiceEvidence,
       });
+const voiceTranscriptStore = voiceTranscriptLoggingEnabled ? new DiscordVoiceTranscriptStore() : undefined;
+if (voiceSession !== undefined && voiceTranscriptStore !== undefined) {
+  voiceSession.subscribeTranscript((_line, transcript) => {
+    void voiceTranscriptStore.append("bot", transcript).catch((error: unknown) => {
+      console.error(
+        { deliveryId: transcript.deliveryId, error: error instanceof Error ? error.message : String(error) },
+        "Discord voice transcript append failed",
+      );
+    });
+  });
+  console.info({ path: discordVoiceTranscriptLogPath() }, "Full Discord voice transcript logging enabled");
+}
 const voiceIdleAutoLeave =
   voiceSession === undefined || voiceRealtimeConfig === undefined
     ? undefined
@@ -886,6 +901,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
           voiceRealtimeConfig?.ttsProvider ?? "openai",
           voiceConsentPolicy,
           voiceRealtimeConfig?.realtimeProvider ?? "openai",
+          voiceTranscriptLoggingEnabled,
         ),
         allowedMentions: { parse: [] },
       });
@@ -1003,6 +1019,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
           voiceRealtimeConfig?.ttsProvider ?? "openai",
           voiceConsentPolicy,
           voiceRealtimeConfig?.realtimeProvider ?? "openai",
+          voiceTranscriptLoggingEnabled,
         ),
         ephemeral: true,
         allowedMentions: { parse: [] },
@@ -1016,6 +1033,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
           voiceEnabled,
           voiceConsentPolicy,
           voiceRealtimeConfig?.realtimeProvider ?? "openai",
+          voiceTranscriptLoggingEnabled,
         ),
         ephemeral: true,
         allowedMentions: { parse: [] },
@@ -1065,7 +1083,14 @@ async function executeCaptainVoicePresence(
     };
   }
   const result = await executeVoicePresenceIntent(
-    { bindings: roleBindings, joinPolicy: voiceJoinPolicy, voiceGuildIds, voiceChannelIds, voiceSession },
+    {
+      bindings: roleBindings,
+      joinPolicy: voiceJoinPolicy,
+      voiceGuildIds,
+      voiceChannelIds,
+      voiceSession,
+      transcriptLoggingEnabled: voiceTranscriptLoggingEnabled,
+    },
     {
       intent: action,
       guildId: target.guildId,

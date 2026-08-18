@@ -1358,6 +1358,8 @@ export const DiscordVoicePresenceResultSchema = z.discriminatedUnion("action", [
       channelId: z.string().min(1),
       /** Whether the authenticated speaker can be heard under the room's current consent policy. */
       actorCanBeHeard: z.boolean(),
+      /** Whether exact consented speech is retained in the private local development log. */
+      transcriptLoggingEnabled: z.boolean(),
     })
     .strict(),
   z.object({ action: z.literal("join_refused"), reason: DiscordVoicePresenceResultReasonSchema }).strict(),
@@ -3053,7 +3055,7 @@ const discordVoiceChannelScope = {
  * answering each one is a monologue. The drop must be receipt-visible or
  * "why didn't he commentate that turn?" is unanswerable.
  */
-export const DiscordVoiceNarrationSuppressReasonSchema = z.enum(["playing", "rate_limited"]);
+export const DiscordVoiceNarrationSuppressReasonSchema = z.enum(["playing", "rate_limited", "responding"]);
 export type DiscordVoiceNarrationSuppressReason = z.infer<typeof DiscordVoiceNarrationSuppressReasonSchema>;
 
 /** Whether Clankie holds the floor (engaged realtime session) or only listens (dormant transcription). */
@@ -3182,6 +3184,9 @@ export const DiscordVoiceFailureStageSchema = z.enum([
   "conversation_session",
   "captain_handoff",
   "look_at_screen",
+  // The mouth: synthesis that never produced audio. Distinct from
+  // `playback`, which is the Discord player leg downstream of it.
+  "speech_synthesis",
   "playback",
 ]);
 export type DiscordVoiceFailureStage = z.infer<typeof DiscordVoiceFailureStageSchema>;
@@ -3233,6 +3238,15 @@ export const DiscordVoiceEvidenceSchema = z
         characters: DiscordVoiceCounterSchema,
         latencyMs: DiscordVoiceDurationMsSchema,
         addressed: z.boolean(),
+        /**
+         * Loudest RMS in the capture, full scale 32_768. Content-free — it is
+         * an amplitude, not a sound — and it is the only thing that separates
+         * the two ways `outcome: "empty"` happens: a quiet room whose open mic
+         * tripped the speaking gate, or real speech the transcriber lost. On
+         * 2026-08-18 a play session logged 181 empty transcriptions against 4
+         * accepted and the receipts could not tell those apart.
+         */
+        peakRms: z.number().nonnegative().max(32_768).optional(),
       })
       .strict(),
     z

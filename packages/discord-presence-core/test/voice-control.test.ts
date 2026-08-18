@@ -48,6 +48,7 @@ describe("voice presence control", () => {
             action: "joined",
             channelId: "voice-1",
             actorCanBeHeard: false,
+            transcriptLoggingEnabled: true,
           });
         })
       ) {

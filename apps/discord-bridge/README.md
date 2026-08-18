@@ -28,16 +28,17 @@ tokens from Clankie's local bridge bearers.
 
 Explicit shell values override unset non-secret settings. The main groups are:
 
-| Capability       | Required settings                                                                              |
-| ---------------- | ---------------------------------------------------------------------------------------------- |
-| Base bot         | `DISCORD_APPLICATION_ID`; optional development `DISCORD_GUILD_ID`                              |
-| Ambient commands | `DISCORD_AMBIENT_ROLE_IDS` and/or `DISCORD_AMBIENT_USER_IDS`                                   |
-| Text ingress     | `DISCORD_TEXT_INGRESS_ENABLED`, `DISCORD_INGRESS_GUILD_IDS`, optional channel/DM policy        |
-| Presence writes  | `DISCORD_PRESENCE_GUILD_IDS`, optional channel allowlist                                       |
-| Voice            | `DISCORD_VOICE_ENABLED`, `DISCORD_VOICE_GUILD_IDS`, optional channels, join and consent policy |
-| Voice provider   | `CLANKIE_VOICE_REALTIME_PROVIDER`; provider model, voice, and optional xAI reasoning effort    |
-| Activity         | `DISCORD_ACTIVITY_APPLICATION_ID_GBA`                                                          |
-| Possessor voice  | `CLANKIE_POSSESSOR_VOICE_ENABLED`; optional `CLANKIE_POSSESSOR_VOICE_PORT`                     |
+| Capability        | Required settings                                                                                |
+| ----------------- | ------------------------------------------------------------------------------------------------ |
+| Base bot          | `DISCORD_APPLICATION_ID`; optional development `DISCORD_GUILD_ID`                                |
+| Ambient commands  | `DISCORD_AMBIENT_ROLE_IDS` and/or `DISCORD_AMBIENT_USER_IDS`                                     |
+| Text ingress      | `DISCORD_TEXT_INGRESS_ENABLED`, `DISCORD_INGRESS_GUILD_IDS`, optional channel/DM policy          |
+| Presence writes   | `DISCORD_PRESENCE_GUILD_IDS`, optional channel allowlist                                         |
+| Voice             | `DISCORD_VOICE_ENABLED`, `DISCORD_VOICE_GUILD_IDS`, optional channels, join and consent policy   |
+| Voice transcripts | Optional `DISCORD_VOICE_TRANSCRIPT_LOGGING_ENABLED`; exact consented text in a private local log |
+| Voice provider    | `CLANKIE_VOICE_REALTIME_PROVIDER`; provider model, voice, and optional xAI reasoning effort      |
+| Activity          | `DISCORD_ACTIVITY_APPLICATION_ID_GBA`                                                            |
+| Possessor voice   | `CLANKIE_POSSESSOR_VOICE_ENABLED`; optional `CLANKIE_POSSESSOR_VOICE_PORT`                       |
 
 Secrets do not belong in that file. `DISCORD_BOT_TOKEN`, `DISCORD_USER_TOKEN`,
 and `CLANKIE_CAPTAIN_TOKEN` are hard startup errors. Voice uses the brokered API
@@ -55,6 +56,10 @@ streaming-STT model selector, so no fake model knob is presented.
 `CLANKIE_API_URL` defaults to `http://127.0.0.1:4310`.
 `DISCORD_BRIDGE_RECEIPT_PATH` may select an absolute receipt path; otherwise it
 uses `${XDG_STATE_HOME:-~/.local/state}/clankie/discord-live-receipts.jsonl`.
+When the owner enables full transcript logging in `/discord`, exact consented
+final speech from either body is appended to the mode-0600
+`${XDG_STATE_HOME:-~/.local/state}/clankie/discord-voice-transcripts.jsonl`.
+Receipts remain content-free.
 
 ## Start And Verify
 

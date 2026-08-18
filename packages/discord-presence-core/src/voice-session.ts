@@ -75,7 +75,7 @@ import {
   type RealtimeTranscriptEvent,
 } from "./realtime-session.ts";
 import { voiceAddressesCharacter } from "./voice-address.ts";
-import { discordPcmToRealtimePcm, openAiPcmToDiscordPcm, PCM_SAMPLE_BYTES } from "./voice-audio.ts";
+import { discordPcmToRealtimePcm, openAiPcmToDiscordPcm, pcmRms, PCM_SAMPLE_BYTES } from "./voice-audio.ts";
 import { DiscordVoiceConsentRegistry, type DiscordVoiceConsentPolicy } from "./voice-consent.ts";
 import { VoiceFloor, type FloorDecision, type FloorState, type VoiceFloorOptions } from "./voice-floor.ts";
 import type { DiscordVoiceIngress, DiscordVoiceTurnOutcome } from "./voice-ingress.ts";
@@ -106,11 +106,24 @@ export const DEFAULT_NARRATION_MIN_INTERVAL_MS = 12_000;
  */
 const CAPTURE_END_SILENCE_MS = 800;
 /**
- * Audio required before a consented speaker is treated as talking over him.
- * Deliberately the same bar as {@link MIN_UTTERANCE_MS}: if it is not enough to
- * count as an utterance, it is not enough to cut him off.
+ * Speech-level audio required before a consented speaker is treated as talking
+ * over him. Deliberately the same bar as {@link MIN_UTTERANCE_MS}: if it is not
+ * enough to count as an utterance, it is not enough to cut him off.
  */
 const BARGE_IN_PCM_BYTES = Math.round(48_000 * 2 * 2 * (MIN_UTTERANCE_MS / 1_000));
+/**
+ * How loud capture audio must be, as RMS in raw s16 units (full scale 32_768),
+ * before it counts toward {@link BARGE_IN_PCM_BYTES}. An open mic streams room
+ * tone continuously — every burst of it clears the duration bar — so duration
+ * alone once truncated him mid-sentence on a fan or a keystroke while the
+ * transcript for the very same capture came back empty.
+ *
+ * A calibration knob, not a derived constant: room tone sits near 300 and
+ * conversational speech runs 2_000–6_000, but every mic and noise-suppression
+ * setting moves both. Raise it if a quiet room still cuts him off; lower it if
+ * a soft talker cannot interrupt him.
+ */
+const BARGE_IN_SPEECH_RMS = 1_200;
 const VOICE_READY_TIMEOUT_MS = 20_000;
 const DAVE_READY_TIMEOUT_MS = 10_000;
 const PLAYBACK_TIMEOUT_MS = 2 * 60_000;
@@ -146,11 +159,12 @@ export const FLOOR_WORK_MAX_MS = 5 * 60_000;
 /** Close a speaker's metered listener after this much silence. */
 export const SPEAKER_TRANSCRIPTION_IDLE_MS = 2 * 60_000;
 /**
- * The transcript ring is the only transcript retention anywhere in the voice
- * path: recent final lines used to seed an engaged session, including the one
- * opened to offer him an unprompted turn. ~30 lines / ~4 000 bytes holds the
- * last few minutes of a lively room and stays well inside a single bounded
- * realtime text item.
+ * The transcript ring is the only retention inside the voice session: recent
+ * final lines used to seed an engaged session, including the one opened to
+ * offer him an unprompted turn. An owner-enabled development subscriber may
+ * persist the same consented finals outside this core (ADR 0121). ~30 lines /
+ * ~4 000 bytes holds the last few minutes of a lively room and stays well
+ * inside a single bounded realtime text item.
  */
 export const TRANSCRIPT_RING_MAX_LINES = 30;
 export const TRANSCRIPT_RING_MAX_BYTES = 4_000;
@@ -243,6 +257,18 @@ export interface DiscordVoiceSessionStatus {
    * window, so `engaged` may be true while `floorState` is `"dormant"`.
    */
   readonly engaged: boolean;
+}
+
+/** Exact final speech after consent and authenticated Discord attribution. */
+export interface DiscordVoiceTranscript {
+  readonly occurredAt: string;
+  readonly guildId: string;
+  readonly channelId: string;
+  readonly stayId?: string;
+  readonly deliveryId: string;
+  readonly speakerId: string;
+  readonly displayName?: string;
+  readonly text: string;
 }
 
 /**
@@ -408,6 +434,11 @@ interface PendingTranscriptTurn {
   readonly userId: string;
   readonly deliveryId: string;
   readonly startedAtMs: number;
+  /**
+   * Loudest RMS seen while capturing, so an empty transcript can be told apart
+   * from a silent one. Written by the capture loop, read once by the receipt.
+   */
+  peakRms?: number;
 }
 
 interface FinalizedUtterance {
@@ -477,8 +508,10 @@ export class DiscordVoiceSession {
   private channelMembers = new Set<string>();
   /** Lines stored as buffers so {@link leave} can zero the bytes, not merely drop references. */
   private transcriptRing: Buffer[] = [];
-  /** Possessors listening to the room; see {@link subscribeTranscript}. Never retains. */
-  private readonly transcriptListeners = new Set<(line: string) => void>();
+  /** Live consumers of the room; see {@link subscribeTranscript}. Never retains by itself. */
+  private readonly transcriptListeners = new Set<
+    (line: string, transcript: DiscordVoiceTranscript) => void
+  >();
   /** Rate-limits possessor narration responses so play does not become a monologue. */
   private lastNarrationResponseAtMs = Number.NEGATIVE_INFINITY;
   private readonly narrationMinIntervalMs: number;
@@ -782,14 +815,20 @@ export class DiscordVoiceSession {
       const deliveryId = options?.deliveryId ?? randomUUID();
       const playing = this.isPlaying();
       const rateLimited = this.clock() - this.lastNarrationResponseAtMs < this.narrationMinIntervalMs;
-      if (playing || rateLimited) {
+      // A response already asked for is not audible yet, so `playing` cannot
+      // see it, and the narration rate limit only clocks other narrations —
+      // a room turn in flight passes both. Asking for a second response earns
+      // "conversation already has active response" from the server and the
+      // narration is lost, so the wait is taken here where it is receipted.
+      const responding = this.pendingResponses.some((candidate) => !candidate.done);
+      if (playing || rateLimited || responding) {
         this.stayNarrationSuppressed += 1;
         await this.emitSafely({
           type: "possessor_narration_suppressed",
           guildId,
           channelId,
           deliveryId,
-          reason: playing ? "playing" : "rate_limited",
+          reason: playing ? "playing" : rateLimited ? "rate_limited" : "responding",
         });
         return;
       }
@@ -833,11 +872,13 @@ export class DiscordVoiceSession {
    * Push-only access to the attributed transcript, for a possessor that is
    * driving the body and should hear the room it is playing in front of.
    *
-   * Push rather than pull is a retention constraint: nothing new is stored to
-   * serve this, so the bridge keeps retaining no transcripts. A subscriber sees
-   * only lines that already passed the consent boundary and the ring.
+   * Push rather than pull keeps this core retention-free. A subscriber sees
+   * only lines that already passed the consent boundary and the ring, then may
+   * forward or retain them under its own explicit policy.
    */
-  public subscribeTranscript(listener: (line: string) => void): () => void {
+  public subscribeTranscript(
+    listener: (line: string, transcript: DiscordVoiceTranscript) => void,
+  ): () => void {
     this.transcriptListeners.add(listener);
     return () => this.transcriptListeners.delete(listener);
   }
@@ -924,6 +965,7 @@ export class DiscordVoiceSession {
     let sourceBytes = 0;
     let convertedBytes = 0;
     let bargeInChecked = false;
+    let bargeInSpeechBytes = 0;
     decoder.on("data", (chunk: Buffer) => {
       // Consent is re-checked per chunk: revocation destroys the capture, and
       // anything the decoder still had in flight is zeroed and dropped here,
@@ -933,11 +975,21 @@ export class DiscordVoiceSession {
         return;
       }
       sourceBytes += chunk.byteLength;
-      if (!bargeInChecked && sourceBytes >= BARGE_IN_PCM_BYTES) {
-        bargeInChecked = true;
-        // Barge-in (a): only the floor holder talking over him truncates;
-        // crosstalk between other people lets him finish (ADR 0057).
-        if (userId === this.floor.floorHolderId) this.truncatePlayback(userId);
+      // Read once and reused: the barge-in gate and the receipt's amplitude
+      // want the same number, and this runs on every decoded chunk.
+      const rms = pcmRms(chunk);
+      if (rms > (turn.peakRms ?? 0)) turn.peakRms = rms;
+      if (!bargeInChecked) {
+        // Only speech-level audio counts toward talking over him: an open mic
+        // never stops sending, so counting bytes alone cut him off mid-sentence
+        // on room tone whose transcript came back empty.
+        if (rms >= BARGE_IN_SPEECH_RMS) bargeInSpeechBytes += chunk.byteLength;
+        if (bargeInSpeechBytes >= BARGE_IN_PCM_BYTES) {
+          bargeInChecked = true;
+          // Barge-in (a): only the floor holder talking over him truncates;
+          // crosstalk between other people lets him finish (ADR 0057).
+          if (userId === this.floor.floorHolderId) this.truncatePlayback(userId);
+        }
       }
       const converted = discordPcmToRealtimePcm(chunk);
       chunk.fill(0);
@@ -1040,6 +1092,7 @@ export class DiscordVoiceSession {
       characters: text.length,
       latencyMs: Math.max(0, Math.round(this.clock() - turn.startedAtMs)),
       addressed,
+      ...(turn.peakRms === undefined ? {} : { peakRms: Math.round(turn.peakRms) }),
     });
     if (text.length === 0) {
       this.flushFinalizedUtterances();
@@ -1111,7 +1164,7 @@ export class DiscordVoiceSession {
     if (guildId === undefined || channelId === undefined) return;
     const { turn, text } = item;
     this.lastTranscriptUserId = turn.userId;
-    this.pushTranscriptLine(turn.userId, text);
+    this.pushTranscriptLine(turn, text);
     this.hearIfOpen(turn.userId, text);
     const decision = this.floor.observeTranscript({ speakerId: turn.userId, text, atMs: this.clock() });
     void this.emitSafely({
@@ -1127,16 +1180,30 @@ export class DiscordVoiceSession {
     this.applyFloorDecision(decision, turn, guildId, channelId);
   }
 
-  private pushTranscriptLine(speakerId: string, text: string): void {
-    const labeled = this.labeledSpeech(speakerId, text);
+  private pushTranscriptLine(turn: PendingTranscriptTurn, text: string): void {
+    const guildId = this.guildId;
+    const channelId = this.channelId;
+    if (guildId === undefined || channelId === undefined) return;
+    const labeled = this.labeledSpeech(turn.userId, text);
     const line = JSON.stringify(labeled);
+    const transcript: DiscordVoiceTranscript = {
+      // Wall clock, not `this.clock()` — that seam is monotonic milliseconds
+      // for durations, and reading it as an epoch stamped every transcript
+      // line somewhere in 1970, which broke the join to receipts by time.
+      occurredAt: new Date().toISOString(),
+      guildId,
+      channelId,
+      ...(this.stayId === undefined ? {} : { stayId: this.stayId }),
+      deliveryId: turn.deliveryId,
+      ...labeled,
+    };
     // Ring and possessor hear the same JSONL. A Discord nickname is untrusted
     // the same way transcript text is — interpolating it would let a nick
     // impersonate another speaker.
     this.transcriptRing.push(Buffer.from(line, "utf8"));
     for (const listener of this.transcriptListeners) {
       try {
-        listener(line);
+        listener(line, transcript);
       } catch {
         // A possessor that throws on hearing must not break the room.
       }
@@ -1382,7 +1449,23 @@ export class DiscordVoiceSession {
         onClose: (reason) => {
           this.handleConversationClose(reason, generation, guildId, channelId);
         },
-        onError: () => undefined,
+        onError: (message) => {
+          // The mouth failing is the only voice failure the room feels and
+          // no trail recorded. An utterance that dies in synthesis plays no
+          // audio, so it leaves no `response` receipt — and swallowing the
+          // error here left no `failed` one either, which made a mute
+          // Clankie indistinguishable from a quiet one for as long as the
+          // mouth stayed broken. Boundary messages are already sanitized
+          // one-liners; the code keeps them machine-readable.
+          if (generation !== this.sessionGeneration) return;
+          void this.emitSafely({
+            type: "failed",
+            guildId,
+            channelId,
+            stage: "speech_synthesis",
+            code: sanitizeFailureCode(message, "voice_speech_synthesis_failed"),
+          });
+        },
       });
     } catch {
       await this.emitSafely({
@@ -2039,7 +2122,14 @@ export class DiscordVoiceSession {
         deliveryId: settled.deliveryId,
         ...(settled.speakerId === undefined ? {} : { userId: settled.speakerId }),
         phase: meta === undefined || meta.status === "completed" ? "completed" : "failed",
-        outcome: (meta?.audioBytes ?? 0) > 0 ? "audio" : settled.toolCalled === true ? "tool" : "silent",
+        // Whether he spoke, not whether the realtime model was the one who
+        // spoke. Under external TTS the model answers in text and every
+        // audible byte arrives from the TTS engine, so `meta.audioBytes` is
+        // always 0 there and reading it reported every narration as silent.
+        // `firstAudioAtMs` is set by the audio deltas that actually play, in
+        // both modalities — the same signal the cleanup below already trusts.
+        outcome:
+          settled.firstAudioAtMs !== undefined ? "audio" : settled.toolCalled === true ? "tool" : "silent",
         ...(meta?.responseId === undefined ? {} : { responseId: meta.responseId }),
         ...(meta?.audioBytes === undefined ? {} : { audioBytes: meta.audioBytes }),
         ...(meta?.textCharacters === undefined ? {} : { textCharacters: meta.textCharacters }),
@@ -2526,12 +2616,12 @@ function parseAskClankieRequest(argumentsJson: string): string | undefined {
 }
 
 /** Evidence codes are machine tokens; a captain code is normalized, never trusted. */
-function sanitizeFailureCode(code: string): string {
+function sanitizeFailureCode(code: string, fallback = "voice_captain_turn_failed"): string {
   const normalized = code
     .toLowerCase()
     .replaceAll(/[^a-z0-9_]/gu, "_")
     .slice(0, 64);
-  return normalized.length === 0 ? "voice_captain_turn_failed" : normalized;
+  return normalized.length === 0 ? fallback : normalized;
 }
 
 async function waitForDave(connection: VoiceConnection, timeoutMs: number): Promise<number> {

@@ -62,6 +62,12 @@ reasoning effort projects separately. xAI streaming STT has no model selector,
 while OpenAI keeps its configurable transcription model. Secrets entered in
 `/voice` go directly to the credential broker and never enter this schema.
 
+`discord.voiceTranscriptLoggingEnabled` is the explicit development switch for
+exact consented Discord voice text. It is off by default and projects to
+`DISCORD_VOICE_TRANSCRIPT_LOGGING_ENABLED`; the private transcript file stays
+separate from content-free receipts. Configure it in `/discord` beside the
+voice consent policy.
+
 `mcp.servers` is the owner's MCP servers ([ADR 0109](../../docs/adr/0109-mcp-is-how-he-reaches-a-service.md)).
 Connectors Clankie ships knowing about — Linear — need no entry; connecting the
 credential is enough. Each entry names a `credential` by **broker provider id**,

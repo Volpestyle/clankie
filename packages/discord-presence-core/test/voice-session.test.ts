@@ -354,7 +354,12 @@ async function flush(rounds = 4): Promise<void> {
   }
 }
 
-function stereoPcm(bytes: number, fill = 1): Buffer {
+/** Byte fill whose s16le samples land at conversational speech level (0x1010 = 4_112). */
+const SPEECH_FILL = 0x10;
+/** Byte fill whose s16le samples land at room-tone level (0x0101 = 257). */
+const ROOM_TONE_FILL = 0x01;
+
+function stereoPcm(bytes: number, fill: number = SPEECH_FILL): Buffer {
   return Buffer.alloc(bytes, fill);
 }
 
@@ -1074,6 +1079,24 @@ describe("unprompted turns", () => {
     expect(at(harness.conversation().textItems, -1)).toBe(ENGAGED_OFFER_TURN_ITEM);
   });
 
+  it("counts a response that played as audio even when the realtime model sent none", async () => {
+    const harness = await offeredHarness();
+    const conversation = harness.conversation();
+    conversation.input.onAudioDelta(pcmDelta(480), "item_1");
+    await flush();
+    // The external-TTS shape: the realtime model answers in text and the
+    // audible bytes come from the TTS engine, so the response meta reports
+    // none. He still spoke, and the receipt has to say so.
+    conversation.input.onResponseDone({
+      responseId: "resp_tts",
+      status: "completed",
+      audioBytes: 0,
+      textCharacters: 96,
+    });
+    await flush();
+    expect(at(harness.ofType("model_response"), -1)).toMatchObject({ phase: "completed", outcome: "audio" });
+  });
+
   it("an empty response is him passing: suppressed, still dormant, session parked on the hold", async () => {
     const harness = await offeredHarness();
     harness.conversation().input.onResponseDone({
@@ -1462,6 +1485,19 @@ describe("ability path", () => {
     expect(at(conversation.functionResults, 0).output).toContain("not playing");
   });
 
+  it("receipts a mouth failure, so a Clankie who cannot be heard is not read as a quiet one", async () => {
+    const harness = await engagedHarness();
+    const conversation = harness.conversation();
+    // An utterance that dies in synthesis plays no audio, so it leaves no
+    // `response` receipt. Without this one there is no trail at all.
+    conversation.input.onError("ElevenLabs context id is already open");
+    await flush();
+    expect(at(harness.ofType("failed"), 0)).toMatchObject({
+      stage: "speech_synthesis",
+      code: "elevenlabs_context_id_is_already_open",
+    });
+  });
+
   it("rejects malformed ask_clankie arguments without hanging", async () => {
     const harness = await engagedHarness();
     const conversation = harness.conversation();
@@ -1667,6 +1703,32 @@ describe("barge-in", () => {
     expect(conversation.responseCreates).toBe(2);
   });
 
+  // Regression: an open mic streams room tone continuously, and counting bytes
+  // alone truncated him mid-sentence on audio that transcribed to nothing.
+  it("room tone from the floor holder never truncates, however long it runs", async () => {
+    const { harness, conversation } = await playingHarness();
+    harness.clock.now = 5_400;
+    const capture = harness.startCapture(ALICE);
+    capture.stream.write(stereoPcm(BARGE_IN_SOURCE_BYTES * 8, ROOM_TONE_FILL));
+    await flush();
+    expect(conversation.truncations).toHaveLength(0);
+    expect(harness.ofType("interrupted")).toHaveLength(0);
+    expect(harness.player().state.status).toBe("playing");
+  });
+
+  it("speech that follows room tone from the floor holder still truncates", async () => {
+    const { harness, conversation } = await playingHarness();
+    harness.clock.now = 5_400;
+    const capture = harness.startCapture(ALICE);
+    capture.stream.write(stereoPcm(BARGE_IN_SOURCE_BYTES, ROOM_TONE_FILL));
+    await flush();
+    expect(conversation.truncations).toHaveLength(0);
+    capture.stream.write(stereoPcm(BARGE_IN_SOURCE_BYTES));
+    await flush();
+    expect(conversation.truncations).toEqual([{ itemId: "item_play", audioEndMs: 400 }]);
+    expect(harness.player().state.status).toBe("idle");
+  });
+
   // Required mission evidence: crosstalk between other people lets him finish.
   it("crosstalk from a non-holder that does not address him never truncates", async () => {
     const { harness, conversation } = await playingHarness();
@@ -1848,6 +1910,15 @@ describe("possessor narration and hearing (ADR 0064)", () => {
     await harness.session.narrate("left the lab");
     await flush();
     expect(harness.conversation().responseCreates).toBe(1);
+    // The server runs one response at a time, so the later reports here are
+    // measuring the interval rather than that first response still being open.
+    harness.conversation().input.onResponseDone({
+      responseId: "resp_narration",
+      status: "completed",
+      audioBytes: 0,
+      textCharacters: 0,
+    });
+    await flush();
 
     harness.clock.now += 1_000;
     await harness.session.narrate("took one step north");
@@ -1870,10 +1941,22 @@ describe("possessor narration and hearing (ADR 0064)", () => {
     const harness = await joinedHarness({ floorOverrides: { volition: { maxPerHour: 0 } } });
     await harness.consent(ALICE);
     const heard: string[] = [];
-    const unsubscribe = harness.session.subscribeTranscript((line) => heard.push(line));
+    const transcripts: unknown[] = [];
+    const unsubscribe = harness.session.subscribeTranscript((line, transcript) => {
+      heard.push(line);
+      transcripts.push(transcript);
+    });
 
     await harness.say(ALICE, "go left instead");
     expect(heard).toEqual([JSON.stringify({ speakerId: ALICE, text: "go left instead" })]);
+    expect(transcripts).toEqual([
+      expect.objectContaining({
+        guildId: GUILD,
+        channelId: CHANNEL,
+        speakerId: ALICE,
+        text: "go left instead",
+      }),
+    ]);
 
     unsubscribe();
     await harness.say(ALICE, "no seriously go left");
@@ -1925,6 +2008,24 @@ describe("possessor narration bursts (ADR 0064)", () => {
     expect(suppressed).toHaveLength(2);
     expect(suppressed.every((event) => event.reason === "rate_limited")).toBe(true);
     expect(new Set(suppressed.map((event) => event.deliveryId)).size).toBe(2);
+  });
+
+  it("holds a report while a room response is still in flight", async () => {
+    // The room turn's response is asked for but not yet audible, so neither
+    // the playback check nor the narration rate limit sees it. Asking anyway
+    // earns "conversation already has active response" and the report is lost
+    // with nothing in the trail to say why.
+    const harness = await engagedHarness({ narrationMinIntervalMs: 0 });
+    const conversation = harness.conversation();
+    const before = conversation.responseCreates;
+
+    await harness.session.narrate("walked into the lab", { deliveryId: "play-turn-1" });
+    await flush();
+
+    expect(conversation.responseCreates).toBe(before);
+    expect(harness.ofType("possessor_narration_suppressed")).toMatchObject([
+      { deliveryId: "play-turn-1", reason: "responding" },
+    ]);
   });
 });
 

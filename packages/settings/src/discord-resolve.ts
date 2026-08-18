@@ -83,6 +83,7 @@ export function resolveDiscordSettings(
   takeString("voiceChannelId", "DISCORD_VOICE_CHANNEL_ID");
   takeString("voiceJoinPolicy", "DISCORD_VOICE_JOIN_POLICY");
   takeString("voiceConsentPolicy", "DISCORD_VOICE_CONSENT_POLICY");
+  takeBoolean("voiceTranscriptLoggingEnabled", "DISCORD_VOICE_TRANSCRIPT_LOGGING_ENABLED");
   takeBoolean("possessorVoiceEnabled", "CLANKIE_POSSESSOR_VOICE_ENABLED");
 
   const activeBody = env.DISCORD_ACTIVE_BODY?.trim();
@@ -181,6 +182,9 @@ export function discordSettingsToEnvironment(settings: DiscordSettings): Record<
   put("DISCORD_VOICE_CHANNEL_ID", settings.voiceChannelId);
   put("DISCORD_VOICE_JOIN_POLICY", settings.voiceJoinPolicy);
   put("DISCORD_VOICE_CONSENT_POLICY", settings.voiceConsentPolicy);
+  if (settings.voiceTranscriptLoggingEnabled) {
+    env["DISCORD_VOICE_TRANSCRIPT_LOGGING_ENABLED"] = "true";
+  }
   if (settings.possessorVoiceEnabled) env["CLANKIE_POSSESSOR_VOICE_ENABLED"] = "true";
 
   env["DISCORD_ACTIVE_BODY"] = settings.activeBody;

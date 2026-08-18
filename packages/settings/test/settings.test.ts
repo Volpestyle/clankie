@@ -257,6 +257,22 @@ describe("voice settings resolution", () => {
     expect(voiceSettingsToEnvironment(settings)).toEqual({});
   });
 
+  it("keeps full Discord voice transcripts opt-in and environment-overridable", () => {
+    const defaults = DiscordSettingsSchema.parse({});
+    expect(defaults.voiceTranscriptLoggingEnabled).toBe(false);
+    expect(discordSettingsToEnvironment(defaults)).not.toHaveProperty(
+      "DISCORD_VOICE_TRANSCRIPT_LOGGING_ENABLED",
+    );
+
+    const enabled = DiscordSettingsSchema.parse({ voiceTranscriptLoggingEnabled: true });
+    expect(discordSettingsToEnvironment(enabled)["DISCORD_VOICE_TRANSCRIPT_LOGGING_ENABLED"]).toBe("true");
+    const overridden = resolveDiscordSettings(enabled, {
+      DISCORD_VOICE_TRANSCRIPT_LOGGING_ENABLED: "false",
+    } as NodeJS.ProcessEnv);
+    expect(overridden.settings.voiceTranscriptLoggingEnabled).toBe(false);
+    expect(overridden.overriddenByEnvironment).toContain("DISCORD_VOICE_TRANSCRIPT_LOGGING_ENABLED");
+  });
+
   it("requires an ElevenLabs voice id before the provider can be elevenlabs", () => {
     expect(() => VoiceSettingsSchema.parse({ ttsProvider: "elevenlabs" })).toThrow(/elevenLabsVoiceId/);
     expect(() => VoiceSettingsSchema.parse({ elevenLabsVoiceId: "not a safe id!" })).toThrow();

@@ -283,6 +283,7 @@ function describeSettings(settings: DiscordSettings): string[] {
         ? "anyone in his active voice channel (one-time owner switch)"
         : "only people who opt in each call"
     }`,
+    `  full transcript log: ${settings.voiceTranscriptLoggingEnabled ? "enabled" : "disabled"}`,
     "",
     show("activity application id (gba)", settings.activityApplicationIdGba),
   ];
@@ -701,6 +702,28 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
   const consentPolicyChoice = consentPolicy?.[0];
   if (consentPolicyChoice === undefined) return;
 
+  const transcriptLogging = await flow.readSelect({
+    kind: "single",
+    message: "Keep full voice transcripts for development?",
+    options: [
+      {
+        value: "false",
+        label: "Disabled",
+        hint: "default",
+        description: "Keep only content-free voice receipts.",
+      },
+      {
+        value: "true",
+        label: "Enabled",
+        hint: "private local JSONL",
+        description: "Retain exact consented speech with speaker attribution for debugging.",
+      },
+    ],
+    required: true,
+  });
+  const transcriptLoggingChoice = transcriptLogging?.[0];
+  if (transcriptLoggingChoice === undefined) return;
+
   const guildIds = resolveGuildList(guilds, current.voiceGuildIds, current.guildId);
   const channelIds = resolveIdList(channels, current.voiceChannelIds);
   if (enabledChoice === "true") {
@@ -715,6 +738,7 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
     voiceEnabled: enabledChoice === "true",
     voiceJoinPolicy: joinPolicyChoice as DiscordSettings["voiceJoinPolicy"],
     voiceConsentPolicy: consentPolicyChoice as DiscordSettings["voiceConsentPolicy"],
+    voiceTranscriptLoggingEnabled: transcriptLoggingChoice === "true",
     ...(channels.trim()
       ? { voiceChannelIds: splitList(channels), voiceChannelId: splitList(channels)[0] }
       : {}),
@@ -728,7 +752,10 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
         : "") +
       (consentPolicyChoice === "presence"
         ? " Anyone in his active voice channel can talk; opt-out still binds for that call."
-        : " Each person still opts in per call."),
+        : " Each person still opts in per call.") +
+      (transcriptLoggingChoice === "true"
+        ? " Full consented transcripts will be retained in the private development log."
+        : " Full transcript logging is off."),
     "success",
   );
 }

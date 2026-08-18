@@ -50,12 +50,17 @@ describe("persona instructions", () => {
     expect(operator).toMatch(/not like a status report/u);
   });
 
-  it("demonstrates the casual register without naming a room he might not be in", () => {
-    // The example used to be "Yeah, I was just in the voice channel". Asked
-    // whether he was talking in Discord, he answered "I'm in Discord voice
-    // right now" — his presence card said Discord text and he had not been in
-    // a voice channel all day. A presence-shaped example is a presence answer
-    // waiting to be copied, so the style demo must name no surface at all.
+  it("describes each register instead of quoting a line he could say", () => {
+    // A style example is a sentence in his voice, and a sentence in his voice
+    // gets said. The casual example was "Yeah, I was just in the voice channel"
+    // and he answered a Discord question with "I'm in Discord voice right now"
+    // while his presence card said text. Naming no room only moved the problem,
+    // so no register quotes speech at all — the owner's notes are the one place
+    // a quote belongs, and those are authored, not demonstrated.
+    for (const register of ["social", "operator", "gameplay"] as const) {
+      const rendered = personaInstructions(persona({ characterNotes: "" }), register);
+      expect(rendered).not.toMatch(/"[^"]{8,}"/u);
+    }
     const operator = personaInstructions(persona(), "operator");
     expect(operator).not.toMatch(/voice channel/iu);
     expect(operator).not.toMatch(/discord/iu);

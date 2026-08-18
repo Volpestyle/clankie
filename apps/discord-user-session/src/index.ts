@@ -7,6 +7,7 @@ import {
 } from "@clankie/credential-broker";
 import {
   createAdvertisedDiscordPresencePort,
+  discordVoiceTranscriptLogPath,
   createVoiceBriefingProvider,
   createVoiceLookAtScreenProvider,
   createVoiceRealtimePorts,
@@ -15,6 +16,7 @@ import {
   DiscordTextIngress,
   DiscordVoiceIngress,
   DiscordVoiceSession,
+  DiscordVoiceTranscriptStore,
   parseDiscordDmPolicy,
   parseDiscordIdSet,
   parseVoiceRealtimeEnv,
@@ -95,6 +97,7 @@ const credentialStore = createDefaultCredentialStore();
 const apiUrl = process.env.CLANKIE_API_URL ?? "http://127.0.0.1:4310";
 const characterId = process.env.CLANKIE_CHARACTER_ID ?? "clankie";
 const voiceEnabled = process.env.DISCORD_USER_SESSION_VOICE_ENABLED === "true";
+const voiceTranscriptLoggingEnabled = process.env.DISCORD_VOICE_TRANSCRIPT_LOGGING_ENABLED === "true";
 const ownerUserId = process.env.DISCORD_OWNER_USER_ID?.trim();
 if (voiceEnabled && (process.env.OPENAI_API_KEY || process.env.XAI_API_KEY)) {
   throw new Error("Voice provider API keys must come from the credential broker, not the environment.");
@@ -293,6 +296,18 @@ const voiceSession =
         presenceSessionId: () => presenceSession.record.sessionId,
         emit: recordVoiceEvidence,
       });
+const voiceTranscriptStore = voiceTranscriptLoggingEnabled ? new DiscordVoiceTranscriptStore() : undefined;
+if (voiceSession !== undefined && voiceTranscriptStore !== undefined) {
+  voiceSession.subscribeTranscript((_line, transcript) => {
+    void voiceTranscriptStore.append("user_session", transcript).catch((error: unknown) => {
+      console.error(
+        { deliveryId: transcript.deliveryId, error: error instanceof Error ? error.message : String(error) },
+        "Discord user-session voice transcript append failed",
+      );
+    });
+  });
+  console.info({ path: discordVoiceTranscriptLogPath() }, "Full Discord voice transcript logging enabled");
+}
 
 const voiceIdleAutoLeave =
   voiceSession === undefined || voiceConfig === undefined
@@ -451,6 +466,7 @@ async function executeCaptainVoicePresence(
       action: "joined",
       channelId: target.channelId,
       actorCanBeHeard: voiceSession.canHear(target.actorId),
+      transcriptLoggingEnabled: voiceTranscriptLoggingEnabled,
     };
   }
   try {
@@ -466,6 +482,7 @@ async function executeCaptainVoicePresence(
     action: "joined",
     channelId: target.channelId,
     actorCanBeHeard: voiceSession.canHear(target.actorId),
+    transcriptLoggingEnabled: voiceTranscriptLoggingEnabled,
   };
 }
 

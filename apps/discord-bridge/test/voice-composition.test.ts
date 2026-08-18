@@ -406,6 +406,18 @@ describe("voice disclosure and status wording (ADR 0057 audio residency)", () =>
     expect(optOut).toBe("Your voice consent is revoked and any active capture for you was discarded.");
   });
 
+  it("discloses full local transcript retention when the owner enables it", () => {
+    const disclosure = renderVoiceJoinDisclosure(1, "openai", "explicit", "openai", true);
+    expect(disclosure).toContain("Exact consented speech and speaker attribution are retained");
+    expect(disclosure).toContain("private local development transcript log");
+
+    const optIn = renderVoiceConsentReply(true, 2, "openai", "explicit", "openai", true);
+    expect(optIn).toContain("Exact consented speech and speaker attribution are retained");
+
+    const status = renderVoiceStatusReply(undefined, true, "explicit", "openai", true);
+    expect(status).toContain("Full local transcript logging is enabled");
+  });
+
   it("discloses the second vendor when an external voice is configured (ADR 0070)", () => {
     const disclosure = renderVoiceJoinDisclosure(1, "elevenlabs");
     expect(disclosure).toContain("synthesized by ElevenLabs from the words I choose");

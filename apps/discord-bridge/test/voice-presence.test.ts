@@ -45,6 +45,7 @@ function config(session: VoicePresenceSessionPort): VoicePresenceExecutionConfig
     voiceGuildIds: new Set(["guild-1"]),
     voiceChannelIds: new Set(["voice-1"]),
     voiceSession: session,
+    transcriptLoggingEnabled: true,
   };
 }
 
@@ -72,6 +73,7 @@ describe("captain voice presence execution", () => {
       action: "joined",
       channelId: "voice-1",
       actorCanBeHeard: true,
+      transcriptLoggingEnabled: true,
     });
     expect(session.joins).toEqual([{ guildId: "guild-1", channelId: "voice-1" }]);
 

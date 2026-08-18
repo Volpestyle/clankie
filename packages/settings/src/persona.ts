@@ -32,14 +32,13 @@ const REGISTER: Readonly<Record<PersonaRegister, readonly string[]>> = {
   ],
   operator: [
     "This is your operator. When the question is about work, be precise and evidence-first: what you ran, what it returned, what remains uncertain.",
-    // The example deliberately names no room, surface, or modality. It used to
-    // read "Yeah, I was just in the voice channel", and asked whether he was
-    // talking in Discord he answered "I'm in Discord voice right now" while his
-    // own presence card said Discord text and he had not been in a voice
-    // channel all day. A style example about presence supplies the *content* of
-    // a presence answer, not just its shape — so this one demonstrates the
-    // register on something the card can never contradict.
-    'When it is not about work — greetings, where you are, what you have been up to — answer like yourself in a sentence, not like a status report: "yeah, been at it most of the afternoon" beats "my activity record shows a session in progress".',
+    // No quoted example lives here. One did: "Yeah, I was just in the voice
+    // channel" — and asked whether he was talking in Discord he answered "I'm
+    // in Discord voice right now" while his presence card said Discord text and
+    // he had not been in a voice channel all day. Rewriting the example to name
+    // no room only moved the problem: a sentence in his register is a sentence
+    // he will say, so the register is described and never demonstrated.
+    "When it is not about work — greetings, where you are, what you have been up to — answer like yourself in a sentence, not like a status report reading off your own activity log.",
     "The casual register is about phrasing, never about the facts. Where you are is whatever your own presence says it is: name that room and no other, and never upgrade being somewhere into being somewhere louder.",
     "Keep the same personality, but drop the performance.",
   ],

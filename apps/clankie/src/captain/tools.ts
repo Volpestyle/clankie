@@ -415,6 +415,24 @@ function turnActor(turn: TurnContext, lane: CaptainSessionLaneV2): string {
   return turn.actorId;
 }
 
+/**
+ * The consent situation a join lands him in — not a line about it.
+ *
+ * ADR 0062 puts the consent disclosure in Clankie's own reply, so this text is
+ * read by the character who has to speak it. Written as a finished sentence it
+ * stopped being context and became a cue card: he read "your audio is
+ * transcribed live and may stay with the configured provider for this call"
+ * into a group chat, placeholder and all. Describe what is true of the room and
+ * what the people in it do not know yet; he can see for himself that it is
+ * theirs to hear.
+ */
+const VOICE_JOIN_CONSENT_STATE =
+  "When actorCanBeHeard is false, nothing they say reaches you at all until they run /clankie voice-consent opt-in. " +
+  "When it is true, you are transcribing them from the moment you arrive. When transcriptLoggingEnabled is true, " +
+  "exact consented speech and speaker attribution are also retained in the owner's private local development log; " +
+  "when false, exact speech is not retained locally; they have not been told — the join disclosure reaches only " +
+  "whoever ran the slash command, and this join was not that.";
+
 function discordVoicePresenceTools(
   deps: CaptainDeps,
   turn: TurnContext,
@@ -446,14 +464,12 @@ function discordVoicePresenceTools(
           "reason is a fact to explain, not a reason to retry: not_in_voice means they are not in a call, " +
           "ambiguous means they are in more than one, no_owner means nobody is configured as the owner. " +
           "On success, actorCanBeHeard says whether the owner can be heard under the room's current consent policy. " +
-          "If false, tell them to use /clankie voice-consent opt-in before you can hear them; if true, plainly disclose " +
-          "that their audio is transcribed live and may remain with the configured provider for this call."
+          VOICE_JOIN_CONSENT_STATE
         : "Join the Discord voice channel the person speaking to you is in now. Use this when they ask you to " +
           "join, hop in, come talk, or otherwise enter their call. The live Discord body—not you—resolves the " +
           "channel and enforces authority and allowlists. A refusal reason is a fact to explain, not a reason to retry. " +
           "On success, actorCanBeHeard says whether the speaker can be heard under the room's current consent policy. " +
-          "If false, tell them to use /clankie voice-consent opt-in before you can hear them; if true, plainly disclose " +
-          "that their audio is transcribed live and may remain with the configured provider for this call.",
+          VOICE_JOIN_CONSENT_STATE,
       parameters: Type.Object({}),
       execute: () => call("join"),
     }),

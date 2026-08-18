@@ -79,7 +79,9 @@ Seeding is therefore unbounded and responding is rate-limited
 did — the alternative is narrating a past he never saw — but he speaks about it
 at the pace of a person watching a game, not a process emitting events. A
 drop is receipt-visible as `possessor_narration_suppressed` with reason
-`playing` or `rate_limited`. Asked play mints one `speechDeliveryId` on the
+`playing`, `rate_limited`, or `responding` — the last covering a response
+already asked for but not yet audible, which the realtime session would
+reject as a second active response. Asked play mints one `speechDeliveryId` on the
 journal turn and carries it across the seam so the submission, the spoken
 response, and the drop share a join key. The receipts stay content-free.
 

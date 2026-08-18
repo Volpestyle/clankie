@@ -26,6 +26,7 @@ export interface VoicePresenceExecutionConfig {
   readonly voiceGuildIds: ReadonlySet<string>;
   readonly voiceChannelIds: ReadonlySet<string>;
   readonly voiceSession: VoicePresenceSessionPort | undefined;
+  readonly transcriptLoggingEnabled: boolean;
 }
 
 export interface VoicePresenceExecutionInput {
@@ -74,12 +75,22 @@ export async function executeVoicePresenceIntent(
     return { action: "join_refused", reason: "other_guild" };
   }
   if (active.active && active.channelId === channelId) {
-    return { action: "joined", channelId, actorCanBeHeard: session.canHear(input.principal.userId) };
+    return {
+      action: "joined",
+      channelId,
+      actorCanBeHeard: session.canHear(input.principal.userId),
+      transcriptLoggingEnabled: config.transcriptLoggingEnabled,
+    };
   }
   try {
     await session.join({ guildId: input.guildId, channelId, adapterCreator: input.adapterCreator });
   } catch {
     return { action: "join_refused", reason: "failed" };
   }
-  return { action: "joined", channelId, actorCanBeHeard: session.canHear(input.principal.userId) };
+  return {
+    action: "joined",
+    channelId,
+    actorCanBeHeard: session.canHear(input.principal.userId),
+    transcriptLoggingEnabled: config.transcriptLoggingEnabled,
+  };
 }

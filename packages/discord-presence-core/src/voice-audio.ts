@@ -105,6 +105,28 @@ function writeStereoFrame(output: Buffer, frame: number, sample: number): void {
   output.writeInt16LE(sample, offset + PCM_SAMPLE_BYTES);
 }
 
+/**
+ * Root-mean-square amplitude of s16le PCM, in raw sample units (full scale
+ * 32_768). Channel layout does not matter — every sample weighs the same — so
+ * this reads interleaved capture audio as-is, without a downmix.
+ *
+ * This is the only thing that separates a room from a sentence. Duration
+ * cannot: an open mic streams fans, keystrokes, and breath continuously, and
+ * all of it clears any duration bar.
+ */
+export function pcmRms(input: Uint8Array): number {
+  // A view, not a copy: this runs on every decoded capture chunk.
+  const source = Buffer.from(input.buffer, input.byteOffset, input.byteLength);
+  const samples = Math.floor(source.byteLength / PCM_SAMPLE_BYTES);
+  if (samples === 0) return 0;
+  let sum = 0;
+  for (let index = 0; index < samples; index += 1) {
+    const sample = source.readInt16LE(index * PCM_SAMPLE_BYTES);
+    sum += sample * sample;
+  }
+  return Math.sqrt(sum / samples);
+}
+
 export function pcmDurationMs(pcm: Uint8Array, sampleRate: number, channels: number): number {
   if (!Number.isFinite(sampleRate) || sampleRate <= 0 || !Number.isFinite(channels) || channels <= 0) {
     throw new Error("Voice PCM format is invalid");

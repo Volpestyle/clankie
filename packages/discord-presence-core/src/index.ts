@@ -68,6 +68,7 @@ export {
   type DiscordVoiceRealtimePorts,
   type DiscordVoiceSessionOptions,
   type DiscordVoiceSessionStatus,
+  type DiscordVoiceTranscript,
   type JoinDiscordVoiceInput,
   type VoiceRoomOccupant,
   type VoiceConversationOpenInput,
@@ -191,6 +192,7 @@ export {
   encodeMonoPcmWav,
   openAiPcmToDiscordPcm,
   pcmDurationMs,
+  pcmRms,
   SPEECH_SAMPLE_RATE,
 } from "./voice-audio.ts";
 export {
@@ -200,6 +202,12 @@ export {
   type DiscordBridgeReceipt,
   type DiscordBridgeReceiptStoreOptions,
 } from "./receipt-store.ts";
+export {
+  discordVoiceTranscriptLogPath,
+  DiscordVoiceTranscriptLogEntrySchema,
+  DiscordVoiceTranscriptStore,
+  type DiscordVoiceTranscriptLogEntry,
+} from "./transcript-store.ts";
 export { encodeReactionEmoji } from "./discord-rest.ts";
 export {
   DEFAULT_VOICE_IDLE_LEAVE_MS,

@@ -9,6 +9,9 @@ and [ADR 0074](0074-the-room-hears-one-voice.md) makes the realtime room session
 the sole author of outbound room speech.
 [ADR 0119](0119-the-room-is-heard-the-floor-is-who-he-answers.md) splits hearing
 from answering in a group room.
+[ADR 0121](0121-development-voice-transcripts-are-explicit.md) separately
+allows an owner-enabled private development transcript while keeping the
+receipt stream content-free.
 
 ## Context
 
@@ -70,6 +73,13 @@ chatter. The repository therefore owns the floor machine:
 
 Barge-in is deliberate: the floor holder speaking over Clankie or addressing
 him again truncates playback; unrelated crosstalk does not.
+
+"Speaking over" is measured, not assumed. An open mic streams room tone
+continuously, so a capture only counts toward barge-in once it carries 350 ms of
+audio above a speech-level RMS floor (`BARGE_IN_SPEECH_RMS` in
+`voice-session.ts`). Duration alone cut him off mid-sentence on fans and
+keystrokes whose transcripts came back empty. The floor is a calibration knob:
+mics and noise suppression move both the room tone and the speech level.
 
 ### Evidence retained from implementation
 

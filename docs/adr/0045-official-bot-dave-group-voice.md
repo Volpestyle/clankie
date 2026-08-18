@@ -58,7 +58,10 @@ under ADR 0100, but it is not executed for official-bot voice.
   buffers are memory-only and zeroed after use. The join disclosure names the
   configured provider and its data handling
   ([ADR 0057](0057-realtime-voice-with-captain-handoff.md)). Voice receipts
-  reject transcript, response, prompt, audio, and PCM fields.
+  reject transcript, response, prompt, audio, and PCM fields. The separate,
+  owner-enabled private development transcript in
+  [ADR 0121](0121-development-voice-transcripts-are-explicit.md) may retain
+  exact consented text; raw audio remains memory-only.
 - Spoken input remains ambient authority and cannot approve privileged work.
   Approval-shaped results become a generic authenticated-surface handoff.
 
@@ -70,7 +73,8 @@ touches the world goes through its single `ask_clankie` tool to the continuing
 ([ADR 0057](0057-realtime-voice-with-captain-handoff.md)). The Clankie service,
 not the bridge request, resolves approved person-memory facts for consented
 guild/user identities and supplies the bounded briefing projection. Voice can
-use approved memory but cannot commit memory or persist a raw transcript.
+use approved memory but cannot commit memory. Exact final speech is persisted
+only when the owner enables ADR 0121's separate development transcript log.
 
 Concurrent speakers retain separate Opus subscriptions and separate
 transcription sessions, then converge as gateway-attributed text in one shared

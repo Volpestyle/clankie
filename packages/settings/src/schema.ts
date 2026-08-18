@@ -66,6 +66,12 @@ export const DiscordSettingsSchema = z
      */
     voiceConsentPolicy: z.enum(["explicit", "presence"]).default("explicit"),
     /**
+     * Retain exact consented speech for local development diagnostics. The
+     * transcript file is private, separate from the content-free receipt log,
+     * and disabled until the owner deliberately enables it.
+     */
+    voiceTranscriptLoggingEnabled: z.boolean().default(false),
+    /**
      * The possessor voice seam (ADR 0064, ADR 0067): whether a process driving
      * his body — asked play, an MCP possessor — may speak and hear through his
      * live voice session. Deny-by-default like every authority binding, and
