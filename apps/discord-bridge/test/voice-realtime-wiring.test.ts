@@ -430,7 +430,7 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
     expect(mouth.url).toContain("model_id=eleven_flash_v2_5");
     expect(mouth.url).toContain("output_format=pcm_24000");
 
-    // Model text streams into one TTS context per item, then flushes on done.
+    // Model text streams into one TTS context per item, then flushes and closes on done.
     engaged.serverEvent({
       type: "response.output_text.delta",
       response_id: "resp_1",
@@ -443,7 +443,8 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
     expect(mouth.frames()).toEqual([
       { text: " ", context_id: "item_say" },
       { text: "Right here.", context_id: "item_say" },
-      { text: " ", context_id: "item_say", flush: true },
+      { context_id: "item_say", flush: true },
+      { context_id: "item_say", close_context: true },
     ]);
 
     // Synthesized PCM plays back through the unchanged path, and the receipt

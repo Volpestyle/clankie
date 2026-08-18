@@ -48,8 +48,14 @@ class FakeTtsPort implements ExternalVoiceTtsPort {
   public isOpen = true;
   public readonly frames: { kind: string; contextId?: string; text?: string }[] = [];
   public closed = false;
+  /** Fails one openContext without the socket dying — the state-poisoning shape. */
+  public failNextOpenContext = false;
 
   public openContext(contextId: string): void {
+    if (this.failNextOpenContext) {
+      this.failNextOpenContext = false;
+      throw new Error("ElevenLabs context id is already open");
+    }
     this.frames.push({ kind: "open", contextId });
   }
 
@@ -269,6 +275,30 @@ describe("external voice conversation", () => {
     expect(events.done).toEqual([doneMeta("resp_1")]);
   });
 
+  it("abandons the wedged context, so a drain timeout costs one utterance and not the call", async () => {
+    const { realtimeHandlers, timers, ttsPorts, events } = await openHarness();
+    const first = ttsPorts[0];
+    if (first === undefined) throw new Error("no mouth");
+    realtimeHandlers.onTextDelta("Hello there.", "item_a");
+    await settle();
+    realtimeHandlers.onResponseDone(doneMeta("resp_1"));
+    timers.fire();
+    await settle();
+
+    // Left live, the timed-out item kept its ElevenLabs context slot and
+    // pinned the mouth in place: four of these and every later utterance hit
+    // the open-context limit while the model went on writing replies.
+    expect(first.closed).toBe(true);
+    realtimeHandlers.onTextDelta("Second answer.", "item_b");
+    await settle();
+    expect(ttsPorts).toHaveLength(2);
+    expect(ttsPorts[1]?.frames).toEqual([
+      { kind: "open", contextId: "item_b" },
+      { kind: "append", contextId: "item_b", text: "Second answer." },
+    ]);
+    expect(events.errors).toEqual(["External voice synthesis did not drain in time"]);
+  });
+
   it("turns barge-in into context close, a marker item, and dropped late output", async () => {
     const { port, realtimeHandlers, ttsHandlers, ttsPorts, realtime, events } = await openHarness();
     // A complete phrase, so it reaches the mouth and the late-delta assertion
@@ -332,6 +362,33 @@ describe("external voice conversation", () => {
     // The failed open dropped the utterance, so its done event is forwarded
     // immediately instead of waiting out the drain timer.
     expect(events.done).toEqual([doneMeta("resp_1")]);
+  });
+
+  it("does not reuse a mouth that just failed a step, so one bad frame is not a mute call", async () => {
+    const { realtimeHandlers, ttsPorts, events } = await openHarness();
+    // The session still reports itself open, so nothing else would reopen it:
+    // before this, every later utterance reused it and he stayed silent for
+    // the rest of the call while the model kept writing replies.
+    const first = ttsPorts[0];
+    if (first === undefined) throw new Error("no mouth");
+    first.failNextOpenContext = true;
+
+    realtimeHandlers.onTextDelta("First answer.", "item_a");
+    await settle();
+    expect(events.errors).toEqual(["ElevenLabs context id is already open"]);
+    // The dropped utterance settles rather than waiting out the drain timer.
+    realtimeHandlers.onResponseDone(doneMeta("resp_1"));
+    await settle();
+    expect(events.done).toEqual([doneMeta("resp_1")]);
+
+    realtimeHandlers.onTextDelta("Second answer.", "item_b");
+    await settle();
+    expect(ttsPorts).toHaveLength(2);
+    expect(first.closed).toBe(true);
+    expect(ttsPorts[1]?.frames).toEqual([
+      { kind: "open", contextId: "item_b" },
+      { kind: "append", contextId: "item_b", text: "Second answer." },
+    ]);
   });
 
   it("delegates the realtime-only surface and closes both sessions", async () => {

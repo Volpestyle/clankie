@@ -185,21 +185,24 @@ describe("elevenlabs tts session", () => {
     }).toThrow("already open");
   });
 
-  it("streams text verbatim, flushes, and closes contexts", async () => {
+  it("streams text verbatim and closes a flushed context while its final audio drains", async () => {
     const { session, socket } = await openSession();
     session.openContext("ctx-1");
     session.appendText("ctx-1", "Sure — give ");
     session.appendText("ctx-1", "me a second.");
     session.appendText("ctx-1", "");
     session.flush("ctx-1");
-    session.closeContext("ctx-1");
     expect(frames(socket).slice(1)).toEqual([
       { text: "Sure — give ", context_id: "ctx-1" },
       { text: "me a second.", context_id: "ctx-1" },
-      { text: " ", context_id: "ctx-1", flush: true },
+      { context_id: "ctx-1", flush: true },
       { context_id: "ctx-1", close_context: true },
     ]);
 
+    // Normal close still accepts server audio until the final frame arrives.
+    const pcm = Buffer.from([1, 0, 2, 0]);
+    socket.emit({ audio: pcm.toString("base64"), contextId: "ctx-1" });
+    socket.emit({ isFinal: true, contextId: "ctx-1" });
     expect(() => {
       session.appendText("ctx-1", "late words");
     }).toThrow("not open");
@@ -232,7 +235,8 @@ describe("elevenlabs tts session", () => {
     expect(audio[0]?.contextId).toBe("ctx-1");
     expect(audio[0]?.pcm.equals(pcm)).toBe(true);
 
-    socket.emit({ isFinal: true, contextId: "ctx-1" });
+    // Multi-context final frames use the API's snake_case wire fields.
+    socket.emit({ is_final: true, context_id: "ctx-1" });
     expect(done).toEqual(["ctx-1"]);
 
     // Barge-in shape: audio arriving after closeContext is late server

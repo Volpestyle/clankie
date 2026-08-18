@@ -39,7 +39,10 @@ session lifetime, sanitized errors, sample alignment, and PCM zeroing.
   did not hear the remainder.
 - **The mouth can fail independently.** A failed TTS session settles the current
   utterance and reopens lazily for the next one; opening a conversation proves
-  both sides can start.
+  both sides can start. Any failed synthesis step discards the mouth, not just a
+  dropped socket — a session that reports itself open after failing a frame
+  would otherwise be reused by every later utterance, and the failure would last
+  the whole call instead of one turn.
 
 Room audio never reaches the TTS provider. Only words Clankie chooses to say do,
 and join/consent disclosures name that residency when configured.
@@ -52,8 +55,10 @@ timbre. That is a character choice, not a code default.
 The low-latency provider mode disabled server-side buffering, which made it
 incorrect to forward raw token deltas as independent utterances. The adapter
 therefore emits complete sentence/clause units, caps unpunctuated runs, and
-flushes the tail at response end. First-audio receipts keep measuring the whole
-decision-to-audible path, including the TTS hop.
+flushes the tail at response end. Normal completion flushes and closes the TTS
+context, then keeps accepting its audio until the provider's final frame;
+closing without that drain is reserved for interruption. First-audio receipts
+keep measuring the whole decision-to-audible path, including the TTS hop.
 
 ## Alternatives considered
 
@@ -73,6 +78,10 @@ decision-to-audible path, including the TTS hop.
 - Barge-in stops synthesis as well as playback, avoiding late paid output nobody
   hears.
 - A second provider credential and session lifecycle exist only when selected.
-- TTS failure settles a turn rather than wedging the room floor.
+- TTS failure settles a turn rather than wedging the room floor, and is
+  receipted under the `speech_synthesis` stage. An utterance that dies in
+  synthesis plays no audio and so leaves no response receipt; without a failure
+  receipt a Clankie who cannot be heard reads exactly like a Clankie with
+  nothing to say.
 - Current providers, settings, credentials, readiness, and diagnostics belong in
   the [Discord bridge operating guide](../../apps/discord-bridge/README.md).

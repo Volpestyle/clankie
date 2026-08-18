@@ -21,7 +21,8 @@ is append-only JSONL or plain files now), never write to it.
 | Play sessions (GBA)                      | `~/.local/state/clankie/gba-play/*.jsonl`                                                            | V1/V2 header / per-turn. V2 binds semantic decision, immediate pre-action, result, post-action, and progress evidence / optional summary.                                                                                                                                                                     |
 | Who held the GBA body                    | `~/.local/state/clankie/gba-body/possession-events.jsonl` (beside `body.lock`)                       | Lease transitions: acquired, released, expired, stolen, refused.                                                                                                                                                                                                                                              |
 | Discord semantic actions                 | `~/.local/state/clankie/discord-live-receipts.jsonl` (override: `DISCORD_BRIDGE_RECEIPT_PATH`)       | What the bridge actually did — content-free receipts, never message bodies.                                                                                                                                                                                                                                   |
-| Service stdout + lifecycle               | `~/.local/state/clankie/<id>.log`, `<id>-service.json`                                               | Service ids: `clankie`, `discord-bridge`, `activity`, `tunnel`.                                                                                                                                                                                                                                               |
+| Opt-in development voice transcript      | `~/.local/state/clankie/discord-voice-transcripts.jsonl`                                             | Exists only when `discord.voiceTranscriptLoggingEnabled` is on. Exact consented final speech with body, guild/channel, stay/delivery ids, speaker id/display name, and timestamp. Mode 0600; receipts remain content-free.                                                                                    |
+| Service stdout + lifecycle               | `~/.local/state/clankie/<id>.log`, `<id>-service.json`                                               | Service ids: `clankie`, `discord-bridge`, `discord-user-session`, `activity`, `tunnel`.                                                                                                                                                                                                                       |
 | Live status                              | `clankie status` / `/trace` in the face                                                              | `/trace` lists rooms and tails their bounded `heard`/`said` lane logs through the service.                                                                                                                                                                                                                    |
 | What's on the TUI screen right now       | `herdr pane read <pane> --source recent`                                                             | Viewport only — see caveat below.                                                                                                                                                                                                                                                                             |
 
@@ -56,36 +57,70 @@ is append-only JSONL or plain files now), never write to it.
 - **`absorbed` is not `declined`.** A message folded into a live run reports
   `absorbed` (ADR 0118): he answered, the answer just rode the delivery that
   owned the run. Only `declined` means he read it and chose silence.
+- **A restart does not clear Discord conversation context.** The next ingress
+  prompt can feed Clankie his own earlier replies from channel history, so a
+  removed tool cue may still be copied after the new process starts. When exact
+  wording survives a restart, inspect the turn's initial user message for that
+  wording before concluding the running code is stale.
 - **Realtime voice tool calls are receipts only.** `discord.voice.realtime_tool`
   names the tool (`ask_clankie`, `look_at_screen`, `music_*`) and its phase,
   never its arguments or result — the content fence applies. To see arguments,
   follow `ask_clankie` into the captain: the durable channel tree under
   `~/.clankie/captain/voice/`, or `turns/` when that handoff was privileged.
-- **Voice does not leave a room transcript.** `get_self_state.voiceHistory` is
+- **Voice leaves a room transcript only when the owner enables the development
+  toggle.** `get_self_state.voiceHistory` is
   closed stays only (join/leave), and it is empty while he is still in the
   channel. `get_self_state.recentVoiceSpeech` is the content-free projection:
   spoken vs suppressed, trigger, latency, tokens, stay id. `observe_room` on
   `discord_voice` is only captain `ask_clankie` handoffs (`heard`/`said` in
   `~/.clankie/captain/lanes/discord_voice~…jsonl` and the matching
   `~/.clankie/captain/voice/<sessionKey>/` tree) — not the Discord conversation.
-  Ambient speech is content-free by design. The same `deliveryId` joins the
+  Receipts stay content-free. With `discord.voiceTranscriptLoggingEnabled` off,
+  exact ambient speech remains memory-only; with it on, read
+  `~/.local/state/clankie/discord-voice-transcripts.jsonl`. The same `deliveryId` joins the
   utterance, transcription outcome, floor decision, realtime response, and
   tool call/result; music continues under `callId` through queue, `yt-dlp`,
   FFmpeg, first-audio, and player checkpoints. These receipts contain ids,
   counts, phases, timings, and exit codes — never the transcript, search query,
   URL, model text, or PCM. Join a play turn to audio with `speechDeliveryId` on
   the GBA journal line and the same `deliveryId` on the submission / response /
-  suppressed receipts. Human words and fast-path model text live only in the
-  bridge's in-memory window and the live OpenAI call. A journal
+  suppressed receipts. Human words persist only in the opt-in transcript log;
+  otherwise they live in the bridge's in-memory window and live provider call.
+  Fast-path model text and exact audible wording are not added to that log. A journal
   `speechDeliveryId` is only a join key: only a matching response, suppression,
-  or refusal receipt proves the outcome. V2 `narrationEvent` is the bounded game
+  refusal, or settled `model_response` receipt proves the outcome. Absence of
+  `discord.voice.response` does not mean the narration was lost — that receipt
+  is emitted only when audio actually played, so a response that settled
+  without speaking leaves `model_response` `phase: "completed"` and nothing
+  else. V2 `narrationEvent` is the bounded game
   event offered to the room, not generated voice wording; exact audible wording
   remains unknown by policy.
+- **Words with no audio is the mute-mouth signature.** A `model_response`
+  `phase: "completed"` carrying `textCharacters > 0` whose `deliveryId` never
+  reaches a `discord.voice.response` is a reply the room never heard: he wrote
+  it, synthesis dropped it. `discord.voice.failed` with stage
+  `speech_synthesis` names the throw. Join by `deliveryId`, never by adjacency
+  — an `ask_clankie` round trip spends **one** `deliveryId` on two responses
+  (the "let me check" and the answer), so a naive join credits the answer with
+  the filler's audio and hides exactly the turn worth looking at.
+- **Voice readiness does not prove an external mouth.**
+  `pnpm discord:voice-readiness` checks the selected TTS credential but
+  deliberately skips paid ElevenLabs synthesis; its engaged probe settles on
+  model text. A `READY` report can therefore coexist with a broken ElevenLabs
+  context lifecycle. Probe the TTS boundary directly when receipts show the
+  mute-mouth signature.
 - **A missing play summary is not automatically an incomplete mystery.** Join
   the journal header `runId` to `embodiment.session.stopped` or
   `embodiment.session.failed` in `~/.clankie/events.jsonl`. A matching terminal
   event accounts for the run with its real outcome (including `lease_lapsed`)
   but never becomes a synthetic summary.
+- **`world_unreachable` is usually a missing process, not a crash.** The hosted
+  world is a separate `pokeagents` server reached over a unix socket, so a
+  refusal milliseconds after `embodiment.session.claimed` means nothing was
+  listening. Check `ps aux | grep pokeagents` and compare its start time
+  (`ps -p <pid> -o lstart=`) against the refusal — a join that lands before the
+  server is up refuses, and the retry seconds later succeeds. `refused` is not
+  `failed`: he never started, so there is no journal and nothing crashed.
 
 ## Queries that answered real questions
 
@@ -130,6 +165,12 @@ Did he speak this stay, and are play reports dropped:
 
 ```bash
 jq -c 'select(.type == "discord.voice.response" or .type == "discord.voice.possessor_narration_suppressed" or .type == "discord.voice.left") | {type, at: .occurredAt, stayId: .data.stayId, deliveryId: .data.deliveryId, trigger: .data.trigger, reason: .data.reason, spoken: .data.spokenCount, suppressed: .data.narrationSuppressed, tokens: {in: .data.inputTokens, out: .data.outputTokens}}' ~/.local/state/clankie/discord-live-receipts.jsonl | tail -n 40
+```
+
+What exact consented speech did Discord transcribe in development:
+
+```bash
+tail -n 40 ~/.local/state/clankie/discord-voice-transcripts.jsonl | jq -c '{at: .occurredAt, body, guildId, channelId, stayId, deliveryId, speakerId, displayName, text}'
 ```
 
 Where did one voice/music turn stop:

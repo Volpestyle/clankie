@@ -131,6 +131,8 @@ export class ElevenLabsTtsSession {
   private readonly onErrorCallback: ((message: string) => void) | undefined;
   private readonly voiceSettings: ElevenLabsVoiceSettings | undefined;
   private readonly contextAudioBytes = new Map<string, number>();
+  /** Contexts closed normally but still draining their final server audio. */
+  private readonly closingContexts = new Set<string>();
   /**
    * Base64 chunk boundaries do not respect s16le sample alignment, and the
    * playback resampler throws on partial samples. A trailing odd byte is held
@@ -210,11 +212,13 @@ export class ElevenLabsTtsSession {
     this.sendFrame({ text, context_id: id });
   }
 
-  /** The response's text is complete; synthesize whatever the chunk scheduler is still holding. */
+  /** Flushes buffered text and closes the context so ElevenLabs emits its final frame. */
   public flush(contextId: string): void {
     this.assertOpen();
     const id = this.requireOpenContext(contextId);
-    this.sendFrame({ text: " ", context_id: id, flush: true });
+    this.sendFrame({ context_id: id, flush: true });
+    this.closingContexts.add(id);
+    this.sendFrame({ context_id: id, close_context: true });
   }
 
   /**
@@ -223,10 +227,12 @@ export class ElevenLabsTtsSession {
    */
   public closeContext(contextId: string): void {
     this.assertOpen();
-    const id = this.requireOpenContext(contextId);
+    const id = boundedContextId(contextId);
+    if (!this.contextAudioBytes.has(id)) throw new Error("ElevenLabs context is not open");
+    const alreadyClosing = this.closingContexts.delete(id);
     this.contextAudioBytes.delete(id);
     this.contextCarry.delete(id);
-    this.sendFrame({ context_id: id, close_context: true });
+    if (!alreadyClosing) this.sendFrame({ context_id: id, close_context: true });
   }
 
   public close(): void {
@@ -256,13 +262,14 @@ export class ElevenLabsTtsSession {
       this.onErrorCallback?.(describeServerError(event));
       return;
     }
-    const contextId = asString(event.contextId);
+    const contextId = asString(event.contextId) ?? asString(event.context_id);
     if (contextId === undefined) return;
-    if (event.isFinal === true) {
+    if (event.isFinal === true || event.is_final === true) {
       // A dangling carry byte at the end of a context is a truncated final
       // sample nothing can play; it is dropped, not surfaced.
       this.contextCarry.delete(contextId);
       this.contextAudioBytes.delete(contextId);
+      this.closingContexts.delete(contextId);
       this.onContextDoneCallback?.(contextId);
       return;
     }
@@ -319,7 +326,7 @@ export class ElevenLabsTtsSession {
 
   private requireOpenContext(contextId: string): string {
     const id = boundedContextId(contextId);
-    if (!this.contextAudioBytes.has(id)) {
+    if (!this.contextAudioBytes.has(id) || this.closingContexts.has(id)) {
       throw new Error("ElevenLabs context is not open");
     }
     return id;
@@ -330,6 +337,7 @@ export class ElevenLabsTtsSession {
     this.closed = true;
     this.timers.clearTimeout(this.lifetimeHandle);
     this.contextAudioBytes.clear();
+    this.closingContexts.clear();
     this.contextCarry.clear();
     try {
       this.socket.close();

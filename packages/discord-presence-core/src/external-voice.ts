@@ -199,11 +199,7 @@ class ExternalVoiceConversation implements VoiceConversationPort {
    */
   public truncate(itemId: string, audioEndMs: number): void {
     const realtime = this.requireRealtime();
-    if (this.liveItemIds.has(itemId)) {
-      this.queue(() => {
-        if (this.tts?.isOpen === true) this.tts.closeContext(itemId);
-      });
-    }
+    this.closeItemContext(itemId);
     this.dropItem(itemId);
     realtime.createTextItem(
       `(You were interrupted about ${String(Math.max(0, Math.round(audioEndMs)))}ms into your reply; ` +
@@ -264,7 +260,14 @@ class ExternalVoiceConversation implements VoiceConversationPort {
     this.lastTextItemId = "";
     const handle = this.timers.setTimeout(() => {
       this.input.onError("External voice synthesis did not drain in time");
-      this.releaseHeldDone(itemId);
+      // A context that missed the drain window is abandoned, not merely
+      // un-held. Left open it keeps its ElevenLabs context slot forever, and
+      // the still-live item pins `discardMouth` shut — so the next utterances
+      // hit the open-context limit and the room stops hearing him for the
+      // rest of the call while the model keeps writing replies.
+      this.closeItemContext(itemId);
+      this.dropItem(itemId);
+      this.discardMouth();
     }, this.drainTimeoutMs);
     this.heldDone.set(itemId, { meta, handle });
     this.drainPendingText(itemId);
@@ -306,6 +309,18 @@ class ExternalVoiceConversation implements VoiceConversationPort {
     };
   }
 
+  /**
+   * Stops server-side generation for an utterance the room will not hear.
+   * Paid synthesis of abandoned speech is waste; an unclosed context is worse,
+   * because the open-context budget is what the next utterance needs.
+   */
+  private closeItemContext(itemId: string): void {
+    if (!this.liveItemIds.has(itemId)) return;
+    this.queue(() => {
+      if (this.tts?.isOpen === true) this.tts.closeContext(itemId);
+    });
+  }
+
   /** The item's speech is over — by barge-in, mouth loss, or step failure. */
   private dropItem(itemId: string): void {
     this.liveItemIds.delete(itemId);
@@ -326,6 +341,7 @@ class ExternalVoiceConversation implements VoiceConversationPort {
         await step();
       } catch (error) {
         this.dropItem(itemId);
+        this.discardMouth();
         throw error;
       }
     });
@@ -337,6 +353,29 @@ class ExternalVoiceConversation implements VoiceConversationPort {
     this.heldDone.delete(itemId);
     this.timers.clearTimeout(held.handle);
     this.input.onResponseDone(held.meta);
+  }
+
+  /**
+   * A mouth that just failed a step is not trusted for the next utterance.
+   * Without this, one failed open or one rejected frame left `this.tts`
+   * in place and every later utterance reused it, so a single bad step could
+   * mute him for the rest of the call — the model kept writing replies and
+   * the room kept hearing nothing. Dropping it here costs one reconnect and
+   * makes the failure last exactly one utterance.
+   *
+   * Only when nothing else is speaking: closing the session would kill an
+   * utterance already in flight on it, and a sibling item's speech is not
+   * this one's to end.
+   */
+  private discardMouth(): void {
+    if (this.liveItemIds.size > 0) return;
+    const tts = this.tts;
+    this.tts = undefined;
+    try {
+      tts?.close();
+    } catch {
+      // Already unusable; the next utterance opens a fresh one either way.
+    }
   }
 
   private async ensureTts(): Promise<void> {
