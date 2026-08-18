@@ -56,7 +56,8 @@ The official bot launches the supported watch-me-play Activity with
 `/clankie watch` or the captain's `discord_watch_start` tool. The Activity viewer
 holds no Discord token, emulator core, input channel, or machine authority. It
 renders the latest producer frame and overlay, plays live cartridge sound after
-the viewer presses **Enable sound**, and shows a present-tense work state so a
+the viewer presses **Enable sound** at whatever level the volume slider is set
+to, and shows a present-tense work state so a
 still-visible prior thought never makes a live model decision look stuck.
 
 The local process has two listeners:

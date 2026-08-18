@@ -87,11 +87,25 @@
         color: var(--muted);
         font-size: 12px;
       }
-      #sound-toggle {
+      #sound-controls {
         position: absolute;
         right: 14px;
         bottom: 14px;
         z-index: 2;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      #volume {
+        width: 90px;
+        accent-color: var(--live);
+        cursor: pointer;
+      }
+      #volume:focus-visible {
+        outline: 3px solid var(--accent);
+        outline-offset: 3px;
+      }
+      #sound-toggle {
         padding: 8px 10px;
         border: 1px solid var(--text);
         border-radius: 3px;
@@ -334,7 +348,10 @@
           <strong id="empty-title">Waiting for Clankie</strong>
           <span id="empty-copy">Gameplay appears here when a session starts.</span>
         </div>
-        <button id="sound-toggle" type="button" aria-pressed="false">Enable sound</button>
+        <div id="sound-controls">
+          <input id="volume" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume" />
+          <button id="sound-toggle" type="button" aria-pressed="false">Enable sound</button>
+        </div>
       </section>
       <section id="lower-third" aria-label="What Clankie is thinking">
         <div id="objective-block">
@@ -376,6 +393,7 @@
       const intent = document.getElementById("intent");
       const effect = document.getElementById("effect");
       const soundToggle = document.getElementById("sound-toggle");
+      const volume = document.getElementById("volume");
       const workStatus = document.getElementById("work-status");
       const workLabel = document.getElementById("work-label");
       context.imageSmoothingEnabled = false;
@@ -385,7 +403,7 @@
       let lastAudioSequence = -1;
       let sessionEnded = false;
       let hasWorkStatus = false;
-      const audio = { context: null, enabled: false, nextAt: 0, sources: new Set() };
+      const audio = { context: null, gain: null, enabled: false, nextAt: 0, sources: new Set() };
 
       /**
        * Frame accounting, because a dropped frame is otherwise invisible here.
@@ -463,7 +481,7 @@
         const startsAt = Math.max(audio.nextAt, now + 0.06);
         const source = audio.context.createBufferSource();
         source.buffer = buffer;
-        source.connect(audio.context.destination);
+        source.connect(audio.gain);
         source.addEventListener("ended", () => audio.sources.delete(source));
         audio.sources.add(source);
         source.start(startsAt);
@@ -478,12 +496,21 @@
           soundToggle.setAttribute("aria-pressed", "false");
           return;
         }
-        audio.context ||= new AudioContext();
+        if (!audio.context) {
+          audio.context = new AudioContext();
+          audio.gain = audio.context.createGain();
+          audio.gain.gain.value = Number(volume.value);
+          audio.gain.connect(audio.context.destination);
+        }
         await audio.context.resume();
         audio.enabled = true;
         stopAudio();
         soundToggle.textContent = lastAudioSequence >= 0 ? "Sound on" : "Sound ready";
         soundToggle.setAttribute("aria-pressed", "true");
+      });
+
+      volume.addEventListener("input", () => {
+        if (audio.gain) audio.gain.gain.value = Number(volume.value);
       });
 
       /** What the status line says while frames are arriving. */
