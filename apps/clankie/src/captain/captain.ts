@@ -55,6 +55,18 @@ const TOOL_DETAIL_TRUNCATED = "\n… truncated";
 /** Whole-turn backstop; tools own their tighter deadlines and typing has its own cosmetic clock. */
 export const DISCORD_TEXT_TURN_HARD_TIMEOUT_MS = 10 * 60_000;
 
+/**
+ * An empty memory still says so. A missing card reads as "you have no memory",
+ * and nothing else in the prompt would ever prompt the first write — so the
+ * store's existence is on every turn and the floor retires itself once he
+ * writes one. A recall *failure* stays silent: a broken store degrades the
+ * prompt, it does not lie about what he remembers.
+ */
+const EMPTY_EPISODE_CARD = [
+  "## What you remember doing recently",
+  "Nothing yet — you have not written an episode. `remember_episode` is how one gets here.",
+].join("\n");
+
 /** Refresh bounded episodic recall as trusted context for every Pi run. */
 export function captainMemoryExtension(memory: CaptainDeps["memory"], lane: CaptainSessionLaneV2) {
   return {
@@ -62,8 +74,10 @@ export function captainMemoryExtension(memory: CaptainDeps["memory"], lane: Capt
     hidden: true,
     factory(pi) {
       pi.on("before_agent_start", async (event) => {
-        const card = await memory.recallEpisodeCard(lane).catch(() => "");
-        return card.length === 0 ? undefined : { systemPrompt: `${event.systemPrompt}\n\n${card}` };
+        const card = await memory.recallEpisodeCard(lane).catch(() => undefined);
+        if (card === undefined) return undefined;
+        const rendered = card.length === 0 ? EMPTY_EPISODE_CARD : card;
+        return { systemPrompt: `${event.systemPrompt}\n\n${rendered}` };
       });
     },
   } satisfies InlineExtension;

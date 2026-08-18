@@ -21,6 +21,11 @@ An episode is his own short note about something that happened in a room:
 "facts, not transcripts." He writes them himself with the `remember_episode`
 tool; nothing else authors one. A summary is capped at 512 characters.
 
+Whether a turn is worth a line is his call, and the identity prompt's
+`# Remembering` section is where he learns to make it
+([`captain/instructions.md`](../apps/clankie/src/captain/instructions.md)) — a
+tool nobody tells him he owns is a tool he never reaches for.
+
 Episodes are one global ring of 128 across every lane, sharded on disk by the
 lane that produced them:
 
@@ -44,6 +49,14 @@ call a tool to remember; the card is simply there. It is labelled as ambient
 context rather than instruction or established fact, because his own past notes
 are still model output. Recall failure is swallowed — a broken memory store
 degrades the prompt, it does not fail the turn.
+
+An empty ring still renders a card, saying so and naming the tool. A missing
+card reads as having no memory at all, and nothing else in the prompt would
+prompt the first write; the floor line retires itself once one episode exists.
+A recall _failure_ stays silent instead — a broken store must not claim he
+remembers nothing. The floor lives in the extension, not the store, so the
+voice briefing keeps omitting an empty section rather than handing the realtime
+speech model a tool it does not have.
 
 **Visibility is decided at write time.** An episode written on the operator lane
 defaults to `operator_private`; every other lane defaults to `shareable`. He can

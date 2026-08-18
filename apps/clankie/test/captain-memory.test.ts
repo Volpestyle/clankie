@@ -39,6 +39,19 @@ describe("captain memory", () => {
     await expect(unavailable({ systemPrompt: "base" })).resolves.toBeUndefined();
   });
 
+  it("says the memory is empty rather than leaving it out of the prompt", async () => {
+    const handler = await beforeAgentStartHandler(
+      captainMemoryExtension(
+        { appendEpisode: () => Promise.resolve(), recallEpisodeCard: () => Promise.resolve("") },
+        "discord_presence",
+      ),
+    );
+
+    const result = (await handler({ systemPrompt: "base" })) as { systemPrompt: string };
+    expect(result.systemPrompt).toContain("What you remember doing recently");
+    expect(result.systemPrompt).toContain("remember_episode");
+  });
+
   it("stamps remember_episode with the host room instead of model input", async () => {
     const writes: Parameters<CaptainDeps["memory"]["appendEpisode"]>[0][] = [];
     const deps = {
