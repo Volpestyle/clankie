@@ -5,10 +5,10 @@ import { describe, expect, it } from "vitest";
 const repoRoot = resolve(import.meta.dirname, "../../..");
 const productRoots = ["apps", "integrations", "packages"] as const;
 /**
- * `world-protocol` is the one package that crosses from the world's repo, as a
- * pinned git dependency carrying the client transport on its `/ipc` subpath —
- * PokeAgent MMO ADR 0008. Clankie is a player in that world, not its owner
- * (ADR 0001), so the contract is allowed and the client and host are not.
+ * `world-protocol` is the version-pinned client package that crosses from the
+ * world's repo and carries the transport on its `/ipc` subpath. Clankie is a
+ * player in that world, not its owner, so the contract and transport-free
+ * cartridge knowledge are allowed and the host is not.
  */
 const allowedDependencies = new Set([
   "@pokeagent-mmo/firered",
@@ -47,13 +47,17 @@ function packageName(specifier: string): string {
   return specifier.split("/").slice(0, 2).join("/");
 }
 
+function isPokeAgentPackage(specifier: string): boolean {
+  return specifier.startsWith("@pokeagent-mmo/") || specifier.startsWith("@pokeagents/");
+}
+
 function importedSpecifiers(source: string): readonly string[] {
   return [...source.matchAll(/(?:from\s+|import\s*(?:\(\s*)?|require\(\s*)["']([^"']+)["']/gu)].map(
     (match) => match[1]!,
   );
 }
 
-describe("PokeAgent MMO is an external MCP world", () => {
+describe("PokeAgent MMO stays behind its published player boundary", () => {
   it("depends only on the packaged MCP server or transport-free FireRed knowledge", () => {
     const violations: string[] = [];
     for (const packageRoot of workspacePackages()) {
@@ -66,7 +70,7 @@ describe("PokeAgent MMO is an external MCP world", () => {
         ...manifest.peerDependencies,
       };
       for (const dependency of Object.keys(dependencies)) {
-        if (dependency.startsWith("@pokeagent-mmo/") && !allowedDependencies.has(dependency)) {
+        if (isPokeAgentPackage(dependency) && !allowedDependencies.has(dependency)) {
           violations.push(`${manifest.name} depends on ${dependency}`);
         }
       }
@@ -80,7 +84,7 @@ describe("PokeAgent MMO is an external MCP world", () => {
       for (const file of sourceFiles(packageRoot)) {
         const source = readFileSync(file, "utf8");
         for (const specifier of importedSpecifiers(source)) {
-          if (specifier.startsWith("@pokeagent-mmo/") && !allowedSourceImports.has(packageName(specifier))) {
+          if (isPokeAgentPackage(specifier) && !allowedSourceImports.has(packageName(specifier))) {
             violations.push(`${relative(repoRoot, file)} imports ${specifier}`);
           }
         }

@@ -238,6 +238,10 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   "that connect to neighbouring maps. walk_to aimed at a listed exit asks the",
   "body to take it; trust the resulting map and effect rather than assuming a",
   "transition from the target coordinate alone.",
+  "Each listed exit says whether walkTo is supported. Unsupported exits remain",
+  "visible because they still exist, but the body cannot safely activate them",
+  "with walk_to. That is capability information, not a suggested alternative;",
+  "the objective and next action remain yours.",
   "A refused walk tells you why — off the map, a wall, or unreachable — and",
   "names the nearest tile you can actually reach. If your notes already mark a",
   "tile or NPC as story-locked, do not walk_to it again.",
@@ -439,6 +443,16 @@ export function renderView(view: FreePlayView): string {
   if (view.refusedHere.length > 0) {
     // What he already learned the hard way from this exact tile.
     lines.push("", `Already blocked from this tile: ${view.refusedHere.join(", ")}.`);
+  }
+  if (view.knownHardFailures.length > 0) {
+    lines.push("", "Known non-retryable results in this exact capability state:");
+    for (const failure of view.knownHardFailures) {
+      lines.push(`  ${describeAction(failure.action)} → ${failure.effect} [${failure.errorCode}]`);
+    }
+    lines.push(
+      "This is memory of what happened, not a replacement action. Repeating one remains your choice, " +
+        "but the body will return the same refusal without dispatch until its capability evidence changes.",
+    );
   }
   if (view.stalledForTurns !== null) {
     // A fact, not a nudge: what to do about standing still is his call.

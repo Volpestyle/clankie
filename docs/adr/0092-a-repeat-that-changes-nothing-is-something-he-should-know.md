@@ -1,6 +1,7 @@
 # ADR 0092: A repeat that changes nothing is something he should know
 
-Status: accepted (2026-08-15). Extends
+Status: accepted (2026-08-15), amended 2026-08-18 for explicit stable
+capability failures. Extends
 [ADR 0072](0072-the-harness-tells-him-the-truth.md) (the harness reports what
 it knows, in the line he reads) inside the agency bounds
 [ADR 0049](0049-free-play-agency-and-non-deterministic-evidence.md) set.
@@ -46,12 +47,19 @@ rejection's line is its effect (ADR 0072). Turns that never reached an action
 rather than resetting it, because a transient failure inside a wedge is not
 evidence the wedge broke.
 
-It is a fact, not an intervention. No forced action, no interrupt, no cap: a
-script that needs more time and a wedge look identical from here, and telling
-them apart is the player's read (ADR 0049). This is the deliberate departure
-from the prior art it is cribbed from — opencode's doom-loop detector raises
-a permission prompt on three byte-identical tool calls, which works because a
-human is sitting there. Nobody is sitting in a playthrough.
+The repeat signal is a fact, not an intervention. No forced action or substitute
+route follows from a repeated dynamic result: a script that needs more time and
+a wedge look identical from here, and telling them apart is the player's read
+(ADR 0049).
+
+An explicitly stable, nonretryable capability refusal is different evidence.
+The body has already answered whether dispatch can do anything. The loop keeps a
+bounded ledger keyed by body generation, adapter version, action, and the exact
+capability evidence that produced the refusal. It presents that memory on every
+later decision even after recent history rolls off. If Clankie chooses the exact
+action again under the same evidence, the body returns the remembered refusal
+without dispatching input. It journals his choice and never chooses, suggests,
+or executes an alternative. A changed body or capability invalidates the key.
 
 The longest such run in a session lands in the result, the journal summary,
 and the finished-playthrough log line as `longestUnchangedRun`, so "is he
@@ -63,11 +71,8 @@ notice by reading the whole journal. It is named apart from the benchmark's
 
 - Every wedge state is visible to him and to us, including the ones with
   no position: battles, menus, naming screens, script holds.
-- Whether the signal changes his behavior is measurable — compare
-  `longestUnchangedRun` across sessions the way the volition suppression count
-  measures whether the speak gate binds. If long runs persist after he is
-  told, the next step is a decision about escalation (a forced re-plan, a
-  bounded intervention), and that is James's call to make on evidence rather
-  than a mechanism to add on speculation.
+- Dynamic repetition remains measurable through `longestUnchangedRun`. Stable
+  capability failures consume at most one world dispatch per unchanged evidence
+  key, without turning the harness into a planner.
 - Three is a judgement about noise, not a proof. It is one constant with its
   reasoning written down, tunable if measured play says otherwise.

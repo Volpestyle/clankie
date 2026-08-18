@@ -382,6 +382,8 @@ export const GbaEmulatorObservationSchema = z.discriminatedUnion("kind", [
                     x: z.number().int().nonnegative().max(65_535),
                     y: z.number().int().nonnegative().max(65_535),
                     destination: z.string().min(1).max(128),
+                    /** Absent on journal evidence written before world protocol v3. */
+                    walkTo: z.enum(["supported", "unsupported"]).optional(),
                   })
                   .strict(),
               )

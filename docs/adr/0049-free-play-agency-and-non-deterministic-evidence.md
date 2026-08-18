@@ -37,8 +37,11 @@ coordinates, HP, PP, and legal moves. Neither substitutes for the other.
 
 Action results distinguish accepted input from visible effect: moved, turned,
 blocked, map changed, dialog/menu changed, framebuffer-only change, or no visible
-change. Refusal memory records what he tried, never a suggested route. Bounded
-button bursts reduce model calls without widening input or frame budgets.
+change. Refusal memory records what he tried, never a suggested route. An exact
+stable capability refusal may be returned from memory without dispatch while
+the body's capability evidence is unchanged; the chosen action is still
+journaled and is never replaced. Bounded button bursts reduce model calls
+without widening input or frame budgets.
 
 The loop keeps a bounded self-authored scratchpad, a standing objective, and a
 one-turn intent. Failure is a turn outcome (`rejected_by_adapter`,

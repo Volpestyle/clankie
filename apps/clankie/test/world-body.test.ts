@@ -200,8 +200,15 @@ describe("hosted world body", () => {
               ],
             },
           });
-          const ran = actRan(current);
-          return { ...ran, outcome: { ...ran.outcome, inputsSpent: 3 } };
+          return actRan(current, {
+            kind: "select_menu_entry",
+            menuId: "intro-rival-name-menu",
+            entryId: "gary",
+            label: "Gary",
+            confirmed: true,
+            presses: 3,
+            endedBecause: "selected",
+          });
         }
         case "play.frame":
           return frame({ frame: current.frame, data: "gary-confirmation" });
@@ -233,6 +240,161 @@ describe("hosted world body", () => {
         endedBecause: "selected",
       },
     });
+    await result.body.close();
+  });
+
+  it("does not invent a successful menu selection when a ran result omits detail", async () => {
+    const current = observation({
+      frame: 30,
+      mode: "menu",
+      menu: { menuId: "test-menu", cursor: 0, entries: [{ id: "one", label: "One" }] },
+    });
+    const world = await fakeWorld((request) => {
+      switch (request.operation) {
+        case "world.join":
+          return joinResult();
+        case "play.observe":
+          return current;
+        case "play.act":
+          return actRan(current);
+        case "play.frame":
+          return frame({ frame: current.frame, data: "menu-still-open" });
+        case "world.leave":
+          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
+        default:
+          throw new Error(`unexpected operation ${request.operation}`);
+      }
+    });
+    const result = await joinWorld({
+      environmentId: "pokemon-firered",
+      env: await provisionedEnv(world.stateDir),
+    });
+    if (result.outcome !== "joined") throw new Error("expected world join");
+
+    const action = await result.body.io.act({ kind: "select_menu_entry", entryId: "one" });
+    if (action.status !== "completed") throw new Error("expected completed action");
+    expect(action.outcome).not.toHaveProperty("confirmed");
+    expect(action.outcome).not.toHaveProperty("endedBecause");
+    await result.body.close();
+  });
+
+  it("returns a stable unsupported-exit refusal without redispatch until capability changes", async () => {
+    let current = observation({
+      frame: 10,
+      exits: [
+        {
+          at: { mapId: "pallet-town/players-house-1f", x: 12, y: 15 },
+          to: "pallet-town",
+          walkTo: "unsupported",
+        },
+      ],
+    });
+    const world = await fakeWorld((request) => {
+      switch (request.operation) {
+        case "world.join":
+          return joinResult();
+        case "play.observe":
+          return current;
+        case "play.act": {
+          const action = (request.input as { action: { kind: string } }).action;
+          if (action.kind === "walk_to" && current.minimap?.exits[0]?.walkTo === "unsupported") {
+            return actRejected(
+              {
+                reason: "walk_exit_unsupported",
+                at: { mapId: "pallet-town/players-house-1f", x: 12, y: 15 },
+                to: "pallet-town",
+              },
+              current.frame,
+            );
+          }
+          current = observation({
+            frame: current.frame + 10,
+            exits: [
+              {
+                at: { mapId: "pallet-town/players-house-1f", x: 12, y: 15 },
+                to: "pallet-town",
+                walkTo: "supported",
+              },
+            ],
+          });
+          return actRan(current);
+        }
+        case "play.frame":
+          return frame({ frame: current.frame, data: "capability-changed" });
+        case "world.leave":
+          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
+        default:
+          throw new Error(`unexpected operation ${request.operation}`);
+      }
+    });
+    const result = await joinWorld({
+      environmentId: "pokemon-firered",
+      env: await provisionedEnv(world.stateDir),
+    });
+    if (result.outcome !== "joined") throw new Error("expected world join");
+
+    const target = { kind: "walk_to" as const, x: 12, y: 15 };
+    await expect(result.body.io.act(target)).resolves.toMatchObject({
+      status: "failed",
+      errorCode: "walk_exit_unsupported",
+    });
+    await expect(result.body.io.act(target)).resolves.toMatchObject({
+      status: "failed",
+      errorCode: "walk_exit_unsupported",
+    });
+    expect(world.requests.filter((request) => request.operation === "play.act")).toHaveLength(1);
+
+    await expect(
+      result.body.io.act({ kind: "button_press", button: "a", holdFrames: 4 }),
+    ).resolves.toMatchObject({ status: "completed" });
+    await expect(result.body.io.act(target)).resolves.toMatchObject({ status: "completed" });
+    expect(world.requests.filter((request) => request.operation === "play.act")).toHaveLength(3);
+    await result.body.close();
+  });
+
+  it("does not cache a rejection returned by a newer body generation", async () => {
+    const current = observation({
+      frame: 10,
+      exits: [
+        {
+          at: { mapId: "pallet-town/players-house-1f", x: 12, y: 15 },
+          to: "pallet-town",
+          walkTo: "unsupported",
+        },
+      ],
+    });
+    const world = await fakeWorld((request) => {
+      switch (request.operation) {
+        case "world.join":
+          return joinResult();
+        case "play.observe":
+          return current;
+        case "play.act":
+          return actRejected(
+            {
+              reason: "walk_exit_unsupported",
+              at: { mapId: "pallet-town/players-house-1f", x: 12, y: 15 },
+              to: "pallet-town",
+            },
+            current.frame,
+            2,
+          );
+        case "world.leave":
+          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
+        default:
+          throw new Error(`unexpected operation ${request.operation}`);
+      }
+    });
+    const result = await joinWorld({
+      environmentId: "pokemon-firered",
+      env: await provisionedEnv(world.stateDir),
+    });
+    if (result.outcome !== "joined") throw new Error("expected world join");
+
+    const target = { kind: "walk_to" as const, x: 12, y: 15 };
+    await result.body.io.act(target);
+    await result.body.io.act(target);
+    expect(world.requests.filter((request) => request.operation === "play.act")).toHaveLength(2);
     await result.body.close();
   });
 
@@ -700,6 +862,11 @@ function observation(options: {
     cursor: number;
     entries: { id: string; label: string }[];
   };
+  exits?: Array<{
+    at: { mapId: string; x: number; y: number };
+    to: string;
+    walkTo: "supported" | "unsupported";
+  }>;
 }) {
   const decoded = options.decoded ?? true;
   const mode = options.mode ?? "overworld";
@@ -721,7 +888,7 @@ function observation(options: {
         ? {
             topLeft: { mapId: "pallet-town/players-house-2f", x: 12, y: 12 },
             rows: ["...", ".@.", "..."],
-            exits: [],
+            exits: options.exits ?? [],
           }
         : null,
     state: decoded
@@ -757,7 +924,7 @@ function actRan(current: ReturnType<typeof observation>, detail?: Record<string,
     replayed: false,
     outcome: {
       kind: "ran",
-      inputsSpent: 1,
+      inputsSpent: typeof detail?.["presses"] === "number" ? detail["presses"] : 1,
       framesSpent: 10,
       screenChanged: true,
       observation: current,
@@ -766,11 +933,11 @@ function actRan(current: ReturnType<typeof observation>, detail?: Record<string,
   };
 }
 
-function actRejected(refusal: Record<string, unknown>, frameNumber: number) {
+function actRejected(refusal: Record<string, unknown>, frameNumber: number, bodyGeneration = 1) {
   return {
     ok: true,
     sessionId: SESSION_ID,
-    bodyGeneration: 1,
+    bodyGeneration,
     frame: frameNumber,
     replayed: false,
     outcome: { kind: "rejected", refusal },

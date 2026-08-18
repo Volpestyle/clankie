@@ -87,6 +87,7 @@ function emptyView(): FreePlayView {
     observations: [],
     framePng: null,
     refusedHere: [],
+    knownHardFailures: [],
     stalledForTurns: null,
     repeatingForTurns: null,
     recurringForTurns: null,
@@ -164,6 +165,24 @@ describe("the view says what reaches the controls", () => {
     expect(rendered).toContain("revisit one another");
     expect(rendered).toContain("stale objective was retired");
     expect(rendered).not.toContain("You should press down");
+  });
+
+  it("renders stable capability failures as memory without choosing a replacement", () => {
+    const rendered = renderView({
+      ...emptyView(),
+      knownHardFailures: [
+        {
+          action: { kind: "walk_to", x: 12, y: 15 },
+          errorCode: "walk_exit_unsupported",
+          effect: "rejected, nothing ran; this body cannot safely activate the exit",
+        },
+      ],
+    });
+
+    expect(rendered).toContain("Known non-retryable results");
+    expect(rendered).toContain("walk_exit_unsupported");
+    expect(rendered).toContain("not a replacement action");
+    expect(rendered).not.toContain("walk to (11, 15)");
   });
 
   it("states that an undecoded screen is normal and what still runs", () => {

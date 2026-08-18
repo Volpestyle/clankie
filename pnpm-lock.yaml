@@ -105,8 +105,8 @@ importers:
         specifier: 1.29.0
         version: 1.29.0(zod@4.4.3)
       '@pokeagents/world-protocol':
-        specifier: 0.1.0
-        version: 0.1.0
+        specifier: 0.2.1
+        version: 0.2.1
       hono:
         specifier: 4.12.28
         version: 4.12.28
@@ -1504,8 +1504,8 @@ packages:
   '@pinojs/redact@0.4.0':
     resolution: {integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==}
 
-  '@pokeagents/world-protocol@0.1.0':
-    resolution: {integrity: sha512-N2wes2prbIUUdobHzAxo+XZLeVm5YL8hVqpPJKlm8uS9FOF3pAqwgtg4FQz3FSDjn2auZGrykoJnOyJdXjNGtA==}
+  '@pokeagents/world-protocol@0.2.1':
+    resolution: {integrity: sha512-I3F8su4EPJFgbaHj0zdyD/edd3RCvOow545+AF1l0oosSA6B0XIQYrnbq4OQ+ceOIe/xXwQRSz/H/PRZo+XikA==}
 
   '@protobufjs/aspromise@1.1.2':
     resolution: {integrity: sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ==}
@@ -3992,7 +3992,7 @@ snapshots:
 
   '@pinojs/redact@0.4.0': {}
 
-  '@pokeagents/world-protocol@0.1.0':
+  '@pokeagents/world-protocol@0.2.1':
     dependencies:
       zod: 4.4.3
 

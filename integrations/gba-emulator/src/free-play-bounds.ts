@@ -73,3 +73,6 @@ export const FREE_PLAY_SPEAK_COOLDOWN_TURNS = 4;
  * exception rather than the rhythm of play.
  */
 export const FREE_PLAY_REPEAT_TURNS = 3;
+
+/** Stable capability failures retained beyond the short recent-history window. */
+export const FREE_PLAY_HARD_FAILURE_LIMIT = 32;

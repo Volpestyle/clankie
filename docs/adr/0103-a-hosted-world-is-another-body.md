@@ -42,17 +42,15 @@ A hosted world is a second implementation of the `GbaDriverIo` seam plus a
 rendered-media source, composed by the same execution the local body already
 uses. It is not a second play loop.
 
-The shared loop describes a hosted walk from its verified before/after state
-when the pinned contract carries counters but no route detail. A map change is a
-transition and reaching the target is an arrival; `inputsSpent` remains button
-presses and is never relabeled as tile steps.
+The shared loop consumes the hosted walk's bounded route detail plus its fresh
+after-state. `inputsSpent` remains button presses and is never relabeled as tile
+steps; partial movement is a ran-but-incomplete action, not a rejection and not
+an arrival.
 
-Clankie reaches the world through `@pokeagent-mmo/world-protocol`, a git
-dependency pinned to a revision, using the client transport on its `/ipc`
-subpath — PokeAgent MMO
-[ADR 0008](https://github.com/Volpestyle/pokeagents/blob/main/docs/adr/0008-the-contract-crosses-as-a-pinned-dependency.md)
-ships that contract for exactly this crossing. `apps/clankie/src/world/body.ts`
-holds the seam; `apps/clankie/src/play-execution-world.ts` composes it.
+Clankie reaches the world through the version-pinned
+`@pokeagents/world-protocol` package, using the client transport on its `/ipc`
+subpath. `apps/clankie/src/world/body.ts` holds the seam;
+`apps/clankie/src/play-execution-world.ts` composes it.
 The operator- and Discord-visible surface is one captain tool, `pokeagent_join_mmo`.
 
 The pinned player contract supplies control and frames. Ephemeral game sound
@@ -65,7 +63,13 @@ Adapter-owned state evolves behind that contract. FireRed adapter version 2
 includes the decoded new-game name menus, which the body exposes through the
 same `menu` observation as local play. A successful hosted menu action is
 rendered from that pre-action entry only after the host reports that its live
-cursor reached and confirmed it; an incomplete selection remains a refusal.
+cursor reached and confirmed it. An incomplete selection is ran with its press
+count, stopping reason, and fresh observation.
+
+World protocol v3 separates exit topology from `walk_to` support. Unsupported
+exits stay visible, trigger mechanics stay private, and the body returns a
+target-local zero-input refusal. Composite actions that already spent input are
+ran with incomplete detail, never success-shaped and never rejection-shaped.
 
 The boundary that survives from ADR 0102 is the one that matters: Clankie is a
 player in that world, not its owner (PokeAgent MMO ADR 0001). He does not import
@@ -79,9 +83,9 @@ knowledge. The world CLI remains an operator debugging fallback.
 [Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams-2.tldraw)
 
 `apps/clankie/test/pokeagent-mmo-boundary.test.ts` enforces this: exactly
-`@pokeagent-mmo/firered` and `@pokeagent-mmo/world-protocol` may be imported by
-product source, and the host, server, and emulator packages may not be depended
-on at all.
+transport-free FireRed knowledge and the published
+`@pokeagents/world-protocol` client contract may be imported by product source;
+the host, server, and emulator packages may not be depended on at all.
 
 The seat is a credential, not a config value. The bearer lives in the credential
 broker under `pokeagent_mmo_world`, and `CLANKIE_WORLD_CREDENTIAL` in the

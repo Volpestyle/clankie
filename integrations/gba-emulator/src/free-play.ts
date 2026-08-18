@@ -11,6 +11,7 @@ import { EnvironmentAdapterActionError } from "@clankie/environment-runtime";
 import { z } from "zod";
 import {
   FREE_PLAY_INTENT_MAX,
+  FREE_PLAY_HARD_FAILURE_LIMIT,
   FREE_PLAY_INTERJECTION_MAX,
   FREE_PLAY_MONOLOGUE_MAX,
   FREE_PLAY_NOTES_MAX,
@@ -194,6 +195,18 @@ export const FreePlayTurnEvidenceSchema = z
     signals: z
       .object({
         refusedHere: z.array(z.string().max(64)).max(4),
+        knownHardFailures: z
+          .array(
+            z
+              .object({
+                action: FreePlayActionSchema,
+                errorCode: z.string().min(1).max(200),
+                effect: z.string().min(1).max(500),
+              })
+              .strict(),
+          )
+          .max(FREE_PLAY_HARD_FAILURE_LIMIT)
+          .optional(),
         stalledForTurns: z.number().int().nonnegative().nullable(),
         repeatingForTurns: z.number().int().nonnegative().nullable(),
         recurringForTurns: z.number().int().nonnegative().nullable(),
@@ -235,6 +248,8 @@ export interface FreePlayView {
    * never a suggested route — the model still chooses.
    */
   refusedHere: readonly string[];
+  /** Stable capability failures in this exact body state. Memory, never a replacement action. */
+  knownHardFailures: readonly FreePlayHardFailure[];
   /**
    * Turns since he last stood on a tile he had never stood on before, surfaced
    * only once it is long enough to mean something. The loop always computed
@@ -289,6 +304,12 @@ export interface FreePlayView {
   interjection: string | null;
   /** Prior turns, most recent last, so the model has continuity. */
   history: readonly { intent: string; action: FreePlayAction; outcome: string; effect: string }[];
+}
+
+export interface FreePlayHardFailure {
+  action: FreePlayAction;
+  errorCode: string;
+  effect: string;
 }
 
 /**
@@ -564,6 +585,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
   const cooldown = input.speakCooldownTurns ?? FREE_PLAY_SPEAK_COOLDOWN_TURNS;
   const recentlySaid: string[] = [];
   const progress = new FreePlayProgressTracker();
+  const hardFailures = new Map<string, FreePlayHardFailure>();
   const initialObservations = observe(input.io);
   const initialPosition = positionOf(initialObservations);
   progress.seed(initialPosition);
@@ -593,6 +615,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     const shownLocaleForTurns =
       currentMap !== null && localeForTurns >= FREE_PLAY_STALL_TURNS ? localeForTurns : null;
     const refusedHere = progress.refusedFrom(positionOf(observations));
+    const knownHardFailures = hardFailuresFor(hardFailures, observations, input.provenance?.() ?? null);
     const decisionStartedAt = clock().toISOString();
     const evidence: FreePlayTurnEvidence = {
       decision: stateEvidence(observations, input.provenance),
@@ -603,6 +626,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
       progressAfter: null,
       signals: {
         refusedHere,
+        knownHardFailures,
         stalledForTurns,
         repeatingForTurns,
         recurringForTurns,
@@ -657,6 +681,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
         observations,
         framePng: input.framePng?.() ?? null,
         refusedHere,
+        knownHardFailures,
         // Only when he has a position to be stuck at: mid-battle and mid-warp
         // the tile counter stalls for reasons that need no telling.
         stalledForTurns,
@@ -730,6 +755,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     let accepted = false;
     let actionOutcome: Record<string, unknown> | undefined;
     let rejection: Described | null = null;
+    let failure: { errorCode: string; retryable: boolean } | null = null;
     /** Set only by an accepted body action, whose effect no diff can read. */
     let bodySummary: Described | null = null;
     /**
@@ -799,6 +825,9 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
             result.status === "failed" ? result.errorCode : null,
             describeRejection(result),
           );
+          if (result.status === "failed") {
+            failure = { errorCode: result.errorCode, retryable: result.retryable };
+          }
         }
       } catch (error) {
         record.outcome = "rejected_by_adapter";
@@ -808,6 +837,9 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
           bounded(error),
         );
         evidence.actionResult = exceptionEvidence(error);
+        if (error instanceof EnvironmentAdapterActionError) {
+          failure = { errorCode: error.errorCode, retryable: error.retryable };
+        }
       }
     }
 
@@ -868,6 +900,26 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     record.effect = effect.summary.slice(0, 200);
     record.effectAdvice = effect.advice === undefined ? null : effect.advice.slice(0, 300);
     const mindEffect = mindEffectLine(effect);
+    if (failure !== null && !failure.retryable) {
+      const key = stableHardFailureKey(
+        preActionObservations,
+        input.provenance?.() ?? null,
+        chosen,
+        failure.errorCode,
+      );
+      if (key !== null) {
+        hardFailures.delete(key);
+        hardFailures.set(key, {
+          action: chosen,
+          errorCode: failure.errorCode,
+          effect: mindEffect.slice(0, 500),
+        });
+        if (hardFailures.size > FREE_PLAY_HARD_FAILURE_LIMIT) {
+          const oldest = hardFailures.keys().next().value;
+          if (oldest !== undefined) hardFailures.delete(oldest);
+        }
+      }
+    }
 
     // Same action, same result: the state-independent stuck signal. Keyed on
     // the observation rather than the fuller line he reads, which discriminates
@@ -986,6 +1038,56 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     objectivesRetired,
     ...coherence(turns),
   };
+}
+
+function hardFailuresFor(
+  failures: ReadonlyMap<string, FreePlayHardFailure>,
+  observations: readonly GbaEmulatorObservation[],
+  provenance: FreePlayProvenance | null,
+): FreePlayHardFailure[] {
+  return [...failures.values()].filter((failure) => {
+    const key = stableHardFailureKey(observations, provenance, failure.action, failure.errorCode);
+    return key !== null && failures.get(key) === failure;
+  });
+}
+
+/** Key only failures the body explicitly says are stable under unchanged capability evidence. */
+function stableHardFailureKey(
+  observations: readonly GbaEmulatorObservation[],
+  provenance: FreePlayProvenance | null,
+  action: FreePlayAction,
+  errorCode: string,
+): string | null {
+  if (errorCode !== "walk_exit_unsupported" || action.kind !== "walk_to") return null;
+  const overworld = observations.find((observation) => observation.kind === "overworld") as
+    | {
+        data?: {
+          position?: { mapId?: string };
+          exits?: {
+            warps?: Array<{
+              x?: number;
+              y?: number;
+              destination?: string;
+              walkTo?: string;
+            }>;
+          };
+        };
+      }
+    | undefined;
+  const exit = overworld?.data?.exits?.warps?.find(
+    (candidate) => candidate.x === action.x && candidate.y === action.y,
+  );
+  if (exit?.walkTo !== "unsupported") return null;
+  return canonicalJson({
+    body: provenance?.body ?? null,
+    sessionId: provenance?.sessionId ?? null,
+    bodyGeneration: provenance?.bodyGeneration ?? null,
+    adapterVersion: provenance?.adapterVersion ?? null,
+    coreId: provenance?.coreId ?? null,
+    mapId: overworld?.data?.position?.mapId ?? null,
+    action,
+    exit,
+  });
 }
 
 /** A bounded semantic state key: volatile envelope ids and RAM digests stay out. */
@@ -1166,6 +1268,9 @@ const REJECTION_HINTS: Readonly<Record<string, string>> = {
   semantic_state_unavailable:
     "this screen carries no decoded state — normal on intros, help screens and boot; " +
     "read the frame and press buttons, and the helpers return when a screen decodes",
+  walk_exit_unsupported:
+    "this exit exists, but this body cannot safely activate it with walk_to; " +
+    "retrying under unchanged capability evidence returns the same refusal without dispatch",
   input_bound_exceeded: "it asked for more button presses than one action may spend",
   frame_bound_exceeded: "it asked for more frames than one action may spend",
   dialog_not_open:

@@ -61,8 +61,10 @@ save states on three different maps. The decoded warps match independently
 known ground truth (the 2f stairs event beside the banister; the 1f door mats;
 Pallet Town's three doors), and the connection directions match
 against live play (pallet-town's direction-2 edge is Route 1, entered by
-walking north). The overworld observation lists every exit with its
-destination; warp tiles render as `D` on the minimap.
+walking north). The overworld observation lists every exit with its destination
+and whether the body supports `walk_to` through it; warp tiles render as `D` on
+the minimap either way. Topology and capability are separate facts. Private
+activation mechanics and button directions do not cross the body seam.
 
 `walk_to` aimed at a warp event on blocking collision — an outdoor door —
 routes to a passable tile beside it and presses toward it, the same move a
@@ -76,6 +78,9 @@ the plan is made against an unloaded map.
 
 - Choosing a walk target is reading a map rather than estimating pixels, and a
   wrong choice teaches: the refusal names the bounds or the nearest real tile.
+- An unsupported exit remains visible rather than being hidden or redirected.
+  Its capability field says only what the body can execute; Clankie still
+  chooses the objective, exit, and action.
 - "Enter the lab" is one action. The founding measurement of ADR 0058 — 14
   calls to cross a bedroom and take one staircase — falls again for doorways.
 - The double renders a minimap from the bounds it already enforces, so CI

@@ -61,6 +61,24 @@ function battle(): GbaEmulatorObservation {
   } as unknown as GbaEmulatorObservation;
 }
 
+function unsupportedExit(frame = 100): GbaEmulatorObservation {
+  const observation = overworld(frame, 17, "pallet-town/players-house-1f") as unknown as {
+    data: Record<string, unknown>;
+  };
+  observation.data["exits"] = {
+    warps: [
+      {
+        x: 12,
+        y: 15,
+        destination: "pallet-town",
+        walkTo: "unsupported",
+      },
+    ],
+    connections: [],
+  };
+  return observation as unknown as GbaEmulatorObservation;
+}
+
 function completed(): EnvironmentActionResult {
   return {
     schemaVersion: 1,
@@ -588,6 +606,52 @@ describe("stall visibility", () => {
     expect(repeats[FREE_PLAY_REPEAT_TURNS - 1]).toBeNull();
     expect(repeats[FREE_PLAY_REPEAT_TURNS]).toBe(FREE_PLAY_REPEAT_TURNS);
     expect(result.longestUnchangedRun).toBe(FREE_PLAY_REPEAT_TURNS + 2);
+  });
+
+  it("retains a stable capability failure after recent history rolls off", async () => {
+    const seen: FreePlayView["knownHardFailures"][] = [];
+    const evidence: FreePlayTurnEvidence[] = [];
+    let frame = 100;
+    const worldIo: GbaDriverIo = {
+      observe: (kind) => {
+        if (kind !== "overworld") throw new Error(`no ${kind} view`);
+        return unsupportedExit(frame++);
+      },
+      act: () => Promise.resolve(failed("walk_exit_unsupported")),
+      pause: () => Promise.resolve(),
+      resume: () => Promise.resolve(),
+    };
+    await runFreePlay({
+      io: worldIo,
+      mind: {
+        decide: (view) => {
+          seen.push(view.knownHardFailures);
+          return Promise.resolve({
+            monologue: "I still want to try that visible exit.",
+            intent: "walk to the exit",
+            action: { kind: "walk_to", x: 12, y: 15 },
+          });
+        },
+      },
+      turns: 4,
+      historyLimit: 1,
+      provenance: () => ({
+        body: "world",
+        sessionId: "session-1",
+        worldId: "kanto",
+        bodyGeneration: 1,
+        adapterVersion: 3,
+      }),
+      onTurn: (_turn, turnEvidence) => evidence.push(turnEvidence),
+    });
+
+    expect(seen[0]).toEqual([]);
+    expect(seen.slice(1).every((failures) => failures.length === 1)).toBe(true);
+    expect(seen.at(-1)?.[0]).toMatchObject({
+      action: { kind: "walk_to", x: 12, y: 15 },
+      errorCode: "walk_exit_unsupported",
+    });
+    expect(evidence[1]?.signals.knownHardFailures).toHaveLength(1);
   });
 
   it("stays quiet while the same action keeps changing something", async () => {

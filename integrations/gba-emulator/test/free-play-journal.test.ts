@@ -206,6 +206,45 @@ describe("free-play journal", () => {
     expect("evidence" in (lines[1] ?? {})).toBe(false);
   });
 
+  it("keeps V2 overworld evidence readable from before exit actionability", () => {
+    const oldEvidence = evidence();
+    if (oldEvidence.postAction === null) throw new Error("expected post-action evidence");
+    oldEvidence.postAction.observations = [
+      {
+        schemaVersion: 1,
+        observationId: "legacy-overworld",
+        sessionId: "legacy-session",
+        characterId: "clankie",
+        worldId: "kanto",
+        goalVersion: 1,
+        capturedAt: "2026-08-15T21:00:00.000Z",
+        frame: 1,
+        kind: "overworld",
+        data: {
+          position: { mapId: "pallet-town/players-house-1f", x: 17, y: 9 },
+          facing: "west",
+          surroundings: null,
+          mapSize: null,
+          minimap: null,
+          exits: {
+            warps: [{ x: 12, y: 15, destination: "pallet-town" }],
+            connections: [],
+          },
+          ramStateSha256: "a".repeat(64),
+        },
+      },
+    ];
+    const line = {
+      kind: "turn",
+      schemaVersion: 2,
+      at: "2026-08-15T21:00:00.000Z",
+      turn: turn(0),
+      evidence: oldEvidence,
+    };
+
+    expect(parseFreePlayJournal(JSON.stringify(line))).toHaveLength(1);
+  });
+
   it("defaults loop metrics on summaries written before they existed", () => {
     const legacy = FreePlayJournalSummarySchema.parse({
       kind: "summary",

@@ -26,7 +26,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { resolveWorldCredential, WorldCredentialError } from "@clankie/credential-broker";
 import { EnvironmentAdapterActionError } from "@clankie/environment-runtime";
-import type { FreePlayProvenance, GbaDriverIo } from "@clankie/gba-emulator";
+import {
+  FREE_PLAY_HARD_FAILURE_LIMIT,
+  type FreePlayProvenance,
+  type GbaDriverIo,
+} from "@clankie/gba-emulator";
 import {
   GbaEmulatorObservationSchema,
   INTERACTIVE_ENVIRONMENT_SCHEMA_VERSION,
@@ -346,6 +350,7 @@ class HostedWorldBody implements WorldBody {
   private closed = false;
   private closePromise: Promise<void> | undefined;
   private lastAction: EnvironmentActionResult | undefined;
+  private readonly stableActionFailures = new Map<string, { errorCode: string; message: string }>();
 
   public constructor(
     socketPath: string,
@@ -635,16 +640,15 @@ class HostedWorldBody implements WorldBody {
     const actionId = `world-action-${String(this.actionSequence)}`;
     if (this.closed) return this.failedAction(actionId, "session_ended", "The hosted world body is closed");
     if (this.paused) return this.failedAction(actionId, "session_paused", "Clankie paused his world actions");
-    const selectedMenu =
-      action.kind === "select_menu_entry" &&
-      this.observation?.gameId === "firered" &&
-      this.observation.adapterVersion === 2
-        ? FireRedStateSchema.safeParse(this.observation.state).data?.menu
-        : undefined;
-    const selectedEntry =
-      action.kind === "select_menu_entry"
-        ? selectedMenu?.entries.find((entry) => entry.id === action.entryId)
-        : undefined;
+    const stableFailureKey = unsupportedWalkKey(this.observation, action);
+    const remembered =
+      stableFailureKey === null ? undefined : this.stableActionFailures.get(stableFailureKey);
+    if (remembered !== undefined && stableFailureKey !== null) {
+      this.stableActionFailures.delete(stableFailureKey);
+      this.stableActionFailures.set(stableFailureKey, remembered);
+      return this.failedAction(actionId, remembered.errorCode, remembered.message);
+    }
+    const requestGeneration = this.bodyGeneration;
     const worldAction = mapAction(action);
     const request = {
       operation: "play.act",
@@ -676,12 +680,28 @@ class HostedWorldBody implements WorldBody {
         refusal.success && refusal.data.retryAfterMs !== undefined,
       );
     }
+    const sameRequestGeneration = result.data.bodyGeneration === requestGeneration;
+    if (result.data.bodyGeneration > this.bodyGeneration) {
+      this.resetGeneration(result.data.bodyGeneration);
+    }
     if (result.data.outcome.kind === "rejected") {
-      const failed = this.failedAction(
-        actionId,
-        result.data.outcome.refusal.reason,
-        `The world refused the action: ${JSON.stringify(result.data.outcome.refusal)}`,
-      );
+      const message = `The world refused the action: ${JSON.stringify(result.data.outcome.refusal)}`;
+      const failed = this.failedAction(actionId, result.data.outcome.refusal.reason, message);
+      if (
+        result.data.outcome.refusal.reason === "walk_exit_unsupported" &&
+        stableFailureKey !== null &&
+        sameRequestGeneration
+      ) {
+        this.stableActionFailures.delete(stableFailureKey);
+        this.stableActionFailures.set(stableFailureKey, {
+          errorCode: result.data.outcome.refusal.reason,
+          message,
+        });
+        if (this.stableActionFailures.size > FREE_PLAY_HARD_FAILURE_LIMIT) {
+          const oldest = this.stableActionFailures.keys().next().value;
+          if (oldest !== undefined) this.stableActionFailures.delete(oldest);
+        }
+      }
       this.lastAction = failed;
       return failed;
     }
@@ -711,17 +731,7 @@ class HostedWorldBody implements WorldBody {
         // effect line `free-play-progress` already writes works here unchanged.
         // Dropping it is what made every `advance_dialog` on a hosted world
         // read as "read no new text — the dialog stopped", however much it read.
-        ...(result.data.outcome.detail ??
-          (selectedMenu === null || selectedMenu === undefined || selectedEntry === undefined
-            ? {}
-            : {
-                menuId: selectedMenu.menuId,
-                entryId: selectedEntry.id,
-                label: selectedEntry.label,
-                confirmed: true,
-                presses: result.data.outcome.inputsSpent,
-                endedBecause: "selected",
-              })),
+        ...result.data.outcome.detail,
       },
     };
     this.lastAction = completed;
@@ -914,6 +924,7 @@ class HostedWorldBody implements WorldBody {
     this.audioGeneration = 0;
     this.audioCursor = 0;
     this.audioPackets.length = 0;
+    this.stableActionFailures.clear();
   }
 
   private stopIfEnded(outcome: unknown): void {
@@ -1065,10 +1076,29 @@ function mapOverworld(minimap: Observation["minimap"], position: NonNullable<Fir
         x: exit.at.x,
         y: exit.at.y,
         destination: exit.to,
+        walkTo: exit.walkTo,
       })),
       connections: [],
     },
   };
+}
+
+function unsupportedWalkKey(observation: Observation | undefined, action: GbaEmulatorAction): string | null {
+  if (observation === undefined || action.kind !== "walk_to" || observation.minimap === null) return null;
+  const exit = observation.minimap.exits.find(
+    (candidate) => candidate.at.x === action.x && candidate.at.y === action.y,
+  );
+  if (exit?.walkTo !== "unsupported") return null;
+  return JSON.stringify({
+    bodyGeneration: observation.bodyGeneration,
+    adapterVersion: observation.adapterVersion,
+    gameId: observation.gameId,
+    mapId: exit.at.mapId,
+    x: exit.at.x,
+    y: exit.at.y,
+    to: exit.to,
+    walkTo: exit.walkTo,
+  });
 }
 
 function stateDigest(observation: Observation | undefined): string {

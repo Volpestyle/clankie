@@ -63,6 +63,11 @@ it is normal on intros and boot, and that the helpers return when a screen
 decodes. The old wording described a defect with no end, so a mind stopped
 reaching for helpers long after they started working.
 
+That code is reserved for absent semantic state. A decoded screen with one
+unsupported composite affordance uses a target-local refusal instead; otherwise
+the harness contradicts the observation and teaches the mind to wait for a
+decode change that cannot occur.
+
 **Uncertainty is not severity.** A hosted body reporting a screen it cannot
 decode drops to `severity: "low"`. `stateCertain` stays false and stays the
 load-bearing field — a scripted driver still halts on it — but a boot sequence

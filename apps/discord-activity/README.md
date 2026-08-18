@@ -31,15 +31,11 @@ CLANKIE_ACTIVITY_PRODUCER_PORT=4322 \
 pnpm --filter @clankie/discord-activity start
 ```
 
-Hosted-world frames use the world socket, but sound uses the host's read-only
-watch listener. A local `pokeagents start` therefore needs both watch settings;
-without them the picture works while no PCM exists to play:
-
-```bash
-WORLD_WATCH_ADDRESS=http://127.0.0.1:7780 \
-WORLD_WATCH_PUBLIC_URL=http://127.0.0.1:7780 \
-pokeagents start
-```
+Hosted-world frames use the world socket, while sound uses the host's read-only
+watch listener. Local worlds started with `pokeagents start` bind that listener
+at `127.0.0.1:7780` automatically. Custom or remotely published hosts must set
+their private watch bind and public HTTPS origin explicitly; without a watch
+listener the picture works while no PCM exists to play.
 
 Only non-secret configuration is environment-supplied. The producer bearer is
 minted into the credential broker on first start under provider id

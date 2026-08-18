@@ -336,6 +336,7 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
                         x: warp.x,
                         y: warp.y,
                         destination: warp.destinationMapId,
+                        walkTo: "supported" as const,
                       })),
                       connections: exits.connections.map((connection) => ({
                         direction: connection.direction,
