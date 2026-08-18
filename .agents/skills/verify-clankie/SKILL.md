@@ -54,7 +54,7 @@ before and after; if adding tests did not move both, they are not in the gate.
 
 ## Hosted FireRed proof
 
-Start the real paced host from `~/dev/pokeagent-mmo`:
+Start the real paced host from `~/dev/pokeagents`:
 
 ```bash
 WORLD_STATE_DIR=~/.pokeagent-mmo/world \
