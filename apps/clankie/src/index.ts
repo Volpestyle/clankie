@@ -19,7 +19,12 @@ import {
   ensureRunnerCredential,
 } from "@clankie/credential-broker";
 import { createLogger } from "@clankie/observability";
-import { applyDiscordSettingsToEnvironment, parsePositiveInt, SettingsStore } from "@clankie/settings";
+import {
+  applyDiscordSettingsToEnvironment,
+  discordAttachmentRoot,
+  parsePositiveInt,
+  SettingsStore,
+} from "@clankie/settings";
 import { createBearerAuthenticator, createClankieApp, type ClankieApp } from "./app.ts";
 import { ActivityObservationProjection } from "./activity-observation.ts";
 import { PlaySightProjection } from "./play-sight.ts";
@@ -137,23 +142,14 @@ if (deviceSessionKey === undefined) {
 const memory = createFileMemory({ dataDir: defaultMemoryDir(process.env) });
 
 // Media he makes lands under the root the Discord attachment resolver already
-// serves (ADR 0085). Without that root there is nowhere attachable to put an
-// artifact, so the plane stays absent and the routes answer 503.
-const attachmentRoot = process.env.CLANKIE_DISCORD_ATTACHMENT_ROOT?.trim();
-const mediaGenerator =
-  attachmentRoot === undefined || attachmentRoot.length === 0
-    ? undefined
-    : new ConfiguredMediaGenerator({
-        credentials: operatorCredentialStore,
-        attachmentRoot: resolve(attachmentRoot),
-        configCwd: repoRoot,
-      });
-if (mediaGenerator === undefined) {
-  logger.warn(
-    { event: "media.unavailable" },
-    "CLANKIE_DISCORD_ATTACHMENT_ROOT is unset; image and video generation are unavailable",
-  );
-}
+// serves (ADR 0085). The root is derived, never merely read, so the bridge
+// that serves the bytes back resolves the same directory this wrote them to.
+const attachmentRoot = discordAttachmentRoot(process.env);
+const mediaGenerator = new ConfiguredMediaGenerator({
+  credentials: operatorCredentialStore,
+  attachmentRoot,
+  configCwd: repoRoot,
+});
 
 // Clankie's own browser (ADR 0082). On by default; a missing binary degrades
 // to a logged unavailability rather than a boot failure.
@@ -162,6 +158,7 @@ if (browserEnabled(process.env.CLANKIE_BROWSER_ENABLED)) {
   try {
     browserHost = await createBrowserHost({
       runnerStateRoot,
+      attachmentRoot,
       logger,
       environment: process.env,
     });
@@ -179,7 +176,7 @@ if (browserEnabled(process.env.CLANKIE_BROWSER_ENABLED)) {
 // he says out loud; nothing here reaches the app until he draws something.
 let tldrawHost: TldrawHost | undefined;
 if (tldrawEnabled(process.env.CLANKIE_TLDRAW_ENABLED)) {
-  tldrawHost = await createTldrawHost({ runnerStateRoot, logger, environment: process.env });
+  tldrawHost = await createTldrawHost({ runnerStateRoot, attachmentRoot, logger, environment: process.env });
   logger.info({ event: "tldraw.capability.enabled" }, "diagram host ready");
 }
 
@@ -243,21 +240,9 @@ const captain = createCaptain(
         }),
     },
     media: {
-      generateImage: (request) =>
-        mediaGenerator?.generateImage(request) ??
-        Promise.resolve({
-          outcome: "refused" as const,
-          schemaVersion: 1 as const,
-          reason: "media_unavailable" as const,
-        }),
-      generateVideo: (request, room) =>
-        mediaGenerator?.generateVideo(request, { room }) ??
-        Promise.resolve({
-          outcome: "refused" as const,
-          schemaVersion: 1 as const,
-          reason: "media_unavailable" as const,
-        }),
-      finishedRenders: (room) => mediaGenerator?.finishedRenders(room) ?? Promise.resolve([]),
+      generateImage: (request) => mediaGenerator.generateImage(request),
+      generateVideo: (request, room) => mediaGenerator.generateVideo(request, { room }),
+      finishedRenders: (room) => mediaGenerator.finishedRenders(room),
     },
     ...(tldrawHost === undefined ? {} : { diagrams: tldrawHost }),
     embodiment: {
@@ -343,7 +328,7 @@ const captain = createCaptain(
 const clankie = await createClankieApp({
   captain,
   memory,
-  ...(mediaGenerator === undefined ? {} : { mediaGenerator }),
+  mediaGenerator,
   ...(discordPresenceRuntime === undefined ? {} : { discordPresenceRuntime }),
   ...(discordUserPresenceRuntime === undefined ? {} : { discordUserPresenceRuntime }),
   ...(browserHost === undefined ? {} : { browserTools: browserHost }),

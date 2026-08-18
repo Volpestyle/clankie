@@ -1093,6 +1093,20 @@ export const CaptainChannelTurnResultSchema = z.discriminatedUnion("state", [
       turnId: z.string().min(1),
     })
     .strict(),
+  /**
+   * It arrived mid-turn and was folded into the run already in flight, whose
+   * reply answers it (ADR 0091, ADR 0118). Like `silent` in that this delivery
+   * writes nothing; unlike it in every way that matters afterwards — he did
+   * answer, so the evidence must not record a decline and the channel must not
+   * age out as one he has stopped talking in.
+   */
+  z
+    .object({
+      state: z.literal("absorbed"),
+      captainSessionId: z.string().min(1),
+      turnId: z.string().min(1),
+    })
+    .strict(),
   z
     .object({
       state: z.literal("waiting_user"),
@@ -1189,6 +1203,15 @@ export const DiscordCaptainActionInputSchema = z.discriminatedUnion("action", [
     name: z.string().trim().min(1).max(100),
   }).strict(),
   DiscordCaptainActionContextSchema.extend({ action: z.literal("join_thread") }).strict(),
+  /**
+   * Something said to the room while the turn is still running (ADR 0118).
+   * A turn is allowed to take as long as the work takes; this is how the room
+   * finds out that is what is happening instead of watching an indicator.
+   */
+  DiscordCaptainActionContextSchema.extend({
+    action: z.literal("say_now"),
+    text: z.string().trim().min(1).max(600),
+  }).strict(),
   DiscordCaptainActionContextSchema.extend({
     action: z.literal("watch_start"),
     guildId: z.string().min(1).max(128),

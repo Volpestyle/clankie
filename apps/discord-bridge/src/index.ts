@@ -1175,6 +1175,22 @@ async function executeCaptainDiscordAction(
     }
     action = `discord.presence.${input.action}`;
     payload = { kind: input.action, channelId, messageId: input.messageId, emoji: input.emoji };
+  } else if (input.action === "say_now") {
+    if (
+      !ingressGuildIds.has(input.guildId) ||
+      (ingressChannelIds.size > 0 && !ingressChannelIds.has(input.channelId))
+    ) {
+      return { ok: false, message: "That channel is outside my admitted Discord channels." };
+    }
+    // Threaded onto the message he is answering, so a "give me a minute" and
+    // the answer that eventually follows read as one exchange.
+    action = "discord.presence.send_message";
+    payload = {
+      kind: "send_message",
+      channelId,
+      replyToMessageId: input.messageId,
+      content: input.text,
+    };
   } else if (input.action === "create_thread" || input.action === "join_thread") {
     if (
       !ingressGuildIds.has(input.guildId) ||
@@ -1254,9 +1270,11 @@ async function executeCaptainDiscordAction(
               ? "I started the thread."
               : input.action === "join_thread"
                 ? "I joined the thread."
-                : input.action === "react"
-                  ? "I reacted."
-                  : "I removed my reaction.",
+                : input.action === "say_now"
+                  ? "I said that to the channel. Keep working; your final reply still posts when the turn ends."
+                  : input.action === "react"
+                    ? "I reacted."
+                    : "I removed my reaction.",
     };
   } catch (error) {
     return {

@@ -14,6 +14,7 @@ import {
   selectInboundImageAttachments,
   TYPING_REFRESH_MS,
   TYPING_MAX_DURATION_MS,
+  TYPING_START_DELAY_MS,
   type DiscordTextIngressConfig,
   type DiscordTextIngressEvidence,
   type DiscordTextIngressPort,
@@ -204,8 +205,9 @@ describe("DiscordTextIngress", () => {
     expect(conflict).toEqual({ state: "dropped", reason: "delivery_id_conflict" });
     expect(port.turns).toHaveLength(1);
     expect(port.replies).toHaveLength(1);
-    // The deduplicated retry and the refused conflict never re-signal typing.
-    expect(port.typing).toHaveLength(1);
+    // The turn settled inside the typing delay, so nothing was ever signalled —
+    // and neither the deduplicated retry nor the refused conflict signals now.
+    expect(port.typing).toHaveLength(0);
     expect(evidence.map((event) => event.outcome)).toContain("deduplicated");
     expect(JSON.stringify(evidence)).not.toContain("first body");
     expect(JSON.stringify(evidence)).not.toContain("drifted body");
@@ -477,6 +479,51 @@ describe("reading live, then checking in", () => {
     expect(ingress.engagedInChannel("channel-1")).toBe(false);
   });
 
+  /**
+   * The burst this exists for: three messages in ten seconds, the second and
+   * third landing inside the first turn's run. Absorbed is not declined — he
+   * answered, the answer just rode the first delivery — so it must neither
+   * write a second reply nor age him out of the room he is talking in.
+   */
+  it("treats an absorbed message as answered rather than as a decline", async () => {
+    const port = new RecordingPort((request) =>
+      Promise.resolve(
+        request.deliveryId === "m1"
+          ? settled(request.deliveryId)
+          : { state: "absorbed", captainSessionId: "session-1", turnId: `turn-${request.deliveryId}` },
+      ),
+    );
+    const evidence: DiscordTextIngressEvidence[] = [];
+    const ingress = new DiscordTextIngress(port, room({ liveMessageWindow: 2 }), (event) =>
+      evidence.push(event),
+    );
+
+    await expect(ingress.handle(say("m1", "clankie why did that happen"))).resolves.toMatchObject({
+      state: "settled",
+    });
+    await expect(ingress.handle(say("m2", "it's very rude"))).resolves.toEqual({
+      state: "absorbed",
+      turnId: "turn-m2",
+    });
+    await expect(ingress.handle(say("m3", "and it still happened"))).resolves.toEqual({
+      state: "absorbed",
+      turnId: "turn-m3",
+    });
+
+    // One reply for the burst, from the delivery that owned the run.
+    expect(port.replies).toHaveLength(1);
+    expect(evidence.map((event) => event.outcome)).toEqual([
+      "accepted",
+      "settled",
+      "accepted",
+      "absorbed",
+      "accepted",
+      "absorbed",
+    ]);
+    // Two absorbed messages did not spend the live window: he is still here.
+    expect(ingress.engagedInChannel("channel-1")).toBe(true);
+  });
+
   it("stops reading live once the conversation has moved on without him", async () => {
     const port = new RecordingPort();
     const ingress = new DiscordTextIngress(port, room({ liveMessageWindow: 2 }), () => undefined);
@@ -589,7 +636,12 @@ describe("typing while he composes", () => {
       const ingress = new DiscordTextIngress(port, config());
 
       const outcome = ingress.handle(guildMessage("message-typing"));
-      await vi.advanceTimersByTimeAsync(0);
+      // Typing is a promise of words; a turn that settles inside the delay
+      // never made one, so nothing has been sent yet.
+      await vi.advanceTimersByTimeAsync(TYPING_START_DELAY_MS - 1);
+      expect(port.typing).toHaveLength(0);
+
+      await vi.advanceTimersByTimeAsync(1);
       expect(port.typing).toHaveLength(1);
       expect(port.typing[0]).toMatchObject({
         action: "discord.presence.typing_start",
@@ -615,67 +667,101 @@ describe("typing while he composes", () => {
   });
 
   it("shows him typing on a live follow-up that never repeats his name", async () => {
-    const port = new RecordingPort();
-    const ingress = new DiscordTextIngress(port, {
-      ...config(),
-      channelIds: new Set(),
-      replyPolicy: "addressed",
-      characterNames: ["clankie"],
-    });
-    await ingress.handle({
-      ...guildMessage("message-asked"),
-      channelId: "channel-live",
-      mentionsBot: false,
-      body: "clankie how did the run go?",
-    });
-    expect(port.typing).toHaveLength(1);
+    vi.useFakeTimers();
+    try {
+      const pending = new Map<string, (result: CaptainChannelTurnResult) => void>();
+      const port = new RecordingPort(
+        (request) =>
+          new Promise((resolve) => {
+            pending.set(request.deliveryId, resolve);
+          }),
+      );
+      const ingress = new DiscordTextIngress(port, {
+        ...config(),
+        channelIds: new Set(),
+        replyPolicy: "addressed",
+        characterNames: ["clankie"],
+      });
+      const asked = ingress.handle({
+        ...guildMessage("message-asked"),
+        channelId: "channel-live",
+        mentionsBot: false,
+        body: "clankie how did the run go?",
+      });
+      await vi.advanceTimersByTimeAsync(TYPING_START_DELAY_MS);
+      expect(port.typing).toHaveLength(1);
+      pending.get("message-asked")?.(settled("message-asked"));
+      await asked;
 
-    // The back-and-forth is where the indicator matters most: he is composing
-    // an answer to someone already waiting on one, and having to re-say his
-    // name to see it is not how a conversation works.
-    await ingress.handle({
-      ...guildMessage("message-followup"),
-      channelId: "channel-live",
-      mentionsBot: false,
-      body: "did it though?",
-    });
-    expect(port.typing).toHaveLength(2);
-    expect(port.typing[1]).toMatchObject({
-      idempotencyKey: "message-followup:typing:0",
-      payload: { kind: "typing_start", channelId: "channel-live" },
-    });
+      // The back-and-forth is where the indicator matters most: he is composing
+      // an answer to someone already waiting on one, and having to re-say his
+      // name to see it is not how a conversation works.
+      const followup = ingress.handle({
+        ...guildMessage("message-followup"),
+        channelId: "channel-live",
+        mentionsBot: false,
+        body: "did it though?",
+      });
+      await vi.advanceTimersByTimeAsync(TYPING_START_DELAY_MS);
+      expect(port.typing).toHaveLength(2);
+      expect(port.typing[1]).toMatchObject({
+        idempotencyKey: "message-followup:typing:0",
+        payload: { kind: "typing_start", channelId: "channel-live" },
+      });
+      pending.get("message-followup")?.(settled("message-followup"));
+      await followup;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("stays invisible while he catches up on a backlog nobody is waiting on", async () => {
-    const port = new RecordingPort();
-    const ingress = new DiscordTextIngress(port, {
-      ...config(),
-      channelIds: new Set(),
-      replyPolicy: "addressed",
-      characterNames: ["clankie"],
-      liveMessageWindow: 0,
-    });
-    await ingress.handle({
-      ...guildMessage("message-asked"),
-      channelId: "channel-live",
-      mentionsBot: false,
-      body: "clankie how did the run go?",
-    });
-    expect(port.typing).toHaveLength(1);
-
-    await expect(
-      ingress.handle({
-        ...guildMessage("message-later"),
+    vi.useFakeTimers();
+    try {
+      const pending = new Map<string, (result: CaptainChannelTurnResult) => void>();
+      const port = new RecordingPort(
+        (request) =>
+          new Promise((resolve) => {
+            pending.set(request.deliveryId, resolve);
+          }),
+      );
+      const ingress = new DiscordTextIngress(port, {
+        ...config(),
+        channelIds: new Set(),
+        replyPolicy: "addressed",
+        characterNames: ["clankie"],
+        liveMessageWindow: 0,
+      });
+      const asked = ingress.handle({
+        ...guildMessage("message-asked"),
         channelId: "channel-live",
         mentionsBot: false,
-        body: "any update?",
-      }),
-    ).resolves.toEqual({ state: "buffered" });
+        body: "clankie how did the run go?",
+      });
+      await vi.advanceTimersByTimeAsync(TYPING_START_DELAY_MS);
+      expect(port.typing).toHaveLength(1);
+      pending.get("message-asked")?.(settled("message-asked"));
+      await asked;
 
-    // Checking in on a channel minutes later is him reading, not the room
-    // waiting on him; a timer must never light the channel up.
-    await expect(ingress.catchUp()).resolves.toMatchObject([{ state: "settled" }]);
-    expect(port.typing).toHaveLength(1);
+      await expect(
+        ingress.handle({
+          ...guildMessage("message-later"),
+          channelId: "channel-live",
+          mentionsBot: false,
+          body: "any update?",
+        }),
+      ).resolves.toEqual({ state: "buffered" });
+
+      // Checking in on a channel minutes later is him reading, not the room
+      // waiting on him; a timer must never light the channel up.
+      const caught = ingress.catchUp();
+      await vi.advanceTimersByTimeAsync(TYPING_START_DELAY_MS * 4);
+      pending.get("message-later")?.(settled("message-later"));
+      await expect(caught).resolves.toMatchObject([{ state: "settled" }]);
+      expect(port.typing).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("stops refreshing after a failed typing post without failing the turn", async () => {
@@ -703,7 +789,38 @@ describe("typing while he composes", () => {
     }
   });
 
-  it("stops refreshing after the cosmetic deadline even when the captain never settles", async () => {
+  /**
+   * Long work is still work: while the turn runs, the room keeps seeing him
+   * type. Only a request that never returns at all hits the backstop.
+   */
+  it("keeps him typing for as long as the turn is actually running", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = new Map<string, (result: CaptainChannelTurnResult) => void>();
+      const port = new RecordingPort(
+        (request) =>
+          new Promise((resolve) => {
+            pending.set(request.deliveryId, resolve);
+          }),
+      );
+      const ingress = new DiscordTextIngress(port, config());
+
+      const outcome = ingress.handle(guildMessage("message-long-lookup"));
+      // Nine minutes of browsing a bracket, far past the old 60-second cutoff.
+      await vi.advanceTimersByTimeAsync(9 * 60_000);
+      expect(port.typing.length).toBeGreaterThan(60);
+
+      pending.get("message-long-lookup")?.(settled("message-long-lookup"));
+      await expect(outcome).resolves.toMatchObject({ state: "settled" });
+      const writesAtSettle = port.typing.length;
+      await vi.advanceTimersByTimeAsync(TYPING_REFRESH_MS * 4);
+      expect(port.typing).toHaveLength(writesAtSettle);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops refreshing at the backstop when the turn request never returns at all", async () => {
     vi.useFakeTimers();
     try {
       const port = new RecordingPort(() => new Promise<CaptainChannelTurnResult>(() => undefined));

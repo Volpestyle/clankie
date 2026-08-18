@@ -20,6 +20,7 @@ export {
   type PersonaSettings,
   type VoiceSettings,
 } from "./schema.ts";
+export { discordAttachmentRoot } from "./attachments.ts";
 export { characterNames, personaInstructions, type PersonaRegister } from "./persona.ts";
 export { SettingsStore, defaultSettingsPath } from "./store.ts";
 export {

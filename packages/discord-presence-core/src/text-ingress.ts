@@ -266,12 +266,22 @@ export type DiscordTextIngressOutcome =
   | { state: "buffered" }
   /** He read an unprompted message and chose silence. Nothing was written. */
   | { state: "declined"; turnId: string }
+  /** Folded into a reply already in flight (ADR 0118); that reply answers it. */
+  | { state: "absorbed"; turnId: string }
   | { state: "waiting_user"; turnId: string; responseMessageId: string }
   | { state: "failed"; code: string };
 
 export interface DiscordTextIngressEvidence {
   readonly service: "discord-text-ingress";
-  readonly outcome: "dropped" | "accepted" | "buffered" | "deduplicated" | "settled" | "declined" | "failed";
+  readonly outcome:
+    | "dropped"
+    | "accepted"
+    | "buffered"
+    | "deduplicated"
+    | "settled"
+    | "declined"
+    | "absorbed"
+    | "failed";
   readonly deliveryId: string;
   readonly correlationId: string;
   readonly presenceSessionId: string;
@@ -300,8 +310,30 @@ const DEFAULT_DELIVERY_RETENTION_MS = 7 * 60 * 60 * 1_000;
 const DEFAULT_MAX_RETAINED_DELIVERIES = 50_000;
 /** Discord shows "typing…" for about ten seconds per post; a turn that thinks longer re-posts to stay visible. */
 export const TYPING_REFRESH_MS = 8_000;
-/** Cosmetic presence must settle even if the captain service or its HTTP request wedges. */
-export const TYPING_MAX_DURATION_MS = 60_000;
+/**
+ * Insurance against a turn request that never comes back at all — not a limit
+ * on how long he may work.
+ *
+ * The indicator's real lifetime is the turn's: `showTyping` returns a stop that
+ * the turn's `finally` always calls, and the captain's own stall watchdog makes
+ * sure the turn itself ends. So while he is working, the room sees him working,
+ * for as long as that takes. This only exists so a genuinely hung HTTP request
+ * cannot leave a channel typing forever.
+ */
+export const TYPING_MAX_DURATION_MS = 30 * 60_000;
+/**
+ * How long a turn must run before the room is told he is typing.
+ *
+ * Typing is a promise of words, and a turn that ends in silence breaks it: the
+ * indicator appears, nothing follows, and it reads as him starting a reply and
+ * thinking better of it. A short delay keeps the fastest of those from ever
+ * showing. It is not a cure — declines and answers take about the same time
+ * (declines run 2–18 seconds, answers 2 seconds to several minutes), so no
+ * delay short enough to keep the indicator useful can tell them apart. Knowing
+ * sooner needs a mid-turn signal the captain does not send today; until then
+ * this buys the cheap part and nothing more.
+ */
+export const TYPING_START_DELAY_MS = 2_000;
 /** Roughly how long a conversation stays "the one you are in" before you drift off. */
 const DEFAULT_LIVE_MESSAGE_WINDOW = 5;
 const DEFAULT_MAX_PENDING_PER_CHANNEL = 20;
@@ -518,6 +550,17 @@ export class DiscordTextIngress {
       return { state: "failed", code: result.code };
     }
 
+    if (result.state === "absorbed") {
+      // It landed mid-thought and the run already in flight answered it
+      // (ADR 0118). Nothing is written from here — the run owner's reply is
+      // the one reply — but he *did* answer, so this refreshes the exchange
+      // exactly as a settled turn does. Recording it as a decline would age
+      // him out of the one conversation he is most actively in.
+      this.rememberReply(message);
+      event("absorbed", { turnId: result.turnId });
+      return { state: "absorbed", turnId: result.turnId };
+    }
+
     if (result.state === "silent") {
       // He read it and chose not to answer. Nothing reaches the channel, and
       // the exchange is *not* refreshed: staying quiet is not engagement, so a
@@ -591,8 +634,10 @@ export class DiscordTextIngress {
   private showTyping(message: DiscordInboundMessage, identity: DiscordPresenceWrite["identity"]): () => void {
     if (message.catchingUp === true) return () => undefined;
     let sequence = 0;
+    let timer: ReturnType<typeof setInterval> | undefined;
     const stop = (): void => {
-      clearInterval(timer);
+      clearTimeout(opener);
+      if (timer !== undefined) clearInterval(timer);
       clearTimeout(deadline);
     };
     const post = (): void => {
@@ -606,11 +651,16 @@ export class DiscordTextIngress {
       sequence += 1;
       void this.port.executeDiscordPresenceAction(write).catch(stop);
     };
-    const timer = setInterval(post, TYPING_REFRESH_MS);
-    timer.unref?.();
+    // Nothing is posted until the delay elapses, so a turn that settles inside
+    // it — an answer or a silence — never showed the room anything at all.
+    const opener = setTimeout(() => {
+      post();
+      timer = setInterval(post, TYPING_REFRESH_MS);
+      timer.unref?.();
+    }, TYPING_START_DELAY_MS);
+    opener.unref?.();
     const deadline = setTimeout(stop, TYPING_MAX_DURATION_MS);
     deadline.unref?.();
-    post();
     return stop;
   }
 

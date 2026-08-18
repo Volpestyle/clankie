@@ -15,18 +15,27 @@ his game bodies, and the HTTP API every surface speaks.
 A Discord message reaches the bridge, which posts it to
 `POST /v1/captain/channel-turns`. The service normalizes it — untrusted body
 fenced and labelled, images resolved to bytes at the last hop, channel context
-attached — and prompts a pi session. Voice channels and operator conversations
-get continuing sessions (pi JSONL trees that survive restarts); text turns are
-one-shot, because the channel history rides in with each request. A one-shot
-still writes its tree — one per turn under `~/.clankie/captain/turns/` — so the
-tools it ran are readable afterwards
-([ADR 0107](adr/0107-a-one-shot-turn-still-leaves-a-trail.md)). The reply
-carries the turn's last screenshot or generated image with it, and replying
-with the silence sentinel sends nothing: silence is a real answer. A one-shot
-text run has a 10-minute hard ceiling so model reasoning and multiple bounded
-tool calls can finish; expiry aborts its pi session and settles the turn as
-`captain_turn_timeout`. The bridge separately stops refreshing Discord typing
-after 60 seconds, so cosmetic presence cannot remain stuck.
+attached — and prompts a pi session. Every room gets a continuing session (a pi
+JSONL tree that survives restarts): operator conversations, voice channels under
+`~/.clankie/captain/voice/`, and text channels under `~/.clankie/captain/rooms/`
+([ADR 0118](adr/0118-a-text-room-is-a-durable-lane.md)). A message that arrives
+while that room's run is streaming is steered into it and reported `absorbed`,
+so a burst of messages gets one merged reply rather than one reply each
+([ADR 0091](adr/0091-a-mid-turn-message-steers-the-turn.md)). The channel
+backlog still rides in with the request, and is used only when the lane does not
+already hold that conversation. A privileged turn drops to a one-shot, which
+writes its own tree under `~/.clankie/captain/turns/` so the tools it ran are
+readable afterwards ([ADR 0107](adr/0107-a-one-shot-turn-still-leaves-a-trail.md)).
+The reply carries the turn's last screenshot or generated image with it — and
+when that artifact cannot be resolved, the words still post and say the picture
+did not — while replying with the silence sentinel sends nothing: silence is a
+real answer. Nothing caps how long a turn may take — looking something
+up properly is work, not a fault — but a turn that emits no event at all for 5
+minutes is a dead stream, so the stall watchdog aborts its pi session and
+settles it as `captain_turn_stalled`. While a turn runs he can post one short
+`say_now` message to the channel ("hang on, pulling the bracket up") without
+ending it, and Discord shows him typing for the whole turn rather than for a
+capped minute.
 
 The TUI and relay speak the same operator-conversation contract
 (`/operator/v1/dispatch`): revision-fenced sends, cursored replay, long-polled
@@ -62,7 +71,7 @@ the full picture — what each store holds, who may read it, and what bounds it.
   ([ADR 0095](adr/0095-discord-system-actors.md),
   [ADR 0105](adr/0105-voice-is-as-capable-as-the-room-it-is-in.md)). A
   privileged turn always runs on a one-shot session, so the grant never
-  outlives the actor who earned it on the shared voice lane. They
+  outlives the actor who earned it on the room's shared lane. They
   land in the conversation's workspace — the directory a workspace-scoped
   operator conversation names, this repository for every other lane
   ([ADR 0104](adr/0104-clankie-works-where-you-launched-him.md)). Voice join/leave

@@ -13,6 +13,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { discordAttachmentRoot } from "@clankie/settings";
 import {
   BrowserToolCatalogSchema,
   CallBrowserToolResultSchema,
@@ -57,6 +58,13 @@ export interface BrowserHostLogger {
 
 export interface BrowserHostOptions {
   runnerStateRoot: string;
+  /**
+   * Where a screenshot is written so the Discord bridge can serve it back.
+   * Supplied by the composition root, which derives it once for every process
+   * that touches an artifact; defaulted here only so a test can point it at a
+   * temporary directory.
+   */
+  attachmentRoot?: string;
   logger: BrowserHostLogger;
   environment?: NodeJS.ProcessEnv;
   /** Injected in tests so the suite never launches a browser. */
@@ -202,10 +210,10 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
 
   // Artifacts land under the root the Discord attachment resolver already
   // serves, so a screenshot is attachable without a second copy or a second
-  // trust boundary. Without that root configured they still get written —
-  // under runner state — and are simply not sendable yet, which keeps the
-  // browser working when Discord is not configured at all.
-  const artifactRoot = environment.CLANKIE_DISCORD_ATTACHMENT_ROOT?.trim() || options.runnerStateRoot;
+  // trust boundary. The root is shared with the bridge by derivation rather
+  // than by both processes happening to read the same variable: a screenshot
+  // written somewhere the resolver does not serve is a reply that dies whole.
+  const artifactRoot = options.attachmentRoot ?? discordAttachmentRoot(environment);
   await mkdir(join(artifactRoot, ARTIFACT_SUBDIRECTORY), { recursive: true, mode: 0o700 });
 
   const command =

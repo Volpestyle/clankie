@@ -23,6 +23,9 @@ interface ChannelInvite {
 /** Activity invites are short-lived; a stale link must not keep a surface launchable. */
 const ACTIVITY_INVITE_MAX_AGE_SECONDS = 6 * 60 * 60;
 
+/** Said in his own voice, because the room is owed the reason the picture is missing. */
+const MEDIA_LOST_NOTE = "(couldn't get the image to upload, so it's just me talking)";
+
 export interface DiscordBotPresenceRuntimeOptions {
   /** Official bot token only. Never a user token. */
   botToken: string;
@@ -92,23 +95,30 @@ export class DiscordBotPresenceRuntime {
        * an arbitrary artifact without an approval.
        */
       case "reply_with_media": {
-        if (this.resolveAttachment === undefined) {
-          throw new Error("discord_presence_attachment_resolver_unavailable");
-        }
-        const file = await this.resolveAttachment(payload.artifactRef);
+        // The words survive the picture. An artifact that will not resolve —
+        // wrong root, deleted file, failed hash — used to throw here and take
+        // the whole reply down with it, so a turn that answered the room
+        // perfectly landed as silence. He says his piece and says the picture
+        // did not make it, which is the same honesty ADR 0072 asks of him when
+        // he cannot see an attachment someone else posted.
+        const file = await this.replyMedia(payload.artifactRef);
         const message = (await this.rest.post(Routes.channelMessages(payload.channelId), {
           body: {
-            content: payload.content,
+            content: file === undefined ? `${payload.content}\n\n${MEDIA_LOST_NOTE}` : payload.content,
             message_reference: { message_id: payload.messageId },
             allowed_mentions: { parse: [] },
           },
-          files: [
-            {
-              name: payload.filename,
-              data: file.data,
-              ...(file.contentType === undefined ? {} : { contentType: file.contentType }),
-            },
-          ],
+          ...(file === undefined
+            ? {}
+            : {
+                files: [
+                  {
+                    name: payload.filename,
+                    data: file.data,
+                    ...(file.contentType === undefined ? {} : { contentType: file.contentType }),
+                  },
+                ],
+              }),
         })) as { id?: string };
         return result(write, payload.channelId, message.id);
       }
@@ -257,6 +267,26 @@ export class DiscordBotPresenceRuntime {
    * inside an activity instance, so stop means "no further launches" and the
    * frame stream is what actually goes dark.
    */
+  /**
+   * The bytes for a reply's picture, or `undefined` when they cannot be had.
+   *
+   * Never throws: every failure mode here — no resolver bound, a root that
+   * does not serve the reference, a file that moved, a hash that no longer
+   * matches — is a reason to post the words alone, not a reason to lose them.
+   */
+  private async replyMedia(artifactRef: string): Promise<{ data: Buffer; contentType?: string } | undefined> {
+    if (this.resolveAttachment === undefined) return undefined;
+    try {
+      return await this.resolveAttachment(artifactRef);
+    } catch (error) {
+      console.error(
+        { artifactRef, error: error instanceof Error ? error.message : String(error) },
+        "Discord presence reply media could not be resolved; posting the text alone",
+      );
+      return undefined;
+    }
+  }
+
   private async revokeActivityInvites(channelId: string, keepCode?: string): Promise<void> {
     const configured = new Set(Object.values(this.activityApplicationIds));
     if (configured.size === 0) return;

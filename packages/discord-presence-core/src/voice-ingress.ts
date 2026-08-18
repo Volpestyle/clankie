@@ -93,10 +93,12 @@ export class DiscordVoiceIngress {
           : result.prompt,
       };
     }
-    if (result.state === "silent") {
-      // Voice does not offer the decline path today — `mayDecline` is only set
-      // by text ingress — so reaching here means the captain used the sentinel
-      // unprompted. Say nothing rather than read the marker aloud.
+    if (result.state === "silent" || result.state === "absorbed") {
+      // Absorbed: the words went into a run already in flight and that run's
+      // reply speaks for them, so this delivery stays quiet (ADR 0091).
+      // Silent: voice does not offer the decline path today — `mayDecline` is
+      // only set by text ingress — so reaching here means the captain used the
+      // sentinel unprompted. Say nothing rather than read the marker aloud.
       return { state: "declined", turnId: result.turnId };
     }
     return { state: "settled", turnId: result.turnId, response: result.response };

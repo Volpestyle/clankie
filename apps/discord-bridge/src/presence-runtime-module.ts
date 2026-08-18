@@ -1,6 +1,7 @@
 import { createDefaultCredentialStore, DiscordBotCredentialProvider } from "@clankie/credential-broker";
 import type { DiscordActivitySurface, DiscordPresenceWrite } from "@clankie/protocol";
 import type { DiscordPresenceSessionRecord } from "@clankie/interactive-environment";
+import { discordAttachmentRoot } from "@clankie/settings";
 import type { REST } from "discord.js";
 import { createFilesystemAttachmentResolver } from "./attachment-resolver.ts";
 import { createDiscordBotPresenceRuntime } from "./bot-presence-runtime.ts";
@@ -52,7 +53,7 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
       return createDiscordBotPresenceRuntime({
         botToken,
         ...(options.rest === undefined ? {} : { rest: options.rest }),
-        resolveAttachment: createFilesystemAttachmentResolver(process.env.CLANKIE_DISCORD_ATTACHMENT_ROOT),
+        resolveAttachment: createFilesystemAttachmentResolver(discordAttachmentRoot(process.env)),
         activityApplicationIds: activitySurfaces(),
       }).execute(write, session);
     },

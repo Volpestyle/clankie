@@ -112,6 +112,43 @@ describe("DiscordBotPresenceRuntime", () => {
     expect(put).toHaveBeenCalledOnce();
   });
 
+  /**
+   * The words survive the picture. An unresolvable artifact used to throw out
+   * of `execute`, which the ingress read as a failed turn — so a browsing turn
+   * that had already written its answer landed in the room as silence, and the
+   * room poked him until two more turns re-answered it.
+   */
+  it("posts the reply text when the picture cannot be resolved, instead of losing both", async () => {
+    const post = vi.fn(async () => ({ id: "msg-out-2" }));
+    const runtime = new DiscordBotPresenceRuntime({
+      botToken: "bot-token",
+      rest: { post, put: vi.fn(), delete: vi.fn(), patch: vi.fn() } as never,
+      resolveAttachment: () => Promise.reject(new Error("discord_presence_attachment_root_unavailable")),
+    });
+
+    const reply = await runtime.execute(
+      write({
+        action: "discord.presence.reply_with_media",
+        content: "sonicfox took it",
+        payload: {
+          kind: "reply_with_media",
+          channelId: "ch-1",
+          messageId: "msg-1",
+          content: "sonicfox took it",
+          artifactRef: "sha256:" + "a".repeat(64) + ":browser/shot.png",
+          filename: "shot.png",
+        },
+      }),
+      presentSession,
+    );
+
+    expect(reply).toMatchObject({ transportKind: "bot", messageId: "msg-out-2" });
+    const sent = post.mock.lastCall as unknown as [string, { body: { content: string }; files?: unknown }];
+    expect(sent[1].body.content).toContain("sonicfox took it");
+    expect(sent[1].body.content).toContain("couldn't get the image to upload");
+    expect(sent[1].files).toBeUndefined();
+  });
+
   it("launches an activity via an EMBEDDED_APPLICATION invite and never a user token", async () => {
     const post = vi.fn(async (route: string) =>
       route.includes("invites") ? { code: "abc123" } : { id: "msg-launch" },

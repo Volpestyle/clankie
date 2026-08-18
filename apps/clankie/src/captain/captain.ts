@@ -36,7 +36,7 @@ import { ConversationStore } from "./conversations.ts";
 import { readHerdrSessionCensus, type HerdrSessionCensus } from "./herdr-census.ts";
 import { operatorPromptWithHerdrSeat } from "./herdr-seat.ts";
 import type { CaptainDeps, ResolvedAttachment } from "./deps.ts";
-import { normalizeDiscordTurn, type NormalizedDiscordTurn } from "./discord-turn.ts";
+import { discordTurnSessionKey, normalizeDiscordTurn, type NormalizedDiscordTurn } from "./discord-turn.ts";
 import { LaneLog, laneKey } from "./lane-log.ts";
 import { createCaptainModelRuntime, type CaptainModelRuntime } from "./model.ts";
 import type { CaptainPort } from "./port.ts";
@@ -52,8 +52,32 @@ const REGISTER_FOR_LANE: Readonly<Record<CaptainSessionLaneV2, PersonaRegister>>
 };
 
 const TOOL_DETAIL_TRUNCATED = "\n… truncated";
-/** Whole-turn backstop; tools own their tighter deadlines and typing has its own cosmetic clock. */
-export const DISCORD_TEXT_TURN_HARD_TIMEOUT_MS = 10 * 60_000;
+/**
+ * How long a Discord turn may show no sign of life before it is declared dead.
+ *
+ * This is not a limit on how long he may take. Asking him to look something up
+ * — a bracket, a page, a task worth real work — is a thing the room is allowed
+ * to do, and a clock that cuts the answer off at some tidy number turns honest
+ * slowness into failure. He tells the room he is going away (`say_now`) and
+ * takes the time the work takes.
+ *
+ * What is bounded is silence *inside* the machine. A turn that is working emits
+ * events continuously — tokens, tool calls, retries — so five minutes with not
+ * one of them is not a long thought, it is a dead stream nothing will revive:
+ * on 2026-08-17 a provider connection died and the turn sat with zero tokens
+ * for six minutes before anything noticed.
+ */
+export const DISCORD_TURN_STALL_MS = 5 * 60_000;
+/**
+ * How often the watchdog re-reads the wall clock.
+ *
+ * A single `setTimeout` is not a deadline on a laptop. This machine suspends,
+ * and a suspended timer resumes owing its full remaining delay: a ten-minute
+ * backstop once fired twenty-two minutes late, holding a turn — and the room's
+ * answer — open the whole time. Re-reading `Date.now()` on a short tick bounds
+ * the overshoot to one tick of *awake* time no matter how long the host slept.
+ */
+const STALL_TICK_MS = 5_000;
 
 /**
  * An empty memory still says so. A missing card reads as "you have no memory",
@@ -219,27 +243,70 @@ export async function runDurableTurn(
   }
 }
 
-/** Abort a one-shot Discord text session instead of holding its HTTP request and typing indicator forever. */
-export async function runOneShotDiscordTurn(
-  session: Pick<AgentSession, "abort" | "prompt">,
-  prompt: string,
-  images: ImageContent[],
-  timeoutMs = DISCORD_TEXT_TURN_HARD_TIMEOUT_MS,
-): Promise<boolean> {
+/**
+ * Run a Discord turn for as long as it keeps working, aborting only once it
+ * has gone quiet inside for {@link DISCORD_TURN_STALL_MS}.
+ *
+ * The session's own event stream is the liveness signal: a token, a tool call,
+ * a retry — anything at all — is proof the turn is still a turn, and resets the
+ * clock. Nothing here caps total duration, because the length of an answer is
+ * the length of the work behind it.
+ *
+ * Every Discord turn goes through here, one-shot and durable alike. A durable
+ * lane had no backstop at all before, which was survivable only while text was
+ * one-shot; a shared lane that wedges takes every speaker in the channel down
+ * with it, so it is the path that needs the watchdog most.
+ */
+export async function runTurnWithStallWatchdog<T>(
+  session: Pick<AgentSession, "abort" | "subscribe">,
+  start: () => Promise<T>,
+  options: { stallMs?: number; now?: () => number } = {},
+): Promise<{ completed: true; value: T } | { completed: false }> {
+  const now = options.now ?? Date.now;
+  const stallMs = options.stallMs ?? DISCORD_TURN_STALL_MS;
+  let lastSignAtMs = now();
+  const unsubscribe = session.subscribe(() => {
+    lastSignAtMs = now();
+  });
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const stalled = new Promise<false>((resolve) => {
+    const tick = (): void => {
+      const quietFor = now() - lastSignAtMs;
+      if (quietFor >= stallMs) {
+        resolve(false);
+        return;
+      }
+      timer = setTimeout(tick, Math.min(STALL_TICK_MS, stallMs - quietFor));
+      timer.unref?.();
+    };
+    tick();
+  });
   try {
-    const completed = await Promise.race([
-      session.prompt(prompt, { expandPromptTemplates: false, images }).then(() => true),
-      new Promise<false>((resolve) => {
-        timer = setTimeout(resolve, timeoutMs, false);
-        timer.unref?.();
-      }),
-    ]);
-    if (!completed) void session.abort().catch(() => undefined);
-    return completed;
+    const outcome = await Promise.race([start().then((value) => ({ value })), stalled]);
+    if (outcome === false) {
+      void session.abort().catch(() => undefined);
+      return { completed: false };
+    }
+    return { completed: true, value: outcome.value };
   } finally {
     if (timer !== undefined) clearTimeout(timer);
+    unsubscribe();
   }
+}
+
+/** A one-shot Discord turn under the shared watchdog; `false` means it went dead, not slow. */
+export async function runOneShotDiscordTurn(
+  session: Pick<AgentSession, "abort" | "prompt" | "subscribe">,
+  prompt: string,
+  images: ImageContent[],
+  stallMs = DISCORD_TURN_STALL_MS,
+): Promise<boolean> {
+  const outcome = await runTurnWithStallWatchdog(
+    session,
+    () => session.prompt(prompt, { expandPromptTemplates: false, images }),
+    { stallMs },
+  );
+  return outcome.completed;
 }
 
 /**
@@ -542,7 +609,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     try {
       if (normalized.durable) {
         if (lane.running === undefined && !lane.session.isStreaming) await syncModel(lane);
-        role = await runDurableTurn(lane, normalized.prompt, normalized.images.map(toImageContent));
+        const outcome = await runTurnWithStallWatchdog(lane.session, () =>
+          runDurableTurn(lane, normalized.prompt, normalized.images.map(toImageContent)),
+        );
+        if (!outcome.completed) {
+          return {
+            state: "failed",
+            captainSessionId: normalized.sessionKey,
+            turnId,
+            code: "captain_turn_stalled",
+          };
+        }
+        role = outcome.value;
       } else {
         const completed = await runOneShotDiscordTurn(
           lane.session,
@@ -554,7 +632,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             state: "failed",
             captainSessionId: normalized.sessionKey,
             turnId,
-            code: "captain_turn_timeout",
+            code: "captain_turn_stalled",
           };
         }
       }
@@ -564,9 +642,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (!normalized.durable) lane.session.dispose();
     }
     if (role === "absorbed") {
-      // Heard inside another turn's live run; that run's reply answers it, so
-      // this delivery sends nothing of its own.
-      return { state: "silent", captainSessionId: normalized.sessionKey, turnId };
+      // Heard inside another turn's live run: that run's reply answers this
+      // message too, so the delivery says so rather than sending words of its
+      // own. Distinct from silence — he did answer, just not from here.
+      return { state: "absorbed", captainSessionId: normalized.sessionKey, turnId };
     }
     const message = lane.lastAssistantText.trim();
     if (message.length === 0) {
@@ -599,16 +678,23 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   return {
     async submitDiscordTurn(request: DiscordPresenceChannelTurnRequest): Promise<CaptainChannelTurnResult> {
-      const heard = await normalizeDiscordTurn(request, deps);
+      // Whether the lane is already live decides what he needs to be told, so
+      // it is read before the prompt is built rather than after. A lane resumed
+      // from disk after a restart reads as cold and gets one redundant backlog,
+      // which costs a duplicated paragraph exactly once per channel per boot.
+      const sessionKey = discordTurnSessionKey(request);
+      const heard = await normalizeDiscordTurn(request, deps, {
+        carriesHistory: sessions.has(sessionKey),
+      });
       const { settings: discord } = resolveDiscordSettings((await settings()).discord);
       const systemTools = discordTurnHasSystemTools({
         lane: heard.lane,
         actorId: request.trigger.actorId,
         systemActorUserIds: discord.systemActorUserIds,
       });
-      // A privileged voice turn leaves the shared voice session for a one-shot
-      // of its own, so the tools it was granted cannot answer to the next
-      // speaker. Every other voice turn continues the durable lane as before.
+      // A privileged turn leaves its shared lane for a one-shot of its own, so
+      // the tools it was granted cannot answer to whoever speaks next. Every
+      // other turn, text or voice, continues the room's durable lane.
       const normalized: NormalizedDiscordTurn = {
         ...heard,
         durable: discordTurnUsesDurableSession({ durable: heard.durable, systemTools }),
@@ -632,10 +718,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         );
         return runDiscordTurn(lane, normalized, request.deliveryId);
       }
+      // Voice keeps the directory it has always written to; text rooms get
+      // their own beside it rather than moving in under a name that means
+      // something else.
       const lane = await durableSession(
         normalized.sessionKey,
         normalized.lane,
-        join(options.stateDir, "voice", encodeURIComponent(normalized.sessionKey)),
+        join(
+          options.stateDir,
+          normalized.lane === "discord_voice" ? "voice" : "rooms",
+          encodeURIComponent(normalized.sessionKey),
+        ),
         false,
         options.repoRoot,
       );

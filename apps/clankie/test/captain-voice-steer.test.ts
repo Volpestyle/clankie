@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  DISCORD_TEXT_TURN_HARD_TIMEOUT_MS,
+  DISCORD_TURN_STALL_MS,
   runDurableTurn,
   runOneShotDiscordTurn,
+  runTurnWithStallWatchdog,
 } from "../src/captain/captain.ts";
 
 /**
@@ -139,22 +140,103 @@ describe("runDurableTurn", () => {
 });
 
 describe("runOneShotDiscordTurn", () => {
-  it("allows tool-using Discord text runs beyond the typing window, then enforces the hard deadline", async () => {
+  it("declares a turn dead only after it has gone silent inside, never for being slow", async () => {
     vi.useFakeTimers();
     try {
       const abort = vi.fn(() => Promise.resolve());
       const run = runOneShotDiscordTurn(
-        { abort, prompt: () => new Promise<void>(() => undefined) },
+        { abort, prompt: () => new Promise<void>(() => undefined), subscribe: () => () => undefined },
         "hello",
         [],
       );
 
-      await vi.advanceTimersByTimeAsync(60_000);
+      // Long is not the same as dead: nothing is cut off at a tidy number.
+      await vi.advanceTimersByTimeAsync(DISCORD_TURN_STALL_MS - 1_000);
       expect(abort).not.toHaveBeenCalled();
 
-      await vi.advanceTimersByTimeAsync(DISCORD_TEXT_TURN_HARD_TIMEOUT_MS - 60_000);
-
+      await vi.advanceTimersByTimeAsync(STALL_TICK);
       await expect(run).resolves.toBe(false);
+      expect(abort).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+const STALL_TICK = 5_000;
+
+describe("runTurnWithStallWatchdog", () => {
+  it("carries a completed value through", async () => {
+    const outcome = await runTurnWithStallWatchdog(
+      { abort: () => Promise.resolve(), subscribe: () => () => undefined },
+      () => Promise.resolve("absorbed" as const),
+    );
+    expect(outcome).toEqual({ completed: true, value: "absorbed" });
+  });
+
+  /**
+   * The bracket case: 23 browser calls over nine minutes, answering a question
+   * the room actually asked. Work is not a wedge, and a turn that keeps
+   * emitting signs of life must be allowed to run past any fixed clock.
+   */
+  it("lets a turn run indefinitely while it keeps showing signs of life", async () => {
+    vi.useFakeTimers();
+    try {
+      const abort = vi.fn(() => Promise.resolve());
+      let emit: (() => void) | undefined;
+      let finish: (() => void) | undefined;
+      const outcome = runTurnWithStallWatchdog(
+        {
+          abort,
+          subscribe: (listener) => {
+            emit = () => listener({ type: "agent_settled" } as never);
+            return () => undefined;
+          },
+        },
+        () => new Promise<void>((resolve) => (finish = resolve)),
+      );
+
+      // Nine minutes of steady work, well past any whole-turn deadline.
+      for (let minute = 0; minute < 9; minute += 1) {
+        await vi.advanceTimersByTimeAsync(60_000);
+        emit?.();
+      }
+      expect(abort).not.toHaveBeenCalled();
+
+      finish?.();
+      await expect(outcome).resolves.toMatchObject({ completed: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * The turn that provoked this: a host suspend held one `setTimeout` past its
+   * delay and a ten-minute backstop fired twenty-two minutes late, so the room
+   * waited on an answer nothing was going to produce. Ticking against a clock
+   * that jumped forward has to fire on the next tick, not on the delay the
+   * timer still believes it owes.
+   */
+  it("fires on the next tick after a suspended host jumps the clock past the stall window", async () => {
+    vi.useFakeTimers();
+    try {
+      let now = 1_000_000;
+      const abort = vi.fn(() => Promise.resolve());
+      const outcome = runTurnWithStallWatchdog(
+        { abort, subscribe: () => () => undefined },
+        () => new Promise<void>(() => undefined),
+        { stallMs: 180_000, now: () => now },
+      );
+
+      await vi.advanceTimersByTimeAsync(STALL_TICK);
+      now += STALL_TICK;
+      expect(abort).not.toHaveBeenCalled();
+
+      // The host slept: wall clock leaps an hour while timers stood still.
+      now += 60 * 60_000;
+      await vi.advanceTimersByTimeAsync(STALL_TICK);
+
+      await expect(outcome).resolves.toEqual({ completed: false });
       expect(abort).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();

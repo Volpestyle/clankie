@@ -493,6 +493,23 @@ function discordActionTools(
     lane === "discord_presence"
       ? [
           defineTool({
+            name: "say_now",
+            label: "Say something now",
+            description:
+              "Say one short thing to the channel immediately, without ending your turn. Your real reply still posts when you finish. Use this BEFORE you go do something slow — looking a bracket up, reading a page, working through a task — so the room knows you are on it instead of watching silence. Say what you are going off to do, in your own voice, and then go do it. Do not use it to pad a turn you can just answer.",
+            parameters: Type.Object({
+              text: Type.String({
+                minLength: 1,
+                maxLength: 600,
+                description: "What to say now, in your own voice. One or two sentences.",
+              }),
+            }),
+            execute: (callId, params) =>
+              deps
+                .discordActions!.execute({ action: "say_now", ...context(callId), text: params.text })
+                .then(json),
+          }),
+          defineTool({
             name: "discord_react",
             label: "React to message",
             description:

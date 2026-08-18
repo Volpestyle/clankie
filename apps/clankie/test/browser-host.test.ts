@@ -118,6 +118,7 @@ describe("browser host", () => {
   ): Promise<BrowserHost> {
     host = await createBrowserHost({
       runnerStateRoot: stateRoot,
+      attachmentRoot: stateRoot,
       logger,
       environment: {},
       spawnImpl: (() => server) as never,

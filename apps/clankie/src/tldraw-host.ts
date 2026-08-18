@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { discordAttachmentRoot } from "@clankie/settings";
 import {
   DrawDiagramResultSchema,
   TLDRAW_ARTIFACT_DIRECTORY,
@@ -68,6 +69,8 @@ export interface TldrawHostLogger {
 
 export interface TldrawHostOptions {
   readonly runnerStateRoot: string;
+  /** Where a diagram is written so the Discord bridge can serve it back; supplied by the composition root. */
+  readonly attachmentRoot?: string;
   readonly logger: TldrawHostLogger;
   readonly environment?: NodeJS.ProcessEnv;
   /** Injectable transport, so tests never need a running desktop app. */
@@ -110,9 +113,8 @@ export async function createTldrawHost(options: TldrawHostOptions): Promise<Tldr
   const activeSystem = environment.CLANKIE_TLDRAW_DESIGN_SYSTEM?.trim() || undefined;
 
   // Diagrams land under the root the Discord attachment resolver already
-  // serves, for the same reason screenshots do (ADR 0088). Without that root
-  // they still get written and are simply not sendable.
-  const artifactRoot = environment.CLANKIE_DISCORD_ATTACHMENT_ROOT?.trim() || options.runnerStateRoot;
+  // serves, for the same reason screenshots do (ADR 0088).
+  const artifactRoot = options.attachmentRoot ?? discordAttachmentRoot(environment);
   await mkdir(join(artifactRoot, ARTIFACT_SUBDIRECTORY), { recursive: true, mode: 0o700 });
 
   const documentDirectory = join(options.runnerStateRoot, "tldraw");
