@@ -14,7 +14,6 @@ import {
   selectInboundImageAttachments,
   TYPING_REFRESH_MS,
   TYPING_MAX_DURATION_MS,
-  TYPING_START_DELAY_MS,
   type DiscordTextIngressConfig,
   type DiscordTextIngressEvidence,
   type DiscordTextIngressPort,
@@ -205,9 +204,9 @@ describe("DiscordTextIngress", () => {
     expect(conflict).toEqual({ state: "dropped", reason: "delivery_id_conflict" });
     expect(port.turns).toHaveLength(1);
     expect(port.replies).toHaveLength(1);
-    // The turn settled inside the typing delay, so nothing was ever signalled —
-    // and neither the deduplicated retry nor the refused conflict signals now.
-    expect(port.typing).toHaveLength(0);
+    // The admitted turn signals once; neither its deduplicated retry nor the
+    // refused conflict starts another indicator.
+    expect(port.typing).toHaveLength(1);
     expect(evidence.map((event) => event.outcome)).toContain("deduplicated");
     expect(JSON.stringify(evidence)).not.toContain("first body");
     expect(JSON.stringify(evidence)).not.toContain("drifted body");
@@ -636,12 +635,7 @@ describe("typing while he composes", () => {
       const ingress = new DiscordTextIngress(port, config());
 
       const outcome = ingress.handle(guildMessage("message-typing"));
-      // Typing is a promise of words; a turn that settles inside the delay
-      // never made one, so nothing has been sent yet.
-      await vi.advanceTimersByTimeAsync(TYPING_START_DELAY_MS - 1);
-      expect(port.typing).toHaveLength(0);
-
-      await vi.advanceTimersByTimeAsync(1);
+      await vi.advanceTimersByTimeAsync(0);
       expect(port.typing).toHaveLength(1);
       expect(port.typing[0]).toMatchObject({
         action: "discord.presence.typing_start",
@@ -688,7 +682,7 @@ describe("typing while he composes", () => {
         mentionsBot: false,
         body: "clankie how did the run go?",
       });
-      await vi.advanceTimersByTimeAsync(TYPING_START_DELAY_MS);
+      await vi.advanceTimersByTimeAsync(0);
       expect(port.typing).toHaveLength(1);
       pending.get("message-asked")?.(settled("message-asked"));
       await asked;
@@ -702,7 +696,7 @@ describe("typing while he composes", () => {
         mentionsBot: false,
         body: "did it though?",
       });
-      await vi.advanceTimersByTimeAsync(TYPING_START_DELAY_MS);
+      await vi.advanceTimersByTimeAsync(0);
       expect(port.typing).toHaveLength(2);
       expect(port.typing[1]).toMatchObject({
         idempotencyKey: "message-followup:typing:0",
@@ -738,7 +732,7 @@ describe("typing while he composes", () => {
         mentionsBot: false,
         body: "clankie how did the run go?",
       });
-      await vi.advanceTimersByTimeAsync(TYPING_START_DELAY_MS);
+      await vi.advanceTimersByTimeAsync(0);
       expect(port.typing).toHaveLength(1);
       pending.get("message-asked")?.(settled("message-asked"));
       await asked;
@@ -755,7 +749,7 @@ describe("typing while he composes", () => {
       // Checking in on a channel minutes later is him reading, not the room
       // waiting on him; a timer must never light the channel up.
       const caught = ingress.catchUp();
-      await vi.advanceTimersByTimeAsync(TYPING_START_DELAY_MS * 4);
+      await vi.advanceTimersByTimeAsync(TYPING_REFRESH_MS);
       pending.get("message-later")?.(settled("message-later"));
       await expect(caught).resolves.toMatchObject([{ state: "settled" }]);
       expect(port.typing).toHaveLength(1);

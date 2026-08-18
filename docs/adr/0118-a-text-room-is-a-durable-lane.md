@@ -105,12 +105,10 @@ without ending the turn or spending his reply. Its description tells him when:
 before going off to do something slow, in his own voice, never to pad a turn he
 could just answer. What he says is his; nothing here writes it for him. The
 typing indicator now also runs for the whole turn rather than stopping after a
-minute, so "he is working" stays visible the entire time. Typing starts two
-seconds in, so a turn that finishes fast never promised words it then withheld
-— though it is honest to say this hides only the quickest false starts: silence
-and answers take about the same time (declines run 2–18 seconds), and no delay
-short enough to keep the indicator useful can separate them. Knowing sooner
-needs a mid-turn signal the captain does not send today.
+minute, so "he is working" stays visible the entire time. Silence and answers
+take about the same time, so delaying the indicator cannot distinguish them
+without also hiding useful progress. Knowing sooner needs a mid-turn signal the
+captain does not send today.
 
 **One derived attachment root, shared by writer and reader.**
 `discordAttachmentRoot(env)` in `@clankie/settings` defaults to
