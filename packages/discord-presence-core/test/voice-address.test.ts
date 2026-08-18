@@ -46,7 +46,6 @@ describe("classifyVoiceAddress", () => {
     expect(classifyVoiceAddress("ask clanki about it", displayNameOnly)).toBe("none");
     expect(classifyVoiceAddress("that is clankie's job", displayNameOnly)).toBe("none");
     expect(classifyVoiceAddress("bob can you ask clankie about it", displayNameOnly)).toBe("none");
-    expect(classifyVoiceAddress("hey bob what did clankie say to you", displayNameOnly)).toBe("none");
     expect(classifyVoiceAddress("bob you should show clankie your build", displayNameOnly)).toBe("none");
     expect(classifyVoiceAddress("bob did you finish that thing", displayNameOnly)).toBe("none");
   });
@@ -77,6 +76,11 @@ describe("classifyVoiceAddress", () => {
   it("answers to any name in a characterNames-style list", () => {
     expect(voiceAddressesCharacter("yo clank you hear that", characterNamesList)).toBe(true);
     expect(classifyVoiceAddress("clanky has opinions i bet", characterNamesList)).toBe("mentioned");
+    // Talking to Bob about him. `none` needs positive evidence — an ask/tell
+    // object or a possessive — and this has neither, so he is offered the turn
+    // and declines it. One declined turn is the honest price of never guessing
+    // a second addressee from word order.
+    expect(classifyVoiceAddress("hey bob what did clankie say to you", displayNameOnly)).toBe("mentioned");
     expect(voiceAddressesCharacter("what do you think clanky", characterNamesList)).toBe(true);
   });
 });

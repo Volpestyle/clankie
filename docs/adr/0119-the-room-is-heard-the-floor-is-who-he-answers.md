@@ -51,10 +51,23 @@ So:
 3. **`mentioned`** (name hit that is not clearly about him — including
    "clankie did you see that", "alright clankie go ahead") also opens or
    offers, from anyone, dormant or engaged. Word lists never drop these.
-4. **`none`** (possessive, ask/tell object, another addressee first) is
-   listen or the dormant volition gate.
+4. **`none`** (possessive, or an ask/tell object — "that is clankie's job",
+   "ask clankie about it") is listen or the dormant volition gate. It is the
+   only bucket he is never offered a turn on, so it demands positive evidence
+   the room is talking _about_ him. A second addressee cannot be inferred from
+   word order: no other name is in evidence, and every discourse marker people
+   open a sentence with reads as a hail. "so what do you think clankie" is a
+   direct question.
 5. **Holder nameless speech** is still `offer`. Occupant display names label
    utterances; identity stays `speakerId`.
+6. **A running `ask_clankie` holds the floor, for a bounded time.** Looking
+   something up is work, and a 90-second lookup must not decay mid-answer, so
+   a heartbeat refreshes the floor while the handoff runs. It stops after
+   `FLOOR_WORK_MAX_MS`, matched to the captain's own stall watchdog: past that
+   the handoff is not slow, it is gone. `stopFloorWork` runs in a `finally`,
+   which a promise that never settles never reaches — and decay is the only
+   self-heal the session has, since release arms the hold window, the hold
+   window closes the conversation, and the close drops the stale call.
 
 Overlapping captures flush in `startedAtMs` order. Addressed speech is never
 held for reorder, so a re-address can still barge in. Other finals wait at most
@@ -69,8 +82,17 @@ held for reorder, so a re-address can still barge in. Other finals wait at most
 - **Tighten address so about-him mentions never wake.** Rejected: once
   silence is a real outcome, the matcher's only job is opening a session.
   A missed "hey clankie" is worse than a declined "ask clankie".
-- **Offer a turn on every overheard line.** Rejected: that is the 1:1 default
-  with extra steps. Injection is enough; volition covers a genuine jump-in.
+- **Offer a turn on every overheard line.** Rejected on cost, not on
+  principle: a `createResponse` per heard line is real money and real latency,
+  and `conversationOps` serializes, so a lively room would queue him behind
+  itself. Injection is enough; volition covers a genuine jump-in. If the
+  economics change, this is the first thing to revisit — `listen` is a budget
+  decision, not a claim that he should have no opinion.
+- **Infer a second addressee from word order.** Rejected: it manufactured
+  `none` — the one bucket with no appeal — out of sentences with no other
+  name in them at all. Ambiguity resolves to `mentioned`, where he decides.
+  A wrong `mentioned` costs one declined turn; a wrong `none` drops an
+  address.
 - **Transcribe unconsented speakers so the group is complete.** Rejected:
   consent (ADR 0071) is the hearing grant, not a group-conversation defect.
 

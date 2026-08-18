@@ -99,7 +99,6 @@ const ABOUT_VERBS = new Set([
   "called",
   "calling",
 ]);
-const SECOND_PERSON = new Set(["you", "your", "youre", "yourself"]);
 
 /** Phonetic keys for every name he answers to, empty keys discarded. */
 export function addressKeys(names: readonly string[]): ReadonlySet<string> {
@@ -112,10 +111,14 @@ export type VoiceAddressKind = "addressed" | "mentioned" | "none";
  * How his name landed in a transcript.
  *
  * `addressed` is a clean hail. `mentioned` is a name hit that is not clearly
- * about him or aimed at someone else — including the name-first questions a
- * word list would drop. `none` is possessive, ask/tell-object, or another
- * addressee first. Nothing here forces him to speak: the floor offers a turn
- * on addressed and mentioned, and only `none` falls through to listen/volition.
+ * about him — including the name-first questions a word list would drop.
+ * `none` is possessive or ask/tell-object, and nothing else: it is the only
+ * bucket he is never offered a turn on, so it demands positive evidence the
+ * room is talking *about* him. Inferring a second addressee from word order
+ * cannot supply that — no other name is in evidence, and every discourse
+ * marker people open a sentence with ("so what do you think clankie") reads
+ * as one. Ambiguity resolves to `mentioned`, where he decides for himself; a
+ * wrong `mentioned` costs one declined turn, a wrong `none` drops an address.
  */
 export function classifyVoiceAddress(transcript: string, names: readonly string[]): VoiceAddressKind {
   const keys = addressKeys(names);
@@ -128,7 +131,6 @@ export function classifyVoiceAddress(transcript: string, names: readonly string[
   }
   if (nameHits.length === 0) return "none";
 
-  const otherAddressee = namesSomeoneElseFirst(tokens, nameHits);
   let mentioned = false;
   for (const hit of nameHits) {
     const previous = hit.index > 0 ? tokens[hit.index - 1]?.word : undefined;
@@ -140,8 +142,7 @@ export function classifyVoiceAddress(transcript: string, names: readonly string[
     const thirdPerson = after !== undefined && THIRD_PERSON_AFTER_NAME.has(after);
     if (aboutObject) continue;
     if (hit.possessive && !last && !vocative) continue;
-    if (otherAddressee && !first) continue;
-    if (vocative || (first && !thirdPerson) || (last && !otherAddressee)) return "addressed";
+    if (vocative || (first && !thirdPerson) || last) return "addressed";
     mentioned = true;
   }
   return mentioned ? "mentioned" : "none";
@@ -153,17 +154,4 @@ export function classifyVoiceAddress(transcript: string, names: readonly string[
  */
 export function voiceAddressesCharacter(transcript: string, names: readonly string[]): boolean {
   return classifyVoiceAddress(transcript, names) !== "none";
-}
-
-function namesSomeoneElseFirst(
-  tokens: readonly TranscriptToken[],
-  nameHits: readonly { readonly index: number }[],
-): boolean {
-  if (tokens.length < 2) return false;
-  if (nameHits.some((hit) => hit.index === 0)) return false;
-  const first = tokens[0]?.word;
-  const second = tokens[1]?.word;
-  if (first === undefined || second === undefined) return false;
-  if (VOCATIVES.has(first) && !nameHits.some((hit) => hit.index === 1)) return true;
-  return SECOND_PERSON.has(second) || second === "can" || second === "could";
 }

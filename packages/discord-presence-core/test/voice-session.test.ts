@@ -24,6 +24,7 @@ import {
   ENGAGED_TICK_MS,
   SPEAKER_TRANSCRIPTION_IDLE_MS,
   FLOOR_WORK_HEARTBEAT_MS,
+  FLOOR_WORK_MAX_MS,
   ADDRESSED_OFFER_TURN_ITEM,
   ENGAGED_OFFER_TURN_ITEM,
   UNPROMPTED_TURN_ITEM,
@@ -1590,6 +1591,40 @@ describe("ability path", () => {
     release?.(settledResult("turn-slow", "Found it."));
     await flush();
     expect(at(harness.conversation().functionResults, 0).output).toBe("Found it.");
+  });
+
+  // A handoff that never settles is not a slow one: `stopFloorWork` lives in a
+  // `finally` that a hung promise never reaches, so the heartbeat has to stop
+  // itself. Decay is the only self-heal here — it arms the hold window, which
+  // closes the conversation and drops the stale call — so the floor must be
+  // allowed to lapse rather than be pinned engaged until the session ages out.
+  it("lets the floor lapse when a captain handoff never returns", async () => {
+    const harness = await joinedHarness({
+      captain: () => new Promise<CaptainChannelTurnResult>(() => undefined),
+    });
+    await harness.consent(ALICE);
+    await harness.say(ALICE, "hey clankie look this up");
+    harness.conversation().input.onFunctionCall({
+      callId: "call_wedged",
+      name: "ask_clankie",
+      argumentsJson: '{"request":"look this up"}',
+    });
+    await flush();
+    expect(harness.session.status().floorState).toBe("engaged");
+    // Still held while the work is plausibly alive.
+    harness.clock.now = FLOOR_WORK_MAX_MS - 1_000;
+    harness.timers.fire(FLOOR_WORK_HEARTBEAT_MS);
+    harness.timers.fire(ENGAGED_TICK_MS);
+    await flush();
+    expect(harness.session.status().floorState).toBe("engaged");
+    // Past the bound the heartbeat gives up and stops re-arming, so the next
+    // decay tick past the window releases.
+    harness.clock.now = 2 * FLOOR_WORK_MAX_MS;
+    harness.timers.fire(FLOOR_WORK_HEARTBEAT_MS);
+    expect(harness.timers.pending().some((entry) => entry.delayMs === FLOOR_WORK_HEARTBEAT_MS)).toBe(false);
+    harness.timers.fire(ENGAGED_TICK_MS);
+    await flush();
+    expect(harness.session.status().floorState).toBe("dormant");
   });
 });
 

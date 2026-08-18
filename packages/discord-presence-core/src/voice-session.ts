@@ -131,6 +131,18 @@ export const ENGAGED_HOLD_MS = 5 * 60_000;
 export const ENGAGED_TICK_MS = 5_000;
 /** Keeps the floor warm while `ask_clankie` is in flight (ADR 0119). */
 export const FLOOR_WORK_HEARTBEAT_MS = 15_000;
+/**
+ * How long the work heartbeat may hold the floor before it gives up.
+ *
+ * `stopFloorWork` runs in a `finally`, which never fires for a promise that
+ * never settles — a wedged transport, not a slow captain. Without a bound the
+ * heartbeat would refresh decay forever, and decay is the *only* self-heal
+ * this session has: release arms the hold window, the hold window closes the
+ * conversation, and the close drops the stale function call so the next
+ * utterance opens a clean session. Matched to the captain's own stall
+ * watchdog, so a handoff still working is never cut off by this.
+ */
+export const FLOOR_WORK_MAX_MS = 5 * 60_000;
 /** Close a speaker's metered listener after this much silence. */
 export const SPEAKER_TRANSCRIPTION_IDLE_MS = 2 * 60_000;
 /**
@@ -2391,12 +2403,16 @@ export class DiscordVoiceSession {
   }
 
   private startFloorWork(speakerId: string): void {
-    this.floor.holdForWork(speakerId, this.clock());
+    const startedAtMs = this.clock();
+    this.floor.holdForWork(speakerId, startedAtMs);
     this.stopFloorWork();
     const generation = this.sessionGeneration;
     const beat = (): void => {
       this.workHeartbeatHandle = undefined;
       if (generation !== this.sessionGeneration) return;
+      // Stop holding rather than hold forever: past this the handoff is not
+      // slow, it is gone, and decay has to be allowed to recycle the session.
+      if (this.clock() - startedAtMs >= FLOOR_WORK_MAX_MS) return;
       this.floor.holdForWork(speakerId, this.clock());
       this.workHeartbeatHandle = this.timers.setTimeout(beat, FLOOR_WORK_HEARTBEAT_MS);
     };

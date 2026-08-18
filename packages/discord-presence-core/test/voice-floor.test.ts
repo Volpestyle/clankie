@@ -116,17 +116,19 @@ describe("holding the floor", () => {
     });
     expect(f.floorHolderId).toBe("alice");
     expect(f.observeTranscript(said("bob", "hey bob what did clankie say to you", 6_000))).toEqual({
-      action: "listen",
+      action: "offer",
+      reason: "mentioned",
     });
     expect(f.floorHolderId).toBe("alice");
   });
 
-  it("clear third-party talk about him does not offer a turn", () => {
+  it("only positive about-him evidence stays listen; ambiguous mentions are offered", () => {
     const f = floor();
     f.observeTranscript(said("alice", "hey clankie", 0));
     expect(f.observeTranscript(said("bob", "ask clankie about it", 5_000))).toEqual({ action: "listen" });
     expect(f.observeTranscript(said("bob", "hey bob what did clankie say to you", 6_000))).toEqual({
-      action: "listen",
+      action: "offer",
+      reason: "mentioned",
     });
     expect(f.floorHolderId).toBe("alice");
   });
