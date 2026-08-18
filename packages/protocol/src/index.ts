@@ -3095,6 +3095,8 @@ export type DiscordVoiceTranscriptionOutcome = z.infer<typeof DiscordVoiceTransc
 export const DiscordVoiceFloorDecisionActionSchema = z.enum([
   "wake",
   "hold",
+  "offer",
+  "listen",
   "release",
   "volition_gate_open",
   "ignore",
@@ -3103,6 +3105,8 @@ export type DiscordVoiceFloorDecisionAction = z.infer<typeof DiscordVoiceFloorDe
 
 export const DiscordVoiceFloorDecisionReasonSchema = z.enum([
   "addressed",
+  "mentioned",
+  "holder",
   "reply_policy_all",
   "volition",
   "explicit",

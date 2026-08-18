@@ -22,7 +22,7 @@
  * transcript and on `tick`.
  */
 
-import { voiceAddressesCharacter } from "./voice-address.ts";
+import { classifyVoiceAddress } from "./voice-address.ts";
 
 export type FloorState = "dormant" | "engaged";
 
@@ -50,9 +50,19 @@ export interface VoiceTranscriptEvent {
 }
 
 export type FloorDecision =
-  | { readonly action: "wake"; readonly reason: "addressed" | "reply_policy_all" | "volition" }
-  /** Engaged: the floor holder continued, or someone re-addressed him (floor moves to that speaker). */
+  | { readonly action: "wake"; readonly reason: "addressed" | "mentioned" | "reply_policy_all" | "volition" }
+  /** Engaged: a clean hail; floor moves. Speech is still an offer he may decline. */
   | { readonly action: "hold" }
+  /**
+   * A turn whose correct answer may be silence: the holder kept talking
+   * without naming him, or his name came up without a clean hail.
+   */
+  | { readonly action: "offer"; readonly reason?: "mentioned" | "holder" }
+  /**
+   * Someone else spoke without addressing him. Inject it; do not spend a turn.
+   * Does not refresh decay.
+   */
+  | { readonly action: "listen" }
   /** The only way the floor is ever given up: nothing gave him a reason to keep it. */
   | { readonly action: "release"; readonly reason: "decay" }
   | { readonly action: "ignore" }
@@ -171,8 +181,7 @@ export class VoiceFloor {
   /**
    * Undefined while dormant. While engaged it is whoever most recently
    * addressed him — or, after a taken volition offer, whoever's remark
-   * provoked it, so the natural nameless reply to his interjection reads as
-   * conversation rather than crosstalk.
+   * provoked it. Used for barge-in, not to force a spoken turn.
    */
   public get floorHolderId(): string | undefined {
     return this.holderId;
@@ -197,6 +206,32 @@ export class VoiceFloor {
   /** His own speech is a reason to hold the floor; playback refreshes decay. */
   public noteAssistantSpokeAt(atMs: number): void {
     if (this.floorState === "engaged") this.lastRelevantAtMs = atMs;
+  }
+
+  /**
+   * He took an offered turn from this speaker. Mentioned-name offers do not
+   * move the holder until he actually speaks — otherwise a "hey bob what did
+   * clankie say" style mention would steal barge-in.
+   */
+  public noteSpeechFrom(speakerId: string, atMs: number): void {
+    if (this.floorState !== "engaged") {
+      this.engage(speakerId, atMs);
+      return;
+    }
+    this.holderId = speakerId;
+    this.lastRelevantAtMs = atMs;
+  }
+
+  /**
+   * Keep the floor alive while he is working (a long `ask_clankie`). If the
+   * floor already lapsed, re-engage on the speaker who asked.
+   */
+  public holdForWork(speakerId: string, atMs: number): void {
+    if (this.floorState === "engaged") {
+      this.lastRelevantAtMs = atMs;
+      return;
+    }
+    this.engage(speakerId, atMs);
   }
 
   /**
@@ -242,27 +277,29 @@ export class VoiceFloor {
 
   private observeEngaged(event: VoiceTranscriptEvent): FloorDecision {
     if (!hasSpeech(event.text)) return { action: "ignore" };
-    if (voiceAddressesCharacter(event.text, this.names)) {
+    const kind = classifyVoiceAddress(event.text, this.names);
+    if (kind === "addressed") {
       this.holderId = event.speakerId;
       this.lastRelevantAtMs = event.atMs;
       return { action: "hold" };
     }
-    if (event.speakerId === this.holderId) {
-      this.lastRelevantAtMs = event.atMs;
-      return { action: "hold" };
+    if (kind === "mentioned") {
+      return { action: "offer", reason: "mentioned" };
     }
-    // Crosstalk between other people. Deliberately does not refresh decay:
-    // a lively room talking among itself is evidence the floor should lapse,
-    // not that it should be held.
-    return { action: "ignore" };
+    if (event.speakerId === this.holderId) return { action: "offer", reason: "holder" };
+    return { action: "listen" };
   }
 
   /** Dormant judgment of one transcript; mutates into engaged on a wake. */
   private wakeFor(event: VoiceTranscriptEvent): FloorDecision | undefined {
     if (!hasSpeech(event.text)) return undefined;
-    if (voiceAddressesCharacter(event.text, this.names)) {
+    const kind = classifyVoiceAddress(event.text, this.names);
+    if (kind === "addressed") {
       this.engage(event.speakerId, event.atMs);
       return { action: "wake", reason: "addressed" };
+    }
+    if (kind === "mentioned") {
+      return { action: "offer", reason: "mentioned" };
     }
     if (this.replyPolicy === "all") {
       this.engage(event.speakerId, event.atMs);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { phoneticKey, voiceAddressesCharacter } from "../src/voice-address.ts";
+import { classifyVoiceAddress, phoneticKey, voiceAddressesCharacter } from "../src/voice-address.ts";
 
 // The tolerance must come from the phonetics, not from a padded alias list, so
 // most cases run against the display name alone.
@@ -22,13 +22,33 @@ describe("phoneticKey", () => {
   });
 });
 
-describe("voiceAddressesCharacter", () => {
-  it("wakes on the ways a transcriber actually garbles the name", () => {
-    expect(voiceAddressesCharacter("hey clanky what are you up to", displayNameOnly)).toBe(true);
-    expect(voiceAddressesCharacter("clankee are you there", displayNameOnly)).toBe(true);
-    expect(voiceAddressesCharacter("i think klankie broke the build", displayNameOnly)).toBe(true);
-    expect(voiceAddressesCharacter("ask clanki about it", displayNameOnly)).toBe(true);
-    expect(voiceAddressesCharacter("that is clankie's job", displayNameOnly)).toBe(true);
+describe("classifyVoiceAddress", () => {
+  it("treats a clean hail as addressed", () => {
+    expect(classifyVoiceAddress("hey clanky what are you up to", displayNameOnly)).toBe("addressed");
+    expect(classifyVoiceAddress("clankee are you there", displayNameOnly)).toBe("addressed");
+    expect(classifyVoiceAddress("thanks klankie", displayNameOnly)).toBe("addressed");
+    expect(classifyVoiceAddress("clanki hold on a second", displayNameOnly)).toBe("addressed");
+    expect(classifyVoiceAddress("clankie run the tests", displayNameOnly)).toBe("addressed");
+    expect(classifyVoiceAddress("what do you think clanky", characterNamesList)).toBe("addressed");
+  });
+
+  it("offers on a name hit that a word list would have dropped", () => {
+    expect(classifyVoiceAddress("clankie is that thing on", displayNameOnly)).toBe("mentioned");
+    expect(classifyVoiceAddress("clankie does that work", displayNameOnly)).toBe("mentioned");
+    expect(classifyVoiceAddress("clankie was that a shiny", displayNameOnly)).toBe("mentioned");
+    expect(classifyVoiceAddress("clankie just tell me the score", displayNameOnly)).toBe("mentioned");
+    expect(classifyVoiceAddress("alright clankie go ahead", displayNameOnly)).toBe("mentioned");
+    expect(classifyVoiceAddress("clankie did you see that", displayNameOnly)).toBe("mentioned");
+    expect(classifyVoiceAddress("i think klankie broke the build", displayNameOnly)).toBe("mentioned");
+  });
+
+  it("ignores talk that is clearly about him or aimed at someone else", () => {
+    expect(classifyVoiceAddress("ask clanki about it", displayNameOnly)).toBe("none");
+    expect(classifyVoiceAddress("that is clankie's job", displayNameOnly)).toBe("none");
+    expect(classifyVoiceAddress("bob can you ask clankie about it", displayNameOnly)).toBe("none");
+    expect(classifyVoiceAddress("hey bob what did clankie say to you", displayNameOnly)).toBe("none");
+    expect(classifyVoiceAddress("bob you should show clankie your build", displayNameOnly)).toBe("none");
+    expect(classifyVoiceAddress("bob did you finish that thing", displayNameOnly)).toBe("none");
   });
 
   it("survives capitalization and punctuation", () => {
@@ -56,6 +76,7 @@ describe("voiceAddressesCharacter", () => {
 
   it("answers to any name in a characterNames-style list", () => {
     expect(voiceAddressesCharacter("yo clank you hear that", characterNamesList)).toBe(true);
-    expect(voiceAddressesCharacter("clanky has opinions i bet", characterNamesList)).toBe(true);
+    expect(classifyVoiceAddress("clanky has opinions i bet", characterNamesList)).toBe("mentioned");
+    expect(voiceAddressesCharacter("what do you think clanky", characterNamesList)).toBe(true);
   });
 });

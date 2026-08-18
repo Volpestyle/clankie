@@ -283,7 +283,9 @@ const voiceSession =
           const channel = client.guilds.cache.get(guildId)?.channels.cache.get(channelId);
           if (channel === undefined || !channel.isVoiceBased()) return [];
           // He is in his own channel and is not someone he needs memory of.
-          return [...channel.members.keys()].filter((userId) => userId !== client.user?.id);
+          return [...channel.members.values()]
+            .filter((member) => member.id !== client.user?.id)
+            .map((member) => ({ userId: member.id, displayName: member.displayName }));
         },
         realtime: createVoiceRealtimePorts({
           apiKey: realtimeCredential.key,

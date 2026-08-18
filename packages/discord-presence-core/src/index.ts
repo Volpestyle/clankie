@@ -52,11 +52,15 @@ export {
 } from "./voice-ingress.ts";
 export {
   CAPTAIN_UNREACHABLE_TEXT,
+  ADDRESSED_OFFER_TURN_ITEM,
+  ENGAGED_OFFER_TURN_ITEM,
   DiscordVoiceSession,
   ENGAGED_HOLD_MS,
   ENGAGED_TICK_MS,
+  FLOOR_WORK_HEARTBEAT_MS,
   TRANSCRIPT_RING_MAX_BYTES,
   TRANSCRIPT_RING_MAX_LINES,
+  UTTERANCE_REORDER_GRACE_MS,
   type DiscordVoiceBriefing,
   type DiscordVoiceBriefingRequest,
   type LookAtScreenResult,
@@ -64,6 +68,7 @@ export {
   type DiscordVoiceSessionOptions,
   type DiscordVoiceSessionStatus,
   type JoinDiscordVoiceInput,
+  type VoiceRoomOccupant,
   type VoiceConversationOpenInput,
   type VoiceConversationPort,
   type VoiceTranscriptionHandlers,
@@ -105,7 +110,13 @@ export {
   type DiscordVoiceConsentPolicy,
   type DiscordVoiceConsentSession,
 } from "./voice-consent.ts";
-export { addressKeys, phoneticKey, voiceAddressesCharacter } from "./voice-address.ts";
+export {
+  addressKeys,
+  classifyVoiceAddress,
+  phoneticKey,
+  voiceAddressesCharacter,
+  type VoiceAddressKind,
+} from "./voice-address.ts";
 export {
   DEFAULT_DECAY_WINDOW_MS,
   VOLITION_DEFAULTS,

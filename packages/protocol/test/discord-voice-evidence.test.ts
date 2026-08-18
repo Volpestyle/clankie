@@ -53,6 +53,23 @@ describe("Discord voice evidence (ADR 0057)", () => {
         reason: "addressed",
         state: "engaged",
       },
+      {
+        type: "floor_decision",
+        ...scope,
+        userId: "user-2",
+        deliveryId: "delivery-1b",
+        action: "listen",
+        state: "engaged",
+      },
+      {
+        type: "floor_decision",
+        ...scope,
+        userId: "user-1",
+        deliveryId: "delivery-1c",
+        action: "offer",
+        reason: "mentioned",
+        state: "engaged",
+      },
       { type: "floor", ...scope, state: "engaged", reason: "addressed" },
       { type: "floor", ...scope, state: "dormant", reason: "decay" },
       {

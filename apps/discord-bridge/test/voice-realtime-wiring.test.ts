@@ -94,6 +94,7 @@ vi.mock("prism-media", async () => {
 
 import * as discordVoiceModule from "@discordjs/voice";
 import {
+  ADDRESSED_OFFER_TURN_ITEM,
   DiscordVoiceIngress,
   DiscordVoiceSession,
   type RealtimeSocket,
@@ -324,7 +325,8 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
     expect(textItems[0]).toContain("Recent room transcript (JSONL;");
     expect(textItems[0]).toContain(JSON.stringify({ speakerId: OWNER, text: "clankie, you there?" }));
     expect(textItems[1]).toBe("Right now: tending the garden.");
-    expect(textItems).toHaveLength(2);
+    expect(textItems[2]).toBe(ADDRESSED_OFFER_TURN_ITEM);
+    expect(textItems).toHaveLength(3);
     expect(frames.some((frame) => frame.type === "response.create")).toBe(true);
 
     // The wake is receipt-visible: floor evidence reports engaged/addressed.

@@ -39,5 +39,9 @@ service (`apps/clankie`) plus the surfaces that reach it.
 - A Discord turn from `systemActorUserIds` may use the operator's machine
   tools (bash, herdr), spoken or typed. Everyone else stays social. A granted
   turn runs one-shot, so the shared voice session never holds a shell.
+- Always give Clankie maximum agency. Hand him context and tools and let him
+  decide; don't gate behavior per trigger, script his words, or add a rule
+  where volition would do. The only limits are the trust and safety
+  boundaries above, never timidity.
 - Agents coordinate through the herdr CLI and plain files. There is no
   mission protocol; say what you did, honestly.

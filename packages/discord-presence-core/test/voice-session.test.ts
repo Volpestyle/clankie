@@ -23,6 +23,9 @@ import {
   ENGAGED_HOLD_MS,
   ENGAGED_TICK_MS,
   SPEAKER_TRANSCRIPTION_IDLE_MS,
+  FLOOR_WORK_HEARTBEAT_MS,
+  ADDRESSED_OFFER_TURN_ITEM,
+  ENGAGED_OFFER_TURN_ITEM,
   UNPROMPTED_TURN_ITEM,
   type DiscordVoiceBriefingRequest,
   type JoinDiscordVoiceInput,
@@ -368,6 +371,7 @@ interface HarnessOptions {
   readonly lookAtScreen?: () => Promise<import("../src/voice-session.ts").LookAtScreenResult>;
   readonly music?: VoiceMusicQueue;
   readonly speakerTranscriptionGate?: Promise<void>;
+  readonly occupants?: readonly { readonly userId: string; readonly displayName?: string }[];
 }
 
 function buildHarness(options: HarnessOptions = {}) {
@@ -444,6 +448,7 @@ function buildHarness(options: HarnessOptions = {}) {
     },
     clock: () => clock.now,
     timers,
+    ...(options.occupants === undefined ? {} : { channelOccupants: () => options.occupants ?? [] }),
   });
   let itemSequence = 0;
   const harness = {
@@ -763,12 +768,13 @@ describe("audio path", () => {
     await flush();
     harness.transcribe(ALICE, "one more detail");
     await flush();
-    expect(at(conversation.textItems, -1)).toBe(
+    expect(conversation.textItems).toContain(
       `Room utterance (authenticated Discord speaker): ${JSON.stringify({
         speakerId: ALICE,
         text: "one more detail",
       })}`,
     );
+    expect(at(conversation.textItems, -1)).toBe(ENGAGED_OFFER_TURN_ITEM);
     // Let the floor decay; the session stays warm but stops hearing the room.
     harness.clock.now = 61_000;
     harness.timers.fire(ENGAGED_TICK_MS);
@@ -816,6 +822,7 @@ describe("floor decisions", () => {
         text: "hey clankie you there",
       })}`,
       "Right now: tending the garden.",
+      ADDRESSED_OFFER_TURN_ITEM,
     ]);
     expect(conversation.responseCreates).toBe(1);
     expect(harness.session.status()).toMatchObject({ floorState: "engaged", engaged: true });
@@ -839,6 +846,122 @@ describe("floor decisions", () => {
     expect(harness.conversations).toHaveLength(1);
     expect(harness.briefingCalls).toHaveLength(1);
     expect(harness.conversation().responseCreates).toBe(2);
+    expect(at(harness.ofType("floor_decision"), -1)).toMatchObject({ action: "offer", userId: ALICE });
+    expect(harness.conversation().textItems).toContain(ENGAGED_OFFER_TURN_ITEM);
+    harness.conversation().input.onResponseDone({
+      responseId: "resp_a",
+      status: "completed",
+      audioBytes: 0,
+      textCharacters: 0,
+    });
+    harness.conversation().input.onResponseDone({
+      responseId: "resp_b",
+      status: "completed",
+      audioBytes: 0,
+      textCharacters: 0,
+    });
+    await flush();
+    expect(harness.ofType("volition")).toHaveLength(0);
+    expect(harness.ofType("model_response").filter((event) => event.outcome === "silent")).toHaveLength(2);
+  });
+
+  it("a same-breath pivot is an offer the model may refuse, and silence does not refresh decay", async () => {
+    const harness = await engagedHarness();
+    const conversation = harness.conversation();
+    await harness.say(ALICE, "yeah thanks. bob did you finish that thing");
+    expect(conversation.responseCreates).toBe(2);
+    expect(at(harness.ofType("floor_decision"), -1)).toMatchObject({ action: "offer", userId: ALICE });
+    expect(at(conversation.textItems, -1)).toBe(ENGAGED_OFFER_TURN_ITEM);
+    conversation.input.onResponseDone({
+      responseId: "resp_silent",
+      status: "completed",
+      audioBytes: 0,
+      textCharacters: 0,
+    });
+    await flush();
+    expect(harness.ofType("volition")).toHaveLength(0);
+    harness.clock.now = 61_000;
+    harness.timers.fire(ENGAGED_TICK_MS);
+    await flush();
+    expect(at(harness.ofType("floor"), -1)).toMatchObject({ state: "dormant", reason: "decay" });
+  });
+
+  it("a name mention from someone else is an offer he may refuse", async () => {
+    const harness = await engagedHarness();
+    const conversation = harness.conversation();
+    await harness.consent(BOB);
+    await harness.say(BOB, "clankie did you see that");
+    expect(at(harness.ofType("floor_decision"), -1)).toMatchObject({
+      action: "offer",
+      reason: "mentioned",
+      userId: BOB,
+    });
+    expect(conversation.responseCreates).toBe(2);
+    expect(at(conversation.textItems, -1)).toBe(ADDRESSED_OFFER_TURN_ITEM);
+    conversation.input.onResponseDone({
+      responseId: "resp_about",
+      status: "completed",
+      audioBytes: 0,
+      textCharacters: 0,
+    });
+    await flush();
+    expect(harness.session.status().floorState).toBe("engaged");
+    expect(harness.ofType("model_response").some((event) => event.outcome === "silent")).toBe(true);
+  });
+
+  it("another speaker's undirected talk is injected into the open session without a response", async () => {
+    const harness = await engagedHarness();
+    const conversation = harness.conversation();
+    await harness.consent(BOB);
+    await harness.say(BOB, "so anyway the meeting moved");
+    expect(conversation.responseCreates).toBe(1);
+    expect(at(conversation.textItems, -1)).toContain("so anyway the meeting moved");
+    expect(at(harness.ofType("floor_decision"), -1)).toMatchObject({ action: "listen", userId: BOB });
+  });
+
+  it("labels room speech with the occupant's display name", async () => {
+    const harness = await engagedHarness({
+      occupants: [
+        { userId: OWNER, displayName: "James" },
+        { userId: ALICE, displayName: "Alice" },
+      ],
+    });
+    expect(at(harness.conversation().textItems, 0)).toContain('"displayName":"Alice"');
+    expect(at(harness.conversation().textItems, 0)).toContain(`"speakerId":"${ALICE}"`);
+    expect(
+      harness
+        .conversation()
+        .textItems.some((item) => item.includes(JSON.stringify({ speakerId: ALICE, displayName: "Alice" }))),
+    ).toBe(true);
+  });
+
+  it("applies overlapping finals in start-of-speech order", async () => {
+    const harness = await joinedHarness();
+    await harness.consent(ALICE);
+    await harness.consent(BOB);
+    harness.clock.now = 0;
+    const alice = harness.startCapture(ALICE);
+    alice.stream.write(stereoPcm(BARGE_IN_SOURCE_BYTES));
+    await flush();
+    harness.clock.now = 50;
+    const bob = harness.startCapture(BOB);
+    bob.stream.write(stereoPcm(BARGE_IN_SOURCE_BYTES));
+    await flush();
+    bob.stream.end();
+    await flush();
+    harness.transcribe(BOB, "yeah that tracks");
+    await flush();
+    expect(harness.conversations).toHaveLength(0);
+    alice.stream.end();
+    await flush();
+    harness.transcribe(ALICE, "hey clankie you there");
+    await flush();
+    expect(harness.conversations).toHaveLength(1);
+    const seed = at(harness.conversation().textItems, 0);
+    expect(seed).toContain("hey clankie you there");
+    expect(seed).toContain("yeah that tracks");
+    expect(seed.indexOf("hey clankie you there")).toBeLessThan(seed.indexOf("yeah that tracks"));
+    expect(harness.conversation().responseCreates).toBe(1);
   });
 
   // Required mission evidence: no response path exists without a floor
@@ -883,8 +1006,8 @@ describe("floor decisions", () => {
     expect(harness.conversations).toHaveLength(1);
     expect(harness.briefingCalls).toHaveLength(1);
     expect(harness.conversation().responseCreates).toBe(2);
-    expect(at(harness.conversation().textItems, -1)).toContain("clankie actually one more thing");
-    expect(at(harness.conversation().textItems, -1)).toContain(`"speakerId":"${ALICE}"`);
+    expect(harness.conversation().textItems.join("\n")).toContain("clankie actually one more thing");
+    expect(at(harness.conversation().textItems, -1)).toBe(ADDRESSED_OFFER_TURN_ITEM);
     expect(at(harness.ofType("floor"), -1)).toMatchObject({ state: "engaged", reason: "addressed" });
   });
 
@@ -946,7 +1069,8 @@ describe("unprompted turns", () => {
     // The outcome is recorded exactly once, however the response finishes.
     expect(harness.ofType("volition")).toHaveLength(1);
     await harness.say(BOB, "huh good point");
-    expect(at(harness.conversation().textItems, -1)).toContain("huh good point");
+    expect(harness.conversation().textItems.join("\n")).toContain("huh good point");
+    expect(at(harness.conversation().textItems, -1)).toBe(ENGAGED_OFFER_TURN_ITEM);
   });
 
   it("an empty response is him passing: suppressed, still dormant, session parked on the hold", async () => {
@@ -1008,8 +1132,9 @@ describe("speaker attribution", () => {
     // it addresses Clankie; merely opening a stream creates no model input.
     harness.transcribe(BOB, "clankie, I have a different question");
     await flush();
-    expect(at(harness.conversation().textItems, -1)).toContain(`"speakerId":"${BOB}"`);
-    expect(at(harness.conversation().textItems, -1)).toContain("I have a different question");
+    expect(harness.conversation().textItems.join("\n")).toContain(`"speakerId":"${BOB}"`);
+    expect(harness.conversation().textItems.join("\n")).toContain("I have a different question");
+    expect(at(harness.conversation().textItems, -1)).toBe(ADDRESSED_OFFER_TURN_ITEM);
   });
 });
 
@@ -1417,6 +1542,55 @@ describe("ability path", () => {
     await flush();
     expect(at(conversation.functionResults, 0)).toEqual({ callId: "call_2", output: "Still here." });
   });
+
+  it("receipts absorbed as absorbed, not as a decline", async () => {
+    const harness = await joinedHarness({
+      captain: () =>
+        Promise.resolve({
+          state: "absorbed",
+          captainSessionId: "session-1",
+          turnId: "turn-abs",
+        } as CaptainChannelTurnResult),
+    });
+    await harness.consent(ALICE);
+    await harness.say(ALICE, "hey clankie look this up");
+    harness.conversation().input.onFunctionCall({
+      callId: "call_abs",
+      name: "ask_clankie",
+      argumentsJson: '{"request":"look this up"}',
+    });
+    await flush();
+    expect(harness.ofType("realtime_tool").some((event) => event.code === "captain_absorbed")).toBe(true);
+    expect(harness.ofType("realtime_tool").some((event) => event.code === "captain_declined")).toBe(false);
+    expect(harness.conversation().functionResults).toHaveLength(0);
+  });
+
+  it("keeps the floor warm while ask_clankie is in flight", async () => {
+    let release: ((result: CaptainChannelTurnResult) => void) | undefined;
+    const harness = await joinedHarness({
+      captain: () =>
+        new Promise<CaptainChannelTurnResult>((resolve) => {
+          release = resolve;
+        }),
+    });
+    await harness.consent(ALICE);
+    await harness.say(ALICE, "hey clankie look this up");
+    harness.conversation().input.onFunctionCall({
+      callId: "call_slow",
+      name: "ask_clankie",
+      argumentsJson: '{"request":"look this up"}',
+    });
+    await flush();
+    expect(harness.session.status().floorState).toBe("engaged");
+    harness.clock.now = 61_000;
+    harness.timers.fire(FLOOR_WORK_HEARTBEAT_MS);
+    harness.timers.fire(ENGAGED_TICK_MS);
+    await flush();
+    expect(harness.session.status().floorState).toBe("engaged");
+    release?.(settledResult("turn-slow", "Found it."));
+    await flush();
+    expect(at(harness.conversation().functionResults, 0).output).toBe("Found it.");
+  });
 });
 
 describe("barge-in", () => {
@@ -1664,7 +1838,7 @@ describe("possessor narration and hearing (ADR 0064)", () => {
     const unsubscribe = harness.session.subscribeTranscript((line) => heard.push(line));
 
     await harness.say(ALICE, "go left instead");
-    expect(heard).toEqual([`${ALICE}: go left instead`]);
+    expect(heard).toEqual([JSON.stringify({ speakerId: ALICE, text: "go left instead" })]);
 
     unsubscribe();
     await harness.say(ALICE, "no seriously go left");
@@ -1693,7 +1867,7 @@ describe("possessor narration and hearing (ADR 0064)", () => {
     harness.session.subscribeTranscript((line) => heard.push(line));
 
     await harness.say(ALICE, "still listening");
-    expect(heard).toEqual([`${ALICE}: still listening`]);
+    expect(heard).toEqual([JSON.stringify({ speakerId: ALICE, text: "still listening" })]);
   });
 });
 

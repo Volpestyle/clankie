@@ -7,6 +7,8 @@ owns the media session, consent, and allowlists.
 realtime provider swappable,
 and [ADR 0074](0074-the-room-hears-one-voice.md) makes the realtime room session
 the sole author of outbound room speech.
+[ADR 0119](0119-the-room-is-heard-the-floor-is-who-he-answers.md) splits hearing
+from answering in a group room.
 
 ## Context
 
@@ -58,7 +60,8 @@ chatter. The repository therefore owns the floor machine:
 
 - dormant, speaker-bound transcription sessions identify admitted utterances
   without producing responses;
-- one engaged conversation receives only floor-approved attributed text;
+- one engaged conversation hears consented speech; `response.create` is still floor-owned
+  ([ADR 0119](0119-the-room-is-heard-the-floor-is-who-he-answers.md));
 - `response.create` and interruption are always explicit;
 - direct address wakes the room without a model call;
 - `persona.chattiness` only rate-limits offers to speak unprompted; the realtime

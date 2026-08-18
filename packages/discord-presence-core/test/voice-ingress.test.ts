@@ -77,6 +77,24 @@ describe("Discord voice ingress", () => {
     expect(JSON.stringify(outcome)).not.toContain("secret operation");
   });
 
+  it("keeps absorbed distinct from a captain decline", async () => {
+    const ingress = new DiscordVoiceIngress(
+      {
+        getHealth: vi.fn().mockResolvedValue({ profileHash: "profile-1" }),
+        submitDiscordCaptainChannelTurn: vi.fn().mockResolvedValue({
+          state: "absorbed",
+          captainSessionId: "session-1",
+          turnId: "turn-absorbed",
+        }),
+      },
+      { characterId: "clankie", credentialRef: "discord_bot", transportKind: "bot" },
+    );
+    await expect(ingress.handle(turn)).resolves.toEqual({
+      state: "absorbed",
+      turnId: "turn-absorbed",
+    });
+  });
+
   it("rejects an empty transcript before a captain call", async () => {
     const submit = vi.fn();
     const ingress = new DiscordVoiceIngress(

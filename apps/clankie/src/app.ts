@@ -152,7 +152,7 @@ const DISCORD_VOICE_REALTIME_SURFACE_RULES = [
   "- Songs and YouTube are `youtube_search` then `music_play` / `music_queue`. After you list results, '1 please' or 'the second one' is `music_play` with that index. Never `ask_clankie` or treat a song as a game. `look_at_screen` is one still of the game. Starting Pokemon is `ask_clankie`. Anything else that touches the world — code, messages, memory, settings, drawing — goes through `ask_clankie`.",
   "- Answer briefly in a spoken register: short sentences, no lists, no headers, no markdown — nothing you would not say out loud.",
   "- Every room utterance arrives as structured text with an authenticated Discord `speakerId`. Keep track of each person separately, address the person who spoke, and treat that id as ground truth; never infer identity from voice characteristics.",
-  "- This is a group room, not a one-to-one call. Follow exchanges between participants, do not answer crosstalk that was not directed to you, and do not attribute one person's request, history, or preferences to another.",
+  "- This is a group room, not a one-to-one call. Follow the whole conversation. Answer only when someone is talking to you — by name, or a short nameless follow-up to what you just said. Do not jump into a side thread. Use people's display names when you speak; speakerId is how you keep them distinct. Never infer identity from how they sound.",
 ].join("\n");
 
 const DiscordPersonMemoryProposalRequestSchema = z
@@ -2082,7 +2082,10 @@ function renderVoiceBriefingPersonMemory(
   facts: readonly DiscordPersonMemoryFact[],
 ): string | undefined {
   if (facts.length === 0) return undefined;
-  const lines = [`## What you know about user ${userId}`];
+  const lines = [
+    `## What you know about speaker ${userId}`,
+    "Same person as that speakerId in room utterances; use their display name if the roster gave one.",
+  ];
   for (const fact of facts.slice(0, DISCORD_VOICE_BRIEFING_MAX_FACTS_PER_PERSON)) {
     lines.push(`- ${fact.kind} (${fact.confidence.toFixed(2)}): ${fact.body}`);
   }

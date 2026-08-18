@@ -10,7 +10,9 @@
  * stay separate all the way through transcription, including during overlap.
  * Final attributed transcripts feed the {@link VoiceFloor}
  * machine, which alone decides when the engaged conversation session opens and
- * when `response.create` is issued: no utterance is ever auto-answered.
+ * when `response.create` is issued. An open session hears every consented
+ * utterance; only a wake, an in-window follow-up, or a volition offer spends
+ * a turn.
  *
  * The captain never sits on the conversational critical path. The engaged
  * session's only privileged tool is `ask_clankie`, which serializes on the turn
@@ -127,6 +129,8 @@ export const ENGAGED_HOLD_MS = 5 * 60_000;
  * phrase at all, without polling hard.
  */
 export const ENGAGED_TICK_MS = 5_000;
+/** Keeps the floor warm while `ask_clankie` is in flight (ADR 0119). */
+export const FLOOR_WORK_HEARTBEAT_MS = 15_000;
 /** Close a speaker's metered listener after this much silence. */
 export const SPEAKER_TRANSCRIPTION_IDLE_MS = 2 * 60_000;
 /**
@@ -138,6 +142,12 @@ export const SPEAKER_TRANSCRIPTION_IDLE_MS = 2 * 60_000;
  */
 export const TRANSCRIPT_RING_MAX_LINES = 30;
 export const TRANSCRIPT_RING_MAX_BYTES = 4_000;
+/**
+ * How long a finalized transcript may wait for an earlier-started overlapping
+ * capture to finish, so floor order follows who started speaking. Addressed
+ * speech is never held — a re-address must cut him off now.
+ */
+export const UTTERANCE_REORDER_GRACE_MS = 400;
 /** The service schema bounds person-memory projection to this many room members. */
 const MAX_BRIEFING_SPEAKERS = 25;
 /** A broken transcriber cannot retain content-free capture ids without bound. */
@@ -171,6 +181,25 @@ export const UNPROMPTED_TURN_ITEM =
   "System note, not spoken by anyone in the room: nobody addressed you. You may say something on " +
   "your own if you actually have something worth saying to these people right now. If you do not, " +
   "produce no output at all — staying quiet is a normal, correct answer, and most of these are.";
+/**
+ * Offered when the floor holder keeps talking without naming him. The line is
+ * already in the session; this is permission to stay silent if they turned to
+ * someone else, or to answer if it is a follow-up to him.
+ */
+export const ENGAGED_OFFER_TURN_ITEM =
+  "System note, not spoken by anyone in the room: nobody named you in that line. " +
+  "Answer only if it is clearly for you — a follow-up to what you just said. " +
+  "If they are talking to someone else, produce no output at all. Silence is the correct answer then.";
+/**
+ * Offered when his name came up. Address matching is deliberately loose so a
+ * garbled "hey clankie" still opens the session; talking-about-him vs talking
+ * to him is this turn's job. Silence is correct when they mentioned him to
+ * someone else.
+ */
+export const ADDRESSED_OFFER_TURN_ITEM =
+  "System note, not spoken by anyone in the room: your name came up. " +
+  "Speak if they are talking to you. If they mentioned you while talking to someone else, " +
+  "produce no output at all. Silence is the correct answer then.";
 
 export interface JoinDiscordVoiceInput {
   readonly guildId: string;
@@ -272,6 +301,12 @@ export type LookAtScreenResult =
   | { readonly outcome: "pending" }
   | { readonly outcome: "still"; readonly pngBase64: string; readonly mimeType: "image/png" };
 
+/** A person sitting in the channel. Display name is optional: some transports only have ids. */
+export interface VoiceRoomOccupant {
+  readonly userId: string;
+  readonly displayName?: string;
+}
+
 export interface DiscordVoiceSessionOptions {
   /** The UNCHANGED `discord_voice` captain lane; `ask_clankie` is its privileged caller. */
   readonly ingress: DiscordVoiceIngress;
@@ -300,17 +335,19 @@ export interface DiscordVoiceSessionOptions {
   readonly consentPolicy?: DiscordVoiceConsentPolicy;
   /**
    * Who is currently sitting in the voice channel, supplied by whoever holds
-   * the gateway. Ids only; this package never touches a Discord client.
+   * the gateway. This package never touches a Discord client.
    *
    * Needed because "who consented" and "who may be heard" stop being the same
    * set under the `presence` policy (ADR 0071): presence *is* consent there, so
    * the explicit opt-in list stays empty while the whole room is permitted. The
    * briefing resolves person memory for whoever may be heard, and reading the
    * explicit list meant it resolved memory for nobody — he could hear the room
-   * and had no idea who was in it. Absent falls back to the explicit list,
-   * which is exactly right under the `explicit` policy.
+   * and had no idea who was in it. Display names ride the same snapshot so
+   * utterances can be labeled as "Alice", not only a snowflake. Absent falls
+   * back to the explicit list, which is exactly right under the `explicit`
+   * policy.
    */
-  readonly channelOccupants?: (guildId: string, channelId: string) => readonly string[];
+  readonly channelOccupants?: (guildId: string, channelId: string) => readonly VoiceRoomOccupant[];
   /** Monotonic milliseconds; defaults to `performance.now`. Injected by tests. */
   readonly clock?: () => number;
   /** Timer seam shared with the realtime runtimes; drives decay ticks, the hold window, and reconnect backoff. */
@@ -337,8 +374,14 @@ interface PendingVoiceResponse {
   readonly state: "settled" | "waiting_user";
   readonly handoffMs: number;
   readonly decidedAtMs: number;
-  /** Set when the floor machine offered this turn rather than the room asking for it. */
-  readonly offer?: boolean;
+  /**
+   * How the floor framed this turn. Settlement is per pending, not session-wide:
+   * two quick offers must each settle, or the second loses armHold and volition
+   * accounting (ADR 0057).
+   */
+  readonly offer?: "volition" | "engaged" | "addressed";
+  /** Set once {@link DiscordVoiceSession.settleOffer} has recorded this turn. */
+  offerSettled?: boolean;
   firstAudioAtMs?: number;
   inputTokens?: number;
   outputTokens?: number;
@@ -353,6 +396,13 @@ interface PendingTranscriptTurn {
   readonly userId: string;
   readonly deliveryId: string;
   readonly startedAtMs: number;
+}
+
+interface FinalizedUtterance {
+  readonly turn: PendingTranscriptTurn;
+  readonly text: string;
+  readonly addressed: boolean;
+  readonly finalizedAtMs: number;
 }
 
 /** One response's streamed playback: a raw-PCM stream fed by deltas, played in order. */
@@ -407,6 +457,8 @@ export class DiscordVoiceSession {
   /** Invalidates an open that resolves after revoke, departure, or idle eviction. */
   private readonly transcriptionEpochs = new Map<string, number>();
   private readonly transcriptTurns = new Map<string, PendingTranscriptTurn[]>();
+  private readonly finalizedUtterances: FinalizedUtterance[] = [];
+  private reorderHandle: unknown;
   private readonly speakerIdleHandles = new Map<string, unknown>();
   private readonly speakerLastActiveAtMs = new Map<string, number>();
   private conversation: VoiceConversationPort | undefined;
@@ -428,9 +480,8 @@ export class DiscordVoiceSession {
   private openPlayback: PlaybackJob | undefined;
   /** The job currently at the player. */
   private playingJob: PlaybackJob | undefined;
-  /** An unprompted turn has been offered and the session has not yet spoken or passed. */
-  private offerOutstanding = false;
   private tickHandle: unknown;
+  private workHeartbeatHandle: unknown;
   private holdHandle: unknown;
   private readonly reconnectHandles = new Map<string, unknown>();
   private readonly reconnectDelays = new Map<string, number>();
@@ -495,7 +546,6 @@ export class DiscordVoiceSession {
     // A fresh floor per call: offer accounting and rate caps are per-session,
     // exactly like consent.
     this.floor = new VoiceFloor(this.options.floor);
-    this.offerOutstanding = false;
     this.consent.open(input.guildId, input.channelId, input.invokingUserId);
     const connection = joinVoiceChannel({
       guildId: input.guildId,
@@ -513,7 +563,7 @@ export class DiscordVoiceSession {
       // Prove the transcription boundary at join time. Actual ears are opened
       // per authenticated speaker, so overlap can never corrupt attribution.
       await this.probeTranscription();
-      this.channelMembers = new Set(this.options.channelOccupants?.(input.guildId, input.channelId) ?? []);
+      this.channelMembers = new Set(this.occupantIds(input.guildId, input.channelId));
       connection.receiver.speaking.on("start", this.onSpeakingStart);
       connection.subscribe(this.player);
       await this.emitSafely({
@@ -618,7 +668,7 @@ export class DiscordVoiceSession {
     this.stayNarrationSuppressed = 0;
     this.daveProtocolVersion = undefined;
     this.sessionGeneration += 1;
-    this.offerOutstanding = false;
+    this.stopFloorWork();
     this.stopTick();
     this.cancelHold();
     for (const handle of this.reconnectHandles.values()) this.timers.clearTimeout(handle);
@@ -638,6 +688,8 @@ export class DiscordVoiceSession {
     this.transcriptionOpens.clear();
     this.transcriptionEpochs.clear();
     this.transcriptTurns.clear();
+    this.finalizedUtterances.length = 0;
+    this.cancelReorderWait();
     const conversation = this.conversation;
     this.conversation = undefined;
     try {
@@ -898,8 +950,16 @@ export class DiscordVoiceSession {
       this.captures.delete(userId);
       this.armSpeakerTranscriptionIdle(userId);
     }
-    if (captureFailed || generation !== this.sessionGeneration) return;
-    if (!this.consent.permits(guildId, channelId, userId)) return;
+    if (captureFailed || generation !== this.sessionGeneration) {
+      this.removeTranscriptTurn(turn);
+      this.flushFinalizedUtterances();
+      return;
+    }
+    if (!this.consent.permits(guildId, channelId, userId)) {
+      this.removeTranscriptTurn(turn);
+      this.flushFinalizedUtterances();
+      return;
+    }
     if (convertedBytes > 0) {
       try {
         transcription.commitAudio();
@@ -969,34 +1029,99 @@ export class DiscordVoiceSession {
       latencyMs: Math.max(0, Math.round(this.clock() - turn.startedAtMs)),
       addressed,
     });
-    if (text.length === 0) return;
-    // Barge-in (b): being re-addressed while playing truncates deliberately,
-    // whichever consented speaker says it.
+    if (text.length === 0) {
+      this.flushFinalizedUtterances();
+      return;
+    }
+    // Barge-in (b): being re-addressed while playing truncates immediately —
+    // a re-address must not wait for an earlier overlapping capture to finish.
     if (this.isPlaying() && addressed) {
       this.truncatePlayback(userId);
     }
-    this.lastTranscriptUserId = userId;
-    this.pushTranscriptLine(userId, text);
-    const decision = this.floor.observeTranscript({ speakerId: userId, text, atMs: this.clock() });
+    this.finalizedUtterances.push({
+      turn,
+      text,
+      addressed,
+      finalizedAtMs: this.clock(),
+    });
+    this.flushFinalizedUtterances();
+  }
+
+  private flushFinalizedUtterances(): void {
+    this.cancelReorderWait();
+    this.finalizedUtterances.sort((left, right) => left.turn.startedAtMs - right.turn.startedAtMs);
+    const now = this.clock();
+    while (this.finalizedUtterances.length > 0) {
+      const next = this.finalizedUtterances[0];
+      if (next === undefined) break;
+      const blocked =
+        !next.addressed &&
+        this.hasEarlierInflight(next) &&
+        now - next.finalizedAtMs < UTTERANCE_REORDER_GRACE_MS;
+      if (blocked) {
+        this.armReorderWait(UTTERANCE_REORDER_GRACE_MS - (now - next.finalizedAtMs));
+        return;
+      }
+      this.finalizedUtterances.shift();
+      this.applyFinalizedUtterance(next);
+    }
+  }
+
+  private hasEarlierInflight(candidate: FinalizedUtterance): boolean {
+    for (const [userId, turns] of this.transcriptTurns) {
+      if (userId === candidate.turn.userId) continue;
+      if (turns.some((turn) => turn.startedAtMs < candidate.turn.startedAtMs)) return true;
+    }
+    return false;
+  }
+
+  private armReorderWait(delayMs: number): void {
+    const generation = this.sessionGeneration;
+    this.reorderHandle = this.timers.setTimeout(
+      () => {
+        this.reorderHandle = undefined;
+        if (generation !== this.sessionGeneration) return;
+        this.flushFinalizedUtterances();
+      },
+      Math.max(0, delayMs),
+    );
+  }
+
+  private cancelReorderWait(): void {
+    if (this.reorderHandle === undefined) return;
+    this.timers.clearTimeout(this.reorderHandle);
+    this.reorderHandle = undefined;
+  }
+
+  private applyFinalizedUtterance(item: FinalizedUtterance): void {
+    const guildId = this.guildId;
+    const channelId = this.channelId;
+    if (guildId === undefined || channelId === undefined) return;
+    const { turn, text } = item;
+    this.lastTranscriptUserId = turn.userId;
+    this.pushTranscriptLine(turn.userId, text);
+    this.hearIfOpen(turn.userId, text);
+    const decision = this.floor.observeTranscript({ speakerId: turn.userId, text, atMs: this.clock() });
     void this.emitSafely({
       type: "floor_decision",
       guildId,
       channelId,
-      userId,
+      userId: turn.userId,
       deliveryId: turn.deliveryId,
       action: decision.action,
       ...("reason" in decision ? { reason: decision.reason } : {}),
       state: this.floor.state,
     });
-    this.applyFloorDecision(decision, turn, text, guildId, channelId);
+    this.applyFloorDecision(decision, turn, guildId, channelId);
   }
 
   private pushTranscriptLine(speakerId: string, text: string): void {
-    const line = `${speakerId}: ${text}`;
-    // The model-facing ring is JSONL so transcript text containing newlines or
-    // label-shaped strings cannot impersonate another Discord speaker. The
-    // possessor seam keeps its compact human-readable push format.
-    this.transcriptRing.push(Buffer.from(JSON.stringify({ speakerId, text }), "utf8"));
+    const labeled = this.labeledSpeech(speakerId, text);
+    const line = JSON.stringify(labeled);
+    // Ring and possessor hear the same JSONL. A Discord nickname is untrusted
+    // the same way transcript text is — interpolating it would let a nick
+    // impersonate another speaker.
+    this.transcriptRing.push(Buffer.from(line, "utf8"));
     for (const listener of this.transcriptListeners) {
       try {
         listener(line);
@@ -1024,7 +1149,6 @@ export class DiscordVoiceSession {
   private applyFloorDecision(
     decision: FloorDecision,
     turn: PendingTranscriptTurn,
-    text: string,
     guildId: string,
     channelId: string,
   ): void {
@@ -1039,11 +1163,20 @@ export class DiscordVoiceSession {
           // still "spoke and was answered", so it reports as addressed.
           reason: decision.reason === "volition" ? "volition" : "addressed",
         });
-        this.queueEngagedResponse(turn, text, guildId, channelId);
+        this.queueEngagedResponse(turn, guildId, channelId, "addressed");
         return;
       }
       case "hold": {
-        this.queueEngagedResponse(turn, text, guildId, channelId);
+        this.queueEngagedResponse(turn, guildId, channelId, "addressed");
+        return;
+      }
+      case "offer": {
+        this.queueEngagedResponse(
+          turn,
+          guildId,
+          channelId,
+          decision.reason === "mentioned" ? "addressed" : "engaged",
+        );
         return;
       }
       case "release": {
@@ -1058,13 +1191,14 @@ export class DiscordVoiceSession {
         this.armHold();
         return;
       }
+      case "listen":
+        return;
       case "volition_gate_open": {
         // The cap allowed an unprompted turn; who decides whether to use it is
         // the point of ADR 0057's amendment. It is his own realtime session,
         // holding his persona and everything he has heard — not a separate
         // personality-free yes/no model that only ever saw ring text.
-        this.offerOutstanding = true;
-        this.queueEngagedResponse(turn, text, guildId, channelId, true);
+        this.queueEngagedResponse(turn, guildId, channelId, "volition");
         return;
       }
       case "ignore":
@@ -1073,24 +1207,43 @@ export class DiscordVoiceSession {
   }
 
   /**
-   * Records what the realtime session did with an offered turn: `taken` when it
-   * produced audio or reached for a tool, suppressed when the response came
-   * back empty or could never be issued at all. Single-shot — first settle wins
-   * — so the counters stay monotonic no matter which signal arrives first.
+   * Records what the realtime session did with one offered turn. Settlement is
+   * per pending so two offers in flight cannot steal each other's outcome.
+   * Volition accounting and evidence fire only for a real gate opening.
    */
-  private settleOffer(taken: boolean): void {
-    if (!this.offerOutstanding) return;
+  private settleOffer(pending: PendingVoiceResponse, taken: boolean): void {
+    if (pending.offer === undefined || pending.offerSettled === true) return;
+    pending.offerSettled = true;
     const guildId = this.guildId;
     const channelId = this.channelId;
     if (guildId === undefined || channelId === undefined) return;
-    this.offerOutstanding = false;
+    if (pending.offer === "volition") {
+      const outcome = this.floor.noteVolitionOutcome(taken);
+      if (outcome.action === "wake") {
+        void this.emitSafely({ type: "floor", guildId, channelId, state: "engaged", reason: "volition" });
+        this.armTick();
+      } else if (this.floor.state !== "engaged") {
+        this.stopTick();
+        this.armHold();
+      }
+      void this.emitSafely({ type: "volition", guildId, channelId, ...this.floor.accounting() });
+      return;
+    }
+    if (taken && pending.speakerId !== undefined) {
+      this.floor.noteSpeechFrom(pending.speakerId, this.clock());
+    }
+  }
+
+  /** Volition offer that never became a pending (open/create failed). */
+  private settleOrphanVolition(taken: boolean): void {
+    const guildId = this.guildId;
+    const channelId = this.channelId;
+    if (guildId === undefined || channelId === undefined) return;
     const outcome = this.floor.noteVolitionOutcome(taken);
     if (outcome.action === "wake") {
       void this.emitSafely({ type: "floor", guildId, channelId, state: "engaged", reason: "volition" });
       this.armTick();
     } else if (this.floor.state !== "engaged") {
-      // He passed. The floor never moved, so the session that was opened to ask
-      // him goes back behind the hold window instead of idling open forever.
       this.stopTick();
       this.armHold();
     }
@@ -1114,10 +1267,9 @@ export class DiscordVoiceSession {
    */
   private queueEngagedResponse(
     turn: PendingTranscriptTurn,
-    text: string,
     guildId: string,
     channelId: string,
-    offer = false,
+    offer?: "volition" | "engaged" | "addressed",
   ): void {
     const generation = this.sessionGeneration;
     this.cancelHold();
@@ -1126,20 +1278,17 @@ export class DiscordVoiceSession {
       .then(async () => {
         if (generation !== this.sessionGeneration) return;
         let wake: DiscordVoiceWake = "continuing";
-        let opened = false;
         if (this.conversation === undefined) {
           wake = "waking";
           await this.openConversationNow(guildId, channelId, turn.userId);
           if (generation !== this.sessionGeneration || this.conversation === undefined) {
             // Briefing or open failed: he was never actually asked, so the
             // offer is suppressed rather than left outstanding forever.
-            if (offer) this.settleOffer(false);
+            if (offer === "volition") this.settleOrphanVolition(false);
             return;
           }
-          opened = true;
         }
-        if (!opened) this.createRoomUtteranceItem(this.conversation, turn.userId, text);
-        if (offer) this.createUnpromptedTurnItem(this.conversation);
+        if (offer !== undefined) this.createOfferTurnItem(this.conversation, offer);
         this.pendingResponses.push({
           deliveryId: turn.deliveryId,
           wake,
@@ -1149,7 +1298,7 @@ export class DiscordVoiceSession {
           state: "settled",
           handoffMs: 0,
           decidedAtMs: this.clock(),
-          ...(offer ? { offer: true } : {}),
+          ...(offer === undefined ? {} : { offer }),
           done: false,
         });
         void this.emitSafely({
@@ -1163,8 +1312,8 @@ export class DiscordVoiceSession {
         try {
           this.conversation.createResponse();
         } catch {
-          this.pendingResponses.pop();
-          if (offer) this.settleOffer(false);
+          const failed = this.pendingResponses.pop();
+          if (failed !== undefined) this.settleOffer(failed, false);
           void this.emitSafely({
             type: "model_response",
             guildId,
@@ -1250,6 +1399,8 @@ export class DiscordVoiceSession {
       if (ring.length > 0) {
         port.createTextItem(`Recent room transcript (JSONL; speakerId is gateway-authenticated):\n${ring}`);
       }
+      const roster = this.rosterText(guildId, channelId);
+      if (roster !== undefined) port.createTextItem(roster);
       const briefingText = briefing.briefing.trim();
       if (briefingText.length > 0) port.createTextItem(briefingText);
     } catch {
@@ -1257,25 +1408,74 @@ export class DiscordVoiceSession {
     }
   }
 
-  private createRoomUtteranceItem(
-    conversation: VoiceConversationPort,
-    speakerId: string,
-    text: string,
-  ): void {
-    if (!conversation.isOpen) return;
+  private hearIfOpen(speakerId: string, text: string): void {
+    const conversation = this.conversation;
+    if (conversation === undefined || !conversation.isOpen) return;
     try {
       conversation.createTextItem(
-        `Room utterance (authenticated Discord speaker): ${JSON.stringify({ speakerId, text })}`,
+        `Room utterance (authenticated Discord speaker): ${JSON.stringify(this.labeledSpeech(speakerId, text))}`,
       );
     } catch {
       // Closed between frames; the close handler owns cleanup.
     }
   }
 
-  private createUnpromptedTurnItem(conversation: VoiceConversationPort): void {
+  private labeledSpeech(
+    speakerId: string,
+    text: string,
+  ): { speakerId: string; displayName?: string; text: string } {
+    const displayName = this.displayNameFor(speakerId);
+    return displayName === undefined ? { speakerId, text } : { speakerId, displayName, text };
+  }
+
+  private displayNameFor(userId: string): string | undefined {
+    const guildId = this.guildId;
+    const channelId = this.channelId;
+    if (guildId === undefined || channelId === undefined) return undefined;
+    const name = this.options
+      .channelOccupants?.(guildId, channelId)
+      .find((occupant) => occupant.userId === userId)?.displayName;
+    const trimmed = name?.trim();
+    if (trimmed === undefined || trimmed.length === 0) return undefined;
+    return trimmed.slice(0, 100);
+  }
+
+  private occupantIds(guildId: string, channelId: string): string[] {
+    return (this.options.channelOccupants?.(guildId, channelId) ?? []).map((occupant) => occupant.userId);
+  }
+
+  private rosterText(guildId: string, channelId: string): string | undefined {
+    const permitted = new Set(this.briefingUserIds(guildId, channelId));
+    const occupants = (this.options.channelOccupants?.(guildId, channelId) ?? []).filter((occupant) =>
+      permitted.has(occupant.userId),
+    );
+    const known = occupants.filter((occupant) => (occupant.displayName?.trim().length ?? 0) > 0);
+    if (known.length === 0) return undefined;
+    const lines = known.map((occupant) =>
+      JSON.stringify({
+        speakerId: occupant.userId,
+        displayName: occupant.displayName?.trim().slice(0, 100) ?? occupant.userId,
+      }),
+    );
+    return (
+      "People in this room (JSONL; speakerId is gateway-authenticated; use displayName when speaking):\n" +
+      lines.join("\n")
+    );
+  }
+
+  private createOfferTurnItem(
+    conversation: VoiceConversationPort,
+    kind: "volition" | "engaged" | "addressed",
+  ): void {
     if (!conversation.isOpen) return;
     try {
-      conversation.createTextItem(UNPROMPTED_TURN_ITEM);
+      const text =
+        kind === "addressed"
+          ? ADDRESSED_OFFER_TURN_ITEM
+          : kind === "engaged"
+            ? ENGAGED_OFFER_TURN_ITEM
+            : UNPROMPTED_TURN_ITEM;
+      conversation.createTextItem(text);
     } catch {
       // Closed between frames; the close handler owns cleanup.
     }
@@ -1300,10 +1500,9 @@ export class DiscordVoiceSession {
       keep.add(this.openPlayback.pending);
       this.openPlayback = undefined;
     }
+    const dropped = this.pendingResponses.filter((pending) => !keep.has(pending));
     this.pendingResponses = this.pendingResponses.filter((pending) => keep.has(pending));
-    // An offered turn whose session died before he answered is a suppressed
-    // offer, not an offer that hangs outstanding forever.
-    this.settleOffer(false);
+    for (const pending of dropped) this.settleOffer(pending, false);
     if (reason === "closed") return;
     void this.emitSafely({
       type: "failed",
@@ -1583,6 +1782,7 @@ export class DiscordVoiceSession {
     }
     const deliveryId = exchange?.deliveryId ?? randomUUID();
     const startedAtMs = this.clock();
+    this.startFloorWork(userId);
     let outcome: DiscordVoiceTurnOutcome;
     try {
       outcome = await this.options.ingress.handle({
@@ -1610,8 +1810,11 @@ export class DiscordVoiceSession {
         code: "voice_captain_handoff_failed",
       });
       return;
+    } finally {
+      this.stopFloorWork();
     }
     const handoffMs = this.clock() - startedAtMs;
+    this.floor.holdForWork(userId, this.clock());
     if (generation !== this.sessionGeneration) {
       this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
       return;
@@ -1635,6 +1838,10 @@ export class DiscordVoiceSession {
       // whose audio would only be dropped, because deciding to stay quiet
       // must not cost a response (ADR 0051 via ADR 0057).
       this.emitRealtimeTool(call, exchange, "completed", guildId, channelId, "captain_declined");
+      return;
+    }
+    if (outcome.state === "absorbed") {
+      this.emitRealtimeTool(call, exchange, "completed", guildId, channelId, "captain_absorbed");
       return;
     }
     // waiting_user keeps DiscordVoiceIngress's authenticated-surface handoff
@@ -1768,7 +1975,7 @@ export class DiscordVoiceSession {
       // He took an offered turn the moment he opens his mouth, not when the
       // response finishes: the room may answer him before then, and that reply
       // has to find an engaged floor.
-      if (pending.offer === true) this.settleOffer(true);
+      if (pending.offer !== undefined) this.settleOffer(pending, true);
     }
     let discordPcm: Buffer;
     try {
@@ -1805,8 +2012,8 @@ export class DiscordVoiceSession {
     settled.done = true;
     // An offered turn he declined comes back with nothing in it. Reaching for a
     // tool counts as taking it — the speech arrives on the follow-up response.
-    if (settled.offer === true) {
-      this.settleOffer(settled.firstAudioAtMs !== undefined || settled.toolCalled === true);
+    if (settled.offer !== undefined) {
+      this.settleOffer(settled, settled.firstAudioAtMs !== undefined || settled.toolCalled === true);
     }
     if (meta?.inputTokens !== undefined) settled.inputTokens = meta.inputTokens;
     if (meta?.outputTokens !== undefined) settled.outputTokens = meta.outputTokens;
@@ -2140,11 +2347,7 @@ export class DiscordVoiceSession {
   }
 
   private briefingUserIds(guildId: string, channelId: string, preferredSpeakerId?: string): string[] {
-    const permitted = this.consent.permitted(
-      guildId,
-      channelId,
-      this.options.channelOccupants?.(guildId, channelId) ?? [],
-    );
+    const permitted = this.consent.permitted(guildId, channelId, this.occupantIds(guildId, channelId));
     if (
       permitted.length <= MAX_BRIEFING_SPEAKERS ||
       preferredSpeakerId === undefined ||
@@ -2185,6 +2388,25 @@ export class DiscordVoiceSession {
     if (this.tickHandle === undefined) return;
     this.timers.clearTimeout(this.tickHandle);
     this.tickHandle = undefined;
+  }
+
+  private startFloorWork(speakerId: string): void {
+    this.floor.holdForWork(speakerId, this.clock());
+    this.stopFloorWork();
+    const generation = this.sessionGeneration;
+    const beat = (): void => {
+      this.workHeartbeatHandle = undefined;
+      if (generation !== this.sessionGeneration) return;
+      this.floor.holdForWork(speakerId, this.clock());
+      this.workHeartbeatHandle = this.timers.setTimeout(beat, FLOOR_WORK_HEARTBEAT_MS);
+    };
+    this.workHeartbeatHandle = this.timers.setTimeout(beat, FLOOR_WORK_HEARTBEAT_MS);
+  }
+
+  private stopFloorWork(): void {
+    if (this.workHeartbeatHandle === undefined) return;
+    this.timers.clearTimeout(this.workHeartbeatHandle);
+    this.workHeartbeatHandle = undefined;
   }
 
   private armHold(): void {

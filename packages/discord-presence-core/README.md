@@ -13,8 +13,8 @@ what lets both bodies be one character
 | `discord-rest`               | Shared bounded REST writes for both Discord transports                                                        |
 | `captain-action-control`     | Authenticated local control requests from captain tools                                                       |
 | `text-ingress`               | Normalises gateway messages into bounded, allowlist-gated captain turns, images included (ADR 0081)           |
-| `voice-address`              | Phonetic address detection over `characterNames()` (ADR 0057)                                                 |
-| `voice-floor`                | The dormant ↔ engaged floor machine: wake, decay, and the unprompted-turn rate cap                            |
+| `voice-address`              | Phonetic name-mention: opens a session; the offered turn decides whether to speak (ADR 0119)                  |
+| `voice-floor`                | Dormant ↔ engaged floor: wake, offer (silence-ok), listen, decay, volition (ADR 0119)                         |
 | `realtime-session`           | Injectable OpenAI/xAI realtime boundaries: transcription, conversation, and `ask_clankie` round trips         |
 | `elevenlabs-tts`             | Injectable ElevenLabs multi-context streaming-TTS boundary (ADR 0070)                                         |
 | `external-voice`             | Pairs a text-modality realtime session with a TTS mouth behind the one conversation port (ADR 0070)           |
@@ -53,7 +53,9 @@ durations, and typed outcomes, never transcript, prompt, audio, or PCM.
 - **Voice identity stays attached to a gateway stream.** Speakers use separate
   transcription inputs. Only attributed JSON transcript items converge into
   the shared engaged conversation; overlapping raw audio is never interleaved
-  and guessed after the fact.
+  and guessed after the fact. An open session hears consented speech; the floor
+  decides who gets a spoken turn
+  ([ADR 0119](../../docs/adr/0119-the-room-is-heard-the-floor-is-who-he-answers.md)).
 - **Speaker listeners are bounded.** An inactive per-speaker transcription
   session closes after two minutes and reopens on demand. At 25 retained
   listeners, the least recently active idle listener is evicted before another

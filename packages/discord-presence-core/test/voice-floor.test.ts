@@ -73,15 +73,62 @@ describe("waking", () => {
 });
 
 describe("holding the floor", () => {
-  it("the floor holder continuing holds, and refreshes the decay clock", () => {
+  it("the floor holder continuing without naming him is an offer, and does not refresh decay", () => {
     const f = floor();
     f.observeTranscript(said("alice", "clankie run the tests", 0));
-    expect(f.observeTranscript(said("alice", "actually just the voice ones", 50_000))).toEqual({
-      action: "hold",
+    expect(f.observeTranscript(said("alice", "actually just the voice ones", 8_000))).toEqual({
+      action: "offer",
+      reason: "holder",
     });
-    // Refreshed at 50s: still alive inside the moved window, dead beyond it.
-    expect(f.tick(50_000 + WINDOW)).toEqual({ action: "ignore" });
-    expect(f.tick(50_000 + WINDOW + 1)).toEqual({ action: "release", reason: "decay" });
+    expect(f.floorHolderId).toBe("alice");
+    // Same-breath pivot is also an offer: the model may stay silent.
+    expect(f.observeTranscript(said("alice", "yeah thanks. bob did you finish that thing", 9_000))).toEqual({
+      action: "offer",
+      reason: "holder",
+    });
+    expect(f.tick(WINDOW)).toEqual({ action: "ignore" });
+    expect(f.tick(WINDOW + 1)).toEqual({ action: "release", reason: "decay" });
+  });
+
+  it("a name mention that is not a clean hail is an offer from anyone, including dormant", () => {
+    const f = floor();
+    expect(f.observeTranscript(said("bob", "clankie did you see that", 0))).toEqual({
+      action: "offer",
+      reason: "mentioned",
+    });
+    expect(f.state).toBe("dormant");
+    expect(f.floorHolderId).toBeUndefined();
+    expect(f.observeTranscript(said("alice", "clankie just tell me the score", 5_000))).toEqual({
+      action: "offer",
+      reason: "mentioned",
+    });
+    expect(f.floorHolderId).toBeUndefined();
+    f.noteSpeechFrom("alice", 5_000);
+    expect(f.floorHolderId).toBe("alice");
+  });
+
+  it("a mention does not steal the holder from a clean hail", () => {
+    const f = floor();
+    f.observeTranscript(said("alice", "hey clankie", 0));
+    expect(f.observeTranscript(said("bob", "clankie did you see that", 5_000))).toEqual({
+      action: "offer",
+      reason: "mentioned",
+    });
+    expect(f.floorHolderId).toBe("alice");
+    expect(f.observeTranscript(said("bob", "hey bob what did clankie say to you", 6_000))).toEqual({
+      action: "listen",
+    });
+    expect(f.floorHolderId).toBe("alice");
+  });
+
+  it("clear third-party talk about him does not offer a turn", () => {
+    const f = floor();
+    f.observeTranscript(said("alice", "hey clankie", 0));
+    expect(f.observeTranscript(said("bob", "ask clankie about it", 5_000))).toEqual({ action: "listen" });
+    expect(f.observeTranscript(said("bob", "hey bob what did clankie say to you", 6_000))).toEqual({
+      action: "listen",
+    });
+    expect(f.floorHolderId).toBe("alice");
   });
 
   it("a re-address from anyone holds and moves the floor to that speaker", () => {
@@ -89,17 +136,17 @@ describe("holding the floor", () => {
     f.observeTranscript(said("alice", "hey clankie", 0));
     expect(f.observeTranscript(said("bob", "clanky what about you", 10_000))).toEqual({ action: "hold" });
     expect(f.floorHolderId).toBe("bob");
-    // The previous holder is a bystander now; nameless speech from them is crosstalk.
+    // The previous holder is a bystander now; nameless speech from them is overheard.
     expect(f.observeTranscript(said("alice", "and then i told him", 20_000))).toEqual({
-      action: "ignore",
+      action: "listen",
     });
   });
 
-  it("crosstalk between other people neither answers nor refreshes decay", () => {
+  it("crosstalk between other people is overheard and does not refresh decay", () => {
     const f = floor();
     f.observeTranscript(said("alice", "clankie you there", 0));
     expect(f.observeTranscript(said("bob", "so anyway the meeting moved", 30_000))).toEqual({
-      action: "ignore",
+      action: "listen",
     });
     // Had the crosstalk refreshed the clock, this tick would still be inside the window.
     expect(f.tick(WINDOW + 1)).toEqual({ action: "release", reason: "decay" });
@@ -120,10 +167,10 @@ describe("holding the floor", () => {
     expect(f.tick(WINDOW + 1)).toEqual({ action: "release", reason: "decay" });
   });
 
-  it("under the all policy, engaged crosstalk is still crosstalk", () => {
+  it("under the all policy, engaged crosstalk is still overheard", () => {
     const f = floor({ replyPolicy: "all" });
     f.observeTranscript(said("alice", "morning", 0));
-    expect(f.observeTranscript(said("bob", "morning alice", 5_000))).toEqual({ action: "ignore" });
+    expect(f.observeTranscript(said("bob", "morning alice", 5_000))).toEqual({ action: "listen" });
     expect(f.floorHolderId).toBe("alice");
   });
 });
@@ -144,7 +191,7 @@ describe("closing phrases", () => {
     const f = floor();
     f.observeTranscript(said("alice", "hey clankie", 0));
     expect(f.observeTranscript(said("bob", "thanks bob that fixed it", 10_000))).toEqual({
-      action: "ignore",
+      action: "listen",
     });
     expect(f.state).toBe("engaged");
     expect(f.floorHolderId).toBe("alice");
@@ -153,7 +200,10 @@ describe("closing phrases", () => {
   it("the holder saying a nameless thanks keeps the floor rather than dropping it", () => {
     const f = floor();
     f.observeTranscript(said("alice", "hey clankie", 0));
-    expect(f.observeTranscript(said("alice", "thanks anyway man", 10_000))).toEqual({ action: "hold" });
+    expect(f.observeTranscript(said("alice", "thanks anyway man", 10_000))).toEqual({
+      action: "offer",
+      reason: "holder",
+    });
     expect(f.state).toBe("engaged");
   });
 });
@@ -274,8 +324,12 @@ describe("volition outcomes", () => {
     expect(f.noteVolitionOutcome(true)).toEqual({ action: "wake", reason: "volition" });
     expect(f.state).toBe("engaged");
     expect(f.floorHolderId).toBe("bob");
-    // The nameless reply to his interjection is conversation, not crosstalk.
-    expect(f.observeTranscript(said("bob", "huh good point", 10_000))).toEqual({ action: "hold" });
+    // Nameless reply is an offer: he may answer or stay quiet. Barge-in still
+    // treats Bob as the holder.
+    expect(f.observeTranscript(said("bob", "huh good point", 10_000))).toEqual({
+      action: "offer",
+      reason: "holder",
+    });
     expect(f.accounting()).toEqual({ offered: 1, taken: 1, suppressed: 0 });
   });
 
