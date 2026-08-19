@@ -189,7 +189,7 @@ describe("world play execution", () => {
     expect(client.reports.map((report) => report.state)).toEqual(["running", "stopped"]);
     expect(client.reports[1]?.receipt?.turnsTaken).toBe(2);
     const journalDir = env["CLANKIE_GBA_PLAY_JOURNAL_DIR"] as string;
-    const journalFile = readdirSync(journalDir)[0] as string;
+    const journalFile = readdirSync(journalDir).find((name) => name.endsWith(".jsonl")) as string;
     const lines = parseFreePlayJournal(readFileSync(join(journalDir, journalFile), "utf8"));
     expect(lines[1]).toMatchObject({
       schemaVersion: 2,

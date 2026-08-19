@@ -192,9 +192,8 @@ describe("asked play voice", () => {
     expect(voice.reported).not.toContain("this desk has beaten me twice now");
     expect(client.reports.map((report) => report.state)).toEqual(["running", "stopped"]);
     const journalDir = client.env["CLANKIE_GBA_PLAY_JOURNAL_DIR"] as string;
-    const lines = parseFreePlayJournal(
-      readFileSync(join(journalDir, readdirSync(journalDir)[0] as string), "utf8"),
-    );
+    const journalFile = readdirSync(journalDir).find((name) => name.endsWith(".jsonl")) as string;
+    const lines = parseFreePlayJournal(readFileSync(join(journalDir, journalFile), "utf8"));
     expect(lines[1]).toMatchObject({
       speechDeliveryId: expect.any(String),
       narrationEvent: expect.stringContaining("thought=still going"),
@@ -211,9 +210,8 @@ describe("asked play voice", () => {
     expect(voice.reported.join("\n")).toContain("thought=still going");
     expect(voice.reportOptions.every((options) => options.respond === false)).toBe(true);
     const journalDir = client.env["CLANKIE_GBA_PLAY_JOURNAL_DIR"] as string;
-    const lines = parseFreePlayJournal(
-      readFileSync(join(journalDir, readdirSync(journalDir)[0] as string), "utf8"),
-    );
+    const journalFile = readdirSync(journalDir).find((name) => name.endsWith(".jsonl")) as string;
+    const lines = parseFreePlayJournal(readFileSync(join(journalDir, journalFile), "utf8"));
     expect(lines.filter((line) => line.kind === "turn").every((line) => !("speechDeliveryId" in line))).toBe(
       true,
     );

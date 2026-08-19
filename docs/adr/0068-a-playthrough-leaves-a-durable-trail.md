@@ -30,7 +30,12 @@ different rules:
   is never rewritten or pruned by code. V1 remains readable. When a room report
   is attempted, `speechDeliveryId` and the bounded narration event join the turn
   to content-free voice receipts. The id alone proves no delivery, and generated
-  audible wording remains unknown by policy.
+  audible wording remains unknown by policy. Selected V2 turns also reference a
+  native-resolution PNG stored under `.screenshots/<journal-stem>/`: the first
+  turn, each 25-turn interval, map/scene/objective transitions, noteworthy
+  speech-intent turns, and failures. At most 63 turn frames are captured so the
+  terminal summary can add the 64th. Each reference records dimensions, byte
+  size, SHA-256, and capture reasons; PNG bytes never enter the JSONL.
 - **The environment session record is operational state, bounded and
   per-run.** `createFreePlaySession` embeds a start-stamped run id in the
   session id, so runs stop overwriting each other, and opts into
@@ -51,6 +56,17 @@ different rules:
   (`artifacts/gba-free-play/trace-<stamp>.jsonl`) instead of one fixed file
   truncated at startup.
 
+```mermaid
+flowchart LR
+  T[Settled play turn] --> P{Screenshot milestone?}
+  P -- no --> J[Append JSONL turn]
+  P -- yes --> F[Read current framebuffer PNG]
+  F --> A[Write bounded hashed artifact]
+  A --> J
+  J --> C[Archive collector verifies and copies references]
+  C --> V[Run viewer shows frame with causal turn]
+```
+
 ## Consequences
 
 - A finished run is reconstructable end to end from files: why each action is
@@ -65,8 +81,9 @@ different rules:
   immediate in practice; the bound is the price of a bounded record.
 - Observer MCP servers create a session record per launch instead of sharing
   one; ended-record pruning is what keeps that finite.
-- The journal directory grows one file per run and is deliberately not pruned
-  by code — deleting play history is an owner's call, never an agent's.
+- The journal directory grows one JSONL file and up to 64 native-resolution
+  screenshots per run and is deliberately not pruned by code — deleting play
+  history is an owner's call, never an agent's.
 - The [GBA MCP operating guide](../../apps/gba-mcp/README.md) documents the
   live body, possession, checkpoint, and observation paths; this ADR remains
   the stable record for journal ownership and retention.

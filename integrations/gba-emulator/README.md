@@ -291,7 +291,11 @@ Every run leaves a durable trail (ADR 0068). `openFreePlayJournal` writes one
 append-only JSONL per run under `~/.local/state/clankie/gba-play/`: a header,
 every validated `FreePlayTurn` with its V2 causal evidence packet, then a summary
 with progress, volition, coherence, exact-repeat, semantic-recurrence, and
-objective-retirement metrics. V1 journals remain readable. Each run also has its own
+objective-retirement metrics. Selected turns and the terminal summary reference
+hashed native-resolution PNGs under `.screenshots/<journal-stem>/`. Capture is
+bounded to the first turn, 25-turn intervals, map/scene/objective transitions,
+noteworthy speech-intent turns, failures, and the terminal frame, with no more
+than 64 screenshots per run. V1 journals remain readable. Each run also has its own
 environment session identity (`gba-free-play:<scenario>:v<n>:<run-stamp>`), so
 a new playthrough never overwrites the previous run's session record; the
 record itself is a bounded working set under `EnvironmentRuntimeRetention`
@@ -313,6 +317,7 @@ defaults are optional; an explicitly named path must exist. The report includes
 per-turn causal evidence and conservative verdicts plus aggregate timing,
 outcomes, alignment, movement, scene appropriateness, stalls, recovery,
 narration receipts, and terminal accounting. Missing V1, stage, or receipt
-evidence remains `unknown`. Journals never contain PNG, PCM, credentials, media
-bytes, the full room transcript, or generated voice wording; exact audible
+evidence remains `unknown`. Journal JSONL never contains PNG, PCM, credentials,
+media bytes, the full room transcript, or generated voice wording; screenshot
+bytes live only in the bounded sibling artifact directory, and exact audible
 wording remains unknown by policy.

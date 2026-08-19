@@ -18,7 +18,7 @@ is append-only JSONL or plain files now), never write to it.
 | Tool calls he made in a room             | `~/.clankie/captain/rooms/<sessionKey>/`, `~/.clankie/captain/turns/<lane>~<encoded-target>/*.jsonl` | Ordinary Discord text runs in the room's durable tree under `rooms/` (ADR 0118). `turns/` holds one pi tree per _one-shot_ — every privileged turn, and text turns from before 2026-08-18 — with full `toolCall`/`toolResult` args and results, under the same directory name as the lane log file. ADR 0107. |
 | Presence + system events                 | `~/.clankie/events.jsonl` (override: `CLANKIE_EVENT_LOG`)                                            | One `DomainEvent` per line, full JSON. Heartbeats are not persisted; everything else is. Replayed at boot to rebuild presence.                                                                                                                                                                                |
 | Durable memory                           | `~/.clankie/memory/discord-people/*.json`, `captain-episodes/*.jsonl`                                | Approved person facts grouped by guild/user plus one global bounded episode ring stored across source-lane files. `/memory status` reads the same store through the operator-only API.                                                                                                                        |
-| Play sessions (GBA)                      | `~/.local/state/clankie/gba-play/*.jsonl`                                                            | V1/V2 header / per-turn. V2 binds semantic decision, immediate pre-action, result, post-action, and progress evidence / optional summary.                                                                                                                                                                     |
+| Play sessions (GBA)                      | `~/.local/state/clankie/gba-play/*.jsonl`, `.screenshots/<journal-stem>/*.png`                       | V1/V2 header / per-turn. V2 binds semantic decision, immediate pre-action, result, post-action, and progress evidence / optional summary. Selected turns and the summary may reference bounded screenshot artifacts by relative path, dimensions, byte size, hash, and capture reason.                        |
 | Who held the GBA body                    | `~/.local/state/clankie/gba-body/possession-events.jsonl` (beside `body.lock`)                       | Lease transitions: acquired, released, expired, stolen, refused.                                                                                                                                                                                                                                              |
 | Discord semantic actions                 | `~/.local/state/clankie/discord-live-receipts.jsonl` (override: `DISCORD_BRIDGE_RECEIPT_PATH`)       | What the bridge actually did — content-free receipts, never message bodies.                                                                                                                                                                                                                                   |
 | Opt-in development voice transcript      | `~/.local/state/clankie/discord-voice-transcripts.jsonl`                                             | Exists only when `discord.voiceTranscriptLoggingEnabled` is on. Exact consented final speech with body, guild/channel, stay/delivery ids, speaker id/display name, and timestamp. Mode 0600; receipts remain content-free.                                                                                    |
@@ -39,6 +39,10 @@ is append-only JSONL or plain files now), never write to it.
   commit. Compare process/restart and commit times, then use fields actually
   present in the journal to prove capabilities; a process may also have started
   from uncommitted source, so do not infer an exact commit from timing alone.
+- **A screenshot reference is evidence only when its bytes match.** Resolve its
+  relative `.screenshots/...` path from the journal directory and verify both
+  `byteLength` and `sha256`; missing or mismatched bytes are a broken artifact,
+  not permission to reconstruct a frame from a later state.
 - **Presence phases are edge-triggered at the event level.** `discord.presence.*`
   and `captain.presence.*` phases persist until the owning process emits the
   next transition, so judge liveness by the **age of the last event** for that
@@ -140,6 +144,11 @@ is append-only JSONL or plain files now), never write to it.
   `embodiment.session.failed` in `~/.clankie/events.jsonl`. A matching terminal
   event accounts for the run with its real outcome (including `lease_lapsed`)
   but never becomes a synthetic summary.
+- **A hosted play has two session ids.** The play journal header's
+  `environmentSessionId` is the Clankie embodiment id used for lifecycle joins.
+  The PokeAgents session id (`ses_...`) lives in each V2 turn's
+  `evidence.*.provenance.sessionId`; use that id to find the independent host
+  journal under `~/.pokeagent-mmo/world/players/*/games/*/journal/`.
 - **`world_unreachable` is usually a missing process, not a crash.** The hosted
   world is a separate `pokeagents` server reached over a unix socket, so a
   refusal milliseconds after `embodiment.session.claimed` means nothing was

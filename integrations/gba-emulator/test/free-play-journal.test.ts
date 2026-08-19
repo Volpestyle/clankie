@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -7,6 +8,7 @@ import {
   openFreePlayJournal,
   parseFreePlayJournal,
 } from "../src/free-play-journal.ts";
+import { encodeFramebufferPng } from "../src/framebuffer-png.ts";
 import type { FreePlayResult, FreePlayTurn, FreePlayTurnEvidence } from "../src/free-play.ts";
 
 const turn = (index: number): FreePlayTurn => ({
@@ -144,7 +146,54 @@ describe("free-play journal", () => {
     at.value = new Date("2026-07-27T03:30:00.000Z");
     const second = open();
     expect(second.path).not.toBe(first.path);
-    expect(readdirSync(rootDir)).toHaveLength(2);
+    expect(readdirSync(rootDir).filter((name) => name.endsWith(".jsonl"))).toHaveLength(2);
+  });
+
+  it("captures bounded milestone screenshots beside the journal", () => {
+    const rootDir = mkdtempSync(path.join(tmpdir(), "play-journal-screenshots-"));
+    const journal = openFreePlayJournal({
+      rootDir,
+      runId: "run",
+      environmentSessionId: "session",
+      scenarioId: "scenario",
+      clock: () => new Date("2026-08-19T12:00:00.000Z"),
+    });
+    const png = encodeFramebufferPng({ width: 2, height: 2, bytes: new Uint8Array(8) });
+    let captures = 0;
+    const framePng = () => {
+      captures += 1;
+      return png;
+    };
+    const turns = Array.from({ length: 80 }, (_, index) => ({
+      ...turn(index),
+      ...(index > 0 ? { outcome: "rejected_by_adapter" as const } : {}),
+    }));
+    for (const record of turns) journal.turn(record, evidence(), { framePng });
+    journal.summary({
+      outcome: "stopped",
+      result: result(turns),
+      durationMs: 1,
+      framesPublished: 1,
+      framesDropped: 0,
+      framePng,
+    });
+
+    const screenshots = parseFreePlayJournal(readFileSync(journal.path, "utf8")).flatMap((line) =>
+      line.kind !== "header" && line.schemaVersion === 2 && line.screenshot !== undefined
+        ? [line.screenshot]
+        : [],
+    );
+    expect(captures).toBe(64);
+    expect(screenshots).toHaveLength(64);
+    expect(screenshots[0]?.reasons).toEqual(["initial"]);
+    expect(screenshots[1]?.reasons).toEqual(["failure"]);
+    expect(screenshots[25]?.reasons).toEqual(["interval", "failure"]);
+    expect(screenshots.at(-1)?.reasons).toEqual(["terminal"]);
+    for (const screenshot of screenshots) {
+      const bytes = readFileSync(path.join(rootDir, screenshot.path));
+      expect(screenshot).toMatchObject({ byteLength: bytes.byteLength, width: 2, height: 2 });
+      expect(screenshot.sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
+    }
   });
 
   it("reports an append failure instead of killing the playthrough", () => {

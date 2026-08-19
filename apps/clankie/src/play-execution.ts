@@ -632,13 +632,12 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
               respond: speechDeliveryId !== undefined,
             });
           }
-          journal?.turn(
-            turn,
-            evidence,
-            speechDeliveryId === undefined || event === null
+          journal?.turn(turn, evidence, {
+            framePng: () => game.framePng(STREAM_SCALE),
+            ...(speechDeliveryId === undefined || event === null
               ? {}
-              : { speechDeliveryId, narrationEvent: event },
-          );
+              : { speechDeliveryId, narrationEvent: event }),
+          });
           if (
             autosaveEvery > 0 &&
             game.checkpoints !== undefined &&
@@ -737,7 +736,15 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
       const outcome = control.stopRequested() ? "stopped" : "budget_exhausted";
       const durationMs = clock().getTime() - startedAt;
       const framesDropped = (sink?.droppedFrameCount ?? 0) + framesDroppedWithoutSink;
-      journal?.summary({ outcome, result, durationMs, framesPublished, framesDropped, checkpointId });
+      journal?.summary({
+        outcome,
+        result,
+        durationMs,
+        framesPublished,
+        framesDropped,
+        checkpointId,
+        framePng: () => game.framePng(STREAM_SCALE),
+      });
       // The receipt is content-free by construction; the metrics the loop
       // computed (progress, volition, coherence) land here and in the journal
       // summary instead of being dropped on conversion.

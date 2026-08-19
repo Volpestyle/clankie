@@ -340,13 +340,12 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
               respond: speechDeliveryId !== undefined,
             });
           }
-          journal?.turn(
-            turn,
-            evidence,
-            speechDeliveryId === undefined || event === null
+          journal?.turn(turn, evidence, {
+            framePng: () => body.framePng(),
+            ...(speechDeliveryId === undefined || event === null
               ? {}
-              : { speechDeliveryId, narrationEvent: event },
-          );
+              : { speechDeliveryId, narrationEvent: event }),
+          });
           options.onTurn?.(turn);
         },
         onSettledTurn: (event: FreePlaySettledTurn) => {
@@ -394,7 +393,14 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
         (sink?.droppedAudioPacketCount ?? 0) +
         audioPacketsDroppedWithoutSink +
         body.droppedAudioPacketCount();
-      journal?.summary({ outcome, result, durationMs, framesPublished, framesDropped });
+      journal?.summary({
+        outcome,
+        result,
+        durationMs,
+        framesPublished,
+        framesDropped,
+        framePng: () => body.framePng(),
+      });
       options.logger.info(
         {
           sessionId: session.sessionId,

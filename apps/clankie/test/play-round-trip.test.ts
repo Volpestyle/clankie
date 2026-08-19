@@ -123,13 +123,14 @@ describe("asked play round trip on the deterministic double", () => {
     // The durable trail (ADR 0068): the run left a journal with the header,
     // both turns, and a summary carrying the metrics the receipt cannot.
     const journalDir = env["CLANKIE_GBA_PLAY_JOURNAL_DIR"] as string;
-    const journalFiles = readdirSync(journalDir);
+    const journalFiles = readdirSync(journalDir).filter((name) => name.endsWith(".jsonl"));
     expect(journalFiles).toHaveLength(1);
     const lines = parseFreePlayJournal(readFileSync(join(journalDir, journalFiles[0]!), "utf8"));
     expect(lines.map((line) => line.kind)).toEqual(["header", "turn", "turn", "summary"]);
     expect(lines[0]).toMatchObject({ runId: "round-trip-1" });
     expect(lines[1]).toMatchObject({
       schemaVersion: 2,
+      screenshot: { reasons: expect.arrayContaining(["initial"]), width: 240, height: 160 },
       turn: { monologue: "pressing on", outcome: "accepted" },
       evidence: {
         decision: { provenance: { body: "local", real: expect.any(Boolean) } },
