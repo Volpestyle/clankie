@@ -2,14 +2,16 @@
 
 Status: accepted (2026-08-15). Narrows [ADR 0057](0057-realtime-voice-with-captain-handoff.md)
 (the mouth's tool surface) and uses [ADR 0068](0068-a-playthrough-leaves-a-durable-trail.md)
-(the play journal) as the store, never as the thing the mouth reads.
+(the play journal) as the store, never as the thing the mouth reads. ADR 0123
+adds continuous interpreted experience; this pull seam remains for raw pixels.
 
 ## Context
 
 The talking half in Discord voice and the playing half that holds the GBA are
 one character. People in the call can watch the activity surface. The mouth
-receives pushed `While playing, Clankie just:` notes and a briefing that he is
-at the controls, but neither carries pixels. `pokeagent_observe` stays
+receives a first-person game-side experience update after every settled turn
+and a briefing that he is at the controls, but neither carries pixels.
+`pokeagent_observe` stays
 digest-only: "frame bytes stay on the rendered-surface media plane."
 `observe_share` returns a short chronological JPEG sequence from _someone
 else's_ Discord share.

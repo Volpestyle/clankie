@@ -369,13 +369,16 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
      * is how six words became seventeen seconds of speech in the 2026-08-01
      * run. What crosses here is the turn's own effect line.
      */
-    const reportToRoom = (event: string, deliveryId: string): void => {
+    const reportToRoom = (
+      event: string,
+      narration: { readonly deliveryId?: string; readonly respond: boolean },
+    ): void => {
       if (event.length === 0 || voice === undefined) return;
       // No room, nothing to report to. Without this the bridge rejects every
       // event with "not in a channel" and the one-shot failure log below would
       // report a broken seam when the truth is an empty room.
       if (!voice.roomListening) return;
-      void voice.narrate(event, { deliveryId }).catch((error: unknown) => {
+      void voice.narrate(event, narration).catch((error: unknown) => {
         if (speechFailureLogged) return;
         speechFailureLogged = true;
         options.logger.info(
@@ -620,8 +623,15 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
           // list of notable-looking effects that would drift from the first.
           const event = roomEvent(turn);
           const speechDeliveryId =
-            event !== null && voice !== undefined && voice.roomListening ? randomUUID() : undefined;
-          if (event !== null && speechDeliveryId !== undefined) reportToRoom(event, speechDeliveryId);
+            event !== null && turn.speakWanted && voice !== undefined && voice.roomListening
+              ? randomUUID()
+              : undefined;
+          if (event !== null) {
+            reportToRoom(event, {
+              ...(speechDeliveryId === undefined ? {} : { deliveryId: speechDeliveryId }),
+              respond: speechDeliveryId !== undefined,
+            });
+          }
           journal?.turn(
             turn,
             evidence,
@@ -781,39 +791,23 @@ function overlayText(value: string | null): string | null {
   return value?.trim().slice(0, 256) || null;
 }
 
-/** Bound on the objective clause, so a rambling goal cannot crowd out the event. */
-const ROOM_EVENT_OBJECTIVE_MAX = 120;
-
 /**
- * The event this turn is worth reporting to the room, or null for silence.
- *
- * Two things are decided here. **Whether** to report defers to `speak`: the
- * volition gate already weighs the whole turn against what he has been doing,
- * so asking it again with a second rule would give the room a different answer
- * than the one he made. `speak` itself is deliberately not sent — ADR 0074 —
- * because handing a finished quip to a conversational model produces a reply
- * *to* the quip rather than a remark of its own.
- *
- * **What** to report is the effect plus the goal it was in service of. The
- * effect line alone is written for his own next decision and reads like
- * telemetry out of context ("turned to face north without stepping"); naming
- * the objective is what turns it back into a moment someone can react to.
+ * A bounded first-person continuity update for the room persona. It crosses
+ * every settled turn; `speakWanted` separately decides whether that update may
+ * ask for audio. The field slices keep the exact offered event inside the
+ * journal's 512-character evidence bound.
  */
 function roomEvent(turn: FreePlayTurn): string | null {
-  if (!turn.speakWanted) return null;
-  // The room's template is "While playing, Clankie just: …", which asks for
-  // something he *did*. `effect` is an observed world delta — "the screen
-  // changed", "moved to (13,17)" — and in that slot it leaves him narrating
-  // telemetry: handed "the screen changed" there is nothing to say but "ok,
-  // time to take a look at the screen". His own `intent` is the action, in his
-  // words, and is what the sentence was shaped for. Effect stays the fallback
-  // for turns that carry no intent.
-  const intent = turn.intent?.trim();
-  const did = intent !== undefined && intent.length > 0 ? intent : turn.effect?.trim();
-  if (did === undefined || did.length === 0) return null;
+  const lines = [`turn=${String(turn.turn)}`];
+  const thought = turn.monologue?.trim();
+  const observed = turn.effect?.trim();
   const objective = turn.objective?.trim();
-  if (objective === undefined || objective.length === 0) return did;
-  return `${did} (working toward: ${objective.slice(0, ROOM_EVENT_OBJECTIVE_MAX)})`;
+  const intent = turn.intent?.trim();
+  if (thought) lines.push(`thought=${thought.slice(0, 160)}`);
+  if (observed) lines.push(`observed=${observed.slice(0, 120)}`);
+  if (objective) lines.push(`goal=${objective.slice(0, 80)}`);
+  if (intent) lines.push(`next=${intent.slice(0, 80)}`);
+  return lines.length === 1 ? null : lines.join("\n");
 }
 
 function positiveIntegerOr(raw: string | undefined, fallback: number): number {

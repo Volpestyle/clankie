@@ -42,12 +42,13 @@ describe("possessor voice client", () => {
       text: "walked into a wall by the lab",
     });
 
-    await client.narrate("took a step", { deliveryId: "play-turn-3" });
+    await client.narrate("took a step", { deliveryId: "play-turn-3", respond: false });
     expect(JSON.parse(socket.sent[1] ?? "{}")).toEqual({
       schemaVersion: POSSESSOR_VOICE_SCHEMA_VERSION,
       type: "narrate",
       text: "took a step",
       deliveryId: "play-turn-3",
+      respond: false,
     });
   });
 

@@ -41,13 +41,16 @@ export interface PossessorVoiceSocket {
 
 export interface PossessorVoiceClient {
   /**
-   * Report what just happened in the body — an event, never a sentence to say.
+   * Report the body's current experience — an event, never a sentence to say.
    * The persona on the other side composes the words (ADR 0064), so a caller
    * that passes finished speech here gets it treated as something that
    * happened and replied to, which is the ADR 0074 defect. Rejects when the
    * bridge is unreachable.
    */
-  narrate(text: string, options?: { readonly deliveryId?: string }): Promise<void>;
+  narrate(
+    text: string,
+    options?: { readonly deliveryId?: string; readonly respond?: boolean },
+  ): Promise<void>;
   /** Subscribe to room utterances as they happen. Returns an unsubscribe. */
   subscribe(listener: (utterance: string) => void): () => void;
   /**
@@ -144,6 +147,7 @@ export function createPossessorVoiceClient(options: PossessorVoiceClientOptions)
         type: "narrate",
         text: trimmed,
         ...(deliveryId === undefined || deliveryId.length === 0 ? {} : { deliveryId }),
+        ...(options?.respond === undefined ? {} : { respond: options.respond }),
       };
       try {
         socket.send(JSON.stringify(message));

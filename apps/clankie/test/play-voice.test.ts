@@ -38,14 +38,16 @@ function fakeVoice(
   options: { failNarrate?: boolean; roomSaysOnSubscribe?: string; roomListening?: boolean } = {},
 ) {
   const reported: string[] = [];
+  const reportOptions: { readonly deliveryId?: string; readonly respond?: boolean }[] = [];
   const listeners = new Set<(utterance: string) => void>();
   let closed = false;
   const client: PossessorVoiceClient = {
-    narrate(text) {
+    narrate(text, narrationOptions) {
       if (options.failNarrate === true) {
         return Promise.reject(new Error("clankie_speech_unavailable: the Discord bridge is not reachable"));
       }
       reported.push(text);
+      reportOptions.push(narrationOptions ?? {});
       return Promise.resolve();
     },
     subscribe(listener) {
@@ -69,6 +71,7 @@ function fakeVoice(
   return {
     client,
     reported,
+    reportOptions,
     isClosed: () => closed,
     hasListeners: () => listeners.size > 0,
   };
@@ -194,21 +197,19 @@ describe("asked play voice", () => {
     );
     expect(lines[1]).toMatchObject({
       speechDeliveryId: expect.any(String),
-      narrationEvent: expect.stringContaining("working toward:"),
+      narrationEvent: expect.stringContaining("thought=still going"),
     });
     expect(JSON.stringify(lines[1])).not.toContain("this desk has beaten me twice now");
   });
 
-  it("stays quiet on the turns his volition passed over", async () => {
-    // The room used to hear every turn's diagnostic — "no visible change — the
-    // frame is identical" — which the 12s narration throttle then sampled at
-    // random. Volition is the judgement of whether a moment is worth a word,
-    // and it is the same judgement whether or not the room holds the pen.
+  it("keeps the room situated without speaking on turns his volition passed over", async () => {
     const voice = fakeVoice();
     const mind = talkingMind(null);
     const client = await play({ voice: voice.client, mind: mind.create });
 
-    expect(voice.reported).toEqual([]);
+    expect(voice.reported).not.toHaveLength(0);
+    expect(voice.reported.join("\n")).toContain("thought=still going");
+    expect(voice.reportOptions.every((options) => options.respond === false)).toBe(true);
     const journalDir = client.env["CLANKIE_GBA_PLAY_JOURNAL_DIR"] as string;
     const lines = parseFreePlayJournal(
       readFileSync(join(journalDir, readdirSync(journalDir)[0] as string), "utf8"),
@@ -218,14 +219,16 @@ describe("asked play voice", () => {
     );
   });
 
-  it("names the goal the event served, so the room can react to a moment", async () => {
+  it("carries thought, outcome, goal, and next intent as one game-side experience", async () => {
     const voice = fakeVoice();
     const mind = talkingMind("this desk has beaten me twice now");
     await play({ voice: voice.client, mind: mind.create });
 
-    // The effect line alone is written for his own next decision and reads as
-    // telemetry out of context; the objective is what makes it a moment.
-    expect(voice.reported.join("\n")).toContain("working toward:");
+    expect(voice.reported.join("\n")).toContain("thought=still going");
+    expect(voice.reported.join("\n")).toContain("observed=");
+    expect(voice.reported.join("\n")).toContain("goal=get out of the house");
+    expect(voice.reported.join("\n")).toContain("next=press a");
+    expect(voice.reportOptions.some((options) => options.respond === true)).toBe(true);
   });
 
   it("hears the room, and leaves the answer to the room", async () => {
@@ -266,8 +269,8 @@ describe("asked play voice", () => {
         expect(voice.connected).toBe(true);
         expect(voice.roomListening).toBe(true);
       });
-      // Volition must fire for anything to reach the room: narration reports
-      // the turns he judged worth a word, not every turn.
+      // Every turn reaches the room as experience; volition decides whether
+      // that update also asks the room persona to speak.
       const mind = talkingMind("that ledge is going to be a problem");
       let deliveredAfterRunning = false;
       let acknowledgeTranscript!: () => void;

@@ -18,8 +18,8 @@ export const POSSESSOR_UTTERANCE_MAX_CHARS = 2_000;
 const EnvelopeShape = { schemaVersion: z.literal(POSSESSOR_VOICE_SCHEMA_VERSION) } as const;
 
 /**
- * Possessor → bridge. `text` describes what just happened in the body, in the
- * possessor's own words. It is **not** a script: the bridge seeds it as a
+ * Possessor → bridge. `text` carries the body's bounded current experience in
+ * the possessor's own words. It is **not** a script: the bridge seeds it as a
  * conversation item and lets the persona decide how — and whether — to voice it
  * (ADR 0047's fence, restated for speech: possession changes who decides, never
  * who is present or how he sounds).
@@ -34,6 +34,8 @@ export const PossessorNarrateSchema = z
      * its own id when a possessor omits it (gba-mcp `clankie_say`).
      */
     deliveryId: z.string().min(1).max(128).regex(/^\S+$/u).optional(),
+    /** False seeds this experience into the live persona without asking it to speak. */
+    respond: z.boolean().optional(),
   })
   .strict();
 export type PossessorNarrate = z.infer<typeof PossessorNarrateSchema>;

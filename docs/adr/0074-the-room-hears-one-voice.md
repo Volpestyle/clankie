@@ -10,6 +10,9 @@ keeps its job, and loses one surface. The consent model
 ([ADR 0071](0071-presence-as-consent-voice-policy.md)), the swappable mouth
 ([ADR 0070](0070-external-voice-via-streaming-tts.md)), and the floor machine
 ([ADR 0057](0057-realtime-voice-with-captain-handoff.md)) are unchanged.
+Amended by [ADR 0123](0123-the-room-inherits-the-games-experience.md): every
+settled game turn reaches the room persona as silent experience, while
+`speakWanted` still decides which turns may produce audio.
 
 ## Context
 
@@ -54,14 +57,9 @@ the wire message and the contract; `say()` is the name that invited a script
 through a seam that never accepted one.
 
 **Authorship moves to the room; the judgement of what is worth remarking on
-does not.** Reporting every turn hands the room a running commentary of turn
-diagnostics — lines like `"no visible change — the frame is identical"`, which
-are written for his own next decision and read as telemetry out of context —
-and the narration throttle then speaks whichever fragment happens to land on
-its interval. So the seam reports only the turns his own volition fired on
-(`speakWanted`), which the loop records even while the room holds the pen. One
-judgement of "is this worth a word", made where the whole moment is visible,
-rather than a second list of notable-looking effects that would drift from it.
+does not.** Every turn updates the room persona's game-side experience, but
+only turns whose own volition fired (`speakWanted`) ask it to answer aloud. One
+judgement of "is this worth a word" remains where the whole moment is visible.
 The words are still never sent: volition says _whether_, the room says _what_.
 
 **2. The Voice agent is not consulted while a room is listening.** The bridge

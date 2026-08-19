@@ -1903,9 +1903,23 @@ describe("possessor narration and hearing (ADR 0064)", () => {
     // The possessor's text is seeded, never queued as speech to synthesize.
     const seeded = conversation.textItems.filter((item) => item.includes("walked into a wall by the lab"));
     expect(seeded).toHaveLength(1);
-    expect(at(seeded, 0)).toBe("While playing, Clankie just: walked into a wall by the lab");
+    expect(at(seeded, 0)).toBe("Your own game-side experience updated:\nwalked into a wall by the lab");
     // A response was requested; what he actually says is the model's.
     expect(conversation.responseCreates).toBe(1);
+  });
+
+  it("inherits game experience without narrating every turn", async () => {
+    const harness = await joinedHarness();
+    await harness.session.narrate("turn=12\nthought=Oak is not in the lab\nnext=look outside", {
+      respond: false,
+    });
+    await flush();
+
+    expect(harness.conversation().textItems).toContain(
+      "Your own game-side experience updated:\nturn=12\nthought=Oak is not in the lab\nnext=look outside",
+    );
+    expect(harness.conversation().responseCreates).toBe(0);
+    expect(harness.ofType("possessor_narration_suppressed")).toHaveLength(0);
   });
 
   it("keeps seeding but stops responding inside the narration interval", async () => {
@@ -1930,7 +1944,9 @@ describe("possessor narration and hearing (ADR 0064)", () => {
 
     const conversation = harness.conversation();
     // Every step is still seeded — he must not narrate a past he never saw.
-    expect(conversation.textItems.filter((item) => item.startsWith("While playing,"))).toHaveLength(3);
+    expect(
+      conversation.textItems.filter((item) => item.startsWith("Your own game-side experience")),
+    ).toHaveLength(3);
     // But the room is not monologued at.
     expect(conversation.responseCreates).toBe(1);
 
@@ -2005,7 +2021,9 @@ describe("possessor narration bursts (ADR 0064)", () => {
     await flush();
 
     const conversation = harness.conversation();
-    expect(conversation.textItems.filter((item) => item.startsWith("While playing,"))).toHaveLength(3);
+    expect(
+      conversation.textItems.filter((item) => item.startsWith("Your own game-side experience")),
+    ).toHaveLength(3);
     expect(conversation.responseCreates).toBe(1);
     const suppressed = harness.ofType("possessor_narration_suppressed");
     expect(suppressed).toHaveLength(2);

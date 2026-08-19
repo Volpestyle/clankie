@@ -26,7 +26,10 @@ export interface PossessorVoiceListenerOptions {
    * and expected — he may not be in a voice channel — and the reason travels
    * back to the possessor rather than being swallowed.
    */
-  narrate: (text: string, options: { readonly deliveryId: string }) => Promise<void>;
+  narrate: (
+    text: string,
+    options: { readonly deliveryId: string; readonly respond: boolean },
+  ) => Promise<void>;
   /**
    * Whether anyone can currently hear the body, read at attach time so a
    * possessor that connects mid-call learns the room without waiting for the
@@ -180,7 +183,7 @@ export function createPossessorVoiceListener(options: PossessorVoiceListenerOpti
         // Fire-and-forget on purpose: narration is an utterance in a live room,
         // not a request/response. A failure is reported through the bridge's own
         // evidence, and a possessor that waited on it would stall its play loop.
-        void narrate(parsed.data.text, { deliveryId })
+        void narrate(parsed.data.text, { deliveryId, respond: parsed.data.respond ?? true })
           .then(() => {
             // A submission receipt means the live persona accepted the event,
             // not merely that the listener attempted the call. Keeping it

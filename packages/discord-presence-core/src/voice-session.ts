@@ -770,19 +770,23 @@ export class DiscordVoiceSession {
   }
 
   /**
-   * A possessor's report of what just happened in the body (ADR 0064).
+   * A possessor's bounded update from another body (ADR 0064 / ADR 0123).
    *
    * The text is seeded as a conversation item and **never spoken verbatim**.
-   * What Clankie says about walking into a wall is his to compose, in the voice
-   * the briefing already gave him, folded in with whatever the room is saying —
-   * the possessor supplies the event, the persona supplies the words. This is
+   * The update may quietly preserve continuity or ask for a response. What
+   * Clankie says is his to compose, in the voice the briefing already gave him,
+   * folded in with whatever the room is saying — the body supplies experience,
+   * the persona supplies words. This is
    * ADR 0047's fence restated for speech: possession changes who decides what
    * the body does, never who is present or how he sounds.
    *
    * Rejects when he is not in a voice channel, so a possessor learns that
    * nobody heard it rather than believing it spoke.
    */
-  public async narrate(text: string, options?: { readonly deliveryId?: string }): Promise<void> {
+  public async narrate(
+    text: string,
+    options?: { readonly deliveryId?: string; readonly respond?: boolean },
+  ): Promise<void> {
     const trimmed = text.trim();
     if (trimmed.length === 0) throw new Error("voice_narration_empty");
     const guildId = this.guildId;
@@ -803,11 +807,14 @@ export class DiscordVoiceSession {
       const conversation = this.conversation;
       if (!conversation.isOpen) return;
       try {
-        conversation.createTextItem(`While playing, Clankie just: ${trimmed}`);
+        conversation.createTextItem(`Your own game-side experience updated:\n${trimmed}`);
       } catch {
         // Closed between frames; the close handler owns cleanup.
         return;
       }
+      // Experience is continuous; speech is selective. The game keeps this
+      // persona situated every turn without turning every turn into narration.
+      if (options?.respond === false) return;
       // Decided here rather than at call time, and deliberately: a play loop
       // fires narrations without awaiting them, so a decision made before the
       // queue would let every report in a burst independently conclude it was

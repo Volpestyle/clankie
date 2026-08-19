@@ -29,10 +29,11 @@ emulator command.
 
 ### Outbound play uses event narration
 
-The play loop reports a bounded event only when its volition says the moment is
-worth remarking on. It does not send `FreePlayTurn.speak`, `reply`, or any other
-finished sentence. The gateway-owning realtime session receives the event and
-is the sole author of what the room hears.
+The play loop reports a bounded experience update every settled turn. Its
+volition separately says whether that update may ask for speech. It does not
+send `FreePlayTurn.speak`, `reply`, or any other finished sentence. The
+gateway-owning realtime session inherits the experience and is the sole author
+of what the room hears.
 
 ![ADR 0067 play requests through the possessor seam](../diagrams/0067-a-play-request-speaks-through-the-possessor-seam.jpg)
 

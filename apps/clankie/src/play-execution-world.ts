@@ -42,7 +42,6 @@ const STREAM_SCALE = 1;
 const FRAME_WIDTH = 240 * STREAM_SCALE;
 const FRAME_HEIGHT = 160 * STREAM_SCALE;
 const PLAY_MODEL_REQUEST_TIMEOUT_MS = 180_000;
-const ROOM_EVENT_OBJECTIVE_MAX = 120;
 
 interface PlayExecutionLogger {
   info(context: Record<string, unknown>, message: string): void;
@@ -214,10 +213,13 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
     const unsubscribe = voice?.subscribe((utterance) => interjections.offer(utterance));
 
     let speechFailureLogged = false;
-    const reportToRoom = (event: string, deliveryId: string): void => {
+    const reportToRoom = (
+      event: string,
+      narration: { readonly deliveryId?: string; readonly respond: boolean },
+    ): void => {
       if (event.length === 0 || voice === undefined) return;
       if (!voice.roomListening) return;
-      void voice.narrate(event, { deliveryId }).catch((error: unknown) => {
+      void voice.narrate(event, narration).catch((error: unknown) => {
         if (speechFailureLogged) return;
         speechFailureLogged = true;
         options.logger.info(
@@ -329,8 +331,15 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
           publishFrame(turn.turn);
           const event = roomEvent(turn);
           const speechDeliveryId =
-            event !== null && voice !== undefined && voice.roomListening ? randomUUID() : undefined;
-          if (event !== null && speechDeliveryId !== undefined) reportToRoom(event, speechDeliveryId);
+            event !== null && turn.speakWanted && voice !== undefined && voice.roomListening
+              ? randomUUID()
+              : undefined;
+          if (event !== null) {
+            reportToRoom(event, {
+              ...(speechDeliveryId === undefined ? {} : { deliveryId: speechDeliveryId }),
+              respond: speechDeliveryId !== undefined,
+            });
+          }
           journal?.turn(
             turn,
             evidence,
@@ -428,21 +437,18 @@ function overlayText(value: string | null): string | null {
   return value?.trim().slice(0, 256) || null;
 }
 
+/** Continuous experience; `speakWanted` separately decides whether the room answers aloud. */
 function roomEvent(turn: FreePlayTurn): string | null {
-  if (!turn.speakWanted) return null;
-  // The room's template is "While playing, Clankie just: …", which asks for
-  // something he *did*. `effect` is an observed world delta — "the screen
-  // changed", "moved to (13,17)" — and in that slot it leaves him narrating
-  // telemetry: handed "the screen changed" there is nothing to say but "ok,
-  // time to take a look at the screen". His own `intent` is the action, in his
-  // words, and is what the sentence was shaped for. Effect stays the fallback
-  // for turns that carry no intent.
-  const intent = turn.intent?.trim();
-  const did = intent !== undefined && intent.length > 0 ? intent : turn.effect?.trim();
-  if (did === undefined || did.length === 0) return null;
+  const lines = [`turn=${String(turn.turn)}`];
+  const thought = turn.monologue?.trim();
+  const observed = turn.effect?.trim();
   const objective = turn.objective?.trim();
-  if (objective === undefined || objective.length === 0) return did;
-  return `${did} (working toward: ${objective.slice(0, ROOM_EVENT_OBJECTIVE_MAX)})`;
+  const intent = turn.intent?.trim();
+  if (thought) lines.push(`thought=${thought.slice(0, 160)}`);
+  if (observed) lines.push(`observed=${observed.slice(0, 120)}`);
+  if (objective) lines.push(`goal=${objective.slice(0, 80)}`);
+  if (intent) lines.push(`next=${intent.slice(0, 80)}`);
+  return lines.length === 1 ? null : lines.join("\n");
 }
 
 function positiveIntegerOr(raw: string | undefined, fallback: number): number {
