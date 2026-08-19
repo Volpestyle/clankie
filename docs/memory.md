@@ -1,7 +1,7 @@
 # Memory
 
 Clankie keeps two durable memories under `~/.clankie/memory/`
-(`CLANKIE_MEMORY_DIR` overrides the root). One is what he remembers doing; the
+(`CLANKIE_MEMORY_DIR` overrides the root). One is what he remembers experiencing; the
 other is what he has been told about people. They have different keys, different
 lifetimes, and different rules about who may read them, so they are separate
 stores rather than one namespace with a policy field
@@ -15,16 +15,24 @@ with `0600` contents, and the implementation is one module —
 
 [Editable Turbopuffer tldraw source](diagrams/clankie-memory.tldraw)
 
-## Episodes — what he remembers doing
+## Episodes — what he remembers experiencing
 
-An episode is his own short note about something that happened in a room:
-"facts, not transcripts." He writes them himself with the `remember_episode`
-tool; nothing else authors one. A summary is capped at 512 characters.
+An episode is his own short memory of something that happened in a room or
+something he wants to carry into his developing personality: an experience,
+reflection, changed opinion, meaningful exchange, taste, commitment, or work in
+progress. He writes them himself with the `remember_episode` tool; nothing else
+authors one, and a person does not need to ask him first. It is a concise memory,
+not a transcript. A summary is capped at 512 characters.
 
-Whether a turn is worth a line is his call, and the identity prompt's
+Whether a turn is worth a line is entirely his call, and the identity prompt's
 `# Remembering` section is where he learns to make it
 ([`captain/instructions.md`](../apps/clankie/src/captain/instructions.md)) — a
 tool nobody tells him he owns is a tool he never reaches for.
+
+The realtime voice model has no direct writer. When it decides that something
+in a conversation is worth keeping, it uses `ask_clankie` to ask the continuing
+captain lane to write the episode. Conversation that it does not choose to save
+remains ordinary bounded session context.
 
 Episodes are one global ring of 128 across every lane, sharded on disk by the
 lane that produced them:
@@ -93,9 +101,9 @@ against the turn's query. The voice briefing pulls facts for each consented
 speaker before a voice session starts, and reports only counts and lengths in
 its egress receipt — never content.
 
-**A person writes them, not Clankie.** He has a tool for remembering an episode
-and no tool for remembering a person — he cannot decide on his own to keep a
-note about someone. Facts arrive through the Discord `person-memory` slash
+**A person writes them, not Clankie.** He can remember his own experience of an
+interaction, but he has no tool for authoring a durable factual profile about a
+person. Facts arrive through the Discord `person-memory` slash
 command (`action: propose`, with the subject, body, kind, visibility, and
 optional expiry), which the bridge forwards to
 `POST /v1/memory/discord-people/proposals`. The same command with

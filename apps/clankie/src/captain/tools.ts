@@ -386,8 +386,9 @@ export function captainTools(
       name: "remember_episode",
       label: "Remember this",
       description:
-        "Write one short episode into your own memory for this room — something that happened that you want to " +
-        "still know tomorrow. Facts, not transcripts.",
+        "Write one short episode into your own memory for this room — anything you choose to carry forward as " +
+        "part of your experience and developing personality. Your concise memory, not a transcript or an " +
+        "unapproved factual profile about someone.",
       parameters: Type.Object({
         summary: Type.String({ minLength: 1, maxLength: CAPTAIN_EPISODE_SUMMARY_MAX }),
         visibility: Type.Optional(StringEnum(["shareable", "operator_private"])),

@@ -148,7 +148,9 @@ const ASK_CLANKIE_TOOL = {
   description:
     "Ask Clankie's captain to act or to look something up. The captain holds every tool and " +
     "memory; use this for anything beyond conversation — actions, files, the story of this " +
-    "playthrough, or facts the briefing does not cover. Do not use it just to look at your screen. " +
+    "playthrough, facts the briefing does not cover, or something from the conversation you choose " +
+    "to remember as part of your own experience. Do not wait for someone to ask you to remember it. " +
+    "Do not use it just to look at your screen. " +
     "Do not use it for songs or YouTube — those are youtube_search and music_play.",
   parameters: {
     type: "object",

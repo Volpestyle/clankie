@@ -73,8 +73,11 @@ touches the world goes through its single `ask_clankie` tool to the continuing
 ([ADR 0057](0057-realtime-voice-with-captain-handoff.md)). The Clankie service,
 not the bridge request, resolves approved person-memory facts for consented
 guild/user identities and supplies the bounded briefing projection. Voice can
-use approved memory but cannot commit memory. Exact final speech is persisted
-only when the owner enables ADR 0121's separate development transcript log.
+use approved person memory but cannot mutate it. The realtime model has no
+direct memory writer; when it chooses to keep part of a conversation as its own
+experience, `ask_clankie` lets the captain write a self-authored episode. Exact
+final speech is persisted only when the owner enables ADR 0121's separate
+development transcript log.
 
 Concurrent speakers retain separate Opus subscriptions and separate
 transcription sessions, then converge as gateway-attributed text in one shared

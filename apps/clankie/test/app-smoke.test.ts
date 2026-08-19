@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { OPERATOR_CONVERSATION_DISPATCH_PATH } from "@clankie/protocol";
+import { ClankieSettingsSchema } from "@clankie/settings";
 import { afterEach, describe, expect, it } from "vitest";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
@@ -20,6 +21,35 @@ afterEach(async () => {
 });
 
 describe("clankie app smoke", () => {
+  it("gives realtime voice agency to initiate its own episodic memories", async () => {
+    const clankie = await createClankieApp({
+      captain: createStubCaptain(),
+      settings: { load: async () => ClankieSettingsSchema.parse({ schemaVersion: 1 }) },
+      authenticateCaptain: (request) =>
+        Promise.resolve(
+          request.headers.get("authorization") === "Bearer captain"
+            ? { captainId: "captain-clankie", steerSourceLane: "discord_voice" as const }
+            : undefined,
+        ),
+    });
+    const response = await clankie.app.request("/v1/discord/voice-briefing", {
+      method: "POST",
+      headers: { authorization: "Bearer captain", "content-type": "application/json" },
+      body: JSON.stringify({
+        schemaVersion: 1,
+        guildId: "12345",
+        channelId: "67890",
+        consentedUserIds: ["54321"],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const briefing = (await response.json()) as { instructions: string };
+    expect(briefing.instructions).toContain("do not wait for someone to tell you to remember it");
+    expect(briefing.instructions).toContain("part of your own experience or developing personality");
+    clankie.close();
+  });
+
   it("boots with a stub captain and answers health, a channel turn, and episode recall", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-smoke-"));
     roots.push(root);

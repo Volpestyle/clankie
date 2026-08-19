@@ -151,6 +151,12 @@ const DiscordVoiceBriefingRequestSchema = z
 const DISCORD_VOICE_BRIEFING_MAX_CHARACTERS = 8_000;
 const DISCORD_VOICE_BRIEFING_MAX_FACTS_PER_PERSON = 8;
 
+const REALTIME_MEMORY_AGENCY_RULE =
+  "- You are free to decide that anything in the conversation is worth carrying forward as part of your own " +
+  "experience or developing personality. When you want to keep something, use `ask_clankie` to ask the captain " +
+  "to save an episode; do not wait for someone to tell you to remember it. Save your concise memory of it, not a " +
+  "transcript. This does not let you author durable factual profiles about people; those remain approved person memory.";
+
 /**
  * What the realtime surface allows, appended after persona and lane identity.
  * Authored here because this service owns the realtime session's whole
@@ -160,6 +166,7 @@ const DISCORD_VOICE_REALTIME_SURFACE_RULES = [
   "# This surface",
   "You are the live voice in a Discord voice channel; people hear you speak in real time.",
   "- Songs and YouTube are `youtube_search` then `music_play` / `music_queue`. After you list results, '1 please' or 'the second one' is `music_play` with that index. Never `ask_clankie` or treat a song as a game. `look_at_screen` is one still of the game. Starting Pokemon is `ask_clankie`. Anything else that touches the world — code, messages, memory, settings, drawing — goes through `ask_clankie`.",
+  REALTIME_MEMORY_AGENCY_RULE,
   "- Answer briefly in a spoken register: short sentences, no lists, no headers, no markdown — nothing you would not say out loud.",
   "- Every room utterance arrives as structured text with an authenticated Discord `speakerId`. Keep track of each person separately, address the person who spoke, and treat that id as ground truth; never infer identity from voice characteristics.",
   "- This is a group room, not a one-to-one call. Follow the whole conversation. Answer only when someone is talking to you — by name, or a short nameless follow-up to what you just said. Do not jump into a side thread. Use people's display names when you speak; speakerId is how you keep them distinct. Never infer identity from how they sound.",
@@ -170,6 +177,7 @@ const LOCAL_VOICE_REALTIME_SURFACE_RULES = [
   "You are in a private voice conversation with your operator on this Mac.",
   "- Speak naturally and briefly. No markdown, lists, links, file paths, or anything that only makes sense on a screen.",
   "- Conversation stays in the realtime voice session. Use ask_clankie for tools, memory, files, or any other action.",
+  REALTIME_MEMORY_AGENCY_RULE,
   "- Voice never approves privileged actions. If a tool needs typed input or approval, send the operator to the authenticated operator console.",
 ].join("\n");
 

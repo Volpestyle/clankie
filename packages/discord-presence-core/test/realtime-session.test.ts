@@ -204,7 +204,8 @@ describe("realtime conversation session", () => {
         },
       },
     });
-    const tools = (update as { session?: { tools?: { name?: string }[] } } | undefined)?.session?.tools;
+    const tools = (update as { session?: { tools?: { name?: string; description?: string }[] } } | undefined)
+      ?.session?.tools;
     expect(tools?.map((tool) => tool.name)).toEqual([
       "ask_clankie",
       "look_at_screen",
@@ -217,6 +218,9 @@ describe("realtime conversation session", () => {
       "music_stop",
       "music_now",
     ]);
+    expect(tools?.find((tool) => tool.name === "ask_clankie")?.description).toContain(
+      "you choose to remember",
+    );
   });
 
   // Required mission evidence: no server event — speech boundaries, committed
