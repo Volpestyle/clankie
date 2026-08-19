@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { browserEnabled, browserHeaded, createBrowserHost, type BrowserHost } from "../src/browser-host.ts";
+import { browserEnabled, createBrowserHost, type BrowserHost } from "../src/browser-host.ts";
 
 const logger = { info: () => undefined, warn: () => undefined };
 
@@ -95,37 +95,6 @@ describe("browserEnabled", () => {
     for (const value of ["1", "true", "yes", "on", "TRUE"]) {
       expect(browserEnabled(value), value).toBe(true);
     }
-  });
-});
-
-describe("browserHeaded", () => {
-  it("stays hidden unless the operator asks for the window", () => {
-    for (const value of [undefined, "", "   ", "0", "false", "no", "off", " Off "]) {
-      expect(browserHeaded(value), String(value)).toBe(false);
-    }
-    for (const value of ["1", "true", "yes", "on", "TRUE"]) {
-      expect(browserHeaded(value), value).toBe(true);
-    }
-  });
-
-  it("hands the child a switch it reads by presence, never a falsey value", async () => {
-    const stateRoot = await mkdtemp(join(tmpdir(), "clankie-browser-headed-"));
-    const captured: (string | undefined)[] = [];
-    for (const environment of [{}, { CLANKIE_BROWSER_HEADED: "0" }, { CLANKIE_BROWSER_HEADED: "1" }]) {
-      const host = await createBrowserHost({
-        runnerStateRoot: stateRoot,
-        attachmentRoot: stateRoot,
-        logger,
-        environment,
-        spawnImpl: ((_command: string, _args: readonly string[], options: { env: NodeJS.ProcessEnv }) => {
-          captured.push(options.env.AGENT_BROWSER_HEADED);
-          return fakeServer({ tools: [] });
-        }) as never,
-      });
-      await host.close();
-    }
-    expect(captured).toEqual([undefined, undefined, "1"]);
-    await rm(stateRoot, { recursive: true, force: true });
   });
 });
 

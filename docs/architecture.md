@@ -103,11 +103,11 @@ the full picture — what each store holds, who may read it, and what bounds it.
   `browser_tool_search` start active. Browser calls are sequential across rooms;
   the subprocess receives no Clankie credentials, but true filesystem/network
   isolation requires a VM or remote broker ([ADR 0082](adr/0082-clankie-holds-the-browser.md)).
-  The persistent profile holds his own accounts, signed up for by hand:
-  `CLANKIE_BROWSER_HEADED=1` shows the window so the operator can complete a
-  signup, a CAPTCHA, or a phone check in that profile, and a headed session is
-  exempt from the browser's idle timeout
-  ([ADR 0127](adr/0127-his-accounts-are-his.md)).
+  The persistent profile holds his own accounts, signed up for by hand: the
+  catalog's `headed` argument relaunches the browser visible on the operator's
+  screen, so he can hand over the window for a signup, a CAPTCHA, or a phone
+  check rather than grinding at it. A headed session is exempt from the
+  browser's idle timeout ([ADR 0127](adr/0127-his-accounts-are-his.md)).
 - **Leading agents.** Clankie leads coding agents through the herdr CLI over
   bash, guided by skills — there is no worker protocol. The service is his
   durable body; joining a herdr session (the operator console in a pane)

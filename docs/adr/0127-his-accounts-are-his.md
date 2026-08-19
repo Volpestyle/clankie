@@ -48,14 +48,16 @@ captain's system prompt states his address from settings rather than from
 authored persona text, so it cannot drift from the mailbox that is actually
 connected, and it is absent when none is.
 
-**Signups are done by hand, in his window.** `CLANKIE_BROWSER_HEADED=1` makes
-the browser visible. The operator clicks through account creation in Clankie's
-own profile; the session persists there and he is that account from then on. The
-window is the takeover seam — the browser runs on the operator's machine, so
-there is no remote display to build and no second browser to fight for the
-profile lock. His instructions tell him what to do when a page asks for a code,
-a CAPTCHA, or a phone number: name the page and the check, hand over the window,
-and neither open a second account nor look for a way around it.
+**Signups are done by hand, in a window he opens.** Nothing is built for this:
+the projected catalog already carries the browser's own `headed` argument, which
+relaunches the session visible mid-conversation, and the browser runs on the
+operator's machine — so the takeover seam is a parameter he holds, not an
+operator switch, a remote display, or a second browser fighting for the profile
+lock. The operator clicks through account creation in Clankie's own profile; the
+session persists there and he is that account from then on. What his
+instructions add is the judgment: when a page asks for a code, a CAPTCHA, or a
+phone number, name the page and the check, show the window, and neither open a
+second account nor look for a way around it.
 
 **Mail stays console-only, for a new reason.** ADR 0093 kept mail off Discord
 because the mailbox was the owner's. It is his now, and it stays off Discord
@@ -107,6 +109,12 @@ logged-in profile when it does not.
 - **A remote display (Xvfb, VNC, noVNC) for takeover.** Rejected: that is the
   design for an agent on a headless box. This one runs on the operator's own
   machine, where the takeover is looking at the window.
+- **An operator env switch making every browser launch visible.** Built first,
+  then removed: the per-call `headed` argument was already in the projected
+  catalog, so the switch was a second mechanism for a capability he holds — and
+  the operator-level version is the weaker one, since it decides at boot what he
+  can decide in the moment. A window that raises itself on every idle lookup is
+  also a cost nobody asked for.
 - **A second mailbox so the owner's inbox and his both connect.** Rejected as
   speculative. One connector, pointed at his; named mailboxes can arrive the day
   both are actually wanted.
@@ -122,11 +130,12 @@ logged-in profile when it does not.
 
 - He can say his own address, and mail he sends is signed with it rather than
   with a provider login.
-- A headed session is exempt from the browser's idle timeout, so the window
-  stays open until something closes it. It is off by default for that reason.
-  The remote way out, when the operator is away from the mac, is a Discord turn
-  from a system actor ([ADR 0095](0095-discord-system-actors.md)) closing the
-  browser — nothing in this design blocks a turn waiting for a human.
+- A headed session is exempt from the browser's idle timeout, so a window he
+  opened stays open until something closes it. He can close it himself, and the
+  remote way out when the operator is away from the mac is a Discord turn from a
+  system actor ([ADR 0095](0095-discord-system-actors.md)). Nothing here blocks
+  a turn waiting for a human: a browser call times out and he reports the wall
+  he hit.
 - The blast radius of the shared browser grew: ADR 0082 already recorded that
   untrusted room text can steer a full-action browser and that content labels
   are not a security boundary. That browser is now signed into his accounts. The
