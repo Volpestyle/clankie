@@ -5,6 +5,16 @@ operator and Discord voice transcripts. Click the microphone to toggle a
 conversation, or hold <kbd>Fn</kbd> to talk momentarily from any app. The
 template menu-bar glyph is the finalized monochrome Clankie mark.
 
+## Design
+
+The editable source is the
+[Clankie menu-bar Figma file](https://www.figma.com/design/ZNQUle993XNCWGS7Oqdz8k?node-id=1-2).
+The checked-in exports preserve the approved design alongside the implementation.
+
+![Clankie menu-bar desktop mockup](Design/clankie-menu-bar-desktop.png)
+
+![Clankie applet mockup](Design/clankie-menu-bar-applet.png)
+
 ```sh
 pnpm --filter @clankie/menu-bar test
 pnpm --filter @clankie/menu-bar bundle
