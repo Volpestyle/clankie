@@ -29,6 +29,12 @@ acts outside that conversation crosses one `ask_clankie` handoff to the existing
 `discord_voice` captain lane. The realtime model receives no system shell or
 other machine-authority tool.
 
+The handoff exists only on a response attributed to a room speaker. A
+possessor narration response has no speaker because it is Clankie's own
+experience; if it selects `ask_clankie`, the voice session settles that tool
+locally and continues the narration. It never guesses the last room speaker or
+emits a captain failure for a request no person made.
+
 ![ADR 0057 realtime voice with captain handoff](../diagrams/0057-realtime-voice-with-captain-handoff.jpg)
 
 [Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams.tldraw)

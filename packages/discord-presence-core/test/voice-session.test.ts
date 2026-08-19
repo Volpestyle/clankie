@@ -1300,6 +1300,39 @@ describe("fast path responses", () => {
 });
 
 describe("ability path", () => {
+  it("settles narration-triggered ask_clankie locally without inventing a speaker", async () => {
+    const harness = await joinedHarness({ narrationMinIntervalMs: 0 });
+    await harness.session.narrate("the battle helper keeps refusing");
+    await flush();
+    const conversation = harness.conversation();
+
+    conversation.input.onFunctionCall({
+      callId: "call_narration",
+      name: "ask_clankie",
+      argumentsJson: '{"request":"fix the battle helper"}',
+    });
+    await flush();
+
+    expect(harness.submitCalls).toHaveLength(0);
+    expect(at(conversation.functionResults, 0)).toMatchObject({
+      callId: "call_narration",
+      output: expect.stringContaining("No person asked for an action"),
+    });
+    expect(harness.ofType("failed")).not.toContainEqual(
+      expect.objectContaining({ code: "voice_ask_clankie_no_speaker" }),
+    );
+    expect(harness.ofType("realtime_tool")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ callId: "call_narration", phase: "called" }),
+        expect.objectContaining({
+          callId: "call_narration",
+          phase: "completed",
+          code: "speakerless_trigger",
+        }),
+      ]),
+    );
+  });
+
   it("keeps the triggering speaker immutable when another participant takes the floor", async () => {
     const harness = await joinedHarness();
     await harness.consent(ALICE);
@@ -1806,6 +1839,33 @@ describe("barge-in", () => {
     capture.stream.write(stereoPcm(BARGE_IN_SOURCE_BYTES));
     await flush();
     expect(conversation.truncations).toEqual([{ itemId: "item_play", audioEndMs: 400 }]);
+    expect(harness.player().state.status).toBe("idle");
+  });
+
+  it("speech already underway when playback starts still truncates", async () => {
+    const harness = await engagedHarness({ narrationMinIntervalMs: 0 });
+    const conversation = harness.conversation();
+    conversation.input.onResponseDone({
+      responseId: "resp_wake",
+      status: "completed",
+      audioBytes: 0,
+      textCharacters: 0,
+    });
+    await flush();
+
+    const capture = harness.startCapture(ALICE);
+    capture.stream.write(stereoPcm(BARGE_IN_SOURCE_BYTES));
+    await flush();
+
+    await harness.session.narrate("walked into the lab");
+    conversation.input.onAudioDelta(pcmDelta(480), "item_narration");
+    await flush();
+    expect(harness.player().state.status).toBe("playing");
+
+    harness.clock.now = 400;
+    capture.stream.write(stereoPcm(3_840));
+    await flush();
+    expect(conversation.truncations).toEqual([{ itemId: "item_narration", audioEndMs: 400 }]);
     expect(harness.player().state.status).toBe("idle");
   });
 

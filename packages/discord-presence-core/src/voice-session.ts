@@ -194,6 +194,8 @@ const RECONNECT_BACKOFF_CAP_MS = 30_000;
  */
 export const CAPTAIN_UNREACHABLE_TEXT =
   "I couldn't reach my captain for that just now. Give me a moment and ask again.";
+const SPEAKERLESS_ASK_RESULT =
+  "No person asked for an action in this response. Continue without using ask_clankie.";
 /**
  * What the room's own Clankie is told when the floor machine offers him an
  * unprompted turn (ADR 0057). The mechanical half — may a turn be offered at
@@ -1042,11 +1044,17 @@ export class DiscordVoiceSession {
         // never stops sending, so counting bytes alone cut him off mid-sentence
         // on room tone whose transcript came back empty.
         if (rms >= BARGE_IN_SPEECH_RMS) bargeInSpeechBytes += chunk.byteLength;
-        if (bargeInSpeechBytes >= BARGE_IN_PCM_BYTES) {
+        // A speaker can clear the bar before unsolicited narration starts.
+        // Spend this capture's one check only when there is playback to stop.
+        if (
+          bargeInSpeechBytes >= BARGE_IN_PCM_BYTES &&
+          userId === this.floor.floorHolderId &&
+          this.isPlaying()
+        ) {
           bargeInChecked = true;
           // Barge-in (a): only the floor holder talking over him truncates;
           // crosstalk between other people lets him finish (ADR 0057).
-          if (userId === this.floor.floorHolderId) this.truncatePlayback(userId);
+          this.truncatePlayback(userId);
         }
       }
       const converted = discordPcmToRealtimePcm(chunk);
@@ -1694,6 +1702,27 @@ export class DiscordVoiceSession {
     const exchange = this.pendingResponses.find((candidate) => !candidate.done);
     if (exchange !== undefined) exchange.toolCalled = true;
     this.emitRealtimeTool(call, exchange, "called", guildId, channelId);
+    if (call.name === ASK_CLANKIE_TOOL_NAME && exchange?.speakerId === undefined) {
+      // Narration is Clankie's own experience, not an attributed room request.
+      // Never guess a speaker for the privileged captain lane; settle the tool
+      // locally so the realtime response can continue as ordinary narration.
+      const submitted = this.submitLocalFunctionResult(
+        call.callId,
+        SPEAKERLESS_ASK_RESULT,
+        exchange,
+        guildId,
+        channelId,
+      );
+      this.emitRealtimeTool(
+        call,
+        exchange,
+        submitted ? "completed" : "dropped",
+        guildId,
+        channelId,
+        "speakerless_trigger",
+      );
+      return;
+    }
     if (this.isMusicTool(call.name)) {
       const generation = this.sessionGeneration;
       this.turnQueue = this.turnQueue
