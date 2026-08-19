@@ -676,6 +676,7 @@ export function createYoutubeAudioSink(options: {
     generation: number,
     attemptCode: string,
     selector: string,
+    playerClient?: string,
   ): Promise<void> =>
     new Promise((resolve, reject) => {
       let settled = false;
@@ -690,7 +691,19 @@ export function createYoutubeAudioSink(options: {
       const ffmpegSeek = seek > 0 ? ["-ss", seek.toFixed(1)] : [];
       const downloader = spawnImpl(
         "yt-dlp",
-        ["-f", selector, "-o", "-", "--no-playlist", "--no-warnings", "--no-progress", url],
+        [
+          ...(playerClient === undefined
+            ? []
+            : ["--extractor-args", `youtube:player_client=${playerClient}`]),
+          "-f",
+          selector,
+          "-o",
+          "-",
+          "--no-playlist",
+          "--no-warnings",
+          "--no-progress",
+          url,
+        ],
         { stdio: ["ignore", "pipe", "pipe"] },
       );
       const transcoder = spawnImpl(
@@ -718,9 +731,13 @@ export function createYoutubeAudioSink(options: {
       downloader.stderr?.on("data", (chunk: string) => {
         downloaderStderr = `${downloaderStderr}${chunk}`.slice(-8_192);
       });
-      observeProcess(downloader, "yt_dlp", operation, trace, attemptCode, () =>
-        /HTTP Error 403/iu.test(downloaderStderr) ? "http_403" : undefined,
-      );
+      observeProcess(downloader, "yt_dlp", operation, trace, attemptCode, () => {
+        if (/HTTP Error 403/iu.test(downloaderStderr)) return "http_403";
+        if (/Requested format is not available/iu.test(downloaderStderr)) {
+          return "format_unavailable";
+        }
+        return undefined;
+      });
       observeProcess(transcoder, "ffmpeg", operation, trace, attemptCode);
       const downloadOutput = downloader.stdout;
       const transcodeInput = transcoder.stdin;
@@ -730,6 +747,7 @@ export function createYoutubeAudioSink(options: {
         return;
       }
       downloadOutput.pipe(transcodeInput);
+      transcodeInput.on("error", () => undefined);
       const failBeforeAudio = (): void => {
         if (!receivedAudio) fail(new Error("music pipeline ended before audio"));
       };
@@ -792,6 +810,7 @@ export function createYoutubeAudioSink(options: {
           attempt === 0
             ? "ba/bestaudio"
             : "worst[protocol^=m3u8][height>=360][acodec!=none]/worst[protocol^=m3u8][acodec!=none]",
+          attempt === 0 ? "web_embedded" : undefined,
         );
         return;
       } catch (error) {

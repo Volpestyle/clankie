@@ -188,7 +188,7 @@ describe("music control (model tools)", () => {
 });
 
 describe("voice music queue", () => {
-  it("retries one pre-audio failure with strict HLS and records both attempts", async () => {
+  it("retries embedded direct audio with strict HLS and records both attempts", async () => {
     const events: VoiceMusicTraceEvent[] = [];
     const children: ChildProcess[] = [];
     const downloaderArgs: string[][] = [];
@@ -210,7 +210,7 @@ describe("voice music queue", () => {
         const currentDownload = ++downloadAttempt;
         if (currentDownload === 1) {
           queueMicrotask(() => {
-            stderr.write("ERROR: unable to download video data: HTTP Error 403: Forbidden");
+            stderr.write("ERROR: Requested format is not available");
             child.emit("close", 1, null);
           });
         }
@@ -241,10 +241,14 @@ describe("voice music queue", () => {
     expect(children).toHaveLength(4);
     expect(kill).toHaveBeenCalled();
     expect(downloaderArgs[0]).toContain("ba/bestaudio");
+    expect(downloaderArgs[0]).toEqual(
+      expect.arrayContaining(["--extractor-args", "youtube:player_client=web_embedded"]),
+    );
     expect(downloaderArgs[1]).toContain(
       "worst[protocol^=m3u8][height>=360][acodec!=none]/worst[protocol^=m3u8][acodec!=none]",
     );
     expect(downloaderArgs[1]?.join(" ")).not.toContain("ba/bestaudio");
+    expect(downloaderArgs[1]?.join(" ")).not.toContain("player_client");
     expect(events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -255,7 +259,7 @@ describe("voice music queue", () => {
         expect.objectContaining({
           component: "yt_dlp",
           outcome: "exited",
-          code: "http_403",
+          code: "format_unavailable",
         }),
         expect.objectContaining({
           component: "player",

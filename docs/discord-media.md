@@ -45,12 +45,13 @@ bearer, and an `openai` API credential for spoken conversation. Music audio is
 decoded to PCM and played through `@discordjs/voice`; no YouTube API key or
 YouTube account credential is used.
 
-Playback prefers YouTube's direct audio-only format. If that URL fails before
-the first PCM frame (including YouTube's HTTP 403 response), the one retry uses
-a low-bandwidth HLS format with audio. It never falls back to the direct format
-on that second attempt. Receipts classify a detected downloader 403 as
-`http_403` and label lifecycle events `attempt_1_direct` or `attempt_2_hls`,
-without retaining the URL, selector, or query.
+Playback first asks YouTube's token-free embedded client for a direct audio-only
+format. If that fails before the first PCM frame, the one retry uses a
+low-bandwidth HLS format with audio. It never falls back to the direct format on
+that second attempt. Receipts classify detected downloader failures as
+`http_403` or `format_unavailable` and label lifecycle events
+`attempt_1_direct` or `attempt_2_hls`, without retaining the URL, selector, or
+query.
 
 The lab user body routes a requested YouTube URL to Go Live. The current H264
 publisher strips source audio, so viewers see video but do not hear synchronized
