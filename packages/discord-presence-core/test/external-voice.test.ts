@@ -326,7 +326,8 @@ describe("external voice conversation", () => {
   });
 
   it("releases held dones when the mouth dies and reopens it for the next utterance", async () => {
-    const { realtimeHandlers, ttsHandlers, ttsPorts, events, failNextTtsOpen } = await openHarness();
+    const { realtimeHandlers, ttsHandlers, ttsPorts, realtime, events, failNextTtsOpen } =
+      await openHarness();
     realtimeHandlers.onTextDelta("Hello there.", "item_a");
     await settle();
     realtimeHandlers.onResponseDone(doneMeta("resp_1"));
@@ -335,6 +336,9 @@ describe("external voice conversation", () => {
     ttsPorts[0]?.close();
     ttsHandlers[0]?.onClose();
     expect(events.done).toEqual([doneMeta("resp_1")]);
+    expect(realtime.textItems).toEqual([
+      "(Your external voice failed before completing your reply; the room may have heard only a prefix, and the exact cutoff is unknown.)",
+    ]);
 
     // Next utterance opens a fresh TTS session and speaks normally.
     realtimeHandlers.onTextDelta("Still here.", "item_b");

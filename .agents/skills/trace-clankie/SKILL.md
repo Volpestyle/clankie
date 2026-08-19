@@ -103,6 +103,15 @@ is append-only JSONL or plain files now), never write to it.
   — an `ask_clankie` round trip spends **one** `deliveryId` on two responses
   (the "let me check" and the answer), so a naive join credits the answer with
   the filler's audio and hides exactly the turn worth looking at.
+- **An ElevenLabs byte-limit failure can follow audible speech.**
+  `discord.voice.failed` with code
+  `elevenlabs_context_audio_exceeded_the_byte_limit` means synthesized PCM hit
+  the per-utterance safety fence, not that Discord disconnected. Earlier audio
+  still plays and leaves a `discord.voice.response`; the room hears only a
+  prefix. Join both records by `deliveryId` and check the code revision's cap.
+  The external-voice adapter adds a conversation marker for this incomplete
+  speech so the next response knows the suffix was not audible and that the
+  exact cutoff is unknown.
 - **Voice readiness does not prove an external mouth.**
   `pnpm discord:voice-readiness` checks the selected TTS credential but
   deliberately skips paid ElevenLabs synthesis; its engaged probe settles on

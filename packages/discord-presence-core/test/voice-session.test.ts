@@ -1488,11 +1488,14 @@ describe("ability path", () => {
   it("receipts a mouth failure, so a Clankie who cannot be heard is not read as a quiet one", async () => {
     const harness = await engagedHarness();
     const conversation = harness.conversation();
+    const deliveryId = at(harness.ofType("utterance"), 0).deliveryId;
     // An utterance that dies in synthesis plays no audio, so it leaves no
     // `response` receipt. Without this one there is no trail at all.
     conversation.input.onError("ElevenLabs context id is already open");
     await flush();
     expect(at(harness.ofType("failed"), 0)).toMatchObject({
+      deliveryId,
+      userId: ALICE,
       stage: "speech_synthesis",
       code: "elevenlabs_context_id_is_already_open",
     });

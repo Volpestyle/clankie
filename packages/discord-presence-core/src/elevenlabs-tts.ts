@@ -50,11 +50,12 @@ const MIN_INACTIVITY_TIMEOUT_SECONDS = 1;
 const MAX_INACTIVITY_TIMEOUT_SECONDS = 180;
 
 /**
- * One minute of 24 kHz mono s16le per context — the same runaway-output line
- * the realtime boundary draws per response. A context is one utterance;
- * sixty seconds of it is not conversation.
+ * Five minutes of 24 kHz mono s16le per context — the same runaway-output line
+ * the realtime boundary draws per response. Read-aloud answers and briefings
+ * legitimately cross one minute; five still bounds server-controlled output
+ * and the playback queue without cutting ordinary long-form speech in half.
  */
-export const MAX_ELEVENLABS_CONTEXT_AUDIO_BYTES = REALTIME_AUDIO_SAMPLE_RATE * PCM_SAMPLE_BYTES * 60;
+export const MAX_ELEVENLABS_CONTEXT_AUDIO_BYTES = REALTIME_AUDIO_SAMPLE_RATE * PCM_SAMPLE_BYTES * 5 * 60;
 
 /**
  * Bounds one text append. Realtime text deltas are small; an append this

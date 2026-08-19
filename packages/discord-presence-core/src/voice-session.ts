@@ -1451,17 +1451,18 @@ export class DiscordVoiceSession {
         },
         onError: (message) => {
           // The mouth failing is the only voice failure the room feels and
-          // no trail recorded. An utterance that dies in synthesis plays no
-          // audio, so it leaves no `response` receipt — and swallowing the
-          // error here left no `failed` one either, which made a mute
-          // Clankie indistinguishable from a quiet one for as long as the
-          // mouth stayed broken. Boundary messages are already sanitized
-          // one-liners; the code keeps them machine-readable.
+          // no trail recorded. It can die before audio or after an audible
+          // prefix, so the failure receipt is what distinguishes either case
+          // from silence or a cleanly settled response. Boundary messages are
+          // already sanitized one-liners; the code keeps them machine-readable.
           if (generation !== this.sessionGeneration) return;
+          const pending = this.pendingResponses.find((candidate) => !candidate.done);
           void this.emitSafely({
             type: "failed",
             guildId,
             channelId,
+            ...(pending === undefined ? {} : { deliveryId: pending.deliveryId }),
+            ...(pending?.speakerId === undefined ? {} : { userId: pending.speakerId }),
             stage: "speech_synthesis",
             code: sanitizeFailureCode(message, "voice_speech_synthesis_failed"),
           });

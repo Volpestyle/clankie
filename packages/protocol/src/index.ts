@@ -3184,8 +3184,8 @@ export const DiscordVoiceFailureStageSchema = z.enum([
   "conversation_session",
   "captain_handoff",
   "look_at_screen",
-  // The mouth: synthesis that never produced audio. Distinct from
-  // `playback`, which is the Discord player leg downstream of it.
+  // The mouth: synthesis failed before completing the utterance. Distinct
+  // from `playback`, which is the Discord player leg downstream of it.
   "speech_synthesis",
   "playback",
 ]);
@@ -3366,6 +3366,8 @@ export const DiscordVoiceEvidenceSchema = z
       .object({
         type: z.literal("failed"),
         ...discordVoiceChannelScope,
+        deliveryId: DiscordVoiceLocalIdSchema.optional(),
+        userId: DiscordVoiceGatewayIdSchema.optional(),
         stage: DiscordVoiceFailureStageSchema,
         code: DiscordVoiceFailureCodeSchema,
       })

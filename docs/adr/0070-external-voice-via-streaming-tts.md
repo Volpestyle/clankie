@@ -28,7 +28,9 @@ The media owner sees the same conversation port in either mode.
 Configuration is owner-authored and settings-first. Credentials stay in the
 broker; provider API keys in ambient environment variables fail closed. The
 external boundary enforces secure-or-loopback transport, bounded text and audio,
-session lifetime, sanitized errors, sample alignment, and PCM zeroing.
+session lifetime, sanitized errors, sample alignment, and PCM zeroing. The
+five-minute per-utterance PCM bound admits briefings and explicit read-aloud
+answers while still fencing runaway output.
 
 ### The adapter owns three ordering problems
 
@@ -42,7 +44,12 @@ session lifetime, sanitized errors, sample alignment, and PCM zeroing.
   both sides can start. Any failed synthesis step discards the mouth, not just a
   dropped socket — a session that reports itself open after failing a frame
   would otherwise be reused by every later utterance, and the failure would last
-  the whole call instead of one turn.
+  the whole call instead of one turn. Before settling incomplete speech, the
+  adapter adds a conversation marker saying the room may have heard only a prefix, so
+  the next response does not assume the whole reply was audible. Failure
+  receipts carry the active delivery and speaker when an utterance owns the
+  failure, so the audible prefix, model response, and synthesis failure join
+  without timestamp inference.
 
 Room audio never reaches the TTS provider. Only words Clankie chooses to say do,
 and join/consent disclosures name that residency when configured.

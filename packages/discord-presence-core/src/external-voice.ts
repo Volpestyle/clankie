@@ -265,6 +265,7 @@ class ExternalVoiceConversation implements VoiceConversationPort {
       // the still-live item pins `discardMouth` shut — so the next utterances
       // hit the open-context limit and the room stops hearing him for the
       // rest of the call while the model keeps writing replies.
+      this.markSpeechFailure(itemId);
       this.closeItemContext(itemId);
       this.dropItem(itemId);
       this.discardMouth();
@@ -301,8 +302,12 @@ class ExternalVoiceConversation implements VoiceConversationPort {
       onClose: () => {
         // The mouth died; every in-flight utterance is over. Fail the held
         // done events through rather than letting them wait out the drain
-        // timer, and let the next utterance reopen the session.
-        for (const itemId of this.liveItemIds) this.dropItem(itemId);
+        // timer, tell the brain the room missed a suffix, and let the next
+        // utterance reopen the session.
+        for (const itemId of this.liveItemIds) {
+          this.markSpeechFailure(itemId);
+          this.dropItem(itemId);
+        }
         for (const itemId of this.heldDone.keys()) this.releaseHeldDone(itemId);
       },
       onError: this.input.onError,
@@ -340,6 +345,7 @@ class ExternalVoiceConversation implements VoiceConversationPort {
       try {
         await step();
       } catch (error) {
+        this.markSpeechFailure(itemId);
         this.dropItem(itemId);
         this.discardMouth();
         throw error;
@@ -394,6 +400,18 @@ class ExternalVoiceConversation implements VoiceConversationPort {
         // reduced to a fixed string so socket detail never escapes here.
         this.input.onError(error instanceof Error ? error.message : "External voice synthesis failed");
       });
+  }
+
+  /** Leaves the failed mouth in conversation history, where the next response can account for it. */
+  private markSpeechFailure(itemId: string): void {
+    if (this.closed || !this.liveItemIds.has(itemId) || this.realtime?.isOpen !== true) return;
+    try {
+      this.realtime.createTextItem(
+        "(Your external voice failed before completing your reply; the room may have heard only a prefix, and the exact cutoff is unknown.)",
+      );
+    } catch {
+      // The realtime boundary owns its own failure; mouth teardown must still settle this utterance.
+    }
   }
 
   private requireRealtime(): ExternalVoiceRealtimePort {

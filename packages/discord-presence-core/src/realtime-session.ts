@@ -51,11 +51,11 @@ const DEFAULT_TRANSCRIPTION_LANGUAGE = "en";
 export const REALTIME_AUDIO_SAMPLE_RATE = 24_000;
 
 /**
- * One minute of 24 kHz mono s16le. A single response that speaks for longer
- * than a minute is runaway output, not conversation, and without the cap the
- * server controls how much memory this process allocates.
+ * Five minutes of 24 kHz mono s16le. Read-aloud answers and briefings
+ * legitimately cross one minute; five still bounds server-controlled output
+ * and the playback queue without cutting ordinary long-form speech in half.
  */
-export const MAX_REALTIME_RESPONSE_AUDIO_BYTES = REALTIME_AUDIO_SAMPLE_RATE * PCM_SAMPLE_BYTES * 60;
+export const MAX_REALTIME_RESPONSE_AUDIO_BYTES = REALTIME_AUDIO_SAMPLE_RATE * PCM_SAMPLE_BYTES * 5 * 60;
 
 /**
  * Five seconds of audio per append. The media loop streams small frames; an
