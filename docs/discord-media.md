@@ -47,9 +47,10 @@ YouTube account credential is used.
 
 Playback prefers YouTube's direct audio-only format. If that URL fails before
 the first PCM frame (including YouTube's HTTP 403 response), the one retry uses
-a low-bandwidth HLS format with audio instead of repeating the same request.
-Receipts classify a detected downloader 403 as `http_403` without retaining the
-URL or query.
+a low-bandwidth HLS format with audio. It never falls back to the direct format
+on that second attempt. Receipts classify a detected downloader 403 as
+`http_403` and label lifecycle events `attempt_1_direct` or `attempt_2_hls`,
+without retaining the URL, selector, or query.
 
 The lab user body routes a requested YouTube URL to Go Live. The current H264
 publisher strips source audio, so viewers see video but do not hear synchronized

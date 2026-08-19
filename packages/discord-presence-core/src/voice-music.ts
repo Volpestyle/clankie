@@ -651,9 +651,10 @@ export function createYoutubeAudioSink(options: {
     component: "yt_dlp" | "ffmpeg",
     operation: "play" | "resume",
     trace: VoiceMusicTraceContext | undefined,
+    attemptCode: string,
     failureCode?: () => string | undefined,
   ): void => {
-    child.once("spawn", () => emit(operation, component, "spawned", trace));
+    child.once("spawn", () => emit(operation, component, "spawned", trace, { code: attemptCode }));
     child.once("error", () => emit(operation, component, "failed", trace, { code: "spawn_failed" }));
     child.once("close", (code, signal) => {
       emit(operation, component, "exited", trace, {
@@ -661,7 +662,7 @@ export function createYoutubeAudioSink(options: {
         ...(typeof code === "number" && code !== 0
           ? { code: failureCode?.() ?? "nonzero_exit" }
           : signal === null
-            ? {}
+            ? { code: attemptCode }
             : { code: signal.toLowerCase() }),
       });
     });
@@ -673,7 +674,8 @@ export function createYoutubeAudioSink(options: {
     trace: VoiceMusicTraceContext | undefined,
     operation: "play" | "resume",
     generation: number,
-    format: string,
+    attemptCode: string,
+    selector: string,
   ): Promise<void> =>
     new Promise((resolve, reject) => {
       let settled = false;
@@ -688,7 +690,7 @@ export function createYoutubeAudioSink(options: {
       const ffmpegSeek = seek > 0 ? ["-ss", seek.toFixed(1)] : [];
       const downloader = spawnImpl(
         "yt-dlp",
-        ["-f", format, "-o", "-", "--no-playlist", "--no-warnings", "--no-progress", url],
+        ["-f", selector, "-o", "-", "--no-playlist", "--no-warnings", "--no-progress", url],
         { stdio: ["ignore", "pipe", "pipe"] },
       );
       const transcoder = spawnImpl(
@@ -716,10 +718,10 @@ export function createYoutubeAudioSink(options: {
       downloader.stderr?.on("data", (chunk: string) => {
         downloaderStderr = `${downloaderStderr}${chunk}`.slice(-8_192);
       });
-      observeProcess(downloader, "yt_dlp", operation, trace, () =>
+      observeProcess(downloader, "yt_dlp", operation, trace, attemptCode, () =>
         /HTTP Error 403/iu.test(downloaderStderr) ? "http_403" : undefined,
       );
-      observeProcess(transcoder, "ffmpeg", operation, trace);
+      observeProcess(transcoder, "ffmpeg", operation, trace, attemptCode);
       const downloadOutput = downloader.stdout;
       const transcodeInput = transcoder.stdin;
       const output = transcoder.stdout;
@@ -744,7 +746,7 @@ export function createYoutubeAudioSink(options: {
         receivedAudio = true;
         settled = true;
         if (pendingStart?.generation === generation) pendingStart = undefined;
-        emit(operation, "pipeline", "first_audio", trace);
+        emit(operation, "pipeline", "first_audio", trace, { code: attemptCode });
         resolve();
       });
       const onPlayerState = (_previous: { status: string }, next: { status: string }): void => {
@@ -754,7 +756,7 @@ export function createYoutubeAudioSink(options: {
       options.player.on("stateChange", onPlayerState);
       removePlayerListener = () => options.player.off("stateChange", onPlayerState);
       options.player.play(createAudioResource(output, { inputType: StreamType.Raw }));
-      emit(operation, "player", "submitted", trace);
+      emit(operation, "player", "submitted", trace, { code: attemptCode });
       output.once("end", () => {
         if (!receivedAudio) {
           failBeforeAudio();
@@ -778,6 +780,7 @@ export function createYoutubeAudioSink(options: {
     startedAt = Date.now();
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const generation = pipelineGeneration;
+      const attemptCode = attempt === 0 ? "attempt_1_direct" : "attempt_2_hls";
       try {
         await startAttempt(
           url,
@@ -785,9 +788,10 @@ export function createYoutubeAudioSink(options: {
           trace,
           operation,
           generation,
+          attemptCode,
           attempt === 0
             ? "ba/bestaudio"
-            : "worst[protocol^=m3u8][height>=360]/worst[protocol^=m3u8]/ba/bestaudio",
+            : "worst[protocol^=m3u8][height>=360][acodec!=none]/worst[protocol^=m3u8][acodec!=none]",
         );
         return;
       } catch (error) {

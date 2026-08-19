@@ -188,7 +188,7 @@ describe("music control (model tools)", () => {
 });
 
 describe("voice music queue", () => {
-  it("waits for audio and retries one pre-audio pipeline failure", async () => {
+  it("retries one pre-audio failure with strict HLS and records both attempts", async () => {
     const events: VoiceMusicTraceEvent[] = [];
     const children: ChildProcess[] = [];
     const downloaderArgs: string[][] = [];
@@ -242,13 +242,31 @@ describe("voice music queue", () => {
     expect(kill).toHaveBeenCalled();
     expect(downloaderArgs[0]).toContain("ba/bestaudio");
     expect(downloaderArgs[1]).toContain(
-      "worst[protocol^=m3u8][height>=360]/worst[protocol^=m3u8]/ba/bestaudio",
+      "worst[protocol^=m3u8][height>=360][acodec!=none]/worst[protocol^=m3u8][acodec!=none]",
     );
+    expect(downloaderArgs[1]?.join(" ")).not.toContain("ba/bestaudio");
     expect(events).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ component: "pipeline", outcome: "failed", code: "pre_audio_retry" }),
-        expect.objectContaining({ component: "yt_dlp", outcome: "exited", code: "http_403" }),
-        expect.objectContaining({ component: "pipeline", outcome: "first_audio" }),
+        expect.objectContaining({
+          component: "pipeline",
+          outcome: "failed",
+          code: "pre_audio_retry",
+        }),
+        expect.objectContaining({
+          component: "yt_dlp",
+          outcome: "exited",
+          code: "http_403",
+        }),
+        expect.objectContaining({
+          component: "player",
+          outcome: "submitted",
+          code: "attempt_2_hls",
+        }),
+        expect.objectContaining({
+          component: "pipeline",
+          outcome: "first_audio",
+          code: "attempt_2_hls",
+        }),
         expect.objectContaining({ component: "queue", outcome: "started", current: true }),
       ]),
     );
