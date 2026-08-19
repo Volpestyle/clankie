@@ -1,5 +1,6 @@
 /**
- * In-process pull-when-he-wants sight of the live playthrough (ADR 0099).
+ * In-process pull-when-he-wants sight of the current or latest play journey
+ * (ADR 0099 / ADR 0126).
  *
  * The play host registers a live capture and the current journal path while
  * the body is running. HTTP and captain tools read this; they never reach
@@ -7,7 +8,12 @@
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { parseFreePlayJournal, projectPlayStory } from "@clankie/gba-emulator";
+import {
+  listPlayJourneyRuns,
+  parseFreePlayJournal,
+  projectPlayStory,
+  type PlayJourneyId,
+} from "@clankie/gba-emulator";
 import {
   PlayStillReadSchema,
   PlayStoryReadSchema,
@@ -25,6 +31,7 @@ export interface PlayStillCapture {
 
 export interface PlaySightAttach {
   readonly sessionId: string;
+  readonly journeyId: PlayJourneyId;
   readonly environmentId: EmbodimentEnvironmentId;
   readonly scenarioId: string;
   readonly startedAt: string;
@@ -43,8 +50,13 @@ export interface PlaySightPort {
 }
 
 export class PlaySightProjection implements PlaySightPort {
+  private readonly journalRootDir: string | undefined;
   private attached: PlaySightAttach | undefined;
   private progress: PlaySightProgress | undefined;
+
+  public constructor(options: { journalRootDir?: string } = {}) {
+    this.journalRootDir = options.journalRootDir;
+  }
 
   public attach(session: PlaySightAttach): void {
     this.attached = session;
@@ -97,7 +109,10 @@ export class PlaySightProjection implements PlaySightPort {
   public story(): PlayStoryRead {
     const attached = this.attached;
     if (attached === undefined) {
-      return PlayStoryReadSchema.parse({ schemaVersion: 1, outcome: "not_playing" });
+      const card = this.readLatestCard();
+      return card === undefined
+        ? PlayStoryReadSchema.parse({ schemaVersion: 1, outcome: "not_playing" })
+        : PlayStoryReadSchema.parse({ schemaVersion: 1, outcome: "card", card });
     }
     const card = this.readCard(attached);
     if (card === undefined) {
@@ -113,18 +128,37 @@ export class PlaySightProjection implements PlaySightPort {
 
   private readCard(attached: PlaySightAttach): PlayStoryCard | undefined {
     if (attached.journalPath === undefined) return undefined;
-    let contents: string;
     try {
-      contents = readFileSync(attached.journalPath, "utf8");
-    } catch {
-      return undefined;
-    }
-    try {
+      const historical =
+        this.journalRootDir === undefined
+          ? []
+          : listPlayJourneyRuns(this.journalRootDir, attached.journeyId).flatMap((run) => run.lines);
+      const lines =
+        historical.length > 0 ? historical : parseFreePlayJournal(readFileSync(attached.journalPath, "utf8"));
       return projectPlayStory({
         sessionId: attached.sessionId,
         environmentId: attached.environmentId,
-        lines: parseFreePlayJournal(contents),
+        lines,
         ...(this.progress === undefined ? {} : { maps: this.progress.maps }),
+      });
+    } catch {
+      return undefined;
+    }
+  }
+
+  private readLatestCard(): PlayStoryCard | undefined {
+    if (this.journalRootDir === undefined) return undefined;
+    const runs = listPlayJourneyRuns(this.journalRootDir);
+    const latest = runs.at(-1);
+    if (latest === undefined) return undefined;
+    const lines = runs
+      .filter((run) => run.header.journeyId === latest.header.journeyId)
+      .flatMap((run) => run.lines);
+    try {
+      return projectPlayStory({
+        sessionId: latest.header.runId,
+        environmentId: latest.header.environmentId,
+        lines,
       });
     } catch {
       return undefined;

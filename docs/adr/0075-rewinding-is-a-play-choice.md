@@ -20,8 +20,9 @@ Two facts make the grant safe to give:
 
 ## Decision
 
-The free-play decision gains two loop-owned body actions, `load_checkpoint`
-(`checkpointId` absent = list what exists; present = restore it) and
+The free-play decision has three loop-owned body actions: `save_checkpoint`
+(mint the current world and mind with an optional label), `load_checkpoint`
+(`checkpointId` absent = list what exists; present = restore it), and
 `restart_game` (reboot to the configured starting savestate).
 
 - **They live outside the frozen emulator catalog.** ADR 0060 defines state
@@ -34,6 +35,10 @@ The free-play decision gains two loop-owned body actions, `load_checkpoint`
   restoring anything, so his own choice can never destroy the state it leaves.
   A refused load (unknown id, digest mismatch, foreign ROM) is verified
   _before_ the bank and mints nothing.
+- **An explicit save carries the current mind.** The body action passes the
+  current notes, objective, and decoded position to the same
+  `writeGbaCheckpoint` gate used by autosave and clean stop. It creates a new
+  sibling and never mutates an earlier save.
 - **The world rewinds; his mind does not.** Notes, objective, history, and
   refusal memory stay untouched across a load — he remembers deciding to
   rewind, and what he knew. The restored checkpoint's own continuity is not
@@ -60,9 +65,10 @@ The free-play decision gains two loop-owned body actions, `load_checkpoint`
 - A listing costs a turn and answers inside the action's effect, mirroring
   the MCP load tool's no-id shape — checkpoints are not pushed into every
   turn's view.
-- Checkpoint volume grows by one `before-rewind` mint per rewind, on top of
-  autosaves and stop mints. Nothing prunes them by design; pruning is the
-  operator's, like every deletion.
+- Checkpoint volume grows through Clankie's explicit saves, one
+  `before-rewind` mint per rewind, autosaves, and stop mints. Nothing prunes
+  them automatically. The TUI's `/saves` browser gives the operator an explicit
+  confirmed deletion path.
 - The MCP possession surface is unchanged: possessors already hold load/save,
   and gain nothing new here. If a possessor ever needs a boot restart, that is
   a separate small addition.

@@ -15,6 +15,7 @@ import {
   createModelVoice,
   defaultGbaPlayJournalDir,
   InterjectionQueue,
+  latestPlayJourneyContinuity,
   openFreePlayJournal,
   runFreePlay,
   type ClankieVoice,
@@ -95,6 +96,8 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
       return { kind: "refused", reason: joined.reason };
     }
     const body = joined.body;
+    const journalDir = defaultGbaPlayJournalDir(env);
+    const resumedContinuity = latestPlayJourneyContinuity(journalDir, body.journeyId);
 
     const require = createRequire(import.meta.url);
     const emulatorPackage = path.dirname(require.resolve("@clankie/gba-emulator/package.json"));
@@ -237,8 +240,11 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
     const scenarioId = `world:${session.environmentId}`;
     try {
       journal = openFreePlayJournal({
-        rootDir: defaultGbaPlayJournalDir(env),
+        rootDir: journalDir,
         runId: session.sessionId,
+        journeyId: body.journeyId,
+        environmentId: session.environmentId,
+        venue: "world",
         environmentSessionId: session.sessionId,
         scenarioId,
         clock,
@@ -266,6 +272,7 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
       await onRunning();
       options.playSight?.attach({
         sessionId: session.sessionId,
+        journeyId: body.journeyId,
         environmentId: session.environmentId,
         scenarioId,
         startedAt: clock().toISOString(),
@@ -293,6 +300,12 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
             : "people in the voice channel, watching him play"),
         ...(voiceAgent === undefined ? {} : { voice: voiceAgent }),
         ...(voice === undefined ? {} : { roomAuthors: () => voice.roomListening }),
+        ...(resumedContinuity === null
+          ? {}
+          : {
+              initialNotes: resumedContinuity.notes,
+              initialObjective: resumedContinuity.objective,
+            }),
         framebufferSha256: () => {
           const png = body.framePng();
           return png === null ? null : createHash("sha256").update(png).digest("hex");

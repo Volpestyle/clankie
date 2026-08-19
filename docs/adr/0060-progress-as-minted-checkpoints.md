@@ -34,6 +34,8 @@ checkpoint directory alongside two documents:
 The pinned fixtures stay frozen. Nothing ever overwrites an existing identity;
 a checkpoint is always a new sibling. Savestate bytes stay operator-local
 exactly like the ROM — receipts, evidence, and tool results carry digests only.
+Receipts also name the environment and journey when the minting runner knows
+them, so an operator can identify saves without opening their state bytes.
 
 ### A load verifies everything before touching the core
 
@@ -72,3 +74,6 @@ serialize that the scenario does not already pin.
   its determinism anchors, which stays true — that is where this session
   started. The load itself is visible in the tool result and the watchers'
   frame stream.
+- Deletion is operator-only. `/saves` in the local TUI lists validated receipt
+  directories and requires a second confirmation before removing exactly one;
+  malformed ids, mismatched receipts, and symlinked directories are refused.

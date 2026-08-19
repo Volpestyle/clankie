@@ -18,6 +18,7 @@ import { createHash } from "node:crypto";
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { EmbodimentEnvironmentIdSchema, EmbodimentVenueSchema } from "@clankie/protocol";
 import { z } from "zod";
 import {
   FreePlayTurnEvidenceSchema,
@@ -43,9 +44,23 @@ export const FreePlayJournalHeaderV1Schema = z
 export const FreePlayJournalHeaderV2Schema = FreePlayJournalHeaderV1Schema.extend({
   schemaVersion: z.literal(2),
 });
+export const PlayJourneyIdSchema = z.string().trim().min(1).max(512);
+export type PlayJourneyId = z.infer<typeof PlayJourneyIdSchema>;
+
+/**
+ * V3 gives each sitting a stable journey parent. Run and checkpoint ids name
+ * one execution/state; journeyId names the adventure they continue.
+ */
+export const FreePlayJournalHeaderV3Schema = FreePlayJournalHeaderV2Schema.extend({
+  schemaVersion: z.literal(3),
+  journeyId: PlayJourneyIdSchema,
+  environmentId: EmbodimentEnvironmentIdSchema,
+  venue: EmbodimentVenueSchema,
+});
 export const FreePlayJournalHeaderSchema = z.union([
   FreePlayJournalHeaderV1Schema,
   FreePlayJournalHeaderV2Schema,
+  FreePlayJournalHeaderV3Schema,
 ]);
 export type FreePlayJournalHeader = z.infer<typeof FreePlayJournalHeaderSchema>;
 
@@ -163,6 +178,7 @@ export type FreePlayJournalSummary = z.infer<typeof FreePlayJournalSummarySchema
 export const FreePlayJournalLineSchema = z.union([
   FreePlayJournalHeaderV1Schema,
   FreePlayJournalHeaderV2Schema,
+  FreePlayJournalHeaderV3Schema,
   FreePlayJournalTurnV1Schema,
   FreePlayJournalTurnV2Schema,
   FreePlayJournalSummaryV1Schema,
@@ -189,6 +205,9 @@ export function defaultGbaPlayJournalDir(env: NodeJS.ProcessEnv = process.env): 
 export interface OpenFreePlayJournalInput {
   rootDir: string;
   runId: string;
+  journeyId: PlayJourneyId;
+  environmentId: z.infer<typeof EmbodimentEnvironmentIdSchema>;
+  venue: z.infer<typeof EmbodimentVenueSchema>;
   environmentSessionId: string;
   scenarioId: string;
   resumedFromCheckpointId?: string | undefined;
@@ -244,8 +263,11 @@ export function openFreePlayJournal(input: OpenFreePlayJournalInput): FreePlayJo
     journalPath,
     FreePlayJournalHeaderSchema.parse({
       kind: "header",
-      schemaVersion: 2,
+      schemaVersion: 3,
       runId: input.runId,
+      journeyId: input.journeyId,
+      environmentId: input.environmentId,
+      venue: input.venue,
       environmentSessionId: input.environmentSessionId,
       scenarioId: input.scenarioId,
       startedAt: startedAt.toISOString(),

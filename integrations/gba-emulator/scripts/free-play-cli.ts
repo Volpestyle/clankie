@@ -214,11 +214,13 @@ function print(turn: FreePlayTurn): void {
                 ? `type "${turn.action.text}"`
                 : turn.action.kind === "select_menu_entry"
                   ? `select "${turn.action.entryId}"`
-                  : turn.action.kind === "load_checkpoint"
-                    ? `load ${turn.action.checkpointId ?? "(list)"}`
-                    : turn.action.kind === "restart_game"
-                      ? "restart game"
-                      : `wait ${String(turn.action.durationMs)}ms`;
+                  : turn.action.kind === "save_checkpoint"
+                    ? `save ${turn.action.label ?? "checkpoint"}`
+                    : turn.action.kind === "load_checkpoint"
+                      ? `load ${turn.action.checkpointId ?? "(list)"}`
+                      : turn.action.kind === "restart_game"
+                        ? "restart game"
+                        : `wait ${String(turn.action.durationMs)}ms`;
   const marker = turn.outcome === "accepted" ? "→" : "✗";
   const detail = turn.outcome === "accepted" ? "" : `  [${turn.outcome}: ${turn.detail ?? ""}]`;
   console.log(`          ${marker} ${action}${detail}`);

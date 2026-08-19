@@ -20,6 +20,7 @@ import { buildDiscordCommands, runDiscordWizard, showDiscordInvite } from "./dis
 import { buildPersonaCommands } from "./persona-commands.ts";
 import { buildVoiceCommands } from "./voice-commands.ts";
 import { buildMemoryCommands } from "./memory-commands.ts";
+import { buildGameSaveCommands } from "./game-save-commands.ts";
 import {
   createCaptainRouteClient,
   createCaptainOperatorConversationClient,
@@ -201,6 +202,7 @@ const commands = [
   ...buildPersonaCommands({ settings: settingsStore }),
   ...buildVoiceCommands(brokeredCommands),
   ...buildMemoryCommands(operatorClient === undefined ? {} : { client: operatorClient }),
+  ...buildGameSaveCommands(),
 ];
 
 function bannerFieldsFor(cwd: string) {

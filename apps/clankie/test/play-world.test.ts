@@ -57,6 +57,7 @@ const fakeIo: GbaDriverIo = {
 function fakeWorldBody(overrides: Partial<WorldBody> = {}): WorldBody {
   const frame = new Uint8Array([137, 80, 78, 71]);
   return {
+    journeyId: "world:kanto:player:player-1",
     io: fakeIo,
     framePng: () => frame,
     observeFrames: () => undefined,
@@ -191,6 +192,12 @@ describe("world play execution", () => {
     const journalDir = env["CLANKIE_GBA_PLAY_JOURNAL_DIR"] as string;
     const journalFile = readdirSync(journalDir).find((name) => name.endsWith(".jsonl")) as string;
     const lines = parseFreePlayJournal(readFileSync(join(journalDir, journalFile), "utf8"));
+    expect(lines[0]).toMatchObject({
+      schemaVersion: 3,
+      journeyId: body.journeyId,
+      environmentId: "pokemon-firered",
+      venue: "world",
+    });
     expect(lines[1]).toMatchObject({
       schemaVersion: 2,
       evidence: {
@@ -205,6 +212,73 @@ describe("world play execution", () => {
       },
     });
     expect(closed).toBe(1);
+  });
+
+  it("restores the game mind from the previous hosted-world sitting", async () => {
+    const env = await playEnv();
+    const first = fakeClient({ kind: "start", session: { ...session("world"), budget: { maxTurns: 1 } } });
+    const firstHost = new PlayHost({
+      client: first,
+      runnerId: "runner-local",
+      environmentIds: ["pokemon-firered"],
+      execute: createGbaPlayExecution({
+        logger: silentLogger,
+        env,
+        createMind: () =>
+          Promise.resolve({
+            decide: () =>
+              Promise.resolve({
+                monologue: "remembering the route",
+                intent: "press a",
+                notes: "the Mart clerk has Oak's Parcel",
+                objective: "return to Oak",
+                action: { kind: "button_press" as const, button: "a" as const, holdFrames: 2 },
+              }),
+          }),
+        joinWorld: () => Promise.resolve({ outcome: "joined", body: fakeWorldBody() }),
+      }),
+      logger: silentLogger,
+    });
+    await firstHost.poll();
+    await firstHost.settled();
+
+    const seen: { notes: string | null; objective: string | null }[] = [];
+    const secondSession = {
+      ...session("world"),
+      sessionId: "world-play-2",
+      intentId: "intent-2",
+      budget: { maxTurns: 1 },
+    };
+    const second = fakeClient({ kind: "start", session: secondSession });
+    const secondHost = new PlayHost({
+      client: second,
+      runnerId: "runner-local",
+      environmentIds: ["pokemon-firered"],
+      execute: createGbaPlayExecution({
+        logger: silentLogger,
+        env,
+        createMind: () =>
+          Promise.resolve({
+            decide: (view) => {
+              seen.push({ notes: view.notes, objective: view.objective });
+              return Promise.resolve({
+                monologue: "continuing",
+                intent: "press a",
+                action: { kind: "button_press" as const, button: "a" as const, holdFrames: 2 },
+              });
+            },
+          }),
+        joinWorld: () => Promise.resolve({ outcome: "joined", body: fakeWorldBody() }),
+      }),
+      logger: silentLogger,
+    });
+    await secondHost.poll();
+    await secondHost.settled();
+
+    expect(seen[0]).toEqual({
+      notes: "the Mart clerk has Oak's Parcel",
+      objective: "return to Oak",
+    });
   });
 
   it("refuses each world-join reason without starting a local body", async () => {

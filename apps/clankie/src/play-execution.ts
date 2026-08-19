@@ -28,7 +28,9 @@ import {
   defaultGbaCheckpointDir,
   defaultGbaPlayJournalDir,
   InterjectionQueue,
+  latestPlayJourneyContinuity,
   listGbaCheckpoints,
+  localPlayJourneyId,
   openFreePlayJournal,
   readGbaCheckpoint,
   runFreePlay,
@@ -37,6 +39,7 @@ import {
   type BootedGbaGame,
   type ClankieVoice,
   type FreePlayJournal,
+  type FreePlayCheckpointPort,
   type FreePlayMind,
   type FreePlaySettledTurn,
   type FreePlayTurn,
@@ -254,6 +257,10 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
     // Resume from the newest compatible checkpoint (ADR 0060). A checkpoint
     // that fails its identity or digest gate is skipped, never trusted.
     const checkpointDir = defaultGbaCheckpointDir(env);
+    const journalDir = defaultGbaPlayJournalDir(env);
+    const journeyId = localPlayJourneyId({
+      environmentId: session.environmentId,
+    });
     // The checkpoint root is shared across games, and the load gate refuses a
     // foreign ROM or core build — so another game's receipts (routine once
     // Emerald joined FireRed) are never listed or resumed here, only ones this
@@ -297,6 +304,12 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
           continue;
         }
       }
+    }
+    // A body without checkpoints (or a cold start with none yet) still has a
+    // durable mind in the journal. A loaded checkpoint wins because its notes
+    // describe that exact saved world rather than a potentially newer branch.
+    if (resumedFromCheckpointId === undefined) {
+      resumedContinuity = latestPlayJourneyContinuity(journalDir, journeyId);
     }
 
     const sink = await createBrokeredActivityFrameSink({
@@ -421,8 +434,11 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
     let journalFailureLogged = false;
     try {
       journal = openFreePlayJournal({
-        rootDir: defaultGbaPlayJournalDir(env),
+        rootDir: journalDir,
         runId: session.sessionId,
+        journeyId,
+        environmentId: session.environmentId,
+        venue: "local",
         environmentSessionId: freePlay.sessionId,
         scenarioId: game.scenario.scenarioId,
         resumedFromCheckpointId,
@@ -462,6 +478,8 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
         capability: game.checkpoints,
         label: "before-rewind",
         position: null,
+        journeyId,
+        environmentId: session.environmentId,
         continuity:
           latestTurn === undefined ? null : { notes: latestTurn.notes, objective: latestTurn.objective },
         clock,
@@ -471,7 +489,7 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
         "banked the present before a rewind",
       );
     };
-    const checkpointPort =
+    const checkpointPort: FreePlayCheckpointPort | undefined =
       game.checkpoints === undefined
         ? undefined
         : {
@@ -482,6 +500,30 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
                 capturedAt: receipt.capturedAt,
                 position: receipt.position,
               })),
+            save: ({ label, position, continuity }) => {
+              const checkpoints = game.checkpoints;
+              if (checkpoints === undefined) throw new Error("checkpoints_unavailable");
+              const saved = writeGbaCheckpoint({
+                rootDir: checkpointDir,
+                capability: checkpoints,
+                ...(label === undefined ? {} : { label }),
+                position,
+                continuity,
+                journeyId,
+                environmentId: session.environmentId,
+                clock,
+              }).receipt;
+              options.logger.info(
+                { sessionId: session.sessionId, checkpointId: saved.checkpointId },
+                "he saved a checkpoint",
+              );
+              return {
+                checkpointId: saved.checkpointId,
+                label: saved.label,
+                capturedAt: saved.capturedAt,
+                position: saved.position,
+              };
+            },
             load: (checkpointId: string) => {
               const checkpoints = game.checkpoints;
               if (checkpoints === undefined) throw new Error("checkpoints_unavailable");
@@ -520,6 +562,7 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
       const glanceScale = 3;
       options.playSight?.attach({
         sessionId: session.sessionId,
+        journeyId,
         environmentId: session.environmentId,
         scenarioId: game.scenario.scenarioId,
         startedAt: clock().toISOString(),
@@ -651,6 +694,8 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
                 label: "autosave",
                 position: null,
                 continuity: { notes: turn.notes, objective: turn.objective },
+                journeyId,
+                environmentId: session.environmentId,
                 clock,
               });
               options.logger.info(
@@ -723,6 +768,8 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
             position: null,
             continuity:
               lastTurn === undefined ? null : { notes: lastTurn.notes, objective: lastTurn.objective },
+            journeyId,
+            environmentId: session.environmentId,
             clock,
           }).receipt.checkpointId;
         } catch (error) {

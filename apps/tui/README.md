@@ -104,6 +104,9 @@ Discord body identities resolve directly from the credential broker.
   press Enter to enable or disable it. `/games solo on|off` and `/games mmo
 on|off` remain available for direct use. Restart Clankie to apply a change.
   Both may be enabled, with one live session across them.
+- `/saves` browses Clankie's receipt-validated local Pokémon checkpoints. Selecting a
+  save shows its game, capture time, position, and id; deletion requires a
+  separate confirmation. Hosted-world saves remain on their world server.
 - `/memory` browses and edits episodes and permitted Discord person facts through
   operator-only APIs.
 - `/status` shows presence, conversation, workspace, model context, activity

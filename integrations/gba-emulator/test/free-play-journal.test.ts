@@ -11,6 +11,12 @@ import {
 import { encodeFramebufferPng } from "../src/framebuffer-png.ts";
 import type { FreePlayResult, FreePlayTurn, FreePlayTurnEvidence } from "../src/free-play.ts";
 
+const journalIdentity = {
+  journeyId: "local:pokemon-firered:test",
+  environmentId: "pokemon-firered" as const,
+  venue: "local" as const,
+};
+
 const turn = (index: number): FreePlayTurn => ({
   turn: index,
   observationSha256: "a".repeat(64),
@@ -88,6 +94,7 @@ describe("free-play journal", () => {
     const rootDir = mkdtempSync(path.join(tmpdir(), "play-journal-"));
     const clock = () => new Date("2026-07-27T02:30:00.000Z");
     const journal = openFreePlayJournal({
+      ...journalIdentity,
       rootDir,
       runId: "embodiment-abc123",
       environmentSessionId: "gba-free-play:firered-bedroom-route:v1:run-1",
@@ -109,8 +116,11 @@ describe("free-play journal", () => {
     const lines = parseFreePlayJournal(readFileSync(journal.path, "utf8"));
     expect(lines.map((line) => line.kind)).toEqual(["header", "turn", "turn", "summary"]);
     expect(lines[0]).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       runId: "embodiment-abc123",
+      journeyId: journalIdentity.journeyId,
+      environmentId: "pokemon-firered",
+      venue: "local",
       scenarioId: "firered-bedroom-route",
       resumedFromCheckpointId: "2026-07-26T15-55-24-710Z-oaks-lab-starter-menu",
     });
@@ -136,6 +146,7 @@ describe("free-play journal", () => {
     const at = { value: new Date("2026-07-27T02:30:00.000Z") };
     const open = () =>
       openFreePlayJournal({
+        ...journalIdentity,
         rootDir,
         runId: "embodiment-abc123",
         environmentSessionId: "session",
@@ -152,6 +163,7 @@ describe("free-play journal", () => {
   it("captures bounded milestone screenshots beside the journal", () => {
     const rootDir = mkdtempSync(path.join(tmpdir(), "play-journal-screenshots-"));
     const journal = openFreePlayJournal({
+      ...journalIdentity,
       rootDir,
       runId: "run",
       environmentSessionId: "session",
@@ -200,6 +212,7 @@ describe("free-play journal", () => {
     const rootDir = mkdtempSync(path.join(tmpdir(), "play-journal-error-"));
     const errors: unknown[] = [];
     const journal = openFreePlayJournal({
+      ...journalIdentity,
       rootDir,
       runId: "run",
       environmentSessionId: "session",
@@ -214,6 +227,7 @@ describe("free-play journal", () => {
   it("joins a reported turn to the voice delivery id without rewriting old lines", () => {
     const rootDir = mkdtempSync(path.join(tmpdir(), "play-journal-speech-"));
     const journal = openFreePlayJournal({
+      ...journalIdentity,
       rootDir,
       runId: "run",
       environmentSessionId: "session",

@@ -453,13 +453,37 @@ describe("free play", () => {
 });
 
 describe("rewind is his to choose", () => {
-  // ADR 0075: restart and checkpoint loads are play choices, dispatched to an
+  // ADR 0075: saves, restarts, and checkpoint loads are play choices, dispatched to an
   // injected port rather than the frozen emulator catalog.
   const summary = (checkpointId: string) => ({
     checkpointId,
     label: "autosave" as string | null,
     capturedAt: "2026-08-01T00:00:00.000Z",
     position: { mapId: "PALLET_TOWN", x: 5, y: 6 } as { mapId: string; x: number; y: number } | null,
+  });
+
+  it("saves the current world and mind when he chooses to", async () => {
+    const save = vi.fn(() => summary("cp-before-gym"));
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: mind([
+        {
+          monologue: "this is worth keeping",
+          intent: "save before the gym",
+          notes: "Pikachu leads",
+          objective: "challenge Brock",
+          action: { kind: "save_checkpoint", label: "before-gym" },
+        },
+      ]),
+      checkpoints: { list: () => [], save, load: () => summary("unused"), restart: () => undefined },
+      turns: 1,
+    });
+    expect(save).toHaveBeenCalledWith({
+      label: "before-gym",
+      position: { mapId: "PALLET_TOWN", x: 8, y: 6 },
+      continuity: { notes: "Pikachu leads", objective: "challenge Brock" },
+    });
+    expect(result.turns[0]?.effect).toContain("saved checkpoint cp-before-gym");
   });
 
   it("lists his checkpoints when he asks with no id", async () => {
@@ -474,6 +498,7 @@ describe("rewind is his to choose", () => {
       ]),
       checkpoints: {
         list: () => [summary("cp-newest"), summary("cp-older")],
+        save: () => summary("saved"),
         load: () => summary("unused"),
         restart: () => undefined,
       },
@@ -496,7 +521,7 @@ describe("rewind is his to choose", () => {
           action: { kind: "load_checkpoint", checkpointId: "cp-before-gym" },
         },
       ]),
-      checkpoints: { list: () => [], load, restart: () => undefined },
+      checkpoints: { list: () => [], save: () => summary("saved"), load, restart: () => undefined },
       turns: 1,
     });
     expect(load).toHaveBeenCalledWith("cp-before-gym");
@@ -517,7 +542,7 @@ describe("rewind is his to choose", () => {
           action: { kind: "restart_game" },
         },
       ]),
-      checkpoints: { list: () => [], load: () => summary("unused"), restart },
+      checkpoints: { list: () => [], save: () => summary("saved"), load: () => summary("unused"), restart },
       turns: 1,
     });
     expect(restart).toHaveBeenCalledOnce();
@@ -547,6 +572,7 @@ describe("rewind is his to choose", () => {
       ]),
       checkpoints: {
         list: () => [],
+        save: () => summary("saved"),
         load: () => {
           throw new Error("checkpoint_not_found: not-a-checkpoint");
         },

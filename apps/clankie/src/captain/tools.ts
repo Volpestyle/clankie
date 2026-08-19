@@ -305,13 +305,21 @@ export function captainTools(
       name: "pokeagent_recall",
       label: "PokeAgent: recall session",
       description:
-        "Read the current PokeAgent session's story so far: where you are, what you are after, and the last few moments " +
-        "you judged worth a remark. The card includes the latest settled-turn time and only exists while the run is live; " +
-        "a gap means the player is deciding, not that it is stuck. Not the raw journal. Use it when someone asks how you " +
-        "got here or what has happened in the run. Say when you are not playing rather than inventing a playthrough.",
+        "Read the current or most recent PokeAgent journey: where you have been, what you are after, and the last few " +
+        "moments you judged worth a remark across sittings. The card says whether that journey is live; a live timestamp " +
+        "gap means the player is deciding, not that it is stuck. Not the raw journal. Use it when someone asks how you " +
+        "got here or what has happened in the adventure. Say when you have no journey rather than inventing one.",
       parameters: Type.Object({}),
-      execute: async () =>
-        json((await deps.playSight?.story()) ?? { schemaVersion: 1, outcome: "not_playing" }),
+      execute: async () => {
+        const [story, live] = await Promise.all([
+          deps.playSight?.story() ??
+            Promise.resolve({ schemaVersion: 1 as const, outcome: "not_playing" as const }),
+          deps.embodiment.getLiveSession(),
+        ]);
+        return json(
+          story.outcome === "card" ? { ...story, active: live?.sessionId === story.card.sessionId } : story,
+        );
+      },
     }),
     defineTool({
       name: "observe_room",
@@ -388,7 +396,8 @@ export function captainTools(
       description:
         "Write one short episode into your own memory for this room — anything you choose to carry forward as " +
         "part of your experience and developing personality. Your concise memory, not a transcript or an " +
-        "unapproved factual profile about someone.",
+        "unapproved factual profile about someone. Not a status receipt: game joins, retries, checkpoints, and routine " +
+        "progress already have their own journey and journals.",
       parameters: Type.Object({
         summary: Type.String({ minLength: 1, maxLength: CAPTAIN_EPISODE_SUMMARY_MAX }),
         visibility: Type.Optional(StringEnum(["shareable", "operator_private"])),
@@ -513,7 +522,7 @@ function discordActionTools(
             name: "send_text_update",
             label: "Send text update",
             description:
-              "Post one short text update to this Discord channel immediately, without ending your turn. This is not voice speech, and your real text reply still posts when you finish. Use it BEFORE you go do something slow — looking a bracket up, reading a page, working through a task — so the room knows you are on it instead of watching silence. Say what you are going off to do, in your own voice, and then go do it. Do not use it to pad a turn you can just answer.",
+              "Post one short text update to this Discord channel immediately, without ending your turn. This is not voice speech, and your real text reply still posts when you finish. Use your social judgment: post one only when someone is actually waiting on work and a meaningful delay would otherwise leave them hanging. An unsolicited link or task you chose to inspect on your own does not need an update; work quietly. If an update is warranted, say what you are going off to do, in your own voice, and then go do it. Do not use it to pad a turn you can just answer.",
             parameters: Type.Object({
               text: Type.String({
                 minLength: 1,

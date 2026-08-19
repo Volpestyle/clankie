@@ -18,8 +18,9 @@ different rules:
 
 - **The play journal is the observability artifact.** `openFreePlayJournal`
   (gba-emulator) writes one append-only JSONL file per run under
-  `~/.local/state/clankie/gba-play/`: a header (run identity, environment
-  session, scenario, resume lineage), one line per validated `FreePlayTurn` as
+  `~/.local/state/clankie/gba-play/`: a header (run identity, stable journey
+  identity, environment, venue, environment session, scenario, resume
+  lineage), one line per validated `FreePlayTurn` as
   it settles, and a summary line carrying the outcome plus the end-of-run
   metrics. Journal V2 turn lines carry the bounded causal packet from
   [ADR 0117](0117-play-evidence-preserves-causal-stages.md): decision,
@@ -27,7 +28,8 @@ different rules:
   structured result and available progress/provenance signals. The production
   play execution always journals; a failed
   append is reported and costs the record, never the playthrough. The journal
-  is never rewritten or pruned by code. V1 remains readable. When a room report
+  is never rewritten or pruned by code. V1/V2 remain readable; V3 headers add
+  cross-run journey identity without changing V2 turn evidence. When a room report
   is attempted, `speechDeliveryId` and the bounded narration event join the turn
   to content-free voice receipts. The id alone proves no delivery, and generated
   audible wording remains unknown by policy. Selected V2 turns also reference a

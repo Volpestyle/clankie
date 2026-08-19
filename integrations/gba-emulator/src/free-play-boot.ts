@@ -10,6 +10,7 @@ import type { FrameGridAnchor } from "./frame-grid.ts";
 import { encodeFramebufferPng } from "./framebuffer-png.ts";
 import { RealGbaRouteScenarioSchema } from "./real-scenario.ts";
 import { MgbaVisualCore, VisualGbaScenarioSchema } from "./visual-core.ts";
+import type { GbaCheckpointCapability } from "./checkpoint.ts";
 
 /**
  * Resolve which game Clankie is looking at.
@@ -29,32 +30,6 @@ import { MgbaVisualCore, VisualGbaScenarioSchema } from "./visual-core.ts";
  * The deterministic double has no serializable state — its determinism *is*
  * its identity — so on the double the capability is absent rather than stubbed.
  */
-export interface GbaCheckpointCapability {
-  saveState: () => Uint8Array;
-  loadState: (bytes: Uint8Array) => void;
-  /**
-   * The savestate the core booted from — the configured beginning. Held so a
-   * restart (ADR 0075) reboots to it without re-reading the operator's file;
-   * the bytes were digest-verified at core creation.
-   */
-  bootSavestate: () => Uint8Array;
-  /** Digests verified at core creation; a checkpoint must match them to load. */
-  identity: GbaCheckpointIdentity;
-  /** The booted scenario — the template a checkpoint's companion scenario is minted from. */
-  scenario: GbaCheckpointScenario;
-}
-
-export interface GbaCheckpointIdentity {
-  readonly romSha256: string;
-  readonly savestateSha256: string;
-  readonly coreWasmSha256: string;
-}
-
-export type GbaCheckpointScenario = GbaAdapterScenario & {
-  readonly romSha256: string;
-  readonly coreWasmSha256: string;
-};
-
 export interface BootedGbaGame {
   scenario: GbaAdapterScenario;
   fixtureSha256: string;

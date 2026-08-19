@@ -54,6 +54,7 @@ const FreePlayWireDecisionSchema = z
       "enter_text",
       "select_menu_entry",
       "frame_advance",
+      "save_checkpoint",
       "load_checkpoint",
       "restart_game",
     ]),
@@ -80,6 +81,10 @@ const FreePlayWireDecisionSchema = z
       .string()
       .nullable()
       .describe("For load_checkpoint: the checkpoint id to restore, or null to be told what exists."),
+    checkpointLabel: z
+      .string()
+      .nullable()
+      .describe("For save_checkpoint: an optional lowercase slug such as before-gym, or null."),
   })
   .strict();
 
@@ -123,14 +128,19 @@ function toDecision(wire: z.infer<typeof FreePlayWireDecisionSchema>): unknown {
             ? { kind: "enter_text", text: wire.text }
             : wire.actionKind === "select_menu_entry"
               ? { kind: "select_menu_entry", entryId: wire.entryId }
-              : wire.actionKind === "load_checkpoint"
+              : wire.actionKind === "save_checkpoint"
                 ? {
-                    kind: "load_checkpoint",
-                    ...(wire.checkpointId === null ? {} : { checkpointId: wire.checkpointId }),
+                    kind: "save_checkpoint",
+                    ...(wire.checkpointLabel === null ? {} : { label: wire.checkpointLabel }),
                   }
-                : wire.actionKind === "restart_game"
-                  ? { kind: "restart_game" }
-                  : { kind: "frame_advance", frames: wire.frames };
+                : wire.actionKind === "load_checkpoint"
+                  ? {
+                      kind: "load_checkpoint",
+                      ...(wire.checkpointId === null ? {} : { checkpointId: wire.checkpointId }),
+                    }
+                  : wire.actionKind === "restart_game"
+                    ? { kind: "restart_game" }
+                    : { kind: "frame_advance", frames: wire.frames };
   return {
     monologue: wire.monologue,
     intent: wire.intent,
@@ -203,6 +213,7 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   '    {"kind":"enter_text","text":"NAME"}',
   '    {"kind":"select_menu_entry","entryId":"ID"}',
   '    {"kind":"frame_advance","frames":N}',
+  '    {"kind":"save_checkpoint","label":"optional-lowercase-slug"}',
   '    {"kind":"load_checkpoint","checkpointId":"ID or null to list"}',
   '    {"kind":"restart_game"}',
   "",
@@ -293,7 +304,10 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   "it matches and erased when it does not, so repeating the same enter_text",
   "safely finishes a partial entry.",
   "",
-  "Your save states are yours too. load_checkpoint with a null checkpointId",
+  "Your save states are yours too. On the local emulator, save_checkpoint",
+  "captures the current world, notes, and objective as a new immutable save;",
+  "its optional label is a short lowercase slug such as before-gym.",
+  "load_checkpoint with a null checkpointId",
   "tells you what checkpoints exist as the action's result; with an id it",
   "restores that moment. restart_game reboots the game to its configured",
   "beginning. Either way the present is checkpointed automatically first, so",
@@ -605,6 +619,9 @@ function describeAction(action: FreePlayView["history"][number]["action"]): stri
   if (action.kind === "advance_dialog") return "advanced the dialog";
   if (action.kind === "enter_text") return `typed "${action.text}"`;
   if (action.kind === "select_menu_entry") return `selected "${action.entryId}"`;
+  if (action.kind === "save_checkpoint") {
+    return action.label === undefined ? "saved a checkpoint" : `saved checkpoint ${action.label}`;
+  }
   if (action.kind === "load_checkpoint") {
     return action.checkpointId === undefined
       ? "listed the checkpoints"

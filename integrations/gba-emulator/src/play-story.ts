@@ -24,8 +24,10 @@ export interface ProjectPlayStoryInput {
 }
 
 export function projectPlayStory(input: ProjectPlayStoryInput): PlayStoryCard {
-  const header = input.lines.find((line) => line.kind === "header");
-  if (header === undefined || header.kind !== "header") {
+  const headers = input.lines.filter((line) => line.kind === "header");
+  const firstHeader = headers[0];
+  const latestHeader = headers.at(-1);
+  if (firstHeader === undefined || latestHeader === undefined) {
     throw new Error("play_story_missing_header");
   }
   const turns = input.lines.filter((line) => line.kind === "turn");
@@ -42,25 +44,24 @@ export function projectPlayStory(input: ProjectPlayStoryInput): PlayStoryCard {
       toward: toward === undefined || toward.length === 0 ? null : toward.slice(0, 160),
     });
   }
-  let summaryMaps: readonly string[] | undefined;
-  for (let index = input.lines.length - 1; index >= 0; index -= 1) {
-    const line = input.lines[index];
-    if (line !== undefined && line.kind === "summary") {
-      summaryMaps = line.progress.maps;
-      break;
-    }
-  }
-  const maps = input.maps ?? summaryMaps ?? [];
+  const maps = unique([
+    ...input.lines.flatMap((line) => (line.kind === "summary" ? line.progress.maps : [])),
+    ...(input.maps ?? []),
+  ]);
   return PlayStoryCardSchema.parse({
     schemaVersion: 1,
     sessionId: input.sessionId,
     environmentId: input.environmentId,
-    scenarioId: header.scenarioId,
-    startedAt: header.startedAt,
+    scenarioId: latestHeader.scenarioId,
+    startedAt: firstHeader.startedAt,
     turnsTaken: turns.length,
     lastTurnAt: last?.kind === "turn" ? last.at : null,
     objective: last?.kind === "turn" ? last.turn.objective?.trim().slice(0, 160) || null : null,
     maps: maps.slice(-PLAY_STORY_MAPS_MAX).map((mapId) => mapId.slice(0, 200)),
     moments: moments.slice(-PLAY_STORY_MOMENTS_MAX),
   });
+}
+
+function unique(values: readonly string[]): string[] {
+  return [...new Set(values)];
 }

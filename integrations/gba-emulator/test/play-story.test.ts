@@ -25,7 +25,7 @@ const turn = (index: number, extra: Partial<FreePlayTurn> = {}): FreePlayTurn =>
   ...extra,
 });
 
-function header(): FreePlayJournalLine {
+function header(): Extract<FreePlayJournalLine, { kind: "header" }> {
   return {
     kind: "header",
     schemaVersion: 1,
@@ -80,5 +80,34 @@ describe("projectPlayStory", () => {
     expect(
       projectPlayStory({ sessionId: "play-1", environmentId: "pokemon-firered", lines: [header()] }),
     ).toMatchObject({ turnsTaken: 0, lastTurnAt: null });
+  });
+
+  it("projects one bounded story across multiple sittings", () => {
+    const secondHeader = {
+      ...header(),
+      runId: "play-2",
+      environmentSessionId: "gba-free-play:firered:v1:run-2",
+      scenarioId: "viridian-city",
+      startedAt: "2026-08-16T20:00:00.000Z",
+    } satisfies FreePlayJournalLine;
+    const card = projectPlayStory({
+      sessionId: "play-2",
+      environmentId: "pokemon-firered",
+      lines: [
+        header(),
+        turnLine(0, { speakWanted: true, effect: "chose Charmander" }),
+        secondHeader,
+        turnLine(1, { speakWanted: true, effect: "reached Viridian", objective: "find the Mart" }),
+      ],
+    });
+
+    expect(card).toMatchObject({
+      sessionId: "play-2",
+      scenarioId: "viridian-city",
+      startedAt: "2026-08-15T20:00:00.000Z",
+      turnsTaken: 2,
+      objective: "find the Mart",
+    });
+    expect(card.moments.map((moment) => moment.effect)).toEqual(["chose Charmander", "reached Viridian"]);
   });
 });

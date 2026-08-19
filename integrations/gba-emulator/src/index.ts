@@ -16,6 +16,7 @@ export * from "./free-play.ts";
 export * from "./free-play-journal.ts";
 export * from "./free-play-evaluator.ts";
 export * from "./play-story.ts";
+export * from "./play-journey.ts";
 export * from "./free-play-mind.ts";
 export * from "./free-play-session.ts";
 export * from "./body-lock.ts";

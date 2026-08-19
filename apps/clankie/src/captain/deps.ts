@@ -78,7 +78,7 @@ export interface CaptainDeps {
   readonly activity: {
     current(): Promise<ActivityObservationRead>;
   };
-  /** Live still and journal story. Absent reads as not playing. */
+  /** Live still and current-or-latest journey story. */
   readonly playSight?: {
     still(): Promise<PlayStillRead>;
     story(): Promise<PlayStoryRead>;

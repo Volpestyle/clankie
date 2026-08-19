@@ -1,11 +1,11 @@
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import { Sha256Schema } from "./contracts.ts";
 import { canonicalJson, sha256 } from "./core-double.ts";
+import type { GbaAdapterScenario } from "./core-seam.ts";
 import { FREE_PLAY_NOTES_MAX, FREE_PLAY_OBJECTIVE_MAX } from "./free-play-bounds.ts";
-import type { GbaCheckpointCapability } from "./free-play-boot.ts";
 
 /**
  * Progress that outlives the process, as minted checkpoints (ADR 0060).
@@ -22,6 +22,29 @@ import type { GbaCheckpointCapability } from "./free-play-boot.ts";
  */
 
 export const GBA_CHECKPOINT_SCHEMA_VERSION = 1 as const;
+
+/** Savestate capture and restore, present only on a real checkpoint-capable core. */
+export interface GbaCheckpointCapability {
+  saveState: () => Uint8Array;
+  loadState: (bytes: Uint8Array) => void;
+  /** Digest-verified boot state used by restart without re-reading operator files. */
+  bootSavestate: () => Uint8Array;
+  /** Digests verified at core creation; a checkpoint must match them to load. */
+  identity: GbaCheckpointIdentity;
+  /** Boot scenario used as the template for a checkpoint's companion scenario. */
+  scenario: GbaCheckpointScenario;
+}
+
+export interface GbaCheckpointIdentity {
+  readonly romSha256: string;
+  readonly savestateSha256: string;
+  readonly coreWasmSha256: string;
+}
+
+export type GbaCheckpointScenario = GbaAdapterScenario & {
+  readonly romSha256: string;
+  readonly coreWasmSha256: string;
+};
 
 /** Filesystem-safe slug so a label can never smuggle path segments. */
 export const GbaCheckpointLabelSchema = z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/u);
@@ -59,6 +82,9 @@ export const GbaCheckpointReceiptSchema = z
       .strict()
       .nullable()
       .default(null),
+    /** Stable adventure and body names for operator browse surfaces. */
+    journeyId: z.string().min(1).max(512).nullable().default(null),
+    environmentId: z.string().min(1).max(200).nullable().default(null),
   })
   .strict();
 export type GbaCheckpointReceipt = z.infer<typeof GbaCheckpointReceiptSchema>;
@@ -90,6 +116,8 @@ export interface WriteGbaCheckpointInput {
   position: { mapId: string; x: number; y: number } | null;
   /** His notes and objective at capture, when the minting driver has them. */
   continuity?: { notes: string | null; objective: string | null } | null;
+  journeyId?: string | undefined;
+  environmentId?: string | undefined;
   clock?: () => Date;
 }
 
@@ -127,6 +155,8 @@ export function writeGbaCheckpoint(input: WriteGbaCheckpointInput): WrittenGbaCh
     savestateSha256,
     position: input.position,
     continuity: input.continuity ?? null,
+    journeyId: input.journeyId ?? null,
+    environmentId: input.environmentId ?? null,
   });
 
   const directory = path.join(input.rootDir, checkpointId);
@@ -159,6 +189,29 @@ export function listGbaCheckpoints(rootDir: string): GbaCheckpointReceipt[] {
     }
   }
   return receipts.sort((a, b) => (a.capturedAt < b.capturedAt ? 1 : -1));
+}
+
+/** Permanently remove one validated checkpoint directory and nothing else. */
+export function deleteGbaCheckpoint(input: { rootDir: string; checkpointId: string }): GbaCheckpointReceipt {
+  if (!CHECKPOINT_ID_PATTERN.test(input.checkpointId)) {
+    throw new Error("checkpoint_id_invalid: ids are directory basenames, never paths");
+  }
+  const directory = path.join(input.rootDir, input.checkpointId);
+  let receipt: GbaCheckpointReceipt;
+  try {
+    const stat = lstatSync(directory);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("not a checkpoint directory");
+    receipt = GbaCheckpointReceiptSchema.parse(
+      JSON.parse(readFileSync(path.join(directory, RECEIPT_FILENAME), "utf8")),
+    );
+  } catch {
+    throw new Error(`checkpoint_not_found: ${input.checkpointId}`);
+  }
+  if (receipt.checkpointId !== input.checkpointId) {
+    throw new Error("checkpoint_receipt_mismatch: receipt does not name this directory");
+  }
+  rmSync(directory, { recursive: true });
+  return receipt;
 }
 
 export interface ReadGbaCheckpointInput {

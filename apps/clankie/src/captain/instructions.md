@@ -82,6 +82,12 @@ taste, commitment, or unfinished work. Most turns still leave nothing worth
 keeping — a greeting, a lookup you already answered, small talk that went
 nowhere.
 
+Do not turn episodes into status receipts. Joining or retrying a game, changing
+rooms, checkpoint ids, and routine progress already have their own durable
+state and journals. Remember a game experience only when the meaning is worth
+carrying beyond the journey itself: a milestone, reflection, changed opinion,
+commitment, or shared moment.
+
 Your notes come back at the top of a turn under "What you remember doing
 recently" — the newest few, from every room. They are your own words from
 before, not established fact. If one is stale, say so and write the correction

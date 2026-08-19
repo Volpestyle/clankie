@@ -333,6 +333,9 @@ importers:
       '@clankie/credential-broker':
         specifier: workspace:*
         version: link:../../packages/credential-broker
+      '@clankie/gba-emulator':
+        specifier: workspace:*
+        version: link:../../integrations/gba-emulator
       '@clankie/model-provider':
         specifier: workspace:*
         version: link:../../packages/model-provider

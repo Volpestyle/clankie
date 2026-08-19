@@ -28,8 +28,10 @@ import { resolveWorldCredential, WorldCredentialError } from "@clankie/credentia
 import { EnvironmentAdapterActionError } from "@clankie/environment-runtime";
 import {
   FREE_PLAY_HARD_FAILURE_LIMIT,
+  worldPlayJourneyId,
   type FreePlayProvenance,
   type GbaDriverIo,
+  type PlayJourneyId,
 } from "@clankie/gba-emulator";
 import {
   GbaEmulatorObservationSchema,
@@ -64,6 +66,8 @@ import { callHost, defaultWorldStateDir, worldSocketPath } from "@pokeagents/wor
 import { z } from "zod";
 
 export interface WorldBody {
+  /** Stable authenticated player journey; never supplied by the model. */
+  readonly journeyId: PlayJourneyId;
   /** The only seam `runFreePlay` touches. */
   readonly io: GbaDriverIo;
   /** Latest world frame as PNG bytes; null until the first frame arrives. */
@@ -345,6 +349,7 @@ interface WatchAudioSource {
 }
 
 class HostedWorldBody implements WorldBody {
+  public readonly journeyId: PlayJourneyId;
   public readonly io: GbaDriverIo;
 
   private readonly socketPath: string;
@@ -382,6 +387,7 @@ class HostedWorldBody implements WorldBody {
   ) {
     this.socketPath = socketPath;
     this.joined = joined;
+    this.journeyId = worldPlayJourneyId({ worldId: joined.worldId, playerId: joined.playerId });
     this.observation = observation;
     this.bodyGeneration = observation.bodyGeneration;
     this.watchAudio = watchAudio;

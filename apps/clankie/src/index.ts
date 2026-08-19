@@ -14,6 +14,7 @@ import {
   parseVoiceRealtimeEnv,
 } from "@clankie/discord-presence-core";
 import { defaultGbaBodyRootDir, observeBodyHolder } from "@clankie/body-lock";
+import { defaultGbaPlayJournalDir } from "@clankie/gba-emulator";
 import {
   createDefaultCredentialStore,
   ensureDiscordBridgeCredential,
@@ -217,7 +218,7 @@ const discordUserPresenceRuntime = await loadDiscordPresenceRuntime(
 );
 
 const activityObservations = new ActivityObservationProjection();
-const playSight = new PlaySightProjection();
+const playSight = new PlaySightProjection({ journalRootDir: defaultGbaPlayJournalDir(process.env) });
 
 // The captain's tools reach the same in-process authorities the routes use.
 // The app needs the captain and the captain's deps need the app, so the app

@@ -34,6 +34,7 @@ describe("model minds issue a prompt the SDK accepts", () => {
         entryId: null,
         frames: null,
         checkpointId: null,
+        checkpointLabel: null,
       }),
     );
 

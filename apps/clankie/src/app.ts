@@ -588,9 +588,12 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         discordStreamWatch.current(),
       ),
     ];
-    const embodimentCard = renderVoiceBriefingEmbodiment(embodiment.liveSession());
+    const liveEmbodiment = embodiment.liveSession();
+    const embodimentCard = renderVoiceBriefingEmbodiment(liveEmbodiment);
     if (embodimentCard !== undefined) sections.push(embodimentCard);
-    const playStory = dependencies.playSight?.story();
+    // Historical recall is pull-only. A room he joins while not playing should
+    // not receive an unrelated old Pokemon journey in every briefing.
+    const playStory = liveEmbodiment === undefined ? undefined : dependencies.playSight?.story();
     const playStoryCard = playStory !== undefined ? renderVoiceBriefingPlayStory(playStory) : undefined;
     if (playStoryCard !== undefined) sections.push(playStoryCard);
     const episodeCard = dependencies.memory?.episodeRecallCard({ lane: "discord_voice" }) ?? "";

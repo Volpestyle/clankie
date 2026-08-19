@@ -1,8 +1,9 @@
-import { mkdtempSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
+  deleteGbaCheckpoint,
   listGbaCheckpoints,
   readGbaCheckpoint,
   writeGbaCheckpoint,
@@ -135,6 +136,8 @@ describe("gba checkpoints", () => {
       capability: cap,
       position: POSITION,
       continuity: { notes: "stairs upper-right, rival took Squirtle", objective: "reach Viridian" },
+      journeyId: "local:pokemon-firered:profile:main",
+      environmentId: "pokemon-firered",
       clock: CLOCK,
     });
     const { receipt } = readGbaCheckpoint({
@@ -146,6 +149,8 @@ describe("gba checkpoints", () => {
       notes: "stairs upper-right, rival took Squirtle",
       objective: "reach Viridian",
     });
+    expect(receipt.journeyId).toBe("local:pokemon-firered:profile:main");
+    expect(receipt.environmentId).toBe("pokemon-firered");
   });
 
   it("still reads a receipt minted before continuity existed", () => {
@@ -180,5 +185,28 @@ describe("gba checkpoints", () => {
       newer.receipt.checkpointId,
       older.receipt.checkpointId,
     ]);
+  });
+
+  it("deletes only a validated checkpoint directory", () => {
+    const dir = root();
+    const written = writeGbaCheckpoint({
+      rootDir: dir,
+      capability: capability(),
+      position: null,
+      clock: CLOCK,
+    });
+    const receipt = deleteGbaCheckpoint({ rootDir: dir, checkpointId: written.receipt.checkpointId });
+    expect(receipt.checkpointId).toBe(written.receipt.checkpointId);
+    expect(existsSync(written.directory)).toBe(false);
+    expect(() => deleteGbaCheckpoint({ rootDir: dir, checkpointId: "../elsewhere" })).toThrow(
+      "checkpoint_id_invalid",
+    );
+
+    const outside = root();
+    symlinkSync(outside, path.join(dir, "2026-07-25T18-00-00-000Z-linked"));
+    expect(() =>
+      deleteGbaCheckpoint({ rootDir: dir, checkpointId: "2026-07-25T18-00-00-000Z-linked" }),
+    ).toThrow("checkpoint_not_found");
+    expect(existsSync(outside)).toBe(true);
   });
 });

@@ -141,6 +141,10 @@ checkpoint is always a sibling identity, never an overwrite — and loading
 verifies the id, receipt, ROM, core build, and savestate digest before touching
 the core. The GBA MCP server publishes this as lease-gated
 `gba_emulator_save_state` / `gba_emulator_load_state` tools.
+Asked play exposes the same store as Clankie's `save_checkpoint` and
+`load_checkpoint` choices, carrying his current notes and objective into every
+explicit save. The local TUI's `/saves` browser lists and explicitly deletes
+receipt-validated checkpoints; hosted-world cartridge persistence remains server-owned.
 
 Fixture development uses the bounded operator-local probe. Its JSON input list
 applies no more than 256 button presses and writes only decoded state,
@@ -295,7 +299,12 @@ objective-retirement metrics. Selected turns and the terminal summary reference
 hashed native-resolution PNGs under `.screenshots/<journal-stem>/`. Capture is
 bounded to the first turn, 25-turn intervals, map/scene/objective transitions,
 noteworthy speech-intent turns, failures, and the terminal frame, with no more
-than 64 screenshots per run. V1 journals remain readable. Each run also has its own
+than 64 screenshots per run. V1/V2 journals remain readable. V3 headers bind
+each run to a stable journey, environment, and venue. The journey projection
+combines those runs into the bounded story returned by `pokeagent_recall` and
+restores the last notes/objective on a cold local start or hosted-world return
+([ADR 0126](../../docs/adr/0126-game-state-history-and-memory-have-separate-owners.md)).
+Each run also has its own
 environment session identity (`gba-free-play:<scenario>:v<n>:<run-stamp>`), so
 a new playthrough never overwrites the previous run's session record; the
 record itself is a bounded working set under `EnvironmentRuntimeRetention`

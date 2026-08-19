@@ -30,6 +30,7 @@ import {
 
 export * from "./free-play-bounds.ts";
 import { canonicalJson, sha256 } from "./core-double.ts";
+import { GbaCheckpointLabelSchema } from "./checkpoint.ts";
 import type { GbaDriverIo } from "./driver.ts";
 import {
   described,
@@ -58,6 +59,13 @@ import {
  * present before restoring the past.
  */
 export const FreePlayBodyActionSchema = z.discriminatedUnion("kind", [
+  /** Capture the current local body as a new immutable checkpoint. */
+  z
+    .object({
+      kind: z.literal("save_checkpoint"),
+      label: GbaCheckpointLabelSchema.optional(),
+    })
+    .strict(),
   /**
    * Restore a minted checkpoint, or list what exists.
    *
@@ -515,6 +523,12 @@ export interface FreePlayCheckpointSummary {
 export interface FreePlayCheckpointPort {
   /** Every loadable checkpoint, newest first. */
   list(): FreePlayCheckpointSummary[];
+  /** Mint the current body and mind as a new immutable checkpoint. */
+  save(input: {
+    label?: string | undefined;
+    position: GbaPosition | null;
+    continuity: { notes: string | null; objective: string | null };
+  }): FreePlayCheckpointSummary;
   /** Restore one by id. Throws with a self-describing reason on refusal. */
   load(checkpointId: string): FreePlayCheckpointSummary;
   /** Reboot to the configured starting savestate. */
@@ -870,7 +884,11 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
      * not. Sampling here narrows the window back to the action itself.
      */
     const frameBefore = input.framebufferSha256?.() ?? null;
-    if (chosen.kind === "load_checkpoint" || chosen.kind === "restart_game") {
+    if (
+      chosen.kind === "save_checkpoint" ||
+      chosen.kind === "load_checkpoint" ||
+      chosen.kind === "restart_game"
+    ) {
       // The body's saved time, not the emulator (ADR 0075): dispatched to the
       // injected checkpoint port, never to io.act — the frozen catalog does
       // not change, and a body without the port refuses truthfully.
@@ -886,7 +904,11 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
         };
       } else {
         try {
-          bodySummary = applyBodyAction(chosen, input.checkpoints);
+          bodySummary = applyBodyAction(chosen, input.checkpoints, {
+            notes,
+            objective,
+            position: positionOf(preActionObservations),
+          });
           record.outcome = "accepted";
           accepted = true;
           record.detail = bounded(mindEffectLine(bodySummary));
@@ -996,7 +1018,12 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
             });
     progress.record(effect, accepted);
     evidence.progressAfter = evidenceProgress(progress.snapshot());
-    if (accepted && chosen.kind !== "load_checkpoint" && chosen.kind !== "restart_game") {
+    if (
+      accepted &&
+      chosen.kind !== "save_checkpoint" &&
+      chosen.kind !== "load_checkpoint" &&
+      chosen.kind !== "restart_game"
+    ) {
       progress.recordTransition(preActionObservations, chosen, afterObservations);
       rememberVerifiedInteraction(
         verifiedInteractionMemory,
@@ -1479,7 +1506,27 @@ const CHECKPOINT_LISTING_LIMIT = 6;
  * own account is what he gets. Throws propagate — the caller renders them as
  * the rejection they are.
  */
-function applyBodyAction(action: FreePlayBodyAction, checkpoints: FreePlayCheckpointPort): Described {
+function applyBodyAction(
+  action: FreePlayBodyAction,
+  checkpoints: FreePlayCheckpointPort,
+  continuity: {
+    notes: string | null;
+    objective: string | null;
+    position: GbaPosition | null;
+  },
+): Described {
+  if (action.kind === "save_checkpoint") {
+    const saved = checkpoints.save({
+      ...(action.label === undefined ? {} : { label: action.label }),
+      position: continuity.position,
+      continuity: { notes: continuity.notes, objective: continuity.objective },
+    });
+    const label = saved.label === null ? "" : ` (${saved.label})`;
+    return described(
+      `saved checkpoint ${saved.checkpointId}${label}, captured ${saved.capturedAt}`,
+      "you can restore it later by its id",
+    );
+  }
   if (action.kind === "restart_game") {
     checkpoints.restart();
     return described(
@@ -1716,8 +1763,14 @@ export function intentMatchesAction(intent: string, action: FreePlayAction): boo
   }
   if (action.kind === "load_checkpoint") {
     return (
-      ["load", "checkpoint", "restore", "rewind", "go back", "save"].some((n) => text.includes(n)) ||
+      ["load", "checkpoint", "restore", "rewind", "go back"].some((n) => text.includes(n)) ||
       (action.checkpointId !== undefined && text.includes(action.checkpointId.toLowerCase()))
+    );
+  }
+  if (action.kind === "save_checkpoint") {
+    return (
+      ["save", "checkpoint", "remember this", "bank"].some((n) => text.includes(n)) ||
+      (action.label !== undefined && text.includes(action.label.toLowerCase()))
     );
   }
   if (action.kind === "restart_game") {

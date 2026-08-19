@@ -4,6 +4,9 @@ Status: accepted (2026-08-15). Narrows [ADR 0057](0057-realtime-voice-with-capta
 (the mouth's tool surface) and uses [ADR 0068](0068-a-playthrough-leaves-a-durable-trail.md)
 (the play journal) as the store, never as the thing the mouth reads. ADR 0123
 adds continuous interpreted experience; this pull seam remains for raw pixels.
+[ADR 0126](0126-game-state-history-and-memory-have-separate-owners.md) extends
+the bounded story across sittings and makes the latest stopped journey
+explicitly recallable.
 
 ## Context
 

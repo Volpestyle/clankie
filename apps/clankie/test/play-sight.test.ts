@@ -54,6 +54,7 @@ describe("PlaySightProjection", () => {
     const sight = new PlaySightProjection();
     sight.attach({
       sessionId: "play-1",
+      journeyId: "local:pokemon-firered:test",
       environmentId: "pokemon-firered",
       scenarioId: "firered-bedroom-route",
       startedAt: "2026-08-15T20:00:00.000Z",
@@ -79,5 +80,56 @@ describe("PlaySightProjection", () => {
 
     sight.detach("play-1");
     expect(sight.still().outcome).toBe("not_playing");
+  });
+
+  it("recalls the latest journey after its live session detaches", () => {
+    const root = mkdtempSync(join(tmpdir(), "play-sight-history-"));
+    const journalPath = join(root, "run.jsonl");
+    writeFileSync(
+      journalPath,
+      [
+        JSON.stringify({
+          kind: "header",
+          schemaVersion: 3,
+          runId: "play-previous",
+          journeyId: "local:pokemon-firered:test",
+          environmentId: "pokemon-firered",
+          venue: "local",
+          environmentSessionId: "gba-previous",
+          scenarioId: "firered-bedroom-route",
+          startedAt: "2026-08-15T20:00:00.000Z",
+          resumedFromCheckpointId: null,
+        }),
+        JSON.stringify({
+          kind: "turn",
+          schemaVersion: 1,
+          at: "2026-08-15T20:00:01.000Z",
+          turn: {
+            turn: 0,
+            observationSha256: "a".repeat(64),
+            framebufferSha256: null,
+            monologue: "thinking",
+            intent: "press a",
+            notes: "Oak is waiting",
+            objective: "leave the lab",
+            interjection: null,
+            reply: null,
+            speak: null,
+            speakSuppressed: false,
+            speakWanted: true,
+            action: { kind: "button_press", button: "a", holdFrames: 2 },
+            outcome: "accepted",
+            detail: null,
+            effect: "chose Charmander",
+          },
+        }),
+      ].join("\n"),
+    );
+
+    const story = new PlaySightProjection({ journalRootDir: root }).story();
+    expect(story).toMatchObject({
+      outcome: "card",
+      card: { sessionId: "play-previous", objective: "leave the lab", turnsTaken: 1 },
+    });
   });
 });

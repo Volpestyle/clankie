@@ -35,10 +35,11 @@ did not — while replying with the silence sentinel sends nothing: silence is a
 real answer. Nothing caps how long a turn may take — looking something
 up properly is work, not a fault — but a turn that emits no event at all for 5
 minutes is a dead stream, so the stall watchdog aborts its pi session and
-settles it as `captain_turn_stalled`. While a turn runs he can post one short
-`send_text_update` message to the channel ("hang on, pulling the bracket up")
-without ending it, and Discord shows him typing for the whole turn rather than
-for a capped minute.
+settles it as `captain_turn_stalled`. While someone waits on a slow requested
+turn, he can post one short `send_text_update` message to the channel ("hang on,
+pulling the bracket up") without ending it; work he elects to do on his own
+stays quiet. Discord shows him typing for the whole turn rather than for a
+capped minute.
 
 The TUI and relay speak the same operator-conversation contract
 (`/operator/v1/dispatch`): revision-fenced sends, cursored replay, long-polled
@@ -115,6 +116,11 @@ the full picture — what each store holds, who may read it, and what bounds it.
   where the body is. The shared journal format does preserve body-aware
   provenance at each causal stage, so evaluation can distinguish local state
   from a hosted body generation without creating a second play loop.
+  Every sitting also carries a stable journey identity separate from its run
+  and checkpoint ids. The bounded story spans that journey, and the next local
+  or hosted sitting receives the last self-authored notes and objective while
+  exact world state remains owned by the checkpoint or hosted cartridge save
+  ([ADR 0126](adr/0126-game-state-history-and-memory-have-separate-owners.md)).
   Two bodies implement that seam. The local one is
   [`integrations/gba-emulator`](../integrations/gba-emulator/README.md), booted
   and leased by the local play host; `body-lock` keeps one writer on it across

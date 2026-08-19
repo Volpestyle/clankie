@@ -73,6 +73,15 @@ episodes; Discord and gameplay lanes see `shareable` only. The default matters
 more than the filter — the gate in recall is only real if writes honor it, so
 what he notes at the console stays at the console unless he says otherwise.
 
+Episodes are not operational journals. Game joins, retries, checkpoint ids,
+routine progress, and the objective of an active adventure live in the game
+body's checkpoints and append-only play journals. New journal headers carry a
+stable journey identity; the current or latest bounded story and the player's
+last self-authored notes/objective are projected from runs in that journey
+([ADR 0126](adr/0126-game-state-history-and-memory-have-separate-owners.md)). A
+game moment becomes an episode only when its meaning is worth carrying outside
+the adventure itself.
+
 ## Person facts — what he knows about people
 
 A person fact is a bounded note about a Discord user, keyed by
