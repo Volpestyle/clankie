@@ -651,6 +651,7 @@ export function createYoutubeAudioSink(options: {
     component: "yt_dlp" | "ffmpeg",
     operation: "play" | "resume",
     trace: VoiceMusicTraceContext | undefined,
+    failureCode?: () => string | undefined,
   ): void => {
     child.once("spawn", () => emit(operation, component, "spawned", trace));
     child.once("error", () => emit(operation, component, "failed", trace, { code: "spawn_failed" }));
@@ -658,7 +659,7 @@ export function createYoutubeAudioSink(options: {
       emit(operation, component, "exited", trace, {
         ...(typeof code === "number" && code >= 0 ? { exitCode: code } : {}),
         ...(typeof code === "number" && code !== 0
-          ? { code: "nonzero_exit" }
+          ? { code: failureCode?.() ?? "nonzero_exit" }
           : signal === null
             ? {}
             : { code: signal.toLowerCase() }),
@@ -672,6 +673,7 @@ export function createYoutubeAudioSink(options: {
     trace: VoiceMusicTraceContext | undefined,
     operation: "play" | "resume",
     generation: number,
+    format: string,
   ): Promise<void> =>
     new Promise((resolve, reject) => {
       let settled = false;
@@ -686,8 +688,8 @@ export function createYoutubeAudioSink(options: {
       const ffmpegSeek = seek > 0 ? ["-ss", seek.toFixed(1)] : [];
       const downloader = spawnImpl(
         "yt-dlp",
-        ["-f", "ba/bestaudio", "-o", "-", "--no-playlist", "--no-warnings", "--no-progress", url],
-        { stdio: ["ignore", "pipe", "ignore"] },
+        ["-f", format, "-o", "-", "--no-playlist", "--no-warnings", "--no-progress", url],
+        { stdio: ["ignore", "pipe", "pipe"] },
       );
       const transcoder = spawnImpl(
         "ffmpeg",
@@ -709,7 +711,14 @@ export function createYoutubeAudioSink(options: {
         { stdio: ["pipe", "pipe", "ignore"] },
       );
       children = [downloader, transcoder];
-      observeProcess(downloader, "yt_dlp", operation, trace);
+      let downloaderStderr = "";
+      downloader.stderr?.setEncoding("utf8");
+      downloader.stderr?.on("data", (chunk: string) => {
+        downloaderStderr = `${downloaderStderr}${chunk}`.slice(-8_192);
+      });
+      observeProcess(downloader, "yt_dlp", operation, trace, () =>
+        /HTTP Error 403/iu.test(downloaderStderr) ? "http_403" : undefined,
+      );
       observeProcess(transcoder, "ffmpeg", operation, trace);
       const downloadOutput = downloader.stdout;
       const transcodeInput = transcoder.stdin;
@@ -770,7 +779,16 @@ export function createYoutubeAudioSink(options: {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const generation = pipelineGeneration;
       try {
-        await startAttempt(url, seek, trace, operation, generation);
+        await startAttempt(
+          url,
+          seek,
+          trace,
+          operation,
+          generation,
+          attempt === 0
+            ? "ba/bestaudio"
+            : "worst[protocol^=m3u8][height>=360]/worst[protocol^=m3u8]/ba/bestaudio",
+        );
         return;
       } catch (error) {
         if (generation !== pipelineGeneration || currentUrl !== url) throw error;

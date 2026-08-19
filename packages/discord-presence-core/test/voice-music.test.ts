@@ -191,17 +191,30 @@ describe("voice music queue", () => {
   it("waits for audio and retries one pre-audio pipeline failure", async () => {
     const events: VoiceMusicTraceEvent[] = [];
     const children: ChildProcess[] = [];
+    const downloaderArgs: string[][] = [];
     const kill = vi.fn(() => true);
     let attempt = 0;
-    const spawnImpl = ((command: string) => {
+    let downloadAttempt = 0;
+    const spawnImpl = ((command: string, args: string[]) => {
       const stdout = new PassThrough();
+      const stderr = new PassThrough();
       const child = Object.assign(new EventEmitter(), {
         stdin: command === "ffmpeg" ? new PassThrough() : null,
         stdout,
-        stderr: null,
+        stderr,
         kill,
       }) as unknown as ChildProcess;
       children.push(child);
+      if (command === "yt-dlp") {
+        downloaderArgs.push(args);
+        const currentDownload = ++downloadAttempt;
+        if (currentDownload === 1) {
+          queueMicrotask(() => {
+            stderr.write("ERROR: unable to download video data: HTTP Error 403: Forbidden");
+            child.emit("close", 1, null);
+          });
+        }
+      }
       if (command === "ffmpeg") {
         const currentAttempt = ++attempt;
         queueMicrotask(() => {
@@ -227,9 +240,14 @@ describe("voice music queue", () => {
     ).resolves.toContain("Playing");
     expect(children).toHaveLength(4);
     expect(kill).toHaveBeenCalled();
+    expect(downloaderArgs[0]).toContain("ba/bestaudio");
+    expect(downloaderArgs[1]).toContain(
+      "worst[protocol^=m3u8][height>=360]/worst[protocol^=m3u8]/ba/bestaudio",
+    );
     expect(events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ component: "pipeline", outcome: "failed", code: "pre_audio_retry" }),
+        expect.objectContaining({ component: "yt_dlp", outcome: "exited", code: "http_403" }),
         expect.objectContaining({ component: "pipeline", outcome: "first_audio" }),
         expect.objectContaining({ component: "queue", outcome: "started", current: true }),
       ]),
