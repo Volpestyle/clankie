@@ -59,8 +59,9 @@ cannot read them says so rather than reporting an empty room.**
 - **`occupants` is a list of positions, not of characters.** Each entry is the
   object's `localId`, its `graphicsId`, its tile, and its facing. No name and no
   role: deciding a sprite is Professor Oak is interpretation, and interpretation
-  belongs to whoever is playing. Where somebody is standing is the fact that was
-  missing.
+  belongs to whoever is playing. The player may make an explicitly tentative
+  visual identification from the frame; the decoded field never asserts it, and
+  direct dialog overrides it. Where somebody is standing is the fact that was missing.
 - **Absent and empty are different claims.** A decoder that does not read object
   events omits the field; an empty array asserts that nobody is standing here.
   A client that collapses the two tells a mind "nobody here" about a screen
@@ -71,6 +72,10 @@ cannot read them says so rather than reporting an empty room.**
   starter table that ADR is named for is invisible to this field by
   construction, so the wording that reaches the mind says "nobody is standing
   in the room", never "the room is empty".
+- **A person is never scenery.** If the person the player expects is absent
+  from `occupants`, the room or identity assumption is wrong. The player
+  gathers new evidence instead of probing furniture as though one of its tiles
+  could secretly be that person.
 - **The base is derived from the two verified player offsets.** Both live inside
   entry 0 of the same array, so `FIRERED_OBJECT_EVENTS_OFFSET` is computed from
   them and a module-load check makes them agree. The **stride** is the one value

@@ -71,9 +71,9 @@ Concretely, in this wave:
    it; it is the deadline that recovers a stalled `wait`.
 6. **`walk_to` is offered, and narrated by its own account.** The action
    exists adapter-side, in the catalogue, and on the free-play wire. Its effect
-   line comes from the route's outcome ("walked 3 of
-   9 steps, then the way is blocked at (6,14) by something the map does not
-   show — an NPC, probably") rather than a bare position diff.
+   line comes from the route's outcome rather than a bare position diff. A
+   verified NPC, battle, or transition is named; an unclassified route stop
+   keeps its cause unknown and tells the player to check current occupants.
 
 7. **`enter_text` types a whole name in one action.** The naming keyboard's
    RAM is probed and verified against the pinned core (cursor in gSprites

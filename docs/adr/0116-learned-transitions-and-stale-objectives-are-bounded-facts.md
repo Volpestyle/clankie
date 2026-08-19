@@ -26,7 +26,10 @@ The free-play loop keeps three bounded, harness-owned facts above `GbaDriverIo`:
    digests do not define semantic identity.
 3. Objective and map tenure are reported once they cross the existing
    twelve-turn stall threshold. If one objective remains unchanged through two
-   consecutive decisions with recurring-state evidence, the loop retires it.
+   consecutive overworld decisions with recurring-state evidence, the loop
+   retires it. Battles, transitions, and other positionless screens preserve
+   route objectives: their repetition describes an interruption, not evidence
+   that the route itself is stale.
    Retirement chooses neither an action nor a replacement objective. It keeps
    the objective slot empty while play remains in the retired loop's semantic
    states, then opens the slot as soon as the body reaches a state outside that
@@ -77,5 +80,7 @@ flowchart LR
   `longestRecurringRun`.
 - Stale optional objectives cannot anchor a loop indefinitely; retirement is
   auditable per turn and counted as `objectivesRetired` in the summary.
+- A battle cannot erase the route objective that should resume when the player
+  returns to the overworld.
 - Transition facts are session-local. Cross-session hosted memory requires a
   player-identity persistence decision rather than an implicit global cache.

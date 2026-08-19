@@ -172,7 +172,8 @@ describe("observed effect", () => {
     });
     // Pressing A rarely moves you; calling that "blocked" would be a lie.
     expect(effect.refused).toBeNull();
-    expect(effect.summary).toBe("no visible change");
+    expect(effect.summary).toBe("A opened no dialog or menu");
+    expect(effect.advice).toContain("readable interaction");
   });
 
   it("treats a d-pad press inside an open menu as navigation, not walking", () => {
@@ -219,7 +220,7 @@ describe("observed effect", () => {
     const decoded = observeEffect({
       before: certain(at("bedroom", 10, 5)),
       after: certain(at("bedroom", 10, 5)),
-      action: pressA,
+      action: { kind: "button_press", button: "start", holdFrames: 4 },
       screenChanged: true,
     });
     expect(decoded.summary).toBe("screen changed though the decoded state did not");
@@ -246,7 +247,7 @@ describe("observed effect", () => {
     const moved = observeEffect({
       before: at("bedroom", 10, 5),
       after: at("bedroom", 10, 5),
-      action: pressA,
+      action: { kind: "button_press", button: "start", holdFrames: 4 },
       screenChanged: true,
     });
     expect(moved.summary).toContain("screen changed though the decoded state did not");
@@ -255,7 +256,7 @@ describe("observed effect", () => {
     const still = observeEffect({
       before: at("bedroom", 10, 5),
       after: at("bedroom", 10, 5),
-      action: pressA,
+      action: { kind: "button_press", button: "start", holdFrames: 4 },
       screenChanged: false,
     });
     // An identical digest upgrades "no visible change" from a guess to a fact.
@@ -415,10 +416,25 @@ describe("walk effects", () => {
       plannedSteps: 9,
       arrived: false,
       blockedAt: { x: 6, y: 14 },
+      blockedBecause: "npc",
       warped: false,
     });
     expect(effect.summary).toContain("blocked at (6,14)");
     expect(effect.summary).toContain("NPC");
+  });
+
+  it("does not invent an NPC when a hosted route only reports changed state", () => {
+    const effect = walk({
+      steps: 3,
+      plannedSteps: 9,
+      arrived: false,
+      blockedAt: { x: 6, y: 14 },
+      blockedBecause: "state_changed",
+      warped: false,
+    });
+    expect(effect.summary).toContain("adapter did not verify why");
+    expect(effect.advice).toContain("check occupants");
+    expect(effect.summary).not.toContain("NPC");
   });
 
   it("names a battle instead of inventing an NPC on the grass", () => {

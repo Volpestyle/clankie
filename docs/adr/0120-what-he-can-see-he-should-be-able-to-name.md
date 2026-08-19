@@ -44,10 +44,10 @@ Two fixes were considered and rejected before this one.
   two ROM adapters, forever. And it does not help the case that started this —
   the starter table is not an obstacle in the decoded map at all. He walked
   _onto_ the tile he thought it occupied.
-- **Name the blocker better.** Already done, and already good: the walk effect
-  reads "the way was blocked at (12,11) by something the map does not show — an
-  NPC, probably". It tells him a tile is occupied. It cannot tell him which tile
-  the thing he is looking at sits on.
+- **Name the blocker better.** The walk effect names a verified NPC, battle, or
+  transition. An unclassified route stop keeps its cause unknown rather than
+  inventing an NPC, and points the player to the current occupants. That still
+  cannot tell him which frame object occupies which map tile.
 
 ## Decision
 

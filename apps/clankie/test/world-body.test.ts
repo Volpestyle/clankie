@@ -457,6 +457,42 @@ describe("hosted world body", () => {
     await result.body.close();
   });
 
+  it("carries a hosted walk refusal's nearest open tile to the player", async () => {
+    const current = observation({ frame: 10 });
+    const world = await fakeWorld((request) => {
+      switch (request.operation) {
+        case "world.join":
+          return joinResult();
+        case "play.observe":
+          return current;
+        case "play.act":
+          return actRejected(
+            {
+              reason: "walk_target_impassable",
+              nearestOpen: { mapId: "route-1", x: 17, y: 16 },
+            },
+            current.frame,
+          );
+        case "world.leave":
+          return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
+        default:
+          throw new Error(`unexpected operation ${request.operation}`);
+      }
+    });
+    const result = await joinWorld({
+      environmentId: "pokemon-firered",
+      env: await provisionedEnv(world.stateDir),
+    });
+    if (result.outcome !== "joined") throw new Error("expected world join");
+
+    await expect(result.body.io.act({ kind: "walk_to", x: 16, y: 16 })).resolves.toMatchObject({
+      status: "failed",
+      errorCode: "walk_target_impassable",
+      message: expect.stringContaining("nearest open tile is (17,16) on route-1"),
+    });
+    await result.body.close();
+  });
+
   it("treats decoded:false as uncertainty while raw buttons remain usable", async () => {
     const undecoded = observation({ frame: 1, decoded: false });
     const world = await fakeWorld((request) => {

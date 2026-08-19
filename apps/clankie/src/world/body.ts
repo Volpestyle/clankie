@@ -53,6 +53,7 @@ import {
   WhoResultSchema,
   WORLD_PROTOCOL_VERSION,
   type Action,
+  type ActionRefusal,
   type Frame,
   type JoinResult,
   type Observation,
@@ -727,7 +728,10 @@ class HostedWorldBody implements WorldBody {
       this.resetGeneration(result.data.bodyGeneration);
     }
     if (result.data.outcome.kind === "rejected") {
-      const message = `The world refused the action: ${JSON.stringify(result.data.outcome.refusal)}`;
+      const refusal = result.data.outcome.refusal;
+      const detail = actionRefusalDetail(refusal);
+      const message =
+        `The world refused the action: ${JSON.stringify(refusal)}` + (detail === null ? "" : ` — ${detail}`);
       const failed = this.failedAction(actionId, result.data.outcome.refusal.reason, message);
       if (
         result.data.outcome.refusal.reason === "walk_exit_unsupported" &&
@@ -988,6 +992,36 @@ class HostedWorldBody implements WorldBody {
     this.audioGeneration = 0;
     this.audioCursor = 0;
     this.audioPackets.length = 0;
+  }
+}
+
+/** Preserve the protocol's answerable refusal detail in the line the player reads. */
+function actionRefusalDetail(refusal: ActionRefusal): string | null {
+  switch (refusal.reason) {
+    case "budget":
+      return `the action asked for ${String(refusal.asked)}; this session allows ${String(refusal.allowed)}`;
+    case "walk_target_outside_map":
+      return (
+        `map bounds are x >= ${String(refusal.bounds.minX)} and x < ${String(refusal.bounds.maxX)}, ` +
+        `y >= ${String(refusal.bounds.minY)} and y < ${String(refusal.bounds.maxY)}`
+      );
+    case "walk_target_impassable":
+      return refusal.nearestOpen === null
+        ? "the world found no open tile near that target"
+        : `nearest open tile is (${String(refusal.nearestOpen.x)},${String(refusal.nearestOpen.y)}) on ${refusal.nearestOpen.mapId}`;
+    case "no_path_to_target":
+      return refusal.nearestReachable === null
+        ? "the world found no reachable tile near that target"
+        : `nearest reachable tile is (${String(refusal.nearestReachable.x)},${String(refusal.nearestReachable.y)}) on ${refusal.nearestReachable.mapId}`;
+    case "walk_exit_unsupported":
+      return `the exit at (${String(refusal.at.x)},${String(refusal.at.y)}) leads to ${refusal.to}`;
+    case "menu_entry_not_present":
+      return `available entries: ${refusal.available.join(", ") || "none"}`;
+    case "script_holding":
+    case "dialog_not_open":
+    case "menu_not_open":
+    case "semantic_state_unavailable":
+      return null;
   }
 }
 

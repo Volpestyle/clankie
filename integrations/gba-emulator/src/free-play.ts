@@ -730,7 +730,10 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
       try {
         input.onPhase?.("thinking");
         objectiveWasStale =
-          objective !== null && objectiveForTurns >= FREE_PLAY_STALL_TURNS && recurringForTurns !== null;
+          objective !== null &&
+          objectiveForTurns >= FREE_PLAY_STALL_TURNS &&
+          recurringForTurns !== null &&
+          positionOf(observations) !== null;
         const decision = input.mind.decide(
           {
             turn,

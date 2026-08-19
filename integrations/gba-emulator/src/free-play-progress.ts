@@ -155,13 +155,13 @@ function describeDialogAdvance(outcome: Record<string, unknown> | undefined): De
   return described(`read: "${text.slice(0, DIALOG_TRANSCRIPT_LIMIT)}" — ${reason.summary}`, reason.advice);
 }
 
-function walkStopReason(outcome: Record<string, unknown>): "battle" | "transition" | "npc" {
+function walkStopReason(outcome: Record<string, unknown>): "battle" | "transition" | "npc" | "unknown" {
   const named = outcome["blockedBecause"];
   if (named === "battle" || named === "transition" || named === "npc") return named;
   const mode = outcome["mode"];
   if (mode === "battle" || mode === "battle_won" || mode === "battle_lost") return "battle";
   if (outcome["inputReady"] === false) return "transition";
-  return "npc";
+  return "unknown";
 }
 
 /** Bounded walk summary from the adapter's own account of the route. */
@@ -208,10 +208,15 @@ function describeWalk(
         "wait it out rather than stepping again",
       );
     }
+    if (reason === "npc") {
+      return described(
+        `${routeProgress(steps, planned)}, then the way was blocked at ${at} by an NPC`,
+        "step around it or talk to it",
+      );
+    }
     return described(
-      `${routeProgress(steps, planned)}, then the way was blocked at ` +
-        `${at} by something the map does not show — an NPC, probably`,
-      "step around it or talk to it",
+      `${routeProgress(steps, planned)}, then the route stopped before ${at}; the adapter did not verify why`,
+      "check occupants before calling it a person, then try another approach",
     );
   }
   if (after !== null) {
@@ -466,6 +471,31 @@ export function observeEffect(input: {
   const battleAfter = firstOfKind(input.after, "battle");
   if (JSON.stringify(battleBefore) !== JSON.stringify(battleAfter)) {
     return { summary: "battle state changed", refused: null, position: after, enteredMap: false };
+  }
+
+  if (
+    input.action.kind === "button_press" &&
+    input.action.button === "a" &&
+    before !== null &&
+    after !== null &&
+    dialogBefore === null &&
+    dialogAfter === null &&
+    menuBefore === null &&
+    menuAfter === null &&
+    battleBefore === null &&
+    battleAfter === null &&
+    heldScreenOf(input.after) === null
+  ) {
+    return {
+      summary: "A opened no dialog or menu",
+      advice:
+        input.screenChanged === true
+          ? "the frame changed, but this did not reach a readable interaction"
+          : "this did not reach a readable interaction",
+      refused: null,
+      position: after,
+      enteredMap: false,
+    };
   }
 
   // The frame digest catches what the decoded surface misses — a naming-screen

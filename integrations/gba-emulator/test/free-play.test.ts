@@ -246,7 +246,7 @@ describe("free play", () => {
       framebufferSha256: () => digests[Math.min(sample++, digests.length - 1)] ?? null,
     });
 
-    expect(result.turns[0]?.effect).toContain("no visible change");
+    expect(result.turns[0]?.effect).toBe("A opened no dialog or menu");
     expect(result.turns[0]?.effect).not.toContain("ambient animation");
   });
 
@@ -284,7 +284,7 @@ describe("free play", () => {
       y: 6,
     });
     expect(position(captured?.postAction?.observations)).toEqual({ mapId: "PALLET_TOWN", x: 6, y: 6 });
-    expect(result.turns[0]?.effect).toContain("no visible change");
+    expect(result.turns[0]?.effect).toBe("A opened no dialog or menu");
   });
 
   it("keeps the structured action result whole when the legacy detail is bounded", async () => {
@@ -747,6 +747,35 @@ describe("stall visibility", () => {
     expect(result.turns.some((turn) => turn.objectiveRetired === "leave through the front door")).toBe(true);
     expect(retired).toContain("leave through the front door");
     expect(result.turns.at(-1)?.objective).toBeNull();
+  });
+
+  it("does not retire a route objective while a battle repeats without a position", async () => {
+    const battleIo: GbaDriverIo = {
+      observe: (kind) => {
+        if (kind === "battle") return battle();
+        if (kind === "danger" || kind === "scene") return sceneOnlyBattle(kind);
+        throw new Error(`no ${kind} view`);
+      },
+      act: () => Promise.resolve(completed()),
+      pause: () => Promise.resolve(),
+      resume: () => Promise.resolve(),
+    };
+    const result = await runFreePlay({
+      io: battleIo,
+      mind: {
+        decide: () =>
+          Promise.resolve({
+            ...press("a", "choose the current move"),
+            objective: "deliver Oak's Parcel to Pallet Town",
+          }),
+      },
+      turns: FREE_PLAY_STALL_TURNS + 4,
+      initialObjective: "deliver Oak's Parcel to Pallet Town",
+    });
+
+    expect(result.objectivesRetired).toBe(0);
+    expect(result.turns.every((turn) => turn.objectiveRetired === null)).toBe(true);
+    expect(result.turns.at(-1)?.objective).toBe("deliver Oak's Parcel to Pallet Town");
   });
 });
 

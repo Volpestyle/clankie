@@ -53,9 +53,10 @@ flowchart LR
 - The voice model does not look at the screen. It remembers the same interpreted
   experience the acting mind just had, including outcomes that contradict an
   earlier guess.
-- The game mind can still be wrong. Occupants therefore remain unnamed until
-  dialog or a prior verified interaction establishes identity; `graphicsId` is
-  sprite appearance, not a character name.
+- The game mind can still be wrong. It may tentatively identify a visually
+  distinctive character from the frame, but `graphicsId` remains sprite
+  appearance rather than a character name, and dialog or a prior verified
+  interaction remains authoritative.
 - A verified interaction carries the observed object signature and resulting
   dialog, not a harness-authored character label. Repeated direct evidence can
   correct a wrong note without turning sprite appearance into identity.

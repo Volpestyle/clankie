@@ -47,7 +47,11 @@ describe("model minds issue a prompt the SDK accepts", () => {
     const call = model.doStreamCalls[0]!;
     expect(call.prompt.filter((message) => message.role === "system")).toHaveLength(1);
     expect(call.prompt[0]?.role).toBe("system");
-    expect(JSON.stringify(call.prompt[0])).toContain("save before treating your");
+    const instructions = JSON.stringify(call.prompt[0]);
+    expect(instructions).toContain("save before treating your");
+    expect(instructions).toContain("visible sprite");
+    expect(instructions).toContain("A person is never scenery");
+    expect(instructions).not.toContain("Keep people unnamed");
   });
 
   it("lets the voice mind reach the provider", async () => {
