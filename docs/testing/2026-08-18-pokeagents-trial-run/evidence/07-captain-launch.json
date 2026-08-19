@@ -1,0 +1,187 @@
+{
+  "source": "${HOME}/.clankie/captain/turns/<lane-target>/2026-08-19T04-14-53-866Z_01a0183a-adaa-737c-9cba-25699bddc89a.jsonl",
+  "events": [
+    {
+      "at": "2026-08-19T04:14:54.029Z",
+      "role": "user",
+      "text": "[redacted operator request to join and play]"
+    },
+    {
+      "at": "2026-08-19T04:15:09.537Z",
+      "role": "assistant",
+      "text": "Hopping in — checking where I am first."
+    },
+    {
+      "at": "2026-08-19T04:15:09.537Z",
+      "role": "assistant",
+      "tool": "send_text_update",
+      "arguments": {}
+    },
+    {
+      "at": "2026-08-19T04:15:09.537Z",
+      "role": "assistant",
+      "tool": "get_self_state",
+      "arguments": {}
+    },
+    {
+      "at": "2026-08-19T04:15:09.998Z",
+      "role": "toolResult",
+      "tool": "send_text_update",
+      "result": {
+        "ok": true,
+        "message": "I posted that text update. Keep working; your final text reply still posts when the turn ends."
+      }
+    },
+    {
+      "at": "2026-08-19T04:15:14.690Z",
+      "role": "assistant",
+      "text": "Not in VC right now — joining and firing up FireRed."
+    },
+    {
+      "at": "2026-08-19T04:15:14.690Z",
+      "role": "assistant",
+      "tool": "voice_join",
+      "arguments": {}
+    },
+    {
+      "at": "2026-08-19T04:15:14.690Z",
+      "role": "assistant",
+      "tool": "pokeagent_join_mmo",
+      "arguments": {
+        "environmentId": "pokemon-firered"
+      }
+    },
+    {
+      "at": "2026-08-19T04:15:34.693Z",
+      "role": "toolResult",
+      "tool": "voice_join",
+      "result": {
+        "action": "join_refused",
+        "reason": "failed"
+      }
+    },
+    {
+      "at": "2026-08-19T04:15:34.693Z",
+      "role": "toolResult",
+      "tool": "pokeagent_join_mmo",
+      "result": {
+        "action": "joined",
+        "sessionId": "embodiment-ec40ffac-19be-48c5-ad63-27075a2af99e",
+        "environmentId": "pokemon-firered"
+      }
+    },
+    {
+      "at": "2026-08-19T04:15:39.244Z",
+      "role": "assistant",
+      "text": "MMO's up. Voice join bounced — retrying that and putting the watch on."
+    },
+    {
+      "at": "2026-08-19T04:15:39.244Z",
+      "role": "assistant",
+      "tool": "voice_join",
+      "arguments": {}
+    },
+    {
+      "at": "2026-08-19T04:15:39.244Z",
+      "role": "assistant",
+      "tool": "discord_watch_start",
+      "arguments": {}
+    },
+    {
+      "at": "2026-08-19T04:15:40.603Z",
+      "role": "toolResult",
+      "tool": "voice_join",
+      "result": {
+        "action": "joined",
+        "actorCanBeHeard": true,
+        "transcriptLoggingEnabled": true
+      }
+    },
+    {
+      "at": "2026-08-19T04:15:40.607Z",
+      "role": "toolResult",
+      "tool": "discord_watch_start",
+      "result": {
+        "ok": false,
+        "message": "I need to be in your admitted voice channel first."
+      }
+    },
+    {
+      "at": "2026-08-19T04:15:43.937Z",
+      "role": "assistant",
+      "tool": "discord_watch_start",
+      "arguments": {}
+    },
+    {
+      "at": "2026-08-19T04:15:43.937Z",
+      "role": "assistant",
+      "tool": "pokeagent_observe",
+      "arguments": {}
+    },
+    {
+      "at": "2026-08-19T04:15:43.937Z",
+      "role": "assistant",
+      "tool": "remember_episode",
+      "arguments": {}
+    },
+    {
+      "at": "2026-08-19T04:15:44.944Z",
+      "role": "toolResult",
+      "tool": "discord_watch_start",
+      "result": {
+        "ok": true,
+        "message": "I posted the live play launch in voice."
+      }
+    },
+    {
+      "at": "2026-08-19T04:15:45.003Z",
+      "role": "toolResult",
+      "tool": "pokeagent_observe",
+      "result": {
+        "outcome": "snapshot",
+        "snapshot": {
+          "surface": "gba_emulator",
+          "sessionId": "embodiment-ec40ffac-19be-48c5-ad63-27075a2af99e",
+          "environmentId": "pokemon-firered",
+          "sequence": 0,
+          "observedAt": "2026-08-19T04:15:27.217Z",
+          "selfAuthored": {
+            "objective": "get into the game",
+            "intent": "press A through the boot/title screens",
+            "commentary": "Screen doesn't decode — boot or title. A advances these. I'll mash A a few times to get through the opening."
+          },
+          "runnerObserved": {
+            "outcome": "accepted",
+            "effect": "the screen changed",
+            "progress": {
+              "distinctTiles": 0,
+              "maps": [],
+              "turnsSinceNewTile": 1,
+              "actionsPerNewTile": null
+            },
+            "framebufferSha256": "e7b18d394ae1eddd2c446974c3bf97beb4aeeeb22b0d3bdadb58ad742958f5e1"
+          }
+        },
+        "still": {
+          "outcome": "still",
+          "width": 240,
+          "height": 160,
+          "sha256": "41b910d46480aefad75f68568c1eae28817544d14c1f472337120c45095cbbfc"
+        }
+      }
+    },
+    {
+      "at": "2026-08-19T04:15:45.005Z",
+      "role": "toolResult",
+      "tool": "remember_episode",
+      "result": {
+        "remembered": true
+      }
+    },
+    {
+      "at": "2026-08-19T04:15:49.378Z",
+      "role": "assistant",
+      "text": "I'm in. FireRed's up — Oak's on screen doing the intro. Watch is in General if you wanna look."
+    }
+  ]
+}

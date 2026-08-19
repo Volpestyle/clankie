@@ -1,0 +1,123 @@
+{
+  "run": {
+    "runId": "embodiment-ec40ffac-19be-48c5-ad63-27075a2af99e",
+    "scenarioId": "world:pokemon-firered",
+    "journalSchemaVersion": 2,
+    "startedAt": "2026-08-19T04:15:15.707Z",
+    "terminal": {
+      "source": "summary",
+      "outcome": "stopped",
+      "at": "2026-08-19T05:20:27.894Z",
+      "summaryPresent": true,
+      "lifecycleEventType": "embodiment.session.stopped",
+      "lifecycleConsistent": true
+    }
+  },
+  "aggregate": {
+    "turns": 315,
+    "outcomes": {
+      "accepted": 290,
+      "rejected_by_adapter": 24,
+      "invalid_decision": 1
+    },
+    "timing": {
+      "decision": {
+        "known": 315,
+        "unknown": 0,
+        "totalMs": 2878121,
+        "averageMs": 9136.892063492063
+      },
+      "action": {
+        "known": 314,
+        "unknown": 1,
+        "totalMs": 1032626,
+        "averageMs": 3288.6178343949045
+      }
+    },
+    "intentToAction": {
+      "aligned": 238,
+      "misaligned": 76,
+      "unknown": 1
+    },
+    "goalToAction": {
+      "unknown": 277,
+      "aligned": 38
+    },
+    "movementEffectiveness": {
+      "not_applicable": 153,
+      "effective": 99,
+      "ineffective": 57,
+      "unknown": 6
+    },
+    "sceneActionAppropriateness": {
+      "appropriate": 199,
+      "unknown": 114,
+      "inappropriate": 2
+    },
+    "rejectionRecovery": {
+      "not_applicable": 291,
+      "recovered": 20,
+      "repeated": 2,
+      "changed_without_success": 1,
+      "unknown": 1
+    },
+    "narration": {
+      "model_silent": 267,
+      "played": 37,
+      "suppressed": 9,
+      "unspoken": 1,
+      "no_attempt": 1
+    },
+    "stalls": {
+      "signalledTurns": 31,
+      "maxTurnsSinceNewTile": 39,
+      "maxRepeatedTurns": 6,
+      "maxRecurringTurns": 12
+    },
+    "summary": {
+      "kind": "summary",
+      "schemaVersion": 2,
+      "at": "2026-08-19T05:20:27.894Z",
+      "outcome": "stopped",
+      "turnsTaken": 315,
+      "accepted": 290,
+      "durationMs": 3912186,
+      "framesPublished": 41602,
+      "framesDropped": 5568,
+      "checkpointId": null,
+      "progress": {
+        "distinctTiles": 80,
+        "maps": [
+          "pallet-town/players-house-2f",
+          "pallet-town/players-house-1f",
+          "pallet-town",
+          "pallet-town/professor-oaks-lab",
+          "pallet-town",
+          "pallet-town/professor-oaks-lab",
+          "pallet-town",
+          "route-1",
+          "firered-map-3-1",
+          "firered-map-5-2",
+          "firered-map-3-1",
+          "firered-map-5-0",
+          "firered-map-3-1",
+          "firered-map-5-3",
+          "firered-map-3-1",
+          "route-1"
+        ],
+        "turnsSinceNewTile": 6,
+        "actionsPerNewTile": 3.670886075949367
+      },
+      "volition": {
+        "offered": 314,
+        "taken": 0,
+        "suppressed": 0,
+        "skipped": 313
+      },
+      "coherence": 0.42660550458715596,
+      "longestUnchangedRun": 6,
+      "longestRecurringRun": 12,
+      "objectivesRetired": 8
+    }
+  }
+}

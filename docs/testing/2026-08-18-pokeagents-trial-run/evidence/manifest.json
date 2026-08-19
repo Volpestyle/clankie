@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "runId": "embodiment-ec40ffac-19be-48c5-ad63-27075a2af99e",
+  "generatedAt": "2026-08-19T05:54:35.843Z",
+  "evidence": [
+    {
+      "path": "01-play-journal.jsonl",
+      "bytes": 3079046,
+      "sha256": "9df58fd7613039acfe198367498229a9bfb3a4146701d3d75da6f6f3b26245ce"
+    },
+    {
+      "path": "02-lifecycle-events.jsonl",
+      "bytes": 2308,
+      "sha256": "86b3a95b00a0b411496cfd70eef69bc6c6f46e3213efbfbf6abc23e750ff237f"
+    },
+    {
+      "path": "03-voice-receipts.jsonl",
+      "bytes": 965555,
+      "sha256": "2b09af89d642213ab4b1eb48d951d577ca04717e20de12ff9abbc61ebb18658c"
+    },
+    {
+      "path": "04-service-events.jsonl",
+      "bytes": 3718,
+      "sha256": "fc62f7506a5083af03e6a708adc2a64df9a04f724561fc6ba2ddd95f14ef34a4"
+    },
+    {
+      "path": "05-world-action-journal.jsonl",
+      "bytes": 70010,
+      "sha256": "01125128d4a14ed8d862fc2d566ebc1fccfdffd6ec1a3fbde722b5e8eda0389f"
+    },
+    {
+      "path": "06-world-checkpoint-receipts.jsonl",
+      "bytes": 799,
+      "sha256": "ef979ff64ce30bfeeb2afc948425e314d9890a303e96278ea8821c37139bb585"
+    },
+    {
+      "path": "07-captain-launch.json",
+      "bytes": 5156,
+      "sha256": "450305c9053aeb8ebc719e9fe4f634650b5bd4c6cb42ded53ee720939b3450f1"
+    },
+    {
+      "path": "08-evaluation-summary.json",
+      "bytes": 2975,
+      "sha256": "b715fa20b19d08f909d8b3849b69603aebf0e9d19712f970d36bbd662806d151"
+    },
+    {
+      "path": "09-turn-timeline.tsv",
+      "bytes": 66926,
+      "sha256": "28d950761af60930b96ab21fbd5d1e10385cc2891204ae7f9cc94248ef4b8a4b"
+    },
+    {
+      "path": "10-capture-environment.json",
+      "bytes": 2674,
+      "sha256": "fd5a12100a642962114f384c67e60d081140551a4e84fe0a1dff3e52e1dec4d0"
+    }
+  ],
+  "sources": {
+    "playJournal": {
+      "path": "${HOME}/.local/state/clankie/gba-play/2026-08-19T04-15-15-707Z-embodiment-ec40ffac-19be-48c5-ad63-27075a2af99e.jsonl",
+      "bytes": 3078949,
+      "sha256": "bc7e6e06617f991552875d51304f56c853b1707310c7083197220421f1b3cf4a"
+    },
+    "lifecycleEvents": {
+      "path": "${HOME}/.clankie/events.jsonl",
+      "bytes": 717064,
+      "sha256": "77d44a7888642fac7d92e00d5a1a19c822d906caf81dba4bd375a4ea33501a7a"
+    },
+    "voiceReceipts": {
+      "path": "${HOME}/.local/state/clankie/discord-live-receipts.jsonl",
+      "bytes": 7246090,
+      "sha256": "c797a5bfb6752bd39828e5941945db617b4858c9c8b4fc3c6b26f890695a9dc5"
+    },
+    "serviceLog": {
+      "path": "${HOME}/.local/state/clankie/clankie.log",
+      "bytes": 321930,
+      "sha256": "49f1339badfc66f6904803a765b53340bc94a2390e98330adc7a3bc253ea8cfd"
+    },
+    "worldJournal": {
+      "path": "${HOME}/.pokeagent-mmo/world/players/<player>/games/firered/journal/2026-08-19T04-15-15-556Z-ses_e14ccfa45a09c8b092b20fd49c3c8b60.jsonl",
+      "bytes": 70035,
+      "sha256": "f7ecb8d5d6125e42a8404212f6a16dab52886f935bc8861e76979000f602d041"
+    },
+    "checkpoint:2026-08-19T04-15-15-556Z": {
+      "path": "${HOME}/.pokeagent-mmo/world/players/<player>/games/firered/checkpoints/2026-08-19T04-15-15-556Z/receipt.json",
+      "bytes": 422,
+      "sha256": "278ae7606ab555c1ae7867dcdc1e5b0201b37e5dc7213f961166472ef60ff25b"
+    },
+    "checkpoint:2026-08-19T05-20-27-898Z": {
+      "path": "${HOME}/.pokeagent-mmo/world/players/<player>/games/firered/checkpoints/2026-08-19T05-20-27-898Z/receipt.json",
+      "bytes": 427,
+      "sha256": "2ffd3f51e02c68b99ad4e3b1beb97002ed97dccaf8f2b821c52743e90ecd5c1f"
+    },
+    "captainLaunchTurn": {
+      "path": "${HOME}/.clankie/captain/turns/<lane-target>/2026-08-19T04-14-53-866Z_01a0183a-adaa-737c-9cba-25699bddc89a.jsonl",
+      "bytes": 31912,
+      "sha256": "20c031a00d67d3541587259197f71ff539c6838912da85f3c7795d178d4f18e1"
+    }
+  },
+  "exclusions": [
+    "ROM, cartridge save, savestate, checkpoint state bytes, and framebuffer bytes",
+    "credentials, session tokens, watch links, and current service-state files",
+    "full Discord room history and full voice transcript text; voice evidence is content-free and limited to the run's active stay",
+    "generated voice wording and PCM, which are not durably recorded by policy"
+  ]
+}

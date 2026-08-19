@@ -1,0 +1,1464 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>Testing archive viewer</title>
+    <style>
+      :root {
+        --page: #232a2e;
+        --stage: #101416;
+        --panel: #111619;
+        --edge: #354047;
+        --text: #edf1f2;
+        --muted: #8799a1;
+        --accent: #e2ad47;
+        --success: #75cf84;
+        --danger: #e28072;
+        --space: 12px;
+        --radius: 3px;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      html,
+      body {
+        min-width: 320px;
+        min-height: 100%;
+        margin: 0;
+        background: var(--page);
+        color: var(--text);
+        font:
+          12px/1.45 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          Consolas,
+          monospace;
+      }
+      body {
+        height: 100dvh;
+        overflow: hidden;
+      }
+      button,
+      input,
+      select,
+      textarea {
+        color: inherit;
+        font: inherit;
+      }
+      button,
+      input,
+      select {
+        min-height: 32px;
+        border: 1px solid var(--edge);
+        border-radius: var(--radius);
+        background: var(--stage);
+      }
+      button {
+        cursor: pointer;
+      }
+      button:hover,
+      button[aria-selected="true"] {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      button:focus-visible,
+      input:focus-visible,
+      select:focus-visible,
+      textarea:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 1px;
+      }
+      input,
+      select {
+        padding: 6px 8px;
+      }
+      a {
+        color: var(--accent);
+        text-underline-offset: 2px;
+      }
+      code {
+        color: #cbd4d7;
+        overflow-wrap: anywhere;
+      }
+      .label {
+        margin: 0;
+        color: var(--muted);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .subtle {
+        color: var(--muted);
+      }
+      .status-dot {
+        display: inline-block;
+        width: 7px;
+        height: 7px;
+        margin-right: 7px;
+        background: var(--accent);
+      }
+      .status-dot.ready {
+        background: var(--success);
+      }
+      .status-dot.error {
+        background: var(--danger);
+      }
+      #app {
+        display: grid;
+        grid-template-rows: auto auto minmax(0, 1fr);
+        width: 100%;
+        height: 100%;
+        padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right))
+          max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+      }
+      header {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 14px;
+        padding: 14px 16px;
+        border: 1px solid var(--edge);
+        border-bottom: 0;
+        border-radius: var(--radius) var(--radius) 0 0;
+        background: var(--panel);
+      }
+      h1 {
+        margin: 2px 0 3px;
+        font-size: clamp(16px, 2vw, 21px);
+        font-weight: 600;
+        line-height: 1.2;
+      }
+      #run-id {
+        display: block;
+        overflow: hidden;
+        color: var(--muted);
+        font-size: 10px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      #load-status {
+        align-self: center;
+        color: var(--muted);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+      #metrics {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(90px, 1fr));
+        border: 1px solid var(--edge);
+        background: var(--panel);
+      }
+      .metric {
+        min-width: 0;
+        padding: 9px 12px 10px;
+        border-right: 1px solid var(--edge);
+      }
+      .metric:last-child {
+        border-right: 0;
+      }
+      .metric-value {
+        display: block;
+        margin-top: 2px;
+        overflow: hidden;
+        font-size: 14px;
+        line-height: 1.2;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      #tab-bar {
+        display: flex;
+        gap: 4px;
+        padding: 8px;
+        border: 1px solid var(--edge);
+        border-top: 0;
+        background: var(--stage);
+      }
+      .view-tab {
+        min-height: 28px;
+        padding: 4px 11px;
+        color: var(--muted);
+        background: transparent;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      .view-tab[aria-selected="true"] {
+        background: var(--panel);
+      }
+      #content {
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+        min-width: 0;
+        min-height: 0;
+      }
+      .view {
+        width: 100%;
+        height: 100%;
+        min-width: 0;
+        min-height: 0;
+      }
+      #run-view {
+        display: grid;
+        grid-template-columns: minmax(230px, 20%) minmax(310px, 29%) minmax(390px, 1fr);
+      }
+      .panel {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        min-height: 0;
+        overflow: hidden;
+        border-right: 1px solid var(--edge);
+        border-bottom: 1px solid var(--edge);
+        background: var(--panel);
+      }
+      .panel:first-child {
+        border-left: 1px solid var(--edge);
+      }
+      .panel:last-child {
+        border-right: 1px solid var(--edge);
+      }
+      .panel-head {
+        flex: 0 0 auto;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--edge);
+        background: var(--stage);
+      }
+      .panel-title {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 8px;
+      }
+      .count {
+        color: var(--muted);
+        font-size: 10px;
+      }
+      .file-list,
+      #turn-list,
+      #detail-body {
+        min-height: 0;
+        overflow: auto;
+        overscroll-behavior: contain;
+      }
+      .file-list {
+        flex: 1 1 auto;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .file-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 4px 10px;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--edge);
+      }
+      .file-name {
+        overflow: hidden;
+        color: var(--text);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .file-size {
+        color: var(--muted);
+        text-align: right;
+      }
+      .file-hash {
+        grid-column: 1 / -1;
+        overflow: hidden;
+        color: var(--muted);
+        font-size: 9px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .manifest-note {
+        flex: 0 0 auto;
+        padding: 10px 12px;
+        border-top: 1px solid var(--edge);
+        color: var(--muted);
+        font-size: 10px;
+      }
+      .filters {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 125px;
+        gap: 6px;
+      }
+      .filters input {
+        grid-column: 1 / -1;
+        width: 100%;
+      }
+      .filters select {
+        width: 100%;
+      }
+      #turn-list {
+        flex: 1 1 auto;
+      }
+      .turn-row {
+        display: grid;
+        grid-template-columns: 46px minmax(0, 1fr) auto;
+        width: 100%;
+        min-height: 0;
+        padding: 9px 10px;
+        border: 0;
+        border-bottom: 1px solid var(--edge);
+        border-radius: 0;
+        color: var(--text);
+        text-align: left;
+        background: var(--panel);
+      }
+      .turn-row:hover,
+      .turn-row[aria-selected="true"] {
+        color: var(--text);
+        background: #182024;
+      }
+      .turn-row[aria-selected="true"] {
+        box-shadow: inset 3px 0 var(--accent);
+      }
+      .turn-number {
+        color: var(--accent);
+        font-weight: 700;
+      }
+      .turn-objective,
+      .turn-effect {
+        grid-column: 2 / -1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .turn-objective {
+        margin: 2px 0;
+      }
+      .turn-effect {
+        color: var(--muted);
+        font-size: 10px;
+      }
+      .outcome {
+        color: var(--success);
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      .outcome.rejected_by_adapter,
+      .outcome.invalid_decision {
+        color: var(--danger);
+      }
+      .state {
+        display: grid;
+        min-height: 120px;
+        place-content: center;
+        gap: 8px;
+        padding: 24px;
+        color: var(--muted);
+        text-align: center;
+      }
+      .state strong {
+        color: var(--text);
+        font-size: 13px;
+      }
+      .state button {
+        justify-self: center;
+        padding: 5px 10px;
+      }
+      #detail-heading {
+        margin: 2px 0 0;
+        font-size: 15px;
+        font-weight: 600;
+      }
+      #detail-body {
+        flex: 1 1 auto;
+        padding: 12px;
+      }
+      .detail-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--space);
+      }
+      .detail-card {
+        min-width: 0;
+        padding: 11px;
+        border: 1px solid var(--edge);
+        border-radius: var(--radius);
+        background: var(--stage);
+      }
+      .detail-card.wide {
+        grid-column: 1 / -1;
+      }
+      .detail-card h3 {
+        margin: 0 0 9px;
+        color: var(--accent);
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .field {
+        display: grid;
+        grid-template-columns: 92px minmax(0, 1fr);
+        gap: 8px;
+        padding: 5px 0;
+        border-top: 1px solid #252d31;
+      }
+      .field:first-of-type {
+        padding-top: 0;
+        border-top: 0;
+      }
+      .field-label {
+        color: var(--muted);
+        font-size: 10px;
+      }
+      .field-value {
+        min-width: 0;
+        margin: 0;
+        overflow-wrap: anywhere;
+        white-space: pre-wrap;
+      }
+      pre.field-value {
+        max-height: 250px;
+        overflow: auto;
+        color: #cbd4d7;
+        tab-size: 2;
+      }
+      .turn-screenshot,
+      #raw-image,
+      #raw-video {
+        display: block;
+        max-width: 100%;
+        border: 1px solid var(--edge);
+        border-radius: var(--radius);
+        background: #000;
+      }
+      .turn-screenshot {
+        width: min(100%, 720px);
+        margin: 0 auto 10px;
+        image-rendering: pixelated;
+      }
+      #image-view {
+        display: grid;
+        grid-template-columns: minmax(300px, 42%) minmax(0, 1fr);
+      }
+      #image-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 10px;
+        padding: 12px;
+        overflow: auto;
+      }
+      .image-card {
+        display: grid;
+        min-width: 0;
+        gap: 7px;
+        padding: 7px;
+        color: var(--text);
+        text-align: left;
+        background: var(--panel);
+      }
+      .image-card img {
+        width: 100%;
+        aspect-ratio: 3 / 2;
+        object-fit: contain;
+        background: #000;
+      }
+      .image-card span {
+        overflow: hidden;
+        font-size: 10px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      #image-detail {
+        border-left: 0;
+      }
+      #image-preview {
+        display: block;
+        flex: 1 1 auto;
+        width: 100%;
+        min-height: 0;
+        object-fit: contain;
+        background: #000;
+      }
+      .pixelated {
+        image-rendering: pixelated;
+      }
+      #image-meta {
+        padding: 10px 12px;
+        border-top: 1px solid var(--edge);
+        color: var(--muted);
+        white-space: pre-wrap;
+      }
+      #source-view {
+        display: grid;
+        grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
+      }
+      #source-files {
+        border-left: 1px solid var(--edge);
+      }
+      .source-file {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        width: 100%;
+        min-height: 0;
+        gap: 8px;
+        padding: 9px 11px;
+        border: 0;
+        border-bottom: 1px solid var(--edge);
+        border-radius: 0;
+        color: var(--text);
+        text-align: left;
+        background: var(--panel);
+      }
+      .source-file[aria-selected="true"] {
+        color: var(--accent);
+        background: #182024;
+      }
+      .source-file span:first-child {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .source-file span:last-child {
+        color: var(--muted);
+        font-size: 9px;
+      }
+      #source-pane {
+        border-left: 0;
+      }
+      #source-head-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      #source-name {
+        overflow: hidden;
+        color: var(--text);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      #source-tools {
+        display: grid;
+        grid-template-columns: minmax(170px, 1fr) auto auto;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      #source-tools button {
+        min-width: 46px;
+        padding: 4px 8px;
+      }
+      #source-search-status {
+        margin-top: 5px;
+        color: var(--muted);
+        font-size: 10px;
+      }
+      #raw-source {
+        flex: 1 1 auto;
+        width: 100%;
+        min-height: 0;
+        margin: 0;
+        padding: 12px;
+        resize: none;
+        border: 0;
+        border-radius: 0;
+        color: #cbd4d7;
+        background: var(--stage);
+        line-height: 1.5;
+        white-space: pre;
+        tab-size: 2;
+      }
+      #raw-image,
+      #raw-video {
+        align-self: center;
+        max-height: calc(100% - 24px);
+        margin: 12px auto;
+      }
+      @media (max-width: 1050px) {
+        #run-view {
+          grid-template-columns: minmax(260px, 34%) minmax(0, 1fr);
+        }
+        #manifest-panel {
+          display: none;
+        }
+        #metrics {
+          overflow-x: auto;
+        }
+        .metric {
+          min-width: 115px;
+        }
+      }
+      @media (max-width: 700px) {
+        body {
+          height: auto;
+          min-height: 100dvh;
+          overflow: auto;
+        }
+        #app {
+          display: block;
+          height: auto;
+          padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right))
+            max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+        }
+        header {
+          grid-template-columns: minmax(0, 1fr);
+          gap: 7px;
+        }
+        #load-status {
+          justify-self: start;
+        }
+        #metrics {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          overflow: visible;
+        }
+        .metric,
+        .metric:last-child {
+          min-width: 0;
+          border-right: 1px solid var(--edge);
+          border-bottom: 1px solid var(--edge);
+        }
+        .metric:nth-child(2n) {
+          border-right: 0;
+        }
+        #run-view,
+        #image-view,
+        #source-view {
+          display: block;
+          height: auto;
+        }
+        #content {
+          display: block;
+        }
+        .panel {
+          border-left: 1px solid var(--edge);
+          border-right: 1px solid var(--edge);
+        }
+        #manifest-panel {
+          display: flex;
+          max-height: 300px;
+        }
+        #timeline-panel {
+          height: 440px;
+        }
+        #detail-panel {
+          overflow: visible;
+        }
+        #detail-body {
+          overflow: visible;
+        }
+        .detail-grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .detail-card.wide {
+          grid-column: auto;
+        }
+        .field {
+          grid-template-columns: minmax(0, 1fr);
+          gap: 3px;
+        }
+        #source-files {
+          max-height: 250px;
+        }
+        #image-grid-panel {
+          max-height: 420px;
+        }
+        #image-detail {
+          height: 65dvh;
+          min-height: 420px;
+        }
+        #source-pane {
+          height: 70dvh;
+          min-height: 460px;
+        }
+        #source-tools {
+          grid-template-columns: minmax(0, 1fr) auto auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main id="app">
+      <header>
+        <div>
+          <p id="archive-label" class="label">Archived forensic console</p>
+          <h1 id="archive-title">Testing archive</h1>
+          <code id="run-id">Loading archive identity…</code>
+        </div>
+        <div id="load-status" role="status" aria-live="polite">
+          <span id="load-dot" class="status-dot"></span><span id="load-label">Loading evidence</span>
+        </div>
+      </header>
+
+      <section id="metrics" aria-label="Run metrics">
+        <div class="metric">
+          <span class="label">Files</span><span id="metric-duration" class="metric-value">—</span>
+        </div>
+        <div class="metric">
+          <span class="label">Size</span><span id="metric-turns" class="metric-value">—</span>
+        </div>
+        <div class="metric">
+          <span class="label">Images</span><span id="metric-accepted" class="metric-value">—</span>
+        </div>
+        <div class="metric">
+          <span class="label">Evidence</span><span id="metric-rejected" class="metric-value">—</span>
+        </div>
+        <div class="metric">
+          <span class="label">Turns</span><span id="metric-tiles" class="metric-value">—</span>
+        </div>
+        <div class="metric">
+          <span class="label">Duration</span><span id="metric-coherence" class="metric-value">—</span>
+        </div>
+        <div class="metric">
+          <span class="label">Outcome</span><span id="metric-outcome" class="metric-value">—</span>
+        </div>
+      </section>
+
+      <div id="content">
+        <nav id="tab-bar" aria-label="Evidence views">
+          <button class="view-tab" type="button" data-view="run-view" role="tab" aria-selected="true">
+            Run trace
+          </button>
+          <button class="view-tab" type="button" data-view="image-view" role="tab" aria-selected="false">
+            Images
+          </button>
+          <button class="view-tab" type="button" data-view="source-view" role="tab" aria-selected="false">
+            Raw sources
+          </button>
+        </nav>
+
+        <section id="run-view" class="view">
+          <aside id="manifest-panel" class="panel" aria-label="Evidence manifest">
+            <div class="panel-head">
+              <div class="panel-title">
+                <p class="label">Evidence manifest</p>
+                <span id="manifest-count" class="count">—</span>
+              </div>
+              <span class="subtle">SHA-256 archived artifacts</span>
+            </div>
+            <ul id="manifest-list" class="file-list">
+              <li class="state">Loading file index…</li>
+            </ul>
+            <div id="manifest-note" class="manifest-note">Archive exclusions loading…</div>
+          </aside>
+
+          <section id="timeline-panel" class="panel" aria-label="Turn timeline">
+            <div class="panel-head">
+              <div class="panel-title">
+                <p class="label">Turn timeline</p>
+                <span id="turn-count" class="count">—</span>
+              </div>
+              <div class="filters">
+                <input
+                  id="turn-search"
+                  type="search"
+                  placeholder="Search objective, thought, action, effect…"
+                  aria-label="Search turns"
+                />
+                <select id="outcome-filter" aria-label="Filter by outcome">
+                  <option value="">All outcomes</option>
+                </select>
+                <select id="action-filter" aria-label="Filter by action">
+                  <option value="">All actions</option>
+                </select>
+              </div>
+            </div>
+            <div id="turn-list">
+              <div class="state">Parsing causal journal…</div>
+            </div>
+          </section>
+
+          <section id="detail-panel" class="panel" aria-label="Selected turn evidence">
+            <div class="panel-head">
+              <p class="label">Causal detail</p>
+              <h2 id="detail-heading">Select a turn</h2>
+            </div>
+            <div id="detail-body">
+              <div class="state">Choose a timeline row to inspect its evidence chain.</div>
+            </div>
+          </section>
+        </section>
+
+        <section id="image-view" class="view" hidden>
+          <section id="image-grid-panel" class="panel" aria-label="Archived image gallery">
+            <div class="panel-head">
+              <div class="panel-title">
+                <p class="label">Archived images</p>
+                <span id="image-count" class="count">—</span>
+              </div>
+              <span class="subtle">Click a frame to inspect it</span>
+            </div>
+            <div id="image-grid"><div class="state">Loading image index…</div></div>
+          </section>
+          <section id="image-detail" class="panel" aria-label="Selected archived image">
+            <div class="panel-head">
+              <p class="label">Image detail</p>
+              <h2 id="image-heading">Select an image</h2>
+            </div>
+            <img id="image-preview" alt="" hidden />
+            <div id="image-meta" class="state">No image selected.</div>
+          </section>
+        </section>
+
+        <section id="source-view" class="view" hidden>
+          <aside id="source-files" class="panel" aria-label="Evidence source tabs">
+            <div class="panel-head">
+              <div class="panel-title">
+                <p class="label">Evidence files</p>
+                <span id="source-count" class="count">—</span>
+              </div>
+              <span class="subtle">Loaded one file at a time</span>
+            </div>
+            <div id="source-file-list" class="file-list">
+              <div class="state">Loading source index…</div>
+            </div>
+          </aside>
+          <section id="source-pane" class="panel">
+            <div class="panel-head">
+              <div id="source-head-row">
+                <p id="source-name" class="label">Select a source</p>
+                <a id="source-download" href="#" download hidden>Download</a>
+              </div>
+              <div id="source-tools">
+                <input
+                  id="source-search"
+                  type="search"
+                  placeholder="Find in raw source…"
+                  aria-label="Search selected raw source"
+                  disabled
+                />
+                <button id="source-prev" type="button" disabled>Prev</button>
+                <button id="source-next" type="button" disabled>Next</button>
+              </div>
+              <div id="source-search-status" role="status" aria-live="polite">No source loaded</div>
+            </div>
+            <textarea id="raw-source" readonly spellcheck="false" aria-label="Raw evidence source">
+Select an evidence file to inspect its exact archived text.</textarea>
+            <img id="raw-image" alt="" hidden />
+            <video id="raw-video" controls hidden></video>
+          </section>
+        </section>
+      </div>
+    </main>
+
+    <script type="module">
+      const elements = Object.fromEntries(
+        [
+          "archive-label",
+          "archive-title",
+          "run-id",
+          "load-dot",
+          "load-label",
+          "manifest-count",
+          "manifest-list",
+          "manifest-note",
+          "turn-search",
+          "outcome-filter",
+          "action-filter",
+          "turn-count",
+          "turn-list",
+          "detail-heading",
+          "detail-body",
+          "image-count",
+          "image-grid",
+          "image-heading",
+          "image-preview",
+          "image-meta",
+          "source-count",
+          "source-file-list",
+          "source-name",
+          "source-download",
+          "source-search",
+          "source-prev",
+          "source-next",
+          "source-search-status",
+          "raw-source",
+          "raw-image",
+          "raw-video",
+        ].map((id) => [id, document.getElementById(id)]),
+      );
+
+      let archive;
+      let archiveManifest;
+      let evaluation;
+      let journalSummary;
+      let playJournalPath = "";
+      let playJournalText = "";
+      let turns = [];
+      let images = [];
+      let selectedTurn;
+      let selectedImage;
+      let currentSource = "";
+      let currentSourceText = "";
+      let sourceMatches = [];
+      let sourceMatchIndex = -1;
+      const screenshotContext = new Map();
+
+      const make = (tag, className, text) => {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+      };
+
+      const fileUrl = (path) => "/files/" + path.split("/").map(encodeURIComponent).join("/");
+
+      const formatBytes = (bytes) => {
+        if (!Number.isFinite(bytes)) return "—";
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KiB`;
+        return `${(bytes / 1024 ** 2).toFixed(2)} MiB`;
+      };
+
+      const formatDuration = (milliseconds) => {
+        if (!Number.isFinite(milliseconds)) return "—";
+        const seconds = Math.floor(milliseconds / 1000);
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const remaining = seconds % 60;
+        return hours > 0 ? `${hours}h ${minutes}m ${remaining}s` : `${minutes}m ${remaining}s`;
+      };
+
+      const formatClock = (iso) => (typeof iso === "string" ? iso.slice(11, 19) + "Z" : "—");
+      const display = (value) => {
+        if (value === null || value === undefined || value === "") return "—";
+        if (typeof value === "string") return value;
+        return JSON.stringify(value, null, 2);
+      };
+
+      const setLoadState = (label, state) => {
+        elements["load-label"].textContent = label;
+        elements["load-dot"].className = `status-dot ${state}`;
+      };
+
+      const fetchText = async (path) => {
+        const response = await fetch(path);
+        if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${path}`);
+        return response.text();
+      };
+
+      const fetchJson = async (path) => JSON.parse(await fetchText(path));
+      const findFile = (name) => archive.files.find((file) => file.path.endsWith(name));
+      const resolveJournalArtifact = (relativePath) => {
+        const base = new URL(playJournalPath, "http://archive.invalid/");
+        return new URL(relativePath, base).pathname.slice(1);
+      };
+
+      function setMetric(id, label, value) {
+        const target = document.getElementById(id);
+        target.previousElementSibling.textContent = label;
+        target.textContent = value;
+        target.title = value;
+      }
+
+      function renderMetrics() {
+        const runSummary = evaluation?.aggregate?.summary ?? journalSummary;
+        const accepted = evaluation?.aggregate?.outcomes?.accepted ?? journalSummary?.accepted;
+        const values =
+          turns.length > 0
+            ? [
+                ["metric-duration", "Duration", formatDuration(runSummary?.durationMs)],
+                ["metric-turns", "Turns", turns.length.toLocaleString()],
+                ["metric-accepted", "Accepted", Number.isFinite(accepted) ? String(accepted) : "—"],
+                ["metric-rejected", "Images", images.length.toLocaleString()],
+                ["metric-tiles", "Files", archive.files.length.toLocaleString()],
+                ["metric-coherence", "Size", formatBytes(archive.totalBytes)],
+                [
+                  "metric-outcome",
+                  "Outcome",
+                  evaluation?.run?.terminal?.outcome ?? journalSummary?.outcome ?? "incomplete",
+                ],
+              ]
+            : [
+                ["metric-duration", "Files", archive.files.length.toLocaleString()],
+                ["metric-turns", "Size", formatBytes(archive.totalBytes)],
+                ["metric-accepted", "Images", images.length.toLocaleString()],
+                [
+                  "metric-rejected",
+                  "Evidence",
+                  archive.files.filter((file) => file.path.startsWith("evidence/")).length.toLocaleString(),
+                ],
+                [
+                  "metric-tiles",
+                  "Flows",
+                  archive.files.filter((file) => file.path.startsWith("flows/")).length.toLocaleString(),
+                ],
+                [
+                  "metric-coherence",
+                  "Text",
+                  archive.files.filter((file) => file.kind === "text").length.toLocaleString(),
+                ],
+                [
+                  "metric-outcome",
+                  "Binary",
+                  archive.files.filter((file) => file.kind === "binary").length.toLocaleString(),
+                ],
+              ];
+        for (const [id, label, value] of values) setMetric(id, label, value);
+      }
+
+      function renderManifest() {
+        elements["manifest-list"].replaceChildren();
+        const fragment = document.createDocumentFragment();
+        for (const file of archive.files) {
+          const row = make("li", "file-row");
+          const link = make("a", "file-name", file.path);
+          link.href = fileUrl(file.path);
+          link.download = file.path.split("/").at(-1);
+          const size = make("span", "file-size", formatBytes(file.bytes));
+          const hash = make("code", "file-hash", file.sha256);
+          hash.title = file.sha256;
+          row.append(link, size, hash);
+          fragment.append(row);
+        }
+        elements["manifest-list"].append(fragment);
+        elements["manifest-count"].textContent = `${archive.files.length} files`;
+        const exclusions = archiveManifest?.exclusions?.length ?? 0;
+        elements["manifest-note"].textContent =
+          `SHA-256 indexed at serve time${exclusions ? ` · ${exclusions} explicit exclusions` : ""}`;
+      }
+
+      function parseJournal(text) {
+        return text
+          .split("\n")
+          .filter((line) => line.trim())
+          .map((line) => JSON.parse(line));
+      }
+
+      function addFilterOptions(select, values) {
+        for (const value of [...new Set(values)].sort()) {
+          const option = document.createElement("option");
+          option.value = value;
+          option.textContent = value;
+          select.append(option);
+        }
+      }
+
+      function filterTurns() {
+        const query = elements["turn-search"].value.trim().toLocaleLowerCase();
+        const outcome = elements["outcome-filter"].value;
+        const action = elements["action-filter"].value;
+        return turns.filter((record) => {
+          const turn = record.turn;
+          if (outcome && turn.outcome !== outcome) return false;
+          if (action && turn.action?.kind !== action) return false;
+          if (!query) return true;
+          return [
+            turn.turn,
+            turn.objective,
+            turn.objectiveRetired,
+            turn.monologue,
+            turn.intent,
+            turn.notes,
+            turn.outcome,
+            turn.effect,
+            turn.effectAdvice,
+            JSON.stringify(turn.action),
+          ]
+            .filter((value) => value !== null && value !== undefined)
+            .some((value) => String(value).toLocaleLowerCase().includes(query));
+        });
+      }
+
+      function renderTurns() {
+        const filtered = filterTurns();
+        elements["turn-list"].replaceChildren();
+        elements["turn-count"].textContent = `${filtered.length} / ${turns.length}`;
+        if (filtered.length === 0) {
+          const state = make("div", "state");
+          state.append(
+            make("strong", "", turns.length ? "No matching turns" : "No play journal detected"),
+            make("span", "", turns.length ? "Change or clear the filters." : "Use Images or Raw sources."),
+          );
+          elements["turn-list"].append(state);
+          return;
+        }
+        const fragment = document.createDocumentFragment();
+        for (const record of filtered) {
+          const turn = record.turn;
+          const button = make("button", "turn-row");
+          button.type = "button";
+          button.dataset.turn = String(turn.turn);
+          button.setAttribute("aria-selected", String(record === selectedTurn));
+          button.append(
+            make("span", "turn-number", `#${turn.turn}`),
+            make("span", "subtle", `${formatClock(record.at)} · ${turn.action?.kind ?? "no action"}`),
+            make("span", `outcome ${turn.outcome}`, turn.outcome.replaceAll("_", " ")),
+            make("span", "turn-objective", turn.objective || "No standing objective"),
+            make("span", "turn-effect", turn.effect || turn.effectAdvice || "No effect recorded"),
+          );
+          button.addEventListener("click", () => selectTurn(record));
+          fragment.append(button);
+        }
+        elements["turn-list"].append(fragment);
+      }
+
+      function addField(card, label, value, raw = false) {
+        const row = make("div", "field");
+        row.append(make("span", "field-label", label));
+        row.append(make(raw ? "pre" : "p", "field-value", display(value)));
+        card.append(row);
+      }
+
+      function addCard(grid, title, fields, wide = false) {
+        const card = make("section", `detail-card${wide ? " wide" : ""}`);
+        card.append(make("h3", "", title));
+        for (const [label, value, raw] of fields) addField(card, label, value, raw);
+        grid.append(card);
+      }
+
+      function timingSummary(timing) {
+        const elapsed = (start, end) => {
+          const value = Date.parse(end) - Date.parse(start);
+          return Number.isFinite(value) ? `${value.toLocaleString()} ms` : "—";
+        };
+        return {
+          decisionMs: elapsed(timing?.decisionStartedAt, timing?.decisionSettledAt),
+          actionMs: elapsed(timing?.actionStartedAt, timing?.actionSettledAt),
+          ...timing,
+        };
+      }
+
+      function selectTurn(record) {
+        selectedTurn = record;
+        renderTurns();
+        const turn = record.turn;
+        elements["detail-heading"].textContent =
+          `Turn ${turn.turn} · ${formatClock(record.at)} · ${turn.outcome.replaceAll("_", " ")}`;
+        const grid = make("div", "detail-grid");
+        if (record.screenshot) {
+          const artifactPath = resolveJournalArtifact(record.screenshot.path);
+          const card = make("section", "detail-card wide");
+          card.append(make("h3", "", `Captured frame · ${record.screenshot.reasons.join(", ")}`));
+          const screenshot = make("img", "turn-screenshot");
+          screenshot.src = fileUrl(artifactPath);
+          screenshot.alt = `Gameplay after turn ${turn.turn}`;
+          card.append(screenshot);
+          addField(
+            card,
+            "Artifact",
+            `${artifactPath} · ${record.screenshot.width}×${record.screenshot.height} · ${formatBytes(record.screenshot.byteLength)}`,
+          );
+          grid.append(card);
+        }
+        addCard(
+          grid,
+          "Decision",
+          [
+            ["Objective", turn.objective],
+            ["Thought", turn.monologue],
+            ["Intent", turn.intent],
+            ["Notes", turn.notes],
+            ["Retired", turn.objectiveRetired],
+          ],
+          true,
+        );
+        addCard(grid, "Immediate pre-action", [["Observations", record.evidence?.immediatePreAction, true]]);
+        addCard(grid, "Action result", [
+          ["Requested", turn.action, true],
+          ["Environment", record.evidence?.actionResult, true],
+          ["Effect", turn.effect],
+          ["Advice", turn.effectAdvice],
+        ]);
+        addCard(grid, "Decision observation", [["Observations", record.evidence?.decision, true]]);
+        addCard(grid, "Post-action", [["Observations", record.evidence?.postAction, true]]);
+        addCard(
+          grid,
+          "Signals and timing",
+          [
+            ["Signals", record.evidence?.signals, true],
+            ["Timing", timingSummary(record.evidence?.timing), true],
+            ["Progress before", record.evidence?.progressBefore, true],
+            ["Progress after", record.evidence?.progressAfter, true],
+          ],
+          true,
+        );
+        elements["detail-body"].replaceChildren(grid);
+        const selected = elements["turn-list"].querySelector(`[data-turn="${turn.turn}"]`);
+        if (matchMedia("(min-width: 701px)").matches) selected?.scrollIntoView({ block: "nearest" });
+      }
+
+      function renderImages() {
+        elements["image-grid"].replaceChildren();
+        elements["image-count"].textContent = `${images.length} images`;
+        if (images.length === 0) {
+          const state = make("div", "state");
+          state.append(
+            make("strong", "", "No images archived"),
+            make(
+              "span",
+              "",
+              "Future captures appear here automatically when they are added to the run directory.",
+            ),
+          );
+          elements["image-grid"].append(state);
+          return;
+        }
+        const fragment = document.createDocumentFragment();
+        for (const file of images) {
+          const button = make("button", "image-card");
+          button.type = "button";
+          button.setAttribute("aria-selected", String(file === selectedImage));
+          const thumbnail = make("img");
+          thumbnail.src = fileUrl(file.path);
+          thumbnail.alt = "";
+          thumbnail.loading = "lazy";
+          thumbnail.classList.toggle("pixelated", screenshotContext.has(file.path));
+          button.append(
+            thumbnail,
+            make("span", "", file.path),
+            make("span", "subtle", formatBytes(file.bytes)),
+          );
+          button.addEventListener("click", () => selectImage(file));
+          fragment.append(button);
+        }
+        elements["image-grid"].append(fragment);
+      }
+
+      function selectImage(file) {
+        selectedImage = file;
+        renderImages();
+        elements["image-heading"].textContent = file.path;
+        elements["image-preview"].src = fileUrl(file.path);
+        elements["image-preview"].alt = `Archived image ${file.path}`;
+        elements["image-preview"].classList.toggle("pixelated", screenshotContext.has(file.path));
+        elements["image-preview"].hidden = false;
+        const context = screenshotContext.get(file.path);
+        elements["image-meta"].className = "";
+        elements["image-meta"].textContent = [
+          `${formatBytes(file.bytes)} · ${file.mime}`,
+          `sha256 ${file.sha256}`,
+          ...(context ? [context] : []),
+        ].join("\n");
+      }
+
+      function renderSourceFiles() {
+        elements["source-file-list"].replaceChildren();
+        const fragment = document.createDocumentFragment();
+        for (const file of archive.files) {
+          const button = make("button", "source-file");
+          button.type = "button";
+          button.dataset.path = file.path;
+          button.setAttribute("aria-selected", String(file.path === currentSource));
+          button.append(make("span", "", file.path), make("span", "", formatBytes(file.bytes)));
+          button.addEventListener("click", () => loadSource(file.path));
+          fragment.append(button);
+        }
+        elements["source-file-list"].append(fragment);
+        elements["source-count"].textContent = `${archive.files.length} files`;
+      }
+
+      function resetSourceMedia() {
+        elements["raw-source"].hidden = false;
+        elements["raw-image"].hidden = true;
+        elements["raw-image"].removeAttribute("src");
+        elements["raw-video"].hidden = true;
+        elements["raw-video"].pause();
+        elements["raw-video"].removeAttribute("src");
+      }
+
+      async function loadSource(path) {
+        const file = archive.files.find((candidate) => candidate.path === path);
+        if (!file) return;
+        currentSource = path;
+        renderSourceFiles();
+        elements["source-name"].textContent = path;
+        elements["source-download"].href = fileUrl(path);
+        elements["source-download"].download = path.split("/").at(-1);
+        elements["source-download"].hidden = false;
+        elements["source-search"].disabled = true;
+        elements["source-prev"].disabled = true;
+        elements["source-next"].disabled = true;
+        elements["source-search-status"].textContent = "Loading source…";
+        elements["raw-source"].value = "Loading…";
+        resetSourceMedia();
+
+        if (file.kind === "image") {
+          currentSourceText = "";
+          elements["raw-source"].hidden = true;
+          elements["raw-image"].src = fileUrl(path);
+          elements["raw-image"].alt = `Archived image ${path}`;
+          elements["raw-image"].classList.toggle("pixelated", screenshotContext.has(path));
+          elements["raw-image"].hidden = false;
+          elements["source-search-status"].textContent = `${formatBytes(file.bytes)} · archived image`;
+          return;
+        }
+        if (file.kind === "video") {
+          currentSourceText = "";
+          elements["raw-source"].hidden = true;
+          elements["raw-video"].src = fileUrl(path);
+          elements["raw-video"].hidden = false;
+          elements["source-search-status"].textContent = `${formatBytes(file.bytes)} · archived video`;
+          return;
+        }
+        if (file.kind !== "text") {
+          currentSourceText = "";
+          elements["raw-source"].value =
+            `Binary artifact: ${path}\n\n${formatBytes(file.bytes)}\nsha256 ${file.sha256}\n\nUse Download to inspect it with its native tool.`;
+          elements["source-search-status"].textContent = "Binary metadata only";
+          return;
+        }
+
+        try {
+          currentSourceText = path === playJournalPath ? playJournalText : await fetchText(fileUrl(path));
+          elements["raw-source"].value = currentSourceText;
+          elements["raw-source"].scrollTop = 0;
+          elements["source-search"].disabled = false;
+          updateSourceSearch();
+        } catch (error) {
+          currentSourceText = "";
+          elements["raw-source"].value = `Unable to load ${path}\n\n${error.message}`;
+          elements["source-search-status"].textContent = "Source load failed";
+        }
+      }
+
+      function updateSourceSearch() {
+        const query = elements["source-search"].value;
+        sourceMatches = [];
+        sourceMatchIndex = -1;
+        if (!query) {
+          elements["source-search-status"].textContent =
+            `${currentSourceText.length.toLocaleString()} characters · exact archived text`;
+          elements["source-prev"].disabled = true;
+          elements["source-next"].disabled = true;
+          return;
+        }
+        const source = currentSourceText.toLocaleLowerCase();
+        const needle = query.toLocaleLowerCase();
+        let index = 0;
+        while (sourceMatches.length < 5000 && (index = source.indexOf(needle, index)) !== -1) {
+          sourceMatches.push(index);
+          index += Math.max(needle.length, 1);
+        }
+        const capped = sourceMatches.length === 5000 ? "+" : "";
+        elements["source-search-status"].textContent = sourceMatches.length
+          ? `${sourceMatches.length.toLocaleString()}${capped} matches`
+          : "No matches";
+        elements["source-prev"].disabled = sourceMatches.length === 0;
+        elements["source-next"].disabled = sourceMatches.length === 0;
+      }
+
+      function moveSourceMatch(direction) {
+        if (sourceMatches.length === 0) return;
+        sourceMatchIndex = (sourceMatchIndex + direction + sourceMatches.length) % sourceMatches.length;
+        const start = sourceMatches[sourceMatchIndex];
+        const end = start + elements["source-search"].value.length;
+        elements["raw-source"].focus({ preventScroll: true });
+        elements["raw-source"].setSelectionRange(start, end);
+        elements["source-search-status"].textContent =
+          `${sourceMatchIndex + 1} / ${sourceMatches.length}${sourceMatches.length === 5000 ? "+" : ""} matches`;
+      }
+
+      function showView(viewId) {
+        for (const tab of document.querySelectorAll(".view-tab")) {
+          const selected = tab.dataset.view === viewId;
+          tab.setAttribute("aria-selected", String(selected));
+          document.getElementById(tab.dataset.view).hidden = !selected;
+        }
+        if (viewId === "source-view" && !currentSource && archive.files.length) {
+          loadSource(archive.files[0].path);
+        }
+        if (viewId === "image-view" && !selectedImage && images.length) {
+          selectImage(images[0]);
+        }
+      }
+
+      function showLoadError(error) {
+        setLoadState("Archive unavailable", "error");
+        for (const target of [elements["manifest-list"], elements["turn-list"], elements["image-grid"]]) {
+          const state = make("div", "state");
+          state.append(make("strong", "", "Could not load the archive"), make("span", "", error.message));
+          const retry = make("button", "", "Retry");
+          retry.type = "button";
+          retry.addEventListener("click", initialize);
+          state.append(retry);
+          target.replaceChildren(state);
+        }
+      }
+
+      async function initialize() {
+        setLoadState("Indexing archive", "");
+        try {
+          archive = await fetchJson("/__archive.json");
+          document.title = `${archive.title} · testing archive`;
+          elements["archive-title"].textContent = archive.title;
+          elements["archive-label"].textContent = "Archived forensic console";
+          elements["run-id"].textContent = archive.slug;
+
+          const manifestFile = findFile("evidence/manifest.json");
+          archiveManifest = manifestFile ? await fetchJson(fileUrl(manifestFile.path)) : undefined;
+
+          const journalFile =
+            findFile("evidence/01-play-journal.jsonl") ??
+            archive.files.find((file) => /(^|\/)play-journal[^/]*\.jsonl$/u.test(file.path));
+          if (journalFile) {
+            playJournalPath = journalFile.path;
+            playJournalText = await fetchText(fileUrl(journalFile.path));
+            const records = parseJournal(playJournalText);
+            turns = records.filter((record) => record.kind === "turn");
+            journalSummary = records.findLast((record) => record.kind === "summary");
+            for (const record of records) {
+              if (!record.screenshot) continue;
+              const artifactPath = resolveJournalArtifact(record.screenshot.path);
+              const context =
+                record.kind === "turn"
+                  ? `turn ${record.turn.turn} · ${record.screenshot.reasons.join(", ")}`
+                  : `terminal summary · ${record.screenshot.reasons.join(", ")}`;
+              screenshotContext.set(artifactPath, context);
+            }
+          }
+
+          const evaluationFile = findFile("evidence/08-evaluation-summary.json");
+          evaluation = evaluationFile ? await fetchJson(fileUrl(evaluationFile.path)) : undefined;
+          images = archive.files.filter((file) => file.kind === "image");
+
+          renderMetrics();
+          renderManifest();
+          renderImages();
+          renderSourceFiles();
+          addFilterOptions(
+            elements["outcome-filter"],
+            turns.map((record) => record.turn.outcome),
+          );
+          addFilterOptions(
+            elements["action-filter"],
+            turns.map((record) => record.turn.action?.kind).filter(Boolean),
+          );
+          renderTurns();
+
+          if (turns.length) {
+            selectedTurn = turns[0];
+            selectTurn(selectedTurn);
+            showView("run-view");
+          } else {
+            document.querySelector('[data-view="run-view"]').hidden = true;
+            showView(images.length ? "image-view" : "source-view");
+          }
+          setLoadState(`${archive.files.length} files · ${images.length} images`, "ready");
+        } catch (error) {
+          showLoadError(error);
+        }
+      }
+
+      for (const tab of document.querySelectorAll(".view-tab")) {
+        tab.addEventListener("click", () => showView(tab.dataset.view));
+      }
+      for (const control of [
+        elements["turn-search"],
+        elements["outcome-filter"],
+        elements["action-filter"],
+      ]) {
+        control.addEventListener("input", renderTurns);
+      }
+      elements["source-search"].addEventListener("input", updateSourceSearch);
+      elements["source-prev"].addEventListener("click", () => moveSourceMatch(-1));
+      elements["source-next"].addEventListener("click", () => moveSourceMatch(1));
+
+      initialize();
+    </script>
+  </body>
+</html>

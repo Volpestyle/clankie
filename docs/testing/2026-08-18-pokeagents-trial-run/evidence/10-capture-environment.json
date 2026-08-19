@@ -1,0 +1,55 @@
+{
+  "capturedAt": "2026-08-19T05:54:35.316Z",
+  "run": {
+    "runId": "embodiment-ec40ffac-19be-48c5-ad63-27075a2af99e",
+    "environmentSessionId": "ses_e14ccfa45a09c8b092b20fd49c3c8b60",
+    "startedAt": "2026-08-19T04:15:15.707Z",
+    "endedAt": "2026-08-19T05:20:27.894Z"
+  },
+  "sourcePaths": {
+    "playJournalPath": "${HOME}/.local/state/clankie/gba-play/2026-08-19T04-15-15-707Z-embodiment-ec40ffac-19be-48c5-ad63-27075a2af99e.jsonl",
+    "eventPath": "${HOME}/.clankie/events.jsonl",
+    "receiptPath": "${HOME}/.local/state/clankie/discord-live-receipts.jsonl",
+    "serviceLogPath": "${HOME}/.local/state/clankie/clankie.log",
+    "worldJournalPath": "${HOME}/.pokeagent-mmo/world/players/<player>/games/firered/journal/2026-08-19T04-15-15-556Z-ses_e14ccfa45a09c8b092b20fd49c3c8b60.jsonl"
+  },
+  "sourceRepositories": {
+    "clankie": {
+      "path": "${HOME}/dev/clankie",
+      "head": "88b901aee99fbfdee0939d56619dbeb1859ae463",
+      "status": [
+        "M .agents/skills/trace-clankie/SKILL.md",
+        " M apps/clankie/src/world/body.ts",
+        " M apps/clankie/test/world-body.test.ts",
+        " M docs/adr/0072-the-harness-tells-him-the-truth.md",
+        " M docs/adr/0116-learned-transitions-and-stale-objectives-are-bounded-facts.md",
+        " M docs/adr/0120-what-he-can-see-he-should-be-able-to-name.md",
+        " M docs/adr/0122-a-blocked-tile-is-not-an-identity.md",
+        " M docs/adr/0123-the-room-inherits-the-games-experience.md",
+        " M docs/discord-media.md",
+        " M docs/testing/README.md",
+        " M integrations/gba-emulator/src/free-play-mind.ts",
+        " M integrations/gba-emulator/src/free-play-progress.ts",
+        " M integrations/gba-emulator/src/free-play.ts",
+        " M integrations/gba-emulator/test/free-play-mind-prompt.test.ts",
+        " M integrations/gba-emulator/test/free-play-progress.test.ts",
+        " M integrations/gba-emulator/test/free-play.test.ts",
+        " M packages/discord-presence-core/src/voice-music.ts",
+        " M packages/discord-presence-core/src/voice-session.ts",
+        " M packages/discord-presence-core/test/voice-music.test.ts",
+        " M packages/discord-presence-core/test/voice-session.test.ts",
+        "?? docs/testing/2026-08-18-pokeagents-trial-run/"
+      ]
+    },
+    "pokeagents": {
+      "path": "${HOME}/dev/pokeagents",
+      "head": "a444bb0265385ebcfcc35ec6607ed6af457936ad",
+      "status": []
+    }
+  },
+  "toolchain": {
+    "node": "v26.7.0",
+    "pnpm": "11.11.0"
+  },
+  "caveat": "The journals do not identify the exact source revision. These repository states were captured later and do not prove what uncommitted source the processes ran."
+}
