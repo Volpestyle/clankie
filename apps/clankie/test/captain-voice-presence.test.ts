@@ -151,6 +151,23 @@ describe("captain voice presence tools", () => {
     );
   });
 
+  it("reserves text updates for people waiting on slow work", () => {
+    const deps = {
+      embodiment: {
+        submitIntent: () => Promise.reject(new Error("unused")),
+        getSession: () => Promise.resolve(undefined),
+        getLiveSession: () => Promise.resolve(undefined),
+      },
+      discordActions: { execute: () => Promise.reject(new Error("unused")) },
+    } as unknown as CaptainDeps;
+    const update = captainTools(deps, {}, {} as LaneLog, "discord_presence").find(
+      (tool) => tool.name === "send_text_update",
+    );
+
+    expect(update?.description).toContain("someone is actually waiting");
+    expect(update?.description).toContain("unsolicited link");
+  });
+
   it("grounds social actions in the trigger message", async () => {
     const calls: unknown[] = [];
     const deps = {

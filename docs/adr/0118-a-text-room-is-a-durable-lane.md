@@ -101,12 +101,13 @@ that is actually working ever looks like — aborts the session, as
 than trusting a single timer, so a suspended host overshoots by one tick of
 awake time instead of by however long it slept.
 
-**He tells the room before he goes away, and keeps typing while he is gone.**
-A long turn is only rude if it is silent, so `send_text_update` gives him one
+**He tells someone waiting before he goes away, and keeps typing while he is gone.**
+A long requested turn is rude if it is silent, so `send_text_update` gives him one
 short text message to the channel mid-turn — threaded onto the message he is answering —
 without ending the turn or spending his reply. Its description tells him when:
-before going off to do something slow, in his own voice, never to pad a turn he
-could just answer. What he says is his; nothing here writes it for him. The
+when someone is actually waiting on slow work and a meaningful delay would
+otherwise leave them hanging. Unsolicited links he elects to inspect get no
+progress announcement. What he says is his; nothing here writes it for him. The
 typing indicator now also runs for the whole turn rather than stopping after a
 minute, so "he is working" stays visible the entire time. Silence and answers
 take about the same time, so delaying the indicator cannot distinguish them

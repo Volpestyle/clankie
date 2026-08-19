@@ -79,8 +79,9 @@ id then joins the floor decision, model response, captain handoff, and playback
 receipts. Voice receipts remain content-free.
 
 **Tool names state their medium.** The mid-turn text progress action is
-`send_text_update`, not `say_now`. It still posts before slow work and still
-does not spend the final reply; it no longer presents itself as a voice action.
+`send_text_update`, not `say_now`. When someone is waiting, it can still post
+before slow work without spending the final reply; it no longer presents
+itself as a voice action or announces work Clankie elected to do on his own.
 
 ## Alternatives considered
 
