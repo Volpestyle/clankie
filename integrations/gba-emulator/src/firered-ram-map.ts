@@ -431,3 +431,102 @@ export function decodeFireRedOverworld(ewram: Uint8Array): FireRedOverworldField
   }
   return { x, y, facing };
 }
+
+/**
+ * `gObjectEvents`: the player and every NPC loaded on the current map.
+ *
+ * The base is derived, not asserted. Both verified player offsets are fields
+ * of entry 0 — 0x36e48 is its `currentCoords` and 0x36e58 its facing byte — so
+ * two independently verified offsets have to agree on where the array starts.
+ *
+ * The **stride** is the one thing here empirical work did not establish. It is
+ * the pokefirered decompilation's `struct ObjectEvent`, corroborated by the
+ * size the symbol table gives `gObjectEvents` (0x240 = 16 entries of 0x24),
+ * and unverified against the running ROM. What stands between a wrong stride
+ * and a fabricated NPC is the pair of filters in the decode — an inactive
+ * `active` bit and a map that is not the player's both drop the entry.
+ */
+const OBJECT_EVENT_CURRENT_COORDS = 0x10;
+const OBJECT_EVENT_FACING = 0x20;
+export const FIRERED_OBJECT_EVENTS_OFFSET = FIRERED_PLAYER_COORDS_OFFSET - OBJECT_EVENT_CURRENT_COORDS;
+export const FIRERED_OBJECT_EVENT_STRIDE = 0x24;
+export const FIRERED_OBJECT_EVENT_COUNT = 16;
+
+if (FIRERED_PLAYER_FACING_OFFSET - OBJECT_EVENT_FACING !== FIRERED_OBJECT_EVENTS_OFFSET) {
+  throw new Error("FireRed player coords and facing disagree about the gObjectEvents base");
+}
+
+const OBJECT_EVENT_FLAGS = 0x00;
+const OBJECT_EVENT_GRAPHICS_ID = 0x05;
+const OBJECT_EVENT_LOCAL_ID = 0x08;
+const OBJECT_EVENT_MAP_NUM = 0x09;
+const OBJECT_EVENT_MAP_GROUP = 0x0a;
+
+export interface FireRedObjectEvent {
+  /** The map-local event id scripts address this object by. */
+  localId: number;
+  /** Which sprite it wears. Identity is a script's business, not the decoder's. */
+  graphicsId: number;
+  /** Tile coords in the same space as the player's, border offset included. */
+  x: number;
+  y: number;
+  /** Null when this object has not faced anywhere yet — a real state, not a failure. */
+  facing: "north" | "east" | "south" | "west" | null;
+}
+
+/**
+ * Every active object event standing on the player's own map, the player
+ * excluded. Null when there is no initialised player object — a title screen,
+ * an intro, a map still loading.
+ *
+ * `onMap` is the caller's decoded save-block map, not entry 0's own copy of
+ * it. Both exist in RAM; only the save block's has been verified here, and a
+ * filter is worth exactly as much as the field it trusts.
+ *
+ * Individual entries are skipped rather than thrown on: one unreadable slot
+ * costs one NPC, while a throw would cost the whole observation the mind was
+ * about to act on.
+ */
+export function decodeFireRedObjectEvents(
+  ewram: Uint8Array,
+  onMap: { readonly mapGroup: number; readonly mapNum: number },
+): FireRedObjectEvent[] | null {
+  if (ewram.length !== GBA_EWRAM_SIZE) {
+    throw new Error(`Expected a ${String(GBA_EWRAM_SIZE)}-byte EWRAM snapshot`);
+  }
+  try {
+    decodeFireRedOverworld(ewram);
+  } catch {
+    return null;
+  }
+  const entry = (index: number, field: number): number =>
+    FIRERED_OBJECT_EVENTS_OFFSET + index * FIRERED_OBJECT_EVENT_STRIDE + field;
+  const { mapGroup, mapNum } = onMap;
+
+  const objects: FireRedObjectEvent[] = [];
+  for (let index = 1; index < FIRERED_OBJECT_EVENT_COUNT; index += 1) {
+    const flags = ewram[entry(index, OBJECT_EVENT_FLAGS)];
+    // Bit 0 is `active`. An inactive slot keeps whatever the last object to
+    // occupy it left behind, so reading one reports a ghost.
+    if (flags === undefined || (flags & 1) === 0) continue;
+    // Objects from an adjacent connected map stay loaded. They are real, but
+    // they are not in the room, and offering them as such is how a mind ends
+    // up walking at a wall.
+    if (ewram[entry(index, OBJECT_EVENT_MAP_NUM)] !== mapNum) continue;
+    if (ewram[entry(index, OBJECT_EVENT_MAP_GROUP)] !== mapGroup) continue;
+    const localId = ewram[entry(index, OBJECT_EVENT_LOCAL_ID)];
+    const graphicsId = ewram[entry(index, OBJECT_EVENT_GRAPHICS_ID)];
+    if (localId === undefined || graphicsId === undefined) continue;
+    const x = readS16(ewram, entry(index, OBJECT_EVENT_CURRENT_COORDS));
+    const y = readS16(ewram, entry(index, OBJECT_EVENT_CURRENT_COORDS + 2));
+    if (x < 0 || y < 0 || x > 4_096 || y > 4_096) continue;
+    objects.push({
+      localId,
+      graphicsId,
+      x,
+      y,
+      facing: FACING_BY_VALUE[ewram[entry(index, OBJECT_EVENT_FACING)] ?? 0] ?? null,
+    });
+  }
+  return objects;
+}

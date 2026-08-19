@@ -318,6 +318,31 @@ const GbaTileViewSchema = z
   })
   .strict();
 
+/**
+ * Somebody standing on the map, in the player's own coordinate space.
+ *
+ * Tile collision cannot carry this. An NPC blocks a tile exactly the way a
+ * bookshelf does, so a mind reading only passability sees a room made of
+ * walls and finds the people in it by pressing A at each one — which is what
+ * a live run spent twenty-four turns doing in Oak's lab.
+ *
+ * No name and no role: `graphicsId` is the sprite the game drew, and deciding
+ * that a sprite is Professor Oak is interpretation, which belongs to whoever
+ * is playing rather than to the decoder. Where somebody is standing is the
+ * fact that was missing.
+ */
+const GbaMapOccupantSchema = z
+  .object({
+    /** The map-local event id scripts address this object by. */
+    localId: z.number().int().nonnegative().max(255),
+    graphicsId: z.number().int().nonnegative().max(255),
+    x: z.number().int().nonnegative().max(65_535),
+    y: z.number().int().nonnegative().max(65_535),
+    /** Null when this object has not faced anywhere yet. */
+    facing: z.enum(["north", "east", "south", "west"]).nullish(),
+  })
+  .strict();
+
 const GbaSurroundingsSchema = z
   .object({
     north: GbaTileViewSchema,
@@ -367,6 +392,13 @@ export const GbaEmulatorObservationSchema = z.discriminatedUnion("kind", [
           })
           .strict()
           .nullish(),
+        /**
+         * Everyone else standing on this map. Absent when the decoder does not
+         * read them at all; an empty array means the map is genuinely empty.
+         * Collapsing the two would tell a mind "nobody here" about a screen
+         * that was never read.
+         */
+        occupants: z.array(GbaMapOccupantSchema).max(31).nullish(),
         /**
          * Every way off the loaded map: warp tiles (doors, stairways, mats) in
          * the same coordinate space as `position`, and edge connections walked

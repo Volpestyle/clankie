@@ -90,6 +90,18 @@ export interface GbaCoreState {
   inputReady?: boolean;
   position: { mapId: string; x: number; y: number };
   facing: "north" | "east" | "south" | "west";
+  /**
+   * Everyone else standing on the loaded map, at their own coordinates. Cores
+   * that do not read object events omit it; an empty array is the different
+   * claim that the map really is empty.
+   */
+  occupants?: {
+    localId: number;
+    graphicsId: number;
+    x: number;
+    y: number;
+    facing: "north" | "east" | "south" | "west" | null;
+  }[];
   dialogLineIndex: number;
   dialogLines?: string[];
   /** Current field text-printer position, used to distinguish printing from a stalled choice. */

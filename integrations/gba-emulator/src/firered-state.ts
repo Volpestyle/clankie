@@ -9,8 +9,10 @@ import {
   GBA_EWRAM_SIZE,
   decodeFireRedMapExits,
   decodeFireRedMapGrid,
+  decodeFireRedObjectEvents,
   decodeFireRedOverworld,
   fireRedSurroundings,
+  type FireRedObjectEvent,
   type FireRedOverworldFields,
   type FireRedSurroundings,
 } from "./firered-ram-map.ts";
@@ -213,6 +215,11 @@ export interface FireRedDecodedState {
     connections: { direction: "north" | "south" | "west" | "east"; destinationMapId: string }[];
   } | null;
   mapIdentity: { mapGroup: number; mapNum: number; mapId: string } | null;
+  /**
+   * Everyone else standing on the loaded map. Null when no map identity
+   * decoded to filter them by — absence, not an empty room.
+   */
+  objectEvents: FireRedObjectEvent[] | null;
   party: GbaCoreState["party"];
   inventory: GbaCoreInventoryEntry[];
   battle: FireRedDecodedBattle | null;
@@ -1012,6 +1019,7 @@ export function decodeFireRedState(
     mapSize,
     exits,
     mapIdentity,
+    objectEvents: mapIdentity === null ? null : decodeFireRedObjectEvents(snapshot.ewram, mapIdentity),
     party,
     inventory,
     battle: battleContext?.battle ?? null,

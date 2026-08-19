@@ -55,6 +55,65 @@ describe("hosted world body", () => {
     expect(WORLD_CREDENTIAL_PROVIDER_ID).toBe("pokeagent_mmo_world");
   });
 
+  it("carries the people standing on the map", async () => {
+    // An NPC blocks a tile exactly like a bookshelf does, so a mind reading
+    // only passability finds people by pressing A at every wall. A live run
+    // spent twenty-four turns doing that in Oak's lab.
+    const world = await staticWorld(
+      observation({ frame: 10, npcs: [{ localId: 4, graphicsId: 38, x: 11, y: 8, facing: "south" }] }),
+    );
+    const result = await joinWorld({
+      environmentId: "pokemon-firered",
+      env: await provisionedEnv(world.stateDir),
+    });
+    expect(result.outcome).toBe("joined");
+    if (result.outcome !== "joined") return;
+    expect(result.body.io.observe("overworld")).toMatchObject({
+      data: { occupants: [{ localId: 4, graphicsId: 38, x: 11, y: 8, facing: "south" }] },
+    });
+    // No dialog on screen is still a refusal, never an empty transcript.
+    expectAdapterError(() => result.body.io.observe("dialog"), "dialog_not_open");
+  });
+
+  it("carries the words in the dialog box", async () => {
+    const world = await staticWorld(
+      observation({
+        frame: 10,
+        mode: "dialog",
+        dialogLines: ["It's like an encyclopedia, but the", "pages are blank."],
+      }),
+    );
+    const result = await joinWorld({
+      environmentId: "pokemon-firered",
+      env: await provisionedEnv(world.stateDir),
+    });
+    expect(result.outcome).toBe("joined");
+    if (result.outcome !== "joined") return;
+    expect(result.body.io.observe("dialog")).toMatchObject({
+      data: { lines: ["It's like an encyclopedia, but the", "pages are blank."], untrusted: true },
+    });
+  });
+
+  it("reports nothing rather than emptiness when the world publishes neither", async () => {
+    // A world too old to publish either field. Silence is the honest answer:
+    // an empty `lines` reads as "he read it and it said nothing", and an empty
+    // occupants list reads as "nobody here" about a screen never read.
+    const stale = observation({ frame: 10, mode: "dialog" });
+    const state = stale.state as Record<string, unknown>;
+    delete state["dialogLines"];
+    delete state["npcs"];
+    const world = await staticWorld(stale);
+    const result = await joinWorld({
+      environmentId: "pokemon-firered",
+      env: await provisionedEnv(world.stateDir),
+    });
+    expect(result.outcome).toBe("joined");
+    if (result.outcome !== "joined") return;
+    expectAdapterError(() => result.body.io.observe("dialog"), "semantic_state_unavailable");
+    const overworld = result.body.io.observe("overworld") as { data: Record<string, unknown> };
+    expect("occupants" in overworld.data).toBe(false);
+  });
+
   it("joins by credential, maps every available view, drives actions, and leaves once", async () => {
     let current = observation({ frame: 10, x: 13, y: 13 });
     const audioUnavailable: string[] = [];
@@ -856,7 +915,9 @@ function observation(options: {
   x?: number;
   y?: number;
   decoded?: boolean;
-  mode?: "overworld" | "menu";
+  mode?: "overworld" | "menu" | "dialog";
+  npcs?: { localId: number; graphicsId: number; x: number; y: number; facing: string | null }[];
+  dialogLines?: string[];
   menu?: {
     menuId: string;
     cursor: number;
@@ -870,6 +931,9 @@ function observation(options: {
 }) {
   const decoded = options.decoded ?? true;
   const mode = options.mode ?? "overworld";
+  // A dialog box is drawn over a loaded map, so the world reports position and
+  // party alongside it — the same shape a live run journals.
+  const onMap = mode === "overworld" || mode === "dialog";
   return {
     sessionId: SESSION_ID,
     bodyGeneration: options.bodyGeneration ?? 1,
@@ -884,7 +948,7 @@ function observation(options: {
       decoded,
     },
     minimap:
-      decoded && mode === "overworld"
+      decoded && onMap
         ? {
             topLeft: { mapId: "pallet-town/players-house-2f", x: 12, y: 12 },
             rows: ["...", ".@.", "..."],
@@ -893,22 +957,20 @@ function observation(options: {
         : null,
     state: decoded
       ? {
-          overworld:
-            mode === "overworld"
-              ? {
-                  mapId: "pallet-town/players-house-2f",
-                  mapGroup: 4,
-                  mapNum: 1,
-                  x: options.x ?? 13,
-                  y: options.y ?? 13,
-                  facing: "north" as const,
-                }
-              : null,
-          party:
-            mode === "overworld"
-              ? [{ slot: 0, speciesId: 1, level: 5, currentHp: 20, maxHp: 20, moveIds: [33] }]
-              : [],
+          overworld: onMap
+            ? {
+                mapId: "pallet-town/players-house-2f",
+                mapGroup: 4,
+                mapNum: 1,
+                x: options.x ?? 13,
+                y: options.y ?? 13,
+                facing: "north" as const,
+              }
+            : null,
+          party: onMap ? [{ slot: 0, speciesId: 1, level: 5, currentHp: 20, maxHp: 20, moveIds: [33] }] : [],
           fieldInputReady: mode === "overworld",
+          npcs: options.npcs ?? [],
+          dialogLines: options.dialogLines ?? [],
           menu: options.menu ?? null,
         }
       : null,
@@ -975,6 +1037,24 @@ function sessionStatus(frameNumber: number) {
 
 function whoResult() {
   return { ok: true, worldId: WORLD_ID, players: [] };
+}
+
+/** A world that answers every poll with one fixed observation. */
+async function staticWorld(current: ReturnType<typeof observation>): Promise<FakeWorld> {
+  return fakeWorld((request) => {
+    switch (request.operation) {
+      case "world.join":
+        return joinResult();
+      case "play.observe":
+        return current;
+      case "play.frame":
+        return frame({ frame: current.frame, data: "still" });
+      case "world.leave":
+        return { ok: true, sessionId: SESSION_ID, endedAt: NOW };
+      default:
+        throw new Error(`unexpected operation ${request.operation}`);
+    }
+  });
 }
 
 function expectAdapterError(run: () => unknown, code: string): void {

@@ -1,6 +1,9 @@
 # ADR 0120: What he can see, he should be able to name
 
-Status: accepted (2026-08-18). Extends
+Status: accepted (2026-08-18). Narrowed by
+[ADR 0122](0122-a-blocked-tile-is-not-an-identity.md): the `gObjectEvents`
+alternative rejected below is adopted for the narrower question of which
+blocked tiles are people, on evidence this record did not have. Extends
 [ADR 0112](0112-a-frame-costs-the-same-at-turn-one-thousand.md): the frame is
 still attached every turn and still costs the same. It now carries the
 coordinate frame that makes what is in it addressable.
@@ -31,7 +34,9 @@ the frame is identical".
 
 Two fixes were considered and rejected before this one.
 
-- **Decode `gObjectEvents` and put NPCs and objects in the observation.** The
+- **Decode `gObjectEvents` and put NPCs and objects in the observation.**
+  (Rejected here; later adopted in narrowed form — see
+  [ADR 0122](0122-a-blocked-tile-is-not-an-identity.md).) The
   RAM map is already there (base `0x02036E38`, `0x24` stride, entry 0 is the
   player, which is where the existing player coords and facing come from), so
   this is tractable. It is also a permanent tax: every object class someone

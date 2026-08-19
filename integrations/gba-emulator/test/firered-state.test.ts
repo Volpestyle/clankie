@@ -251,6 +251,44 @@ describe("version-pinned FireRed state decoder", () => {
     expect(() => decodeFireRedState(memory, rom)).toThrow(/active party slot|battler 0/);
   });
 
+  it("decodes the people standing on the loaded map, and nobody standing elsewhere", () => {
+    // Passability alone cannot tell a person from a bookshelf: both report the
+    // tile as blocked, so a mind without this list finds people by pressing A
+    // at every wall.
+    const memory = syntheticMemory();
+    const rom = syntheticRom();
+    memory.ewramView.setUint8(ewramOffset(0x02024029), 1);
+    writeEncryptedPartyMember(memory);
+    // A save block naming Oak's lab, so object events have a map to filter by.
+    // Both pointers, because a half-initialised pair is its own decode error.
+    memory.iwramView.setUint32(iwramOffset(0x03005008), 0x02030000, true);
+    memory.iwramView.setUint32(iwramOffset(0x0300500c), 0x02031000, true);
+    memory.ewramView.setUint8(ewramOffset(0x02030004), 4);
+    memory.ewramView.setUint8(ewramOffset(0x02030005), 3);
+
+    const place = (index: number, fields: { x: number; y: number; mapNum: number }): void => {
+      const base = 0x36e38 + index * 0x24;
+      memory.ewramView.setUint8(base, 1);
+      memory.ewramView.setUint8(base + 0x05, 38);
+      memory.ewramView.setUint8(base + 0x08, index + 3);
+      memory.ewramView.setUint8(base + 0x09, fields.mapNum);
+      memory.ewramView.setUint8(base + 0x0a, 4);
+      memory.ewramView.setInt16(base + 0x10, fields.x, true);
+      memory.ewramView.setInt16(base + 0x12, fields.y, true);
+      memory.ewramView.setUint8(base + 0x20, 1);
+    };
+    place(1, { x: 11, y: 8, mapNum: 3 });
+    // Loaded from a connected map: real, but not in this room.
+    place(2, { x: 4, y: 4, mapNum: 9 });
+    // An inactive slot still holding whatever last occupied it.
+    place(3, { x: 12, y: 9, mapNum: 3 });
+    memory.ewramView.setUint8(0x36e38 + 3 * 0x24, 0);
+
+    expect(decodeFireRedState(memory, rom).objectEvents).toEqual([
+      { localId: 4, graphicsId: 38, x: 11, y: 8, facing: "south" },
+    ]);
+  });
+
   it("decodes field dialog and start, party, and bag menus without framebuffer guessing", () => {
     const memory = syntheticMemory();
     const rom = syntheticRom();

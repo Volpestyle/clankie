@@ -328,6 +328,9 @@ export class GbaEmulatorSession implements EnvironmentAdapterSession {
               mapSize: state.mapSize ?? null,
               minimap:
                 grid === null ? null : renderWalkabilityMinimap(grid, state.position, exits?.warps ?? []),
+              // Absent rather than empty when nothing was read: "not decoded"
+              // and "nobody here" are different facts to act on.
+              ...(state.occupants === undefined ? {} : { occupants: state.occupants }),
               exits:
                 exits === null
                   ? null

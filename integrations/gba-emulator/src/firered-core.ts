@@ -351,6 +351,7 @@ export class MgbaFireRedCore implements GbaCoreSeam {
         y: decoded.overworld.y,
       },
       facing: decoded.overworld.facing,
+      ...(decoded.objectEvents === null ? {} : { occupants: decoded.objectEvents }),
       surroundings: decoded.surroundings,
       mapSize: decoded.mapSize,
       exits: decoded.exits,

@@ -475,6 +475,34 @@ describe.skipIf(!romAvailable)("real mGBA core (ROM-gated)", () => {
     expect(first.gameState()).toEqual(second.gameState());
   });
 
+  it("decodes an empty room as empty, from real object-event memory", { timeout: 240_000 }, async () => {
+    // The bedroom has no object events but the player's own. What this pins
+    // is the absence of false positives: fifteen slots are read on live RAM
+    // and none survives the `active` and map filters, which a badly aligned
+    // stride would have to manage fifteen times over.
+    //
+    // It does NOT pin a true positive. Proving the stride needs a savestate
+    // in a populated room — Oak's lab, where the aides' tiles are known —
+    // and `firered-oaks-lab-starter-v1` is not an operator-local artifact
+    // here. Until then `occupants` is trustworthy for "is anybody here" and
+    // no further. See ADR 0122.
+    const { romBytes, savestateBytes } = load();
+    const core = await MgbaFireRedCore.create({
+      coreId: scenario.coreId,
+      romBytes,
+      savestateBytes,
+      romSha256: scenario.romSha256,
+      savestateSha256: scenario.savestateSha256,
+      coreWasmSha256: scenario.coreWasmSha256,
+      mapId: scenario.map.mapId,
+    });
+    expect(core.gameState().occupants).toEqual([]);
+    // Still empty after real movement, so this is not one lucky frame.
+    core.pressButton("right", scenario.holdFramesPerStep);
+    core.pressButton("right", scenario.holdFramesPerStep);
+    expect(core.gameState().occupants).toEqual([]);
+  });
+
   it("fails closed on any pinned-identity mismatch", { timeout: 240_000 }, async () => {
     const { romBytes, savestateBytes } = load();
     await expect(

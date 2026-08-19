@@ -267,6 +267,27 @@ const FireRedStateSchema = z
         .strict(),
     ),
     fieldInputReady: z.boolean(),
+    /**
+     * Absent on a world older than this field; null when that world decoded no
+     * map to stand on. Both mean "unknown", which is not the same answer as an
+     * empty room and must not be rendered as one.
+     */
+    npcs: z
+      .array(
+        z
+          .object({
+            localId: z.number().int().min(0).max(255),
+            graphicsId: z.number().int().min(0).max(255),
+            x: z.number().int().min(0).max(1_023),
+            y: z.number().int().min(0).max(1_023),
+            facing: z.enum(["north", "east", "south", "west"]).nullable(),
+          })
+          .strict(),
+      )
+      .max(31)
+      .nullish(),
+    /** Absent on a world older than this field; empty outside dialog. */
+    dialogLines: z.array(z.string().max(512)).max(8).nullish(),
     menu: z
       .object({
         menuId: z.string().min(1).max(128),
@@ -562,6 +583,7 @@ class HostedWorldBody implements WorldBody {
             throw adapterError("semantic_state_unavailable", "The world has no decoded overworld position");
           }
           const view = mapOverworld(observation?.minimap ?? null, overworld);
+          const npcs = requireSemanticState(state).npcs;
           return {
             ...base,
             kind,
@@ -571,6 +593,9 @@ class HostedWorldBody implements WorldBody {
               surroundings: view.surroundings,
               mapSize: null,
               minimap: view.minimap,
+              // A world that does not publish them leaves this absent rather
+              // than empty: "not read" and "nobody here" are different facts.
+              ...(npcs === undefined || npcs === null ? {} : { occupants: npcs }),
               exits: view.exits,
               ramStateSha256: stateDigest(observation),
             },
@@ -598,12 +623,29 @@ class HostedWorldBody implements WorldBody {
           if (observation?.scene.mode !== "dialog") {
             throw adapterError("dialog_not_open", "No dialog is open in the hosted world");
           }
-          requireSemanticState(state);
-          return {
-            ...base,
-            kind,
-            data: { speaker: "firered", lines: [], lineIndex: 0, untrusted: true as const },
-          };
+          {
+            const lines = requireSemanticState(state).dialogLines ?? [];
+            if (lines.length === 0) {
+              // A world that does not publish the text, or a box that decoded
+              // to nothing. Refusing is what keeps `advance_dialog` honest —
+              // an empty `lines` array reads as "he read it and it said
+              // nothing", and he then acts on a line he never saw.
+              throw adapterError(
+                "semantic_state_unavailable",
+                "The hosted world does not expose the text of this dialog",
+              );
+            }
+            return {
+              ...base,
+              kind,
+              data: {
+                speaker: "firered",
+                lines: [...lines],
+                lineIndex: 0,
+                untrusted: true as const,
+              },
+            };
+          }
         case "menu":
           if (observation?.scene.mode !== "menu" && observation?.scene.mode !== "naming") {
             throw adapterError("menu_not_open", "No menu is open in the hosted world");
