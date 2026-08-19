@@ -103,6 +103,11 @@ the full picture — what each store holds, who may read it, and what bounds it.
   `browser_tool_search` start active. Browser calls are sequential across rooms;
   the subprocess receives no Clankie credentials, but true filesystem/network
   isolation requires a VM or remote broker ([ADR 0082](adr/0082-clankie-holds-the-browser.md)).
+  The persistent profile holds his own accounts, signed up for by hand:
+  `CLANKIE_BROWSER_HEADED=1` shows the window so the operator can complete a
+  signup, a CAPTCHA, or a phone check in that profile, and a headed session is
+  exempt from the browser's idle timeout
+  ([ADR 0127](adr/0127-his-accounts-are-his.md)).
 - **Leading agents.** Clankie leads coding agents through the herdr CLI over
   bash, guided by skills — there is no worker protocol. The service is his
   durable body; joining a herdr session (the operator console in a pane)
@@ -141,7 +146,11 @@ the full picture — what each store holds, who may read it, and what bounds it.
   `~/.config/clankie/settings.json` and can never be set by a caller.
   `/connect` stores Linear and mailbox credentials the same way; Discord
   remains a body configured by `/discord` ([credential guide](credentials.md),
-  [ADR 0093](adr/0093-owner-authored-service-connections.md)). A seat in a
+  [ADR 0093](adr/0093-owner-authored-service-connections.md)). The mailbox is
+  his own address, not the owner's inbox: `email.fromAddress` carries the
+  identity when the provider login differs, the captain states that address
+  from settings, and mail stays console-only because sign-in codes arrive there
+  ([ADR 0127](adr/0127-his-accounts-are-his.md)). A seat in a
   hosted world is a broker credential too — `pokeagent_mmo_world`, with the
   environment variant refused outright. An optional lab
   user-session body watches Discord screen shares and publishes Go Live through

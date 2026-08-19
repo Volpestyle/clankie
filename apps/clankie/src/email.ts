@@ -246,7 +246,10 @@ export function defaultEmailAdapters(): EmailAdapters {
       });
       try {
         const info = await transport.sendMail({
-          from: account.username,
+          // Who he is, not what he signed in as. The provider still has to
+          // accept the alias — Gmail wants it verified under "Send mail as" —
+          // and rewrites the header to the authenticated user when it does not.
+          from: account.settings.fromAddress ?? account.username,
           to: message.to,
           subject: message.subject,
           text: message.text,

@@ -8,6 +8,10 @@
  *   minus an optional operator blocklist (default empty).
  * - **A persistent profile.** He logs into a site once and stays logged in.
  *   The profile is service-private and is his, never the operator's browser.
+ * - **A window, when asked.** `CLANKIE_BROWSER_HEADED=1` shows it. That is the
+ *   takeover seam: the accounts in this profile are signed up for by hand, in
+ *   this window, because the sites that own them forbid automated signup
+ *   ([ADR 0127](../../../docs/adr/0127-his-accounts-are-his.md)).
  */
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -40,6 +44,24 @@ const DEFAULT_BROWSER_ARGS = ["mcp", "--tools", "all"] as const;
 export function browserEnabled(value: string | undefined): boolean {
   const normalized = value?.trim().toLowerCase();
   if (normalized === undefined || normalized.length === 0) return true;
+  return !["0", "false", "no", "off"].includes(normalized);
+}
+
+/**
+ * Whether the browser window is visible, defaulting to **no**.
+ *
+ * A headed window is the takeover seam: the browser runs on the operator's own
+ * machine, so a login wall, a CAPTCHA, or a phone-verification step is
+ * something they can reach over and click in Clankie's own profile — no remote
+ * display, no second browser fighting for the profile lock. It is off by
+ * default because a headed session is also exempt from the browser's idle
+ * timeout, so the window stays open until something closes it, and because a
+ * window that raises itself while the operator is working is a cost they
+ * should opt into.
+ */
+export function browserHeaded(value: string | undefined): boolean {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === undefined || normalized.length === 0) return false;
   return !["0", "false", "no", "off"].includes(normalized);
 }
 
@@ -231,6 +253,10 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
       AGENT_BROWSER_SESSION: "clankie",
       AGENT_BROWSER_CONTENT_BOUNDARIES: "1",
       AGENT_BROWSER_MAX_OUTPUT: String(MAX_RESULT_CHARACTERS),
+      // Normalized rather than forwarded verbatim: the value reaching the child
+      // is the browser's own switch, so an unset or falsey knob must leave it
+      // absent instead of passing "0" to a flag that reads presence.
+      ...(browserHeaded(environment.CLANKIE_BROWSER_HEADED) ? { AGENT_BROWSER_HEADED: "1" } : {}),
     },
   }) as ChildProcessWithoutNullStreams;
   child.stderr?.setEncoding("utf8");

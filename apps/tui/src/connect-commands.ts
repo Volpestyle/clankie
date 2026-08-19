@@ -470,6 +470,17 @@ async function runEmailWizard(shell: ClankieFaceShell, services: ConnectCommandS
     };
   }
 
+  // Asked separately because a mailbox on his own domain usually forwards into
+  // a provider box: the sign-in name is the provider's, the address he is known
+  // by is not. Blank keeps them the same, which is the ordinary case.
+  const fromAddress = await flow.readText({
+    message: "Address he sends as (blank = the username above)",
+    placeholder: current.fromAddress ?? username.trim(),
+    validate: (value) =>
+      value.trim().length === 0 || value.includes("@") ? undefined : "Must be an email address.",
+  });
+  if (fromAddress === undefined) return;
+
   const password = await flow.readSecret({
     message: "Mailbox password or app password",
     validate: (value) => (value.trim().length === 0 ? "Required." : undefined),
@@ -486,11 +497,13 @@ async function runEmailWizard(shell: ClankieFaceShell, services: ConnectCommandS
       ...(hosts.imapHost === undefined ? {} : { imapHost: hosts.imapHost }),
       ...(hosts.smtpHost === undefined ? {} : { smtpHost: hosts.smtpHost }),
       username: username.trim(),
+      ...(fromAddress.trim().length === 0 ? {} : { fromAddress: fromAddress.trim() }),
     },
   }));
+  const identity = fromAddress.trim().length === 0 ? username.trim() : fromAddress.trim();
   shell.insertCommandResult(
     "/connect email",
-    `Email connected for ${username.trim()}. Mail is console-only — he will not read or send it from Discord.`,
+    `Email connected for ${identity}. Mail is console-only — he will not read or send it from Discord.`,
     "success",
   );
 }

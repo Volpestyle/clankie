@@ -346,7 +346,21 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           "# This room",
           "You do not have a shell or filesystem tools in this room. If someone asks you to inspect herdr, run a command, or read a file, say you cannot from here. Do not imply you chose not to look.",
         ].join("\n");
-    return `${identity}\n\n${persona}${reach}`;
+    // His own address is a fact he should be able to say without calling a tool
+    // for it, and it belongs to whichever mailbox is actually connected — so it
+    // is derived from settings rather than written into the persona a second
+    // time, where it would drift the day the mailbox changes.
+    const mailbox = currentSettings.email.fromAddress ?? currentSettings.email.username;
+    const address =
+      mailbox === undefined
+        ? ""
+        : [
+            "",
+            "# Your address",
+            "",
+            `Your own mailbox is ${mailbox}. That is how someone reaches you directly, and you can give it out. Reading it stays at the console.`,
+          ].join("\n");
+    return `${identity}\n\n${persona}${reach}${address}`;
   }
 
   /**

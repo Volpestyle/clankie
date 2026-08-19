@@ -345,6 +345,15 @@ export const EmailSettingsSchema = z
     smtpHost: HostnameSchema.optional(),
     smtpPort: z.number().int().min(1).max(65535).default(587),
     username: z.string().min(1).max(320).optional(),
+    /**
+     * The address he sends as, when that is not the address he signs in with.
+     *
+     * A mailbox on his own domain is commonly a forwarding address in front of
+     * a provider mailbox — the sign-in name is the provider's, the identity is
+     * his. Without this, every message he sends is signed with the plumbing
+     * instead of with his name. Empty means the username is also the identity.
+     */
+    fromAddress: z.email().max(320).optional(),
     /** IMAP implicit TLS (usually port 993). SMTP uses its own port to pick STARTTLS vs implicit. */
     secure: z.boolean().default(true),
   })
