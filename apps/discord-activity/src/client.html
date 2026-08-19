@@ -349,7 +349,7 @@
           <span id="empty-copy">Gameplay appears here when a session starts.</span>
         </div>
         <div id="sound-controls">
-          <input id="volume" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume" />
+          <input id="volume" type="range" min="0" max="1" step="0.01" value="0.2" aria-label="Volume" />
           <button id="sound-toggle" type="button" aria-pressed="false">Enable sound</button>
         </div>
       </section>
@@ -451,6 +451,8 @@
         audio.nextAt = 0;
       }
 
+      const playbackGain = () => Number(volume.value) ** 2;
+
       function renderAudio(packet) {
         if (packet.sequence <= lastAudioSequence) return;
         if (lastAudioSequence >= 0 && packet.sequence !== lastAudioSequence + 1) stopAudio();
@@ -499,7 +501,7 @@
         if (!audio.context) {
           audio.context = new AudioContext();
           audio.gain = audio.context.createGain();
-          audio.gain.gain.value = Number(volume.value);
+          audio.gain.gain.value = playbackGain();
           audio.gain.connect(audio.context.destination);
         }
         await audio.context.resume();
@@ -510,7 +512,7 @@
       });
 
       volume.addEventListener("input", () => {
-        if (audio.gain) audio.gain.gain.value = Number(volume.value);
+        if (audio.gain) audio.gain.gain.value = playbackGain();
       });
 
       /** What the status line says while frames are arriving. */

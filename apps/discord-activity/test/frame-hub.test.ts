@@ -81,6 +81,8 @@ describe("RenderedSurfaceHub", () => {
     const script = html.match(/<script type="module">([\s\S]+)<\/script>/u)?.[1];
     expect(html).toContain("Enable sound");
     expect(html).toContain("Sound ready");
+    expect(html).toContain('step="0.01" value="0.2"');
+    expect(html).toContain("Number(volume.value) ** 2");
     expect(script).toBeDefined();
     expect(() => new Function(script!)).not.toThrow();
   });
