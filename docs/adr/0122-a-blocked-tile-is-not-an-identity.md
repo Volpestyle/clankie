@@ -82,6 +82,15 @@ cannot read them says so rather than reporting an empty room.**
   own copy of the current map; only the save block's has been verified here, and
   a filter is worth exactly as much as the field it trusts.
 
+**A direct interaction result stays attached to the object it came from.** When
+a single A press is made while directly facing a listed occupant and the next
+observation opens dialog, later turns see that object signature and exact
+dialog together. This still does not name the occupant; it records “pressing A
+toward this object opened text beginning `GARY: ...`.” The fact is bounded,
+scoped to body generation, map, local event id, and sprite id, and absent when
+that occupant is no longer present. It outranks self-authored notes because it
+is a directly observed result rather than an interpretation.
+
 **A dialog observation carries the text or refuses.** The hosted-world path
 returned `lines: []` unconditionally — a stub, in place since the path was
 built — so every dialog box on every world run reached the mind empty while the
@@ -119,3 +128,6 @@ as context he does not get.
 - The hosted world still has no labelled axes. 0120's named gap is unchanged by
   this record, and remains the reason its own failure mode is reachable on the
   path Clankie actually plays.
+- Repeated dialog can correct a guessed name without turning `graphicsId` into
+  an identity table. The stored fact says what interaction produced, not who a
+  sprite must be.

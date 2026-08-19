@@ -37,6 +37,8 @@ played. Thus knowing is continuous while talking remains voluntary and sparse.
 ```mermaid
 flowchart LR
   Screen[frame + decoded state] --> Mind[game mind]
+  Screen -->|A toward occupant + resulting dialog| Facts[bounded verified interaction results]
+  Facts --> Mind
   Mind -->|every settled turn: thought, effect, goal, next| Experience[realtime conversation context]
   Mind -->|speakWanted| Gate{room floor + rate gate}
   Gate -->|allowed| Voice[realtime persona authors words]
@@ -54,6 +56,9 @@ flowchart LR
 - The game mind can still be wrong. Occupants therefore remain unnamed until
   dialog or a prior verified interaction establishes identity; `graphicsId` is
   sprite appearance, not a character name.
+- A verified interaction carries the observed object signature and resulting
+  dialog, not a harness-authored character label. Repeated direct evidence can
+  correct a wrong note without turning sprite appearance into identity.
 - Continuous updates do not create suppression receipts because no response was
   requested. A `speechDeliveryId` remains evidence of a real speech attempt,
   not merely a context update.

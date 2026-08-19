@@ -61,6 +61,24 @@ function battle(): GbaEmulatorObservation {
   } as unknown as GbaEmulatorObservation;
 }
 
+function sceneOnlyBattle(kind: "danger" | "scene"): GbaEmulatorObservation {
+  return {
+    schemaVersion: 1,
+    kind,
+    observationId: `obs-${kind}`,
+    sessionId: "gba-emulator:test",
+    characterId: "clankie",
+    worldId: "gba-emulator-lab-v1",
+    goalVersion: 0,
+    capturedAt: "2026-07-25T18:00:00.000Z",
+    frame: 100,
+    data:
+      kind === "danger"
+        ? { severity: "low", code: "input_bound", summary: "raw buttons still work", stateCertain: false }
+        : { mode: "battle", inputReady: false, waitingForDialogAdvance: false },
+  } as unknown as GbaEmulatorObservation;
+}
+
 function unsupportedExit(frame = 100): GbaEmulatorObservation {
   const observation = overworld(frame, 17, "pallet-town/players-house-1f") as unknown as {
     data: Record<string, unknown>;
@@ -708,14 +726,17 @@ describe("stall visibility", () => {
     expect(result.longestRecurringRun).toBe(FREE_PLAY_REPEAT_TURNS * 2);
   });
 
-  it("retires a stale objective after one warned loop turn without choosing a replacement", async () => {
+  it("keeps a retired objective empty while paraphrases remain inside the same loop", async () => {
     const retired: (string | null)[] = [];
     const result = await runFreePlay({
       io: cyclingIo(),
       mind: {
         decide: (view) => {
           retired.push(view.retiredObjective);
-          return Promise.resolve(press(view.turn % 2 === 0 ? "left" : "right", "try the other side"));
+          return Promise.resolve({
+            ...press(view.turn % 2 === 0 ? "left" : "right", "try the other side"),
+            objective: view.retiredObjective === null ? undefined : "get outside through the front entrance",
+          });
         },
       },
       turns: FREE_PLAY_STALL_TURNS + 4,
@@ -901,6 +922,38 @@ describe("persistent notes", () => {
 });
 
 describe("interjection", () => {
+  it("preempts an in-flight decision and redecides the same turn with the newest words", async () => {
+    const queue = new InterjectionQueue();
+    const seen: (string | null)[] = [];
+    let calls = 0;
+    const result = await runFreePlay({
+      io: io(() => Promise.resolve(completed())),
+      mind: {
+        decide: (view) => {
+          seen.push(view.interjection);
+          calls += 1;
+          if (calls === 1) {
+            queue.offer("stop and look at the desk");
+            // Deliberately ignores AbortSignal: the loop must still stop
+            // awaiting a custom mind that does not cooperate.
+            return new Promise(() => undefined);
+          }
+          return Promise.resolve(press("left", "look at the desk"));
+        },
+      },
+      turns: 1,
+      interjections: queue,
+      onTurn: (_turn, evidence) => {
+        expect(evidence.signals.decisionPreemptions).toBe(1);
+      },
+    });
+
+    expect(seen).toEqual([null, "stop and look at the desk"]);
+    expect(result.turns).toHaveLength(1);
+    expect(result.turns[0]?.interjection).toBe("stop and look at the desk");
+    expect(result.accepted).toBe(1);
+  });
+
   it("reaches the next turn and is answered without losing turn state", async () => {
     const seen: (string | null)[] = [];
     const queue = new InterjectionQueue();
@@ -956,6 +1009,88 @@ describe("interjection", () => {
       turns: 1,
     });
     expect(result.turns[0]?.outcome).toBe("invalid_decision");
+  });
+});
+
+describe("grounded interaction and capability memory", () => {
+  it("carries the dialog opened by a directly faced occupant into the next decision", async () => {
+    let acted = false;
+    const views: FreePlayView[] = [];
+    const occupantIo: GbaDriverIo = {
+      observe: (kind) => {
+        if (kind === "overworld") {
+          const observation = overworld(100, 5) as unknown as { data: Record<string, unknown> };
+          observation.data["facing"] = "south";
+          observation.data["occupants"] = [{ localId: 8, graphicsId: 72, x: 5, y: 7, facing: "north" }];
+          return observation as unknown as GbaEmulatorObservation;
+        }
+        if (kind === "dialog" && acted) {
+          return {
+            schemaVersion: 1,
+            kind: "dialog",
+            observationId: "obs-dialog",
+            sessionId: "gba-emulator:test",
+            characterId: "clankie",
+            worldId: "gba-emulator-lab-v1",
+            goalVersion: 0,
+            capturedAt: "2026-07-25T18:00:00.000Z",
+            frame: 101,
+            data: {
+              speaker: "firered",
+              lines: ["GARY: Gramps isn't around."],
+              lineIndex: 0,
+              untrusted: true,
+            },
+          } as GbaEmulatorObservation;
+        }
+        throw new Error(`no ${kind} view`);
+      },
+      act: () => {
+        acted = true;
+        return Promise.resolve(completed());
+      },
+      pause: () => Promise.resolve(),
+      resume: () => Promise.resolve(),
+    };
+
+    await runFreePlay({
+      io: occupantIo,
+      mind: {
+        decide: (view) => {
+          views.push(view);
+          return Promise.resolve(press("a", "talk to the person"));
+        },
+      },
+      turns: 2,
+    });
+
+    expect(views[0]?.verifiedInteractions).toEqual([]);
+    expect(views[1]?.verifiedInteractions).toEqual([
+      expect.stringContaining('opened dialog: "GARY: Gramps isn\'t around."'),
+    ]);
+  });
+
+  it("does not redispatch a semantic helper after the same non-retryable capability refusal", async () => {
+    const act = vi.fn(() => Promise.resolve(failed("semantic_state_unavailable")));
+    const sceneIo: GbaDriverIo = {
+      observe: (kind) => {
+        if (kind === "danger" || kind === "scene") return sceneOnlyBattle(kind);
+        throw new Error(`no ${kind} view`);
+      },
+      act,
+      pause: () => Promise.resolve(),
+      resume: () => Promise.resolve(),
+    };
+    const decision = {
+      monologue: "the helper should read this",
+      intent: "advance the battle text",
+      action: { kind: "advance_dialog" },
+    };
+
+    const result = await runFreePlay({ io: sceneIo, mind: mind([decision, decision]), turns: 2 });
+
+    expect(act).toHaveBeenCalledTimes(1);
+    expect(result.turns[1]?.detail).toBe("known_non_retryable:semantic_state_unavailable");
   });
 });
 
@@ -1145,11 +1280,15 @@ describe("voice owns speech", () => {
         reply: view.heard === null ? null : "still working on this desk",
       }),
     );
+    let offered = false;
     const result = await runFreePlay({
       io: io(() => Promise.resolve(completed())),
       mind: {
         decide: (view) => {
-          if (view.turn === 1) interjections.offer("you good?");
+          if (view.turn === 1 && !offered) {
+            offered = true;
+            interjections.offer("you good?");
+          }
           return Promise.resolve(press("up", "up"));
         },
       },
@@ -1158,10 +1297,10 @@ describe("voice owns speech", () => {
       turns: 3,
       speakCooldownTurns: 5,
     });
-    // Turn 0: gate open, spoke. Turn 1: cooldown, silent, skipped. Turn 2: the
-    // question forces a consultation despite the cooldown.
+    // Turn 0: gate open, spoke. The turn-1 decision is preempted, so the
+    // question reaches that same turn despite the cooldown. Turn 2 is skipped.
     expect(decide).toHaveBeenCalledTimes(2);
-    expect(result.turns[2]?.reply).toContain("desk");
+    expect(result.turns[1]?.reply).toContain("desk");
     expect(result.volition.skipped).toBe(1);
   });
 });

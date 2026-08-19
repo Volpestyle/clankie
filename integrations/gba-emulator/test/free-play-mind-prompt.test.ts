@@ -94,6 +94,8 @@ function emptyView(): FreePlayView {
     objectiveForTurns: null,
     localeForTurns: null,
     retiredObjective: null,
+    objectiveRecovery: false,
+    verifiedInteractions: [],
     learnedTransitions: [],
     notes: null,
     objective: null,
@@ -200,6 +202,22 @@ describe("the view says what reaches the controls", () => {
     expect(rendered).not.toContain("walk to (11, 15)");
   });
 
+  it("renders verified occupant dialog ahead of self-authored notes", () => {
+    const rendered = renderView({
+      ...emptyView(),
+      notes: "The sprite must be Oak.",
+      verifiedInteractions: [
+        'On lab, pressing A while facing occupant localId 8, graphicsId 72, at (12,11) opened dialog: "GARY: Gramps isn\'t around."',
+      ],
+    });
+
+    expect(rendered).toContain("Verified direct interaction results");
+    expect(rendered.indexOf("Your notes")).toBeLessThan(
+      rendered.indexOf("Verified direct interaction results"),
+    );
+    expect(rendered).toContain("GARY: Gramps isn't around");
+  });
+
   it("states that an undecoded screen is normal and what still runs", () => {
     const rendered = renderView(screen("unknown", false));
     expect(rendered).toContain("Nothing on this screen decodes");
@@ -232,6 +250,12 @@ describe("the view says what reaches the controls", () => {
     const rendered = renderView(screen("cutscene", false));
     expect(rendered).toContain("This is a cutscene screen");
     expect(rendered).toContain("expected, not a fault");
+  });
+
+  it("prescribes the dedicated dialog helper for a scene-only hosted battle", () => {
+    const rendered = renderView(screen("battle", false));
+    expect(rendered).toContain("use advance_dialog, not frame_advance");
+    expect(rendered).toContain("dedicated decoder");
   });
 
   it("stays quiet once a screen decodes", () => {

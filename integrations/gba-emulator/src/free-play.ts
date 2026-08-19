@@ -216,6 +216,9 @@ export const FreePlayTurnEvidenceSchema = z
         previousObjective: z.string().max(FREE_PLAY_OBJECTIVE_MAX).nullable(),
         previousNotes: z.string().max(FREE_PLAY_NOTES_MAX).nullable(),
         retiredObjective: z.string().max(FREE_PLAY_OBJECTIVE_MAX).nullable(),
+        objectiveRecovery: z.boolean().default(false),
+        verifiedInteractions: z.array(z.string().max(700)).max(FREE_PLAY_HARD_FAILURE_LIMIT).default([]),
+        decisionPreemptions: z.number().int().nonnegative().default(0),
       })
       .strict(),
     timing: z
@@ -278,6 +281,10 @@ export interface FreePlayView {
   localeForTurns: number | null;
   /** A stale objective the loop retired after warning him, shown once. */
   retiredObjective: string | null;
+  /** True until play reaches a semantic state outside the loop that retired the objective. */
+  objectiveRecovery: boolean;
+  /** Direct occupant interactions observed by the harness in this body generation. */
+  verifiedInteractions: readonly string[];
   /** Successful map transitions learned from this session's own actions. */
   learnedTransitions: readonly LearnedTransition[];
   /** The notes he wrote on the previous turn, verbatim. */
@@ -313,12 +320,23 @@ export interface FreePlayHardFailure {
   effect: string;
 }
 
+interface VerifiedInteraction {
+  readonly key: string;
+  readonly mapId: string;
+  readonly localId: number;
+  readonly graphicsId: number;
+  readonly x: number;
+  readonly y: number;
+  readonly dialog: string;
+  readonly count: number;
+}
+
 /**
  * The decision-maker. Returns an unvalidated value on purpose: a model can
  * emit anything, and rejecting it is part of what this loop must survive.
  */
 export interface FreePlayMind {
-  decide(view: FreePlayView): Promise<unknown>;
+  decide(view: FreePlayView, signal?: AbortSignal): Promise<unknown>;
 }
 
 export const FreePlayTurnSchema = z
@@ -440,27 +458,40 @@ const OBSERVED_KINDS: GbaEmulatorObservationKind[] = [
 ];
 
 /**
- * Somewhere for a person's message to wait until the next turn reads it.
+ * Somewhere for a person's latest message to wait until the player reads it.
  *
- * Injection is asynchronous — a question arrives while he is mid-decision — but
- * it is consumed at a turn boundary so it cannot interrupt an action already in
- * flight. Only the most recent message survives: a backlog of stale questions
- * answered several turns late reads worse than the newest one answered now.
+ * Injection is asynchronous. A message offered while the mind is deciding
+ * aborts that proposal so the same turn can be decided again with the new words.
+ * Only the most recent message survives: a backlog of stale questions answered
+ * several turns late reads worse than the newest one answered now.
  */
 export class InterjectionQueue {
   private pending: string | null = null;
+  private readonly listeners = new Set<() => void>();
 
   /** Called from outside the loop, whenever someone says something. */
   public offer(message: string): void {
     const trimmed = message.trim().slice(0, FREE_PLAY_INTERJECTION_MAX);
-    if (trimmed.length > 0) this.pending = trimmed;
+    if (trimmed.length === 0) return;
+    this.pending = trimmed;
+    for (const listener of this.listeners) listener();
   }
 
-  /** Taken once, at a turn boundary. */
+  /** Taken by the next proposal; a later offer preempts it with newer words. */
   public take(): string | null {
     const message = this.pending;
     this.pending = null;
     return message;
+  }
+
+  public hasPending(): boolean {
+    return this.pending !== null;
+  }
+
+  /** Wake an in-flight decision. The queued words remain available to {@link take}. */
+  public subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 }
 
@@ -586,6 +617,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
   let objectiveForTurns = 0;
   let staleObjectiveWarned = false;
   let retiredObjective: string | null = null;
+  let retiredLoopStates: Set<string> | null = null;
   let objectivesRetired = 0;
   let lastSpokeTurn: number | null = null;
   const volition: FreePlayVolition = { offered: 0, taken: 0, suppressed: 0, skipped: 0 };
@@ -593,6 +625,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
   const recentlySaid: string[] = [];
   const progress = new FreePlayProgressTracker();
   const hardFailures = new Map<string, FreePlayHardFailure>();
+  const verifiedInteractionMemory = new Map<string, VerifiedInteraction>();
   const initialObservations = observe(input.io);
   const initialPosition = positionOf(initialObservations);
   progress.seed(initialPosition);
@@ -609,7 +642,12 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
 
   for (let turn = 0; turn < input.turns; turn += 1) {
     if (input.shouldStop?.() === true) break;
-    const observations = observe(input.io);
+    let observations = observe(input.io);
+    const decisionFingerprint = semanticStateFingerprint(observations, input.framebufferSha256?.() ?? null);
+    if (retiredLoopStates !== null && !retiredLoopStates.has(decisionFingerprint)) {
+      retiredLoopStates = null;
+    }
+    const objectiveRecovery = retiredLoopStates !== null;
     const progressBefore = evidenceProgress(progress.snapshot());
     const sinceNewTile = progressBefore.turnsSinceNewTile;
     const recurringForTurns = recurringStateTurns(semanticStates);
@@ -621,8 +659,10 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
       objective !== null && objectiveForTurns >= FREE_PLAY_STALL_TURNS ? objectiveForTurns : null;
     const shownLocaleForTurns =
       currentMap !== null && localeForTurns >= FREE_PLAY_STALL_TURNS ? localeForTurns : null;
-    const refusedHere = progress.refusedFrom(positionOf(observations));
-    const knownHardFailures = hardFailuresFor(hardFailures, observations, input.provenance?.() ?? null);
+    let refusedHere = progress.refusedFrom(positionOf(observations));
+    let provenance = input.provenance?.() ?? null;
+    let knownHardFailures = hardFailuresFor(hardFailures, observations, provenance);
+    let verifiedInteractions = verifiedInteractionsFor(verifiedInteractionMemory, observations, provenance);
     const decisionStartedAt = clock().toISOString();
     const evidence: FreePlayTurnEvidence = {
       decision: stateEvidence(observations, input.provenance),
@@ -642,6 +682,9 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
         previousObjective: objective,
         previousNotes: notes,
         retiredObjective,
+        objectiveRecovery,
+        verifiedInteractions,
+        decisionPreemptions: 0,
       },
       timing: {
         decisionStartedAt,
@@ -671,46 +714,86 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
       speakWanted: false,
     };
 
-    // Taken at the boundary, before he decides, so a question reaches the turn
-    // it was asked during rather than interrupting one already dispatched.
-    const interjection = input.interjections?.take() ?? null;
+    // Taken before the first proposal. A later offer aborts that proposal and
+    // replaces this with the newest words without consuming a numbered turn.
+    let interjection = input.interjections?.take() ?? null;
     record.interjection = interjection;
 
     let raw: unknown;
+    let mindFailed = false;
+    let mindFailure: unknown;
     let objectiveWasStale = false;
     const retiredForView = retiredObjective;
-    try {
-      input.onPhase?.("thinking");
-      objectiveWasStale =
-        objective !== null && objectiveForTurns >= FREE_PLAY_STALL_TURNS && recurringForTurns !== null;
-      raw = await input.mind.decide({
-        turn,
-        observations,
-        framePng: framePngAt(input.framePng, positionOf(observations)),
-        refusedHere,
-        knownHardFailures,
-        // Only when he has a position to be stuck at: mid-battle and mid-warp
-        // the tile counter stalls for reasons that need no telling.
-        stalledForTurns,
-        repeatingForTurns,
-        recurringForTurns,
-        objectiveForTurns: shownObjectiveForTurns,
-        localeForTurns: shownLocaleForTurns,
-        retiredObjective: retiredForView,
-        learnedTransitions: progress.transitionsFrom(positionOf(observations)),
-        notes,
-        objective,
-        interjection,
-        turnsSinceSpoke: lastSpokeTurn === null ? null : turn - lastSpokeTurn,
-        audience: input.audience ?? null,
-        history: [...history],
-      });
-      evidence.timing.decisionSettledAt = clock().toISOString();
-    } catch (error) {
+    while (true) {
+      const interrupted = new AbortController();
+      const unsubscribe = input.interjections?.subscribe(() => interrupted.abort("room_interjection"));
+      try {
+        input.onPhase?.("thinking");
+        objectiveWasStale =
+          objective !== null && objectiveForTurns >= FREE_PLAY_STALL_TURNS && recurringForTurns !== null;
+        const decision = input.mind.decide(
+          {
+            turn,
+            observations,
+            framePng: framePngAt(input.framePng, positionOf(observations)),
+            refusedHere,
+            knownHardFailures,
+            verifiedInteractions,
+            // Only when he has a position to be stuck at: mid-battle and mid-warp
+            // the tile counter stalls for reasons that need no telling.
+            stalledForTurns,
+            repeatingForTurns,
+            recurringForTurns,
+            objectiveForTurns: shownObjectiveForTurns,
+            localeForTurns: shownLocaleForTurns,
+            retiredObjective: retiredForView,
+            objectiveRecovery,
+            learnedTransitions: progress.transitionsFrom(positionOf(observations)),
+            notes,
+            objective,
+            interjection,
+            turnsSinceSpoke: lastSpokeTurn === null ? null : turn - lastSpokeTurn,
+            audience: input.audience ?? null,
+            history: [...history],
+          },
+          interrupted.signal,
+        );
+        raw =
+          input.interjections === undefined
+            ? await decision
+            : await Promise.race([decision, rejectOnAbort(interrupted.signal)]);
+      } catch (error) {
+        mindFailed = !interrupted.signal.aborted;
+        mindFailure = error;
+      } finally {
+        unsubscribe?.();
+      }
+      if (interrupted.signal.aborted || input.interjections?.hasPending() === true) {
+        evidence.signals.decisionPreemptions += 1;
+        interjection = input.interjections?.take() ?? interjection;
+        record.interjection = interjection;
+        observations = observe(input.io);
+        provenance = input.provenance?.() ?? null;
+        refusedHere = progress.refusedFrom(positionOf(observations));
+        knownHardFailures = hardFailuresFor(hardFailures, observations, provenance);
+        verifiedInteractions = verifiedInteractionsFor(verifiedInteractionMemory, observations, provenance);
+        const framebufferSha256 = input.framebufferSha256?.() ?? null;
+        record.observationSha256 = sha256(canonicalJson(observations));
+        record.framebufferSha256 = framebufferSha256;
+        evidence.decision = stateEvidence(observations, input.provenance);
+        evidence.signals.refusedHere = refusedHere;
+        evidence.signals.knownHardFailures = knownHardFailures;
+        evidence.signals.verifiedInteractions = verifiedInteractions;
+        mindFailed = false;
+        continue;
+      }
+      break;
+    }
+    evidence.timing.decisionSettledAt = clock().toISOString();
+    if (mindFailed) {
       // A model that errors must not end the playthrough; the turn is lost and
       // the loop continues so a long run survives a transient failure.
-      record.detail = bounded(error);
-      evidence.timing.decisionSettledAt = clock().toISOString();
+      record.detail = bounded(mindFailure);
       turns.push(finalize(record, evidence, input.onTurn));
       continue;
     }
@@ -732,7 +815,13 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     const priorObjective = objective;
     // Omission keeps an objective for custom minds; structured minds use null
     // to clear it and restate the string to keep it.
-    if (parsed.data.objective !== undefined) objective = parsed.data.objective?.trim() || null;
+    if (parsed.data.objective !== undefined) {
+      const proposed = parsed.data.objective?.trim() || null;
+      // Retirement is about the loop, not the exact wording of the goal. Keep
+      // the slot empty until play reaches a semantic state outside that loop,
+      // so paraphrasing the stale objective cannot resurrect it one turn later.
+      objective = objectiveRecovery && proposed !== null ? null : proposed;
+    }
     const objectiveChanged = objective !== priorObjective;
     objectiveForTurns = objective === null ? 0 : objectiveChanged ? 1 : objectiveForTurns + 1;
     if (objectiveWasStale && !objectiveChanged && priorObjective !== null) {
@@ -741,6 +830,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
         objectiveForTurns = 0;
         staleObjectiveWarned = false;
         retiredObjective = priorObjective;
+        retiredLoopStates = new Set(semanticStates);
         record.objectiveRetired = priorObjective;
         objectivesRetired += 1;
       } else {
@@ -814,26 +904,46 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
       }
     } else {
       try {
-        const result = await input.io.act(chosen);
-        evidence.actionResult = { source: "environment", result };
-        // A rejection arrives as a status, not only as a throw: the adapter fails
-        // closed on an illegal button, an exceeded frame bound, a missing
-        // capability, or a stale goal version. Both shapes are legitimate answers
-        // rather than crashes, so both keep the playthrough running.
-        if (result.status === "completed") {
-          record.outcome = "accepted";
-          accepted = true;
-          actionOutcome = result.outcome as Record<string, unknown>;
-          record.detail = bounded(JSON.stringify(result.outcome));
-        } else {
+        const remembered = hardFailuresFor(
+          hardFailures,
+          preActionObservations,
+          input.provenance?.() ?? null,
+        ).find((failure) => canonicalJson(failure.action) === canonicalJson(chosen));
+        if (remembered !== undefined) {
           record.outcome = "rejected_by_adapter";
-          record.detail = bounded(`${result.status}:${describeRejection(result)}`);
-          rejection = describeRejectionForPlayer(
-            result.status === "failed" ? result.errorCode : null,
-            describeRejection(result),
+          record.detail = `known_non_retryable:${remembered.errorCode}`;
+          rejection = described(
+            "rejected, nothing ran",
+            `unchanged capability evidence already produced ${remembered.errorCode}`,
           );
-          if (result.status === "failed") {
-            failure = { errorCode: result.errorCode, retryable: result.retryable };
+          evidence.actionResult = {
+            source: "body",
+            status: "rejected",
+            summary: `known_non_retryable:${remembered.errorCode}`,
+            advice: "the body was not called again because its capability evidence has not changed",
+          };
+        } else {
+          const result = await input.io.act(chosen);
+          evidence.actionResult = { source: "environment", result };
+          // A rejection arrives as a status, not only as a throw: the adapter fails
+          // closed on an illegal button, an exceeded frame bound, a missing
+          // capability, or a stale goal version. Both shapes are legitimate answers
+          // rather than crashes, so both keep the playthrough running.
+          if (result.status === "completed") {
+            record.outcome = "accepted";
+            accepted = true;
+            actionOutcome = result.outcome as Record<string, unknown>;
+            record.detail = bounded(JSON.stringify(result.outcome));
+          } else {
+            record.outcome = "rejected_by_adapter";
+            record.detail = bounded(`${result.status}:${describeRejection(result)}`);
+            rejection = describeRejectionForPlayer(
+              result.status === "failed" ? result.errorCode : null,
+              describeRejection(result),
+            );
+            if (result.status === "failed") {
+              failure = { errorCode: result.errorCode, retryable: result.retryable };
+            }
           }
         }
       } catch (error) {
@@ -885,6 +995,13 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     evidence.progressAfter = evidenceProgress(progress.snapshot());
     if (accepted && chosen.kind !== "load_checkpoint" && chosen.kind !== "restart_game") {
       progress.recordTransition(preActionObservations, chosen, afterObservations);
+      rememberVerifiedInteraction(
+        verifiedInteractionMemory,
+        preActionObservations,
+        afterObservations,
+        input.provenance?.() ?? null,
+        chosen,
+      );
     }
     semanticStates.push(semanticStateFingerprint(afterObservations, frameAfter));
     if (semanticStates.length > FREE_PLAY_STALL_TURNS) semanticStates.shift();
@@ -1066,6 +1183,133 @@ function hardFailuresFor(
   });
 }
 
+function verifiedInteractionsFor(
+  memory: ReadonlyMap<string, VerifiedInteraction>,
+  observations: readonly GbaEmulatorObservation[],
+  provenance: FreePlayProvenance | null,
+): string[] {
+  const overworld = overworldInteractionState(observations);
+  if (overworld === null) return [];
+  const current = new Set(
+    overworld.occupants.map((occupant) =>
+      interactionKey(provenance, overworld.mapId, occupant.localId, occupant.graphicsId),
+    ),
+  );
+  return [...memory.values()]
+    .filter((fact) => current.has(fact.key))
+    .map(
+      (fact) =>
+        `On ${fact.mapId}, pressing A while facing occupant localId ${String(fact.localId)}, ` +
+        `graphicsId ${String(fact.graphicsId)}, at (${String(fact.x)},${String(fact.y)}) opened dialog: ` +
+        `"${fact.dialog}"${fact.count === 1 ? "" : ` (${String(fact.count)} observed interactions)`}`,
+    );
+}
+
+function rememberVerifiedInteraction(
+  memory: Map<string, VerifiedInteraction>,
+  before: readonly GbaEmulatorObservation[],
+  after: readonly GbaEmulatorObservation[],
+  provenance: FreePlayProvenance | null,
+  action: FreePlayAction,
+): void {
+  if (action.kind !== "button_press" || action.button !== "a" || (action.repeat ?? 1) !== 1) {
+    return;
+  }
+  const overworld = overworldInteractionState(before);
+  if (overworld === null) return;
+  const ahead = aheadOf(overworld.x, overworld.y, overworld.facing);
+  const occupant = overworld.occupants.find(
+    (candidate) => candidate.x === ahead.x && candidate.y === ahead.y,
+  );
+  if (occupant === undefined) return;
+  const dialog = after.find((observation) => observation.kind === "dialog") as
+    | { data?: { lines?: readonly string[] } }
+    | undefined;
+  const text = dialog?.data?.lines?.join(" / ").trim().slice(0, 500);
+  if (text === undefined || text.length === 0) return;
+  const key = interactionKey(provenance, overworld.mapId, occupant.localId, occupant.graphicsId);
+  const prior = memory.get(key);
+  memory.delete(key);
+  memory.set(key, {
+    key,
+    mapId: overworld.mapId,
+    localId: occupant.localId,
+    graphicsId: occupant.graphicsId,
+    x: occupant.x,
+    y: occupant.y,
+    dialog: text,
+    count: (prior?.count ?? 0) + 1,
+  });
+  if (memory.size > FREE_PLAY_HARD_FAILURE_LIMIT) {
+    const oldest = memory.keys().next().value;
+    if (oldest !== undefined) memory.delete(oldest);
+  }
+}
+
+function overworldInteractionState(observations: readonly GbaEmulatorObservation[]): {
+  mapId: string;
+  x: number;
+  y: number;
+  facing: "north" | "east" | "south" | "west";
+  occupants: readonly { localId: number; graphicsId: number; x: number; y: number }[];
+} | null {
+  const overworld = observations.find((observation) => observation.kind === "overworld") as
+    | {
+        data?: {
+          position?: { mapId?: string; x?: number; y?: number };
+          facing?: "north" | "east" | "south" | "west";
+          occupants?: readonly { localId: number; graphicsId: number; x: number; y: number }[] | null;
+        };
+      }
+    | undefined;
+  const position = overworld?.data?.position;
+  const facing = overworld?.data?.facing;
+  const occupants = overworld?.data?.occupants;
+  if (
+    typeof position?.mapId !== "string" ||
+    typeof position.x !== "number" ||
+    typeof position.y !== "number" ||
+    facing === undefined ||
+    !Array.isArray(occupants)
+  ) {
+    return null;
+  }
+  return {
+    mapId: position.mapId,
+    x: position.x,
+    y: position.y,
+    facing,
+    occupants,
+  };
+}
+
+function aheadOf(
+  x: number,
+  y: number,
+  facing: "north" | "east" | "south" | "west",
+): { x: number; y: number } {
+  if (facing === "north") return { x, y: y - 1 };
+  if (facing === "east") return { x: x + 1, y };
+  if (facing === "south") return { x, y: y + 1 };
+  return { x: x - 1, y };
+}
+
+function interactionKey(
+  provenance: FreePlayProvenance | null,
+  mapId: string,
+  localId: number,
+  graphicsId: number,
+): string {
+  return canonicalJson({
+    body: provenance?.body ?? null,
+    sessionId: provenance?.sessionId ?? null,
+    bodyGeneration: provenance?.bodyGeneration ?? null,
+    mapId,
+    localId,
+    graphicsId,
+  });
+}
+
 /** Key only failures the body explicitly says are stable under unchanged capability evidence. */
 function stableHardFailureKey(
   observations: readonly GbaEmulatorObservation[],
@@ -1073,6 +1317,17 @@ function stableHardFailureKey(
   action: FreePlayAction,
   errorCode: string,
 ): string | null {
+  if (errorCode === "semantic_state_unavailable" && semanticHelper(action)) {
+    return canonicalJson({
+      body: provenance?.body ?? null,
+      sessionId: provenance?.sessionId ?? null,
+      bodyGeneration: provenance?.bodyGeneration ?? null,
+      adapterVersion: provenance?.adapterVersion ?? null,
+      coreId: provenance?.coreId ?? null,
+      action,
+      semanticState: semanticStateFingerprint(observations, null),
+    });
+  }
   if (errorCode !== "walk_exit_unsupported" || action.kind !== "walk_to") return null;
   const overworld = observations.find((observation) => observation.kind === "overworld") as
     | {
@@ -1102,6 +1357,25 @@ function stableHardFailureKey(
     mapId: overworld?.data?.position?.mapId ?? null,
     action,
     exit,
+  });
+}
+
+function semanticHelper(action: FreePlayAction): boolean {
+  return (
+    action.kind === "walk_to" ||
+    action.kind === "advance_dialog" ||
+    action.kind === "enter_text" ||
+    action.kind === "select_menu_entry"
+  );
+}
+
+function rejectOnAbort(signal: AbortSignal): Promise<never> {
+  return new Promise((_, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
   });
 }
 

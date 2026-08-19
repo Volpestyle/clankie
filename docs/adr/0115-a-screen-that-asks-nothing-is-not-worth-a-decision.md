@@ -69,6 +69,19 @@ decode and work again on the next one that does, and `advance_dialog`'s
 recommendation is conditioned on the scene decoding. ADR 0110 fixed the hint;
 this fixes the sentence that taught the belief in the first place.
 
+A hosted battle can expose `scene.mode: battle` while its general state is null.
+`advance_dialog` still runs there: the host's dedicated FireRed dialog decoder
+reads the battle text directly and stops at the action menu. The scene mode is
+the capability evidence the mind needs; a separate battle or dialog observation
+is not required.
+
+**An unchanged non-retryable semantic refusal is dispatched once.** The loop
+keys a semantic helper's `semantic_state_unavailable` result to body generation,
+adapter version, action, and the current semantic state. If the model chooses
+the same helper under the same capability evidence, the loop returns the known
+refusal without calling the body again. A changed observation or body
+generation removes the match automatically.
+
 **"Nothing decodes" is the scene's mode, asked directly.** `heldScreenAdvice`
 branches on `mode === "unknown"` rather than on `stateCertain`. The question it
 asks is a property of the screen, and the scene observation is where that lives
@@ -82,6 +95,10 @@ the same prompt, which is what the journal shows him quoting back before each
 wasted turn. The three defects were all cases of the harness asserting
 something false with confidence, so the change is subtractive: the fix is
 removing the false sentences, not adding advice on top of them.
+
+A scene-only battle and the body now agree on `advance_dialog`. Stable
+capability memory also keeps a real refusal from becoming an argument between
+player and harness across later turns.
 
 The local body gains the ADR 0110 advice it never rendered. No deterministic
 scenario changes: `stateCertain` keeps its per-body meaning and the scripted

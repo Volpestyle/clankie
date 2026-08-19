@@ -27,7 +27,11 @@ The free-play loop keeps three bounded, harness-owned facts above `GbaDriverIo`:
 3. Objective and map tenure are reported once they cross the existing
    twelve-turn stall threshold. If one objective remains unchanged through two
    consecutive decisions with recurring-state evidence, the loop retires it.
-   Retirement chooses neither an action nor a replacement objective.
+   Retirement chooses neither an action nor a replacement objective. It keeps
+   the objective slot empty while play remains in the retired loop's semantic
+   states, then opens the slot as soon as the body reaches a state outside that
+   set. Rephrasing the stale objective is not world progress and cannot
+   resurrect it.
 
 `null` explicitly clears an objective; omission retains it for custom minds.
 Structured model calls repeat the current objective text when they want to keep
@@ -47,7 +51,9 @@ flowchart LR
   V --> M
   R --> S{Objective stale\nfor two warned turns?}
   S -->|yes| C[Clear objective only]
-  C --> V
+  C --> L{State outside\nretired loop?}
+  L -->|no: keep slot empty| V
+  L -->|yes: reopen slot| V
 ```
 
 ## Alternatives considered
@@ -60,6 +66,8 @@ flowchart LR
   would replace the model as player.
 - Prompt-only warnings were rejected because they cannot bound stale objective
   anchoring.
+- Comparing objective strings semantically was rejected because another model
+  judgement cannot prove the body escaped a loop. The observed state can.
 
 ## Consequences
 

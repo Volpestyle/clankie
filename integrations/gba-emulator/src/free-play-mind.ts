@@ -258,6 +258,8 @@ export const FREE_PLAY_SYSTEM_PROMPT = [
   "An occupant's graphicsId describes its sprite, not its identity. Keep people",
   "unnamed until dialog or a prior verified interaction establishes who they are;",
   "never turn 'person on this tile' into Oak, Green, or anyone else by guesswork.",
+  "Verified direct-interaction results are observed effects, newer and more",
+  "reliable than your notes when the two conflict.",
   "",
   "When text is on screen and the scene decodes, use advance_dialog rather than",
   "pressing A box by box.",
@@ -342,13 +344,14 @@ export function createModelFreePlayMind(options: ModelFreePlayMindOptions): Free
     .join("\n\n");
 
   return {
-    async decide(view: FreePlayView): Promise<unknown> {
+    async decide(view: FreePlayView, signal?: AbortSignal): Promise<unknown> {
       // Streamed on purpose. The Codex OAuth endpoint rejects a non-streaming
       // request outright with `{"detail":"Stream must be set to true"}`, and
       // streaming is accepted by every other configured provider, so this is
       // the portable call. The final object is still awaited whole — nothing
       // downstream consumes partial decisions.
       const deadline = modelRequestAbortSignal(options.requestTimeoutMs);
+      const requestSignal = signal === undefined ? deadline : AbortSignal.any([deadline, signal]);
       const stream = streamObject({
         model: options.model,
         schema: FreePlayWireDecisionSchema,
@@ -376,7 +379,7 @@ export function createModelFreePlayMind(options: ModelFreePlayMindOptions): Free
           },
         ],
         maxRetries: options.maxRetries ?? 1,
-        abortSignal: deadline,
+        abortSignal: requestSignal,
         providerOptions: options.providerOptions ?? {},
       });
 
@@ -394,7 +397,7 @@ export function createModelFreePlayMind(options: ModelFreePlayMindOptions): Free
       } catch {
         // The same failure is reported by awaiting the settled object below.
       }
-      return toDecision(await settleWithinDeadline(settled, deadline));
+      return toDecision(await settleWithinDeadline(settled, requestSignal));
     },
   };
 }
@@ -439,8 +442,18 @@ export function renderView(view: FreePlayView): string {
   if (view.retiredObjective !== null) {
     lines.push("", `A stale objective was retired after repeated-state evidence: ${view.retiredObjective}`);
   }
+  if (view.objectiveRecovery) {
+    lines.push(
+      "The objective slot stays empty until you reach a semantic state outside that retired loop; " +
+        "renaming the same objective does not count as progress.",
+    );
+  }
   if (view.notes !== null && view.notes.length > 0) {
     lines.push("", "Your notes:", `  ${view.notes}`);
+  }
+  if (view.verifiedInteractions.length > 0) {
+    lines.push("", "Verified direct interaction results (effects, not guessed identities):");
+    for (const interaction of view.verifiedInteractions) lines.push(`  ${interaction}`);
   }
   if (view.learnedTransitions.length > 0) {
     lines.push("", "Transitions your own actions completed earlier:");
@@ -530,6 +543,15 @@ function heldScreenAdvice(observations: FreePlayView["observations"]): string | 
       "truth here: button_press and frame_advance are the only actions that will run. " +
       "A advances these screens and B does not leave them; when a run of them asks you " +
       "nothing, one button_press with a repeat clears several for a single decision."
+    );
+  }
+  if (
+    data.mode === "battle" &&
+    !observations.some((observation) => observation.kind === "battle" || observation.kind === "dialog")
+  ) {
+    return (
+      "Scene is a battle and input is not ready — use advance_dialog, not frame_advance. " +
+      "The hosted body reads battle text with its dedicated decoder even when the general battle view is absent."
     );
   }
   if (certainty(observations) === false) {

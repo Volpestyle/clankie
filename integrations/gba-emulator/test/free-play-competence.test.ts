@@ -340,6 +340,8 @@ function viewWith(observations: GbaEmulatorObservation[]): FreePlayView {
     objectiveForTurns: null,
     localeForTurns: null,
     retiredObjective: null,
+    objectiveRecovery: false,
+    verifiedInteractions: [],
     learnedTransitions: [],
     notes: null,
     objective: null,

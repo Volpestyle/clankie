@@ -64,8 +64,19 @@ text the repo already treats as input rather than instruction; it does not
 become a route because it arrives faster.
 
 Delivery happens at the ingress boundary before the voice-presence ask and the
-captain turn, both of which await model calls. An interjection that lands after
-the reply is an interjection into the turn after the one it is about.
+captain turn, both of which await model calls. The play queue notifies an
+in-flight game decision: its abort signal invalidates that proposal, and the
+same numbered turn is decided again from fresh observations with the newest
+admitted line. Superseded decisions never dispatch an action or enter the
+journal; the settled turn records how many proposals the room preempted.
+
+An action the body has already accepted remains the body's work. The hosted
+world protocol has no cancellation operation, and pretending a disconnected
+request undid an action would allow the next decision to race a walk that is
+still changing the game. A line arriving during an action therefore waits for
+that action's truthful settlement and preempts the following model decision.
+Body-level cooperative cancellation is the upgrade path when every body can
+report a terminal cancelled result.
 
 ## Consequences
 
@@ -83,3 +94,6 @@ the reply is an interjection into the turn after the one it is about.
 - A busy channel feeds a playthrough every admitted message. The
   interjection queue's existing bound is what keeps that from becoming a
   backlog he answers long after the room moves on.
+- A model request no longer adds a full turn of steering latency. A body action
+  still defines the safe cancellation boundary until its protocol says
+  otherwise.

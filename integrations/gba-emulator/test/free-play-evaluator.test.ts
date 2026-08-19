@@ -126,6 +126,9 @@ function evidence(start: number, end: number, status: "completed" | "failed") {
       previousObjective: "walk east",
       previousNotes: "the north path is blocked",
       retiredObjective: null,
+      objectiveRecovery: false,
+      verifiedInteractions: [],
+      decisionPreemptions: 0,
     },
     timing: {
       decisionStartedAt: "2026-08-17T01:00:00.000Z",
