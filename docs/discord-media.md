@@ -43,7 +43,12 @@ The official bot is the audible path. It must already be in voice and requires
 `yt-dlp`, FFmpeg, native Opus, the brokered `discord_bot` token, the bot voice
 bearer, and an `openai` API credential for spoken conversation. Music audio is
 decoded to PCM and played through `@discordjs/voice`; no YouTube API key or
-YouTube account credential is used.
+YouTube account credential is used. Speech and music each have a player.
+Speech steals the connection subscription, which pauses the music player
+(`NoSubscriberBehavior.Pause`) without killing yt-dlp/ffmpeg; when speech
+ends the subscription returns and music unpauses. Music controls only pause
+or stop the resource the music sink owns. Play-narration is held while a
+requested track is still starting.
 
 Playback first asks YouTube's token-free embedded client for a direct audio-only
 format. If that fails before the first PCM frame, the one retry uses a

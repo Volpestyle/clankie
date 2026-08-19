@@ -1,7 +1,14 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { AudioPlayerStatus, createAudioResource, StreamType, type AudioPlayer } from "@discordjs/voice";
+import {
+  AudioPlayerStatus,
+  createAudioResource,
+  entersState,
+  StreamType,
+  type AudioPlayer,
+  type AudioResource,
+} from "@discordjs/voice";
 
 /**
  * Shared DJ queue for the active Discord mouth.
@@ -35,6 +42,7 @@ export interface VoiceMusicSnapshot {
   readonly current: VoiceMusicTrack | undefined;
   readonly queued: readonly VoiceMusicTrack[];
   readonly paused: boolean;
+  readonly starting: boolean;
   readonly sink: "audio" | "video";
 }
 
@@ -96,6 +104,7 @@ const MAX_QUEUE = 32;
 const MAX_SEARCH_RESULTS = 5;
 const PENDING_PICK_TTL_MS = 120_000;
 const SEARCH_TIMEOUT_MS = 15_000;
+const PLAYER_HANDOFF_TIMEOUT_MS = 120_000;
 
 export interface YouTubeSearchHit {
   readonly videoId: string;
@@ -123,6 +132,7 @@ export class VoiceMusicQueue {
   private readonly queued: TrackedVoiceMusicTrack[] = [];
   private current: TrackedVoiceMusicTrack | undefined;
   private paused = false;
+  private starting = false;
   private readonly sinkKind: "audio" | "video";
   private readonly searchImpl: typeof searchYouTube;
   private readonly now: () => number;
@@ -201,6 +211,7 @@ export class VoiceMusicQueue {
       current: this.current?.track,
       queued: this.queued.map((entry) => entry.track),
       paused: this.paused,
+      starting: this.starting,
       sink: this.sinkKind,
     };
   }
@@ -272,6 +283,7 @@ export class VoiceMusicQueue {
     if (next === undefined) {
       this.current = undefined;
       this.paused = false;
+      this.starting = false;
       this.emit("skip", "queue", "skipped", trace);
       return "Skipped. Queue is empty.";
     }
@@ -318,6 +330,7 @@ export class VoiceMusicQueue {
     this.current = undefined;
     this.queued.length = 0;
     this.paused = false;
+    this.starting = false;
     this.emit("stop", "queue", "stopped", trace);
     return "Stopped.";
   }
@@ -341,6 +354,7 @@ export class VoiceMusicQueue {
     if (next === undefined) {
       const trace = this.current?.trace;
       this.current = undefined;
+      this.starting = false;
       this.sink.stop();
       this.emit("ended", "queue", "ended", trace);
       return;
@@ -355,12 +369,15 @@ export class VoiceMusicQueue {
   ): Promise<string> {
     this.current = track;
     this.paused = false;
+    this.starting = true;
     try {
       await this.sink.play(track.track.url, track.trace);
     } catch {
       this.current = undefined;
       this.emit(operation, "queue", "failed", track.trace, { code: "music_sink_rejected" });
       return "I couldn't start that track.";
+    } finally {
+      this.starting = false;
     }
     this.emit(operation, "queue", "started", track.trace);
     return this.sinkKind === "video" ? `Streaming ${track.track.url}` : `Playing ${track.track.url}`;
@@ -603,11 +620,10 @@ export function parseYtDlpSearchJson(raw: string): YouTubeSearchHit[] {
 }
 
 /**
- * YouTube → PCM → the shared voice AudioPlayer.
+ * YouTube → PCM → a dedicated music AudioPlayer.
  *
- * Used when the official bot is the mouth, or when the lab body has no
- * video sink. Ducking stops the pipeline and remembers elapsed time so
- * speech can own the player, then restarts with `-ss`.
+ * Speech uses a different player and steals the connection subscription.
+ * Pause and duck leave yt-dlp/ffmpeg running; resume is `unpause`.
  */
 export function createYoutubeAudioSink(options: {
   readonly player: AudioPlayer;
@@ -623,7 +639,13 @@ export function createYoutubeAudioSink(options: {
   let startedAt = 0;
   let seekSeconds = 0;
   let pipelineGeneration = 0;
+  let resource: AudioResource | undefined;
   let pendingStart: { readonly generation: number; readonly reject: (error: Error) => void } | undefined;
+
+  const ownsPlayer = (): boolean =>
+    resource !== undefined &&
+    options.player.state.status !== AudioPlayerStatus.Idle &&
+    options.player.state.resource === resource;
 
   const emit = (
     operation: VoiceMusicTraceEvent["operation"],
@@ -773,7 +795,8 @@ export function createYoutubeAudioSink(options: {
       };
       options.player.on("stateChange", onPlayerState);
       removePlayerListener = () => options.player.off("stateChange", onPlayerState);
-      options.player.play(createAudioResource(output, { inputType: StreamType.Raw }));
+      resource = createAudioResource(output, { inputType: StreamType.Raw });
+      options.player.play(resource);
       emit(operation, "player", "submitted", trace, { code: attemptCode });
       output.once("end", () => {
         if (!receivedAudio) {
@@ -795,6 +818,22 @@ export function createYoutubeAudioSink(options: {
     currentUrl = url;
     currentTrace = trace;
     seekSeconds = seek;
+    if (ownsPlayer()) options.player.stop(true);
+    resource = undefined;
+    const handoffGeneration = pipelineGeneration;
+    try {
+      await entersState(options.player, AudioPlayerStatus.Idle, PLAYER_HANDOFF_TIMEOUT_MS);
+    } catch (error) {
+      emit(operation, "player", "failed", trace, { code: "handoff_timeout" });
+      currentUrl = undefined;
+      currentTrace = undefined;
+      seekSeconds = 0;
+      stopChildren();
+      throw error;
+    }
+    if (handoffGeneration !== pipelineGeneration || currentUrl !== url) {
+      throw new Error("music pipeline stopped");
+    }
     startedAt = Date.now();
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const generation = pipelineGeneration;
@@ -837,13 +876,23 @@ export function createYoutubeAudioSink(options: {
     },
     pause() {
       if (currentUrl === undefined) return;
-      seekSeconds += Math.max(0, (Date.now() - startedAt) / 1_000);
-      stopChildren();
-      options.player.pause(true);
+      if (startedAt > 0) {
+        seekSeconds += Math.max(0, (Date.now() - startedAt) / 1_000);
+        startedAt = 0;
+      }
+      if (ownsPlayer()) options.player.pause(true);
       emit("pause", "player", "paused", currentTrace);
     },
     resume() {
       if (currentUrl === undefined) return;
+      if (children.length > 0) {
+        startedAt = Date.now();
+        if (ownsPlayer() || options.player.state.status === AudioPlayerStatus.Paused) {
+          options.player.unpause();
+        }
+        emit("resume", "player", "playing", currentTrace);
+        return;
+      }
       void startAt(currentUrl, seekSeconds, currentTrace, "resume").catch(() => undefined);
     },
     stop() {
@@ -852,7 +901,8 @@ export function createYoutubeAudioSink(options: {
       currentTrace = undefined;
       seekSeconds = 0;
       stopChildren();
-      options.player.stop(true);
+      if (ownsPlayer()) options.player.stop(true);
+      resource = undefined;
       emit("stop", "player", "stopped", trace);
     },
   };

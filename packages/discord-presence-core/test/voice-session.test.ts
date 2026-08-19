@@ -95,6 +95,11 @@ vi.mock("@discordjs/voice", async () => {
       return true;
     }
 
+    public unpause(): boolean {
+      if (this.state.status === "paused") this.setStatus("playing");
+      return true;
+    }
+
     private setStatus(status: string): void {
       const previous = this.state;
       this.state = { status };
@@ -2166,6 +2171,36 @@ describe("possessor narration bursts (ADR 0064)", () => {
     expect(suppressed).toHaveLength(2);
     expect(suppressed.every((event) => event.reason === "rate_limited")).toBe(true);
     expect(new Set(suppressed.map((event) => event.deliveryId)).size).toBe(2);
+  });
+
+  it("holds a report while a requested track is still starting", async () => {
+    let releasePlay: (() => void) | undefined;
+    const playStarted = new Promise<void>((resolve) => {
+      releasePlay = resolve;
+    });
+    const music = new VoiceMusicQueue({
+      sinkKind: "audio",
+      sink: {
+        play: () => playStarted,
+        pause: () => undefined,
+        resume: () => undefined,
+        stop: () => undefined,
+      },
+    });
+    const harness = await joinedHarness({ music, narrationMinIntervalMs: 0 });
+    const started = harness.session.music.play("https://youtu.be/one", "u1");
+    await flush();
+    expect(harness.session.music.snapshot().starting).toBe(true);
+
+    await harness.session.narrate("walked into the lab", { deliveryId: "play-turn-start" });
+    await flush();
+    expect(harness.ofType("possessor_narration_suppressed")).toMatchObject([
+      { deliveryId: "play-turn-start", reason: "playing" },
+    ]);
+
+    releasePlay?.();
+    await started;
+    expect(harness.session.music.snapshot().starting).toBe(false);
   });
 
   it("holds a report while a room response is still in flight", async () => {

@@ -2,7 +2,7 @@ import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { createServer } from "node:http";
 import { PassThrough } from "node:stream";
-import type { AudioPlayer } from "@discordjs/voice";
+import { AudioPlayerStatus, type AudioPlayer, type AudioResource } from "@discordjs/voice";
 import { describe, expect, it, vi } from "vitest";
 import {
   VoiceMusicQueue,
@@ -33,6 +33,36 @@ function recordingSink(): VoiceMusicSink & { calls: string[] } {
       calls.push("stop");
     },
   };
+}
+
+function audioPlayer(initialState: AudioPlayer["state"] = { status: AudioPlayerStatus.Idle }) {
+  const emitter = new EventEmitter();
+  let state = initialState;
+  const setState = (next: AudioPlayer["state"]): void => {
+    const previous = state;
+    state = next;
+    emitter.emit("stateChange", previous, next);
+    emitter.emit(next.status, previous, next);
+  };
+  const play = vi.fn((resource: AudioResource) => {
+    setState({ status: AudioPlayerStatus.Playing, resource } as AudioPlayer["state"]);
+  });
+  const pause = vi.fn(() => true);
+  const unpause = vi.fn(() => true);
+  const stop = vi.fn(() => {
+    setState({ status: AudioPlayerStatus.Idle });
+    return true;
+  });
+  const player = Object.assign(emitter, {
+    get state() {
+      return state;
+    },
+    play,
+    pause,
+    unpause,
+    stop,
+  }) as unknown as AudioPlayer;
+  return { player, play, pause, unpause, stop, setState };
 }
 
 const hits = [
@@ -224,11 +254,7 @@ describe("voice music queue", () => {
       }
       return child;
     }) as typeof import("node:child_process").spawn;
-    const player = Object.assign(new EventEmitter(), {
-      play: vi.fn(),
-      pause: vi.fn(),
-      stop: vi.fn(),
-    }) as unknown as AudioPlayer;
+    const { player } = audioPlayer();
     const queue = new VoiceMusicQueue({
       sink: createYoutubeAudioSink({ player, spawnImpl, trace: (event) => events.push(event) }),
       sinkKind: "audio",
@@ -274,6 +300,76 @@ describe("voice music queue", () => {
         expect.objectContaining({ component: "queue", outcome: "started", current: true }),
       ]),
     );
+    queue.stop();
+  });
+
+  it("waits for speech and never pauses or stops a foreign player resource", async () => {
+    const speech = {} as AudioResource;
+    const nextSpeech = {} as AudioResource;
+    const fake = audioPlayer({ status: AudioPlayerStatus.Playing, resource: speech } as AudioPlayer["state"]);
+    const spawnImpl = ((command: string) => {
+      const stdout = new PassThrough();
+      const child = Object.assign(new EventEmitter(), {
+        stdin: command === "ffmpeg" ? new PassThrough() : null,
+        stdout,
+        stderr: new PassThrough(),
+        kill: vi.fn(() => true),
+      }) as unknown as ChildProcess;
+      if (command === "ffmpeg") queueMicrotask(() => stdout.write(Buffer.alloc(4)));
+      return child;
+    }) as typeof import("node:child_process").spawn;
+    const sink = createYoutubeAudioSink({ player: fake.player, spawnImpl });
+
+    const started = Promise.resolve(sink.play("https://youtu.be/one"));
+    expect(fake.play).not.toHaveBeenCalled();
+    fake.setState({ status: AudioPlayerStatus.Idle });
+    await started;
+    expect(fake.play).toHaveBeenCalledOnce();
+
+    fake.pause.mockClear();
+    fake.stop.mockClear();
+    fake.setState({ status: AudioPlayerStatus.Playing, resource: nextSpeech } as AudioPlayer["state"]);
+    sink.pause();
+    sink.stop();
+    expect(fake.pause).not.toHaveBeenCalled();
+    expect(fake.stop).not.toHaveBeenCalled();
+  });
+
+  it("ducks and unducks without killing yt-dlp or ffmpeg", async () => {
+    const events: VoiceMusicTraceEvent[] = [];
+    const kill = vi.fn(() => true);
+    const spawnImpl = ((command: string) => {
+      const stdout = new PassThrough();
+      const child = Object.assign(new EventEmitter(), {
+        stdin: command === "ffmpeg" ? new PassThrough() : null,
+        stdout,
+        stderr: new PassThrough(),
+        kill,
+      }) as unknown as ChildProcess;
+      if (command === "ffmpeg") queueMicrotask(() => stdout.write(Buffer.alloc(4)));
+      return child;
+    }) as typeof import("node:child_process").spawn;
+    const fake = audioPlayer();
+    const queue = new VoiceMusicQueue({
+      sink: createYoutubeAudioSink({ player: fake.player, spawnImpl, trace: (event) => events.push(event) }),
+      sinkKind: "audio",
+      trace: (event) => events.push(event),
+    });
+    await queue.play("https://youtu.be/one", "u1", { source: "control", callId: "call-1" });
+    const killsAfterStart = kill.mock.calls.length;
+    queue.duck();
+    queue.unduck();
+    expect(kill.mock.calls.length).toBe(killsAfterStart);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ operation: "duck", outcome: "ducked" }),
+        expect.objectContaining({ operation: "unduck", outcome: "unducked" }),
+      ]),
+    );
+    expect(events.some((event) => event.code === "sigkill")).toBe(false);
+    expect(
+      events.filter((event) => event.operation === "resume" && event.component === "yt_dlp"),
+    ).toHaveLength(0);
     queue.stop();
   });
 

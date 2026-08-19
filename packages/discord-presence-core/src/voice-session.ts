@@ -489,6 +489,7 @@ export class DiscordVoiceSession {
   private readonly timers: RealtimeTimers;
   private readonly consent: DiscordVoiceConsentRegistry;
   private readonly player: AudioPlayer;
+  private readonly musicPlayer: AudioPlayer;
   public readonly music: VoiceMusicQueue;
   private floor: VoiceFloor;
   private connection: VoiceConnection | undefined;
@@ -568,6 +569,9 @@ export class DiscordVoiceSession {
     this.consent = new DiscordVoiceConsentRegistry(options.consentPolicy);
     this.floor = new VoiceFloor(options.floor);
     this.narrationMinIntervalMs = options.narrationMinIntervalMs ?? DEFAULT_NARRATION_MIN_INTERVAL_MS;
+    this.musicPlayer = createAudioPlayer({
+      behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
+    });
     this.player = createAudioPlayer({
       behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
     });
@@ -580,7 +584,7 @@ export class DiscordVoiceSession {
         sink:
           options.musicVideo ??
           createYoutubeAudioSink({
-            player: this.player,
+            player: this.musicPlayer,
             trace: traceMusic,
             onEnded: () => {
               void this.music.ended();
@@ -621,7 +625,7 @@ export class DiscordVoiceSession {
       await this.probeTranscription();
       this.channelMembers = new Set(this.occupantIds(input.guildId, input.channelId));
       connection.receiver.speaking.on("start", this.onSpeakingStart);
-      connection.subscribe(this.player);
+      connection.subscribe(this.musicPlayer);
       await this.emitSafely({
         type: "joined",
         guildId: input.guildId,
@@ -713,6 +717,7 @@ export class DiscordVoiceSession {
     this.captures.clear();
     this.music.stop();
     this.player.stop(true);
+    this.musicPlayer.stop(true);
     this.consent.close();
     this.connection = undefined;
     this.guildId = undefined;
@@ -833,21 +838,24 @@ export class DiscordVoiceSession {
       // the one allowed to speak.
       const deliveryId = options?.deliveryId ?? randomUUID();
       const playing = this.isPlaying();
+      const startingTrack = this.music.snapshot().starting;
       const rateLimited = this.clock() - this.lastNarrationResponseAtMs < this.narrationMinIntervalMs;
       // A response already asked for is not audible yet, so `playing` cannot
       // see it, and the narration rate limit only clocks other narrations —
       // a room turn in flight passes both. Asking for a second response earns
       // "conversation already has active response" from the server and the
       // narration is lost, so the wait is taken here where it is receipted.
+      // A requested track still spinning up yt-dlp is the same: speaking
+      // would duck it into a restart. Receipt as `playing`.
       const responding = this.pendingResponses.some((candidate) => !candidate.done);
-      if (playing || rateLimited || responding) {
+      if (playing || startingTrack || rateLimited || responding) {
         this.stayNarrationSuppressed += 1;
         await this.emitSafely({
           type: "possessor_narration_suppressed",
           guildId,
           channelId,
           deliveryId,
-          reason: playing ? "playing" : rateLimited ? "rate_limited" : "responding",
+          reason: playing || startingTrack ? "playing" : rateLimited ? "rate_limited" : "responding",
         });
         return;
       }
@@ -2257,6 +2265,7 @@ export class DiscordVoiceSession {
     this.playingJob = job;
     job.startedAtMs = this.clock();
     this.music.duck();
+    this.connection?.subscribe(this.player);
     this.player.play(createAudioResource(job.stream, { inputType: StreamType.Raw }));
     try {
       await entersState(this.player, AudioPlayerStatus.Idle, PLAYBACK_TIMEOUT_MS);
@@ -2272,6 +2281,7 @@ export class DiscordVoiceSession {
     } finally {
       const playbackMs = Math.max(0, this.clock() - (job.startedAtMs ?? this.clock()));
       this.playingJob = undefined;
+      this.connection?.subscribe(this.musicPlayer);
       this.music.unduck();
       for (const buffer of job.buffers) buffer.fill(0);
       const pending = job.pending;
