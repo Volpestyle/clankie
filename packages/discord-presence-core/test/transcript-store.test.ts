@@ -52,6 +52,15 @@ describe("DiscordVoiceTranscriptStore", () => {
     expect(entries[0]).toMatchObject({ body: "bot", speakerId: "830574404453793842" });
     expect((await stat(path)).mode & 0o777).toBe(0o600);
     expect((await stat(join(root, "state"))).mode & 0o777).toBe(0o700);
+
+    const recent = await store.read(undefined, 1);
+    expect(recent.entries.map((entry) => entry.text)).toEqual(["second exact line"]);
+    expect(recent.nextCursor).toBe("000000000002");
+    expect(recent.hasMore).toBe(false);
+
+    await store.append("bot", transcript("third exact line", "delivery-3"));
+    const tail = await store.read(recent.nextCursor, 1);
+    expect(tail.entries.map((entry) => entry.text)).toEqual(["third exact line"]);
   });
 
   it("refuses a symlink target", async () => {

@@ -7,7 +7,12 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { serve } from "@hono/node-server";
+import { serve, type WebSocketServerLike } from "@hono/node-server";
+import {
+  MAX_REALTIME_AUDIO_APPEND_BYTES,
+  createVoiceRealtimePorts,
+  parseVoiceRealtimeEnv,
+} from "@clankie/discord-presence-core";
 import { defaultGbaBodyRootDir, observeBodyHolder } from "@clankie/body-lock";
 import {
   createDefaultCredentialStore,
@@ -21,10 +26,12 @@ import {
 import { createLogger } from "@clankie/observability";
 import {
   applyDiscordSettingsToEnvironment,
+  applyVoiceSettingsToEnvironment,
   discordAttachmentRoot,
   parsePositiveInt,
   SettingsStore,
 } from "@clankie/settings";
+import { WebSocketServer } from "ws";
 import { createBearerAuthenticator, createClankieApp, type ClankieApp } from "./app.ts";
 import { ActivityObservationProjection } from "./activity-observation.ts";
 import { PlaySightProjection } from "./play-sight.ts";
@@ -69,7 +76,10 @@ loadRepoEnvFile();
 // existing environment entries win, so a deliberate override still overrides.
 const settingsStore = new SettingsStore();
 const startupSettings = await settingsStore.load();
-const settingsFilledDiscordNames = applyDiscordSettingsToEnvironment(startupSettings.discord);
+const settingsFilledNames = [
+  ...applyDiscordSettingsToEnvironment(startupSettings.discord),
+  ...applyVoiceSettingsToEnvironment(startupSettings.voice),
+];
 
 const stateRoot = process.env.CLANKIE_STATE?.trim() || join(homedir(), ".clankie");
 const runnerStateRoot = process.env.CLANKIE_RUNNER_STATE ?? join(stateRoot, "runner");
@@ -77,6 +87,21 @@ const eventLogPath = process.env.CLANKIE_EVENT_LOG?.trim() || join(stateRoot, "e
 
 const operatorCredentialStore = createDefaultCredentialStore();
 await ensureOperatorCredential({ env: process.env, store: operatorCredentialStore });
+const localVoiceConfig = parseVoiceRealtimeEnv(process.env);
+const localVoiceCredential = await operatorCredentialStore.get(localVoiceConfig.realtimeProvider);
+const localVoiceElevenLabsCredential =
+  localVoiceConfig.ttsProvider === "elevenlabs" ? await operatorCredentialStore.get("elevenlabs") : undefined;
+const localVoiceRealtime =
+  localVoiceCredential?.type === "api" &&
+  (localVoiceConfig.ttsProvider !== "elevenlabs" || localVoiceElevenLabsCredential?.type === "api")
+    ? createVoiceRealtimePorts({
+        apiKey: localVoiceCredential.key,
+        ...(localVoiceElevenLabsCredential?.type === "api"
+          ? { elevenLabsApiKey: localVoiceElevenLabsCredential.key }
+          : {}),
+        config: localVoiceConfig,
+      })
+    : undefined;
 const runnerToken =
   process.env.CLANKIE_RUNNER_TOKEN ??
   (await ensureRunnerCredential({ env: process.env, store: operatorCredentialStore }));
@@ -328,7 +353,9 @@ const captain = createCaptain(
 const clankie = await createClankieApp({
   captain,
   memory,
+  settings: settingsStore,
   mediaGenerator,
+  ...(localVoiceRealtime === undefined ? {} : { localVoiceRealtime }),
   ...(discordPresenceRuntime === undefined ? {} : { discordPresenceRuntime }),
   ...(discordUserPresenceRuntime === undefined ? {} : { discordUserPresenceRuntime }),
   ...(browserHost === undefined ? {} : { browserTools: browserHost }),
@@ -394,14 +421,24 @@ logger.info({ environmentIds: ["pokemon-firered", "pokemon-emerald"] }, "embodim
 
 const port = Number(process.env.PORT ?? 4310);
 const listenHost = "127.0.0.1";
-const server = serve({ fetch: clankie.app.fetch, port, hostname: listenHost });
+const webSocketServer = new WebSocketServer({
+  noServer: true,
+  maxPayload: MAX_REALTIME_AUDIO_APPEND_BYTES,
+});
+const server = serve({
+  fetch: clankie.app.fetch,
+  port,
+  hostname: listenHost,
+  websocket: { server: webSocketServer as unknown as WebSocketServerLike },
+});
 logger.info(
   {
     hostname: listenHost,
     port,
     eventLogPath,
     memoryDir: defaultMemoryDir(process.env),
-    settingsFilledDiscordNames,
+    settingsFilledNames,
+    localVoiceAvailable: localVoiceRealtime !== undefined,
   },
   "clankie listening",
 );
@@ -415,6 +452,8 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   process.exitCode = exitCode;
   logger.info({ signal, exitCode, playShutdownDeadlineMs }, "clankie shutdown requested");
   playAbort.abort(signal);
+  for (const client of webSocketServer.clients) client.close(1001, "service_shutdown");
+  webSocketServer.close();
   server.close();
   void (async () => {
     const result = await playHost.stopAndWait({ deadlineMs: playShutdownDeadlineMs, reason: signal });

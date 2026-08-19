@@ -7,6 +7,7 @@ import {
   XAI_REALTIME_BASE_URL,
   type RealtimeSocketFactory,
   type RealtimeTimers,
+  type RealtimeTranscriptEvent,
 } from "./realtime-session.ts";
 import { openElevenLabsTtsSession } from "./elevenlabs-tts.ts";
 import { openExternalVoiceConversation } from "./external-voice.ts";
@@ -17,6 +18,7 @@ import type {
   DiscordVoiceBriefingRequest,
   LookAtScreenResult,
   VoiceConversationOpenInput,
+  VoiceConversationPort,
   VoiceTranscriptionHandlers,
 } from "./voice-session.ts";
 
@@ -241,8 +243,16 @@ export interface VoiceRealtimePortsInput {
   readonly timers?: RealtimeTimers;
 }
 
+export interface TranscriptVoiceConversationOpenInput extends VoiceConversationOpenInput {
+  readonly onTranscript?: (event: RealtimeTranscriptEvent) => void;
+}
+
+export interface TranscriptVoiceRealtimePorts extends Omit<DiscordVoiceRealtimePorts, "openConversation"> {
+  openConversation(input: TranscriptVoiceConversationOpenInput): Promise<VoiceConversationPort>;
+}
+
 /** Shared provider composition for both Discord bodies. */
-export function createVoiceRealtimePorts(input: VoiceRealtimePortsInput): DiscordVoiceRealtimePorts {
+export function createVoiceRealtimePorts(input: VoiceRealtimePortsInput): TranscriptVoiceRealtimePorts {
   const { apiKey, elevenLabsApiKey, config, socketFactory, timers } = input;
   if (config.ttsProvider === "elevenlabs" && elevenLabsApiKey === undefined) {
     throw new Error(
@@ -258,8 +268,9 @@ export function createVoiceRealtimePorts(input: VoiceRealtimePortsInput): Discor
   };
   const openConversation =
     config.ttsProvider === "elevenlabs" && elevenLabsApiKey !== undefined
-      ? (open: VoiceConversationOpenInput) =>
-          openExternalVoiceConversation(
+      ? (open: TranscriptVoiceConversationOpenInput) => {
+          let transcript = "";
+          return openExternalVoiceConversation(
             open,
             {
               openRealtime: (handlers) =>
@@ -271,9 +282,19 @@ export function createVoiceRealtimePorts(input: VoiceRealtimePortsInput): Discor
                   truncationRetentionRatio: config.truncationRetentionRatio,
                   postInstructionsTokenLimit: config.postInstructionsTokenLimit,
                   onAudioDelta: open.onAudioDelta,
-                  onTextDelta: handlers.onTextDelta,
+                  onTextDelta: (delta, itemId) => {
+                    transcript += delta;
+                    handlers.onTextDelta(delta, itemId);
+                    open.onTranscript?.({ itemId, text: delta, final: false });
+                  },
                   onFunctionCall: handlers.onFunctionCall,
-                  onResponseDone: handlers.onResponseDone,
+                  onResponseDone: (meta) => {
+                    if (transcript.trim().length > 0) {
+                      open.onTranscript?.({ itemId: "", text: transcript, final: true });
+                    }
+                    transcript = "";
+                    handlers.onResponseDone(meta);
+                  },
                   onClose: handlers.onClose,
                   onError: handlers.onError,
                 }),
@@ -294,8 +315,9 @@ export function createVoiceRealtimePorts(input: VoiceRealtimePortsInput): Discor
                 }),
             },
             timers === undefined ? {} : { timers },
-          )
-      : (open: VoiceConversationOpenInput) =>
+          );
+        }
+      : (open: TranscriptVoiceConversationOpenInput) =>
           openRealtimeConversationSession({
             ...common,
             ...(config.realtimeProvider === "xai"
@@ -311,6 +333,7 @@ export function createVoiceRealtimePorts(input: VoiceRealtimePortsInput): Discor
             truncationRetentionRatio: config.truncationRetentionRatio,
             postInstructionsTokenLimit: config.postInstructionsTokenLimit,
             onAudioDelta: open.onAudioDelta,
+            ...(open.onTranscript === undefined ? {} : { onTranscript: open.onTranscript }),
             onFunctionCall: open.onFunctionCall,
             onResponseDone: open.onResponseDone,
             onClose: open.onClose,

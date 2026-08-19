@@ -101,6 +101,7 @@ function framesOfType(socket: FakeRealtimeSocket, type: string): Record<string, 
 
 interface ConversationEvents {
   readonly audio: { pcm: Buffer; itemId: string }[];
+  readonly transcripts: RealtimeTranscriptEvent[];
   readonly done: RealtimeResponseMeta[];
   readonly calls: RealtimeFunctionCall[];
   readonly closes: RealtimeSessionCloseReason[];
@@ -117,7 +118,14 @@ async function openConversation(overrides: Partial<RealtimeConversationSessionOp
   const socket = new FakeRealtimeSocket();
   const timers = new FakeTimers();
   const factory: { url: string; headers: Record<string, string> }[] = [];
-  const events: ConversationEvents = { audio: [], done: [], calls: [], closes: [], errors: [] };
+  const events: ConversationEvents = {
+    audio: [],
+    transcripts: [],
+    done: [],
+    calls: [],
+    closes: [],
+    errors: [],
+  };
   const session = await openRealtimeConversationSession({
     apiKey: "sk-test-secret",
     instructions: "Be Clankie, in the social register.",
@@ -127,6 +135,7 @@ async function openConversation(overrides: Partial<RealtimeConversationSessionOp
     },
     timers,
     onAudioDelta: (pcm, itemId) => events.audio.push({ pcm: Buffer.from(pcm), itemId }),
+    onTranscript: (event) => events.transcripts.push(event),
     onResponseDone: (meta) => events.done.push(meta),
     onFunctionCall: (call) => events.calls.push(call),
     onClose: (reason) => events.closes.push(reason),
@@ -265,6 +274,12 @@ describe("realtime conversation session", () => {
     expect(events.audio).toHaveLength(1);
     expect(events.audio[0]?.itemId).toBe("item_a");
     expect(events.audio[0]?.pcm.equals(smallPcm)).toBe(true);
+    socket.emit({
+      type: "response.output_audio_transcript.done",
+      item_id: "item_a",
+      transcript: "Yep, I’m here.",
+    });
+    expect(events.transcripts).toEqual([{ itemId: "item_a", text: "Yep, I’m here.", final: true }]);
 
     // A new response resets the accounting: two large responses that are each
     // under the cap must both play.

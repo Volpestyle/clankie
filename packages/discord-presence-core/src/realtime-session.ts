@@ -343,6 +343,8 @@ export interface RealtimeConversationSessionOptions extends RealtimeSessionCommo
    * the cascade zeroed synthesized PCM after each turn.
    */
   readonly onAudioDelta: (pcm: Buffer, itemId: string) => void;
+  /** Live transcript of the model's spoken output, when the provider supplies one. */
+  readonly onTranscript?: (event: RealtimeTranscriptEvent) => void;
   /**
    * Response text deltas, only in `"text"` modality. This is what Clankie is
    * about to say out loud through the external voice — bounded per response
@@ -709,6 +711,7 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
   private readonly onTextDeltaCallback: ((delta: string, itemId: string) => void) | undefined;
   private readonly onResponseDoneCallback: ((meta: RealtimeResponseMeta) => void) | undefined;
   private readonly onFunctionCallCallback: ((call: RealtimeFunctionCall) => void) | undefined;
+  private readonly onTranscriptCallback: ((event: RealtimeTranscriptEvent) => void) | undefined;
   private currentResponseId = "";
   private currentResponseAudioBytes = 0;
   private currentResponseTextCharacters = 0;
@@ -743,6 +746,7 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
     this.onTextDeltaCallback = options.onTextDelta;
     this.onResponseDoneCallback = options.onResponseDone;
     this.onFunctionCallCallback = options.onFunctionCall;
+    this.onTranscriptCallback = options.onTranscript;
     this.provider = provider;
     this.sendFrame({
       type: "session.update",
@@ -901,6 +905,16 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
         this.handleTextDelta(event);
         return;
       }
+      case "response.output_audio_transcript.delta":
+      case "response.audio_transcript.delta": {
+        this.emitAudioTranscript(event, asString(event.delta) ?? "", false);
+        return;
+      }
+      case "response.output_audio_transcript.done":
+      case "response.audio_transcript.done": {
+        this.emitAudioTranscript(event, asString(event.transcript) ?? "", true);
+        return;
+      }
       case "response.done": {
         this.handleResponseDone(event);
         return;
@@ -917,6 +931,15 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
       // Everything else — acks, VAD boundaries, item lifecycle — is state the
       // caller does not need and content this boundary refuses to surface.
     }
+  }
+
+  private emitAudioTranscript(event: Record<string, unknown>, text: string, final: boolean): void {
+    if (text.length === 0) return;
+    this.onTranscriptCallback?.({
+      itemId: asString(event.item_id) ?? "",
+      text: text.slice(0, MAX_TRANSCRIPT_CHARACTERS),
+      final,
+    });
   }
 
   private handleTextDelta(event: Record<string, unknown>): void {

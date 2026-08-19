@@ -1,26 +1,25 @@
 import { randomUUID } from "node:crypto";
+import { constants } from "node:fs";
 import { chmod, lstat, mkdir, open, rename, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
-import { z } from "zod";
+import {
+  DISCORD_VOICE_TRANSCRIPT_PAGE_LIMIT_MAX,
+  DiscordVoiceTranscriptCursorSchema,
+  DiscordVoiceTranscriptLogEntrySchema,
+  type DiscordVoiceTranscriptLogEntry,
+} from "@clankie/protocol";
 import type { DiscordVoiceTranscript } from "./voice-session.ts";
 
-export const DiscordVoiceTranscriptLogEntrySchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    body: z.enum(["bot", "user_session"]),
-    occurredAt: z.string().datetime(),
-    guildId: z.string().min(1).max(64),
-    channelId: z.string().min(1).max(64),
-    stayId: z.string().min(1).max(256).optional(),
-    deliveryId: z.string().min(1).max(256),
-    speakerId: z.string().min(1).max(64),
-    displayName: z.string().min(1).max(256).optional(),
-    text: z.string().min(1).max(64_000),
-  })
-  .strict();
+export { DiscordVoiceTranscriptLogEntrySchema, type DiscordVoiceTranscriptLogEntry } from "@clankie/protocol";
 
-export type DiscordVoiceTranscriptLogEntry = z.infer<typeof DiscordVoiceTranscriptLogEntrySchema>;
+const ZERO_CURSOR = "000000000000";
+
+export interface DiscordVoiceTranscriptReadPage {
+  readonly entries: readonly DiscordVoiceTranscriptLogEntry[];
+  readonly nextCursor: string;
+  readonly hasMore: boolean;
+}
 
 export function discordVoiceTranscriptLogPath(env: NodeJS.ProcessEnv = process.env): string {
   const stateHome = env.XDG_STATE_HOME?.trim() || join(homedir(), ".local", "state");
@@ -44,7 +43,11 @@ export class DiscordVoiceTranscriptStore {
     const entry = DiscordVoiceTranscriptLogEntrySchema.parse({ schemaVersion: 1, body, ...transcript });
     const result = this.queue.then(async () => {
       await this.ensureTarget();
-      const handle = await open(this.path, "a", 0o600);
+      const handle = await open(
+        this.path,
+        constants.O_APPEND | constants.O_WRONLY | constants.O_NOFOLLOW,
+        0o600,
+      );
       try {
         await handle.appendFile(`${JSON.stringify(entry)}\n`, "utf8");
         await handle.sync();
@@ -56,6 +59,49 @@ export class DiscordVoiceTranscriptStore {
     });
     this.queue = result.catch(() => undefined);
     return result;
+  }
+
+  /** Recent page when cursor is absent; subsequent calls read strictly after it. */
+  public async read(afterCursor?: string, limit = 100): Promise<DiscordVoiceTranscriptReadPage> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > DISCORD_VOICE_TRANSCRIPT_PAGE_LIMIT_MAX) {
+      throw new Error("Discord voice transcript limit is invalid");
+    }
+    const cursor =
+      afterCursor === undefined ? undefined : DiscordVoiceTranscriptCursorSchema.parse(afterCursor);
+    await this.queue;
+    let raw: string;
+    try {
+      const handle = await open(this.path, constants.O_RDONLY | constants.O_NOFOLLOW);
+      try {
+        raw = await handle.readFile("utf8");
+      } finally {
+        await handle.close();
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return { entries: [], nextCursor: ZERO_CURSOR, hasMore: false };
+      }
+      throw error;
+    }
+    const lines = raw.endsWith("\n") ? raw.slice(0, -1).split("\n") : raw.split("\n");
+    if (lines.length === 1 && lines[0] === "") lines.length = 0;
+    // ponytail: this development-only log is scanned in memory; add an index if it grows beyond a few MB.
+    const requestedStart = cursor === undefined ? Math.max(0, lines.length - limit) : Number(cursor);
+    const start = Math.min(requestedStart, lines.length);
+    const end = Math.min(start + limit, lines.length);
+    const entries: DiscordVoiceTranscriptLogEntry[] = [];
+    for (const line of lines.slice(start, end)) {
+      try {
+        entries.push(DiscordVoiceTranscriptLogEntrySchema.parse(JSON.parse(line)));
+      } catch {
+        // A malformed/torn line is not exposed and does not shift later cursors.
+      }
+    }
+    return {
+      entries,
+      nextCursor: String(end).padStart(12, "0"),
+      hasMore: end < lines.length,
+    };
   }
 
   private async ensureTarget(): Promise<void> {

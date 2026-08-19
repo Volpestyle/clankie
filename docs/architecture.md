@@ -51,6 +51,15 @@ surface is listed in [`apps/clankie/openapi.yaml`](../apps/clankie/openapi.yaml)
 [`apps/clankie/scripts/setup-yaak.py`](../apps/clankie/scripts/setup-yaak.py)
 builds a local Yaak workspace against it.
 
+The native macOS menu-bar app uses that same contract to list continuing Pi
+sessions and tail expanded transcripts. Its microphone opens a private local
+realtime room over an authenticated loopback WebSocket; social speech stays in
+the room, while `ask_clankie` sends actionable work through the operator
+conversation service. Raw PCM remains in memory. Exact Discord speech is a
+separate, bounded captain read that returns content only while owner-controlled
+transcript retention is enabled
+([ADR 0125](adr/0125-the-menu-bar-is-a-private-local-voice-room.md)).
+
 Operator input can invoke an exact loaded skill as `/name task` or
 `/skill:name task`. The service rewrites that verified invocation to Pi's native
 skill command and enables expansion for that prompt only. Discord input and
@@ -168,6 +177,7 @@ media, browsing, and operator control.
 | ------------------------------ | ----------------------------------------------------------------------------------------- |
 | HTTP API                       | [`apps/clankie/openapi.yaml`](../apps/clankie/openapi.yaml)                               |
 | Operator console and launcher  | [`apps/tui/README.md`](../apps/tui/README.md)                                             |
+| macOS menu-bar app             | [`apps/menu-bar/README.md`](../apps/menu-bar/README.md)                                   |
 | Official Discord bot operation | [`apps/discord-bridge/README.md`](../apps/discord-bridge/README.md)                       |
 | Shared Discord behavior        | [`packages/discord-presence-core/README.md`](../packages/discord-presence-core/README.md) |
 | Personal-lab Discord body      | [`apps/discord-user-session/README.md`](../apps/discord-user-session/README.md)           |

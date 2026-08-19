@@ -9,6 +9,11 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname } from "node:path";
+import { upgradeWebSocket } from "@hono/node-server";
+import {
+  DiscordVoiceTranscriptStore,
+  type TranscriptVoiceRealtimePorts,
+} from "@clankie/discord-presence-core";
 import { createLogger } from "@clankie/observability";
 import {
   DISCORD_PRESENCE_LIVE_PHASE_HEADER,
@@ -39,6 +44,10 @@ import {
   MEDIA_IMAGE_GENERATION_PATH,
   MEDIA_VIDEO_GENERATION_PATH,
   CAPTAIN_LANE_OBSERVATION_PATH,
+  DISCORD_VOICE_TRANSCRIPT_PAGE_LIMIT_MAX,
+  DISCORD_VOICE_TRANSCRIPTS_PATH,
+  DiscordVoiceTranscriptCursorSchema,
+  LOCAL_VOICE_CHAT_PATH,
   OPERATOR_CONVERSATION_DISPATCH_PATH,
   OperatorConversationServiceRequestSchema,
   CaptainChannelTurnResultSchema,
@@ -113,6 +122,7 @@ import {
 } from "./device-session.ts";
 import type { MediaGeneratorPort } from "./media-generation.ts";
 import type { MemoryStores } from "./memory.ts";
+import { LocalVoiceChatSession } from "./local-voice-chat.ts";
 import { DiscordStreamWatchProjection } from "./stream-watch-observation.ts";
 import type { DiscordStreamWatchObservation } from "@clankie/protocol";
 
@@ -153,6 +163,14 @@ const DISCORD_VOICE_REALTIME_SURFACE_RULES = [
   "- Answer briefly in a spoken register: short sentences, no lists, no headers, no markdown — nothing you would not say out loud.",
   "- Every room utterance arrives as structured text with an authenticated Discord `speakerId`. Keep track of each person separately, address the person who spoke, and treat that id as ground truth; never infer identity from voice characteristics.",
   "- This is a group room, not a one-to-one call. Follow the whole conversation. Answer only when someone is talking to you — by name, or a short nameless follow-up to what you just said. Do not jump into a side thread. Use people's display names when you speak; speakerId is how you keep them distinct. Never infer identity from how they sound.",
+].join("\n");
+
+const LOCAL_VOICE_REALTIME_SURFACE_RULES = [
+  "# This surface",
+  "You are in a private voice conversation with your operator on this Mac.",
+  "- Speak naturally and briefly. No markdown, lists, links, file paths, or anything that only makes sense on a screen.",
+  "- Conversation stays in the realtime voice session. Use ask_clankie for tools, memory, files, or any other action.",
+  "- Voice never approves privileged actions. If a tool needs typed input or approval, send the operator to the authenticated operator console.",
 ].join("\n");
 
 const DiscordPersonMemoryProposalRequestSchema = z
@@ -262,6 +280,10 @@ export interface ClankieAppDependencies {
   playSight?: { still(): PlayStillRead; story(): PlayStoryRead };
   browserTools?: BrowserToolPort;
   mediaGenerator?: MediaGeneratorPort;
+  /** Shared realtime voice provider composition; the app owns only loopback media transport. */
+  localVoiceRealtime?: TranscriptVoiceRealtimePorts;
+  /** Private exact Discord transcript log, injected by tests when needed. */
+  voiceTranscriptStore?: DiscordVoiceTranscriptStore;
   authenticateRunner?: RunnerAuthenticator;
   authenticateCaptain?: CaptainAuthenticator;
   authenticateOperator?: OperatorAuthenticator;
@@ -323,6 +345,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   // Read per briefing rather than cached: the owner edits persona and a
   // refreshed voice session must pick it up without a restart.
   const settingsSource = dependencies.settings ?? new SettingsStore();
+  const voiceTranscriptStore = dependencies.voiceTranscriptStore ?? new DiscordVoiceTranscriptStore();
   const instanceId = randomUUID();
   const hostDisplayName = dependencies.hostDisplayName ?? hostname();
 
@@ -661,6 +684,45 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       schemaVersion: 1 as const,
       stays: deriveDiscordVoiceHistory(storedEvents, parsedLimit),
     });
+  });
+
+  /** Exact retained speech is private, bounded, and unreadable while retention is disabled. */
+  app.get(DISCORD_VOICE_TRANSCRIPTS_PATH, async (context) => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") return context.json({ error: "captain_execution_unavailable" }, 503);
+    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
+    const rawLimit = context.req.query("limit");
+    const limit = rawLimit === undefined ? 100 : Number.parseInt(rawLimit, 10);
+    const rawCursor = context.req.query("cursor");
+    if (
+      !Number.isInteger(limit) ||
+      limit < 1 ||
+      limit > DISCORD_VOICE_TRANSCRIPT_PAGE_LIMIT_MAX ||
+      (rawCursor !== undefined && !DiscordVoiceTranscriptCursorSchema.safeParse(rawCursor).success)
+    ) {
+      return context.json({ error: "invalid_voice_transcript_query" }, 400);
+    }
+    let enabled: boolean;
+    try {
+      enabled = (await settingsSource.load()).discord.voiceTranscriptLoggingEnabled;
+    } catch {
+      return context.json({ error: "voice_transcript_settings_unavailable" }, 503);
+    }
+    if (!enabled) {
+      return context.json({
+        schemaVersion: 1 as const,
+        enabled: false,
+        entries: [],
+        nextCursor: "000000000000",
+        hasMore: false,
+      });
+    }
+    try {
+      const page = await voiceTranscriptStore.read(rawCursor, limit);
+      return context.json({ schemaVersion: 1 as const, enabled: true, ...page });
+    } catch {
+      return context.json({ error: "voice_transcript_read_failed" }, 500);
+    }
   });
 
   /** Operator-readable presence status for `clankie status`; phase and counts only. */
@@ -1873,6 +1935,77 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const parsed = OperatorConversationServiceRequestSchema.safeParse(body);
     if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
     return context.json(await dependencies.captain.serveOperatorConversation(parsed.data));
+  });
+
+  app.get(LOCAL_VOICE_CHAT_PATH, async (context) => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") return context.json({ error: "captain_execution_unavailable" }, 503);
+    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
+    if (captain.steerSourceLane !== "api")
+      return context.json({ error: "operator_voice_authority_required" }, 403);
+    if (dependencies.localVoiceRealtime === undefined) {
+      return context.json({ error: "local_voice_unavailable" }, 503);
+    }
+    let persona: ClankieSettings["persona"];
+    try {
+      persona = (await settingsSource.load()).persona;
+    } catch {
+      return context.json({ error: "local_voice_persona_unavailable" }, 503);
+    }
+    const sections = [
+      renderVoiceBriefingSelfState(
+        captainPresence.snapshot(),
+        discordPresenceSessions.list(),
+        discordStreamWatch.current(),
+      ),
+    ];
+    const embodimentCard = renderVoiceBriefingEmbodiment(embodiment.liveSession());
+    if (embodimentCard !== undefined) sections.push(embodimentCard);
+    const episodeCard = dependencies.memory?.episodeRecallCard({ lane: "operator" }) ?? "";
+    if (episodeCard.length > 0) sections.push(episodeCard);
+    let session: LocalVoiceChatSession;
+    try {
+      session = await LocalVoiceChatSession.open({
+        realtime: dependencies.localVoiceRealtime,
+        captain: dependencies.captain,
+        instructions: boundVoiceBriefingText(
+          [personaInstructions(persona, "social"), LOCAL_VOICE_REALTIME_SURFACE_RULES].join("\n\n"),
+          DISCORD_VOICE_BRIEFING_MAX_CHARACTERS,
+        ),
+        briefing: boundVoiceBriefingText(sections.join("\n\n"), DISCORD_VOICE_BRIEFING_MAX_CHARACTERS),
+      });
+    } catch {
+      return context.json({ error: "local_voice_upstream_unavailable" }, 503);
+    }
+    return upgradeWebSocket(context, {
+      onOpen(_event, ws) {
+        session.attach({
+          get bufferedAmount() {
+            const raw = ws.raw as { readonly bufferedAmount?: unknown } | undefined;
+            return typeof raw?.bufferedAmount === "number" ? raw.bufferedAmount : 0;
+          },
+          send: (data) => ws.send(data),
+          close: (code, reason) => ws.close(code, reason),
+        });
+      },
+      onMessage(event, ws) {
+        if (typeof event.data === "string") {
+          session.receiveText(event.data);
+          return;
+        }
+        if (event.data instanceof ArrayBuffer) {
+          session.receiveAudio(new Uint8Array(event.data));
+          return;
+        }
+        ws.close(1003, "unsupported_voice_frame");
+      },
+      onClose() {
+        session.close();
+      },
+      onError() {
+        session.close();
+      },
+    });
   });
 
   app.get(CAPTAIN_LANE_OBSERVATION_PATH, async (context) => {

@@ -206,6 +206,45 @@ paths:
         "200":
           description: Recent stays
 
+  /v1/discord/voice-transcripts:
+    get:
+      tags: [Operator, Discord]
+      operationId: getDiscordVoiceTranscripts
+      summary: Page through retained Discord voice transcripts
+      description: |
+        Captain bearer only. Exact speech is returned only while
+        `discord.voiceTranscriptLoggingEnabled` is enabled; otherwise the route
+        returns an empty page with `enabled: false`.
+      security: [{ captainBearer: [] }]
+      parameters:
+        - in: query
+          name: cursor
+          description: Exclusive cursor from a previous page.
+          schema: { type: string, pattern: "^[0-9]{12}$" }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 200, default: 100 }
+      responses:
+        "200":
+          description: Bounded transcript page
+          content:
+            application/json:
+              example:
+                schemaVersion: 1
+                enabled: true
+                entries:
+                  - schemaVersion: 1
+                    body: bot
+                    occurredAt: "2026-08-18T20:05:32.899Z"
+                    guildId: "123456789012345678"
+                    channelId: "123456789012345679"
+                    deliveryId: delivery-1
+                    speakerId: "123456789012345680"
+                    displayName: James
+                    text: Hello Clankie
+                nextCursor: "000000000001"
+                hasMore: false
+
   /v1/discord/presence-actions:
     post:
       tags: [Discord]
@@ -366,6 +405,28 @@ paths:
       responses:
         "200":
           description: Discriminated result
+
+  /operator/v1/voice-chat:
+    get:
+      tags: [Operator]
+      operationId: openOperatorVoiceChat
+      summary: Open a private local voice chat
+      description: |
+        Upgrades to a WebSocket for captain bearers whose source lane is `api`.
+        Binary client frames are 24 kHz mono signed 16-bit little-endian PCM;
+        `{"schemaVersion":1,"type":"commit"}` ends one utterance. Binary
+        server frames use the same PCM format. JSON server frames report
+        `status`, attributed `transcript`, `response_done`, or `error` events.
+        Raw audio is not retained. The realtime room can call the captain through
+        the shared operator-conversation service when work is required.
+      security: [{ captainBearer: [] }]
+      responses:
+        "101":
+          description: WebSocket opened
+        "403":
+          description: Bearer is not an operator API captain
+        "503":
+          description: Local realtime voice is unavailable
 
   /captain/v1/lanes:
     get:

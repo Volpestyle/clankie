@@ -22,6 +22,8 @@ import {
   DiscordStreamWatchReportSchema,
   DiscordUserSessionOptInRequestSchema,
   DiscordUserSessionOptInSchema,
+  DISCORD_VOICE_TRANSCRIPTS_PATH,
+  DiscordVoiceTranscriptPageSchema,
   DISCORD_STREAM_WATCH_PATH,
   EmbodimentAssignmentSchema,
   EmbodimentSessionSchema,
@@ -46,6 +48,7 @@ import {
   type DiscordStreamWatchReport,
   type DiscordUserSessionOptIn,
   type DiscordUserSessionOptInRequest,
+  type DiscordVoiceTranscriptPage,
   type EmbodimentAssignment,
   type EmbodimentClaim,
   type EmbodimentIntent,
@@ -311,6 +314,23 @@ export class ClankieApiClient {
       headers: this.captainHeaders(),
     });
     return DiscordVoiceHistorySchema.parse(result).stays;
+  }
+
+  /** Reads the private exact transcript log only while the owner retention setting is enabled. */
+  public async readDiscordVoiceTranscripts(
+    input: {
+      readonly cursor?: string;
+      readonly limit?: number;
+    } = {},
+  ): Promise<DiscordVoiceTranscriptPage> {
+    const query = new URLSearchParams();
+    if (input.cursor !== undefined) query.set("cursor", input.cursor);
+    if (input.limit !== undefined) query.set("limit", String(input.limit));
+    const suffix = query.size === 0 ? "" : `?${query.toString()}`;
+    const result = await this.request<unknown>(`${DISCORD_VOICE_TRANSCRIPTS_PATH}${suffix}`, {
+      headers: this.captainHeaders(),
+    });
+    return DiscordVoiceTranscriptPageSchema.parse(result);
   }
 
   public inspectDiscordReadiness(): Promise<DiscordControlPlaneReadiness> {

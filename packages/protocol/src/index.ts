@@ -422,6 +422,43 @@ export type SubmitOperatorConversationTurnResult = z.infer<typeof SubmitOperator
 /** The authenticated route path that carries the callable service contract. */
 export const OPERATOR_CONVERSATION_DISPATCH_PATH = "/operator/v1/dispatch";
 
+/** Private loopback voice chat used by authenticated local operator surfaces. */
+export const LOCAL_VOICE_CHAT_PATH = "/operator/v1/voice-chat";
+
+export const LocalVoiceChatClientEventSchema = z
+  .object({ schemaVersion: z.literal(1), type: z.literal("commit") })
+  .strict();
+export type LocalVoiceChatClientEvent = z.infer<typeof LocalVoiceChatClientEventSchema>;
+
+export const LocalVoiceChatServerEventSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      schemaVersion: z.literal(1),
+      type: z.literal("status"),
+      state: z.enum(["listening", "thinking", "speaking"]),
+    })
+    .strict(),
+  z
+    .object({
+      schemaVersion: z.literal(1),
+      type: z.literal("transcript"),
+      speaker: z.enum(["operator", "clankie"]),
+      text: z.string().min(1).max(OPERATOR_CONVERSATION_TEXT_MAX),
+      final: z.boolean(),
+      occurredAt: z.string().datetime(),
+    })
+    .strict(),
+  z.object({ schemaVersion: z.literal(1), type: z.literal("response_done") }).strict(),
+  z
+    .object({
+      schemaVersion: z.literal(1),
+      type: z.literal("error"),
+      message: z.string().min(1).max(OPERATOR_CONVERSATION_SUMMARY_MAX),
+    })
+    .strict(),
+]);
+export type LocalVoiceChatServerEvent = z.infer<typeof LocalVoiceChatServerEventSchema>;
+
 export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op", [
   z
     .object({
@@ -3038,6 +3075,36 @@ export type OperatorMemoryCatalog = z.infer<typeof OperatorMemoryCatalogSchema>;
 const DiscordVoiceGatewayIdSchema = z.string().min(1).max(64).regex(/^\S+$/u);
 /** Locally-minted correlation ids (delivery/turn). Same construction, sized for UUIDs and prefixed ids. */
 const DiscordVoiceLocalIdSchema = z.string().min(1).max(128).regex(/^\S+$/u);
+
+export const DISCORD_VOICE_TRANSCRIPTS_PATH = "/v1/discord/voice-transcripts";
+export const DISCORD_VOICE_TRANSCRIPT_PAGE_LIMIT_MAX = 200;
+export const DiscordVoiceTranscriptCursorSchema = z.string().regex(/^\d{12}$/u);
+export const DiscordVoiceTranscriptLogEntrySchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    body: z.enum(["bot", "user_session"]),
+    occurredAt: z.string().datetime(),
+    guildId: DiscordVoiceGatewayIdSchema,
+    channelId: DiscordVoiceGatewayIdSchema,
+    stayId: z.string().min(1).max(256).optional(),
+    deliveryId: z.string().min(1).max(256),
+    speakerId: DiscordVoiceGatewayIdSchema,
+    displayName: z.string().min(1).max(256).optional(),
+    text: z.string().min(1).max(64_000),
+  })
+  .strict();
+export type DiscordVoiceTranscriptLogEntry = z.infer<typeof DiscordVoiceTranscriptLogEntrySchema>;
+
+export const DiscordVoiceTranscriptPageSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    enabled: z.boolean(),
+    entries: z.array(DiscordVoiceTranscriptLogEntrySchema).max(DISCORD_VOICE_TRANSCRIPT_PAGE_LIMIT_MAX),
+    nextCursor: DiscordVoiceTranscriptCursorSchema,
+    hasMore: z.boolean(),
+  })
+  .strict();
+export type DiscordVoiceTranscriptPage = z.infer<typeof DiscordVoiceTranscriptPageSchema>;
 /** Wall-clock milliseconds; a scalar measurement, never a payload. */
 const DiscordVoiceDurationMsSchema = z.number().finite().nonnegative();
 /** Monotonic non-negative integer counter. */

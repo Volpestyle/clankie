@@ -218,6 +218,7 @@ export {
   DiscordVoiceTranscriptLogEntrySchema,
   DiscordVoiceTranscriptStore,
   type DiscordVoiceTranscriptLogEntry,
+  type DiscordVoiceTranscriptReadPage,
 } from "./transcript-store.ts";
 export { encodeReactionEmoji } from "./discord-rest.ts";
 export {
@@ -250,6 +251,8 @@ export {
   type VoiceRealtimeEnvConfig,
   type VoiceRealtimePortsInput,
   type VoiceRealtimeProvider,
+  type TranscriptVoiceConversationOpenInput,
+  type TranscriptVoiceRealtimePorts,
   type VoiceTtsProvider,
   type XaiVoiceReasoningEffort,
 } from "./voice-composition.ts";
