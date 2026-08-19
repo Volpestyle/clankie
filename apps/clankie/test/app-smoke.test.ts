@@ -47,6 +47,8 @@ describe("clankie app smoke", () => {
     const briefing = (await response.json()) as { instructions: string };
     expect(briefing.instructions).toContain("do not wait for someone to tell you to remember it");
     expect(briefing.instructions).toContain("part of your own experience or developing personality");
+    expect(briefing.instructions).toContain("your own captain mind");
+    expect(briefing.instructions).toContain("web browsing and research");
     clankie.close();
   });
 

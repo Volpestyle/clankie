@@ -29,6 +29,12 @@ acts outside that conversation crosses one `ask_clankie` handoff to the existing
 `discord_voice` captain lane. The realtime model receives no system shell or
 other machine-authority tool.
 
+The handoff is one part of Clankie, not a request to another assistant. The
+realtime model treats captain tools reachable through `ask_clankie` as its own
+capabilities, including web browsing and research, and uses the handoff instead
+of denying a capability merely because the realtime process does not hold it
+directly.
+
 The handoff exists only on a response attributed to a room speaker. A
 possessor narration response has no speaker because it is Clankie's own
 experience; if it selects `ask_clankie`, the voice session settles that tool
@@ -123,7 +129,8 @@ room hears.
 - Fast-path speech is bounded model output no captain reviewed; its safety
   boundary is the absence of machine-action tools.
 - Voice uses separate dormant-listener and engaged-conversation lifecycles, so
-  readiness must prove the wake transition as well as a simple round trip.
+  readiness proves both the wake transition and that a web lookup routes through
+  `ask_clankie` under the live room instructions.
 - Audio residency and AI-generated speech must be disclosed to participants;
   local PCM remains memory-only.
 - Cost is session- and context-shaped, so listener caps, truncation, decay, and

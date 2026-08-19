@@ -90,6 +90,7 @@ describe("Discord group voice readiness", () => {
         Promise.resolve({
           listener: { ok: true, detail: "dormant transcription session opened cleanly" },
           engaged: { ok: true, detail: "conversation session opened and produced a response" },
+          capability: { ok: true, detail: "web lookup routed through ask_clankie" },
         }),
       rest: {
         get: (route) =>
@@ -116,6 +117,7 @@ describe("Discord group voice readiness", () => {
     // exercises dormant→engaged, not one session round trip).
     expect(checkByName(report, "listener session").ok).toBe(true);
     expect(checkByName(report, "engaged session").ok).toBe(true);
+    expect(checkByName(report, "captain capability routing").ok).toBe(true);
     expect(checkByName(report, "wake transition").ok).toBe(true);
     expect(checkByName(report, "voice briefing endpoint").ok).toBe(true);
     // The realtime echo replaces the cascade's speech readiness: content-free
@@ -158,6 +160,7 @@ describe("Discord group voice readiness", () => {
     // checks rather than attempted.
     expect(checkByName(report, "listener session").ok).toBe(false);
     expect(checkByName(report, "engaged session").ok).toBe(false);
+    expect(checkByName(report, "captain capability routing").ok).toBe(false);
     expect(checkByName(report, "wake transition").ok).toBe(false);
     expect(checkByName(report, "voice briefing endpoint").ok).toBe(false);
   });
@@ -178,6 +181,7 @@ describe("Discord group voice readiness", () => {
       Promise.resolve({
         listener: { ok: true, detail: "dormant transcription session opened cleanly" },
         engaged: { ok: true, detail: "conversation session opened and produced a response" },
+        capability: { ok: true, detail: "web lookup routed through ask_clankie" },
       });
     const missing = await inspectDiscordVoiceReadiness({
       env,
@@ -219,6 +223,7 @@ describe("Discord group voice readiness", () => {
         Promise.resolve({
           listener: { ok: true, detail: "xAI streaming STT opened" },
           engaged: { ok: true, detail: "Grok Voice responded" },
+          capability: { ok: true, detail: "web lookup routed through ask_clankie" },
         }),
     });
     expect(checkByName(report, "xai realtime credential").ok).toBe(true);
@@ -259,6 +264,11 @@ class FakeProbeSocket implements RealtimeSocket {
   public readonly sent: string[] = [];
   private readonly messageHandlers: ((data: string) => void)[] = [];
   private readonly closeHandlers: (() => void)[] = [];
+  private readonly routeCapability: boolean;
+
+  public constructor(routeCapability = true) {
+    this.routeCapability = routeCapability;
+  }
 
   public send(data: string | Uint8Array): void {
     if (typeof data !== "string") return;
@@ -266,6 +276,23 @@ class FakeProbeSocket implements RealtimeSocket {
     const frame = JSON.parse(data) as { type?: string };
     if (frame.type === "response.create") {
       queueMicrotask(() => {
+        if (this.routeCapability) {
+          this.serverEvent({
+            type: "response.output_item.done",
+            item: {
+              type: "function_call",
+              call_id: "call_1",
+              name: "ask_clankie",
+              arguments: '{"request":"look up the current weather in Chicago"}',
+            },
+          });
+          this.serverEvent({
+            type: "response.function_call_arguments.done",
+            call_id: "call_1",
+            name: "ask_clankie",
+            arguments: '{"request":"look up the current weather in Chicago"}',
+          });
+        }
         this.serverEvent({ type: "response.done", response: { id: "resp_1", status: "completed" } });
       });
     }
@@ -310,6 +337,7 @@ describe("voice wake-transition probe", () => {
     });
     expect(result.listener.ok).toBe(true);
     expect(result.engaged.ok).toBe(true);
+    expect(result.capability.ok).toBe(true);
     // Two sessions in sequence: the dormant listener first, the engaged
     // conversation second — the wake transition, not one round trip.
     expect(sockets).toHaveLength(2);
@@ -346,6 +374,7 @@ describe("voice wake-transition probe", () => {
     });
     expect(result.listener.ok).toBe(true);
     expect(result.engaged.ok).toBe(true);
+    expect(result.capability.ok).toBe(true);
     expect(sockets).toHaveLength(2);
     const engagedUpdate = JSON.parse(sockets[1]?.sent[0] ?? "{}") as {
       session?: { output_modalities?: string[]; audio?: { output?: unknown } };
@@ -367,6 +396,7 @@ describe("voice wake-transition probe", () => {
     });
     expect(result.listener.ok).toBe(true);
     expect(result.engaged.ok).toBe(true);
+    expect(result.capability.ok).toBe(true);
     expect(urls[0]).toContain("wss://api.x.ai/v1/stt");
     expect(urls[1]).toContain("wss://api.x.ai/v1/realtime");
   });
@@ -380,6 +410,21 @@ describe("voice wake-transition probe", () => {
     });
     expect(result.listener.ok).toBe(false);
     expect(result.engaged.ok).toBe(false);
+    expect(result.capability.ok).toBe(false);
     expect(result.engaged.detail).toContain("not attempted");
+  });
+
+  it("fails capability routing when the realtime model answers the web lookup directly", async () => {
+    let socketIndex = 0;
+    const result = await probeVoiceWakeTransition({
+      apiKey: "probe-key",
+      config: parseVoiceRealtimeEnv({}),
+      socketFactory: () => Promise.resolve(new FakeProbeSocket(socketIndex++ === 0)),
+      timeoutMs: 1_000,
+    });
+    expect(result.listener.ok).toBe(true);
+    expect(result.engaged.ok).toBe(true);
+    expect(result.capability.ok).toBe(false);
+    expect(result.capability.detail).toContain("without ask_clankie");
   });
 });

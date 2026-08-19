@@ -88,7 +88,9 @@ as environment overrides. It validates brokered identities, application/guild
 membership, Message Content Intent, allowlist alignment, and service
 composition. Voice readiness loads stored settings before additionally
 validating native Opus, realtime configuration, the voice briefing endpoint,
-and a live dormant-to-engaged wake probe. Both support `--json`.
+and a live dormant-to-engaged wake probe. The engaged probe uses the composed
+room instructions and fails if a web lookup does not route through
+`ask_clankie`. Both support `--json`.
 
 After exercising the relevant surface, evaluate the mode-0600 receipt log with
 the package scripts that actually own the gates:

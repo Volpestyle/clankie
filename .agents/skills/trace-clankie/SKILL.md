@@ -79,6 +79,11 @@ is append-only JSONL or plain files now), never write to it.
   never its arguments or result — the content fence applies. To see arguments,
   follow `ask_clankie` into the captain: the durable channel tree under
   `~/.clankie/captain/voice/`, or `turns/` when that handoff was privileged.
+- **A voice capability denial may never have reached the captain.** Join the
+  room delivery to `model_response`, `realtime_tool`, and `response`. A settled
+  fast-path response with no `ask_clankie` receipt means the realtime mouth
+  answered alone; verify the underlying host separately before blaming its
+  permissions or availability.
 - **Voice leaves a room transcript only when the owner enables the development
   toggle.** `get_self_state.voiceHistory` is
   closed stays only (join/leave), and it is empty while he is still in the

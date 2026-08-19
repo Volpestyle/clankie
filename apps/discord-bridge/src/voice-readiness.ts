@@ -11,6 +11,7 @@ import {
 import { REST, Routes } from "discord.js";
 import { opus } from "prism-media";
 import {
+  ASK_CLANKIE_TOOL_NAME,
   openRealtimeConversationSession,
   openRealtimeTranscriptionSession,
   openXaiStreamingTranscriptionSession,
@@ -79,6 +80,7 @@ export interface VoiceWakeProbeStage {
 export interface VoiceWakeTransitionProbeResult {
   readonly listener: VoiceWakeProbeStage;
   readonly engaged: VoiceWakeProbeStage;
+  readonly capability: VoiceWakeProbeStage;
 }
 
 /**
@@ -292,6 +294,7 @@ export async function inspectDiscordVoiceReadiness(
   // The briefing path end-to-end (T4→T6): the service composes
   // instructions and a projection for the configured channel with zero
   // consented ids, so nobody's person memory is touched by a readiness run.
+  let voiceInstructions: string | undefined;
   if (guildId !== undefined && channelId !== undefined) {
     try {
       const briefing = await options.api.fetchDiscordVoiceBriefing({
@@ -300,6 +303,7 @@ export async function inspectDiscordVoiceReadiness(
         channelId,
         consentedUserIds: [],
       });
+      voiceInstructions = briefing.instructions;
       add(
         "voice briefing endpoint",
         true,
@@ -330,14 +334,15 @@ export async function inspectDiscordVoiceReadiness(
   // session — not just one session round trip.
   const wakeProbe =
     options.wakeProbe ??
-    (realtimeKey !== undefined && realtimeConfig !== undefined
-      ? buildDefaultWakeProbe(realtimeKey, realtimeConfig)
+    (realtimeKey !== undefined && realtimeConfig !== undefined && voiceInstructions !== undefined
+      ? buildDefaultWakeProbe(realtimeKey, realtimeConfig, voiceInstructions)
       : undefined);
   if (wakeProbe === undefined) {
-    const detail = `not checked because the brokered ${provider} credential or realtime configuration is missing`;
-    const remediation = `Resolve the ${provider} realtime credential and configuration checks first.`;
+    const detail = `not checked because the brokered ${provider} credential, realtime configuration, or voice briefing is missing`;
+    const remediation = `Resolve the ${provider} realtime credential, configuration, and voice briefing checks first.`;
     add("listener session", false, detail, remediation);
     add("engaged session", false, detail, remediation);
+    add("captain capability routing", false, detail, remediation);
     add("wake transition", false, detail, remediation);
   } else {
     let probe: VoiceWakeTransitionProbeResult;
@@ -348,6 +353,7 @@ export async function inspectDiscordVoiceReadiness(
       probe = {
         listener: { ok: false, detail },
         engaged: { ok: false, detail },
+        capability: { ok: false, detail },
       };
     }
     add(
@@ -361,6 +367,12 @@ export async function inspectDiscordVoiceReadiness(
       probe.engaged.ok,
       probe.engaged.detail,
       `Verify the brokered ${provider} credential has access to the configured realtime model.`,
+    );
+    add(
+      "captain capability routing",
+      probe.capability.ok,
+      probe.capability.detail,
+      "Verify the voice briefing presents ask_clankie as Clankie's own route to web browsing and other captain tools.",
     );
     add(
       "wake transition",
@@ -466,6 +478,8 @@ export interface VoiceWakeTransitionProbeOptions {
   /** Broker-resolved OpenAI key. */
   readonly apiKey: string;
   readonly config: VoiceRealtimeEnvConfig;
+  /** The same service-composed instructions used by the live voice room. */
+  readonly instructions?: string;
   /** Injected by tests; production uses the runtime's WebSocket factory. */
   readonly socketFactory?: RealtimeSocketFactory;
   readonly timers?: RealtimeTimers;
@@ -475,15 +489,17 @@ export interface VoiceWakeTransitionProbeOptions {
 
 const WAKE_PROBE_TIMEOUT_MS = 20_000;
 const WAKE_PROBE_INSTRUCTIONS =
-  "You are a connectivity probe for a readiness check. Reply with one short word.";
-const WAKE_PROBE_ITEM = "Readiness probe: reply with one short word.";
+  "You are Clankie. Use ask_clankie as your own captain mind for every action or lookup outside this conversation.";
+const WAKE_PROBE_ITEM =
+  "Readiness probe: use your web browsing ability to look up the current weather in Chicago. Do not answer from memory.";
 
 /**
  * Exercises the dormant→engaged wake transition against the live Realtime API:
  * opens a real transcription session and waits for a clean open, then — with
  * the listener still connected, exactly like a wake — opens a real
- * conversation session with minimal instructions, sends one text item plus one
- * `response.create`, and closes both on the first sign of a response. The
+ * conversation session with the live room instructions, sends one web-lookup
+ * item plus one `response.create`, and requires the response to select
+ * `ask_clankie`. The
  * runtime's byte caps bound everything received; audio deltas are zeroed on
  * arrival and nothing content-bearing enters the result.
  */
@@ -498,6 +514,10 @@ export async function probeVoiceWakeTransition(
   let listener: { close(): void } | undefined;
   let listenerStage: VoiceWakeProbeStage;
   let engagedStage: VoiceWakeProbeStage = {
+    ok: false,
+    detail: "not attempted because the listener session failed",
+  };
+  let capabilityStage: VoiceWakeProbeStage = {
     ok: false,
     detail: "not attempted because the listener session failed",
   };
@@ -528,6 +548,7 @@ export async function probeVoiceWakeTransition(
   if (listenerStage.ok) {
     try {
       let settle: (() => void) | undefined;
+      let capabilityCalled = false;
       const responded = new Promise<void>((resolvePromise) => {
         settle = resolvePromise;
       });
@@ -549,22 +570,24 @@ export async function probeVoiceWakeTransition(
               }
             : {}),
           ...(textModality ? { outputModality: "text" as const } : { voice: options.config.voice }),
-          instructions: WAKE_PROBE_INSTRUCTIONS,
+          instructions: options.instructions ?? WAKE_PROBE_INSTRUCTIONS,
           truncationRetentionRatio: options.config.truncationRetentionRatio,
           postInstructionsTokenLimit: options.config.postInstructionsTokenLimit,
           ...injected,
           onAudioDelta: (pcm) => {
             pcm.fill(0);
-            settle?.();
           },
           ...(textModality
             ? {
-                onTextDelta: () => {
-                  settle?.();
-                },
+                onTextDelta: () => undefined,
               }
             : {}),
           onResponseDone: () => {
+            settle?.();
+          },
+          onFunctionCall: (call) => {
+            if (call.name !== ASK_CLANKIE_TOOL_NAME) return;
+            capabilityCalled = true;
             settle?.();
           },
         }),
@@ -576,6 +599,9 @@ export async function probeVoiceWakeTransition(
         engaged.createResponse();
         await withTimeout(responded, timeoutMs, "engaged session produced no response");
         engagedStage = { ok: true, detail: "conversation session opened and produced a response" };
+        capabilityStage = capabilityCalled
+          ? { ok: true, detail: "web lookup routed through ask_clankie" }
+          : { ok: false, detail: "realtime model answered a web lookup without ask_clankie" };
       } finally {
         try {
           engaged.close();
@@ -584,10 +610,12 @@ export async function probeVoiceWakeTransition(
         }
       }
     } catch (error) {
+      const detail = error instanceof Error ? error.message : "engaged session probe failed";
       engagedStage = {
         ok: false,
-        detail: error instanceof Error ? error.message : "engaged session probe failed",
+        detail,
       };
+      capabilityStage = { ok: false, detail };
     }
   }
   try {
@@ -595,11 +623,15 @@ export async function probeVoiceWakeTransition(
   } catch {
     // Already closed; the probe result stands either way.
   }
-  return { listener: listenerStage, engaged: engagedStage };
+  return { listener: listenerStage, engaged: engagedStage, capability: capabilityStage };
 }
 
-function buildDefaultWakeProbe(apiKey: string, config: VoiceRealtimeEnvConfig): VoiceWakeTransitionProbe {
-  return () => probeVoiceWakeTransition({ apiKey, config });
+function buildDefaultWakeProbe(
+  apiKey: string,
+  config: VoiceRealtimeEnvConfig,
+  instructions: string,
+): VoiceWakeTransitionProbe {
+  return () => probeVoiceWakeTransition({ apiKey, config, instructions });
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {

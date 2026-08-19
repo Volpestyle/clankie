@@ -221,6 +221,10 @@ describe("realtime conversation session", () => {
     expect(tools?.find((tool) => tool.name === "ask_clankie")?.description).toContain(
       "you choose to remember",
     );
+    expect(tools?.find((tool) => tool.name === "ask_clankie")?.description).toContain("your own route");
+    expect(tools?.find((tool) => tool.name === "ask_clankie")?.description).toContain(
+      "web browsing and research",
+    );
   });
 
   // Required mission evidence: no server event — speech boundaries, committed
