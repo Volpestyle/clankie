@@ -20,6 +20,7 @@ import {
   parseDiscordDmPolicy,
   parseDiscordIdSet,
   parseVoiceRealtimeEnv,
+  routeDiscordRoomText,
   selectInboundImageAttachments,
   VoiceIdleAutoLeave,
   VoiceMusicQueue,
@@ -359,13 +360,29 @@ gateway.on("messageCreate", (message) => {
   void (async () => {
     try {
       const selection = selectInboundImageAttachments(message.attachments, message.embeds);
+      const authorIsBot = message.authorIsBot || message.authorId === gateway.userId;
+      const routedRoomText = routeDiscordRoomText(
+        { guildIds, channelIds },
+        {
+          ...(message.guildId === undefined ? {} : { guildId: message.guildId }),
+          channelId: message.channelId,
+          authorIsBot,
+          body: message.content,
+          userId: message.authorId,
+          ...(message.authorDisplayName === undefined ? {} : { displayName: message.authorDisplayName }),
+          deliveryId: message.id,
+          hasAttachments: selection.attachments.length > 0 || selection.omitted > 0,
+        },
+        voiceSession,
+      );
+      if (routedRoomText.voiceOwned) return;
       const result = await textIngress.handle({
         id: message.id,
         ...(message.guildId === undefined ? {} : { guildId: message.guildId }),
         channelId: message.channelId,
         authorId: message.authorId,
         // A user session must never answer itself; the account is a participant.
-        authorIsBot: message.authorIsBot || message.authorId === gateway.userId,
+        authorIsBot,
         mentionsBot: message.mentionsSelf,
         body: message.content,
         attachments: selection.attachments,
@@ -538,6 +555,17 @@ async function executeCaptainDiscordAction(
     }
     action = `discord.presence.${input.action}`;
     payload = { kind: input.action, channelId, messageId: input.messageId, emoji: input.emoji };
+  } else if (input.action === "send_text_update") {
+    if (!guildIds.has(input.guildId) || (channelIds.size > 0 && !channelIds.has(input.channelId))) {
+      return { ok: false, message: "That channel is outside my admitted Discord channels." };
+    }
+    action = "discord.presence.send_message";
+    payload = {
+      kind: "send_message",
+      channelId,
+      replyToMessageId: input.messageId,
+      content: input.text,
+    };
   } else if (input.action === "create_thread" || input.action === "join_thread") {
     if (!guildIds.has(input.guildId) || (channelIds.size > 0 && !channelIds.has(input.channelId))) {
       return { ok: false, message: "Threads only work in my admitted server channels." };
@@ -600,9 +628,11 @@ async function executeCaptainDiscordAction(
               ? "I started the thread."
               : input.action === "join_thread"
                 ? "I joined the thread."
-                : input.action === "react"
-                  ? "I reacted."
-                  : "I removed my reaction.",
+                : input.action === "send_text_update"
+                  ? "I posted that text update. Keep working; your final text reply still posts when the turn ends."
+                  : input.action === "react"
+                    ? "I reacted."
+                    : "I removed my reaction.",
     };
   } catch {
     return { ok: false, message: "My Discord body refused that action." };

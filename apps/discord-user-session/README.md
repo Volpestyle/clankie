@@ -74,6 +74,12 @@ Voice provider settings are shared with the bot body and configured through
 model, voice, and xAI reasoning effort; both bodies therefore sound and wake
 the same way after an active-body switch.
 
+Text-only messages in the active voice channel's attached chat enter the same
+`VoiceFloor` as speech. The realtime room persona may answer aloud, hand work
+to the captain, or stay silent; the user-session bridge does not also launch a
+text reply for that delivery
+([ADR 0124](../../docs/adr/0124-one-self-has-many-local-threads.md)).
+
 ## Capability differences from the bot plane
 
 | Capability                   | Bot | User session | Why                                                                                               |

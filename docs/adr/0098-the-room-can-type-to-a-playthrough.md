@@ -5,7 +5,9 @@ Status: accepted (James, 2026-08-15). Amends
 transcripts only. The seam's shape, transport, bearer, and message set are
 unchanged; what may travel on the `utterance` message widens by one source.
 Consent ([ADR 0071](0071-presence-as-consent-voice-policy.md)) and authorship
-([ADR 0074](0074-the-room-hears-one-voice.md)) are untouched.
+([ADR 0074](0074-the-room-hears-one-voice.md)) are untouched. The same admitted
+text also reaches an active realtime room under
+[ADR 0124](0124-one-self-has-many-local-threads.md).
 
 ## Context
 

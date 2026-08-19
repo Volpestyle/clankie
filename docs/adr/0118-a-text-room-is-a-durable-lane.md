@@ -7,7 +7,10 @@ as its own upgrade path. This takes that path and applies the whole mechanism
 to Discord text. Also touches
 [ADR 0107](0107-a-one-shot-turn-still-leaves-a-trail.md) (where a text turn's
 evidence lives) and [ADR 0085](0085-a-picture-he-makes-is-something-he-says.md) (one
-message carries the words and the picture).
+message carries the words and the picture). Narrowed by
+[ADR 0124](0124-one-self-has-many-local-threads.md): the active voice room owns
+text-only input from its attached chat, so that delivery does not also start a
+text-lane turn.
 
 ## Context
 
@@ -99,8 +102,8 @@ than trusting a single timer, so a suspended host overshoots by one tick of
 awake time instead of by however long it slept.
 
 **He tells the room before he goes away, and keeps typing while he is gone.**
-A long turn is only rude if it is silent, so `say_now` gives him one short
-message to the channel mid-turn — threaded onto the message he is answering —
+A long turn is only rude if it is silent, so `send_text_update` gives him one
+short text message to the channel mid-turn — threaded onto the message he is answering —
 without ending the turn or spending his reply. Its description tells him when:
 before going off to do something slow, in his own voice, never to pad a turn he
 could just answer. What he says is his; nothing here writes it for him. The
@@ -143,7 +146,7 @@ sequenceDiagram
     participant R as Room
     participant L as Durable lane
     R->>L: "what was the biggest upset?"
-    L->>R: say_now — "hang on, pulling the bracket up"
+    L->>R: send_text_update — "hang on, pulling the bracket up"
     Note over R: typing stays lit for the whole turn
     loop as long as it keeps working
         L->>L: browse, read, click — each event resets the stall clock
@@ -179,7 +182,7 @@ sequenceDiagram
   slow tool call that emits nothing for five minutes is treated as dead; every
   bounded tool has a tighter deadline of its own, so this is a backstop rather
   than a live constraint.
-- `say_now` is a channel write he controls, so it inherits every bound the
+- `send_text_update` is a channel write he controls, so it inherits every bound the
   other presence writes have (admitted guild and channel, 600 characters,
   content-free receipts) and none of the reply path's: it cannot carry media
   and does not settle the turn. A turn that abuses it posts twice, which reads

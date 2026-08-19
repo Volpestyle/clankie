@@ -1204,12 +1204,12 @@ export const DiscordCaptainActionInputSchema = z.discriminatedUnion("action", [
   }).strict(),
   DiscordCaptainActionContextSchema.extend({ action: z.literal("join_thread") }).strict(),
   /**
-   * Something said to the room while the turn is still running (ADR 0118).
+   * A text update posted while the turn is still running (ADR 0118).
    * A turn is allowed to take as long as the work takes; this is how the room
    * finds out that is what is happening instead of watching an indicator.
    */
   DiscordCaptainActionContextSchema.extend({
-    action: z.literal("say_now"),
+    action: z.literal("send_text_update"),
     text: z.string().trim().min(1).max(600),
   }).strict(),
   DiscordCaptainActionContextSchema.extend({
@@ -3247,6 +3247,18 @@ export const DiscordVoiceEvidenceSchema = z
          * accepted and the receipts could not tell those apart.
          */
         peakRms: z.number().nonnegative().max(32_768).optional(),
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("text_input"),
+        ...discordVoiceChannelScope,
+        /** Discord gateway identity of the author; text needs no voice-consent inference. */
+        userId: DiscordVoiceGatewayIdSchema,
+        deliveryId: DiscordVoiceLocalIdSchema,
+        /** Character count only; the Discord body remains absent from voice receipts. */
+        characters: DiscordVoiceCounterSchema,
+        addressed: z.boolean(),
       })
       .strict(),
     z

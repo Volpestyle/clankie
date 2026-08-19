@@ -322,8 +322,10 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
     const textItems = frames
       .filter((frame) => frame.type === "conversation.item.create")
       .map((frame) => (frame as { item: { content: { text: string }[] } }).item.content[0]?.text ?? "");
-    expect(textItems[0]).toContain("Recent room transcript (JSONL;");
-    expect(textItems[0]).toContain(JSON.stringify({ speakerId: OWNER, text: "clankie, you there?" }));
+    expect(textItems[0]).toContain("Recent room conversation (JSONL;");
+    expect(textItems[0]).toContain(
+      JSON.stringify({ speakerId: OWNER, text: "clankie, you there?", source: "speech" }),
+    );
     expect(textItems[1]).toBe("Right now: tending the garden.");
     expect(textItems[2]).toBe(ADDRESSED_OFFER_TURN_ITEM);
     expect(textItems).toHaveLength(3);

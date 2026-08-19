@@ -724,6 +724,81 @@ describe("consent boundary", () => {
   });
 });
 
+describe("typed voice-room input (ADR 0124)", () => {
+  it("lets the active room persona answer attributed text without publishing a fake voice transcript", async () => {
+    const harness = await joinedHarness({
+      occupants: [{ userId: OWNER, displayName: "James" }],
+    });
+    const publishedTranscripts: string[] = [];
+    harness.session.subscribeTranscript((line) => publishedTranscripts.push(line));
+
+    expect(
+      harness.session.receiveRoomText({
+        guildId: GUILD,
+        channelId: CHANNEL,
+        userId: ALICE,
+        displayName: "Alice",
+        deliveryId: "message-1",
+        text: "say something in vc clankie",
+      }),
+    ).toBe(true);
+    await flush();
+
+    expect(harness.ofType("text_input")).toMatchObject([
+      {
+        guildId: GUILD,
+        channelId: CHANNEL,
+        userId: ALICE,
+        deliveryId: "message-1",
+        characters: 27,
+        addressed: true,
+      },
+    ]);
+    expect(harness.ofType("floor_decision")).toMatchObject([
+      { userId: ALICE, deliveryId: "message-1", action: "wake", reason: "addressed" },
+    ]);
+    expect(harness.conversation().textItems).toContain(
+      `Recent room conversation (JSONL; speakerId is gateway-authenticated):\n${JSON.stringify({
+        speakerId: ALICE,
+        displayName: "Alice",
+        text: "say something in vc clankie",
+        source: "text",
+      })}`,
+    );
+    expect(harness.conversation().responseCreates).toBe(1);
+    expect(publishedTranscripts).toEqual([]);
+
+    // Gateway redelivery remains owned by voice but cannot create a second response.
+    expect(
+      harness.session.receiveRoomText({
+        guildId: GUILD,
+        channelId: CHANNEL,
+        userId: ALICE,
+        deliveryId: "message-1",
+        text: "say something in vc clankie",
+      }),
+    ).toBe(true);
+    await flush();
+    expect(harness.ofType("text_input")).toHaveLength(1);
+    expect(harness.conversation().responseCreates).toBe(1);
+  });
+
+  it("leaves text to ordinary ingress when this voice session does not own the room", async () => {
+    const harness = await joinedHarness();
+    expect(
+      harness.session.receiveRoomText({
+        guildId: GUILD,
+        channelId: "somewhere-else",
+        userId: ALICE,
+        deliveryId: "message-2",
+        text: "hey clankie",
+      }),
+    ).toBe(false);
+    expect(harness.ofType("text_input")).toHaveLength(0);
+    expect(harness.conversations).toHaveLength(0);
+  });
+});
+
 describe("audio path", () => {
   it("streams converted audio to the listener as it arrives, zeroes the source, and receipts the utterance", async () => {
     const harness = await joinedHarness();
@@ -778,6 +853,7 @@ describe("audio path", () => {
       `Room utterance (authenticated Discord speaker): ${JSON.stringify({
         speakerId: ALICE,
         text: "one more detail",
+        source: "speech",
       })}`,
     );
     expect(at(conversation.textItems, -1)).toBe(ENGAGED_OFFER_TURN_ITEM);
@@ -823,9 +899,10 @@ describe("floor decisions", () => {
     const conversation = harness.conversation();
     expect(conversation.input.instructions).toBe("Be Clankie, in the social register.");
     expect(conversation.textItems).toEqual([
-      `Recent room transcript (JSONL; speakerId is gateway-authenticated):\n${JSON.stringify({
+      `Recent room conversation (JSONL; speakerId is gateway-authenticated):\n${JSON.stringify({
         speakerId: ALICE,
         text: "hey clankie you there",
+        source: "speech",
       })}`,
       "Right now: tending the garden.",
       ADDRESSED_OFFER_TURN_ITEM,
@@ -1047,7 +1124,7 @@ describe("unprompted turns", () => {
     const conversation = harness.conversation();
     expect(conversation.responseCreates).toBe(1);
     expect(at(conversation.textItems, 0)).toContain(
-      JSON.stringify({ speakerId: BOB, text: "the garden bot has been quiet" }),
+      JSON.stringify({ speakerId: BOB, text: "the garden bot has been quiet", source: "speech" }),
     );
     expect(at(conversation.textItems, -1)).toBe(UNPROMPTED_TURN_ITEM);
     // Nothing is decided until he answers: the floor has not moved yet.
@@ -1149,7 +1226,7 @@ describe("speaker attribution", () => {
     harness.transcribe(ALICE, "hey clankie what do you think");
     await flush();
     expect(at(harness.conversation().textItems, 0)).toContain(
-      JSON.stringify({ speakerId: ALICE, text: "hey clankie what do you think" }),
+      JSON.stringify({ speakerId: ALICE, text: "hey clankie what do you think", source: "speech" }),
     );
 
     // Bob's transcript comes from Bob's listener and moves the floor only when
@@ -1874,7 +1951,7 @@ describe("transcript ring", () => {
     }
     await harness.say(ALICE, "hey clankie summarize that");
     const seed = at(harness.conversation().textItems, 0);
-    expect(seed.startsWith("Recent room transcript (JSONL;")).toBe(true);
+    expect(seed.startsWith("Recent room conversation (JSONL;")).toBe(true);
     expect(seed).toContain("line-34");
     expect(seed).not.toContain("line-0 ");
     expect(seed.split("\n")).toHaveLength(31);
@@ -1967,7 +2044,7 @@ describe("possessor narration and hearing (ADR 0064)", () => {
     });
 
     await harness.say(ALICE, "go left instead");
-    expect(heard).toEqual([JSON.stringify({ speakerId: ALICE, text: "go left instead" })]);
+    expect(heard).toEqual([JSON.stringify({ speakerId: ALICE, text: "go left instead", source: "speech" })]);
     expect(transcripts).toEqual([
       expect.objectContaining({
         guildId: GUILD,
@@ -2004,7 +2081,7 @@ describe("possessor narration and hearing (ADR 0064)", () => {
     harness.session.subscribeTranscript((line) => heard.push(line));
 
     await harness.say(ALICE, "still listening");
-    expect(heard).toEqual([JSON.stringify({ speakerId: ALICE, text: "still listening" })]);
+    expect(heard).toEqual([JSON.stringify({ speakerId: ALICE, text: "still listening", source: "speech" })]);
   });
 });
 

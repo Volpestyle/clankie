@@ -410,6 +410,7 @@ export class VoiceIdleAutoLeave {
     switch (evidence.type) {
       case "joined":
       case "utterance":
+      case "text_input":
       case "response":
       case "floor":
         this.arm();

@@ -114,7 +114,10 @@ Fixtures cannot satisfy these live gates.
   configured owner ([ADR 0062](../../docs/adr/0062-voice-join-by-asking.md)).
 - Bounded text ingress is deny-by-default by guild/channel/DM policy. Admitted
   Discord content and attachments are labelled untrusted before the captain
-  sees them. The bridge persists no channel transcript.
+  sees them. Text-only input in the active voice channel instead enters that
+  room's shared floor, so the realtime persona may answer aloud or stay silent
+  without a second text reply ([ADR 0124](../../docs/adr/0124-one-self-has-many-local-threads.md)).
+  The bridge persists no channel transcript.
 - Presence actions use a live gateway claim and the configured presence
   allowlists. Reactions and thread actions are grounded in the triggering
   message. See [ADR 0024](../../docs/adr/0024-discord-dual-plane-presence.md).

@@ -44,6 +44,17 @@ export {
   type DiscordTextIngressPort,
 } from "./text-ingress.ts";
 export {
+  admittedDiscordRoomText,
+  DISCORD_ROOM_TEXT_MAX_CHARS,
+  routeDiscordRoomText,
+  type DiscordRoomTextDelivery,
+  type DiscordRoomTextGate,
+  type DiscordRoomTextMessage,
+  type DiscordRoomTextRoute,
+  type DiscordRoomTextVoiceSink,
+  type DiscordVoiceRoomTextInput,
+} from "./room-text.ts";
+export {
   DiscordVoiceIngress,
   type DiscordVoiceCaptainPort,
   type DiscordVoiceIngressOptions,

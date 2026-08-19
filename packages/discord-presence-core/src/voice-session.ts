@@ -79,6 +79,7 @@ import { discordPcmToRealtimePcm, openAiPcmToDiscordPcm, pcmRms, PCM_SAMPLE_BYTE
 import { DiscordVoiceConsentRegistry, type DiscordVoiceConsentPolicy } from "./voice-consent.ts";
 import { VoiceFloor, type FloorDecision, type FloorState, type VoiceFloorOptions } from "./voice-floor.ts";
 import type { DiscordVoiceIngress, DiscordVoiceTurnOutcome } from "./voice-ingress.ts";
+import { DISCORD_ROOM_TEXT_MAX_CHARS, type DiscordVoiceRoomTextInput } from "./room-text.ts";
 import {
   createYoutubeAudioSink,
   isAllowedMusicUrl,
@@ -429,11 +430,15 @@ interface PendingVoiceResponse {
   toolCalled?: boolean;
 }
 
-/** One gateway capture waiting for its speaker-bound final transcript. */
-interface PendingTranscriptTurn {
+interface RoomTurn {
   readonly userId: string;
   readonly deliveryId: string;
   readonly startedAtMs: number;
+  readonly displayName?: string;
+}
+
+/** One gateway capture waiting for its speaker-bound final transcript. */
+interface PendingTranscriptTurn extends RoomTurn {
   /**
    * Loudest RMS seen while capturing, so an empty transcript can be told apart
    * from a silent one. Written by the capture loop, read once by the receipt.
@@ -447,6 +452,8 @@ interface FinalizedUtterance {
   readonly addressed: boolean;
   readonly finalizedAtMs: number;
 }
+
+type RoomInputSource = "speech" | "text";
 
 /** One response's streamed playback: a raw-PCM stream fed by deltas, played in order. */
 interface PlaybackJob {
@@ -506,7 +513,7 @@ export class DiscordVoiceSession {
   private readonly speakerLastActiveAtMs = new Map<string, number>();
   private conversation: VoiceConversationPort | undefined;
   private channelMembers = new Set<string>();
-  /** Lines stored as buffers so {@link leave} can zero the bytes, not merely drop references. */
+  /** Room lines stored as buffers so {@link leave} can zero the bytes, not merely drop references. */
   private transcriptRing: Buffer[] = [];
   /** Live consumers of the room; see {@link subscribeTranscript}. Never retains by itself. */
   private readonly transcriptListeners = new Set<
@@ -530,7 +537,9 @@ export class DiscordVoiceSession {
   private holdHandle: unknown;
   private readonly reconnectHandles = new Map<string, unknown>();
   private readonly reconnectDelays = new Map<string, number>();
-  private lastTranscriptUserId: string | undefined;
+  private lastRoomUserId: string | undefined;
+  /** Bounded idempotency window for gateway MESSAGE_CREATE redelivery. */
+  private readonly roomTextDeliveryIds = new Set<string>();
 
   private readonly onSpeakingStart = (userId: string): void => {
     if (this.guildId === undefined || this.channelId === undefined) return;
@@ -745,6 +754,7 @@ export class DiscordVoiceSession {
     for (const line of this.transcriptRing) line.fill(0);
     this.transcriptRing = [];
     this.channelMembers.clear();
+    this.lastRoomUserId = undefined;
     this.pendingResponses = [];
     if (this.openPlayback !== undefined) {
       this.openPlayback.stream.end();
@@ -873,6 +883,47 @@ export class DiscordVoiceSession {
     });
     this.conversationOps = queued.catch(() => undefined);
     await queued;
+  }
+
+  /**
+   * Let the active voice room hear one message from its attached text chat.
+   *
+   * Text and speech enter the same floor machine. The realtime room persona
+   * therefore decides whether to answer aloud, use `ask_clankie`, or stay
+   * silent; no sentence is supplied for it to repeat. Returns false when this
+   * session does not own the message's room so ordinary text ingress can take
+   * the turn instead.
+   */
+  public receiveRoomText(input: DiscordVoiceRoomTextInput): boolean {
+    if (input.guildId !== this.guildId || input.channelId !== this.channelId) return false;
+    const text = input.text.trim().slice(0, DISCORD_ROOM_TEXT_MAX_CHARS);
+    if (text.length === 0) return false;
+    if (this.roomTextDeliveryIds.has(input.deliveryId)) return true;
+    this.roomTextDeliveryIds.add(input.deliveryId);
+    if (this.roomTextDeliveryIds.size > 1_024) {
+      const oldest = this.roomTextDeliveryIds.values().next().value as string | undefined;
+      if (oldest !== undefined) this.roomTextDeliveryIds.delete(oldest);
+    }
+
+    const turn: RoomTurn = {
+      userId: input.userId,
+      deliveryId: input.deliveryId,
+      startedAtMs: this.clock(),
+      ...(input.displayName === undefined ? {} : { displayName: input.displayName }),
+    };
+    const addressed = voiceAddressesCharacter(text, this.options.floor.names);
+    void this.emitSafely({
+      type: "text_input",
+      guildId: input.guildId,
+      channelId: input.channelId,
+      userId: input.userId,
+      deliveryId: input.deliveryId,
+      characters: text.length,
+      addressed,
+    });
+    if (this.isPlaying() && addressed) this.truncatePlayback(input.userId);
+    this.applyRoomUtterance(turn, text, "text");
+    return true;
   }
 
   /**
@@ -1166,13 +1217,16 @@ export class DiscordVoiceSession {
   }
 
   private applyFinalizedUtterance(item: FinalizedUtterance): void {
+    this.applyRoomUtterance(item.turn, item.text, "speech");
+  }
+
+  private applyRoomUtterance(turn: RoomTurn, text: string, source: RoomInputSource): void {
     const guildId = this.guildId;
     const channelId = this.channelId;
     if (guildId === undefined || channelId === undefined) return;
-    const { turn, text } = item;
-    this.lastTranscriptUserId = turn.userId;
-    this.pushTranscriptLine(turn, text);
-    this.hearIfOpen(turn.userId, text);
+    this.lastRoomUserId = turn.userId;
+    this.rememberRoomLine(turn, text, source);
+    this.hearIfOpen(turn, text, source);
     const decision = this.floor.observeTranscript({ speakerId: turn.userId, text, atMs: this.clock() });
     void this.emitSafely({
       type: "floor_decision",
@@ -1187,32 +1241,36 @@ export class DiscordVoiceSession {
     this.applyFloorDecision(decision, turn, guildId, channelId);
   }
 
-  private pushTranscriptLine(turn: PendingTranscriptTurn, text: string): void {
+  private rememberRoomLine(turn: RoomTurn, text: string, source: RoomInputSource): void {
     const guildId = this.guildId;
     const channelId = this.channelId;
     if (guildId === undefined || channelId === undefined) return;
-    const labeled = this.labeledSpeech(turn.userId, text);
-    const line = JSON.stringify(labeled);
-    const transcript: DiscordVoiceTranscript = {
-      // Wall clock, not `this.clock()` — that seam is monotonic milliseconds
-      // for durations, and reading it as an epoch stamped every transcript
-      // line somewhere in 1970, which broke the join to receipts by time.
-      occurredAt: new Date().toISOString(),
-      guildId,
-      channelId,
-      ...(this.stayId === undefined ? {} : { stayId: this.stayId }),
-      deliveryId: turn.deliveryId,
-      ...labeled,
-    };
-    // Ring and possessor hear the same JSONL. A Discord nickname is untrusted
-    // the same way transcript text is — interpolating it would let a nick
-    // impersonate another speaker.
+    const labeled = this.labeledSpeech(turn.userId, text, turn.displayName);
+    const line = JSON.stringify({ ...labeled, source });
+    // A Discord nickname is untrusted the same way message text is —
+    // interpolating it would let a nick impersonate another participant.
     this.transcriptRing.push(Buffer.from(line, "utf8"));
-    for (const listener of this.transcriptListeners) {
-      try {
-        listener(line, transcript);
-      } catch {
-        // A possessor that throws on hearing must not break the room.
+    // Voice transcript subscribers are deliberately speech-only. Typed text
+    // already has Discord's durable source, and publishing it here would send
+    // the existing possessor text delivery twice.
+    if (source === "speech") {
+      const transcript: DiscordVoiceTranscript = {
+        // Wall clock, not `this.clock()` — that seam is monotonic milliseconds
+        // for durations, and reading it as an epoch stamped every transcript
+        // line somewhere in 1970, which broke the join to receipts by time.
+        occurredAt: new Date().toISOString(),
+        guildId,
+        channelId,
+        ...(this.stayId === undefined ? {} : { stayId: this.stayId }),
+        deliveryId: turn.deliveryId,
+        ...labeled,
+      };
+      for (const listener of this.transcriptListeners) {
+        try {
+          listener(line, transcript);
+        } catch {
+          // A possessor that throws on hearing must not break the room.
+        }
       }
     }
     let totalBytes = 0;
@@ -1234,7 +1292,7 @@ export class DiscordVoiceSession {
 
   private applyFloorDecision(
     decision: FloorDecision,
-    turn: PendingTranscriptTurn,
+    turn: RoomTurn,
     guildId: string,
     channelId: string,
   ): void {
@@ -1352,7 +1410,7 @@ export class DiscordVoiceSession {
    * whichever way it lands settles the offer's accounting.
    */
   private queueEngagedResponse(
-    turn: PendingTranscriptTurn,
+    turn: RoomTurn,
     guildId: string,
     channelId: string,
     offer?: "volition" | "engaged" | "addressed",
@@ -1500,7 +1558,7 @@ export class DiscordVoiceSession {
       // keeps the fast path from being ignorant (ADR 0057).
       const ring = this.ringText();
       if (ring.length > 0) {
-        port.createTextItem(`Recent room transcript (JSONL; speakerId is gateway-authenticated):\n${ring}`);
+        port.createTextItem(`Recent room conversation (JSONL; speakerId is gateway-authenticated):\n${ring}`);
       }
       const roster = this.rosterText(guildId, channelId);
       if (roster !== undefined) port.createTextItem(roster);
@@ -1511,12 +1569,16 @@ export class DiscordVoiceSession {
     }
   }
 
-  private hearIfOpen(speakerId: string, text: string): void {
+  private hearIfOpen(turn: RoomTurn, text: string, source: RoomInputSource): void {
     const conversation = this.conversation;
     if (conversation === undefined || !conversation.isOpen) return;
     try {
+      const label =
+        source === "text"
+          ? "Room text message (authenticated Discord author)"
+          : "Room utterance (authenticated Discord speaker)";
       conversation.createTextItem(
-        `Room utterance (authenticated Discord speaker): ${JSON.stringify(this.labeledSpeech(speakerId, text))}`,
+        `${label}: ${JSON.stringify({ ...this.labeledSpeech(turn.userId, text, turn.displayName), source })}`,
       );
     } catch {
       // Closed between frames; the close handler owns cleanup.
@@ -1526,8 +1588,11 @@ export class DiscordVoiceSession {
   private labeledSpeech(
     speakerId: string,
     text: string,
+    suppliedDisplayName?: string,
   ): { speakerId: string; displayName?: string; text: string } {
-    const displayName = this.displayNameFor(speakerId);
+    const supplied = suppliedDisplayName?.trim().slice(0, 100);
+    const displayName =
+      supplied === undefined || supplied.length === 0 ? this.displayNameFor(speakerId) : supplied;
     return displayName === undefined ? { speakerId, text } : { speakerId, displayName, text };
   }
 
@@ -1680,7 +1745,7 @@ export class DiscordVoiceSession {
       this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
       return;
     }
-    const speakerId = exchange?.speakerId ?? this.lastTranscriptUserId;
+    const speakerId = exchange?.speakerId ?? this.lastRoomUserId;
     const trace: VoiceMusicTraceContext = {
       source: "realtime",
       callId: call.callId,

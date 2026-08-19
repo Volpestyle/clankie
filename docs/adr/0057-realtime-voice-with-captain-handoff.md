@@ -11,7 +11,8 @@ the sole author of outbound room speech.
 from answering in a group room.
 [ADR 0121](0121-development-voice-transcripts-are-explicit.md) separately
 allows an owner-enabled private development transcript while keeping the
-receipt stream content-free.
+receipt stream content-free. [ADR 0124](0124-one-self-has-many-local-threads.md)
+also feeds the active voice room's attached text chat through this floor.
 
 ## Context
 

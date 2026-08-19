@@ -509,10 +509,10 @@ function discordActionTools(
     lane === "discord_presence"
       ? [
           defineTool({
-            name: "say_now",
-            label: "Say something now",
+            name: "send_text_update",
+            label: "Send text update",
             description:
-              "Say one short thing to the channel immediately, without ending your turn. Your real reply still posts when you finish. Use this BEFORE you go do something slow — looking a bracket up, reading a page, working through a task — so the room knows you are on it instead of watching silence. Say what you are going off to do, in your own voice, and then go do it. Do not use it to pad a turn you can just answer.",
+              "Post one short text update to this Discord channel immediately, without ending your turn. This is not voice speech, and your real text reply still posts when you finish. Use it BEFORE you go do something slow — looking a bracket up, reading a page, working through a task — so the room knows you are on it instead of watching silence. Say what you are going off to do, in your own voice, and then go do it. Do not use it to pad a turn you can just answer.",
             parameters: Type.Object({
               text: Type.String({
                 minLength: 1,
@@ -522,7 +522,11 @@ function discordActionTools(
             }),
             execute: (callId, params) =>
               deps
-                .discordActions!.execute({ action: "say_now", ...context(callId), text: params.text })
+                .discordActions!.execute({
+                  action: "send_text_update",
+                  ...context(callId),
+                  text: params.text,
+                })
                 .then(json),
           }),
           defineTool({

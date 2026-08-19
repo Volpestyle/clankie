@@ -6,29 +6,30 @@ what lets both bodies be one character
 ([ADR 0024](../../docs/adr/0024-discord-dual-plane-presence.md),
 [ADR 0048](../../docs/adr/0048-discord-user-session-transport.md)).
 
-| Module                       | Responsibility                                                                                                |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `presence-session`           | Gateway/voice phase lifecycle, typed phase events, act-tool revoke fence                                      |
-| `presence-action-advertiser` | Retains the live catalogue and forwards phase as an execution fence                                           |
-| `discord-rest`               | Shared bounded REST writes for both Discord transports                                                        |
-| `captain-action-control`     | Authenticated local control requests from captain tools                                                       |
-| `text-ingress`               | Normalises gateway messages into bounded, allowlist-gated captain turns, images included (ADR 0081)           |
-| `voice-address`              | Phonetic name-mention: opens a session; the offered turn decides whether to speak (ADR 0119)                  |
-| `voice-floor`                | Dormant ↔ engaged floor: wake, offer (silence-ok), listen, decay, volition (ADR 0119)                         |
-| `realtime-session`           | Injectable OpenAI/xAI realtime boundaries: transcription, conversation, and `ask_clankie` round trips         |
-| `elevenlabs-tts`             | Injectable ElevenLabs multi-context streaming-TTS boundary (ADR 0070)                                         |
-| `external-voice`             | Pairs a text-modality realtime session with a TTS mouth behind the one conversation port (ADR 0070)           |
-| `voice-session`              | Media owner: consent, per-speaker capture/transcription, shared group floor, deliberate barge-in and playback |
-| `voice-composition`          | Shared voice dependency assembly for bot and user-session bodies                                              |
-| `voice-control`              | Local join/leave control request handling                                                                     |
-| `voice-music`                | Shared bounded queue and transport controls                                                                   |
-| `voice-ingress`              | Routes one `ask_clankie` handoff to the continuing `discord_voice` captain lane                               |
-| `voice-consent`              | Ephemeral consent under explicit or owner-selected presence policy; opt-out always wins                       |
-| `voice-audio`                | Memory-only PCM conversion between Discord 48 kHz stereo and realtime 24 kHz mono                             |
-| `receipt-store`              | Append-only, content-free receipts for both planes                                                            |
+| Module                       | Responsibility                                                                                        |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `presence-session`           | Gateway/voice phase lifecycle, typed phase events, act-tool revoke fence                              |
+| `presence-action-advertiser` | Retains the live catalogue and forwards phase as an execution fence                                   |
+| `discord-rest`               | Shared bounded REST writes for both Discord transports                                                |
+| `captain-action-control`     | Authenticated local control requests from captain tools                                               |
+| `text-ingress`               | Normalises gateway messages into bounded, allowlist-gated captain turns, images included (ADR 0081)   |
+| `room-text`                  | Shared admission for typed room experience across text, voice, and game threads (ADR 0124)            |
+| `voice-address`              | Phonetic name-mention: opens a session; the offered turn decides whether to speak (ADR 0119)          |
+| `voice-floor`                | Dormant ↔ engaged floor: wake, offer (silence-ok), listen, decay, volition (ADR 0119)                 |
+| `realtime-session`           | Injectable OpenAI/xAI realtime boundaries: transcription, conversation, and `ask_clankie` round trips |
+| `elevenlabs-tts`             | Injectable ElevenLabs multi-context streaming-TTS boundary (ADR 0070)                                 |
+| `external-voice`             | Pairs a text-modality realtime session with a TTS mouth behind the one conversation port (ADR 0070)   |
+| `voice-session`              | Media owner: attributed speech/text input, shared group floor, deliberate barge-in and playback       |
+| `voice-composition`          | Shared voice dependency assembly for bot and user-session bodies                                      |
+| `voice-control`              | Local join/leave control request handling                                                             |
+| `voice-music`                | Shared bounded queue and transport controls                                                           |
+| `voice-ingress`              | Routes one `ask_clankie` handoff to the continuing `discord_voice` captain lane                       |
+| `voice-consent`              | Ephemeral consent under explicit or owner-selected presence policy; opt-out always wins               |
+| `voice-audio`                | Memory-only PCM conversion between Discord 48 kHz stereo and realtime 24 kHz mono                     |
+| `receipt-store`              | Append-only, content-free receipts for both planes                                                    |
 
 Voice receipts use the `discord.voice.*` vocabulary — `joined`, `consent`,
-`utterance`, `floor`, `response`, `volition`, `overlap`, `interrupted`,
+`utterance`, `text_input`, `floor`, `response`, `volition`, `overlap`, `interrupted`,
 `failed`, `left` — and every field is a content-free scalar: ids, counts,
 durations, and typed outcomes, never transcript, prompt, audio, or PCM.
 
@@ -50,6 +51,10 @@ durations, and typed outcomes, never transcript, prompt, audio, or PCM.
   ([ADR 0081](../../docs/adr/0081-an-image-is-part-of-what-is-said.md)).
 - **This package never fetches attachment bytes.** It carries references; the
   clankie service resolves them at the last hop before the model.
+- **The active voice room owns its attached text chat.** Text-only messages in
+  that exact guild/channel enter `VoiceFloor`, where the realtime room persona
+  speaks, hands off, or stays silent. The bridge does not also launch a text
+  captain turn ([ADR 0124](../../docs/adr/0124-one-self-has-many-local-threads.md)).
 - **Voice identity stays attached to a gateway stream.** Speakers use separate
   transcription inputs. Only attributed JSON transcript items converge into
   the shared engaged conversation; overlapping raw audio is never interleaved

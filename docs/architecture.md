@@ -12,8 +12,11 @@ his game bodies, and the HTTP API every surface speaks.
 
 ![Message to captain turn sequence](diagrams/clankie-message-turn-sequence.jpg)
 
-A Discord message reaches the bridge, which posts it to
-`POST /v1/captain/channel-turns`. The service normalizes it — untrusted body
+A Discord message reaches the active bridge. A text-only message in the live
+voice channel's attached chat enters that room's existing `VoiceFloor`; the
+realtime room thread may answer aloud, ask the captain to act, or stay silent,
+and no separate text turn races it ([ADR 0124](adr/0124-one-self-has-many-local-threads.md)).
+Every other message posts to `POST /v1/captain/channel-turns`. The service normalizes it — untrusted body
 fenced and labelled, images resolved to bytes at the last hop, channel context
 attached — and prompts a pi session. Every room gets a continuing session (a pi
 JSONL tree that survives restarts): operator conversations, voice channels under
@@ -33,9 +36,9 @@ real answer. Nothing caps how long a turn may take — looking something
 up properly is work, not a fault — but a turn that emits no event at all for 5
 minutes is a dead stream, so the stall watchdog aborts its pi session and
 settles it as `captain_turn_stalled`. While a turn runs he can post one short
-`say_now` message to the channel ("hang on, pulling the bracket up") without
-ending it, and Discord shows him typing for the whole turn rather than for a
-capped minute.
+`send_text_update` message to the channel ("hang on, pulling the bracket up")
+without ending it, and Discord shows him typing for the whole turn rather than
+for a capped minute.
 
 The TUI and relay speak the same operator-conversation contract
 (`/operator/v1/dispatch`): revision-fenced sends, cursored replay, long-polled

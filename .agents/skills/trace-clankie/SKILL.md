@@ -34,6 +34,11 @@ is append-only JSONL or plain files now), never write to it.
 - **Conversation metadata is not a liveness clock.** `meta.json.updatedAt` may
   stay at turn acceptance while activity and tools keep appending. Judge a live
   turn by the newest `events.jsonl` event and its accepted/completed pair.
+- **A play journal does not prove which code revision ran.** Its header has no
+  source revision, and service logs carry the package version rather than the
+  commit. Compare process/restart and commit times, then use fields actually
+  present in the journal to prove capabilities; a process may also have started
+  from uncommitted source, so do not infer an exact commit from timing alone.
 - **Presence phases are edge-triggered at the event level.** `discord.presence.*`
   and `captain.presence.*` phases persist until the owning process emits the
   next transition, so judge liveness by the **age of the last event** for that
@@ -62,6 +67,13 @@ is append-only JSONL or plain files now), never write to it.
   removed tool cue may still be copied after the new process starts. When exact
   wording survives a restart, inspect the turn's initial user message for that
   wording before concluding the running code is stale.
+- **Typed input can belong to the active voice room.** A text-only message in
+  the voice channel's attached chat does not start a `discord_presence` captain
+  turn while that exact guild/channel has a live voice session. Find
+  `discord.voice.text_input`, then join its `deliveryId` to
+  `discord.voice.floor_decision`, `model_response`, `realtime_tool`, and
+  `response`. The receipt is content-free; exact text remains in Discord, and
+  the opt-in voice transcript log stays speech-only.
 - **Realtime voice tool calls are receipts only.** `discord.voice.realtime_tool`
   names the tool (`ask_clankie`, `look_at_screen`, `music_*`) and its phase,
   never its arguments or result — the content fence applies. To see arguments,

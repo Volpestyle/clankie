@@ -58,8 +58,8 @@ const TOOL_DETAIL_TRUNCATED = "\n… truncated";
  * This is not a limit on how long he may take. Asking him to look something up
  * — a bracket, a page, a task worth real work — is a thing the room is allowed
  * to do, and a clock that cuts the answer off at some tidy number turns honest
- * slowness into failure. He tells the room he is going away (`say_now`) and
- * takes the time the work takes.
+ * slowness into failure. He posts a text update (`send_text_update`) and takes
+ * the time the work takes.
  *
  * What is bounded is silence *inside* the machine. A turn that is working emits
  * events continuously — tokens, tool calls, retries — so five minutes with not

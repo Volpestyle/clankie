@@ -48,6 +48,7 @@ import {
   DiscordVoiceTranscriptStore,
   parseDiscordDmPolicy,
   parseDiscordIdSet,
+  routeDiscordRoomText,
   selectInboundImageAttachments,
   tryHandleCaptainDiscordActionRequest,
   tryHandleMusicControlRequest,
@@ -87,7 +88,6 @@ import {
   voiceEvidenceReceiptType,
 } from "./voice-composition.ts";
 import { executeVoicePresenceIntent } from "./voice-presence.ts";
-import { possessorRoomText } from "./possessor-text.ts";
 import { sanitizeDiscordText } from "./text.ts";
 
 // Fill unset DISCORD_* names from the operator settings file before anything
@@ -373,20 +373,6 @@ if (possessorVoiceListener !== undefined && voiceSession !== undefined) {
     "Discord bridge possessor voice seam listening on loopback",
   );
 }
-/** Hand a text message to a running playthrough as a line from the room. */
-const publishRoomTextToPossessor = (message: Message): void => {
-  if (possessorVoiceListener === undefined) return;
-  const line = possessorRoomText(
-    { ingressGuildIds, ingressChannelIds },
-    {
-      guildId: message.guildId,
-      channelId: message.channelId,
-      authorIsBot: message.author.bot || message.author.id === client.user?.id,
-      body: message.content,
-    },
-  );
-  if (line !== null) possessorVoiceListener.publishUtterance(line);
-};
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -620,21 +606,37 @@ client.on("messageCreate", async (message) => {
   if (!textIngress) return;
   try {
     const selection = selectDiscordMessageImages(message);
+    const authorIsBot = message.author.bot || message.author.id === client.user?.id;
     const inbound = {
       id: message.id,
       ...(message.guildId === null ? {} : { guildId: message.guildId }),
       channelId: message.channelId,
       authorId: message.author.id,
-      authorIsBot: message.author.bot || message.author.id === client.user?.id,
+      authorIsBot,
       mentionsBot: client.user !== null && message.mentions.users.has(client.user.id),
       body: message.content,
       attachments: selection.attachments,
       attachmentsOmitted: selection.omitted,
     };
-    // Before the captain turn: a playthrough is mid-turn right now and the
-    // point of an interjection is that it reaches the next decision, not the
-    // one after the reply.
-    publishRoomTextToPossessor(message);
+    const routedRoomText = routeDiscordRoomText(
+      { guildIds: ingressGuildIds, channelIds: ingressChannelIds },
+      {
+        ...(message.guildId === null ? {} : { guildId: message.guildId }),
+        channelId: message.channelId,
+        authorIsBot,
+        body: message.content,
+        userId: message.author.id,
+        displayName: message.member?.displayName ?? message.author.globalName ?? message.author.username,
+        deliveryId: message.id,
+        hasAttachments: selection.attachments.length > 0 || selection.omitted > 0,
+      },
+      voiceSession,
+    );
+    // The playthrough and realtime voice room are local threads of the same
+    // character. Both inherit the event; only the active voice room owns the
+    // reply, so the separate text captain does not race it.
+    if (routedRoomText.text !== null) possessorVoiceListener?.publishUtterance(routedRoomText.text);
+    if (routedRoomText.voiceOwned) return;
     let contextRead: Promise<readonly DiscordInboundContextMessage[]> | undefined;
     const loadContextOnce = () => (contextRead ??= readDiscordContext(message, textIngressContextLimit));
     const result = await textIngress.handle({
@@ -1202,7 +1204,7 @@ async function executeCaptainDiscordAction(
     }
     action = `discord.presence.${input.action}`;
     payload = { kind: input.action, channelId, messageId: input.messageId, emoji: input.emoji };
-  } else if (input.action === "say_now") {
+  } else if (input.action === "send_text_update") {
     if (
       !ingressGuildIds.has(input.guildId) ||
       (ingressChannelIds.size > 0 && !ingressChannelIds.has(input.channelId))
@@ -1297,8 +1299,8 @@ async function executeCaptainDiscordAction(
               ? "I started the thread."
               : input.action === "join_thread"
                 ? "I joined the thread."
-                : input.action === "say_now"
-                  ? "I said that to the channel. Keep working; your final reply still posts when the turn ends."
+                : input.action === "send_text_update"
+                  ? "I posted that text update. Keep working; your final text reply still posts when the turn ends."
                   : input.action === "react"
                     ? "I reacted."
                     : "I removed my reaction.",

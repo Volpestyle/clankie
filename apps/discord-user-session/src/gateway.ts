@@ -38,6 +38,7 @@ export interface DiscordGatewayMessage {
   readonly guildId?: string;
   readonly channelId: string;
   readonly authorId: string;
+  readonly authorDisplayName?: string;
   readonly authorIsBot: boolean;
   readonly mentionsSelf: boolean;
   readonly content: string;
@@ -287,6 +288,11 @@ export class DiscordUserGateway {
           ...(typeof payload.guild_id === "string" ? { guildId: payload.guild_id } : {}),
           channelId: payload.channel_id,
           authorId: author.id,
+          ...(typeof author.global_name === "string"
+            ? { authorDisplayName: author.global_name }
+            : typeof author.username === "string"
+              ? { authorDisplayName: author.username }
+              : {}),
           authorIsBot: author.bot === true,
           mentionsSelf: mentions.some(
             (mention) => record(mention)?.id === this.selfUserId && this.selfUserId !== undefined,
