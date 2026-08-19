@@ -62,9 +62,15 @@ cannot read them says so rather than reporting an empty room.**
   belongs to whoever is playing. Where somebody is standing is the fact that was
   missing.
 - **Absent and empty are different claims.** A decoder that does not read object
-  events omits the field; an empty array asserts the map really is empty. A
-  client that collapses the two tells a mind "nobody here" about a screen nobody
-  read — a worse answer than silence, because it is actionable and wrong.
+  events omits the field; an empty array asserts that nobody is standing here.
+  A client that collapses the two tells a mind "nobody here" about a screen
+  nobody read — a worse answer than silence, because it is actionable and wrong.
+- **Empty is not "nothing to do here".** Only what the game models as a movable
+  object appears: people and item balls. Tables, signs, and scenery are map
+  terrain. ADR 0120's objection lands exactly here and is not answered — the
+  starter table that ADR is named for is invisible to this field by
+  construction, so the wording that reaches the mind says "nobody is standing
+  in the room", never "the room is empty".
 - **The base is derived from the two verified player offsets.** Both live inside
   entry 0 of the same array, so `FIRERED_OBJECT_EVENTS_OFFSET` is computed from
   them and a module-load check makes them agree. The **stride** is the one value
@@ -87,6 +93,13 @@ as context he does not get.
 
 ## Consequences
 
+- **The frame is an unreliable narrator, which is the argument ADR 0120 did not
+  weigh.** Its run was wrong about _where_ a seen object was; this one was wrong
+  about _whether_ a person was there at all — "the red guy is Oak", three times,
+  in three different places, about a professor the script had put on Route 1.
+  Labelled axes make a confabulating reader precise rather than truthful.
+  Decoded object events cannot hallucinate, and that is the whole of the case
+  for paying the tax.
 - ADR 0120's rejection of `gObjectEvents` is narrowed, not overturned. Labelled
   axes remain the answer to addressing things no decoder names — map
   decorations, the starter table, scenery. Occupants answer which blocked tiles

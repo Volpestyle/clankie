@@ -394,9 +394,14 @@ export const GbaEmulatorObservationSchema = z.discriminatedUnion("kind", [
           .nullish(),
         /**
          * Everyone else standing on this map. Absent when the decoder does not
-         * read them at all; an empty array means the map is genuinely empty.
+         * read them at all; an empty array means nobody is standing here.
          * Collapsing the two would tell a mind "nobody here" about a screen
          * that was never read.
+         *
+         * Only what the game models as a movable object: people, item balls.
+         * Tables, signs, and scenery are map terrain and never appear, so an
+         * empty list is never a claim that a room holds nothing worth an A
+         * press — the starter table is invisible here by construction.
          */
         occupants: z.array(GbaMapOccupantSchema).max(31).nullish(),
         /**

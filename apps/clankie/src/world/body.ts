@@ -269,8 +269,8 @@ const FireRedStateSchema = z
     fieldInputReady: z.boolean(),
     /**
      * Absent on a world older than this field; null when that world decoded no
-     * map to stand on. Both mean "unknown", which is not the same answer as an
-     * empty room and must not be rendered as one.
+     * map to stand on. Both mean "unknown", which is not the same answer as
+     * "nobody is standing here" and must not be rendered as one.
      */
     npcs: z
       .array(
