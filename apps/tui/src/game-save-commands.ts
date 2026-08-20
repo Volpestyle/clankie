@@ -30,43 +30,36 @@ async function browseGameSaves(shell: ClankieFaceShell, rootDir: string): Promis
         flow.renderLine("No local Pokémon saves exist.", "info");
         return;
       }
-      const picked = await flow.readSelect({
-        kind: "single",
+      const checkpointId = await flow.readSelect({
         message: "Local Pokémon saves\nHosted-world saves stay with their world server.",
         options: saves.map(saveOption),
         statusActions: [{ value: "done", label: "Done" }],
-        required: true,
       });
-      const checkpointId = picked?.[0];
       if (checkpointId === undefined || checkpointId === "done") return;
       const save = saves.find((candidate) => candidate.checkpointId === checkpointId);
       if (save === undefined) continue;
 
       const action = await flow.readSelect({
-        kind: "single",
         message: saveDetails(save),
         options: [
           { value: "back", label: "Back", description: "Keep this save." },
           { value: "delete", label: "Delete", description: "Permanently remove this checkpoint." },
         ],
         initialValue: "back",
-        required: true,
         allowBack: true,
       });
-      if (action?.[0] !== "delete") continue;
+      if (action !== "delete") continue;
 
       const confirmation = await flow.readSelect({
-        kind: "single",
         message: `Delete ${saveName(save)}? This cannot be undone.`,
         options: [
           { value: "cancel", label: "Cancel" },
           { value: "delete", label: "Delete permanently" },
         ],
         initialValue: "cancel",
-        required: true,
         allowBack: true,
       });
-      if (confirmation?.[0] !== "delete") continue;
+      if (confirmation !== "delete") continue;
       try {
         deleteGbaCheckpoint({ rootDir, checkpointId });
         flow.renderLine(`Deleted ${saveName(save)}.`, "success");

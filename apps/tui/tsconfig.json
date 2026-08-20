@@ -1,4 +1,9 @@
 {
   "extends": "../../tsconfig.base.json",
-  "include": ["bin/**/*.ts", "src/**/*.ts", "test/**/*.ts"]
+  "include": [
+    "bin/**/*.ts",
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "../../integrations/gba-emulator/src/romdev-platform-gba.d.ts"
+  ]
 }

@@ -29,7 +29,7 @@ describe("game save commands", () => {
       })}\n`,
     );
 
-    const selections = [[checkpointId], ["delete"], ["delete"]];
+    const selections = [checkpointId, "delete", "delete"];
     const menus: Array<{ message: string; options: readonly { label: string }[]; initialValue?: string }> =
       [];
     const lines: string[] = [];
