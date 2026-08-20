@@ -26,6 +26,22 @@ Report advertised capabilities as `live`, `refused`, or `absent`. A receipt
 that fails because a promised capability is absent is useful evidence; do not
 weaken the expectation to make the instrument green.
 
+## Game-body boundary
+
+- A GBA MCP probe proves only the private core/runtime created by that stdio
+  process. It cannot prove Clankie's local play, Activity publication, play
+  voice, room hearing, or interruption because none of those paths exist in the
+  harness.
+- Prove Clankie's local play through the captain/play-host path. Prove his hosted
+  play through the pinned native `@pokeagents/world-protocol` client path. Do
+  not substitute PokeAgents MCP for Clankie's native body seam.
+- In the sibling PokeAgents repository, `WORLD_OPERATIONS` owns operation and
+  capability schemas and the MCP surface derives from it. Treat stronger
+  session-bound typed-client or catalog-only dispatch work as PokeAgents-owned
+  follow-up unless the checked revision actually contains it.
+- `EnvironmentRuntime` lease expiry/recovery is an internal runtime property,
+  not evidence that one process can possess another process's body.
+
 ## What a live proof must demonstrate
 
 - Booting is not playing. Require a decoded observation and a meaningful state
@@ -35,7 +51,7 @@ weaken the expectation to make the instrument green.
   gaps or dropped-frame counts too.
 - Exercise identity, session, refusal, persistence, and cleanup paths when the
   claim includes them. Put leave/close in `finally` so a failed probe does not
-  strand a body.
+  strand its own session or body.
 - Use semantic observations to steer scripted cartridge setup. Fixed button
   loops can reopen a menu or take a different branch and then misdiagnose the
   implementation under test.
@@ -45,9 +61,8 @@ weaken the expectation to make the instrument green.
 ## Test discovery gotcha
 
 Read the repo's root `vitest.config.ts` before deciding where a test belongs.
-PokeAgents currently discovers both `<package>/test/**/*.test.ts` and co-located
-`<package>/src/**/*.test.ts`; older revisions discovered only `test/`, so moving
-a correctly co-located test based on memory just creates churn.
+Clankie discovers `<package>/test/**/*.test.ts` only; co-located
+`<package>/src/**/*.test.ts` files are outside the gate.
 
 Confirm discovery by count, not by exit code. Note **Test Files** and **Tests**
 before and after; if adding tests did not move both, they are not in the gate.

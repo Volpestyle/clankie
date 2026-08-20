@@ -5,8 +5,7 @@
   "description": "Clankie: a persistent agent who codes, leads herdr fleets, plays games, and hangs out in Discord.",
   "type": "module",
   "scripts": {
-    "dev": "turbo run dev --parallel",
-    "build": "turbo run build",
+    "build": "turbo run build --filter=@clankie/menu-bar --filter=@clankie/vox",
     "typecheck": "turbo run typecheck",
     "test": "vitest run --config vitest.config.ts && pnpm --filter @clankie/vox test && pnpm --filter @clankie/vox-client smoke debug",
     "lint": "oxlint --deny-warnings . && pnpm --filter @clankie/vox lint",
@@ -17,20 +16,16 @@
     "check": "pnpm fmt:check && pnpm lint && pnpm docs:check && pnpm typecheck && pnpm test",
     "doctor": "node scripts/doctor.mjs",
     "cli:install": "node scripts/install-cli.mjs",
-    "clean": "turbo run clean && rm -rf .turbo .data",
+    "clean": "turbo run clean --filter=@clankie/menu-bar --filter=@clankie/vox && rm -rf .turbo .data",
     "gba:free-play": "pnpm --filter @clankie/gba-emulator free-play",
     "gba:free-play-live": "pnpm --filter @clankie/clankie free-play-live",
-    "gba:mcp-probe": "pnpm --filter @clankie/gba-mcp probe",
     "discord:readiness": "pnpm --filter @clankie/discord-bridge readiness",
     "discord:voice-readiness": "pnpm --filter @clankie/discord-bridge voice-readiness"
   },
   "devDependencies": {
-    "@types/node": "24.12.4",
     "oxfmt": "0.58.0",
     "oxlint": "1.73.0",
-    "tsx": "4.23.0",
     "turbo": "2.10.4",
-    "typescript": "5.9.3",
     "vitest": "4.1.10"
   },
   "engines": {

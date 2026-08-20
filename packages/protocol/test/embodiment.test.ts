@@ -3,7 +3,6 @@ import {
   canTransitionEmbodimentSession,
   EMBODIMENT_SESSION_TRANSITIONS,
   EmbodimentIntentSchema,
-  EmbodimentLifecycleReportSchema,
   EmbodimentPlayNoteSchema,
   EmbodimentSessionSchema,
   embodimentVenue,
@@ -32,18 +31,6 @@ const baseSession = {
   budget: { maxTurns: 40, maxDurationMs: 30 * 60 * 1_000 },
   requestedAt: "2026-07-26T12:00:00.000Z",
   updatedAt: "2026-07-26T12:00:01.000Z",
-} as const;
-
-const receipt = {
-  schemaVersion: 1,
-  sessionId: "session-1",
-  environmentId: "pokemon-firered",
-  outcome: "stopped",
-  turnsTaken: 12,
-  durationMs: 240_000,
-  framesPublished: 7_200,
-  framesDropped: 0,
-  checkpointId: "checkpoint-9",
 } as const;
 
 describe("Embodiment intents (ADR 0063)", () => {
@@ -109,7 +96,6 @@ describe("Embodiment session record", () => {
       EmbodimentSessionSchema.parse({
         ...baseSession,
         state: "running",
-        runnerId: "runner-local",
         resumedFromCheckpointId: "checkpoint-8",
       }).state,
     ).toBe("running");
@@ -121,7 +107,7 @@ describe("Embodiment session record", () => {
       EmbodimentSessionSchema.safeParse({
         ...baseSession,
         state: "refused",
-        refusalReason: "body_held",
+        refusalReason: "play_session_active",
       }).success,
     ).toBe(true);
     expect(
@@ -135,14 +121,16 @@ describe("Embodiment session record", () => {
       EmbodimentSessionSchema.safeParse({
         ...baseSession,
         state: "running",
-        runnerId: "runner-local",
-        refusalReason: "body_held",
+        refusalReason: "play_session_active",
       }).success,
     ).toBe(false);
   });
 
-  it("requires runner attribution after claim", () => {
-    expect(EmbodimentSessionSchema.safeParse({ ...baseSession, state: "claimed" }).success).toBe(false);
+  it("rejects legacy runner attribution", () => {
+    expect(
+      EmbodimentSessionSchema.safeParse({ ...baseSession, state: "claimed", runnerId: "runner-local" })
+        .success,
+    ).toBe(false);
   });
 
   it("pins the transition map to the lifecycle the ADR draws", () => {
@@ -157,33 +145,6 @@ describe("Embodiment session record", () => {
   });
 });
 
-describe("Embodiment lifecycle reports", () => {
-  it("requires a receipt exactly on terminal states", () => {
-    const base = {
-      schemaVersion: 1,
-      sessionId: "session-1",
-      runnerId: "runner-local",
-      reportedAt: "2026-07-26T12:10:00.000Z",
-    } as const;
-    expect(EmbodimentLifecycleReportSchema.safeParse({ ...base, state: "running" }).success).toBe(true);
-    expect(EmbodimentLifecycleReportSchema.safeParse({ ...base, state: "stopped" }).success).toBe(false);
-    expect(EmbodimentLifecycleReportSchema.safeParse({ ...base, state: "stopped", receipt }).success).toBe(
-      true,
-    );
-    expect(EmbodimentLifecycleReportSchema.safeParse({ ...base, state: "running", receipt }).success).toBe(
-      false,
-    );
-    expect(
-      EmbodimentLifecycleReportSchema.safeParse({
-        ...base,
-        state: "refused",
-        refusalReason: "body_held",
-      }).success,
-    ).toBe(true);
-    expect(EmbodimentLifecycleReportSchema.safeParse({ ...base, state: "refused" }).success).toBe(false);
-  });
-});
-
 describe("Embodiment play note", () => {
   it("parses every outcome a captain reply can render", () => {
     const notes = [
@@ -193,7 +154,7 @@ describe("Embodiment play note", () => {
         environmentId: "pokemon-firered",
         resumedFromCheckpointId: "checkpoint-8",
       },
-      { action: "start_refused", environmentId: "pokemon-firered", reason: "body_held" },
+      { action: "start_refused", environmentId: "pokemon-firered", reason: "play_session_active" },
       { action: "joined", sessionId: "session-1", environmentId: "pokemon-firered" },
       { action: "join_refused", environmentId: "pokemon-firered", reason: "no_credential" },
       { action: "stopped", sessionId: "session-1", checkpointId: "checkpoint-9" },
@@ -207,6 +168,7 @@ describe("Embodiment play note", () => {
 
   it("names every world-join refusal the tool can say out loud", () => {
     const reasons = [
+      "play_session_active",
       "no_credential",
       "world_unreachable",
       "world_refused",

@@ -9,6 +9,13 @@ persona supplies the words) and
 [ADR 0099](0099-he-can-look-at-his-own-play.md)'s story card, which reads the
 same field.
 
+## Current status (2026-08-19)
+
+The summary/advice split remains current. The audience reader is Clankie's own
+`@clankie/play-voice` seam, not an external possessor; GBA MCP receives only its
+private runtime's tool results under
+[ADR 0129](0129-each-player-owns-a-body.md).
+
 ## Context
 
 Every turn of a free-play run ends with one line saying what the action did.

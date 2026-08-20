@@ -13,36 +13,7 @@ import {
 } from "@clankie/discord-presence-core";
 import type { DiscordVoiceEvidence } from "@clankie/protocol";
 
-export {
-  DEFAULT_VOICE_IDLE_LEAVE_MS,
-  DEFAULT_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT,
-  DEFAULT_VOICE_REALTIME_MODEL,
-  DEFAULT_VOICE_REALTIME_PROVIDER,
-  DEFAULT_VOICE_REALTIME_VOICE,
-  DEFAULT_VOICE_TRANSCRIBE_MODEL,
-  DEFAULT_VOICE_TRUNCATION_RETENTION,
-  DEFAULT_VOICE_TTS_PROVIDER,
-  DEFAULT_XAI_VOICE_REALTIME_MODEL,
-  DEFAULT_XAI_VOICE_REALTIME_VOICE,
-  MAX_VOICE_IDLE_LEAVE_MS,
-  VOICE_REALTIME_PROVIDERS,
-  VOICE_TTS_PROVIDERS,
-  XAI_VOICE_REASONING_EFFORTS,
-  VoiceIdleAutoLeave,
-  createVoiceBriefingProvider,
-  createVoiceLookAtScreenProvider,
-  createVoiceRealtimePorts,
-  parseVoiceRealtimeEnv,
-  voiceEvidenceReceiptData,
-  voiceEvidenceReceiptType,
-  type VoiceRealtimeEnvConfig,
-  type VoiceRealtimeProvider,
-  type VoiceTtsProvider,
-} from "@clankie/discord-presence-core";
-
-export type DiscordVoiceResponseEvidence = Extract<DiscordVoiceEvidence, { type: "response" }>;
-
-export function describeVoiceResponse(evidence: DiscordVoiceResponseEvidence): string {
+export function describeVoiceResponse(evidence: Extract<DiscordVoiceEvidence, { type: "response" }>): string {
   const path = evidence.fastPath
     ? "fast path"
     : `clankie handoff ${String(Math.round(evidence.handoffMs))}ms`;

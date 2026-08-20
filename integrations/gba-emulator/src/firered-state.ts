@@ -3,6 +3,7 @@ import type {
   GbaCoreMenuState,
   GbaCoreNamingState,
   GbaCoreState,
+  GbaCoreSurroundings,
 } from "./core-double.ts";
 import {
   GBA_EWRAM_BASE,
@@ -14,7 +15,6 @@ import {
   fireRedSurroundings,
   type FireRedObjectEvent,
   type FireRedOverworldFields,
-  type FireRedSurroundings,
 } from "./firered-ram-map.ts";
 import { GBA_IWRAM_BUS_ADDRESS, GBA_IWRAM_BYTE_LENGTH } from "./mgba-core.ts";
 
@@ -203,7 +203,7 @@ export interface FireRedDecodedState {
    * battle or a map transition there is genuinely nothing to report, and a
    * fabricated "all open" would be worse than an absent field.
    */
-  surroundings: FireRedSurroundings | null;
+  surroundings: GbaCoreSurroundings | null;
   mapSize: { width: number; height: number } | null;
   /**
    * Every way off the loaded map — warp events (doors, stairs, mats) in player
@@ -984,7 +984,7 @@ export function decodeFireRedState(
   const overworld = decodeFireRedOverworld(snapshot.ewram);
   // A missing grid is a normal state (battle, mid-warp), not a decode failure,
   // so this reports absence rather than propagating the throw.
-  let surroundings: FireRedSurroundings | null = null;
+  let surroundings: GbaCoreSurroundings | null = null;
   let mapSize: { width: number; height: number } | null = null;
   let exits: FireRedDecodedState["exits"] = null;
   try {

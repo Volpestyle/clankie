@@ -1,7 +1,7 @@
 /**
  * The merged Clankie service's HTTP surface: the surviving control-plane
- * routes, with the runner's capabilities wired in-process instead of over the
- * loopback. Missions, doctrine, workers, approvals, trackers, shell, and
+ * routes, with local capabilities wired in-process instead of over loopback.
+ * Missions, doctrine, workers, approvals, trackers, shell, and
  * terminals are gone; what remains is Discord presence, the captain seam,
  * memory, embodiment (play), browser, media, and device pairing.
  */
@@ -25,6 +25,7 @@ import {
   PLAY_STILL_PATH,
   PLAY_STORY_PATH,
   isDiscordPresenceActionAvailable,
+  resolveDiscordPresenceToolExposure,
   resolveDiscordPresencePhaseToolExposure,
   type ActivityObservationSnapshot,
   type PlayStillRead,
@@ -64,14 +65,11 @@ import {
   DiscordStreamWatchReportSchema,
   DiscordUserSessionOptInRequestSchema,
   DiscordUserSessionOptInSchema,
-  EmbodimentClaimSchema,
   EmbodimentIntentSchema,
-  EmbodimentLifecycleReportSchema,
   PairingCompleteRequestSchema,
   PairingRedeemRequestSchema,
   SUPERVISE_GRANTS,
   eventStreamKindForId,
-  type BodyPossession,
   type BrowserToolCatalog,
   type CallBrowserToolRequest,
   type CallBrowserToolResult,
@@ -225,7 +223,7 @@ function isSubsetGrants(accepted: DeviceGrantSet, offered: DeviceGrantSet): bool
 }
 
 // ---------------------------------------------------------------------------
-// Injected capability ports (formerly the runner loopback's contracts).
+// Injected in-process capability ports.
 // ---------------------------------------------------------------------------
 
 export interface ActivityObservationReadPort {
@@ -238,13 +236,8 @@ export interface BrowserToolPort {
 }
 
 // ---------------------------------------------------------------------------
-// Authentication contracts (unchanged shapes from the old control plane).
+// Authentication contracts.
 // ---------------------------------------------------------------------------
-
-export interface TrustedRunnerIdentity {
-  runnerId: string;
-}
-export type RunnerAuthenticator = (request: Request) => Promise<TrustedRunnerIdentity | undefined>;
 
 export interface TrustedCaptainIdentity {
   captainId: string;
@@ -282,8 +275,6 @@ export interface ClankieAppDependencies {
   settings?: { load(): Promise<ClankieSettings> };
   discordPresenceRuntime?: DiscordPresenceRuntimePort;
   discordUserPresenceRuntime?: DiscordPresenceRuntimePort;
-  /** Read-only view of the cross-process body lock; absent reads as "nobody". */
-  bodyPossession?: () => BodyPossession | null;
   activityObservations?: ActivityObservationReadPort;
   /** Live still and journal story of the asked playthrough (ADR 0099). */
   playSight?: { still(): PlayStillRead; story(): PlayStoryRead };
@@ -293,7 +284,6 @@ export interface ClankieAppDependencies {
   localVoiceRealtime?: TranscriptVoiceRealtimePorts;
   /** Private exact Discord transcript log, injected by tests when needed. */
   voiceTranscriptStore?: DiscordVoiceTranscriptStore;
-  authenticateRunner?: RunnerAuthenticator;
   authenticateCaptain?: CaptainAuthenticator;
   authenticateOperator?: OperatorAuthenticator;
   /** HMAC key (≥32 bytes) signing device session tokens; absent fails pairing closed (503). */
@@ -660,12 +650,10 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       }
       try {
         const durableBefore = discordPresenceSessions.resolve(event.data.session);
-        const observed = discordPresenceSessions.validate(event);
-        const advancesDurableRevision =
-          durableBefore === undefined || observed.revision > durableBefore.revision;
-        if (advancesDurableRevision) discordPresenceLiveSessions.set(sessionKey, observed);
         const session = discordPresenceSessions.apply(event);
-        if (advancesDurableRevision) discordPresenceLiveSessions.set(sessionKey, session);
+        if (durableBefore === undefined || session.revision > durableBefore.revision) {
+          discordPresenceLiveSessions.set(sessionKey, session);
+        }
         appendEvent(domainEvent);
         return context.json({ accepted: true, session });
       } catch (error) {
@@ -903,7 +891,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       if (session === undefined) {
         return context.json({ error: "discord_presence_session_unavailable" }, 409);
       }
-      const advertisedTools = discordPresenceSessions.resolveToolExposure(write.identity, "discord_presence");
+      const advertisedTools = resolveDiscordPresenceToolExposure(session, "discord_presence");
       if (
         advertisedTools?.presenceTools.includes("discord_presence_act") !== true ||
         !isDiscordPresenceActionAvailable({ action: write.action, session })
@@ -1376,22 +1364,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   });
 
   app.get("/v1/embodiment/sessions/live", async (context) => {
-    const captain = await authenticateCaptain(context.req.raw, dependencies);
-    if (captain !== "unavailable" && captain) {
-      return context.json({ session: embodiment.liveSession() ?? null });
-    }
-    const runner = await authenticateRunner(context.req.raw, dependencies);
-    if (runner !== "unavailable" && runner) {
-      return context.json({ session: embodiment.liveSession() ?? null });
-    }
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator !== "unavailable" && operator) {
-      return context.json({ session: embodiment.liveSession() ?? null });
-    }
-    if (captain === "unavailable" && runner === "unavailable" && operator === "unavailable") {
-      return context.json({ error: "captain_authentication_unavailable" }, 503);
-    }
-    return context.json({ error: "captain_authentication_required" }, 401);
+    const authorization = await authenticateCaptainOrOperator(context);
+    if ("denial" in authorization) return authorization.denial;
+    return context.json({ session: embodiment.liveSession() ?? null });
   });
 
   /** Present-tense self-observation, read straight from the in-process projection. */
@@ -1545,12 +1520,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (dependencies.browserTools === undefined) {
       return context.json({ error: "browser_unavailable" }, 503);
     }
-    let body: unknown;
-    try {
-      body = await context.req.json();
-    } catch {
-      return context.json({ error: "invalid_browser_call" }, 400);
-    }
+    const body = await readJson(context.req.raw);
     const parsed = CallBrowserToolRequestSchema.safeParse(body);
     if (!parsed.success) return context.json({ error: "invalid_browser_call" }, 400);
 
@@ -1612,12 +1582,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       if (dependencies.mediaGenerator === undefined) {
         return context.json({ error: "media_unavailable" }, 503);
       }
-      let body: unknown;
-      try {
-        body = await context.req.json();
-      } catch {
-        return context.json({ error: "invalid_media_request" }, 400);
-      }
+      const body = await readJson(context.req.raw);
       const parsed = schema.safeParse(body);
       if (!parsed.success) return context.json({ error: "invalid_media_request" }, 400);
       try {
@@ -1645,62 +1610,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const session = embodiment.getSession(context.req.param("id"));
     if (session === undefined) return context.json({ error: "embodiment_session_not_found" }, 404);
     return context.json({ session });
-  });
-
-  /** Who holds Clankie's body right now (VUH-938). An unwired observer reports nobody. */
-  app.get("/v1/embodiment/possession", async (context) => {
-    const captain = await authenticateCaptain(context.req.raw, dependencies);
-    if (captain === "unavailable") {
-      return context.json({ error: "captain_authentication_unavailable" }, 503);
-    }
-    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
-    return context.json({
-      schemaVersion: 1 as const,
-      possession: dependencies.bodyPossession?.() ?? null,
-    });
-  });
-
-  app.post("/v1/embodiment/claims", async (context) => {
-    const runner = await authenticateRunner(context.req.raw, dependencies);
-    if (runner === "unavailable") return context.json({ error: "runner_execution_unavailable" }, 503);
-    if (!runner) return context.json({ error: "runner_authentication_required" }, 401);
-    const parsed = EmbodimentClaimSchema.safeParse(await readJson(context.req.raw));
-    if (!parsed.success) return context.json({ error: "invalid_embodiment_claim" }, 400);
-    if (parsed.data.runnerId !== runner.runnerId) {
-      return context.json({ error: "embodiment_claim_runner_mismatch" }, 403);
-    }
-    const assignment = await embodiment.claim(parsed.data);
-    if (assignment === undefined) return context.body(null, 204);
-    logger.info(
-      {
-        runnerId: runner.runnerId,
-        kind: assignment.kind,
-        sessionId: assignment.kind === "start" ? assignment.session.sessionId : assignment.sessionId,
-      },
-      "embodiment work claimed",
-    );
-    return context.json({ assignment });
-  });
-
-  app.post("/v1/embodiment/sessions/:id/report", async (context) => {
-    const runner = await authenticateRunner(context.req.raw, dependencies);
-    if (runner === "unavailable") return context.json({ error: "runner_execution_unavailable" }, 503);
-    if (!runner) return context.json({ error: "runner_authentication_required" }, 401);
-    const parsed = EmbodimentLifecycleReportSchema.safeParse(await readJson(context.req.raw));
-    if (!parsed.success) return context.json({ error: "invalid_embodiment_report" }, 400);
-    if (parsed.data.sessionId !== context.req.param("id")) {
-      return context.json({ error: "embodiment_report_session_mismatch" }, 400);
-    }
-    if (parsed.data.runnerId !== runner.runnerId) {
-      return context.json({ error: "embodiment_report_runner_mismatch" }, 403);
-    }
-    const result = await embodiment.report(parsed.data);
-    if (result.outcome === "rejected") {
-      const status =
-        result.error === "unknown_session" ? 404 : result.error === "runner_mismatch" ? 403 : 409;
-      return context.json({ error: `embodiment_${result.error}` }, status);
-    }
-    return context.json({ accepted: true, session: result.session });
   });
 
   // Mint a one-time pairing offer. The offer secret appears once in the
@@ -2052,14 +1961,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-async function authenticateRunner(
-  request: Request,
-  dependencies: ClankieAppDependencies,
-): Promise<TrustedRunnerIdentity | "unavailable" | undefined> {
-  if (!dependencies.authenticateRunner) return "unavailable";
-  return dependencies.authenticateRunner(request);
-}
 
 async function authenticateCaptain(
   request: Request,

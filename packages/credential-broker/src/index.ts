@@ -80,25 +80,16 @@ export {
   type WorldCredentialOptions,
 } from "./world-credential.ts";
 export {
-  RUNNER_CREDENTIAL_PROVIDER_ID,
-  RunnerCredentialError,
-  ensureRunnerCredential,
-  mintRunnerToken,
-  resolveRunnerCredential,
-  type RunnerCredentialErrorCode,
-  type RunnerCredentialOptions,
-} from "./runner-credential.ts";
-export {
-  POSSESSOR_VOICE_CREDENTIAL_PROVIDER_ID,
-  POSSESSOR_VOICE_FORBIDDEN_ENV,
-  PossessorVoiceCredentialError,
-  assertNoEnvironmentPossessorVoiceToken,
-  ensurePossessorVoiceCredential,
-  mintPossessorVoiceToken,
-  resolvePossessorVoiceCredential,
-  type PossessorVoiceCredentialErrorCode,
-  type PossessorVoiceCredentialOptions,
-} from "./possessor-voice-credential.ts";
+  PLAY_VOICE_CREDENTIAL_PROVIDER_ID,
+  PLAY_VOICE_FORBIDDEN_ENV,
+  PlayVoiceCredentialError,
+  assertNoEnvironmentPlayVoiceToken,
+  ensurePlayVoiceCredential,
+  mintPlayVoiceToken,
+  resolvePlayVoiceCredential,
+  type PlayVoiceCredentialErrorCode,
+  type PlayVoiceCredentialOptions,
+} from "./play-voice-credential.ts";
 export {
   DISCORD_BRIDGE_CREDENTIAL_PROVIDER_ID,
   DISCORD_USER_BRIDGE_CREDENTIAL_PROVIDER_ID,

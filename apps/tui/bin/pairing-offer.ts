@@ -1,4 +1,3 @@
-import { z } from "zod";
 import { PairingOfferWireSchema, type PairingOfferWire } from "@clankie/protocol";
 
 // Narrow client for the device pairing-offer boundary. `clankie pair`
@@ -22,14 +21,7 @@ export const PairingOfferSchema = PairingOfferWireSchema;
 export type PairingOffer = PairingOfferWire;
 
 /** Every failure the command must fail closed on (VUH-878 acceptance criteria). */
-export type PairingOfferStatus =
-  | "unavailable"
-  | "unauthorized"
-  | "expired"
-  | "consumed"
-  | "revoked"
-  | "malformed"
-  | "interrupted";
+export type PairingOfferStatus = "unavailable" | "unauthorized" | "expired" | "malformed" | "interrupted";
 
 /**
  * A fail-closed pairing outcome. The message is content-free and actionable —
@@ -54,10 +46,6 @@ export function pairingFailureMessage(status: PairingOfferStatus): string {
       return "Operator credential unavailable. Start the clankie service once, then retry.";
     case "expired":
       return "Pairing offer expired before it could be shown. Run `clankie pair` again for a fresh offer.";
-    case "consumed":
-      return "Pairing offer already used. Each offer pairs one device — run `clankie pair` again.";
-    case "revoked":
-      return "Pairing offer revoked. Run `clankie pair` again or review device access from the host.";
     case "malformed":
       return "Pairing service returned an unexpected response. Update Clankie or retry.";
     case "interrupted":
@@ -70,16 +58,6 @@ export interface RequestPairingOfferOptions {
   readonly operatorToken?: string | undefined;
   readonly fetchImpl?: typeof fetch;
   readonly signal?: AbortSignal;
-}
-
-/** Non-2xx service errors report a content-free reason code we can map to a status. */
-const PairingErrorBodySchema = z.object({ error: z.string().optional() });
-
-function statusFromErrorBody(body: unknown): PairingOfferStatus | undefined {
-  const parsed = PairingErrorBodySchema.safeParse(body);
-  const code = parsed.success ? parsed.data.error : undefined;
-  if (code === "expired" || code === "consumed" || code === "revoked") return code;
-  return undefined;
 }
 
 function isAbortError(error: unknown): boolean {
@@ -115,8 +93,7 @@ export async function requestPairingOffer(options: RequestPairingOfferOptions = 
 
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) throw new PairingOfferError("unauthorized");
-    const body = await response.json().catch(() => undefined);
-    throw new PairingOfferError(statusFromErrorBody(body) ?? "unavailable");
+    throw new PairingOfferError("unavailable");
   }
 
   const payload: unknown = await response.json().catch(() => undefined);

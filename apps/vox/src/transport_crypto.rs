@@ -74,10 +74,9 @@ impl TransportCrypto {
     ///
     /// Under Discord's `rtpsize` AEAD modes the AAD covers the RTP fixed
     /// header + CSRC list + the 4-byte extension header prefix (profile +
-    /// length) but **not** the extension body.  `header_size` from
-    /// `parse_rtp_header` includes the full extension (header + body), so we
-    /// must recompute the AAD boundary from the raw packet bytes.
-    pub(crate) fn decrypt(&self, packet: &[u8], _header_size: usize) -> Result<Vec<u8>> {
+    /// length) but **not** the extension body, so the AAD boundary is computed
+    /// from the raw packet bytes rather than `parse_rtp_header`'s full size.
+    pub(crate) fn decrypt(&self, packet: &[u8]) -> Result<Vec<u8>> {
         let cc = (packet[0] & 0x0F) as usize;
         let mut aad_size = RTP_HEADER_LEN + cc * 4;
         if (packet[0] >> 4) & 0x01 != 0 {
@@ -150,9 +149,7 @@ mod tests {
         packet.extend_from_slice(&header);
         packet.extend_from_slice(&encrypted);
 
-        let decrypted = crypto
-            .decrypt(&packet, header.len())
-            .expect("decrypt should succeed");
+        let decrypted = crypto.decrypt(&packet).expect("decrypt should succeed");
         assert_eq!(decrypted, payload);
     }
 
@@ -168,9 +165,7 @@ mod tests {
         packet.extend_from_slice(&header);
         packet.extend_from_slice(&encrypted);
 
-        let decrypted = crypto
-            .decrypt(&packet, header.len())
-            .expect("decrypt should succeed");
+        let decrypted = crypto.decrypt(&packet).expect("decrypt should succeed");
         assert_eq!(decrypted, payload);
     }
 
@@ -242,7 +237,7 @@ mod tests {
         // decrypt() must recompute the correct AAD boundary from the packet
         // bytes, ignoring the too-large header_size.
         let decrypted = crypto
-            .decrypt(&packet, parsed_header_size)
+            .decrypt(&packet)
             .expect("decrypt must succeed with extension present");
         assert_eq!(decrypted, plaintext);
 

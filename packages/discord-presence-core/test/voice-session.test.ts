@@ -1,7 +1,17 @@
 import { Buffer } from "node:buffer";
-import type { EventEmitter } from "node:events";
-import { PassThrough } from "node:stream";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import {
+  VOX_IPC_PROTOCOL_VERSION,
+  VoxClientError,
+  type VoxClient,
+  type VoxControlEvent,
+  type VoxDecodedVideoFrame,
+  type VoxMusicRequest,
+  type VoxProcessStatus,
+  type VoxStreamConnect,
+  type VoxTtsAudio,
+  type VoxUserAudioFrame,
+} from "@clankie/vox-client";
 import {
   DiscordVoiceEvidenceSchema,
   type CaptainChannelTurnResult,
@@ -13,10 +23,8 @@ import {
   type RealtimeSessionCloseReason,
   type RealtimeTimers,
 } from "../src/realtime-session.ts";
-import { discordPcmToRealtimePcm, openAiPcmToDiscordPcm } from "../src/voice-audio.ts";
 import type { VoiceFloorOptions } from "../src/voice-floor.ts";
 import { DiscordVoiceIngress } from "../src/voice-ingress.ts";
-import { VoiceMusicQueue } from "../src/voice-music.ts";
 import {
   CAPTAIN_UNREACHABLE_TEXT,
   DiscordVoiceSession,
@@ -29,7 +37,6 @@ import {
   ENGAGED_OFFER_TURN_ITEM,
   UNPROMPTED_TURN_ITEM,
   type DiscordVoiceBriefingRequest,
-  type JoinDiscordVoiceInput,
   type VoiceConversationOpenInput,
   type VoiceConversationPort,
   type VoiceTranscriptionHandlers,
@@ -37,165 +44,207 @@ import {
 } from "../src/voice-session.ts";
 
 // ---------------------------------------------------------------------------
-// @discordjs/voice and prism-media doubles. The media owner is the only
-// component allowed to touch them, so the fakes live here rather than in a
-// shared harness: a ready connection with DAVE, a player that goes idle when
-// its resource's stream drains, and an opus "decoder" that passes PCM through
-// so tests write raw 48 kHz stereo frames directly.
+// Vox double: one process with role-scoped readiness and correlated media ids.
 // ---------------------------------------------------------------------------
 
-interface MockPlayer extends EventEmitter {
-  state: { status: string };
-  written: { ref: Buffer; copy: Buffer }[];
-  stop(force?: boolean): boolean;
-}
+class FakeVox implements VoxClient {
+  public readonly available = true;
+  public status: VoxProcessStatus = "ready";
+  public detail = "fake Vox";
+  public autoReady = true;
+  public autoBuffer = true;
+  public autoDrain = true;
+  public autoMusicStart = true;
+  public sendAudioError: Error | undefined;
+  public finishError: Error | undefined;
+  public stopError: Error | undefined;
+  public leaveError: Error | undefined;
+  public subscribeError: Error | undefined;
+  public unsubscribeError: Error | undefined;
+  public musicStopError: Error | undefined;
+  public readonly joins: {
+    connectionId: string;
+    guildId: string;
+    channelId: string;
+    selfMute?: boolean;
+  }[] = [];
+  public readonly leaves: (string | undefined)[] = [];
+  public readonly subscriptions: {
+    userId: string;
+    captureId: string;
+    options?: { silenceDurationMs?: number; sampleRate?: number };
+  }[] = [];
+  public readonly unsubscriptions: string[] = [];
+  public readonly audio: { playbackId: string; pcm: Buffer; sampleRate?: number }[] = [];
+  public readonly finishes: string[] = [];
+  public readonly stops: string[] = [];
+  public readonly musicRequests: VoxMusicRequest[] = [];
+  public readonly musicGains: { musicId: string; target: number; fadeMs?: number }[] = [];
+  public activePlaybackId: string | undefined;
+  public closeCalls = 0;
+  private readonly statusListeners = new Set<(status: VoxProcessStatus, detail: string) => void>();
+  private readonly eventListeners = new Set<(event: VoxControlEvent) => void>();
+  private readonly audioListeners = new Set<(frame: VoxUserAudioFrame) => void>();
+  private readonly frameListeners = new Set<(frame: VoxDecodedVideoFrame) => void>();
+  private readonly bufferedPlaybackIds = new Set<string>();
 
-interface MockConnection extends EventEmitter {
-  state: { status: string };
-  receiver: { speaking: EventEmitter; subscribe: (userId: string, options: unknown) => PassThrough };
-  captures: { userId: string; stream: PassThrough }[];
-}
-
-interface VoiceMockState {
-  readonly players: MockPlayer[];
-  readonly connections: MockConnection[];
-}
-
-vi.mock("@discordjs/voice", async () => {
-  const { EventEmitter: Emitter } = await import("node:events");
-  const { PassThrough: Stream } = await import("node:stream");
-
-  interface Resource {
-    stream: InstanceType<typeof Stream>;
-  }
-
-  class FakeAudioPlayer extends Emitter {
-    public state: { status: string } = { status: "idle" };
-    public written: { ref: Buffer; copy: Buffer }[] = [];
-    private current: Resource | undefined;
-
-    public play(resource: Resource): void {
-      this.current = resource;
-      this.setStatus("playing");
-      resource.stream.on("data", (chunk: Buffer) => {
-        this.written.push({ ref: chunk, copy: Buffer.from(chunk) });
-      });
-      resource.stream.on("end", () => {
-        if (this.current === resource && this.state.status === "playing") this.setStatus("idle");
-      });
-    }
-
-    public stop(_force?: boolean): boolean {
-      if (this.state.status !== "idle") this.setStatus("idle");
-      return true;
-    }
-
-    public pause(_interpolate?: boolean): boolean {
-      if (this.state.status === "playing") this.setStatus("paused");
-      return true;
-    }
-
-    public unpause(): boolean {
-      if (this.state.status === "paused") this.setStatus("playing");
-      return true;
-    }
-
-    private setStatus(status: string): void {
-      const previous = this.state;
-      this.state = { status };
-      this.emit("stateChange", previous, this.state);
-    }
-  }
-
-  class FakeVoiceConnection extends Emitter {
-    public state: {
-      status: string;
-      networking: { state: { code: string; dave: { protocolVersion: number } } };
-    } = {
+  public joinVoice(input: {
+    connectionId: string;
+    guildId: string;
+    channelId: string;
+    selfMute?: boolean;
+  }): void {
+    this.joins.push(input);
+    if (!this.autoReady) return;
+    this.emit({ type: "ready", connectionId: input.connectionId });
+    this.emit({
+      type: "transport_state",
+      role: "voice",
+      connectionId: input.connectionId,
       status: "ready",
-      networking: { state: { code: "ready", dave: { protocolVersion: 1 } } },
-    };
-    public captures: { userId: string; stream: InstanceType<typeof Stream> }[] = [];
-    public receiver = {
-      speaking: new Emitter(),
-      subscribe: (userId: string, _options: unknown): InstanceType<typeof Stream> => {
-        const stream = new Stream();
-        this.captures.push({ userId, stream });
-        return stream;
-      },
-    };
-
-    public subscribe(_player: unknown): void {
-      // The session wires the player to the connection; nothing to fake.
-    }
-
-    public destroy(): void {
-      this.state = { ...this.state, status: "destroyed" };
-    }
-  }
-
-  const players: FakeAudioPlayer[] = [];
-  const connections: FakeVoiceConnection[] = [];
-
-  const entersState = (
-    target: { state: { status: string } } & InstanceType<typeof Emitter>,
-    status: string,
-    _timeoutMs: number,
-  ): Promise<unknown> => {
-    if (target.state.status === status) return Promise.resolve(target);
-    return new Promise((resolve) => {
-      const onChange = (_previous: { status: string }, next: { status: string }): void => {
-        if (next.status === status) {
-          target.off("stateChange", onChange);
-          resolve(target);
-        }
-      };
-      target.on("stateChange", onChange);
     });
-  };
+    this.emit({
+      type: "dave_state",
+      role: "voice",
+      connectionId: input.connectionId,
+      status: "ready",
+      protocolVersion: 1,
+    });
+  }
 
-  return {
-    AudioPlayerStatus: { Idle: "idle", Playing: "playing", Buffering: "buffering", Paused: "paused" },
-    EndBehaviorType: { AfterSilence: "afterSilence" },
-    NetworkingStatusCode: { Ready: "ready" },
-    NoSubscriberBehavior: { Pause: "pause" },
-    StreamType: { Raw: "raw" },
-    VoiceConnectionStatus: { Ready: "ready", Destroyed: "destroyed", Disconnected: "disconnected" },
-    createAudioPlayer: (): FakeAudioPlayer => {
-      const player = new FakeAudioPlayer();
-      players.push(player);
-      return player;
-    },
-    createAudioResource: (
-      stream: InstanceType<typeof Stream>,
-      options: unknown,
-    ): Resource & { options: unknown } => ({
-      stream,
-      options,
-    }),
-    entersState,
-    joinVoiceChannel: (_options: unknown): FakeVoiceConnection => {
-      const connection = new FakeVoiceConnection();
-      connections.push(connection);
-      return connection;
-    },
-    __voiceMock: { players, connections },
-  };
-});
+  public leaveVoice(reason?: string): void {
+    this.leaves.push(reason);
+    if (this.leaveError !== undefined) throw this.leaveError;
+  }
 
-vi.mock("prism-media", async () => {
-  const { PassThrough: Stream } = await import("node:stream");
-  class Decoder extends Stream {
-    public constructor(_options?: unknown) {
-      super();
+  public sendAudio(input: VoxTtsAudio): void {
+    if (this.sendAudioError !== undefined) throw this.sendAudioError;
+    this.activePlaybackId = input.playbackId;
+    this.audio.push({
+      playbackId: input.playbackId,
+      pcm: Buffer.from(input.pcmBase64, "base64"),
+      ...(input.sampleRate === undefined ? {} : { sampleRate: input.sampleRate }),
+    });
+    if (this.autoBuffer && !this.bufferedPlaybackIds.has(input.playbackId)) {
+      this.bufferedPlaybackIds.add(input.playbackId);
+      this.emit({ type: "tts_playback_state", playbackId: input.playbackId, status: "buffered" });
+      this.emit({ type: "tts_playback_state", playbackId: input.playbackId, status: "started" });
     }
   }
-  return { opus: { Decoder } };
-});
 
-import * as discordVoiceModule from "@discordjs/voice";
+  public finishTtsPlayback(playbackId: string): void {
+    if (this.finishError !== undefined) throw this.finishError;
+    this.finishes.push(playbackId);
+    if (this.autoDrain) {
+      this.activePlaybackId = undefined;
+      this.emit({ type: "tts_playback_state", playbackId, status: "drained" });
+    }
+  }
 
-const voiceMock = (discordVoiceModule as unknown as { __voiceMock: VoiceMockState }).__voiceMock;
+  public stopTtsPlayback(playbackId: string): void {
+    if (this.stopError !== undefined) throw this.stopError;
+    this.stops.push(playbackId);
+    if (this.activePlaybackId === playbackId) this.activePlaybackId = undefined;
+    this.emit({ type: "tts_playback_state", playbackId, status: "stopped" });
+  }
+
+  public subscribeUserAudio(
+    userId: string,
+    captureId: string,
+    options?: { silenceDurationMs?: number; sampleRate?: number },
+  ): void {
+    if (this.subscribeError !== undefined) throw this.subscribeError;
+    this.subscriptions.push({ userId, captureId, ...(options === undefined ? {} : { options }) });
+  }
+
+  public unsubscribeUserAudio(userId: string): void {
+    this.unsubscriptions.push(userId);
+    if (this.unsubscribeError !== undefined) throw this.unsubscribeError;
+  }
+
+  public emit(event: VoxControlEvent): void {
+    for (const listener of this.eventListeners) listener(event);
+  }
+
+  public emitAudio(userId: string, captureId: string, pcm: Buffer): void {
+    const samples = Math.floor(pcm.byteLength / 2);
+    for (const listener of this.audioListeners) {
+      listener({
+        userId,
+        captureId,
+        signalPeakAbs: 0,
+        signalActiveSampleCount: samples,
+        signalSampleCount: samples,
+        pcm,
+      });
+    }
+  }
+
+  public setStatus(status: VoxProcessStatus, detail = this.detail): void {
+    this.status = status;
+    this.detail = detail;
+    for (const listener of this.statusListeners) listener(status, detail);
+  }
+
+  public onStatus(listener: (status: VoxProcessStatus, detail: string) => void): () => void {
+    this.statusListeners.add(listener);
+    listener(this.status, this.detail);
+    return () => this.statusListeners.delete(listener);
+  }
+
+  public onEvent(listener: (event: VoxControlEvent) => void): () => void {
+    this.eventListeners.add(listener);
+    return () => this.eventListeners.delete(listener);
+  }
+
+  public onUserAudio(listener: (frame: VoxUserAudioFrame) => void): () => void {
+    this.audioListeners.add(listener);
+    return () => this.audioListeners.delete(listener);
+  }
+
+  public onDecodedFrame(listener: (frame: VoxDecodedVideoFrame) => void): () => void {
+    this.frameListeners.add(listener);
+    return () => this.frameListeners.delete(listener);
+  }
+
+  public updateVoiceServer(): void {}
+  public updateVoiceState(): void {}
+  public stopPlayback(): void {}
+  public musicPlay(input: VoxMusicRequest): void {
+    this.musicRequests.push(input);
+    if (this.autoMusicStart) {
+      this.emit({ type: "player_state", status: "playing", musicId: input.musicId });
+    }
+  }
+  public musicStop(musicId: string): void {
+    if (this.musicStopError !== undefined) throw this.musicStopError;
+    this.emit({ type: "music_idle", musicId });
+  }
+  public musicPause(_musicId: string): void {}
+  public musicResume(_musicId: string): void {}
+  public musicSetGain(musicId: string, target: number, fadeMs?: number): void {
+    this.musicGains.push({ musicId, target, ...(fadeMs === undefined ? {} : { fadeMs }) });
+  }
+  public streamWatchConnect(_input: VoxStreamConnect): void {}
+  public streamWatchDisconnect(_reason?: string): void {}
+  public subscribeUserVideo(_userId: string, _maxFramesPerSecond?: number): void {}
+  public unsubscribeUserVideo(_userId: string): void {}
+  public streamPublishConnect(_input: VoxStreamConnect): void {}
+  public streamPublishDisconnect(_reason?: string): void {}
+  public streamPublishPlay(_url: string): void {}
+  public streamPublishBrowserStart(_mimeType?: "image/png"): void {}
+  public streamPublishBrowserFrame(_input: {
+    mimeType: "image/png";
+    frameBase64: string;
+    capturedAtMs?: number;
+  }): void {}
+  public streamPublishStop(): void {}
+  public streamPublishPause(): void {}
+  public streamPublishResume(): void {}
+  public close(): void {
+    this.closeCalls += 1;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Realtime port fakes: structural VoiceTranscriptionPort / VoiceConversationPort
@@ -337,6 +386,15 @@ class TestTimers implements RealtimeTimers {
     entry.fired = true;
     entry.handler();
   }
+
+  public fireLast(delayMs: number): void {
+    const entry = this.scheduled.findLast(
+      (candidate) => !candidate.cleared && !candidate.fired && candidate.delayMs === delayMs,
+    );
+    if (entry === undefined) throw new Error(`No armed timer with delay ${delayMs.toString()}`);
+    entry.fired = true;
+    entry.handler();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -350,8 +408,8 @@ const ALICE = "1111";
 const BOB = "2222";
 const MALLORY = "6666";
 
-/** 350 ms of 48 kHz stereo s16le — the sustained-speech barge-in threshold. */
-const BARGE_IN_SOURCE_BYTES = 67_200;
+/** 350 ms of Vox 24 kHz mono s16le — the sustained-speech barge-in threshold. */
+const BARGE_IN_SOURCE_BYTES = 16_800;
 
 async function flush(rounds = 4): Promise<void> {
   for (let round = 0; round < rounds; round += 1) {
@@ -364,7 +422,7 @@ const SPEECH_FILL = 0x10;
 /** Byte fill whose s16le samples land at room-tone level (0x0101 = 257). */
 const ROOM_TONE_FILL = 0x01;
 
-function stereoPcm(bytes: number, fill: number = SPEECH_FILL): Buffer {
+function monoPcm(bytes: number, fill: number = SPEECH_FILL): Buffer {
   return Buffer.alloc(bytes, fill);
 }
 
@@ -380,7 +438,6 @@ interface HarnessOptions {
   readonly floorOverrides?: Partial<VoiceFloorOptions>;
   readonly captain?: (request: DiscordPresenceChannelTurnRequest) => Promise<CaptainChannelTurnResult>;
   readonly lookAtScreen?: () => Promise<import("../src/voice-session.ts").LookAtScreenResult>;
-  readonly music?: VoiceMusicQueue;
   readonly speakerTranscriptionGate?: Promise<void>;
   readonly occupants?: readonly { readonly userId: string; readonly displayName?: string }[];
 }
@@ -389,6 +446,7 @@ function buildHarness(options: HarnessOptions = {}) {
   const clock = { now: 0 };
   const timers = new TestTimers();
   const evidence: DiscordVoiceEvidence[] = [];
+  const vox = new FakeVox();
   const transcriptions: FakeTranscription[] = [];
   const speakerTranscriptions = new Map<string, FakeTranscription>();
   const conversations: FakeConversation[] = [];
@@ -428,6 +486,7 @@ function buildHarness(options: HarnessOptions = {}) {
     { characterId: "clankie", credentialRef: "discord_bot", transportKind: "bot" },
   );
   const session = new DiscordVoiceSession({
+    vox,
     ingress,
     realtime: ports,
     briefing: (request) => {
@@ -438,7 +497,6 @@ function buildHarness(options: HarnessOptions = {}) {
       });
     },
     ...(options.lookAtScreen === undefined ? {} : { lookAtScreen: options.lookAtScreen }),
-    ...(options.music === undefined ? {} : { music: options.music }),
     floor: {
       names: ["clankie"],
       replyPolicy: "addressed",
@@ -472,11 +530,14 @@ function buildHarness(options: HarnessOptions = {}) {
     briefingCalls,
     submitCalls,
     ports,
-    connection: (): MockConnection => at(voiceMock.connections, -1),
-    player: (): MockPlayer => at(voiceMock.players, -1),
+    vox,
     transcription: (): FakeTranscription => at(transcriptions, -1),
     transcriptionFor: (userId: string): FakeTranscription => {
-      const transcription = speakerTranscriptions.get(userId);
+      let transcription = speakerTranscriptions.get(userId);
+      if (transcription === undefined) {
+        transcription = [...transcriptions].reverse().find((candidate) => candidate.isOpen);
+        if (transcription !== undefined) speakerTranscriptions.set(userId, transcription);
+      }
       if (transcription === undefined) throw new Error(`No transcription session for ${userId}`);
       return transcription;
     },
@@ -488,21 +549,48 @@ function buildHarness(options: HarnessOptions = {}) {
         guildId: GUILD,
         channelId: CHANNEL,
         invokingUserId: OWNER,
-        adapterCreator: (() => ({
-          sendPayload: () => true,
-          destroy: () => undefined,
-        })) as unknown as JoinDiscordVoiceInput["adapterCreator"],
       });
     },
     consent: async (userId: string) => {
       await session.setConsent(GUILD, CHANNEL, userId, true);
     },
-    startCapture: (userId: string): { userId: string; stream: PassThrough } => {
-      harness.connection().receiver.speaking.emit("start", userId);
+    startCapture: (userId: string) => {
+      const subscriptionStart = vox.subscriptions.length;
+      const unsubscribeStart = vox.unsubscriptions.length;
+      vox.emit({ type: "speaking_start", userId });
       if (speakerTranscriptions.get(userId)?.isOpen !== true) {
         speakerTranscriptions.set(userId, at(transcriptions, -1));
       }
-      return at(harness.connection().captures, -1);
+      const captureId = (): string | undefined => {
+        const subscription = vox.subscriptions
+          .slice(subscriptionStart)
+          .findLast((candidate) => candidate.userId === userId);
+        return subscription?.captureId;
+      };
+      return {
+        userId,
+        captureId,
+        stream: {
+          write(pcm: Buffer): boolean {
+            setImmediate(() => {
+              const id = captureId();
+              if (id === undefined) pcm.fill(0);
+              else vox.emitAudio(userId, id, pcm);
+            });
+            return true;
+          },
+          end(): void {
+            setImmediate(() => {
+              const id = captureId();
+              if (id !== undefined) vox.emit({ type: "user_audio_end", userId, captureId: id });
+            });
+          },
+          on(_event: string, _listener: () => void): void {},
+          get destroyed(): boolean {
+            return vox.unsubscriptions.slice(unsubscribeStart).includes(userId);
+          },
+        },
+      };
     },
     transcribe: (userId: string, text: string): void => {
       itemSequence += 1;
@@ -513,7 +601,7 @@ function buildHarness(options: HarnessOptions = {}) {
     /** One short spoken utterance: capture opens, PCM flows, capture ends, the transcript lands. */
     say: async (userId: string, text: string): Promise<void> => {
       const capture = harness.startCapture(userId);
-      capture.stream.write(stereoPcm(BARGE_IN_SOURCE_BYTES));
+      capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
       await flush();
       capture.stream.end();
       await flush();
@@ -566,15 +654,93 @@ describe("lifecycle", () => {
     expect(harness.evidence.map((event) => event.type)).toEqual(["joined", "consent"]);
   });
 
+  it("does not join on Vox process readiness without voice transport and positive DAVE readiness", async () => {
+    const harness = buildHarness();
+    harness.vox.autoReady = false;
+    let settled = false;
+    const joining = harness.join().then(() => {
+      settled = true;
+    });
+    await flush();
+    const connectionId = at(harness.vox.joins, -1).connectionId;
+    harness.vox.emit({ type: "process_ready", protocolVersion: VOX_IPC_PROTOCOL_VERSION });
+    await flush();
+    expect(settled).toBe(false);
+    harness.vox.emit({ type: "transport_state", role: "voice", connectionId, status: "ready" });
+    harness.vox.emit({
+      type: "dave_state",
+      role: "voice",
+      connectionId,
+      status: "ready",
+      protocolVersion: 0,
+    });
+    await flush();
+    expect(settled).toBe(false);
+    harness.vox.emit({
+      type: "dave_state",
+      role: "voice",
+      connectionId,
+      status: "ready",
+      protocolVersion: 2,
+    });
+    await joining;
+    expect(harness.session.status()).toMatchObject({ active: true, daveProtocolVersion: 2 });
+  });
+
+  it("rejects join only for a matching primary voice error", async () => {
+    const harness = buildHarness();
+    harness.vox.autoReady = false;
+    let settled = false;
+    const joining = harness.join();
+    void joining.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    await flush();
+    const connectionId = at(harness.vox.joins, -1).connectionId;
+    harness.vox.emit({
+      type: "error",
+      code: "stream_watch_connect_failed",
+      message: "watch failed",
+      role: "stream_watch",
+    });
+    harness.vox.emit({
+      type: "error",
+      code: "voice_runtime_error",
+      message: "publish failed",
+      role: "stream_publish",
+    });
+    harness.vox.emit({
+      type: "error",
+      code: "voice_connect_failed",
+      message: "old voice failed",
+      role: "voice",
+      connectionId: "old-connection",
+    });
+    await flush();
+    expect(settled).toBe(false);
+
+    harness.vox.emit({
+      type: "error",
+      code: "voice_connect_failed",
+      message: "current voice failed",
+      role: "voice",
+      connectionId,
+    });
+    await expect(joining).rejects.toThrow("Discord voice transport failed");
+    expect(harness.session.status().active).toBe(false);
+    expect(harness.ofType("left")).toHaveLength(1);
+  });
+
   it("an asked join (no invoker) opts in nobody until explicit opt-in", async () => {
     const harness = buildHarness();
     await harness.session.join({
       guildId: GUILD,
       channelId: CHANNEL,
-      adapterCreator: (() => ({
-        sendPayload: () => true,
-        destroy: () => undefined,
-      })) as unknown as JoinDiscordVoiceInput["adapterCreator"],
     });
     expect(harness.session.status().consentedParticipantCount).toBe(0);
     expect(harness.session.canHear(OWNER)).toBe(false);
@@ -582,13 +748,14 @@ describe("lifecycle", () => {
     expect(harness.evidence.map((event) => event.type)).toEqual(["joined"]);
     // The asker consents like everyone else: speaking before opt-in is never
     // subscribed, and opting in restores the ordinary path.
-    harness.connection().receiver.speaking.emit("start", OWNER);
-    expect(harness.connection().captures).toHaveLength(0);
+    harness.vox.emit({ type: "speaking_start", userId: OWNER });
+    expect(harness.vox.subscriptions).toHaveLength(0);
     await harness.consent(OWNER);
     expect(harness.session.status().consentedParticipantCount).toBe(1);
     expect(harness.session.canHear(OWNER)).toBe(true);
-    harness.connection().receiver.speaking.emit("start", OWNER);
-    expect(harness.connection().captures).toHaveLength(1);
+    harness.vox.emit({ type: "speaking_start", userId: OWNER });
+    await flush();
+    expect(harness.vox.subscriptions).toHaveLength(1);
   });
 
   it("fails the join when the listener cannot open, and leaves cleanly", async () => {
@@ -596,8 +763,22 @@ describe("lifecycle", () => {
     harness.ports.failTranscriptionOpens = 1;
     await expect(harness.join()).rejects.toThrow("listener open refused");
     expect(harness.session.status().active).toBe(false);
-    expect(harness.connection().state.status).toBe("destroyed");
+    expect(harness.vox.leaves).toContain("join_failed");
     expect(harness.evidence.map((event) => event.type)).toEqual(["left"]);
+  });
+
+  it("preserves the join failure when the cleanup leave command also throws", async () => {
+    const harness = buildHarness();
+    harness.ports.failTranscriptionOpens = 1;
+    harness.vox.leaveError = new VoxClientError("not_ready", "Vox failed during cleanup");
+    await expect(harness.join()).rejects.toThrow("listener open refused");
+    expect(harness.session.status()).toMatchObject({
+      active: false,
+      activeCaptureCount: 0,
+      engaged: false,
+      floorState: "dormant",
+    });
+    expect(harness.ofType("left")).toHaveLength(1);
   });
 
   it("leave closes both sessions with reason closed, cancels timers, and zeroes the ring", async () => {
@@ -620,6 +801,54 @@ describe("lifecycle", () => {
     expect(seed).not.toContain("you there");
   });
 
+  it("clears all local voice state before terminal cleanup commands can throw", async () => {
+    const harness = await engagedHarness();
+    harness.vox.autoDrain = false;
+    harness.conversation().input.onAudioDelta(pcmDelta(480), "item_cleanup");
+    await flush();
+    await harness.session.handleMusic({ kind: "play", url: "https://youtu.be/cleanup" }, OWNER);
+    const capture = harness.startCapture(ALICE);
+    await flush();
+    const captureId = capture.captureId();
+    expect(captureId).toEqual(expect.any(String));
+    harness.vox.unsubscribeError = new VoxClientError("not_ready", "capture cleanup failed");
+    harness.vox.stopError = new VoxClientError("not_ready", "playback cleanup failed");
+    harness.vox.musicStopError = new VoxClientError("not_ready", "music cleanup failed");
+    harness.vox.leaveError = new VoxClientError("not_ready", "leave cleanup failed");
+
+    await expect(harness.session.leave()).resolves.toBeUndefined();
+    expect(harness.session.status()).toMatchObject({
+      active: false,
+      activeCaptureCount: 0,
+      engaged: false,
+      floorState: "dormant",
+    });
+    expect(harness.session.status().guildId).toBeUndefined();
+    expect(harness.session.status().channelId).toBeUndefined();
+    expect(harness.session.music.snapshot()).toEqual({
+      current: undefined,
+      queued: [],
+      paused: false,
+      starting: false,
+      sink: "audio",
+    });
+    expect(harness.transcriptions.every((transcription) => !transcription.isOpen)).toBe(true);
+    expect(harness.ofType("left")).toHaveLength(1);
+
+    const stale = monoPcm(3_840);
+    harness.vox.emitAudio(ALICE, captureId ?? "missing", stale);
+    expect(stale.equals(Buffer.alloc(stale.byteLength))).toBe(true);
+  });
+
+  it("contains leave rejection from a terminal Vox status callback", async () => {
+    const harness = await joinedHarness();
+    harness.vox.leaveError = new VoxClientError("closed", "Vox is closed");
+    harness.vox.setStatus("error", "Vox exited");
+    await flush();
+    expect(harness.session.status()).toMatchObject({ active: false, floorState: "dormant" });
+    expect(harness.ofType("left")).toHaveLength(1);
+  });
+
   it("ignores listener callbacks that arrive after leave", async () => {
     const harness = await joinedHarness();
     const transcription = harness.transcription();
@@ -632,6 +861,112 @@ describe("lifecycle", () => {
     expect(harness.evidence).toHaveLength(evidenceCount);
     expect(harness.timers.pending()).toHaveLength(0);
   });
+
+  it("leaves and rejoins without closing the shared Vox process", async () => {
+    const harness = await joinedHarness();
+    await harness.session.leave();
+    expect(harness.vox.closeCalls).toBe(0);
+    await harness.join();
+    expect(harness.session.status().active).toBe(true);
+    expect(harness.vox.joins).toHaveLength(2);
+    expect(harness.vox.joins[1]?.connectionId).not.toBe(harness.vox.joins[0]?.connectionId);
+    expect(harness.vox.closeCalls).toBe(0);
+  });
+
+  it("ignores delayed leave events from an old connection while a reordered rejoin becomes ready", async () => {
+    const harness = buildHarness();
+    harness.vox.autoReady = false;
+    const firstJoin = harness.join();
+    await flush();
+    const firstConnectionId = at(harness.vox.joins, -1).connectionId;
+    harness.vox.emit({
+      type: "dave_state",
+      role: "voice",
+      connectionId: firstConnectionId,
+      status: "ready",
+      protocolVersion: 1,
+    });
+    harness.vox.emit({
+      type: "transport_state",
+      role: "voice",
+      connectionId: firstConnectionId,
+      status: "ready",
+    });
+    await firstJoin;
+    await harness.session.leave();
+
+    let rejoined = false;
+    const secondJoin = harness.join().then(() => {
+      rejoined = true;
+    });
+    await flush();
+    const secondConnectionId = at(harness.vox.joins, -1).connectionId;
+    expect(secondConnectionId).not.toBe(firstConnectionId);
+    harness.vox.emit({
+      type: "transport_state",
+      role: "voice",
+      connectionId: firstConnectionId,
+      status: "disconnected",
+    });
+    harness.vox.emit({
+      type: "dave_state",
+      role: "voice",
+      connectionId: firstConnectionId,
+      status: "cleared",
+    });
+    harness.vox.emit({
+      type: "dave_state",
+      role: "voice",
+      connectionId: secondConnectionId,
+      status: "ready",
+      protocolVersion: 2,
+    });
+    await flush();
+    expect(rejoined).toBe(false);
+    harness.vox.emit({
+      type: "transport_state",
+      role: "voice",
+      connectionId: secondConnectionId,
+      status: "ready",
+    });
+    await secondJoin;
+
+    harness.vox.emit({
+      type: "dave_state",
+      role: "voice",
+      connectionId: firstConnectionId,
+      status: "cleared",
+    });
+    await flush();
+    expect(harness.session.status()).toMatchObject({ active: true, daveProtocolVersion: 2 });
+  });
+
+  it("clears the current session when the voice transport disconnects", async () => {
+    const harness = await joinedHarness();
+    harness.vox.emit({
+      type: "transport_state",
+      role: "voice",
+      connectionId: at(harness.vox.joins, -1).connectionId,
+      status: "disconnected",
+    });
+    await flush();
+    expect(harness.session.status().active).toBe(false);
+    expect(harness.ofType("left")).toHaveLength(1);
+    expect(harness.vox.closeCalls).toBe(0);
+  });
+
+  it("clears the current session when matching DAVE state is cleared", async () => {
+    const harness = await joinedHarness();
+    harness.vox.emit({
+      type: "dave_state",
+      role: "voice",
+      connectionId: at(harness.vox.joins, -1).connectionId,
+      status: "cleared",
+    });
+    await flush();
+    expect(harness.session.status().active).toBe(false);
+    expect(harness.ofType("left")).toHaveLength(1);
+  });
 });
 
 describe("consent boundary", () => {
@@ -639,11 +974,98 @@ describe("consent boundary", () => {
   // before the socket boundary because the user is never subscribed at all.
   it("never subscribes an unconsented participant, so appendAudio is never called", async () => {
     const harness = await joinedHarness();
-    harness.connection().receiver.speaking.emit("start", MALLORY);
+    harness.vox.emit({ type: "speaking_start", userId: MALLORY });
     await flush();
-    expect(harness.connection().captures).toHaveLength(0);
+    expect(harness.vox.subscriptions).toHaveLength(0);
     expect(harness.session.status().activeCaptureCount).toBe(0);
     expect(harness.transcription().appended).toHaveLength(0);
+  });
+
+  it("subscribes consented speakers as correlated 24 kHz Vox captures", async () => {
+    const harness = await joinedHarness();
+    await harness.consent(ALICE);
+    harness.startCapture(ALICE);
+    await flush();
+    expect(at(harness.vox.subscriptions, -1)).toMatchObject({
+      userId: ALICE,
+      captureId: expect.any(String),
+      options: { sampleRate: 24_000, silenceDurationMs: 800 },
+    });
+  });
+
+  it("finalizes a capture only for its matching native capture id", async () => {
+    const harness = await joinedHarness();
+    await harness.consent(ALICE);
+    harness.startCapture(ALICE);
+    await flush();
+    const captureId = at(harness.vox.subscriptions, -1).captureId;
+    harness.vox.emit({ type: "user_audio_end", userId: ALICE, captureId: "stale-capture" });
+    await flush();
+    expect(harness.session.status().activeCaptureCount).toBe(1);
+    expect(harness.vox.unsubscriptions).not.toContain(ALICE);
+
+    harness.vox.emit({ type: "user_audio_end", userId: ALICE, captureId });
+    await flush();
+    expect(harness.session.status().activeCaptureCount).toBe(0);
+    expect(harness.vox.unsubscriptions).toContain(ALICE);
+  });
+
+  it("disarms an ended capture before an immediate speaking follow-up rearms a new id", async () => {
+    const harness = await joinedHarness();
+    await harness.consent(ALICE);
+    harness.startCapture(ALICE);
+    await flush();
+    const firstCaptureId = at(harness.vox.subscriptions, -1).captureId;
+    harness.vox.unsubscribeError = new VoxClientError("not_ready", "Vox ended while disarming");
+
+    harness.vox.emit({ type: "user_audio_end", userId: ALICE, captureId: firstCaptureId });
+    harness.vox.emit({ type: "speaking_start", userId: ALICE });
+    await flush();
+
+    const secondCaptureId = at(harness.vox.subscriptions, -1).captureId;
+    expect(secondCaptureId).not.toBe(firstCaptureId);
+    expect(harness.session.status().activeCaptureCount).toBe(1);
+    expect(at(harness.ofType("failed"), -1)).toMatchObject({
+      stage: "capture",
+      code: "voice_capture_unsubscribe_failed",
+    });
+  });
+
+  it("clears a capture whose Vox subscription throws and recovers on the next speaking start", async () => {
+    const harness = await joinedHarness();
+    await harness.consent(ALICE);
+    harness.vox.subscribeError = new VoxClientError("not_ready", "Vox cannot subscribe");
+    harness.vox.emit({ type: "speaking_start", userId: ALICE });
+    await flush();
+    expect(harness.session.status().activeCaptureCount).toBe(0);
+    expect(at(harness.ofType("failed"), -1)).toMatchObject({
+      stage: "capture",
+      code: "voice_capture_subscribe_failed",
+    });
+
+    harness.vox.subscribeError = undefined;
+    harness.vox.emit({ type: "speaking_start", userId: ALICE });
+    await flush();
+    expect(harness.session.status().activeCaptureCount).toBe(1);
+    expect(harness.vox.subscriptions).toHaveLength(1);
+  });
+
+  it("forwards an ordered final PCM tail before the matching audio-end finalizes capture", async () => {
+    const harness = await joinedHarness();
+    await harness.consent(ALICE);
+    harness.startCapture(ALICE);
+    await flush();
+    const captureId = at(harness.vox.subscriptions, -1).captureId;
+    const tail = monoPcm(3_840, 7);
+    const expected = Buffer.from(tail);
+    harness.vox.emitAudio(ALICE, captureId, tail);
+    harness.vox.emit({ type: "user_audio_end", userId: ALICE, captureId });
+    await flush();
+
+    expect(harness.transcriptionFor(ALICE).appended).toContainEqual(expected);
+    expect(harness.transcriptionFor(ALICE).commits).toBe(1);
+    expect(harness.session.status().activeCaptureCount).toBe(0);
+    expect(tail.equals(Buffer.alloc(tail.byteLength))).toBe(true);
   });
 
   it("revoking consent mid-capture destroys the capture and stops appends", async () => {
@@ -651,7 +1073,7 @@ describe("consent boundary", () => {
     await harness.consent(BOB);
     const capture = harness.startCapture(BOB);
     capture.stream.on("error", () => undefined);
-    capture.stream.write(stereoPcm(3_840));
+    capture.stream.write(monoPcm(3_840));
     await flush();
     expect(harness.transcription().appended).toHaveLength(1);
     expect(harness.transcription().commits).toBe(0);
@@ -659,7 +1081,7 @@ describe("consent boundary", () => {
     await flush();
     expect(capture.stream.destroyed).toBe(true);
     try {
-      capture.stream.write(stereoPcm(3_840));
+      capture.stream.write(monoPcm(3_840));
     } catch {
       // Writing into a destroyed capture may throw; the point is below.
     }
@@ -697,6 +1119,24 @@ describe("consent boundary", () => {
     await flush();
     expect(harness.transcriptions).toHaveLength(3);
     expect(at(harness.transcriptions, -1).isOpen).toBe(true);
+  });
+
+  it("drops late PCM from an invalidated capture epoch after re-consent", async () => {
+    const harness = await joinedHarness();
+    await harness.consent(ALICE);
+    harness.startCapture(ALICE);
+    await flush();
+    const staleCaptureId = at(harness.vox.subscriptions, -1).captureId;
+    await harness.session.setConsent(GUILD, CHANNEL, ALICE, false);
+    await harness.consent(ALICE);
+    harness.startCapture(ALICE);
+    await flush();
+    const currentCaptureId = at(harness.vox.subscriptions, -1).captureId;
+    expect(currentCaptureId).not.toBe(staleCaptureId);
+    const stale = monoPcm(3_840);
+    harness.vox.emitAudio(ALICE, staleCaptureId, stale);
+    expect(stale.equals(Buffer.alloc(stale.byteLength))).toBe(true);
+    expect(harness.transcriptionFor(ALICE).appended).toHaveLength(0);
   });
 
   it("leaving the channel revokes consent and destroys the capture", async () => {
@@ -805,11 +1245,11 @@ describe("typed voice-room input (ADR 0124)", () => {
 });
 
 describe("audio path", () => {
-  it("streams converted audio to the listener as it arrives, zeroes the source, and receipts the utterance", async () => {
+  it("streams native Vox audio to the listener as it arrives, zeroes the source, and receipts the utterance", async () => {
     const harness = await joinedHarness();
     await harness.consent(ALICE);
-    const chunk = stereoPcm(BARGE_IN_SOURCE_BYTES, 2);
-    const expected = discordPcmToRealtimePcm(Buffer.from(chunk));
+    const chunk = monoPcm(BARGE_IN_SOURCE_BYTES, 2);
+    const expected = Buffer.from(chunk);
     const capture = harness.startCapture(ALICE);
     capture.stream.write(chunk);
     await flush();
@@ -827,12 +1267,12 @@ describe("audio path", () => {
     expect(utterances[0]?.deliveryId.length).toBeGreaterThan(0);
   });
 
-  it("slices oversized converted buffers to the realtime append cap", async () => {
+  it("slices oversized Vox buffers to the realtime append cap", async () => {
     const harness = await joinedHarness();
     await harness.consent(ALICE);
     const capture = harness.startCapture(ALICE);
-    // 1 920 000 source bytes convert to 480 000 mono bytes — two capped slices.
-    capture.stream.write(stereoPcm(1_920_000));
+    // 480 000 native mono bytes split into two capped realtime appends.
+    capture.stream.write(monoPcm(480_000));
     await flush();
     const appended = harness.transcription().appended;
     expect(appended.map((buffer) => buffer.byteLength)).toEqual([
@@ -846,7 +1286,7 @@ describe("audio path", () => {
     const conversation = harness.conversation();
     const heardWhileEngaged = conversation.appended.length;
     const capture = harness.startCapture(ALICE);
-    capture.stream.write(stereoPcm(3_840, 4));
+    capture.stream.write(monoPcm(3_840, 4));
     await flush();
     expect(conversation.appended.length).toBe(heardWhileEngaged);
     expect(at(harness.transcriptionFor(ALICE).appended, -1).byteLength).toBeGreaterThan(0);
@@ -869,7 +1309,7 @@ describe("audio path", () => {
     const heardAtRelease = conversation.appended.length;
     const listenerHeard = harness.transcriptionFor(ALICE).appended.length;
     const idleCapture = harness.startCapture(ALICE);
-    idleCapture.stream.write(stereoPcm(3_840, 5));
+    idleCapture.stream.write(monoPcm(3_840, 5));
     await flush();
     expect(conversation.appended.length).toBe(heardAtRelease);
     expect(harness.transcriptionFor(ALICE).appended.length).toBe(listenerHeard + 1);
@@ -1029,11 +1469,11 @@ describe("floor decisions", () => {
     await harness.consent(BOB);
     harness.clock.now = 0;
     const alice = harness.startCapture(ALICE);
-    alice.stream.write(stereoPcm(BARGE_IN_SOURCE_BYTES));
+    alice.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
     await flush();
     harness.clock.now = 50;
     const bob = harness.startCapture(BOB);
-    bob.stream.write(stereoPcm(BARGE_IN_SOURCE_BYTES));
+    bob.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
     await flush();
     bob.stream.end();
     await flush();
@@ -1222,11 +1662,11 @@ describe("speaker attribution", () => {
     // Both streams overlap. Alice's final arrives while Bob is still active,
     // but her dedicated transcriber keeps it attached to Alice.
     const alice = harness.startCapture(ALICE);
-    alice.stream.write(stereoPcm(3_840));
+    alice.stream.write(monoPcm(3_840));
     await flush();
     alice.stream.end();
     await flush();
-    harness.startCapture(BOB).stream.write(stereoPcm(3_840));
+    harness.startCapture(BOB).stream.write(monoPcm(3_840));
     await flush();
     harness.transcribe(ALICE, "hey clankie what do you think");
     await flush();
@@ -1254,7 +1694,7 @@ describe("fast path responses", () => {
     expect(conversation.responseCreates).toBe(1);
     harness.clock.now = 1_120;
     const delta = pcmDelta(480);
-    const expectedPlayback = openAiPcmToDiscordPcm(Buffer.from(delta));
+    const expectedPlayback = Buffer.from(delta);
     conversation.input.onAudioDelta(delta, "item_1");
     // Delta zeroing is the session's duty once it converted the audio.
     expect(delta.equals(Buffer.alloc(480))).toBe(true);
@@ -1277,9 +1717,7 @@ describe("fast path responses", () => {
       playbackMs: 30,
     });
     expect(first.turnId).toBeUndefined();
-    const written = at(harness.player().written, 0);
-    expect(written.copy.equals(expectedPlayback)).toBe(true);
-    expect(written.ref.equals(Buffer.alloc(written.ref.byteLength))).toBe(true);
+    expect(at(harness.vox.audio, 0).pcm.equals(expectedPlayback)).toBe(true);
 
     // The next turn in the same exchange is a continuing response.
     harness.clock.now = 2_000;
@@ -1302,6 +1740,292 @@ describe("fast path responses", () => {
       playbackMs: 30,
     });
   });
+
+  it("starts first-audio and played-time evidence at started, not buffered", async () => {
+    const harness = await engagedHarness();
+    harness.vox.autoBuffer = false;
+    harness.vox.autoDrain = false;
+    const conversation = harness.conversation();
+    harness.clock.now = 1_000;
+    conversation.input.onAudioDelta(pcmDelta(480), "item_delayed");
+    await flush();
+    const playbackId = at(harness.vox.audio, -1).playbackId;
+    harness.clock.now = 1_100;
+    conversation.input.onResponseDone({
+      responseId: "resp_delayed",
+      status: "completed",
+      audioBytes: 480,
+      textCharacters: 0,
+    });
+    await flush();
+    expect(harness.ofType("response")).toHaveLength(0);
+    expect(at(harness.ofType("model_response"), -1).phase).toBe("requested");
+
+    harness.clock.now = 1_300;
+    harness.vox.emit({ type: "tts_playback_state", playbackId, status: "buffered" });
+    await flush();
+    expect(at(harness.ofType("model_response"), -1).phase).toBe("requested");
+    expect(harness.ofType("response")).toHaveLength(0);
+
+    harness.clock.now = 1_600;
+    harness.vox.emit({ type: "tts_playback_state", playbackId, status: "started" });
+    await flush();
+    expect(at(harness.ofType("model_response"), -1)).toMatchObject({ phase: "completed", outcome: "audio" });
+    harness.clock.now = 1_900;
+    harness.vox.emit({ type: "tts_playback_state", playbackId, status: "drained" });
+    await flush();
+    expect(at(harness.ofType("response"), -1)).toMatchObject({
+      toFirstAudioMs: 1_600,
+      playbackMs: 300,
+    });
+  });
+
+  it("does not count buffered then drained playback as audible without started", async () => {
+    const harness = await engagedHarness();
+    harness.vox.autoBuffer = false;
+    harness.vox.autoDrain = false;
+    const conversation = harness.conversation();
+    conversation.input.onAudioDelta(pcmDelta(480), "item_never_started");
+    await flush();
+    const playbackId = at(harness.vox.audio, -1).playbackId;
+    conversation.input.onResponseDone({
+      responseId: "resp_never_started",
+      status: "completed",
+      audioBytes: 480,
+      textCharacters: 0,
+    });
+    harness.vox.emit({ type: "tts_playback_state", playbackId, status: "buffered" });
+    harness.vox.emit({ type: "tts_playback_state", playbackId, status: "drained" });
+    await flush();
+
+    expect(harness.ofType("response")).toHaveLength(0);
+    expect(at(harness.ofType("model_response"), -1)).toMatchObject({
+      phase: "completed",
+      outcome: "silent",
+    });
+  });
+
+  it("does not count IPC or prebuffer latency in barge-in truncation", async () => {
+    const harness = await engagedHarness();
+    harness.vox.autoBuffer = false;
+    harness.vox.autoDrain = false;
+    const conversation = harness.conversation();
+    harness.clock.now = 5_000;
+    conversation.input.onAudioDelta(pcmDelta(480), "item_prebuffered");
+    await flush();
+    const playbackId = at(harness.vox.audio, -1).playbackId;
+    harness.clock.now = 5_400;
+    const capture = harness.startCapture(ALICE);
+    capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
+    await flush();
+    expect(conversation.truncations).toHaveLength(0);
+
+    harness.clock.now = 6_000;
+    harness.vox.emit({ type: "tts_playback_state", playbackId, status: "buffered" });
+    harness.clock.now = 6_400;
+    capture.stream.write(monoPcm(2));
+    await flush();
+    expect(conversation.truncations).toHaveLength(0);
+
+    harness.clock.now = 7_000;
+    harness.vox.emit({ type: "tts_playback_state", playbackId, status: "started" });
+    harness.clock.now = 7_400;
+    capture.stream.write(monoPcm(2));
+    await flush();
+    expect(conversation.truncations).toEqual([{ itemId: "item_prebuffered", audioEndMs: 400 }]);
+  });
+
+  it("settles playback evidence only on the matching Vox drain", async () => {
+    const harness = await engagedHarness();
+    harness.vox.autoDrain = false;
+    const conversation = harness.conversation();
+    conversation.input.onAudioDelta(pcmDelta(480), "item_correlated");
+    await flush();
+    const playbackId = at(harness.vox.audio, -1).playbackId;
+    conversation.input.onResponseDone({
+      responseId: "resp_correlated",
+      status: "completed",
+      audioBytes: 480,
+      textCharacters: 0,
+    });
+    await flush();
+    expect(harness.ofType("response")).toHaveLength(0);
+    harness.vox.emit({ type: "tts_playback_state", playbackId: "stale-playback", status: "drained" });
+    await flush();
+    expect(harness.ofType("response")).toHaveLength(0);
+    harness.vox.emit({ type: "tts_playback_state", playbackId, status: "drained" });
+    await flush();
+    expect(harness.ofType("response")).toHaveLength(1);
+  });
+
+  it("settles a matching Vox playback failure without a response receipt", async () => {
+    const harness = await engagedHarness();
+    harness.vox.autoDrain = false;
+    const conversation = harness.conversation();
+    conversation.input.onAudioDelta(pcmDelta(480), "item_failed");
+    await flush();
+    const playbackId = at(harness.vox.audio, -1).playbackId;
+    harness.vox.emit({
+      type: "tts_playback_state",
+      playbackId,
+      status: "failed",
+      reason: "transport_send_failed",
+    });
+    await flush();
+    expect(harness.ofType("response")).toHaveLength(0);
+    expect(at(harness.ofType("failed"), -1)).toMatchObject({
+      stage: "playback",
+      code: "transport_send_failed",
+    });
+  });
+
+  it("removes a failed playback response immediately so the next response can start", async () => {
+    const harness = await engagedHarness({ narrationMinIntervalMs: 0 });
+    harness.vox.autoDrain = false;
+    const conversation = harness.conversation();
+    conversation.input.onAudioDelta(pcmDelta(480), "item_failed_pending");
+    await flush();
+    const playbackId = at(harness.vox.audio, -1).playbackId;
+    harness.vox.emit({
+      type: "tts_playback_state",
+      playbackId,
+      status: "failed",
+      reason: "native_playback_failed",
+    });
+    await flush();
+
+    const responseCount = conversation.responseCreates;
+    await harness.session.narrate("walked into the lab");
+    expect(conversation.responseCreates).toBe(responseCount + 1);
+  });
+
+  it("treats a correlated native TTS buffer overflow as failed playback", async () => {
+    const harness = await engagedHarness();
+    harness.vox.autoDrain = false;
+    const conversation = harness.conversation();
+    conversation.input.onAudioDelta(pcmDelta(480), "item_overflow");
+    await flush();
+    const playbackId = at(harness.vox.audio, -1).playbackId;
+    conversation.input.onResponseDone({
+      responseId: "resp_overflow",
+      status: "completed",
+      audioBytes: 480,
+      textCharacters: 0,
+    });
+    harness.vox.emit({
+      type: "tts_buffer_overflow",
+      playbackId,
+      droppedSamples: 240,
+      droppedMs: 10,
+      bufferSamples: 48_000,
+      bufferMs: 2_000,
+    });
+    await flush();
+    harness.vox.emit({ type: "tts_playback_state", playbackId, status: "drained" });
+    await flush();
+    expect(harness.ofType("response")).toHaveLength(0);
+    expect(at(harness.ofType("failed"), -1)).toMatchObject({
+      deliveryId: at(harness.ofType("utterance"), -1).deliveryId,
+      stage: "playback",
+      code: "tts_buffer_overflow",
+    });
+  });
+
+  it("fails the correlated playback when Vox rejects a synchronous audio command", async () => {
+    const harness = await engagedHarness();
+    harness.vox.sendAudioError = new VoxClientError(
+      "stdin_queue_overflow",
+      "reliable queue unavailable",
+      "test-playback",
+    );
+    const conversation = harness.conversation();
+    conversation.input.onAudioDelta(pcmDelta(480), "item_send_rejected");
+    await flush();
+    expect(harness.vox.audio).toHaveLength(0);
+    expect(at(harness.ofType("failed"), -1)).toMatchObject({
+      deliveryId: at(harness.ofType("utterance"), -1).deliveryId,
+      stage: "playback",
+      code: "stdin_queue_overflow",
+    });
+    expect(harness.ofType("response")).toHaveLength(0);
+  });
+
+  it("fails the correlated playback when Vox rejects synchronous finish", async () => {
+    const harness = await engagedHarness();
+    harness.vox.autoDrain = false;
+    const conversation = harness.conversation();
+    conversation.input.onAudioDelta(pcmDelta(480), "item_finish_rejected");
+    await flush();
+    harness.vox.finishError = new VoxClientError("not_ready", "Vox became unavailable", "test-playback");
+    conversation.input.onResponseDone({
+      responseId: "resp_finish_rejected",
+      status: "completed",
+      audioBytes: 480,
+      textCharacters: 0,
+    });
+    await flush();
+    expect(at(harness.ofType("failed"), -1)).toMatchObject({
+      deliveryId: at(harness.ofType("utterance"), -1).deliveryId,
+      stage: "playback",
+      code: "not_ready",
+    });
+    expect(harness.ofType("response")).toHaveLength(0);
+  });
+
+  it.each(["failed", "timeout"] as const)(
+    "invalidates a response after playback %s, drops its late PCM, and plays the next response",
+    async (failure) => {
+      const harness = await engagedHarness();
+      harness.vox.autoDrain = false;
+      harness.vox.autoBuffer = failure !== "timeout";
+      const conversation = harness.conversation();
+      conversation.input.onAudioDelta(pcmDelta(480), "item_failed_response");
+      await flush();
+      const failedPlaybackId = at(harness.vox.audio, -1).playbackId;
+      if (failure === "failed") {
+        harness.vox.emit({
+          type: "tts_playback_state",
+          playbackId: failedPlaybackId,
+          status: "failed",
+          reason: "native_playback_failed",
+        });
+      } else {
+        harness.timers.fireLast(2 * 60_000);
+      }
+      await flush();
+      conversation.input.onResponseDone({
+        responseId: "resp_failed_response",
+        status: "completed",
+        audioBytes: 480,
+        textCharacters: 0,
+      });
+      await flush();
+
+      await harness.say(ALICE, "clankie try the next response");
+      const nextDeliveryId = at(harness.ofType("utterance"), -1).deliveryId;
+      const audioCount = harness.vox.audio.length;
+      const late = pcmDelta(480);
+      conversation.input.onAudioDelta(late, "item_failed_response");
+      await flush();
+      expect(late.equals(Buffer.alloc(late.byteLength))).toBe(true);
+      expect(harness.vox.audio).toHaveLength(audioCount);
+
+      harness.vox.autoBuffer = true;
+      harness.vox.autoDrain = true;
+      conversation.input.onAudioDelta(pcmDelta(480), "item_recovered_response");
+      await flush();
+      conversation.input.onResponseDone({
+        responseId: "resp_recovered_response",
+        status: "completed",
+        audioBytes: 480,
+        textCharacters: 0,
+      });
+      await flush();
+      expect(harness.ofType("response")).toContainEqual(
+        expect.objectContaining({ deliveryId: nextDeliveryId }),
+      );
+    },
+  );
 });
 
 describe("ability path", () => {
@@ -1529,18 +2253,13 @@ describe("ability path", () => {
   });
 
   it("correlates a realtime music tool through its queue and spoken result", async () => {
-    const music = new VoiceMusicQueue({
-      sinkKind: "audio",
-      sink: { play: () => undefined, pause: () => undefined, resume: () => undefined, stop: () => undefined },
-      search: async () => [{ videoId: "video-1", url: "https://youtu.be/video-1", title: "Private title" }],
-    });
-    const harness = await engagedHarness({ music });
+    const harness = await engagedHarness();
     const conversation = harness.conversation();
     const deliveryId = at(harness.ofType("utterance"), 0).deliveryId;
     conversation.input.onFunctionCall({
       callId: "music-call-1",
-      name: "youtube_search",
-      argumentsJson: '{"query":"private query"}',
+      name: "music_play",
+      argumentsJson: '{"url":"https://youtu.be/video-1"}',
     });
     conversation.input.onResponseDone({
       responseId: "music-function-response",
@@ -1550,28 +2269,28 @@ describe("ability path", () => {
     });
     await flush();
     expect(harness.ofType("realtime_tool")).toMatchObject([
-      { deliveryId, callId: "music-call-1", name: "youtube_search", phase: "called" },
-      { deliveryId, callId: "music-call-1", name: "youtube_search", phase: "completed" },
+      { deliveryId, callId: "music-call-1", name: "music_play", phase: "called" },
+      { deliveryId, callId: "music-call-1", name: "music_play", phase: "completed" },
     ]);
-    expect(harness.ofType("music")).toMatchObject([
-      {
-        deliveryId,
-        callId: "music-call-1",
-        source: "realtime",
-        operation: "search",
-        component: "queue",
-        outcome: "offered",
-        resultCount: 1,
-      },
-    ]);
+    expect(harness.ofType("music")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          deliveryId,
+          callId: "music-call-1",
+          source: "realtime",
+          operation: "play",
+          component: "queue",
+          outcome: "started",
+        }),
+      ]),
+    );
     expect(at(harness.ofType("model_response"), 1)).toMatchObject({
       deliveryId,
       phase: "completed",
       outcome: "tool",
     });
     expect(at(harness.ofType("model_response"), -1)).toMatchObject({ deliveryId, phase: "requested" });
-    expect(JSON.stringify(harness.evidence)).not.toContain("private query");
-    expect(JSON.stringify(harness.evidence)).not.toContain("Private title");
+    expect(JSON.stringify(harness.evidence)).not.toContain("youtu.be");
   });
 
   it("look_at_screen seeds a still and does not call the captain", async () => {
@@ -1789,21 +2508,39 @@ describe("barge-in", () => {
     harness.clock.now = 5_000;
     conversation.input.onAudioDelta(pcmDelta(480), "item_play");
     await flush();
-    expect(harness.player().state.status).toBe("playing");
+    expect(harness.vox.activePlaybackId).toEqual(expect.any(String));
     return { harness, conversation };
   }
 
   it("sustained speech from the floor holder truncates deliberately at the played offset", async () => {
     const { harness, conversation } = await playingHarness();
+    const playbackId = harness.vox.activePlaybackId;
     harness.clock.now = 5_400;
     const capture = harness.startCapture(ALICE);
-    capture.stream.write(stereoPcm(BARGE_IN_SOURCE_BYTES));
+    capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
     await flush();
     expect(conversation.truncations).toEqual([{ itemId: "item_play", audioEndMs: 400 }]);
-    expect(harness.player().state.status).toBe("idle");
+    expect(harness.vox.activePlaybackId).toBeUndefined();
+    expect(harness.vox.stops).toContain(playbackId);
     expect(harness.ofType("interrupted")).toMatchObject([
       { type: "interrupted", guildId: GUILD, channelId: CHANNEL, userId: ALICE, phase: "playing" },
     ]);
+  });
+
+  it("settles barge-in locally when the terminal Vox stop command throws", async () => {
+    const { harness, conversation } = await playingHarness();
+    harness.vox.stopError = new VoxClientError("closed", "Vox is closed");
+    harness.clock.now = 5_400;
+    const capture = harness.startCapture(ALICE);
+    capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
+    await flush();
+    expect(conversation.truncations).toEqual([{ itemId: "item_play", audioEndMs: 400 }]);
+    expect(harness.ofType("interrupted")).toHaveLength(1);
+    expect(at(harness.ofType("failed"), -1)).toMatchObject({ stage: "playback", code: "closed" });
+
+    capture.stream.write(monoPcm(2));
+    await flush();
+    expect(conversation.truncations).toHaveLength(1);
   });
 
   it("a re-address from any consented speaker truncates and moves the floor", async () => {
@@ -1811,7 +2548,7 @@ describe("barge-in", () => {
     await harness.consent(BOB);
     harness.clock.now = 5_250;
     const capture = harness.startCapture(BOB);
-    capture.stream.write(stereoPcm(3_840));
+    capture.stream.write(monoPcm(3_840));
     await flush();
     harness.transcribe(BOB, "clankie hold on a second");
     await flush();
@@ -1827,24 +2564,24 @@ describe("barge-in", () => {
     const { harness, conversation } = await playingHarness();
     harness.clock.now = 5_400;
     const capture = harness.startCapture(ALICE);
-    capture.stream.write(stereoPcm(BARGE_IN_SOURCE_BYTES * 8, ROOM_TONE_FILL));
+    capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES * 8, ROOM_TONE_FILL));
     await flush();
     expect(conversation.truncations).toHaveLength(0);
     expect(harness.ofType("interrupted")).toHaveLength(0);
-    expect(harness.player().state.status).toBe("playing");
+    expect(harness.vox.activePlaybackId).toEqual(expect.any(String));
   });
 
   it("speech that follows room tone from the floor holder still truncates", async () => {
     const { harness, conversation } = await playingHarness();
     harness.clock.now = 5_400;
     const capture = harness.startCapture(ALICE);
-    capture.stream.write(stereoPcm(BARGE_IN_SOURCE_BYTES, ROOM_TONE_FILL));
+    capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES, ROOM_TONE_FILL));
     await flush();
     expect(conversation.truncations).toHaveLength(0);
-    capture.stream.write(stereoPcm(BARGE_IN_SOURCE_BYTES));
+    capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
     await flush();
     expect(conversation.truncations).toEqual([{ itemId: "item_play", audioEndMs: 400 }]);
-    expect(harness.player().state.status).toBe("idle");
+    expect(harness.vox.activePlaybackId).toBeUndefined();
   });
 
   it("speech already underway when playback starts still truncates", async () => {
@@ -1859,19 +2596,19 @@ describe("barge-in", () => {
     await flush();
 
     const capture = harness.startCapture(ALICE);
-    capture.stream.write(stereoPcm(BARGE_IN_SOURCE_BYTES));
+    capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
     await flush();
 
     await harness.session.narrate("walked into the lab");
     conversation.input.onAudioDelta(pcmDelta(480), "item_narration");
     await flush();
-    expect(harness.player().state.status).toBe("playing");
+    expect(harness.vox.activePlaybackId).toEqual(expect.any(String));
 
     harness.clock.now = 400;
-    capture.stream.write(stereoPcm(3_840));
+    capture.stream.write(monoPcm(3_840));
     await flush();
     expect(conversation.truncations).toEqual([{ itemId: "item_narration", audioEndMs: 400 }]);
-    expect(harness.player().state.status).toBe("idle");
+    expect(harness.vox.activePlaybackId).toBeUndefined();
   });
 
   // Required mission evidence: crosstalk between other people lets him finish.
@@ -1879,13 +2616,13 @@ describe("barge-in", () => {
     const { harness, conversation } = await playingHarness();
     await harness.consent(BOB);
     const capture = harness.startCapture(BOB);
-    capture.stream.write(stereoPcm(BARGE_IN_SOURCE_BYTES));
+    capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
     await flush();
     harness.transcribe(BOB, "no I meant the blue one");
     await flush();
     expect(conversation.truncations).toHaveLength(0);
     expect(harness.ofType("interrupted")).toHaveLength(0);
-    expect(harness.player().state.status).toBe("playing");
+    expect(harness.vox.activePlaybackId).toEqual(expect.any(String));
     expect(conversation.responseCreates).toBe(1);
   });
 });
@@ -1896,7 +2633,7 @@ describe("reconnect", () => {
     await harness.consent(ALICE);
 
     const first = harness.startCapture(ALICE);
-    first.stream.write(stereoPcm(BARGE_IN_SOURCE_BYTES));
+    first.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
     await flush();
     first.stream.end();
     await flush();
@@ -1925,7 +2662,7 @@ describe("reconnect", () => {
     const harness = await joinedHarness();
     await harness.consent(ALICE);
     const capture = harness.startCapture(ALICE);
-    capture.stream.write(stereoPcm(3_840));
+    capture.stream.write(monoPcm(3_840));
     await flush();
     capture.stream.end();
     await flush();
@@ -1951,7 +2688,7 @@ describe("reconnect", () => {
     await flush();
     expect(harness.transcriptions).toHaveLength(3);
     // The new listener is his ears again.
-    harness.startCapture(ALICE).stream.write(stereoPcm(3_840));
+    harness.startCapture(ALICE).stream.write(monoPcm(3_840));
     await flush();
     expect(harness.transcriptionFor(ALICE).appended).toHaveLength(1);
     // Success reset the backoff: a later loss starts back at one second.
@@ -2023,7 +2760,7 @@ describe("transcript ring", () => {
   });
 });
 
-describe("possessor narration and hearing (ADR 0064)", () => {
+describe("play narration and hearing (ADR 0064)", () => {
   it("refuses to narrate when he is not in a voice channel", async () => {
     const harness = buildHarness();
     await expect(harness.session.narrate("walked into a wall")).rejects.toThrow(
@@ -2042,7 +2779,7 @@ describe("possessor narration and hearing (ADR 0064)", () => {
     await flush();
 
     const conversation = harness.conversation();
-    // The possessor's text is seeded, never queued as speech to synthesize.
+    // The play text is seeded, never queued as speech to synthesize.
     const seeded = conversation.textItems.filter((item) => item.includes("walked into a wall by the lab"));
     expect(seeded).toHaveLength(1);
     expect(at(seeded, 0)).toBe("Your own game-side experience updated:\nwalked into a wall by the lab");
@@ -2061,7 +2798,7 @@ describe("possessor narration and hearing (ADR 0064)", () => {
       "Your own game-side experience updated:\nturn=12\nthought=Oak is not in the lab\nnext=look outside",
     );
     expect(harness.conversation().responseCreates).toBe(0);
-    expect(harness.ofType("possessor_narration_suppressed")).toHaveLength(0);
+    expect(harness.ofType("play_narration_suppressed")).toHaveLength(0);
   });
 
   it("keeps seeding but stops responding inside the narration interval", async () => {
@@ -2098,7 +2835,7 @@ describe("possessor narration and hearing (ADR 0064)", () => {
     expect(harness.conversation().responseCreates).toBe(2);
   });
 
-  it("pushes attributed room lines to a subscribed possessor", async () => {
+  it("pushes attributed room lines to subscribed play", async () => {
     const harness = await joinedHarness({ floorOverrides: { volition: { maxPerHour: 0 } } });
     await harness.consent(ALICE);
     const heard: string[] = [];
@@ -2130,9 +2867,9 @@ describe("possessor narration and hearing (ADR 0064)", () => {
     harness.session.subscribeTranscript((line) => heard.push(line));
 
     // Mallory never consented, so no capture opens and no transcript exists.
-    harness.connection().receiver.speaking.emit("start", MALLORY);
+    harness.vox.emit({ type: "speaking_start", userId: MALLORY });
     await flush();
-    expect(harness.connection().captures.some((capture) => capture.userId === MALLORY)).toBe(false);
+    expect(harness.vox.subscriptions.some((capture) => capture.userId === MALLORY)).toBe(false);
     expect(heard).toEqual([]);
   });
 
@@ -2141,7 +2878,7 @@ describe("possessor narration and hearing (ADR 0064)", () => {
     await harness.consent(ALICE);
     const heard: string[] = [];
     harness.session.subscribeTranscript(() => {
-      throw new Error("possessor died mid-line");
+      throw new Error("play listener died mid-line");
     });
     harness.session.subscribeTranscript((line) => heard.push(line));
 
@@ -2150,7 +2887,7 @@ describe("possessor narration and hearing (ADR 0064)", () => {
   });
 });
 
-describe("possessor narration bursts (ADR 0064)", () => {
+describe("play narration bursts (ADR 0064)", () => {
   it("lets only one un-awaited report in a burst reach a response", async () => {
     const harness = await joinedHarness({ narrationMinIntervalMs: 10_000 });
     // A play loop fires and forgets; nothing awaits between these.
@@ -2167,38 +2904,30 @@ describe("possessor narration bursts (ADR 0064)", () => {
       conversation.textItems.filter((item) => item.startsWith("Your own game-side experience")),
     ).toHaveLength(3);
     expect(conversation.responseCreates).toBe(1);
-    const suppressed = harness.ofType("possessor_narration_suppressed");
+    const suppressed = harness.ofType("play_narration_suppressed");
     expect(suppressed).toHaveLength(2);
     expect(suppressed.every((event) => event.reason === "rate_limited")).toBe(true);
     expect(new Set(suppressed.map((event) => event.deliveryId)).size).toBe(2);
   });
 
   it("holds a report while a requested track is still starting", async () => {
-    let releasePlay: (() => void) | undefined;
-    const playStarted = new Promise<void>((resolve) => {
-      releasePlay = resolve;
-    });
-    const music = new VoiceMusicQueue({
-      sinkKind: "audio",
-      sink: {
-        play: () => playStarted,
-        pause: () => undefined,
-        resume: () => undefined,
-        stop: () => undefined,
-      },
-    });
-    const harness = await joinedHarness({ music, narrationMinIntervalMs: 0 });
+    const harness = await joinedHarness({ narrationMinIntervalMs: 0 });
+    harness.vox.autoMusicStart = false;
     const started = harness.session.music.play("https://youtu.be/one", "u1");
     await flush();
     expect(harness.session.music.snapshot().starting).toBe(true);
 
     await harness.session.narrate("walked into the lab", { deliveryId: "play-turn-start" });
     await flush();
-    expect(harness.ofType("possessor_narration_suppressed")).toMatchObject([
+    expect(harness.ofType("play_narration_suppressed")).toMatchObject([
       { deliveryId: "play-turn-start", reason: "playing" },
     ]);
 
-    releasePlay?.();
+    harness.vox.emit({
+      type: "player_state",
+      status: "playing",
+      musicId: at(harness.vox.musicRequests, -1).musicId,
+    });
     await started;
     expect(harness.session.music.snapshot().starting).toBe(false);
   });
@@ -2216,7 +2945,7 @@ describe("possessor narration bursts (ADR 0064)", () => {
     await flush();
 
     expect(conversation.responseCreates).toBe(before);
-    expect(harness.ofType("possessor_narration_suppressed")).toMatchObject([
+    expect(harness.ofType("play_narration_suppressed")).toMatchObject([
       { deliveryId: "play-turn-1", reason: "responding" },
     ]);
   });
@@ -2234,7 +2963,7 @@ describe("voice stay correlation", () => {
     await harness.session.narrate("took one step north", { deliveryId: "play-turn-2" });
     await flush();
 
-    expect(harness.ofType("possessor_narration_suppressed")).toMatchObject([
+    expect(harness.ofType("play_narration_suppressed")).toMatchObject([
       { deliveryId: "play-turn-2", reason: "rate_limited", stayId },
     ]);
 

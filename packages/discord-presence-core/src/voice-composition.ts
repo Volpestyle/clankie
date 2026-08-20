@@ -1,5 +1,5 @@
 import type { DiscordVoiceEvidence } from "@clankie/protocol";
-import type { DiscordBridgeReceipt } from "./receipt-store.ts";
+import type { DiscordBridgeReceipt, DiscordBridgeReceiptType } from "./receipt-store.ts";
 import {
   openRealtimeConversationSession,
   openRealtimeTranscriptionSession,
@@ -463,7 +463,7 @@ export class VoiceIdleAutoLeave {
   }
 }
 
-export function voiceEvidenceReceiptType(evidence: DiscordVoiceEvidence): DiscordBridgeReceipt["type"] {
+export function voiceEvidenceReceiptType(evidence: DiscordVoiceEvidence): DiscordBridgeReceiptType {
   return `discord.voice.${evidence.type}`;
 }
 

@@ -1,8 +1,12 @@
-import { mkdtemp, readFile, rm, stat, symlink } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { DiscordBridgeReceiptStore, parseDiscordBridgeReceipt } from "../src/receipt-store.ts";
+import {
+  DiscordBridgeReceiptStore,
+  parseDiscordBridgeReceipt,
+  readDiscordBridgeReceipts,
+} from "../src/receipt-store.ts";
 
 const roots: string[] = [];
 
@@ -37,6 +41,12 @@ describe("DiscordBridgeReceiptStore", () => {
     expect(raw).not.toContain("message body");
     expect((await stat(path)).mode & 0o777).toBe(0o600);
     expect((await stat(join(root, "state"))).mode & 0o777).toBe(0o700);
+    await expect(readDiscordBridgeReceipts(path, 1)).rejects.toThrow(/proof limit/);
+    await writeFile(path, `${raw}{"schemaVersion":`);
+    await expect(readDiscordBridgeReceipts(path)).resolves.toEqual([receipt]);
+    await writeFile(path, `${raw}not-json\n`);
+    await expect(readDiscordBridgeReceipts(path)).rejects.toThrow();
+    await expect(readDiscordBridgeReceipts(join(root, "missing.jsonl"))).resolves.toEqual([]);
   });
 
   it("refuses a symlink target", async () => {
@@ -48,9 +58,10 @@ describe("DiscordBridgeReceiptStore", () => {
     const store = new DiscordBridgeReceiptStore({ path });
 
     await expect(store.append("discord.bridge.ready", { commandCount: 8 })).rejects.toThrow("not a symlink");
+    await expect(readDiscordBridgeReceipts(path)).rejects.toThrow("not a symlink");
   });
 
-  it("appends a suppressed narration receipt", async () => {
+  it("appends a play narration suppression receipt", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-discord-receipts-suppress-"));
     roots.push(root);
     const path = join(root, "receipts.jsonl");
@@ -59,8 +70,8 @@ describe("DiscordBridgeReceiptStore", () => {
       clock: () => new Date("2026-08-15T21:00:00.000Z"),
       idFactory: () => "receipt-suppress",
     });
-    await store.append("discord.voice.possessor_narration_suppressed", {
-      type: "possessor_narration_suppressed",
+    await store.append("discord.voice.play_narration_suppressed", {
+      type: "play_narration_suppressed",
       guildId: "guild-1",
       channelId: "channel-1",
       stayId: "stay-1",
@@ -68,9 +79,29 @@ describe("DiscordBridgeReceiptStore", () => {
       reason: "rate_limited",
     });
     const receipt = parseDiscordBridgeReceipt(JSON.parse((await readFile(path, "utf8")).trim()));
-    expect(receipt.type).toBe("discord.voice.possessor_narration_suppressed");
+    expect(receipt.type).toBe("discord.voice.play_narration_suppressed");
     expect(receipt.data.deliveryId).toBe("play-turn-2");
     expect(receipt.data.reason).toBe("rate_limited");
+  });
+
+  it("reads legacy possessor receipts but refuses to write them", async () => {
+    const legacy = {
+      schemaVersion: 1,
+      id: "legacy-receipt",
+      occurredAt: "2026-08-15T21:00:00.000Z",
+      type: "discord.voice.possessor_refusal",
+      data: { deliveryId: "play-turn-1", attachedCount: 1, reason: "voice_narration_not_in_channel" },
+    } as const;
+    expect(parseDiscordBridgeReceipt(legacy)).toEqual(legacy);
+
+    const root = await mkdtemp(join(tmpdir(), "clankie-discord-receipts-legacy-"));
+    roots.push(root);
+    const historicalPath = join(root, "historical.jsonl");
+    await writeFile(historicalPath, `${JSON.stringify(legacy)}\n`);
+    await expect(readDiscordBridgeReceipts(historicalPath)).resolves.toEqual([legacy]);
+
+    const store = new DiscordBridgeReceiptStore({ path: join(root, "current.jsonl") });
+    expect(() => store.append(legacy.type as never, legacy.data)).toThrow();
   });
 
   it("appends the ADR 0057 floor and volition receipt types", async () => {

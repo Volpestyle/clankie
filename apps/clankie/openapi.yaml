@@ -18,7 +18,6 @@ info:
     | Discord voice | `clankie_discord_voice_bridge` | Voice briefing; voice-lane channel turns |
     | Discord user text | `clankie_discord_user_bridge` | Lab-user channel turns and presence |
     | Discord user voice | `clankie_discord_user_voice_bridge` | Lab-user voice-lane turns |
-    | Runner | `clankie_runner` | Embodiment claim/report |
     | Device | minted at pairing complete | `/v1/devices/self*` |
 
     Discord-lane routes 403 if the bearer is the console captain token (steer
@@ -687,15 +686,15 @@ paths:
                   sessionId: replace-me
       responses:
         "200":
-          description: Accepted, refused, or stop requested
+          description: Accepted, refused (`play_session_active` when another local or hosted session is live), or stop requested
 
   /v1/embodiment/sessions/live:
     get:
       tags: [Embodiment]
       operationId: getLiveEmbodimentSession
       summary: Live play session
-      description: Captain, runner, or operator.
-      security: [{ operatorBearer: [] }, { captainBearer: [] }, { runnerBearer: [] }]
+      description: Captain or operator.
+      security: [{ operatorBearer: [] }, { captainBearer: [] }]
       responses:
         "200":
           description: "`{ session }` or `{ session: null }`"
@@ -728,7 +727,7 @@ paths:
       operationId: getLivePlayStill
       summary: One still of the live play screen
       description: Read-only glance. PNG as base64. No controller.
-      security: [{ operatorBearer: [] }, { captainBearer: [] }, { discordVoiceBearer: [] }]
+      security: [{ operatorBearer: [] }, { captainBearer: [] }]
       responses:
         "200":
           description: not_playing, pending, or still
@@ -739,7 +738,7 @@ paths:
       operationId: getLivePlayStory
       summary: Bounded story of this playthrough
       description: Journal projection — objective, maps, last notable moments. Not the raw log.
-      security: [{ operatorBearer: [] }, { captainBearer: [] }, { discordVoiceBearer: [] }]
+      security: [{ operatorBearer: [] }, { captainBearer: [] }]
       responses:
         "200":
           description: not_playing, pending, or card
@@ -757,59 +756,6 @@ paths:
           description: Session
         "404":
           description: Unknown
-
-  /v1/embodiment/sessions/{id}/report:
-    post:
-      tags: [Embodiment]
-      operationId: postEmbodimentReport
-      summary: Runner lifecycle report
-      security: [{ runnerBearer: [] }]
-      parameters:
-        - $ref: "#/components/parameters/sessionId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            example:
-              schemaVersion: 1
-              sessionId: replace-me
-              runnerId: local
-              state: running
-              reportedAt: "2026-08-15T20:00:00.000Z"
-      responses:
-        "200":
-          description: Accepted
-
-  /v1/embodiment/possession:
-    get:
-      tags: [Embodiment]
-      operationId: getBodyPossession
-      summary: Who holds the body right now
-      security: [{ captainBearer: [] }]
-      responses:
-        "200":
-          description: Possession or null
-
-  /v1/embodiment/claims:
-    post:
-      tags: [Embodiment]
-      operationId: postEmbodimentClaim
-      summary: Runner poll for start/stop work
-      security: [{ runnerBearer: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            example:
-              schemaVersion: 1
-              claimId: yaak-claim-1
-              runnerId: local
-              environmentIds: [pokemon-firered, pokemon-emerald]
-      responses:
-        "200":
-          description: Assignment
-        "204":
-          description: Nothing to claim
 
   /v1/browser/tools:
     get:
@@ -1013,10 +959,6 @@ components:
       type: http
       scheme: bearer
       description: Keychain `clankie_discord_voice_bridge` or `clankie_discord_user_voice_bridge`
-    runnerBearer:
-      type: http
-      scheme: bearer
-      description: Keychain `clankie_runner`
     deviceBearer:
       type: http
       scheme: bearer

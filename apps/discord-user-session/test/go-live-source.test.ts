@@ -11,8 +11,6 @@ describe("Go Live activity snapshot source", () => {
           encoding: "png",
           data: "cG5n",
           sha256: "abc",
-          width: 240,
-          height: 160,
         });
       }) as typeof fetch,
       async () => "clankie_activity_producer_test",
@@ -21,8 +19,6 @@ describe("Go Live activity snapshot source", () => {
       mimeType: "image/png",
       data: "cG5n",
       sha256: "abc",
-      width: 240,
-      height: 160,
     });
   });
 

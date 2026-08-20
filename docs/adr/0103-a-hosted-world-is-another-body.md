@@ -1,6 +1,6 @@
 # ADR 0103: A hosted world is another body, behind a pinned contract
 
-Status: proposed (2026-08-16). Amends
+Status: accepted (James, 2026-08-19). Amends
 [ADR 0102](0102-pokeagent-mmo-is-an-external-mcp-world.md), which decided the
 world would be reached only through the packaged MCP server. The shipped code
 (VUH-970) reaches it through the pinned world contract instead; this record
@@ -14,6 +14,17 @@ publishes the client kit under the `@pokeagents` scope; its private host
 packages keep `@pokeagent-mmo`, so the scope now marks the boundary this record
 is about. Everything below about what may be imported still holds, and the
 `pinned` in the title now means a pinned version.
+
+## Current status (2026-08-19)
+
+The code described here is shipped. [ADR 0129](0129-each-player-owns-a-body.md)
+clarifies that hosted co-play uses separately credentialed player seats and that
+MCP is only a transport projection for other harnesses. The sibling PokeAgents
+repository ships the operation catalog and derives its MCP tools from it.
+Clankie's current boundary imports only published `@pokeagents/world-protocol`
+and `/ipc`; host packages remain forbidden. A stronger session-bound typed
+client or catalog-only dispatch remains PokeAgents-owned follow-up, not a claim
+about this implementation.
 
 ## Context
 

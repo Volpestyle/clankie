@@ -29,15 +29,6 @@ export type DiscordAuthorityDecision =
   | { allowed: true }
   | { allowed: false; code: "role_not_authorized"; message: string };
 
-export function parseRoleIds(value: string | undefined): ReadonlySet<string> {
-  return new Set(
-    (value ?? "")
-      .split(",")
-      .map((roleId) => roleId.trim())
-      .filter((roleId) => roleId.length > 0),
-  );
-}
-
 /** Unknown or absent values fall back to the closed policy, never the open one. */
 export function parseDiscordVoiceJoinPolicy(value: string | undefined): DiscordVoiceJoinPolicy {
   return value?.trim() === "guild_members" ? "guild_members" : "ambient";

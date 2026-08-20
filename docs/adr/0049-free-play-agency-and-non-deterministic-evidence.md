@@ -1,8 +1,12 @@
 # ADR 0049: Free play is model-decided, and asserts something other than determinism
 
-Status: accepted (James, 2026-07-25). Free play and its evidence model remain;
-commands, run procedures, and current tool details belong in the
-[GBA MCP operating guide](../../apps/gba-mcp/README.md).
+Status: accepted (James, 2026-07-25).
+
+## Current status (2026-08-19)
+
+Free play and its evidence model remain. [ADR 0129](0129-each-player-owns-a-body.md)
+supersedes possession and shared-body references below: Clankie's play owns its
+runtime, while GBA MCP applies the same contracts to a separate private runtime.
 
 ## Context
 
@@ -86,6 +90,7 @@ button over adapting to the game.
 - Model text shown on an activity overlay is bounded and remains untrusted.
 - Cost scales with decisions, so longer play depends on bounded context and
   self-authored summaries rather than an ever-growing prompt.
-- Operational controls, possession, checkpoints, and tool semantics stay in the
-  [GBA MCP operating guide](../../apps/gba-mcp/README.md); the live rendering
-  path stays in the [activity guide](../../apps/discord-activity/README.md).
+- Current local-play controls and checkpoints stay in the
+  [emulator guide](../../integrations/gba-emulator/README.md); the isolated MCP
+  tools stay in the [GBA MCP guide](../../apps/gba-mcp/README.md), and live
+  rendering stays in the [activity guide](../../apps/discord-activity/README.md).

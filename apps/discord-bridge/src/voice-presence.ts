@@ -1,4 +1,3 @@
-import type { JoinDiscordVoiceInput } from "@clankie/discord-presence-core";
 import type { DiscordVoicePresenceResult } from "@clankie/protocol";
 import {
   authorizeVoicePresenceCommand,
@@ -7,16 +6,10 @@ import {
   type DiscordVoiceJoinPolicy,
 } from "./authority.ts";
 
-type VoiceAdapterCreator = JoinDiscordVoiceInput["adapterCreator"];
-
 export interface VoicePresenceSessionPort {
   status(): { readonly active: boolean; readonly guildId?: string; readonly channelId?: string };
   canHear(userId: string): boolean;
-  join(input: {
-    readonly guildId: string;
-    readonly channelId: string;
-    readonly adapterCreator: VoiceAdapterCreator;
-  }): Promise<unknown>;
+  join(input: { readonly guildId: string; readonly channelId: string }): Promise<unknown>;
   leave(): Promise<void>;
 }
 
@@ -35,7 +28,6 @@ export interface VoicePresenceExecutionInput {
   readonly principal: DiscordCommandPrincipal;
   /** Fresh gateway state. The model never supplies a voice channel id. */
   readonly memberVoiceChannelId: string | undefined;
-  readonly adapterCreator: VoiceAdapterCreator;
 }
 
 /** Authority and execution stay in the body that owns the gateway and media session. */
@@ -83,7 +75,7 @@ export async function executeVoicePresenceIntent(
     };
   }
   try {
-    await session.join({ guildId: input.guildId, channelId, adapterCreator: input.adapterCreator });
+    await session.join({ guildId: input.guildId, channelId });
   } catch {
     return { action: "join_refused", reason: "failed" };
   }

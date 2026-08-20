@@ -4,6 +4,14 @@ Status: accepted (James, 2026-07-26). Implemented in the voice consent
 registry, the Discord settings schema, and the bridge's voice session
 composition, with the policy behavior pinned by tests.
 
+## Current status (2026-08-19)
+
+The consent policy remains current for Clankie's Discord room. Mid-play room
+input reaches only Clankie's own play through `@clankie/play-voice`; external
+harnesses are outside this consent and transport path under
+[ADR 0129](0129-each-player-owns-a-body.md). Possession comparisons below are
+historical.
+
 ## Context
 
 ADR 0045's consent boundary is explicit and session-bound: nobody's audio is

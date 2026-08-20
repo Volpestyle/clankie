@@ -120,25 +120,25 @@ describe("Discord voice evidence (ADR 0057)", () => {
         spokenCount: 2,
         narrationSuppressed: 5,
       },
-      { type: "possessor_connection", phase: "attached", attachedCount: 1 },
-      { type: "possessor_room", listening: true, attachedCount: 1, deliveredCount: 1 },
+      { type: "play_connection", phase: "attached", attachedCount: 1 },
+      { type: "play_room", listening: true, attachedCount: 1, deliveredCount: 1 },
       {
-        type: "possessor_transcript_delivery",
-        deliveryId: "possessor-delivery-1",
+        type: "play_transcript_delivery",
+        deliveryId: "play-delivery-1",
         attachedCount: 1,
         deliveredCount: 1,
       },
-      { type: "possessor_narration_submission", deliveryId: "possessor-delivery-2", attachedCount: 1 },
+      { type: "play_narration_submission", deliveryId: "play-delivery-2", attachedCount: 1 },
       {
-        type: "possessor_narration_suppressed",
+        type: "play_narration_suppressed",
         ...scope,
         stayId: "stay-1",
-        deliveryId: "possessor-delivery-4",
+        deliveryId: "play-delivery-4",
         reason: "rate_limited",
       },
       {
-        type: "possessor_refusal",
-        deliveryId: "possessor-delivery-3",
+        type: "play_refusal",
+        deliveryId: "play-delivery-3",
         attachedCount: 1,
         reason: "voice_narration_not_in_channel",
       },
@@ -205,8 +205,8 @@ describe("Discord voice evidence (ADR 0057)", () => {
     ).toThrow();
     expect(() =>
       DiscordVoiceEvidenceSchema.parse({
-        type: "possessor_transcript_delivery",
-        deliveryId: "possessor-delivery-1",
+        type: "play_transcript_delivery",
+        deliveryId: "play-delivery-1",
         attachedCount: 1,
         deliveredCount: 1,
         text: "speaker: private words",
@@ -214,8 +214,8 @@ describe("Discord voice evidence (ADR 0057)", () => {
     ).toThrow();
     expect(() =>
       DiscordVoiceEvidenceSchema.parse({
-        type: "possessor_narration_submission",
-        deliveryId: "possessor-delivery-2",
+        type: "play_narration_submission",
+        deliveryId: "play-delivery-2",
         attachedCount: 1,
         narration: "walked into a wall",
       }),

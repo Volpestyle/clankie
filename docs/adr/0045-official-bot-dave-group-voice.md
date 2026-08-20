@@ -1,9 +1,12 @@
 # ADR 0045: Official-bot group voice uses the maintained Discord media stack
 
-Status: accepted (2026-07-25). [ADR 0057](0057-realtime-voice-with-captain-handoff.md)
-defines the realtime speech path; media ownership, DAVE, the consent model, and
-the allowlists remain authoritative here. Live
-Discord evidence remains a deployment gate.
+Status: accepted (2026-07-25). Current-status addendum (2026-08-19):
+[ADR 0128](0128-vox-is-the-sole-discord-media-owner.md) supersedes this ADR's
+`@discordjs/voice` media-owner, Node Opus readiness, and split-stack rollout
+decisions. Consent, Discord attribution, DAVE-positive join, allowlists, floor,
+memory-only PCM, and live-evidence requirements remain authoritative here.
+[ADR 0057](0057-realtime-voice-with-captain-handoff.md) defines the realtime
+speech path. The rationale and diagram below are retained as historical.
 
 ## Context
 

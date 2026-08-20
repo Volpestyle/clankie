@@ -1,9 +1,9 @@
 /**
- * Single official-bot media owner for one guild voice channel, rewired for
+ * Transport-neutral policy coordinator for one guild voice channel, rewired for
  * [ADR 0057](../../../docs/adr/0057-realtime-voice-with-captain-handoff.md)'s
  * two-tier realtime flow.
  *
- * Discord's receiver supplies per-user Opus streams; only explicitly consented
+ * Vox supplies authenticated per-user PCM streams; only explicitly consented
  * user ids are ever subscribed, so unconsented audio can never reach an
  * `input_audio_buffer.append` (mission criterion 3). Each consented speaker has
  * a separate transcription session: Discord's authenticated per-user streams
@@ -28,26 +28,13 @@
  */
 
 import {
-  AudioPlayerStatus,
-  EndBehaviorType,
-  NetworkingStatusCode,
-  NoSubscriberBehavior,
-  StreamType,
-  VoiceConnectionStatus,
-  createAudioPlayer,
-  createAudioResource,
-  entersState,
-  joinVoiceChannel,
-  type AudioPlayer,
-  type AudioReceiveStream,
-  type DiscordGatewayAdapterCreator,
-  type VoiceConnection,
-} from "@discordjs/voice";
+  VoxClientError,
+  type VoxClient,
+  type VoxControlEvent,
+  type VoxUserAudioFrame,
+} from "@clankie/vox-client";
 import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
-import { PassThrough } from "node:stream";
-import { pipeline } from "node:stream/promises";
-import { opus } from "prism-media";
 import type {
   DiscordVoiceEvidence,
   DiscordVoiceRealtimeToolName,
@@ -75,17 +62,16 @@ import {
   type RealtimeTranscriptEvent,
 } from "./realtime-session.ts";
 import { voiceAddressesCharacter } from "./voice-address.ts";
-import { discordPcmToRealtimePcm, openAiPcmToDiscordPcm, pcmRms, PCM_SAMPLE_BYTES } from "./voice-audio.ts";
+import { pcmRms, PCM_SAMPLE_BYTES } from "./voice-audio.ts";
 import { DiscordVoiceConsentRegistry, type DiscordVoiceConsentPolicy } from "./voice-consent.ts";
 import { VoiceFloor, type FloorDecision, type FloorState, type VoiceFloorOptions } from "./voice-floor.ts";
 import type { DiscordVoiceIngress, DiscordVoiceTurnOutcome } from "./voice-ingress.ts";
 import { DISCORD_ROOM_TEXT_MAX_CHARS, type DiscordVoiceRoomTextInput } from "./room-text.ts";
 import {
-  createYoutubeAudioSink,
+  createVoxMusicSink,
   isAllowedMusicUrl,
   VoiceMusicQueue,
   type VoiceMusicCommand,
-  type VoiceMusicSink,
   type VoiceMusicTraceContext,
   type VoiceMusicTraceEvent,
 } from "./voice-music.ts";
@@ -93,7 +79,7 @@ import {
 /** Shorter than this is noise, not an utterance; it earns no receipt. */
 const MIN_UTTERANCE_MS = 350;
 /**
- * How rarely a possessor's narration may make him speak (ADR 0064). A play loop
+ * How rarely a play narration may make him speak (ADR 0064). A play loop
  * reports constantly — every step, every bump — and answering each one would
  * turn a voice channel into a monologue nobody can talk over. Seeding is
  * unbounded; only the spoken response waits.
@@ -111,7 +97,9 @@ const CAPTURE_END_SILENCE_MS = 800;
  * over him. Deliberately the same bar as {@link MIN_UTTERANCE_MS}: if it is not
  * enough to count as an utterance, it is not enough to cut him off.
  */
-const BARGE_IN_PCM_BYTES = Math.round(48_000 * 2 * 2 * (MIN_UTTERANCE_MS / 1_000));
+const BARGE_IN_PCM_BYTES = Math.round(
+  REALTIME_AUDIO_SAMPLE_RATE * PCM_SAMPLE_BYTES * (MIN_UTTERANCE_MS / 1_000),
+);
 /**
  * How loud capture audio must be, as RMS in raw s16 units (full scale 32_768),
  * before it counts toward {@link BARGE_IN_PCM_BYTES}. An open mic streams room
@@ -179,6 +167,8 @@ export const UTTERANCE_REORDER_GRACE_MS = 400;
 const MAX_BRIEFING_SPEAKERS = 25;
 /** A broken transcriber cannot retain content-free capture ids without bound. */
 const MAX_PENDING_TRANSCRIPT_TURNS = 32;
+/** Failed provider item ids retained only long enough to reject late PCM. */
+const MAX_INVALID_PLAYBACK_ITEM_IDS = 32;
 /** Matches the service's bounded participant projection and caps live sockets. */
 const MAX_SPEAKER_TRANSCRIPTION_SESSIONS = 25;
 /**
@@ -240,7 +230,6 @@ export interface JoinDiscordVoiceInput {
    * `/clankie voice-consent opt-in`, which carries the residency disclosure.
    */
   readonly invokingUserId?: string;
-  readonly adapterCreator: DiscordGatewayAdapterCreator;
 }
 
 export interface DiscordVoiceSessionStatus {
@@ -349,6 +338,8 @@ export interface VoiceRoomOccupant {
 }
 
 export interface DiscordVoiceSessionOptions {
+  /** Sole Discord voice media owner. The session never closes this shared process. */
+  readonly vox: VoxClient;
   /** The UNCHANGED `discord_voice` captain lane; `ask_clankie` is its privileged caller. */
   readonly ingress: DiscordVoiceIngress;
   /**
@@ -361,7 +352,7 @@ export interface DiscordVoiceSessionOptions {
   readonly briefing: (request: DiscordVoiceBriefingRequest) => Promise<DiscordVoiceBriefing>;
   readonly floor: VoiceFloorOptions;
   /**
-   * Floor for how often a possessor's narration may trigger a spoken response.
+   * Floor for how often a play narration may trigger a spoken response.
    * Seeding is never rate-limited; only speaking is. Defaults to
    * {@link DEFAULT_NARRATION_MIN_INTERVAL_MS}.
    */
@@ -393,13 +384,6 @@ export interface DiscordVoiceSessionOptions {
   readonly clock?: () => number;
   /** Timer seam shared with the realtime runtimes; drives decay ticks, the hold window, and reconnect backoff. */
   readonly timers?: RealtimeTimers;
-  /**
-   * Lab-user Go Live sink. When present, YouTube plays as a stream (video)
-   * instead of voice audio. The official bot omits this.
-   */
-  readonly musicVideo?: VoiceMusicSink;
-  /** Shared queue when the app owns the sink (user video DJ without a voice session). */
-  readonly music?: VoiceMusicQueue;
 }
 
 /** One `response.create` decision awaiting its audio; receipts are cut from these. */
@@ -407,7 +391,7 @@ interface PendingVoiceResponse {
   readonly deliveryId: string;
   readonly wake: DiscordVoiceWake;
   readonly fastPath: boolean;
-  /** Who prompted it: the room, or a possessor's report of the body. */
+  /** Who prompted it: the room, or a play report from the body. */
   readonly trigger: DiscordVoiceResponseTrigger;
   /** Immutable gateway identity for the utterance that caused this exchange. */
   readonly speakerId?: string;
@@ -428,6 +412,10 @@ interface PendingVoiceResponse {
   outputTokens?: number;
   /** Set when the server finished the response this decision produced. */
   done: boolean;
+  /** Playback failed before response.done; late media must not bind to this decision. */
+  invalidated?: boolean;
+  responseMeta?: RealtimeResponseMeta;
+  modelResponseEmitted?: boolean;
   /** Set synchronously when this response chose a function instead of speech. */
   toolCalled?: boolean;
 }
@@ -457,22 +445,31 @@ interface FinalizedUtterance {
 
 type RoomInputSource = "speech" | "text";
 
-/** One response's streamed playback: a raw-PCM stream fed by deltas, played in order. */
+/** One response's correlated native Vox playback, queued in provider response order. */
 interface PlaybackJob {
   readonly pending: PendingVoiceResponse;
   readonly itemId: string;
-  readonly stream: PassThrough;
-  /**
-   * Every Discord-rate buffer written into the stream. They are zeroed when
-   * playback of this job ends rather than at write time: the stream holds the
-   * exact buffer reference until the player reads it, so zeroing at write
-   * time would silence audio still in flight. End-of-playback zeroing
-   * preserves the discipline — nothing outlives its turn — without
-   * corrupting it.
-   */
-  readonly buffers: Buffer[];
+  readonly playbackId: string;
+  readonly encodedChunks: string[];
   readonly generation: number;
+  providerDone: boolean;
+  stopping: boolean;
+  outcome?: "drained" | "stopped" | "failed" | "timeout";
+  settle: ((result: "drained" | "stopped" | "failed" | "timeout") => void) | undefined;
+  failureReason: string | undefined;
   startedAtMs?: number;
+}
+
+interface ActiveCapture {
+  readonly userId: string;
+  readonly captureId: string;
+  readonly epoch: number;
+  readonly generation: number;
+  readonly turn: PendingTranscriptTurn;
+  transcription?: VoiceTranscriptionPort;
+  audioBytes: number;
+  bargeInChecked: boolean;
+  bargeInSpeechBytes: number;
 }
 
 const defaultTimers: RealtimeTimers = {
@@ -488,15 +485,17 @@ export class DiscordVoiceSession {
   private readonly clock: () => number;
   private readonly timers: RealtimeTimers;
   private readonly consent: DiscordVoiceConsentRegistry;
-  private readonly player: AudioPlayer;
-  private readonly musicPlayer: AudioPlayer;
   public readonly music: VoiceMusicQueue;
   private floor: VoiceFloor;
-  private connection: VoiceConnection | undefined;
   private guildId: string | undefined;
   private channelId: string | undefined;
+  private connectionId: string | undefined;
+  private voiceReady = false;
   private daveProtocolVersion: number | undefined;
-  private readonly captures = new Map<string, AudioReceiveStream>();
+  private readonly captures = new Map<string, ActiveCapture>();
+  private readonly captureEpochs = new Map<string, number>();
+  private readonly voxUnsubscribes: (() => void)[];
+  private disposed = false;
   /** Serializes `ask_clankie` handoffs so two results never talk over each other. */
   private turnQueue: Promise<void> = Promise.resolve();
   /** Serializes engage/seed/respond so a second wake cannot race session setup. */
@@ -522,7 +521,7 @@ export class DiscordVoiceSession {
   private readonly transcriptListeners = new Set<
     (line: string, transcript: DiscordVoiceTranscript) => void
   >();
-  /** Rate-limits possessor narration responses so play does not become a monologue. */
+  /** Rate-limits play narration responses so play does not become a monologue. */
   private lastNarrationResponseAtMs = Number.NEGATIVE_INFINITY;
   private readonly narrationMinIntervalMs: number;
   private stayId: string | undefined;
@@ -531,9 +530,10 @@ export class DiscordVoiceSession {
   private staySpokenCount = 0;
   private stayNarrationSuppressed = 0;
   private pendingResponses: PendingVoiceResponse[] = [];
+  private readonly invalidPlaybackItemIds = new Set<string>();
   /** The job whose stream still receives deltas. */
   private openPlayback: PlaybackJob | undefined;
-  /** The job currently at the player. */
+  /** The job currently active in Vox. */
   private playingJob: PlaybackJob | undefined;
   private tickHandle: unknown;
   private workHeartbeatHandle: unknown;
@@ -545,7 +545,7 @@ export class DiscordVoiceSession {
   private readonly roomTextDeliveryIds = new Set<string>();
 
   private readonly onSpeakingStart = (userId: string): void => {
-    if (this.guildId === undefined || this.channelId === undefined) return;
+    if (!this.voiceReady || this.guildId === undefined || this.channelId === undefined) return;
     // The consent boundary (ADR 0045/0057, mission criterion 3): an
     // unconsented participant is never subscribed, so their audio can never
     // reach an input_audio_buffer.append.
@@ -569,35 +569,40 @@ export class DiscordVoiceSession {
     this.consent = new DiscordVoiceConsentRegistry(options.consentPolicy);
     this.floor = new VoiceFloor(options.floor);
     this.narrationMinIntervalMs = options.narrationMinIntervalMs ?? DEFAULT_NARRATION_MIN_INTERVAL_MS;
-    this.musicPlayer = createAudioPlayer({
-      behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
-    });
-    this.player = createAudioPlayer({
-      behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
-    });
     const traceMusic = (event: VoiceMusicTraceEvent): void => this.handleMusicTrace(event);
-    this.music =
-      options.music ??
-      new VoiceMusicQueue({
-        sinkKind: options.musicVideo === undefined ? "audio" : "video",
+    this.music = new VoiceMusicQueue({
+      sinkKind: "audio",
+      trace: traceMusic,
+      sink: createVoxMusicSink({
+        vox: options.vox,
         trace: traceMusic,
-        sink:
-          options.musicVideo ??
-          createYoutubeAudioSink({
-            player: this.musicPlayer,
-            trace: traceMusic,
-            onEnded: () => {
-              void this.music.ended();
-            },
-          }),
-      });
+        onEnded: () => {
+          void this.music.ended();
+        },
+      }),
+    });
     this.music.setTrace(traceMusic);
+    this.voxUnsubscribes = [
+      options.vox.onEvent((event) => this.handleVoxEvent(event)),
+      options.vox.onUserAudio((frame) => this.handleUserAudio(frame)),
+      options.vox.onStatus((status) => {
+        if (
+          (status === "error" || status === "closed" || status === "missing") &&
+          this.guildId !== undefined
+        ) {
+          this.leaveSafely("vox_process_lost");
+        }
+      }),
+    ];
   }
 
   public async join(input: JoinDiscordVoiceInput): Promise<DiscordVoiceSessionStatus> {
+    if (this.disposed) throw new Error("Discord voice session is disposed");
     await this.leave();
     this.guildId = input.guildId;
     this.channelId = input.channelId;
+    const connectionId = randomUUID();
+    this.connectionId = connectionId;
     this.stayId = randomUUID();
     this.stayInputTokens = 0;
     this.stayOutputTokens = 0;
@@ -607,25 +612,60 @@ export class DiscordVoiceSession {
     // exactly like consent.
     this.floor = new VoiceFloor(this.options.floor);
     this.consent.open(input.guildId, input.channelId, input.invokingUserId);
-    const connection = joinVoiceChannel({
-      guildId: input.guildId,
-      channelId: input.channelId,
-      adapterCreator: input.adapterCreator,
-      selfDeaf: false,
-      selfMute: false,
-      daveEncryption: true,
-    });
-    this.connection = connection;
+    const generation = this.sessionGeneration;
+    const readinessAbort = new AbortController();
+    const transportReady = waitForVoxEvent(
+      this.options.vox,
+      (event): event is Extract<VoxControlEvent, { type: "transport_state" }> =>
+        event.type === "transport_state" &&
+        event.role === "voice" &&
+        event.connectionId === connectionId &&
+        event.status === "ready",
+      VOICE_READY_TIMEOUT_MS,
+      "Discord voice transport did not become ready",
+      readinessAbort.signal,
+      connectionId,
+    );
+    const daveReady = waitForVoxEvent(
+      this.options.vox,
+      (event): event is Extract<VoxControlEvent, { type: "dave_state" }> =>
+        event.type === "dave_state" &&
+        event.role === "voice" &&
+        event.connectionId === connectionId &&
+        event.status === "ready" &&
+        (event.protocolVersion ?? 0) > 0,
+      DAVE_READY_TIMEOUT_MS,
+      "Discord DAVE encryption did not become ready",
+      readinessAbort.signal,
+      connectionId,
+    );
+    const readiness = Promise.all([transportReady, daveReady]);
     try {
-      await entersState(connection, VoiceConnectionStatus.Ready, VOICE_READY_TIMEOUT_MS);
-      const protocolVersion = await waitForDave(connection, DAVE_READY_TIMEOUT_MS);
+      this.options.vox.joinVoice({
+        connectionId,
+        guildId: input.guildId,
+        channelId: input.channelId,
+        selfMute: false,
+      });
+      const [, dave] = await readiness;
+      const protocolVersion = dave.protocolVersion;
+      if (protocolVersion === undefined || protocolVersion <= 0) {
+        throw new Error("Discord DAVE encryption did not become ready");
+      }
       this.daveProtocolVersion = protocolVersion;
       // Prove the transcription boundary at join time. Actual ears are opened
       // per authenticated speaker, so overlap can never corrupt attribution.
       await this.probeTranscription();
+      if (
+        generation !== this.sessionGeneration ||
+        this.connectionId !== connectionId ||
+        this.guildId !== input.guildId ||
+        this.channelId !== input.channelId
+      ) {
+        throw new Error("Discord voice session ended while joining");
+      }
+      this.voiceReady = true;
       this.channelMembers = new Set(this.occupantIds(input.guildId, input.channelId));
-      connection.receiver.speaking.on("start", this.onSpeakingStart);
-      connection.subscribe(this.musicPlayer);
       await this.emitSafely({
         type: "joined",
         guildId: input.guildId,
@@ -644,8 +684,12 @@ export class DiscordVoiceSession {
       }
       return this.status();
     } catch (error) {
-      await this.leave();
+      readinessAbort.abort();
+      await readiness.catch(() => undefined);
+      await this.leave("join_failed");
       throw error;
+    } finally {
+      readinessAbort.abort();
     }
   }
 
@@ -657,10 +701,10 @@ export class DiscordVoiceSession {
   ): Promise<DiscordVoiceSessionStatus> {
     const wasPermitted = this.consent.permits(guildId, channelId, userId);
     const session = this.consent.set(guildId, channelId, userId, consented);
-    // Revocation destroys the live capture, which stops its appends; the
-    // decoder's data handler re-checks consent per chunk and zeroes stragglers.
+    // Revocation invalidates the capture id before any late native PCM can
+    // reach a transcription append.
     if (!consented) {
-      this.captures.get(userId)?.destroy();
+      this.cancelCapture(userId);
       this.releaseSpeakerTranscription(userId);
     }
     const isPermitted = this.consent.permits(guildId, channelId, userId);
@@ -689,7 +733,7 @@ export class DiscordVoiceSession {
     else this.channelMembers.delete(userId);
     this.consent.memberChannelChanged(userId, channelId);
     if (!isPresent) {
-      this.captures.get(userId)?.destroy();
+      this.cancelCapture(userId);
       this.releaseSpeakerTranscription(userId);
     }
     if (!wasPresent && isPresent && this.consent.permits(guildId, activeChannelId, userId)) {
@@ -703,7 +747,7 @@ export class DiscordVoiceSession {
     return this.music.handle(command, requestedBy);
   }
 
-  public async leave(): Promise<void> {
+  public async leave(reason = "session_leave"): Promise<void> {
     const guildId = this.guildId;
     const channelId = this.channelId;
     const stayId = this.stayId;
@@ -711,15 +755,17 @@ export class DiscordVoiceSession {
     const outputTokens = this.stayOutputTokens;
     const spokenCount = this.staySpokenCount;
     const narrationSuppressed = this.stayNarrationSuppressed;
-    const connection = this.connection;
-    connection?.receiver.speaking.off("start", this.onSpeakingStart);
-    for (const capture of this.captures.values()) capture.destroy();
-    this.captures.clear();
-    this.music.stop();
-    this.player.stop(true);
-    this.musicPlayer.stop(true);
-    this.consent.close();
-    this.connection = undefined;
+    const captureUserIds = [...this.captures.keys()];
+    const transcriptions = [...this.transcriptions.values()];
+    const conversation = this.conversation;
+    const playbackJobs = new Set([this.openPlayback, this.playingJob]);
+    const transcriptRing = this.transcriptRing;
+
+    // Vox commands are synchronous and may throw after process loss. Make the
+    // local session inactive first so no failing cleanup command can preserve
+    // stale authority, content, or media correlation.
+    this.voiceReady = false;
+    this.connectionId = undefined;
     this.guildId = undefined;
     this.channelId = undefined;
     this.stayId = undefined;
@@ -727,8 +773,30 @@ export class DiscordVoiceSession {
     this.stayOutputTokens = 0;
     this.staySpokenCount = 0;
     this.stayNarrationSuppressed = 0;
+    this.lastNarrationResponseAtMs = Number.NEGATIVE_INFINITY;
     this.daveProtocolVersion = undefined;
     this.sessionGeneration += 1;
+    this.consent.close();
+    this.captures.clear();
+    this.captureEpochs.clear();
+    this.transcriptions.clear();
+    this.transcriptionOpens.clear();
+    this.transcriptionEpochs.clear();
+    this.transcriptTurns.clear();
+    this.finalizedUtterances.length = 0;
+    this.conversation = undefined;
+    this.transcriptRing = [];
+    this.channelMembers.clear();
+    this.lastRoomUserId = undefined;
+    this.roomTextDeliveryIds.clear();
+    this.pendingResponses = [];
+    this.invalidPlaybackItemIds.clear();
+    this.openPlayback = undefined;
+    this.playingJob = undefined;
+    this.playbackChain = Promise.resolve();
+    this.turnQueue = Promise.resolve();
+    this.conversationOps = Promise.resolve();
+    this.floor = new VoiceFloor(this.options.floor);
     this.stopFloorWork();
     this.stopTick();
     this.cancelHold();
@@ -738,39 +806,49 @@ export class DiscordVoiceSession {
     for (const handle of this.speakerIdleHandles.values()) this.timers.clearTimeout(handle);
     this.speakerIdleHandles.clear();
     this.speakerLastActiveAtMs.clear();
-    for (const transcription of this.transcriptions.values()) {
+    this.cancelReorderWait();
+    for (const line of transcriptRing) line.fill(0);
+    for (const job of playbackJobs) {
+      if (job === undefined) continue;
+      job.stopping = true;
+      job.encodedChunks.length = 0;
+      this.settlePlayback(job, "stopped");
+    }
+
+    for (const transcription of transcriptions) {
       try {
         transcription.close();
       } catch {
         // Already closed; leaving is idempotent.
       }
     }
-    this.transcriptions.clear();
-    this.transcriptionOpens.clear();
-    this.transcriptionEpochs.clear();
-    this.transcriptTurns.clear();
-    this.finalizedUtterances.length = 0;
-    this.cancelReorderWait();
-    const conversation = this.conversation;
-    this.conversation = undefined;
     try {
       conversation?.close();
     } catch {
       // Already closed; leaving is idempotent.
     }
-    for (const line of this.transcriptRing) line.fill(0);
-    this.transcriptRing = [];
-    this.channelMembers.clear();
-    this.lastRoomUserId = undefined;
-    this.pendingResponses = [];
-    if (this.openPlayback !== undefined) {
-      this.openPlayback.stream.end();
-      this.openPlayback = undefined;
+    this.music.stop();
+    for (const userId of captureUserIds) {
+      try {
+        this.options.vox.unsubscribeUserAudio(userId);
+      } catch {
+        // Local capture state was already revoked.
+      }
     }
-    // An in-flight playback job finalizes against the bumped generation: it
-    // zeroes its buffers and emits nothing.
-    if (connection !== undefined && connection.state.status !== VoiceConnectionStatus.Destroyed) {
-      connection.destroy();
+    for (const job of playbackJobs) {
+      if (job === undefined) continue;
+      try {
+        this.options.vox.stopTtsPlayback(job.playbackId);
+      } catch {
+        // Local playback state was already settled.
+      }
+    }
+    if (guildId !== undefined || channelId !== undefined) {
+      try {
+        this.options.vox.leaveVoice(reason);
+      } catch {
+        // Local voice authority was already cleared; the left receipt remains valid.
+      }
     }
     if (guildId !== undefined && channelId !== undefined) {
       await this.emitSafely({
@@ -786,18 +864,37 @@ export class DiscordVoiceSession {
     }
   }
 
+  /** Tears down this coordinator's listeners without owning the shared Vox process. */
+  public async dispose(): Promise<void> {
+    if (this.disposed) return;
+    await this.leave("session_disposed");
+    this.disposed = true;
+    try {
+      this.music.dispose();
+    } catch {
+      // Local music state was already cleared by leave.
+    }
+    for (const unsubscribe of this.voxUnsubscribes) {
+      try {
+        unsubscribe();
+      } catch {
+        // Listener teardown is best effort after local disposal.
+      }
+    }
+  }
+
   /**
-   * A possessor's bounded update from another body (ADR 0064 / ADR 0123).
+   * A bounded play update from another body (ADR 0064 / ADR 0123).
    *
    * The text is seeded as a conversation item and **never spoken verbatim**.
    * The update may quietly preserve continuity or ask for a response. What
    * Clankie says is his to compose, in the voice the briefing already gave him,
    * folded in with whatever the room is saying — the body supplies experience,
    * the persona supplies words. This is
-   * ADR 0047's fence restated for speech: possession changes who decides what
-   * the body does, never who is present or how he sounds.
+   * ADR 0047's fence restated for speech: play changes what the body does,
+   * never who is present or how he sounds.
    *
-   * Rejects when he is not in a voice channel, so a possessor learns that
+   * Rejects when he is not in a voice channel, so play learns that
    * nobody heard it rather than believing it spoke.
    */
   public async narrate(
@@ -845,13 +942,13 @@ export class DiscordVoiceSession {
       // a room turn in flight passes both. Asking for a second response earns
       // "conversation already has active response" from the server and the
       // narration is lost, so the wait is taken here where it is receipted.
-      // A requested track still spinning up yt-dlp is the same: speaking
-      // would duck it into a restart. Receipt as `playing`.
+      // A requested track awaiting Vox's correlated playing event is the same:
+      // speaking would overlap its startup. Receipt as `playing`.
       const responding = this.pendingResponses.some((candidate) => !candidate.done);
       if (playing || startingTrack || rateLimited || responding) {
         this.stayNarrationSuppressed += 1;
         await this.emitSafely({
-          type: "possessor_narration_suppressed",
+          type: "play_narration_suppressed",
           guildId,
           channelId,
           deliveryId,
@@ -937,7 +1034,7 @@ export class DiscordVoiceSession {
   }
 
   /**
-   * Push-only access to the attributed transcript, for a possessor that is
+   * Push-only access to the attributed transcript, for play that is
    * driving the body and should hear the room it is playing in front of.
    *
    * Push rather than pull keeps this core retention-free. A subscriber sees
@@ -961,7 +1058,7 @@ export class DiscordVoiceSession {
 
   public status(): DiscordVoiceSessionStatus {
     return {
-      active: this.connection?.state.status === VoiceConnectionStatus.Ready,
+      active: this.voiceReady,
       ...(this.guildId === undefined ? {} : { guildId: this.guildId }),
       ...(this.channelId === undefined ? {} : { channelId: this.channelId }),
       ...(this.daveProtocolVersion === undefined ? {} : { daveProtocolVersion: this.daveProtocolVersion }),
@@ -974,45 +1071,107 @@ export class DiscordVoiceSession {
   }
 
   // ------------------------------------------------------------------
-  // Capture: per-user Opus → 48 kHz stereo PCM → 24 kHz mono, streamed.
+  // Capture: correlated per-user Vox 24 kHz mono PCM, streamed unchanged.
   // ------------------------------------------------------------------
 
-  private async capture(userId: string): Promise<void> {
-    const connection = this.connection;
-    const guildId = this.guildId;
-    const channelId = this.channelId;
+  private handleVoxEvent(event: VoxControlEvent): void {
     if (
-      connection === undefined ||
-      guildId === undefined ||
-      channelId === undefined ||
-      this.captures.has(userId)
+      (event.type === "transport_state" || event.type === "dave_state") &&
+      event.role === "voice" &&
+      event.connectionId !== this.connectionId
     ) {
       return;
     }
+    if (event.type === "error") {
+      if (
+        event.role === "voice" &&
+        event.connectionId === this.connectionId &&
+        (event.code === "voice_connect_failed" || event.code === "voice_runtime_error") &&
+        this.guildId !== undefined
+      ) {
+        this.leaveSafely("vox_voice_error");
+      }
+      return;
+    }
+    if (event.type === "speaking_start" && event.captureId === undefined) {
+      this.onSpeakingStart(event.userId);
+      return;
+    }
+    if (event.type === "user_audio_end") {
+      void this.finishCapture(event.userId, event.captureId);
+      return;
+    }
+    if (event.type === "client_disconnect") {
+      this.cancelCapture(event.userId);
+      this.releaseSpeakerTranscription(event.userId);
+      this.channelMembers.delete(event.userId);
+      return;
+    }
+    if (event.type === "tts_playback_state") {
+      this.handlePlaybackState(event);
+      return;
+    }
+    if (event.type === "tts_buffer_overflow") {
+      const job = this.playingJob;
+      if (job === undefined || event.playbackId !== job.playbackId) return;
+      this.failPlayback(job, "tts_buffer_overflow");
+      return;
+    }
+    if (
+      event.type === "transport_state" &&
+      event.role === "voice" &&
+      (event.status === "disconnected" || event.status === "failed" || event.status === "closed") &&
+      this.guildId !== undefined
+    ) {
+      this.leaveSafely("vox_voice_transport_lost");
+      return;
+    }
+    if (
+      event.type === "dave_state" &&
+      event.role === "voice" &&
+      (event.status === "disabled" || event.status === "cleared") &&
+      this.guildId !== undefined
+    ) {
+      this.leaveSafely("vox_dave_lost");
+    }
+  }
+
+  private async capture(userId: string): Promise<void> {
+    const guildId = this.guildId;
+    const channelId = this.channelId;
+    if (!this.voiceReady || guildId === undefined || channelId === undefined || this.captures.has(userId)) {
+      return;
+    }
     const generation = this.sessionGeneration;
+    const epoch = this.captureEpochs.get(userId) ?? 0;
     this.cancelSpeakerTranscriptionIdle(userId);
     this.speakerLastActiveAtMs.set(userId, this.clock());
-    const stream = connection.receiver.subscribe(userId, {
-      end: { behavior: EndBehaviorType.AfterSilence, duration: CAPTURE_END_SILENCE_MS },
-    });
-    this.captures.set(userId, stream);
     const turn: PendingTranscriptTurn = {
       userId,
       deliveryId: randomUUID(),
       startedAtMs: this.clock(),
     };
+    const capture: ActiveCapture = {
+      userId,
+      captureId: randomUUID(),
+      epoch,
+      generation,
+      turn,
+      audioBytes: 0,
+      bargeInChecked: false,
+      bargeInSpeechBytes: 0,
+    };
+    this.captures.set(userId, capture);
     const transcriptTurns = this.transcriptTurns.get(userId) ?? [];
     transcriptTurns.push(turn);
     if (transcriptTurns.length > MAX_PENDING_TRANSCRIPT_TURNS) {
       transcriptTurns.splice(0, transcriptTurns.length - MAX_PENDING_TRANSCRIPT_TURNS);
     }
     this.transcriptTurns.set(userId, transcriptTurns);
-    let transcription: VoiceTranscriptionPort;
     try {
-      transcription = await this.ensureSpeakerTranscription(userId);
+      capture.transcription = await this.ensureSpeakerTranscription(userId);
     } catch {
-      this.captures.delete(userId);
-      stream.destroy();
+      if (this.captures.get(userId) === capture) this.cancelCapture(userId);
       this.removeTranscriptTurn(turn);
       await this.emitSafely({
         type: "failed",
@@ -1023,112 +1182,166 @@ export class DiscordVoiceSession {
       });
       return;
     }
-    if (generation !== this.sessionGeneration || !this.consent.permits(guildId, channelId, userId)) {
-      this.captures.delete(userId);
-      stream.destroy();
+    if (
+      generation !== this.sessionGeneration ||
+      epoch !== (this.captureEpochs.get(userId) ?? 0) ||
+      this.captures.get(userId) !== capture ||
+      !this.voiceReady ||
+      !this.consent.permits(guildId, channelId, userId)
+    ) {
       this.removeTranscriptTurn(turn);
       return;
     }
-    const decoder = new opus.Decoder({ rate: 48_000, channels: 2, frameSize: 960 });
-    let sourceBytes = 0;
-    let convertedBytes = 0;
-    let bargeInChecked = false;
-    let bargeInSpeechBytes = 0;
-    decoder.on("data", (chunk: Buffer) => {
-      // Consent is re-checked per chunk: revocation destroys the capture, and
-      // anything the decoder still had in flight is zeroed and dropped here,
-      // before it can reach a session.
-      if (generation !== this.sessionGeneration || !this.consent.permits(guildId, channelId, userId)) {
-        chunk.fill(0);
-        return;
-      }
-      sourceBytes += chunk.byteLength;
-      // Read once and reused: the barge-in gate and the receipt's amplitude
-      // want the same number, and this runs on every decoded chunk.
-      const rms = pcmRms(chunk);
-      if (rms > (turn.peakRms ?? 0)) turn.peakRms = rms;
-      if (!bargeInChecked) {
-        // Only speech-level audio counts toward talking over him: an open mic
-        // never stops sending, so counting bytes alone cut him off mid-sentence
-        // on room tone whose transcript came back empty.
-        if (rms >= BARGE_IN_SPEECH_RMS) bargeInSpeechBytes += chunk.byteLength;
-        // A speaker can clear the bar before unsolicited narration starts.
-        // Spend this capture's one check only when there is playback to stop.
-        if (
-          bargeInSpeechBytes >= BARGE_IN_PCM_BYTES &&
-          userId === this.floor.floorHolderId &&
-          this.isPlaying()
-        ) {
-          bargeInChecked = true;
-          // Barge-in (a): only the floor holder talking over him truncates;
-          // crosstalk between other people lets him finish (ADR 0057).
-          this.truncatePlayback(userId);
-        }
-      }
-      const converted = discordPcmToRealtimePcm(chunk);
-      chunk.fill(0);
-      convertedBytes += converted.byteLength;
-      this.forwardAudio(transcription, converted);
-    });
-    let captureFailed = false;
     try {
-      await pipeline(stream, decoder);
+      this.options.vox.subscribeUserAudio(userId, capture.captureId, {
+        sampleRate: REALTIME_AUDIO_SAMPLE_RATE,
+        silenceDurationMs: CAPTURE_END_SILENCE_MS,
+      });
     } catch {
-      captureFailed = true;
-      if (generation === this.sessionGeneration && this.consent.permits(guildId, channelId, userId)) {
+      if (this.captures.get(userId) === capture) {
+        this.captures.delete(userId);
+        this.captureEpochs.set(userId, capture.epoch + 1);
+        this.removeTranscriptTurn(turn);
+        this.flushFinalizedUtterances();
+        this.armSpeakerTranscriptionIdle(userId);
+      }
+      await this.emitSafely({
+        type: "failed",
+        guildId,
+        channelId,
+        userId,
+        deliveryId: turn.deliveryId,
+        stage: "capture",
+        code: "voice_capture_subscribe_failed",
+      });
+    }
+  }
+
+  private handleUserAudio(frame: VoxUserAudioFrame): void {
+    const capture = this.captures.get(frame.userId);
+    const guildId = this.guildId;
+    const channelId = this.channelId;
+    if (
+      capture === undefined ||
+      capture.captureId !== frame.captureId ||
+      capture.generation !== this.sessionGeneration ||
+      capture.epoch !== (this.captureEpochs.get(frame.userId) ?? 0) ||
+      guildId === undefined ||
+      channelId === undefined ||
+      !this.voiceReady ||
+      !this.consent.permits(guildId, channelId, frame.userId) ||
+      capture.transcription === undefined
+    ) {
+      frame.pcm.fill(0);
+      return;
+    }
+    const pcm = Buffer.from(frame.pcm.buffer, frame.pcm.byteOffset, frame.pcm.byteLength);
+    capture.audioBytes += pcm.byteLength;
+    const rms = pcmRms(pcm);
+    if (rms > (capture.turn.peakRms ?? 0)) capture.turn.peakRms = rms;
+    if (!capture.bargeInChecked) {
+      if (rms >= BARGE_IN_SPEECH_RMS) capture.bargeInSpeechBytes += pcm.byteLength;
+      if (
+        capture.bargeInSpeechBytes >= BARGE_IN_PCM_BYTES &&
+        frame.userId === this.floor.floorHolderId &&
+        this.isPlaying()
+      ) {
+        capture.bargeInChecked = true;
+        this.truncatePlayback(frame.userId);
+      }
+    }
+    this.forwardAudio(capture.transcription, pcm);
+    frame.pcm.fill(0);
+  }
+
+  private async finishCapture(userId: string, captureId: string): Promise<void> {
+    const capture = this.captures.get(userId);
+    const guildId = this.guildId;
+    const channelId = this.channelId;
+    if (capture === undefined || capture.captureId !== captureId) return;
+    this.captures.delete(userId);
+    this.captureEpochs.set(userId, capture.epoch + 1);
+    this.armSpeakerTranscriptionIdle(userId);
+    try {
+      this.options.vox.unsubscribeUserAudio(userId);
+    } catch {
+      if (guildId !== undefined && channelId !== undefined) {
         await this.emitSafely({
           type: "failed",
           guildId,
           channelId,
+          userId,
+          deliveryId: capture.turn.deliveryId,
           stage: "capture",
-          code: "voice_capture_failed",
+          code: "voice_capture_unsubscribe_failed",
         });
       }
-    } finally {
-      this.captures.delete(userId);
-      this.armSpeakerTranscriptionIdle(userId);
     }
-    if (captureFailed || generation !== this.sessionGeneration) {
-      this.removeTranscriptTurn(turn);
+    if (
+      capture.generation !== this.sessionGeneration ||
+      guildId === undefined ||
+      channelId === undefined ||
+      !this.consent.permits(guildId, channelId, userId)
+    ) {
+      this.removeTranscriptTurn(capture.turn);
       this.flushFinalizedUtterances();
       return;
     }
-    if (!this.consent.permits(guildId, channelId, userId)) {
-      this.removeTranscriptTurn(turn);
-      this.flushFinalizedUtterances();
-      return;
-    }
-    if (convertedBytes > 0) {
+    if (capture.audioBytes > 0) {
       try {
-        transcription.commitAudio();
+        capture.transcription?.commitAudio();
       } catch {
         // A closed listener reports through its close handler; the bounded
         // Discord utterance remains useful evidence even when commit loses.
       }
     }
-    const durationMs = Math.round((convertedBytes / (REALTIME_AUDIO_SAMPLE_RATE * PCM_SAMPLE_BYTES)) * 1_000);
+    const durationMs = Math.round(
+      (capture.audioBytes / (REALTIME_AUDIO_SAMPLE_RATE * PCM_SAMPLE_BYTES)) * 1_000,
+    );
     if (durationMs < MIN_UTTERANCE_MS) return;
     await this.emitSafely({
       type: "utterance",
       guildId,
       channelId,
       userId,
-      deliveryId: turn.deliveryId,
+      deliveryId: capture.turn.deliveryId,
       durationMs,
     });
   }
 
+  private cancelCapture(userId: string): void {
+    const capture = this.captures.get(userId);
+    this.captureEpochs.set(userId, (this.captureEpochs.get(userId) ?? 0) + 1);
+    this.captures.delete(userId);
+    if (capture !== undefined) this.removeTranscriptTurn(capture.turn);
+    this.flushFinalizedUtterances();
+    try {
+      this.options.vox.unsubscribeUserAudio(userId);
+    } catch {
+      const guildId = this.guildId;
+      const channelId = this.channelId;
+      if (guildId !== undefined && channelId !== undefined) {
+        void this.emitSafely({
+          type: "failed",
+          guildId,
+          channelId,
+          userId,
+          ...(capture === undefined ? {} : { deliveryId: capture.turn.deliveryId }),
+          stage: "capture",
+          code: "voice_capture_unsubscribe_failed",
+        });
+      }
+    }
+  }
+
   /**
-   * Streams one converted 24 kHz mono buffer into this speaker's transcription
+   * Streams one native 24 kHz mono buffer into this speaker's transcription
    * session, sliced to the realtime append cap. The engaged conversation gets
    * attributed transcript items, never an interleaved room-audio buffer.
    */
-  private forwardAudio(transcription: VoiceTranscriptionPort, converted: Buffer): void {
-    for (let offset = 0; offset < converted.byteLength; offset += MAX_REALTIME_AUDIO_APPEND_BYTES) {
-      const slice = converted.subarray(
-        offset,
-        Math.min(offset + MAX_REALTIME_AUDIO_APPEND_BYTES, converted.byteLength),
-      );
+  private forwardAudio(transcription: VoiceTranscriptionPort, pcm: Buffer): void {
+    for (let offset = 0; offset < pcm.byteLength; offset += MAX_REALTIME_AUDIO_APPEND_BYTES) {
+      const slice = pcm.subarray(offset, Math.min(offset + MAX_REALTIME_AUDIO_APPEND_BYTES, pcm.byteLength));
       if (transcription.isOpen) {
         try {
           transcription.appendAudio(slice);
@@ -1268,7 +1481,7 @@ export class DiscordVoiceSession {
     this.transcriptRing.push(Buffer.from(line, "utf8"));
     // Voice transcript subscribers are deliberately speech-only. Typed text
     // already has Discord's durable source, and publishing it here would send
-    // the existing possessor text delivery twice.
+    // the existing play text delivery twice.
     if (source === "speech") {
       const transcript: DiscordVoiceTranscript = {
         // Wall clock, not `this.clock()` — that seam is monotonic milliseconds
@@ -1285,7 +1498,7 @@ export class DiscordVoiceSession {
         try {
           listener(line, transcript);
         } catch {
-          // A possessor that throws on hearing must not break the room.
+          // A play listener that throws on hearing must not break the room.
         }
       }
     }
@@ -1680,7 +1893,10 @@ export class DiscordVoiceSession {
     const keep = new Set<PendingVoiceResponse>();
     if (this.playingJob !== undefined) keep.add(this.playingJob.pending);
     if (this.openPlayback !== undefined) {
-      this.openPlayback.stream.end();
+      this.openPlayback.providerDone = true;
+      if (this.playingJob === this.openPlayback) {
+        this.finishPlayback(this.openPlayback);
+      }
       keep.add(this.openPlayback.pending);
       this.openPlayback = undefined;
     }
@@ -2016,7 +2232,7 @@ export class DiscordVoiceSession {
       });
       return;
     } finally {
-      this.stopFloorWork();
+      if (generation === this.sessionGeneration) this.stopFloorWork();
     }
     const handoffMs = this.clock() - startedAtMs;
     this.floor.holdForWork(userId, this.clock());
@@ -2167,24 +2383,23 @@ export class DiscordVoiceSession {
   // ------------------------------------------------------------------
 
   private handleAudioDelta(pcm: Buffer, itemId: string): void {
+    if (this.invalidPlaybackItemIds.has(itemId)) {
+      pcm.fill(0);
+      return;
+    }
     // Server responses run one at a time, so audio belongs to the oldest
     // decision the server has not finished yet.
-    const pending = this.pendingResponses.find((candidate) => !candidate.done);
+    const pending = this.pendingResponses.find(
+      (candidate) => !candidate.done && candidate.invalidated !== true,
+    );
     if (pending === undefined) {
       // Audio with no outstanding decision is stale; zero and drop.
       pcm.fill(0);
       return;
     }
-    if (pending.firstAudioAtMs === undefined) {
-      pending.firstAudioAtMs = this.clock();
-      // He took an offered turn the moment he opens his mouth, not when the
-      // response finishes: the room may answer him before then, and that reply
-      // has to find an engaged floor.
-      if (pending.offer !== undefined) this.settleOffer(pending, true);
-    }
-    let discordPcm: Buffer;
+    let encoded: string;
     try {
-      discordPcm = openAiPcmToDiscordPcm(pcm);
+      encoded = pcm.toString("base64");
     } catch {
       pcm.fill(0);
       return;
@@ -2192,138 +2407,273 @@ export class DiscordVoiceSession {
     // Delta zeroing is this caller's duty per T2's contract.
     pcm.fill(0);
     if (this.openPlayback === undefined || this.openPlayback.pending !== pending) {
-      this.openPlayback?.stream.end();
       const job: PlaybackJob = {
         pending,
         itemId,
-        stream: new PassThrough(),
-        buffers: [],
+        playbackId: randomUUID(),
+        encodedChunks: [],
         generation: this.sessionGeneration,
+        providerDone: false,
+        stopping: false,
+        settle: undefined,
+        failureReason: undefined,
       };
       this.openPlayback = job;
       this.playbackChain = this.playbackChain.then(() => this.playJob(job)).catch(() => undefined);
     }
-    this.openPlayback.buffers.push(discordPcm);
-    this.openPlayback.stream.write(discordPcm);
+    const job = this.openPlayback;
+    if (job.stopping || job.outcome !== undefined) return;
+    if (this.playingJob === job) this.sendPlaybackAudio(job, encoded);
+    else job.encodedChunks.push(encoded);
   }
 
   private handleResponseDone(meta?: RealtimeResponseMeta): void {
-    if (this.openPlayback !== undefined) {
-      this.openPlayback.stream.end();
-      this.openPlayback = undefined;
-    }
     const settled = this.pendingResponses.find((candidate) => !candidate.done);
     if (settled === undefined) return;
-    settled.done = true;
-    // An offered turn he declined comes back with nothing in it. Reaching for a
-    // tool counts as taking it — the speech arrives on the follow-up response.
-    if (settled.offer !== undefined) {
-      this.settleOffer(settled, settled.firstAudioAtMs !== undefined || settled.toolCalled === true);
+    const job = this.openPlayback?.pending === settled ? this.openPlayback : undefined;
+    if (job !== undefined) {
+      job.providerDone = true;
+      if (this.playingJob === job && !job.stopping && job.outcome === undefined) {
+        this.finishPlayback(job);
+      }
+      this.openPlayback = undefined;
     }
+    settled.done = true;
+    if (meta !== undefined) settled.responseMeta = meta;
     if (meta?.inputTokens !== undefined) settled.inputTokens = meta.inputTokens;
     if (meta?.outputTokens !== undefined) settled.outputTokens = meta.outputTokens;
-    const guildId = this.guildId;
-    const channelId = this.channelId;
-    if (guildId !== undefined && channelId !== undefined) {
-      void this.emitSafely({
-        type: "model_response",
-        guildId,
-        channelId,
-        deliveryId: settled.deliveryId,
-        ...(settled.speakerId === undefined ? {} : { userId: settled.speakerId }),
-        phase: meta === undefined || meta.status === "completed" ? "completed" : "failed",
-        // Whether he spoke, not whether the realtime model was the one who
-        // spoke. Under external TTS the model answers in text and every
-        // audible byte arrives from the TTS engine, so `meta.audioBytes` is
-        // always 0 there and reading it reported every narration as silent.
-        // `firstAudioAtMs` is set by the audio deltas that actually play, in
-        // both modalities — the same signal the cleanup below already trusts.
-        outcome:
-          settled.firstAudioAtMs !== undefined ? "audio" : settled.toolCalled === true ? "tool" : "silent",
-        ...(meta?.responseId === undefined ? {} : { responseId: meta.responseId }),
-        ...(meta?.audioBytes === undefined ? {} : { audioBytes: meta.audioBytes }),
-        ...(meta?.textCharacters === undefined ? {} : { textCharacters: meta.textCharacters }),
-      });
+    const playbackPending = job !== undefined && settled.firstAudioAtMs === undefined;
+    if (settled.offer !== undefined && (!playbackPending || settled.toolCalled === true)) {
+      this.settleOffer(settled, settled.firstAudioAtMs !== undefined || settled.toolCalled === true);
     }
-    if (settled.firstAudioAtMs === undefined) {
+    if (!playbackPending || settled.invalidated === true) this.emitModelResponseCompletion(settled);
+    if (settled.invalidated === true || (job === undefined && settled.firstAudioAtMs === undefined)) {
       // The response spoke nothing: a function-call round trip (whose
       // follow-up response carries the speech) or a model that chose
       // silence. No audio, nothing to receipt. Tokens still landed.
       this.addStayTokens(settled);
       this.pendingResponses = this.pendingResponses.filter((candidate) => candidate !== settled);
+    } else if (job?.outcome !== undefined && job.outcome !== "drained") {
+      this.addStayTokens(settled);
+      this.pendingResponses = this.pendingResponses.filter((candidate) => candidate !== settled);
     }
+  }
+
+  private emitModelResponseCompletion(pending: PendingVoiceResponse): void {
+    if (pending.modelResponseEmitted === true) return;
+    pending.modelResponseEmitted = true;
+    const guildId = this.guildId;
+    const channelId = this.channelId;
+    if (guildId === undefined || channelId === undefined) return;
+    const meta = pending.responseMeta;
+    void this.emitSafely({
+      type: "model_response",
+      guildId,
+      channelId,
+      deliveryId: pending.deliveryId,
+      ...(pending.speakerId === undefined ? {} : { userId: pending.speakerId }),
+      phase: meta === undefined || meta.status === "completed" ? "completed" : "failed",
+      outcome:
+        pending.firstAudioAtMs !== undefined ? "audio" : pending.toolCalled === true ? "tool" : "silent",
+      ...(meta?.responseId === undefined ? {} : { responseId: meta.responseId }),
+      ...(meta?.audioBytes === undefined ? {} : { audioBytes: meta.audioBytes }),
+      ...(meta?.textCharacters === undefined ? {} : { textCharacters: meta.textCharacters }),
+    });
   }
 
   private async playJob(job: PlaybackJob): Promise<void> {
     const guildId = this.guildId;
     const channelId = this.channelId;
     if (job.generation !== this.sessionGeneration || guildId === undefined || channelId === undefined) {
-      for (const buffer of job.buffers) buffer.fill(0);
+      job.encodedChunks.length = 0;
       this.pendingResponses = this.pendingResponses.filter((candidate) => candidate !== job.pending);
       return;
     }
     this.playingJob = job;
-    job.startedAtMs = this.clock();
     this.music.duck();
-    this.connection?.subscribe(this.player);
-    this.player.play(createAudioResource(job.stream, { inputType: StreamType.Raw }));
-    try {
-      await entersState(this.player, AudioPlayerStatus.Idle, PLAYBACK_TIMEOUT_MS);
-    } catch {
-      this.player.stop(true);
+    const result = await new Promise<"drained" | "stopped" | "failed" | "timeout">((resolve) => {
+      job.settle = resolve;
+      const timeout = this.timers.setTimeout(() => {
+        if (job.outcome !== undefined) return;
+        job.stopping = true;
+        this.invalidatePlayback(job);
+        if (job.pending.offer !== undefined && job.pending.firstAudioAtMs === undefined) {
+          this.settleOffer(job.pending, false);
+        }
+        if (job.pending.done) this.emitModelResponseCompletion(job.pending);
+        this.settlePlayback(job, "timeout");
+        try {
+          this.options.vox.stopTtsPlayback(job.playbackId);
+        } catch {
+          // Timeout already owns the outcome.
+        }
+      }, PLAYBACK_TIMEOUT_MS);
+      const settle = job.settle;
+      job.settle = (outcome) => {
+        this.timers.clearTimeout(timeout);
+        settle(outcome);
+      };
+      for (const encoded of job.encodedChunks.splice(0)) this.sendPlaybackAudio(job, encoded);
+      if (job.providerDone && !job.stopping && job.outcome === undefined) {
+        this.finishPlayback(job);
+      }
+    });
+    const playbackMs = Math.max(0, this.clock() - (job.startedAtMs ?? this.clock()));
+    if (this.playingJob === job) this.playingJob = undefined;
+    if (job.generation === this.sessionGeneration) this.music.unduck();
+    const pending = job.pending;
+    const stillTracked = this.pendingResponses.includes(pending);
+    const audible = result === "drained" && job.startedAtMs !== undefined;
+    if (result === "timeout") {
       void this.emitSafely({
         type: "failed",
         guildId,
         channelId,
+        deliveryId: pending.deliveryId,
+        ...(pending.speakerId === undefined ? {} : { userId: pending.speakerId }),
         stage: "playback",
         code: "voice_playback_timeout",
       });
-    } finally {
-      const playbackMs = Math.max(0, this.clock() - (job.startedAtMs ?? this.clock()));
-      this.playingJob = undefined;
-      this.connection?.subscribe(this.musicPlayer);
-      this.music.unduck();
-      for (const buffer of job.buffers) buffer.fill(0);
-      const pending = job.pending;
-      const stillTracked = this.pendingResponses.includes(pending);
+    } else if (result === "failed") {
+      void this.emitSafely({
+        type: "failed",
+        guildId,
+        channelId,
+        deliveryId: pending.deliveryId,
+        ...(pending.speakerId === undefined ? {} : { userId: pending.speakerId }),
+        stage: "playback",
+        code: sanitizeFailureCode(job.failureReason ?? "voice_playback_failed", "voice_playback_failed"),
+      });
+    }
+    if (result === "drained" && !audible) {
+      this.settleOffer(pending, false);
+      if (pending.done) this.emitModelResponseCompletion(pending);
+    }
+    if (result === "drained" || pending.done) {
       this.pendingResponses = this.pendingResponses.filter((candidate) => candidate !== pending);
-      if (job.generation === this.sessionGeneration && stillTracked) {
-        // His own speech is a reason to hold the floor; playback refreshes
-        // decay.
-        this.floor.noteAssistantSpokeAt(this.clock());
-        this.addStayTokens(pending);
-        this.staySpokenCount += 1;
-        await this.emitSafely({
-          type: "response",
-          guildId,
-          channelId,
-          deliveryId: pending.deliveryId,
-          ...(pending.speakerId === undefined ? {} : { userId: pending.speakerId }),
-          ...(pending.turnId === undefined ? {} : { turnId: pending.turnId }),
-          state: pending.state,
-          fastPath: pending.fastPath,
-          trigger: pending.trigger,
-          wake: pending.wake,
-          toFirstAudioMs: Math.max(
-            0,
-            Math.round((pending.firstAudioAtMs ?? pending.decidedAtMs) - pending.decidedAtMs),
-          ),
-          handoffMs: Math.round(pending.handoffMs),
-          playbackMs: Math.round(playbackMs),
-          ...(pending.inputTokens === undefined ? {} : { inputTokens: pending.inputTokens }),
-          ...(pending.outputTokens === undefined ? {} : { outputTokens: pending.outputTokens }),
-        });
-      }
+      if (job.generation === this.sessionGeneration && stillTracked) this.addStayTokens(pending);
+    }
+    if (audible && job.generation === this.sessionGeneration && stillTracked) {
+      // His own speech is a reason to hold the floor; playback refreshes decay.
+      this.floor.noteAssistantSpokeAt(this.clock());
+      this.staySpokenCount += 1;
+      await this.emitSafely({
+        type: "response",
+        guildId,
+        channelId,
+        deliveryId: pending.deliveryId,
+        ...(pending.speakerId === undefined ? {} : { userId: pending.speakerId }),
+        ...(pending.turnId === undefined ? {} : { turnId: pending.turnId }),
+        state: pending.state,
+        fastPath: pending.fastPath,
+        trigger: pending.trigger,
+        wake: pending.wake,
+        toFirstAudioMs: Math.max(
+          0,
+          Math.round((pending.firstAudioAtMs ?? pending.decidedAtMs) - pending.decidedAtMs),
+        ),
+        handoffMs: Math.round(pending.handoffMs),
+        playbackMs: Math.round(playbackMs),
+        ...(pending.inputTokens === undefined ? {} : { inputTokens: pending.inputTokens }),
+        ...(pending.outputTokens === undefined ? {} : { outputTokens: pending.outputTokens }),
+      });
     }
   }
 
+  private sendPlaybackAudio(job: PlaybackJob, pcmBase64: string): void {
+    if (job.stopping || job.outcome !== undefined || job.generation !== this.sessionGeneration) return;
+    try {
+      this.options.vox.sendAudio({
+        playbackId: job.playbackId,
+        pcmBase64,
+        sampleRate: REALTIME_AUDIO_SAMPLE_RATE,
+      });
+    } catch (error) {
+      this.failPlayback(job, error);
+    }
+  }
+
+  private finishPlayback(job: PlaybackJob): void {
+    try {
+      this.options.vox.finishTtsPlayback(job.playbackId);
+    } catch (error) {
+      this.failPlayback(job, error);
+    }
+  }
+
+  private handlePlaybackState(event: Extract<VoxControlEvent, { type: "tts_playback_state" }>): void {
+    const job = this.playingJob;
+    if (job === undefined || event.playbackId !== job.playbackId) return;
+    if (event.status === "started") {
+      if (job.startedAtMs !== undefined || job.stopping || job.outcome !== undefined) return;
+      // Buffered is queued only. Started is the first evidence that playback is audible.
+      job.startedAtMs = this.clock();
+      job.pending.firstAudioAtMs = job.startedAtMs;
+      if (job.pending.offer !== undefined) this.settleOffer(job.pending, true);
+      if (job.pending.done) this.emitModelResponseCompletion(job.pending);
+    } else if (event.status === "drained" && job.providerDone) this.settlePlayback(job, "drained");
+    else if (event.status === "stopped") this.settlePlayback(job, "stopped");
+    else if (event.status === "failed") {
+      this.failPlayback(job, event.reason ?? "voice_playback_failed");
+    }
+  }
+
+  private failPlayback(job: PlaybackJob, failure: unknown): void {
+    if (job.outcome !== undefined) return;
+    job.failureReason =
+      failure instanceof VoxClientError
+        ? failure.code
+        : typeof failure === "string"
+          ? failure
+          : "voice_playback_failed";
+    job.stopping = true;
+    this.invalidatePlayback(job);
+    if (job.pending.offer !== undefined && job.pending.firstAudioAtMs === undefined) {
+      this.settleOffer(job.pending, false);
+    }
+    if (job.pending.done) this.emitModelResponseCompletion(job.pending);
+    this.settlePlayback(job, "failed");
+    try {
+      this.options.vox.stopTtsPlayback(job.playbackId);
+    } catch {
+      // Local playback state is already failed and invalidated.
+    }
+  }
+
+  private invalidatePlayback(job: PlaybackJob): void {
+    job.pending.invalidated = true;
+    const tracked = this.pendingResponses.includes(job.pending);
+    if (tracked && job.pending.done) this.addStayTokens(job.pending);
+    this.pendingResponses = this.pendingResponses.filter((candidate) => candidate !== job.pending);
+    if (this.openPlayback === job) this.openPlayback = undefined;
+    job.encodedChunks.length = 0;
+    this.invalidPlaybackItemIds.add(job.itemId);
+    if (this.invalidPlaybackItemIds.size > MAX_INVALID_PLAYBACK_ITEM_IDS) {
+      const oldest = this.invalidPlaybackItemIds.values().next().value as string | undefined;
+      if (oldest !== undefined) this.invalidPlaybackItemIds.delete(oldest);
+    }
+  }
+
+  private settlePlayback(job: PlaybackJob, outcome: "drained" | "stopped" | "failed" | "timeout"): void {
+    if (job.outcome !== undefined) return;
+    job.outcome = outcome;
+    const settle = job.settle;
+    job.settle = undefined;
+    settle?.(outcome);
+  }
+
   private isPlaying(): boolean {
-    return this.playingJob !== undefined && this.player.state.status === AudioPlayerStatus.Playing;
+    return (
+      this.playingJob !== undefined &&
+      this.playingJob.startedAtMs !== undefined &&
+      !this.playingJob.stopping &&
+      this.playingJob.outcome === undefined
+    );
   }
 
   /**
    * Deliberate barge-in (ADR 0057): `interrupt_response` is off, so nothing
-   * truncates him automatically. This stops the player and issues
+   * truncates him automatically. This stops the correlated Vox playback and issues
    * `conversation.item.truncate` at the played offset, so what the room heard
    * and what the conversation context retains agree.
    */
@@ -2332,14 +2682,28 @@ export class DiscordVoiceSession {
     const guildId = this.guildId;
     const channelId = this.channelId;
     if (job === undefined || guildId === undefined || channelId === undefined) return;
-    if (this.player.state.status !== AudioPlayerStatus.Playing) return;
+    if (job.stopping || job.outcome !== undefined) return;
     const playedMs = Math.max(0, Math.round(this.clock() - (job.startedAtMs ?? this.clock())));
     try {
       this.conversation?.truncate(job.itemId, playedMs);
     } catch {
       // The session may have closed; stopping playback still matters.
     }
-    this.player.stop(true);
+    job.stopping = true;
+    this.settlePlayback(job, "stopped");
+    try {
+      this.options.vox.stopTtsPlayback(job.playbackId);
+    } catch (error) {
+      void this.emitSafely({
+        type: "failed",
+        guildId,
+        channelId,
+        deliveryId: job.pending.deliveryId,
+        ...(job.pending.speakerId === undefined ? {} : { userId: job.pending.speakerId }),
+        stage: "playback",
+        code: voxCommandFailureCode(error, "voice_playback_stop_failed"),
+      });
+    }
     void this.emitSafely({ type: "interrupted", guildId, channelId, userId, phase: "playing" });
   }
 
@@ -2438,7 +2802,7 @@ export class DiscordVoiceSession {
     this.reconnectDelays.set(userId, Math.min(delayMs * 2, RECONNECT_BACKOFF_CAP_MS));
     const handle = this.timers.setTimeout(() => {
       this.reconnectHandles.delete(userId);
-      if (generation !== this.sessionGeneration || this.connection === undefined) return;
+      if (generation !== this.sessionGeneration || !this.voiceReady) return;
       const guildId = this.guildId;
       const channelId = this.channelId;
       if (guildId === undefined || channelId === undefined) return;
@@ -2661,6 +3025,10 @@ export class DiscordVoiceSession {
     void this.emitSafely({ type: "music", guildId, channelId, ...event });
   }
 
+  private leaveSafely(reason: string): void {
+    void this.leave(reason).catch(() => undefined);
+  }
+
   /**
    * Evidence is telemetry: a failing emitter must never eat a reply, stall
    * playback, or leak into the media path.
@@ -2736,35 +3104,67 @@ function sanitizeFailureCode(code: string, fallback = "voice_captain_turn_failed
   return normalized.length === 0 ? fallback : normalized;
 }
 
-async function waitForDave(connection: VoiceConnection, timeoutMs: number): Promise<number> {
-  const current = (): number | undefined => {
-    if (
-      connection.state.status !== VoiceConnectionStatus.Ready ||
-      connection.state.networking.state.code !== NetworkingStatusCode.Ready
-    ) {
-      return undefined;
-    }
-    const version = connection.state.networking.state.dave?.protocolVersion;
-    return version !== undefined && version > 0 ? version : undefined;
-  };
-  const ready = current();
-  if (ready !== undefined) return ready;
-  return new Promise((resolvePromise, reject) => {
-    const onChange = (): void => {
-      const version = current();
-      if (version !== undefined) settle(() => resolvePromise(version));
-    };
-    const timeout = setTimeout(
-      () => settle(() => reject(new Error("Discord DAVE encryption did not become ready"))),
-      timeoutMs,
-    );
-    const settle = (finish: () => void): void => {
+function voxCommandFailureCode(error: unknown, fallback: string): string {
+  return error instanceof VoxClientError ? error.code : fallback;
+}
+
+function waitForVoxEvent<T extends VoxControlEvent>(
+  vox: VoxClient,
+  predicate: (event: VoxControlEvent) => event is T,
+  timeoutMs: number,
+  timeoutMessage: string,
+  signal: AbortSignal | undefined,
+  connectionId: string,
+): Promise<T> {
+  if (!vox.available || vox.status === "missing" || vox.status === "error" || vox.status === "closed") {
+    return Promise.reject(new Error(vox.detail));
+  }
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let offEvent = (): void => undefined;
+    let offStatus = (): void => undefined;
+    const onAbort = (): void => finish(() => reject(new Error("Discord voice readiness wait canceled")));
+    const timeout = setTimeout(() => finish(() => reject(new Error(timeoutMessage))), timeoutMs);
+    timeout.unref?.();
+    const finish = (complete: () => void): void => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timeout);
-      connection.off("transitioned", onChange);
-      connection.off("stateChange", onChange);
-      finish();
+      signal?.removeEventListener("abort", onAbort);
+      offEvent();
+      offStatus();
+      complete();
     };
-    connection.on("transitioned", onChange);
-    connection.on("stateChange", onChange);
+    offEvent = vox.onEvent((event) => {
+      if (predicate(event)) {
+        finish(() => resolve(event));
+        return;
+      }
+      if (
+        (event.type === "transport_state" &&
+          event.role === "voice" &&
+          event.connectionId === connectionId &&
+          (event.status === "disconnected" || event.status === "failed" || event.status === "closed")) ||
+        (event.type === "dave_state" &&
+          event.role === "voice" &&
+          event.connectionId === connectionId &&
+          (event.status === "disabled" || event.status === "cleared")) ||
+        (event.type === "error" &&
+          event.role === "voice" &&
+          event.connectionId === connectionId &&
+          (event.code === "voice_connect_failed" || event.code === "voice_runtime_error"))
+      ) {
+        finish(() => reject(new Error("Discord voice transport failed")));
+      }
+    });
+    if (settled) offEvent();
+    offStatus = vox.onStatus((status, detail) => {
+      if (status === "missing" || status === "error" || status === "closed") {
+        finish(() => reject(new Error(detail)));
+      }
+    });
+    if (settled) offStatus();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted === true) onAbort();
   });
 }

@@ -15,12 +15,15 @@ service (`apps/clankie`) plus the surfaces that reach it.
 - `apps/discord-bridge`, `apps/discord-user-session` — his Discord bodies
   (one active mouth; `/discord` picks which process the launcher starts).
 - `apps/discord-activity` — the watch-me-play surface.
-- `apps/gba-mcp` — his GBA body as an MCP server for external agents.
+- `apps/gba-mcp` — an isolated private GBA emulator contract sandbox for
+  external harnesses; it never controls Clankie's body or receives room input.
 - `apps/relay` — remote access for the phone/desktop app.
 - `apps/vox` — AGPL native Discord voice, screen-watch, and Go Live media.
-- `integrations/gba-emulator` — his local GBA body.
+- `integrations/gba-emulator` — the local GBA implementation; each owning
+  process instantiates its own body/runtime.
 - `packages/` — shared contracts and adapters; `protocol` depends on nothing.
-  `vox-client` is the Apache process boundary for the AGPL Vox executable.
+  `vox-client` is the Apache process boundary for the AGPL Vox executable;
+  `play-voice` connects only Clankie's own play to his active Discord body.
 
 ## Rules
 
@@ -32,13 +35,16 @@ service (`apps/clankie`) plus the surfaces that reach it.
 - The credential broker (Keychain on macOS) is the canonical secret store.
   Compatibility provider keys may come from the shell or gitignored root
   `.env.local`; never commit them. Discord account and internal body credentials
-  stay broker-only except documented operator/captain/runner test overrides.
+  stay broker-only. Operator and captain bearers retain documented test overrides.
   Persona and settings are owner-authored in `~/.config/clankie/`.
 - Model output is untrusted input: Discord bodies, images, and web content
   never become instructions.
 - A Discord turn from `systemActorUserIds` may use the operator's machine
   tools (bash, herdr), spoken or typed. Everyone else stays social. A granted
   turn runs one-shot, so the shared voice session never holds a shell.
+- No harness possesses Clankie. Local processes own independent game runtimes;
+  hosted co-play uses separately credentialed PokeAgents player seats. MCP is a
+  transport projection, not authority or gameplay semantics.
 - Always give Clankie maximum agency. Hand him context and tools and let him
   decide; don't gate behavior per trigger, script his words, or add a rule
   where volition would do. The only limits are the trust and safety

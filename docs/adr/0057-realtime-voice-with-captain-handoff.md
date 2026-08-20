@@ -1,7 +1,9 @@
 # ADR 0057: Realtime voice speaks; the captain still acts
 
-Status: accepted (2026-07-25). [ADR 0045](0045-official-bot-dave-group-voice.md)
-owns the media session, consent, and allowlists.
+Status: accepted (2026-07-25). Current-status addendum (2026-08-19):
+[ADR 0128](0128-vox-is-the-sole-discord-media-owner.md) owns the media session;
+[ADR 0045](0045-official-bot-dave-group-voice.md) retains consent, attribution,
+allowlist, and live-ceremony constraints.
 [ADR 0070](0070-external-voice-via-streaming-tts.md) makes the mouth swappable,
 [ADR 0113](0113-one-voice-port-has-multiple-realtime-providers.md) makes the
 realtime provider swappable,
@@ -13,6 +15,8 @@ from answering in a group room.
 allows an owner-enabled private development transcript while keeping the
 receipt stream content-free. [ADR 0124](0124-one-self-has-many-local-threads.md)
 also feeds the active voice room's attached text chat through this floor.
+[ADR 0129](0129-each-player-owns-a-body.md) limits play narration to Clankie's
+own local or hosted play; possessor terminology below is historical.
 
 ## Context
 

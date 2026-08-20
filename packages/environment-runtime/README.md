@@ -1,13 +1,22 @@
 # @clankie/environment-runtime
 
 Service-owned lifecycle and lease enforcement for durable interactive
-environments. Adapters implement provider-neutral start, attach, heartbeat,
-pause, resume, action, cancellation, and stop operations using strict
-provider-profiled contracts from `@clankie/interactive-environment`.
+environments. Adapters implement start, attach, pause, resume, action,
+cancellation, and stop operations. Start actions use the concrete GBA command
+contract from `@clankie/interactive-environment`; persisted legacy session
+profiles remain readable through the historical normalization seam.
 
-![Environment runtime command and event boundaries](../../docs/diagrams/environment-runtime.jpg)
+The older
+[environment-runtime JPG](../../docs/diagrams/environment-runtime.jpg) is a
+historical snapshot. The current ownership boundary is:
 
-[Editable Turbopuffer tldraw source](../../docs/diagrams/clankie-docs-diagrams-2.tldraw)
+```mermaid
+flowchart LR
+  Host[one owning host process] --> Runtime[EnvironmentRuntime]
+  Runtime --> Lease[internal session + capability lease]
+  Lease --> Adapter[process-owned environment adapter]
+  Adapter --> Result[action result + bounded events]
+```
 
 Exactly one unexpired writer lease may own a character/world pair. Capability
 tokens and connection credentials stay in host memory; durable records hold
@@ -18,6 +27,10 @@ repeated command or restart
 returns the recorded result instead of repeating an external side effect.
 One live host process owns each state directory; a replacement takes ownership
 through restart reconciliation rather than concurrent file access.
+
+The lease is an internal action, expiry, and recovery fence. It does not let a
+different process attach to, steal, suspend, or impersonate the owning process's
+environment ([ADR 0129](../../docs/adr/0129-each-player-owns-a-body.md)).
 
 Lease expiry, revocation, pause, timeout, explicit cancellation, and emergency
 stop invalidate pending motor work immediately. Emergency stop is a direct

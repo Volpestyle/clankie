@@ -30,7 +30,6 @@ pub(super) struct ReadyPayload {
     pub(super) modes: Vec<String>,
     #[serde(default)]
     pub(super) experiments: Vec<String>,
-    #[serde(default)]
     pub(super) video_ssrc: Option<u32>,
     #[serde(default)]
     pub(super) streams: Vec<RemoteVideoStreamPayload>,
@@ -45,11 +44,8 @@ pub(super) struct SessionDescriptionPayload {
     pub(super) secret_key: Zeroizing<Vec<u8>>,
     #[serde(default)]
     pub(super) dave_protocol_version: u16,
-    #[serde(default)]
     pub(super) video_codec: Option<String>,
-    #[serde(default)]
     pub(super) audio_codec: Option<String>,
-    #[serde(default)]
     pub(super) media_session_id: Option<String>,
 }
 
@@ -101,13 +97,9 @@ pub(super) struct EpochPayload {
 
 #[derive(Debug, Deserialize, Clone)]
 pub(super) struct SessionUpdatePayload {
-    #[serde(default)]
     pub(super) video_codec: Option<String>,
-    #[serde(default)]
     pub(super) audio_codec: Option<String>,
-    #[serde(default)]
     pub(super) media_session_id: Option<String>,
-    #[serde(default)]
     pub(super) keyframe_interval: Option<u32>,
 }
 
@@ -253,5 +245,17 @@ mod tests {
         let parsed: VoiceOpcode<HelloPayload> = parse_voice_opcode(text).expect("hello payload");
         assert_eq!(parsed.op, 8);
         assert_eq!(parsed.d.heartbeat_interval, Some(2500.0));
+    }
+
+    #[test]
+    fn optional_session_description_fields_may_be_absent() {
+        let parsed: VoiceOpcode<SessionDescriptionPayload> =
+            parse_voice_opcode(r#"{"op":4,"d":{"secret_key":[1,2,3,4]}}"#)
+                .expect("session description");
+
+        assert_eq!(parsed.d.dave_protocol_version, 0);
+        assert_eq!(parsed.d.video_codec, None);
+        assert_eq!(parsed.d.audio_codec, None);
+        assert_eq!(parsed.d.media_session_id, None);
     }
 }

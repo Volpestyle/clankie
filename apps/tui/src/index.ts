@@ -242,7 +242,6 @@ const shell = new ClankieFaceShell({
       await reportHerdrAgent("idle", { source: "clankie", agent: "clankie" });
     }
   },
-  interruptMode: "detach",
   onExit: async () => {
     presence.stop();
     herdrRoster.stop();

@@ -16,9 +16,9 @@ import { FrozenGbaScenarioSchema } from "../src/contracts.ts";
 import { RealGbaRouteScenarioSchema } from "../src/real-scenario.ts";
 import { MgbaFireRedCore } from "../src/firered-core.ts";
 import { encodeFramebufferPng } from "../src/framebuffer-png.ts";
-import type { GbaCoreFactory } from "../src/core-seam.ts";
+import type { GbaAdapterScenario, GbaCoreFactory } from "../src/core-seam.ts";
 import { sha256 } from "../src/core-double.ts";
-import { defaultGbaBodyRootDir } from "../src/free-play-boot.ts";
+import { defaultGbaRuntimeRootDir } from "../src/free-play-boot.ts";
 import { createModelFreePlayMind, createModelVoice } from "../src/free-play-mind.ts";
 import { SettingsStore, personaInstructions } from "@clankie/settings";
 import { InterjectionQueue, runFreePlay, type FreePlayTurn } from "../src/free-play.ts";
@@ -63,14 +63,13 @@ const scenarioPath =
   );
 const fixtureBytes = readFileSync(scenarioPath);
 const parsedScenario: unknown = JSON.parse(fixtureBytes.toString("utf8"));
-const scenario = real
-  ? RealGbaRouteScenarioSchema.parse(parsedScenario)
-  : FrozenGbaScenarioSchema.parse(parsedScenario);
 
+let scenario: GbaAdapterScenario;
 let coreFactory: GbaCoreFactory | undefined;
 let liveCore: MgbaFireRedCore | undefined;
 if (real) {
   const routeScenario = RealGbaRouteScenarioSchema.parse(parsedScenario);
+  scenario = routeScenario;
   // Fails closed unless the ROM, savestate, and core wasm match the pinned
   // digests, so a wrong dump cannot silently produce a plausible playthrough.
   const core = await MgbaFireRedCore.create({
@@ -84,11 +83,12 @@ if (real) {
   });
   coreFactory = () => core;
   liveCore = core;
+} else {
+  scenario = FrozenGbaScenarioSchema.parse(parsedScenario);
 }
 
-const { io, close: releaseBody } = await createFreePlaySession({
-  rootDir: defaultGbaBodyRootDir(),
-  holderId: "free-play-cli",
+const { io, close: closeSession } = await createFreePlaySession({
+  rootDir: defaultGbaRuntimeRootDir(),
   scenario,
   fixtureSha256: sha256(fixtureBytes),
   ...(coreFactory === undefined ? {} : { coreFactory }),
@@ -220,7 +220,7 @@ function print(turn: FreePlayTurn): void {
                       ? `load ${turn.action.checkpointId ?? "(list)"}`
                       : turn.action.kind === "restart_game"
                         ? "restart game"
-                        : `wait ${String(turn.action.durationMs)}ms`;
+                        : "unknown action";
   const marker = turn.outcome === "accepted" ? "→" : "✗";
   const detail = turn.outcome === "accepted" ? "" : `  [${turn.outcome}: ${turn.detail ?? ""}]`;
   console.log(`          ${marker} ${action}${detail}`);
@@ -231,4 +231,4 @@ function print(turn: FreePlayTurn): void {
   if (turn.intent !== null) console.log(`          next: ${turn.intent}\n`);
 }
 
-releaseBody();
+await closeSession();

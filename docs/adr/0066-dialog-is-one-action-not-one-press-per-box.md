@@ -6,6 +6,13 @@ Status: accepted (2026-07-26). Extends the catalogued-composite-action pattern
 [ADR 0053](0053-mcp-possession-of-clankies-body.md) and
 [ADR 0049](0049-free-play-agency-and-non-deterministic-evidence.md) already set.
 
+## Current status (2026-08-19)
+
+`advance_dialog` remains a shared catalogued emulator action. The possessor and
+shared-body examples below are historical under
+[ADR 0129](0129-each-player-owns-a-body.md); Clankie's runtime and each private
+GBA MCP runtime enforce the same action schema independently.
+
 ## Context
 
 Pokémon is a game made largely of talking. FireRed prints text one box at a

@@ -102,7 +102,7 @@ export const FreePlayJournalTurnV1Schema = z
     at: z.string().datetime(),
     turn: FreePlayTurnSchema,
     /**
-     * Join key for the possessor-voice delivery of this turn's room report.
+     * Join key for the play-voice delivery of this turn's room report.
      * Absent when the turn was not worth reporting. Same id as the voice
      * submission / response / suppressed receipts.
      */
@@ -186,7 +186,7 @@ export const FreePlayJournalLineSchema = z.union([
 ]);
 export type FreePlayJournalLine = z.infer<typeof FreePlayJournalLineSchema>;
 
-/** Mirrors `defaultGbaBodyRootDir`: one well-known operator-local home. */
+/** One well-known operator-local home. */
 export function defaultGbaPlayJournalDir(env: NodeJS.ProcessEnv = process.env): string {
   const override = env["CLANKIE_GBA_PLAY_JOURNAL_DIR"];
   if (override !== undefined && override.length > 0) {

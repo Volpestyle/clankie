@@ -195,12 +195,7 @@ async function harness(core?: ScriptedDialogCore) {
       maxInputsPerAction: 8,
       maxFramesPerAction: 600,
       maxActionDurationMs: 5_000,
-      capabilities: [
-        "emulator.gba.observe",
-        "emulator.gba.input",
-        "emulator.gba.frame_advance",
-        "emulator.gba.wait",
-      ],
+      capabilities: ["emulator.gba.observe", "emulator.gba.input", "emulator.gba.frame_advance"],
     },
   });
   const grant = await runtime.start({

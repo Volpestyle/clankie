@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { parseArgs } from "node:util";
 import {
   buildFreePlayCompetenceOperatorReceipt,
   FreePlayCompetenceOperatorReceiptSchema,
@@ -12,7 +13,11 @@ import { createRomCompetenceCoreLoader } from "./free-play-competence-rom.ts";
 
 type Mode = "deterministic_double" | "rom_gated" | "all";
 
-const mode = parseMode(argument("--mode") ?? process.env["CLANKIE_GBA_COMPETENCE_MODE"]);
+const { values } = parseArgs({
+  args: process.argv.slice(2).filter((argument) => argument !== "--"),
+  options: { mode: { type: "string" } },
+});
+const mode = parseMode(values.mode ?? process.env["CLANKIE_GBA_COMPETENCE_MODE"]);
 const benchmarkPath = path.resolve(import.meta.dirname, "../fixtures/free-play/competence-benchmark-v1.json");
 const receiptDir = process.env["CLANKIE_GBA_COMPETENCE_RECEIPT_DIR"]?.trim();
 if ((mode === "rom_gated" || mode === "all") && !receiptDir) {
@@ -61,11 +66,6 @@ const output = {
 };
 process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
 if (!output.passed) process.exitCode = 1;
-
-function argument(name: string): string | undefined {
-  const index = process.argv.indexOf(name);
-  return index < 0 ? undefined : process.argv[index + 1];
-}
 
 function parseMode(raw: string | undefined): Mode {
   if (raw === undefined || raw.length === 0) return "deterministic_double";

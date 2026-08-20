@@ -22,7 +22,7 @@ describe("/persona", () => {
         return current;
       },
     } as unknown as SettingsStore;
-    const selections = [["character"], ["names"], ["done"]];
+    const selections = ["character", "names", "done"];
     const prompts: Parameters<SetupFlow["readText"]>[0][] = [];
     const flow = {
       begin: () => undefined,
@@ -55,7 +55,7 @@ describe("/persona", () => {
         return current;
       },
     } as unknown as SettingsStore;
-    const selections = [["names"], ["done"]];
+    const selections = ["names", "done"];
     const responses: Array<string | undefined> = ["Clankie Jr", undefined, "Clankie Jr", "Clanky"];
     const messages: string[] = [];
     const defaults: Array<string | undefined> = [];

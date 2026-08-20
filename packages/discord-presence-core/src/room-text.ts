@@ -2,7 +2,7 @@
  * Admission shared by every live consumer of a Discord room's text.
  *
  * The guild allowlist is the boundary; the optional channel list only narrows
- * it. A voice room and a possessor therefore hear exactly the guild text the
+ * it. A voice room and active play therefore hear exactly the guild text the
  * ordinary text ingress already admits, without acquiring a second policy.
  */
 export interface DiscordRoomTextGate {
@@ -40,13 +40,13 @@ export interface DiscordRoomTextVoiceSink {
 }
 
 export interface DiscordRoomTextRoute {
-  /** The admitted line, also delivered once to a live game possessor. */
+  /** The admitted line, also delivered once to live play. */
   readonly text: string | null;
   /** True means voice owns the response and ordinary text ingress must not run. */
   readonly voiceOwned: boolean;
 }
 
-/** Discord's ordinary message bound, also the possessor seam's utterance bound. */
+/** Discord's ordinary message bound, also the play seam's utterance bound. */
 export const DISCORD_ROOM_TEXT_MAX_CHARS = 2_000;
 
 /** The admitted bounded line, or null when this is not a human guild-room message. */

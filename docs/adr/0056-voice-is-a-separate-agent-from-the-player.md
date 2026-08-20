@@ -6,6 +6,13 @@ alongside [ADR 0049](0049-free-play-agency-and-non-deterministic-evidence.md). I
 activity overlay and the journal, and is not consulted while a voice room is
 listening — there the realtime session is the sole author.
 
+## Current status (2026-08-19)
+
+The player/voice split remains inside Clankie's play loop. Per
+[ADR 0129](0129-each-player-owns-a-body.md), external harnesses have independent
+bodies and no access to Clankie's voice or room-input seam. The comparison to
+possession below records the rationale at ratification only.
+
 ## Context
 
 The single-call player returns an action, a monologue, and an optional `speak`.

@@ -6,11 +6,12 @@ import { CatalogSchema } from "@clankie/model-registry";
 import { generateText } from "ai";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  CODEX_API_ENDPOINT,
   ConfiguredModelError,
   resolveConfiguredLanguageModel,
   withCodexSubscriptionProvider,
 } from "../src/index.ts";
+
+const CODEX_API_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
 
 const tempDirs: string[] = [];
 

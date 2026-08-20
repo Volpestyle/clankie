@@ -26,9 +26,9 @@ re-implementing against GraphQL the surface the token was minted for. Every
 Linear capability he did not have was a function somebody had to write.
 
 The cost is not only Linear. A second connector meant a second port, a second
-tool bank, a second refusal vocabulary, and a second wizard branch — and the
-`browser-host.ts` stdio JSON-RPC client sitting one file over, hardcoded to one
-server, was proof the machinery already existed and could not be reused.
+tool bank, a second refusal vocabulary, and a second wizard branch. The browser
+host proves the service-owned MCP process boundary; both hosts use
+the SDK transport while keeping their different projections above it.
 
 Options weighed:
 
@@ -115,9 +115,9 @@ so an owner's existing file still opens.
   follow their server's naming. Nothing outside his own instructions referenced
   the old names.
 - A connector that speaks MCP now costs a settings entry instead of a file.
-- `browser-host.ts` keeps its own hand-rolled client. It is a _specialized_
-  host — artifact extraction, a blocklist, a protocol-typed catalog — and
-  folding it in would be churn against working code for no capability gained.
+- `browser-host.ts` remains a _specialized_ host — artifact extraction, a
+  blocklist, and a protocol-typed catalog — over the same SDK client and stdio
+  transport rather than a second JSON-RPC implementation.
 - Adding an MCP server is still an owner action with a real blast radius. The
   closed-by-default lane is what keeps a careless entry from becoming a
   capability every Discord room holds.

@@ -149,8 +149,9 @@ export function captainTools(
         "Not for songs or YouTube — those are youtube_search / music_play. Not a hosted world with other players — " +
         "that is pokeagent_join_mmo. The session resumes from your latest " +
         "checkpoint and keeps going until someone asks you to stop; people can watch. 'started' means you are " +
-        "playing; 'start_refused' names a reason you can say out loud (body_held means someone else is already " +
-        "driving your body); 'pending' means it is still spinning up — say so, never claim to be playing yet.",
+        "playing; 'start_refused' names a reason you can say out loud (play_session_active means another local or hosted " +
+        "play session is active or winding down); 'pending' means it is still spinning up — say so, never claim " +
+        "to be playing yet.",
       parameters: Type.Object({
         environmentId: StringEnum(["pokemon-firered", "pokemon-emerald"], {
           default: "pokemon-firered",
@@ -172,7 +173,8 @@ export function captainTools(
         "Join the hosted PokeAgent MMO where other Pokemon players already exist, live on the activity watch surface. " +
         "Not your own private cartridge — that is pokeagent_start_solo. You land in a session someone else is hosting; " +
         "you can see who else is here. 'joined' means you are in the world; 'join_refused' names a reason you " +
-        "can say out loud (no_credential means nobody provisioned you a seat, world_unreachable means the host " +
+        "can say out loud (play_session_active means another local or hosted play session is active or winding down, " +
+        "no_credential means nobody provisioned you a seat, world_unreachable means the host " +
         "is down, world_full means there is no room, region_not_hosted means that game is not up, world_refused " +
         "means the world said no); 'pending' means it is still spinning up — say so, never claim to be playing yet.",
       parameters: Type.Object({
@@ -361,16 +363,15 @@ export function captainTools(
       name: "get_self_state",
       label: "Check on yourself",
       description:
-        "A present-tense card of what you are doing right now: live play session, Discord presence, who holds " +
-        "your body, closed voice stays, and recent voice speech scalars (spoken vs suppressed — never words). " +
+        "A present-tense card of what you are doing right now: live play session, Discord presence, closed " +
+        "voice stays, and recent voice speech scalars (spoken vs suppressed — never words). " +
         "Read it before answering questions about yourself. voiceHistory is closed stays only and is empty " +
         "while you are still in the channel; recentVoiceSpeech.currentStay is whether you have been talking.",
       parameters: Type.Object({}),
       execute: async () => {
-        const [live, sessions, possession, voiceHistory, voiceSpeech, renders, shares] = await Promise.all([
+        const [live, sessions, voiceHistory, voiceSpeech, renders, shares] = await Promise.all([
           deps.embodiment.getLiveSession(),
           deps.presence.listSessions(),
-          deps.embodiment.getPossession(),
           deps.presence.listVoiceHistory(5),
           deps.presence.listRecentVoiceSpeech(12),
           // Only this room's renders: what he was asked to make elsewhere is
@@ -381,7 +382,6 @@ export function captainTools(
         return json({
           liveSession: live,
           presenceSessions: sessions,
-          bodyPossession: possession,
           voiceHistory,
           recentVoiceSpeech: voiceSpeech,
           finishedRenders: renders,

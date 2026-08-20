@@ -41,7 +41,7 @@ import {
   type GbaEmulatorObservation,
   type GbaEmulatorObservationKind,
 } from "@clankie/interactive-environment";
-import type { EmbodimentEnvironmentId } from "@clankie/protocol";
+import type { EmbodimentEnvironmentId, WorldJoinRefusalReason } from "@clankie/protocol";
 import {
   ActionSchema,
   ActResultSchema,
@@ -50,17 +50,13 @@ import {
   LeaveResultSchema,
   ObservationSchema,
   RefusalSchema,
-  SessionStatusSchema,
   WatchResultSchema,
-  WhoResultSchema,
   WORLD_PROTOCOL_VERSION,
   type Action,
   type ActionRefusal,
   type Frame,
   type JoinResult,
   type Observation,
-  type SessionStatus,
-  type WhoResult,
 } from "@pokeagents/world-protocol";
 import { callHost, defaultWorldStateDir, worldSocketPath } from "@pokeagents/world-protocol/ipc";
 import { z } from "zod";
@@ -92,28 +88,18 @@ export interface WorldBody {
   readonly droppedAudioPacketCount: () => number;
   /** Causal identity sampled beside decision/pre-action/post-action state. */
   readonly traceProvenance: () => FreePlayProvenance;
-  readonly session: () => Promise<SessionStatus>;
-  /** Who else is here — the answer he voices, and the reason this exists. */
-  readonly who: () => Promise<WhoResult>;
   /** Leaves the world and releases the body. Always call it. */
   readonly close: () => Promise<void>;
 }
 
 /**
- * Why a join did not happen, in the vocabulary he says out loud. Distinct from
- * `pokeagent_start_solo`'s refusals on purpose: `body_held` is about his own machine,
- * these are all about a world somewhere else.
+ * Why a hosted join did not happen, in the vocabulary he says out loud. The
+ * shared play host may refuse `play_session_active` before this body is opened;
+ * this module produces the world-specific reasons.
  */
-export type WorldJoinRefusal =
-  | "no_credential"
-  | "world_unreachable"
-  | "world_refused"
-  | "region_not_hosted"
-  | "world_full";
-
 export type WorldJoinResult =
   | { outcome: "joined"; body: WorldBody }
-  | { outcome: "refused"; reason: WorldJoinRefusal; detail?: string };
+  | { outcome: "refused"; reason: WorldJoinRefusalReason; detail?: string };
 
 export interface WorldJoinOptions {
   environmentId: EmbodimentEnvironmentId;
@@ -239,7 +225,7 @@ export async function joinWorld(options: WorldJoinOptions): Promise<WorldJoinRes
   };
 }
 
-const REQUIRED_CAPABILITIES = ["world.observe", "world.act", "world.frames", "world.presence"] as const;
+const REQUIRED_CAPABILITIES = ["world.observe", "world.act", "world.frames"] as const;
 const HARDWARE_TICK_MS = Math.round(1_000 / 59.7275);
 const AUDIO_POLL_MS = 80;
 const AUDIO_QUEUE_MAX = 64;
@@ -436,33 +422,6 @@ class HostedWorldBody implements WorldBody {
     bodyGeneration: this.bodyGeneration,
     ...(this.observation === undefined ? {} : { adapterVersion: this.observation.adapterVersion }),
   });
-
-  public readonly session = async (): Promise<SessionStatus> => {
-    const outcome = await callHost(this.socketPath, {
-      operation: "world.session",
-      token: this.joined.token,
-    });
-    const parsed = SessionStatusSchema.safeParse(outcome);
-    if (!parsed.success || parsed.data.sessionId !== this.joined.sessionId) {
-      throw new Error(refusalDetail(outcome, "The world returned an invalid session status"));
-    }
-    if (parsed.data.bodyGeneration > this.bodyGeneration) {
-      this.resetGeneration(parsed.data.bodyGeneration);
-    }
-    return parsed.data;
-  };
-
-  public readonly who = async (): Promise<WhoResult> => {
-    const outcome = await callHost(this.socketPath, {
-      operation: "world.who",
-      token: this.joined.token,
-    });
-    const parsed = WhoResultSchema.safeParse(outcome);
-    if (!parsed.success || parsed.data.worldId !== this.joined.worldId) {
-      throw new Error(refusalDetail(outcome, "The world returned invalid presence"));
-    }
-    return parsed.data;
-  };
 
   public readonly close = (): Promise<void> => {
     if (this.closePromise !== undefined) return this.closePromise;

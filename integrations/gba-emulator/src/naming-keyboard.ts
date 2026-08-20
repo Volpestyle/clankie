@@ -79,11 +79,6 @@ export function findNamingKey(character: string, currentPage: NamingPage): Namin
   return null;
 }
 
-/** SELECT presses from one page to another, along the verified cycle. */
-export function pageDistance(from: NamingPage, to: NamingPage): number {
-  return (PAGE_CYCLE.indexOf(to) - PAGE_CYCLE.indexOf(from) + PAGE_CYCLE.length) % PAGE_CYCLE.length;
-}
-
 /**
  * The next d-pad press toward a key, or null when the cursor is on it.
  *

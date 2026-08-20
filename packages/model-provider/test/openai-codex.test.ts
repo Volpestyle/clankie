@@ -5,18 +5,15 @@ import { join } from "node:path";
 import { FileCredentialStore, type ProviderCredential } from "@clankie/credential-broker";
 import { describe, expect, it } from "vitest";
 import {
-  buildCodexAuthorizeUrl,
-  CODEX_API_ENDPOINT,
-  CODEX_CLIENT_ID,
-  CODEX_ISSUER,
   CODEX_PROVIDER_ID,
   createCodexFetch,
-  extractCodexAccountId,
-  generateCodexPkce,
-  refreshCodexToken,
   runCodexBrowserLogin,
   runCodexDeviceLogin,
 } from "../src/oauth/openai-codex.ts";
+
+const API_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
+const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
+const ISSUER = "https://auth.openai.com";
 
 function base64UrlJson(value: unknown): string {
   return Buffer.from(JSON.stringify(value)).toString("base64url");
@@ -98,82 +95,18 @@ function expectOauth(
   return credential;
 }
 
-describe("generateCodexPkce", () => {
-  it("derives the challenge as BASE64URL(SHA256(verifier)) over a sane verifier", () => {
-    const { verifier, challenge } = generateCodexPkce();
-    expect(verifier).toMatch(/^[A-Za-z0-9\-._~]{43}$/);
-    expect(challenge).toBe(createHash("sha256").update(verifier).digest("base64url"));
-    expect(challenge).not.toMatch(/[+/=]/);
-    expect(generateCodexPkce().verifier).not.toBe(verifier);
-  });
-});
-
-describe("buildCodexAuthorizeUrl", () => {
-  it("includes every parameter opencode sends", () => {
-    const raw = buildCodexAuthorizeUrl({
-      challenge: "test-challenge",
-      state: "test-state",
-      redirectUri: "http://localhost:1455/auth/callback",
-    });
-    const url = new URL(raw);
-    expect(`${url.origin}${url.pathname}`).toBe(`${CODEX_ISSUER}/oauth/authorize`);
-    expect(url.searchParams.get("response_type")).toBe("code");
-    expect(url.searchParams.get("client_id")).toBe(CODEX_CLIENT_ID);
-    expect(url.searchParams.get("redirect_uri")).toBe("http://localhost:1455/auth/callback");
-    expect(url.searchParams.get("scope")).toBe("openid profile email offline_access");
-    expect(url.searchParams.get("code_challenge")).toBe("test-challenge");
-    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
-    expect(url.searchParams.get("id_token_add_organizations")).toBe("true");
-    expect(url.searchParams.get("codex_cli_simplified_flow")).toBe("true");
-    expect(url.searchParams.get("state")).toBe("test-state");
-    expect(url.searchParams.get("originator")).toBe("opencode");
-  });
-});
-
-describe("extractCodexAccountId", () => {
-  it("reads the chatgpt account id claim path with opencode's precedence", () => {
-    expect(
-      extractCodexAccountId(
-        fakeJwt({ "https://api.openai.com/auth": { chatgpt_account_id: "acct_nested" } }),
-      ),
-    ).toBe("acct_nested");
-    expect(extractCodexAccountId(fakeJwt({ chatgpt_account_id: "acct_direct" }))).toBe("acct_direct");
-    expect(extractCodexAccountId(fakeJwt({ organizations: [{ id: "org_fallback" }] }))).toBe("org_fallback");
-    expect(
-      extractCodexAccountId(
-        fakeJwt({
-          chatgpt_account_id: "acct_direct",
-          "https://api.openai.com/auth": { chatgpt_account_id: "acct_nested" },
-          organizations: [{ id: "org_fallback" }],
-        }),
-      ),
-    ).toBe("acct_direct");
-  });
-
-  it("returns undefined for garbage or claimless tokens", () => {
-    expect(extractCodexAccountId("garbage")).toBeUndefined();
-    expect(extractCodexAccountId("")).toBeUndefined();
-    expect(extractCodexAccountId("a.b.c")).toBeUndefined();
-    expect(
-      extractCodexAccountId(`${base64UrlJson({})}.${Buffer.from("not json").toString("base64url")}.sig`),
-    ).toBeUndefined();
-    expect(extractCodexAccountId(fakeJwt({}))).toBeUndefined();
-    expect(extractCodexAccountId(fakeJwt({ organizations: [] }))).toBeUndefined();
-  });
-});
-
 describe("runCodexDeviceLogin", () => {
   it("polls through pending and slow_down (growing the interval) to a credential", async () => {
     const pollIntervalMs = 40;
     const codes: Array<{ code: string; url: string }> = [];
     const { fetchImpl, calls } = recordingFetch((request, index) => {
       if (index === 0) {
-        expect(request.url).toBe(`${CODEX_ISSUER}/api/accounts/deviceauth/usercode`);
-        expect(JSON.parse(request.body)).toEqual({ client_id: CODEX_CLIENT_ID });
+        expect(request.url).toBe(`${ISSUER}/api/accounts/deviceauth/usercode`);
+        expect(JSON.parse(request.body)).toEqual({ client_id: CLIENT_ID });
         return jsonResponse({ device_auth_id: "device-1", user_code: "ABCD-1234", interval: "1" });
       }
       if (index === 1) {
-        expect(request.url).toBe(`${CODEX_ISSUER}/api/accounts/deviceauth/token`);
+        expect(request.url).toBe(`${ISSUER}/api/accounts/deviceauth/token`);
         expect(JSON.parse(request.body)).toEqual({ device_auth_id: "device-1", user_code: "ABCD-1234" });
         return jsonResponse({ error: "authorization_pending" }, 403);
       }
@@ -181,13 +114,13 @@ describe("runCodexDeviceLogin", () => {
       if (index === 3)
         return jsonResponse({ authorization_code: "device-auth-code", code_verifier: "device-verifier" });
       if (index === 4) {
-        expect(request.url).toBe(`${CODEX_ISSUER}/oauth/token`);
+        expect(request.url).toBe(`${ISSUER}/oauth/token`);
         const body = new URLSearchParams(request.body);
         expect(body.get("grant_type")).toBe("authorization_code");
         expect(body.get("code")).toBe("device-auth-code");
         expect(body.get("code_verifier")).toBe("device-verifier");
-        expect(body.get("redirect_uri")).toBe(`${CODEX_ISSUER}/deviceauth/callback`);
-        expect(body.get("client_id")).toBe(CODEX_CLIENT_ID);
+        expect(body.get("redirect_uri")).toBe(`${ISSUER}/deviceauth/callback`);
+        expect(body.get("client_id")).toBe(CLIENT_ID);
         return jsonResponse(
           tokenResponseBody({ access: "device-access", refresh: "device-refresh", accountId: "acct_device" }),
         );
@@ -204,7 +137,7 @@ describe("runCodexDeviceLogin", () => {
       }),
     );
 
-    expect(codes).toEqual([{ code: "ABCD-1234", url: `${CODEX_ISSUER}/codex/device` }]);
+    expect(codes).toEqual([{ code: "ABCD-1234", url: `${ISSUER}/codex/device` }]);
     expect(credential.access).toBe("device-access");
     expect(credential.refresh).toBe("device-refresh");
     expect(credential.accountId).toBe("acct_device");
@@ -231,29 +164,6 @@ describe("runCodexDeviceLogin", () => {
   });
 });
 
-describe("refreshCodexToken", () => {
-  it("re-extracts accountId from refreshed tokens and rotates the refresh token", async () => {
-    const { fetchImpl, calls } = recordingFetch(() =>
-      jsonResponse(
-        tokenResponseBody({ access: "next-access", refresh: "next-refresh", accountId: "acct_new" }),
-      ),
-    );
-    const refreshed = expectOauth(
-      await refreshCodexToken(
-        { type: "oauth", access: "old-access", refresh: "old-refresh", expires: 1, accountId: "acct_old" },
-        fetchImpl,
-      ),
-    );
-    expect(refreshed.access).toBe("next-access");
-    expect(refreshed.refresh).toBe("next-refresh");
-    expect(refreshed.accountId).toBe("acct_new");
-    const body = new URLSearchParams(calls[0]!.body);
-    expect(body.get("grant_type")).toBe("refresh_token");
-    expect(body.get("refresh_token")).toBe("old-refresh");
-    expect(body.get("client_id")).toBe(CODEX_CLIENT_ID);
-  });
-});
-
 describe("createCodexFetch", () => {
   it("refreshes an expired credential exactly once across concurrent requests and persists it", async () => {
     const store = await temporaryStore();
@@ -267,14 +177,14 @@ describe("createCodexFetch", () => {
 
     let refreshCount = 0;
     const { fetchImpl, calls } = recordingFetch((request) => {
-      if (request.url === `${CODEX_ISSUER}/oauth/token`) {
+      if (request.url === `${ISSUER}/oauth/token`) {
         refreshCount += 1;
         const body = new URLSearchParams(request.body);
         expect(body.get("grant_type")).toBe("refresh_token");
         expect(body.get("refresh_token")).toBe("stale-refresh");
         return jsonResponse(tokenResponseBody({ access: "fresh-access", refresh: "fresh-refresh" }));
       }
-      expect(request.url).toBe(CODEX_API_ENDPOINT);
+      expect(request.url).toBe(API_ENDPOINT);
       return jsonResponse({ ok: true });
     });
 
@@ -294,7 +204,7 @@ describe("createCodexFetch", () => {
     // The refreshed tokens carried no account claim, so the stored accountId is preserved.
     expect(persisted.accountId).toBe("acct_old");
 
-    const apiCalls = calls.filter((call) => call.url === CODEX_API_ENDPOINT);
+    const apiCalls = calls.filter((call) => call.url === API_ENDPOINT);
     expect(apiCalls).toHaveLength(2);
     for (const call of apiCalls) {
       expect(call.headers.get("authorization")).toBe("Bearer fresh-access");
@@ -319,7 +229,7 @@ describe("createCodexFetch", () => {
       body: "{}",
     });
     const rerouted = calls[0]!;
-    expect(rerouted.url).toBe(CODEX_API_ENDPOINT);
+    expect(rerouted.url).toBe(API_ENDPOINT);
     expect(rerouted.method).toBe("POST");
     expect(rerouted.headers.get("authorization")).toBe("Bearer valid-access");
     expect(rerouted.headers.get("ChatGPT-Account-Id")).toBe("acct_42");
@@ -333,21 +243,21 @@ describe("createCodexFetch", () => {
     expect(calls[1]!.headers.get("authorization")).toBe("Bearer valid-access");
 
     // A valid credential never touches the token endpoint.
-    expect(calls.some((call) => call.url === `${CODEX_ISSUER}/oauth/token`)).toBe(false);
+    expect(calls.some((call) => call.url === `${ISSUER}/oauth/token`)).toBe(false);
   });
 
-  it("treats expires === 0 as non-expiring and throws when no credential is stored", async () => {
+  it("treats expires === 0 as non-expiring and honors broker revocation", async () => {
     const store = await temporaryStore();
     await store.set(CODEX_PROVIDER_ID, { type: "oauth", access: "eternal", refresh: "r", expires: 0 });
     const { fetchImpl, calls } = recordingFetch(() => jsonResponse({ ok: true }));
     const codexFetch = createCodexFetch({ store, fetchImpl });
     await codexFetch("https://api.openai.com/v1/responses");
-    expect(calls.some((call) => call.url === `${CODEX_ISSUER}/oauth/token`)).toBe(false);
+    expect(calls.some((call) => call.url === `${ISSUER}/oauth/token`)).toBe(false);
     expect(calls[0]!.headers.get("authorization")).toBe("Bearer eternal");
 
-    const emptyStore = await temporaryStore();
-    const missing = createCodexFetch({ store: emptyStore, fetchImpl });
-    await expect(missing("https://api.openai.com/v1/responses")).rejects.toThrow(CODEX_PROVIDER_ID);
+    expect(await store.delete(CODEX_PROVIDER_ID)).toBe(true);
+    await expect(codexFetch("https://api.openai.com/v1/responses")).rejects.toThrow(CODEX_PROVIDER_ID);
+    expect(calls).toHaveLength(1);
   });
 });
 
@@ -355,7 +265,7 @@ describe("runCodexBrowserLogin", () => {
   it("serves the callback, verifies state, exchanges the code, and resolves a credential", async () => {
     const opened = deferred<string>();
     const { fetchImpl, calls } = recordingFetch((request) => {
-      expect(request.url).toBe(`${CODEX_ISSUER}/oauth/token`);
+      expect(request.url).toBe(`${ISSUER}/oauth/token`);
       return jsonResponse(
         tokenResponseBody({
           access: "browser-access",
@@ -373,7 +283,14 @@ describe("runCodexBrowserLogin", () => {
     });
 
     const authorizeUrl = new URL(await opened.promise);
-    expect(`${authorizeUrl.origin}${authorizeUrl.pathname}`).toBe(`${CODEX_ISSUER}/oauth/authorize`);
+    expect(`${authorizeUrl.origin}${authorizeUrl.pathname}`).toBe(`${ISSUER}/oauth/authorize`);
+    expect(authorizeUrl.searchParams.get("response_type")).toBe("code");
+    expect(authorizeUrl.searchParams.get("client_id")).toBe(CLIENT_ID);
+    expect(authorizeUrl.searchParams.get("scope")).toBe("openid profile email offline_access");
+    expect(authorizeUrl.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(authorizeUrl.searchParams.get("id_token_add_organizations")).toBe("true");
+    expect(authorizeUrl.searchParams.get("codex_cli_simplified_flow")).toBe("true");
+    expect(authorizeUrl.searchParams.get("originator")).toBe("opencode");
     const redirectUri = authorizeUrl.searchParams.get("redirect_uri")!;
     const state = authorizeUrl.searchParams.get("state")!;
     expect(redirectUri).toMatch(/^http:\/\/localhost:\d+\/auth\/callback$/);
@@ -396,7 +313,7 @@ describe("runCodexBrowserLogin", () => {
     expect(body.get("grant_type")).toBe("authorization_code");
     expect(body.get("code")).toBe("browser-code");
     expect(body.get("redirect_uri")).toBe(redirectUri);
-    expect(body.get("client_id")).toBe(CODEX_CLIENT_ID);
+    expect(body.get("client_id")).toBe(CLIENT_ID);
     // PKCE round trip: the verifier sent to the token endpoint hashes to the advertised challenge.
     expect(createHash("sha256").update(body.get("code_verifier")!).digest("base64url")).toBe(
       authorizeUrl.searchParams.get("code_challenge"),

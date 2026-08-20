@@ -15,10 +15,12 @@
  *   own them forbid automated signup
  *   ([ADR 0127](../../../docs/adr/0127-his-accounts-are-his.md)).
  */
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { discordAttachmentRoot } from "@clankie/settings";
 import {
   BrowserToolCatalogSchema,
@@ -30,8 +32,6 @@ import {
   type CallBrowserToolResult,
 } from "@clankie/protocol";
 
-/** The stdio MCP server this host drives, verbatim from the old registry entry. */
-export const BROWSER_SERVER_NAME = "agent_browser";
 const DEFAULT_BROWSER_COMMAND = "agent-browser";
 const DEFAULT_BROWSER_ARGS = ["mcp", "--tools", "all"] as const;
 
@@ -63,7 +63,7 @@ export interface BrowserHostLogger {
 }
 
 export interface BrowserHostOptions {
-  runnerStateRoot: string;
+  stateRoot: string;
   /**
    * Where a screenshot is written so the Discord bridge can serve it back.
    * Supplied by the composition root, which derives it once for every process
@@ -73,8 +73,6 @@ export interface BrowserHostOptions {
   attachmentRoot?: string;
   logger: BrowserHostLogger;
   environment?: NodeJS.ProcessEnv;
-  /** Injected in tests so the suite never launches a browser. */
-  spawnImpl?: typeof spawn;
   /** Tool names never projected or callable. Defaults to empty: the full catalog is allowed. */
   blockedTools?: readonly string[];
   /** Server launch command; `CLANKIE_AGENT_BROWSER_EXECUTABLE` still overrides it. */
@@ -86,109 +84,6 @@ export interface BrowserHost {
   catalog(): Promise<BrowserToolCatalog>;
   call(request: CallBrowserToolRequest): Promise<CallBrowserToolResult>;
   close(): Promise<void>;
-}
-
-interface PendingRequest {
-  resolve(value: unknown): void;
-  reject(error: Error): void;
-  timer: NodeJS.Timeout;
-}
-
-/**
- * A minimal stdio JSON-RPC client for the one MCP server this host owns.
- *
- * The MCP SDK's `Client` is deliberately not used: it is a dependency of a
- * single app in this tree, and the surface needed here is two calls
- * (`tools/list`, `tools/call`) over newline-delimited JSON-RPC. Hand-rolling
- * that keeps the runner's dependency set unchanged and keeps the framing rules
- * — one message per line, ids never reused — visible at the boundary that has
- * to enforce them.
- */
-class StdioMcpClient {
-  readonly #child: ChildProcessWithoutNullStreams;
-  readonly #pending = new Map<number, PendingRequest>();
-  #nextId = 1;
-  #buffer = "";
-  #closed = false;
-
-  public constructor(child: ChildProcessWithoutNullStreams) {
-    this.#child = child;
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => this.#consume(chunk));
-    child.on("exit", () => this.#failAll(new Error("browser_host_exited")));
-    child.on("error", (error) => this.#failAll(error instanceof Error ? error : new Error("spawn_failed")));
-  }
-
-  public get closed(): boolean {
-    return this.#closed;
-  }
-
-  #consume(chunk: string): void {
-    this.#buffer += chunk;
-    let newline = this.#buffer.indexOf("\n");
-    while (newline >= 0) {
-      const line = this.#buffer.slice(0, newline).trim();
-      this.#buffer = this.#buffer.slice(newline + 1);
-      if (line.length > 0) this.#dispatch(line);
-      newline = this.#buffer.indexOf("\n");
-    }
-  }
-
-  #dispatch(line: string): void {
-    let message: { id?: unknown; result?: unknown; error?: { message?: unknown } };
-    try {
-      message = JSON.parse(line) as typeof message;
-    } catch {
-      return; // A server that writes noise to stdout must not crash the runner.
-    }
-    if (typeof message.id !== "number") return; // Notifications carry no id.
-    const pending = this.#pending.get(message.id);
-    if (pending === undefined) return;
-    this.#pending.delete(message.id);
-    clearTimeout(pending.timer);
-    if (message.error) {
-      const detail = typeof message.error.message === "string" ? message.error.message : "mcp_error";
-      pending.reject(new Error(detail));
-      return;
-    }
-    pending.resolve(message.result);
-  }
-
-  #failAll(error: Error): void {
-    this.#closed = true;
-    for (const [id, pending] of this.#pending) {
-      this.#pending.delete(id);
-      clearTimeout(pending.timer);
-      pending.reject(error);
-    }
-  }
-
-  public request(method: string, params: unknown, timeoutMs: number): Promise<unknown> {
-    if (this.#closed) return Promise.reject(new Error("browser_host_closed"));
-    const id = this.#nextId++;
-    return new Promise<unknown>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.#pending.delete(id);
-        reject(new Error("browser_host_timeout"));
-      }, timeoutMs);
-      timer.unref?.();
-      this.#pending.set(id, { resolve, reject, timer });
-      this.#child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
-    });
-  }
-
-  public notify(method: string, params: unknown): void {
-    if (this.#closed) return;
-    this.#child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`);
-  }
-
-  public async close(): Promise<void> {
-    if (this.#closed) return;
-    this.#closed = true;
-    this.#failAll(new Error("browser_host_closed"));
-    this.#child.stdin.end();
-    this.#child.kill();
-  }
 }
 
 /** Extensions the resolver can label; anything else lands as a generic blob. */
@@ -203,12 +98,12 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
   const environment = options.environment ?? process.env;
   const blockedTools = new Set(options.blockedTools ?? []);
 
-  // Persistent and runner-private. `RESTORE_SAVE` is deliberately the opposite
+  // Persistent and service-private. `RESTORE_SAVE` is deliberately the opposite
   // of the Codex projection's `never`: staying logged in is the point.
-  const profileDirectory = join(options.runnerStateRoot, "browser", "profile");
-  const socketDirectory = join(options.runnerStateRoot, "browser", "run");
-  const homeDirectory = join(options.runnerStateRoot, "browser", "home");
-  const tempDirectory = join(options.runnerStateRoot, "browser", "tmp");
+  const profileDirectory = join(options.stateRoot, "browser", "profile");
+  const socketDirectory = join(options.stateRoot, "browser", "run");
+  const homeDirectory = join(options.stateRoot, "browser", "home");
+  const tempDirectory = join(options.stateRoot, "browser", "tmp");
   await mkdir(profileDirectory, { recursive: true, mode: 0o700 });
   await mkdir(socketDirectory, { recursive: true, mode: 0o700 });
   await mkdir(homeDirectory, { recursive: true, mode: 0o700 });
@@ -224,11 +119,12 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
 
   const command =
     environment.CLANKIE_AGENT_BROWSER_EXECUTABLE?.trim() || options.command || DEFAULT_BROWSER_COMMAND;
-  const child = (options.spawnImpl ?? spawn)(command, [...(options.args ?? DEFAULT_BROWSER_ARGS)], {
-    stdio: ["pipe", "pipe", "pipe"],
+  const transport = new StdioClientTransport({
+    command,
+    args: [...(options.args ?? DEFAULT_BROWSER_ARGS)],
     env: {
-      PATH: environment.PATH,
-      LANG: environment.LANG,
+      PATH: environment.PATH ?? "",
+      LANG: environment.LANG ?? "",
       HOME: homeDirectory,
       TMPDIR: tempDirectory,
       AGENT_BROWSER_SOCKET_DIR: socketDirectory,
@@ -238,35 +134,33 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
       AGENT_BROWSER_CONTENT_BOUNDARIES: "1",
       AGENT_BROWSER_MAX_OUTPUT: String(MAX_RESULT_CHARACTERS),
     },
-  }) as ChildProcessWithoutNullStreams;
-  child.stderr?.setEncoding("utf8");
-  child.stderr?.on("data", (chunk: string) => {
-    options.logger.warn({ event: "browser.host.stderr", detail: chunk.slice(0, 500) }, "browser host stderr");
+    stderr: "pipe",
+  });
+  transport.stderr?.on("data", (chunk) => {
+    options.logger.warn(
+      { event: "browser.host.stderr", detail: String(chunk).slice(0, 500) },
+      "browser host stderr",
+    );
   });
 
-  const client = new StdioMcpClient(child);
+  const client = new Client({ name: "clankie", version: "1" }, { capabilities: {} });
+  let closed = false;
+  client.onclose = () => {
+    closed = true;
+  };
   let descriptors: BrowserToolDescriptor[] | undefined;
   let descriptorsLoading: Promise<BrowserToolDescriptor[]> | undefined;
   let unavailableReason: string | undefined;
   let callTail = Promise.resolve();
 
   try {
-    await client.request(
-      "initialize",
-      {
-        protocolVersion: "2025-11-25",
-        capabilities: {},
-        clientInfo: { name: "clankie-runner", version: "1" },
-      },
-      STARTUP_TIMEOUT_MS,
-    );
-    client.notify("notifications/initialized", {});
+    await client.connect(transport, { timeout: STARTUP_TIMEOUT_MS });
     options.logger.info(
       { event: "browser.host.ready", command, profileDirectory, blocked: blockedTools.size },
       "browser host ready",
     );
   } catch (error) {
-    unavailableReason = error instanceof Error ? error.message : "browser_host_unavailable";
+    unavailableReason = mcpErrorDetail(error, "browser_host_unavailable");
     options.logger.warn(
       { event: "browser.host.unavailable", reason: unavailableReason },
       "browser host unavailable",
@@ -281,14 +175,9 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
       const seenCursors = new Set<string>();
       let cursor: string | undefined;
       do {
-        const result = (await client.request(
-          "tools/list",
-          cursor === undefined ? {} : { cursor },
-          REQUEST_TIMEOUT_MS,
-        )) as {
-          tools?: { name?: unknown; description?: unknown; inputSchema?: unknown }[];
-          nextCursor?: unknown;
-        };
+        const result = await client.listTools(cursor === undefined ? {} : { cursor }, {
+          timeout: REQUEST_TIMEOUT_MS,
+        });
         for (const tool of result.tools ?? []) {
           if (typeof tool.name !== "string" || blockedTools.has(tool.name)) continue;
           projected.push({
@@ -337,7 +226,7 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
         detail: `${request.tool} is on this deployment's browser blocklist`,
       });
     }
-    if (unavailableReason !== undefined || client.closed) {
+    if (unavailableReason !== undefined || closed) {
       return CallBrowserToolResultSchema.parse({
         outcome: "refused",
         tool: request.tool,
@@ -350,17 +239,19 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
       isError?: unknown;
     };
     try {
-      result = (await client.request(
-        "tools/call",
-        { name: request.tool, arguments: request.arguments },
-        REQUEST_TIMEOUT_MS,
-      )) as typeof result;
+      const called = await client.callTool({ name: request.tool, arguments: request.arguments }, undefined, {
+        timeout: REQUEST_TIMEOUT_MS,
+      });
+      result = {
+        content: Array.isArray(called.content) ? called.content : [],
+        isError: called.isError,
+      } as typeof result;
     } catch (error) {
       return CallBrowserToolResultSchema.parse({
         outcome: "refused",
         tool: request.tool,
         reason: "browser_unavailable",
-        detail: error instanceof Error ? error.message.slice(0, 500) : "browser_call_failed",
+        detail: mcpErrorDetail(error, "browser_call_failed").slice(0, 500),
       });
     }
     const text = (result.content ?? [])
@@ -369,7 +260,7 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
       .join("\n");
     // Screenshots return a text path *and* an image block. Keeping only the
     // text is what let a screenshot look successful while no pixels existed
-    // anywhere he could reach: he was handed a path on the runner's disk and
+    // anywhere he could reach: he was handed a service-private path and
     // rendered it as though it were an attachment.
     const artifacts: BrowserArtifact[] = [];
     for (const block of result.content ?? []) {
@@ -400,7 +291,7 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
 
   return {
     async catalog(): Promise<BrowserToolCatalog> {
-      if (unavailableReason !== undefined || client.closed) {
+      if (unavailableReason !== undefined || closed) {
         return BrowserToolCatalogSchema.parse({
           schemaVersion: 1,
           available: false,
@@ -433,6 +324,18 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
       return queued;
     },
 
-    close: () => client.close(),
+    async close(): Promise<void> {
+      if (closed) return;
+      closed = true;
+      await client.close();
+    },
   };
+}
+
+function mcpErrorDetail(error: unknown, fallback: string): string {
+  if (!(error instanceof Error)) return fallback;
+  if (!(error instanceof McpError)) return error.message;
+  if (error.code === ErrorCode.RequestTimeout) return "browser_host_timeout";
+  if (error.code === ErrorCode.ConnectionClosed) return "browser_host_exited";
+  return error.message.replace(/^MCP error -?\d+: /u, "");
 }

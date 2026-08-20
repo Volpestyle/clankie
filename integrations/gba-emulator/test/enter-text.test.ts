@@ -211,12 +211,7 @@ async function harness(core?: ScriptedNamingCore) {
       maxInputsPerAction: LIMITS.maxInputs,
       maxFramesPerAction: LIMITS.maxFrames,
       maxActionDurationMs: LIMITS.timeoutMs,
-      capabilities: [
-        "emulator.gba.observe",
-        "emulator.gba.input",
-        "emulator.gba.frame_advance",
-        "emulator.gba.wait",
-      ],
+      capabilities: ["emulator.gba.observe", "emulator.gba.input", "emulator.gba.frame_advance"],
     },
   });
   const grant = await runtime.start({

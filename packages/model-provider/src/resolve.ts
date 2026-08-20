@@ -1,11 +1,9 @@
 import {
   applyCustomProviders,
-  findModel,
   type Catalog,
   type CustomModelEntry,
   type CustomProviders,
   type ModelEntry,
-  type ProviderEntry,
 } from "@clankie/model-registry";
 import { parseModelRef, type ClankieConfig } from "./config.ts";
 import { codexSubscriptionModelIdFor, withCodexSubscriptionProvider } from "./codex-catalog.ts";
@@ -37,70 +35,10 @@ export function mergedCatalog(config: ClankieConfig, catalog: Catalog): Catalog 
 }
 
 // ---------------------------------------------------------------------------
-// Provider resolution — which providers exist, which are usable, and how.
-// ---------------------------------------------------------------------------
-
-export type ProviderConnection = "credential" | "env" | "none";
-
-export interface ResolvedProvider {
-  id: string;
-  name: string;
-  entry: ProviderEntry;
-  connected: boolean;
-  connection: ProviderConnection;
-  declaredInConfig: boolean;
-}
-
-export interface ResolveProvidersInput {
-  config: ClankieConfig;
-  catalog: Catalog;
-  /** Provider ids that have a stored credential (from the credential broker's `list()`). */
-  credentialIds: readonly string[];
-  env?: NodeJS.ProcessEnv;
-}
-
-/**
- * Resolves the provider list from the merged catalog: `disabled_providers`
- * are dropped, a non-empty `enabled_providers` acts as an allowlist, and each
- * survivor is marked connected when the credential broker holds a credential
- * for it or one of its declared env vars is set. Connected providers sort
- * first; ties break by display name.
- */
-export function resolveProviders(input: ResolveProvidersInput): ResolvedProvider[] {
-  const env = input.env ?? process.env;
-  const catalog = mergedCatalog(input.config, input.catalog);
-  const disabled = new Set(input.config.disabled_providers ?? []);
-  const enabled = input.config.enabled_providers ?? [];
-
-  const resolved: ResolvedProvider[] = [];
-  for (const entry of Object.values(catalog)) {
-    if (disabled.has(entry.id)) continue;
-    if (enabled.length > 0 && !enabled.includes(entry.id)) continue;
-    const connection: ProviderConnection = input.credentialIds.includes(entry.id)
-      ? "credential"
-      : entry.env.some((name) => (env[name] ?? "") !== "")
-        ? "env"
-        : "none";
-    resolved.push({
-      id: entry.id,
-      name: entry.name,
-      entry,
-      connected: connection !== "none",
-      connection,
-      declaredInConfig: input.config.provider?.[entry.id] !== undefined,
-    });
-  }
-  return resolved.sort((a, b) => {
-    if (a.connected !== b.connected) return a.connected ? -1 : 1;
-    return a.name.localeCompare(b.name);
-  });
-}
-
-// ---------------------------------------------------------------------------
 // Role resolution — which concrete model a configured role points at.
 // ---------------------------------------------------------------------------
 
-export type ModelRole = "model" | "small_model" | "voice_model" | "settle_classifier_model";
+export type ModelRole = "model" | "settle_classifier_model";
 
 /**
  * Roles that name a media model rather than a language model.
@@ -170,7 +108,7 @@ export function subscriptionOverrideFor(
   if (ref === undefined) return undefined;
   const parsed = parseModelRef(ref);
   if (parsed === undefined) return undefined;
-  const model = findModel(mergedCatalog(input.config, input.catalog), parsed.providerId, parsed.modelId);
+  const model = mergedCatalog(input.config, input.catalog)[parsed.providerId]?.models[parsed.modelId];
   if (model === undefined) return undefined;
   return {
     providerId: parsed.providerId,
@@ -192,7 +130,7 @@ export function resolveRole(
   return {
     providerId: parsed.providerId,
     modelId: parsed.modelId,
-    model: findModel(catalog, parsed.providerId, parsed.modelId),
+    model: catalog[parsed.providerId]?.models[parsed.modelId],
     variantId: input.config.variant?.[ref],
   };
 }

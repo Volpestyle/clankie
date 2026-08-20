@@ -14,9 +14,9 @@ import { z } from "zod";
  * requests to the ChatGPT Codex backend with subscription headers.
  */
 
-export const CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
-export const CODEX_ISSUER = "https://auth.openai.com";
-export const CODEX_API_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
+const CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
+const CODEX_ISSUER = "https://auth.openai.com";
+const CODEX_API_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
 /**
  * Credential-store key for the ChatGPT subscription. Deliberately distinct from "openai"
  * so an OpenAI API key and the subscription credential can coexist in the same store.
@@ -74,7 +74,7 @@ const DeviceTokenSchema = z.object({
 type OauthCredential = Extract<ProviderCredential, { type: "oauth" }>;
 
 /** Generates a PKCE verifier/challenge pair (S256, base64url) with opencode's charset and length. */
-export function generateCodexPkce(): { verifier: string; challenge: string } {
+function generateCodexPkce(): { verifier: string; challenge: string } {
   const verifier = Array.from(randomBytes(PKCE_VERIFIER_LENGTH), (byte) =>
     PKCE_VERIFIER_CHARSET.charAt(byte % PKCE_VERIFIER_CHARSET.length),
   ).join("");
@@ -83,11 +83,7 @@ export function generateCodexPkce(): { verifier: string; challenge: string } {
 }
 
 /** Builds the auth.openai.com authorize URL with the exact parameter set opencode sends. */
-export function buildCodexAuthorizeUrl(input: {
-  challenge: string;
-  state: string;
-  redirectUri: string;
-}): string {
+function buildCodexAuthorizeUrl(input: { challenge: string; state: string; redirectUri: string }): string {
   const params = new URLSearchParams({
     response_type: "code",
     client_id: CODEX_CLIENT_ID,
@@ -108,7 +104,7 @@ export function buildCodexAuthorizeUrl(input: {
  * account id: `chatgpt_account_id`, then `"https://api.openai.com/auth".chatgpt_account_id`,
  * then the first organization id — the same claim path opencode reads.
  */
-export function extractCodexAccountId(token: string): string | undefined {
+function extractCodexAccountId(token: string): string | undefined {
   const parts = token.split(".");
   if (parts.length !== 3 || parts[1] === undefined || parts[1] === "") return undefined;
   let payload: unknown;
@@ -290,23 +286,6 @@ export async function runCodexDeviceLogin(options: CodexDeviceLoginOptions): Pro
     if (remainingMs <= 0) throw new Error("Device login timeout - authorization took too long");
     await sleep(Math.min(intervalMs, remainingMs));
   }
-}
-
-/**
- * Refresh-token grant against the Codex issuer. Preserves the existing accountId unless the
- * refreshed tokens carry a new account claim, and keeps the old refresh token when the
- * response omits one.
- */
-export async function refreshCodexToken(
-  credential: ProviderCredential,
-  fetchImpl: typeof fetch = fetch,
-): Promise<ProviderCredential> {
-  if (credential.type !== "oauth") {
-    throw new Error(
-      `Cannot refresh a "${credential.type}" credential; ${CODEX_PROVIDER_ID} uses oauth credentials`,
-    );
-  }
-  return refreshOauthCredential(credential, fetchImpl);
 }
 
 export interface CodexFetchOptions {

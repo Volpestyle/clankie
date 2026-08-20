@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   EnvironmentRuntime,
   type EnvironmentAdapter,
+  type EnvironmentAdapterActionCompletion,
   type EnvironmentAdapterActionRunning,
   type EnvironmentAdapterSession,
   type EnvironmentEventSink,
@@ -26,6 +27,7 @@ class FakeSession implements EnvironmentAdapterSession {
   hangStartAction = false;
   hangCancelAction = false;
   background = false;
+  synchronousOutcome: Record<string, unknown> | undefined;
   private backgroundCompletion:
     | {
         resolve: (value: { status: "completed"; outcome: Record<string, unknown> }) => void;
@@ -43,9 +45,14 @@ class FakeSession implements EnvironmentAdapterSession {
     this.resumes += 1;
     return Promise.resolve();
   }
-  startAction(command: EnvironmentStartActionCommand): Promise<void | EnvironmentAdapterActionRunning> {
+  startAction(
+    command: EnvironmentStartActionCommand,
+  ): Promise<void | EnvironmentAdapterActionCompletion | EnvironmentAdapterActionRunning> {
     if (this.hangStartAction) return new Promise<void>(() => {});
     this.started.push(command.actionId);
+    if (this.synchronousOutcome !== undefined) {
+      return Promise.resolve({ status: "completed", outcome: this.synchronousOutcome });
+    }
     if (this.background) {
       const completion = new Promise<{ status: "completed"; outcome: Record<string, unknown> }>(
         (resolve, reject) => {
@@ -119,7 +126,11 @@ const command = (sessionId: string, actionId: string): EnvironmentStartActionCom
   },
   sessionId,
   actionId,
-  action: { kind: "fake_action" },
+  action: {
+    kind: "gba_emulator_action",
+    action: { kind: "button_press", button: "a", holdFrames: 1 },
+    limits: { maxInputs: 1, maxFrames: 1, timeoutMs: 1_000 },
+  },
 });
 
 async function harness() {
@@ -278,6 +289,18 @@ describe("EnvironmentRuntime fake-adapter contract", () => {
     const session = adapter.sessions.get("adapter-background")!;
     session.background = true;
 
+    await expect(
+      runtime.startAction(token, command("background", "completed-action")),
+    ).resolves.toMatchObject({
+      status: "running",
+    });
+    session.finishBackground({ result: "ok" });
+    await Promise.resolve();
+    await expect(runtime.actionStatus(token, "background", "completed-action")).resolves.toMatchObject({
+      status: "completed",
+      outcome: { result: "ok" },
+    });
+
     await expect(runtime.startAction(token, command("background", "long-action"))).resolves.toMatchObject({
       status: "running",
     });
@@ -297,8 +320,8 @@ describe("EnvironmentRuntime fake-adapter contract", () => {
     const { adapter, make } = await harness();
     const first = make();
     const { token } = await first.start({ spec: baseSpec("s1"), holderId: "runner", correlationId: "c1" });
+    adapter.sessions.get("adapter-s1")!.synchronousOutcome = { result: "ok" };
     await first.startAction(token, command("s1", "a1"));
-    await first.finishAction(token, "s1", "a1", { result: "ok" });
     const restarted = make();
     expect(await restarted.reconcile()).toMatchObject({ attached: ["s1"] });
     expect(await restarted.reconcile()).toMatchObject({ retained: ["s1"] });
@@ -312,7 +335,7 @@ describe("EnvironmentRuntime fake-adapter contract", () => {
   });
 
   it("redacts credentials and grants from output, logs, state, and telemetry", async () => {
-    const { events, make, rootDir } = await harness();
+    const { adapter, events, make, rootDir } = await harness();
     const runtime = make();
     const { token } = await runtime.start({
       spec: baseSpec("s1"),
@@ -320,11 +343,11 @@ describe("EnvironmentRuntime fake-adapter contract", () => {
       correlationId: "grant-marker",
       connection: { password: "credential-marker" },
     });
-    await runtime.startAction(token, command("s1", "a1"));
-    const result = await runtime.finishAction(token, "s1", "a1", {
+    adapter.sessions.get("adapter-s1")!.synchronousOutcome = {
       echo: "credential-marker grant-marker",
       accessToken: "credential-marker",
-    });
+    };
+    const result = await runtime.startAction(token, command("s1", "a1"));
     expect(JSON.stringify(result)).not.toMatch(/credential-marker|grant-marker/);
     const telemetry = await runtime.publishTelemetry(token, {
       schemaVersion: 1,
@@ -379,7 +402,7 @@ describe("EnvironmentRuntime fake-adapter contract", () => {
   }, 10_000);
 
   it("keeps connection-secret redaction durable across restart via reconcile re-provisioning (VUH-770 f2)", async () => {
-    const { events, make, rootDir } = await harness();
+    const { adapter, events, make, rootDir } = await harness();
     const before = make();
     const { token } = await before.start({
       spec: baseSpec("s1"),
@@ -390,10 +413,10 @@ describe("EnvironmentRuntime fake-adapter contract", () => {
     await before.startAction(token, command("s1", "a1"));
     const restarted = make();
     await restarted.reconcile({ s1: { password: "connection-marker" } });
-    await restarted.startAction(token, command("s1", "a2"));
-    const result = await restarted.finishAction(token, "s1", "a2", {
+    adapter.sessions.get("adapter-s1")!.synchronousOutcome = {
       echo: "adapter echoed connection-marker into an outcome field",
-    });
+    };
+    const result = await restarted.startAction(token, command("s1", "a2"));
     expect(JSON.stringify(result)).not.toMatch(/connection-marker/);
     expect(JSON.stringify(events)).not.toMatch(/connection-marker/);
     const file = (await readdir(join(rootDir, "environment-sessions"))).find((name) =>
@@ -410,10 +433,9 @@ describe("retention for open-ended sessions", () => {
     const { adapter, make, rootDir } = await harness();
     const runtime = make({ retention: { maxActionRecords: 2 } });
     const { token } = await runtime.start({ spec: baseSpec("s1"), holderId: "runner", correlationId: "c1" });
+    adapter.sessions.get("adapter-s1")!.synchronousOutcome = { done: true };
     await runtime.startAction(token, command("s1", "a1"));
-    await runtime.finishAction(token, "s1", "a1", { done: true });
     await runtime.startAction(token, command("s1", "a2"));
-    await runtime.finishAction(token, "s1", "a2", { done: true });
     await runtime.startAction(token, command("s1", "a3"));
     const file = (await readdir(join(rootDir, "environment-sessions"))).find((name) =>
       name.endsWith(".json"),

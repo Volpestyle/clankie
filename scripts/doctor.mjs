@@ -27,13 +27,10 @@ for (const check of [
   ["git", true, ["--version"], "Install Git."],
   ["cargo", true, ["--version"], "Install the Rust 1.88+ toolchain to build @clankie/vox.", "1.88"],
   ["cmake", true, ["--version"], "Install CMake to build Vox's bundled native codecs."],
+  ["swift", true, ["--version"], "Install Swift to build @clankie/menu-bar."],
   ["ffmpeg", false, ["-version"], "Required for Vox URL/video playback and VP8 decode."],
   ["yt-dlp", false, ["--version"], "Required for Vox playback from indirect media URLs."],
-  ["docker", false, ["--version"], "Optional: install Docker for telemetry and sandbox experiments."],
-  ["codex", false, ["--version"], "Optional: install/authenticate Codex CLI for App Server workers."],
-  ["pi", false, ["--version"], "Optional: install @earendil-works/pi-coding-agent for Pi RPC workers."],
   ["herdr", false, ["--version"], "Optional: install Herdr as an external pane host."],
-  ["xcodebuild", false, ["-version"], "Required only for iOS/macOS native shells."],
 ]) {
   const [command, required, args, remediation, minimumVersion] = check;
   try {
@@ -58,19 +55,6 @@ function versionAtLeast(detected, minimum) {
     if (detectedPart !== minimumPart) return detectedPart > minimumPart;
   }
   return true;
-}
-
-try {
-  await access(resolve(root, "pnpm-lock.yaml"));
-  result("lockfile", false, true, "pnpm-lock.yaml present", "Run pnpm install to create the lockfile.");
-} catch {
-  result(
-    "lockfile",
-    false,
-    false,
-    "pnpm-lock.yaml absent",
-    "Run pnpm install before reproducible development.",
-  );
 }
 
 // Credentials live in the credential broker (macOS Keychain or a mode-0600 file

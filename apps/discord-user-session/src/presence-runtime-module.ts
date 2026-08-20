@@ -2,6 +2,7 @@ import {
   createDefaultCredentialStore,
   DiscordUserSessionCredentialProvider,
 } from "@clankie/credential-broker";
+import { parseDiscordIdSet } from "@clankie/discord-presence-core";
 import type { DiscordPresenceSessionRecord } from "@clankie/interactive-environment";
 import type {
   DiscordPresenceWrite,
@@ -39,8 +40,8 @@ export function createDiscordUserPresenceRuntime(
   const resolveOptIn = options.resolveOptIn ?? loadOptInFromControlPlane;
   const provider = new DiscordUserSessionCredentialProvider({
     store: createDefaultCredentialStore(),
-    allowedGuildIds: commaSeparated(process.env.DISCORD_USER_SESSION_GUILD_IDS),
-    allowedChannelIds: commaSeparated(process.env.DISCORD_USER_SESSION_CHANNEL_IDS),
+    allowedGuildIds: [...parseDiscordIdSet(process.env.DISCORD_USER_SESSION_GUILD_IDS)],
+    allowedChannelIds: [...parseDiscordIdSet(process.env.DISCORD_USER_SESSION_CHANNEL_IDS)],
     resolveOptIn: async (profileHash) => {
       const optIn = await resolveOptIn(profileHash);
       if (optIn === undefined) return undefined;
@@ -92,13 +93,4 @@ async function loadOptInFromControlPlane(profileHash: string): Promise<DiscordUs
   });
   const optIn = await api.inspectDiscordUserSessionOptIn();
   return optIn?.profileHash === profileHash ? optIn : undefined;
-}
-
-function commaSeparated(value: string | undefined): string[] {
-  return (
-    value
-      ?.split(",")
-      .map((item) => item.trim())
-      .filter(Boolean) ?? []
-  );
 }

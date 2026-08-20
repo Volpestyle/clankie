@@ -222,8 +222,6 @@ fn decrypt_video_frame_candidates(
     }
 }
 
-#[allow(clippy::too_many_lines)]
-#[allow(clippy::too_many_arguments)]
 pub(super) async fn udp_recv_loop(
     socket: Arc<UdpSocket>,
     crypto: Arc<TransportCrypto>,
@@ -233,6 +231,7 @@ pub(super) async fn udp_recv_loop(
     event_tx: mpsc::Sender<VoiceEvent>,
     shutdown: Arc<AtomicBool>,
     role: TransportRole,
+    generation: u64,
     disconnect_sent: Arc<AtomicBool>,
 ) {
     let mut buf = [0u8; 65_536];
@@ -268,6 +267,7 @@ pub(super) async fn udp_recv_loop(
                     &event_tx,
                     &disconnect_sent,
                     role,
+                    generation,
                     format!("UDP recv error: {e}"),
                 )
                 .await;
@@ -302,7 +302,7 @@ pub(super) async fn udp_recv_loop(
             continue;
         }
 
-        let decrypted = match crypto.decrypt(packet, header_size) {
+        let decrypted = match crypto.decrypt(packet) {
             Ok(p) => p,
             Err(e) => {
                 if payload_type == OPUS_PT {
@@ -424,6 +424,7 @@ pub(super) async fn udp_recv_loop(
                 let _ = event_tx
                     .send(VoiceEvent::SsrcUpdate {
                         role,
+                        generation,
                         ssrc,
                         user_id: remapped_user_id,
                     })
@@ -433,6 +434,7 @@ pub(super) async fn udp_recv_loop(
             let _ = event_tx
                 .send(VoiceEvent::OpusReceived {
                     role,
+                    generation,
                     ssrc,
                     opus_frame,
                     rtp_sequence: sequence,
@@ -755,6 +757,7 @@ pub(super) async fn udp_recv_loop(
         if event_tx
             .send(VoiceEvent::VideoFrameReceived {
                 role,
+                generation,
                 user_id: binding_user_id,
                 ssrc,
                 codec: codec.as_str().to_string(),

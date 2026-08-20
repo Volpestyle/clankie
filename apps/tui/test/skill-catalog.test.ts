@@ -33,7 +33,7 @@ describe("skill catalog", () => {
     expect(resolveClankieSlashSkill("/skill:ponytail fix this", skills)?.name).toBe("ponytail");
   });
 
-  it("discovers project and user skills, follows links, and hides non-model skills", async () => {
+  it("uses Pi discovery while preserving root precedence and hidden-name fallback", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-skills-"));
     temporaryDirectories.push(root);
     const repo = join(root, "repo");
@@ -44,16 +44,25 @@ describe("skill catalog", () => {
       join(repo, ".agents", "skills", "project"),
       "name: project-skill\ndescription: Project version",
     );
+    await skill(
+      join(repo, ".pi", "skills", "preferred"),
+      "name: preferred-skill\ndescription: Project Pi version",
+    );
     await skill(shared, "name: linked-skill\ndescription: >-\n  A linked user\n  skill");
     await mkdir(join(home, ".agents", "skills"), { recursive: true });
     await symlink(shared, join(home, ".agents", "skills", "linked-skill"));
     await skill(
       join(home, ".pi", "agent", "skills", "hidden"),
-      "name: hidden-skill\ndescription: Hidden\ndisable-model-invocation: true",
+      "name: linked-skill\ndescription: Hidden duplicate\ndisable-model-invocation: true",
+    );
+    await skill(
+      join(home, ".agents", "skills", "preferred"),
+      "name: preferred-skill\ndescription: User version",
     );
 
     await expect(discoverClankieSkills(repo, { HOME: home })).resolves.toEqual([
       { name: "linked-skill", description: "A linked user skill" },
+      { name: "preferred-skill", description: "Project Pi version" },
       { name: "project-skill", description: "Project version" },
     ]);
   });

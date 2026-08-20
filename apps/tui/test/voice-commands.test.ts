@@ -25,7 +25,7 @@ interface CommandResult {
 }
 
 function testShell(
-  selections: Array<string[] | undefined>,
+  selections: Array<string | undefined>,
   secrets: Array<string | undefined> = [],
   texts: Array<string | undefined> = [],
 ): {
@@ -108,7 +108,7 @@ describe("/voice", () => {
     const view = testShell(
       // wizard: provider step → done; the missing-key follow-up asks nothing
       // (readSecret consumes from `secrets`).
-      [["provider"], ["elevenlabs"], ["done"]],
+      ["provider", "elevenlabs", "done"],
       ["sk-openai", "xi-secret-key"],
       ["voice_abc123", "eleven_flash_v2_5"],
     );
@@ -132,7 +132,7 @@ describe("/voice", () => {
     const { credentials, services, settings } = await testServices();
     const voice = command(buildVoiceCommands(services), "voice");
     const view = testShell(
-      [["provider"], ["openai"], ["done"]],
+      ["provider", "openai", "done"],
       ["sk-openai"],
       ["gpt-realtime-2.1", "gpt-realtime-whisper", "cedar"],
     );
@@ -151,7 +151,7 @@ describe("/voice", () => {
     const { credentials, services, settings } = await testServices();
     const voice = command(buildVoiceCommands(services), "voice");
     const view = testShell(
-      [["provider"], ["xai"], ["none"], ["done"]],
+      ["provider", "xai", "none", "done"],
       ["xai-secret"],
       ["grok-voice-think-fast-2.0", "eve"],
     );
@@ -171,7 +171,7 @@ describe("/voice", () => {
     const { services, settings } = await testServices();
     const voice = command(buildVoiceCommands(services), "voice");
     // Provider chosen, then the voice-id prompt is cancelled (undefined text).
-    const view = testShell([["provider"], ["elevenlabs"], ["done"]], [], [undefined]);
+    const view = testShell(["provider", "elevenlabs", "done"], [], [undefined]);
     await voice.run("", view.shell);
     expect((await settings.load()).voice.ttsProvider).toBe("openai");
   });

@@ -1,5 +1,4 @@
-import { lstat, readFile } from "node:fs/promises";
-import { parseDiscordBridgeReceipt, type DiscordBridgeReceipt } from "@clankie/discord-presence-core";
+import type { DiscordBridgeReceipt } from "@clankie/discord-presence-core";
 
 export interface DiscordLiveProofCheck {
   readonly name: string;
@@ -13,9 +12,6 @@ export interface DiscordLiveProofReport {
   readonly receiptCount: number;
   readonly checks: readonly DiscordLiveProofCheck[];
 }
-
-export type DiscordPersonMemoryLiveProofReport = DiscordLiveProofReport;
-export type DiscordVoiceLiveProofReport = DiscordLiveProofReport;
 
 export function evaluateDiscordLiveProof(receipts: readonly DiscordBridgeReceipt[]): DiscordLiveProofReport {
   const checks: DiscordLiveProofCheck[] = [];
@@ -70,7 +66,7 @@ export function evaluateDiscordLiveProof(receipts: readonly DiscordBridgeReceipt
  */
 export function evaluateDiscordPersonMemoryLiveProof(
   receipts: readonly DiscordBridgeReceipt[],
-): DiscordPersonMemoryLiveProofReport {
+): DiscordLiveProofReport {
   const checks: DiscordLiveProofCheck[] = [];
   const check = (name: string, ok: boolean, detail: string): void => {
     checks.push({ name, ok, detail });
@@ -133,7 +129,7 @@ export function evaluateDiscordPersonMemoryLiveProof(
 /** Requires one DAVE session with three explicitly consented, speaker-attributed human round trips. */
 export function evaluateDiscordVoiceLiveProof(
   receipts: readonly DiscordBridgeReceipt[],
-): DiscordVoiceLiveProofReport {
+): DiscordLiveProofReport {
   const checks: DiscordLiveProofCheck[] = [];
   const check = (name: string, ok: boolean, detail: string): void => {
     checks.push({ name, ok, detail });
@@ -141,6 +137,20 @@ export function evaluateDiscordVoiceLiveProof(
   const sessions = voiceProofSessions(receipts);
   const selected = selectVoiceProofSession(sessions);
   const joined = selected?.joined;
+  const bridgeReady =
+    selected === undefined
+      ? undefined
+      : receipts
+          .slice(0, selected.joinedIndex + 1)
+          .findLast((receipt) => receipt.type === "discord.bridge.ready");
+  const voxOwned = bridgeReady?.data.mediaOwner === "vox" && bridgeReady.data.voxProcessReady === true;
+  check(
+    "Vox media owner",
+    voxOwned,
+    voxOwned
+      ? "the bridge process declared ready with Vox as its media owner"
+      : "no preceding bridge-ready receipt proves a ready Vox media owner",
+  );
   check(
     "DAVE voice session",
     joined !== undefined,
@@ -210,42 +220,42 @@ export function evaluateDiscordVoiceLiveProof(
     "clean leave",
     selected?.complete === true,
     selected?.complete === true
-      ? "voice session ended with an explicit leave receipt"
-      : "no matching leave receipt",
+      ? "Discord confirmed the Vox-owned gateway leave"
+      : "no matching gateway-confirmed Vox-owned leave receipt",
   );
 
-  const possessorAttached = activeReceipts.some(
+  const playAttached = activeReceipts.some(
     (receipt) =>
-      receipt.type === "discord.voice.possessor_connection" &&
+      receipt.type === "discord.voice.play_connection" &&
       receipt.data.phase === "attached" &&
       numberField(receipt, "attachedCount") >= 1,
   );
   const roomDeliveries = sumReceiptNumber(
     activeReceipts.filter(
-      (receipt) => receipt.type === "discord.voice.possessor_room" && receipt.data.listening === true,
+      (receipt) => receipt.type === "discord.voice.play_room" && receipt.data.listening === true,
     ),
     "deliveredCount",
   );
   check(
-    "possessor room state",
-    possessorAttached && roomDeliveries >= 1,
-    `${possessorAttached ? "attached" : "no attach"}; ${String(roomDeliveries)} listening room-state delivery receipt(s)`,
+    "play room state",
+    playAttached && roomDeliveries >= 1,
+    `${playAttached ? "attached" : "no attach"}; ${String(roomDeliveries)} listening room-state delivery receipt(s)`,
   );
 
   const transcriptDeliveries = sumReceiptNumber(
-    activeReceipts.filter((receipt) => receipt.type === "discord.voice.possessor_transcript_delivery"),
+    activeReceipts.filter((receipt) => receipt.type === "discord.voice.play_transcript_delivery"),
     "deliveredCount",
   );
   const narrationSubmissions = activeReceipts.filter(
-    (receipt) => receipt.type === "discord.voice.possessor_narration_submission",
+    (receipt) => receipt.type === "discord.voice.play_narration_submission",
   ).length;
-  const possessorRefusals = activeReceipts.filter(
-    (receipt) => receipt.type === "discord.voice.possessor_refusal",
+  const playRefusals = activeReceipts.filter(
+    (receipt) => receipt.type === "discord.voice.play_refusal",
   ).length;
   check(
-    "possessor two-way delivery",
-    transcriptDeliveries >= 1 && narrationSubmissions >= 1 && possessorRefusals === 0,
-    `${String(transcriptDeliveries)} transcript delivery counter(s); ${String(narrationSubmissions)} accepted narration submission(s); ${String(possessorRefusals)} refusal(s)`,
+    "play two-way delivery",
+    transcriptDeliveries >= 1 && narrationSubmissions >= 1 && playRefusals === 0,
+    `${String(transcriptDeliveries)} transcript delivery counter(s); ${String(narrationSubmissions)} accepted narration submission(s); ${String(playRefusals)} refusal(s)`,
   );
 
   const reconnected =
@@ -307,7 +317,7 @@ function voiceProofSessions(receipts: readonly DiscordBridgeReceipt[]): VoicePro
       }
       continue;
     }
-    if (receipt.type === "discord.voice.left") {
+    if (receipt.type === "discord.voice.left" && isGatewayConfirmedVoxLeave(receipt)) {
       const key = voiceScopeKey(receipt);
       const session = key === undefined ? undefined : active.get(key);
       if (session !== undefined) {
@@ -328,7 +338,7 @@ function voiceProofSessions(receipts: readonly DiscordBridgeReceipt[]): VoicePro
       active.get(key)?.activeReceipts.push(receipt);
       continue;
     }
-    if (receipt.type.startsWith("discord.voice.possessor_")) {
+    if (receipt.type.startsWith("discord.voice.play_")) {
       latestActiveSession(active)?.activeReceipts.push(receipt);
     }
   }
@@ -342,6 +352,10 @@ function voiceProofSessions(receipts: readonly DiscordBridgeReceipt[]): VoicePro
     });
   }
   return sessions.sort((left, right) => left.joinedIndex - right.joinedIndex);
+}
+
+function isGatewayConfirmedVoxLeave(receipt: DiscordBridgeReceipt): boolean {
+  return receipt.data.gatewayConfirmed === true && receipt.data.mediaOwner === "vox";
 }
 
 function selectVoiceProofSession(sessions: readonly VoiceProofSession[]): VoiceProofSession | undefined {
@@ -404,28 +418,4 @@ function numberField(receipt: DiscordBridgeReceipt, key: string): number {
 
 function sumReceiptNumber(receipts: readonly DiscordBridgeReceipt[], key: string): number {
   return receipts.reduce((sum, receipt) => sum + numberField(receipt, key), 0);
-}
-
-export async function readDiscordLiveReceipts(
-  path: string,
-  maximumBytes = 10 * 1024 * 1024,
-): Promise<DiscordBridgeReceipt[]> {
-  let target;
-  try {
-    target = await lstat(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw error;
-  }
-  if (!target.isFile() || target.isSymbolicLink()) {
-    throw new Error(`Discord receipt path must be a regular file, not a symlink: ${path}`);
-  }
-  if (target.size > maximumBytes) {
-    throw new Error(`Discord receipt file exceeds the ${maximumBytes.toString()} byte proof limit`);
-  }
-  const raw = await readFile(path, "utf8");
-  return raw
-    .split(/\r?\n/u)
-    .filter(Boolean)
-    .map((line) => parseDiscordBridgeReceipt(JSON.parse(line)));
 }

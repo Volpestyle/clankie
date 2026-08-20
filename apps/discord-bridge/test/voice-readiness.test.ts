@@ -9,8 +9,11 @@ import {
 import { Buffer } from "node:buffer";
 import { Routes } from "discord.js";
 import { describe, expect, it } from "vitest";
-import type { RealtimeSocket, RealtimeSocketFactory } from "@clankie/discord-presence-core";
-import { parseVoiceRealtimeEnv } from "../src/voice-composition.ts";
+import {
+  parseVoiceRealtimeEnv,
+  type RealtimeSocket,
+  type RealtimeSocketFactory,
+} from "@clankie/discord-presence-core";
 import { inspectDiscordVoiceReadiness, probeVoiceWakeTransition } from "../src/voice-readiness.ts";
 
 class MemoryCredentialStore implements CredentialStore {
@@ -46,6 +49,14 @@ const briefing: DiscordVoiceBriefing = {
   refreshedAt: "2026-07-25T17:00:00.000Z",
 };
 
+const readyVoxProbe = () =>
+  Promise.resolve({
+    binaryResolved: true,
+    binaryDetail: "owned Vox binary resolved",
+    processReady: true,
+    processDetail: "Vox emitted process_ready",
+  });
+
 function checkByName(
   report: { checks: readonly { name: string; ok: boolean; detail: string }[] },
   name: string,
@@ -56,7 +67,7 @@ function checkByName(
 }
 
 describe("Discord group voice readiness", () => {
-  it("proves credentials, realtime config, briefing path, wake transition, Opus, and live guild", async () => {
+  it("proves credentials, realtime config, briefing path, wake transition, Vox, and live guild", async () => {
     const store = new MemoryCredentialStore();
     store.credentials.set(DISCORD_BOT_PROVIDER_ID, { type: "api", key: "bot-secret" });
     store.credentials.set(DISCORD_VOICE_BRIDGE_CREDENTIAL_PROVIDER_ID, {
@@ -83,7 +94,7 @@ describe("Discord group voice readiness", () => {
           return Promise.resolve(briefing);
         },
       },
-      opusAvailable: () => true,
+      voxProbe: readyVoxProbe,
       // The live probe is faked so unit readiness stays offline; the CLI path
       // builds the real one.
       wakeProbe: () =>
@@ -120,6 +131,11 @@ describe("Discord group voice readiness", () => {
     expect(checkByName(report, "captain capability routing").ok).toBe(true);
     expect(checkByName(report, "wake transition").ok).toBe(true);
     expect(checkByName(report, "voice briefing endpoint").ok).toBe(true);
+    expect(checkByName(report, "Vox binary").ok).toBe(true);
+    expect(checkByName(report, "Vox process")).toMatchObject({
+      ok: true,
+      detail: "Vox emitted process_ready",
+    });
     // The realtime echo replaces the cascade's speech readiness: content-free
     // provider/model/truncation scalars only.
     expect(report.realtime).toEqual({
@@ -152,7 +168,13 @@ describe("Discord group voice readiness", () => {
         inspectDiscordReadiness: () => Promise.reject(new Error("offline")),
         fetchDiscordVoiceBriefing: () => Promise.reject(new Error("offline")),
       },
-      opusAvailable: () => false,
+      voxProbe: () =>
+        Promise.resolve({
+          binaryResolved: false,
+          binaryDetail: "Vox binary was not found",
+          processReady: false,
+          processDetail: "process smoke was not attempted because the Vox binary is missing",
+        }),
     });
     expect(report.ready).toBe(false);
     expect(report.checks.filter((check) => !check.ok).length).toBeGreaterThan(5);
@@ -187,7 +209,7 @@ describe("Discord group voice readiness", () => {
       env,
       store,
       api,
-      opusAvailable: () => true,
+      voxProbe: readyVoxProbe,
       wakeProbe,
     });
     const credentialCheck = checkByName(missing, "ElevenLabs voice credential");
@@ -201,7 +223,7 @@ describe("Discord group voice readiness", () => {
       env,
       store,
       api,
-      opusAvailable: () => true,
+      voxProbe: readyVoxProbe,
       wakeProbe,
     });
     expect(checkByName(present, "ElevenLabs voice credential").ok).toBe(true);
@@ -218,7 +240,7 @@ describe("Discord group voice readiness", () => {
         inspectDiscordReadiness: () => Promise.resolve(controlPlane),
         fetchDiscordVoiceBriefing: () => Promise.resolve(briefing),
       },
-      opusAvailable: () => true,
+      voxProbe: readyVoxProbe,
       wakeProbe: () =>
         Promise.resolve({
           listener: { ok: true, detail: "xAI streaming STT opened" },
@@ -246,7 +268,7 @@ describe("Discord group voice readiness", () => {
         inspectDiscordReadiness: () => Promise.resolve(controlPlane),
         fetchDiscordVoiceBriefing: () => Promise.resolve(briefing),
       },
-      opusAvailable: () => true,
+      voxProbe: readyVoxProbe,
     });
     expect(report.ready).toBe(false);
     const config = checkByName(report, "realtime configuration");

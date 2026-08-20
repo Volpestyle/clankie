@@ -9,10 +9,8 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "start": "tsx src/index.ts",
-    "build": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run",
-    "clean": "rm -rf dist coverage"
+    "test": "vitest run"
   },
   "dependencies": {
     "@clankie/api-client": "workspace:*",
@@ -26,7 +24,6 @@
     "@earendil-works/pi-coding-agent": "0.84.2",
     "@earendil-works/pi-tui": "0.84.2",
     "qrcode": "1.5.4",
-    "yaml": "catalog:",
     "zod": "4.4.3"
   },
   "devDependencies": {

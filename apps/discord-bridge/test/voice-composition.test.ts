@@ -1,15 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { DiscordVoiceEvidence } from "@clankie/protocol";
-import type { RealtimeTimers } from "@clankie/discord-presence-core";
 import {
-  describeVoiceResponse,
   parseVoiceRealtimeEnv,
-  renderVoiceConsentReply,
-  renderVoiceJoinDisclosure,
-  renderVoiceStatusReply,
   VoiceIdleAutoLeave,
   voiceEvidenceReceiptData,
   voiceEvidenceReceiptType,
+  type RealtimeTimers,
+} from "@clankie/discord-presence-core";
+import {
+  describeVoiceResponse,
+  renderVoiceConsentReply,
+  renderVoiceJoinDisclosure,
+  renderVoiceStatusReply,
 } from "../src/voice-composition.ts";
 
 class TestTimers implements RealtimeTimers {
@@ -161,12 +163,12 @@ describe("voice evidence receipts and the response line", () => {
     expect(voiceEvidenceReceiptType({ type: "left", ...scope })).toBe("discord.voice.left");
     expect(
       voiceEvidenceReceiptType({
-        type: "possessor_narration_suppressed",
+        type: "play_narration_suppressed",
         ...scope,
         deliveryId: "play-turn-2",
         reason: "rate_limited",
       }),
-    ).toBe("discord.voice.possessor_narration_suppressed");
+    ).toBe("discord.voice.play_narration_suppressed");
   });
 
   it("flattens evidence into scalar receipt data without undefined slots", () => {

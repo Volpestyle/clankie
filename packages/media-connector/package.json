@@ -1,19 +1,15 @@
 {
   "name": "@clankie/media-connector",
   "version": "0.1.0",
-  "private": false,
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
   },
   "scripts": {
-    "build": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run",
-    "clean": "rm -rf dist coverage"
+    "test": "vitest run"
   },
   "dependencies": {
-    "@clankie/protocol": "workspace:*",
     "zod": "4.4.3"
   },
   "devDependencies": {

@@ -9,18 +9,22 @@ the native media sockets, codec work, packet timing, encryption, and low-level
 telemetry that live below Clankie's Node runtime. The invariant across the
 boundary is that ClankVox stays deterministic; Clankie applies policy.
 
-Current product wiring consumes `stream_watch` and `stream_publish` from the
-active lab user body. Ordinary voice and audible music still run through
-`@discordjs/voice`; the native `voice` and music contracts below describe
-implemented Vox capability, not the current product owner.
+The media-enabled active bot or user-session body owns one child and consumes
+the primary `voice` role for join, capture, TTS, and audible music. A text-only
+official-bot process does not spawn Vox. The user body can concurrently consume
+`stream_watch` and `stream_publish`. Vox is the sole Discord media owner
+([ADR 0128](../../../docs/adr/0128-vox-is-the-sole-discord-media-owner.md)).
 
 ## Ownership Boundary
 
 Clankie's TypeScript runtime owns:
 
 - platform gateway/session control outside the raw media transport
-- Discord selfbot gateway session and stream discovery dispatch handling
+- the active bot or user account token, gateway, REST, and admission checks
+- user-body stream discovery dispatch handling
 - session orchestration and product logic
+- `DiscordVoiceSession` consent, attribution, floor, realtime-provider, and
+  captain-handoff policy
 - tools, prompts, settings, and commentary decisions
 - deciding whether raw VP8 frames can be promoted; the current product path does
   not decode them and uses Vox-decoded H264 JPEGs
@@ -42,9 +46,17 @@ Clankie's TypeScript runtime owns:
 `clankvox` should stay transport-native and deterministic. Clankie should stay
 agentic and product-facing.
 
+The account token never crosses this boundary. Once the body validates a join,
+only Discord-issued short-lived voice/stream endpoint, token, session, user,
+server, and channel fields cross IPC.
+
 ## Process Model
 
-The entrypoint in [../src/main.rs](../src/main.rs) creates one long-lived `AppState` and drives it from a single async event loop.
+Each media-enabled active Discord body creates one app-lifetime client and
+child. The entrypoint in [../src/main.rs](../src/main.rs) creates one long-lived
+`AppState` and drives it from a single async event loop. A text-only official-bot
+process creates neither, and the inactive body is down, so neither can create a
+competing child or media owner.
 
 The loop reacts to five sources:
 
@@ -97,11 +109,26 @@ where it is the protocol-correct output.
 - music pipeline state
 - stream publish runtime state
 - reconnect bookkeeping
+- caller-owned primary `connectionId` on join and every primary ready,
+  connection, transport, DAVE, and transport-error event, plus one internal
+  generation per role
+
+Primary voice teardown is role-scoped. Explicit `leave` sends gateway OP4 with
+`channel_id: null`, clears only primary voice credentials, capture/playback,
+transport, DAVE, and reconnect state, and leaves `stream_watch` and
+`stream_publish` running in the same process.
 
 The important architectural choice is that each Discord transport role has its
 own connection slot and its own DAVE manager: a media role with distinct
 lifecycle or encryption state gets its own slot. That is why Go Live is not
 modeled as “extra fields on the main voice socket.”
+
+Every `VoiceEvent` carries its role generation. Replacing or clearing a
+connection advances that generation, so delayed ready, DAVE, media, and
+disconnect events from the old socket are ignored. Early DAVE readiness is held
+until transport readiness and can never regress to negotiating. Remote video
+state, decoder state, and feedback are keyed by role plus user/stream; primary
+webcam and stream-watch screen state cannot overwrite or reroute one another.
 
 ## Discord Transport Roles
 
@@ -117,6 +144,8 @@ The main voice leg for:
 - inbound user audio capture
 - outbound TTS and music
 
+Both Discord bodies use this role.
+
 ### `stream_watch`
 
 A separate stream-server connection used only for inbound Go Live receive:
@@ -126,6 +155,9 @@ A separate stream-server connection used only for inbound Go Live receive:
 - decrypts video and forwards encoded frames to Clankie over IPC
 - never owns the main audio session
 
+Only the user-session body can use this role because Discord bots cannot
+receive Go Live pixels.
+
 ### `stream_publish`
 
 A separate stream-server connection used only for outbound Go Live send:
@@ -134,6 +166,9 @@ A separate stream-server connection used only for outbound Go Live send:
 - advertises sender-side H264 support
 - announces video state to Discord
 - packetizes and transmits outbound H264 access units
+
+Only the user-session body can use this role because Discord bots cannot Go
+Live. This is a platform limitation, not a second media implementation.
 
 ## Supervisor Split
 
@@ -145,7 +180,7 @@ The code is organized around four operational surfaces:
 
 Owns:
 
-- join / destroy
+- join / leave / destroy
 - connect and disconnect commands for all roles
 - role-specific reconnect handling
 - connection teardown when session metadata changes
@@ -192,10 +227,12 @@ Owns:
 
 Inbound commands are grouped into four conceptual families:
 
-- connection: join, voice server/state updates, stream-watch connect/disconnect, stream-publish connect/disconnect, destroy
-- capture: subscribe/unsubscribe user audio and user video
-- playback: TTS audio (`audio`), `stop_playback`, `stop_tts_playback`, music play/pause/resume/stop/gain
-- stream publish runtime: `stream_publish_play`, `stream_publish_play_visualizer`, `stream_publish_browser_start`, `stream_publish_browser_frame`, pause, resume, stop
+- connection: a caller-owned `connectionId` on primary join; leave and voice
+  server/state updates for the active primary connection; stream-watch
+  connect/disconnect; stream-publish connect/disconnect
+- capture: capture-ID-scoped subscribe/unsubscribe user audio and user video
+- playback/lifecycle: playback-ID-scoped TTS audio (`audio`), ordered `finish_tts_playback`, targeted `stop_tts_playback`, music-ID-scoped play/pause/resume/stop/gain, destroy
+- stream publish runtime: `stream_publish_play`, `stream_publish_browser_start`, `stream_publish_browser_frame`, pause, resume, stop
 
 Stdin is read with a hard per-line cap (8MB): an oversized line is discarded
 up to its newline and reported as an `input_too_large` error; invalid UTF-8
@@ -207,15 +244,34 @@ Outbound events are also grouped:
 - process / adapter / connection state: `process_ready`, `ready`,
   `adapter_send`, `connection_state`
 - transport state per role: `transport_state`
+- negotiated encryption state per role: `dave_state`; transport readiness and
+  positive DAVE readiness are separate events
 - speaking and user audio capture: `speaking_start`/`speaking_end`,
-  `user_audio` (binary framing), `user_audio_end`, `client_disconnect`
-- user video: `user_video_state`, raw VP8 frames as `user_video_frame`,
-  in-process-decoded H264 JPEG frames as `decoded_video_frame`,
-  `user_video_end`
-- playback and music lifecycle: `player_state`, `playback_armed`,
+  capture-correlated `user_audio` (binary framing), `user_audio_end`,
+  `client_disconnect`
+- user video: raw VP8 frames as `user_video_frame` and in-process-decoded H264
+  JPEG frames as `decoded_video_frame`
+- playback and music lifecycle: `player_state`, `playback_armed`, correlated
   `tts_playback_state`, `music_idle`, `music_error`, `music_gain_reached`
 - telemetry: `buffer_depth`, `transport_stats`, `tts_buffer_overflow`
-- structured IPC errors (`error`) and forwarded log records (`log`)
+- structured IPC errors (`error`); transport tracing stays on stderr
+
+`process_ready` carries the explicit IPC protocol version and is process/IPC
+readiness only. The TypeScript client accepts no command before an exact version
+match. It never substitutes for a role's `transport_state=ready`, and transport
+readiness never substitutes for positive, role-scoped `dave_state=ready`.
+Primary voice `ready`, `connection_state`, `transport_state`, `dave_state`, and
+transport errors carry the caller's `connectionId`; stream roles use their own
+internal generation instead. Fresh media-enabled app evidence identifies
+`mediaOwner: vox`; a text-only bot identifies `mediaOwner: none`. Watch and
+publish retain separate role proofs. A clean `voice` leave preserves the other
+roles, while body shutdown destroys all roles and the sole child.
+
+`tts_playback_state` is playback-ID-scoped transport truth: `buffered` means PCM
+was accepted into the queue, `started` means the first audible TTS-containing
+RTP frame was successfully transmitted, and `drained` follows
+`finish_tts_playback` only after PCM, a held partial tail, and trailing output
+frames have crossed the sender. `stopped` and `failed` are terminal alternatives.
 
 ### Telemetry Semantics
 
@@ -230,19 +286,17 @@ any Discord transport is connected (`voice`, `stream_watch`, or
 every 250 ticks, about every 5s, and the cadence counter resets while no
 transport is connected. Counters are cumulative since the ClankVox process
 started. The snapshot includes tick cadence (`total`, `skipped`, `slipEvents`,
-`maxGapMs`), IPC lane drops, inbound audio decrypt/loss/concealment counters,
+`maxGapMs`), control/audio/video IPC lane drops, inbound audio decrypt/loss/concealment counters,
 inbound video decode/DAVE counters, and outbound RTP/encrypt-failure counters.
 
 ### Writer Lanes
 
-The stdout writer thread drains four bounded lanes in strict priority order:
-control (4096), audio (512), video (64), then log (4096), so log bursts can
-never preempt realtime audio/video delivery. Audio and video are lossy
-(newest dropped and counted on overflow), the log lane drops its oldest entry
-on overflow, and the control lane only drops (with an error log) once 4096
-control messages are stuck behind a stalled parent. A stalled parent
-therefore caps subprocess memory at the lane depths instead of growing
-unbounded.
+The stdout writer thread drains three bounded lanes in priority order: control
+(4096), ordered capture audio (512), then video (64). Control and capture audio
+backpressure producers rather than dropping. `user_audio_end` uses the same FIFO
+as its PCM, so it cannot overtake a queued tail. Video remains lossy and counted
+on overflow. A stalled parent therefore caps subprocess memory at the lane
+depths without reporting successful truncated capture or playback.
 
 ## Module Map
 
@@ -269,7 +323,7 @@ Media and crypto:
 - [../src/rtp.rs](../src/rtp.rs): RTP header build/parse, padding/extension stripping, codec payload types
 - [../src/rtcp.rs](../src/rtcp.rs): protected RTCP packet construction
 - [../src/h264.rs](../src/h264.rs) / [../src/vp8.rs](../src/vp8.rs): codec depacketizers and Annex-B helpers
-- [../src/video_decoder.rs](../src/video_decoder.rs): persistent OpenH264 decoder, YUV→RGB, JPEG encode, frame-diff scoring
+- [../src/video_decoder.rs](../src/video_decoder.rs): persistent OpenH264 decoder, YUV→RGB, and JPEG encode
 - [../src/video_decode_worker.rs](../src/video_decode_worker.rs): dedicated H264 decode thread, fps gate, `decoded_video_frame` emission, PLI feedback lane
 - [../src/video.rs](../src/video.rs): video stream descriptors, subscriptions, and state helpers
 - [../src/video_state.rs](../src/video_state.rs): remote video state payloads and OP12 announcements
@@ -283,31 +337,23 @@ Media and crypto:
 IPC:
 
 - [../src/ipc.rs](../src/ipc.rs): message contracts, prioritized stdout writer lanes, capped stdin reader
-- [../src/ipc_protocol.rs](../src/ipc_protocol.rs): routing inbound IPC into command groups
-- [../src/ipc_router.rs](../src/ipc_router.rs): dispatches routed commands into supervisors
-- [../src/ipc_log_layer.rs](../src/ipc_log_layer.rs): tracing layer forwarding info+ logs over the IPC log lane
+- [../src/ipc_router.rs](../src/ipc_router.rs): dispatches inbound commands directly into supervisors
 
 ## Transport-Owned Mixing Rules
 
-Two pieces of product-flavored policy currently live in the transport plane,
+One product-flavored mixing rule currently lives in the transport plane,
 inside [../src/playback_supervisor.rs](../src/playback_supervisor.rs):
 
 - **TTS-vs-music arbitration:** inbound TTS PCM is rejected while music is
   actively playing unless music is ducked, and TTS always mixes at full
   volume over gain-enveloped music.
-- **The pending-music-start state machine:** `music_play` does not start
-  playback immediately; it waits for announcement TTS to arrive, then for a
-  gap in TTS audio, then for the TTS buffer to drain (with prepare/drain
-  safety timeouts) before committing the music start.
 
-These are documented here as transport-owned mixing rules because they decide
+This is documented here as a transport-owned mixing rule because it decides
 _what the listener hears_, not just how bytes move, which strains the
-"ClankVox stays deterministic, Clankie applies product policy" boundary. They
-are a candidate to move upstream behind explicit duck/hold commands from the
-brain (e.g. `duck_music`, `hold_music_start`/`release_music_start`), leaving
-ClankVox with pure mixing mechanics. Moving them is a cross-package change
-(the Clankie service owns the command contract) and is deliberately not done
-yet.
+"ClankVox stays deterministic, Clankie applies product policy" boundary. It is
+a candidate to move upstream behind explicit duck commands. A
+policy-approved `music_play` starts its pipeline immediately; Vox never waits
+for unrelated TTS tool-result playback.
 
 ## Why The Architecture Looks This Way
 

@@ -2,15 +2,11 @@ import { ClankieApiClient } from "@clankie/api-client";
 import {
   createDefaultCredentialStore,
   DISCORD_BOT_PROVIDER_ID,
-  ensurePossessorVoiceCredential,
+  ensurePlayVoiceCredential,
   resolveDiscordBridgeCredential,
   resolveDiscordVoiceBridgeCredential,
 } from "@clankie/credential-broker";
-import {
-  createPossessorVoiceListener,
-  POSSESSOR_VOICE_DEFAULT_PORT,
-  POSSESSOR_VOICE_PATH,
-} from "@clankie/possessor-voice";
+import { createPlayVoiceListener, PLAY_VOICE_DEFAULT_PORT, PLAY_VOICE_PATH } from "@clankie/play-voice";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
@@ -32,13 +28,15 @@ import {
   authorizeAmbientCommand,
   authorizeVoicePresenceCommand,
   parseDiscordVoiceJoinPolicy,
-  parseRoleIds,
   type DiscordCommandPrincipal,
   type DiscordRoleBindings,
 } from "./authority.ts";
 import {
   CATCH_UP_INTERVAL_MS,
   createAdvertisedDiscordPresencePort,
+  createVoiceBriefingProvider,
+  createVoiceLookAtScreenProvider,
+  createVoiceRealtimePorts,
   discordVoiceTranscriptLogPath,
   DiscordBridgeReceiptStore,
   DiscordPresenceSession,
@@ -48,13 +46,19 @@ import {
   DiscordVoiceTranscriptStore,
   parseDiscordDmPolicy,
   parseDiscordIdSet,
+  planNonWatchCaptainDiscordAction,
+  parseVoiceRealtimeEnv,
   routeDiscordRoomText,
   selectInboundImageAttachments,
   tryHandleCaptainDiscordActionRequest,
   tryHandleMusicControlRequest,
   resolveOwnerFollowTarget,
   tryHandleVoicePresenceControlRequest,
+  VoiceIdleAutoLeave,
+  voiceEvidenceReceiptData,
+  voiceEvidenceReceiptType,
   type DiscordBridgeReceipt,
+  type DiscordBridgeReceiptType,
   type DiscordInboundContextMessage,
   type VoicePresenceControlAction,
   type VoicePresenceControlInput,
@@ -64,7 +68,6 @@ import {
   DiscordPresenceWriteSchema,
   type DiscordCaptainActionInput,
   type DiscordCaptainActionResult,
-  type DiscordPresenceWrite,
   type DiscordVoiceEvidence,
 } from "@clankie/protocol";
 import {
@@ -75,20 +78,17 @@ import {
 } from "@clankie/settings";
 import { commands, DISCORD_COMMAND_NAME, DISCORD_SUBCOMMANDS } from "./commands.ts";
 import {
-  createVoiceBriefingProvider,
-  createVoiceLookAtScreenProvider,
-  createVoiceRealtimePorts,
   describeVoiceResponse,
-  parseVoiceRealtimeEnv,
   renderVoiceConsentReply,
   renderVoiceJoinDisclosure,
   renderVoiceStatusReply,
-  VoiceIdleAutoLeave,
-  voiceEvidenceReceiptData,
-  voiceEvidenceReceiptType,
 } from "./voice-composition.ts";
 import { executeVoicePresenceIntent } from "./voice-presence.ts";
 import { sanitizeDiscordText } from "./text.ts";
+import { shutdownDiscordBridge } from "./shutdown.ts";
+import { DiscordVoxGatewayBridge } from "./vox-gateway.ts";
+import { startOfficialBotVox } from "./vox-process.ts";
+import { assertOfficialBotBodyActive, discordBridgeHealth } from "./lifecycle.ts";
 
 // Fill unset DISCORD_* names from the operator settings file before anything
 // reads them, so TUI-configured deployments need no .env. Deliberately ahead of
@@ -100,6 +100,7 @@ const settingsFilledNames = [
   ...applyDiscordSettingsToEnvironment(storedSettings.discord),
   ...applyVoiceSettingsToEnvironment(storedSettings.voice),
 ];
+assertOfficialBotBodyActive(process.env);
 
 if (process.env.DISCORD_USER_TOKEN) {
   throw new Error("DISCORD_USER_TOKEN must not be set for the official Discord bot bridge.");
@@ -157,6 +158,7 @@ const voiceApi =
     ? undefined
     : new ClankieApiClient({ baseUrl: apiUrl, captainToken: voiceBridgeToken });
 const characterId = process.env.CLANKIE_CHARACTER_ID ?? "clankie";
+let terminalFailure: string | undefined;
 const presenceSession = new DiscordPresenceSession({
   sessionId: `discord:bot:${applicationId}:${randomUUID()}`,
   characterId,
@@ -169,6 +171,7 @@ const presenceSession = new DiscordPresenceSession({
   },
   onPublicationFailure: reportPresencePhaseFailure,
   onTerminalFailure: (error, event) => {
+    terminalFailure ??= `presence publication failed: ${error.disposition}`;
     console.error(
       {
         disposition: error.disposition,
@@ -180,8 +183,8 @@ const presenceSession = new DiscordPresenceSession({
   },
 });
 const roleBindings: DiscordRoleBindings = {
-  ambientRoleIds: parseRoleIds(process.env.DISCORD_AMBIENT_ROLE_IDS),
-  ambientUserIds: parseRoleIds(process.env.DISCORD_AMBIENT_USER_IDS),
+  ambientRoleIds: parseDiscordIdSet(process.env.DISCORD_AMBIENT_ROLE_IDS),
+  ambientUserIds: parseDiscordIdSet(process.env.DISCORD_AMBIENT_USER_IDS),
 };
 const voiceJoinPolicy = parseDiscordVoiceJoinPolicy(process.env.DISCORD_VOICE_JOIN_POLICY);
 const receipts = new DiscordBridgeReceiptStore({
@@ -240,6 +243,17 @@ const voiceChannelIds = parseDiscordIdSet(process.env.DISCORD_VOICE_CHANNEL_IDS)
 if (voiceEnabled && voiceGuildIds.size === 0) {
   throw new Error("Discord voice is enabled but DISCORD_VOICE_GUILD_IDS is empty.");
 }
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildVoiceStates,
+    ...(textIngressEnabled
+      ? [GatewayIntentBits.GuildMessages, GatewayIntentBits.DirectMessages, GatewayIntentBits.MessageContent]
+      : []),
+  ],
+  partials: textIngressEnabled ? [Partials.Channel] : [],
+});
+let shuttingDown = false;
 // Validated at startup like the rest of the env: truncation and idle auto-leave
 // are always configured, never defaulted to unbounded (ADR 0057, mission T6).
 const voiceRealtimeConfig = voiceEnabled ? parseVoiceRealtimeEnv(process.env) : undefined;
@@ -268,10 +282,20 @@ if (voiceRealtimeConfig?.ttsProvider === "elevenlabs" && elevenLabsCredential?.t
 // stays on the explicit opt-in policy.
 const voiceConsentPolicy =
   process.env["DISCORD_VOICE_CONSENT_POLICY"] === "presence" ? ("presence" as const) : ("explicit" as const);
+const vox = await startOfficialBotVox({
+  enabled: voiceEnabled,
+  env: process.env,
+  onError: (message) => console.error({ message }, "Vox media process failed"),
+  onLog: (message) => console.info({ message }, "Vox media process"),
+});
 const voiceSession =
-  realtimeCredential?.type !== "api" || voiceApi === undefined || voiceRealtimeConfig === undefined
+  realtimeCredential?.type !== "api" ||
+  voiceApi === undefined ||
+  voiceRealtimeConfig === undefined ||
+  vox === undefined
     ? undefined
     : new DiscordVoiceSession({
+        vox,
         ingress: new DiscordVoiceIngress(voiceApi, {
           characterId,
           credentialRef: "discord_bot",
@@ -307,6 +331,23 @@ const voiceSession =
         presenceSessionId: () => presenceSession.record.sessionId,
         emit: recordVoiceEvidence,
       });
+const voiceGateway =
+  vox === undefined || voiceSession === undefined
+    ? undefined
+    : new DiscordVoxGatewayBridge(vox, voiceSession, {
+        onError: (message) => {
+          terminalFailure ??= message;
+          console.error({ message }, "Discord Vox gateway adapter failed");
+        },
+        onLeaveConfirmed: async ({ guildId, channelId }) => {
+          await recordReceipt("discord.voice.left", {
+            guildId,
+            channelId,
+            gatewayConfirmed: true,
+            mediaOwner: "vox",
+          });
+        },
+      });
 const voiceTranscriptStore = voiceTranscriptLoggingEnabled ? new DiscordVoiceTranscriptStore() : undefined;
 if (voiceSession !== undefined && voiceTranscriptStore !== undefined) {
   voiceSession.subscribeTranscript((_line, transcript) => {
@@ -325,7 +366,7 @@ const voiceIdleAutoLeave =
     : new VoiceIdleAutoLeave({
         idleLeaveMs: voiceRealtimeConfig.idleLeaveMs,
         isActive: () => voiceSession.status().active,
-        leave: () => voiceSession.leave(),
+        leave: () => voiceGateway?.leave() ?? voiceSession.leave(),
         onLeave: (idleMs) => {
           console.info(`Discord voice session idle for ${String(idleMs)}ms; leaving the metered channel.`);
         },
@@ -336,17 +377,15 @@ const voiceIdleAutoLeave =
           );
         },
       });
-// The possessor voice seam (ADR 0064): a harness driving Clankie's GBA body
-// reports what it just did, and he commentates it in his own voice. Off by
-// default and composed only when he actually has a voice — with no realtime
-// session there is nothing for a report to reach, so the listener never binds
-// and a possessor's `clankie_say` refuses with a reason.
-const possessorVoiceListener =
-  process.env["CLANKIE_POSSESSOR_VOICE_ENABLED"] === "true" && voiceSession !== undefined
-    ? createPossessorVoiceListener({
-        // The bridge owns the listener, so the bridge owns the mint; a
-        // possessor only ever resolves.
-        token: await ensurePossessorVoiceCredential(),
+// Clankie's play voice seam (ADR 0064): local or hosted play reports what it
+// just did, and the active Discord body lets his live persona decide whether to
+// commentate. No voice session means no listener and no Discord capability.
+const playVoiceListener =
+  voiceSession === undefined
+    ? undefined
+    : createPlayVoiceListener({
+        // The active body owns the listener, so it owns first-run minting.
+        token: await ensurePlayVoiceCredential({ store: credentialStore }),
         narrate: (text, options) => voiceSession.narrate(text, options),
         emit: (evidence) => {
           const stayId = voiceSession.status().stayId;
@@ -357,33 +396,19 @@ const possessorVoiceListener =
         // Read at attach time so a play loop that starts mid-call learns the
         // room immediately instead of waiting for the next join or leave.
         room: () => ({ listening: voiceSession.status().active }),
-      })
-    : undefined;
-if (possessorVoiceListener !== undefined && voiceSession !== undefined) {
-  const port = await possessorVoiceListener.listen(
-    Number(process.env["CLANKIE_POSSESSOR_VOICE_PORT"] ?? POSSESSOR_VOICE_DEFAULT_PORT),
-  );
+      });
+let stopPlayVoiceTranscript: (() => void) | undefined;
+if (playVoiceListener !== undefined && voiceSession !== undefined) {
+  const port = await playVoiceListener.listen(PLAY_VOICE_DEFAULT_PORT);
   // Hearing is push-only, so the bridge starts retaining nothing new: lines
   // that already passed the consent boundary are handed on as they happen.
-  voiceSession.subscribeTranscript((line) => possessorVoiceListener.publishUtterance(line));
+  stopPlayVoiceTranscript = voiceSession.subscribeTranscript((line) =>
+    playVoiceListener.publishUtterance(line),
+  );
   // Text lands on the same seam (see `messageCreate`), so the room can steer a
   // playthrough without anyone opting into voice capture.
-  console.info(
-    { port, path: POSSESSOR_VOICE_PATH },
-    "Discord bridge possessor voice seam listening on loopback",
-  );
+  console.info({ port, path: PLAY_VOICE_PATH }, "Discord bridge play voice seam listening on loopback");
 }
-const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildVoiceStates,
-    ...(textIngressEnabled
-      ? [GatewayIntentBits.GuildMessages, GatewayIntentBits.DirectMessages, GatewayIntentBits.MessageContent]
-      : []),
-  ],
-  partials: textIngressEnabled ? [Partials.Channel] : [],
-});
-
 // The gateway is the authority on which servers he is in and how much of each
 // he can see; the presence record is how that knowledge reaches the captain.
 // Synced before every ready/resume publication (membership rides the phase
@@ -436,6 +461,7 @@ const syncGuildMembership = () => {
 // event per change); a trailing coalesce keeps that from spraying the durable
 // stream. The presence core additionally drops syncs that change nothing.
 let membershipSyncTimer: NodeJS.Timeout | undefined;
+let catchUpTimer: NodeJS.Timeout | undefined;
 const scheduleGuildMembershipSync = () => {
   if (membershipSyncTimer !== undefined) clearTimeout(membershipSyncTimer);
   membershipSyncTimer = setTimeout(() => {
@@ -473,6 +499,8 @@ client.once("ready", async () => {
     commandCount: DISCORD_SUBCOMMANDS.length,
     textIngressEnabled,
     voiceEnabled,
+    mediaOwner: voiceEnabled ? "vox" : "none",
+    voxProcessReady: vox?.status === "ready",
     settingsFilledCount: settingsFilledNames.length,
   });
   if (settingsFilledNames.length > 0) {
@@ -522,6 +550,7 @@ client.on("shardDisconnect", () => {
 });
 
 client.on("invalidated", () => {
+  terminalFailure ??= "Discord gateway session was invalidated";
   void presenceSession.fail().catch(reportPresencePhaseFailure);
 });
 
@@ -592,7 +621,7 @@ client.on("voiceStateUpdate", (previous, current) => {
     const activeVoiceSession = voiceSession;
     const status = activeVoiceSession?.status();
     if (activeVoiceSession !== undefined && status?.active && current.channelId !== status.channelId) {
-      void activeVoiceSession.leave().catch((error) => {
+      void (voiceGateway?.leave() ?? activeVoiceSession.leave()).catch((error) => {
         console.error(
           { error: error instanceof Error ? error.message : String(error) },
           "Discord voice session failed to close after a bot channel move",
@@ -603,7 +632,7 @@ client.on("voiceStateUpdate", (previous, current) => {
 });
 
 client.on("messageCreate", async (message) => {
-  if (!textIngress) return;
+  if (shuttingDown || !textIngress) return;
   try {
     const selection = selectDiscordMessageImages(message);
     const authorIsBot = message.author.bot || message.author.id === client.user?.id;
@@ -635,7 +664,7 @@ client.on("messageCreate", async (message) => {
     // The playthrough and realtime voice room are local threads of the same
     // character. Both inherit the event; only the active voice room owns the
     // reply, so the separate text captain does not race it.
-    if (routedRoomText.text !== null) possessorVoiceListener?.publishUtterance(routedRoomText.text);
+    if (routedRoomText.text !== null) playVoiceListener?.publishUtterance(routedRoomText.text);
     if (routedRoomText.voiceOwned) return;
     let contextRead: Promise<readonly DiscordInboundContextMessage[]> | undefined;
     const loadContextOnce = () => (contextRead ??= readDiscordContext(message, textIngressContextLimit));
@@ -671,7 +700,7 @@ client.on("messageCreate", async (message) => {
 });
 
 client.on("interactionCreate", async (interaction) => {
-  if (!interaction.isChatInputCommand()) return;
+  if (shuttingDown || !interaction.isChatInputCommand()) return;
   try {
     await handleCommand(interaction);
   } catch (error) {
@@ -889,10 +918,9 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
       const status =
         current.active && current.guildId === interaction.guild.id && current.channelId === channel.id
           ? await voiceSession.setConsent(interaction.guild.id, channel.id, interaction.user.id, true)
-          : await voiceSession.join({
+          : await voiceGateway!.join(interaction.guild, {
               channelId: channel.id,
               guildId: interaction.guild.id,
-              adapterCreator: interaction.guild.voiceAdapterCreator,
               invokingUserId: interaction.user.id,
             });
       await interaction.editReply({
@@ -1064,7 +1092,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
         });
         return;
       }
-      await voiceSession?.leave();
+      await voiceGateway?.leave();
       await interaction.reply({ content: "Left the voice channel.", ephemeral: true });
       return;
     }
@@ -1090,7 +1118,15 @@ async function executeCaptainVoicePresence(
       joinPolicy: voiceJoinPolicy,
       voiceGuildIds,
       voiceChannelIds,
-      voiceSession,
+      voiceSession:
+        voiceSession === undefined || voiceGateway === undefined
+          ? undefined
+          : {
+              status: () => voiceSession.status(),
+              canHear: (userId) => voiceSession.canHear(userId),
+              join: (joinInput) => voiceGateway.join(target.guild, joinInput),
+              leave: () => voiceGateway.leave(),
+            },
       transcriptLoggingEnabled: voiceTranscriptLoggingEnabled,
     },
     {
@@ -1098,7 +1134,6 @@ async function executeCaptainVoicePresence(
       guildId: target.guildId,
       principal: { userId: target.actorId, roleIds: new Set(target.member.roles.cache.keys()) },
       memberVoiceChannelId: target.member.voice.channelId ?? undefined,
-      adapterCreator: target.guild.voiceAdapterCreator,
     },
   );
   console.info(
@@ -1193,45 +1228,22 @@ async function executeCaptainDiscordAction(
     return { ok: false, message: "That Discord action is not available in DMs." };
   }
   let channelId = input.channelId;
-  let action: DiscordPresenceWrite["action"];
-  let payload: DiscordPresenceWrite["payload"];
-  if (input.action === "react" || input.action === "unreact") {
+  let plan = planNonWatchCaptainDiscordAction(input);
+  if (plan !== undefined) {
     if (
       !ingressGuildIds.has(input.guildId) ||
       (ingressChannelIds.size > 0 && !ingressChannelIds.has(input.channelId))
     ) {
-      return { ok: false, message: "That message is outside my admitted Discord channels." };
+      return {
+        ok: false,
+        message:
+          input.action === "react" || input.action === "unreact"
+            ? "That message is outside my admitted Discord channels."
+            : input.action === "send_text_update"
+              ? "That channel is outside my admitted Discord channels."
+              : "Threads only work in my admitted server channels.",
+      };
     }
-    action = `discord.presence.${input.action}`;
-    payload = { kind: input.action, channelId, messageId: input.messageId, emoji: input.emoji };
-  } else if (input.action === "send_text_update") {
-    if (
-      !ingressGuildIds.has(input.guildId) ||
-      (ingressChannelIds.size > 0 && !ingressChannelIds.has(input.channelId))
-    ) {
-      return { ok: false, message: "That channel is outside my admitted Discord channels." };
-    }
-    // Threaded onto the message he is answering, so a "give me a minute" and
-    // the answer that eventually follows read as one exchange.
-    action = "discord.presence.send_message";
-    payload = {
-      kind: "send_message",
-      channelId,
-      replyToMessageId: input.messageId,
-      content: input.text,
-    };
-  } else if (input.action === "create_thread" || input.action === "join_thread") {
-    if (
-      !ingressGuildIds.has(input.guildId) ||
-      (ingressChannelIds.size > 0 && !ingressChannelIds.has(input.channelId))
-    ) {
-      return { ok: false, message: "Threads only work in my admitted server channels." };
-    }
-    action = `discord.presence.${input.action}`;
-    payload =
-      input.action === "create_thread"
-        ? { kind: "create_thread", channelId, messageId: input.messageId, name: input.name }
-        : { kind: "join_thread", channelId };
   } else {
     const guild = client.guilds.cache.get(input.guildId);
     const member =
@@ -1262,12 +1274,18 @@ async function executeCaptainDiscordAction(
     ) {
       return { ok: false, message: "I need to be in your admitted voice channel first." };
     }
-    action =
-      input.action === "watch_start" ? "discord.presence.activity_start" : "discord.presence.activity_stop";
-    payload =
-      input.action === "watch_start"
-        ? { kind: "activity_start", guildId: input.guildId, channelId, surface: "gba_emulator" }
-        : { kind: "activity_stop", guildId: input.guildId, channelId };
+    plan = {
+      action:
+        input.action === "watch_start" ? "discord.presence.activity_start" : "discord.presence.activity_stop",
+      payload:
+        input.action === "watch_start"
+          ? { kind: "activity_start", guildId: input.guildId, channelId, surface: "gba_emulator" }
+          : { kind: "activity_stop", guildId: input.guildId, channelId },
+      successMessage:
+        input.action === "watch_start"
+          ? "I posted the live play launch in voice."
+          : "I stopped offering the live play launch.",
+    };
   }
 
   try {
@@ -1276,7 +1294,7 @@ async function executeCaptainDiscordAction(
       DiscordPresenceWriteSchema.parse({
         schemaVersion: 1,
         idempotencyKey: `captain:${input.callId}:${input.action}`,
-        action,
+        action: plan.action,
         identity: {
           presenceSessionId: discordPresenceLaneAddress({ guildId: input.guildId, channelId }),
           correlationId: `discord-captain-action:${input.callId}`,
@@ -1285,25 +1303,12 @@ async function executeCaptainDiscordAction(
           credentialRef: "discord_bot",
           transportKind: "bot",
         },
-        payload,
+        payload: plan.payload,
       }),
     );
     return {
       ok: true,
-      message:
-        input.action === "watch_start"
-          ? "I posted the live play launch in voice."
-          : input.action === "watch_stop"
-            ? "I stopped offering the live play launch."
-            : input.action === "create_thread"
-              ? "I started the thread."
-              : input.action === "join_thread"
-                ? "I joined the thread."
-                : input.action === "send_text_update"
-                  ? "I posted that text update. Keep working; your final text reply still posts when the turn ends."
-                  : input.action === "react"
-                    ? "I reacted."
-                    : "I removed my reaction.",
+      message: plan.successMessage,
     };
   } catch (error) {
     return {
@@ -1409,7 +1414,7 @@ function bridgeReceiptPath(): string {
 }
 
 function recordReceipt(
-  type: DiscordBridgeReceipt["type"],
+  type: DiscordBridgeReceiptType,
   data: DiscordBridgeReceipt["data"],
 ): Promise<DiscordBridgeReceipt> {
   return receipts.append(type, data).catch((error) => {
@@ -1425,11 +1430,11 @@ async function recordVoiceEvidence(evidence: DiscordVoiceEvidence): Promise<void
   // The idle auto-leave watches the same stream the receipts do, so "activity"
   // is exactly what the evidence says happened.
   voiceIdleAutoLeave?.observe(evidence);
-  // A possessor authors for its own surfaces until it learns it has an audience
+  // Play authors for its own surfaces until it learns it has an audience
   // (ADR 0074). These two transitions are the whole of "is anyone listening",
   // and they are already the authority the idle watcher trusts.
   if (evidence.type === "joined" || evidence.type === "left") {
-    possessorVoiceListener?.publishRoom({ listening: evidence.type === "joined" });
+    playVoiceListener?.publishRoom({ listening: evidence.type === "joined" });
   }
   if (evidence.type === "response") {
     // Printed as well as recorded: "it felt slow" is only actionable next to
@@ -1452,13 +1457,37 @@ let musicControlServer: ReturnType<typeof createServer> | undefined;
 async function shutdown(signal: NodeJS.Signals): Promise<void> {
   if (shutdownPromise !== undefined) return shutdownPromise;
   shutdownPromise = (async () => {
-    voiceIdleAutoLeave?.stop();
-    musicControlServer?.close();
-    await possessorVoiceListener?.close();
-    await voiceSession?.leave();
-    client.destroy();
-    await presenceSession.stop().catch(reportPresencePhaseFailure);
-    await recordReceipt("discord.bridge.stopped", { signal });
+    await shutdownDiscordBridge({
+      stopIngress: async () => {
+        shuttingDown = true;
+        voiceIdleAutoLeave?.stop();
+        if (membershipSyncTimer !== undefined) clearTimeout(membershipSyncTimer);
+        if (catchUpTimer !== undefined) clearInterval(catchUpTimer);
+        await Promise.all([
+          (async () => {
+            stopPlayVoiceTranscript?.();
+            stopPlayVoiceTranscript = undefined;
+            await playVoiceListener?.close();
+          })(),
+          new Promise<void>((resolve) => {
+            if (musicControlServer?.listening !== true) return resolve();
+            musicControlServer.close(() => resolve());
+          }),
+        ]);
+      },
+      leaveVoice: () =>
+        voiceGateway?.leave("bridge_shutdown") ?? voiceSession?.leave("bridge_shutdown") ?? Promise.resolve(),
+      disposeVoiceSession: () => voiceSession?.dispose() ?? Promise.resolve(),
+      disposeVoiceGateway: () => voiceGateway?.dispose(),
+      closeVox: () => vox?.close(),
+      destroyDiscord: () => client.destroy(),
+      stopPresence: async () => {
+        await presenceSession.stop();
+      },
+      recordStopped: async () => {
+        await recordReceipt("discord.bridge.stopped", { signal });
+      },
+    });
   })();
   return shutdownPromise;
 }
@@ -1485,7 +1514,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
  */
 if (textIngress !== undefined) {
   let catchingUp = false;
-  const catchUpTimer = setInterval(() => {
+  catchUpTimer = setInterval(() => {
     if (catchingUp) return;
     catchingUp = true;
     void textIngress
@@ -1507,8 +1536,15 @@ const musicControlPort = Number.parseInt(process.env.CLANKIE_DISCORD_BRIDGE_CONT
 const musicServer = createServer((request, response) => {
   const url = request.url ?? "/";
   if (request.method === "GET" && (url === "/" || url === "/health")) {
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ ok: true, service: "discord-bridge" }));
+    const health = discordBridgeHealth({
+      discordReady: client.isReady(),
+      shuttingDown,
+      ...(terminalFailure === undefined ? {} : { terminalFailure }),
+      voiceEnabled,
+      ...(vox === undefined ? {} : { vox }),
+    });
+    response.writeHead(health.ok ? 200 : 503, { "content-type": "application/json" });
+    response.end(JSON.stringify(health));
     return;
   }
   if (

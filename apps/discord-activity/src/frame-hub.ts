@@ -1,8 +1,4 @@
 import {
-  RenderedSurfaceFrameSchema,
-  RenderedSurfaceAudioSchema,
-  RenderedSurfaceOverlaySchema,
-  RenderedSurfaceStatusSchema,
   type RenderedSurfaceFrame,
   type RenderedSurfaceAudio,
   type RenderedSurfaceMessage,
@@ -100,27 +96,23 @@ export class RenderedSurfaceHub {
   }
 
   public publishFrame(frame: RenderedSurfaceFrame): void {
-    const validated = RenderedSurfaceFrameSchema.parse(frame);
-    this.latestFrame = validated;
-    this.broadcast({ kind: "frame", frame: validated });
+    this.latestFrame = frame;
+    this.broadcast({ kind: "frame", frame });
   }
 
   /** Audio is never replayed to a late viewer; only packets produced while connected are live. */
   public publishAudio(audio: RenderedSurfaceAudio): void {
-    const validated = RenderedSurfaceAudioSchema.parse(audio);
-    this.broadcast({ kind: "audio", audio: validated });
+    this.broadcast({ kind: "audio", audio });
   }
 
   public publishOverlay(overlay: RenderedSurfaceOverlay): void {
-    const validated = RenderedSurfaceOverlaySchema.parse(overlay);
-    this.latestOverlay = validated;
-    this.broadcast({ kind: "overlay", overlay: validated });
+    this.latestOverlay = overlay;
+    this.broadcast({ kind: "overlay", overlay });
   }
 
   public publishStatus(status: RenderedSurfaceStatus): void {
-    const validated = RenderedSurfaceStatusSchema.parse(status);
-    this.latestStatus = validated;
-    this.broadcast({ kind: "status", status: validated });
+    this.latestStatus = status;
+    this.broadcast({ kind: "status", status });
   }
 
   /** Tell every viewer the surface is done, then drop them. */

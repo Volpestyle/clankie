@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ClankieApiClient } from "../src/index.ts";
 
-describe("ClankieApiClient runner surface", () => {
+describe("ClankieApiClient live surface", () => {
   it("authenticates and validates Discord presence phase events", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
       expect(String(input)).toBe("http://127.0.0.1:4310/v1/discord/presence-session-events");
@@ -141,29 +141,6 @@ describe("ClankieApiClient runner surface", () => {
     ).resolves.toMatchObject({ messageId: "reply-1" });
   });
 
-  it("records captain presence through the authenticated captain lane", async () => {
-    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
-      expect(String(input)).toBe("http://127.0.0.1:4310/v1/captain/presence");
-      expect(init?.headers).toMatchObject({ authorization: "Bearer captain-secret" });
-      return Response.json({ accepted: true });
-    });
-    const client = new ClankieApiClient({
-      baseUrl: "http://127.0.0.1:4310",
-      fetchImpl,
-      captainToken: "captain-secret",
-    });
-    await expect(
-      client.recordCaptainPresence({
-        schemaVersion: 1,
-        eventId: "heartbeat-1",
-        leaseId: "lease-1",
-        generationId: "generation-1",
-        occurredAt: "2026-07-11T12:00:00.000Z",
-        type: "captain.heartbeat",
-      }),
-    ).resolves.toEqual({ accepted: true });
-  });
-
   it("fills a missing health profileHash with the unversioned constant", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({ ok: true, service: "clankie" }));
     const client = new ClankieApiClient({ baseUrl: "http://127.0.0.1:4310", fetchImpl });
@@ -174,24 +151,10 @@ describe("ClankieApiClient runner surface", () => {
     });
   });
 
-  it("fails before a request when no matching token is configured", async () => {
+  it("fails before a request when no matching token is configured", () => {
     const client = new ClankieApiClient({ baseUrl: "http://127.0.0.1:4310", fetchImpl: vi.fn() });
-    await expect(
-      client.claimEmbodiment({ schemaVersion: 1, claimId: "claim-1", runnerId: "runner-1" } as never),
-    ).rejects.toThrow("CLANKIE_RUNNER_TOKEN");
-    await expect(
-      client.recordCaptainPresence({
-        schemaVersion: 1,
-        eventId: "heartbeat-1",
-        leaseId: "lease-1",
-        generationId: "generation-1",
-        occurredAt: "2026-07-11T12:00:00.000Z",
-        type: "captain.heartbeat",
-      }),
-    ).rejects.toThrow("CLANKIE_CAPTAIN_TOKEN");
-    expect(() => client.exportDiscordPersonMemory({ guildId: "guild-1", userId: "user-1" })).toThrow(
-      "CLANKIE_OPERATOR_TOKEN",
-    );
+    expect(() => client.inspectDiscordReadiness()).toThrow("CLANKIE_CAPTAIN_TOKEN");
+    expect(() => client.inspectMemory()).toThrow("CLANKIE_OPERATOR_TOKEN");
   });
 
   it("authenticates and validates current activity reads for captain or operator", async () => {

@@ -21,12 +21,12 @@ try {
     );
     client = createVoxClient({
       ...(requestedBin === undefined ? {} : { bin: requestedBin }),
-      onStatus: (status) => {
-        if (status === "ready") resolve();
-      },
       onError: (message) => reject(new Error(message)),
     });
-    if (!client.available) reject(new Error(client.detail));
+    client.onStatus((status) => {
+      if (status === "ready") resolve();
+    });
+    if (client.status === "missing") reject(new Error(client.detail));
   });
   const readyClient = client;
   if (readyClient === undefined) throw new Error("Vox client was not created");

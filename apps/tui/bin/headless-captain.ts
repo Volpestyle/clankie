@@ -564,7 +564,7 @@ function formatDevicesTable(devices: readonly DeviceListItem[]): string {
  * Operator controls for the live playthrough (asked play, ADR 0063).
  * `status` reads the live embodiment session; `stop` submits the operator
  * stop intent — the kill-switch that never needs Discord, and never a kill:
- * the runner winds down at the next turn boundary and mints its checkpoint.
+ * the local play host winds down at the next turn boundary and mints its checkpoint.
  */
 async function runPlay(args: readonly string[], options: HeadlessCaptainCommandOptions): Promise<number> {
   const action = args[0];

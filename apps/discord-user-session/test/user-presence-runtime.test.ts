@@ -1,7 +1,7 @@
 import { DiscordPresenceSessionRecordSchema } from "@clankie/interactive-environment";
 import type { DiscordPresenceWrite } from "@clankie/protocol";
 import { describe, expect, it, vi } from "vitest";
-import { DiscordUserPresenceRuntime, encodeReactionEmoji } from "../src/user-presence-runtime.ts";
+import { DiscordUserPresenceRuntime } from "../src/user-presence-runtime.ts";
 
 describe("DiscordUserPresenceRuntime", () => {
   it("sends the user credential bare, without the bot prefix", async () => {
@@ -125,6 +125,28 @@ describe("DiscordUserPresenceRuntime", () => {
     ).rejects.toThrow(/discord_presence_go_live_media_unavailable/u);
   });
 
+  it("propagates a Go Live stop refusal from the lab process", async () => {
+    const goLiveSession = DiscordPresenceSessionRecordSchema.parse({
+      ...present,
+      phase: "voice_active",
+      voiceGuildIds: ["guild-1"],
+    });
+    const withControl = new DiscordUserPresenceRuntime({
+      token: "user-token",
+      fetch: jsonFetch({}),
+      controlFetch: vi.fn(() => Promise.resolve(new Response(null, { status: 503 }))),
+    });
+    await expect(
+      withControl.execute(
+        write({
+          action: "discord.presence.go_live_stop",
+          payload: { kind: "go_live_stop", guildId: "guild-1" },
+        }),
+        goLiveSession,
+      ),
+    ).rejects.toThrow(/user_session_control_503/u);
+  });
+
   it("reports a REST failure by status and route, never by response body", async () => {
     const fetchImpl = vi.fn(() =>
       Promise.resolve(new Response("secret channel content", { status: 403 })),
@@ -138,13 +160,6 @@ describe("DiscordUserPresenceRuntime", () => {
         present,
       ),
     ).rejects.toThrow(/discord_user_session_rest_failed:403:POST/u);
-  });
-
-  it("encodes unicode and custom reaction emoji for the REST path", () => {
-    expect(encodeReactionEmoji("👍")).toBe(encodeURIComponent("👍"));
-    expect(encodeReactionEmoji("<:clankie:12345>")).toBe("clankie:12345");
-    expect(encodeReactionEmoji("clankie:12345")).toBe("clankie:12345");
-    expect(() => encodeReactionEmoji("bad:")).toThrow(/discord_presence_invalid_emoji/u);
   });
 });
 

@@ -5,15 +5,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   applyCustomProviders,
   CatalogSchema,
-  contextWindow,
   createModelRegistry,
-  findModel,
-  listModels,
-  listProviders,
   loadBundledCatalog,
   ProviderEntrySchema,
-  searchModels,
-  supportsReasoning,
 } from "../src/index.ts";
 
 const tempDirs: string[] = [];
@@ -80,9 +74,9 @@ describe("loadBundledCatalog", () => {
     }
     const anthropic = must(catalog["anthropic"], "anthropic provider");
     expect(Object.keys(anthropic.models).length).toBeGreaterThanOrEqual(10);
-    const opus = must(findModel(catalog, "anthropic", "claude-opus-4-5"), "claude-opus-4-5");
-    expect(contextWindow(opus)).toBeGreaterThan(0);
-    expect(supportsReasoning(opus)).toBe(true);
+    const opus = must(anthropic.models["claude-opus-4-5"], "claude-opus-4-5");
+    expect(opus.limit.context).toBeGreaterThan(0);
+    expect(opus.reasoning).toBe(true);
   });
 });
 
@@ -214,39 +208,6 @@ describe("createModelRegistry", () => {
   });
 });
 
-describe("query helpers", () => {
-  it("searchModels finds grok under xai", () => {
-    const results = searchModels(loadBundledCatalog(), "GROK");
-    expect(results.length).toBeGreaterThan(0);
-    const xaiHit = results.find((match) => match.provider.id === "xai");
-    expect(must(xaiHit).model.id.toLowerCase()).toContain("grok");
-  });
-
-  it("listModels sorts newest release_date first with undated models last", () => {
-    const catalog = CatalogSchema.parse({
-      p: {
-        id: "p",
-        name: "P",
-        models: {
-          old: { id: "old", name: "Old", release_date: "2025-01-01" },
-          fresh: { id: "fresh", name: "Fresh", release_date: "2026-05-01" },
-          undated: { id: "undated", name: "Undated" },
-        },
-      },
-    });
-    expect(listModels(catalog, "p").map((model) => model.id)).toEqual(["fresh", "old", "undated"]);
-    expect(listModels(catalog, "missing")).toEqual([]);
-  });
-
-  it("listProviders sorts by display name", () => {
-    const catalog = CatalogSchema.parse({
-      b: { id: "b", name: "Beta", models: {} },
-      a: { id: "a", name: "Alpha", models: {} },
-    });
-    expect(listProviders(catalog).map((provider) => provider.id)).toEqual(["a", "b"]);
-  });
-});
-
 describe("applyCustomProviders", () => {
   it("adds an ollama provider with a custom model", () => {
     const catalog = loadBundledCatalog();
@@ -262,11 +223,11 @@ describe("applyCustomProviders", () => {
     const ollama = must(merged["ollama"]);
     expect(ollama.name).toBe("Ollama (local)");
     expect(ollama.api).toBe("http://localhost:11434/v1");
-    const model = must(findModel(merged, "ollama", "qwen3:32b"));
+    const model = must(merged["ollama"]?.models["qwen3:32b"]);
     expect(model.name).toBe("qwen3:32b");
     expect(model.tool_call).toBe(true);
     expect(model.reasoning).toBe(false);
-    expect(contextWindow(model)).toBe(32768);
+    expect(model.limit.context).toBe(32768);
     // Input catalog is not mutated.
     expect(catalog["ollama"]).toBeUndefined();
   });
@@ -276,8 +237,8 @@ describe("applyCustomProviders", () => {
     const merged = applyCustomProviders(catalog, {
       anthropic: { models: { "claude-opus-4-5": { name: "Opus (custom)" } } },
     });
-    const original = must(findModel(catalog, "anthropic", "claude-opus-4-5"));
-    const overridden = must(findModel(merged, "anthropic", "claude-opus-4-5"));
+    const original = must(catalog["anthropic"]?.models["claude-opus-4-5"]);
+    const overridden = must(merged["anthropic"]?.models["claude-opus-4-5"]);
     expect(overridden.name).toBe("Opus (custom)");
     expect(overridden.limit.context).toBe(original.limit.context);
     expect(overridden.cost).toEqual(original.cost);

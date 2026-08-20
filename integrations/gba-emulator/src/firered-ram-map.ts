@@ -15,6 +15,8 @@
  * same memory surface.
  */
 
+import type { GbaCoreSurroundings, GbaCoreTileView } from "./core-double.ts";
+
 /** EWRAM offset of the player object's current tile coords (two s16 LE: x, y). */
 export const FIRERED_PLAYER_COORDS_OFFSET = 0x36e48;
 /** EWRAM offset of the player object's facing-direction byte. */
@@ -168,26 +170,7 @@ export const FIRERED_DIRECTION_STEPS = {
 
 export type FireRedDirection = keyof typeof FIRERED_DIRECTION_STEPS;
 
-export interface FireRedTileView {
-  x: number;
-  y: number;
-  /** False for border filler as well as for walls, so it is safe to act on. */
-  passable: boolean;
-  /** Null outside the loaded map, where no tile genuinely exists. */
-  elevation: number | null;
-  metatileId: number | null;
-}
-
-export interface FireRedSurroundings {
-  north: FireRedTileView;
-  east: FireRedTileView;
-  south: FireRedTileView;
-  west: FireRedTileView;
-  /** The tile the player is facing — the one A would interact with. */
-  ahead: FireRedTileView;
-}
-
-export function fireRedTileView(grid: FireRedMapGrid, x: number, y: number): FireRedTileView {
+export function fireRedTileView(grid: FireRedMapGrid, x: number, y: number): GbaCoreTileView {
   if (!isInsideFireRedMap(grid, x, y)) {
     return { x, y, passable: false, elevation: null, metatileId: null };
   }
@@ -212,8 +195,8 @@ export function fireRedSurroundings(
   x: number,
   y: number,
   facing: FireRedDirection,
-): FireRedSurroundings {
-  const at = (direction: FireRedDirection): FireRedTileView => {
+): GbaCoreSurroundings {
+  const at = (direction: FireRedDirection): GbaCoreTileView => {
     const step = FIRERED_DIRECTION_STEPS[direction];
     return fireRedTileView(grid, x + step.dx, y + step.dy);
   };

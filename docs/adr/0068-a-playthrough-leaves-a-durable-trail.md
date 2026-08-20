@@ -3,13 +3,23 @@
 Status: accepted (James, 2026-07-26). Implemented across the Clankie play host,
 free-play session composer, environment runtime, and GBA MCP server.
 
+## Current status (2026-08-19)
+
+Play journals, bounded environment records, and lifecycle events remain current.
+The possession-log/body-lock artifact described below is retired by
+[ADR 0129](0129-each-player-owns-a-body.md). Existing files remain inert
+historical evidence; current code neither migrates, deletes, reads, nor appends
+them. Each GBA MCP process has a separate private runtime and no shared-body
+ownership trail.
+
 ## Context
 
 An operator needs to reconstruct _what_ Clankie presses, _why_ he chooses it,
-whether he is making progress, what he says, and who holds the body. The bounded
-environment record alone cannot hold that full trail. `FreePlayTurn` contains
-monologue, intent, objective, notes, reply, speech intent, outcome, and effect;
-durable journals and lifecycle records assign each concern an owner.
+whether he is making progress, what he says, and which independently owned body
+produced the evidence. The bounded environment record alone cannot hold that
+full trail. `FreePlayTurn` contains monologue, intent, objective, notes, reply,
+speech intent, outcome, and effect; durable journals and lifecycle records
+assign each concern an owner.
 
 ## Decision
 
@@ -46,11 +56,10 @@ different rules:
   [ADR 0061](0061-evidence-rolls-for-open-ended-play.md)), and the newest 16
   ended session records survive on disk. Frozen scenario drivers configure no
   retention and keep everything.
-- **Possession transitions are durable.** The MCP server appends every lease
-  event (acquired, released, expired, stolen, refused) to
-  `possession-events.jsonl` beside `body.lock` in the shared body root —
-  across every server that ever serves the body. stderr keeps its live line;
-  the file is the record. Logging observes the lease and never gates it.
+- **The retired shared-body implementation recorded possession transitions.**
+  Older MCP servers appended lease events to `possession-events.jsonl` beside
+  `body.lock`. ADR 0129 replaces that model with process-owned runtimes; current
+  play and GBA MCP paths neither read nor append those files.
 - **The play host logs every lifecycle transition** (claimed, running,
   settled with its receipt, refused, failed) through the service's structured
   logger, so the service log narrates the same story as lifecycle events.
@@ -73,8 +82,9 @@ flowchart LR
 
 - A finished run is reconstructable end to end from files: why each action is
   chosen and what it did (journal), how the run is going (journal summary and
-  receipt), who held the body when (possession log, body lock), and how the
-  lifecycle unfolds (service log and lifecycle events).
+  receipt), which body generation produced each causal stage (journal
+  provenance), and how the lifecycle unfolds (service log and lifecycle
+  events).
 - A run with no summary still has truthful terminal accounting when its run id
   joins a durable terminal embodiment event. That lifecycle outcome does not
   become a synthetic summary.
@@ -86,6 +96,6 @@ flowchart LR
 - The journal directory grows one JSONL file and up to 64 native-resolution
   screenshots per run and is deliberately not pruned by code — deleting play
   history is an owner's call, never an agent's.
-- The [GBA MCP operating guide](../../apps/gba-mcp/README.md) documents the
-  live body, possession, checkpoint, and observation paths; this ADR remains
-  the stable record for journal ownership and retention.
+- The [GBA MCP guide](../../apps/gba-mcp/README.md) documents its private
+  runtime, checkpoints, and observation tools; this ADR remains the stable
+  record for Clankie journal ownership and retention.

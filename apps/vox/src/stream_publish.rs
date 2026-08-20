@@ -8,7 +8,7 @@ use crossbeam_channel as crossbeam;
 use tracing::{info, warn};
 
 use crate::app_state::AppState;
-use crate::ipc_protocol::StreamPublishCommand;
+use crate::ipc::{ErrorCode, InMsg, OutMsg, send_msg, send_transport_error};
 use crate::voice_conn::TransportRole;
 
 const STREAM_PUBLISH_STDERR_TAIL_LINES: usize = 24;
@@ -18,6 +18,7 @@ const STREAM_PUBLISH_TARGET_HEIGHT: u32 = 720;
 const STREAM_PUBLISH_VIDEO_BITRATE_KBPS: u32 = 2_500;
 const STREAM_PUBLISH_BROWSER_FRAME_MAX_BYTES: usize = 6 * 1024 * 1024;
 const STREAM_PUBLISH_H264_BUFFER_MAX_BYTES: usize = 8 * 1024 * 1024;
+const STREAM_PUBLISH_BROWSER_MIME_TYPE: &str = "image/png";
 /// Bounded depth of the browser-frame lane into the stdin writer thread.
 /// Frames can be up to 6MB each, so keep the queue shallow and drop the
 /// oldest frame when the writer falls behind (e.g. ffmpeg stalls).
@@ -27,61 +28,19 @@ const STREAM_PUBLISH_BROWSER_FRAME_QUEUE_CAPACITY: usize = 4;
 pub(crate) struct StreamPublishFrame {
     pub(crate) access_unit: Vec<u8>,
     pub(crate) timestamp_increment: u32,
+    pub(crate) source_generation: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum StreamPublishSource {
-    Url {
-        url: String,
-        resolved_direct_url: bool,
-    },
-    Visualizer {
-        url: String,
-        resolved_direct_url: bool,
-        visualizer_mode: String,
-    },
-    BrowserFrames {
-        mime_type: BrowserFrameMimeType,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BrowserFrameMimeType {
-    Png,
-}
-
-impl BrowserFrameMimeType {
-    fn parse(mime_type: &str) -> Option<Self> {
-        match mime_type.trim().to_ascii_lowercase().as_str() {
-            "image/png" => Some(Self::Png),
-            _ => None,
-        }
-    }
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Png => "image/png",
-        }
-    }
-
-    fn ffmpeg_codec(self) -> &'static str {
-        match self {
-            Self::Png => "png",
-        }
-    }
-}
-
-impl std::fmt::Display for BrowserFrameMimeType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
+    Url(String),
+    BrowserFrames,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) enum StreamPublishEvent {
     Idle,
     Error(String),
-    FirstFrame { startup_ms: u64, fps: u32 },
 }
 
 #[derive(Default)]
@@ -91,6 +50,8 @@ pub(crate) struct StreamPublishState {
     pub(crate) active_source: Option<StreamPublishSource>,
     pub(crate) active: bool,
     pub(crate) paused: bool,
+    source_generation: u64,
+    media_started: bool,
 }
 
 impl StreamPublishState {
@@ -100,6 +61,24 @@ impl StreamPublishState {
 
     pub(crate) fn clear_pending_start(&mut self) {
         self.pending_source = None;
+    }
+
+    fn begin_source(&mut self) -> u64 {
+        self.source_generation = self.source_generation.wrapping_add(1);
+        self.media_started = false;
+        self.source_generation
+    }
+
+    fn mark_media_started(&mut self, source_generation: u64) -> bool {
+        if source_generation != self.source_generation || self.media_started {
+            return false;
+        }
+        self.media_started = true;
+        true
+    }
+
+    pub(crate) fn reset_media_started(&mut self) {
+        self.media_started = false;
     }
 
     pub(crate) fn stop_player(&mut self) {
@@ -114,6 +93,7 @@ impl StreamPublishState {
         self.active_source = None;
         self.active = false;
         self.paused = false;
+        self.media_started = false;
     }
 }
 
@@ -128,7 +108,6 @@ struct BrowserFrameInput {
 enum StreamPublishPlayerMode {
     Url,
     BrowserFrames {
-        mime_type: BrowserFrameMimeType,
         frame_input_tx: crossbeam::Sender<BrowserFrameInput>,
         /// Receiver clone used only to pop the oldest queued frame when the
         /// lane is full — the writer thread holds its own receiver.
@@ -188,69 +167,30 @@ fn drain_h264_access_units(buffer: &mut Vec<u8>, flush_tail: bool) -> Vec<Vec<u8
     out
 }
 
-pub(crate) fn build_stream_publish_pipeline_command(
-    url: &str,
-    resolved_direct_url: bool,
-) -> String {
+pub(crate) fn build_stream_publish_pipeline_command(url: &str) -> String {
     let ffmpeg_tail = format!(
         "ffmpeg -nostdin -loglevel error -re -i {{input}} -an -sn -dn -vf \"scale=w={STREAM_PUBLISH_TARGET_WIDTH}:h={STREAM_PUBLISH_TARGET_HEIGHT}:force_original_aspect_ratio=decrease:flags=lanczos,pad={STREAM_PUBLISH_TARGET_WIDTH}:{STREAM_PUBLISH_TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2:black,fps={STREAM_PUBLISH_TARGET_FPS}\" -c:v libx264 -preset veryfast -tune zerolatency -pix_fmt yuv420p -profile:v baseline -level 3.1 -g {STREAM_PUBLISH_TARGET_FPS} -keyint_min {STREAM_PUBLISH_TARGET_FPS} -sc_threshold 0 -b:v {STREAM_PUBLISH_VIDEO_BITRATE_KBPS}k -maxrate {STREAM_PUBLISH_VIDEO_BITRATE_KBPS}k -bufsize {}k -f h264 -bsf:v h264_metadata=aud=insert pipe:1",
         STREAM_PUBLISH_VIDEO_BITRATE_KBPS * 2
     );
 
-    if resolved_direct_url {
-        let quoted_url = process_unix::shell_quote(url);
-        ffmpeg_tail.replace("{input}", &quoted_url)
-    } else {
-        let input = process_unix::ytdlp_resolved_input(
-            url,
-            "bestvideo[ext=mp4][vcodec*=avc1]/bestvideo[vcodec*=avc1]/bestvideo/best",
-        );
-        ffmpeg_tail.replace("{input}", &input)
-    }
-}
-
-pub(crate) fn build_stream_publish_visualizer_pipeline_command(
-    url: &str,
-    resolved_direct_url: bool,
-    visualizer_mode: &str,
-) -> String {
-    let visualizer_filter = match visualizer_mode {
-        "spectrum" => format!(
-            "showspectrum=s={STREAM_PUBLISH_TARGET_WIDTH}x{STREAM_PUBLISH_TARGET_HEIGHT}:mode=combined:slide=scroll:color=intensity"
-        ),
-        "waves" => format!(
-            "showwaves=s={STREAM_PUBLISH_TARGET_WIDTH}x{STREAM_PUBLISH_TARGET_HEIGHT}:mode=cline:rate={STREAM_PUBLISH_TARGET_FPS}:colors=0x00FFAA|0x00AAFF"
-        ),
-        "vectorscope" => format!(
-            "avectorscope=s={STREAM_PUBLISH_TARGET_WIDTH}x{STREAM_PUBLISH_TARGET_HEIGHT}:mode=lissajous:rate={STREAM_PUBLISH_TARGET_FPS}:draw=line"
-        ),
-        // "cqt" and everything else
-        _ => format!(
-            "showcqt=s={STREAM_PUBLISH_TARGET_WIDTH}x{STREAM_PUBLISH_TARGET_HEIGHT}:fps={STREAM_PUBLISH_TARGET_FPS}:count=6:bar_g=6"
-        ),
-    };
-    let ffmpeg_tail = format!(
-        "ffmpeg -nostdin -loglevel error -re -i {{input}} -vn -filter_complex \"{visualizer_filter},format=yuv420p\" -c:v libx264 -preset veryfast -tune zerolatency -pix_fmt yuv420p -profile:v baseline -level 3.1 -g {STREAM_PUBLISH_TARGET_FPS} -keyint_min {STREAM_PUBLISH_TARGET_FPS} -sc_threshold 0 -b:v {STREAM_PUBLISH_VIDEO_BITRATE_KBPS}k -maxrate {STREAM_PUBLISH_VIDEO_BITRATE_KBPS}k -bufsize {}k -f h264 -bsf:v h264_metadata=aud=insert pipe:1",
-        STREAM_PUBLISH_VIDEO_BITRATE_KBPS * 2
+    let input = process_unix::ytdlp_resolved_input(
+        url,
+        "bestvideo[ext=mp4][vcodec*=avc1]/bestvideo[vcodec*=avc1]/bestvideo/best",
     );
-
-    if resolved_direct_url {
-        let quoted_url = process_unix::shell_quote(url);
-        ffmpeg_tail.replace("{input}", &quoted_url)
-    } else {
-        let input = process_unix::ytdlp_resolved_input(url, "bestaudio/best");
-        ffmpeg_tail.replace("{input}", &input)
-    }
+    ffmpeg_tail.replace("{input}", &input)
 }
 
-pub(crate) fn build_stream_publish_browser_pipeline_command(
-    mime_type: BrowserFrameMimeType,
-) -> String {
-    let codec = mime_type.ffmpeg_codec();
+pub(crate) fn build_stream_publish_browser_pipeline_command() -> String {
     format!(
-        "ffmpeg -nostdin -loglevel error -f image2pipe -codec:v {codec} -framerate {STREAM_PUBLISH_TARGET_FPS} -i pipe:0 -an -sn -dn -vf \"scale=w={STREAM_PUBLISH_TARGET_WIDTH}:h={STREAM_PUBLISH_TARGET_HEIGHT}:force_original_aspect_ratio=decrease:flags=lanczos,pad={STREAM_PUBLISH_TARGET_WIDTH}:{STREAM_PUBLISH_TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2:black\" -c:v libx264 -preset veryfast -tune zerolatency -pix_fmt yuv420p -profile:v baseline -level 3.1 -g {STREAM_PUBLISH_TARGET_FPS} -keyint_min {STREAM_PUBLISH_TARGET_FPS} -sc_threshold 0 -b:v {STREAM_PUBLISH_VIDEO_BITRATE_KBPS}k -maxrate {STREAM_PUBLISH_VIDEO_BITRATE_KBPS}k -bufsize {}k -f h264 -bsf:v h264_metadata=aud=insert pipe:1",
+        "ffmpeg -nostdin -loglevel error -f image2pipe -codec:v png -framerate {STREAM_PUBLISH_TARGET_FPS} -i pipe:0 -an -sn -dn -vf \"scale=w={STREAM_PUBLISH_TARGET_WIDTH}:h={STREAM_PUBLISH_TARGET_HEIGHT}:force_original_aspect_ratio=decrease:flags=lanczos,pad={STREAM_PUBLISH_TARGET_WIDTH}:{STREAM_PUBLISH_TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2:black\" -c:v libx264 -preset veryfast -tune zerolatency -pix_fmt yuv420p -profile:v baseline -level 3.1 -g {STREAM_PUBLISH_TARGET_FPS} -keyint_min {STREAM_PUBLISH_TARGET_FPS} -sc_threshold 0 -b:v {STREAM_PUBLISH_VIDEO_BITRATE_KBPS}k -maxrate {STREAM_PUBLISH_VIDEO_BITRATE_KBPS}k -bufsize {}k -f h264 -bsf:v h264_metadata=aud=insert pipe:1",
         STREAM_PUBLISH_VIDEO_BITRATE_KBPS * 2
     )
+}
+
+fn is_supported_browser_mime_type(mime_type: &str) -> bool {
+    mime_type
+        .trim()
+        .eq_ignore_ascii_case(STREAM_PUBLISH_BROWSER_MIME_TYPE)
 }
 
 fn decode_stream_publish_browser_frame(frame_base64: &str) -> Result<Vec<u8>, String> {
@@ -311,11 +251,6 @@ struct PipelineLabels {
 /// in: how to build the shell command, whether stdin is piped (and where to
 /// stash it), what to log on the first frame, and how to compute each frame's
 /// timestamp increment.
-#[allow(
-    clippy::too_many_arguments,
-    clippy::too_many_lines,
-    clippy::needless_pass_by_value
-)]
 fn run_pipeline(
     pipeline_command: String,
     pipe_stdin: bool,
@@ -326,6 +261,7 @@ fn run_pipeline(
     paused: Arc<AtomicBool>,
     child_pid: Arc<AtomicU32>,
     labels: PipelineLabels,
+    source_generation: u64,
     on_first_frame: impl Fn(u64),
     mut timestamp_increment: impl FnMut() -> u32,
 ) {
@@ -417,15 +353,12 @@ fn run_pipeline(
                         first_frame_reported = true;
                         let startup_ms = pipeline_started_at.elapsed().as_millis() as u64;
                         on_first_frame(startup_ms);
-                        let _ = event_tx.send(StreamPublishEvent::FirstFrame {
-                            startup_ms,
-                            fps: STREAM_PUBLISH_TARGET_FPS,
-                        });
                     }
                     if frame_tx
                         .send(StreamPublishFrame {
                             access_unit,
                             timestamp_increment: timestamp_increment(),
+                            source_generation,
                         })
                         .is_err()
                     {
@@ -448,6 +381,7 @@ fn run_pipeline(
             let _ = frame_tx.send(StreamPublishFrame {
                 access_unit,
                 timestamp_increment: timestamp_increment(),
+                source_generation,
             });
         }
     }
@@ -554,9 +488,9 @@ fn spawn_browser_stdin_writer(
 impl StreamPublishPlayer {
     pub(crate) fn start_url(
         url: &str,
+        source_generation: u64,
         frame_tx: crossbeam::Sender<StreamPublishFrame>,
         event_tx: crossbeam::Sender<StreamPublishEvent>,
-        resolved_direct_url: bool,
     ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let stop_clone = stop.clone();
@@ -567,7 +501,7 @@ impl StreamPublishPlayer {
         let url = url.to_string();
 
         let thread = std::thread::spawn(move || {
-            let pipeline_command = build_stream_publish_pipeline_command(&url, resolved_direct_url);
+            let pipeline_command = build_stream_publish_pipeline_command(&url);
             run_pipeline(
                 pipeline_command,
                 false,
@@ -582,11 +516,11 @@ impl StreamPublishPlayer {
                     pipeline: "pipeline",
                     read: "",
                 },
+                source_generation,
                 |startup_ms| {
                     info!(
                         startup_ms,
                         fps = STREAM_PUBLISH_TARGET_FPS,
-                        resolved_direct_url,
                         "stream publish produced first video frame"
                     );
                 },
@@ -603,65 +537,8 @@ impl StreamPublishPlayer {
         }
     }
 
-    pub(crate) fn start_visualizer(
-        url: &str,
-        frame_tx: crossbeam::Sender<StreamPublishFrame>,
-        event_tx: crossbeam::Sender<StreamPublishEvent>,
-        resolved_direct_url: bool,
-        visualizer_mode: &str,
-    ) -> Self {
-        let stop = Arc::new(AtomicBool::new(false));
-        let stop_clone = stop.clone();
-        let paused = Arc::new(AtomicBool::new(false));
-        let paused_thread = paused.clone();
-        let child_pid = Arc::new(AtomicU32::new(0));
-        let child_pid_thread = child_pid.clone();
-        let url = url.to_string();
-        let visualizer_mode = visualizer_mode.to_string();
-
-        let thread = std::thread::spawn(move || {
-            let pipeline_command = build_stream_publish_visualizer_pipeline_command(
-                &url,
-                resolved_direct_url,
-                &visualizer_mode,
-            );
-            run_pipeline(
-                pipeline_command,
-                false,
-                None,
-                frame_tx,
-                event_tx,
-                stop_clone,
-                paused_thread,
-                child_pid_thread,
-                PipelineLabels {
-                    spawn: "visualizer",
-                    pipeline: "visualizer",
-                    read: "visualizer ",
-                },
-                |startup_ms| {
-                    info!(
-                        startup_ms,
-                        fps = STREAM_PUBLISH_TARGET_FPS,
-                        visualizer_mode = %visualizer_mode,
-                        "stream publish visualizer produced first video frame"
-                    );
-                },
-                || 90_000 / STREAM_PUBLISH_TARGET_FPS,
-            );
-        });
-
-        Self {
-            stop,
-            paused,
-            child_pid,
-            thread: Some(thread),
-            mode: StreamPublishPlayerMode::Url,
-        }
-    }
-
     pub(crate) fn start_browser_frames(
-        mime_type: BrowserFrameMimeType,
+        source_generation: u64,
         frame_tx: crossbeam::Sender<StreamPublishFrame>,
         event_tx: crossbeam::Sender<StreamPublishEvent>,
     ) -> Self {
@@ -676,7 +553,6 @@ impl StreamPublishPlayer {
         let timestamp_increments = Arc::new(parking_lot::Mutex::new(VecDeque::<u32>::new()));
         let timestamp_increments_thread = timestamp_increments.clone();
         let last_captured_at_ms = Arc::new(AtomicU64::new(0));
-        let browser_mime_type = mime_type;
         let (frame_input_tx, frame_input_rx) =
             crossbeam::bounded::<BrowserFrameInput>(STREAM_PUBLISH_BROWSER_FRAME_QUEUE_CAPACITY);
 
@@ -688,7 +564,7 @@ impl StreamPublishPlayer {
         );
 
         let thread = std::thread::spawn(move || {
-            let pipeline_command = build_stream_publish_browser_pipeline_command(browser_mime_type);
+            let pipeline_command = build_stream_publish_browser_pipeline_command();
             run_pipeline(
                 pipeline_command,
                 true,
@@ -703,11 +579,12 @@ impl StreamPublishPlayer {
                     pipeline: "browser pipeline",
                     read: "browser ",
                 },
+                source_generation,
                 |startup_ms| {
                     info!(
                         startup_ms,
                         fps = STREAM_PUBLISH_TARGET_FPS,
-                        mime_type = %browser_mime_type,
+                        mime_type = STREAM_PUBLISH_BROWSER_MIME_TYPE,
                         "stream publish produced first browser video frame"
                     );
                 },
@@ -726,7 +603,6 @@ impl StreamPublishPlayer {
             child_pid,
             thread: Some(thread),
             mode: StreamPublishPlayerMode::BrowserFrames {
-                mime_type,
                 frame_input_tx,
                 frame_input_rx,
                 last_captured_at_ms,
@@ -740,12 +616,10 @@ impl StreamPublishPlayer {
     /// stream keeps showing the freshest capture.
     pub(crate) fn push_browser_frame(
         &self,
-        mime_type: BrowserFrameMimeType,
         frame_bytes: Vec<u8>,
         captured_at_ms: u64,
     ) -> io::Result<()> {
         let StreamPublishPlayerMode::BrowserFrames {
-            mime_type: active_mime_type,
             frame_input_tx,
             frame_input_rx,
             last_captured_at_ms,
@@ -758,12 +632,6 @@ impl StreamPublishPlayer {
             ));
         };
 
-        if *active_mime_type != mime_type {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "stream publish browser frame mime type mismatch",
-            ));
-        }
         if frame_bytes.is_empty() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -924,6 +792,7 @@ impl AppState {
         self.stream_publish.active = false;
         self.stream_publish.paused = false;
         self.stream_publish.active_source = None;
+        self.stream_publish.media_started = false;
         self.stream_publish_frames_sent = 0;
     }
 
@@ -934,46 +803,28 @@ impl AppState {
         {
             return;
         }
-        let Some(source) = self.stream_publish.pending_source.clone() else {
+        let Some(source) = self.stream_publish.pending_source.take() else {
             return;
         };
 
         self.stop_stream_publish_runtime("restart_before_publish_start");
-        self.clear_stream_publish_runtime_buffers();
+        let source_generation = self.stream_publish.begin_source();
 
         self.stream_publish.player = Some(match &source {
-            StreamPublishSource::Url {
+            StreamPublishSource::Url(url) => StreamPublishPlayer::start_url(
                 url,
-                resolved_direct_url,
-            } => StreamPublishPlayer::start_url(
-                url,
+                source_generation,
                 self.stream_publish_frame_tx.clone(),
                 self.stream_publish_event_tx.clone(),
-                *resolved_direct_url,
             ),
-            StreamPublishSource::Visualizer {
-                url,
-                resolved_direct_url,
-                visualizer_mode,
-            } => StreamPublishPlayer::start_visualizer(
-                url,
+            StreamPublishSource::BrowserFrames => StreamPublishPlayer::start_browser_frames(
+                source_generation,
                 self.stream_publish_frame_tx.clone(),
                 self.stream_publish_event_tx.clone(),
-                *resolved_direct_url,
-                visualizer_mode,
             ),
-            StreamPublishSource::BrowserFrames { mime_type } => {
-                StreamPublishPlayer::start_browser_frames(
-                    *mime_type,
-                    self.stream_publish_frame_tx.clone(),
-                    self.stream_publish_event_tx.clone(),
-                )
-            }
         });
         self.stream_publish.active = true;
         self.stream_publish.paused = false;
-        self.stream_publish.active_source = Some(source.clone());
-        self.stream_publish.clear_pending_start();
 
         if let Some(conn) = self.stream_publish_conn.as_ref() {
             if let Err(error) = conn.set_stream_publish_video_active(true) {
@@ -984,33 +835,21 @@ impl AppState {
             }
         }
         self.emit_transport_state(TransportRole::StreamPublish, "playing", None);
-        match source {
-            StreamPublishSource::Url {
-                resolved_direct_url,
-                ..
-            } => {
-                info!(resolved_direct_url, "started stream publish pipeline");
-            }
-            StreamPublishSource::Visualizer {
-                resolved_direct_url,
-                visualizer_mode,
-                ..
-            } => {
+        match &source {
+            StreamPublishSource::Url(_) => info!("started stream publish pipeline"),
+            StreamPublishSource::BrowserFrames => {
                 info!(
-                    resolved_direct_url,
-                    visualizer_mode = %visualizer_mode,
-                    "started stream publish visualizer pipeline"
+                    mime_type = STREAM_PUBLISH_BROWSER_MIME_TYPE,
+                    "started browser stream publish pipeline"
                 );
             }
-            StreamPublishSource::BrowserFrames { mime_type } => {
-                info!(mime_type = %mime_type, "started browser stream publish pipeline");
-            }
         }
+        self.stream_publish.active_source = Some(source);
     }
 
-    pub(crate) fn handle_stream_publish_command(&mut self, msg: StreamPublishCommand) {
+    pub(crate) fn handle_stream_publish_command(&mut self, msg: InMsg) {
         match msg {
-            StreamPublishCommand::Play {
+            InMsg::StreamPublishPlay {
                 url,
                 resolved_direct_url,
             } => {
@@ -1023,57 +862,15 @@ impl AppState {
                     );
                     return;
                 }
-                let source = StreamPublishSource::Url {
-                    url: normalized_url,
-                    resolved_direct_url,
-                };
-                if self.stream_publish.active
-                    && !self.stream_publish.paused
-                    && self.stream_publish.active_source.as_ref() == Some(&source)
-                {
-                    self.emit_transport_state(TransportRole::StreamPublish, "playing", None);
-                    return;
-                }
-                if self.stream_publish.active_source.as_ref() != Some(&source) {
-                    self.stop_stream_publish_runtime("stream_publish_source_switch");
-                }
-                self.stream_publish.queue_pending_start(source);
-                if self.stream_publish_conn.is_some() {
-                    self.maybe_start_stream_publish_pipeline();
-                } else {
-                    self.emit_transport_state(
-                        TransportRole::StreamPublish,
-                        "waiting_for_transport",
-                        None,
-                    );
-                }
-            }
-            StreamPublishCommand::PlayVisualizer {
-                url,
-                resolved_direct_url,
-                visualizer_mode,
-            } => {
-                let normalized_url = url.trim().to_string();
-                if normalized_url.is_empty() {
+                if resolved_direct_url {
                     self.emit_transport_state(
                         TransportRole::StreamPublish,
                         "failed",
-                        Some("stream_publish_play_visualizer_missing_url"),
+                        Some("stream_publish_play_direct_url_unsupported"),
                     );
                     return;
                 }
-                let normalized_mode = match visualizer_mode.trim() {
-                    "spectrum" => "spectrum",
-                    "waves" => "waves",
-                    "vectorscope" => "vectorscope",
-                    _ => "cqt",
-                }
-                .to_string();
-                let source = StreamPublishSource::Visualizer {
-                    url: normalized_url,
-                    resolved_direct_url,
-                    visualizer_mode: normalized_mode,
-                };
+                let source = StreamPublishSource::Url(normalized_url);
                 if self.stream_publish.active
                     && !self.stream_publish.paused
                     && self.stream_publish.active_source.as_ref() == Some(&source)
@@ -1095,18 +892,16 @@ impl AppState {
                     );
                 }
             }
-            StreamPublishCommand::BrowserStart { mime_type } => {
-                let Some(normalized_mime_type) = BrowserFrameMimeType::parse(&mime_type) else {
+            InMsg::StreamPublishBrowserStart { mime_type } => {
+                if !is_supported_browser_mime_type(&mime_type) {
                     self.emit_transport_state(
                         TransportRole::StreamPublish,
                         "failed",
                         Some("stream_publish_browser_start_unsupported_mime_type"),
                     );
                     return;
-                };
-                let source = StreamPublishSource::BrowserFrames {
-                    mime_type: normalized_mime_type,
-                };
+                }
+                let source = StreamPublishSource::BrowserFrames;
                 if self.stream_publish.active
                     && !self.stream_publish.paused
                     && self.stream_publish.active_source.as_ref() == Some(&source)
@@ -1128,19 +923,19 @@ impl AppState {
                     );
                 }
             }
-            StreamPublishCommand::BrowserFrame {
+            InMsg::StreamPublishBrowserFrame {
                 mime_type,
                 frame_base64,
                 captured_at_ms,
             } => {
-                let Some(normalized_mime_type) = BrowserFrameMimeType::parse(&mime_type) else {
+                if !is_supported_browser_mime_type(&mime_type) {
                     self.emit_transport_state(
                         TransportRole::StreamPublish,
                         "failed",
                         Some("stream_publish_browser_frame_unsupported_mime_type"),
                     );
                     return;
-                };
+                }
                 // While paused the ffmpeg process group is SIGSTOPped and
                 // consumes nothing — queueing frames would only fill the
                 // writer lane with stale captures.  Drop them until resume.
@@ -1164,8 +959,7 @@ impl AppState {
                     && !self.stream_publish.active
                     && matches!(
                         self.stream_publish.pending_source.as_ref(),
-                        Some(StreamPublishSource::BrowserFrames { mime_type })
-                            if mime_type == &normalized_mime_type
+                        Some(StreamPublishSource::BrowserFrames)
                     )
                 {
                     self.maybe_start_stream_publish_pipeline();
@@ -1181,8 +975,7 @@ impl AppState {
                 };
                 if !matches!(
                     self.stream_publish.active_source.as_ref(),
-                    Some(StreamPublishSource::BrowserFrames { mime_type })
-                        if mime_type == &normalized_mime_type
+                    Some(StreamPublishSource::BrowserFrames)
                 ) {
                     self.emit_transport_state(
                         TransportRole::StreamPublish,
@@ -1191,9 +984,7 @@ impl AppState {
                     );
                     return;
                 }
-                if let Err(error) =
-                    player.push_browser_frame(normalized_mime_type, frame_bytes, captured_at_ms)
-                {
+                if let Err(error) = player.push_browser_frame(frame_bytes, captured_at_ms) {
                     self.emit_transport_state(
                         TransportRole::StreamPublish,
                         "failed",
@@ -1203,7 +994,7 @@ impl AppState {
                     );
                 }
             }
-            StreamPublishCommand::Stop => {
+            InMsg::StreamPublishStop => {
                 self.stop_stream_publish_runtime("stream_publish_stop");
                 self.stream_publish.clear_pending_start();
                 self.emit_transport_state(
@@ -1212,7 +1003,7 @@ impl AppState {
                     Some("stream_publish_stopped"),
                 );
             }
-            StreamPublishCommand::Pause => {
+            InMsg::StreamPublishPause => {
                 self.stream_publish.paused = true;
                 if let Some(player) = self.stream_publish.player.as_ref()
                     && !player.pause()
@@ -1229,7 +1020,7 @@ impl AppState {
                 }
                 self.emit_transport_state(TransportRole::StreamPublish, "paused", None);
             }
-            StreamPublishCommand::Resume => {
+            InMsg::StreamPublishResume => {
                 self.stream_publish.paused = false;
                 if let Some(player) = self.stream_publish.player.as_ref()
                     && player.resume()
@@ -1252,6 +1043,7 @@ impl AppState {
                 }
                 self.maybe_start_stream_publish_pipeline();
             }
+            _ => unreachable!("non-publish IPC command routed to stream publish supervisor"),
         }
     }
 
@@ -1268,9 +1060,6 @@ impl AppState {
             StreamPublishEvent::Error(message) => {
                 self.stop_stream_publish_runtime("stream_publish_error");
                 self.emit_transport_state(TransportRole::StreamPublish, "failed", Some(&message));
-            }
-            StreamPublishEvent::FirstFrame { startup_ms, fps } => {
-                info!(startup_ms, fps, "stream publish first frame observed");
             }
         }
     }
@@ -1298,6 +1087,9 @@ impl AppState {
         let mut frames_this_tick = 0;
 
         while let Ok(frame) = self.stream_publish_frame_rx.try_recv() {
+            if frame.source_generation != self.stream_publish.source_generation {
+                continue;
+            }
             frames_this_tick += 1;
             self.stream_publish_frames_sent += 1;
             let queue_depth = self.stream_publish_frame_rx.len();
@@ -1318,6 +1110,7 @@ impl AppState {
             let StreamPublishFrame {
                 access_unit,
                 timestamp_increment,
+                source_generation,
             } = frame;
             let encrypted_frame = {
                 let mut guard = self.stream_publish_dave.lock();
@@ -1342,8 +1135,10 @@ impl AppState {
                                 if failures
                                     == crate::app_state::DAVE_ENCRYPT_FAILURE_ALERT_THRESHOLD
                                 {
-                                    crate::ipc::send_error(
-                                        crate::ipc::ErrorCode::VoiceRuntimeError,
+                                    send_transport_error(
+                                        ErrorCode::VoiceRuntimeError,
+                                        TransportRole::StreamPublish,
+                                        None,
                                         format!(
                                             "stream publish DAVE encrypt failed {failures} times in a row; dropping outbound video"
                                         ),
@@ -1367,15 +1162,28 @@ impl AppState {
                 }
             };
 
+            let mut frame_transmitted = false;
             if let Some(encrypted_frame) = encrypted_frame {
                 self.stream_publish_encrypt_failures = 0;
-                if let Some(conn) = self.stream_publish_conn.as_ref()
-                    && let Err(error) = conn
+                if let Some(conn) = self.stream_publish_conn.as_ref() {
+                    match conn
                         .send_h264_frame(&encrypted_frame, timestamp_increment)
                         .await
-                {
-                    warn!(error = %error, "failed to send stream publish video frame");
+                    {
+                        Ok(()) => frame_transmitted = true,
+                        Err(error) => {
+                            warn!(error = %error, "failed to send stream publish video frame");
+                        }
+                    }
                 }
+            }
+            if frame_transmitted && self.stream_publish.mark_media_started(source_generation) {
+                send_msg(OutMsg::StreamPublishMediaStarted {
+                    role: TransportRole::StreamPublish,
+                    connection_generation: self
+                        .current_transport_generation(TransportRole::StreamPublish),
+                    source_generation,
+                });
             }
 
             if frames_this_tick >= MAX_FRAMES_PER_TICK {
@@ -1388,42 +1196,23 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::{
-        BrowserFrameMimeType, STREAM_PUBLISH_TARGET_FPS,
+        STREAM_PUBLISH_TARGET_FPS, StreamPublishState,
         build_stream_publish_browser_pipeline_command, build_stream_publish_pipeline_command,
-        build_stream_publish_visualizer_pipeline_command, drain_h264_access_units,
+        drain_h264_access_units,
     };
 
     #[test]
-    fn build_stream_publish_pipeline_command_uses_direct_ffmpeg_for_direct_urls() {
+    fn build_stream_publish_pipeline_command_uses_ytdlp() {
         let command =
-            build_stream_publish_pipeline_command("https://cdn.example.com/video.mp4", true);
-        assert!(command.contains("ffmpeg"));
-        assert!(!command.contains("yt-dlp"));
-        assert!(command.contains(&format!("fps={STREAM_PUBLISH_TARGET_FPS}")));
-    }
-
-    #[test]
-    fn build_stream_publish_pipeline_command_uses_ytdlp_for_indirect_urls() {
-        let command =
-            build_stream_publish_pipeline_command("https://www.youtube.com/watch?v=abc123", false);
+            build_stream_publish_pipeline_command("https://www.youtube.com/watch?v=abc123");
         assert!(command.contains("yt-dlp"));
+        assert!(command.contains(&format!("fps={STREAM_PUBLISH_TARGET_FPS}")));
         assert!(command.contains("h264_metadata=aud=insert"));
     }
 
     #[test]
-    fn build_stream_publish_visualizer_command_uses_ytdlp_resolved_url_for_indirect_urls() {
-        let command = build_stream_publish_visualizer_pipeline_command(
-            "https://www.youtube.com/watch?v=abc123",
-            false,
-            "waves",
-        );
-        assert!(command.contains("yt-dlp"));
-        assert!(command.contains("showwaves"));
-    }
-
-    #[test]
     fn build_stream_publish_browser_pipeline_command_uses_image2pipe_png_input() {
-        let command = build_stream_publish_browser_pipeline_command(BrowserFrameMimeType::Png);
+        let command = build_stream_publish_browser_pipeline_command();
         assert!(command.contains("-f image2pipe"));
         assert!(command.contains("-codec:v png"));
         assert!(command.contains("h264_metadata=aud=insert"));
@@ -1439,5 +1228,20 @@ mod tests {
         assert_eq!(frames.len(), 1);
         assert!(frames[0].starts_with(&[0, 0, 0, 1, 0x09]));
         assert!(buffer.starts_with(&[0, 0, 0, 1, 0x09]));
+    }
+
+    #[test]
+    fn media_started_is_once_per_source_and_rejects_stale_source_generations() {
+        let mut state = StreamPublishState::default();
+        let first = state.begin_source();
+        assert!(state.mark_media_started(first));
+        assert!(!state.mark_media_started(first));
+        state.reset_media_started();
+        assert!(state.mark_media_started(first));
+
+        let replacement = state.begin_source();
+        assert_ne!(replacement, first);
+        assert!(!state.mark_media_started(first));
+        assert!(state.mark_media_started(replacement));
     }
 }

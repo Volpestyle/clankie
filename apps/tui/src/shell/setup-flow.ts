@@ -50,16 +50,14 @@ export type SetupFlow = {
     readonly validate?: (value: string) => string | undefined;
   }): Promise<string | undefined>;
   readSelect(options: {
-    readonly kind: "single";
     readonly message: string;
     readonly options: readonly MenuOption[];
     readonly statusActions?: readonly MenuOption[];
     readonly initialValue?: string;
     readonly currentValue?: string;
-    readonly required?: boolean;
     readonly allowBack?: boolean;
     readonly onClose?: (value: string) => void;
-  }): Promise<string[] | undefined>;
+  }): Promise<string | undefined>;
   waitForInterrupt(): {
     readonly promise: Promise<void>;
     dispose(): void;
@@ -179,11 +177,11 @@ export function createSetupFlow(context: SetupFlowContext): SetupFlowController 
 
   async function readSelectOverlay(
     options: Parameters<SetupFlow["readSelect"]>[0],
-  ): Promise<string[] | undefined> {
-    return await new Promise<string[] | undefined>((resolve) => {
+  ): Promise<string | undefined> {
+    return await new Promise<string | undefined>((resolve) => {
       let settled = false;
       let handle: OverlayHandle | undefined;
-      const finish = (values: readonly string[] | undefined): void => {
+      const finish = (value: string | undefined): void => {
         if (settled) return;
         settled = true;
         if (cancelActivePrompt === cancel) cancelActivePrompt = undefined;
@@ -192,7 +190,7 @@ export function createSetupFlow(context: SetupFlowContext): SetupFlowController 
         context.refreshStatusView();
         context.refreshCommandSurface(context.editor.getText());
         context.tui.requestRender();
-        resolve(values === undefined ? undefined : [...values]);
+        resolve(value);
       };
       const cancel = (): void => finish(undefined);
       cancelActivePrompt = cancel;
@@ -202,7 +200,6 @@ export function createSetupFlow(context: SetupFlowContext): SetupFlowController 
         allowBack: options.allowBack,
         currentValue: options.currentValue,
         initialValue: options.initialValue,
-        kind: options.kind,
         message: options.message,
         onCancel: cancel,
         ...(options.onClose === undefined
@@ -214,9 +211,8 @@ export function createSetupFlow(context: SetupFlowContext): SetupFlowController 
               },
             }),
         onRender: () => context.tui.requestRender(),
-        onSubmit: (values) => finish(values),
+        onSubmit: finish,
         options: options.options.map(toInteractivePromptOption),
-        required: options.required,
         statusActions: options.statusActions?.map(toInteractivePromptOption),
         theme: context.selectListTheme,
       });
@@ -264,7 +260,7 @@ export function createSetupFlow(context: SetupFlowContext): SetupFlowController 
         if (error === undefined) return submitted;
       }
     },
-    async readSelect(options): Promise<string[] | undefined> {
+    async readSelect(options): Promise<string | undefined> {
       return await readSelectOverlay(options);
     },
     waitForInterrupt() {

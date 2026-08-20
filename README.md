@@ -24,11 +24,14 @@ hands, he leads a fleet of coding agents through herdr panes you can watch.
 - **Discord teammate.** A real member of your server: bounded text turns,
   consented group voice, pictures ride his replies, and he remembers the
   people he talks to. Ask him to search or play YouTube music in voice; he can
-  also stay silent — silence is a real answer.
+  also stay silent — silence is a real answer. Each media-enabled active Discord
+  body owns one native Vox child for voice capture, TTS, and audible music; a
+  text-only official-bot process does not spawn Vox.
 - **Plays games on stream.** Pokemon FireRed/Emerald on his own GBA body,
-  watchable live in a Discord Activity with voice commentary over the run.
-  External agents can possess the GBA body through
-  [`apps/gba-mcp`](apps/gba-mcp/README.md).
+  or a separately credentialed seat in a hosted PokeAgents world, watchable live
+  in a Discord Activity with voice commentary over the run. External agents get
+  an isolated private emulator through [`apps/gba-mcp`](apps/gba-mcp/README.md);
+  they never take Clankie's body or receive his room input.
 - **Makes things.** Image and video generation behind one provider-neutral
   seam (OpenAI, Google, Grok); a browser via the agent-browser MCP host.
 - **Codes and leads.** The same pi coding tools every agent has, plus the
@@ -61,9 +64,9 @@ generation, `/persona` for who he is, `/connect` for Linear and email, and
 keys from a gitignored root `.env.local`, and model/media providers may fall
 back to their declared API-key environment variables when the broker has no
 entry. Existing shell values win. Discord account, bridge, activity-producer,
-and possessor-voice credentials remain broker-only and reject their forbidden
-environment names. Operator, captain, and runner bearers retain documented
-test/CI overrides. `pnpm doctor` reports broker status and exported
+and play-voice credentials remain broker-only and reject their forbidden
+environment names. Operator and captain bearers retain documented test/CI
+overrides. `pnpm doctor` reports broker status and exported
 OpenAI/Anthropic fallbacks; it does not load `.env.local` or print secret values.
 
 ## Apps
@@ -73,15 +76,17 @@ OpenAI/Anthropic fallbacks; it does not load `.env.local` or print secret values
 | [`apps/clankie`](apps/clankie)                                     | The service: captain, tools, bodies, API (:4310). [HTTP catalog](apps/clankie/openapi.yaml) |
 | [`apps/tui`](apps/tui/README.md)                                   | Operator console and the `clankie` launcher                                                 |
 | [`apps/discord-bridge`](apps/discord-bridge/README.md)             | Official bot: text, voice, attachments                                                      |
-| [`apps/discord-user-session`](apps/discord-user-session/README.md) | Personal-lab user-session body (off by default)                                             |
+| [`apps/discord-user-session`](apps/discord-user-session/README.md) | Personal-lab voice, screen-watch, and Go Live body (off by default)                         |
 | [`apps/discord-activity`](apps/discord-activity/README.md)         | The watch-me-play surface                                                                   |
-| [`apps/gba-mcp`](apps/gba-mcp/README.md)                           | His GBA body as an MCP server                                                               |
+| [`apps/gba-mcp`](apps/gba-mcp/README.md)                           | Isolated private GBA emulator contract sandbox                                              |
 | [`apps/relay`](apps/relay/README.md)                               | Remote access for the phone/desktop app                                                     |
-| [`apps/vox`](apps/vox/README.md)                                   | Native Discord media; currently lab screen-watch and Go Live                                |
+| [`apps/vox`](apps/vox/README.md)                                   | Sole native Discord media owner behind an AGPL process boundary                             |
 
-[`integrations/gba-emulator`](integrations/gba-emulator/README.md) holds the GBA
-body; `packages/` holds the shared contracts. The graphical garden app is a
-separate private repo (`clankie-app`).
+[`integrations/gba-emulator`](integrations/gba-emulator/README.md) implements
+the local GBA body each owning process instantiates; `packages/` holds the
+shared contracts. Hosted co-play uses separately credentialed PokeAgents seats
+([ADR 0129](docs/adr/0129-each-player-owns-a-body.md)). The graphical garden app
+is a separate private repo (`clankie-app`).
 
 ## Development
 

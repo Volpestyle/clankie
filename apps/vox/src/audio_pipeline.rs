@@ -5,7 +5,7 @@ use anyhow::Result;
 use audiopus::coder::Encoder as OpusEncoder;
 use audiopus::{Application, Channels, SampleRate};
 use parking_lot::Mutex;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 use crate::ipc::{OutMsg, send_msg};
 
@@ -56,7 +56,7 @@ impl GainEnvelope {
 
 const MAX_TRAILING_SILENCE: u32 = 5; // 100ms of trailing silence
 pub(crate) const AUDIO_FRAME_SAMPLES: usize = 960; // 20ms @ 48kHz mono
-const MAX_PCM_BUFFER_SAMPLES: usize = 720_000; // 15 seconds @ 48kHz mono
+pub(crate) const MAX_PCM_BUFFER_SAMPLES: usize = 720_000; // 15 seconds @ 48kHz mono
 pub(crate) const MAX_MUSIC_BUFFER_SAMPLES: usize = 96_000; // 2 seconds @ 48kHz mono
 const PARTIAL_TTS_FLUSH_TICKS: u32 = 6; // Flush an underfilled tail after 120ms of no growth
 
@@ -72,6 +72,15 @@ const TTS_PREBUFFER_SAMPLES: usize = 9_600; // 200ms @ 48kHz mono
 /// than holding it forever.  6 ticks = 120ms of no growth.
 const TTS_PREBUFFER_STALL_TICKS: u32 = 6;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct TtsBufferOverflow {
+    pub(crate) dropped_samples: usize,
+    pub(crate) dropped_ms: f64,
+    pub(crate) buffer_samples: usize,
+    pub(crate) buffer_ms: f64,
+}
+
+#[allow(clippy::struct_excessive_bools)] // Mixer gates and response drain state are independent.
 pub(crate) struct AudioSendState {
     pcm_buffer: VecDeque<i16>,   // TTS audio
     music_buffer: VecDeque<i16>, // Music audio (separate for mixing)
@@ -93,6 +102,14 @@ pub(crate) struct AudioSendState {
     /// Snapshot of the TTS buffer size on the previous prebuffer-gate tick,
     /// used to detect whether the buffer is still growing.
     tts_prebuffer_last_len: usize,
+    /// A response remains in flight until its final PCM plus five 20ms tail
+    /// frames have actually crossed the encoder.
+    tts_output_started: bool,
+    tts_tail_frames_sent: u32,
+    /// Metadata for the frame most recently returned by `next_opus_frame`.
+    /// The supervisor uses this only after the frame is accepted by UDP so the
+    /// correlated `started` event cannot precede actual TTS transmission.
+    last_frame_contained_audible_tts: bool,
     /// Reusable mix buffer for the clamped 20ms PCM frame handed to the
     /// Opus encoder — avoids one allocation per frame.
     pcm_mix_scratch: Vec<i16>,
@@ -119,34 +136,30 @@ impl AudioSendState {
             tts_prebuffer_satisfied: false,
             tts_prebuffer_stall_ticks: 0,
             tts_prebuffer_last_len: 0,
+            tts_output_started: false,
+            tts_tail_frames_sent: 0,
+            last_frame_contained_audible_tts: false,
             pcm_mix_scratch: Vec::with_capacity(AUDIO_FRAME_SAMPLES),
             opus_out_scratch: vec![0u8; 4000],
         })
     }
 
-    pub(crate) fn push_pcm(&mut self, samples: Vec<i16>) {
-        self.pcm_buffer.extend(samples);
-        // Drop newest samples to keep the buffer bounded without skipping ahead
-        // through speech that is already queued for playback.
-        if self.pcm_buffer.len() > MAX_PCM_BUFFER_SAMPLES {
-            let overflow = self.pcm_buffer.len() - MAX_PCM_BUFFER_SAMPLES;
-            let overflow_ms = overflow as f64 / 48.0;
-            let buffer_samples = self.pcm_buffer.len();
-            let buffer_ms = buffer_samples as f64 / 48.0;
-            warn!(
-                "TTS PCM buffer overflow: dropping {} newest samples ({:.1}ms), buffer was {} samples ({:.1}ms)",
-                overflow, overflow_ms, buffer_samples, buffer_ms
-            );
-            send_msg(OutMsg::TtsBufferOverflow {
-                dropped_samples: overflow,
-                dropped_ms: overflow_ms,
+    pub(crate) fn push_pcm(&mut self, mut samples: Vec<i16>) -> Result<(), TtsBufferOverflow> {
+        let buffer_samples = self.pcm_buffer.len().saturating_add(samples.len());
+        if buffer_samples > MAX_PCM_BUFFER_SAMPLES {
+            let dropped_samples = buffer_samples - MAX_PCM_BUFFER_SAMPLES;
+            samples.fill(0);
+            return Err(TtsBufferOverflow {
+                dropped_samples,
+                dropped_ms: dropped_samples as f64 / 48.0,
                 buffer_samples,
-                buffer_ms,
+                buffer_ms: buffer_samples as f64 / 48.0,
             });
-            self.pcm_buffer.truncate(MAX_PCM_BUFFER_SAMPLES);
         }
+        self.pcm_buffer.extend(samples);
         self.trailing_silence_frames = 0;
         self.partial_tts_stall_ticks = 0;
+        Ok(())
     }
 
     pub(crate) fn push_music_pcm(&mut self, samples: Vec<i16>) {
@@ -182,8 +195,8 @@ impl AudioSendState {
         }
     }
 
-    pub(crate) fn begin_music_fade_in(&mut self, fade_ms: u32) {
-        self.music_gain = GainEnvelope::new(0.0, 1.0, fade_ms);
+    pub(crate) fn begin_music_fade_in(&mut self, target: f32, fade_ms: u32) {
+        self.music_gain = GainEnvelope::new(0.0, target, fade_ms);
         self.music_gain_notified = 0.0;
     }
 
@@ -207,8 +220,9 @@ impl AudioSendState {
         self.music_gain.target < 1.0
     }
 
-    pub(crate) fn tts_is_empty(&self) -> bool {
-        self.pcm_buffer.is_empty()
+    #[cfg(test)]
+    pub(crate) fn music_gain_target(&self) -> f32 {
+        self.music_gain.target
     }
 
     pub(crate) fn tts_buffer_samples(&self) -> usize {
@@ -225,6 +239,8 @@ impl AudioSendState {
     }
 
     fn clear(&mut self) {
+        zero_pcm_queue(&mut self.pcm_buffer);
+        zero_pcm_queue(&mut self.music_buffer);
         self.pcm_buffer.clear();
         self.music_buffer.clear();
         self.music_output_suppressed = false;
@@ -233,40 +249,61 @@ impl AudioSendState {
         self.tts_prebuffer_satisfied = false;
         self.tts_prebuffer_stall_ticks = 0;
         self.tts_prebuffer_last_len = 0;
+        self.tts_output_started = false;
+        self.tts_tail_frames_sent = 0;
+        self.last_frame_contained_audible_tts = false;
+        self.pcm_mix_scratch.fill(0);
     }
 
     fn clear_tts(&mut self) {
+        zero_pcm_queue(&mut self.pcm_buffer);
         self.pcm_buffer.clear();
         self.partial_tts_stall_ticks = 0;
         self.tts_prebuffer_satisfied = false;
         self.tts_prebuffer_stall_ticks = 0;
         self.tts_prebuffer_last_len = 0;
+        self.tts_output_started = false;
+        self.tts_tail_frames_sent = 0;
+        self.last_frame_contained_audible_tts = false;
+        self.pcm_mix_scratch.fill(0);
     }
 
     fn clear_music(&mut self) {
+        zero_pcm_queue(&mut self.music_buffer);
         self.music_buffer.clear();
         self.music_output_suppressed = false;
         self.trailing_silence_frames = MAX_TRAILING_SILENCE;
+        self.pcm_mix_scratch.fill(0);
     }
 
-    /// Returns true when the TTS buffer has just transitioned from non-empty to
-    /// empty (the trailing silence frames have all been sent).  The caller
-    /// should emit an immediate drain notification to the TS side so the
-    /// output-lock state converges without waiting for the periodic report.
-    pub(crate) fn tts_just_drained(&self) -> bool {
-        // The buffer is empty, we were speaking, and we have exhausted all
-        // trailing silence frames — meaning this tick is the first fully-idle
-        // tick after playback finished.
-        !self.speaking
-            && self.pcm_buffer.is_empty()
-            && self.trailing_silence_frames >= MAX_TRAILING_SILENCE
-            && !self.tts_prebuffer_satisfied
+    pub(crate) fn tts_is_fully_drained(&self) -> bool {
+        self.pcm_buffer.is_empty() && !self.tts_output_started
+    }
+
+    pub(crate) fn last_frame_contained_audible_tts(&self) -> bool {
+        self.last_frame_contained_audible_tts
+    }
+
+    fn note_tts_frame_sent(&mut self, contained_tts: bool) {
+        if contained_tts {
+            self.tts_output_started = true;
+            self.tts_tail_frames_sent = 0;
+        } else if self.tts_output_started && self.pcm_buffer.is_empty() {
+            self.tts_tail_frames_sent = self.tts_tail_frames_sent.saturating_add(1);
+            if self.tts_tail_frames_sent >= MAX_TRAILING_SILENCE {
+                self.tts_output_started = false;
+                self.tts_prebuffer_satisfied = false;
+                self.tts_prebuffer_stall_ticks = 0;
+                self.tts_prebuffer_last_len = 0;
+            }
+        }
     }
 
     /// Encode the next 20ms frame, mixing TTS and music buffers.
     /// Music samples have the gain envelope applied unless music output is
     /// temporarily suppressed for a wake-word pause. Returns None if idle.
     pub(crate) fn next_opus_frame(&mut self) -> Option<Vec<u8>> {
+        self.last_frame_contained_audible_tts = false;
         let available_tts = self.pcm_buffer.len();
         let available_music = self.music_buffer.len();
         let has_music = !self.music_output_suppressed && available_music >= AUDIO_FRAME_SAMPLES;
@@ -292,19 +329,23 @@ impl AudioSendState {
             }
             self.tts_prebuffer_last_len = available_tts;
 
-            if self.tts_prebuffer_stall_ticks < TTS_PREBUFFER_STALL_TICKS && !has_music {
-                // Still accumulating — don't produce TTS output yet.
+            if self.tts_prebuffer_stall_ticks < TTS_PREBUFFER_STALL_TICKS {
+                // Still accumulating. Music may continue underneath, but TTS
+                // must remain gated until either 200ms buffers or 120ms stalls.
                 self.partial_tts_stall_ticks = 0;
-                return None;
+                if !has_music {
+                    return None;
+                }
+            } else {
+                // Stall timeout reached — short utterance, release the gate.
+                self.tts_prebuffer_satisfied = true;
+                info!(
+                    buffered_samples = available_tts,
+                    buffered_ms = available_tts as f64 / 48.0,
+                    stall_ticks = self.tts_prebuffer_stall_ticks,
+                    "clankvox_tts_prebuffer_satisfied_short_utterance"
+                );
             }
-            // Stall timeout reached — short utterance, release the gate.
-            self.tts_prebuffer_satisfied = true;
-            info!(
-                buffered_samples = available_tts,
-                buffered_ms = available_tts as f64 / 48.0,
-                stall_ticks = self.tts_prebuffer_stall_ticks,
-                "clankvox_tts_prebuffer_satisfied_short_utterance"
-            );
         }
         if available_tts >= TTS_PREBUFFER_SAMPLES && !self.tts_prebuffer_satisfied {
             self.tts_prebuffer_satisfied = true;
@@ -317,8 +358,10 @@ impl AudioSendState {
             );
         }
 
-        let has_full_tts = available_tts >= AUDIO_FRAME_SAMPLES;
-        let has_partial_tts = available_tts > 0 && available_tts < AUDIO_FRAME_SAMPLES;
+        let has_full_tts = self.tts_prebuffer_satisfied && available_tts >= AUDIO_FRAME_SAMPLES;
+        let has_partial_tts = self.tts_prebuffer_satisfied
+            && available_tts > 0
+            && available_tts < AUDIO_FRAME_SAMPLES;
 
         if has_full_tts {
             self.partial_tts_stall_ticks = 0;
@@ -338,6 +381,7 @@ impl AudioSendState {
             0
         };
         let has_tts = tts_samples_to_take > 0;
+        let mut has_audible_tts = false;
 
         if has_tts || has_music {
             let mut mixed = [0i32; AUDIO_FRAME_SAMPLES];
@@ -356,11 +400,17 @@ impl AudioSendState {
                     );
                 }
                 for (i, s) in self.pcm_buffer.drain(..tts_samples_to_take).enumerate() {
+                    has_audible_tts |= s != 0;
                     mixed[i] += s as i32; // TTS at full volume always
                 }
             }
 
-            return self.encode_mixed_frame(&mixed);
+            let frame = self.encode_mixed_frame(&mixed);
+            if frame.is_some() {
+                self.note_tts_frame_sent(has_tts);
+                self.last_frame_contained_audible_tts = has_audible_tts;
+            }
+            return frame;
         }
 
         if has_partial_tts {
@@ -374,6 +424,7 @@ impl AudioSendState {
         // Buffer empty — send trailing silence to avoid abrupt cutoff
         if self.trailing_silence_frames < MAX_TRAILING_SILENCE {
             self.trailing_silence_frames += 1;
+            self.note_tts_frame_sent(false);
             // Opus silence frame (RFC 6716 comfort noise)
             return Some(vec![0xF8, 0xFF, 0xFE]);
         }
@@ -413,6 +464,10 @@ impl AudioSendState {
             }
         }
     }
+}
+
+fn zero_pcm_queue(queue: &mut VecDeque<i16>) {
+    queue.make_contiguous().fill(0);
 }
 
 /// Windowed-sinc low-pass FIR filter + polyphase resampling.
@@ -604,24 +659,65 @@ pub(crate) fn emit_playback_armed(
 mod tests {
     use super::{
         AudioSendState, MAX_PCM_BUFFER_SAMPLES, convert_llm_to_48k_mono,
-        is_supported_llm_sample_rate,
+        is_supported_llm_sample_rate, zero_pcm_queue,
     };
+
+    #[test]
+    fn tts_drain_waits_for_pcm_and_all_trailing_frames() {
+        let mut state = AudioSendState::new().expect("audio state");
+        state.tts_prebuffer_satisfied = true;
+        state
+            .push_pcm(vec![123; super::AUDIO_FRAME_SAMPLES])
+            .expect("PCM fits");
+
+        assert!(state.next_opus_frame().is_some());
+        assert!(!state.tts_is_fully_drained());
+        for _ in 1..super::MAX_TRAILING_SILENCE {
+            assert!(state.next_opus_frame().is_some());
+            assert!(!state.tts_is_fully_drained());
+        }
+        assert!(state.next_opus_frame().is_some());
+        assert!(state.tts_is_fully_drained());
+    }
+
+    #[test]
+    fn clear_tts_zeros_pcm_queue_and_mix_scratch() {
+        let mut queue = std::collections::VecDeque::from([1_i16, -2, 3]);
+        zero_pcm_queue(&mut queue);
+        assert!(queue.iter().all(|sample| *sample == 0));
+
+        let mut state = AudioSendState::new().expect("audio state");
+        state.tts_prebuffer_satisfied = true;
+        state
+            .push_pcm(vec![123; super::AUDIO_FRAME_SAMPLES * 2])
+            .expect("PCM fits");
+        assert!(state.next_opus_frame().is_some());
+        assert!(state.pcm_mix_scratch.iter().any(|sample| *sample != 0));
+
+        state.clear_tts();
+
+        assert_eq!(state.tts_buffer_samples(), 0);
+        assert!(state.pcm_mix_scratch.iter().all(|sample| *sample == 0));
+        assert!(state.tts_is_fully_drained());
+    }
 
     #[test]
     fn tts_partial_tail_flushes_after_short_stall() {
         let mut state = AudioSendState::new().expect("audio state");
         // Bypass prebuffer gate — this test is about partial-tail flush behavior
         state.tts_prebuffer_satisfied = true;
-        state.push_pcm(vec![123; 480]);
+        state.push_pcm(vec![123; 480]).expect("PCM fits");
 
         assert_eq!(state.tts_buffer_samples(), 480);
         for _ in 1..super::PARTIAL_TTS_FLUSH_TICKS {
             assert!(state.next_opus_frame().is_none());
+            assert!(!state.last_frame_contained_audible_tts());
             assert_eq!(state.tts_buffer_samples(), 480);
         }
 
         let frame = state.next_opus_frame().expect("partial tail should flush");
         assert!(!frame.is_empty());
+        assert!(state.last_frame_contained_audible_tts());
         assert_eq!(state.tts_buffer_samples(), 0);
     }
 
@@ -630,10 +726,10 @@ mod tests {
         let mut state = AudioSendState::new().expect("audio state");
         // Bypass prebuffer gate — this test is about tail coalescing behavior
         state.tts_prebuffer_satisfied = true;
-        state.push_pcm(vec![123; 480]);
+        state.push_pcm(vec![123; 480]).expect("PCM fits");
 
         assert!(state.next_opus_frame().is_none());
-        state.push_pcm(vec![123; 480]);
+        state.push_pcm(vec![123; 480]).expect("PCM fits");
 
         let frame = state
             .next_opus_frame()
@@ -646,12 +742,13 @@ mod tests {
     fn tts_prebuffer_gate_holds_output_until_threshold() {
         let mut state = AudioSendState::new().expect("audio state");
         // Push less than TTS_PREBUFFER_SAMPLES — should be held
-        state.push_pcm(vec![123; 960]);
+        state.push_pcm(vec![123; 960]).expect("PCM fits");
         assert!(!state.tts_prebuffer_satisfied);
         assert!(
             state.next_opus_frame().is_none(),
             "prebuffer should hold output"
         );
+        assert!(!state.last_frame_contained_audible_tts());
         assert_eq!(
             state.tts_buffer_samples(),
             960,
@@ -659,26 +756,31 @@ mod tests {
         );
 
         // Push enough to cross the threshold
-        state.push_pcm(vec![123; super::TTS_PREBUFFER_SAMPLES]);
+        state
+            .push_pcm(vec![123; super::TTS_PREBUFFER_SAMPLES])
+            .expect("PCM fits");
         assert!(!state.tts_prebuffer_satisfied);
         let frame = state
             .next_opus_frame()
             .expect("prebuffer satisfied, should produce frame");
         assert!(!frame.is_empty());
         assert!(state.tts_prebuffer_satisfied);
+        assert!(state.last_frame_contained_audible_tts());
     }
 
     #[test]
     fn tts_prebuffer_releases_short_utterance_after_stall() {
         let mut state = AudioSendState::new().expect("audio state");
         // Push a short utterance (under TTS_PREBUFFER_SAMPLES)
-        state.push_pcm(vec![123; 960]);
+        state.push_pcm(vec![123; 960]).expect("PCM fits");
         assert!(!state.tts_prebuffer_satisfied);
 
         // First tick sees growth (0 -> 960), resets stall counter.
         assert!(state.next_opus_frame().is_none());
+        assert!(!state.last_frame_contained_audible_tts());
         for _ in 1..super::TTS_PREBUFFER_STALL_TICKS {
             assert!(state.next_opus_frame().is_none());
+            assert!(!state.last_frame_contained_audible_tts());
         }
         // Stall threshold reached, so the short utterance releases.
         let frame = state
@@ -686,6 +788,30 @@ mod tests {
             .expect("short utterance should play after stall timeout");
         assert!(!frame.is_empty());
         assert!(state.tts_prebuffer_satisfied);
+        assert!(state.last_frame_contained_audible_tts());
+    }
+
+    #[test]
+    fn music_frames_do_not_bypass_the_tts_prebuffer_started_gate() {
+        let mut state = AudioSendState::new().expect("audio state");
+        state.push_pcm(vec![123; 960]).expect("PCM fits");
+        state.push_music_pcm(vec![456; super::AUDIO_FRAME_SAMPLES]);
+
+        assert!(state.next_opus_frame().is_some(), "music may continue");
+        assert!(!state.last_frame_contained_audible_tts());
+        assert_eq!(state.tts_buffer_samples(), 960);
+    }
+
+    #[test]
+    fn silent_tts_pcm_does_not_mark_a_frame_audible() {
+        let mut state = AudioSendState::new().expect("audio state");
+        state.tts_prebuffer_satisfied = true;
+        state
+            .push_pcm(vec![0; super::AUDIO_FRAME_SAMPLES])
+            .expect("PCM fits");
+
+        assert!(state.next_opus_frame().is_some());
+        assert!(!state.last_frame_contained_audible_tts());
     }
 
     #[test]
@@ -713,7 +839,7 @@ mod tests {
     #[test]
     fn clear_music_preserves_tts_buffer() {
         let mut state = AudioSendState::new().expect("audio state");
-        state.push_pcm(vec![123; 480]);
+        state.push_pcm(vec![123; 480]).expect("PCM fits");
         state.push_music_pcm(vec![456; 960]);
         state.suppress_music_output();
 
@@ -725,14 +851,19 @@ mod tests {
     }
 
     #[test]
-    fn tts_overflow_drops_newest_tail_instead_of_skipping_buffered_speech() {
+    fn tts_overflow_rejects_the_whole_chunk_without_truncating_pcm() {
         let mut state = AudioSendState::new().expect("audio state");
-        state.push_pcm(vec![111; MAX_PCM_BUFFER_SAMPLES]);
-        state.push_pcm(vec![222; 960]);
+        state
+            .push_pcm(vec![111; MAX_PCM_BUFFER_SAMPLES])
+            .expect("initial PCM fits");
+        let overflow = state
+            .push_pcm(vec![222; 960])
+            .expect_err("overflow must fail closed");
 
         assert_eq!(state.tts_buffer_samples(), MAX_PCM_BUFFER_SAMPLES);
         assert_eq!(state.pcm_buffer.front().copied(), Some(111));
         assert_eq!(state.pcm_buffer.back().copied(), Some(111));
+        assert_eq!(overflow.dropped_samples, 960);
     }
 
     #[test]

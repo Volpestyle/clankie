@@ -2,7 +2,6 @@ import type { DiscordControlPlaneReadiness } from "@clankie/api-client";
 import {
   DISCORD_BOT_PROVIDER_ID,
   resolveDiscordBridgeCredential,
-  resolveDiscordVoiceBridgeCredential,
   type CredentialStore,
 } from "@clankie/credential-broker";
 import { ApplicationFlagsBitField, REST, Routes } from "discord.js";
@@ -51,11 +50,9 @@ export async function inspectDiscordTextReadiness(
     checks.push(check);
     return check;
   };
-  const forbiddenEnvironmentCredentials = [
-    "DISCORD_BOT_TOKEN",
-    "DISCORD_USER_TOKEN",
-    "OPENAI_API_KEY",
-  ].filter((name) => options.env[name]);
+  const forbiddenEnvironmentCredentials = ["DISCORD_BOT_TOKEN", "DISCORD_USER_TOKEN"].filter(
+    (name) => options.env[name],
+  );
   add(
     "credential environment",
     forbiddenEnvironmentCredentials.length === 0,
@@ -92,35 +89,6 @@ export async function inspectDiscordTextReadiness(
       "Remove the malformed clankie_discord_bridge entry and restart the clankie service.",
     );
   }
-  const voiceEnabled = options.env.DISCORD_VOICE_ENABLED === "true";
-  if (voiceEnabled) {
-    try {
-      const voiceBridgeToken = await resolveDiscordVoiceBridgeCredential({ store: options.store });
-      add(
-        "voice bridge identity",
-        voiceBridgeToken !== undefined,
-        voiceBridgeToken === undefined
-          ? "broker entry clankie_discord_voice_bridge is missing"
-          : "present in broker",
-        "Start the clankie service once so it can mint the local Discord voice identity.",
-      );
-    } catch (error) {
-      add(
-        "voice bridge identity",
-        false,
-        error instanceof Error ? error.message : "stored voice bridge identity is invalid",
-        "Remove the malformed clankie_discord_voice_bridge entry and restart the clankie service.",
-      );
-    }
-  } else {
-    add(
-      "voice bridge identity",
-      true,
-      "voice is disabled",
-      "Set DISCORD_VOICE_ENABLED=true when running the group-voice capability.",
-    );
-  }
-
   const applicationId = discordId(options.env.DISCORD_APPLICATION_ID);
   const guildId = discordId(options.env.DISCORD_GUILD_ID);
   const ambientRoles = discordIdSet(options.env.DISCORD_AMBIENT_ROLE_IDS);
@@ -128,8 +96,6 @@ export async function inspectDiscordTextReadiness(
   const ingressChannels = discordIdSet(options.env.DISCORD_INGRESS_CHANNEL_IDS);
   const presenceGuilds = discordIdSet(options.env.DISCORD_PRESENCE_GUILD_IDS);
   const presenceChannels = discordIdSet(options.env.DISCORD_PRESENCE_CHANNEL_IDS);
-  const voiceGuilds = discordIdSet(options.env.DISCORD_VOICE_GUILD_IDS);
-  const voiceChannels = discordIdSet(options.env.DISCORD_VOICE_CHANNEL_IDS);
 
   add(
     "application id",
@@ -150,32 +116,6 @@ export async function inspectDiscordTextReadiness(
       ? `${ambientRoles.size.toString()} role binding(s) configured`
       : "no ambient role binding is configured",
     "Set DISCORD_AMBIENT_ROLE_IDS to the role ids granted the ambient command tier.",
-  );
-  const openAiCredential = voiceEnabled ? await options.store.get("openai") : undefined;
-  add(
-    "OpenAI speech credential",
-    !voiceEnabled || openAiCredential?.type === "api",
-    !voiceEnabled
-      ? "voice is disabled"
-      : openAiCredential?.type === "api"
-        ? "brokered openai API credential is available"
-        : "broker entry openai is missing or is not an API credential",
-    "Use /auth to store the existing OpenAI API key under provider openai.",
-  );
-  // The channel allowlist is optional refinement: empty admits every voice
-  // channel inside an allowlisted guild. Only the guild allowlist is required.
-  const voiceAllowlistReady = !voiceEnabled || (guildId !== undefined && voiceGuilds.has(guildId));
-  add(
-    "voice allowlist",
-    voiceAllowlistReady,
-    !voiceEnabled
-      ? "voice is disabled"
-      : voiceAllowlistReady
-        ? voiceChannels.size === 0
-          ? "every voice channel in the target guild is admitted"
-          : `${voiceChannels.size.toString()} voice channel(s) admitted in the target guild`
-        : "target voice guild allowlist is incomplete",
-    "Include DISCORD_GUILD_ID in DISCORD_VOICE_GUILD_IDS.",
   );
   add(
     "text ingress enabled",

@@ -9,25 +9,78 @@ use crate::audio_pipeline::{
     is_supported_llm_sample_rate, resume_music_output, suppress_music_output,
 };
 use crate::ipc::{
-    ErrorCode, OutMsg, send_buffer_depth, send_error, send_msg, send_transport_stats,
-    send_tts_playback_state,
+    ErrorCode, InMsg, MusicErrorCode, OutMsg, TtsPlaybackStatus, send_buffer_depth, send_error,
+    send_msg, send_transport_error, send_transport_stats, send_tts_playback_state,
 };
-use crate::ipc_protocol::PlaybackCommand;
 use crate::music::{MusicEvent, drain_music_pcm_queue, is_music_output_drained};
-
-const MUSIC_PREPARE_TIMEOUT_MS: u64 = 20_000;
+use crate::voice_conn::TransportRole;
 
 impl AppState {
-    pub(crate) fn handle_playback_command(&mut self, msg: PlaybackCommand) -> bool {
+    fn mark_tts_playback_started(
+        &mut self,
+        frame_transmitted: bool,
+        frame_contained_audible_tts: bool,
+    ) -> Option<String> {
+        if !frame_transmitted || !frame_contained_audible_tts || self.tts_playback_started {
+            return None;
+        }
+        let playback_id = self.tts_playback_id.clone()?;
+        self.tts_playback_started = true;
+        Some(playback_id)
+    }
+
+    fn fail_tts_playback(&mut self, playback_id: &str, reason: &str) {
+        if !self
+            .failed_tts_playback_ids
+            .iter()
+            .any(|failed| failed == playback_id)
+        {
+            if self.failed_tts_playback_ids.len() >= crate::app_state::MAX_FAILED_TTS_PLAYBACK_IDS {
+                self.failed_tts_playback_ids.pop_front();
+            }
+            self.failed_tts_playback_ids
+                .push_back(playback_id.to_string());
+        }
+        if self.tts_playback_id.as_deref() == Some(playback_id) {
+            clear_tts_send_buffer(&self.audio_send_state);
+            self.tts_playback_id = None;
+            self.tts_finish_pending = false;
+            self.tts_playback_buffered = false;
+            self.tts_playback_started = false;
+        }
+        send_tts_playback_state(playback_id, TtsPlaybackStatus::Failed, Some(reason));
+    }
+
+    pub(crate) fn handle_playback_command(&mut self, msg: InMsg) -> bool {
         match msg {
-            PlaybackCommand::Audio {
+            InMsg::Audio {
+                playback_id,
                 pcm_base64,
                 sample_rate,
             } => {
-                let now = time::Instant::now();
-                if self.music.pending_url.is_some() {
-                    self.music.pending_audio_seen = true;
-                    self.music.pending_last_audio_at = Some(now);
+                if playback_id.is_empty() {
+                    send_error(
+                        ErrorCode::InvalidRequest,
+                        "audio requires a non-empty playbackId",
+                    );
+                    return false;
+                }
+                if self.failed_tts_playback_ids.contains(&playback_id) {
+                    send_tts_playback_state(
+                        &playback_id,
+                        TtsPlaybackStatus::Failed,
+                        Some("playback_already_failed"),
+                    );
+                    return false;
+                }
+                if self
+                    .tts_playback_id
+                    .as_deref()
+                    .is_some_and(|active| active != playback_id)
+                    || self.tts_finish_pending
+                {
+                    self.fail_tts_playback(&playback_id, "stale_playback_id");
+                    return false;
                 }
 
                 if self.music.active && !self.music.paused {
@@ -38,97 +91,162 @@ impl AppState {
                             .is_some_and(crate::audio_pipeline::AudioSendState::is_music_ducked)
                     };
                     if !is_ducked {
+                        self.fail_tts_playback(&playback_id, "music_not_ducked");
                         return false;
                     }
                 }
 
                 let engine = base64::engine::general_purpose::STANDARD;
-                if let Ok(raw) = engine.decode(&pcm_base64) {
-                    if !is_supported_llm_sample_rate(sample_rate) {
-                        send_error(
-                            ErrorCode::InvalidRequest,
-                            format!(
-                                "audio sampleRate must be between 8000 and 48000 Hz, got {sample_rate}"
-                            ),
-                        );
-                        return false;
-                    }
-                    let samples = convert_llm_to_48k_mono(&raw, sample_rate);
-                    if !samples.is_empty() {
-                        let mut emit_tts_buffered = false;
-                        let mut buffer_depth = None;
-                        {
-                            let mut guard = self.audio_send_state.lock();
-                            if let Some(ref mut state) = *guard {
-                                state.push_pcm(samples);
+                let Ok(mut raw) = engine.decode(&pcm_base64) else {
+                    self.fail_tts_playback(&playback_id, "invalid_pcm_base64");
+                    return false;
+                };
+                if !is_supported_llm_sample_rate(sample_rate) {
+                    raw.fill(0);
+                    send_error(
+                        ErrorCode::InvalidRequest,
+                        format!(
+                            "audio sampleRate must be between 8000 and 48000 Hz, got {sample_rate}"
+                        ),
+                    );
+                    self.fail_tts_playback(&playback_id, "invalid_sample_rate");
+                    return false;
+                }
+                let mut samples = convert_llm_to_48k_mono(&raw, sample_rate);
+                raw.fill(0);
+                if samples.is_empty() {
+                    self.fail_tts_playback(&playback_id, "empty_pcm");
+                    return false;
+                }
+                let mut buffer_depth = None;
+                let mut overflow = None;
+                {
+                    let mut guard = self.audio_send_state.lock();
+                    if let Some(ref mut state) = *guard {
+                        match state.push_pcm(samples) {
+                            Ok(()) => {
                                 buffer_depth = Some((
                                     state.tts_buffer_samples(),
                                     state.music_buffer_samples(),
                                 ));
-                                if state.tts_buffer_samples() > 0 && !self.tts_playback_buffered {
-                                    self.tts_playback_buffered = true;
-                                    emit_tts_buffered = true;
-                                }
                             }
+                            Err(error) => overflow = Some(error),
                         }
-                        if let Some((tts, music)) = buffer_depth {
-                            send_buffer_depth(tts, music, "tts_pcm_enqueued");
-                        }
-                        if emit_tts_buffered {
-                            send_tts_playback_state("buffered", "tts_pcm_enqueued");
-                        }
+                    } else {
+                        samples.fill(0);
                     }
+                }
+                if let Some(overflow) = overflow {
+                    send_msg(OutMsg::TtsBufferOverflow {
+                        playback_id: playback_id.clone(),
+                        dropped_samples: overflow.dropped_samples,
+                        dropped_ms: overflow.dropped_ms,
+                        buffer_samples: overflow.buffer_samples,
+                        buffer_ms: overflow.buffer_ms,
+                    });
+                    self.fail_tts_playback(&playback_id, "tts_buffer_overflow");
+                    return false;
+                }
+                let Some((tts, music)) = buffer_depth else {
+                    self.fail_tts_playback(&playback_id, "voice_transport_not_ready");
+                    return false;
+                };
+                if self.tts_playback_id.is_none() {
+                    self.tts_playback_started = false;
+                }
+                self.tts_playback_id = Some(playback_id.clone());
+                send_buffer_depth(tts, music, "tts_pcm_enqueued");
+                if !self.tts_playback_buffered {
+                    self.tts_playback_buffered = true;
+                    send_tts_playback_state(&playback_id, TtsPlaybackStatus::Buffered, None);
                 }
                 false
             }
-            PlaybackCommand::StopPlayback => {
+            InMsg::StopPlayback => {
+                let music_id = self.music.music_id.clone();
                 self.music.reset();
                 drain_music_pcm_queue(&self.music_pcm_rx);
                 clear_audio_send_buffer(&self.audio_send_state);
-                if self.tts_playback_buffered {
-                    self.tts_playback_buffered = false;
-                    send_tts_playback_state("idle", "stop_playback");
+                if let Some(playback_id) = self.tts_playback_id.take() {
+                    send_tts_playback_state(
+                        &playback_id,
+                        TtsPlaybackStatus::Stopped,
+                        Some("stop_playback"),
+                    );
                 }
+                self.tts_finish_pending = false;
+                self.tts_playback_buffered = false;
+                self.tts_playback_started = false;
                 send_msg(OutMsg::PlayerState {
                     status: "idle".into(),
+                    music_id: music_id.clone(),
                 });
+                if let Some(music_id) = music_id {
+                    send_msg(OutMsg::MusicIdle { music_id });
+                }
                 emit_playback_armed("stop_playback", &self.audio_send_state);
                 false
             }
-            PlaybackCommand::StopTtsPlayback => {
-                clear_tts_send_buffer(&self.audio_send_state);
-                if self.tts_playback_buffered {
-                    self.tts_playback_buffered = false;
-                    send_tts_playback_state("idle", "stop_tts_playback");
+            InMsg::FinishTtsPlayback { playback_id } => {
+                if self.tts_playback_id.as_deref() == Some(playback_id.as_str())
+                    && !self.tts_finish_pending
+                {
+                    self.tts_finish_pending = true;
+                } else {
+                    self.fail_tts_playback(&playback_id, "stale_playback_id");
                 }
                 false
             }
-            PlaybackCommand::MusicPlay {
+            InMsg::StopTtsPlayback { playback_id } => {
+                if self.tts_playback_id.as_deref() != Some(playback_id.as_str()) {
+                    self.fail_tts_playback(&playback_id, "stale_playback_id");
+                    return false;
+                }
+                clear_tts_send_buffer(&self.audio_send_state);
+                self.tts_playback_id = None;
+                self.tts_finish_pending = false;
+                self.tts_playback_buffered = false;
+                self.tts_playback_started = false;
+                send_tts_playback_state(
+                    &playback_id,
+                    TtsPlaybackStatus::Stopped,
+                    Some("stop_tts_playback"),
+                );
+                false
+            }
+            InMsg::MusicPlay {
+                music_id,
                 url,
                 resolved_direct_url,
             } => {
                 let normalized_url = url.trim().to_string();
-                if normalized_url.is_empty() {
+                if music_id.is_empty() || normalized_url.is_empty() {
                     send_msg(OutMsg::MusicError {
-                        message: "music_play missing url".to_string(),
+                        music_id,
+                        code: MusicErrorCode::PipelineFailed,
+                        message: "music_play requires non-empty musicId and url".to_string(),
                     });
                     return false;
                 }
 
                 clear_music_send_buffer(&self.audio_send_state);
-                self.music
-                    .queue_pending_start(normalized_url.clone(), resolved_direct_url);
-                self.start_music_pipeline(&normalized_url, resolved_direct_url, false);
+                self.music.start(
+                    music_id.clone(),
+                    normalized_url.clone(),
+                    resolved_direct_url,
+                );
+                self.start_music_pipeline(&music_id, &normalized_url, resolved_direct_url, false);
                 send_msg(OutMsg::PlayerState {
                     status: "loading".into(),
+                    music_id: Some(music_id),
                 });
-                tracing::info!(
-                    "music_play queued pending start direct={} (waiting for first pcm and announcement drain)",
-                    resolved_direct_url
-                );
+                tracing::info!("music_play started direct={}", resolved_direct_url);
                 false
             }
-            PlaybackCommand::MusicStop => {
+            InMsg::MusicStop { music_id } => {
+                if self.music.music_id.as_deref() != Some(music_id.as_str()) {
+                    return false;
+                }
                 if self.music.player.is_some() && self.music.active {
                     let mut guard = self.audio_send_state.lock();
                     if let Some(ref mut state) = *guard {
@@ -138,21 +256,20 @@ impl AppState {
                 } else {
                     self.music.reset();
                     drain_music_pcm_queue(&self.music_pcm_rx);
-                    clear_audio_send_buffer(&self.audio_send_state);
-                    if self.tts_playback_buffered {
-                        self.tts_playback_buffered = false;
-                        send_tts_playback_state("idle", "music_stop");
-                    }
+                    clear_music_send_buffer(&self.audio_send_state);
                     send_msg(OutMsg::PlayerState {
                         status: "idle".into(),
+                        music_id: Some(music_id.clone()),
                     });
-                    send_msg(OutMsg::MusicIdle);
+                    send_msg(OutMsg::MusicIdle { music_id });
                     emit_playback_armed("music_stop", &self.audio_send_state);
                 }
                 false
             }
-            PlaybackCommand::MusicPause => {
-                self.music.clear_pending_start();
+            InMsg::MusicPause { music_id } => {
+                if self.music.music_id.as_deref() != Some(music_id.as_str()) {
+                    return false;
+                }
                 self.music.pending_stop = false;
                 let was_finishing = self.music.finishing;
                 let player_alive = self
@@ -162,34 +279,33 @@ impl AppState {
                     .is_some_and(crate::music::MusicPlayer::is_alive);
                 let buffered_music_output = !self.music_pcm_rx.is_empty()
                     || has_buffered_music_output(&self.audio_send_state);
-                if player_alive || self.music.active || was_finishing {
-                    info!(
-                        "music_pause: player_alive={} active={} was_finishing={} buffered_output={}",
-                        player_alive, self.music.active, was_finishing, buffered_music_output
-                    );
-                    if player_alive
-                        && !self
-                            .music
-                            .player
-                            .as_ref()
-                            .is_some_and(crate::music::MusicPlayer::pause)
-                    {
-                        warn!("music_pause: failed to pause music process group");
-                    }
-                    self.music.paused = true;
-                    self.music.active = false;
-                    self.music.finishing =
-                        was_finishing || (!player_alive && buffered_music_output);
-                    suppress_music_output(&self.audio_send_state);
-                    send_msg(OutMsg::PlayerState {
-                        status: "paused".into(),
-                    });
-                    emit_playback_armed("music_pause", &self.audio_send_state);
+                info!(
+                    "music_pause: player_alive={} active={} was_finishing={} buffered_output={}",
+                    player_alive, self.music.active, was_finishing, buffered_music_output
+                );
+                if !self
+                    .music
+                    .player
+                    .as_ref()
+                    .is_none_or(crate::music::MusicPlayer::pause)
+                {
+                    warn!("music_pause: failed to pause music process group");
                 }
+                self.music.paused = true;
+                self.music.active = false;
+                self.music.finishing = was_finishing || (!player_alive && buffered_music_output);
+                suppress_music_output(&self.audio_send_state);
+                send_msg(OutMsg::PlayerState {
+                    status: "paused".into(),
+                    music_id: Some(music_id),
+                });
+                emit_playback_armed("music_pause", &self.audio_send_state);
                 false
             }
-            PlaybackCommand::MusicResume => {
-                self.music.clear_pending_start();
+            InMsg::MusicResume { music_id } => {
+                if self.music.music_id.as_deref() != Some(music_id.as_str()) {
+                    return false;
+                }
                 self.music.pending_stop = false;
                 self.music.finishing = false;
 
@@ -211,9 +327,14 @@ impl AppState {
                     info!("music_resume: player alive, resuming from position");
                     resume_music_output(&self.audio_send_state);
                     self.music.paused = false;
-                    self.music.active = true;
+                    self.music.active = self.music.first_pcm_seen;
                     send_msg(OutMsg::PlayerState {
-                        status: "playing".into(),
+                        status: if self.music.active {
+                            "playing".into()
+                        } else {
+                            "loading".into()
+                        },
+                        music_id: Some(music_id.clone()),
                     });
                 } else if !player_alive && buffered_music_output {
                     info!(
@@ -225,6 +346,20 @@ impl AppState {
                     self.music.finishing = true;
                     send_msg(OutMsg::PlayerState {
                         status: "playing".into(),
+                        music_id: Some(music_id.clone()),
+                    });
+                } else if self.music.player.is_some() {
+                    let _ = self
+                        .music
+                        .player
+                        .as_ref()
+                        .is_some_and(crate::music::MusicPlayer::resume);
+                    resume_music_output(&self.audio_send_state);
+                    self.music.paused = false;
+                    self.music.active = false;
+                    send_msg(OutMsg::PlayerState {
+                        status: "loading".into(),
+                        music_id: Some(music_id.clone()),
                     });
                 } else if let Some(url) = self.music.active_url.clone() {
                     self.music.stop_player();
@@ -232,41 +367,63 @@ impl AppState {
                         "music_resume: player dead, restarting pipeline direct={}",
                         self.music.active_resolved_direct_url
                     );
-                    self.start_music_pipeline(&url, self.music.active_resolved_direct_url, true);
+                    self.start_music_pipeline(
+                        &music_id,
+                        &url,
+                        self.music.active_resolved_direct_url,
+                        true,
+                    );
                     self.music.paused = false;
                     self.music.active = true;
                     send_msg(OutMsg::PlayerState {
                         status: "playing".into(),
+                        music_id: Some(music_id),
                     });
                 } else {
                     warn!("music_resume: no player and no url, cannot resume");
                 }
                 false
             }
-            PlaybackCommand::MusicSetGain { target, fade_ms } => {
+            InMsg::MusicSetGain {
+                music_id,
+                target,
+                fade_ms,
+            } => {
+                if self.music.music_id.as_deref() != Some(music_id.as_str()) {
+                    return false;
+                }
                 let clamped = target.clamp(0.0, 1.0);
+                self.music.desired_gain = clamped;
                 let mut guard = self.audio_send_state.lock();
                 if let Some(ref mut state) = *guard
                     && let Some(reached) = state.set_music_gain(clamped, fade_ms)
                 {
                     drop(guard);
-                    send_msg(OutMsg::MusicGainReached { gain: reached });
+                    send_msg(OutMsg::MusicGainReached {
+                        music_id,
+                        gain: reached,
+                    });
                 }
                 false
             }
-            PlaybackCommand::Destroy => {
-                self.music.stop_player();
+            InMsg::Destroy => {
+                self.clear_primary_playback("destroy");
                 self.stream_publish.reset();
                 self.clear_voice_connection();
+                self.clear_stream_watch_connection();
                 self.clear_stream_publish_connection();
                 true
             }
+            _ => unreachable!("non-playback IPC command routed to playback supervisor"),
         }
     }
 
     pub(crate) fn handle_music_event(&mut self, event: MusicEvent) {
         match event {
-            MusicEvent::Idle => {
+            MusicEvent::Idle { music_id } => {
+                if self.music.music_id.as_deref() != Some(music_id.as_str()) {
+                    return;
+                }
                 info!(
                     "music_event_idle: active={} paused={} finishing={}",
                     self.music.active, self.music.paused, self.music.finishing
@@ -275,158 +432,71 @@ impl AppState {
                 self.music.paused = false;
                 self.music.finishing = self.music.active;
                 self.music.pending_stop = false;
-                self.music.clear_pending_start();
                 if !self.music.finishing {
+                    self.music.music_id = None;
                     self.music.active_url = None;
                     self.music.active_resolved_direct_url = false;
+                    self.music.first_pcm_seen = false;
                     send_msg(OutMsg::PlayerState {
                         status: "idle".into(),
+                        music_id: Some(music_id.clone()),
                     });
-                    send_msg(OutMsg::MusicIdle);
+                    send_msg(OutMsg::MusicIdle { music_id });
                     emit_playback_armed("music_idle", &self.audio_send_state);
                 }
             }
-            MusicEvent::Error(message) => {
-                self.music.reset();
-                drain_music_pcm_queue(&self.music_pcm_rx);
-                clear_music_send_buffer(&self.audio_send_state);
-                send_msg(OutMsg::MusicError { message });
-                send_msg(OutMsg::PlayerState {
-                    status: "idle".into(),
-                });
-                emit_playback_armed("music_error", &self.audio_send_state);
-            }
-            MusicEvent::FirstPcm {
-                startup_ms,
-                resolved_direct_url,
+            MusicEvent::Error {
+                music_id,
+                code,
+                diagnostic,
             } => {
-                let now = time::Instant::now();
-                self.music.pending_first_pcm_at = Some(now);
-                if let Some(received_at) = self.music.pending_received_at {
-                    tracing::info!(
-                        "music_play prepared direct={} startupMs={} requestToFirstPcmMs={}",
-                        resolved_direct_url,
-                        startup_ms,
-                        now.duration_since(received_at).as_millis() as u64
-                    );
-                } else {
-                    tracing::info!(
-                        "music_play prepared direct={} startupMs={}",
-                        resolved_direct_url,
-                        startup_ms
-                    );
+                if self.music.music_id.as_deref() != Some(music_id.as_str()) {
+                    return;
                 }
-            }
-        }
-    }
-
-    /// Evaluate the pending-music-start state machine: wait for announcement
-    /// audio to arrive, then for a gap in TTS audio, then for the TTS buffer to
-    /// drain, before committing the music start.  Various safety/timeout paths
-    /// ensure music eventually starts even if the announcement never arrives or
-    /// the buffer never drains.
-    fn tick_pending_music_start(&mut self, now: time::Instant) {
-        let Some(url) = self.music.pending_url.clone() else {
-            return;
-        };
-
-        let elapsed_ms = self.music.pending_received_at.map_or(0, |received_at| {
-            now.duration_since(received_at).as_millis() as u64
-        });
-        if self.music.pending_first_pcm_at.is_none() {
-            if elapsed_ms > MUSIC_PREPARE_TIMEOUT_MS {
                 self.music.reset();
                 drain_music_pcm_queue(&self.music_pcm_rx);
                 clear_music_send_buffer(&self.audio_send_state);
                 send_msg(OutMsg::MusicError {
-                    message: format!(
-                        "music_play did not produce audio within {MUSIC_PREPARE_TIMEOUT_MS}ms"
-                    ),
+                    music_id: music_id.clone(),
+                    code,
+                    message: diagnostic,
                 });
                 send_msg(OutMsg::PlayerState {
                     status: "idle".into(),
+                    music_id: Some(music_id),
                 });
-                emit_playback_armed("music_prepare_timeout", &self.audio_send_state);
+                emit_playback_armed("music_error", &self.audio_send_state);
             }
-            return;
-        }
-
-        let mut start_music = false;
-        let mut reason = "pending_unknown";
-
-        if let Some(received_at) = self.music.pending_received_at {
-            if elapsed_ms > 15_000 {
-                start_music = true;
-                reason = "pending_safety_timeout";
-            } else if !self.music.pending_audio_seen {
-                if elapsed_ms > 5_000 {
-                    start_music = true;
-                    reason = "pending_no_announcement_audio";
+            MusicEvent::FirstPcm {
+                music_id,
+                startup_ms,
+                resolved_direct_url,
+            } => {
+                if self.music.music_id.as_deref() != Some(music_id.as_str()) {
+                    return;
                 }
-            } else {
-                let last_audio_at = self.music.pending_last_audio_at.unwrap_or(received_at);
-                let gap_ms = now.duration_since(last_audio_at).as_millis() as u64;
-                if !self.music.pending_waiting_for_drain && gap_ms > 500 {
-                    self.music.pending_waiting_for_drain = true;
-                    self.music.pending_drain_started_at = Some(now);
-                }
-                if self.music.pending_waiting_for_drain {
-                    let audio_buffer_empty = {
-                        let guard = self.audio_send_state.lock();
-                        guard
-                            .as_ref()
-                            .is_none_or(crate::audio_pipeline::AudioSendState::tts_is_empty)
-                    };
-                    let drain_elapsed_ms = self
-                        .music
-                        .pending_drain_started_at
-                        .map_or(0, |started| now.duration_since(started).as_millis() as u64);
-                    if audio_buffer_empty {
-                        start_music = true;
-                        reason = "pending_announcement_drain_complete";
-                    } else if drain_elapsed_ms > 5_000 {
-                        start_music = true;
-                        reason = "pending_drain_timeout";
+                self.music.active = !self.music.paused;
+                self.music.first_pcm_seen = true;
+                if self.music.active {
+                    let mut guard = self.audio_send_state.lock();
+                    if let Some(ref mut state) = *guard {
+                        state.begin_music_fade_in(self.music.desired_gain, 1500);
                     }
                 }
+                send_msg(OutMsg::PlayerState {
+                    status: if self.music.paused {
+                        "paused".into()
+                    } else {
+                        "playing".into()
+                    },
+                    music_id: Some(music_id),
+                });
+                tracing::info!(
+                    "music_play started direct={} startupMs={}",
+                    resolved_direct_url,
+                    startup_ms
+                );
             }
-        } else {
-            start_music = true;
-            reason = "pending_missing_timestamp";
-        }
-
-        if start_music {
-            let total_wait_ms = self.music.pending_received_at.map_or(0, |received_at| {
-                now.duration_since(received_at).as_millis() as u64
-            });
-            let prepared_lead_ms = self.music.pending_first_pcm_at.map_or(0, |first_pcm_at| {
-                now.duration_since(first_pcm_at).as_millis() as u64
-            });
-            let committed_direct_url = self.music.pending_resolved_direct_url;
-            self.music.clear_pending_start();
-            self.music.finishing = false;
-            self.music.active_url = Some(url.clone());
-            self.music.active_resolved_direct_url = committed_direct_url;
-            self.music.active = true;
-            self.music.paused = false;
-
-            {
-                let mut guard = self.audio_send_state.lock();
-                if let Some(ref mut state) = *guard {
-                    state.begin_music_fade_in(1500);
-                }
-            }
-
-            send_msg(OutMsg::PlayerState {
-                status: "playing".into(),
-            });
-            tracing::info!(
-                "music_play committed reason={} totalWaitMs={} preparedLeadMs={} direct={}",
-                reason,
-                total_wait_ms,
-                prepared_lead_ms,
-                committed_direct_url
-            );
         }
     }
 
@@ -443,17 +513,17 @@ impl AppState {
                 .is_none_or(crate::audio_pipeline::AudioSendState::is_music_fade_out_complete)
         };
         if fade_done {
+            let music_id = self.music.music_id.clone();
             self.music.reset();
             drain_music_pcm_queue(&self.music_pcm_rx);
-            clear_audio_send_buffer(&self.audio_send_state);
-            if self.tts_playback_buffered {
-                self.tts_playback_buffered = false;
-                send_tts_playback_state("idle", "music_track_finished");
-            }
+            clear_music_send_buffer(&self.audio_send_state);
             send_msg(OutMsg::PlayerState {
                 status: "idle".into(),
+                music_id: music_id.clone(),
             });
-            send_msg(OutMsg::MusicIdle);
+            if let Some(music_id) = music_id {
+                send_msg(OutMsg::MusicIdle { music_id });
+            }
             emit_playback_armed("music_stop", &self.audio_send_state);
         }
     }
@@ -475,27 +545,15 @@ impl AppState {
                 self.buffer_depth_was_nonempty = true;
                 drop(guard);
                 send_buffer_depth(tts, music, "periodic_nonempty");
-                if tts > 0 && !self.tts_playback_buffered {
-                    self.tts_playback_buffered = true;
-                    send_tts_playback_state("buffered", "periodic_nonempty");
-                }
             } else if self.buffer_depth_was_nonempty {
                 self.buffer_depth_was_nonempty = false;
                 drop(guard);
                 send_buffer_depth(0, 0, "periodic_drained");
-                if self.tts_playback_buffered {
-                    self.tts_playback_buffered = false;
-                    send_tts_playback_state("idle", "periodic_drained");
-                }
             }
         } else if self.buffer_depth_was_nonempty {
             self.buffer_depth_was_nonempty = false;
             drop(guard);
             send_buffer_depth(0, 0, "audio_send_state_missing");
-            if self.tts_playback_buffered {
-                self.tts_playback_buffered = false;
-                send_tts_playback_state("idle", "audio_send_state_missing");
-            }
         }
     }
 
@@ -522,16 +580,18 @@ impl AppState {
         self.on_capture_tick(now);
         self.drain_stream_publish_runtime_events();
 
-        self.tick_pending_music_start(now);
-
         if self.music.active && !self.music.paused {
             let mut guard = self.audio_send_state.lock();
             if let Some(ref mut state) = *guard {
                 while state.can_accept_music_chunk() {
-                    let Ok(chunk) = self.music_pcm_rx.try_recv() else {
+                    let Ok(mut chunk) = self.music_pcm_rx.try_recv() else {
                         break;
                     };
-                    state.push_music_pcm(chunk);
+                    if self.music.music_id.as_deref() == Some(chunk.music_id.as_str()) {
+                        state.push_music_pcm(chunk.samples);
+                    } else {
+                        chunk.samples.fill(0);
+                    }
                 }
             }
         }
@@ -539,15 +599,20 @@ impl AppState {
         if self.music.finishing
             && is_music_output_drained(&self.music_pcm_rx, &self.audio_send_state)
         {
+            let music_id = self.music.music_id.take();
             self.music.finishing = false;
             self.music.active = false;
             self.music.paused = false;
             self.music.active_url = None;
             self.music.active_resolved_direct_url = false;
+            self.music.first_pcm_seen = false;
             send_msg(OutMsg::PlayerState {
                 status: "idle".into(),
+                music_id: music_id.clone(),
             });
-            send_msg(OutMsg::MusicIdle);
+            if let Some(music_id) = music_id {
+                send_msg(OutMsg::MusicIdle { music_id });
+            }
             emit_playback_armed("music_idle", &self.audio_send_state);
         }
 
@@ -555,9 +620,13 @@ impl AppState {
             let mut guard = self.audio_send_state.lock();
             if let Some(ref mut state) = *guard
                 && let Some(reached) = state.maybe_take_music_gain_reached()
+                && let Some(music_id) = self.music.music_id.clone()
             {
                 drop(guard);
-                send_msg(OutMsg::MusicGainReached { gain: reached });
+                send_msg(OutMsg::MusicGainReached {
+                    music_id,
+                    gain: reached,
+                });
             }
         }
 
@@ -565,39 +634,64 @@ impl AppState {
         self.tick_buffer_depth_report();
         self.tick_transport_stats_report();
 
-        let (opus_frame, tts_just_drained) = {
+        let (opus_frame, opus_frame_contained_audible_tts) = {
             let mut guard = self.audio_send_state.lock();
             match *guard {
                 Some(ref mut state) => {
                     let frame = state.next_opus_frame();
-                    let drained = frame.is_none() && state.tts_just_drained();
-                    (frame, drained)
+                    let contained_audible_tts =
+                        frame.is_some() && state.last_frame_contained_audible_tts();
+                    (frame, contained_audible_tts)
                 }
                 None => (None, false),
             }
         };
 
-        // Emit an immediate drain notification so the TS side learns the TTS
-        // buffer is empty without waiting up to 500ms for the periodic report.
-        // Only send tts_playback_state — do not emit a synthetic buffer_depth
-        // event here because it would need to lie about musicSamples (which
-        // may still be non-zero if music is playing).  The periodic report
-        // will send accurate combined depths on its normal cadence.
-        if tts_just_drained && self.tts_playback_buffered {
-            self.tts_playback_buffered = false;
-            send_tts_playback_state("idle", "tts_drained");
+        let mut opus_send_failed = false;
+        let mut opus_frame_transmitted = false;
+        if let Some(opus) = opus_frame {
+            if let Some(encrypted) = self.encrypt_outbound_opus(opus) {
+                if let Some(ref conn) = self.voice_conn {
+                    if let Err(error) = conn.send_rtp_frame(&encrypted).await {
+                        tracing::debug!("RTP send error: {}", error);
+                        opus_send_failed = true;
+                    } else {
+                        opus_frame_transmitted = true;
+                        transport_stats()
+                            .outbound_rtp_audio_sent
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                } else {
+                    opus_send_failed = true;
+                }
+            } else {
+                opus_send_failed = true;
+            }
         }
 
-        if let Some(opus) = opus_frame
-            && let Some(encrypted) = self.encrypt_outbound_opus(opus)
-            && let Some(ref conn) = self.voice_conn
-        {
-            if let Err(error) = conn.send_rtp_frame(&encrypted).await {
-                tracing::debug!("RTP send error: {}", error);
-            } else {
-                transport_stats()
-                    .outbound_rtp_audio_sent
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if opus_send_failed {
+            if let Some(playback_id) = self.tts_playback_id.clone() {
+                self.fail_tts_playback(&playback_id, "transport_send_failed");
+            }
+        } else {
+            if let Some(playback_id) = self
+                .mark_tts_playback_started(opus_frame_transmitted, opus_frame_contained_audible_tts)
+            {
+                send_tts_playback_state(&playback_id, TtsPlaybackStatus::Started, None);
+            }
+        }
+
+        if !opus_send_failed && self.tts_finish_pending {
+            let drained = self
+                .audio_send_state
+                .lock()
+                .as_ref()
+                .is_none_or(crate::audio_pipeline::AudioSendState::tts_is_fully_drained);
+            if drained && let Some(playback_id) = self.tts_playback_id.take() {
+                self.tts_finish_pending = false;
+                self.tts_playback_buffered = false;
+                self.tts_playback_started = false;
+                send_tts_playback_state(&playback_id, TtsPlaybackStatus::Drained, None);
             }
         }
 
@@ -633,8 +727,10 @@ impl AppState {
                             );
                         }
                         if failures == crate::app_state::DAVE_ENCRYPT_FAILURE_ALERT_THRESHOLD {
-                            send_error(
+                            send_transport_error(
                                 ErrorCode::VoiceRuntimeError,
+                                TransportRole::Voice,
+                                self.connection_id.as_deref(),
                                 format!(
                                     "DAVE opus encrypt failed {failures} times in a row; dropping outbound audio"
                                 ),
@@ -653,17 +749,18 @@ impl AppState {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use std::time::Duration;
-
+    use base64::Engine as _;
     use crossbeam_channel as crossbeam;
     use parking_lot::Mutex;
+    use std::sync::Arc;
     use tokio::sync::mpsc;
-    use tokio::time;
 
     use super::AppState;
-    use crate::audio_pipeline::{AUDIO_FRAME_SAMPLES, AudioSendState, MAX_MUSIC_BUFFER_SAMPLES};
-    use crate::ipc_protocol::PlaybackCommand;
+    use crate::audio_pipeline::{
+        AUDIO_FRAME_SAMPLES, AudioSendState, MAX_MUSIC_BUFFER_SAMPLES, MAX_PCM_BUFFER_SAMPLES,
+    };
+    use crate::ipc::InMsg;
+    use crate::music::{MusicEvent, MusicPcm};
     use crate::stream_publish::{StreamPublishEvent, StreamPublishFrame};
 
     fn make_app_state_with_music_queue_capacity(queue_capacity: usize) -> AppState {
@@ -675,7 +772,7 @@ mod tests {
         let audio_send_state = Arc::new(Mutex::new(Some(
             AudioSendState::new().expect("audio state"),
         )));
-        let (music_pcm_tx, music_pcm_rx) = crossbeam::bounded::<Vec<i16>>(queue_capacity);
+        let (music_pcm_tx, music_pcm_rx) = crossbeam::bounded::<MusicPcm>(queue_capacity);
         let (stream_publish_frame_tx, stream_publish_frame_rx) =
             crossbeam::bounded::<StreamPublishFrame>(4);
         let (stream_publish_event_tx, stream_publish_event_rx) =
@@ -699,49 +796,258 @@ mod tests {
         make_app_state_with_music_queue_capacity(4)
     }
 
-    #[tokio::test]
-    async fn pending_music_start_waits_for_first_pcm_before_playing() {
+    #[test]
+    fn tts_finish_is_ordered_after_pcm_and_stop_is_playback_scoped() {
         let mut state = make_app_state();
-        let now = time::Instant::now();
+        let pcm = [1_u8, 0].repeat(960);
+        let pcm_base64 = base64::engine::general_purpose::STANDARD.encode(pcm);
+
+        assert!(!state.handle_playback_command(InMsg::Audio {
+            playback_id: "playback-1".into(),
+            pcm_base64: pcm_base64.clone(),
+            sample_rate: 24_000,
+        }));
+        assert!(!state.handle_playback_command(InMsg::FinishTtsPlayback {
+            playback_id: "playback-1".into(),
+        }));
+        assert_eq!(state.tts_playback_id.as_deref(), Some("playback-1"));
+        assert!(state.tts_finish_pending);
+        assert!(
+            state
+                .audio_send_state
+                .lock()
+                .as_ref()
+                .is_some_and(|audio| audio.tts_buffer_samples() > 0)
+        );
+
+        assert!(!state.handle_playback_command(InMsg::Audio {
+            playback_id: "stale-playback".into(),
+            pcm_base64,
+            sample_rate: 24_000,
+        }));
+        assert_eq!(state.tts_playback_id.as_deref(), Some("playback-1"));
+
+        assert!(!state.handle_playback_command(InMsg::StopTtsPlayback {
+            playback_id: "playback-1".into(),
+        }));
+        assert!(state.tts_playback_id.is_none());
+        assert!(!state.tts_finish_pending);
+        assert!(
+            state
+                .audio_send_state
+                .lock()
+                .as_ref()
+                .is_some_and(|audio| audio.tts_buffer_samples() == 0)
+        );
+    }
+
+    #[test]
+    fn tts_started_requires_a_transmitted_tts_frame_and_emits_once() {
+        let mut state = make_app_state();
+        state.tts_playback_id = Some("playback-1".into());
+
+        assert_eq!(state.mark_tts_playback_started(false, true), None);
+        assert_eq!(state.mark_tts_playback_started(true, false), None);
+        assert_eq!(
+            state.mark_tts_playback_started(true, true).as_deref(),
+            Some("playback-1")
+        );
+        assert_eq!(state.mark_tts_playback_started(true, true), None);
+    }
+
+    #[test]
+    fn failed_tts_playback_tombstones_are_bounded_and_reject_late_audio() {
+        let mut state = make_app_state();
+        for index in 0..crate::app_state::MAX_FAILED_TTS_PLAYBACK_IDS + 8 {
+            state.fail_tts_playback(&format!("failed-{index}"), "test_failure");
+        }
+
+        assert_eq!(
+            state.failed_tts_playback_ids.len(),
+            crate::app_state::MAX_FAILED_TTS_PLAYBACK_IDS
+        );
+        assert!(!state.failed_tts_playback_ids.contains(&"failed-0".into()));
+        let latest = format!(
+            "failed-{}",
+            crate::app_state::MAX_FAILED_TTS_PLAYBACK_IDS + 7
+        );
+        assert!(state.failed_tts_playback_ids.contains(&latest));
+
+        let pcm_base64 = base64::engine::general_purpose::STANDARD.encode([1_u8, 0].repeat(960));
+        state.handle_playback_command(InMsg::Audio {
+            playback_id: latest,
+            pcm_base64,
+            sample_rate: 24_000,
+        });
+        assert!(state.tts_playback_id.is_none());
+    }
+
+    #[test]
+    fn policy_approved_music_starts_without_waiting_for_tts() {
+        let mut state = make_app_state();
         state
             .music
-            .queue_pending_start("https://example.com/live".to_string(), false);
-        state.music.pending_received_at = Some(now - Duration::from_millis(6_000));
+            .start("music-1".into(), "https://example.com/live".into(), false);
 
-        state.on_audio_tick().await;
-
-        assert!(
-            !state.music.active,
-            "pending music should not become active before the pipeline produces PCM"
-        );
-        assert!(state.music.pending_url.is_some());
-
-        state.music.pending_first_pcm_at = Some(now);
-        state.on_audio_tick().await;
-
-        assert!(state.music.active);
+        assert!(!state.music.active, "music remains loading until first PCM");
+        assert_eq!(state.music.music_id.as_deref(), Some("music-1"));
         assert_eq!(
             state.music.active_url.as_deref(),
             Some("https://example.com/live")
         );
-        assert!(state.music.pending_url.is_none());
     }
 
-    #[tokio::test]
-    async fn pending_music_start_times_out_when_pipeline_never_produces_pcm() {
+    #[test]
+    fn pause_before_first_pcm_remains_paused_when_pipeline_starts() {
         let mut state = make_app_state();
-        let now = time::Instant::now();
         state
             .music
-            .queue_pending_start("https://example.com/missing".to_string(), false);
-        state.music.pending_received_at =
-            Some(now - Duration::from_millis(super::MUSIC_PREPARE_TIMEOUT_MS + 1));
+            .start("music-1".into(), "https://example.com/live".into(), false);
 
-        state.on_audio_tick().await;
+        state.handle_playback_command(InMsg::MusicPause {
+            music_id: "music-1".into(),
+        });
+        state.handle_music_event(MusicEvent::FirstPcm {
+            music_id: "music-1".into(),
+            startup_ms: 10,
+            resolved_direct_url: false,
+        });
 
+        assert!(state.music.paused);
         assert!(!state.music.active);
-        assert!(state.music.pending_url.is_none());
-        assert!(state.music.active_url.is_none());
+        assert!(
+            state
+                .audio_send_state
+                .lock()
+                .as_ref()
+                .is_some_and(AudioSendState::is_music_output_suppressed)
+        );
+    }
+
+    #[test]
+    fn resume_before_first_pcm_stays_loading_until_pcm_arrives() {
+        let mut state = make_app_state();
+        state
+            .music
+            .start("music-1".into(), "https://example.com/live".into(), false);
+        state.music.player = Some(crate::music::MusicPlayer::pending_for_test());
+
+        state.handle_playback_command(InMsg::MusicPause {
+            music_id: "music-1".into(),
+        });
+        state.handle_playback_command(InMsg::MusicResume {
+            music_id: "music-1".into(),
+        });
+
+        assert!(!state.music.paused);
+        assert!(!state.music.active);
+        assert!(!state.music.first_pcm_seen);
+
+        state.handle_music_event(MusicEvent::FirstPcm {
+            music_id: "music-1".into(),
+            startup_ms: 10,
+            resolved_direct_url: false,
+        });
+        assert!(state.music.active);
+        assert!(state.music.first_pcm_seen);
+    }
+
+    #[test]
+    fn duck_before_first_pcm_is_not_overwritten_by_fade_in() {
+        let mut state = make_app_state();
+        state
+            .music
+            .start("music-1".into(), "https://example.com/live".into(), false);
+
+        state.handle_playback_command(InMsg::MusicSetGain {
+            music_id: "music-1".into(),
+            target: 0.2,
+            fade_ms: 150,
+        });
+        state.handle_music_event(MusicEvent::FirstPcm {
+            music_id: "music-1".into(),
+            startup_ms: 10,
+            resolved_direct_url: false,
+        });
+
+        assert!((state.music.desired_gain - 0.2).abs() < f32::EPSILON);
+        assert!(
+            state
+                .audio_send_state
+                .lock()
+                .as_ref()
+                .is_some_and(|audio| (audio.music_gain_target() - 0.2).abs() < f32::EPSILON)
+        );
+    }
+
+    #[test]
+    fn stop_before_first_pcm_prevents_stale_pipeline_start() {
+        let mut state = make_app_state();
+        state
+            .music
+            .start("music-1".into(), "https://example.com/live".into(), false);
+
+        state.handle_playback_command(InMsg::MusicStop {
+            music_id: "music-1".into(),
+        });
+        state.handle_music_event(MusicEvent::FirstPcm {
+            music_id: "music-1".into(),
+            startup_ms: 10,
+            resolved_direct_url: false,
+        });
+
+        assert!(state.music.music_id.is_none());
+        assert!(!state.music.active);
+    }
+
+    #[test]
+    fn tts_overflow_fails_the_playback_and_clears_all_pcm() {
+        let mut state = make_app_state();
+        let input_samples = MAX_PCM_BUFFER_SAMPLES / 2 + 1;
+        let pcm_base64 =
+            base64::engine::general_purpose::STANDARD.encode([1_u8, 0].repeat(input_samples));
+
+        state.handle_playback_command(InMsg::Audio {
+            playback_id: "overflowed-playback".into(),
+            pcm_base64,
+            sample_rate: 24_000,
+        });
+
+        assert!(state.tts_playback_id.is_none());
+        assert!(
+            state
+                .failed_tts_playback_ids
+                .iter()
+                .any(|playback_id| playback_id == "overflowed-playback")
+        );
+        assert_eq!(
+            state
+                .audio_send_state
+                .lock()
+                .as_ref()
+                .map(AudioSendState::tts_buffer_samples),
+            Some(0)
+        );
+        state.handle_playback_command(InMsg::FinishTtsPlayback {
+            playback_id: "overflowed-playback".into(),
+        });
+        assert!(!state.tts_finish_pending);
+    }
+
+    #[test]
+    fn stale_music_lifecycle_cannot_advance_current_track() {
+        let mut state = make_app_state();
+        state
+            .music
+            .start("music-new".into(), "https://example.com/new".into(), false);
+        state.music.active = true;
+
+        state.handle_music_event(MusicEvent::Idle {
+            music_id: "music-old".into(),
+        });
+
+        assert!(state.music.active);
+        assert_eq!(state.music.music_id.as_deref(), Some("music-new"));
     }
 
     #[test]
@@ -754,10 +1060,13 @@ mod tests {
         }
         state.music.active = true;
         state.music.finishing = true;
+        state.music.music_id = Some("music-1".into());
         state.music.active_url = Some("https://cdn.example.com/track.mp4".to_string());
         state.music.active_resolved_direct_url = true;
 
-        assert!(!state.handle_playback_command(PlaybackCommand::MusicPause));
+        assert!(!state.handle_playback_command(InMsg::MusicPause {
+            music_id: "music-1".into(),
+        }));
         assert!(state.music.paused);
         assert!(!state.music.active);
         assert!(state.music.finishing);
@@ -768,7 +1077,9 @@ mod tests {
             assert!(audio_state.is_music_output_suppressed());
         }
 
-        assert!(!state.handle_playback_command(PlaybackCommand::MusicResume));
+        assert!(!state.handle_playback_command(InMsg::MusicResume {
+            music_id: "music-1".into(),
+        }));
         assert!(
             state.music.player.is_none(),
             "buffered resume should not restart the pipeline"
@@ -792,11 +1103,15 @@ mod tests {
     async fn on_audio_tick_caps_music_prefetch_to_live_window() {
         let mut state = make_app_state_with_music_queue_capacity(128);
         state.music.active = true;
+        state.music.music_id = Some("music-1".into());
 
         for _ in 0..128 {
             state
                 .music_pcm_tx
-                .send(vec![321; AUDIO_FRAME_SAMPLES])
+                .send(MusicPcm {
+                    music_id: "music-1".into(),
+                    samples: vec![321; AUDIO_FRAME_SAMPLES],
+                })
                 .expect("queue music chunk");
         }
 

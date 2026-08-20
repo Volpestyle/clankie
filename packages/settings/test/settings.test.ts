@@ -158,24 +158,6 @@ describe("discord settings resolution", () => {
     // Disabled flags are omitted rather than set to "false", so a stale export
     // cannot accidentally enable a plane.
     expect(env["DISCORD_VOICE_ENABLED"]).toBeUndefined();
-    expect(env["CLANKIE_POSSESSOR_VOICE_ENABLED"]).toBeUndefined();
-  });
-
-  it("carries the possessor voice seam flag so a bridge restart cannot silently mute play", () => {
-    // The env-only flag muted his playthroughs whenever the bridge restarted
-    // from a shell without it. Stored, deny-by-default, env still wins.
-    const enabled = DiscordSettingsSchema.parse({ possessorVoiceEnabled: true });
-    expect(discordSettingsToEnvironment(enabled)["CLANKIE_POSSESSOR_VOICE_ENABLED"]).toBe("true");
-
-    const filled = {} as NodeJS.ProcessEnv;
-    expect(applyDiscordSettingsToEnvironment(enabled, filled)).toContain("CLANKIE_POSSESSOR_VOICE_ENABLED");
-    expect(filled["CLANKIE_POSSESSOR_VOICE_ENABLED"]).toBe("true");
-
-    const overridden = resolveDiscordSettings(enabled, {
-      CLANKIE_POSSESSOR_VOICE_ENABLED: "false",
-    } as NodeJS.ProcessEnv);
-    expect(overridden.settings.possessorVoiceEnabled).toBe(false);
-    expect(overridden.overriddenByEnvironment).toContain("CLANKIE_POSSESSOR_VOICE_ENABLED");
   });
 
   it("carries the Discord system-actor allowlist and lets the environment override it", () => {
@@ -378,7 +360,7 @@ describe("mcp and email settings", () => {
     expect(McpServerSchema.parse({ ...http, url: "https://example.com/mcp" }).url).toContain("https");
   });
 
-  it("opens a file written before linear was retired, and still rejects a typo", async () => {
+  it("opens a file with retired settings, and still rejects a typo", async () => {
     // A section this version dropped must not lock the owner out of his own
     // settings; anything else unknown is still a loud failure.
     const path = join(await mkdtemp(join(tmpdir(), "clankie-settings-")), "settings.json");
@@ -387,6 +369,7 @@ describe("mcp and email settings", () => {
       `${JSON.stringify({
         schemaVersion: 1,
         linear: { defaultTeamId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" },
+        discord: { possessorVoiceEnabled: true },
       })}\n`,
       "utf8",
     );

@@ -1,10 +1,11 @@
 import { createDefaultCredentialStore, DiscordBotCredentialProvider } from "@clankie/credential-broker";
+import { parseDiscordIdSet } from "@clankie/discord-presence-core";
 import type { DiscordActivitySurface, DiscordPresenceWrite } from "@clankie/protocol";
 import type { DiscordPresenceSessionRecord } from "@clankie/interactive-environment";
 import { discordAttachmentRoot } from "@clankie/settings";
 import type { REST } from "discord.js";
 import { createFilesystemAttachmentResolver } from "./attachment-resolver.ts";
-import { createDiscordBotPresenceRuntime } from "./bot-presence-runtime.ts";
+import { DiscordBotPresenceRuntime } from "./bot-presence-runtime.ts";
 
 /**
  * Trusted service load target (CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE).
@@ -14,7 +15,7 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
   execute(
     write: DiscordPresenceWrite,
     session: DiscordPresenceSessionRecord,
-  ): ReturnType<ReturnType<typeof createDiscordBotPresenceRuntime>["execute"]>;
+  ): ReturnType<DiscordBotPresenceRuntime["execute"]>;
 } {
   if (process.env.DISCORD_USER_TOKEN) {
     throw new Error(
@@ -28,8 +29,8 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
   }
   const provider = new DiscordBotCredentialProvider({
     store: createDefaultCredentialStore(),
-    allowedGuildIds: commaSeparated(process.env.DISCORD_PRESENCE_GUILD_IDS),
-    allowedChannelIds: commaSeparated(process.env.DISCORD_PRESENCE_CHANNEL_IDS),
+    allowedGuildIds: [...parseDiscordIdSet(process.env.DISCORD_PRESENCE_GUILD_IDS)],
+    allowedChannelIds: [...parseDiscordIdSet(process.env.DISCORD_PRESENCE_CHANNEL_IDS)],
   });
   return {
     async execute(write, session) {
@@ -50,7 +51,7 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
       };
       const grant = await provider.issueGrant(request);
       const botToken = await provider.resolveBotToken({ grant, ...request });
-      return createDiscordBotPresenceRuntime({
+      return new DiscordBotPresenceRuntime({
         botToken,
         ...(options.rest === undefined ? {} : { rest: options.rest }),
         resolveAttachment: createFilesystemAttachmentResolver(discordAttachmentRoot(process.env)),
@@ -68,13 +69,4 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
 function activitySurfaces(): Partial<Record<DiscordActivitySurface, string>> {
   const emulator = process.env.DISCORD_ACTIVITY_APPLICATION_ID_GBA?.trim();
   return emulator ? { gba_emulator: emulator } : {};
-}
-
-function commaSeparated(value: string | undefined): string[] {
-  return (
-    value
-      ?.split(",")
-      .map((item) => item.trim())
-      .filter(Boolean) ?? []
-  );
 }

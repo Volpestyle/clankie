@@ -18,41 +18,29 @@ use crate::voice_conn::{TransportRole, VoiceEvent, parse_user_id};
 #[derive(Debug, Deserialize, Clone)]
 pub(crate) struct RemoteVideoStreamPayload {
     pub(crate) ssrc: Option<u32>,
-    #[serde(default)]
     pub(crate) rtx_ssrc: Option<u32>,
-    #[serde(default)]
     pub(crate) rid: Option<String>,
-    #[serde(default)]
     pub(crate) quality: Option<u32>,
-    #[serde(default, rename = "type")]
+    #[serde(rename = "type")]
     pub(crate) stream_type: Option<String>,
-    #[serde(default)]
     pub(crate) active: Option<bool>,
-    #[serde(default)]
     pub(crate) max_bitrate: Option<u32>,
-    #[serde(default)]
     pub(crate) max_framerate: Option<u32>,
-    #[serde(default)]
     pub(crate) max_resolution: Option<RemoteVideoResolutionPayload>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub(crate) struct RemoteVideoResolutionPayload {
-    #[serde(default)]
     pub(crate) width: Option<u32>,
-    #[serde(default)]
     pub(crate) height: Option<u32>,
-    #[serde(default, rename = "type")]
+    #[serde(rename = "type")]
     pub(crate) resolution_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub(crate) struct RemoteVideoStatePayload {
-    #[serde(default)]
     pub(crate) user_id: Option<String>,
-    #[serde(default)]
     pub(crate) audio_ssrc: Option<u32>,
-    #[serde(default)]
     pub(crate) video_ssrc: Option<u32>,
     #[serde(default)]
     pub(crate) streams: Vec<RemoteVideoStreamPayload>,
@@ -147,6 +135,7 @@ pub(crate) async fn apply_remote_video_state(
     video_ssrc_map: &Arc<Mutex<HashMap<u32, RemoteVideoTrackBinding>>>,
     current_video_codec: &Arc<Mutex<Option<String>>>,
     role: TransportRole,
+    generation: u64,
 ) {
     let stream_count = payload.streams.len();
     let Some(raw_user_id) = payload.user_id.as_deref() else {
@@ -234,6 +223,7 @@ pub(crate) async fn apply_remote_video_state(
     let _ = event_tx
         .send(VoiceEvent::VideoStateUpdate {
             role,
+            generation,
             user_id,
             audio_ssrc,
             video_ssrc,
@@ -250,6 +240,17 @@ pub(crate) async fn apply_remote_video_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn optional_video_state_fields_may_be_absent() {
+        let payload: RemoteVideoStatePayload =
+            serde_json::from_str(r#"{"user_id":"42"}"#).expect("video state");
+
+        assert_eq!(payload.user_id.as_deref(), Some("42"));
+        assert_eq!(payload.audio_ssrc, None);
+        assert_eq!(payload.video_ssrc, None);
+        assert!(payload.streams.is_empty());
+    }
 
     #[tokio::test]
     async fn apply_remote_video_state_preserves_existing_streams_when_update_omits_streams() {
@@ -304,6 +305,7 @@ mod tests {
             &video_ssrc_map,
             &current_video_codec,
             TransportRole::Voice,
+            1,
         )
         .await;
 
@@ -374,6 +376,7 @@ mod tests {
             &video_ssrc_map,
             &current_video_codec,
             TransportRole::Voice,
+            1,
         )
         .await;
 

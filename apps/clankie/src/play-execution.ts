@@ -1,10 +1,9 @@
 /**
  * The production PlayExecution: the same composition `free-play-live.ts`
- * proved out — boot, body lock, activity frame sink, model mind, free-play
- * loop — owned by the play host instead of a hand-launched terminal.
+ * proved out — boot, activity frame sink, model mind, free-play loop — owned
+ * by the play host instead of a hand-launched terminal.
  *
  * Degradation rules (ADR 0063):
- * - another holder on the body lock refuses `body_held`, never crashes;
  * - a missing ROM, fixture, or model refuses `environment_unavailable`;
  * - a missing activity producer degrades to counted dropped frames — the
  *   playthrough continues, the receipt says nobody could watch;
@@ -18,15 +17,13 @@ import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import path from "node:path";
 import {
-  acquireBodyLock,
-  BodyBusyError,
   bootGbaGame,
   createFreePlaySession,
   createModelFreePlayMind,
   createModelVoice,
-  defaultGbaBodyRootDir,
   defaultGbaCheckpointDir,
   defaultGbaPlayJournalDir,
+  defaultGbaRuntimeRootDir,
   InterjectionQueue,
   latestPlayJourneyContinuity,
   listGbaCheckpoints,
@@ -35,7 +32,6 @@ import {
   readGbaCheckpoint,
   runFreePlay,
   writeGbaCheckpoint,
-  type BodyLock,
   type BootedGbaGame,
   type ClankieVoice,
   type FreePlayJournal,
@@ -49,8 +45,8 @@ import {
   RenderedSurfaceOverlaySchema,
 } from "@clankie/interactive-environment";
 import { resolveConfiguredLanguageModel } from "@clankie/model-provider";
-import { createBrokeredPossessorVoiceClient, type PossessorVoiceClient } from "@clankie/possessor-voice";
-import { createBrokeredActivityFrameSink } from "@clankie/rendered-surface-client";
+import { createBrokeredPlayVoiceClient, type PlayVoiceClient } from "@clankie/play-voice";
+import { createBrokeredActivityFrameSink, type ActivityFrameSink } from "@clankie/rendered-surface-client";
 import { personaInstructions, SettingsStore, type GameplaySettings } from "@clankie/settings";
 import { embodimentVenue } from "@clankie/protocol";
 import type { ActivityObservationWritePort } from "./activity-observation.ts";
@@ -139,8 +135,10 @@ export interface GbaPlayExecutionOptions {
   createVoiceAgent?: () => Promise<ClankieVoice | undefined>;
   /** Test injection; production boots the ROM-gated game or the double. */
   boot?: () => Promise<BootedGbaGame>;
-  /** Test injection; production resolves the brokered possessor voice seam. */
-  createVoice?: () => Promise<PossessorVoiceClient | undefined>;
+  /** Test injection; production resolves the brokered play voice seam. */
+  createVoice?: () => Promise<PlayVoiceClient | undefined>;
+  /** Test injection; production resolves the brokered activity sink. */
+  createActivitySink?: () => Promise<ActivityFrameSink | undefined>;
   /**
    * Test injection for a hosted-world join. Production calls `joinWorld`.
    * Lane A fills the real body; tests supply a fake.
@@ -165,34 +163,10 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
     if (venue === "world") {
       return runWorld(session, control, onRunning);
     }
-    // The body lock comes first: a held body must refuse fast and typed, not
-    // after paying a real-core boot whose latency could push the answer past
-    // the captain tool's bounded wait.
-    let bodyLock: BodyLock;
-    try {
-      bodyLock = acquireBodyLock({
-        rootDir: defaultGbaBodyRootDir(env),
-        holderId: `captain-play:${session.sessionId}`,
-      });
-    } catch (error) {
-      if (error instanceof BodyBusyError) {
-        options.logger.info(
-          { sessionId: session.sessionId, holderId: error.holder.holderId },
-          "embodiment start refused: body held",
-        );
-        return { kind: "refused", reason: "body_held" };
-      }
-      return { kind: "refused", reason: "environment_unavailable" };
-    }
-
-    try {
-      return await runLockedPlay(session, control, onRunning);
-    } finally {
-      bodyLock.release();
-    }
+    return runLocalPlay(session, control, onRunning);
   };
 
-  async function runLockedPlay(
+  async function runLocalPlay(
     session: Parameters<PlayExecution>[0],
     control: Parameters<PlayExecution>[1],
     onRunning: Parameters<PlayExecution>[2],
@@ -312,9 +286,12 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
       resumedContinuity = latestPlayJourneyContinuity(journalDir, journeyId);
     }
 
-    const sink = await createBrokeredActivityFrameSink({
-      url: env["CLANKIE_ACTIVITY_PRODUCER_URL"] ?? "ws://127.0.0.1:4322/producer",
-    });
+    const sink =
+      options.createActivitySink === undefined
+        ? await createBrokeredActivityFrameSink({
+            url: env["CLANKIE_ACTIVITY_PRODUCER_URL"] ?? "ws://127.0.0.1:4322/producer",
+          })
+        : await options.createActivitySink();
     let framesPublished = 0;
     let framesDroppedWithoutSink = 0;
     let sequence = 0;
@@ -351,24 +328,50 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
       });
     };
 
-    // The room, both directions (ADR 0067 over ADR 0064's seam). Best-effort
-    // exactly like the frame sink: the runner holds no gateway, so with no
-    // credential or no bridge listening he plays watchable but silent rather
-    // than not playing at all.
-    const voice =
-      options.createVoice === undefined
-        ? await createBrokeredPossessorVoiceClient()
-        : await options.createVoice();
-    if (voice === undefined) {
-      options.logger.info(
-        { sessionId: session.sessionId },
-        "no possessor voice seam; this playthrough is silent",
+    let freePlay;
+    try {
+      freePlay = await createFreePlaySession({
+        rootDir: defaultGbaRuntimeRootDir(env),
+        scenario: game.scenario,
+        fixtureSha256: game.fixtureSha256,
+        ...(game.coreFactory === undefined ? {} : { coreFactory: game.coreFactory }),
+      });
+    } catch (error) {
+      sink?.close();
+      options.logger.warn(
+        { sessionId: session.sessionId, errorName: error instanceof Error ? error.name : "Error" },
+        "embodiment session start refused",
       );
+      return { kind: "refused", reason: "environment_unavailable" };
     }
-    // Voice feeds the same queue the dev script's stdin does, so hearing the
-    // room needs no second path into the loop.
+
+    // Establish every cleanup handle before voice credential/client creation:
+    // broker failures must not strand the activity socket or emulator runtime.
+    let voice: PlayVoiceClient | undefined;
+    let unsubscribe: (() => void) | undefined;
     const interjections = options.interjections ?? new InterjectionQueue();
-    const unsubscribe = voice?.subscribe((utterance) => interjections.offer(utterance));
+    try {
+      voice =
+        options.createVoice === undefined
+          ? await createBrokeredPlayVoiceClient()
+          : await options.createVoice();
+      if (voice === undefined) {
+        options.logger.info(
+          { sessionId: session.sessionId },
+          "no play voice seam; this playthrough is silent",
+        );
+      }
+      // Voice feeds the same queue the dev script's stdin does, so hearing the
+      // room needs no second path into the loop.
+      unsubscribe = voice?.subscribe((utterance) => interjections.offer(utterance));
+    } catch (error) {
+      unsubscribe?.();
+      voice?.close();
+      game.observeFrames(null);
+      sink?.close();
+      await freePlay.close().catch(() => undefined);
+      throw error;
+    }
 
     // One log line per session, not per turn: a bridge that is down stays down,
     // and a line per turn would bury the playthrough in its own failure.
@@ -403,29 +406,6 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
         );
       });
     };
-
-    let freePlay;
-    try {
-      freePlay = await createFreePlaySession({
-        rootDir: defaultGbaBodyRootDir(env),
-        holderId: `captain-play:${session.sessionId}`,
-        scenario: game.scenario,
-        fixtureSha256: game.fixtureSha256,
-        // The caller already holds the cross-process body lock; taking it
-        // twice would refuse against ourselves.
-        acquireBody: false,
-        ...(game.coreFactory === undefined ? {} : { coreFactory: game.coreFactory }),
-      });
-    } catch (error) {
-      sink?.close();
-      unsubscribe?.();
-      voice?.close();
-      options.logger.warn(
-        { sessionId: session.sessionId, errorName: error instanceof Error ? error.name : "Error" },
-        "embodiment session start refused",
-      );
-      return { kind: "refused", reason: "environment_unavailable" };
-    }
 
     // The durable trail (ADR 0068): header now, every turn as it settles, the
     // summary at the end. Best-effort in both directions — an unwritable
@@ -836,7 +816,7 @@ export function createGbaPlayExecution(options: GbaPlayExecutionOptions): PlayEx
       sink?.close();
       unsubscribe?.();
       voice?.close();
-      freePlay.close();
+      await freePlay.close();
     }
   }
 }

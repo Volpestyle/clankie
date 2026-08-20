@@ -1,4 +1,15 @@
-import { existsSync, mkdtempSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -80,6 +91,35 @@ describe("gba checkpoints", () => {
     ).toThrow();
   });
 
+  it("mints unique private checkpoints even when captures share a timestamp", () => {
+    const dir = root();
+    const cap = capability();
+    const first = writeGbaCheckpoint({ rootDir: dir, capability: cap, position: null, clock: CLOCK });
+    const second = writeGbaCheckpoint({ rootDir: dir, capability: cap, position: null, clock: CLOCK });
+    expect(second.receipt.checkpointId).not.toBe(first.receipt.checkpointId);
+    expect(statSync(first.directory).mode & 0o777).toBe(0o700);
+    for (const file of [
+      first.savestatePath,
+      first.scenarioPath,
+      path.join(first.directory, "checkpoint.json"),
+    ]) {
+      expect(statSync(file).mode & 0o777).toBe(0o600);
+    }
+  });
+
+  it("removes a partial checkpoint when any file fails to write", () => {
+    const dir = root();
+    const cap = capability();
+    const broken = {
+      ...cap,
+      scenario: { ...cap.scenario, cannotSerialize: 1n },
+    } as unknown as GbaCheckpointCapability;
+    expect(() =>
+      writeGbaCheckpoint({ rootDir: dir, capability: broken, position: null, clock: CLOCK }),
+    ).toThrow();
+    expect(readdirSync(dir)).toEqual([]);
+  });
+
   it("refuses a checkpoint id that is not a directory basename", () => {
     expect(() =>
       readGbaCheckpoint({ rootDir: root(), checkpointId: "../elsewhere", identity: capability().identity }),
@@ -94,6 +134,38 @@ describe("gba checkpoints", () => {
     expect(() =>
       readGbaCheckpoint({ rootDir: dir, checkpointId: written.receipt.checkpointId, identity: cap.identity }),
     ).toThrow("checkpoint_savestate_corrupt");
+  });
+
+  it("refuses symlinked or non-regular checkpoint paths", () => {
+    const dir = root();
+    const cap = capability();
+    const linked = writeGbaCheckpoint({ rootDir: dir, capability: cap, position: null, clock: CLOCK });
+    const outside = path.join(root(), "outside.ss1");
+    writeFileSync(outside, new Uint8Array([1, 2, 3, 4]));
+    rmSync(linked.savestatePath);
+    symlinkSync(outside, linked.savestatePath);
+    expect(() =>
+      readGbaCheckpoint({ rootDir: dir, checkpointId: linked.receipt.checkpointId, identity: cap.identity }),
+    ).toThrow("checkpoint_savestate_unsafe");
+
+    const nonRegular = writeGbaCheckpoint({ rootDir: dir, capability: cap, position: null, clock: CLOCK });
+    rmSync(nonRegular.scenarioPath);
+    mkdirSync(nonRegular.scenarioPath);
+    expect(() =>
+      readGbaCheckpoint({
+        rootDir: dir,
+        checkpointId: nonRegular.receipt.checkpointId,
+        identity: cap.identity,
+      }),
+    ).toThrow("checkpoint_scenario_unsafe");
+
+    const foreignId = "2026-07-25T18-00-00-000Z-foreign-000000000000";
+    const foreign = root();
+    symlinkSync(nonRegular.directory, path.join(foreign, foreignId));
+    expect(() =>
+      readGbaCheckpoint({ rootDir: foreign, checkpointId: foreignId, identity: cap.identity }),
+    ).toThrow("checkpoint_directory_unsafe");
+    expect(existsSync(path.join(foreign, foreignId))).toBe(true);
   });
 
   it("refuses a checkpoint taken from a different ROM or core build", () => {

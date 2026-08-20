@@ -3,8 +3,7 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
-  GBA_EMULATOR_CAPABILITY_BOUNDARY,
-  GbaEmulatorCapabilityBoundarySchema,
+  GBA_EMULATOR_LOCAL_CAPABILITIES,
   GbaEmulatorSessionSpecSchema,
   type EnvironmentEvent,
   type GbaEmulatorAction,
@@ -46,12 +45,7 @@ async function fixture() {
   return { binding, fixtureSha256, scenario };
 }
 
-const allCapabilities = [
-  "emulator.gba.observe",
-  "emulator.gba.input",
-  "emulator.gba.frame_advance",
-  "emulator.gba.wait",
-] as const;
+const allCapabilities = ["emulator.gba.observe", "emulator.gba.input", "emulator.gba.frame_advance"] as const;
 
 const DIRECTION_STEPS = {
   up: { dx: 0, dy: -1 },
@@ -490,6 +484,17 @@ describe("GBA emulator embodiment", () => {
     });
   });
 
+  it("forgets route caches when an external savestate replaces the timeline", async () => {
+    const { adapter, command, grant, runtime, spec } = await harness({ occupied: [{ x: 1, y: 1 }] });
+    await runtime.startAction(grant.token, command("walk-1", { kind: "walk_to", x: 3, y: 1 }));
+    adapter.session(spec.sessionId).resetAfterStateLoad();
+    const afterLoad = await runtime.startAction(
+      grant.token,
+      command("walk-after-load", { kind: "walk_to", x: 3, y: 1 }),
+    );
+    expect(afterLoad).toMatchObject({ outcome: { plannedSteps: 3, blockedAt: { x: 1, y: 1 } } });
+  });
+
   it("names a grass encounter instead of remembering it as an NPC", async () => {
     const { command, grant, runtime } = await harness({ encounter: [{ x: 1, y: 1 }] });
     const first = await runtime.startAction(grant.token, command("walk-1", { kind: "walk_to", x: 3, y: 1 }));
@@ -653,11 +658,7 @@ describe("GBA emulator embodiment", () => {
     const { command, grant, runtime } = await harness();
     const malformed = command("malformed", { kind: "button_press", button: "right", holdFrames: 12 });
     (malformed.action.action as { holdFrames: number }).holdFrames = 100_000;
-    await expect(runtime.startAction(grant.token, malformed)).resolves.toMatchObject({
-      status: "failed",
-      errorCode: "invalid_emulator_command",
-      retryable: false,
-    });
+    expect(() => runtime.startAction(grant.token, malformed)).toThrow(/holdFrames/);
     const overLimit = command("over-limit", { kind: "frame_advance", frames: 601 });
     await expect(runtime.startAction(grant.token, overLimit)).resolves.toMatchObject({
       status: "failed",
@@ -665,25 +666,8 @@ describe("GBA emulator embodiment", () => {
     });
   });
 
-  it("cancels pending waits and fails closed on lease loss and emergency stop", async () => {
-    const first = await harness();
-    const waiting = await first.runtime.startAction(
-      first.grant.token,
-      first.command("wait", { kind: "wait", durationMs: 1_000 }),
-    );
-    expect(waiting).toMatchObject({ status: "running" });
-    await expect(
-      first.runtime.cancelAction(first.grant.token, first.spec.sessionId, "wait", "operator cancel"),
-    ).resolves.toMatchObject({ status: "cancelled" });
-    expect(first.adapter.session(first.spec.sessionId).trace().events.at(-1)).toMatchObject({
-      actionKind: "cancel_action",
-    });
-
+  it("fails closed on lease loss and emergency stop", async () => {
     const second = await harness();
-    await second.runtime.startAction(
-      second.grant.token,
-      second.command("lease-wait", { kind: "wait", durationMs: 1_000 }),
-    );
     second.now.value = new Date("2026-07-19T00:00:11.000Z");
     expect(await second.runtime.sweep()).toMatchObject({ expiredSessions: [second.spec.sessionId] });
     await expect(
@@ -703,10 +687,6 @@ describe("GBA emulator embodiment", () => {
     ).resolves.toMatchObject({ status: "completed" });
 
     const third = await harness();
-    await third.runtime.startAction(
-      third.grant.token,
-      third.command("emergency-wait", { kind: "wait", durationMs: 1_000 }),
-    );
     await expect(
       third.runtime.emergencyStop(third.spec.sessionId, "operator emergency"),
     ).resolves.toMatchObject({ phase: "off" });
@@ -716,15 +696,11 @@ describe("GBA emulator embodiment", () => {
   });
 
   it("performs no network I/O and owns no network or tamper capability", async () => {
-    // Boundary: the schema cannot represent a network or tamper capability.
-    expect(GBA_EMULATOR_CAPABILITY_BOUNDARY.networkCapabilities).toHaveLength(0);
-    expect(GBA_EMULATOR_CAPABILITY_BOUNDARY.remoteTamperCapabilities).toHaveLength(0);
-    expect(() =>
-      GbaEmulatorCapabilityBoundarySchema.parse({
-        ...GBA_EMULATOR_CAPABILITY_BOUNDARY,
-        networkCapabilities: ["emulator.gba.network"],
-      }),
-    ).toThrow();
+    expect(GBA_EMULATOR_LOCAL_CAPABILITIES).toEqual([
+      "emulator.gba.observe",
+      "emulator.gba.input",
+      "emulator.gba.frame_advance",
+    ]);
     // Static proof: no source file in this integration can open a socket or
     // speak to any networked service.
     const sourceRoot = resolve(import.meta.dirname, "../src");

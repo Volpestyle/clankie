@@ -204,7 +204,6 @@ describe("headless clankie commands", () => {
       services: [
         { id: "clankie", ok: true },
         { id: "discord-bridge", ok: true },
-        { id: "discord-user-session", ok: true },
       ],
     });
     // Progress narration must stay off stdout so it remains a JSON document.

@@ -6,6 +6,11 @@ shipped through
 [ADR 0098 (user-session shares)](0098-user-session-watches-discord-shares.md)
 and [ADR 0100](0100-vox-is-an-owned-native-media-package.md). Live game sound
 is added by [ADR 0114](0114-a-rendered-game-surface-carries-live-sound.md).
+Current-status addendum (2026-08-19):
+[ADR 0128](0128-vox-is-the-sole-discord-media-owner.md) governs Discord media
+ownership. The Activity remains the bot-supported rendered-media surface;
+screen watch and Go Live remain user-body capabilities because Discord does not
+offer them to bots.
 
 ## Context
 

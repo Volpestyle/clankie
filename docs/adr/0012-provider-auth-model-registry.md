@@ -18,7 +18,7 @@ explicit CI/test override and health exposes only content-free consistency.
 3. **Provider layer** (`packages/model-provider`) — non-secret config in
    `~/.config/clankie/clankie.json` with a per-repo override, deep-merged and
    zod-validated; provider resolution (credential present ∪ env var declared by
-   the registry ∪ config-declared); Pi provider projection for the captain; AI SDK instantiation for gameplay, voice, and media with
+   the registry ∪ config-declared); Pi provider projection for the captain; AI SDK instantiation for gameplay and media with
    `@ai-sdk/openai-compatible` as the universal adapter for local endpoints
    (Ollama, LM Studio/MLX, llama.cpp, vLLM — just `baseURL`). The captain uses Pi's native thinking levels; non-captain AI SDK adapters lower their provider options at request time.
 
@@ -31,8 +31,8 @@ Responses request contract (`instructions`, `store:false`, OAuth headers).
 There is no implicit credential fallback between the identities.
 
 The operator UX is the TUI's guided setup (`/auth`, `/provider`, `/model`,
-`/effort`, and `/voice`). Voice configuration uses the same registry and
-credential store. Local endpoints are declared in the same `/provider` modal:
+`/effort`, and `/voice`). Voice configuration uses the same credential store.
+Local endpoints are declared in the same `/provider` modal:
 it writes the `baseURL` provider entry and seeds its models from the
 endpoint's own `GET {baseURL}/models`, since models.dev has no catalog for a
 machine-local runtime.

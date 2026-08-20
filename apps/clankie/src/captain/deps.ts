@@ -7,21 +7,11 @@ import type {
 } from "@clankie/interactive-environment";
 import type { VoiceSpeechSnapshot } from "../voice-receipt-activity.ts";
 import type {
-  BodyPossession,
-  BrowserToolCatalog,
-  CallBrowserToolRequest,
-  CallBrowserToolResult,
   CaptainEpisodeVisibility,
   CaptainSessionLaneV2,
   DiscordPersonIdentity,
   DiscordPresenceAttachment,
-  DiscordCaptainActionInput,
-  DiscordCaptainActionResult,
   DiscordStreamWatchObservation,
-  DiscordVoicePresenceResult,
-  DrawDiagramResult,
-  DrawErDiagramRequest,
-  DrawSequenceDiagramRequest,
   EmbodimentIntent,
   EmbodimentSession,
   EmbodimentSubmitResult,
@@ -30,9 +20,14 @@ import type {
   GenerateVideoRequest,
   GenerateVideoResult,
 } from "@clankie/protocol";
+import type { BrowserHost } from "../browser-host.ts";
+import type { createDiscordCaptainActionClient } from "../discord-captain-actions.ts";
+import type { createDiscordMusicClient } from "../discord-music.ts";
+import type { createDiscordVoicePresenceClient } from "../discord-voice-presence.ts";
 import type { EmailPort } from "../email.ts";
-import type { McpCallResult, McpToolDescriptor } from "../mcp-host.ts";
+import type { McpHost } from "../mcp-host.ts";
 import type { FinishedRender } from "../media-generation.ts";
+import type { TldrawHost } from "../tldraw-host.ts";
 
 /**
  * Everything the captain's tools reach in the rest of the service, as plain
@@ -40,20 +35,9 @@ import type { FinishedRender } from "../media-generation.ts";
  */
 export interface CaptainDeps {
   /** Tools on his connected MCP servers. The lane is passed on every call. */
-  readonly mcp: {
-    catalog(lane: CaptainSessionLaneV2): Promise<readonly McpToolDescriptor[]>;
-    call(input: {
-      readonly lane: CaptainSessionLaneV2;
-      readonly server: string;
-      readonly tool: string;
-      readonly arguments: Record<string, unknown>;
-    }): Promise<McpCallResult>;
-  };
+  readonly mcp: Pick<McpHost, "catalog" | "call">;
   readonly email: EmailPort;
-  readonly browser: {
-    catalog(): Promise<BrowserToolCatalog>;
-    call(request: CallBrowserToolRequest): Promise<CallBrowserToolResult>;
-  };
+  readonly browser: Pick<BrowserHost, "catalog" | "call">;
   readonly media: {
     generateImage(request: GenerateImageRequest): Promise<GenerateImageResult>;
     /** `room` tags the render so the room that asked is told when it lands. */
@@ -65,15 +49,11 @@ export interface CaptainDeps {
    * His drawing hand (ADR 0096). Absent when the capability is switched off;
    * the tools then say so rather than disappearing.
    */
-  readonly diagrams?: {
-    drawErDiagram(request: DrawErDiagramRequest): Promise<DrawDiagramResult>;
-    drawSequenceDiagram(request: DrawSequenceDiagramRequest): Promise<DrawDiagramResult>;
-  };
+  readonly diagrams?: TldrawHost;
   readonly embodiment: {
     submitIntent(intent: EmbodimentIntent): Promise<EmbodimentSubmitResult>;
     getSession(sessionId: string): Promise<EmbodimentSession | undefined>;
     getLiveSession(): Promise<EmbodimentSession | undefined>;
-    getPossession(): Promise<BodyPossession | undefined>;
   };
   readonly activity: {
     current(): Promise<ActivityObservationRead>;
@@ -90,37 +70,11 @@ export interface CaptainDeps {
    * Discord DJ desk on the active body (search / play / queue). Absent when
    * the live Discord process is not accepting music.
    */
-  readonly discordMusic?: {
-    search(input: {
-      query: string;
-      next?: boolean;
-      authorId: string;
-    }): Promise<{ ok: boolean; message: string }>;
-    play(input: {
-      url?: string;
-      index?: number;
-      authorId: string;
-    }): Promise<{ ok: boolean; message: string }>;
-    queue(input: {
-      url?: string;
-      index?: number;
-      authorId: string;
-    }): Promise<{ ok: boolean; message: string }>;
-    skip(): Promise<{ ok: boolean; message: string }>;
-    pause(): Promise<{ ok: boolean; message: string }>;
-    resume(): Promise<{ ok: boolean; message: string }>;
-    stop(): Promise<{ ok: boolean; message: string }>;
-    now(): Promise<{ ok: boolean; message: string }>;
-  };
+  readonly discordMusic?: ReturnType<typeof createDiscordMusicClient>;
   /** Voice membership on the active Discord body; the body resolves and authorizes the target. */
-  readonly discordVoicePresence?: {
-    join(input: { guildId?: string; actorId?: string }): Promise<DiscordVoicePresenceResult>;
-    leave(input: { guildId?: string; actorId?: string }): Promise<DiscordVoicePresenceResult>;
-  };
+  readonly discordVoicePresence?: ReturnType<typeof createDiscordVoicePresenceClient>;
   /** Grounded social actions on the message and body belonging to the active turn. */
-  readonly discordActions?: {
-    execute(input: DiscordCaptainActionInput): Promise<DiscordCaptainActionResult>;
-  };
+  readonly discordActions?: ReturnType<typeof createDiscordCaptainActionClient>;
   readonly presence: {
     listSessions(): Promise<DiscordPresenceSessionRecord[]>;
     listVoiceHistory(limit?: number): Promise<DiscordVoiceStay[]>;

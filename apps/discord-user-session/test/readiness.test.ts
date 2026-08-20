@@ -20,6 +20,12 @@ describe("user-session admission (ADR 0048)", () => {
     ).rejects.toMatchObject({ code: "discord_user_session_disabled" });
   });
 
+  it("refuses direct startup when the launcher-selected body is not user_session", async () => {
+    await expect(
+      assertUserSessionAdmissible(input({ env: { ...env(), DISCORD_ACTIVE_BODY: "bot" } })),
+    ).rejects.toMatchObject({ code: "discord_user_session_inactive_body" });
+  });
+
   it("refuses an empty guild or channel allowlist", async () => {
     await expect(
       assertUserSessionAdmissible(input({ env: { ...env(), DISCORD_USER_SESSION_CHANNEL_IDS: "" } })),
@@ -105,6 +111,7 @@ function optIn(): DiscordUserSessionOptIn {
 function env(): NodeJS.ProcessEnv {
   return {
     DISCORD_USER_SESSION_ENABLED: "true",
+    DISCORD_ACTIVE_BODY: "user_session",
     DISCORD_USER_SESSION_GUILD_IDS: "guild-1",
     DISCORD_USER_SESSION_CHANNEL_IDS: "channel-1",
   };

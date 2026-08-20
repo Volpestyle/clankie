@@ -1,8 +1,15 @@
 # ADR 0059: Lease expiry pauses the body; only revocation is final
 
-Status: accepted (James, 2026-07-25). Implemented in the environment runtime,
-the free-play session composer, and the GBA MCP server, with the recovery paths
-covered by tests.
+Status: accepted (James, 2026-07-25). Possession-specific behavior is superseded
+by [ADR 0129](0129-each-player-owns-a-body.md).
+
+## Current status (2026-08-19)
+
+`EnvironmentRuntime` still expires, pauses, renews, and reconciles its internal
+session/capability lease as described below. Each owning process now has an
+independent runtime, so references to yielding a shared body, a possessor, or a
+cross-process body lock are historical. The retained lease is an action and
+recovery fence, not possession.
 
 ## Context
 

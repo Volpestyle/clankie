@@ -1,5 +1,5 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { homedir } from "node:os";
 
 export interface HerdrAgentSummary {
@@ -43,26 +43,4 @@ export function readHerdrSummariesFile(path: string = herdrSummariesPath()): Her
   } catch {
     return { at: new Date(0).toISOString(), agents: {} };
   }
-}
-
-export function upsertHerdrSummaries(
-  updates: Record<string, { summary: string; next?: string }>,
-  path: string = herdrSummariesPath(),
-): HerdrSummariesFile {
-  const now = new Date().toISOString();
-  const current = readHerdrSummariesFile(path);
-  const agents = { ...current.agents };
-  for (const [pane, update] of Object.entries(updates)) {
-    const summary = update.summary.trim();
-    if (!summary) continue;
-    agents[pane] = {
-      summary,
-      ...(update.next?.trim() ? { next: update.next.trim() } : {}),
-      at: now,
-    };
-  }
-  const next = { at: now, agents };
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(next, null, 2)}\n`);
-  return next;
 }

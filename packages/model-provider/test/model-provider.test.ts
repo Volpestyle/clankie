@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { CatalogSchema, findModel, ProviderEntrySchema } from "@clankie/model-registry";
+import { CatalogSchema, ProviderEntrySchema } from "@clankie/model-registry";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -15,7 +15,7 @@ import {
 } from "../src/config.ts";
 import { createLanguageModel, providerFamilyFor, variantProviderOptions } from "../src/instantiate.ts";
 import { resolvePiModelSelection } from "../src/pi.ts";
-import { mergedCatalog, resolveProviders, resolveRole, subscriptionRefFor } from "../src/resolve.ts";
+import { mergedCatalog, resolveRole, subscriptionRefFor } from "../src/resolve.ts";
 import { effortVariantsFor, variantById } from "../src/variants.ts";
 
 const tempDirs: string[] = [];
@@ -280,16 +280,22 @@ describe("updateGlobalConfig", () => {
       ),
       updateGlobalConfig(
         (config) => {
-          config.small_model = "openai/gpt-test";
+          config.variant = { "anthropic/claude-test": "high" };
         },
         { env },
       ),
     ]);
     expect(first.model).toBe("anthropic/claude-test");
-    expect(second).toEqual({ model: "anthropic/claude-test", small_model: "openai/gpt-test" });
+    expect(second).toEqual({
+      model: "anthropic/claude-test",
+      variant: { "anthropic/claude-test": "high" },
+    });
 
     const raw = await readFile(globalPath, "utf8");
-    expect(JSON.parse(raw)).toEqual({ model: "anthropic/claude-test", small_model: "openai/gpt-test" });
+    expect(JSON.parse(raw)).toEqual({
+      model: "anthropic/claude-test",
+      variant: { "anthropic/claude-test": "high" },
+    });
     expect(raw).toContain('\n  "model"'); // pretty-printed
     expect(raw.endsWith("\n")).toBe(true);
     const leftovers = (await readdir(dirname(globalPath))).filter((name) => name.endsWith(".tmp"));
@@ -304,8 +310,8 @@ describe("updateGlobalConfig", () => {
       },
       { env },
     );
-    const next = await updateGlobalConfig(() => ({ voice_model: "openai/gpt-test" }), { env });
-    expect(next).toEqual({ voice_model: "openai/gpt-test" });
+    const next = await updateGlobalConfig(() => ({ model: "openai/gpt-test" }), { env });
+    expect(next).toEqual({ model: "openai/gpt-test" });
   });
 });
 
@@ -340,78 +346,12 @@ describe("mergedCatalog", () => {
       },
       fakeCatalog,
     );
-    const llama = must(findModel(catalog, "ollama", "llama-test"), "llama-test");
+    const llama = must(catalog["ollama"]?.models["llama-test"], "llama-test");
     expect(llama.reasoning).toBe(true);
     expect(must(catalog["ollama"]).npm).toBe("@ai-sdk/openai-compatible");
-    expect(must(findModel(catalog, "anthropic", "claude-test")).name).toBe("Claude Renamed");
+    expect(must(catalog["anthropic"]?.models["claude-test"]).name).toBe("Claude Renamed");
     // Input catalog is untouched.
-    expect(findModel(fakeCatalog, "ollama", "llama-test")).toBeUndefined();
-  });
-});
-
-describe("resolveProviders", () => {
-  it("marks credential and env connections and sorts connected providers first", () => {
-    const resolved = resolveProviders({
-      config: {},
-      catalog: fakeCatalog,
-      credentialIds: ["xai"],
-      env: { OPENAI_API_KEY: "sk-env" },
-    });
-    expect(resolved.map((provider) => provider.id)).toEqual(["openai", "xai", "anthropic", "openai-codex"]);
-    expect(resolved.map((provider) => provider.connection)).toEqual(["env", "credential", "none", "none"]);
-    expect(resolved.map((provider) => provider.connected)).toEqual([true, true, false, false]);
-    expect(resolved.every((provider) => !provider.declaredInConfig)).toBe(true);
-  });
-
-  it("keeps OpenAI API-key and ChatGPT subscription credentials explicit and independent", () => {
-    const resolved = resolveProviders({
-      config: {},
-      catalog: fakeCatalog,
-      credentialIds: ["openai-codex"],
-      env: {},
-    });
-    expect(resolved.find((provider) => provider.id === "openai-codex")).toMatchObject({
-      connected: true,
-      connection: "credential",
-    });
-    expect(resolved.find((provider) => provider.id === "openai")).toMatchObject({
-      connected: false,
-      connection: "none",
-    });
-  });
-
-  it("drops disabled providers and honors the enabled allowlist", () => {
-    const disabled = resolveProviders({
-      config: { disabled_providers: ["anthropic"] },
-      catalog: fakeCatalog,
-      credentialIds: [],
-      env: {},
-    });
-    expect(disabled.map((provider) => provider.id)).not.toContain("anthropic");
-
-    const allowlisted = resolveProviders({
-      config: { enabled_providers: ["openai"] },
-      catalog: fakeCatalog,
-      credentialIds: [],
-      env: {},
-    });
-    expect(allowlisted.map((provider) => provider.id)).toEqual(["openai"]);
-  });
-
-  it("includes config-declared custom providers with declaredInConfig set", () => {
-    const resolved = resolveProviders({
-      config: { provider: { ollama: { name: "Ollama", models: { "llama-test": {} } } } },
-      catalog: fakeCatalog,
-      credentialIds: ["ollama"],
-      env: {},
-    });
-    const ollama = must(
-      resolved.find((provider) => provider.id === "ollama"),
-      "ollama",
-    );
-    expect(ollama.declaredInConfig).toBe(true);
-    expect(ollama.connection).toBe("credential");
-    expect(must(resolved[0]).id).toBe("ollama"); // only connected provider sorts first
+    expect(fakeCatalog["ollama"]?.models["llama-test"]).toBeUndefined();
   });
 });
 
@@ -448,9 +388,9 @@ describe("resolveRole", () => {
   });
 
   it("returns undefined for unset roles and keeps unknown models as undefined", () => {
-    expect(resolveRole("voice_model", { config: {}, catalog: fakeCatalog })).toBeUndefined();
+    expect(resolveRole("model", { config: {}, catalog: fakeCatalog })).toBeUndefined();
     const resolved = must(
-      resolveRole("small_model", { config: { small_model: "openai/does-not-exist" }, catalog: fakeCatalog }),
+      resolveRole("model", { config: { model: "openai/does-not-exist" }, catalog: fakeCatalog }),
     );
     expect(resolved.model).toBeUndefined();
     expect(resolved.variantId).toBeUndefined();
@@ -520,11 +460,8 @@ describe("resolvePiModelSelection", () => {
 
 function fakeModel(id: string, reasoning: boolean) {
   return must(
-    findModel(
-      CatalogSchema.parse({ p: { id: "p", name: "P", models: { [id]: { id, name: id, reasoning } } } }),
-      "p",
-      id,
-    ),
+    CatalogSchema.parse({ p: { id: "p", name: "P", models: { [id]: { id, name: id, reasoning } } } })["p"]
+      ?.models[id],
   );
 }
 

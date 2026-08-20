@@ -1,14 +1,12 @@
 import {
   DiscordPresencePhaseEventSchema,
   DiscordPresenceSessionRecordSchema,
-  resolveDiscordPresenceToolExposure,
   type DiscordPresencePhaseEvent,
   type DiscordPresenceSessionRecord,
-  type DiscordPresenceToolExposure,
   type DiscordVoiceRoom,
   type DiscordVoiceStay,
 } from "@clankie/interactive-environment";
-import type { CaptainLane, DiscordPresenceChannelIdentity, DomainEvent } from "@clankie/protocol";
+import type { DiscordPresenceChannelIdentity, DomainEvent } from "@clankie/protocol";
 
 export const DISCORD_PRESENCE_EVENT_STREAM_ID = "discord-presence" as const;
 
@@ -23,14 +21,6 @@ export class DiscordPresenceSessionProjection {
   }
 
   public apply(event: DiscordPresencePhaseEvent): DiscordPresenceSessionRecord {
-    return this.project(event, true);
-  }
-
-  public validate(event: DiscordPresencePhaseEvent): DiscordPresenceSessionRecord {
-    return this.project(event, false);
-  }
-
-  private project(event: DiscordPresencePhaseEvent, commit: boolean): DiscordPresenceSessionRecord {
     const parsed = DiscordPresencePhaseEventSchema.parse(event);
     const session = parsed.data.session;
     const key = bindingKey(session);
@@ -44,7 +34,7 @@ export class DiscordPresenceSessionProjection {
       ) {
         throw new Error("discord_presence_session_initial_transition_invalid");
       }
-      if (commit) this.sessions.set(key, structuredClone(session));
+      this.sessions.set(key, structuredClone(session));
       return structuredClone(session);
     }
     if (previous.sessionId !== session.sessionId) {
@@ -56,7 +46,7 @@ export class DiscordPresenceSessionProjection {
       ) {
         throw new Error("discord_presence_session_binding_conflict");
       }
-      if (commit) this.sessions.set(key, structuredClone(session));
+      this.sessions.set(key, structuredClone(session));
       return structuredClone(session);
     }
     if (session.revision < previous.revision) {
@@ -81,7 +71,7 @@ export class DiscordPresenceSessionProjection {
             ...session,
             revision: previous.revision + 1,
           });
-    if (commit) this.sessions.set(key, structuredClone(projected));
+    this.sessions.set(key, structuredClone(projected));
     return structuredClone(projected);
   }
 
@@ -94,14 +84,6 @@ export class DiscordPresenceSessionProjection {
 
   public list(): DiscordPresenceSessionRecord[] {
     return [...this.sessions.values()].map((session) => structuredClone(session));
-  }
-
-  public resolveToolExposure(
-    identity: Pick<DiscordPresenceChannelIdentity, "characterId" | "credentialRef" | "transportKind">,
-    lane: CaptainLane,
-  ): DiscordPresenceToolExposure | undefined {
-    const session = this.resolve(identity);
-    return session === undefined ? undefined : resolveDiscordPresenceToolExposure(session, lane);
   }
 }
 

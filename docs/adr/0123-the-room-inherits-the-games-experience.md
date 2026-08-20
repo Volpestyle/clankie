@@ -4,6 +4,13 @@ Status: accepted (2026-08-18). Amends
 [ADR 0074](0074-the-room-hears-one-voice.md), which keeps the realtime room
 session as the sole author of audible speech.
 
+## Current status (2026-08-19)
+
+The room inherits only Clankie's own local or hosted game experience through
+`@clankie/play-voice`. [ADR 0129](0129-each-player-owns-a-body.md) supersedes
+the possessor wording below; external harnesses receive neither experience nor
+room input.
+
 ## Context
 
 A live 58-turn FireRed run exposed a gap between one audible character and two

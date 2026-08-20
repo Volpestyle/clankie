@@ -23,15 +23,14 @@ later ADRs link back to the decision they amend or replace.
 
 ## Diagram sources
 
-| Editable source                                                                          | Export                                                                             |
-| ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| [`clankie-current-architecture.tldraw`](../diagrams/clankie-current-architecture.tldraw) | [`clankie-current-architecture.jpg`](../diagrams/clankie-current-architecture.jpg) |
-| [`vox-architecture.tldraw`](../diagrams/vox-architecture.tldraw)                         | [`vox-architecture.jpg`](../diagrams/vox-architecture.jpg)                         |
-| [`clankie-memory.tldraw`](../diagrams/clankie-memory.tldraw)                             | [`clankie-memory.jpg`](../diagrams/clankie-memory.jpg)                             |
-| [`clankie-docs-diagrams.tldraw`](../diagrams/clankie-docs-diagrams.tldraw)               | Historical per-ADR JPG exports that remain linked                                  |
-| [`clankie-docs-diagrams-2.tldraw`](../diagrams/clankie-docs-diagrams-2.tldraw)           | Current app, package, and ADR JPG exports that remain linked                       |
+| Editable source                                                                          | Export                                                                                        |
+| ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| [`clankie-current-architecture.tldraw`](../diagrams/clankie-current-architecture.tldraw) | Historical [`clankie-current-architecture.jpg`](../diagrams/clankie-current-architecture.jpg) |
+| [`vox-architecture.tldraw`](../diagrams/vox-architecture.tldraw)                         | Historical [`vox-architecture.jpg`](../diagrams/vox-architecture.jpg)                         |
+| [`clankie-memory.tldraw`](../diagrams/clankie-memory.tldraw)                             | Historical [`clankie-memory.jpg`](../diagrams/clankie-memory.jpg)                             |
+| [`clankie-docs-diagrams.tldraw`](../diagrams/clankie-docs-diagrams.tldraw)               | Historical per-ADR JPG exports that remain linked                                             |
+| [`clankie-docs-diagrams-2.tldraw`](../diagrams/clankie-docs-diagrams-2.tldraw)           | Historical app, package, and ADR JPG exports that remain linked                               |
 
-When a JPG no longer matches its document, update the matching Turbopuffer page
-and replace the export in the same change. A source board holds at most 40
-pages; start the next numbered board before reaching that limit. Do not
-hand-edit or fabricate a binary render without its source.
+Current architecture decisions use Mermaid in the owning Markdown. Retained JPG
+exports preserve the architecture at their publication date; do not treat them
+as current or hand-edit/fabricate a binary render without its source.

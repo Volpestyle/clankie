@@ -6,6 +6,12 @@ read activity across rooms. The doctrine-governed world-fact store used as the
 comparison in this record was later removed; references to it below are
 historical, not current implementation claims.
 
+## Current status (2026-08-19)
+
+Presence and self-authored memory remain shared across Clankie's own rooms.
+[ADR 0129](0129-each-player-owns-a-body.md) removes possession state from the
+current projection: an external harness is not one of Clankie's rooms or bodies.
+
 ## Context
 
 One Clankie can have separate operator, Discord, voice, and gameplay sessions

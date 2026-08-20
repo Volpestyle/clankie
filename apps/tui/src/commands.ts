@@ -165,7 +165,6 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
               const currentConversationId = conversations.conversationId;
               let conversationIdToClose: string | undefined;
               const picked = await flow.readSelect({
-                kind: "single",
                 message: "Conversations",
                 options: rows.map((item) => ({
                   value: item.conversationId,
@@ -184,7 +183,6 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
                 ...(conversations.close === undefined
                   ? {}
                   : { onClose: (conversationId: string) => (conversationIdToClose = conversationId) }),
-                required: true,
               });
               if (conversationIdToClose !== undefined && conversations.close !== undefined) {
                 const closing = rows.find((item) => item.conversationId === conversationIdToClose);
@@ -208,7 +206,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
                 flow.renderLine(`Closed ${closing?.title ?? "conversation"}.`, "success");
                 continue;
               }
-              const conversationId = picked?.[0];
+              const conversationId = picked;
               if (conversationId === undefined) return;
               const selected = await conversations.select(conversationId);
               shell.insertCommandResult("/conversation", `Switched to ${selected.title}.`, "success");
@@ -545,7 +543,6 @@ async function runGameplayWizard(shell: ClankieFaceShell, settings: SettingsStor
     for (;;) {
       const gameplay = (await settings.load()).gameplay;
       const selected = await flow.readSelect({
-        kind: "single",
         message:
           "Toggle a PokeAgent game\nEnter toggles availability. Both may be enabled; one live session runs across them.",
         options: [
@@ -564,9 +561,8 @@ async function runGameplayWizard(shell: ClankieFaceShell, settings: SettingsStor
         ],
         statusActions: [{ value: "done", label: "Done", hint: "restart Clankie to apply changes" }],
         initialValue,
-        required: true,
       });
-      const mode = selected?.[0];
+      const mode = selected;
       if (mode !== "solo" && mode !== "mmo") break;
       const enabled = mode === "solo" ? !gameplay.pokemonEmulatorEnabled : !gameplay.pokeagentMmoEnabled;
       await setGameplayEnabled(settings, mode, enabled);

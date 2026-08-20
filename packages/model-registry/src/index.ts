@@ -11,27 +11,21 @@ import bundledSnapshot from "../data/models-dev-snapshot.json" with { type: "jso
 // values fall back to safe defaults (.catch/.default) instead of throwing.
 // ---------------------------------------------------------------------------
 
-export const ModelCostSchema = z.looseObject({
+const ModelCostSchema = z.looseObject({
   input: z.number().catch(0).default(0),
   output: z.number().catch(0).default(0),
   cache_read: z.number().catch(0).default(0),
   cache_write: z.number().catch(0).default(0),
 });
-export type ModelCost = z.infer<typeof ModelCostSchema>;
-
-export const ModelLimitSchema = z.looseObject({
+const ModelLimitSchema = z.looseObject({
   context: z.number().catch(0).default(0),
   input: z.number().optional(),
   output: z.number().catch(0).default(0),
 });
-export type ModelLimit = z.infer<typeof ModelLimitSchema>;
-
-export const ModelModalitiesSchema = z.looseObject({
+const ModelModalitiesSchema = z.looseObject({
   input: z.array(z.string()).catch([]).default([]),
   output: z.array(z.string()).catch([]).default([]),
 });
-export type ModelModalities = z.infer<typeof ModelModalitiesSchema>;
-
 export const ModelEntrySchema = z.looseObject({
   id: z.string().catch("").default(""),
   name: z.string().catch("").default(""),
@@ -227,69 +221,12 @@ export function createModelRegistry(options: ModelRegistryOptions = {}): ModelRe
 }
 
 // ---------------------------------------------------------------------------
-// Query helpers — pure functions over a Catalog
-// ---------------------------------------------------------------------------
-
-export function listProviders(catalog: Catalog): ProviderEntry[] {
-  return Object.values(catalog).sort((a, b) => a.name.localeCompare(b.name));
-}
-
-/** Models for a provider, newest release_date first; undated models sort last. */
-export function listModels(catalog: Catalog, providerId: string): ModelEntry[] {
-  const provider = catalog[providerId];
-  if (!provider) return [];
-  return Object.values(provider.models).sort((a, b) => {
-    const left = a.release_date ?? "";
-    const right = b.release_date ?? "";
-    if (left !== right) return right.localeCompare(left);
-    return a.id.localeCompare(b.id);
-  });
-}
-
-export function findModel(catalog: Catalog, providerId: string, modelId: string): ModelEntry | undefined {
-  return catalog[providerId]?.models[modelId];
-}
-
-export interface ModelMatch {
-  provider: ProviderEntry;
-  model: ModelEntry;
-}
-
-/** Case-insensitive substring search over provider id/name and model id/name. */
-export function searchModels(catalog: Catalog, query: string): ModelMatch[] {
-  const needle = query.toLowerCase();
-  const matches: ModelMatch[] = [];
-  for (const provider of listProviders(catalog)) {
-    const providerHit =
-      provider.id.toLowerCase().includes(needle) || provider.name.toLowerCase().includes(needle);
-    for (const model of Object.values(provider.models)) {
-      if (
-        providerHit ||
-        model.id.toLowerCase().includes(needle) ||
-        model.name.toLowerCase().includes(needle)
-      ) {
-        matches.push({ provider, model });
-      }
-    }
-  }
-  return matches;
-}
-
-export function supportsReasoning(model: ModelEntry): boolean {
-  return model.reasoning;
-}
-
-export function contextWindow(model: ModelEntry): number {
-  return model.limit.context;
-}
-
-// ---------------------------------------------------------------------------
 // Custom providers — user-config entries merged over the catalog
 // ---------------------------------------------------------------------------
 
 export type CustomModelEntry = Partial<ModelEntry>;
 
-export type CustomProviderEntry = Omit<Partial<ProviderEntry>, "models"> & {
+type CustomProviderEntry = Omit<Partial<ProviderEntry>, "models"> & {
   models?: Record<string, CustomModelEntry>;
 };
 

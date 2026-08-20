@@ -29,9 +29,3 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm --filter @clankie/vox build
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: self-build-evaluation
-          path: artifacts/evals/self-build
-          if-no-files-found: warn

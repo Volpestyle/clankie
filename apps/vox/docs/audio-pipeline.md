@@ -18,9 +18,9 @@ the `voice` role.
 
 Go Live video send/receive is documented separately in [go-live.md](./go-live.md).
 
-This document describes implemented Vox audio capability. The current Clankie
-product keeps ordinary Discord voice and audible music on `@discordjs/voice`;
-only lab-user screen watch and Go Live are wired through Vox.
+This is the live ordinary-voice and audible-music path for both Discord bodies.
+The personal-lab user body can run its separate screen-watch and Go Live roles
+concurrently; those roles do not replace or carry music audio.
 
 ## Inbound Audio Receive
 
@@ -46,6 +46,10 @@ At the Clankie boundary, capture is exposed through events like:
 - `client_disconnect`
 
 Those events are what the higher-level voice session manager uses to decide when a speaker has actually taken the floor and when ASR input is ready to finalize.
+Each audio subscription carries a caller-provided `captureId`. Binary PCM and
+the applicable speaking/end lifecycle carry that ID, and stale frames from a
+superseded subscription are never relabeled as the new capture. Output remains
+mono PCM at the requested rate, normally 24kHz.
 
 ## Outbound Playback
 
@@ -70,6 +74,20 @@ This is why Clankie does not send Opus frames directly in the Discord transport.
 `clankvox` keeps pacing, codec, and encryption truth local to the transport
 layer.
 
+TTS PCM is scoped by `playbackId`. Clankie sends all PCM followed by
+`finish_tts_playback` on the same ordered stdin lane. Vox emits `buffered` when
+PCM first enters the queue, `started` only after an audible TTS-containing RTP
+frame is successfully transmitted, then `drained` only after PCM, a held partial
+tail, and trailing output frames have actually crossed the sender. Targeted stop
+and failures emit `stopped` and `failed`; stale playback IDs are dropped.
+
+The TTS cap is fail-closed. A chunk that would exceed it is not partially
+accepted: Vox clears that playback, emits playback-correlated
+`tts_buffer_overflow` and `tts_playback_state=failed`, and permanently rejects
+later chunks or finish for that playback ID. On capture output,
+`user_audio_end` shares the reliable PCM FIFO and can never pass the final
+audio frame under stdout backpressure.
+
 ## Music Playback
 
 Music is implemented as a local subprocess pipeline in [../src/music.rs](../src/music.rs).
@@ -86,14 +104,30 @@ Music also emits lifecycle events back into the main loop, including:
 - `music_error`
 - `music_gain_reached`
 
-Those events are available for a future Clankie voice-owner migration; the
-current product does not connect native Vox music to its shared queue.
+Commands, PCM chunks, and lifecycle events carry `musicId`, so an old pipeline
+cannot advance the current queue entry. A policy-approved request starts
+immediately; pause, resume, stop, gain envelopes, yt-dlp, and ffmpeg remain
+transport-owned.
+
+Pause, desired gain/duck, resume, and stop are valid while the pipeline is still
+starting. The subprocess applies pending pause/resume after spawn, first PCM
+fades toward the requested gain rather than resetting it, and a stopped ID
+cannot be revived by a delayed first-PCM event. Before first PCM only,
+classified `http_403` or `format_unavailable` failures retry once with a strict
+audio-bearing HLS selector; failures after first PCM never retry. `music_error`
+reports the content-free classification separately from its redacted human
+message.
+
+Those events drive the shared `DiscordVoiceSession.music` queue in both bodies,
+including automatic end-of-track advancement.
 
 ## TTS Buffering And Telemetry
 
 Clankie intentionally does not assume audio is “done” as soon as it has sent all PCM to the subprocess.
 
-`clankvox` emits playback telemetry so Clankie can reason about actual floor occupancy:
+`clankvox` emits playback telemetry so Clankie can reason about actual floor
+occupancy. Queued `buffered` audio does not hold the floor; `started` begins
+audible occupancy, and `drained` ends it:
 
 - `buffer_depth`
 - `tts_playback_state`

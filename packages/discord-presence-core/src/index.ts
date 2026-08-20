@@ -90,7 +90,7 @@ export {
 export {
   VoiceMusicQueue,
   applyMusicControl,
-  createYoutubeAudioSink,
+  createVoxMusicSink,
   isAllowedMusicUrl,
   parseMusicControlPath,
   parseYtDlpSearchJson,
@@ -117,7 +117,11 @@ export {
   type VoicePresenceControlAction,
   type VoicePresenceControlInput,
 } from "./voice-control.ts";
-export { tryHandleCaptainDiscordActionRequest } from "./captain-action-control.ts";
+export {
+  planNonWatchCaptainDiscordAction,
+  tryHandleCaptainDiscordActionRequest,
+  type CaptainDiscordActionPlan,
+} from "./captain-action-control.ts";
 export {
   DiscordVoiceConsentRegistry,
   type DiscordVoiceConsentPolicy,
@@ -198,10 +202,8 @@ export {
   type ElevenLabsVoiceSettings,
 } from "./elevenlabs-tts.ts";
 export {
-  discordPcmToRealtimePcm,
   discordPcmToSpeechPcm,
   encodeMonoPcmWav,
-  openAiPcmToDiscordPcm,
   pcmDurationMs,
   pcmRms,
   SPEECH_SAMPLE_RATE,
@@ -210,7 +212,9 @@ export {
   DiscordBridgeReceiptSchema,
   DiscordBridgeReceiptStore,
   parseDiscordBridgeReceipt,
+  readDiscordBridgeReceipts,
   type DiscordBridgeReceipt,
+  type DiscordBridgeReceiptType,
   type DiscordBridgeReceiptStoreOptions,
 } from "./receipt-store.ts";
 export {
@@ -220,7 +224,12 @@ export {
   type DiscordVoiceTranscriptLogEntry,
   type DiscordVoiceTranscriptReadPage,
 } from "./transcript-store.ts";
-export { encodeReactionEmoji } from "./discord-rest.ts";
+export {
+  encodeReactionEmoji,
+  planDiscordRestAction,
+  resolveDiscordRestActionResult,
+  type DiscordRestActionPlan,
+} from "./discord-rest.ts";
 export {
   DEFAULT_VOICE_IDLE_LEAVE_MS,
   DEFAULT_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT,

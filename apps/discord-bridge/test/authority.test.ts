@@ -3,7 +3,6 @@ import {
   authorizeAmbientCommand,
   authorizeVoicePresenceCommand,
   parseDiscordVoiceJoinPolicy,
-  parseRoleIds,
 } from "../src/authority.ts";
 
 const bindings = {
@@ -32,10 +31,6 @@ describe("Discord role authority", () => {
     // user directly is what lets voice open to a server while ambient commands
     // stay with one person.
     expect(authorizeAmbientCommand(principal("owner-user"), bindings)).toEqual({ allowed: true });
-  });
-
-  it("parses comma-separated role bindings without empty ids", () => {
-    expect([...parseRoleIds(" one, two ,,one ")]).toEqual(["one", "two"]);
   });
 });
 

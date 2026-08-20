@@ -39,7 +39,7 @@ describe("readVoiceSpeechSnapshot", () => {
           inputTokens: 100,
           outputTokens: 20,
         }),
-        receipt("discord.voice.possessor_narration_suppressed", "2026-08-15T20:45:12.000Z", {
+        receipt("discord.voice.play_narration_suppressed", "2026-08-15T20:45:12.000Z", {
           ...room,
           stayId: "stay-1",
           deliveryId: "play-turn-2",

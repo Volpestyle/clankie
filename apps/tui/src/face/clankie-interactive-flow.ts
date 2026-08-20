@@ -37,19 +37,17 @@ export type InteractiveTextPromptOptions = {
 };
 
 export type InteractiveSelectPromptOptions = {
-  readonly kind: "single";
   readonly message: string;
   readonly options: readonly InteractivePromptOption[];
   readonly statusActions?: readonly InteractivePromptOption[] | undefined;
   readonly initialValue?: string | undefined;
   readonly currentValue?: string | undefined;
-  readonly required?: boolean | undefined;
   readonly allowBack?: boolean | undefined;
   readonly theme: SelectListTheme;
   readonly onCancel: () => void;
   readonly onClose?: ((value: string) => void) | undefined;
   readonly onRender: () => void;
-  readonly onSubmit: (values: readonly string[]) => void;
+  readonly onSubmit: (value: string) => void;
 };
 
 type IndexedOption = {
@@ -414,15 +412,11 @@ export class InteractiveSelectPrompt implements Component, Focusable {
   private submit(): void {
     const current = this.currentOption();
     if (current !== undefined) {
-      this.options.onSubmit([current.value]);
+      this.options.onSubmit(current.value);
       return;
     }
-    if (this.options.required === true) {
-      this.error = "A selection is required.";
-      this.options.onRender();
-      return;
-    }
-    this.options.onSubmit([]);
+    this.error = "A selection is required.";
+    this.options.onRender();
   }
 
   private currentOption(): InteractivePromptOption | undefined {

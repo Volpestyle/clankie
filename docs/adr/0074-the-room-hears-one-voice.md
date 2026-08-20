@@ -14,6 +14,13 @@ Amended by [ADR 0123](0123-the-room-inherits-the-games-experience.md): every
 settled game turn reaches the room persona as silent experience, while
 `speakWanted` still decides which turns may produce audio.
 
+## Current status (2026-08-19)
+
+The active Discord room remains the sole author of audible play speech. The
+transport is now neutral `@clankie/play-voice` and is available only to
+Clankie's own local or hosted play. [ADR 0129](0129-each-player-owns-a-body.md)
+supersedes every external-possessor implication below.
+
 ## Context
 
 ADR 0064 defines the possessor voice seam around one property, stated in its

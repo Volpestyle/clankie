@@ -5,21 +5,18 @@ import { join } from "node:path";
 import { FileCredentialStore, type ProviderCredential } from "@clankie/credential-broker";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  ANTHROPIC_AUTHORIZE_ENDPOINT,
-  ANTHROPIC_OAUTH_BETA_FEATURES,
-  ANTHROPIC_OAUTH_CLIENT_ID,
-  ANTHROPIC_OAUTH_SCOPES,
   ANTHROPIC_PROVIDER_ID,
-  ANTHROPIC_REDIRECT_URI,
-  ANTHROPIC_TOKEN_ENDPOINT,
-  buildAnthropicAuthorizeUrl,
-  createAnthropicAuthorization,
   createAnthropicFetch,
-  exchangeAnthropicCode,
-  generateAnthropicPkce,
-  refreshAnthropicToken,
   runAnthropicBrowserLogin,
 } from "../src/oauth/anthropic.ts";
+
+const TOKEN_ENDPOINT = "https://console.anthropic.com/v1/oauth/token";
+const REQUIRED_BETA_FEATURES = [
+  "oauth-2025-04-20",
+  "claude-code-20250219",
+  "interleaved-thinking-2025-05-14",
+  "fine-grained-tool-streaming-2025-05-14",
+];
 
 const tempDirs: string[] = [];
 
@@ -53,59 +50,10 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 }
 
 describe("Anthropic OAuth authorization", () => {
-  it("generates an RFC 7636 S256 challenge", () => {
-    const { verifier, challenge } = generateAnthropicPkce();
-    expect(verifier).toMatch(/^[A-Za-z0-9\-._~]{64}$/);
-    expect(challenge).toBe(createHash("sha256").update(verifier).digest("base64url"));
-  });
-
-  it("builds the recovered Claude Pro/Max manual-code URL", () => {
-    const raw = buildAnthropicAuthorizeUrl({ challenge: "pkce-challenge", state: "oauth-state" });
-    const url = new URL(raw);
-
-    expect(`${url.origin}${url.pathname}`).toBe(ANTHROPIC_AUTHORIZE_ENDPOINT);
-    expect(url.searchParams.get("code")).toBe("true");
-    expect(url.searchParams.get("client_id")).toBe(ANTHROPIC_OAUTH_CLIENT_ID);
-    expect(url.searchParams.get("response_type")).toBe("code");
-    expect(url.searchParams.get("redirect_uri")).toBe(ANTHROPIC_REDIRECT_URI);
-    expect(url.searchParams.get("scope")).toBe(ANTHROPIC_OAUTH_SCOPES);
-    expect(url.searchParams.get("code_challenge")).toBe("pkce-challenge");
-    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
-    expect(url.searchParams.get("state")).toBe("oauth-state");
-  });
-
-  it("keeps PKCE verifier and OAuth state separate in memory", () => {
-    const authorization = createAnthropicAuthorization();
-    const url = new URL(authorization.url);
-
-    expect(authorization.verifier).not.toBe(authorization.state);
-    expect(url.searchParams.get("state")).toBe(authorization.state);
-    expect(url.searchParams.get("code_challenge")).toBe(
-      createHash("sha256").update(authorization.verifier).digest("base64url"),
-    );
-  });
-
-  it("validates returned state before exchanging the pasted code", async () => {
-    let calls = 0;
-    const fetchImpl: typeof fetch = async () => {
-      calls += 1;
-      return jsonResponse({});
-    };
-
-    await expect(
-      exchangeAnthropicCode({
-        code: "authorization-code#wrong-state",
-        verifier: "pkce-verifier",
-        state: "expected-state",
-        fetchImpl,
-      }),
-    ).rejects.toThrow("Invalid state");
-    expect(calls).toBe(0);
-  });
-
-  it("exchanges the pasted code with Anthropic's JSON token contract", async () => {
+  it("opens the PKCE flow and persists exchanged tokens only through the broker", async () => {
+    const store = await temporaryStore();
+    let openedUrl = "";
     let request: { url: string; headers: Headers; body: Record<string, string> } | undefined;
-    const before = Date.now();
     const fetchImpl: typeof fetch = async (input, init) => {
       request = {
         url: String(input),
@@ -115,89 +63,63 @@ describe("Anthropic OAuth authorization", () => {
       return jsonResponse({ access_token: "access-new", refresh_token: "refresh-new", expires_in: 900 });
     };
 
-    const credential = expectOauth(
-      await exchangeAnthropicCode({
-        code: " authorization-code#returned-state ",
-        verifier: "pkce-verifier",
-        state: "returned-state",
-        fetchImpl,
-      }),
-    );
-
-    expect(request?.url).toBe(ANTHROPIC_TOKEN_ENDPOINT);
-    expect(request?.headers.get("content-type")).toBe("application/json");
-    expect(request?.body).toEqual({
-      code: "authorization-code",
-      state: "returned-state",
-      grant_type: "authorization_code",
-      client_id: ANTHROPIC_OAUTH_CLIENT_ID,
-      redirect_uri: ANTHROPIC_REDIRECT_URI,
-      code_verifier: "pkce-verifier",
-    });
-    expect(credential).toMatchObject({
-      type: "oauth",
-      access: "access-new",
-      refresh: "refresh-new",
-    });
-    expect(credential.expires).toBeGreaterThanOrEqual(before + 900_000);
-  });
-
-  it("opens the browser flow and persists tokens only through the broker", async () => {
-    const store = await temporaryStore();
-    let openedUrl = "";
-    const fetchImpl: typeof fetch = async () =>
-      jsonResponse({ access_token: "stored-access", refresh_token: "stored-refresh", expires_in: 60 });
-
     await runAnthropicBrowserLogin({
       store,
       openUrl(url) {
         openedUrl = url;
       },
       async readCode(authorization) {
+        const url = new URL(authorization.url);
         expect(authorization.url).toBe(openedUrl);
-        return `stored-code#${authorization.state}`;
+        expect(authorization.verifier).not.toBe(authorization.state);
+        expect(`${url.origin}${url.pathname}`).toBe("https://claude.ai/oauth/authorize");
+        expect(url.searchParams.get("code")).toBe("true");
+        expect(url.searchParams.get("response_type")).toBe("code");
+        expect(url.searchParams.get("redirect_uri")).toBe(
+          "https://console.anthropic.com/oauth/code/callback",
+        );
+        expect(url.searchParams.get("code_challenge")).toBe(
+          createHash("sha256").update(authorization.verifier).digest("base64url"),
+        );
+        expect(url.searchParams.get("state")).toBe(authorization.state);
+        return `authorization-code#${authorization.state}`;
       },
       fetchImpl,
     });
 
-    expect(new URL(openedUrl).origin).toBe("https://claude.ai");
-    expect(await store.list()).toEqual({
-      anthropic: expect.objectContaining({ type: "oauth" }),
+    expect(request?.url).toBe(TOKEN_ENDPOINT);
+    expect(request?.headers.get("content-type")).toBe("application/json");
+    expect(request?.body).toMatchObject({
+      code: "authorization-code",
+      grant_type: "authorization_code",
+      redirect_uri: "https://console.anthropic.com/oauth/code/callback",
     });
     expect(expectOauth(await store.get(ANTHROPIC_PROVIDER_ID))).toMatchObject({
-      access: "stored-access",
-      refresh: "stored-refresh",
+      access: "access-new",
+      refresh: "refresh-new",
     });
+  });
+
+  it("rejects a returned state before token exchange", async () => {
+    const store = await temporaryStore();
+    let calls = 0;
+
+    await expect(
+      runAnthropicBrowserLogin({
+        store,
+        openUrl: () => {},
+        readCode: async () => "authorization-code#wrong-state",
+        fetchImpl: async () => {
+          calls += 1;
+          return jsonResponse({});
+        },
+      }),
+    ).rejects.toThrow("Invalid state");
+    expect(calls).toBe(0);
   });
 });
 
 describe("Anthropic OAuth refresh and request adaptation", () => {
-  it("refreshes with the prior refresh token and preserves it when rotation omits one", async () => {
-    let body: Record<string, string> | undefined;
-    const credential = expectOauth(
-      await refreshAnthropicToken(
-        { type: "oauth", access: "expired", refresh: "refresh-old", expires: 1 },
-        async (_input, init) => {
-          body = JSON.parse(String(init?.body)) as Record<string, string>;
-          return jsonResponse({ access_token: "access-next", expires_in: 120 });
-        },
-      ),
-    );
-
-    expect(body).toEqual({
-      grant_type: "refresh_token",
-      refresh_token: "refresh-old",
-      client_id: ANTHROPIC_OAUTH_CLIENT_ID,
-    });
-    expect(credential).toMatchObject({ access: "access-next", refresh: "refresh-old" });
-  });
-
-  it("rejects refresh for API-key credentials", async () => {
-    await expect(refreshAnthropicToken({ type: "api", key: "api-secret" })).rejects.toThrow(
-      "uses oauth credentials",
-    );
-  });
-
   it("strips the API key and attaches bearer plus required beta features", async () => {
     const store = await temporaryStore();
     await store.set(ANTHROPIC_PROVIDER_ID, {
@@ -228,7 +150,7 @@ describe("Anthropic OAuth refresh and request adaptation", () => {
     expect(headers.get("authorization")).toBe("Bearer access-secret");
     const features = headers.get("anthropic-beta")?.split(",") ?? [];
     expect(features).toContain("context-1m-2025-08-07");
-    for (const feature of ANTHROPIC_OAUTH_BETA_FEATURES) expect(features).toContain(feature);
+    for (const feature of REQUIRED_BETA_FEATURES) expect(features).toContain(feature);
     expect(features.filter((feature) => feature === "oauth-2025-04-20")).toHaveLength(1);
   });
 
@@ -243,12 +165,14 @@ describe("Anthropic OAuth refresh and request adaptation", () => {
     const refreshStarted = deferred();
     const releaseRefresh = deferred();
     let refreshCalls = 0;
+    let refreshBody: Record<string, string> | undefined;
     let messageCalls = 0;
     const adapted = createAnthropicFetch({
       store,
-      fetchImpl: async (input) => {
-        if (String(input) === ANTHROPIC_TOKEN_ENDPOINT) {
+      fetchImpl: async (input, init) => {
+        if (String(input) === TOKEN_ENDPOINT) {
           refreshCalls += 1;
+          refreshBody = JSON.parse(String(init?.body)) as Record<string, string>;
           refreshStarted.resolve();
           await releaseRefresh.promise;
           return jsonResponse({
@@ -269,6 +193,10 @@ describe("Anthropic OAuth refresh and request adaptation", () => {
     await Promise.all([first, second]);
 
     expect(refreshCalls).toBe(1);
+    expect(refreshBody).toMatchObject({
+      grant_type: "refresh_token",
+      refresh_token: "refresh-old",
+    });
     expect(messageCalls).toBe(2);
     expect(expectOauth(await store.get(ANTHROPIC_PROVIDER_ID))).toMatchObject({
       access: "access-rotated",

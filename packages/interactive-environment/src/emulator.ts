@@ -1,20 +1,16 @@
 import {
   ActionIdSchema,
-  CaptainLaneSchema,
   CharacterIdSchema,
   CommandAuthoritySchema,
   EnvironmentSessionIdSchema,
   IntentContextSchema,
   WorldIdSchema,
-  type CaptainLaneV1,
 } from "@clankie/protocol";
 import { z } from "zod";
 import {
   ENVIRONMENT_SESSION_SCHEMA_VERSION,
   EnvironmentActionStatusSchema,
-  EnvironmentSessionPhaseSchema,
   GbaEmulatorResourceBoundsSchema,
-  type EnvironmentSessionPhase,
 } from "./environment.ts";
 
 export const GBA_EMULATOR_CONTRACT_SCHEMA_VERSION = 1 as const;
@@ -60,7 +56,6 @@ export const GbaEmulatorActionSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   z.object({ kind: z.literal("frame_advance"), frames: FrameCountSchema }).strict(),
-  z.object({ kind: z.literal("wait"), durationMs: z.number().int().positive().max(30_000) }).strict(),
   /**
    * Walk to a tile on the current map, routing around walls.
    *
@@ -610,140 +605,8 @@ const _observationKindsMatch: GbaEmulatorObservationKind = "overworld" as z.infe
 >;
 void _observationKindsMatch;
 
-export const GbaEmulatorToolNameSchema = z.enum([
-  "gba_emulator_join",
-  "gba_emulator_status",
-  "gba_emulator_cancel_join",
-  "gba_emulator_steer",
-  "gba_emulator_pause",
-  "gba_emulator_resume",
-  "gba_emulator_disconnect",
-  "gba_emulator_observe",
-  "gba_emulator_start_action",
-  "gba_emulator_action_status",
-  "gba_emulator_cancel_action",
-]);
-export type GbaEmulatorToolName = z.infer<typeof GbaEmulatorToolNameSchema>;
-
-const emulatorToolSetsFor = (
-  phase: EnvironmentSessionPhase,
-  lane: CaptainLaneV1,
-): { lifecycleTools: GbaEmulatorToolName[]; gameplayTools: GbaEmulatorToolName[] } => {
-  if (phase === "off" || phase === "failed") {
-    return { lifecycleTools: ["gba_emulator_join", "gba_emulator_status"], gameplayTools: [] };
-  }
-  if (phase === "starting") {
-    return { lifecycleTools: ["gba_emulator_status", "gba_emulator_cancel_join"], gameplayTools: [] };
-  }
-  if (phase === "paused") {
-    return {
-      lifecycleTools: ["gba_emulator_status", "gba_emulator_resume", "gba_emulator_disconnect"],
-      gameplayTools: [],
-    };
-  }
-  if (phase === "stopping") return { lifecycleTools: ["gba_emulator_status"], gameplayTools: [] };
-  if (lane === "gameplay") {
-    return {
-      lifecycleTools: ["gba_emulator_status", "gba_emulator_pause", "gba_emulator_disconnect"],
-      gameplayTools: [
-        "gba_emulator_observe",
-        "gba_emulator_start_action",
-        "gba_emulator_action_status",
-        "gba_emulator_cancel_action",
-      ],
-    };
-  }
-  return {
-    lifecycleTools: [
-      "gba_emulator_status",
-      "gba_emulator_steer",
-      "gba_emulator_pause",
-      "gba_emulator_disconnect",
-    ],
-    gameplayTools: [],
-  };
-};
-
-export const GbaEmulatorToolExposureSchema = z
-  .object({
-    schemaVersion: z.literal(GBA_EMULATOR_CONTRACT_SCHEMA_VERSION),
-    environmentKind: z.literal("gba_emulator"),
-    phase: EnvironmentSessionPhaseSchema,
-    lane: CaptainLaneSchema,
-    lifecycleTools: z.array(GbaEmulatorToolNameSchema).max(8),
-    gameplayTools: z.array(GbaEmulatorToolNameSchema).max(8),
-  })
-  .strict()
-  .superRefine((value, context) => {
-    const expected = emulatorToolSetsFor(value.phase, value.lane);
-    if (JSON.stringify(value.lifecycleTools) !== JSON.stringify(expected.lifecycleTools)) {
-      context.addIssue({
-        code: "custom",
-        path: ["lifecycleTools"],
-        message: "invalid lifecycle tool exposure",
-      });
-    }
-    if (JSON.stringify(value.gameplayTools) !== JSON.stringify(expected.gameplayTools)) {
-      context.addIssue({
-        code: "custom",
-        path: ["gameplayTools"],
-        message: "invalid gameplay tool exposure",
-      });
-    }
-  });
-export type GbaEmulatorToolExposure = z.infer<typeof GbaEmulatorToolExposureSchema>;
-
-export function resolveGbaEmulatorToolExposure(
-  phase: EnvironmentSessionPhase,
-  lane: CaptainLaneV1,
-): GbaEmulatorToolExposure {
-  return GbaEmulatorToolExposureSchema.parse({
-    schemaVersion: GBA_EMULATOR_CONTRACT_SCHEMA_VERSION,
-    environmentKind: "gba_emulator",
-    phase,
-    lane,
-    ...emulatorToolSetsFor(phase, lane),
-  });
-}
-
 export const GBA_EMULATOR_LOCAL_CAPABILITIES = [
   "emulator.gba.observe",
   "emulator.gba.input",
   "emulator.gba.frame_advance",
-  "emulator.gba.wait",
 ] as const;
-export const GbaEmulatorLocalCapabilitySchema = z.enum(GBA_EMULATOR_LOCAL_CAPABILITIES);
-export type GbaEmulatorLocalCapability = z.infer<typeof GbaEmulatorLocalCapabilitySchema>;
-
-/**
- * The emulator embodiment is local-only: input injection and framebuffer/RAM
- * observation against a locally-run emulator core. It owns no network or
- * networked-service-tampering capabilities, and the schema cannot represent
- * one — both boundary arrays reject every element.
- */
-export const GbaEmulatorCapabilityBoundarySchema = z
-  .object({
-    schemaVersion: z.literal(GBA_EMULATOR_CONTRACT_SCHEMA_VERSION),
-    environmentKind: z.literal("gba_emulator"),
-    localCapabilities: z.tuple([
-      z.literal(GBA_EMULATOR_LOCAL_CAPABILITIES[0]),
-      z.literal(GBA_EMULATOR_LOCAL_CAPABILITIES[1]),
-      z.literal(GBA_EMULATOR_LOCAL_CAPABILITIES[2]),
-      z.literal(GBA_EMULATOR_LOCAL_CAPABILITIES[3]),
-    ]),
-    networkCapabilities: z.array(z.never()).max(0),
-    remoteTamperCapabilities: z.array(z.never()).max(0),
-  })
-  .strict();
-
-export const GBA_EMULATOR_CAPABILITY_BOUNDARY = GbaEmulatorCapabilityBoundarySchema.parse({
-  schemaVersion: GBA_EMULATOR_CONTRACT_SCHEMA_VERSION,
-  environmentKind: "gba_emulator",
-  localCapabilities: GBA_EMULATOR_LOCAL_CAPABILITIES,
-  networkCapabilities: [],
-  remoteTamperCapabilities: [],
-});
-
-export function isGbaEmulatorCapabilityLocal(capability: string): capability is GbaEmulatorLocalCapability {
-  return GbaEmulatorLocalCapabilitySchema.safeParse(capability).success;
-}

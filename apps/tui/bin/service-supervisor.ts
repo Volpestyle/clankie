@@ -26,7 +26,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 export type ServiceId = "clankie" | "discord-bridge" | "discord-user-session" | "activity" | "tunnel";
 
-/** Ordered by dependency: each service may only depend on those before it. */
+/** Stable operator-facing service order. */
 export const SERVICE_ORDER: readonly ServiceId[] = [
   "clankie",
   "discord-bridge",
@@ -40,8 +40,6 @@ export type ServiceState = "healthy" | "unhealthy" | "unreachable";
 export interface ServiceRecord {
   readonly id: ServiceId;
   readonly pid: number;
-  /** Absent for the captain, whose record predates this field. */
-  readonly startedAt?: string;
   readonly version: 1;
 }
 
@@ -68,7 +66,6 @@ export interface ServiceProbeInput {
 export interface ManagedService {
   readonly id: ServiceId;
   readonly label: string;
-  readonly dependsOn: readonly ServiceId[];
   /**
    * Executable to spawn. Defaults to `pnpm`, which every workspace service
    * uses; named so the registry can also own a process that is not one of ours
@@ -96,12 +93,9 @@ export interface ManagedService {
    * Dependencies whose restart invalidates state this service is holding, so it
    * has to restart alongside them.
    *
-   * Narrower than {@link ManagedService.dependsOn} on purpose. `dependsOn`
-   * describes who calls whom and orders startup; it does not mean a dependency's
-   * restart breaks the dependent. The Discord bridge is the case that does: it
-   * stamps every write with a live claim the clankie service matches against,
-   * and a service that restarts rebuilds presence from its event log, so the
-   * bridge's claim silently becomes unusable.
+   * The Discord bridge stamps every write with a live claim the clankie service
+   * matches against. A service restart rebuilds presence from its event log, so
+   * the bridge's claim silently becomes unusable.
    */
   readonly restartsWith?: readonly ServiceId[];
   /** Time after SIGTERM before this service is force-killed. */
@@ -118,11 +112,6 @@ export interface ManagedService {
      */
     readonly captainToken?: string | undefined;
   }) => NodeJS.ProcessEnv;
-  /** Overrides the default record location/format (the captain has its own). */
-  readonly readRecord?: (
-    env: NodeJS.ProcessEnv,
-    processIsAliveImpl: (pid: number) => boolean,
-  ) => ServiceRecord | undefined;
   readonly probe: (input: ServiceProbeInput) => Promise<ServiceProbe>;
 }
 
@@ -230,7 +219,6 @@ export function readServiceRecord(
     const record = JSON.parse(readFileSync(serviceStatePath(id, env), "utf8")) as {
       id?: unknown;
       pid?: unknown;
-      startedAt?: unknown;
       version?: unknown;
     };
     return record.version === 1 &&
@@ -242,7 +230,6 @@ export function readServiceRecord(
       ? {
           id,
           pid: record.pid,
-          ...(typeof record.startedAt === "string" ? { startedAt: record.startedAt } : {}),
           version: 1,
         }
       : undefined;
@@ -251,30 +238,18 @@ export function readServiceRecord(
   }
 }
 
-function resolveRecord(
-  service: ManagedService,
-  env: NodeJS.ProcessEnv,
-  processIsAliveImpl: (pid: number) => boolean,
-): ServiceRecord | undefined {
-  return service.readRecord === undefined
-    ? readServiceRecord(service.id, env, processIsAliveImpl)
-    : service.readRecord(env, processIsAliveImpl);
-}
-
 function writeServiceRecord(input: {
   readonly env: NodeJS.ProcessEnv;
   readonly id: ServiceId;
   readonly pid: number;
-  readonly startedAt: string;
 }): void {
   const path = serviceStatePath(input.id, input.env);
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   try {
-    writeFileSync(
-      temporary,
-      `${JSON.stringify({ version: 1, id: input.id, pid: input.pid, startedAt: input.startedAt })}\n`,
-      { encoding: "utf8", mode: 0o600 },
-    );
+    writeFileSync(temporary, `${JSON.stringify({ version: 1, id: input.id, pid: input.pid })}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
     renameSync(temporary, path);
     chmodSync(path, 0o600);
   } finally {
@@ -328,7 +303,7 @@ export async function inspectService(
   options: ServiceCommandOptions,
 ): Promise<ServiceStatus> {
   const env = options.env ?? process.env;
-  const record = resolveRecord(service, env, options.processIsAliveImpl ?? processIsAlive);
+  const record = readServiceRecord(service.id, env, options.processIsAliveImpl ?? processIsAlive);
   const probe = await service.probe({
     env,
     fetchImpl: options.fetchImpl ?? fetch,
@@ -351,7 +326,7 @@ export async function stopService(
   options: ServiceCommandOptions,
 ): Promise<{ readonly stopped: boolean; readonly signal?: NodeJS.Signals }> {
   const env = options.env ?? process.env;
-  const record = resolveRecord(service, env, options.processIsAliveImpl ?? processIsAlive);
+  const record = readServiceRecord(service.id, env, options.processIsAliveImpl ?? processIsAlive);
   if (record === undefined) {
     // Nothing owned is running. A foreign process is the caller's to resolve;
     // reporting "stopped" here would let a restart silently start a duplicate.
@@ -469,7 +444,7 @@ export async function startService(
       stdio: ["ignore", logFd, logFd],
     });
     if (child.pid === undefined) throw new Error(`${service.label} spawn returned no pid.`);
-    writeServiceRecord({ env, id: service.id, pid: child.pid, startedAt: new Date().toISOString() });
+    writeServiceRecord({ env, id: service.id, pid: child.pid });
   } finally {
     closeSync(logFd);
   }
@@ -482,7 +457,7 @@ export async function startService(
 
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const record = resolveRecord(service, env, options.processIsAliveImpl ?? processIsAlive);
+    const record = readServiceRecord(service.id, env, options.processIsAliveImpl ?? processIsAlive);
     const probe = await service.probe({
       env,
       fetchImpl,

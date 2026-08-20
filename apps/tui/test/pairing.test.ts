@@ -189,9 +189,6 @@ describe("clankie pair — fail closed", () => {
     ["absent route (404)", jsonFetch({ error: "not_found" }, { status: 404 }), "unavailable"],
     ["service unavailable (503)", jsonFetch({ error: "unavailable" }, { status: 503 }), "unavailable"],
     ["unauthorized (401)", jsonFetch({ error: "unauthorized" }, { status: 401 }), "unauthorized"],
-    ["expired offer state", jsonFetch({ error: "expired" }, { status: 409 }), "expired"],
-    ["consumed offer state", jsonFetch({ error: "consumed" }, { status: 409 }), "consumed"],
-    ["revoked offer state", jsonFetch({ error: "revoked" }, { status: 409 }), "revoked"],
     ["malformed response", jsonFetch({ version: 1, deepLink: "" }), "malformed"],
   ])("fails closed on %s with JSON status %s", async (_label, fetchImpl, status) => {
     const stdout = outputBuffer();
@@ -242,7 +239,7 @@ describe("clankie pair — redaction", () => {
     const stdout = outputBuffer();
     const stderr = outputBuffer();
     const exit = await runPair([], {
-      fetchImpl: jsonFetch({ error: "revoked", token: "body-secret-999" }, { status: 409 }),
+      fetchImpl: jsonFetch({ error: "internal", token: "body-secret-999" }, { status: 500 }),
       stdout: stdout.stream,
       stderr: stderr.stream,
     });

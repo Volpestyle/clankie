@@ -75,7 +75,6 @@ async function runPersonaWizard(shell: ClankieFaceShell, services: PersonaComman
   try {
     for (;;) {
       const action = await flow.readSelect({
-        kind: "single",
         message: "Character",
         options: [
           {
@@ -98,9 +97,8 @@ async function runPersonaWizard(shell: ClankieFaceShell, services: PersonaComman
           { value: "status", label: "Show status" },
           { value: "done", label: "Done" },
         ],
-        required: true,
       });
-      const choice = action?.[0];
+      const choice = action;
       if (choice === undefined || choice === "done") break;
       if (choice === "status") {
         await showPersonaStatus(shell, services);
@@ -185,21 +183,18 @@ async function editVoice(shell: ClankieFaceShell, services: PersonaCommandServic
 
   for (;;) {
     const chattiness = await flow.readSelect({
-      kind: "single",
       message: "How talkative is he by nature?",
       options: [
         { value: "quiet", label: "Quiet", hint: "short, sparing" },
         { value: "balanced", label: "Balanced", hint: "a sentence or two" },
         { value: "chatty", label: "Chatty", hint: "takes more room" },
       ],
-      required: true,
       allowBack: true,
     });
-    const chattinessChoice = chattiness?.[0];
+    const chattinessChoice = chattiness;
     if (chattinessChoice === undefined) return;
 
     const replyPolicy = await flow.readSelect({
-      kind: "single",
       message: "Which admitted text messages should he see?",
       options: [
         {
@@ -215,10 +210,9 @@ async function editVoice(shell: ClankieFaceShell, services: PersonaCommandServic
             "Only a mention or one of his names spends a model turn; useful when cost matters more.",
         },
       ],
-      required: true,
       allowBack: true,
     });
-    const replyChoice = replyPolicy?.[0];
+    const replyChoice = replyPolicy;
     if (replyChoice === undefined) continue;
 
     await apply(services, (persona) => ({

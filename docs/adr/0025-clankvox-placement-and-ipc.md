@@ -1,8 +1,10 @@
 # ADR 0025: ClankVox is an in-repo voice sidecar behind versioned bridge IPC
 
-Status: superseded. Official-bot voice uses
-[ADR 0045](0045-official-bot-dave-group-voice.md); owned native media placement
-and the live IPC client use [ADR 0100](0100-vox-is-an-owned-native-media-package.md).
+Status: superseded. [ADR 0128](0128-vox-is-the-sole-discord-media-owner.md)
+governs the current sole-owner process/role model; owned native media placement,
+licensing, and the live IPC client use
+[ADR 0100](0100-vox-is-an-owned-native-media-package.md). The proposal and
+diagram below remain historical.
 
 ## Context
 
@@ -173,8 +175,9 @@ second version word to the v1 header. `user_audio_end` closes the current per-sp
 
 - ADR 0100 records and preserves the AGPL package license and exact source
   provenance for the imported native implementation.
-- The official-bot media session uses the maintained `@discordjs/voice` path in
-  ADR 0045 and does not instantiate this direct-adapter design.
+- ADR 0128 replaces the later `@discordjs/voice` path with one Vox child behind
+  the direct gateway/client boundary for either media-enabled active body; a
+  text-only official-bot process starts no media child.
 - The isolated, opt-in user-session transport and shipped Go Live receive/publish
   path are owned by
   [ADR 0098 (user-session shares)](0098-user-session-watches-discord-shares.md)

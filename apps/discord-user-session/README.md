@@ -28,20 +28,27 @@ user token from the official bot token and Clankie's four local bridge bearers.
 
 [Editable Turbopuffer tldraw source](../../docs/diagrams/clankie-docs-diagrams-2.tldraw)
 
-## Three gates, all fail-closed
+This image is the historical credential-isolation view. The canonical current
+media diagram is
+[ADR 0128](../../docs/adr/0128-vox-is-the-sole-discord-media-owner.md).
+
+## Admission, all fail-closed
 
 `readiness.ts` checks these in order, cheapest first. The brokered token is
 resolved **last**, so a run that will be refused never materialises a user
 credential in process memory.
 
-1. `DISCORD_USER_SESSION_ENABLED=true` plus non-empty guild/channel allowlists.
-2. A durable, non-revoked owner opt-in bound to the character and recorded
+1. `DISCORD_ACTIVE_BODY=user_session`; direct startup cannot bypass launcher ownership.
+2. `DISCORD_USER_SESSION_ENABLED=true` plus non-empty guild/channel allowlists.
+3. A durable, non-revoked owner opt-in bound to the character and recorded
    scope. Configuration may narrow that scope, never widen it.
-3. A brokered `discord_user_session` credential. `DISCORD_USER_TOKEN` in the
+4. A brokered `discord_user_session` credential. `DISCORD_USER_TOKEN` in the
    environment is a startup error.
 
 Run `pnpm --filter @clankie/discord-user-session readiness` to diagnose a
-refusal without connecting.
+refusal and verify the Vox executable without connecting to Discord.
+That preflight does not prove `process_ready`, a role transport, or DAVE; those
+facts exist only after the body and relevant Discord role run.
 
 ## Recording the opt-in
 
@@ -74,6 +81,13 @@ Voice provider settings are shared with the bot body and configured through
 model, voice, and xAI reasoning effort; both bodies therefore sound and wake
 the same way after an active-body switch.
 
+Whenever this active body has a voice session, it hosts the fixed
+`ws://127.0.0.1:4323/play` loopback endpoint from `@clankie/play-voice` for
+Clankie's own play loop. Narration, admitted room text, consented transcripts,
+room state, and shutdown follow the same paths as the bot body. The bearer is
+not issued to GBA MCP or external harnesses, so this endpoint cannot turn the
+lab body into their mouth or room-input feed.
+
 Text-only messages in the active voice channel's attached chat enter the same
 `VoiceFloor` as speech. The realtime room persona may answer aloud, hand work
 to the captain, or stay silent; the user-session bridge does not also launch a
@@ -85,7 +99,7 @@ text reply for that delivery
 | Capability                   | Bot | User session | Why                                                                                               |
 | ---------------------------- | --- | ------------ | ------------------------------------------------------------------------------------------------- |
 | Text, reactions, threads     | ✅  | ✅           | Shared catalogue, one lane, one memory                                                            |
-| Group voice (DAVE, realtime) | ✅  | ✅           | Same media owner via a custom gateway adapter                                                     |
+| Group voice (DAVE, realtime) | ✅  | ✅           | One Vox child via the user-session gateway                                                        |
 | Slash commands               | ✅  | ❌           | A user account cannot register them                                                               |
 | Ambient context messages     | ✅  | ❌           | Would require reading channels wholesale                                                          |
 | Embedded activities          | ✅  | ❌           | Owned by the bot application ([ADR 0047](../../docs/adr/0047-discord-activity-presence-plane.md)) |
@@ -98,8 +112,12 @@ The official bot cannot receive Go Live video. This process can. When someone
 in an allowlisted channel hits Share Screen, the lab body joins the channel,
 sends OP20 `STREAM_WATCH`, and Vox decodes one JPEG per second. The service
 keeps a four-frame rolling window, and the captain looks across those
-chronological samples with `observe_share`; the active lab body remains the
-one mouth.
+chronological samples with `observe_share`.
+
+One app-lifetime Vox child owns ordinary voice, TTS, audible music, screen
+watch, and Go Live. A membership coordinator keeps all active roles in one
+guild/channel: voice is unmuted, stream-only membership is muted/deafened, and
+the gateway leaves only after the final role releases its lease.
 
 This is distinct from the public Activity and from publishing Clankie's own Go
 Live stream; the [Discord media guide](../../docs/discord-media.md) diagrams all
@@ -113,14 +131,19 @@ Enable the body in `/discord` → Lab user body (token, allowlists that include
 the voice channel, ToS opt-in), then `clankie restart`. After a real share:
 
 ```bash
-pnpm --filter @clankie/discord-user-session live-proof
+pnpm --filter @clankie/discord-user-session watch-live-proof
 # or wait up to two minutes while someone shares:
-pnpm --filter @clankie/discord-user-session live-proof -- --wait=120
+pnpm --filter @clankie/discord-user-session watch-live-proof -- --wait=120
 ```
 
-The gate requires a ready receipt, `watch_connected` with `decoder=ready`, and
-one decoded still of that same user after the watch. Deterministic tests cannot
-mint those receipts.
+The gate requires a fresh, correlated ready receipt identifying Vox as the
+`mediaOwner`, exact Vox IPC protocol readiness, and gateway readiness. A matching
+`watch_connected` must prove both the stream-watch transport and positive DAVE
+readiness before one decoded still of that same user. Stale receipts from an
+older process or the pre-Vox-proof format do not qualify. Deterministic tests
+cannot mint those receipts. The CLI reads
+`${XDG_STATE_HOME:-~/.local/state}/clankie/discord-user-session-receipts.jsonl`
+unless `DISCORD_USER_SESSION_RECEIPT_PATH` overrides it.
 
 ## Go Live publish
 
@@ -132,14 +155,23 @@ mint those receipts.
 4. Plays an optional `sourceUrl`, or pumps the live activity PNG snapshot
    (`GET 127.0.0.1:4322/snapshot`) when he is already on the activity plane
 
+`discord.stream.publish_started` is content-free and is recorded only after
+Discord accepts OP18 and OP22, the stream-publish transport is ready, DAVE is
+positive, and Vox reports the first accepted H264 media for that publish. Verify
+that ordered evidence against the current process's fresh ready receipt with:
+
+```bash
+pnpm --filter @clankie/discord-user-session publish-live-proof
+# or wait up to two minutes for first media:
+pnpm --filter @clankie/discord-user-session publish-live-proof -- --wait=120
+```
+
 Songs go through the model, not a chat parser. Text uses the captain's
 `youtube_search` / `music_play` tools (they POST to this process on
-`/music/*`); voice uses the same tool names on the realtime session. The
-current Go Live URL pipeline is video-only and strips source audio. Audible
-synchronized music remains unavailable on the lab body until its ordinary
-voice media path moves onto Vox; the official bot is down while this body is
-active. Native end-of-track completion is not connected to the shared queue on
-this path, so queued tracks do not advance automatically.
+`/music/*`); voice uses the same tool names on the realtime session. Both use
+`DiscordVoiceSession.music`, so music is audible through the ordinary Vox voice
+transport and native end-of-track events advance its queue. Explicit Go Live
+start/stop commands remain independent of music playback.
 
 Voice presence is agentic too ([ADR 0062](../../docs/adr/0062-voice-join-by-asking.md)).
 The captain's argument-free `voice_join` / `voice_leave` tools POST to this
@@ -156,9 +188,22 @@ same captain `discord_watch_start` / `discord_watch_stop` tools map to Go Live
 on this body, but only after the gateway freshly resolves the owner in the
 active allowlisted voice channel.
 
-Production uses `@clankie/vox` through the separately licensed
+The local lab body uses `@clankie/vox` through the separately licensed
 `@clankie/vox-client` process boundary. Without a running lab process,
 `go_live_start` is unavailable.
+
+`GET /health` is readiness, not a process-only liveness claim. It returns 503
+before gateway READY, while reconnecting, when the exact Vox IPC handshake is
+not ready, and permanently after a terminal gateway or Vox failure until the
+supervisor starts a new process.
+
+Primary voice leave releases only the `voice` role. It must not stop an active
+watch or publish role; the gateway leaves the channel only after the last role
+lease ends. A `discord.voice.left` receipt qualifies only after the account
+gateway confirms detachment and records `gatewayConfirmed: true` with
+`mediaOwner: vox`. Full body shutdown disconnects streams, leaves voice, removes
+listeners, closes the one Vox child, and then closes the account gateway. A live
+deployment must show that ordering and no duplicate media owner.
 
 **Account risk.** Automating a normal Discord account violates Discord's terms
 and can get the account permanently terminated. That risk is the owner's to

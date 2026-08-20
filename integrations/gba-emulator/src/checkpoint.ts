@@ -1,11 +1,23 @@
-import { lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import { Sha256Schema } from "./contracts.ts";
 import { canonicalJson, sha256 } from "./core-double.ts";
-import type { GbaAdapterScenario } from "./core-seam.ts";
 import { FREE_PLAY_NOTES_MAX, FREE_PLAY_OBJECTIVE_MAX } from "./free-play-bounds.ts";
+import type { GbaCheckpointCapability } from "./free-play-boot.ts";
 
 /**
  * Progress that outlives the process, as minted checkpoints (ADR 0060).
@@ -23,39 +35,17 @@ import { FREE_PLAY_NOTES_MAX, FREE_PLAY_OBJECTIVE_MAX } from "./free-play-bounds
 
 export const GBA_CHECKPOINT_SCHEMA_VERSION = 1 as const;
 
-/** Savestate capture and restore, present only on a real checkpoint-capable core. */
-export interface GbaCheckpointCapability {
-  saveState: () => Uint8Array;
-  loadState: (bytes: Uint8Array) => void;
-  /** Digest-verified boot state used by restart without re-reading operator files. */
-  bootSavestate: () => Uint8Array;
-  /** Digests verified at core creation; a checkpoint must match them to load. */
-  identity: GbaCheckpointIdentity;
-  /** Boot scenario used as the template for a checkpoint's companion scenario. */
-  scenario: GbaCheckpointScenario;
-}
-
-export interface GbaCheckpointIdentity {
-  readonly romSha256: string;
-  readonly savestateSha256: string;
-  readonly coreWasmSha256: string;
-}
-
-export type GbaCheckpointScenario = GbaAdapterScenario & {
-  readonly romSha256: string;
-  readonly coreWasmSha256: string;
-};
-
 /** Filesystem-safe slug so a label can never smuggle path segments. */
 export const GbaCheckpointLabelSchema = z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/u);
 
 /** Ids are directory basenames (timestamp + optional label), never paths. */
 const CHECKPOINT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]{0,159}$/u;
+export const GbaCheckpointIdSchema = z.string().regex(CHECKPOINT_ID_PATTERN);
 
 export const GbaCheckpointReceiptSchema = z
   .object({
     schemaVersion: z.literal(GBA_CHECKPOINT_SCHEMA_VERSION),
-    checkpointId: z.string().regex(CHECKPOINT_ID_PATTERN),
+    checkpointId: GbaCheckpointIdSchema,
     label: GbaCheckpointLabelSchema.nullable(),
     capturedAt: z.string().datetime(),
     /** The identity the core verified at boot; a load refuses any mismatch. */
@@ -88,12 +78,17 @@ export const GbaCheckpointReceiptSchema = z
   })
   .strict();
 export type GbaCheckpointReceipt = z.infer<typeof GbaCheckpointReceiptSchema>;
+/** Checkpoint metadata safe to show to a player; identity digests stay private. */
+export type GbaCheckpointSummary = Pick<
+  GbaCheckpointReceipt,
+  "checkpointId" | "label" | "capturedAt" | "position"
+>;
 
 const SAVESTATE_FILENAME = "savestate.ss1";
 const RECEIPT_FILENAME = "checkpoint.json";
 const SCENARIO_FILENAME = "scenario.json";
 
-/** Mirrors `defaultGbaBodyRootDir`: one well-known operator-local home. */
+/** One well-known operator-local home. */
 export function defaultGbaCheckpointDir(env: NodeJS.ProcessEnv = process.env): string {
   const override = env["CLANKIE_GBA_CHECKPOINT_DIR"];
   if (override !== undefined && override.length > 0) {
@@ -132,7 +127,8 @@ export function writeGbaCheckpoint(input: WriteGbaCheckpointInput): WrittenGbaCh
   const label = input.label === undefined ? null : GbaCheckpointLabelSchema.parse(input.label);
   const capturedAt = (input.clock ?? (() => new Date()))();
   const stamp = capturedAt.toISOString().replace(/[:.]/gu, "-");
-  const checkpointId = label === null ? stamp : `${stamp}-${label}`;
+  const suffix = randomBytes(6).toString("hex");
+  const checkpointId = label === null ? `${stamp}-${suffix}` : `${stamp}-${label}-${suffix}`;
 
   const savestateBytes = input.capability.saveState();
   const savestateSha256 = sha256(savestateBytes);
@@ -159,13 +155,24 @@ export function writeGbaCheckpoint(input: WriteGbaCheckpointInput): WrittenGbaCh
     environmentId: input.environmentId ?? null,
   });
 
+  mkdirSync(input.rootDir, { recursive: true, mode: 0o700 });
+  requireDirectory(input.rootDir, "checkpoint_root_unsafe");
   const directory = path.join(input.rootDir, checkpointId);
-  mkdirSync(directory, { recursive: true });
+  mkdirSync(directory, { mode: 0o700 });
   const savestatePath = path.join(directory, SAVESTATE_FILENAME);
   const scenarioPath = path.join(directory, SCENARIO_FILENAME);
-  writeFileSync(savestatePath, savestateBytes);
-  writeFileSync(scenarioPath, `${canonicalJson(scenario)}\n`);
-  writeFileSync(path.join(directory, RECEIPT_FILENAME), `${canonicalJson(receipt)}\n`);
+  try {
+    writeFileSync(savestatePath, savestateBytes, { flag: "wx", mode: 0o600 });
+    writeFileSync(scenarioPath, `${canonicalJson(scenario)}\n`, { flag: "wx", mode: 0o600 });
+    // The receipt is the commit marker: readers ignore partial directories.
+    writeFileSync(path.join(directory, RECEIPT_FILENAME), `${canonicalJson(receipt)}\n`, {
+      flag: "wx",
+      mode: 0o600,
+    });
+  } catch (error) {
+    rmSync(directory, { recursive: true, force: true });
+    throw error;
+  }
   return { receipt, directory, savestatePath, scenarioPath };
 }
 
@@ -173,14 +180,21 @@ export function writeGbaCheckpoint(input: WriteGbaCheckpointInput): WrittenGbaCh
 export function listGbaCheckpoints(rootDir: string): GbaCheckpointReceipt[] {
   let entries: string[];
   try {
+    requireDirectory(rootDir, "checkpoint_root_unsafe");
     entries = readdirSync(rootDir);
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     return [];
   }
   const receipts: GbaCheckpointReceipt[] = [];
   for (const entry of entries) {
     try {
-      const raw = readFileSync(path.join(rootDir, entry, RECEIPT_FILENAME), "utf8");
+      const directory = path.join(rootDir, entry);
+      requireDirectory(directory, "checkpoint_directory_unsafe");
+      const raw = readRegularFile(
+        path.join(directory, RECEIPT_FILENAME),
+        "checkpoint_receipt_unsafe",
+      ).toString("utf8");
       const receipt = GbaCheckpointReceiptSchema.parse(JSON.parse(raw));
       // A receipt that does not name its own directory is not trusted enough to list.
       if (receipt.checkpointId === entry) receipts.push(receipt);
@@ -199,10 +213,12 @@ export function deleteGbaCheckpoint(input: { rootDir: string; checkpointId: stri
   const directory = path.join(input.rootDir, input.checkpointId);
   let receipt: GbaCheckpointReceipt;
   try {
-    const stat = lstatSync(directory);
-    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("not a checkpoint directory");
+    requireDirectory(input.rootDir, "checkpoint_root_unsafe");
+    requireDirectory(directory, "checkpoint_directory_unsafe");
     receipt = GbaCheckpointReceiptSchema.parse(
-      JSON.parse(readFileSync(path.join(directory, RECEIPT_FILENAME), "utf8")),
+      JSON.parse(
+        readRegularFile(path.join(directory, RECEIPT_FILENAME), "checkpoint_receipt_unsafe").toString("utf8"),
+      ),
     );
   } catch {
     throw new Error(`checkpoint_not_found: ${input.checkpointId}`);
@@ -231,8 +247,13 @@ export function readGbaCheckpoint(input: ReadGbaCheckpointInput): {
   const directory = path.join(input.rootDir, input.checkpointId);
   let raw: string;
   try {
-    raw = readFileSync(path.join(directory, RECEIPT_FILENAME), "utf8");
-  } catch {
+    requireDirectory(input.rootDir, "checkpoint_root_unsafe");
+    requireDirectory(directory, "checkpoint_directory_unsafe");
+    raw = readRegularFile(path.join(directory, RECEIPT_FILENAME), "checkpoint_receipt_unsafe").toString(
+      "utf8",
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     throw new Error(`checkpoint_not_found: ${input.checkpointId}`);
   }
   const receipt = GbaCheckpointReceiptSchema.parse(JSON.parse(raw));
@@ -245,9 +266,33 @@ export function readGbaCheckpoint(input: ReadGbaCheckpointInput): {
   if (receipt.coreWasmSha256 !== input.identity.coreWasmSha256) {
     throw new Error("checkpoint_core_mismatch: checkpoint was taken on a different core build");
   }
-  const savestateBytes = readFileSync(path.join(directory, SAVESTATE_FILENAME));
+  const savestateBytes = readRegularFile(
+    path.join(directory, SAVESTATE_FILENAME),
+    "checkpoint_savestate_unsafe",
+  );
+  readRegularFile(path.join(directory, SCENARIO_FILENAME), "checkpoint_scenario_unsafe");
   if (sha256(savestateBytes) !== receipt.savestateSha256) {
     throw new Error("checkpoint_savestate_corrupt: bytes do not match the recorded digest");
   }
   return { receipt, savestateBytes };
+}
+
+function requireDirectory(target: string, code: string): void {
+  if (!lstatSync(target).isDirectory()) throw new Error(`${code}: expected a real directory`);
+}
+
+function readRegularFile(target: string, code: string): Buffer {
+  let descriptor: number;
+  try {
+    descriptor = openSync(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") throw error;
+    throw new Error(`${code}: expected a non-symlink regular file`, { cause: error });
+  }
+  try {
+    if (!fstatSync(descriptor).isFile()) throw new Error(`${code}: expected a regular file`);
+    return readFileSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
 }

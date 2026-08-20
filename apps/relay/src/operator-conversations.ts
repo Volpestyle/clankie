@@ -17,6 +17,8 @@ import type {
 
 export const OPERATOR_CONVERSATION_TAIL_PATH = "/operator/v1/tail";
 const MAX_REQUEST_BYTES = 1024 * 1024;
+const IDEMPOTENCY_TTL_MS = 24 * 60 * 60_000;
+const IDEMPOTENCY_MAX_ENTRIES = 4_096;
 
 export interface RelayConversationLogger {
   info(fields: Readonly<Record<string, unknown>>, message: string): void;
@@ -39,14 +41,9 @@ export interface OperatorConversationRelayOptions {
  */
 export function createOperatorConversationRelayHandler(options: OperatorConversationRelayOptions) {
   const logger = options.logger ?? silentLogger;
-  const idempotency = new TurnIdempotencyStore(options.clock === undefined ? {} : { clock: options.clock });
+  const idempotency = new TurnIdempotencyStore(options.clock ?? Date.now);
   return async (request: IncomingMessage, response: ServerResponse): Promise<boolean> => {
     const path = requestUrl(request).pathname;
-    if (isApprovalCompletionPath(path)) {
-      writeJson(response, 404, { error: "route_not_found" });
-      logger.warn({ route: "approval_completion", statusCode: 404 }, "relay route denied");
-      return true;
-    }
     if (path !== OPERATOR_CONVERSATION_DISPATCH_PATH && path !== OPERATOR_CONVERSATION_TAIL_PATH) {
       return false;
     }
@@ -220,17 +217,9 @@ class TurnIdempotencyStore {
     { readonly expiresAt: number; readonly result: Promise<OperatorConversationServiceResult> }
   >();
   private readonly clock: () => number;
-  private readonly ttlMs: number;
-  private readonly maxEntries: number;
 
-  public constructor(options: {
-    readonly clock?: () => number;
-    readonly ttlMs?: number;
-    readonly maxEntries?: number;
-  }) {
-    this.clock = options.clock ?? Date.now;
-    this.ttlMs = options.ttlMs ?? 24 * 60 * 60_000;
-    this.maxEntries = options.maxEntries ?? 4096;
+  public constructor(clock: () => number) {
+    this.clock = clock;
   }
 
   public run(
@@ -250,8 +239,8 @@ class TurnIdempotencyStore {
       this.entries.delete(key);
       throw error;
     });
-    this.entries.set(key, { expiresAt: this.clock() + this.ttlMs, result });
-    while (this.entries.size > this.maxEntries) {
+    this.entries.set(key, { expiresAt: this.clock() + IDEMPOTENCY_TTL_MS, result });
+    while (this.entries.size > IDEMPOTENCY_MAX_ENTRIES) {
       const oldest = this.entries.keys().next().value as string | undefined;
       if (oldest === undefined) break;
       this.entries.delete(oldest);
@@ -365,10 +354,6 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
 
 function requestUrl(request: IncomingMessage): URL {
   return new URL(request.url ?? "/", "http://relay.invalid");
-}
-
-function isApprovalCompletionPath(path: string): boolean {
-  return /\/approvals?(?:\/|$)/iu.test(path) && /(?:complete|approve|reject|record)/iu.test(path);
 }
 
 function writeAuthDenial(response: ServerResponse, denial: RelayDeviceAuthDenial): void {

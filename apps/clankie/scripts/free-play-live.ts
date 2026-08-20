@@ -55,7 +55,6 @@ const session: EmbodimentSession = {
   budget: { maxTurns: turns, maxDurationMs: 6 * 60 * 60 * 1_000 },
   requestedAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
-  runnerId: "dev-script",
 };
 
 const outcome = await execution(session, { stopRequested: () => stopped }, (resumedFrom) => {

@@ -83,7 +83,7 @@ describe("games console command", () => {
     const settings = new SettingsStore(
       join(await mkdtemp(join(tmpdir(), "clankie-games-")), "settings.json"),
     );
-    const selections = [["solo"], ["mmo"], ["done"]];
+    const selections = ["solo", "mmo", "done"];
     const menus: Array<{ options: readonly { label: string }[] }> = [];
     const command = buildConsoleCommands({ settings }).find((candidate) => candidate.name === "games");
     if (command === undefined) throw new Error("games command not found");

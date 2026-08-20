@@ -1,11 +1,14 @@
 import { ClankieApiClient } from "@clankie/api-client";
 import { createDefaultCredentialStore, resolveDiscordUserBridgeCredential } from "@clankie/credential-broker";
+import { applyDiscordSettingsToEnvironment, SettingsStore } from "@clankie/settings";
+import { resolveVoxBin } from "@clankie/vox-client";
 import { assertUserSessionAdmissible, DiscordUserSessionRefused } from "./readiness.ts";
 
 /**
  * Reports whether the user-session plane would be admitted, without connecting.
  * Run this before starting the plane so a refusal is diagnosed off-Discord.
  */
+applyDiscordSettingsToEnvironment((await new SettingsStore().load()).discord);
 const store = createDefaultCredentialStore();
 const bridgeToken = await resolveDiscordUserBridgeCredential({ store });
 if (!bridgeToken) {
@@ -24,6 +27,9 @@ try {
     api,
     characterId: process.env.CLANKIE_CHARACTER_ID ?? "clankie",
   });
+  const voxBin = resolveVoxBin();
+  if (voxBin === undefined)
+    throw new Error("Vox binary not found; build @clankie/vox or set CLANKIE_VOX_BIN");
   console.log(
     JSON.stringify(
       {
@@ -35,6 +41,7 @@ try {
         channelIds: admission.optIn.channelIds,
         dmPolicy: admission.optIn.dmPolicy,
         recordedAt: admission.optIn.recordedAt,
+        voxBin,
       },
       null,
       2,

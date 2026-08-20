@@ -166,16 +166,6 @@ export const OperatorConversationSchema = z
   .strict();
 export type OperatorConversation = z.infer<typeof OperatorConversationSchema>;
 
-export const OperatorConversationAttachmentSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    conversationId: OperatorConversationIdSchema,
-    surfaceClientId: OperatorSurfaceClientIdSchema,
-    cursor: OperatorConversationCursorSchema.optional(),
-  })
-  .strict();
-export type OperatorConversationAttachment = z.infer<typeof OperatorConversationAttachmentSchema>;
-
 /**
  * Strict discriminated public event union. Every app-renderable VUH-745 session
  * event (activity, message, reasoning, context occupancy, tool, typed input,
@@ -998,10 +988,10 @@ export const CAPTAIN_SILENT_REPLY_SENTINEL = "[[stay-silent]]";
 /** Sole write target of the media generator, relative to the attachment root. */
 export const GENERATED_MEDIA_DIRECTORY = "generated";
 
-/** Sole write target of the runner's browser host, relative to the attachment root. */
+/** Sole write target of the service's browser host, relative to the attachment root. */
 export const BROWSER_ARTIFACT_DIRECTORY = "browser";
 
-/** Sole write target of the runner's diagram host, relative to the attachment root. */
+/** Sole write target of the service's diagram host, relative to the attachment root. */
 export const TLDRAW_ARTIFACT_DIRECTORY = "tldraw";
 
 /** Sole write target of Discord stream-watch stills, relative to the attachment root. */
@@ -1041,7 +1031,7 @@ export function isGeneratedMediaRef(artifactRef: string): boolean {
 }
 
 /**
- * Whether a reference names a screenshot the runner's browser host minted.
+ * Whether a reference names a screenshot the service's browser host minted.
  *
  * Same argument as generated media, same shape: one safe segment under one
  * fixed directory that only the browser host writes. He cannot forge it, cannot
@@ -1053,7 +1043,7 @@ export function isBrowserArtifactRef(artifactRef: string): boolean {
 }
 
 /**
- * Whether a reference names a diagram the runner's tldraw host minted.
+ * Whether a reference names a diagram the service's tldraw host minted.
  *
  * Same argument again, and it holds for the same reason: the host is the only
  * writer beneath `tldraw/`, and the model never authors the canvas code that
@@ -1078,7 +1068,7 @@ export function isShareArtifactRef(artifactRef: string): boolean {
 /**
  * Whether a reference may ride his reply without an approval (ADR 0088).
  *
- * Every one of these directories is written only by a governed runner-side
+ * Every one of these directories is written only by a governed service-side
  * host, so what he shows a room is always something a tool of his actually
  * produced. The distinction this preserves is against *arbitrary* files under
  * the attachment root — a repository file, a support bundle — which keep
@@ -1183,7 +1173,7 @@ export const DiscordPresenceActionSchema = z.enum([
    * A separate action rather than an optional field on `reply` so the frozen
    * risk-class table below states the truth about what may carry bytes into a
    * channel. It is narrative-write because the payload can only reference media
-   * a governed runner-side host minted — the generator or the browser host, see
+   * a governed service-side host minted — the generator or the browser host, see
    * `isAttachableTurnMediaRef`. Any other artifact is still `send_attachment`,
    * still publish-external, still approval-gated.
    */
@@ -1205,17 +1195,6 @@ export const DiscordPresenceActionSchema = z.enum([
   "discord.presence.activity_stop",
 ]);
 export type DiscordPresenceAction = z.infer<typeof DiscordPresenceActionSchema>;
-
-/** Grounded Discord actions a social captain turn may ask the live body to perform. */
-export const DiscordCaptainActionSchema = z.enum([
-  "react",
-  "unreact",
-  "create_thread",
-  "join_thread",
-  "watch_start",
-  "watch_stop",
-]);
-export type DiscordCaptainAction = z.infer<typeof DiscordCaptainActionSchema>;
 
 const DiscordCaptainActionContextSchema = z.object({
   callId: z.string().min(1).max(256),
@@ -2034,16 +2013,6 @@ export const DeviceListItemSchema = z.object({
 export type DeviceListItem = z.infer<typeof DeviceListItemSchema>;
 
 /**
- * Content-free reason codes for the redeem/complete boundary. Extends the
- * `clankie pair` client's fail-closed vocabulary (expired/consumed/revoked)
- * with the malformed and terminal-control-denied cases redemption adds.
- */
-export const PairingRedeemErrorSchema = z.object({
-  error: z.enum(["expired", "consumed", "revoked", "malformed", "terminal_control_not_grantable"]),
-});
-export type PairingRedeemError = z.infer<typeof PairingRedeemErrorSchema>;
-
-/**
  * Durable device lifecycle events on the `device:${deviceId}` stream. Every
  * `data` payload is secret-free; token material and offer secrets never appear.
  */
@@ -2102,7 +2071,7 @@ export type DeviceEvent = z.infer<typeof DeviceEventSchema>;
 
 // ---------------------------------------------------------------------------
 // Asked embodiment (ADR 0063): the captain asks for play, the embodiment
-// authority holds the intent, the play host owns the session.
+// authority holds the intent, and the in-process play host runs the session.
 //
 // Every schema is a STRICT, content-free wire boundary: ids, enums, counters,
 // and timestamps only. No field may carry free text, model output, frame
@@ -2128,10 +2097,11 @@ export function embodimentVenue(
 }
 
 /**
- * Why a world join did not happen, said out loud. Distinct from `pokeagent_start_solo`'s
- * `body_held`: these are all about a world somewhere else.
+ * Why a world join did not happen, said out loud. `play_session_active` is the
+ * shared play host's refusal; the remaining reasons come from the hosted world.
  */
 export const WorldJoinRefusalReasonSchema = z.enum([
+  "play_session_active",
   "no_credential",
   "world_unreachable",
   "world_refused",
@@ -2143,17 +2113,14 @@ export type WorldJoinRefusalReason = z.infer<typeof WorldJoinRefusalReasonSchema
 export const EmbodimentIntentIdSchema = z.string().min(1).max(200);
 export type EmbodimentIntentId = z.infer<typeof EmbodimentIntentIdSchema>;
 
-export const EmbodimentRunnerIdSchema = z.string().min(1).max(200);
-export type EmbodimentRunnerId = z.infer<typeof EmbodimentRunnerIdSchema>;
-
 export const EmbodimentCheckpointIdSchema = z.string().min(1).max(200);
 export type EmbodimentCheckpointId = z.infer<typeof EmbodimentCheckpointIdSchema>;
 
 /**
  * An absent field is "no cap" — the owner's chosen default (2026-07-26): he
- * plays until asked to stop. The stop ask, the single-holder body lock, and
- * lease mechanics are the standing controls; a present field is a caller's
- * deliberate bound and must still be a positive integer.
+ * plays until asked to stop. The stop ask and lease mechanics are the standing
+ * controls; a present field is a caller's deliberate bound and must still be a
+ * positive integer.
  */
 export const EmbodimentBudgetSchema = z
   .object({
@@ -2213,14 +2180,9 @@ export const EmbodimentSessionStateSchema = z.enum([
 ]);
 export type EmbodimentSessionState = z.infer<typeof EmbodimentSessionStateSchema>;
 
-/**
- * `body_held` is one reason on purpose (ADR 0063): whether the service
- * saw a live asked session or the body lock saw an external
- * possessor, he says the same true thing — someone is already driving.
- */
+/** A different service-local play session is active or winding down. */
 export const EmbodimentRefusalReasonSchema = z.enum([
-  "body_held",
-  "no_runner",
+  "play_session_active",
   "environment_unavailable",
   "budget",
   "policy",
@@ -2233,7 +2195,7 @@ export const EmbodimentRefusalReasonSchema = z.enum([
 ]);
 export type EmbodimentRefusalReason = z.infer<typeof EmbodimentRefusalReasonSchema>;
 
-/** The one authority for session-state transitions, shared by every process. */
+/** The one authority for service-local session-state transitions. */
 export const EMBODIMENT_SESSION_TRANSITIONS: Readonly<
   Record<EmbodimentSessionState, readonly EmbodimentSessionState[]>
 > = {
@@ -2267,8 +2229,6 @@ export const EmbodimentSessionSchema = z
     budget: EmbodimentBudgetSchema,
     requestedAt: z.string().datetime(),
     updatedAt: z.string().datetime(),
-    /** Present from `claimed` onward; a pre-claim refusal never had a runner. */
-    runnerId: EmbodimentRunnerIdSchema.optional(),
     refusalReason: EmbodimentRefusalReasonSchema.optional(),
     /** ADR 0060 lineage; absent on a cold start. */
     resumedFromCheckpointId: EmbodimentCheckpointIdSchema.optional(),
@@ -2291,27 +2251,8 @@ export const EmbodimentSessionSchema = z
         message: "Only refused sessions carry a refusal reason",
       });
     }
-    const postClaim: EmbodimentSessionState[] = ["claimed", "running", "stopping", "stopped", "failed"];
-    if (postClaim.includes(session.state) && session.runnerId === undefined) {
-      context.addIssue({
-        code: "custom",
-        path: ["runnerId"],
-        message: "Post-claim states attribute the owning runner",
-      });
-    }
   });
 export type EmbodimentSession = z.infer<typeof EmbodimentSessionSchema>;
-
-/** A runner's poll for embodiment work, in the mission claim shape. */
-export const EmbodimentClaimSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    claimId: z.string().min(1).max(200),
-    runnerId: EmbodimentRunnerIdSchema,
-    environmentIds: z.array(EmbodimentEnvironmentIdSchema).min(1),
-  })
-  .strict();
-export type EmbodimentClaim = z.infer<typeof EmbodimentClaimSchema>;
 
 /**
  * The service's answer to a submitted intent. A refused start still
@@ -2330,17 +2271,6 @@ export const EmbodimentSubmitResultSchema = z.discriminatedUnion("outcome", [
   z.object({ outcome: z.literal("stop_requested"), session: EmbodimentSessionSchema }).strict(),
 ]);
 export type EmbodimentSubmitResult = z.infer<typeof EmbodimentSubmitResultSchema>;
-
-/**
- * What a claim poll hands the runner: a start session to own, or a stop for a
- * session it already owns. Stops re-deliver until the runner reports them
- * done; stopping twice is idempotent, silently missing a stop is not.
- */
-export const EmbodimentAssignmentSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("start"), session: EmbodimentSessionSchema }).strict(),
-  z.object({ kind: z.literal("stop"), sessionId: EnvironmentSessionIdSchema }).strict(),
-]);
-export type EmbodimentAssignment = z.infer<typeof EmbodimentAssignmentSchema>;
 
 export const EmbodimentSessionOutcomeSchema = z.enum([
   "stopped",
@@ -2369,93 +2299,10 @@ export const EmbodimentSessionReceiptSchema = z
 export type EmbodimentSessionReceipt = z.infer<typeof EmbodimentSessionReceiptSchema>;
 
 /**
- * Who holds Clankie's body right now (VUH-938): a read-only projection of the
- * cross-process body lock, the one authority that sees every suitor —
- * including an MCP possessor no embodiment session ever recorded (ADR 0053,
- * ADR 0063). Liveness-checked at read time; a dead holder's lock reports as
- * nobody. The pid stays off the wire: consumers need who and since when, not
- * process trivia.
- */
-export const BodyPossessionSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    holderId: z.string().min(1).max(200),
-    acquiredAt: z.string().min(1),
-  })
-  .strict();
-export type BodyPossession = z.infer<typeof BodyPossessionSchema>;
-
-/** Wire shape of `GET /v1/embodiment/possession`; `possession: null` means nobody holds the body. */
-export const BodyPossessionReadSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    possession: BodyPossessionSchema.nullable(),
-  })
-  .strict();
-export type BodyPossessionRead = z.infer<typeof BodyPossessionReadSchema>;
-
-export const EmbodimentReportStateSchema = z.enum(["running", "stopping", "stopped", "refused", "failed"]);
-export type EmbodimentReportState = z.infer<typeof EmbodimentReportStateSchema>;
-
-/** One play-host→service lifecycle transition for a claimed session. */
-export const EmbodimentLifecycleReportSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    sessionId: EnvironmentSessionIdSchema,
-    runnerId: EmbodimentRunnerIdSchema,
-    state: EmbodimentReportStateSchema,
-    reportedAt: z.string().datetime(),
-    refusalReason: EmbodimentRefusalReasonSchema.optional(),
-    receipt: EmbodimentSessionReceiptSchema.optional(),
-    /** ADR 0060 lineage, reported at start; terminal receipts repeat it. */
-    resumedFromCheckpointId: EmbodimentCheckpointIdSchema.optional(),
-  })
-  .strict()
-  .superRefine((report, context) => {
-    if (report.resumedFromCheckpointId !== undefined && report.state !== "running") {
-      context.addIssue({
-        code: "custom",
-        path: ["resumedFromCheckpointId"],
-        message: "Checkpoint lineage is reported when the session starts running",
-      });
-    }
-    if (report.state === "refused" && report.refusalReason === undefined) {
-      context.addIssue({
-        code: "custom",
-        path: ["refusalReason"],
-        message: "Refused reports carry the typed reason",
-      });
-    }
-    if (report.state !== "refused" && report.refusalReason !== undefined) {
-      context.addIssue({
-        code: "custom",
-        path: ["refusalReason"],
-        message: "Only refused reports carry a refusal reason",
-      });
-    }
-    const terminal = report.state === "stopped" || report.state === "failed";
-    if (terminal && report.receipt === undefined) {
-      context.addIssue({
-        code: "custom",
-        path: ["receipt"],
-        message: "Terminal reports carry the session receipt",
-      });
-    }
-    if (!terminal && report.receipt !== undefined) {
-      context.addIssue({
-        code: "custom",
-        path: ["receipt"],
-        message: "Only terminal reports carry a receipt",
-      });
-    }
-  });
-export type EmbodimentLifecycleReport = z.infer<typeof EmbodimentLifecycleReportSchema>;
-
-/**
  * The captain tool's typed outcome, like DiscordVoicePresenceResult: the
  * reply reflects what actually happened, and a refusal names a reason he can
- * say out loud. `pending` means the bounded wait elapsed before the runner
- * answered — the request stands, and he must not claim to be playing yet.
+ * say out loud. `pending` means the bounded wait elapsed before the local play
+ * host started — the request stands, and he must not claim to be playing yet.
  */
 export const EmbodimentPlayNoteSchema = z.discriminatedUnion("action", [
   z
@@ -2638,7 +2485,7 @@ export type DiscordPersonMemoryEdit = z.infer<typeof DiscordPersonMemoryEditSche
 // ---------------------------------------------------------------------------
 // Clankie's browser (ADR 0082).
 //
-// The captain drives a runner-hosted `agent-browser` MCP server. Descriptors
+// The captain drives an in-process `agent-browser` MCP server. Descriptors
 // are projected through doctrine before they reach him, so `requiresApproval`
 // is a decided fact carried on the wire rather than something the captain or
 // the model re-derives.
@@ -2683,7 +2530,7 @@ export type CallBrowserToolRequest = z.infer<typeof CallBrowserToolRequestSchema
  * can relay in words rather than errors he has to interpret.
  */
 /**
- * A non-text result the browser produced, parked as bytes on the runner.
+ * A non-text result the browser produced, parked as service-private bytes.
  *
  * Screenshots come back as base64 image blocks, and base64 pixels are the one
  * thing that must never enter a captain turn: a single screenshot is tens of
@@ -3118,7 +2965,7 @@ const discordVoiceChannelScope = {
 } as const;
 
 /**
- * Why a possessor report was seeded but not spoken. Play loops report constantly;
+ * Why a play report was seeded but not spoken. Play loops report constantly;
  * answering each one is a monologue. The drop must be receipt-visible or
  * "why didn't he commentate that turn?" is unanswerable.
  */
@@ -3149,7 +2996,7 @@ export const DiscordVoiceResponseStateSchema = z.enum(["settled", "waiting_user"
 export type DiscordVoiceResponseState = z.infer<typeof DiscordVoiceResponseStateSchema>;
 
 /**
- * What made him speak: someone in the room, or a possessor reporting what the
+ * What made him speak: someone in the room, or play reporting what the
  * body just did. Both take the fast path with a zero handoff, so without this
  * the latency line cannot tell a real reply from a play narration — which is
  * exactly the ambiguity that slowed the 2026-08-02 diagnosis.
@@ -3262,9 +3109,9 @@ export type DiscordVoiceFailureStage = z.infer<typeof DiscordVoiceFailureStageSc
 export const DiscordVoiceFailureCodeSchema = z.string().regex(/^[a-z0-9_]{1,64}$/u);
 export type DiscordVoiceFailureCode = z.infer<typeof DiscordVoiceFailureCodeSchema>;
 
-/** The loopback possessor seam attaches and detaches locally; no room text is retained. */
-export const DiscordVoicePossessorConnectionPhaseSchema = z.enum(["attached", "detached"]);
-export type DiscordVoicePossessorConnectionPhase = z.infer<typeof DiscordVoicePossessorConnectionPhaseSchema>;
+/** The loopback play seam attaches and detaches locally; no room text is retained. */
+export const DiscordVoicePlayConnectionPhaseSchema = z.enum(["attached", "detached"]);
+export type DiscordVoicePlayConnectionPhase = z.infer<typeof DiscordVoicePlayConnectionPhaseSchema>;
 
 export const DiscordVoiceEvidenceSchema = z
   .discriminatedUnion("type", [
@@ -3463,15 +3310,15 @@ export const DiscordVoiceEvidenceSchema = z
       .strict(),
     z
       .object({
-        type: z.literal("possessor_connection"),
-        phase: DiscordVoicePossessorConnectionPhaseSchema,
+        type: z.literal("play_connection"),
+        phase: DiscordVoicePlayConnectionPhaseSchema,
         attachedCount: DiscordVoiceCounterSchema,
         stayId: DiscordVoiceLocalIdSchema.optional(),
       })
       .strict(),
     z
       .object({
-        type: z.literal("possessor_room"),
+        type: z.literal("play_room"),
         listening: z.boolean(),
         attachedCount: DiscordVoiceCounterSchema,
         deliveredCount: DiscordVoiceCounterSchema,
@@ -3480,7 +3327,7 @@ export const DiscordVoiceEvidenceSchema = z
       .strict(),
     z
       .object({
-        type: z.literal("possessor_transcript_delivery"),
+        type: z.literal("play_transcript_delivery"),
         deliveryId: DiscordVoiceLocalIdSchema,
         attachedCount: DiscordVoiceCounterSchema,
         deliveredCount: DiscordVoiceCounterSchema,
@@ -3489,7 +3336,7 @@ export const DiscordVoiceEvidenceSchema = z
       .strict(),
     z
       .object({
-        type: z.literal("possessor_narration_submission"),
+        type: z.literal("play_narration_submission"),
         deliveryId: DiscordVoiceLocalIdSchema,
         attachedCount: DiscordVoiceCounterSchema,
         stayId: DiscordVoiceLocalIdSchema.optional(),
@@ -3497,7 +3344,7 @@ export const DiscordVoiceEvidenceSchema = z
       .strict(),
     z
       .object({
-        type: z.literal("possessor_narration_suppressed"),
+        type: z.literal("play_narration_suppressed"),
         ...discordVoiceChannelScope,
         deliveryId: DiscordVoiceLocalIdSchema,
         reason: DiscordVoiceNarrationSuppressReasonSchema,
@@ -3505,7 +3352,7 @@ export const DiscordVoiceEvidenceSchema = z
       .strict(),
     z
       .object({
-        type: z.literal("possessor_refusal"),
+        type: z.literal("play_refusal"),
         deliveryId: DiscordVoiceLocalIdSchema.optional(),
         attachedCount: DiscordVoiceCounterSchema,
         reason: DiscordVoiceFailureCodeSchema,

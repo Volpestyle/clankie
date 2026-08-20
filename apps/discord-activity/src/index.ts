@@ -3,10 +3,6 @@ import { RenderedSurfaceHub } from "./frame-hub.ts";
 import { createFrameProducerServer } from "./producer.ts";
 import { createDiscordActivityServer } from "./server.ts";
 
-export { RenderedSurfaceHub, type RenderedSurfaceViewer } from "./frame-hub.ts";
-export { createFrameProducerServer, type FrameProducerServer } from "./producer.ts";
-export { createDiscordActivityServer, type DiscordActivityServer } from "./server.ts";
-
 /**
  * Standalone entrypoint. The surface is a rendering client only: it holds no
  * Discord credentials, no authority, and no emulator core. The host

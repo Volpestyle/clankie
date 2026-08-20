@@ -6,14 +6,11 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "start": "tsx src/index.ts",
-    "build": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run --passWithNoTests",
-    "free-play-live": "tsx scripts/free-play-live.ts",
-    "clean": "rm -rf dist coverage"
+    "free-play-live": "tsx scripts/free-play-live.ts"
   },
   "dependencies": {
-    "@clankie/body-lock": "workspace:*",
     "@clankie/credential-broker": "workspace:*",
     "@clankie/discord-presence-core": "workspace:*",
     "@clankie/environment-runtime": "workspace:*",
@@ -23,11 +20,10 @@
     "@clankie/model-provider": "workspace:*",
     "@clankie/model-registry": "workspace:*",
     "@clankie/observability": "workspace:*",
-    "@clankie/possessor-voice": "workspace:*",
+    "@clankie/play-voice": "workspace:*",
     "@clankie/protocol": "workspace:*",
     "@clankie/rendered-surface-client": "workspace:*",
     "@clankie/settings": "workspace:*",
-    "@earendil-works/pi-agent-core": "0.84.2",
     "@earendil-works/pi-ai": "0.84.2",
     "@earendil-works/pi-coding-agent": "0.84.2",
     "@hono/node-server": "2.0.8",

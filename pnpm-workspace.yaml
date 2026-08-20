@@ -3,8 +3,9 @@ packages:
   - "integrations/*"
   - "packages/*"
 
+engineStrict: true
+
 allowBuilds:
-  "@discordjs/opus": true
   "@google/genai": false
   esbuild: true
   node-pty: true
@@ -13,17 +14,6 @@ allowBuilds:
 catalog:
   typescript: 5.9.3
   vitest: 4.1.10
-  zod: 4.4.3
-  pino: 10.3.1
-  yaml: 2.9.0
-  tsx: 4.23.0
-
-minimumReleaseAgeExclude:
-  - "@earendil-works/pi-tui@0.84.2"
-  - "@earendil-works/pi-ai@0.84.2"
-  - "@earendil-works/pi-agent-core@0.84.2"
-  - "@earendil-works/pi-coding-agent@0.84.2"
-  - "@pokeagents/world-protocol@0.1.0 || 0.2.0 || 0.2.1"
 
 patchedDependencies:
   "@earendil-works/pi-tui@0.84.2": patches/@earendil-works__pi-tui@0.84.2.patch

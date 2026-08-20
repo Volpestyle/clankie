@@ -6,8 +6,6 @@ mod connection_supervisor;
 mod dave;
 mod h264;
 mod ipc;
-mod ipc_log_layer;
-mod ipc_protocol;
 mod ipc_router;
 mod media_sink_wants;
 mod music;
@@ -31,14 +29,12 @@ use std::time::Duration;
 use crossbeam_channel as crossbeam;
 use parking_lot::Mutex;
 use tokio::time;
-use tracing_subscriber::prelude::*;
 
 use crate::app_state::AppState;
 use crate::audio_pipeline::AudioSendState;
 use crate::dave::DaveManager;
-use crate::ipc::{OutMsg, send_msg, spawn_ipc_reader, spawn_ipc_writer};
-use crate::ipc_log_layer::IpcLogLayer;
-use crate::music::MusicEvent;
+use crate::ipc::{IPC_PROTOCOL_VERSION, OutMsg, send_msg, spawn_ipc_reader, spawn_ipc_writer};
+use crate::music::{MusicEvent, MusicPcm};
 use crate::stream_publish::{StreamPublishEvent, StreamPublishFrame};
 use crate::voice_conn::VoiceEvent;
 
@@ -114,27 +110,19 @@ async fn main() {
         .install_default()
         .expect("Failed to install rustls crypto provider");
 
-    // Build layered subscriber: stderr fmt for local dev + IPC forwarding to Clankie/Loki.
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_writer(io::stderr)
-                .with_filter(
-                    tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                        tracing_subscriber::EnvFilter::new(
-                            "info,davey=warn,davey::cryptor::frame_processors=off",
-                        )
-                    }),
-                ),
+    tracing_subscriber::fmt()
+        .with_writer(io::stderr)
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                tracing_subscriber::EnvFilter::new(
+                    "info,davey=warn,davey::cryptor::frame_processors=off",
+                )
+            }),
         )
-        .with(IpcLogLayer)
         .init();
 
     spawn_ipc_writer();
-    ipc_log_layer::mark_ipc_log_ready();
-
-    let audio_debug = std::env::var("AUDIO_DEBUG").is_ok();
-    let mut inbound_ipc = spawn_ipc_reader(audio_debug);
+    let mut inbound_ipc = spawn_ipc_reader();
 
     tracing::info!("Voice subprocess started, waiting for IPC messages");
 
@@ -149,7 +137,7 @@ async fn main() {
     let mut tick_slippage = TickSlippageMonitor::new(send_tick_period);
 
     let (music_pcm_tx, music_pcm_rx) =
-        crossbeam::bounded::<Vec<i16>>(MUSIC_PCM_QUEUE_CAPACITY_CHUNKS);
+        crossbeam::bounded::<MusicPcm>(MUSIC_PCM_QUEUE_CAPACITY_CHUNKS);
     let (music_event_tx, mut music_event_rx) = tokio::sync::mpsc::channel::<MusicEvent>(32);
     let (stream_publish_frame_tx, stream_publish_frame_rx) =
         crossbeam::bounded::<StreamPublishFrame>(STREAM_PUBLISH_QUEUE_CAPACITY_FRAMES);
@@ -168,7 +156,9 @@ async fn main() {
         stream_publish_event_tx,
         stream_publish_event_rx,
     );
-    send_msg(OutMsg::ProcessReady);
+    send_msg(OutMsg::ProcessReady {
+        protocol_version: IPC_PROTOCOL_VERSION,
+    });
 
     loop {
         tokio::select! {

@@ -3,6 +3,12 @@
 Status: accepted (James, 2026-07-26). Implemented in the GBA adapter and the
 free-play session composer, with both policies covered by tests.
 
+## Current status (2026-08-19)
+
+Frozen and rolling evidence policies remain current. The possession incident
+below is historical; [ADR 0129](0129-each-player-owns-a-body.md) makes every
+local play or harness process own its runtime, without changing evidence rolling.
+
 ## Context
 
 A possession-driven FireRed session died mid-starter-selection with

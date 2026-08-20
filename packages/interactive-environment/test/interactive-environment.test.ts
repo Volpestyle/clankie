@@ -9,7 +9,6 @@ import {
   DiscordPresenceToolExposureSchema,
   DiscordPresenceTransportBindingSchema,
   EnvironmentActionResultSchema,
-  EnvironmentCommandSchema,
   EnvironmentEventSchema,
   EnvironmentLeaseSchema,
   discordPresencePhaseFromEnvironment,
@@ -17,60 +16,18 @@ import {
   isDiscordPresenceActionAvailable,
   resolveDiscordPresenceToolExposure,
 } from "../src/index.ts";
-import { actionResultFixtures, validEnvironmentLease, validStartActionCommand } from "./fixtures.ts";
+import { actionResultFixtures, validEnvironmentLease } from "./fixtures.ts";
 
 describe("interactive environment protocol", () => {
-  it("validates commands and every frozen action-result fixture", () => {
-    expect(EnvironmentCommandSchema.parse(validStartActionCommand)).toMatchObject({
-      type: "start_action",
-      actionId: "environment-action-1",
-    });
+  it("validates every frozen action-result fixture", () => {
     for (const result of Object.values(actionResultFixtures)) {
       expect(EnvironmentActionResultSchema.parse(result)).toEqual(result);
     }
   });
 
-  it("requires authority, lane, correlation, and expected goal version on every command", () => {
-    const { context: _context, ...unguarded } = validStartActionCommand;
-    expect(() => EnvironmentCommandSchema.parse(unguarded)).toThrow();
-    expect(() =>
-      EnvironmentCommandSchema.parse({
-        ...validStartActionCommand,
-        context: { ...validStartActionCommand.context, expectedGoalVersion: undefined },
-      }),
-    ).toThrow(/expectedGoalVersion/);
-  });
-
   it("keeps credentials out of strict lease contracts", () => {
     expect(EnvironmentLeaseSchema.parse(validEnvironmentLease)).toEqual(validEnvironmentLease);
     expect(() => EnvironmentLeaseSchema.parse({ ...validEnvironmentLease, accessToken: "secret" })).toThrow();
-  });
-
-  it("rejects a join whose session authority differs from its command authority", () => {
-    expect(() =>
-      EnvironmentCommandSchema.parse({
-        schemaVersion: 1,
-        commandId: "join-1",
-        type: "join",
-        context: {
-          sourceLane: "tui",
-          authority: { principal: { kind: "human", id: "james" }, tier: "authenticated" },
-          correlationId: "corr-join-1",
-          expectedGoalVersion: 0,
-        },
-        requestedAt: "2026-07-11T12:00:00.000Z",
-        session: {
-          schemaVersion: 1,
-          sessionId: "environment-session-1",
-          environmentKind: "test_environment",
-          characterId: "clankie",
-          worldId: "private-paper-world",
-          requestedBy: { principal: { kind: "captain", id: "clankie" }, tier: "autonomous" },
-          initialGoalVersion: 0,
-          resourceBounds: validEnvironmentLease.resourceBounds,
-        },
-      }),
-    ).toThrow(/join authority mismatch/);
   });
 
   it("keeps high-volume telemetry out of semantic events", () => {

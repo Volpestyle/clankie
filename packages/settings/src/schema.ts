@@ -72,15 +72,6 @@ export const DiscordSettingsSchema = z
      */
     voiceTranscriptLoggingEnabled: z.boolean().default(false),
     /**
-     * The possessor voice seam (ADR 0064, ADR 0067): whether a process driving
-     * his body — asked play, an MCP possessor — may speak and hear through his
-     * live voice session. Deny-by-default like every authority binding, and
-     * stored here so a bridge restart does not silently mute his playthroughs
-     * the way an env-only flag did.
-     */
-    possessorVoiceEnabled: z.boolean().default(false),
-
-    /**
      * Which Discord body is the mouth. The launcher starts only this process.
      * Both tokens stay stored; only one gateway is live. `user_session` still
      * requires enablement, allowlists, and the durable opt-in.
@@ -386,6 +377,7 @@ export function emptySettings(): ClankieSettings {
  *   one. Linear is reached over MCP now and its server resolves the team.
  */
 const RETIRED_SETTINGS_KEYS: readonly string[] = ["linear"];
+const RETIRED_DISCORD_SETTINGS_KEYS: readonly string[] = ["possessorVoiceEnabled"];
 
 /**
  * Drops sections this version has retired, so an owner whose file predates the
@@ -398,10 +390,18 @@ const RETIRED_SETTINGS_KEYS: readonly string[] = ["linear"];
  */
 export function dropRetiredSettings(parsed: unknown): unknown {
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return parsed;
-  const entries = Object.entries(parsed as Record<string, unknown>).filter(
-    ([key]) => !RETIRED_SETTINGS_KEYS.includes(key),
+  const settings = Object.fromEntries(
+    Object.entries(parsed as Record<string, unknown>).filter(([key]) => !RETIRED_SETTINGS_KEYS.includes(key)),
   );
-  return Object.fromEntries(entries);
+  const discord = settings["discord"];
+  if (discord !== null && typeof discord === "object" && !Array.isArray(discord)) {
+    settings["discord"] = Object.fromEntries(
+      Object.entries(discord as Record<string, unknown>).filter(
+        ([key]) => !RETIRED_DISCORD_SETTINGS_KEYS.includes(key),
+      ),
+    );
+  }
+  return settings;
 }
 
 /** Token prefixes that must never reach the settings file. */

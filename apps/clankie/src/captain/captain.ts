@@ -17,7 +17,6 @@ import {
   type DiscordPresenceChannelTurnRequest,
   type ObservableCaptainLane,
   type OperatorConversationActivityPhase,
-  type OperatorConversationEventBody,
   type OperatorConversationServiceRequest,
   type OperatorConversationServiceResult,
 } from "@clankie/protocol";
@@ -800,5 +799,3 @@ function toImageContent(attachment: ResolvedAttachment): ImageContent {
     mimeType: attachment.mediaType,
   };
 }
-
-export { type OperatorConversationEventBody };

@@ -4,7 +4,12 @@ import type { GbaCoreState } from "./core-double.ts";
 import type { GbaCoreMapGrid, GbaCoreSeam } from "./core-seam.ts";
 import { decodeFireRedMapGrid, isFireRedTilePassable, FIRERED_MAP_BORDER_OFFSET } from "./firered-ram-map.ts";
 import { decodeFireRedState, FIRERED_US_V10_ROM_SHA256 } from "./firered-state.ts";
-import { MgbaLibretroCore, mgbaCoreWasmSha256, type MgbaFramebuffer } from "./mgba-core.ts";
+import {
+  MgbaLibretroCore,
+  mgbaCoreWasmSha256,
+  type MgbaCoreIdentity,
+  type MgbaFramebuffer,
+} from "./mgba-core.ts";
 
 /**
  * Real GBA core behind the adapter seam: the pinned headless mGBA WASM core
@@ -27,55 +32,14 @@ export const POST_INPUT_SETTLE_FRAMES = 32;
 /** Frames rendered after restoring the savestate so a framebuffer exists. */
 const WARMUP_FRAMES_AFTER_RESTORE = 2;
 
-/**
- * Emulated frames between observations while an action runs.
- *
- * One frame per observation is hardware rate: what a watcher sees is what the
- * console drew. A chunk of 3 showed every third frame, which reads as a stutter
- * through the 16-frame walk cycle rather than as walking. It cost nothing to
- * fix because the activity stream publishes the native 240x160 screen: measured
- * on the FireRed bedroom state, 3.2KB base64 at 1.68ms encode, so 60fps costs
- * fewer milliseconds and the same bytes as the 3x-upscaled 20fps it replaces.
- */
-const OBSERVE_CHUNK_FRAMES = 1;
-
-/** Wall-clock milliseconds one emulated frame represents. */
-const FRAME_INTERVAL_MS = 1_000 / 59.7275;
-
-/**
- * Wait `ms` while leaving the event loop free.
- *
- * This was `Atomics.wait`, which paces precisely but blocks the whole thread:
- * measured on 2026-08-15, a single 600-frame action fired 0 of the ~731 timer
- * ticks due during it. Nothing else in the process ran for the duration of an
- * action, so nothing could flush: the frames a watcher was owed piled up in the
- * socket the runner publishes through and arrived as a burst when the action
- * ended, which is what "frozen, then it teleports" actually was. The HTTP API,
- * the Discord turn, and the voice seam were just as stuck.
- */
-function delay(ms: number): Promise<void> {
-  if (ms <= 0) return Promise.resolve();
-  return new Promise((done) => setTimeout(done, ms));
-}
-
-export interface MgbaFireRedCoreInit {
+export interface MgbaFireRedCoreInit extends MgbaCoreIdentity {
   coreId: string;
   /** ROM bytes read by the caller from the operator-supplied path. */
   romBytes: Uint8Array;
   /** Pinned savestate bytes read by the caller from the operator-local path. */
   savestateBytes: Uint8Array;
-  /** Pinned identity digests; creation fails closed on any mismatch. */
-  romSha256: string;
-  savestateSha256: string;
-  coreWasmSha256: string;
   /** Scenario label attached to decoded coordinates (not decoded from RAM). */
   mapId: string;
-}
-
-export interface MgbaFireRedCoreIdentity {
-  romSha256: string;
-  savestateSha256: string;
-  coreWasmSha256: string;
 }
 
 /**
@@ -97,7 +61,7 @@ export class MgbaFireRedCore implements GbaCoreSeam {
   private readonly core: MgbaLibretroCore;
   private readonly romBytes: Uint8Array;
   private readonly mapId: string;
-  private readonly verifiedIdentity: MgbaFireRedCoreIdentity;
+  private readonly verifiedIdentity: MgbaCoreIdentity;
   private frame = 0;
   private inputCount = 0;
   private battleSequence = 0;
@@ -112,7 +76,7 @@ export class MgbaFireRedCore implements GbaCoreSeam {
     core: MgbaLibretroCore,
     romBytes: Uint8Array,
     mapId: string,
-    identity: MgbaFireRedCoreIdentity,
+    identity: MgbaCoreIdentity,
   ) {
     this.coreId = coreId;
     this.core = core;
@@ -154,7 +118,7 @@ export class MgbaFireRedCore implements GbaCoreSeam {
   }
 
   /** The digests actually verified at creation time. */
-  public identity(): MgbaFireRedCoreIdentity {
+  public identity(): MgbaCoreIdentity {
     return { ...this.verifiedIdentity };
   }
 
@@ -202,16 +166,10 @@ export class MgbaFireRedCore implements GbaCoreSeam {
 
   private frameObserver: (() => void) | null = null;
   private paceToWallClock = false;
-  /** True while an action owns the core, so idle ticks stand off. */
-  private running = false;
 
   /** Console-clock frames between actions. See `GbaCoreSeam.idleFrames`. */
   public idleFrames(frames: number): void {
-    if (this.running || frames <= 0) return;
-    this.core.setHeldButtons([]);
-    this.core.runFrames(frames);
-    this.frame += frames;
-    this.frameObserver?.();
+    if (this.core.idleFrames(frames, this.frameObserver)) this.frame += frames;
   }
 
   /**
@@ -224,28 +182,7 @@ export class MgbaFireRedCore implements GbaCoreSeam {
    */
   private async runFramesObserved(frames: number): Promise<void> {
     const observer = this.frameObserver;
-    if (observer === null && !this.paceToWallClock) {
-      this.core.runFrames(frames);
-      return;
-    }
-    // Held across the awaits: an idle tick that fired between two paced frames
-    // would clear the buttons this action is still holding.
-    this.running = true;
-    try {
-      const startedAt = performance.now();
-      let done = 0;
-      while (done < frames) {
-        const chunk = Math.min(OBSERVE_CHUNK_FRAMES, frames - done);
-        this.core.runFrames(chunk);
-        done += chunk;
-        observer?.();
-        if (this.paceToWallClock) {
-          await delay(startedAt + done * FRAME_INTERVAL_MS - performance.now());
-        }
-      }
-    } finally {
-      this.running = false;
-    }
+    await this.core.runFramesObserved(frames, observer, () => this.paceToWallClock);
   }
 
   public async pressButton(button: GbaButton, holdFrames: number): Promise<void> {

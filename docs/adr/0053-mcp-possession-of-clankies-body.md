@@ -1,11 +1,15 @@
 # ADR 0053: An external harness possesses Clankie under a lease
 
-Status: accepted (James, 2026-07-25). The speech/hearing ports were implemented
-by [ADR 0064](0064-possessor-voice-seam.md), admitted room text was added by
-[ADR 0098 (room text)](0098-the-room-can-type-to-a-playthrough.md), and outbound
-authorship was superseded by
-[ADR 0074](0074-the-room-hears-one-voice.md). The possessor remains authoritative
-for its own gameplay decisions, not for exact words heard by the room.
+Status: superseded (2026-08-19) by
+[ADR 0129](0129-each-player-owns-a-body.md).
+
+## Current status (2026-08-19)
+
+This record preserves the retired shared-body design. GBA MCP now creates a
+private emulator/runtime for its caller. It cannot attach to, suspend, steal,
+speak through, or hear input from Clankie's body. Existing `body.lock` and
+`possession-events.jsonl` files are inert historical artifacts and are neither
+migrated nor automatically deleted.
 
 ## Context
 

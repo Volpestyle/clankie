@@ -8,21 +8,29 @@
  * The execution itself is one injected function, so every lifecycle path is
  * testable offline with the deterministic core double and a fake execution.
  */
-import { randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import type {
-  EmbodimentAssignment,
-  EmbodimentClaim,
   EmbodimentEnvironmentId,
-  EmbodimentLifecycleReport,
   EmbodimentRefusalReason,
   EmbodimentSession,
   EmbodimentSessionOutcome,
   EmbodimentSessionReceipt,
 } from "@clankie/protocol";
+import type { EmbodimentAssignment, EmbodimentLifecycleUpdate } from "./embodiment.ts";
+
+export type { EmbodimentAssignment, EmbodimentLifecycleUpdate } from "./embodiment.ts";
+
+type EmbodimentLifecycleTransition =
+  | { state: "running"; resumedFromCheckpointId?: string }
+  | { state: "stopping" }
+  | { state: "refused"; refusalReason: EmbodimentRefusalReason }
+  | { state: "stopped" | "failed"; receipt: EmbodimentSessionReceipt };
 
 export interface EmbodimentClientPort {
-  claimEmbodiment(claim: EmbodimentClaim): Promise<EmbodimentAssignment | undefined>;
-  reportEmbodiment(report: EmbodimentLifecycleReport): Promise<unknown>;
+  claimEmbodiment(
+    environmentIds: readonly EmbodimentEnvironmentId[],
+  ): Promise<EmbodimentAssignment | undefined>;
+  reportEmbodiment(report: EmbodimentLifecycleUpdate): Promise<unknown>;
   getLiveEmbodimentSession(): Promise<EmbodimentSession | undefined>;
 }
 
@@ -47,9 +55,9 @@ export type PlayExecutionResult =
   | { kind: "ran"; result: PlayRunResult };
 
 /**
- * One playthrough. Must call `onRunning` exactly once, after the body lock and
- * boot succeed and before the first turn — that is the moment "he is playing"
- * becomes true, and the lineage names the checkpoint he resumed from.
+ * One playthrough. Must call `onRunning` exactly once, after boot succeeds and
+ * before the first turn — that is the moment "he is playing" becomes true, and
+ * the lineage names the checkpoint he resumed from.
  */
 export type PlayExecution = (
   session: EmbodimentSession,
@@ -80,12 +88,10 @@ export type PlayShutdownResult =
 
 export interface PlayHostOptions {
   client: EmbodimentClientPort;
-  runnerId: string;
   environmentIds: readonly EmbodimentEnvironmentId[];
   execute: PlayExecution;
   logger: PlayHostLogger;
   clock?: () => Date;
-  claimIdFactory?: () => string;
   /** Best-effort grace for the forced terminal report after a shutdown deadline. */
   forcedReportGraceMs?: number;
 }
@@ -93,7 +99,6 @@ export interface PlayHostOptions {
 export class PlayHost {
   private readonly options: PlayHostOptions;
   private readonly clock: () => Date;
-  private readonly claimIdFactory: () => string;
   private readonly forcedReportGraceMs: number;
   private active: ActivePlay | undefined;
   /** Last logged claim-failure signature; undefined while the poll is healthy. */
@@ -102,15 +107,12 @@ export class PlayHost {
   public constructor(options: PlayHostOptions) {
     this.options = options;
     this.clock = options.clock ?? (() => new Date());
-    this.claimIdFactory = options.claimIdFactory ?? randomUUID;
     this.forcedReportGraceMs = options.forcedReportGraceMs ?? 1_000;
   }
 
   /**
-   * A live session attributed to this runner that this process does not hold
-   * is a previous process's corpse: the body lock has already self-healed
-   * (ADR 0059), and only the runner can say so. Reported as failed with a
-   * `lease_lapsed` receipt so the next ask is not blocked by a ghost.
+   * A live session this process does not hold is a previous service process's
+   * corpse. Report it failed so the next ask is not blocked by a ghost.
    */
   public async reconcile(): Promise<void> {
     let live: EmbodimentSession | undefined;
@@ -119,7 +121,7 @@ export class PlayHost {
     } catch {
       return;
     }
-    if (live === undefined || live.runnerId !== this.options.runnerId) return;
+    if (live === undefined) return;
     if (this.active?.session.sessionId === live.sessionId) return;
     if (live.state !== "claimed" && live.state !== "running" && live.state !== "stopping") return;
     this.options.logger.warn(
@@ -147,12 +149,7 @@ export class PlayHost {
   public async poll(): Promise<boolean> {
     let assignment: EmbodimentAssignment | undefined;
     try {
-      assignment = await this.options.client.claimEmbodiment({
-        schemaVersion: 1,
-        claimId: this.claimIdFactory(),
-        runnerId: this.options.runnerId,
-        environmentIds: [...this.options.environmentIds],
-      });
+      assignment = await this.options.client.claimEmbodiment(this.options.environmentIds);
     } catch (error) {
       // Deduplicated by signature, not swallowed: on a 1s cadence a per-poll
       // line is spam, but a fully silent catch spent a live evening looking
@@ -182,13 +179,13 @@ export class PlayHost {
       // but a second start must not silently run beside the first.
       await this.report(assignment.session.sessionId, {
         state: "refused",
-        refusalReason: "body_held",
+        refusalReason: "play_session_active",
       });
       return false;
     }
     // The whole lifecycle narrates into this log (ADR 0068): before these
     // lines existed, a session that claimed, ran, and settled cleanly left the
-    // runner's own log silent — the successful path was the invisible one.
+    // service log silent — the successful path was the invisible one.
     this.options.logger.info(
       {
         sessionId: assignment.session.sessionId,
@@ -413,20 +410,10 @@ export class PlayHost {
     };
   }
 
-  private async report(
-    sessionId: string,
-    partial:
-      | { state: "running"; resumedFromCheckpointId?: string }
-      | { state: "stopping" }
-      | { state: "refused"; refusalReason: EmbodimentRefusalReason }
-      | { state: "stopped" | "failed"; receipt: EmbodimentSessionReceipt },
-  ): Promise<void> {
+  private async report(sessionId: string, partial: EmbodimentLifecycleTransition): Promise<void> {
     try {
       await this.options.client.reportEmbodiment({
-        schemaVersion: 1,
         sessionId,
-        runnerId: this.options.runnerId,
-        reportedAt: this.clock().toISOString(),
         ...partial,
       });
     } catch (error) {
@@ -441,16 +428,14 @@ export class PlayHost {
 }
 
 async function settlesWithin(promise: Promise<void>, milliseconds: number): Promise<boolean> {
-  let timer: NodeJS.Timeout | undefined;
+  const controller = new AbortController();
   try {
     return await Promise.race([
       promise.then(() => true),
-      new Promise<boolean>((resolveDelay) => {
-        timer = setTimeout(() => resolveDelay(false), milliseconds);
-      }),
+      delay(milliseconds, false, { signal: controller.signal }),
     ]);
   } finally {
-    if (timer !== undefined) clearTimeout(timer);
+    controller.abort();
   }
 }
 
@@ -459,16 +444,9 @@ function remainingMilliseconds(deadlineAt: number): number {
 }
 
 async function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return;
-  await new Promise<void>((resolveDelay) => {
-    const timer = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
-      resolveDelay();
-    }, milliseconds);
-    const onAbort = (): void => {
-      clearTimeout(timer);
-      resolveDelay();
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
+  try {
+    await delay(milliseconds, undefined, { signal });
+  } catch (error) {
+    if (!(error instanceof Error) || error.name !== "AbortError") throw error;
+  }
 }

@@ -1,17 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
-  GBA_EMULATOR_CAPABILITY_BOUNDARY,
   GbaEmulatorActionRequestSchema,
   GbaEmulatorActionSchema,
-  GbaEmulatorCapabilityBoundarySchema,
   GbaEmulatorObservationSchema,
   GbaEmulatorResourceBoundsSchema,
   GbaEmulatorSessionSpecSchema,
   GbaEmulatorStartActionCommandSchema,
   EnvironmentLeaseV2Schema,
-  isGbaEmulatorCapabilityLocal,
   normalizeEnvironmentSessionSpec,
-  resolveGbaEmulatorToolExposure,
 } from "../src/index.ts";
 
 const bounds = {
@@ -40,14 +36,14 @@ const spec = {
 } as const;
 
 describe("GBA emulator contract", () => {
-  it("accepts bounded button, frame-advance, and wait actions and rejects impossible values", () => {
+  it("accepts bounded button and frame-advance actions and rejects impossible values", () => {
     expect(
       GbaEmulatorActionSchema.parse({ kind: "button_press", button: "a", holdFrames: 12 }),
     ).toMatchObject({ kind: "button_press" });
     expect(GbaEmulatorActionSchema.parse({ kind: "frame_advance", frames: 60 })).toMatchObject({
       frames: 60,
     });
-    expect(GbaEmulatorActionSchema.parse({ kind: "wait", durationMs: 500 })).toMatchObject({ kind: "wait" });
+    expect(() => GbaEmulatorActionSchema.parse({ kind: "wait", durationMs: 500 })).toThrow();
     expect(() =>
       GbaEmulatorActionSchema.parse({ kind: "button_press", button: "turbo", holdFrames: 12 }),
     ).toThrow();
@@ -233,47 +229,5 @@ describe("GBA emulator contract", () => {
       }),
     ).toThrow();
     expect(() => GbaEmulatorObservationSchema.parse({ ...base, kind: "ram_dump", data: {} })).toThrow();
-  });
-
-  it("scopes gameplay tools to the active gameplay lane and keeps dormant sessions join/status-only", () => {
-    expect(resolveGbaEmulatorToolExposure("off", "gameplay")).toMatchObject({
-      lifecycleTools: ["gba_emulator_join", "gba_emulator_status"],
-      gameplayTools: [],
-    });
-    expect(resolveGbaEmulatorToolExposure("failed", "tui")).toMatchObject({
-      lifecycleTools: ["gba_emulator_join", "gba_emulator_status"],
-      gameplayTools: [],
-    });
-    expect(resolveGbaEmulatorToolExposure("active", "gameplay").gameplayTools).toEqual([
-      "gba_emulator_observe",
-      "gba_emulator_start_action",
-      "gba_emulator_action_status",
-      "gba_emulator_cancel_action",
-    ]);
-    // Supervision lanes steer, pause, resume, and disconnect without gameplay tools.
-    expect(resolveGbaEmulatorToolExposure("active", "tui")).toMatchObject({
-      lifecycleTools: [
-        "gba_emulator_status",
-        "gba_emulator_steer",
-        "gba_emulator_pause",
-        "gba_emulator_disconnect",
-      ],
-      gameplayTools: [],
-    });
-    expect(resolveGbaEmulatorToolExposure("paused", "tui").lifecycleTools).toContain("gba_emulator_resume");
-    expect(resolveGbaEmulatorToolExposure("active", "discord_voice").gameplayTools).toEqual([]);
-  });
-
-  it("cannot represent a network or live-service tamper capability", () => {
-    expect(GBA_EMULATOR_CAPABILITY_BOUNDARY.networkCapabilities).toEqual([]);
-    expect(GBA_EMULATOR_CAPABILITY_BOUNDARY.remoteTamperCapabilities).toEqual([]);
-    expect(() =>
-      GbaEmulatorCapabilityBoundarySchema.parse({
-        ...GBA_EMULATOR_CAPABILITY_BOUNDARY,
-        networkCapabilities: ["emulator.gba.upload"],
-      }),
-    ).toThrow();
-    expect(isGbaEmulatorCapabilityLocal("emulator.gba.input")).toBe(true);
-    expect(isGbaEmulatorCapabilityLocal("environment.remote.act")).toBe(false);
   });
 });

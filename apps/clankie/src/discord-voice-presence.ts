@@ -1,5 +1,5 @@
 import { DiscordVoicePresenceResultSchema, type DiscordVoicePresenceResult } from "@clankie/protocol";
-import { resolveDiscordActiveBody } from "@clankie/settings";
+import { postToDiscordActiveBody } from "./discord-active-body.ts";
 
 export function createDiscordVoicePresenceClient(
   env: NodeJS.ProcessEnv = process.env,
@@ -21,16 +21,7 @@ async function postVoicePresence(
 ): Promise<DiscordVoicePresenceResult> {
   const refused = action === "join" ? ("join_refused" as const) : ("leave_refused" as const);
   try {
-    const port =
-      resolveDiscordActiveBody(env) === "user_session"
-        ? env.CLANKIE_USER_SESSION_CONTROL_PORT?.trim() || "4312"
-        : env.CLANKIE_DISCORD_BRIDGE_CONTROL_PORT?.trim() || "4313";
-    const response = await fetchImpl(`http://127.0.0.1:${port}/voice/${action}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(20_000),
-    });
+    const response = await postToDiscordActiveBody(`/voice/${action}`, body, env, fetchImpl);
     if (!response.ok) return { action: refused, reason: "failed" };
     const parsed = DiscordVoicePresenceResultSchema.safeParse(await response.json());
     return parsed.success ? parsed.data : { action: refused, reason: "failed" };

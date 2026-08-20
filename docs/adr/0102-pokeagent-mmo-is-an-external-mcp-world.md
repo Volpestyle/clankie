@@ -7,6 +7,17 @@ below still holds. The transport does not: Clankie reaches the world through the
 is now consumed as a published version; it crossed as a pinned git revision
 under the `@pokeagent-mmo` scope until 2026-08-16.
 
+## Current status (2026-08-19)
+
+PokeAgents still exposes a harness-neutral MCP surface, but its tools are a
+transport projection derived from the `@pokeagents/world-protocol` operation and
+capability catalog; MCP owns no authority or gameplay semantics. Clankie does
+not use that projection. His separately credentialed player seat uses the
+pinned native world contract as ratified by
+[ADR 0103](0103-a-hosted-world-is-another-body.md) and scoped by
+[ADR 0129](0129-each-player-owns-a-body.md). The MCP-only decision below is
+historical.
+
 ## Context
 
 PokeAgent MMO is a world any agent harness can enter. A Clankie-only connector

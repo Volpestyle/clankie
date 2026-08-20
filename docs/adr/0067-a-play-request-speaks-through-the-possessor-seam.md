@@ -6,6 +6,13 @@ sentence-carriage decision is superseded by
 [ADR 0074](0074-the-room-hears-one-voice.md): the play loop now reports events
 and the realtime room session authors the words.
 
+## Current status (2026-08-19)
+
+The bidirectional event/utterance behavior remains for Clankie's own play under
+the neutral `@clankie/play-voice` name. [ADR 0129](0129-each-player-owns-a-body.md)
+supersedes the possessor scope: external harnesses receive no voice seam or room
+input. The diagram and terminology below are historical.
+
 ## Context
 
 The play runner owns the game loop and activity overlay. The Discord body owns
@@ -69,4 +76,4 @@ surface running. Nothing queues on behalf of a dead room session.
   cannot continue hearing a room.
 - Current enablement, ports, and live proof belong in the
   [Discord bridge](../../apps/discord-bridge/README.md) and
-  [GBA MCP](../../apps/gba-mcp/README.md) operating guides.
+  [play-voice](../../packages/play-voice/README.md) operating guides.

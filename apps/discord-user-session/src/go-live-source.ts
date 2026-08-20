@@ -7,12 +7,10 @@ import { resolveActivityProducerCredential } from "@clankie/credential-broker";
  * reader only resolves the brokered token — it never mints one — so a lab
  * body cannot invent a second producer secret.
  */
-export interface ActivitySnapshotFrame {
+interface ActivitySnapshotFrame {
   readonly mimeType: "image/png";
   readonly data: string;
   readonly sha256: string;
-  readonly width: number;
-  readonly height: number;
 }
 
 export async function fetchActivitySnapshot(
@@ -35,18 +33,13 @@ export async function fetchActivitySnapshot(
     encoding?: string;
     data?: string;
     sha256?: string;
-    width?: number;
-    height?: number;
   };
   if (body.encoding !== "png" || typeof body.data !== "string" || typeof body.sha256 !== "string") {
     return undefined;
   }
-  if (typeof body.width !== "number" || typeof body.height !== "number") return undefined;
   return {
     mimeType: "image/png",
     data: body.data,
     sha256: body.sha256,
-    width: body.width,
-    height: body.height,
   };
 }

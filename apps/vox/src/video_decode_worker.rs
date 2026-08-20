@@ -17,11 +17,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use base64::Engine as _;
 use crossbeam_channel as crossbeam;
 use tokio::time;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 use crate::app_state::transport_stats;
 use crate::ipc::{OutMsg, send_msg};
 use crate::video_decoder::PersistentVideoDecoder;
+use crate::voice_conn::TransportRole;
 
 /// Bounded depth of the frame lane.  Encoded access units are small relative
 /// to decoded output; 8 frames is ~250ms of headroom at 30fps before the
@@ -33,19 +34,18 @@ const PLI_QUEUE_CAPACITY: usize = 16;
 /// One encoded H264 access unit plus the subscription context the worker
 /// needs to decode, rate-limit, and emit it.
 pub(crate) struct VideoDecodeFrameJob {
+    pub(crate) role: TransportRole,
+    pub(crate) generation: u64,
     pub(crate) user_id: u64,
     pub(crate) ssrc: u32,
     pub(crate) frame: Vec<u8>,
-    pub(crate) rtp_timestamp: u32,
-    pub(crate) stream_type: Option<String>,
-    pub(crate) rid: Option<String>,
     pub(crate) jpeg_quality: i32,
     pub(crate) max_frames_per_second: u32,
 }
 
 enum VideoDecodeControl {
-    RemoveUser(u64),
-    Clear,
+    RemoveUser(TransportRole, u64),
+    ClearRole(TransportRole),
 }
 
 /// Event-loop handle to the decode thread.  Dropping it disconnects both
@@ -56,7 +56,7 @@ pub(crate) struct VideoDecodeWorker {
     /// is full — the worker thread holds its own receiver.
     frame_rx: crossbeam::Receiver<VideoDecodeFrameJob>,
     control_tx: crossbeam::Sender<VideoDecodeControl>,
-    pli_rx: crossbeam::Receiver<(u64, u32)>,
+    pli_rx: crossbeam::Receiver<(TransportRole, u64, u64, u32)>,
     dropped_frames: AtomicU64,
 }
 
@@ -64,7 +64,8 @@ impl VideoDecodeWorker {
     pub(crate) fn spawn() -> Self {
         let (frame_tx, frame_rx) = crossbeam::bounded::<VideoDecodeFrameJob>(FRAME_QUEUE_CAPACITY);
         let (control_tx, control_rx) = crossbeam::unbounded::<VideoDecodeControl>();
-        let (pli_tx, pli_rx) = crossbeam::bounded::<(u64, u32)>(PLI_QUEUE_CAPACITY);
+        let (pli_tx, pli_rx) =
+            crossbeam::bounded::<(TransportRole, u64, u64, u32)>(PLI_QUEUE_CAPACITY);
 
         let worker_frame_rx = frame_rx.clone();
         std::thread::spawn(move || {
@@ -124,19 +125,18 @@ impl VideoDecodeWorker {
 
     /// Drop the persistent decoder state for a user (video ended or the user
     /// left the channel).
-    pub(crate) fn remove_user(&self, user_id: u64) {
+    pub(crate) fn remove_user(&self, role: TransportRole, user_id: u64) {
         let _ = self
             .control_tx
-            .send(VideoDecodeControl::RemoveUser(user_id));
+            .send(VideoDecodeControl::RemoveUser(role, user_id));
     }
 
-    /// Drop all persistent decoder state (transport teardown).
-    pub(crate) fn clear(&self) {
-        let _ = self.control_tx.send(VideoDecodeControl::Clear);
+    pub(crate) fn clear_role(&self, role: TransportRole) {
+        let _ = self.control_tx.send(VideoDecodeControl::ClearRole(role));
     }
 
     /// Collect pending decoder-reset PLI requests as `(user_id, ssrc)` pairs.
-    pub(crate) fn drain_pli_requests(&self) -> Vec<(u64, u32)> {
+    pub(crate) fn drain_pli_requests(&self) -> Vec<(TransportRole, u64, u64, u32)> {
         let mut requests = Vec::new();
         while let Ok(request) = self.pli_rx.try_recv() {
             requests.push(request);
@@ -146,14 +146,14 @@ impl VideoDecodeWorker {
 }
 
 struct WorkerState {
-    decoders: HashMap<u64, PersistentVideoDecoder>,
-    last_emit_at: HashMap<u64, time::Instant>,
+    decoders: HashMap<(TransportRole, u64, u64), PersistentVideoDecoder>,
+    last_emit_at: HashMap<(TransportRole, u64, u64), time::Instant>,
 }
 
 fn run_worker(
     frame_rx: &crossbeam::Receiver<VideoDecodeFrameJob>,
     control_rx: &crossbeam::Receiver<VideoDecodeControl>,
-    pli_tx: &crossbeam::Sender<(u64, u32)>,
+    pli_tx: &crossbeam::Sender<(TransportRole, u64, u64, u32)>,
 ) {
     let mut state = WorkerState {
         decoders: HashMap::new(),
@@ -183,25 +183,38 @@ fn run_worker(
 
 fn handle_control(state: &mut WorkerState, control: &VideoDecodeControl) {
     match control {
-        VideoDecodeControl::RemoveUser(user_id) => {
-            state.decoders.remove(user_id);
-            state.last_emit_at.remove(user_id);
+        VideoDecodeControl::RemoveUser(role, user_id) => {
+            state.decoders.retain(|(entry_role, _, entry_user_id), _| {
+                entry_role != role || entry_user_id != user_id
+            });
+            state
+                .last_emit_at
+                .retain(|(entry_role, _, entry_user_id), _| {
+                    entry_role != role || entry_user_id != user_id
+                });
         }
-        VideoDecodeControl::Clear => {
-            state.decoders.clear();
-            state.last_emit_at.clear();
+        VideoDecodeControl::ClearRole(role) => {
+            state
+                .decoders
+                .retain(|(entry_role, _, _), _| entry_role != role);
+            state
+                .last_emit_at
+                .retain(|(entry_role, _, _), _| entry_role != role);
         }
     }
 }
 
 fn handle_frame(
     state: &mut WorkerState,
-    pli_tx: &crossbeam::Sender<(u64, u32)>,
+    pli_tx: &crossbeam::Sender<(TransportRole, u64, u64, u32)>,
     job: &VideoDecodeFrameJob,
 ) {
     // Lazily create or retrieve the decoder.  If init fails, skip H264
     // decode for this user instead of panicking.
-    let decoder = match state.decoders.entry(job.user_id) {
+    let decoder = match state
+        .decoders
+        .entry((job.role, job.generation, job.user_id))
+    {
         std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
         std::collections::hash_map::Entry::Vacant(entry) => match PersistentVideoDecoder::new() {
             Ok(decoder) => {
@@ -232,7 +245,11 @@ fn handle_frame(
     // If the decoder was reset after sustained errors, it needs a fresh
     // keyframe — hand the PLI request back to the event loop, which owns
     // the transport connection.
-    if decoder.take_pending_pli() && pli_tx.try_send((job.user_id, job.ssrc)).is_err() {
+    if decoder.take_pending_pli()
+        && pli_tx
+            .try_send((job.role, job.generation, job.user_id, job.ssrc))
+            .is_err()
+    {
         warn!(
             user_id = job.user_id,
             ssrc = job.ssrc,
@@ -245,20 +262,21 @@ fn handle_frame(
         return;
     };
 
-    // fps gate BEFORE the JPEG encode: rate-limited frames still updated the
-    // decoder's reference state and change-score EMA above, but they never
-    // pay the encode + base64 + IPC cost.
+    // fps gate BEFORE the JPEG encode: rate-limited frames still update the
+    // decoder's reference state but never pay the encode + base64 + IPC cost.
     let now = time::Instant::now();
     let min_gap =
         std::time::Duration::from_secs_f64(1.0 / f64::from(job.max_frames_per_second.max(1)));
     let should_emit = state
         .last_emit_at
-        .get(&job.user_id)
+        .get(&(job.role, job.generation, job.user_id))
         .is_none_or(|last| now.duration_since(*last) >= min_gap);
     if !should_emit {
         return;
     }
-    state.last_emit_at.insert(job.user_id, now);
+    state
+        .last_emit_at
+        .insert((job.role, job.generation, job.user_id), now);
 
     let Some(jpeg_data) = decoder.encode_jpeg(picture.width, picture.height) else {
         warn!(
@@ -276,38 +294,17 @@ fn handle_frame(
             width = picture.width,
             height = picture.height,
             jpeg_bytes = jpeg_data.len(),
-            change_score = picture.change_score,
             "clankvox_first_h264_frame_decoded"
-        );
-    }
-
-    // Periodic change-score logging for threshold tuning
-    // (every 60th frame ≈ 30 s at 2 fps).
-    if frames_decoded % 60 == 0 {
-        debug!(
-            user_id = job.user_id,
-            ssrc = job.ssrc,
-            frames_decoded,
-            change_score = %format!("{:.4}", picture.change_score),
-            ema_change_score = %format!("{:.4}", picture.ema_change_score),
-            is_scene_cut = picture.is_scene_cut,
-            "clankvox_frame_diff_periodic"
         );
     }
 
     let jpeg_base64 = base64::engine::general_purpose::STANDARD.encode(&jpeg_data);
     send_msg(OutMsg::DecodedVideoFrame {
+        role: job.role,
         user_id: job.user_id.to_string(),
-        ssrc: job.ssrc,
         width: picture.width,
         height: picture.height,
         jpeg_base64,
-        rtp_timestamp: job.rtp_timestamp,
-        stream_type: job.stream_type.clone(),
-        rid: job.rid.clone(),
-        change_score: picture.change_score,
-        ema_change_score: picture.ema_change_score,
-        is_scene_cut: picture.is_scene_cut,
     });
 }
 
@@ -317,12 +314,11 @@ mod tests {
 
     fn garbage_job(user_id: u64) -> VideoDecodeFrameJob {
         VideoDecodeFrameJob {
+            role: crate::voice_conn::TransportRole::StreamWatch,
+            generation: 1,
             user_id,
             ssrc: 4201,
             frame: vec![0x00, 0x00, 0x00, 0x01, 0xFF, 0xAB, 0xCD, 0xEF],
-            rtp_timestamp: 90_000,
-            stream_type: Some("screen".into()),
-            rid: None,
             jpeg_quality: 75,
             max_frames_per_second: 2,
         }
@@ -334,8 +330,8 @@ mod tests {
         for _ in 0..32 {
             worker.submit_frame(garbage_job(42));
         }
-        worker.remove_user(42);
-        worker.clear();
+        worker.remove_user(crate::voice_conn::TransportRole::StreamWatch, 42);
+        worker.clear_role(crate::voice_conn::TransportRole::StreamWatch);
         assert!(worker.drain_pli_requests().is_empty());
     }
 }
